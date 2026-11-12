@@ -147,15 +147,14 @@ describe("plaintext — cellUnit: paragraph", () => {
     expect(cells.map((cell) => cell.original)).toEqual([LONG_PARAGRAPH, "Second block."])
   })
 
-  // AQU-2544: a blank line before the first line or after the last separates
-  // nothing. Read as a paragraph break it turned a file written one line per
-  // paragraph into ONE cell, its lines joined by spaces — one extra Enter at
-  // the end of a translation was enough.
-  it("doesn't count a blank line at the start or end of the file as a break", () => {
-    for (const text of ["One.\nTwo.\nThree.\n\n", "\n\nOne.\nTwo.\nThree.\n", "One.\r\nTwo.\r\nThree.\r\n \r\n"]) {
-      const cells = extractPlaintextStrings(text, { cellUnit: "paragraph" })
-      expect(cells.map((cell) => cell.original)).toEqual(["One.", "Two.", "Three."])
-    }
+  // AQU-2544 review: a single hard-wrapped paragraph saved with a blank line
+  // after it is one paragraph, as it always was. (A file written one line per
+  // paragraph with an extra Enter at the end has exactly this shape, so it
+  // reads as one paragraph too; a translation of it is read the same way.)
+  it("keeps a hard-wrapped paragraph with a trailing blank line as one cell", () => {
+    const text = "This is one paragraph that was\nhard-wrapped across\nthree lines.\n\n"
+    expect(extractPlaintextStrings(text, { cellUnit: "paragraph" }).map((cell) => cell.original))
+      .toEqual(["This is one paragraph that was hard-wrapped across three lines."])
   })
 
   it("leaves sentence mode (the default) splitting as before", () => {

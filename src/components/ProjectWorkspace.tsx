@@ -3645,15 +3645,18 @@ export function ProjectWorkspace() {
    * it says how many landed and how many did not, with a Retry for just
    * those. Never a flat "Transcribed N" over a run where some failed.
    * `quiet` (the selected sections, which never had a toast) speaks only
-   * when something went wrong.
+   * when a row failed (`transcribeRunToast`).
    */
   const showTranscribeRunEnd = useCallback((
     report: TranscribeRunReport,
     opts: { kind: TranscribeRunKind; fileId: string; fileName: string; toastId: string | null; quiet?: boolean },
   ) => {
-    const said = transcribeRunToast(report, { kind: opts.kind, ...(opts.kind === "import" ? { fileName: opts.fileName } : {}) })
+    const said = transcribeRunToast(report, {
+      kind: opts.kind,
+      ...(opts.kind === "import" ? { fileName: opts.fileName } : {}),
+      ...(opts.quiet ? { quiet: true } : {}),
+    })
     if (!said) return
-    if (opts.quiet && said.type === "success") return
     // A failed row from before a reload has only its id; the Retry finds it
     // again in the file it is on.
     const retryCells = report.failed.flatMap((f) => (f.cell ? [f.cell] : []))

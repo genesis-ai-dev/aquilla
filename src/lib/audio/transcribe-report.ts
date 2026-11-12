@@ -27,13 +27,15 @@ export interface TranscribeRunToast {
 /**
  * The toast for a finished run, or null when nothing ran. `fileName` names the
  * recording for a run over one recording's sections (the post-import run);
- * other runs count recordings.
+ * other runs count recordings. `quiet` (the selected sections, which never
+ * had a toast) speaks only when a row failed (the review, Nov 12).
  */
 export function transcribeRunToast(
   report: TranscribeRunReport,
-  opts: { kind: TranscribeRunKind; fileName?: string },
+  opts: { kind: TranscribeRunKind; fileName?: string; quiet?: boolean },
 ): TranscribeRunToast | null {
   if (!report.started || report.total === 0) return null
+  if (opts.quiet && report.failed.length === 0) return null
   const sections = opts.kind === "import" && opts.fileName !== undefined
   const name = opts.fileName ?? ""
   const failed = report.failed.length

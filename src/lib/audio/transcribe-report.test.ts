@@ -85,6 +85,16 @@ describe("transcribeRunToast", () => {
     expect(said!.description).toBe("1 had nothing to transcribe.")
   })
 
+  // The review (Nov 12), N6: a quiet run (the selected sections, which never
+  // had a toast) stays quiet unless something failed: a section that held
+  // only music, a stop or a row not reached says nothing there.
+  it("a quiet run says nothing unless a row failed", () => {
+    expect(transcribeRunToast(report({ total: 3, transcribed: 3, heardNothing: 1 }), { kind: "sections", quiet: true })).toBeNull()
+    expect(transcribeRunToast(report({ transcribed: 20, notRun: 25, cancelled: true }), { kind: "sections", quiet: true })).toBeNull()
+    expect(transcribeRunToast(report({ total: 3, transcribed: 2, failed: failures(1) }), { kind: "sections", quiet: true }))
+      .toMatchObject({ type: "error", retryLabel: "Retry 1" })
+  })
+
   it("says a cancelled run stopped, and still counts its failures", () => {
     const said = transcribeRunToast(report({ transcribed: 20, failed: failures(2), notRun: 23, cancelled: true }), { kind: "all" })
     expect(said!.type).toBe("info")

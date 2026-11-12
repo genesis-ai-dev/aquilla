@@ -498,7 +498,9 @@ export async function exportDocx(
     // A cell made by today's importer holds exactly the paragraph's own line;
     // an old one held the words of the boxes inside too.
     if (!source || source === own) continue
-    const held = boxLinesIn(holder).filter((box) => occurrences(source, box.words) > occurrences(own, box.words))
+    // With no words of its own, everything its cell held was its boxes' (even
+    // words hidden there now, which today's lines leave out).
+    const held = boxLinesIn(holder).filter((box) => !own || occurrences(source, box.words) > occurrences(own, box.words))
     if (held.length === 0) continue
     const untranslated = held.filter((box) => !translations.has(box.span.index))
     if (own) {

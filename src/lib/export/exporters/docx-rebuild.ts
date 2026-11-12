@@ -576,6 +576,9 @@ function matchAnchors(nodes: readonly RNode[], masked: string, baseRpr: string, 
   const lookMatches: Match[] = []
   let cursor = 0
   const { anchors, text: sourceText, unsought } = anchorsOf(nodes, baseRpr, io)
+  // A stretch grown to its whole word ("12th" from a superscript "th") starts
+  // in the main look: its own look is the first one that is not.
+  const ownLook = (looks: readonly string[]) => looks.find((look) => look !== baseRpr) ?? looks[0]
   lost.push(...unsought)
   // In source order; when the translation holds the text as often as the
   // source paragraph does, the source's n-th occurrence takes the n-th.
@@ -605,14 +608,14 @@ function matchAnchors(nodes: readonly RNode[], masked: string, baseRpr: string, 
     for (const word of anchor.words ?? []) {
       const wordFound = find(word.needle, word.order)
       if (wordFound === null) {
-        missing.push({ text: word.needle, look: word.looks[0] })
+        missing.push({ text: word.needle, look: ownLook(word.looks) })
         continue
       }
       lookMatches.push({ ...wordFound, looks: word.looks, text: word.needle })
       cursor = wordFound.end
     }
     if (!anchor.looks) continue
-    if (missing.length === (anchor.words?.length ?? 0)) lost.push({ text: anchor.needle, look: anchor.looks[0] })
+    if (missing.length === (anchor.words?.length ?? 0)) lost.push({ text: anchor.needle, look: ownLook(anchor.looks) })
     else lost.push(...missing)
   }
   // Look stretches are keyed by synthetic nodes so one text node may hold several.

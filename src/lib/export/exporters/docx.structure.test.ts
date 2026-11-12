@@ -899,6 +899,16 @@ describe("exportDocx — an old import's cell for the paragraph holding a text b
     expect(result.fidelity.textBoxCellsAdopted).toBe(1)
   })
 
+  it("names a text-box caption with hidden words that the old cell held", async () => {
+    // Dev's importer read the hidden word too, so the cell's source is not the
+    // caption's line repeated: nothing is taken, and the caption is named.
+    const partlyHidden = para(textBoxRun(para(run("Figure 4: ") + run("SECRET ", "<w:rPr><w:vanish/></w:rPr>") + run("Map"), "Caption")), "Caption")
+    const cells = [cellAt(1, "Figure 4 : SECRET CarteFigure 4 : SECRET Carte", { original: "Figure 4: SECRET MapFigure 4: SECRET Map" })]
+    const { xml, result } = await exportedXml(partlyHidden, cells)
+    expect(xml).not.toContain("Carte")
+    expect(result.warnings.map((w) => w.segment)).toEqual(["Figure 4: Map"])
+  })
+
   it("names a text-box paragraph once, however many old cells held its words", async () => {
     // w:p[1] holder; w:p[2] the outer box ("Outer", holding the inner box
     // w:p[3], copy w:p[4]); w:p[5]..[7] the outer box's copy.
@@ -976,6 +986,13 @@ describe("exportDocx — which paragraphs lost a look (AQU-2539)", () => {
     const body = para(run("Some ") + run("words here", quiet) + run(" and more"))
     const { result } = await exportedXml(body, [cellAt(1, "Quelques mots ici et plus", { original: "Some words here and more" })])
     expect(result.lostLooks).toEqual([])
+  })
+
+  it("names a paragraph whose ordinal lost its superscript", async () => {
+    // "12th" is looked for as its whole word, which starts in the main look.
+    const body = para(run("In the 12") + run("th", '<w:rPr><w:vertAlign w:val="superscript"/></w:rPr>') + run(" century."))
+    const { result } = await exportedXml(body, [cellAt(1, "Au XIIe siècle.", { original: "In the 12th century." })])
+    expect(result.lostLooks).toEqual([{ segment: "In the 12th century.", words: ["12th"] }])
   })
 
   it("names the one paragraph whose words with their own look the translation changed, by its first words", async () => {

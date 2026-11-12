@@ -215,7 +215,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
       else if (node.piece.el.tagName === "w:fldSimple") result.keptFields++
     } else {
       const looks = match.looks!
-      stream += runsByLook(input.text, match.start, match.end, (i) => looks[i - match.start])
+      stream += runsByLook(match.text!, 0, match.text!.length, (i) => looks[i])
       result.keptLooks++
     }
     cursor = end
@@ -374,8 +374,11 @@ function collectMarkers(nodes: readonly RNode[], visit: (piece: FootnotePiece) =
 interface Match {
   start: number
   end: number
-  /** For a look stretch: the source look of each character. */
+  /** For a look stretch: the source's own text and the look of each of its
+   *  characters (it is written from the source, so a translation that holds
+   *  the same word in another Unicode form gets the source's bytes). */
   looks?: string[]
+  text?: string
 }
 
 interface LookAnchor {
@@ -520,9 +523,9 @@ function matchAnchors(nodes: readonly RNode[], masked: string, baseRpr: string, 
   for (const anchor of anchorsOf(nodes, baseRpr, io)) {
     // A look stretch's node may carry several stretches; frames carry one.
     if (anchor.looks === undefined && out.has(anchor.node)) continue
-    const at = findWhole(masked, anchor.needle, cursor)
-    if (at !== -1) {
-      const match = { start: at, end: at + anchor.needle.length, ...(anchor.looks ? { looks: anchor.looks } : {}) }
+    const found = findWhole(masked, anchor.needle, cursor)
+    if (found !== null) {
+      const match = { ...found, ...(anchor.looks ? { looks: anchor.looks, text: anchor.needle } : {}) }
       if (anchor.looks) lookMatches.push(match)
       else out.set(anchor.node, match)
       cursor = match.end
@@ -530,10 +533,10 @@ function matchAnchors(nodes: readonly RNode[], masked: string, baseRpr: string, 
     }
     // Not found whole: open it up into its words.
     for (const word of anchor.words ?? []) {
-      const wordAt = findWhole(masked, word.needle, cursor)
-      if (wordAt === -1) continue
-      lookMatches.push({ start: wordAt, end: wordAt + word.needle.length, looks: word.looks })
-      cursor = wordAt + word.needle.length
+      const wordFound = findWhole(masked, word.needle, cursor)
+      if (wordFound === null) continue
+      lookMatches.push({ ...wordFound, looks: word.looks, text: word.needle })
+      cursor = wordFound.end
     }
   }
   // Look stretches are keyed by synthetic nodes so one text node may hold several.
@@ -558,8 +561,62 @@ function charAt(text: string, index: number): string {
   return code === undefined ? "" : String.fromCodePoint(code)
 }
 
+/**
+ * The first whole-word occurrence of `needle` in `hay` at or after `from`, as
+ * a range of `hay`, or null. When the exact characters are not there, the
+ * same text in another Unicode normal form counts (Hebrew points or Greek
+ * accents composed or ordered differently): both are compared in NFC.
+ */
+function findWhole(hay: string, needle: string, from: number): { start: number; end: number } | null {
+  const exact = findWholeExact(hay, needle, from)
+  if (exact !== -1) return { start: exact, end: exact + needle.length }
+  const target = needle.normalize("NFC")
+  const normal = normalizedWithMap(hay)
+  if (target === needle && normal.text === hay) return null
+  let k = 0
+  while (k < normal.starts.length && normal.starts[k] < from) k++
+  const fromNormal = k < normal.starts.length ? normal.offsets[k] : normal.text.length
+  let at = findWholeExact(normal.text, target, fromNormal)
+  while (at !== -1) {
+    // A match must begin and end on whole characters of the original text.
+    const first = normal.offsets.indexOf(at)
+    const last = normal.offsets.indexOf(at + target.length)
+    const endsCleanly = last !== -1 || at + target.length === normal.text.length
+    if (first !== -1 && endsCleanly) {
+      return { start: normal.starts[first], end: last === -1 ? hay.length : normal.starts[last] }
+    }
+    at = findWholeExact(normal.text, target, at + 1)
+  }
+  return null
+}
+
+/** `text` in NFC, one cluster (a character and its combining marks) at a time,
+ *  with where each cluster starts in the original and in the normalised text. */
+let lastNormalized: { source: string; result: { text: string; starts: number[]; offsets: number[] } } | null = null
+
+function normalizedWithMap(text: string): { text: string; starts: number[]; offsets: number[] } {
+  if (lastNormalized?.source === text) return lastNormalized.result
+  const result = buildNormalizedMap(text)
+  lastNormalized = { source: text, result }
+  return result
+}
+
+function buildNormalizedMap(text: string): { text: string; starts: number[]; offsets: number[] } {
+  const starts: number[] = []
+  const offsets: number[] = []
+  let out = ""
+  const cluster = /\P{M}\p{M}*|\p{M}+/gu
+  let m: RegExpExecArray | null
+  while ((m = cluster.exec(text)) !== null) {
+    starts.push(m.index)
+    offsets.push(out.length)
+    out += m[0].normalize("NFC")
+  }
+  return { text: out, starts, offsets }
+}
+
 /** First whole-word occurrence of `needle` in `hay` at or after `from`. */
-function findWhole(hay: string, needle: string, from: number): number {
+function findWholeExact(hay: string, needle: string, from: number): number {
   const first = charAt(needle, 0)
   const last = charBefore(needle, needle.length)
   let at = hay.indexOf(needle, from)

@@ -707,3 +707,17 @@ describe("exportDocx — footnotes the translation reorders (AQU-2539)", () => {
     expect(fn).toContain('<w:footnote w:id="2"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t xml:space="preserve"> Note un.</w:t></w:r></w:p></w:footnote>')
   })
 })
+
+describe("exportDocx — unchanged text in another Unicode form (AQU-2539)", () => {
+  it("finds a pointed Hebrew word the translation holds in another normal form, and writes the source's own bytes", async () => {
+    const HEB = '<w:rPr><w:rFonts w:cs="SBL Hebrew"/><w:rtl/></w:rPr>'
+    // Source: shin + dagesh + qamats (not canonical order); NFC puts qamats first.
+    const source = "\u05e9\u05bc\u05b8\u05e0\u05b8\u05d4"
+    const other = source.normalize("NFC")
+    expect(other).not.toBe(source)
+    const body = para(run("The long story of the word ") + run(source, HEB) + run(" means year in Hebrew."))
+    const { xml } = await exportedXml(body, [cellAt(1, `La longue histoire du mot ${other} signifie année en hébreu.`)])
+    expect(xml).toContain(`<w:r>${HEB}<w:t xml:space="preserve">${source}</w:t></w:r>`)
+    expect(xml).not.toContain(other)
+  })
+})

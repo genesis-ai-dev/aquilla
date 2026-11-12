@@ -20,7 +20,10 @@ vi.mock("./AdminElevationGate", () => ({
   ),
 }))
 beforeEach(() => vi.clearAllMocks())
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 it("requires fresh verification, confirmation and saved-code acknowledgment; clears secrets on account switch", async () => {
   vi.mocked(adminTotp).mockImplementation(async (_jwt, path) => {
     if (!path) return { enabled: false, configured: true } as never
@@ -34,22 +37,33 @@ it("requires fresh verification, confirmation and saved-code acknowledgment; cle
       return { recoveryCodes: ["private-recovery"] } as never
     return {} as never
   })
+  const writeText = vi.fn().mockResolvedValue(undefined)
+  vi.stubGlobal("navigator", { clipboard: { writeText } })
   const view = render(<AdminAuthenticator jwt="account-one" />)
   fireEvent.click(
     await screen.findByRole("button", {
       name: "Verify and set up authenticator",
     }),
   )
+  expect(
+    screen.queryByRole("button", { name: "Verify and set up authenticator" }),
+  ).toBeNull()
   expect(adminTotp).not.toHaveBeenCalledWith("account-one", "setup", {})
   fireEvent.click(
     screen.getByRole("button", { name: "Complete fresh verification" }),
   )
   await screen.findByText("private-seed")
+  fireEvent.click(screen.getByRole("button", { name: "Copy setup key" }))
+  await screen.findByText("Copied")
+  expect(writeText).toHaveBeenLastCalledWith("private-seed")
   fireEvent.change(screen.getByLabelText("Authenticator code"), {
     target: { value: "123456" },
   })
   fireEvent.click(screen.getByRole("button", { name: "Confirm authenticator" }))
   await screen.findByText("private-recovery")
+  fireEvent.click(screen.getByRole("button", { name: "Copy recovery codes" }))
+  await screen.findByText("Copied")
+  expect(writeText).toHaveBeenLastCalledWith("private-recovery")
   expect(screen.queryByText("private-seed")).toBeNull()
   expect(screen.getByRole("button", { name: "Enable TOTP" })).toBeDisabled()
   fireEvent.click(screen.getByLabelText("I have saved my recovery codes"))

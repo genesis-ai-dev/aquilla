@@ -213,16 +213,24 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
   // the Undo gives the take back the approvals it had before the cut and keeps
   // the pieces' approvals, and the Redo gives those back — the voters' own,
   // as they were, never cast for them.
+  // AQU-2492 (Sam, Nov 11): a second half deleted since, by anyone, never
+  // stops it. The Undo did the same thing or nothing depending on whether this
+  // page had heard of a colleague's delete yet (Safari's engine usually had,
+  // Chrome's not yet). The server's undo joins the take on what is left and
+  // gives back the whole take's approvals either way, so the cut is undone
+  // whenever the take it was made on is still there as the cut left it.
   const intact = (c: CutRecord): boolean | null => {
     const first = ctx.readTake(c.cellId, c.audioId)
+    if (!first) return null
     const second = ctx.readTake(c.cellId, c.newAudioId)
-    if (!first || !second) return null
     return (
       first.trimEndMs === c.atMs &&
-      second.trimStartMs === c.atMs &&
-      (second.trimEndMs ?? null) === c.before.trimEndMs &&
-      (second.targetOffsetMs ?? null) === c.before.targetOffsetMs &&
-      (second.recordingsOffsetMs ?? null) === (c.before.recordingsOffsetMs ?? null) &&
+      (second == null || (
+        second.trimStartMs === c.atMs &&
+        (second.trimEndMs ?? null) === c.before.trimEndMs &&
+        (second.targetOffsetMs ?? null) === c.before.targetOffsetMs &&
+        (second.recordingsOffsetMs ?? null) === (c.before.recordingsOffsetMs ?? null)
+      )) &&
       levelsIntact(c, first, second)
     )
   }
@@ -233,9 +241,9 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
   // had before the cut.
   const sameLevel = (att: CodexCellAttachment, l: TakeLevel) =>
     (att.gainDb ?? null) === l.gainDb && (att.fadeInMs ?? null) === l.fadeInMs && (att.fadeOutMs ?? null) === l.fadeOutMs
-  const levelsIntact = (c: CutRecord, first: CodexCellAttachment, second: CodexCellAttachment): boolean => {
+  const levelsIntact = (c: CutRecord, first: CodexCellAttachment, second: CodexCellAttachment | null): boolean => {
     if (!c.before.level) return true
-    return sameLevel(first, c.before.level) && sameLevel(second, { gainDb: null, fadeInMs: null, fadeOutMs: null })
+    return sameLevel(first, c.before.level) && (second == null || sameLevel(second, { gainDb: null, fadeInMs: null, fadeOutMs: null }))
   }
   const whole = (c: CutRecord): boolean | null => {
     const first = ctx.readTake(c.cellId, c.audioId)

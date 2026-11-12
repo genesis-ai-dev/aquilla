@@ -128,6 +128,65 @@ describe("take.cut", () => {
   })
 })
 
+// AQU-2492 (Sam, Nov 11): a colleague deletes the second half of my cut and I
+// press ⌘Z. One result, whether or not my page has heard of the delete yet, in
+// every browser: the cut is undone on what is left and the whole take's
+// approvals come back (the server's undo does both either way). The browser
+// pass found it joined only while the page still drew the half (Chrome's
+// engine, 0.15 s after the delete) and was skipped as gone once it had heard
+// (Safari's engine at the same moment, and both later), losing the approvals
+// the take had before the cut for good.
+describe("take.cut after a colleague deleted its second half (AQU-2492, Nov 11)", () => {
+  const level = { gainDb: 6, fadeInMs: 300, fadeOutMs: 500 }
+  const record = (over: Partial<CutRecord["before"]> = {}): CutRecord => ({
+    cellId: "c1", audioId: "a", atMs: 1700, newAudioId: "b",
+    before: { trimEndMs: null, label: "Take 1", targetOffsetMs: null, validators: ["alice", "carol"], ...over },
+    renamed: true,
+  })
+
+  it("the page has heard of the delete: Undo joins the take on what is left, as it does when it has not", async () => {
+    const heard = ctxFor({ a: { trimEndMs: 1700 } })
+    const notYet = ctxFor({ a: { trimEndMs: 1700 }, b: { trimStartMs: 1700, pieceOf: "a" } })
+    const rec = record()
+    expect(await heard.handlers["take.cut"].undo({ cuts: [rec] })).toEqual({ kind: "done" })
+    expect(heard.ctx.uncut).toHaveBeenCalledWith(rec)
+    expect(await notYet.handlers["take.cut"].undo({ cuts: [record()] })).toEqual({ kind: "done" })
+    expect(notYet.ctx.uncut).toHaveBeenCalledTimes(1)
+    // What the joined take gets back is the take's approvals from before the
+    // cut, the same either way; the gone half has none to note.
+    expect(rec.before.validators).toEqual(["alice", "carol"])
+    expect(rec.pieceVoters?.second).toEqual([])
+  })
+
+  it("with the take's volume and fades: the first half is checked, and is enough", async () => {
+    const { ctx, handlers } = ctxFor({ a: { trimEndMs: 1700, ...level } })
+    expect(await handlers["take.cut"].undo({ cuts: [record({ level })] })).toEqual({ kind: "done" })
+    expect(ctx.uncut).toHaveBeenCalledTimes(1)
+  })
+
+  it("someone worked on the first half since: skipped as changed, as with both halves there", async () => {
+    const trimmed = ctxFor({ a: { trimEndMs: 1200 } })
+    expect(await trimmed.handlers["take.cut"].undo({ cuts: [record()] })).toEqual({ kind: "skipped", reason: "changed" })
+    const louder = ctxFor({ a: { trimEndMs: 1700, ...level, gainDb: 0 } })
+    expect(await louder.handlers["take.cut"].undo({ cuts: [record({ level })] })).toEqual({ kind: "skipped", reason: "changed" })
+    expect(trimmed.ctx.uncut).not.toHaveBeenCalled()
+    expect(louder.ctx.uncut).not.toHaveBeenCalled()
+  })
+
+  it("the take it was cut from is gone: skipped as gone", async () => {
+    const { ctx, handlers } = ctxFor({ b: { trimStartMs: 1700, pieceOf: "a" } })
+    expect(await handlers["take.cut"].undo({ cuts: [record()] })).toEqual({ kind: "skipped", reason: "gone" })
+    expect(ctx.uncut).not.toHaveBeenCalled()
+  })
+
+  it("Redo then brings that half back", async () => {
+    const { ctx, handlers } = ctxFor({ a: { validators: ["alice", "carol"] } })
+    const rec = record()
+    expect(await handlers["take.cut"].redo({ cuts: [rec] })).toEqual({ kind: "done" })
+    expect(ctx.cut).toHaveBeenCalledWith(rec, "b")
+  })
+})
+
 // AQU-2492 (review, Nov 9), finding 7: the cut keeps the take's volume and
 // fades, and the server gives them back to the joined take on Undo. Work on a
 // piece's level since stops the Undo (it would be thrown away); a level change

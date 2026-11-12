@@ -4238,8 +4238,6 @@ export const th: Catalog = {
   "projectSettings.permission.reconnectToEdit": "เชื่อมต่อใหม่เพื่อแก้ไขการตั้งค่าที่ใช้ร่วมกัน",
   "projectSettings.permission.onlyRoleCanModify": "เฉพาะ {role} ที่แก้ไขได้",
   "projectSettings.permission.viewPrivilegedMembers": "ดู {role}",
-  "projectSettings.permission.privilegedDialogTitle": "{role} ของโปรเจกต์",
-  "projectSettings.permission.privilegedDialogDescription": "{role} สามารถเปลี่ยนการตั้งค่าที่ใช้ร่วมกัน สมาชิก และการกำหนดค่าโปรเจกต์อื่นได้",
   "projectSettings.permission.privilegedDialogEmpty": "ไม่มี {role} ในโปรเจกต์นี้",
   "projectSettings.permission.privilegedDialogError": "โหลด {role} ไม่สำเร็จ",
   "projectSettings.create.trigger": "โปรเจกต์ใหม่",

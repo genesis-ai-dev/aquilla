@@ -1,3 +1,4 @@
+import * as passwordUtil from "../utils/password"
 import { env } from "cloudflare:test"
 import { describe, it, expect, vi } from "vitest"
 import app from "../index"
@@ -282,6 +283,21 @@ describe("password reset — request (AQU-675: never creates an account)", () =>
 })
 
 describe("password reset — verify", () => {
+  it("reports a database outage as retryable without consuming a valid link", async () => {
+    await register("verifyretry", "verifyretry@example.com", "old-password-1")
+    const credentials = { token: "retrytoken1234567890", username: "verifyretry" }
+    await seedToken(credentials.username, credentials.token, soon())
+    const prepare = env.AQUILLA_PG.prepare.bind(env.AQUILLA_PG)
+    const spy = vi.spyOn(env.AQUILLA_PG, "prepare").mockImplementation(sql => {
+      if (sql.includes("SELECT expires_at FROM password_reset_tokens")) throw new Error("simulated database outage")
+      return prepare(sql)
+    })
+    try {
+      expect((await reqJson("/api/v2/auth/password-reset/verify", credentials)).status).toBe(503)
+    } finally { spy.mockRestore() }
+    expect((await reqJson("/api/v2/auth/password-reset/verify", credentials)).status).toBe(200)
+  })
+
   it("accepts a valid token", async () => {
     await register("ruser", "ruser@example.com", "old-password-1")
     await seedToken("ruser", "validtoken1234567890", soon())
@@ -429,4 +445,47 @@ describe("authenticated settings password reset", () => {
     const url = new URL(send.mock.calls[0][0].text!.match(/https?:\/\/\S+\/reset-password\?\S+/)![0])
     expect(url.searchParams.get("returnTo")).toBe("/preferences/login-methods")
   })
+})
+
+
+it("consumes one reset link only once even when both requests have validated it", async () => {
+  await register("concurrentreset", "concurrentreset@example.com", "original-password-1")
+  await seedToken("concurrentreset", "concurrent-link", soon())
+  const original = passwordUtil.hashPasswordWerkzeugScrypt
+  let arrivals = 0
+  let release!: () => void
+  const barrier = new Promise<void>(resolve => { release = resolve })
+  const hashing = vi.spyOn(passwordUtil, "hashPasswordWerkzeugScrypt").mockImplementation(async value => {
+    if (++arrivals === 2) release()
+    await barrier
+    return original(value)
+  })
+  try {
+    const requests = ["replacement-password-1", "replacement-password-2"].map(new_password => reqJson("/api/v2/auth/password-reset/reset", { token: "concurrent-link", username: "concurrentreset", new_password }))
+    const responses = await Promise.all(requests)
+    expect(responses.map(r => r.status).sort()).toEqual([200,400])
+    const saved=await env.AQUILLA_PG.prepare("SELECT password_hash FROM users WHERE username='concurrentreset'").first<{password_hash:string}>()
+    for (const [index,password] of ["replacement-password-1","replacement-password-2"].entries()) {
+      expect((await passwordUtil.verifyPassword(password,saved!.password_hash)).isValid).toBe(responses[index].status===200)
+    }
+    expect(await env.AQUILLA_PG.prepare("SELECT session_version FROM users WHERE username='concurrentreset'").first()).toEqual({session_version:1})
+    expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM password_reset_tokens").first()).toEqual({n:0})
+  } finally { hashing.mockRestore() }
+})
+
+it("rolls back password, generation and reset-link consumption when a recovery side effect fails", async () => {
+  await register("rollbackreset", "rollbackreset@example.com", "original-password-1")
+  await seedToken("rollbackreset", "rollback-link", soon())
+  const before = await env.AQUILLA_PG.prepare("SELECT password_hash,session_version FROM users WHERE username='rollbackreset'").first()
+  await env.AQUILLA_PG.prepare("INSERT INTO api_credentials(id,user_id,name,token_prefix,token_hash,mode) SELECT '00000000-0000-0000-0000-000000000001',id::text,'audit','audit','audit-reset-hash','ask' FROM users WHERE username='rollbackreset'").run()
+  // Real PostgreSQL constraint failure after the password UPDATE and token claim.
+  await env.AQUILLA_PG.prepare("ALTER TABLE activity_logs ADD CONSTRAINT audit_reject_reset CHECK (activity_type <> 'password_reset_completed')").run()
+  try {
+    expect((await reqJson("/api/v2/auth/password-reset/reset", { token:"rollback-link", username:"rollbackreset", new_password:"replacement-password-1" })).status).toBe(500)
+    expect(await env.AQUILLA_PG.prepare("SELECT password_hash,session_version FROM users WHERE username='rollbackreset'").first()).toEqual(before)
+    expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM password_reset_tokens").first()).toEqual({n:1})
+    expect(await env.AQUILLA_PG.prepare("SELECT revoked_at FROM api_credentials WHERE token_hash='audit-reset-hash'").first()).toEqual({revoked_at:null})
+  } finally { await env.AQUILLA_PG.prepare("ALTER TABLE activity_logs DROP CONSTRAINT audit_reject_reset").run() }
+  expect((await reqJson("/api/v2/auth/password-reset/reset", { token:"rollback-link", username:"rollbackreset", new_password:"replacement-password-1" })).status).toBe(200)
+  expect(await env.AQUILLA_PG.prepare("SELECT revoked_at IS NOT NULL AS revoked FROM api_credentials WHERE token_hash='audit-reset-hash'").first()).toEqual({revoked:true})
 })

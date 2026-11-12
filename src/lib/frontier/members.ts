@@ -249,15 +249,23 @@ export async function listProjectMembers(
 }
 
 /**
- * People who can change shared project settings (Maintainer+). Uses
- * `?minRole=` so a below-roster-floor caller still gets this list without
- * the rest of the roster.
+ * People who can change a project setting at `minRole` or above (Maintainer+
+ * by default). Uses `?minRole=` so a below-roster-floor caller still gets
+ * this list without the rest of the roster.
+ *
+ * AQU-2457: the floor is a parameter because project settings no longer share
+ * one. The Languages card gates on the org's `languageEditMinRole` (Project
+ * Lead by default) and "Count headings" on Project Lead, so the dialog opened
+ * from those sections must list people at *that* level or above — not the
+ * Maintainers it used to hardcode. Floors below Project Lead do not get the
+ * roster-hide bypass server-side (see `parsePrivilegedMinRole`).
  */
 export async function fetchPrivilegedProjectMembers(
   jwt: string,
   projectId: string,
+  minRole: number = ROLE.MAINTAINER,
 ): Promise<ProjectRosterResult> {
-  return fetchProjectRoster(jwt, projectId, { minRole: ROLE.MAINTAINER })
+  return fetchProjectRoster(jwt, projectId, { minRole })
 }
 
 /**

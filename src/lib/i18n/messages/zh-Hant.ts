@@ -4254,8 +4254,6 @@ export const zh_Hant: Catalog = {
   "projectSettings.permission.reconnectToEdit": "請重新連線以編輯共用設定。",
   "projectSettings.permission.onlyRoleCanModify": "只有{role}可以修改",
   "projectSettings.permission.viewPrivilegedMembers": "檢視{role}",
-  "projectSettings.permission.privilegedDialogTitle": "專案{role}",
-  "projectSettings.permission.privilegedDialogDescription": "{role}可以變更共用設定、成員以及其他專案組態。",
   "projectSettings.permission.privilegedDialogEmpty": "這個專案沒有任何{role}。",
   "projectSettings.permission.privilegedDialogError": "無法載入{role}。",
   "projectSettings.create.trigger": "新增專案",

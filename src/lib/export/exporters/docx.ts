@@ -846,25 +846,28 @@ function spliceSpans(spans: readonly Span[], at: number, remove: number, insert:
 /**
  * The run look the translation is written in (AQU-2539): the `w:rPr` that
  * covers the most LETTERS of the paragraph's text that is not bold, italic,
- * underlined, struck through or right-to-left — so a paragraph that opens with
- * a bold term is not translated all in bold, and a mostly-Hebrew line does not
- * put its French in the Hebrew right-to-left look. Vowel points and accents
- * are not letters. When every letter carries one of those marks (a bold
- * heading), it is the look covering most of the letters. Ties go to the look
- * met first. Null when that look is no rPr at all.
+ * underlined, struck through, right-to-left, superscript or subscript — so a
+ * paragraph that opens with a bold term is not translated all in bold, a
+ * mostly-Hebrew line does not put its French in the Hebrew right-to-left look,
+ * and a cell of sigla does not put its text in superscript. Vowel points and
+ * accents are not letters. When every letter carries one of those marks (a
+ * bold heading), it is the look covering most of the letters; characters are
+ * counted only when the line has no letters at all. Ties go to the look met
+ * first. Null when that look is no rPr at all.
  */
 function baseRunLook(
   chunks: ReturnType<typeof docxLine>["chunks"],
   runRprXml: (run: XmlElement) => string,
 ): string | null {
-  const letters = (text: string) => (text.match(/\p{L}/gu) ?? []).length || text.replace(/\s+/g, "").length
-  const tally = (plainOnly: boolean): string | null => {
+  const letters = (text: string) => (text.match(/\p{L}/gu) ?? []).length
+  const characters = (text: string) => text.replace(/\s+/g, "").length
+  const tally = (plainOnly: boolean, measure: (text: string) => number): string | null => {
     const counts = new Map<string, number>()
     for (const chunk of chunks) {
       if (chunk.piece.kind !== "text" || chunk.piece.source !== "t") continue
       const look = runRprXml(chunk.piece.run)
-      if (plainOnly && (chunk.marks.size > 0 || isRightToLeft(look))) continue
-      const count = letters(chunk.text)
+      if (plainOnly && (chunk.marks.size > 0 || isRightToLeft(look) || isRaisedOrLowered(look))) continue
+      const count = measure(chunk.text)
       if (count === 0) continue
       counts.set(look, (counts.get(look) ?? 0) + count)
     }
@@ -878,8 +881,15 @@ function baseRunLook(
     }
     return best
   }
-  const look = tally(true) ?? tally(false)
+  // Letters decide; characters only when the line has no letters at all.
+  const look = tally(true, letters) ?? tally(false, letters) ?? tally(true, characters) ?? tally(false, characters)
   return look ? look : null
+}
+
+/** Is this run look superscript or subscript? */
+function isRaisedOrLowered(rPrXml: string): boolean {
+  const el = rPrXml ? directRprChild(rPrXml, "vertAlign") : null
+  return el !== null && /\sw:val="(superscript|subscript)"/.test(el)
 }
 
 /** Is this run look right-to-left (`w:rtl` on)? */

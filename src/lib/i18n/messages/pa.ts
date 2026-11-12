@@ -5095,8 +5095,6 @@ export const pa: Catalog = {
   "projectSettings.permission.reconnectToEdit": "ਸਾਂਝੀਆਂ ਸੈਟਿੰਗਾਂ ਸੋਧਣ ਲਈ ਮੁੜ ਜੁੜੋ.",
   "projectSettings.permission.onlyRoleCanModify": "ਸਿਰਫ਼ {role} ਬਦਲ ਸਕਦਾ ਹੈ",
   "projectSettings.permission.viewPrivilegedMembers": "{role} ਵੇਖੋ",
-  "projectSettings.permission.privilegedDialogTitle": "ਪ੍ਰੋਜੈਕਟ {role}",
-  "projectSettings.permission.privilegedDialogDescription": "{role} ਸਾਂਝੀਆਂ ਸੈਟਿੰਗਾਂ, ਸਦੱਸ ਅਤੇ ਹੋਰ ਪ੍ਰੋਜੈਕਟ ਸੰਰਚਨਾ ਬਦਲ ਸਕਦਾ ਹੈ.",
   "projectSettings.permission.privilegedDialogEmpty": "ਇਸ ਪ੍ਰੋਜੈਕਟ ਉੱਤੇ ਕੋਈ {role} ਨਹੀਂ.",
   "projectSettings.permission.privilegedDialogError": "{role} ਲੋਡ ਨਹੀਂ ਹੋ ਸਕੇ.",
   "projectSettings.create.trigger": "ਨਵਾਂ ਪ੍ਰੋਜੈਕਟ",

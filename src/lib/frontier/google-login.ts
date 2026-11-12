@@ -1,8 +1,9 @@
+import { ANALYTICS_DISCLOSURE_VERSION } from "../../../shared/analytics-consent"
 import { AUTH_BASE } from "./auth"
 import { safeLoginNext } from "../navigation/login-path"
 import { readSignupAnalyticsChoice, type SignupAnalyticsChoice } from "../signup-analytics-choice"
 const KEY = `aquilla:google-login:${AUTH_BASE}`
-export interface GoogleAttempt { verifier: string; next: string; expires: number; choice: SignupAnalyticsChoice | null; connectUsername?: string }
+export interface GoogleAttempt { verifier: string; next: string; expires: number; choice: SignupAnalyticsChoice | null; connectUsername?: string; pending?: GooglePending; connectCode?: string }
 export interface GooglePending { continuation: string; step: "signup" | "link"; email: string; username?: string }
 export interface GoogleSession { access_token: string; token_type: string; username: string; created: boolean }
 export async function googleRequest<T>(path: string, body?: object, jwt?: string): Promise<T> {
@@ -13,6 +14,9 @@ export async function googleRequest<T>(path: string, body?: object, jwt?: string
     ...(body ? { body: JSON.stringify(body) } : {}),
   })
   } catch { throw new Error("unavailable") }
+  // Only this read endpoint's 401 unambiguously means the session is invalid.
+  // Link/disconnect can also return 401 for an incorrect password proof.
+  if (path === "methods" && jwt && response.status === 401) throw new Error("session_expired")
   let data
   try { data = await response.json() } catch { throw new Error("unavailable") }
   if (!data || typeof data !== "object") throw new Error("unavailable")
@@ -36,7 +40,19 @@ export async function startGoogleLogin(next: string, signup: boolean, connectUse
 export function readGoogleAttempt(): GoogleAttempt | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(KEY) ?? "null") as GoogleAttempt | null
-    return value && /^[a-f0-9]{64}$/.test(value.verifier) && value.expires > Date.now() ? { ...value, next: safeLoginNext(value.next) } : null
+    if (!value || !/^[a-f0-9]{64}$/.test(value.verifier) || !Number.isFinite(value.expires) || value.expires <= Date.now()) { clearGoogleAttempt(); return null }
+    if (value.pending && (!/^[a-f0-9]{64}$/.test(value.pending.continuation) || !["signup","link"].includes(value.pending.step) || typeof value.pending.email !== "string")) { clearGoogleAttempt(); return null }
+    if (value.connectCode && !/^[a-f0-9]{64}$/.test(value.connectCode)) { clearGoogleAttempt(); return null }
+    const choice = value.choice?.version === ANALYTICS_DISCLOSURE_VERSION && typeof value.choice.allowed === "boolean" && typeof value.choice.revision === "string" ? value.choice : null
+    return { ...value, choice, next: safeLoginNext(value.next) }
   } catch { return null }
 }
 export function clearGoogleAttempt(): void { try { sessionStorage.removeItem(KEY) } catch { /* already unusable */ } }
+
+/** Short-lived, tab-local continuation only. No password, JWT or provider token.
+ * The server still enforces one-use redemption, PKCE and its own expiry. */
+export function saveGoogleProgress(verifier: string, update: { pending?: GooglePending; choice?: SignupAnalyticsChoice | null; connectCode?: string }): void {
+  const attempt = readGoogleAttempt()
+  if (!attempt || attempt.verifier !== verifier) throw new Error("expired_request")
+  sessionStorage.setItem(KEY, JSON.stringify({ ...attempt, ...update, expires: Math.min(attempt.expires, Date.now() + 4 * 60_000) }))
+}

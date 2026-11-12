@@ -214,7 +214,7 @@ function TokenExpiredView({ username, returnTo }: { username: string; returnTo?:
 // ---------------------------------------------------------------------------
 // Main reset form — shown when token is valid.
 // ---------------------------------------------------------------------------
-type VerifyState = "loading" | "valid" | "invalid"
+type VerifyState = "loading" | "valid" | "invalid" | "unavailable"
 
 export function ResetPassword() {
   const t = useT()
@@ -227,6 +227,7 @@ export function ResetPassword() {
   const returnTo = passwordResetReturnTo(searchParams.get("returnTo"))
 
   const [verifyState, setVerifyState] = useState<VerifyState>("loading")
+  const [verifyRevision, setVerifyRevision] = useState(0)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
 
   const passwordSchema = z.object({
@@ -257,18 +258,19 @@ export function ResetPassword() {
       return
     }
     let cancelled = false
+    setVerifyState("loading")
     void verifyResetToken(token, username).then(
       () => {
         if (!cancelled) setVerifyState("valid")
       },
-      () => {
-        if (!cancelled) setVerifyState("invalid")
+      (error: unknown) => {
+        if (!cancelled) setVerifyState(error instanceof FrontierAuthError && error.status === 400 ? "invalid" : "unavailable")
       },
     )
     return () => {
       cancelled = true
     }
-  }, [token, username])
+  }, [token, username, verifyRevision])
 
   return (
     <AuthPage>
@@ -290,6 +292,10 @@ export function ResetPassword() {
             </p>
           )}
 
+          {verifyState === "unavailable" && <div className="flex flex-col gap-3">
+            <p role="alert">{t("auth.resetPassword.networkRetry")}</p>
+            <Button onClick={() => setVerifyRevision(n => n + 1)}>{t("common.retry")}</Button>
+          </div>}
         {verifyState === "invalid" && <TokenExpiredView username={username} returnTo={returnTo} />}
 
           {verifyState === "valid" && (

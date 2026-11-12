@@ -5097,8 +5097,6 @@ export const sw: Catalog = {
   "projectSettings.permission.reconnectToEdit": "Unganisha tena ili kuhariri mipangilio iliyoshirikiwa.",
   "projectSettings.permission.onlyRoleCanModify": "Ni {role} pekee wanaoweza kubadilisha",
   "projectSettings.permission.viewPrivilegedMembers": "Tazama {role}",
-  "projectSettings.permission.privilegedDialogTitle": "{role} wa mradi",
-  "projectSettings.permission.privilegedDialogDescription": "{role} wanaweza kubadilisha mipangilio iliyoshirikiwa, wanachama, na usanidi mwingine wa mradi.",
   "projectSettings.permission.privilegedDialogEmpty": "Hakuna {role} kwenye mradi huu.",
   "projectSettings.permission.privilegedDialogError": "Imeshindwa kupakia {role}.",
   "projectSettings.create.trigger": "Mradi mpya",

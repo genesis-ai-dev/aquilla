@@ -4247,8 +4247,6 @@ export const ar: Catalog = {
   "projectSettings.permission.reconnectToEdit": "أعِد الاتصال لتعديل الإعدادات المشتركة.",
   "projectSettings.permission.onlyRoleCanModify": "يمكن لـ{role} فقط التعديل",
   "projectSettings.permission.viewPrivilegedMembers": "عرض {role}",
-  "projectSettings.permission.privilegedDialogTitle": "{role} في المشروع",
-  "projectSettings.permission.privilegedDialogDescription": "يمكن لـ{role} تغيير الإعدادات المشتركة والأعضاء وإعدادات المشروع الأخرى.",
   "projectSettings.permission.privilegedDialogEmpty": "لا يوجد {role} في هذا المشروع.",
   "projectSettings.permission.privilegedDialogError": "تعذّر تحميل {role}.",
   "projectSettings.create.trigger": "مشروع جديد",

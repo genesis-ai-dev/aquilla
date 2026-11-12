@@ -4304,8 +4304,6 @@ export const fr: Catalog = {
   "projectSettings.permission.reconnectToEdit": "Reconnectez-vous pour modifier les paramètres partagés.",
   "projectSettings.permission.onlyRoleCanModify": "Seuls les {role} peuvent modifier",
   "projectSettings.permission.viewPrivilegedMembers": "Voir les {role}",
-  "projectSettings.permission.privilegedDialogTitle": "{role} du projet",
-  "projectSettings.permission.privilegedDialogDescription": "Les {role} peuvent modifier les paramètres partagés, les membres et les autres configurations du projet.",
   "projectSettings.permission.privilegedDialogEmpty": "Aucun {role} sur ce projet.",
   "projectSettings.permission.privilegedDialogError": "Impossible de charger les {role}.",
   "projectSettings.create.trigger": "Nouveau projet",

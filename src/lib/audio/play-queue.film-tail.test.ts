@@ -22,6 +22,8 @@ import { act, renderHook } from "@testing-library/react"
 import {
   getQueueProgress,
   getQueueState,
+  hasAnyPlayableAudio,
+  hasPlayableAudio,
   linesHaveAnythingOfTheirOwnToPlay,
   linesHaveAnythingToPlayCountingFilm,
   onQueueRanOut,
@@ -2120,5 +2122,85 @@ describe("a line under the film whose take gives up is crossed with the film, ne
     expect(getQueueProgress().filmClock).toBe(false)
     await wait(2_000)
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+  })
+})
+
+// Sam, Nov 12 (question 44): one rule for a file with a linked film: a line
+// nobody has recorded has something to play, the film, so "Play selected" and
+// Next and Previous treat it as a line, as Play and Play all already do. The
+// browser pass on the joined copy saw "Play selected" count and play lines 1
+// and 3 of three, skipping line 2 under the film. "Play selected" runs the
+// chosen lines on their own (a `snapshot` context) and the film stays still
+// under such a run, so a line only the film plays is crossed on the queue's
+// own timer, and the run still ends with its lines.
+describe("an unrecorded line under the film is a line: Play selected, and the question asked line by line", () => {
+  // b1 recorded 2 s [0, 2); b2 a stand-in [2, 3.5); b3 recorded 1 s [3.5, 4.5).
+  const chosen = () => [line("b1", 2_000), line("b2"), line("b3", 1_000)]
+
+  it("Play selected plays the unrecorded line, crossed on the queue's own timer, then the next one", async () => {
+    const cells = chosen()
+    linkFilm(10, cells)
+    startQueue(ctxFor(cells, { snapshot: true }), 0, true)
+    await wait()
+    el("b1")!.tick(2)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    // The film is not this run's clock: nothing waits for its word.
+    expect(film.reports).toBe(0)
+    await wait(1_000)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    await wait(750)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    expect(el("b3")!.paused).toBe(false)
+  })
+
+  it("Play selected still ends with its lines, even when they are every line of the film's file", async () => {
+    const cells = [line("b1", 2_000), line("b2")]
+    linkFilm(10, cells)
+    startQueue(ctxFor(cells, { snapshot: true }), 0, true)
+    await wait()
+    el("b1")!.tick(2)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    await wait(1_600)
+    expect(getQueueState().kind).toBe("idle")
+  })
+
+  it("Next inside Play selected steps onto the unrecorded line", async () => {
+    const cells = chosen()
+    linkFilm(10, cells)
+    startQueue(ctxFor(cells, { snapshot: true }), 0, true)
+    await wait()
+    skipForward()
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+  })
+
+  it("asked of one line (what Play selected counts, and Next and Previous ask line by line), the film counts", () => {
+    const [b1, b2] = chosen()
+    linkFilm(10, chosen())
+    expect(hasPlayableAudio(b2)).toBe(true)
+    expect(hasAnyPlayableAudio([b2])).toBe(true)
+    expect(hasPlayableAudio(b1)).toBe(true)
+    // Play all's own move into the next chapter still asks without the film.
+    expect(linesHaveAnythingOfTheirOwnToPlay([b2])).toBe(false)
+  })
+
+  describe("on a file with no film nothing changes: an unrecorded line has nothing to play", () => {
+    it("Play selected skips it", async () => {
+      const cells = chosen()
+      startQueue(ctxFor(cells, { snapshot: true }), 0, true)
+      await wait()
+      el("b1")!.tick(2)
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    })
+
+    it("asked of one line, it has nothing", () => {
+      const [b1, b2] = chosen()
+      expect(hasPlayableAudio(b2)).toBe(false)
+      expect(hasAnyPlayableAudio([b2])).toBe(false)
+      expect(hasPlayableAudio(b1)).toBe(true)
+    })
   })
 })

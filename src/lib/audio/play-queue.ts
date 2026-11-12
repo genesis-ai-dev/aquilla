@@ -505,14 +505,33 @@ export function useProgrammeFilm(): ProgrammeFilm | null {
   )
 }
 
+/**
+ * Sam, Nov 12 (question 44): the film is behind a run of chosen lines too
+ * ("Play selected", a `snapshot` context): a line of it nobody has recorded
+ * is a line, played, not skipped, as Play and Play all play it. Such a run
+ * still ends with its lines (no run on to the film's end), and the film is
+ * never its clock (`progFilmFollowsRun`).
+ */
 function progFilmResolve(): void {
   const ctx = activeContext
   const prog = programme
-  const over = timingMode === "audioFirst" && ctx && !ctx.snapshot && prog && prog.slots.length > 0
+  const over = timingMode === "audioFirst" && ctx && prog && prog.slots.length > 0
     ? filmOverRun(progFilm, ctx.cells.map((c) => c.id))
     : null
-  progFilmEndSec = over?.runsOnToSec ?? 0
+  progFilmEndSec = ctx?.snapshot ? 0 : over?.runsOnToSec ?? 0
   progFilmCoverSec = over?.coverSec ?? 0
+}
+
+/**
+ * Does the film follow this run's clock? Only a run on the file's own clock
+ * (`progOwnsProgressClock`). A run of chosen lines starts its clock at 0:00
+ * wherever its lines are, so the film panel leaves the film still under it
+ * (MediaVideoPane: not the file's clock). There a line only the film plays is
+ * crossed on the queue's own timer: waiting for the film's word would wait
+ * for a film that is not playing.
+ */
+function progFilmFollowsRun(): boolean {
+  return activeContext?.snapshot !== true
 }
 
 /** Is this programme second past the last line, on a run with a film to run
@@ -538,6 +557,7 @@ function progFilmPlaysUnder(slot: ProgrammeSlot): boolean {
  *  after the last line once no take on another track still plays out there.
  *  Not in the film's last moment, a still frame (`progArmFilmClock`). */
 function progFilmIsClockAt(sec: number): boolean {
+  if (!progFilmFollowsRun()) return false
   if (progFilmCoverSec - sec <= FILM_END_GUARD_SEC) return false
   if (progOverFilmTail(sec)) return !layersSoundIn(progLayers, sec + HOLD_MIN_SEC, Infinity)
   // AQU-2253 (review 2, Nov 9): a film that went quiet as a line's clock is
@@ -551,7 +571,7 @@ function progFilmIsClockAt(sec: number): boolean {
  *  second: its picture runs there (not its last moment), and it has not gone
  *  quiet. */
 function progFilmCanCarryLineAt(sec: number): boolean {
-  return !progFilmQuiet && progFilmCoverSec - sec > FILM_END_GUARD_SEC
+  return progFilmFollowsRun() && !progFilmQuiet && progFilmCoverSec - sec > FILM_END_GUARD_SEC
 }
 
 /** How long the run is: the programme, or a linked film that outlasts it. */
@@ -5227,13 +5247,20 @@ export function updateQueueCells(cells: CellData[]): void {
   armEarlyDub()
 }
 
-/** Whether THIS cell has playable audio. AQU-2123: the selection toolbar's
+/** Whether THIS line has anything to play. AQU-2123: the selection toolbar's
  *  "Play selected" states how many of the chosen lines a range run will
  *  actually sound, so it needs the per-cell answer the list predicate below
  *  was already computing one cell at a time. AQU-2253: what the queue plays
- *  for the line, so a line with only its original counts (see below). */
+ *  for the line, so a line with only its original counts (see below).
+ *
+ *  Sam, Nov 12 (question 44): on a file with a linked film, a line nobody has
+ *  recorded has something to play, the film, as Play and Play all already
+ *  play it. So this is the person's question for one line, the film counted
+ *  (`linesHaveAnythingToPlayCountingFilm`), wherever it is asked: "Play
+ *  selected" counts and plays such a line, and Next and Previous asking line
+ *  by line step onto it. With no film behind the line, as before. */
 export function hasPlayableAudio(cell: CellData): boolean {
-  return masterAudioForCell(cell) !== undefined
+  return linesHaveAnythingToPlayCountingFilm([cell])
 }
 
 /** Whether any cell in the list has playable audio. Drives the bar's
@@ -5243,7 +5270,8 @@ export function hasPlayableAudio(cell: CellData): boolean {
  *  line (`masterAudioForCell`): a section of an imported recording plays its
  *  original whether or not that is the line's selected audio, so a line with
  *  only its original is something to play here too, as it is to the queue,
- *  which never skips it. */
+ *  which never skips it. Sam, Nov 12: and a line a linked film plays behind
+ *  (`hasPlayableAudio`). */
 export function hasAnyPlayableAudio(cells: CellData[]): boolean {
   return cells.some(hasPlayableAudio)
 }
@@ -5281,10 +5309,12 @@ export function linesHaveAnythingToPlayCountingFilm(cells: CellData[], film: Pro
 
 /**
  * A take or an original of the lines' own, the film not counted: what Play
- * all asks of the next chapter before it goes on into it. See above.
+ * all asks of the next chapter before it goes on into it. See above. (What
+ * the queue plays for a line itself, `masterAudioForCell`; not
+ * `hasAnyPlayableAudio`, which counts the film since Nov 12.)
  */
 export function linesHaveAnythingOfTheirOwnToPlay(cells: CellData[]): boolean {
-  return hasAnyPlayableAudio(cells)
+  return cells.some((c) => masterAudioForCell(c) !== undefined)
 }
 
 // ── Dubs over a linked picture (AQU-646 round 5) ────────────────────────────

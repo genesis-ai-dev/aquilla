@@ -31,7 +31,7 @@ import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
 import { ROLE } from "@/lib/frontier/roles"
 import type { MemberScope } from "@/lib/sync/member-scopes"
 import * as selectionModule from "@/lib/audio/selection"
-import { startQueue } from "@/lib/audio/play-queue"
+import { setProgrammeFilm, startQueue } from "@/lib/audio/play-queue"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { toast } from "@/components/ui/toast"
 import posthog from "@/lib/posthog"
@@ -60,8 +60,9 @@ vi.mock("@/lib/sync/events-emit", async (importActual) => ({
 }))
 
 // AQU-2123: spy on startQueue while keeping the rest of the play queue real —
-// `hasPlayableAudio` decides the Play-selected button's own enablement, so a
-// blanket mock would prove nothing about which lines it found.
+// its answer for one line (`hasPlayableAudio`, the film counted since Nov 12)
+// decides the Play-selected button's own enablement, so a blanket mock would
+// prove nothing about which lines it found.
 vi.mock("@/lib/audio/play-queue", async (importActual) => ({
   ...(await importActual<typeof import("@/lib/audio/play-queue")>()),
   startQueue: vi.fn(),
@@ -1294,6 +1295,37 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
 
     const [ctx] = vi.mocked(startQueue).mock.calls[0]
     expect(ctx.cells.map((c) => c.id)).toEqual(["cell-1", "cell-2", "cell-3"])
+  })
+
+  // Sam, Nov 12 (question 44): on a file with a linked film a line nobody has
+  // recorded has the film to play, so it is counted (and the run plays it:
+  // play-queue.film-tail.test.ts). With no film, the count above is unchanged.
+  it("on a file with a linked film, counts a line nobody has recorded, and follows the film's word", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
+    // Verse 2 was never recorded.
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audioMapFor(["cell-1", "cell-3"]),
+    })
+    expect(playButton().textContent).toContain("2")
+
+    act(() => setProgrammeFilm({ endSec: 60, cellIds: new Set(THREE.map((c) => c.id)) }, "file-1"))
+    expect(playButton().textContent).toContain("3")
+
+    await userEvent.setup().click(playButton())
+    const [ctx] = vi.mocked(startQueue).mock.calls[0]
+    expect(ctx.cells.map((c) => c.id)).toEqual(["cell-1", "cell-2", "cell-3"])
+    act(() => setProgrammeFilm(null))
+  })
+
+  it("on a file with a linked film and nothing recorded, Play selected is offered for the film", () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    act(() => setProgrammeFilm({ endSec: 60, cellIds: new Set(THREE.map((c) => c.id)) }, "file-1"))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: new Map(),
+    })
+    expect(playButton()).not.toBeDisabled()
+    expect(playButton().textContent).toContain("2")
+    act(() => setProgrammeFilm(null))
   })
 
   it("is disabled, and says why, when not one selected line has audio", async () => {

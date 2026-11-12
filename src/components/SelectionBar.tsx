@@ -29,7 +29,7 @@ import { emitCellValidate, emitCellUnvalidate, emitCellAudioValidate, emitCellAu
 import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import { isBulkAudioValidatableByMe, isBulkAudioUnvalidatableByMe } from "@/lib/review/bulk-audio-validation"
 import { fileHasAudio as fileHasAnyAudio } from "@/lib/audio/file-has-audio"
-import { hasPlayableAudio, startQueue } from "@/lib/audio/play-queue"
+import { linesHaveAnythingToPlayCountingFilm, startQueue, useProgrammeFilm } from "@/lib/audio/play-queue"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { BatchVoiceDialog } from "@/components/voice/BatchVoiceDialog"
 import { audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
@@ -355,9 +355,15 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // with no audio and carries on, so this is a count for the button's badge and
   // the has-anything-to-play test — not a filter on what is handed to the queue
   // (dropping the silent lines would be the same run, one highlight short).
+  // Sam, Nov 12 (question 44): each line asked the person's question for one
+  // line (play-queue's `hasPlayableAudio`), so on a file with a linked film a
+  // line nobody has recorded counts: the film is its to play, and the run
+  // plays it. The workspace's word about the film is read here so the count
+  // follows it.
+  const film = useProgrammeFilm()
   const playableSelectedCount = useMemo(
-    () => playbackRange.filter(hasPlayableAudio).length,
-    [playbackRange],
+    () => playbackRange.filter((c) => linesHaveAnythingToPlayCountingFilm([c], film)).length,
+    [playbackRange, film],
   )
 
   /**

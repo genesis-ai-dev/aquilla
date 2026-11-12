@@ -17,13 +17,18 @@ import { splitIntoSegments } from "./text-splitter"
  * Guessing wrong in either direction is visible and wrong: collapsing a
  * line-per-block transcript gives one enormous cell, and splitting a wrapped
  * paragraph per line gives a cell per wrapped line.
+ *
+ * Only a blank line BETWEEN two lines of text counts (AQU-2544): one before
+ * the first line or after the last separates nothing, and an extra Enter at
+ * the end of a line-per-block file used to collapse it into one cell.
  */
 function paragraphBlocks(normalized: string): string[] {
-  const hasBlankLine = /\n[ \t]*\n/.test(normalized)
+  const body = normalized.trim()
+  const hasBlankLine = /\n[ \t]*\n/.test(body)
   if (!hasBlankLine) {
-    return normalized.split("\n").map((line) => line.trim()).filter((line) => line.length > 0)
+    return body.split("\n").map((line) => line.trim()).filter((line) => line.length > 0)
   }
-  return normalized
+  return body
     .split(/\n[ \t]*\n+/)
     .map((block) => block.split("\n").map((line) => line.trim()).filter(Boolean).join(" "))
     .filter((block) => block.length > 0)

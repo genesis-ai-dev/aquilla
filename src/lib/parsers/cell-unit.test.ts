@@ -147,6 +147,17 @@ describe("plaintext — cellUnit: paragraph", () => {
     expect(cells.map((cell) => cell.original)).toEqual([LONG_PARAGRAPH, "Second block."])
   })
 
+  // AQU-2544: a blank line before the first line or after the last separates
+  // nothing. Read as a paragraph break it turned a file written one line per
+  // paragraph into ONE cell, its lines joined by spaces — one extra Enter at
+  // the end of a translation was enough.
+  it("doesn't count a blank line at the start or end of the file as a break", () => {
+    for (const text of ["One.\nTwo.\nThree.\n\n", "\n\nOne.\nTwo.\nThree.\n", "One.\r\nTwo.\r\nThree.\r\n \r\n"]) {
+      const cells = extractPlaintextStrings(text, { cellUnit: "paragraph" })
+      expect(cells.map((cell) => cell.original)).toEqual(["One.", "Two.", "Three."])
+    }
+  })
+
   it("leaves sentence mode (the default) splitting as before", () => {
     const text = [LONG_PARAGRAPH, "Second block."].join("\n")
     expect(extractPlaintextStrings(text).length).toBeGreaterThan(2)

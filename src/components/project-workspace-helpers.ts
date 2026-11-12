@@ -3,6 +3,7 @@
 // non-components).
 
 import { ROLE } from "@/lib/frontier/roles"
+import { canPerform } from "@/lib/sync/role-policy"
 import type { ContextualDraftsScope } from "@/lib/contextual/drafts-store"
 import { btSeedsFromAlignmentSeeds, type BtSeed } from "@/lib/completion/bt-glosser"
 import type { BacktranslationRecord } from "@/lib/completion/bt-record"
@@ -174,6 +175,26 @@ export function canRestructureTracks(args: {
   allowTrackEditing: boolean | undefined
 }): boolean {
   return args.roleLevel >= ROLE.MAINTAINER && (args.allowTrackEditing ?? true)
+}
+
+/**
+ * AQU-2432 (browser pass, Nov 11): the timeline's take writes that start with
+ * a drag — moving a take, a line's room, trimming — for someone who can save
+ * them, and none at all below that. The timeline's `editable` is the
+ * project's and the lane's, never the person's role, so a viewer dragged a
+ * take that was never saved and stayed drawn moved. The gate is "don't pass
+ * the callback" (no callback, no drag), asked with `canPerform` as every
+ * other write in the workspace asks.
+ */
+export function timelineTakeDrags<Move, Rooms, Trim>(
+  roleLevel: number | null,
+  drags: { onRetimeTarget: Move; onMoveTakeRooms: Rooms; onTrimTarget: Trim },
+): { onRetimeTarget?: Move; onMoveTakeRooms?: Rooms; onTrimTarget?: Trim } {
+  return {
+    ...(canPerform("cell.audio.place", roleLevel) ? { onRetimeTarget: drags.onRetimeTarget } : {}),
+    ...(canPerform("cell.lane.retime", roleLevel) ? { onMoveTakeRooms: drags.onMoveTakeRooms } : {}),
+    ...(canPerform("cell.audio.trim", roleLevel) ? { onTrimTarget: drags.onTrimTarget } : {}),
+  }
 }
 
 /**

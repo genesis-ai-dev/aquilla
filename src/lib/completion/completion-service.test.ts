@@ -1125,6 +1125,38 @@ describe("selectApprovedExamples", () => {
     expect(selected).toEqual([{ cellId: "long", source: longSource, target: "full target" }])
     expect(selected[0].source.endsWith("ending")).toBe(true)
   })
+
+  // The Examples panel showed "100% match" rows for a line the project had
+  // already translated, and the draft still came back with a different word:
+  // the drafted cell used to be kept out by its SOURCE TEXT, which also threw
+  // away every other cell carrying that same text.
+  it("keeps an identical line from another cell, and never the drafted cell itself", () => {
+    const source = "Mercy: Exodus 32:1–35."
+    const selected = selectApprovedExamples(
+      [
+        { cellId: "other-file", source, target: "Милосердие: Исход 32:1–35." },
+        { cellId: "another-file", source: `  ${source.toUpperCase()} `, target: "Милосердие: Исход 32:1–35." },
+      ],
+      [{ cellId: "drafted", source, target: "its own old translation" }],
+      DEFAULT_APPROVED_EXAMPLE_COUNT,
+      [],
+      ["drafted"],
+    )
+
+    // One copy of the exact match is enough; the repeats are the same pair.
+    expect(selected).toEqual([{ cellId: "other-file", source, target: "Милосердие: Исход 32:1–35." }])
+  })
+
+  it("drops the drafted cell even when it is the only candidate", () => {
+    const selected = selectApprovedExamples(
+      [{ cellId: "drafted", source: "Mercy", target: "old" }],
+      [{ cellId: "drafted", source: "Mercy", target: "old" }],
+      DEFAULT_APPROVED_EXAMPLE_COUNT,
+      [],
+      ["drafted"],
+    )
+    expect(selected).toEqual([])
+  })
 })
 
 // ---------------------------------------------------------------------------

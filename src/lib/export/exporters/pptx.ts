@@ -25,6 +25,7 @@ import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
 import { pptxParagraphBlocks, pptxSlideParts } from "@/lib/parsers/pptx"
 import {
+  blockParts,
   packageBlockKey,
   translationsByPackageBlock,
   removedPackageBlockKeys,
@@ -87,6 +88,7 @@ export async function exportPptx(
   // Build a map: group → joined translation text, preserving first-seen order.
   const groupOrder: string[] = []
   const groupToTranslation = new Map<string, string>()
+  const groupCells = new Map<string, CellData[]>()
 
   for (const cell of cells) {
     // AQU-1068: a line somebody ADDED here has no place in the original
@@ -97,24 +99,23 @@ export async function exportPptx(
     // locator, so it is simply skipped); this is the positional path's guard.
     if (isUserAddedLine(cell)) continue
     const legacyGroup = cell.group || cell.id
-    if (!groupToTranslation.has(legacyGroup)) {
+    if (!groupCells.has(legacyGroup)) {
       groupOrder.push(legacyGroup)
-      groupToTranslation.set(legacyGroup, "")
+      groupCells.set(legacyGroup, [])
     }
-    if (cell.translated.trim()) {
-      const existing = groupToTranslation.get(legacyGroup) ?? ""
-      groupToTranslation.set(
-        legacyGroup,
-        existing ? `${existing} ${cell.translated.trim()}` : cell.translated.trim(),
-      )
-    }
+    groupCells.get(legacyGroup)!.push(cell)
   }
-  const locatedTranslations = translationsByPackageBlock(cells)
+  // AQU-2552: a paragraph's lines in order, each its translation or its source
+  // where it has none (see blockParts); "" when none is translated.
+  for (const [group, list] of groupCells) {
+    groupToTranslation.set(group, blockParts(list).map((part) => part.plain).filter(Boolean).join(" "))
+  }
+  const locatedTranslations = translationsByPackageBlock(cells, options.removedCells ?? [])
   const hasLocatedTranslations = locatedTranslations.size > 0
   // AQU-1068. Both built BEFORE the deck walk, for the reason the guard above
   // exists: a mapping computed while the tree is being mutated writes
   // translations into the wrong paragraphs of the client's own deck.
-  const removedKeys = removedPackageBlockKeys(options.removedCells ?? [])
+  const removedKeys = removedPackageBlockKeys(options.removedCells ?? [], cells)
   const insertions = insertionsAfterPackageBlock(cells, isUserAddedLine)
 
   let injected = 0

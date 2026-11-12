@@ -24,15 +24,17 @@ export interface BlockPart {
 }
 
 /**
- * AQU-2539: a block (a paragraph cut into lines) is written as its lines in
- * order, each line's translation, or its source where it has none. A block
- * with no translated line at all has no parts: the client's paragraph stays as
- * it is.
+ * AQU-2539, AQU-2552: a block (a paragraph cut into lines) is written as its
+ * lines in order, each line's translation, or its source where it has none. A
+ * hidden or deleted line contributes nothing (`lostLines`: the block lost a
+ * line the cells no longer show). A block with no translated line and no lost
+ * line has no parts: the client's paragraph stays as it is.
  */
-export function blockParts(cells: readonly CellData[]): BlockPart[] {
+export function blockParts(cells: readonly CellData[], lostLines = false): BlockPart[] {
+  const live = cells.filter((cell) => cell.hidden !== true)
   const translated = (cell: CellData) => cell.translated.trim() !== "" || (cell.translatedHtml?.trim() ?? "") !== ""
-  if (!cells.some(translated)) return []
-  return cells.map((cell): BlockPart => translated(cell)
+  if (!live.some(translated) && !lostLines && live.length === cells.length) return []
+  return live.map((cell): BlockPart => translated(cell)
     ? { plain: cell.translated.trim(), html: cell.translatedHtml?.trim() ?? "", source: cell.original ?? "" }
     : { plain: (cell.original ?? "").trim(), html: "", source: cell.original ?? "", untranslated: true })
 }
@@ -73,10 +75,13 @@ function packageBlockLocator(cell: CellData): PackageBlockLocator | null {
 
 /** Build translations keyed by the reversible OOXML package locator emitted
  * at import. This deliberately ignores visual/editor order: reordering or
- * deleting cells must never inject a translation into a different paragraph. */
+ * deleting cells must never inject a translation into a different paragraph.
+ * `removed` (the server's removed cells) tells which blocks lost a line. */
 export function translationsByPackageBlock(
   cells: CellData[],
+  removed: readonly RemovedCellLocatorSource[] = [],
 ): Map<string, PackageBlockTranslation> {
+  const lost = blocksOf(removed)
   const grouped = new Map<string, Array<{ cell: CellData; locator: PackageBlockLocator }>>()
   for (const cell of cells) {
     const locator = packageBlockLocator(cell)
@@ -93,9 +98,9 @@ export function translationsByPackageBlock(
       a.locator.segment - b.locator.segment
       || a.locator.physicalOrder - b.locator.physicalOrder,
     )
-    const parts = blockParts(entries.map(({ cell }) => cell))
+    const parts = blockParts(entries.map(({ cell }) => cell), lost.has(key))
     const plain = parts.map((part) => part.plain).filter(Boolean).join(" ")
-    const html = entries.map(({ cell }) => cell.translatedHtml?.trim()).filter(Boolean).join(" ")
+    const html = parts.map((part) => part.html).filter(Boolean).join(" ")
     translations.set(key, {
       plain,
       html,
@@ -135,10 +140,26 @@ export interface RemovedCellLocatorSource {
  * live cell claims is ALSO how a paragraph that was never imported as a cell
  * looks — a running head, an empty paragraph, a non-text frame — and dropping
  * those would damage the client's document.
+ *
+ * AQU-2552: a paragraph leaves only when every line of it is gone. While one
+ * of its lines is still in `cells` and not hidden, the paragraph stays, written
+ * as its remaining lines (see `blockParts`).
  */
 export function removedPackageBlockKeys(
   removed: readonly RemovedCellLocatorSource[],
+  cells: readonly CellData[] = [],
 ): Set<string> {
+  const keys = blocksOf(removed)
+  for (const cell of cells) {
+    if (cell.hidden === true) continue
+    const locator = packageBlockLocator(cell)
+    if (locator) keys.delete(packageBlockKey(locator.memberPath, locator.blockPath))
+  }
+  return keys
+}
+
+/** The package blocks these removed cells came from. */
+function blocksOf(removed: readonly RemovedCellLocatorSource[]): Set<string> {
   const keys = new Set<string>()
   for (const entry of removed) {
     const locator = packageBlockLocator({ metadata: entry.metadata } as CellData)

@@ -274,13 +274,13 @@ export async function exportDocx(
   }
 
   const { groups, groupToData } = buildLegacyGroups(cells)
-  const locatedTranslations = translationsByPackageBlock(cells)
+  const locatedTranslations = translationsByPackageBlock(cells, options.removedCells ?? [])
   const hasLocatedTranslations = locatedTranslations.size > 0
   // AQU-1068. BOTH lookups are built BEFORE the package walk, which is the
   // point of the guard in buildLegacyGroups: an added cell that consumed a
   // positional slot would shift every mapping after it and write translations
   // into the wrong paragraphs of the client's document.
-  const removedKeys = removedPackageBlockKeys(options.removedCells ?? [])
+  const removedKeys = removedPackageBlockKeys(options.removedCells ?? [], cells)
   const insertions = insertionsAfterPackageBlock(cells, isUserAddedLine)
 
   // AQU-2539: the two things the target language changes in what is written.

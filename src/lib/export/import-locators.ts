@@ -8,9 +8,33 @@ export interface PackageBlockTranslation {
    *  the translator's editor wrote one) its own HTML. The joined `html` above
    *  only holds the segments that HAVE html, so a reader that wants every
    *  segment's words must read these (AQU-2539, the DOCX exporter). */
-  parts: { plain: string; html: string; source: string }[]
+  parts: BlockPart[]
   /** Every segment's source text, translated or not, in order. */
   source: string
+}
+
+/** One line of a block, as the export writes it. */
+export interface BlockPart {
+  plain: string
+  html: string
+  source: string
+  /** AQU-2539: the line has no translation, so it is written as its source
+   *  (`plain` is that source): a partly translated block keeps every line. */
+  untranslated?: true
+}
+
+/**
+ * AQU-2539: a block (a paragraph cut into lines) is written as its lines in
+ * order, each line's translation, or its source where it has none. A block
+ * with no translated line at all has no parts: the client's paragraph stays as
+ * it is.
+ */
+export function blockParts(cells: readonly CellData[]): BlockPart[] {
+  const translated = (cell: CellData) => cell.translated.trim() !== "" || (cell.translatedHtml?.trim() ?? "") !== ""
+  if (!cells.some(translated)) return []
+  return cells.map((cell): BlockPart => translated(cell)
+    ? { plain: cell.translated.trim(), html: cell.translatedHtml?.trim() ?? "", source: cell.original ?? "" }
+    : { plain: (cell.original ?? "").trim(), html: "", source: cell.original ?? "", untranslated: true })
 }
 
 interface PackageBlockLocator {
@@ -69,15 +93,9 @@ export function translationsByPackageBlock(
       a.locator.segment - b.locator.segment
       || a.locator.physicalOrder - b.locator.physicalOrder,
     )
-    const plain = entries.map(({ cell }) => cell.translated.trim()).filter(Boolean).join(" ")
+    const parts = blockParts(entries.map(({ cell }) => cell))
+    const plain = parts.map((part) => part.plain).filter(Boolean).join(" ")
     const html = entries.map(({ cell }) => cell.translatedHtml?.trim()).filter(Boolean).join(" ")
-    const parts = entries
-      .map(({ cell }) => ({
-        plain: cell.translated.trim(),
-        html: cell.translatedHtml?.trim() ?? "",
-        source: cell.original ?? "",
-      }))
-      .filter((part) => part.plain !== "" || part.html !== "")
     translations.set(key, {
       plain,
       html,

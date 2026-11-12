@@ -84,6 +84,8 @@ import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import {
   packageBlockKey,
   translationsByPackageBlock,
+  blockParts,
+  type BlockPart,
   removedPackageBlockKeys,
   insertionsAfterPackageBlock,
   type RemovedCellLocatorSource,
@@ -172,16 +174,14 @@ export interface DocxExportFidelity {
 
 /** One paragraph's translation: its segments in order, with their sources. */
 interface ParagraphTranslation {
-  parts: { plain: string; html: string; source?: string }[]
+  parts: { plain: string; html: string; source?: string; untranslated?: true }[]
   label: string
   /** Every segment's source, translated or not. */
   source: string
 }
 
 interface LegacyGroup {
-  html: string
-  plain: string
-  parts: { plain: string; html: string; source: string }[]
+  parts: BlockPart[]
   source: string
 }
 
@@ -200,6 +200,7 @@ export function buildLegacyGroups(cells: CellData[]): {
 } {
   const groups: string[] = []
   const groupToData = new Map<string, LegacyGroup>()
+  const groupCells = new Map<string, CellData[]>()
   for (const cell of cells) {
     // AQU-1068: a line somebody ADDED here has no paragraph in the original
     // package, so letting it consume a slot shifts every mapping after it and
@@ -208,17 +209,14 @@ export function buildLegacyGroups(cells: CellData[]): {
     // `translationsByPackageBlock` skips it. This is the positional path's guard.
     if (isUserAddedLine(cell)) continue
     const legacyGroup = cell.group || cell.id
-    if (!groupToData.has(legacyGroup)) {
+    if (!groupCells.has(legacyGroup)) {
       groups.push(legacyGroup)
-      groupToData.set(legacyGroup, { html: "", plain: "", parts: [], source: "" })
+      groupCells.set(legacyGroup, [])
     }
-    const data = groupToData.get(legacyGroup)!
-    const plain = cell.translated?.trim() ?? ""
-    const html = cell.translatedHtml?.trim() ?? ""
-    if (plain) data.plain = data.plain ? `${data.plain} ${plain}` : plain
-    if (html) data.html = data.html ? `${data.html} ${html}` : html
-    if (plain || html) data.parts.push({ plain, html, source: cell.original ?? "" })
-    data.source = data.source ? `${data.source} ${cell.original ?? ""}` : (cell.original ?? "")
+    groupCells.get(legacyGroup)!.push(cell)
+  }
+  for (const [group, list] of groupCells) {
+    groupToData.set(group, { parts: blockParts(list), source: list.map((cell) => cell.original ?? "").join(" ") })
   }
   return { groups, groupToData }
 }
@@ -516,7 +514,9 @@ export async function exportDocx(
     const fits = untranslated.filter((box) =>
       source.length % box.words.length === 0 && box.words.repeat(source.length / box.words.length) === source)
     const one = fits.length === 1 ? fits[0] : null
-    const derived = one ? withoutRepetition(translation.parts.map((part) => part.plain).join(" "), source.length / one.words.length) : null
+    // A holder cell only partly translated gives its box no whole translation.
+    const whole = !translation.parts.some((part) => part.untranslated)
+    const derived = one && whole ? withoutRepetition(translation.parts.map((part) => part.plain).join(" "), source.length / one.words.length) : null
     if (one && derived) {
       translations.set(one.span.index, { parts: [{ plain: derived, html: "" }], label: translation.label, source: one.text })
       fidelity.textBoxCellsAdopted++
@@ -717,6 +717,25 @@ function rebuildParagraphIn(
   const text = all.map((s) => s.text).join("")
   const marks: ReadonlySet<Mark>[] = []
   for (const s of all) for (let i = 0; i < s.text.length; i++) marks.push(s.marks)
+  // A line with no translation is written as its source (AQU-2539): each of
+  // its characters in its own look and as the source has it, with neither the
+  // translation's language nor its language's spacing rules.
+  const lineLooks: (string | null)[] = []
+  for (const chunk of line.chunks) {
+    const look = chunk.piece.kind === "text" ? runRprXml(chunk.piece.run) : null
+    for (let i = 0; i < chunk.text.length; i++) lineLooks.push(look)
+  }
+  const sourceLooks: (string | undefined)[] = []
+  for (const s of all) {
+    for (let i = 0; i < s.text.length; i++) {
+      sourceLooks.push(s.fromLine === undefined ? undefined : s.fromLine >= 0 ? (lineLooks[s.fromLine + i] ?? base ?? "") : (base ?? ""))
+    }
+  }
+  const translatedText = part.writeText(text)
+  // (writeText keeps the length, so index i is the same character in both.)
+  const writtenText = sourceLooks.some((look) => look !== undefined)
+    ? text.split("").map((ch, i) => (sourceLooks[i] !== undefined ? ch : translatedText[i])).join("")
+    : translatedText
   const io: RebuildIo = {
     elementXml: (el) => part.renderRange(at(el.start), at(el.end), span),
     openTag: (el) => xml.slice(at(el.start), at(el.openEnd)),
@@ -727,8 +746,9 @@ function rebuildParagraphIn(
     items: target.items,
     lineSet,
     text,
-    writtenText: part.writeText(text),
+    writtenText,
     marks,
+    sourceLooks,
     translatedLook: part.translatedLook,
     baseRpr: base ?? "",
     io,
@@ -824,7 +844,7 @@ function plainSpans(text: string): Span[] {
  * one space — every translation is trimmed, so the break is not in it.
  */
 function translationSpans(
-  parts: readonly { plain: string; html: string; source?: string }[],
+  parts: readonly { plain: string; html: string; source?: string; untranslated?: true }[],
   lineText = "",
 ): Span[] {
   const out: Span[] = []
@@ -842,7 +862,10 @@ function translationSpans(
       previousEnd = -1
     }
     const spans = part.html ? htmlToSpans(part.html) : []
-    const segment = spans.length > 0 ? spans : plainSpans(part.plain)
+    // A line with no translation is its source, from where it sits in the line.
+    const segment = part.untranslated
+      ? plainSpans(part.plain).map((span) => ({ ...span, fromLine: at }))
+      : spans.length > 0 ? spans : plainSpans(part.plain)
     if (segment.length === 0) continue
     if (out.length > 0) out.push({ text: gap.replace(/[^\t\n]/g, "") || " ", marks: new Set(NO_MARKS) })
     out.push(...segment)
@@ -922,12 +945,15 @@ function spliceSpans(spans: readonly Span[], at: number, remove: number, insert:
       out.push(span)
       continue
     }
-    if (keepBefore) out.push({ text: keepBefore, marks: span.marks })
+    if (keepBefore) out.push({ ...span, text: keepBefore })
     if (!inserted) {
       out.push({ text: insert, marks: new Set(NO_MARKS) })
       inserted = true
     }
-    if (keepAfter && end > at + remove) out.push({ text: keepAfter, marks: span.marks })
+    if (keepAfter && end > at + remove) {
+      const shift = span.text.length - keepAfter.length
+      out.push({ ...span, text: keepAfter, ...(span.fromLine !== undefined && span.fromLine >= 0 ? { fromLine: span.fromLine + shift } : {}) })
+    }
   }
   if (!inserted) out.push({ text: insert, marks: new Set(NO_MARKS) })
   return out

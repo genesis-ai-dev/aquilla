@@ -2,7 +2,14 @@ import { scanXmlTags, startTagName } from "@/lib/parsers/xml-lite"
 
 const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 export type Mark = "b" | "i" | "u" | "s" | "sup" | "sub" | "code"
-export interface Span { text: string; marks: Set<Mark> }
+export interface Span {
+  text: string
+  marks: Set<Mark>
+  /** AQU-2539 (Word export): this text is a line with no translation, written
+   *  as its source: where it starts in the paragraph's line, or -1 when it is
+   *  not found there. It keeps the source's own looks and characters. */
+  fromLine?: number
+}
 
 const TAG_TO_MARK: Record<string, Mark> = {
   b: "b", strong: "b", i: "i", em: "i", u: "u",

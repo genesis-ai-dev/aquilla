@@ -1007,3 +1007,74 @@ describe("exportDocx — which paragraphs lost a look (AQU-2539)", () => {
     expect(result.lostLooks).toEqual([{ segment: "For the scribes of that time, the more…", words: ["more difficult"] }])
   })
 })
+
+describe("exportDocx — a paragraph cut into lines, some of them untranslated (AQU-2539)", () => {
+  // A paragraph is exported as its lines in order: each line's translation,
+  // or its source where it has none. Nothing is dropped because a neighbour
+  // was translated.
+  const lines = ["First line here.", "Second line here.", "Third line here."]
+  const french = ["Première ligne ici.", "Deuxième ligne ici.", "Troisième ligne ici."]
+  const body = para(run(lines.join(" ")))
+  const cellsWith = (translated: boolean[], line = lines) =>
+    line.map((original, k) => cellAt(1, translated[k] ? french[k] : "", { original }, k + 1))
+  /** The visible text of the first paragraph of an export. */
+  const firstParagraph = (xml: string) => docxPartsToStrings({ documentXml: xml }).filter((s) => s.sourceLocation?.blockPath === "w:p[1]").map((s) => s.original).join(" ")
+
+  it.each([
+    ["the middle line", [true, false, true], "Première ligne ici. Second line here. Troisième ligne ici."],
+    ["the first line", [false, true, true], "First line here. Deuxième ligne ici. Troisième ligne ici."],
+    ["the last line", [true, true, false], "Première ligne ici. Deuxième ligne ici. Third line here."],
+    ["all lines but one", [false, true, false], "First line here. Deuxième ligne ici. Third line here."],
+  ])("keeps %s's own words when it has no translation", async (_name, translated, want) => {
+    const { xml } = await exportedXml(body, cellsWith(translated))
+    expect(firstParagraph(xml)).toBe(want)
+  })
+
+  it("keeps the footnote of an untranslated line, its note left as it is", async () => {
+    const withNote = para(run("First line here. Second line") + footnoteRefRun(1) + run(" here. Third line here."))
+    const notes = footnotesXml({ 1: "A note." })
+    const [line] = docxPartsToStrings({ documentXml: documentXml(withNote), footnotesXml: notes }, { cellUnit: "paragraph" })
+    const parts = line.original.split(/(?<=here\.) /)
+    expect(parts).toHaveLength(3)
+    const cells = parts.map((original, k) => cellAt(1, k === 1 ? "" : french[k], { original }, k + 1))
+    const result = await exportDocx(await makeDocx(withNote, notes), cells)
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
+    const xml = await zip.file("word/document.xml")!.async("string")
+    expect(xml.match(/<w:footnoteReference w:id="1"\/>/g)).toHaveLength(1)
+    expect(firstParagraph(xml).replace(/\\f[\s\S]*?\\f\*/g, "")).toBe("Première ligne ici. Second line here. Troisième ligne ici.")
+    expect(await zip.file("word/footnotes.xml")!.async("string")).toBe(notes)
+  })
+
+  it("keeps the field of an untranslated line", async () => {
+    const withField = para(run("First line here. Second line on page ") + complexField("PAGE", "7") + run(". Third line here."))
+    const original = ["First line here.", "Second line on page 7.", "Third line here."]
+    const { xml } = await exportedXml(withField, cellsWith([true, false, true], original))
+    expect(xml).toContain('<w:fldChar w:fldCharType="begin"/>')
+    expect(xml).toContain("PAGE")
+    expect(firstParagraph(xml)).toBe("Première ligne ici. Second line on page 7. Troisième ligne ici.")
+  })
+
+  it("writes an untranslated line in its own looks and characters: no French spacing, no French language", async () => {
+    const italic = "<w:rPr><w:i/></w:rPr>"
+    const mixed = para(run("First line here. Note 3 : 4, the ") + run("second", italic) + run(` line${"<"}/w:t></w:r><w:r><w:tab/></w:r><w:r><w:t xml:space="preserve">here. Third line here.`))
+    const original = ["First line here.", "Note 3 : 4, the second line\there.", "Third line here."]
+    const cells = original.map((o, k) => cellAt(1, k === 1 ? "" : `${french[k].replace(".", "")} : fin.`, { original: o }, k + 1))
+    const result = await exportDocx(await makeDocx(mixed), cells, { targetLanguage: "fr" })
+    const xml = await (await JSZip.loadAsync(await result.blob.arrayBuffer())).file("word/document.xml")!.async("string")
+    expectWellFormed(xml)
+    // The source line: plain runs without w:lang, its italic word in its own run, its tab kept.
+    expect(xml).toContain(`<w:r><w:t xml:space="preserve">Note 3 : 4, the </w:t></w:r>`)
+    expect(xml).toContain(`<w:r>${italic}<w:t xml:space="preserve">second</w:t></w:r>`)
+    expect(xml).toContain(`<w:r><w:t xml:space="preserve"> line</w:t><w:tab/><w:t xml:space="preserve">here.</w:t></w:r>`)
+    // The translated lines: French language, and a no-break space before the colon.
+    expect(xml).toContain(`<w:r><w:rPr><w:lang w:val="fr"/></w:rPr><w:t xml:space="preserve">Première ligne ici : fin. </w:t></w:r>`)
+    expect(xml).not.toContain("3 :")
+  })
+
+  it("writes an unvalidated line's source, never its draft, in a validated-only export", async () => {
+    const cells = cellsWith([true, true, true]).map((cell, k) => ({ ...cell, status: k === 1 ? "unvalidated" : "validated" }) as CellData)
+    const { xml } = await exportedXml(body, scopeRoundTripCells(cells, "validated-only"))
+    expect(firstParagraph(xml)).toBe("Première ligne ici. Second line here. Troisième ligne ici.")
+    expect(xml).not.toContain("Deuxième")
+  })
+})

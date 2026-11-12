@@ -75,6 +75,10 @@ export interface RebuildInput {
   baseRpr: string
   /** Applied to every run look of TRANSLATED text (not to unchanged stretches). */
   translatedLook?: (rPr: string) => string
+  /** Per character: the source look to write it in, for a line with no
+   *  translation written as its source (AQU-2539); undefined for translated
+   *  text. */
+  sourceLooks?: readonly (string | undefined)[]
   io: RebuildIo
 }
 
@@ -216,7 +220,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
         continue
       }
       const next = Math.min(to, markers.find((m) => m.start > k)?.start ?? to)
-      stream += runsByLook(written, k, next, (i) => lookFor(input, input.marks[i] ?? new Set()))
+      stream += runsByLook(written, k, next, (i) => input.sourceLooks?.[i] ?? lookFor(input, input.marks[i] ?? new Set()))
       k = next
     }
   }

@@ -97,8 +97,9 @@ export interface TimingStepContext {
   readTiming(fileId: string): FileTiming | undefined
   /** The switch's own role rule: whether this person may switch a file's timing. */
   mayChangeTiming(): boolean
-  /** Whether the file can follow `mode` now (a film-timed file always follows
-   *  its source; a file with nothing to follow, its recordings). */
+  /** Whether the file can follow `mode` now: what the file's timing resolver
+   *  says (`fileMayFollowTiming`). Today's resolver keeps a file timed to a
+   *  film on its source, and a file with nothing to follow on its recordings. */
   offersTiming(fileId: string, mode: FileTiming): boolean
   /** Write it; false when the write was refused. */
   writeTiming(fileId: string, mode: FileTiming): Promise<boolean>

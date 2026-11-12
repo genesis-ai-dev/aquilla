@@ -187,6 +187,25 @@ export function setRprChild(rPrXml: string, name: string, elementXml: string | n
 }
 
 /**
+ * The run look with its proofing language set to `lang` (AQU-2539), so Word
+ * spell-checks a translation in the language it is written in. Only `w:val`
+ * changes; an existing `w:eastAsia` or `w:bidi` is kept.
+ */
+export function rPrWithLanguage(rPrXml: string, lang: string): string {
+  const code = lang.replace(/[^A-Za-z0-9-]/g, "")
+  if (!code) return rPrXml
+  const existing = /<w:lang\b[^>]*\/>/.exec(rPrXml)
+  if (existing) {
+    const el = existing[0]
+    const next = /\sw:val="[^"]*"/.test(el)
+      ? el.replace(/\sw:val="[^"]*"/, ` w:val="${code}"`)
+      : el.replace(/^<w:lang\b/, `<w:lang w:val="${code}"`)
+    return rPrXml.replace(el, next)
+  }
+  return setRprChild(rPrXml || "<w:rPr></w:rPr>", "lang", `<w:lang w:val="${code}"/>`)
+}
+
+/**
  * One run of translated text (AQU-2539). A tab becomes `<w:tab/>` and a line
  * break `<w:br/>`, the elements Word reads them from, so a tab-separated list
  * or a broken line comes back as it went in. Returns "" for empty text.

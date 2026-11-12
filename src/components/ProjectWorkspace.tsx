@@ -42,7 +42,7 @@ import { languagesEqual } from "@/lib/language-normalize"
 import { importLanguageDecision } from "@/lib/import-language"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { assignLaneOptions } from "@/lib/sync/assignment-lane"
-import { laneCodesByTag, laneLabelsByTag, laneRowLanguage, liveTargetLaneLanguages, type LaneLanguageRow } from "@/lib/lanes/lane-language"
+import { laneCodesByTag, laneLabelsByTag, laneLanguageCodeForTag, laneRowLanguage, liveTargetLaneLanguages, type LaneLanguageRow } from "@/lib/lanes/lane-language"
 import { switcherLaneTags } from "@/lib/lanes/switcher-lanes"
 import {
   acknowledgeLaneArchive,
@@ -19465,6 +19465,7 @@ export function ProjectWorkspace() {
           sourceLanguage={activeSourceLanguage}
           targetLanguage={activeLaneTargetLanguage}
           targetLang={activeLane}
+          targetLanguageCode={laneLanguageCodeForTag(activeLane, laneRows)}
           ttsSettings={tts.settings}
           getToken={getTokenForFile}
           // AQU-965: the number the line's own audio check compares against,

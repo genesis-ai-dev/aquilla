@@ -432,6 +432,10 @@ interface ExportDialogProps {
   targetLanguage?: string
   /** Storage lane for the active target. Distinct from its display language. */
   targetLang?: string
+  /** AQU-2539: the active target's BCP 47 code ("fr-FR"), when one is known.
+   *  The Word export sets it as the proofing language and applies French
+   *  spacing for French. `targetLanguage` above is freeform ("French"). */
+  targetLanguageCode?: string | null
   /** Project TTS settings including cast assignments and voice library.
    *  Required for "audio-by-character" export; safe to omit for other formats. */
   ttsSettings?: ProjectTtsSettings
@@ -545,6 +549,7 @@ export function ExportDialog({
   sourceLanguage = "und",
   targetLanguage = "und",
   targetLang = "",
+  targetLanguageCode = null,
   ttsSettings,
   getToken,
   orgId,
@@ -1458,7 +1463,10 @@ export function ExportDialog({
         // AQU-1148: a non-validated cell keeps its place (the package is located
         // through it) but carries no translation, so the exporter leaves that
         // paragraph's original words alone — as it already does when untranslated.
-        const result = await exportDocx(rawBytes, scopeRoundTripCells(cells, contentMode), { removedCells })
+        const result = await exportDocx(rawBytes, scopeRoundTripCells(cells, contentMode), {
+          removedCells,
+          targetLanguage: targetLanguageCode,
+        })
         const baseName = buildExportStem(false) // AQU-437: user-chosen stem
         downloadBlob(result.blob, `${baseName}.docx`)
         setFidelityWarnings([

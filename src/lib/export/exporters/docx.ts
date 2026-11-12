@@ -68,7 +68,8 @@
 
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
-import { htmlToSpans, rPrWithMarks, textRunXml, type Mark, type Span } from "./docx-runs"
+import { htmlToSpans, rPrWithLanguage, rPrWithMarks, textRunXml, type Mark, type Span } from "./docx-runs"
+import { frenchSpacing, isFrenchLanguage } from "./french-spacing"
 import { markKey, rebuildParagraphInner, type RebuildIo } from "./docx-rebuild"
 import {
   packageBlockKey,
@@ -177,6 +178,10 @@ export interface DocxExportOptions {
    *  a removed paragraph is indistinguishable from an untranslated one and the
    *  removal is silently undone. */
   removedCells?: readonly RemovedCellLocatorSource[]
+  /** AQU-2539: the target language as a BCP 47 code ("fr", "fr-FR"), when the
+   *  project knows one. Translated runs get it as their proofing language, and
+   *  French gets its no-break spaces (french-spacing.ts). Unknown: neither. */
+  targetLanguage?: string | null
 }
 
 /**
@@ -228,6 +233,11 @@ export async function exportDocx(
   // into the wrong paragraphs of the client's document.
   const removedKeys = removedPackageBlockKeys(options.removedCells ?? [])
   const insertions = insertionsAfterPackageBlock(cells, isUserAddedLine)
+
+  // AQU-2539: the two things the target language changes in what is written.
+  const targetLanguage = options.targetLanguage?.trim() || null
+  const writeText = isFrenchLanguage(targetLanguage) ? frenchSpacing : (text: string) => text
+  const translatedLook = (rPr: string) => (targetLanguage ? rPrWithLanguage(rPr, targetLanguage) : rPr)
 
   // AQU-2539: every w:p, nested ones included, numbered as the importer
   // numbers them. Rendering walks this list; the regex it replaces could not
@@ -338,7 +348,8 @@ export async function exportDocx(
     const baseRprXml = extractFirstRunRpr(pPrXml ? inner.slice(inner.indexOf(pPrXml) + pPrXml.length) : inner)
     let out = ""
     for (const text of texts) {
-      out += `${openTag}${pPrXml}${runsForSpans(plainSpans(text), baseRprXml)}</w:p>`
+      const spans = plainSpans(writeText(text))
+      out += `${openTag}${pPrXml}${runsForSpans(spans, baseRprXml, translatedLook)}</w:p>`
       inserted++
     }
     return out
@@ -410,7 +421,9 @@ export async function exportDocx(
       items: target.items,
       lineSet,
       text,
+      writtenText: writeText(text),
       marks,
+      translatedLook,
       baseRpr: base ?? "",
       markLooks: markLooksOf(line.chunks, runRprXml),
       io,
@@ -567,13 +580,17 @@ function markLooksOf(
   return out
 }
 
-function runsForSpans(spans: readonly Span[], baseRprXml: string | null): string {
+function runsForSpans(
+  spans: readonly Span[],
+  baseRprXml: string | null,
+  look: (rPr: string) => string = (rPr) => rPr,
+): string {
   // Neighbouring stretches with the same look are one run.
   let out = ""
   let pendingText = ""
   let pendingRpr: string | null = null
   for (const span of spans) {
-    const rPr = rPrWithMarks(baseRprXml, span.marks)
+    const rPr = look(rPrWithMarks(baseRprXml, span.marks))
     if (pendingRpr !== null && rPr !== pendingRpr) {
       out += textRunXml(pendingText, pendingRpr)
       pendingText = ""

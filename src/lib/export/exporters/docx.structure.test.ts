@@ -345,3 +345,43 @@ describe("exportDocx — unchanged text keeps its own look (AQU-2539)", () => {
     expect(xml).toContain('<w:t xml:space="preserve">LXXI : la </w:t>')
   })
 })
+
+describe("exportDocx — the target language (AQU-2539)", () => {
+  const NB = " "
+  const HEB = '<w:rPr><w:rFonts w:cs="SBL Hebrew"/><w:rtl/><w:lang w:val="en-US" w:bidi="he-IL"/></w:rPr>'
+  const EN = '<w:rPr><w:sz w:val="22"/><w:lang w:val="en-US" w:eastAsia="zh-CN"/></w:rPr>'
+
+  async function exportWith(targetLanguage: string | undefined, translated: string, body: string) {
+    const result = await exportDocx(await makeDocx(body), [cellAt(1, translated)], { targetLanguage })
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
+    const xml = await zip.file("word/document.xml")!.async("string")
+    expectWellFormed(xml)
+    return xml
+  }
+  const body = para(run("The word ", EN) + run("שנה", HEB) + run(" means: year!", EN))
+
+  it("French: no-break spaces in translated text, French proofing on translated runs, unchanged text keeps its own", async () => {
+    const xml = await exportWith("fr-FR", "Le mot שנה signifie : année !", body)
+    expect(xml).toContain(`<w:r><w:rPr><w:sz w:val="22"/><w:lang w:val="fr-FR" w:eastAsia="zh-CN"/></w:rPr><w:t xml:space="preserve">Le mot </w:t></w:r>`)
+    expect(xml).toContain(`<w:r>${HEB}<w:t xml:space="preserve">שנה</w:t></w:r>`)
+    expect(xml).toContain(` signifie${NB}: année${NB}!</w:t>`)
+  })
+
+  it("another language: proofing language only, no French spacing", async () => {
+    const xml = await exportWith("es", "La palabra שנה significa : año !", body)
+    expect(xml).toContain('<w:lang w:val="es" w:eastAsia="zh-CN"/>')
+    expect(xml).not.toContain(NB)
+  })
+
+  it("unknown language: neither", async () => {
+    const xml = await exportWith(undefined, "Le mot שנה signifie : année !", body)
+    expect(xml).not.toContain("fr-FR")
+    expect(xml).not.toContain(NB)
+    expect(xml).toContain('<w:lang w:val="en-US" w:eastAsia="zh-CN"/>')
+  })
+
+  it("adds a w:lang where the run had none, at its schema place", async () => {
+    const xml = await exportWith("fr", "Bonjour", para(run("Hello", '<w:rPr><w:b/><w:sz w:val="20"/><w:rtl/></w:rPr>')))
+    expect(xml).toContain('<w:rPr><w:b/><w:sz w:val="20"/><w:rtl/><w:lang w:val="fr"/></w:rPr>')
+  })
+})

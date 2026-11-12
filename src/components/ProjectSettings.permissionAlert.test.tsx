@@ -114,6 +114,19 @@ vi.mock("@/hooks/useOrg", () => ({
   useOrg: () => ({ org: null }),
 }))
 
+// AQU-2457: the lock lines' "View …" link opens PrivilegedMembersDialog, which
+// reads the privileged roster. Stub the fetch so the dialog renders its list.
+const { fetchPrivilegedProjectMembers } = vi.hoisted(() => ({
+  fetchPrivilegedProjectMembers: vi.fn(),
+}))
+vi.mock("@/lib/frontier/members", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/frontier/members")>()
+  return {
+    ...actual,
+    fetchPrivilegedProjectMembers: (...args: unknown[]) => fetchPrivilegedProjectMembers(...args),
+  }
+})
+
 vi.mock("@/components/org/OrgSidebar", () => ({
   OrgSidebar: () => <div data-testid="org-sidebar">sidebar</div>,
 }))
@@ -190,6 +203,7 @@ function renderSettings(path = `/project/${PROJECT_ID}/settings`) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  fetchPrivilegedProjectMembers.mockResolvedValue({ kind: "ok", members: [] })
   currentProject = makeProject()
   currentCanEdit = false
   currentReasonCannotEdit = "role"
@@ -340,5 +354,67 @@ describe("ProjectSettings — Count headings follows its own project-lead floor 
     expect(screen.getAllByTestId("settings-group-locked")[0]).toHaveTextContent("Only Maintainers can change these settings.")
     expect(screen.getByText("Only Project Leads can change this.")).toBeVisible()
     expect(screen.getByTestId("count-structural-cells-source")).toHaveTextContent(/Organization default/)
+  })
+})
+
+// AQU-2457: there is one PrivilegedMembersDialog behind every lock line, and it
+// used to be handed the page-wide Maintainer role no matter which line opened
+// it — so "View project leads" under the Languages card opened a dialog
+// titled "Maintainers", contradicting the line above it. The dialog now names,
+// and asks the server for, the floor of the section that opened it.
+describe("ProjectSettings — the privileged-members dialog matches the section that opened it (AQU-2457)", () => {
+  it("Languages → View project leads names Project Leads and asks for that floor", async () => {
+    currentProject = makeProject({ syncRole: { level: 400, source: "member" } } as Partial<ProjectRecord>)
+    currentLanguageEditFloor = 500
+    renderSettings(`/project/${PROJECT_ID}/settings/general`)
+    const languagesLock = screen.getByTestId("languages-view-only")
+    expect(languagesLock).toHaveTextContent("Only Project Leads can change these settings.")
+    await userEvent.setup().click(
+      within(languagesLock).getByRole("button", { name: /view project leads/i }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByRole("heading", { name: /^project leads$/i })).toBeTruthy()
+    expect(within(dialog).getByText(/only project leads can change these settings/i)).toBeTruthy()
+    expect(fetchPrivilegedProjectMembers).toHaveBeenCalledWith("tok", PROJECT_ID, 500)
+  })
+
+  it("an org that raised the language floor to Maintainer gets a Maintainers dialog from the same line", async () => {
+    currentProject = makeProject({ syncRole: { level: 400, source: "member" } } as Partial<ProjectRecord>)
+    currentLanguageEditFloor = 600
+    renderSettings(`/project/${PROJECT_ID}/settings/general`)
+    const languagesLock = screen.getByTestId("languages-view-only")
+    expect(languagesLock).toHaveTextContent("Only Maintainers can change these settings.")
+    await userEvent.setup().click(
+      within(languagesLock).getByRole("button", { name: /view maintainers/i }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByRole("heading", { name: /^maintainers$/i })).toBeTruthy()
+    expect(fetchPrivilegedProjectMembers).toHaveBeenCalledWith("tok", PROJECT_ID, 600)
+  })
+
+  it("a Maintainer-only section still opens the Maintainers dialog", async () => {
+    currentProject = makeProject({ syncRole: { level: 400, source: "member" } } as Partial<ProjectRecord>)
+    renderSettings(`/project/${PROJECT_ID}/settings/general`)
+    const projectInfo = screen.getAllByTestId("settings-group-locked")[0]!
+    await userEvent.setup().click(
+      within(projectInfo).getByRole("button", { name: /view maintainers/i }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByRole("heading", { name: /^maintainers$/i })).toBeTruthy()
+    expect(fetchPrivilegedProjectMembers).toHaveBeenCalledWith("tok", PROJECT_ID, 600)
+  })
+
+  it("Count headings → View project leads names Project Leads, not the card's Maintainers", async () => {
+    currentProject = makeProject({ syncRole: { level: 400, source: "member" } } as Partial<ProjectRecord>)
+    renderSettings(`/project/${PROJECT_ID}/settings/validation`)
+    // The only Project-Lead lock line on this pane; the card's own line above
+    // it says Maintainers.
+    expect(screen.getByText("Only Project Leads can change this.")).toBeVisible()
+    await userEvent.setup().click(
+      screen.getByRole("button", { name: /view project leads/i }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByRole("heading", { name: /^project leads$/i })).toBeTruthy()
+    expect(fetchPrivilegedProjectMembers).toHaveBeenCalledWith("tok", PROJECT_ID, 500)
   })
 })

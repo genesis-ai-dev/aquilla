@@ -1,4 +1,6 @@
 import { Spinner } from "@/components/ui/spinner"
+import { Link } from "react-router-dom"
+import { loginPath } from "@/lib/navigation/login-path"
 import { useEffect, useState } from "react"
 import { useAccounts } from "@/hooks/useAccounts"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -17,20 +19,24 @@ function AccountLoginMethods({ jwt, username }: { jwt: string; username: string 
   const t = useT()
   const [methods, setMethods] = useState<{ email: string; password: boolean; google: boolean; google_available: boolean } | null>(null)
   const [error, setError] = useState(false), [busy, setBusy] = useState(false)
+  const [sessionExpired, setSessionExpired] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false), [password, setPassword] = useState("")
   const [recovering, setRecovering] = useState(false), [revision, setRevision] = useState(0)
   useEffect(() => {
     let current = true
-    setMethods(null); setError(false)
+    setMethods(null); setError(false); setSessionExpired(false)
     void googleRequest<NonNullable<typeof methods>>("methods", undefined, jwt)
       .then(value => { if (current) setMethods(value) })
-      .catch(() => { if (current) setError(true) })
+      .catch(reason => { if (current) { setError(true); setSessionExpired(reason instanceof Error && reason.message === "session_expired") } })
     return () => { current = false }
   }, [jwt, revision])
   return <SettingsGroup>
-      {error && <SettingsBlock><p role="alert" className="text-sm text-destructive">{t("auth.methods.failed")}</p></SettingsBlock>}
+      {error && <SettingsBlock><p role="alert" className="text-sm text-destructive">{t(sessionExpired ? "auth.sessionExpired.message" : "auth.methods.failed")}</p></SettingsBlock>}
       {!methods && !error && <SettingsBlock><Spinner /></SettingsBlock>}
-      {!methods && error && <SettingsBlock><Button size="sm" variant="outline" onClick={() => setRevision(n => n + 1)}>{t("auth.methods.refresh")}</Button></SettingsBlock>}
+      {!methods && error && <SettingsBlock>{sessionExpired
+        ? <Link className="underline" to={loginPath({ next: "/preferences/login-methods", add: true })}>{t("auth.sessionExpired.signInAgain")}</Link>
+        : <Button size="sm" variant="outline" onClick={() => setRevision(n => n + 1)}>{t("auth.methods.refresh")}</Button>
+      }</SettingsBlock>}
       {methods && <>
         <SettingsRow
           className="flex-wrap items-center"

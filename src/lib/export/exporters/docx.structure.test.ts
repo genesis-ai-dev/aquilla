@@ -596,3 +596,15 @@ describe("exportDocx — tabs and breaks of an old import (AQU-2539)", () => {
     expect(xml.match(/<w:tab\/>/g)).toHaveLength(1)
   })
 })
+
+describe("exportDocx — a mostly right-to-left line (AQU-2539)", () => {
+  it("writes the French in the line's left-to-right look, not the Hebrew look", async () => {
+    const HEB = '<w:rPr><w:rFonts w:ascii="Arial" w:cs="Arial"/><w:rtl/></w:rPr>'
+    // Pointed Hebrew is long in UTF-16 units (each point is one); letters count.
+    const hebrew = "בְּרֵאשִׁית בָּרָא אֱלֹהִים אֵת הַשָּׁמַיִם וְאֵת הָאָרֶץ"
+    const body = para(run("for day (one ") + run(hebrew, HEB) + run(")"))
+    const { xml } = await exportedXml(body, [cellAt(1, `pour jour (un ${hebrew})`)])
+    expect(xml).toContain('<w:r><w:t xml:space="preserve">pour jour (un </w:t></w:r>')
+    expect(xml).toContain(`<w:r>${HEB}<w:t xml:space="preserve">${hebrew}</w:t></w:r>`)
+  })
+})

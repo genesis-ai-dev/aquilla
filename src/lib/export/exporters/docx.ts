@@ -68,7 +68,16 @@
 
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
-import { htmlToSpans, rPrWithLanguage, rPrWithMarks, setRprChild, textRunXml, type Mark, type Span } from "./docx-runs"
+import {
+  directRprChild,
+  htmlToSpans,
+  rPrWithLanguage,
+  rPrWithMarks,
+  setRprChild,
+  textRunXml,
+  type Mark,
+  type Span,
+} from "./docx-runs"
 import { frenchSpacing, isFrenchLanguage } from "./french-spacing"
 import { anchorCounts, markKey, rebuildParagraphInner, type RebuildIo, type RebuildResult } from "./docx-rebuild"
 import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
@@ -834,25 +843,28 @@ function spliceSpans(spans: readonly Span[], at: number, remove: number, insert:
 
 /**
  * The run look the translation is written in (AQU-2539): the `w:rPr` that
- * covers the most characters of the paragraph's text WITHOUT bold, italic,
- * underline or strikethrough, so a paragraph that opens with a bold term is
- * not translated all in bold. When every character carries one of those marks
- * (a heading set in bold), it is the look covering most of all the text. Ties
- * go to the look met first. Null when that look is no rPr at all.
+ * covers the most LETTERS of the paragraph's text that is not bold, italic,
+ * underlined, struck through or right-to-left — so a paragraph that opens with
+ * a bold term is not translated all in bold, and a mostly-Hebrew line does not
+ * put its French in the Hebrew right-to-left look. Vowel points and accents
+ * are not letters. When every letter carries one of those marks (a bold
+ * heading), it is the look covering most of the letters. Ties go to the look
+ * met first. Null when that look is no rPr at all.
  */
 function baseRunLook(
   chunks: ReturnType<typeof docxLine>["chunks"],
   runRprXml: (run: XmlElement) => string,
 ): string | null {
-  const tally = (unmarkedOnly: boolean): string | null => {
+  const letters = (text: string) => (text.match(/\p{L}/gu) ?? []).length || text.replace(/\s+/g, "").length
+  const tally = (plainOnly: boolean): string | null => {
     const counts = new Map<string, number>()
     for (const chunk of chunks) {
       if (chunk.piece.kind !== "text" || chunk.piece.source !== "t") continue
-      if (unmarkedOnly && chunk.marks.size > 0) continue
-      const chars = chunk.text.replace(/\s+/g, "").length
-      if (chars === 0) continue
       const look = runRprXml(chunk.piece.run)
-      counts.set(look, (counts.get(look) ?? 0) + chars)
+      if (plainOnly && (chunk.marks.size > 0 || isRightToLeft(look))) continue
+      const count = letters(chunk.text)
+      if (count === 0) continue
+      counts.set(look, (counts.get(look) ?? 0) + count)
     }
     let best: string | null = null
     let bestCount = 0
@@ -866,6 +878,14 @@ function baseRunLook(
   }
   const look = tally(true) ?? tally(false)
   return look ? look : null
+}
+
+/** Is this run look right-to-left (`w:rtl` on)? */
+function isRightToLeft(rPrXml: string): boolean {
+  const rtl = rPrXml ? directRprChild(rPrXml, "rtl") : null
+  if (rtl === null) return false
+  const val = /\sw:val="([^"]*)"/.exec(rtl)?.[1]
+  return val === undefined || !/^(0|false|off)$/i.test(val)
 }
 
 /**

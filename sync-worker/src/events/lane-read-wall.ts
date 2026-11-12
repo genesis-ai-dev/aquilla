@@ -134,3 +134,26 @@ export function targetVisibilityClause(args: {
   if (!args.sideExpr) return { sql: `AND ${match}`, binds: [...args.laneIds] }
   return { sql: `AND (${args.sideExpr} = 'source' OR ${match})`, binds: [...args.laneIds] }
 }
+
+/**
+ * Event-log rows a caller may read. The log holds every lane's text, so any
+ * route that returns raw events applies this one rule: source events are never
+ * hidden, and any other event is kept only when its payload names a granted
+ * lane by id. An event with no `laneId`, or an unparseable payload, fails
+ * closed. `visible === null` (wall off, maintainer, platform) keeps every row.
+ */
+export function eventRowsForVisibleLanes<T extends { kind: string; payload: string }>(
+  rows: readonly T[],
+  visible: VisibleLaneTags,
+): T[] {
+  if (visible === null) return [...rows]
+  return rows.filter((row) => {
+    if (row.kind.startsWith("source.")) return true
+    try {
+      const laneId = (JSON.parse(row.payload) as { laneId?: unknown } | null)?.laneId
+      return typeof laneId === "string" && visible.has(laneId)
+    } catch {
+      return false
+    }
+  })
+}

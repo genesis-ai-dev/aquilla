@@ -749,12 +749,23 @@ describe("the can't-be-undone note is true for every kind of upload", () => {
     )
   })
 
-  it("leaves out choosing again where the earlier recording plays on another track and never stopped", async () => {
+  // AQU-2496 (browser pass, Nov 12): "already has a recording … the new one
+  // will play" counts lines by the same rule as "takes over from an earlier
+  // one", so the two notes agree: a take on an added track keeps playing there.
+  it("leaves out choosing again, and the already-recorded note, where the earlier recording plays on another track and never stopped", async () => {
     withLines({ "mat:19:2": { hasRecording: true, mainTake: false } })
     review(["Matthew 19-1.ogg", "Matthew 19-2.ogg"])
     await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
-    expect(screen.getByTestId("recordings-recorded-note")).toBeInTheDocument()
+    expect(screen.queryByTestId("recordings-recorded-note")).toBeNull()
     expect(note()).not.toHaveTextContent("earlier")
+    cleanup()
+    withLines({ "mat:19:1": { hasRecording: true, mainTake: true }, "mat:19:2": { hasRecording: true, mainTake: false } })
+    review(["Matthew 19-1.ogg", "Matthew 19-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    expect(screen.getByTestId("recordings-recorded-note")).toHaveTextContent(
+      /^1 of those lines already has a recording\. The new one will play, and the old one stays in the take list\.$/,
+    )
+    expect(note()).toHaveTextContent("On 1 line the new recording takes over from an earlier one;")
   })
 
   it("says where the new recordings take over from earlier ones, one line or several", async () => {

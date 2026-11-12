@@ -16,7 +16,7 @@ vi.mock("./bytes-cache", () => ({
 import {
   getQueueProgress,
   getQueueState,
-  hasAnyPlayableAudio,
+  linesPlaybackStopsAt,
   seekQueueToTime,
   skipBack,
   skipForward,
@@ -249,6 +249,6 @@ describe("Play all from the bottom bar", () => {
   })
 
   it("has nothing to play when only hidden lines are voiced", () => {
-    expect(hasAnyPlayableAudio([hidden(line("a", 0, 0))])).toBe(false)
+    expect(linesPlaybackStopsAt([hidden(line("a", 0, 0))]).size).toBe(0)
   })
 })

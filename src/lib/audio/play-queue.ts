@@ -11,7 +11,7 @@ import { activeTargetForCell, resolveTargetAudio, resolveTargetPieces, sourceCli
 import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
-import { filmIsBehindSlot, filmOverRun, playedProgramme, slotAtProgrammeSec, whatSlotPlays, type Programme, type ProgrammeFilm, type ProgrammeSlot } from "@/lib/timeline/programme"
+import { filmIsBehindSlot, filmOverRun, playedProgramme, slotAtProgrammeSec, whatSlotPlays, type BuildProgrammeOptions, type Programme, type ProgrammeFilm, type ProgrammeSlot } from "@/lib/timeline/programme"
 import { buildLayerSchedule, layerIndexAfter, layersDueAt, layersSoundIn, NO_LAYERS, type LayerSchedule, type ProgLayerRef } from "./play-queue-layers"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
@@ -5273,33 +5273,48 @@ export function updateQueueCells(cells: CellData[]): void {
   armEarlyDub()
 }
 
-/** Whether THIS line has anything to play. AQU-2123: the selection toolbar's
- *  "Play selected" states how many of the chosen lines a range run will
- *  actually sound, so it needs the per-cell answer the list predicate below
- *  was already computing one cell at a time. AQU-2253: what the queue plays
- *  for the line, so a line with only its original counts (see below).
+/**
+ * The lines of this list that playback stops at, decided as the queue decides
+ * them (Sam, Nov 12, question 44, and the review of it). Following the
+ * recordings, laid out as the queue plays them (`playedProgramme`), a line is
+ * a stop when it has a take, an original or a take on another track to hear,
+ * or a linked film behind it (`whatSlotPlays`, with how far the film plays
+ * behind these lines, `filmOverRun`: a line laid out past the film's end has
+ * none), or, with "Skip lines with nothing to play" off, when it is anything
+ * but a hidden line (`progPlaysThroughSilence`). Following the source, and on
+ * a file the queue plays line by line, the lines with a take or an original
+ * (`masterAudioForCell`).
  *
- *  Sam, Nov 12 (question 44): on a file with a linked film, a line nobody has
- *  recorded has something to play, the film, as Play and Play all already
- *  play it. So this is the person's question for one line, the film counted
- *  (`linesHaveAnythingToPlayCountingFilm`), wherever it is asked: "Play
- *  selected" counts and plays such a line, and Next and Previous asking line
- *  by line step onto it. With no film behind the line, as before. */
-export function hasPlayableAudio(cell: CellData): boolean {
-  return linesHaveAnythingToPlayCountingFilm([cell])
-}
-
-/** Whether any cell in the list has playable audio. Drives the bar's
- *  Play button enablement.
- *
- *  AQU-2253 (Sam, Nov 9): "recorded or source". What the queue plays for a
- *  line (`masterAudioForCell`): a section of an imported recording plays its
- *  original whether or not that is the line's selected audio, so a line with
- *  only its original is something to play here too, as it is to the queue,
- *  which never skips it. Sam, Nov 12: and a line a linked film plays behind
- *  (`hasPlayableAudio`). */
-export function hasAnyPlayableAudio(cells: CellData[]): boolean {
-  return cells.some(hasPlayableAudio)
+ * One answer for every surface that asks the queue's question before asking
+ * the queue: "Play selected" counts the chosen lines among these, and the
+ * bottom strip offers Play when there is one. `as` is the timing and tracks
+ * the asker has (the strip renders before the queue is told); absent, the
+ * queue's own. `film` is the workspace's word, as a React caller reads it
+ * (`useProgrammeFilm`).
+ */
+export function linesPlaybackStopsAt(
+  cells: readonly CellData[],
+  as?: { freeTiming: boolean; tracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots"> },
+  film: ProgrammeFilm | null = progFilm,
+): ReadonlySet<string> {
+  const followsRecordings = as ? as.freeTiming : timingMode === "audioFirst"
+  const played = followsRecordings
+    ? playedProgramme(cells, as?.tracks ?? {
+        layerSlots: targetSlots.filter((slot) => !isDefaultTrackSlot(slot)),
+        layerTrackSlots,
+      })
+    : null
+  if (!played || played.programme.slots.length === 0) {
+    return new Set(cells.filter((c) => masterAudioForCell(c) !== undefined).map((c) => c.id))
+  }
+  const coverSec = filmOverRun(film, cells.map((c) => c.id)).coverSec
+  const skip = getSkipSilentLinesPref()
+  const stops = new Set<string>()
+  for (const slot of played.programme.slots) {
+    const plays = whatSlotPlays(slot, played.hiddenCellIds, played.underLayers, coverSec)
+    if (plays === "sound" || plays === "film" || (plays === "nothing" && !skip)) stops.add(slot.cellId)
+  }
+  return stops
 }
 
 // ── AQU-2253 (review 2, Nov 9): "is there anything to play in these lines?" ──
@@ -5309,11 +5324,11 @@ export function hasAnyPlayableAudio(cells: CellData[]): boolean {
 //  - `linesHaveAnythingToPlayCountingFilm`: a take, an original, OR a linked
 //    film playing behind the lines (the workspace's word, `setProgrammeFilm`;
 //    following the recordings the film is their source, `whatSlotPlays`).
-//    Asked where a PERSON picks the lines to play: the bottom strip's Play
-//    (is it offered), and a chapter picked in the chapter picker while Play
-//    all plays (lib/timeline/chapter-pick's `planChapterPick`). A chapter
-//    only the film can play is played when someone asks for it: the film is
-//    behind its lines and the lines nobody recorded are crossed with it.
+//    Asked of a chapter picked in the chapter picker while Play all plays
+//    (lib/timeline/chapter-pick's `planChapterPick`). A chapter only the film
+//    can play is played when someone asks for it: the film is behind its
+//    lines and the lines nobody recorded are crossed with it. (The bottom
+//    strip's Play asks `linesPlaybackStopsAt`.)
 //
 //  - `linesHaveAnythingOfTheirOwnToPlay`: a take or an original, the film
 //    NOT counted. Asked by Play all's own move into the next chapter when a
@@ -5336,8 +5351,7 @@ export function linesHaveAnythingToPlayCountingFilm(cells: CellData[], film: Pro
 /**
  * A take or an original of the lines' own, the film not counted: what Play
  * all asks of the next chapter before it goes on into it. See above. (What
- * the queue plays for a line itself, `masterAudioForCell`; not
- * `hasAnyPlayableAudio`, which counts the film since Nov 12.)
+ * the queue plays for a line itself, `masterAudioForCell`.)
  */
 export function linesHaveAnythingOfTheirOwnToPlay(cells: CellData[]): boolean {
   return cells.some((c) => masterAudioForCell(c) !== undefined)

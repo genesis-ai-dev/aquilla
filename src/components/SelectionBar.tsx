@@ -29,7 +29,7 @@ import { emitCellValidate, emitCellUnvalidate, emitCellAudioValidate, emitCellAu
 import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import { isBulkAudioValidatableByMe, isBulkAudioUnvalidatableByMe } from "@/lib/review/bulk-audio-validation"
 import { fileHasAudio as fileHasAnyAudio } from "@/lib/audio/file-has-audio"
-import { linesHaveAnythingToPlayCountingFilm, startQueue, useProgrammeFilm } from "@/lib/audio/play-queue"
+import { linesPlaybackStopsAt, startQueue, useProgrammeFilm } from "@/lib/audio/play-queue"
 import { filmOverRun } from "@/lib/timeline/programme"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { BatchVoiceDialog } from "@/components/voice/BatchVoiceDialog"
@@ -362,16 +362,25 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // with no audio and carries on, so this is a count for the button's badge and
   // the has-anything-to-play test — not a filter on what is handed to the queue
   // (dropping the silent lines would be the same run, one highlight short).
-  // Sam, Nov 12 (question 44): each line asked the person's question for one
-  // line (play-queue's `hasPlayableAudio`), so on a file with a linked film a
-  // line nobody has recorded counts: the film is its to play, and the run
-  // plays it. The workspace's word about the film is read here so the count
-  // follows it.
+  //
+  // Sam, Nov 12 (question 44), and its review: the run "Play selected" starts
+  // (`selectionRun`, below) and the chosen lines it stops at, as the queue
+  // decides them (play-queue's `linesPlaybackStopsAt`), so "Play selected 3"
+  // plays 3. On a file with a linked film a line nobody has recorded counts:
+  // the film is its to play; a line laid out past the film's end does not.
+  // The workspace's word about the film is read here so the count follows it.
   const film = useProgrammeFilm()
-  const playableSelectedCount = useMemo(
-    () => playbackRange.filter((c) => linesHaveAnythingToPlayCountingFilm([c], film)).length,
-    [playbackRange, film],
-  )
+  const selectionRun = useMemo(() => {
+    const ids = playbackRange.map((c) => c.id)
+    const from = playbackLines?.findIndex((c) => c.id === ids[0]) ?? -1
+    if (playbackLines && from >= 0 && ids.every((id) => playbackLines.some((c) => c.id === id))
+      && filmOverRun(film, playbackLines.map((c) => c.id)).coverSec > 0) {
+      const stops = linesPlaybackStopsAt(playbackLines, undefined, film)
+      return { cells: playbackLines, from, only: new Set(ids), stopCount: ids.filter((id) => stops.has(id)).length }
+    }
+    return { cells: playbackRange, from: 0, only: null, stopCount: linesPlaybackStopsAt(playbackRange, undefined, film).size }
+  }, [playbackRange, playbackLines, film])
+  const playableSelectedCount = selectionRun.stopCount
 
   /**
    * AQU-2123: play the chosen lines back to back, hands-free, and STOP after
@@ -397,15 +406,11 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // the last one. Anywhere else, as before.
   const onPlaySelected = useCallback(() => {
     if (!session?.jwt) return
-    const ids = playbackRange.map((c) => c.id)
-    const from = playbackLines?.findIndex((c) => c.id === ids[0]) ?? -1
-    if (playbackLines && from >= 0 && ids.every((id) => playbackLines.some((c) => c.id === id))
-      && filmOverRun(film, playbackLines.map((c) => c.id)).coverSec > 0) {
-      startQueue({ cells: playbackLines, projectId: project.id, session, only: new Set(ids) }, from, true)
-      return
-    }
-    startQueue({ cells: playbackRange, projectId: project.id, session, snapshot: true }, 0, true)
-  }, [playbackRange, playbackLines, film, project.id, session])
+    const { cells, from, only } = selectionRun
+    startQueue(only
+      ? { cells, projectId: project.id, session, only }
+      : { cells, projectId: project.id, session, snapshot: true }, from, true)
+  }, [selectionRun, project.id, session])
 
   // AQU-1722: a line's name the way the reader sees it — its reference, else
   // the table's # column, else nothing. The same rule the partial-validate

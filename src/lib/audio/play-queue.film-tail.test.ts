@@ -22,9 +22,8 @@ import { act, renderHook } from "@testing-library/react"
 import {
   getQueueProgress,
   getQueueState,
-  hasAnyPlayableAudio,
-  hasPlayableAudio,
   linesHaveAnythingOfTheirOwnToPlay,
+  linesPlaybackStopsAt,
   linesHaveAnythingToPlayCountingFilm,
   onQueueRanOut,
   pauseQueue,
@@ -2225,14 +2224,40 @@ describe("an unrecorded line under the film is a line: Play selected, and the qu
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
   })
 
-  it("asked of one line (what Play selected counts, and Next and Previous ask line by line), the film counts", () => {
-    const [b1, b2] = chosen()
-    linkFilm(10, chosen())
-    expect(hasPlayableAudio(b2)).toBe(true)
-    expect(hasAnyPlayableAudio([b2])).toBe(true)
-    expect(hasPlayableAudio(b1)).toBe(true)
+  // The review (Nov 12): what Play selected counts, and Previous while stopped
+  // asks, is one answer with the queue's: the lines playback stops at, laid
+  // out as the queue plays them (`linesPlaybackStopsAt`).
+  it("the lines playback stops at count the unrecorded line the film plays behind", () => {
+    const cells = chosen()
+    linkFilm(10, cells)
+    expect([...linesPlaybackStopsAt(cells)]).toEqual(["b1", "b2", "b3"])
     // Play all's own move into the next chapter still asks without the film.
-    expect(linesHaveAnythingOfTheirOwnToPlay([b2])).toBe(false)
+    expect(linesHaveAnythingOfTheirOwnToPlay([cells[1]!])).toBe(false)
+  })
+
+  it("…but not a line laid out past the film's end, which the queue skips: started there, the run plays the last line that is a stop", async () => {
+    // a1 recorded 2 s [0, 2); a2 a stand-in [2, 3.5), the film's to 3 s; a3 a stand-in [3.5, 5), past it.
+    const cells = [line("a1", 2_000), line("a2"), line("a3")]
+    linkFilm(3, cells)
+    const stops = linesPlaybackStopsAt(cells)
+    expect([...stops]).toEqual(["a1", "a2"])
+    const last = cells.map((c) => c.id).lastIndexOf([...stops].pop()!)
+    startQueue(ctxFor(cells), last)
+    await wait()
+    expect(getQueueState()).toMatchObject({ cellId: "a2" })
+  })
+
+  it("with Skip off, every line is a stop, as the queue plays them through", () => {
+    setSkipSilentLinesPref(false)
+    const cells = [line("a1", 2_000), line("a2"), line("a3")]
+    linkFilm(3, cells)
+    expect([...linesPlaybackStopsAt(cells)]).toEqual(["a1", "a2", "a3"])
+  })
+
+  it("uses the timing it is handed: following the source the film is not counted", () => {
+    const cells = chosen()
+    linkFilm(10, cells)
+    expect([...linesPlaybackStopsAt(cells, { freeTiming: false })]).toEqual(["b1", "b3"])
   })
 
   describe("on a file with no film nothing changes: an unrecorded line has nothing to play", () => {
@@ -2245,11 +2270,8 @@ describe("an unrecorded line under the film is a line: Play selected, and the qu
       expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
     })
 
-    it("asked of one line, it has nothing", () => {
-      const [b1, b2] = chosen()
-      expect(hasPlayableAudio(b2)).toBe(false)
-      expect(hasAnyPlayableAudio([b2])).toBe(false)
-      expect(hasPlayableAudio(b1)).toBe(true)
+    it("it is not a line playback stops at", () => {
+      expect([...linesPlaybackStopsAt(chosen())]).toEqual(["b1", "b3"])
     })
   })
 })

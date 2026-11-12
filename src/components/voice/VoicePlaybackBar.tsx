@@ -17,8 +17,8 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
 import {
-  linesHaveAnythingOfTheirOwnToPlay, pauseQueue, queueClockIsFileTime, resumeQueue, seekQueueToTime,
-  setQueueRate, setQueueVolume, skipBack, skipForward, startQueue, updateQueueCells, useProgrammeFilm, linesHaveAnythingToPlayCountingFilm,
+  linesPlaybackStopsAt, pauseQueue, queueClockIsFileTime, resumeQueue, seekQueueToTime,
+  setQueueRate, setQueueVolume, skipBack, skipForward, startQueue, updateQueueCells, useProgrammeFilm,
 } from "@/lib/audio/play-queue"
 import { toggleAudibility, useQueueAudibility } from "@/lib/audio/audibility"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
@@ -193,13 +193,14 @@ export function VoicePlaybackBar({
   // virtual clock to the queue. A press in that window went to the engine that
   // was about to lose the file, so nothing sounded (AQU-1643).
   // AQU-2253 (Sam, Nov 9): …or a linked film playing behind the lines, their
-  // source (`linesHaveAnythingToPlayCountingFilm`, the queue's own answer for
-  // a person pressing Play): with nothing recorded yet, Play was off here and
-  // the film could not be watched. Following the source the film is not the
-  // queue's to play here: the lines' own takes and originals alone.
+  // source: with nothing recorded yet, Play was off here and the film could
+  // not be watched. Following the source the film is not the queue's to play
+  // here: the lines' own takes and originals alone. Nov 12 (the review of
+  // question 44): one call, the queue's own answer for these lines, with this
+  // bar's timing and tracks (`linesPlaybackStopsAt`).
   const canPlay = useMemo(
-    () => audioLoaded && (drivesVideo || (filmCounts ? linesHaveAnythingToPlayCountingFilm(cells, film) : linesHaveAnythingOfTheirOwnToPlay(cells))),
-    [audioLoaded, drivesVideo, filmCounts, film, cells],
+    () => audioLoaded && (drivesVideo || linesPlaybackStopsAt(cells, { freeTiming: filmCounts, tracks: programmeTracks }, film).size > 0),
+    [audioLoaded, drivesVideo, filmCounts, film, cells, programmeTracks],
   )
   const activeIndex = transport.cellId ? cells.findIndex((c) => c.id === transport.cellId) : -1
   const activeCell = activeIndex >= 0 ? cells[activeIndex] : undefined

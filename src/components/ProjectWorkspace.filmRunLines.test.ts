@@ -34,7 +34,7 @@ import {
   startQueue,
   startQueueAtTime,
   stopQueue,
-  linesHaveAnythingToPlayCountingFilm,
+  linesPlaybackStopsAt,
   useProgrammeFilm,
   type PlayContext,
 } from "@/lib/audio/play-queue"
@@ -116,7 +116,7 @@ describe("the film's lines are the lines each caller starts the queue with (AQU-
         setProgrammeFilm(film, "f1")
         const cells = asTheStripStartsIt(strip)
         const word = renderHook(() => useProgrammeFilm())
-        expect(linesHaveAnythingToPlayCountingFilm(cells, word.result.current)).toBe(true)
+        expect(linesPlaybackStopsAt(cells, { freeTiming: true }, word.result.current).size).toBeGreaterThan(0)
         // The length the strip shows: the film's, except on a book's chapter.
         expect(filmOverRun(word.result.current, cells.map((c) => c.id)).runsOnToSec).toBe(chapterOfABook ? 0 : FILM_SEC)
         startQueue(ctxFor(cells), 0, false)
@@ -152,7 +152,7 @@ describe("the film's lines are the lines each caller starts the queue with (AQU-
     setProgrammeFilm(film, "f1")
     // One line more than the film was named with.
     const drifted = [...plain, line("l4")]
-    expect(linesHaveAnythingToPlayCountingFilm(drifted)).toBe(false)
+    expect(linesPlaybackStopsAt(drifted, { freeTiming: true }).size).toBe(0)
     startQueue(ctxFor(drifted), 0, false)
     expect(getQueueState().kind).toBe("idle")
     // One line fewer: under the film, but it ends with its lines.
@@ -216,7 +216,7 @@ describe("the workspace and the strip take their lists from those helpers (AQU-2
     expect(strip).toContain("const cellIds = useMemo(() => new Set(cells.map((c) => c.id)), [cells])")
     expect(strip).toContain("const film = useProgrammeFilm()")
     expect(strip).toContain("filmOverRun(film, cellIds)")
-    expect(strip).toContain("linesHaveAnythingToPlayCountingFilm(cells, film)")
+    expect(strip).toContain("linesPlaybackStopsAt(cells, { freeTiming: filmCounts, tracks: programmeTracks }, film)")
     expect(strip).toContain("startQueue({ cells, projectId, session,")
   })
 

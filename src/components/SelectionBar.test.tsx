@@ -31,7 +31,8 @@ import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
 import { ROLE } from "@/lib/frontier/roles"
 import type { MemberScope } from "@/lib/sync/member-scopes"
 import * as selectionModule from "@/lib/audio/selection"
-import { setProgrammeFilm, startQueue } from "@/lib/audio/play-queue"
+import { setProgrammeFilm, setQueueTimingMode, startQueue } from "@/lib/audio/play-queue"
+import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { toast } from "@/components/ui/toast"
 import posthog from "@/lib/posthog"
@@ -60,9 +61,9 @@ vi.mock("@/lib/sync/events-emit", async (importActual) => ({
 }))
 
 // AQU-2123: spy on startQueue while keeping the rest of the play queue real —
-// its answer for one line (`hasPlayableAudio`, the film counted since Nov 12)
-// decides the Play-selected button's own enablement, so a blanket mock would
-// prove nothing about which lines it found.
+// its answer for which lines playback stops at (`linesPlaybackStopsAt`, the
+// film counted since Nov 12) decides the Play-selected button's own count and
+// enablement, so a blanket mock would prove nothing about which lines it found.
 vi.mock("@/lib/audio/play-queue", async (importActual) => ({
   ...(await importActual<typeof import("@/lib/audio/play-queue")>()),
   startQueue: vi.fn(),
@@ -1300,11 +1301,26 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
   // Sam, Nov 12 (question 44): on a file with a linked film a line nobody has
   // recorded has the film to play, so it is counted (and the run plays it:
   // play-queue.film-tail.test.ts). With no film, the count above is unchanged.
+  /** A file with a linked film, following its recordings, as the workspace
+   *  has it: the lines Play plays, with their audio, and the film's word. */
+  function filmFile(audio: Map<string, CellAudioEntry>, endSec: number) {
+    setQueueTimingMode("audioFirst")
+    act(() => setProgrammeFilm({ endSec, cellIds: new Set(THREE.map((c) => c.id)) }, "file-1"))
+    return mergeCellsWithAudio(THREE, audio)
+  }
+  afterEach(() => {
+    act(() => setProgrammeFilm(null))
+    setQueueTimingMode("dubbing")
+  })
+
   it("on a file with a linked film, counts a line nobody has recorded, and follows the film's word", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
     // Verse 2 was never recorded.
+    const audio = audioMapFor(["cell-1", "cell-3"])
+    setQueueTimingMode("audioFirst")
+    const lines = mergeCellsWithAudio(THREE, audio)
     renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
-      audioMode: true, session: SESSION, audioByCellId: audioMapFor(["cell-1", "cell-3"]),
+      audioMode: true, session: SESSION, audioByCellId: audio, playbackLines: lines,
     })
     expect(playButton().textContent).toContain("2")
 
@@ -1314,19 +1330,28 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     await userEvent.setup().click(playButton())
     const [ctx] = vi.mocked(startQueue).mock.calls[0]
     expect(ctx.cells.map((c) => c.id)).toEqual(["cell-1", "cell-2", "cell-3"])
-    act(() => setProgrammeFilm(null))
   })
 
-  // Sam, Nov 12 (question 44): …and runs the film. The chosen lines are played
-  // as a run of the lines Play plays (`only`), on the file's clock, so the film
-  // follows it (play-queue.film-tail.test.ts); with no film, a run of the
-  // chosen lines on their own, as before (the tests above).
+  // The review (Nov 12), SHOULD 1: the count is what the run plays. A line
+  // laid out past the film's end has nothing to play, and the run skips it.
+  it("\"Play selected 3\" plays 3, or says 2: a line past the film's end is not counted", () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
+    // cell-1 recorded 1 s [0, 1); cell-2 a stand-in [1, 2.5), the film's to
+    // 2 s; cell-3 a stand-in [2.5, 4), past the film's end.
+    const audio = audioMapFor(["cell-1"])
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audio, playbackLines: filmFile(audio, 2),
+    })
+    expect(playButton().textContent).toContain("2")
+    expect(playButton().textContent).not.toContain("3")
+  })
+
   it("on a file with a linked film, plays the chosen lines as a run of the file's lines, so the film follows it", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-3", "cell-1"]))
-    const lines = THREE.map((c) => ({ ...c }))
-    act(() => setProgrammeFilm({ endSec: 60, cellIds: new Set(THREE.map((c) => c.id)) }, "file-1"))
+    const audio = audioMapFor(["cell-1"])
+    const lines = filmFile(audio, 60)
     renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
-      audioMode: true, session: SESSION, audioByCellId: audioMapFor(["cell-1"]), playbackLines: lines,
+      audioMode: true, session: SESSION, audioByCellId: audio, playbackLines: lines,
     })
 
     await userEvent.setup().click(playButton())
@@ -1337,7 +1362,6 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     expect([...(ctx.only ?? [])].sort()).toEqual(["cell-1", "cell-3"])
     expect(fromIndex).toBe(0)
     expect(explicit).toBe(true)
-    act(() => setProgrammeFilm(null))
   })
 
   it("with no film, Play selected is still a run of the chosen lines on their own", async () => {
@@ -1356,9 +1380,9 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
 
   it("on a file with a linked film and nothing recorded, Play selected is offered for the film", () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
-    act(() => setProgrammeFilm({ endSec: 60, cellIds: new Set(THREE.map((c) => c.id)) }, "file-1"))
+    const lines = filmFile(new Map(), 60)
     renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
-      audioMode: true, session: SESSION, audioByCellId: new Map(),
+      audioMode: true, session: SESSION, audioByCellId: new Map(), playbackLines: lines,
     })
     expect(playButton()).not.toBeDisabled()
     expect(playButton().textContent).toContain("2")

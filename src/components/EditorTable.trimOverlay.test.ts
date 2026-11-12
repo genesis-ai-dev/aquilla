@@ -130,3 +130,32 @@ describe("applyRowOverlays — the audio validation fields (AQU-490)", () => {
     expect(out.attachments?.["take-1"]?.validatorCount).toBe(0)
   })
 })
+
+/**
+ * The same gap, a fourth time (browser pass, Nov 11): the take's own PLACE.
+ * The Recording tab reads its takes from this copy, so without the place it
+ * took every take for one sitting on its line's start: Join put the joined
+ * take there (AQU-2491), and the trim's floor let a clip's sound start before
+ * 0:00 (AQU-2495).
+ */
+describe("applyRowOverlays — the take's place (AQU-2491, AQU-2495)", () => {
+  const entry = (attachment: Record<string, unknown>): CellAudioEntry => ({
+    attachments: { "take-1": { audioId: "take-1", url: "frontier-audio://take-1", slot: "recording", mimeType: null, voiceId: null, referenceAudioId: null, durationMs: null, trimStartMs: null, trimEndMs: null, ...attachment } },
+    selectedBySlot: { recording: "take-1" },
+    selectedAudioId: "take-1",
+    selectedGeneratedVoiceAudioId: null,
+    audioTimings: {},
+  } as unknown as CellAudioEntry)
+
+  it("forwards its place in both timings", () => {
+    const out = applyRowOverlays(mediaCell(), { audioEntry: entry({ targetOffsetMs: -8_000, recordingsOffsetMs: 500 }) })
+    expect(out.attachments?.["take-1"]).toMatchObject({ targetOffsetMs: -8_000, recordingsOffsetMs: 500 })
+  })
+
+  // 0 is a take placed exactly on its line, by hand: a real place, not "none".
+  it("keeps a place of 0, and leaves out a place the take has not got", () => {
+    const placed = applyRowOverlays(mediaCell(), { audioEntry: entry({ targetOffsetMs: 0, recordingsOffsetMs: null }) })
+    expect(placed.attachments?.["take-1"]?.targetOffsetMs).toBe(0)
+    expect(placed.attachments?.["take-1"] && "recordingsOffsetMs" in placed.attachments["take-1"]).toBe(false)
+  })
+})

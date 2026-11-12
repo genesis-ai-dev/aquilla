@@ -524,6 +524,13 @@ export function applyRowOverlays(
         // fell through to whole-clip transcription for every section.
         ...(attachment.trimStartMs != null ? { trimStartMs: attachment.trimStartMs } : {}),
         ...(attachment.trimEndMs != null ? { trimEndMs: attachment.trimEndMs } : {}),
+        // The take's own place in each timing (`!= null`: a place of 0 is
+        // real), as mergeCellsWithAudio carries it. Missing here, the
+        // Recording tab read every take as sitting on its line's start: its
+        // Join put the joined take there (AQU-2491) and its trim's floor let
+        // a clip's sound start before 0:00 (AQU-2495). Browser pass, Nov 11.
+        ...(attachment.targetOffsetMs != null ? { targetOffsetMs: attachment.targetOffsetMs } : {}),
+        ...(attachment.recordingsOffsetMs != null ? { recordingsOffsetMs: attachment.recordingsOffsetMs } : {}),
         // AQU-646/AQU-490: THE SECOND COPY OF THIS LIST.
         //
         // `mergeCellsWithAudio` rebuilds attachments field by field and so

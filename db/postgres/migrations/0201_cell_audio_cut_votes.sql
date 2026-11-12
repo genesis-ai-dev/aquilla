@@ -1,4 +1,4 @@
--- 0199_cell_audio_cut_votes.sql — AQU-2492: undoing a cut keeps the approvals.
+-- 0201_cell_audio_cut_votes.sql — AQU-2492: undoing a cut keeps the approvals.
 --
 -- A cut keeps the take's id on its first piece, and an audio vote is keyed by
 -- take id, so the take's approvals and its first piece's approvals cannot both
@@ -38,8 +38,8 @@
 -- sync-worker's projection; no app read path touches it.
 -- Idempotent; a database loaded from schema.sql already has it.
 --
--- Numbered 0199: 0197 is the newest on dev, and 0198 is taken on two
--- unlanded branches (AQU-2253, AQU-2459).
+-- Numbered 0201: 0200 is the newest on dev, and 0198 is taken on
+-- unlanded branches.
 
 CREATE TABLE IF NOT EXISTS cell_audio_cut_votes (
     event_id      TEXT PRIMARY KEY,

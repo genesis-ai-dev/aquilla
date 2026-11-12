@@ -696,7 +696,7 @@ CREATE TABLE IF NOT EXISTS removed_cell_archive (
 CREATE INDEX IF NOT EXISTS idx_removed_cell_archive_cell
     ON removed_cell_archive (project_id, file_id, cell_id, deleted_ts DESC);
 
--- AQU-2492 (migration 0199): the approvals a cut, or the undo of a cut, took
+-- AQU-2492 (migration 0201): the approvals a cut, or the undo of a cut, took
 -- off a take, keyed by that event, so undoing the cut gives the take its
 -- approvals back and redoing it gives them to its pieces again — and the
 -- take's volume and fades as they were. Written once by the projection's live

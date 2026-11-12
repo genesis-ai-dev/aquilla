@@ -25,6 +25,8 @@ fallback to SECRET_KEY. Missing configuration leaves email enrollment unchanged;
 for an already enrolled user it fails closed rather than reverting to email.
 
 Records are scoped by DEPLOYMENT_WORKER_NAME (ENVIRONMENT for local test stacks).
+Preview parents additionally include the configured BASE_URL origin, isolating
+sibling branch previews that share a Worker parent and database.
 Do not rename that identity without migrating the matching records first: a new
 name is a different factor scope. Database copies retain production-scoped rows
 but development does not select or decrypt them. Preserve the key in the approved

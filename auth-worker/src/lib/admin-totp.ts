@@ -5,8 +5,14 @@ import {
   decryptIntegrationToken,
 } from "./integrations/token-crypto"
 
-export const deployment = (c: Context<AuthHonoEnv>) =>
-  c.env.DEPLOYMENT_WORKER_NAME || c.env.ENVIRONMENT || "local"
+export const deployment = (c: Context<AuthHonoEnv>) => {
+  const worker = c.env.DEPLOYMENT_WORKER_NAME || c.env.ENVIRONMENT || "local"
+  // Branch previews share a parent Worker and database, but not enrollment keys.
+  // BASE_URL is trusted deployment configuration, never a request header.
+  if (!worker.endsWith("-preview")) return worker
+  if (!c.env.BASE_URL) throw new Error("Preview enrollment scope is not configured")
+  return `${worker}:${new URL(c.env.BASE_URL).origin}`
+}
 const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 export function base32(bytes: Uint8Array): string {
   let bits = 0,

@@ -2,7 +2,7 @@ import { env } from "cloudflare:test"
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
-import { base32, totp, matchingStep } from "../lib/admin-totp"
+import { base32, totp, matchingStep, deployment } from "../lib/admin-totp"
 let jwt: string
 const call = (path: string, body?: object, token = jwt) =>
   app.request(
@@ -265,6 +265,11 @@ describe("admin authenticator", () => {
         time,
       ),
     ).toBeNull()
+  })
+  it("isolates sibling previews sharing a Worker parent", () => {
+    const context = (url: string) => ({ env: { DEPLOYMENT_WORKER_NAME: "aquilla-auth-preview", BASE_URL: url } }) as Parameters<typeof deployment>[0]
+    expect(deployment(context("https://branch-a.example"))).not.toBe(deployment(context("https://branch-b.example")))
+    expect(deployment(context("https://branch-a.example/path"))).toBe(deployment(context("https://branch-a.example")))
   })
   it("limits attempts even with a valid admin session", async () => {
     const s = await enroll()

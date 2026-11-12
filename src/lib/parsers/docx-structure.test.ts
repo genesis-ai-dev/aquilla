@@ -128,3 +128,62 @@ describe("docxPartsToStrings (AQU-2539)", () => {
     expect(strings[0].original).toBe("Text\\f + \\ft The note.\\f* more.")
   })
 })
+
+describe("hidden text (AQU-2539)", () => {
+  const V = "<w:rPr><w:vanish/></w:rPr>"
+  const styles = (inner: string, defaults = "") =>
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+    `<w:docDefaults><w:rPrDefault><w:rPr>${defaults}</w:rPr></w:rPrDefault></w:docDefaults>${inner}</w:styles>`
+  const lines = (body: string, stylesXml?: string) =>
+    docxPartsToStrings({ documentXml: documentXml(body), ...(stylesXml ? { stylesXml } : {}) }).map((s) => [
+      s.sourceLocation?.blockPath,
+      s.original,
+    ])
+
+  it("leaves hidden runs out of the line, and a wholly hidden paragraph makes no line", () => {
+    expect(lines(para(run("Shown ") + run("hidden ", V) + run("too")) + para(run("All hidden", V)) + para(run("Next")))).toEqual([
+      ["w:p[1]", "Shown too"],
+      // w:p[2] still counts: numbering does not change, old locators resolve.
+      ["w:p[3]", "Next"],
+    ])
+  })
+
+  it("honours w:val=\"0\" as not hidden", () => {
+    expect(lines(para(run("Visible", '<w:rPr><w:vanish w:val="0"/></w:rPr>')))).toEqual([["w:p[1]", "Visible"]])
+  })
+
+  it("follows hidden text through a character style and its basedOn chain", () => {
+    const sheet = styles(
+      `<w:style w:type="character" w:styleId="Base"><w:rPr><w:vanish/></w:rPr></w:style>` +
+        `<w:style w:type="character" w:styleId="Derived"><w:basedOn w:val="Base"/></w:style>`,
+    )
+    expect(lines(para(run("a ") + run("secret ", '<w:rPr><w:rStyle w:val="Derived"/></w:rPr>') + run("b")), sheet)).toEqual([
+      ["w:p[1]", "a b"],
+    ])
+  })
+
+  it("follows hidden text through the paragraph's style, and through the default paragraph style", () => {
+    const sheet = styles(
+      `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"/>` +
+        `<w:style w:type="paragraph" w:styleId="NotForTranslation"><w:basedOn w:val="Normal"/><w:rPr><w:vanish/></w:rPr></w:style>`,
+    )
+    expect(lines(para(run("Bibliography entry"), "NotForTranslation") + para(run("Body")), sheet)).toEqual([["w:p[2]", "Body"]])
+    const hiddenNormal = styles(`<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:rPr><w:vanish/></w:rPr></w:style>`)
+    expect(lines(para(run("Unstyled")), hiddenNormal)).toEqual([])
+  })
+
+  it("uses the document defaults only when no style says anything, and lets a run override them", () => {
+    const sheet = styles("", "<w:vanish/>")
+    expect(lines(para(run("Default hidden")) + para(run("Shown", '<w:rPr><w:vanish w:val="false"/></w:rPr>')), sheet)).toEqual([
+      ["w:p[2]", "Shown"],
+    ])
+  })
+
+  it("combines a hidden character style and a hidden paragraph style as Word does (they cancel)", () => {
+    const sheet = styles(
+      `<w:style w:type="paragraph" w:styleId="P"><w:rPr><w:vanish/></w:rPr></w:style>` +
+        `<w:style w:type="character" w:styleId="C"><w:rPr><w:vanish/></w:rPr></w:style>`,
+    )
+    expect(lines(para(run("x", '<w:rPr><w:rStyle w:val="C"/></w:rPr>'), "P"), sheet)).toEqual([["w:p[1]", "x"]])
+  })
+})

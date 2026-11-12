@@ -436,3 +436,101 @@ export function docxLine(items: readonly DocxPiece[]): DocxLine {
   }
   return { text, chunks, hasWords }
 }
+
+// ── Hidden text (AQU-2539) ──────────────────────────────────────────────────
+//
+// The app imports what Word shows and prints. A run is hidden when its
+// `w:vanish` is on — set on the run itself, or inherited through its character
+// style, its paragraph's style, or the document defaults in word/styles.xml,
+// each style followed up its `basedOn` chain. `w:val="0"/"false"/"off"` turns
+// it off. A hidden run is never part of a line (walkRun keeps it whole), so a
+// wholly hidden paragraph makes no line and the exporter never rewrites it.
+//
+// `w:vanish` is an ECMA-376 toggle property: direct formatting is absolute;
+// from styles, the character style's value and the paragraph style's value
+// are combined by exclusive-or (two "hidden" styles cancel), and the document
+// default applies only when neither style says anything.
+
+interface StyleEntry {
+  basedOn: string | null
+  /** The style's own w:vanish, or undefined when it does not set one. */
+  vanish: boolean | undefined
+}
+
+export interface DocxStyleSheet {
+  styles: ReadonlyMap<string, StyleEntry>
+  defaultParagraphStyle: string | null
+  defaultVanish: boolean
+}
+
+const EMPTY_STYLES: DocxStyleSheet = { styles: new Map(), defaultParagraphStyle: null, defaultVanish: false }
+
+function vanishOf(rPr: XmlElement | undefined): boolean | undefined {
+  if (rPr === undefined) return undefined
+  const el = directChild(rPr, "w:vanish")
+  return el === undefined ? undefined : isOnOffValueTrue(getAttribute(el, "w:val"))
+}
+
+/** Read the bits of word/styles.xml that decide whether text is hidden. */
+export function readDocxStyleSheet(root: XmlElement | undefined): DocxStyleSheet {
+  if (root === undefined) return EMPTY_STYLES
+  const stylesEl = root.tagName === "w:styles" ? root : firstElementByTagName(root, "w:styles")
+  if (stylesEl === undefined) return EMPTY_STYLES
+  const styles = new Map<string, StyleEntry>()
+  let defaultParagraphStyle: string | null = null
+  let defaultVanish = false
+  for (const child of stylesEl.children) {
+    if (!isElement(child)) continue
+    if (child.tagName === "w:docDefaults") {
+      const rPrDefault = directChild(child, "w:rPrDefault")
+      defaultVanish = vanishOf(rPrDefault ? directChild(rPrDefault, "w:rPr") : undefined) ?? false
+      continue
+    }
+    if (child.tagName !== "w:style") continue
+    const id = getAttribute(child, "w:styleId")
+    if (id === null) continue
+    const basedOn = directChild(child, "w:basedOn")
+    styles.set(id, {
+      basedOn: basedOn ? getAttribute(basedOn, "w:val") : null,
+      vanish: vanishOf(directChild(child, "w:rPr")),
+    })
+    const isDefault = getAttribute(child, "w:default")
+    if (getAttribute(child, "w:type") === "paragraph" && isDefault !== null && isOnOffValueTrue(isDefault)) {
+      defaultParagraphStyle = id
+    }
+  }
+  return { styles, defaultParagraphStyle, defaultVanish }
+}
+
+/** A style's w:vanish, followed up its basedOn chain; undefined if none sets it. */
+function styleVanish(sheet: DocxStyleSheet, styleId: string | null): boolean | undefined {
+  const seen = new Set<string>()
+  let id = styleId
+  while (id !== null && !seen.has(id)) {
+    seen.add(id)
+    const entry = sheet.styles.get(id)
+    if (entry === undefined) return undefined
+    if (entry.vanish !== undefined) return entry.vanish
+    id = entry.basedOn
+  }
+  return undefined
+}
+
+/** The `isHiddenRun` a walk needs, for one document's style sheet. */
+export function hiddenRunTest(sheet: DocxStyleSheet): (run: XmlElement, paragraph: XmlElement) => boolean {
+  const paragraphStyleOf = (p: XmlElement): string | null => {
+    const pPr = directChild(p, "w:pPr")
+    const pStyle = pPr ? directChild(pPr, "w:pStyle") : undefined
+    return pStyle ? getAttribute(pStyle, "w:val") : sheet.defaultParagraphStyle
+  }
+  return (run, p) => {
+    const rPr = directChild(run, "w:rPr")
+    const direct = vanishOf(rPr)
+    if (direct !== undefined) return direct
+    const rStyle = rPr ? directChild(rPr, "w:rStyle") : undefined
+    const fromCharacter = styleVanish(sheet, rStyle ? getAttribute(rStyle, "w:val") : null)
+    const fromParagraph = styleVanish(sheet, paragraphStyleOf(p))
+    if (fromCharacter === undefined && fromParagraph === undefined) return sheet.defaultVanish
+    return (fromCharacter ?? false) !== (fromParagraph ?? false)
+  }
+}

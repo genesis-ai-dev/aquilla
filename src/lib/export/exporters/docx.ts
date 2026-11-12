@@ -80,7 +80,9 @@ import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
 import {
   docxLine,
   flattenPieces,
+  hiddenRunTest,
   linePieceFlags,
+  readDocxStyleSheet,
   scanDocxParagraphs,
   walkDocxParagraph,
   type DocxParagraphSpan,
@@ -93,6 +95,7 @@ import { assertWellFormedXml, isElement, parseXmlLite, type XmlElement } from "@
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 const DOCUMENT_PART = "word/document.xml"
 const FOOTNOTES_PART = "word/footnotes.xml"
+const STYLES_PART = "word/styles.xml"
 
 /** A full USFM footnote span, as the importer inlines one (footnotes/insert.ts). */
 const FOOTNOTE_SPAN_RE = /\\f\s+[^\s\\]+[\s\S]*?\\f\*/g
@@ -193,8 +196,13 @@ export async function exportDocx(
     throw new Error("Malformed DOCX: word/document.xml not found in side-car")
   }
   const footnotesXml = await zip.file(FOOTNOTES_PART)?.async("string")
+  const stylesXml = await zip.file(STYLES_PART)?.async("string")
   const walkContext: DocxWalkContext = {
     footnotes: footnotesXml ? loadFootnotes(footnotesXml) : new Map(),
+    // AQU-2539: hidden runs are never rewritten. A wholly hidden paragraph has
+    // no visible words, so it is left byte-identical even when an old import
+    // holds a cell (and a translation) for it.
+    isHiddenRun: hiddenRunTest(readDocxStyleSheet(stylesXml ? parseXmlLite(stylesXml) : undefined)),
   }
 
   const { groups, groupToData } = buildLegacyGroups(cells)

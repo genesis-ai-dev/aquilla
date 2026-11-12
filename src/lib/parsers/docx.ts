@@ -15,6 +15,8 @@ import {
 import {
   directChild,
   docxLine,
+  hiddenRunTest,
+  readDocxStyleSheet,
   scanDocxParagraphs,
   walkDocxParagraph,
   type DocxWalkContext,
@@ -57,6 +59,7 @@ const BREAK_MASK_RE = //g
 
 const DOCUMENT_PART = "word/document.xml"
 const FOOTNOTES_PART = "word/footnotes.xml"
+const STYLES_PART = "word/styles.xml"
 
 /**
  * Ceiling on the inflated `word/document.xml` this parser will try to build a
@@ -87,6 +90,8 @@ const MAX_DOCUMENT_XML_CHARS = 64 * 1024 * 1024 // 64 M chars
 export interface DocxParts {
   documentXml: string
   footnotesXml?: string
+  /** word/styles.xml: where text hidden through a style is declared (AQU-2539). */
+  stylesXml?: string
 }
 
 /** Per-import parse options. `cellUnit: "paragraph"` (AQU-1720) emits one cell
@@ -114,10 +119,12 @@ export async function extractDocxStrings(
   const documentXml = await readZipLiteEntryText(archive, DOCUMENT_PART)
   if (documentXml === null) throw new Error("DOCX file does not contain word/document.xml")
   const footnotesXml = await readZipLiteEntryText(archive, FOOTNOTES_PART)
+  const stylesXml = await readZipLiteEntryText(archive, STYLES_PART)
 
   return docxPartsToStrings({
     documentXml,
     ...(footnotesXml !== null ? { footnotesXml } : {}),
+    ...(stylesXml !== null ? { stylesXml } : {}),
   }, options)
 }
 
@@ -156,7 +163,14 @@ export function docxPartsToStrings(
       `DOCX paragraph scan disagrees with the XML tree (${spans.length} vs ${paragraphs.length})`,
     )
   }
-  const walkContext: DocxWalkContext = { footnotes }
+  // AQU-2539: the app imports what Word shows and prints; hidden runs are not
+  // part of any line (see hiddenRunTest in docx-structure.ts).
+  const walkContext: DocxWalkContext = {
+    footnotes,
+    isHiddenRun: hiddenRunTest(
+      readDocxStyleSheet(parts.stylesXml === undefined ? undefined : parseXmlLite(parts.stylesXml)),
+    ),
+  }
 
   for (let i = 0; i < paragraphs.length; i++) {
     // A paragraph in a later branch of mc:AlternateContent is a copy of one in

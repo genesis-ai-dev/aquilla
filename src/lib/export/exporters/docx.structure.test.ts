@@ -257,3 +257,20 @@ describe("exportDocx — the look of a translated paragraph (AQU-2539)", () => {
     expect(xml).toContain(`<w:r>${B}<w:t xml:space="preserve">TOUT GRAS</w:t></w:r>`)
   })
 })
+
+describe("exportDocx — hidden text (AQU-2539)", () => {
+  const V = "<w:rPr><w:vanish/></w:rPr>"
+
+  it("leaves a wholly hidden paragraph byte-identical even when an old import translated it", async () => {
+    const hidden = para(run("Wikipedia contributors. (n.d.).", V) + run(" Retrieved.", V))
+    const { xml } = await exportedXml(para(run("Body")) + hidden, [cellAt(1, "Corps"), cellAt(2, "Contributeurs de Wikipédia.")])
+    expect(xml).toContain(hidden)
+    expect(xml).not.toContain("Contributeurs")
+  })
+
+  it("keeps hidden runs inside a translated paragraph verbatim, by the same placement rule", async () => {
+    const note = run("[do not translate]", V)
+    const { xml } = await exportedXml(para(run("Visible ") + note + run("words")), [cellAt(1, "Mots visibles")])
+    expect(xml).toMatch(/Mots visibles<\/w:t><\/w:r><w:r><w:rPr><w:vanish\/><\/w:rPr><w:t xml:space="preserve">\[do not translate\]/)
+  })
+})

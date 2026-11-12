@@ -125,7 +125,15 @@ beforeEach(async () => {
   // Unlocked timing by default; track editing OFF by default (its own gate is
   // switched on per-test, matching the product default).
   await setSettings(tdb, { timingLocked: false })
+  const minted = await tdb.pg.query<{ id: string }>(
+    `SELECT id FROM lanes WHERE project_id = $1 AND role = 'target' AND legacy_tag = ''`,
+    [PROJECT],
+  )
+  bridgeLane = minted.rows[0]?.id ?? ''
 })
+
+/** The target lane the cell seed already minted (legacy_tag ''). */
+let bridgeLane = ''
 
 // ── validation ───────────────────────────────────────────────────────────────
 
@@ -174,6 +182,23 @@ describe('cell-field commands — validation', () => {
     expect(badId.ok).toBe(false)
   })
 
+  it('AQU-2252: setsLineLengths makes an added track a layer, as the handler allows; only a boolean or null', () => {
+    const layer = validateCommands([
+      { kind: 'SetTrackOverride', fileId: FILE, trackId: 't1', patch: { setsLineLengths: false } },
+    ])
+    expect(layer.ok).toBe(true)
+    if (!layer.ok) throw new Error('unreachable')
+    expect(layer.commands[0]).toMatchObject({ patch: { setsLineLengths: false } })
+    const cleared = validateCommands([
+      { kind: 'SetTrackOverride', fileId: FILE, trackId: 't1', patch: { setsLineLengths: null } },
+    ])
+    expect(cleared.ok).toBe(true)
+    const junk = validateCommands([
+      { kind: 'SetTrackOverride', fileId: FILE, trackId: 't1', patch: { setsLineLengths: 'no' } },
+    ])
+    expect(junk.ok).toBe(false)
+  })
+
   it('normalizes SetSource + SetTranscription on one cell into ONE source event', () => {
     const cmds: CellFieldCommand[] = [
       { kind: 'SetSource', fileId: FILE, cellId: 'cell-1', value: 'fixed' },
@@ -204,7 +229,7 @@ describe('cell-field commands — validation', () => {
 describe('cell-field commands — role floors', () => {
   it('SetSource sits ABOVE SetTranslation, and each floor matches its compiled event', () => {
     const setTranslation = requiredRoleForCommand({
-      kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'x',
+      kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: '', value: 'x',
     })
     const setSource = requiredRoleForCommand({
       kind: 'SetSource', fileId: FILE, cellId: 'cell-1', value: 'x',
@@ -219,9 +244,10 @@ describe('cell-field commands — role floors', () => {
     expect(
       requiredRoleForCommand({ kind: 'SetTiming', fileId: FILE, cellId: 'c', startMs: 0, endMs: 1 }),
     ).toBe(ROLE.CONTRIBUTOR)
-    // timingMode is a FILE-level structural change — it pulls the floor up.
+    // timingMode is a FILE-level change — it pulls the floor up to project
+    // lead (AQU-2204: leads and above choose a file's timing).
     expect(requiredRoleForCommand({ kind: 'SetTiming', fileId: FILE, timingMode: 'dubbing' })).toBe(
-      ROLE.MAINTAINER,
+      ROLE.PROJECT_LEAD,
     )
     expect(
       requiredRoleForCommand({ kind: 'SetTrackOverride', fileId: FILE, trackId: 't', patch: null }),
@@ -235,7 +261,7 @@ describe('cell-field commands — role floors', () => {
     // The same credential CAN stage the target-side write, so the refusal below
     // is about the source floor and not about membership or scope.
     const ok = await prepare(env, contributor, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'una traducción' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: bridgeLane, value: 'una traducción' },
     ])
     expect(ok.res.status).toBe(200)
 
@@ -419,6 +445,8 @@ describe('SetTrackOverride — apply', () => {
   it('a RESTRUCTURING patch is refused while allowTrackEditing is off — even for an OWNER', async () => {
     const env = makeEnv(tdb.db)
     const owner = await memberToken(tdb, ROLE.OWNER)
+    // AQU-2214: the project has to say no out loud — unset is the ON default.
+    await setSettings(tdb, { timingLocked: false, allowTrackEditing: false })
     const denied = await prepare(env, owner, [
       { kind: 'SetTrackOverride', fileId: FILE, trackId: 'target-audio', patch: null },
     ])
@@ -443,7 +471,7 @@ describe('cell-field commands — changeset hygiene', () => {
     const lead = await memberToken(tdb, ROLE.PROJECT_LEAD)
     const { res, body } = await prepare(env, lead, [
       { kind: 'SetSource', fileId: FILE, cellId: 'cell-1', value: 'a' },
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'b' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: bridgeLane, value: 'b' },
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')

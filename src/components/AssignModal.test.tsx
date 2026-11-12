@@ -9,6 +9,7 @@ vi.mock("@/lib/sync/assignments", () => ({
   createAssignment: vi.fn(),
   createBulkFileAssignments: vi.fn(),
   getFileChapters: vi.fn(),
+  getUnitAssignments: vi.fn().mockResolvedValue([]),
   AssignmentEmitError: class AssignmentEmitError extends Error {
     constructor(message: string) { super(message); this.name = "AssignmentEmitError" }
   },
@@ -18,12 +19,13 @@ vi.mock("@/lib/frontier/roles", async (importOriginal) => {
   return { ...actual }
 })
 
-import { createAssignment, createBulkFileAssignments, getFileChapters } from "@/lib/sync/assignments"
+import { createAssignment, createBulkFileAssignments, getFileChapters, getUnitAssignments } from "@/lib/sync/assignments"
 import { ROLE } from "@/lib/frontier/roles"
 
 const mockCreate = vi.mocked(createAssignment)
 const mockBulkCreate = vi.mocked(createBulkFileAssignments)
 const mockChapters = vi.mocked(getFileChapters)
+const mockUnit = vi.mocked(getUnitAssignments)
 
 const BASE_PROPS = {
   open: true,
@@ -52,6 +54,7 @@ beforeEach(() => {
     args.entries.map((e) => ({ fileId: e.fileId, assignmentId: `assign-${e.fileId}` })),
   )
   mockChapters.mockResolvedValue(["GEN 1", "GEN 2", "GEN 3"])
+  mockUnit.mockResolvedValue([])
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -93,7 +96,7 @@ describe("self-assign carve-out (AQU-496)", () => {
     expect(screen.getByText("Assign work")).toBeTruthy()
   })
 
-  it("renders a full assignee picker below Project lead when the org lowers the floor", () => {
+  it("renders a full assignee picker below Project Lead when the org lowers the floor", () => {
     render(
       <AssignModal
         {...BASE_PROPS}
@@ -188,6 +191,74 @@ describe("project-member-only assignee picker (AQU-676)", () => {
   })
 })
 
+describe("nobody else on the project yet (AQU-2194)", () => {
+  // Come and See, Oct 26: a PM added a target language and opened Assign work
+  // to give it to a linguist. The linguist was in the organisation but not on
+  // the project, so (AQU-676) the picker held only the PM, with no word why.
+  const CREATOR = {
+    userId: 5,
+    username: "wendi",
+    role: { level: 600, name: "maintainer", source: "creator" as const },
+    secondarySources: [],
+  }
+  const LINGUIST_IN_ORG_ONLY = {
+    userId: 7,
+    username: "kofi",
+    role: { level: 400, name: "contributor", source: "org" as const },
+    secondarySources: [],
+  }
+
+  it("says why only the caller can be picked, and links a maintainer to where people are added", () => {
+    render(<AssignModal {...BASE_PROPS} roleLevel={ROLE.MAINTAINER} members={[CREATOR, LINGUIST_IN_ORG_ONLY]} />)
+    const hint = screen.getByTestId("assign-modal-staff-hint")
+    expect(hint.textContent).toMatch(/only people on this project/i)
+    const link = screen.getByRole("link", { name: /add someone to this project/i })
+    expect(link.getAttribute("href")).toBe("/project/proj-1/settings/members")
+  })
+
+  it("still says it when the only others are the project's maintainers or owners", () => {
+    // The real shape: the project's creator (an org owner) is listed, the PM
+    // is a Project Lead, and the linguist isn't on the project.
+    const PM = { userId: 2, username: "lee", role: { level: 500, name: "project_lead", source: "override" as const }, secondarySources: [] }
+    render(<AssignModal {...BASE_PROPS} author="lee" members={[CREATOR, PM, LINGUIST_IN_ORG_ONLY]} />)
+    // A Project Lead can't open the Members settings, so no link: who to ask.
+    const hint = screen.getByTestId("assign-modal-staff-hint")
+    expect(hint.textContent).toMatch(/ask a project maintainer/i)
+    expect(screen.queryByRole("link", { name: /add someone to this project/i })).toBeNull()
+  })
+
+  it("says nothing once someone else is on the project", () => {
+    render(<AssignModal {...BASE_PROPS} members={[CREATOR, ...BASE_PROPS.members, LINGUIST_IN_ORG_ONLY]} />)
+    expect(screen.queryByTestId("assign-modal-staff-hint")).toBeNull()
+  })
+
+  it("leaves a project with nobody on any language to the line that already says so", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        members={[CREATOR, LINGUIST_IN_ORG_ONLY]}
+        lanes={[{ legacyTag: "ha", label: "Hausa", laneId: "lane-ha" }]}
+        staffedLaneIds={[]}
+      />,
+    )
+    expect(screen.getByTestId("assign-modal-no-staffed-lanes")).toBeTruthy()
+    expect(screen.queryByTestId("assign-modal-staff-hint")).toBeNull()
+  })
+
+  it("leaves self-assign mode to its own explanation", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        members={[CREATOR, LINGUIST_IN_ORG_ONLY]}
+        roleLevel={ROLE.CONTRIBUTOR}
+        allowSelfAssignment
+        callerUserId={5}
+      />,
+    )
+    expect(screen.queryByTestId("assign-modal-staff-hint")).toBeNull()
+  })
+})
+
 // Base UI Select renders a combobox trigger; options live in a portaled popup.
 // The shared helper drives the pointer sequence Base UI requires to commit a
 // choice (see src/test-utils/select.tsx); here we additionally hold it to
@@ -221,6 +292,77 @@ describe("verses scope", () => {
   })
 })
 
+// ── AQU-1510: warn when the person already holds these lines ─────────────────
+describe("overlap warning (AQU-1510)", () => {
+  it("says anna already holds GEN 2, and still assigns the whole file", async () => {
+    mockUnit.mockResolvedValue([
+      {
+        assignmentId: "held",
+        assigneeUserId: 42,
+        username: "anna",
+        scopeLabel: "Genesis · GEN 2",
+        targetLang: "",
+        deadline: null,
+        cellsTotal: 5,
+        translated: 0,
+        validated: 0,
+        recorded: 0,
+        audioValidated: 0,
+        chapters: [{ key: "GEN 2", total: 5, translated: 0, validated: 0, recorded: 0, audioValidated: 0 }],
+      },
+    ])
+    render(<AssignModal {...BASE_PROPS} />)
+    await pickSelectOption(/assign to/i, /anna/)
+    expect(await screen.findByTestId("assignment-overlap")).toHaveTextContent(
+      "anna already holds GEN 2 in Genesis",
+    )
+    fireEvent.click(screen.getByRole("button", { name: /assign/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+  })
+
+  it("stays quiet for bob, who holds nothing here", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    await pickSelectOption(/assign to/i, /bob/)
+    await waitFor(() => expect(mockUnit).toHaveBeenCalledWith("test-jwt", "proj-1", "file-1", "", ""))
+    expect(screen.queryByTestId("assignment-overlap")).not.toBeInTheDocument()
+  })
+})
+
+// ── Task: translate or validate (AQU-1969) ───────────────────────────────────
+describe("task (AQU-1969)", () => {
+  it("opens on Translate, and a translate assignment says so", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    expect(screen.getByRole("combobox", { name: /task/i }).textContent).toMatch(/translate/i)
+    // The validate-only sentence is not there to explain the default.
+    expect(screen.queryByText(/lines they approve themselves/i)).toBeNull()
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0].kind).toBe("translate")
+  })
+
+  it("sends a Validate assignment, and says what its progress will count", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    await pickSelectOption(/task/i, /validate/i)
+    expect(screen.getByText(/lines they approve themselves/i)).toBeTruthy()
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0]).toMatchObject({ kind: "validate", assigneeUserId: 42, scopeKind: "books" })
+  })
+
+  it("gives every file of a books batch the chosen kind", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    await pickSelectOption(/task/i, /validate/i)
+    await pickSelectOption(/scope/i, /books \(files\)/i)
+    fireEvent.click(screen.getByText("Genesis"))
+    await pickSelectOption(/assign to/i, /bob/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockBulkCreate).toHaveBeenCalledTimes(1))
+    expect(mockBulkCreate.mock.calls[0][0].kind).toBe("validate")
+  })
+})
+
 // ── Scope: selection ─────────────────────────────────────────────────────────
 describe("selection scope", () => {
   it("is enabled and pre-selected when selectedCellIds is non-empty", async () => {
@@ -233,9 +375,33 @@ describe("selection scope", () => {
     fireEvent.click(screen.getByRole("button", { name: /assign/i }))
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
     const args = mockCreate.mock.calls[0][0]
-    expect(args.scopeKind).toBe("books")
     expect(args.scopeLabel).toBe("3 verse(s)")
     expect(args.assigneeUserId).toBe(99)
+  })
+
+  it("AQU-1628: sends the selected lines, not the file they live in", async () => {
+    const selectedCellIds = new Set(["cell-a", "cell-b", "cell-c"])
+    render(<AssignModal {...BASE_PROPS} selectedCellIds={selectedCellIds} />)
+    await pickSelectOption(/assign to/i, /bob/)
+    fireEvent.click(screen.getByRole("button", { name: /assign/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    const args = mockCreate.mock.calls[0][0]
+    // A bare { fileId } resolves to EVERY source line in the file server-side,
+    // which is what handed the assignee the whole file while the label said
+    // "3 verse(s)".
+    expect(args.scopeKind).toBe("cells")
+    expect(args.scope).toEqual([{ fileId: "file-1", cellIds: ["cell-a", "cell-b", "cell-c"] }])
+  })
+
+  it("the whole-file scope stays a book scope with no cell list", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    // No selection ⇒ the dialog opens on "All verses in file".
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /assign/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    const args = mockCreate.mock.calls[0][0]
+    expect(args.scopeKind).toBe("books")
+    expect(args.scope).toEqual([{ fileId: "file-1" }])
   })
 })
 
@@ -438,14 +604,19 @@ describe("non-scripture unit copy (AQU-658)", () => {
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
     expect(mockCreate.mock.calls[0][0].scopeLabel).toBe("2 segment(s)")
     expect(mockCreate.mock.calls[0][0].scopeLabel).not.toContain("verse")
+    // AQU-1628: the count in the label is the count that gets assigned.
+    expect(mockCreate.mock.calls[0][0].scope).toEqual([
+      { fileId: "file-1", cellIds: ["cell-a", "cell-b"] },
+    ])
   })
 })
 
 // ── AQU-538 (§3.5): lane select ──────────────────────────────────────────────
 describe("lane select (AQU-538)", () => {
-  it("is hidden when the project has no extra lanes", () => {
-    render(<AssignModal {...BASE_PROPS} />)
+  it("names the only lane instead of hiding the field", () => {
+    render(<AssignModal {...BASE_PROPS} defaultLaneLabel="French" />)
     expect(screen.queryByRole("combobox", { name: /language lane/i })).toBeNull()
+    expect(screen.getByTestId("assign-modal-lane-fixed")).toHaveTextContent("French")
   })
 
   it("renders and pre-fills from defaultLane when the project has extra lanes", () => {
@@ -464,7 +635,7 @@ describe("lane select (AQU-538)", () => {
     const emphasised = screen.getByText("can", { selector: "em" })
     expect(emphasised.tagName).toBe("EM")
     expect(screen.getByText(/Restricting who/)).toBeInTheDocument()
-    expect(screen.getByText(/edit a lane is separate/)).toBeInTheDocument()
+    expect(screen.getByText(/edit a language lane is separate/)).toBeInTheDocument()
   })
 
   it("threads the pre-filled lane into createAssignment as targetLang", async () => {
@@ -483,12 +654,41 @@ describe("lane select (AQU-538)", () => {
     expect(mockCreate.mock.calls[0][0].targetLang).toBeUndefined()
   })
 
+  // ── AQU-1977: a project made since AQU-1594 has no '' lane ────────────────
+  // Offering "Default language lane" there, and submitting it, saved an assignment
+  // that belongs to no lane, whose progress reads 0% for ever.
+  it("offers only the project's own lanes, and opens a '' default on the first", async () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        lanes={[{ legacyTag: "Spanish", label: "Spanish" }, { legacyTag: "French", label: "French" }]}
+        defaultLane=""
+      />,
+    )
+    const laneTrigger = screen.getByRole("combobox", { name: /language lane/i })
+    expect(laneTrigger.textContent).toMatch(/spanish/i)
+    fireEvent.click(laneTrigger)
+    expect(await screen.findByRole("option", { name: /french/i })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: /default language/i })).toBeNull()
+  })
+
+  it("saves the work into that lane, not into a '' lane the project lacks", async () => {
+    render(
+      <AssignModal {...BASE_PROPS} lanes={[{ legacyTag: "Spanish", label: "Spanish" }]} defaultLane="" />,
+    )
+    expect(screen.getByTestId("assign-modal-lane-fixed")).toHaveTextContent("Spanish")
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /assign/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0].targetLang).toBe("Spanish")
+  })
+
   // ── AQU-728: the default ('') lane must be labeled by its real language ──────
   // The default lane IS a real language lane (the project's own default target
   // language). Launched from a Portuguese-default project it previously showed
-  // "Default language" and preselected "default", so Portuguese was neither
+  // "Default language lane" and preselected "default", so Portuguese was neither
   // listed nor preselected while extra lanes (Swahili) were.
-  it("labels the default ('') lane with defaultLaneLabel instead of the generic 'Default language'", () => {
+  it("labels the default ('') lane with defaultLaneLabel instead of the generic 'Default language lane'", () => {
     render(
       <AssignModal
         {...BASE_PROPS}
@@ -531,11 +731,55 @@ describe("lane select (AQU-538)", () => {
     await pickSelectOption(/assign to/i, /anna/)
     fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
-    // The label is cosmetic: the default lane still routes to the default (no tag).
+    // The label is the project's language. The stored lane is the default
+    // lane — never the word "default", the sentinel, or the display name.
+    const targetLang = mockCreate.mock.calls[0][0].targetLang
+    expect(targetLang).toBeUndefined()
+    expect(targetLang).not.toBe("default")
+    expect(targetLang).not.toBe("Portuguese")
+    expect(targetLang).not.toBe("__default__")
+  })
+
+  it("does not persist a preselected lane named default; the label stays the project's language", async () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        targetLanes={["Swahili", "default"]}
+        defaultLane="default"
+        defaultLaneLabel="Portuguese"
+      />,
+    )
+    const laneTrigger = screen.getByRole("combobox", { name: /language lane/i })
+    expect(laneTrigger.textContent).toMatch(/portuguese/i)
+    expect(laneTrigger.textContent).not.toMatch(/default/i)
+    fireEvent.click(laneTrigger)
+    expect(await screen.findByRole("option", { name: /portuguese/i })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: /^default$/i })).toBeNull()
+    fireEvent.click(laneTrigger)
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
     expect(mockCreate.mock.calls[0][0].targetLang).toBeUndefined()
   })
 
-  it("falls back to 'Default language' when defaultLaneLabel is unknown/empty", () => {
+  it("still submits an explicit language after the dialog opens on the project's language", async () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        targetLanes={["Swahili", "World English"]}
+        defaultLane=""
+        defaultLaneLabel="Portuguese"
+      />,
+    )
+    await pickSelectOption(/language lane/i, /swahili/i)
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0].targetLang).toBe("Swahili")
+  })
+
+  it("falls back to 'Default language lane' when defaultLaneLabel is unknown/empty", () => {
     render(
       <AssignModal
         {...BASE_PROPS}
@@ -546,6 +790,119 @@ describe("lane select (AQU-538)", () => {
     )
     const laneTrigger = screen.getByRole("combobox", { name: /language lane/i })
     expect(laneTrigger.textContent).toMatch(/default language/i)
+  })
+
+  // AQU-581 review: a coordinator scoped to one language of a multi-language
+  // project got no lane field at all, so the dialog never said which language
+  // the work would land in.
+  it("names the single lane a one-lane coordinator assigns into, read-only", async () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        roleLevel={ROLE.CONTRIBUTOR}
+        targetLanes={["Spanish", "German"]}
+        defaultLane="German"
+        defaultLaneLabel="French"
+        laneDelegate={{ allowScopedLaneAssignment: true, scopes: [{ kind: "lane", value: "Spanish" }] }}
+      />,
+    )
+    expect(screen.getByText(/language lane/i)).toBeTruthy()
+    expect(screen.getByTestId("assign-modal-lane-fixed").textContent).toBe("Spanish")
+    expect(screen.queryByRole("combobox", { name: /language lane/i })).toBeNull()
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0].targetLang).toBe("Spanish")
+  })
+
+  // AQU-2260 (Sam, Oct 29, option 2B): the people list grows with the team,
+  // so "Assign to" gets a search box.
+  it("the Assign to list has a search box that narrows it to matching people", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    fireEvent.click(screen.getByRole("combobox", { name: /assign to/i }))
+    const search = await screen.findByRole("combobox", { name: "Search the list" })
+    fireEvent.change(search, { target: { value: "bo" } })
+    expect(await screen.findByRole("option", { name: /bob/ })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: /anna/ })).toBeNull()
+  })
+
+  it("offers a coordinator only members who can do the work (Contributor and up)", async () => {
+    const withViewer = [
+      ...BASE_PROPS.members,
+      { userId: 55, username: "vera", role: { level: 100, name: "viewer", source: "override" as const }, secondarySources: [] },
+    ]
+    const delegate = { allowScopedLaneAssignment: true, scopes: [{ kind: "lane" as const, value: "Spanish" }] }
+    const { unmount } = render(
+      <AssignModal {...BASE_PROPS} members={withViewer} roleLevel={ROLE.CONTRIBUTOR} targetLanes={["Spanish"]} laneDelegate={delegate} />,
+    )
+    fireEvent.click(screen.getByRole("combobox", { name: /assign to/i }))
+    expect(await screen.findByRole("option", { name: /anna/ })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: /vera/ })).toBeNull()
+    unmount()
+    // A lead still sees everyone.
+    render(<AssignModal {...BASE_PROPS} members={withViewer} />)
+    fireEvent.click(screen.getByRole("combobox", { name: /assign to/i }))
+    expect(await screen.findByRole("option", { name: /vera/ })).toBeTruthy()
+  })
+
+  it("says who can't take the work and in which language when the server refuses the pick", async () => {
+    const { AssignmentEmitError } = await import("@/lib/sync/assignments")
+    mockCreate.mockRejectedValueOnce(
+      new AssignmentEmitError(
+        "this person cannot take work in Spanish: they need to be a Contributor or above and be allowed to work in Spanish",
+        403,
+      ),
+    )
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        roleLevel={ROLE.CONTRIBUTOR}
+        targetLanes={["Spanish"]}
+        defaultLaneLabel="German"
+        laneDelegate={{ allowScopedLaneAssignment: true, scopes: [{ kind: "lane", value: "Spanish" }] }}
+      />,
+    )
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    expect(
+      await screen.findByText(
+        "anna can't be given work in Spanish. They need to be a Contributor or above, and allowed to work in Spanish.",
+      ),
+    ).toBeTruthy()
+  })
+
+  it("names the main language by its name when that is a coordinator's only lane", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        roleLevel={ROLE.CONTRIBUTOR}
+        targetLanes={["Spanish"]}
+        defaultLane=""
+        defaultLaneLabel="French"
+        laneDelegate={{ allowScopedLaneAssignment: true, scopes: [{ kind: "lane", value: "" }] }}
+      />,
+    )
+    expect(screen.getByTestId("assign-modal-lane-fixed").textContent).toBe("French")
+  })
+
+  // AQU-729 x AQU-581: the picker holds a sentinel for the '' default lane, but
+  // the submit gate and the wire must see the raw '' tag. Otherwise a
+  // coordinator whose only lane is the main language is refused their own lane.
+  it("lets a coordinator scoped to the main language hand out work in it", async () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        roleLevel={ROLE.CONTRIBUTOR}
+        targetLanes={["Spanish"]}
+        defaultLane=""
+        defaultLaneLabel="French"
+        laneDelegate={{ allowScopedLaneAssignment: true, scopes: [{ kind: "lane", value: "" }] }}
+      />,
+    )
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0].targetLang).toBeUndefined()
   })
 })
 
@@ -574,5 +931,157 @@ describe("validation", () => {
     fireEvent.click(screen.getByRole("button", { name: /assign/i }))
     await waitFor(() => expect(onAssigned).toHaveBeenCalledTimes(1))
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+})
+
+/**
+ * AQU-1994 — the dialog offers the same lanes the project overview's Team card
+ * does: only the lanes somebody on the project is staffed on. Criterion 8 of
+ * the issue ("every other Assign entry point offers the same lanes") is why
+ * this lives on the shared modal and not only on the Team card's panel.
+ */
+describe("only the lanes the project's people are on (AQU-1994)", () => {
+  const LANES = [
+    { legacyTag: "French", label: "French", laneId: "lane-fr" },
+    { legacyTag: "Mandarin Chinese", label: "Mandarin Chinese", laneId: "lane-zh" },
+    { legacyTag: "Swedish", label: "Swedish", laneId: "lane-sv" },
+  ]
+
+  it("names the one staffed lane rather than offering all three", () => {
+    render(<AssignModal {...BASE_PROPS} lanes={LANES} staffedLaneIds={new Set(["lane-zh"])} />)
+
+    expect(screen.getByTestId("assign-modal-lane-fixed")).toHaveTextContent("Mandarin Chinese")
+    expect(screen.queryByRole("combobox", { name: /language lane/i })).not.toBeInTheDocument()
+  })
+
+  it("offers every lane when the server said nothing about staffing", () => {
+    render(<AssignModal {...BASE_PROPS} lanes={LANES} staffedLaneIds={null} />)
+
+    expect(screen.queryByTestId("assign-modal-lane-fixed")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("assign-modal-no-staffed-lanes")).not.toBeInTheDocument()
+  })
+
+  it("says so and refuses Assign when nobody on the project is on any lane", async () => {
+    render(<AssignModal {...BASE_PROPS} lanes={LANES} staffedLaneIds={new Set<string>()} />)
+
+    expect(screen.getByTestId("assign-modal-no-staffed-lanes")).toHaveTextContent(
+      /no one on this project is on any of its language lanes/i,
+    )
+    const submit = screen.getByRole("button", { name: "Assign" })
+    expect(submit).toBeDisabled()
+    fireEvent.click(submit)
+    await waitFor(() => expect(mockCreate).not.toHaveBeenCalled())
+  })
+})
+
+/**
+ * AQU-2047 — this dialog is the other menu that builds lane options (lane
+ * row, plan, org, editor). It must drop the lanes an attached team is not
+ * tied to, the same way the Team card's Assign work panel does.
+ */
+describe("lanes the attached teams are tied to (AQU-2047)", () => {
+  const LANES = [
+    { legacyTag: "French", label: "French", laneId: "lane-fr" },
+    { legacyTag: "Mandarin Chinese", label: "Mandarin Chinese", laneId: "lane-zh" },
+    { legacyTag: "Swedish", label: "Swedish", laneId: "lane-sv" },
+  ]
+  const staffed = new Set(["lane-fr", "lane-zh", "lane-sv"])
+
+  it("names French only when the team checked French", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        lanes={LANES}
+        staffedLaneIds={staffed}
+        teamLanes={[{ lanesExplicit: true, laneIds: ["lane-fr"] }]}
+      />,
+    )
+
+    expect(screen.getByTestId("assign-modal-lane-fixed")).toHaveTextContent("French")
+    expect(screen.queryByRole("combobox", { name: /language lane/i })).not.toBeInTheDocument()
+    expect(screen.queryByText("Mandarin Chinese")).not.toBeInTheDocument()
+    expect(screen.queryByText("Swedish")).not.toBeInTheDocument()
+  })
+
+  it("keeps the current lanes when the team has not saved a lane list", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        lanes={LANES}
+        staffedLaneIds={staffed}
+        teamLanes={[{ lanesExplicit: false }]}
+      />,
+    )
+    fireEvent.click(screen.getByRole("combobox", { name: /language lane/i }))
+    for (const lane of ["French", "Mandarin Chinese", "Swedish"]) {
+      expect(screen.getByRole("option", { name: lane })).toBeTruthy()
+    }
+  })
+
+  it("leaves every lane on offer when team data is omitted or there is no team", () => {
+    const { unmount } = render(
+      <AssignModal {...BASE_PROPS} lanes={LANES} staffedLaneIds={staffed} teamLanes={null} />,
+    )
+    fireEvent.click(screen.getByRole("combobox", { name: /language lane/i }))
+    for (const lane of ["French", "Mandarin Chinese", "Swedish"]) {
+      expect(screen.getByRole("option", { name: lane })).toBeTruthy()
+    }
+    unmount()
+
+    render(
+      <AssignModal {...BASE_PROPS} lanes={LANES} staffedLaneIds={staffed} teamLanes={[]} />,
+    )
+    fireEvent.click(screen.getByRole("combobox", { name: /language lane/i }))
+    for (const lane of ["French", "Mandarin Chinese", "Swedish"]) {
+      expect(screen.getByRole("option", { name: lane })).toBeTruthy()
+    }
+  })
+
+  it("offers the union when two teams checked different lanes", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        lanes={LANES}
+        staffedLaneIds={staffed}
+        teamLanes={[
+          { lanesExplicit: true, laneIds: ["lane-fr"] },
+          { lanesExplicit: true, laneIds: ["lane-sv"] },
+        ]}
+      />,
+    )
+    fireEvent.click(screen.getByRole("combobox", { name: /language lane/i }))
+    expect(screen.getByRole("option", { name: "French" })).toBeTruthy()
+    expect(screen.getByRole("option", { name: "Swedish" })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: "Mandarin Chinese" })).toBeNull()
+  })
+
+  it("still hides a lane nobody is on, even when a team checked it", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        lanes={LANES}
+        staffedLaneIds={new Set(["lane-zh"])}
+        teamLanes={[{ lanesExplicit: true, laneIds: ["lane-fr", "lane-zh"] }]}
+      />,
+    )
+
+    expect(screen.getByTestId("assign-modal-lane-fixed")).toHaveTextContent("Mandarin Chinese")
+    expect(screen.queryByText("French")).not.toBeInTheDocument()
+  })
+
+  it("assigns the lane the menu still offers", async () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        lanes={LANES}
+        defaultLane="Swedish"
+        staffedLaneIds={staffed}
+        teamLanes={[{ lanesExplicit: true, laneIds: ["lane-fr"] }]}
+      />,
+    )
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0].targetLang).toBe("French")
   })
 })

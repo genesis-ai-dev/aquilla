@@ -12,6 +12,9 @@
  * hole — but drift defeats the point, so update both together.
  */
 
+import { laneScopeTags } from "@/lib/lanes/scope-ids"
+import { READ_WALL_MAINTAINER, type LaneIdentity } from "@/lib/lanes/read-wall"
+
 export const ROLE = {
   VIEWER: 100,
   COMMENTER: 200,
@@ -49,6 +52,19 @@ const REQUIRED_ROLE: Record<string, number> = {
   "source.cell.commit": ROLE.PROJECT_LEAD,
   "source.cell.delete": ROLE.COMMENTER,
   "source.cell.reorder": ROLE.COMMENTER,
+  // AQU-1422: PROJECT_LEAD, in lock-step with the server. Hiding a cell takes it
+  // out of translation and out of every export for EVERYONE, in every lane — the
+  // same class of decision as source.cell.commit, and not the low-floored
+  // create/delete/reorder trio (those sit at COMMENTER because re-import, DCS
+  // repair and diarization all emit them through a user's own outbox).
+  //
+  // THE MIRROR MATTERS HERE PARTICULARLY: this module fails OPEN on an unknown
+  // kind, so a missing row would let a contributor's outbox enqueue a hide that
+  // the server then 403s — the row would vanish optimistically and come back on
+  // reload, which reads as data loss rather than as a refusal.
+  "source.cell.visibility.set": ROLE.PROJECT_LEAD,
+  // AQU-1767 phase 2: undo of a removal; the server adds "only who removed it, or a maintainer".
+  "source.cell.restore": ROLE.COMMENTER,
 
   "target.cell.create": ROLE.CONTRIBUTOR,
   "target.cell.commit": ROLE.CONTRIBUTOR,
@@ -66,7 +82,11 @@ const REQUIRED_ROLE: Record<string, number> = {
   "cell.audio.remove": ROLE.CONTRIBUTOR,
   "cell.audio.rename": ROLE.CONTRIBUTOR,
   "cell.audio.trim": ROLE.CONTRIBUTOR,
+  // AQU-2327: volume and fades need what a trim needs.
+  "cell.audio.gain": ROLE.CONTRIBUTOR,
   "cell.audio.place": ROLE.CONTRIBUTOR,
+  // AQU-1767: cutting a take needs exactly what trimming it needs (Sam, 2026-10-12).
+  "cell.audio.cut": ROLE.CONTRIBUTOR,
   // AQU-646: project lead, not contributor. The pairings are settled during
   // setup and handed off; a contributor re-cutting one silently moves which
   // line a recording belongs to, for everyone.
@@ -83,11 +103,33 @@ const REQUIRED_ROLE: Record<string, number> = {
   "cell.audio.validate": ROLE.REVIEWER,
   "cell.audio.unvalidate": ROLE.REVIEWER,
 
+  // AQU-777: attaching reference images to a cell is editing the cell's working
+  // context, so it sits on the CONTRIBUTOR floor alongside the other per-cell
+  // blob write (cell.audio.attach) rather than the COMMENTER one. Removal
+  // carries the same floor — the issue asks for "a user with edit access".
+  // Mirrored server-side in sync-worker/src/events/role-policy.ts.
+  "cell.attachment.add": ROLE.CONTRIBUTOR,
+  "cell.attachment.remove": ROLE.CONTRIBUTOR,
+
   "file.create": ROLE.PROJECT_LEAD,
   "file.rename": ROLE.CONTRIBUTOR,
   "file.corpus.set": ROLE.CONTRIBUTOR,
+  "file.extension.set": ROLE.PROJECT_LEAD,
+  // AQU-1569: a reorder changes the sidebar for EVERY member of the project,
+  // so it sits with file.video.set ("project setup, not an edit") rather than
+  // with the contributor-level file.rename / file.corpus.set, which change one
+  // file's own label. Mirrored server-side in sync-worker role-policy.ts.
+  "file.reorder": ROLE.PROJECT_LEAD,
   "file.delete": ROLE.PROJECT_LEAD,
   "file.restore": ROLE.PROJECT_LEAD,
+  // AQU-2308: hand-set milestones. MAINTAINER, matching file.track.set — a
+  // division relayouts the navigator for everyone who opens the file. This
+  // mirror matters more than it looks: `canPerform` fails OPEN on a kind it
+  // has never heard of (see the AQU-646 note below), so without these two rows
+  // the cell menu would offer "Set a new milestone…" to a contributor and the
+  // server's 403 would be the only thing stopping them.
+  "file.milestone.set": ROLE.MAINTAINER,
+  "file.milestone.remove": ROLE.MAINTAINER,
 
   // These are the SELF floors — the bar to touch your own comment. Acting on
   // someone else's carries a second, higher floor; see FOREIGN_COMMENT_ROLE.
@@ -106,6 +148,8 @@ const REQUIRED_ROLE: Record<string, number> = {
   "comment.resolve": ROLE.COMMENTER,
 
   "cell.backtranslation.set": ROLE.CONTRIBUTOR,
+  // AQU-1408 §1: correcting the gloss is the same act at a different grain.
+  "cell.gloss.set": ROLE.CONTRIBUTOR,
 
   "assignment.create": ROLE.PROJECT_LEAD,
   "assignment.reassign": ROLE.PROJECT_LEAD,
@@ -135,11 +179,18 @@ const REQUIRED_ROLE: Record<string, number> = {
   //   than a crash, because the client mirror throws before anything reaches the
   //   durable outbox.
   "cast.assign": ROLE.MAINTAINER,
-  // Structural — keeps the clearance the setting had in Project Settings.
-  "file.timing.set": ROLE.MAINTAINER,
+  // AQU-2408: a hand-typed cell label is metadata, not casting. Project lead is
+  // the LOWEST rung the project's `cellLabelFloor` tier can admit; the tier
+  // itself (maintainer unless set otherwise) is enforced where the Label field
+  // is drawn (src/lib/cell-label-gate.ts), like `cellEditingFloor`.
+  "cell.label.set": ROLE.PROJECT_LEAD,
+  // AQU-2204 (Sam, Oct 26): project lead and above choose what a file's
+  // timeline follows ("Follows source" / "Follows recordings"), per file, for
+  // everyone on it. Was maintainer (the Project Settings clearance it came from).
+  "file.timing.set": ROLE.PROJECT_LEAD,
   // Track structure IS file structure: a rename or reorder relayouts the
   // timeline for everyone who opens the file, so it sits with file.timing.set
-  // rather than with the contributor-level file.rename / file.video.set.
+  // rather than with file.rename (contributor) and file.video.set (project lead).
   "file.track.set": ROLE.MAINTAINER,
 
   // AQU-478: repin ("accept upstream change as-is") — same authority bar
@@ -172,6 +223,21 @@ export function canPerform(kind: string, roleLevel: number | null | undefined): 
   const required = requiredRoleFor(kind)
   if (required == null) return true
   return roleLevel >= required
+}
+
+/**
+ * AQU-1565 follow-up: marking a clip as the file's SOURCE audio (the shared
+ * programme recording every media row plays) is setting up the file, not
+ * recording a line, so it sits with the source-side import writes at Project
+ * Lead rather than with an ordinary take's CONTRIBUTOR floor. A payload
+ * condition the per-kind table above cannot express, so it has its own
+ * check. Mirrored server-side in sync-worker/src/events/authorize.ts.
+ */
+export const SOURCE_AUDIO_ATTACH_FLOOR: number = ROLE.PROJECT_LEAD
+
+/** Same fail-open contract as `canPerform`: an unknown role is let through. */
+export function canAttachSourceAudio(roleLevel: number | null | undefined): boolean {
+  return roleLevel == null || roleLevel >= SOURCE_AUDIO_ATTACH_FLOOR
 }
 
 /**
@@ -323,31 +389,75 @@ export function canMutateComment(
 }
 
 /**
+ * AQU-581: the caller's own lane-delegate grant — the org's
+ * `allowScopedLaneAssignment` setting plus the caller's own lane/file scopes
+ * (AQU-553). Passed as one object so the two halves can never drift apart at
+ * a call site: the setting alone grants nothing, and scopes alone grant
+ * nothing.
+ */
+export interface LaneDelegateGrant {
+  allowScopedLaneAssignment: boolean
+  scopes: ReadonlyArray<{ kind: "lane" | "file"; value: string }>
+}
+
+/**
+ * The lane values a delegate grant covers — empty when it grants nothing
+ * (setting off, or the caller carries no lane scopes). Exported so the assign
+ * UI can restrict its lane picker to exactly these, rather than offering a
+ * lane the submit check would then refuse.
+ */
+export function laneDelegateLanes(grant: LaneDelegateGrant | undefined): string[] {
+  if (!grant?.allowScopedLaneAssignment) return []
+  return grant.scopes.filter((s) => s.kind === "lane").map((s) => s.value)
+}
+
+/** True when the grant confers assignment authority in at least one lane. */
+function isLaneDelegate(grant: LaneDelegateGrant | undefined): boolean {
+  return laneDelegateLanes(grant).length > 0
+}
+
+/**
  * AQU-496: whether the assign-work UI (AssignModal / AssignWork) should be
  * offered at all, given the caller's role and the org's `allowSelfAssignment`
- * setting. Mirrors the self-assign carve-out enforced server-side in
- * `sync-worker/src/events/authorize.ts` — UX gate only, never the security
- * boundary; the server re-checks independently on every `assignment.create`.
+ * setting. AQU-581 adds a second way in: a lane-scoped delegate. Mirrors the
+ * carve-outs enforced server-side in `sync-worker/src/events/authorize.ts` —
+ * UX gate only, never the security boundary; the server re-checks
+ * independently on every `assignment.create`.
  *
  * A caller at the org's assignmentMinRole can open it for any assignee.
- * Below that floor, CONTRIBUTOR+ can open it only when the org has opted into
- * allowSelfAssignment, and canSubmitAssignment restricts them to themselves.
+ * Below that floor, CONTRIBUTOR+ can open it only under one of the org's two
+ * carve-outs — and opening is not submitting either way:
+ * `canSubmitAssignment` narrows a self-assigner to themselves, and a lane
+ * delegate to the lanes their grant names.
  */
 export function canOpenAssignUi(
   roleLevel: number | null | undefined,
   allowSelfAssignment: boolean,
   assignmentMinRole: number = ROLE.PROJECT_LEAD,
+  laneDelegate?: LaneDelegateGrant,
 ): boolean {
   if (roleLevel == null) return false
   if (roleLevel >= assignmentMinRole) return true
-  return allowSelfAssignment && roleLevel >= ROLE.CONTRIBUTOR
+  if (roleLevel < ROLE.CONTRIBUTOR) return false
+  return allowSelfAssignment || isLaneDelegate(laneDelegate)
 }
 
 /**
- * AQU-496: whether `roleLevel` may submit `assignment.create` assigning
- * `assigneeUserId`. Callers at assignmentMinRole may assign anyone.
- * Below-floor callers may only self-assign (assigneeUserId === callerUserId),
- * and only when allowSelfAssignment is on.
+ * AQU-496 / AQU-581: whether `roleLevel` may submit `assignment.create`
+ * assigning `assigneeUserId` in lane `lane`. Callers at assignmentMinRole may
+ * assign anyone, anywhere. Below-floor callers get in one of two ways,
+ * mirroring the two server carve-outs in
+ * `sync-worker/src/events/authorize.ts`:
+ *
+ *   1. AQU-496 self-assign — `assigneeUserId === callerUserId`, while the org
+ *      has `allowSelfAssignment` on.
+ *   2. AQU-581 lane delegate — assigning ANYONE, but only in a lane the org
+ *      scoped this caller to, and only while `allowScopedLaneAssignment` is
+ *      on. `lane` is the assignment's target-language lane ('' = default);
+ *      omitting it means the default lane, matching the server's read of an
+ *      absent `payload.targetLang`.
+ *
+ * UX gate only — the server re-checks independently on every event.
  */
 export function canSubmitAssignment(
   roleLevel: number | null | undefined,
@@ -355,11 +465,14 @@ export function canSubmitAssignment(
   callerUserId: number | null | undefined,
   assigneeUserId: number,
   assignmentMinRole: number = ROLE.PROJECT_LEAD,
+  laneDelegate?: LaneDelegateGrant,
+  lane: string = "",
 ): boolean {
   if (roleLevel == null) return false
   if (roleLevel >= assignmentMinRole) return true
-  if (!allowSelfAssignment || roleLevel < ROLE.CONTRIBUTOR) return false
-  return callerUserId != null && callerUserId === assigneeUserId
+  if (roleLevel < ROLE.CONTRIBUTOR) return false
+  if (allowSelfAssignment && callerUserId != null && callerUserId === assigneeUserId) return true
+  return laneDelegateLanes(laneDelegate).includes(lane)
 }
 
 /**
@@ -380,6 +493,40 @@ export function canSwitchLanes(roleLevel: number | null | undefined): boolean {
   return roleLevel != null && roleLevel >= ROLE.MAINTAINER
 }
 
+/**
+ * The lanes a member below maintainer may open and switch between: their own
+ * lane scopes (AQU-553), in the project's lane order. AQU-608 kept the lane
+ * switcher from everyone below MAINTAINER so a translator stays on the lane
+ * their assignment opens — but a member the org has LIMITED to certain lanes
+ * then opened on the default lane, often the one lane outside their limit,
+ * with no way to reach their own. A lane coordinator (AQU-581) could hand out
+ * Spanish chapters yet not open the Spanish lane to look at them.
+ *
+ * `null` when the AQU-608 rule stands unchanged: a MAINTAINER+ (every lane,
+ * via `canSwitchLanes`), or a member with no lane scopes (their assigned
+ * lane). A project lead with lane scopes is limited to those lanes. A scope
+ * naming no lane the project has yields `[]`: nothing to move to.
+ */
+export function scopedLanesFor(
+  roleLevel: number | null | undefined,
+  scopes: ReadonlyArray<{ kind: string; value: string }> | null | undefined,
+  lanes: readonly string[],
+  /**
+   * AQU-1607: the project's lane rows, which turn the lane ids a scope now
+   * holds into the tags `lanes` is written in. Omitted (a caller with no lane
+   * rows loaded yet) compares the stored value to the tag, which is what a
+   * scope meant before lane ids.
+   */
+  laneRows?: readonly LaneIdentity[] | null,
+): string[] | null {
+  if (canSwitchLanes(roleLevel)) return null
+  if (roleLevel != null && roleLevel >= READ_WALL_MAINTAINER) return null
+  const laneScopes = (scopes ?? []).filter((s) => s.kind === "lane").map((s) => s.value)
+  if (laneScopes.length === 0) return null
+  const allowed = laneScopeTags(laneScopes, laneRows ?? [])
+  return lanes.filter((lane) => allowed.has(lane))
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // AQU-1086: the org-configurable project-language edit floor.
 //
@@ -388,14 +535,13 @@ export function canSwitchLanes(roleLevel: number | null | undefined): boolean {
 // re-resolves the floor on every language write, so this is an affordance
 // value used to disable controls — never authority.
 //
-// The default is MAINTAINER, i.e. the behaviour before this issue: an org opts
-// in to project-lead language editing by lowering `languageEditMinRole` on
-// Org Settings → Security. Deliberately different from the termbase floor
-// (glossary-view.ts), which defaults to PROJECT_LEAD.
+// The default is PROJECT_LEAD when the org has not stored a floor (AQU-984).
+// A stored `languageEditMinRole`, including an explicit MAINTAINER, is kept.
+// Deliberately the same default as the termbase floor (glossary-view.ts).
 // ──────────────────────────────────────────────────────────────────────────
 
 /** Floor for editing a project's languages when the org hasn't configured one. */
-export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = ROLE.MAINTAINER
+export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
 
 /** Clamp an org-configured language floor to the role ladder, else the default. */
 export function resolveLanguageEditFloor(minRole?: number | null): number {
@@ -404,4 +550,64 @@ export function resolveLanguageEditFloor(minRole?: number | null): number {
   }
   if (minRole < 100 || minRole > 700) return DEFAULT_LANGUAGE_EDIT_MIN_ROLE
   return minRole
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-2304: the org-configurable import floor.
+//
+// CLIENT MIRROR of sync-worker/src/events/import-authority.ts
+// (resolveImportMinRole / DEFAULT_IMPORT_MIN_ROLE) and auth-worker's
+// DEFAULT_IMPORT_MIN_ROLE. The server re-resolves the floor on every
+// `file.create`, so this is an affordance value — never authority.
+//
+// It is NOT a row in REQUIRED_ROLE above, and must not become one: that table
+// is static, and this floor is per-org. `file.create`'s entry there stays
+// PROJECT_LEAD (the lowest reachable bar, which the server also keeps), and
+// the org's value is applied ON TOP by whoever holds the project's resolved
+// policy — see `canImportSourceFiles` and src/lib/sync/project-org-policy.ts.
+// A surface that asks `canPerform("file.create", …)` alone is asking the
+// pre-AQU-2304 question and will offer an import the server refuses.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Floor for importing a new source file when the org hasn't configured one. */
+export const DEFAULT_IMPORT_MIN_ROLE = ROLE.PROJECT_LEAD
+
+/** Clamp an org-configured import floor to the role ladder, else the default. */
+export function resolveImportFloor(minRole?: number | null): number {
+  if (typeof minRole !== "number" || !Number.isFinite(minRole)) {
+    return DEFAULT_IMPORT_MIN_ROLE
+  }
+  if (minRole < 100 || minRole > 700) return DEFAULT_IMPORT_MIN_ROLE
+  return minRole
+}
+
+/**
+ * Whether `roleLevel` may bring a NEW source file into the project — the
+ * static `file.create` floor AND the org's configurable one, which only ever
+ * raises it (`Math.max`, the same direction the comment floors take).
+ *
+ * Fail-open on an unknown role, exactly as `canPerform`: a local or
+ * git-imported project has no sync role and no org floor to apply.
+ */
+export function canImportSourceFiles(
+  roleLevel: number | null | undefined,
+  importMinRole: number = DEFAULT_IMPORT_MIN_ROLE,
+): boolean {
+  if (roleLevel == null) return true
+  if (!canPerform("file.create", roleLevel)) return false
+  return roleLevel >= resolveImportFloor(importMinRole)
+}
+
+/**
+ * The floor a denial message should name for a refused source import: the
+ * higher of the static `file.create` bar and the org's. A lead refused by an
+ * org at Maintainer must be told "Maintainer", not "Project lead".
+ */
+export function importDenialFloor(
+  importMinRole: number = DEFAULT_IMPORT_MIN_ROLE,
+): number {
+  return Math.max(
+    requiredRoleFor("file.create") ?? DEFAULT_IMPORT_MIN_ROLE,
+    resolveImportFloor(importMinRole),
+  )
 }

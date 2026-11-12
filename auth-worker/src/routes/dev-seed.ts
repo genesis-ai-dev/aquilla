@@ -23,6 +23,7 @@ import type { AuthHonoEnv } from "../middleware/auth"
 import { JWTService } from "../auth/jwt"
 import { hashPasswordWerkzeugScrypt } from "../utils/password"
 import { ROLE } from "../types"
+import { ensureProjectLanes } from "../../../db/shared/lanes"
 
 const DEV_USERNAME = "dev"
 const DEV_EMAIL = "dev@local.test"
@@ -39,6 +40,8 @@ const DEV_PROJECT_NAME = "Dev Project"
 //   - override: alice has a direct OWNER row on Genesis that beats her org tier
 //   - group:    bob (NOT an org member) reaches Exodus only via the Reviewers group
 //   - below-floor: carol is a Contributor on Dev Project (settings write lock)
+//   - lowest roles: vera is a Viewer and cora a Commenter on Dev Org and Dev
+//               Project (AQU-2259), so those views can be checked locally
 //   - invite:   `dev` is a contributor on Partner Org projects with no org
 //               membership — the dashboard "Shared with you" section
 const GENESIS_PROJECT_ID = "dev-project-genesis"
@@ -55,12 +58,19 @@ const BOB_USERNAME = "bob"
 const BOB_EMAIL = "bob@local.test"
 const CAROL_USERNAME = "carol"
 const CAROL_EMAIL = "carol@local.test"
+// AQU-2259: one person at each of the two lowest roles.
+const VERA_USERNAME = "vera"
+const VERA_EMAIL = "vera@local.test"
+const CORA_USERNAME = "cora"
+const CORA_EMAIL = "cora@local.test"
 const REVIEWERS_GROUP_NAME = "Reviewers"
 const DEV_LOGIN_USERNAMES = new Set([
   DEV_USERNAME,
   ALICE_USERNAME,
   BOB_USERNAME,
   CAROL_USERNAME,
+  VERA_USERNAME,
+  CORA_USERNAME,
 ])
 const PARTNER_ORG_NAME = "Partner Org"
 const SHARED_MATTHEW_PROJECT_ID = "dev-project-shared-matthew"
@@ -139,6 +149,14 @@ async function upsertProject(
     )
     .bind(projectId, name, orgId, createdBy, deadlineAt)
     .run()
+  // AQU-1594: every dev project has a source lane and one target lane. The
+  // tag is the language, not `''`. Idempotent, so a reseed keeps the rows.
+  await ensureProjectLanes(db, projectId, {
+    lanes: [
+      { role: "source", language: "English" },
+      { role: "target", language: "Spanish", legacyTag: "Spanish" },
+    ],
+  })
 }
 
 async function upsertOrgMember(
@@ -198,6 +216,11 @@ async function upsertOrgSettingFloor(
       settings = {}
     }
   }
+  // A later dev login must not undo a floor an owner just set. The seed only
+  // fills the key in when the org has never chosen one — otherwise switching
+  // to alice/carol via /__dev/login snaps "only owners" back to the local
+  // contributor default and the roster looks unsaved.
+  if (row && typeof settings[key] === "number" && Number.isFinite(settings[key])) return
   settings[key] = value
   const json = JSON.stringify(settings)
   if (row) {
@@ -296,11 +319,19 @@ async function seedDev(db: AquillaDb): Promise<{
     .run()
 
   await upsertProjectMember(db, DEV_PROJECT_ID, userId, ROLE.OWNER, userId)
+  await ensureProjectLanes(db, DEV_PROJECT_ID, {
+    lanes: [
+      { role: "source", language: "English" },
+      { role: "target", language: "Spanish", legacyTag: "Spanish" },
+    ],
+  })
 
   // ── Extra collaborators + projects so the Members matrix is non-trivial ──
   const aliceId = await upsertUser(db, ALICE_USERNAME, ALICE_EMAIL, passwordHash)
   const bobId = await upsertUser(db, BOB_USERNAME, BOB_EMAIL, passwordHash)
   const carolId = await upsertUser(db, CAROL_USERNAME, CAROL_EMAIL, passwordHash)
+  const veraId = await upsertUser(db, VERA_USERNAME, VERA_EMAIL, passwordHash)
+  const coraId = await upsertUser(db, CORA_USERNAME, CORA_EMAIL, passwordHash)
 
   await upsertProject(db, GENESIS_PROJECT_ID, GENESIS_PROJECT_NAME, orgId, userId)
   await upsertProject(db, EXODUS_PROJECT_ID, EXODUS_PROJECT_NAME, orgId, userId)
@@ -322,6 +353,14 @@ async function seedDev(db: AquillaDb): Promise<{
   // shared-settings controls (password `dev`; /__dev/login?as=carol).
   await upsertOrgMember(db, orgId, carolId, ROLE.CONTRIBUTOR, userId)
   await upsertProjectMember(db, DEV_PROJECT_ID, carolId, ROLE.CONTRIBUTOR, userId)
+
+  // AQU-2259: vera is a Viewer and cora a Commenter — on the org (so the org
+  // settings pages show them their read-only view) and with a direct row on
+  // Dev Project (password `dev`; /__dev/login?as=vera, ?as=cora).
+  await upsertOrgMember(db, orgId, veraId, ROLE.VIEWER, userId)
+  await upsertProjectMember(db, DEV_PROJECT_ID, veraId, ROLE.VIEWER, userId)
+  await upsertOrgMember(db, orgId, coraId, ROLE.COMMENTER, userId)
+  await upsertProjectMember(db, DEV_PROJECT_ID, coraId, ROLE.COMMENTER, userId)
 
   // Product default for rosterViewMinRole is MAINTAINER, which hides the
   // members list from carol. Open it to Contributor on Dev Org so the

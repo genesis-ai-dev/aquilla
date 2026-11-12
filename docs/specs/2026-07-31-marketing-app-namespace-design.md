@@ -159,6 +159,10 @@ for none of the migration cost:
   visitor their workspace. Additive, so no flicker; renders `null` without a DOM, so the
   prerendered page stays identical for everyone; keys on session *presence*, not validity,
   because a stale token is better handled by `/app` than by hiding the door.
+  *(Superseded by AQU-834: the "additive, so no flicker" half no longer holds — the marketing
+  pages now rewrite their "Sign up free" CTAs to "Open app" after the session check, and the
+  banner itself has been retired. Session *presence*, not validity, is still the key. See
+  `docs/SEO-WORKPLAN.md` §1.2a.)*
 - **`/app`**: the workspace entry (`AppEntry`, mounted at `/app` and `/`), sending signed-out
   visitors to `/login`. Marketing's "Open app" link is now unconditional — no identity read in a
   cached page.

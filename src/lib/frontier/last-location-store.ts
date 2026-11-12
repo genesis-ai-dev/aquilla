@@ -93,3 +93,62 @@ export function writeLastLocation(
   )
   writeAll(next)
 }
+
+// ---- per-file last cell -----------------------------------------------------
+//
+// The entry above remembers ONE position per project, so switching files (or
+// leaving the editor for comments/agent/memory, which unmounts it) dropped you
+// back at the top of every file but the last. This keeps the last cell the
+// user was on in EACH file, so going back to any of them resumes there.
+
+const CELL_STORAGE_KEY = "aq.lastcell.v1"
+const MAX_CELL_ENTRIES = 300
+
+interface CellEntry {
+  userId: string
+  projectId: string
+  fileId: string
+  cellId: string
+}
+
+function readCellEntries(): CellEntry[] {
+  if (typeof window === "undefined") return []
+  try {
+    const raw = window.localStorage.getItem(CELL_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? (parsed as CellEntry[]) : []
+  } catch {
+    return []
+  }
+}
+
+function sameFile(e: CellEntry, userId: string, projectId: string, fileId: string): boolean {
+  return e.userId === userId && e.projectId === projectId && e.fileId === fileId
+}
+
+/** The last cell this user was on in this file, or null. */
+export function readLastCell(
+  userId: string,
+  projectId: string,
+  fileId: string,
+): string | null {
+  return readCellEntries().find((e) => sameFile(e, userId, projectId, fileId))?.cellId ?? null
+}
+
+/** Remember the cell this user is on in this file (LRU, most-recent first). */
+export function writeLastCell(
+  userId: string,
+  projectId: string,
+  fileId: string,
+  cellId: string,
+): void {
+  if (typeof window === "undefined") return
+  const rest = readCellEntries().filter((e) => !sameFile(e, userId, projectId, fileId))
+  const next = [{ userId, projectId, fileId, cellId }, ...rest].slice(0, MAX_CELL_ENTRIES)
+  try {
+    window.localStorage.setItem(CELL_STORAGE_KEY, JSON.stringify(next))
+  } catch {
+    // localStorage full / disabled — non-fatal
+  }
+}

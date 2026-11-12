@@ -18,7 +18,11 @@ import {
 import { audioCachePutBlob } from "./bytes-cache"
 import { decodeToMono48k } from "./decode-mono"
 import { denoiseMono48k } from "./denoise"
-import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioGain, emitCellAudioPlace } from "@/lib/sync/events-emit"
+import type { VersionChanges } from "@/lib/sync/outbox-types"
+import { recordTakeAdded } from "@/lib/history/take-steps"
+import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
+import { newPieceAudioId } from "./cut-take"
 import {
   injectOptimisticAudioAttachment,
   notifyAudioAttachmentsChanged,
@@ -28,6 +32,7 @@ import { markProjectHasAudioDataSoon } from "./project-audio-state"
 import { setTranscribeStatus } from "./transcribe-status"
 
 function extForMime(mimeType: string): string {
+  if (mimeType.includes("wav")) return "wav"
   if (mimeType.includes("ogg")) return "ogg"
   if (mimeType.includes("webm")) return "webm"
   return "webm"
@@ -43,6 +48,31 @@ export interface DenoiseTakeArgs {
   sourceUrl: string
   author: string
   session: FrontierSession | null
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** Decision 11: record an Undo step for the new take, naming the take that
+   *  played in its slot before. Omitted by bulk runs, which record none. */
+  history?: { selectedBefore: string | null }
+  /** AQU-2327: run from the Station — the cleaned take is a version, and its
+   *  History row says so ("noise removed · used on line 331"). */
+  versionChanges?: VersionChanges
+  /**
+   * AQU-2327: the take being cleaned, so the cleaned take keeps its track,
+   * name, kept part, places and level — cleaning a take on an added track used
+   * to land it on the main track with its margins back. Cleaning keeps the
+   * length, so every window carries over as it is.
+   */
+  source?: {
+    slot?: string | null
+    label?: string | null
+    trimStartMs?: number | null
+    trimEndMs?: number | null
+    targetOffsetMs?: number | null
+    recordingsOffsetMs?: number | null
+    gainDb?: number | null
+    fadeInMs?: number | null
+    fadeOutMs?: number | null
+  }
 }
 
 export interface DenoiseTakeResult {
@@ -52,8 +82,15 @@ export interface DenoiseTakeResult {
   durationMs: number
 }
 
-export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeResult> {
-  const { projectId, fileId, cellId, sourceAudioId, sourceUrl, author, session } = args
+/** Steps 1-3: clean a take's recording and upload it as a new (dn-) clip. */
+async function cleanAndUpload(args: {
+  projectId: string
+  fileId: string
+  cellId: string
+  sourceUrl: string
+  session: FrontierSession | null
+}) {
+  const { projectId, fileId, cellId, sourceUrl, session } = args
   if (!session?.jwt) throw new Error("Sign in to remove noise")
 
   const source = parseFrontierAudioUrl(sourceUrl)
@@ -70,8 +107,11 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
   })
   const samples = await decodeToMono48k(bytes)
 
-  // 2. Run RNNoise → WebM/Opus blob.
-  const { blob, durationMs, mimeType } = await denoiseMono48k(samples)
+  // 2. Run RNNoise → WebM/Opus blob, or a WAV for a WAV take. AQU-1575: a WAV
+  //    original stays a WAV; removing noise must not quietly downgrade it to
+  //    compressed audio. Every other input is written as Opus, as before.
+  const output = source.ext.toLowerCase() === "wav" ? "wav" : "opus"
+  const { blob, durationMs, mimeType } = await denoiseMono48k(samples, { output })
 
   // 3. Upload as a new (denoised) take. Warm the byte cache first (FRO-355)
   //    so the new take is transcribable/playable locally straight away.
@@ -83,11 +123,22 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
 
   setTranscribeStatus(result.audioId, { kind: "idle" })
   markProjectHasAudioDataSoon(projectId)
+  const dropUpload = () => {
+    void deleteCellAudio({ projectId, fileId, audioId: result.audioId, ext: result.ext, getSyncToken })
+  }
+  return { blob, durationMs, result, fullAudioId, dropUpload }
+}
+
+export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeResult> {
+  const { projectId, fileId, cellId, sourceAudioId, author } = args
+  const { blob, durationMs, result, fullAudioId, dropUpload } = await cleanAndUpload({ ...args })
 
   // 4. Attach (records + selects the clip in its slot). Link back to the source
   //    take so the UI can revert. On emit failure, clean up the orphaned R2
   //    object and re-throw the original error.
   let attachEventId: string
+  const src = args.source
+  const slot = src?.slot ?? "recording"
   try {
     attachEventId = await emitCellAudioAttach({
       projectId,
@@ -95,14 +146,35 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
       cellId,
       audioId: fullAudioId,
       url: result.url,
-      slot: "recording",
+      slot,
       mimeType: blob.type || undefined,
       referenceAudioId: sourceAudioId,
       durationMs: Math.round(durationMs),
+      ...(src?.label ? { label: src.label } : {}),
+      ...(src?.trimStartMs != null ? { trimStartMs: src.trimStartMs } : {}),
+      ...(src?.trimEndMs != null ? { trimEndMs: src.trimEndMs } : {}),
+      ...(args.versionChanges ? { versionChanges: args.versionChanges } : {}),
+      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       author,
     })
+    const lane = args.targetLang ? { targetLang: args.targetLang } : {}
+    if (src && (src.targetOffsetMs != null || src.recordingsOffsetMs != null)) {
+      attachEventId = await emitCellAudioPlace({
+        projectId, fileId, cellId, audioId: fullAudioId,
+        targetOffsetMs: src.targetOffsetMs ?? null,
+        recordingsOffsetMs: src.recordingsOffsetMs ?? null,
+        ...lane, author,
+      })
+    }
+    if (src && (src.gainDb != null || src.fadeInMs != null || src.fadeOutMs != null)) {
+      await emitCellAudioGain({
+        projectId, fileId, cellId, audioId: fullAudioId,
+        gainDb: src.gainDb ?? null, fadeInMs: src.fadeInMs ?? null, fadeOutMs: src.fadeOutMs ?? null,
+        ...lane, author,
+      })
+    }
   } catch (emitErr) {
-    void deleteCellAudio({ projectId, fileId, audioId: result.audioId, ext: result.ext, getSyncToken })
+    dropUpload()
     throw emitErr
   }
 
@@ -111,15 +183,132 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
   injectOptimisticAudioAttachment(fileId, cellId, {
     audioId: fullAudioId,
     url: result.url,
-    slot: "recording",
+    slot,
     mimeType: blob.type || null,
     voiceId: null,
     referenceAudioId: sourceAudioId,
     durationMs: Math.round(durationMs),
-    trimStartMs: null,
-    trimEndMs: null,
+    trimStartMs: src?.trimStartMs ?? null,
+    trimEndMs: src?.trimEndMs ?? null,
+    ...(src?.label ? { label: src.label } : {}),
+    ...(src?.targetOffsetMs != null ? { targetOffsetMs: src.targetOffsetMs } : {}),
+    ...(src?.recordingsOffsetMs != null ? { recordingsOffsetMs: src.recordingsOffsetMs } : {}),
+    ...(src?.gainDb != null ? { gainDb: src.gainDb } : {}),
+    ...(src?.fadeInMs != null ? { fadeInMs: src.fadeInMs } : {}),
+    ...(src?.fadeOutMs != null ? { fadeOutMs: src.fadeOutMs } : {}),
   }, attachEventId)
   notifyAudioAttachmentsChanged(fileId)
+  if (args.history) {
+    recordTakeAdded("denoise", { cellId, audioId: fullAudioId, slot, selectedBefore: args.history.selectedBefore }, { fileId })
+  }
 
   return { audioId: fullAudioId, url: result.url, durationMs }
+}
+
+export interface DenoiseSplitTakeArgs {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The split take's live pieces, in clip order. They share one recording. */
+  pieces: readonly AudioAttachmentOut[]
+  author: string
+  session: FrontierSession | null
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** Decision 11: record an Undo step for the new take, naming the take that
+   *  played in its slot before. Omitted by bulk runs, which record none. */
+  history?: { selectedBefore: string | null }
+  /** AQU-2327: run from the Station (see `DenoiseTakeArgs`). */
+  versionChanges?: VersionChanges
+}
+
+/**
+ * AQU-1767 (Sam, 2026-10-14): "Remove noise" on a SPLIT take — clean it and
+ * keep the cuts. The recording all its pieces share is cleaned once, and the
+ * cleaned take is made of the same pieces: each keeps its window, its name and
+ * where it sits on the timeline, on the take's own track. The first is the
+ * cleaned take itself (a dn- id, so it reads as cleaned); every other piece is
+ * born naming it (`pieceOf`). Each cleaned piece remembers the piece it was
+ * cleaned from, so Revert goes back to the original take. Attaching chooses
+ * the cleaned take; the original stays among the line's other takes.
+ */
+export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<DenoiseTakeResult> {
+  const { projectId, fileId, cellId, pieces, author, targetLang } = args
+  const [first] = pieces
+  if (!first) throw new Error("Nothing to clean")
+  const { blob, durationMs, result, fullAudioId, dropUpload } = await cleanAndUpload({
+    projectId, fileId, cellId, sourceUrl: first.url, session: args.session,
+  })
+  const lane = targetLang ? { targetLang } : {}
+  const born = pieces.map((piece, i) => ({
+    piece,
+    audioId: i === 0 ? fullAudioId : newPieceAudioId(cellId, fullAudioId),
+  }))
+  const rootId = born[0].audioId
+  let attached = 0
+  try {
+    for (const { piece, audioId } of born) {
+      const eventId = await emitCellAudioAttach({
+        projectId, fileId, cellId, audioId,
+        url: result.url,
+        slot: piece.slot,
+        mimeType: blob.type || undefined,
+        referenceAudioId: piece.audioId,
+        durationMs: Math.round(durationMs),
+        ...(piece.label ? { label: piece.label } : {}),
+        ...(piece.trimStartMs != null ? { trimStartMs: piece.trimStartMs } : {}),
+        ...(piece.trimEndMs != null ? { trimEndMs: piece.trimEndMs } : {}),
+        ...(audioId !== rootId ? { pieceOf: rootId } : {}),
+        ...(args.versionChanges ? { versionChanges: args.versionChanges } : {}),
+        ...lane,
+        author,
+      })
+      attached += 1
+      // AQU-2267: in both timings — its place following the recordings is
+      // stated beside its place following the source, so neither moves.
+      const placeP = piece.targetOffsetMs != null || piece.recordingsOffsetMs != null
+        ? emitCellAudioPlace({
+            projectId, fileId, cellId, audioId,
+            targetOffsetMs: piece.targetOffsetMs ?? null,
+            recordingsOffsetMs: piece.recordingsOffsetMs ?? null,
+            ...lane, author,
+          })
+        : null
+      injectOptimisticAudioAttachment(fileId, cellId, {
+        audioId,
+        url: result.url,
+        slot: piece.slot,
+        mimeType: blob.type || null,
+        voiceId: null,
+        referenceAudioId: piece.audioId,
+        durationMs: Math.round(durationMs),
+        trimStartMs: piece.trimStartMs ?? null,
+        trimEndMs: piece.trimEndMs ?? null,
+        targetOffsetMs: piece.targetOffsetMs ?? null,
+        recordingsOffsetMs: piece.recordingsOffsetMs ?? null,
+        ...(piece.label ? { label: piece.label } : {}),
+        ...(audioId !== rootId ? { pieceOf: rootId } : {}),
+      }, placeP ?? eventId)
+    }
+  } catch (emitErr) {
+    // Nothing of the cleaned take reached the outbox: drop the upload. Once a
+    // piece has, the clip is in use and stays.
+    if (attached === 0) dropUpload()
+    throw emitErr
+  }
+  notifyAudioAttachmentsChanged(fileId)
+  if (args.history) {
+    recordTakeAdded(
+      "denoise",
+      {
+        cellId,
+        audioId: rootId,
+        slot: first.slot,
+        selectedBefore: args.history.selectedBefore,
+        pieces: born.slice(1).map((b) => b.audioId),
+      },
+      { fileId },
+    )
+  }
+  return { audioId: rootId, url: result.url, durationMs }
 }

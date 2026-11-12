@@ -26,6 +26,7 @@ import {
   findOccupiedCells,
   claimStrandedRuns,
   listAutopilotCandidateFiles,
+  listActiveAutopilotRunFiles,
   getProjectAutopilotSummary,
   parkRun,
   failRun,
@@ -102,8 +103,7 @@ async function seedCell(
   if (opts?.target !== undefined) {
     await db
       .prepare(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, source_event_id, last_edit_at, validated, target_lang)
-         VALUES (?, ?, ?, 'target', ?, ?, ?, ?, 0, 0, ?)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, source_event_id, last_edit_at, validated, lane_id) VALUES (?, ?, ?, 'target', ?, ?, ?, ?, 0, 0, (SELECT aquilla_test_resolve_target_lane(?, ?)))`,
       )
       .bind(
         PROJECT,
@@ -113,6 +113,7 @@ async function seedCell(
         ref,
         `ev-tgt-${fileId}-${cellId}-${opts.targetLang ?? "default"}`,
         `ev-src-${fileId}-${cellId}`,
+        PROJECT,
         opts.targetLang ?? "",
       )
       .run()
@@ -515,9 +516,7 @@ describe("listAutopilotCandidateFiles", () => {
       await seedCell(`retry-cell-${suffix}`, `GEN ${index}:1`, "retry", { fileId })
       initialRuns.push(
         db.prepare(
-          `INSERT INTO contextual_runs
-              (id, project_id, file_id, target_lang, status, created_at, updated_at)
-           VALUES (?, ?, ?, '', 'failed', ?::timestamptz, ?::timestamptz)`,
+          `INSERT INTO contextual_runs (id, project_id, file_id, status, created_at, updated_at) VALUES (?, ?, ?, 'failed', ?::timestamptz, ?::timestamptz)`,
         ).bind(
           `initial-retry-${suffix}`,
           PROJECT,
@@ -539,9 +538,7 @@ describe("listAutopilotCandidateFiles", () => {
     // moves forward, so the two files deferred last time become oldest-first.
     await db.batch(firstBatch.map((candidate, index) =>
       db.prepare(
-        `INSERT INTO contextual_runs
-            (id, project_id, file_id, target_lang, status, created_at, updated_at)
-         VALUES (?, ?, ?, '', 'failed', ?::timestamptz, ?::timestamptz)`,
+        `INSERT INTO contextual_runs (id, project_id, file_id, status, created_at, updated_at) VALUES (?, ?, ?, 'failed', ?::timestamptz, ?::timestamptz)`,
       ).bind(
         `second-retry-${String(index + 1).padStart(2, "0")}`,
         PROJECT,
@@ -557,6 +554,82 @@ describe("listAutopilotCandidateFiles", () => {
       "retry-25",
       "retry-26",
     ])
+  })
+
+  // AQU-935. "Work left" is a question about ONE lane. Before this, discovery
+  // read `target_lang = ''` unconditionally, so a project whose default lane
+  // was finished reported nothing to do in a language nobody had touched.
+  it("reads work left in the lane it was asked about, not the default lane", async () => {
+    await seedFileRow("f-lane", "usfm")
+    // Fully drafted in the default lane; completely untouched in `th`.
+    await seedCell("l1", "JHN 3:1", "one", { fileId: "f-lane", target: "hecho" })
+    await seedCell("l2", "JHN 3:2", "two", { fileId: "f-lane", target: "hecho" })
+
+    const defaultLane = await listAutopilotCandidateFiles(db, PROJECT)
+    expect(defaultLane.map((c) => c.fileId)).not.toContain("f-lane")
+
+    const thai = await listAutopilotCandidateFiles(db, PROJECT, "th")
+    expect(thai.find((c) => c.fileId === "f-lane")?.untranslatedCells).toBe(2)
+  })
+
+  it("counts a lane's own translations as done rather than the default lane's", async () => {
+    await seedFileRow("f-mixed", "usfm")
+    await seedCell("m1", "JHN 4:1", "one", { fileId: "f-mixed", target: "แปล", targetLang: "th" })
+    await seedCell("m2", "JHN 4:2", "two", { fileId: "f-mixed" })
+
+    const thai = await listAutopilotCandidateFiles(db, PROJECT, "th")
+    // Only the second cell is still blank in `th`.
+    expect(thai.find((c) => c.fileId === "f-mixed")?.untranslatedCells).toBe(1)
+    // …while the default lane has neither.
+    expect((await listAutopilotCandidateFiles(db, PROJECT))
+      .find((c) => c.fileId === "f-mixed")?.untranslatedCells).toBe(2)
+  })
+
+  // The retry rotation is per lane too: a lane that has never run must sort as
+  // never-started even when the default lane has a long failure history there.
+  it("orders by the lane's own attempt history", async () => {
+    await seedFileRow("f-tried", "usfm")
+    await seedFileRow("f-fresh", "usfm")
+    await seedCell("t1", "ROM 3:1", "a", { fileId: "f-tried" })
+    await seedCell("t2", "ROM 3:2", "b", { fileId: "f-tried" })
+    await seedCell("fr1", "ROM 4:1", "c", { fileId: "f-fresh" })
+    // A failed attempt in `th` on the BIGGER file.
+    const prior = await createRun(db, { projectId: PROJECT, fileId: "f-tried", targetLang: "th" })
+    if (prior.status !== "ok") throw new Error("lane retry fixture was not created")
+    await failRun(db, prior.run.id, "safe categorical failure")
+
+    const thai = (await listAutopilotCandidateFiles(db, PROJECT, "th")).map((c) => c.fileId)
+    expect(thai.indexOf("f-fresh")).toBeLessThan(thai.indexOf("f-tried"))
+
+    // The default lane never attempted either, so it falls back to size order.
+    const dflt = (await listAutopilotCandidateFiles(db, PROJECT)).map((c) => c.fileId)
+    expect(dflt.indexOf("f-tried")).toBeLessThan(dflt.indexOf("f-fresh"))
+  })
+})
+
+describe("listActiveAutopilotRunFiles", () => {
+  // AQU-935. A run drafting Burmese says nothing about whether Thai is free.
+  // Conflating them made a second lane's project-wide start skip every file as
+  // "already running" and start nothing at all.
+  it("reports only the runs in the lane it was asked about", async () => {
+    await seedFileRow("f-busy", "usfm")
+    const running = await createRun(db, { projectId: PROJECT, fileId: "f-busy", targetLang: "" })
+    if (running.status !== "ok") throw new Error("active default-lane fixture was not created")
+
+    expect((await listActiveAutopilotRunFiles(db, PROJECT)).map((r) => r.fileId))
+      .toContain("f-busy")
+    expect(await listActiveAutopilotRunFiles(db, PROJECT, "th")).toEqual([])
+  })
+
+  it("sees a named lane's own active run", async () => {
+    await seedFileRow("f-th-busy", "usfm")
+    const running = await createRun(db, { projectId: PROJECT, fileId: "f-th-busy", targetLang: "th" })
+    if (running.status !== "ok") throw new Error("active th-lane fixture was not created")
+
+    expect((await listActiveAutopilotRunFiles(db, PROJECT, "th")).map((r) => r.fileId))
+      .toContain("f-th-busy")
+    expect((await listActiveAutopilotRunFiles(db, PROJECT)).map((r) => r.fileId))
+      .not.toContain("f-th-busy")
   })
 })
 

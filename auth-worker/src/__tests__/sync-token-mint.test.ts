@@ -132,6 +132,64 @@ describe("mintSyncTokenForUser", () => {
   })
 })
 
+// AQU-2003: OPS-44's platform-only arm. The base test allowlist is
+// ADMIN_EMAILS=root@example.com (pg-test-env), so "root" is a platform
+// operator. p1 belongs to nobody root is related to.
+describe("mintSyncTokenForUser: un-elevated platform admin (AQU-2003)", () => {
+  async function seedForeignProject(): Promise<void> {
+    await seedUser(1, "root")
+    await seedUser(2, "boss")
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES ('p1', 'P', 2)").run()
+  }
+  const root = () => authUser(1, "root")
+
+  it("mints a read-only Viewer token that keeps the platform source when the caller opts in", async () => {
+    await seedForeignProject()
+    const res = await mintSyncTokenForUser(env as unknown as Env, root(), "p1", "f1", {
+      platformViewWithoutElevation: true,
+    })
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.role).toEqual({ level: 100, name: "viewer", source: "platform" })
+    const claims = (await verify(res.token, SYNC_SECRET, "HS256")) as Record<string, unknown>
+    expect(claims).toMatchObject({ role: 100, src: "platform" })
+  })
+
+  it("mints the full platform token when elevated, with or without the opt-in", async () => {
+    await seedForeignProject()
+    const res = await mintSyncTokenForUser(env as unknown as Env, root(), "p1", "f1", {
+      platformElevated: true,
+      platformViewWithoutElevation: true,
+    })
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.role).toEqual({ level: 700, name: "owner", source: "platform" })
+  })
+
+  it("still refuses with elevation_required when the caller does not opt in (agent harness)", async () => {
+    await seedForeignProject()
+    const res = await mintSyncTokenForUser(env as unknown as Env, root(), "p1", "f1")
+    expect(res).toEqual({ ok: false, reason: "elevation_required" })
+    const explicit = await mintSyncTokenForUser(env as unknown as Env, root(), "p1", "f1", {
+      platformElevated: false,
+    })
+    expect(explicit).toEqual({ ok: false, reason: "elevation_required" })
+  })
+
+  it("demotes to the genuine role, not Viewer, when the admin is also a real member", async () => {
+    await seedForeignProject()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level) VALUES ('p1', 1, 400)",
+    ).run()
+    const res = await mintSyncTokenForUser(env as unknown as Env, root(), "p1", "f1", {
+      platformViewWithoutElevation: true,
+    })
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.role).toEqual({ level: 400, name: "contributor", source: "override" })
+  })
+})
+
 describe("signSyncTokenWithRole", () => {
   it("signs for a caller-resolved role (the route's auto-register path)", async () => {
     await seedUser(1, "alice")

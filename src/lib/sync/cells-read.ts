@@ -11,6 +11,7 @@
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { timeoutSignal } from "./fetch-timeout"
+import { isTransientReadStatus, isTransportFailure, retryTransientRead } from "./read-retry"
 import { observedSyncFetch, readSyncJson } from "./connection-activity"
 import type { CellRow, CellsPage, FileSummary } from "./cells-read-types"
 // Re-export so consumers (e.g. org/ProjectOverview) can import FileSummary from
@@ -76,9 +77,9 @@ const READ_TIMEOUT_MS = 15_000
 // AQU-775: an initial editor load used to turn one transient worker/CORS
 // failure into a permanent, false "file is empty" screen. Cell projection
 // reads are idempotent, so retry the small class of errors that can recover
-// without user intervention. Keep the budget bounded: authorization and
-// other deterministic 4xx responses still fail immediately.
-const CELL_READ_ATTEMPTS = 3
+// without user intervention (see read-retry.ts). Keep the budget bounded:
+// three attempts, and authorization and other deterministic 4xx responses
+// still fail immediately.
 const CELL_READ_RETRY_DELAYS_MS = [100, 400] as const
 
 function fetchInit(jwt: string): RequestInit {
@@ -86,37 +87,16 @@ function fetchInit(jwt: string): RequestInit {
 }
 
 function isTransientCellsReadError(error: unknown): boolean {
-  if (error instanceof CellsReadError) {
-    return error.status === 408
-      || error.status === 425
-      || error.status === 429
-      || error.status >= 500
-  }
-  // Browser fetch rejects with TypeError for transport and CORS failures.
-  // AbortError/TimeoutError are the timeoutSignal watchdog firing.
-  return error instanceof TypeError
-    || (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError"))
-}
-
-async function waitForCellReadRetry(delayMs: number): Promise<void> {
-  await new Promise<void>((resolve) => setTimeout(resolve, delayMs))
+  if (error instanceof CellsReadError) return isTransientReadStatus(error.status)
+  return isTransportFailure(error)
 }
 
 async function fetchCellsJson<T>(url: string, jwt: string): Promise<T> {
-  let lastError: unknown
-  for (let attempt = 0; attempt < CELL_READ_ATTEMPTS; attempt++) {
-    try {
-      const res = await observedSyncFetch(url, fetchInit(jwt))
-      return await readJson<T>(res)
-    } catch (error) {
-      lastError = error
-      if (!isTransientCellsReadError(error) || attempt === CELL_READ_ATTEMPTS - 1) {
-        throw error
-      }
-      await waitForCellReadRetry(CELL_READ_RETRY_DELAYS_MS[attempt])
-    }
-  }
-  throw lastError
+  return retryTransientRead(
+    async () => readJson<T>(await observedSyncFetch(url, fetchInit(jwt))),
+    isTransientCellsReadError,
+    CELL_READ_RETRY_DELAYS_MS,
+  )
 }
 
 /** Page size the SPA asks the files listing for. */
@@ -134,6 +114,18 @@ export const FILES_PAGE_SIZE = 100
 export async function fetchProjectFiles(
   projectId: string,
   jwt: string,
+  opts: {
+    /** Smart Extensions apiRev 7: also list the (hidden) extension data files. */
+    extensionData?: boolean
+    /**
+     * AQU-2118: the target lane whose filled / approved counts each row
+     * carries — the lane the sidebar's switcher shows. '' (the default lane)
+     * is never put on the wire, so a one-lane project's request stays
+     * byte-identical to before (the AQU-538 convention); the server then
+     * pins the counts to its bridge / only lane as it always has.
+     */
+    lane?: string
+  } = {},
 ): Promise<FileSummary[]> {
   const base = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/files`
   const files: FileSummary[] = []
@@ -142,6 +134,8 @@ export async function fetchProjectFiles(
   do {
     const params = new URLSearchParams({ limit: String(FILES_PAGE_SIZE) })
     if (cursor) params.set("cursor", cursor)
+    if (opts.extensionData) params.set("extensionData", "1")
+    if (opts.lane) params.set("lane", opts.lane)
     const res = await observedSyncFetch(`${base}?${params.toString()}`, fetchInit(jwt))
     const body: { files: FileSummary[]; nextCursor?: string | null } = await readJson(res)
     for (const f of body.files) {
@@ -154,6 +148,27 @@ export async function fetchProjectFiles(
     cursor = body.nextCursor ?? null
   } while (cursor)
   return files
+}
+
+/** Smart Extensions apiRev 7: one row of GET /cells/by-ref (a cell row plus its file). */
+export type CellRowWithFile = CellRow & { fileId: string }
+
+/**
+ * GET /api/v1/projects/:projectId/cells/by-ref — cells whose canonical ref is
+ * one of `refs` (or starts with `prefix`) across up to 50 files, source rows
+ * plus the lane's target rows (sync-worker cells-by-ref-route.ts).
+ */
+export async function fetchCellsByRef(
+  projectId: string,
+  jwt: string,
+  query: { fileIds: string[]; refs?: string[]; prefix?: string; lane?: string },
+): Promise<{ cells: CellRowWithFile[]; truncated: boolean }> {
+  const params = new URLSearchParams({ files: query.fileIds.join(",") })
+  if (query.refs && query.refs.length > 0) params.set("refs", query.refs.join("|"))
+  if (query.prefix) params.set("prefix", query.prefix)
+  if (query.lane) params.set("lane", query.lane)
+  const url = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/cells/by-ref?${params.toString()}`
+  return readJson(await observedSyncFetch(url, fetchInit(jwt)))
 }
 
 /**
@@ -207,6 +222,9 @@ export interface FetchFileCellsOptions {
    * N=1 (no non-default lanes) requests are byte-identical to pre-lane ones.
    */
   lane?: string
+  /** AQU-2094: first page only — also ask for every later page's cursor,
+   *  `pageSize` rows each (`CellsPageWithMeta.pageCursors`). */
+  pageSize?: number
 }
 
 /** Full-read page plus the M2-1 watermark. Extends the shared `CellsPage`
@@ -219,6 +237,9 @@ export interface CellsPageWithMeta extends CellsPage {
   /** AQU-943: the project incarnation this page's watermark belongs to.
    *  Absent when talking to a pre-AQU-943 server. */
   projectEpoch?: number | null
+  /** AQU-2094: with `pageSize` on the first page, the cursor of every later
+   *  page, in order. Absent from a worker that predates it. */
+  pageCursors?: string[]
 }
 
 /**
@@ -239,6 +260,7 @@ export async function fetchFileCells(
   if (typeof opts.limit === "number") params.set("limit", String(opts.limit))
   if (opts.cursor) params.set("cursor", opts.cursor)
   if (opts.lane) params.set("lane", opts.lane)
+  if (typeof opts.pageSize === "number") params.set("pageSize", String(opts.pageSize))
   const qs = params.toString()
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
@@ -390,6 +412,18 @@ export async function fetchCellsByIds(
  * is still an offset into that ordering and the cache is invalidated exactly
  * when the watermark changes — so this torn-snapshot reasoning, and the "no
  * `?since=` cursor from a mid-stream watermark change" rule, are unaffected.)
+ * (AQU-1841: the server now pins that ordering INTO the cursor, so while it
+ * can still honor the pin the watermark stays put across the whole stream and
+ * a mid-stream peer commit no longer tears it. Nothing here changes: the rule
+ * is still "same watermark on every page or no cursor", it just fires far less
+ * often. A page-to-page change still means the pin was retired or evicted and
+ * the stream really may be torn.)
+ *
+ * AQU-2094: a paired read asks the first page for every later page's cursor
+ * and keeps the next page downloading while `onPage` handles the current one,
+ * instead of a round trip per page (17 of them on a whole Bible). Pages still
+ * reach `onMeta`/`onPage` one at a time, in order. A worker without
+ * `pageCursors` is read one page after another, as before.
  */
 export async function streamFileCells(
   projectId: string,
@@ -411,7 +445,7 @@ export async function streamFileCells(
   const MAX_PAGES = paired ? 1000 : 100
   for (let i = 0; i < MAX_PAGES; i++) {
     // Keep the first paint small; amortize subsequent network/database work.
-    const page = await fetchFileCells(projectId, fileId, { side, cursor, lane, paired, limit: i === 0 ? 500 : 2000 }, jwt)
+    const page = await fetchFileCells(projectId, fileId, { side, cursor, lane, paired, limit: i === 0 ? 500 : LATER_PAGE_SIZE, ...(i === 0 && paired ? { pageSize: LATER_PAGE_SIZE } : {}) }, jwt)
     if (onMeta) onMeta({ maxServerSeq: page.maxServerSeq, projectEpoch: page.projectEpoch, total: page.total })
     const nextCursor = page.nextCursor ?? undefined
     const isLast = nextCursor === undefined
@@ -422,10 +456,46 @@ export async function streamFileCells(
     const cont = await onPage(legacy ? (isLast ? legacyRows : []) : page.cells, isLast)
     if (cont === false) return
     if (isLast) return
+    if (i === 0 && !legacy && page.pageCursors?.length) {
+      const cursors = page.pageCursors
+      if (cursors.length >= MAX_PAGES) break
+      const fetchPage = (k: number) => {
+        const next = fetchFileCells(projectId, fileId, { side, cursor: cursors[k], lane, paired, limit: LATER_PAGE_SIZE }, jwt)
+        next.catch(() => {}) // Surfaced when its turn comes; never unhandled if the caller stops first.
+        return next
+      }
+      // One page ahead hides the round trip without splitting the connection
+      // across many downloads, which would delay every page's first paint.
+      let ahead = fetchPage(0)
+      let k = 0
+      for (; k < cursors.length; k++) {
+        const current = ahead
+        if (k + 1 < cursors.length) ahead = fetchPage(k + 1)
+        const later = await current
+        // Each page must end where the next cursor starts. If not (a page
+        // size the server read differently), carry on one page at a time from
+        // where this page really ends, discarding the page fetched ahead.
+        const chained = (later.nextCursor ?? undefined) === cursors[k + 1]
+        if (onMeta) onMeta({ maxServerSeq: later.maxServerSeq, projectEpoch: later.projectEpoch, total: later.total })
+        const last = later.nextCursor == null
+        if ((await onPage(later.cells, last)) === false) return
+        if (last) return
+        if (!chained) {
+          cursor = later.nextCursor!
+          break
+        }
+      }
+      if (k === cursors.length) return
+      i += k + 1
+      continue
+    }
     cursor = nextCursor
   }
   throw new CellsReadError(0, `pagination exceeded ${MAX_PAGES} pages for fileId=${fileId}`)
 }
+
+/** Rows per page after the first (the server's maximum). */
+const LATER_PAGE_SIZE = 2000
 
 /**
  * Paginate through every page of cells for a file. Returns the flat array of

@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test"
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import app from "../index"
 import { sha256Hex } from "../../../db/shared/api-credentials"
 
@@ -39,6 +39,41 @@ async function seedToken(username: string, token: string, expiresAt: string): Pr
 }
 
 const soon = () => new Date(Date.now() + 3600_000).toISOString()
+
+describe("password reset — invitation context (AQU-2298)", () => {
+  it.each([
+    ["invited", "/join-org/invite-token", "/join-org/invite-token"],
+    ["ordinary", undefined, null],
+    ["external", "https://example.com/join-org/invite-token", null],
+    ["relativehost", "//example.com/join-org/invite-token", null],
+    ["dotpath", "/join-org/../settings", null],
+    ["encoded", "/join-org/invite%2Ftoken", null],
+    ["query", "/join-org/invite-token?next=/settings", null],
+    ["newline", "/join-org/invite-token\n", null],
+  ])("emits a usable email reset link with safe context: %s", async (suffix, returnTo, expected) => {
+    const username = `recover${suffix}`
+    const email = `${username}@example.com`
+    expect((await register(username, email, "old-password-1")).status).toBe(200)
+    const send = vi.fn(async (_message: { text?: string; html?: string }) => ({ messageId: "test-reset" }))
+    const response = await app.request("/api/v2/auth/password-reset/request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, return_to: returnTo }),
+    }, { ...env, EMAIL: { send } })
+    expect(response.status).toBe(200)
+    expect(send).toHaveBeenCalledOnce()
+    const resetLink = send.mock.calls[0][0].text!.match(/https?:\/\/\S+\/reset-password\?\S+/)![0]
+    const url = new URL(resetLink)
+    expect(url.searchParams.get("returnTo")).toBe(expected)
+    expect(url.searchParams.get("username")).toBe(username)
+    const credentials = { username, token: url.searchParams.get("token") }
+    expect((await reqJson("/api/v2/auth/password-reset/verify", credentials)).status).toBe(200)
+    expect((await reqJson("/api/v2/auth/password-reset/reset", {
+      ...credentials, new_password: "NewPassword123!",
+    })).status).toBe(200)
+    expect((await reqJson("/api/v2/auth/token", { username, password: "NewPassword123!" })).status).toBe(200)
+  })
+})
 
 // AQU-675 regression guard. Reported live (Biblica ETT sync 2026-07-16):
 // requesting a reset with an email that has NO account silently created a fresh
@@ -318,5 +353,57 @@ describe("password reset — reset (full recovery loop)", () => {
       new_password: "brand-new-pw-9",
     })
     expect(res.status).toBe(400)
+  })
+})
+
+// 2026-11-02 regression guard. PR #1761 moved the token mint and the send off
+// the response (executionCtx.waitUntil) so a registered address answers as
+// fast as an unregistered one. Every test above calls app.request without an
+// ExecutionContext and so takes the inline fallback; this one goes through a
+// real one and checks the deferred work still finishes: once the waitUntil
+// promises settle, the token row exists and the mail went out. (The production
+// failure — the request-scoped connection being closed under the deferred
+// work — is covered by lib/post-response-db.test.ts and end to end by
+// e2e/specs/projects/share-invite.smoke.spec.ts.)
+describe("password reset — request deferred past the response (executionCtx)", () => {
+  it("mints the token and sends the email after the response, through waitUntil", async () => {
+    const username = "deferredreset"
+    const email = `${username}@example.com`
+    expect((await register(username, email, "old-password-1")).status).toBe(200)
+    const send = vi.fn(async (_message: { text?: string; html?: string }) => ({ messageId: "test-reset" }))
+    const deferred: Promise<unknown>[] = []
+    const ctx = {
+      waitUntil: (p: Promise<unknown>) => { deferred.push(p) },
+      passThroughOnException: () => {},
+      props: {},
+    } as unknown as ExecutionContext
+
+    const response = await app.request("/api/v2/auth/password-reset/request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    }, { ...env, EMAIL: { send } }, ctx)
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ message: "Password reset link sent to your email" })
+    expect(deferred).toHaveLength(1)
+    await Promise.all(deferred)
+
+    const u = await env.AQUILLA_PG.prepare("SELECT id FROM users WHERE username = ?")
+      .bind(username)
+      .first<{ id: number }>()
+    const tokens = await env.AQUILLA_PG.prepare("SELECT COUNT(*) AS n FROM password_reset_tokens WHERE user_id = ?")
+      .bind(u!.id)
+      .first<{ n: number }>()
+    expect(Number(tokens!.n)).toBe(1)
+    expect(send).toHaveBeenCalledOnce()
+    const resetLink = send.mock.calls[0][0].text!.match(/https?:\/\/\S+\/reset-password\?\S+/)![0]
+    expect(new URL(resetLink).searchParams.get("username")).toBe(username)
+    const activity = await env.AQUILLA_PG.prepare(
+      "SELECT activity_type FROM activity_logs WHERE user_id = ? AND activity_type = 'password_reset_requested'",
+    )
+      .bind(u!.id)
+      .all<{ activity_type: string }>()
+    expect(activity.results).toHaveLength(1)
   })
 })

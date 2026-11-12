@@ -73,3 +73,54 @@ describe("decodePeaks", () => {
     await expect(decodePeaks(new Uint8Array(), 0)).rejects.toThrow()
   })
 })
+
+describe("decodePeaks, offline", () => {
+  class StubOffline {
+    static made = 0
+    rate: number
+    constructor(_channels: number, _length: number, rate: number) { this.rate = rate; StubOffline.made++ }
+    decodeAudioData(): Promise<StubAudioBuffer> {
+      return Promise.resolve(new StubAudioBuffer([new Float32Array(100).fill(0.5)], this.rate))
+    }
+  }
+
+  it("decodes without opening a realtime context when an offline one exists", async () => {
+    vi.resetModules()
+    StubOffline.made = 0
+    vi.stubGlobal("OfflineAudioContext", StubOffline)
+    const realtime = vi.fn()
+    vi.stubGlobal("AudioContext", realtime)
+    const { decodePeaks } = await import("./peaks")
+    const { peaks, sampleRate } = await decodePeaks(new Uint8Array([1]), 4)
+    expect(peaks.length).toBe(4)
+    expect(sampleRate).toBe(48_000)
+    expect(StubOffline.made).toBe(1)
+    expect(realtime).not.toHaveBeenCalled()
+  })
+
+  it("never decodes more than two clips at once", async () => {
+    vi.resetModules()
+    let inFlight = 0
+    let peak = 0
+    const resolvers: Array<() => void> = []
+    class SlowOffline {
+      decodeAudioData(): Promise<StubAudioBuffer> {
+        inFlight++
+        peak = Math.max(peak, inFlight)
+        return new Promise((resolve) => resolvers.push(() => {
+          inFlight--
+          resolve(new StubAudioBuffer([new Float32Array(10).fill(0.5)], 48_000))
+        }))
+      }
+    }
+    vi.stubGlobal("OfflineAudioContext", SlowOffline)
+    const { decodePeaks } = await import("./peaks")
+    const all = Promise.all([1, 2, 3, 4, 5].map(() => decodePeaks(new Uint8Array([1]), 2)))
+    for (let i = 0; i < 5; i++) {
+      await new Promise((r) => setTimeout(r, 0))
+      resolvers.shift()?.()
+    }
+    await all
+    expect(peak).toBe(2)
+  })
+})

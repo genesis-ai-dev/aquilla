@@ -4,21 +4,22 @@ import { type ColumnDef } from "@tanstack/react-table"
 import { FolderKanban } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { validatedPct } from "@/lib/frontier/portfolio"
+import { startedPct, validatedPct } from "@/lib/frontier/portfolio"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UsageRollup } from "./UsageRollup"
-import { CreditsPanel } from "./CreditsPanel"
-import { BillingUsagePanel } from "./BillingUsagePanel"
+import { OrgAiMeter } from "@/components/billing/AiMeter"
+import { orgSettingsPath } from "@/lib/navigation/org-paths"
 import {
   SectionVisibilityBadge,
   SectionVisibilityGate,
   sectionTintClass,
+  visibilityRolePickerLabelKey,
 } from "./SectionVisibilityBadge"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
 import { UserError } from "@/lib/errors/user-error"
@@ -46,6 +47,7 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
 import { portfolioAttentionReasons, type ProjectAttentionReason } from "@/lib/project-status"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { SignedOutWorkspace } from "./SignedOutWorkspace"
+import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 /** Bounded pane height so LegendList can virtualize instead of growing with content. */
 const PROJECTS_PANEL_MAX_H =
@@ -60,36 +62,12 @@ function OverviewLoadingTemplate() {
   return (
     <div data-testid="org-overview-loading-template" className="h-full">
       <AppShell
-        sidebar={
-          <div className="flex h-full flex-col gap-4 p-2">
-            <Skeleton className="h-9 w-full" />
-            <div className="flex flex-col gap-2">
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-3/4" />
-              <Skeleton className="h-8 w-2/3" />
-            </div>
-          </div>
-        }
-        header={
-          <div className="flex items-center gap-4 px-4">
-            <Skeleton className="h-5 w-40" />
-          </div>
-        }
+        sidebar={<OrgSidebar />}
+        header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
         statusBar={null}
         main={
           <Page size="wide">
-            <Skeleton className="mb-8 h-7 w-48" />
-            <div className={STAT_TILE_GRID}>
-              {Array.from({ length: 6 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="flex h-[88px] items-center justify-between rounded-lg border bg-card px-5 py-4 min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-2"
-                >
-                  <Skeleton className="order-last h-6 w-12 min-[480px]:order-none" />
-                  <Skeleton className="h-3 w-20" />
-                </div>
-              ))}
-            </div>
+            <LoadingCursor className="text-xl" />
           </Page>
         }
       />
@@ -109,11 +87,45 @@ export function OrgOverview() {
   const jwt = session?.jwt ?? null
   const navigate = useNavigate()
 
-  const portfolio = useOrgPortfolio(activeOrgId, activeOrg?.name)
   const orgSettings = useOrgSettings(activeOrgId, activeOrg?.role?.level)
+  // AQU-1913: the org settings version, so an org default changed elsewhere
+  // re-reads the numbers.
+  const portfolio = useOrgPortfolio(activeOrgId, activeOrg?.name, {
+    orgSettingsVersion: orgSettings.version,
+  })
   const canEditVisibility = canEditRosterProgressFloor(activeOrg?.role?.level)
   const memberProgressReady = orgSettings.hasFetched
   const memberProgressViewerRole = activeOrg?.role?.level ?? null
+  // AQU-1771: Team workload and Team usage list people by name, so they need
+  // the member-list setting as well as the member-progress one — the higher
+  // of the two decides, exactly as the server reads both and as the project
+  // overview's Team card does.
+  const teamNamesFloor = Math.max(
+    orgSettings.memberProgressViewMinRole,
+    orgSettings.rosterViewMinRole,
+  )
+  // A card whose read the server refused stays hidden, rather than showing an
+  // empty state that claims there is nothing to see. Keyed by org, so moving
+  // to another org asks again.
+  const [workloadRefusedOrg, setWorkloadRefusedOrg] = useState<number | null>(null)
+  const [usageRefusedOrg, setUsageRefusedOrg] = useState<number | null>(null)
+  const teamNamesBadge = (description: string) => (
+    <SectionVisibilityBadge
+      minRole={teamNamesFloor}
+      canEdit={canEditVisibility}
+      onChangeMinRole={async (next) => {
+        await orgSettings.patch({ memberProgressViewMinRole: next })
+      }}
+      description={description}
+      // The badge writes only the progress setting, so it offers nothing below
+      // the member-list setting: such a value would save and then not show.
+      minSelectableRole={orgSettings.rosterViewMinRole}
+      storedMinRole={orgSettings.memberProgressViewMinRole}
+      belowMinSelectableHint={t("org.orgHome.teamVisibilityRosterFloorHint", {
+        floor: t(visibilityRolePickerLabelKey(orgSettings.rosterViewMinRole)),
+      })}
+    />
+  )
   const assignmentRoleByProjectId = useMemo(
     () => new Map(accessibleProjects.map((project) => [project.id, project.role.level])),
     [accessibleProjects],
@@ -178,7 +190,16 @@ export function OrgOverview() {
         id: "validated",
         enableSorting: false,
         header: t("org.orgHome.table.validatedHeaderLabel"),
-        cell: ({ row }) => <ValidatedBar fraction={validatedPct(row.original.project)} />,
+        // AQU-1764: validated, then translated but not validated, as one
+        // two-part bar in the shared progress palette.
+        cell: ({ row }) => (
+          <ValidatedBar
+            fraction={validatedPct(row.original.project)}
+            // Media redesign slice 1: the lines with any work in them, by
+            // what each language delivers (the translated share for Text).
+            translatedFraction={startedPct(row.original.project)}
+          />
+        ),
       },
       {
         id: "status",
@@ -282,17 +303,25 @@ export function OrgOverview() {
 
               <div className={STAT_TILE_GRID}>
                 <StatTile label={t("nav.projects")} value={portfolio.projects.length} />
+                {/* AQU-1071: the org's active target-language count — the figure the
+                  * enterprise billing band is read off. Server-counted on the same rule
+                  * billing bills on, so this tile and the invoice agree. */}
+                <StatTile
+                  label={t("org.orgHome.activeLanguages")}
+                  hint={t("org.orgHome.activeLanguagesHint")}
+                  value={portfolio.activeLanguageCount}
+                />
                 <StatTile
                   label={t("org.orgHome.avgTranslated")}
-                  value={`${Math.round(portfolio.avgTranslatedPct * 100)}%`}
+                  value={`${progressPercentOfFraction(portfolio.avgTranslatedPct)}%`}
                 />
                 <StatTile
                   label={t("org.orgHome.avgValidated")}
-                  value={`${Math.round(portfolio.avgValidatedPct * 100)}%`}
+                  value={`${progressPercentOfFraction(portfolio.avgValidatedPct)}%`}
                 />
                 <StatTile
                   label={t("org.orgHome.avgAudio")}
-                  value={`${Math.round(portfolio.avgAudioPct * 100)}%`}
+                  value={`${progressPercentOfFraction(portfolio.avgAudioPct)}%`}
                 />
                 <StatTile label={t("org.orgHome.stalled")} value={portfolio.stalledCount} />
                 <StatTile
@@ -347,16 +376,16 @@ export function OrgOverview() {
                 </div>
               </Section>
 
-              {jwt && activeOrgId != null && (
+              {jwt && activeOrgId != null && workloadRefusedOrg !== activeOrgId && (
                 <SectionVisibilityGate
-                  minRole={orgSettings.memberProgressViewMinRole}
+                  minRole={teamNamesFloor}
                   viewerRoleLevel={memberProgressViewerRole}
                   ready={memberProgressReady}
                 >
                   <div
                     className={cn(
                       "relative rounded-lg",
-                      sectionTintClass(orgSettings.memberProgressViewMinRole),
+                      sectionTintClass(teamNamesFloor),
                     )}
                     data-testid="section-team-workload"
                   >
@@ -367,84 +396,52 @@ export function OrgOverview() {
                         (assignmentRoleByProjectId.get(projectId) ?? 0) >=
                         orgSettings.assignmentMinRole
                       }
-                      action={
-                        <SectionVisibilityBadge
-                          minRole={orgSettings.memberProgressViewMinRole}
-                          canEdit={canEditVisibility}
-                          onChangeMinRole={async (next) => {
-                            await orgSettings.patch({ memberProgressViewMinRole: next })
-                          }}
-                          description={t("org.orgHome.workloadVisibilityDescription")}
-                        />
-                      }
+                      onRefused={() => setWorkloadRefusedOrg(activeOrgId)}
+                      action={teamNamesBadge(t("org.orgHome.workloadVisibilityDescription"))}
                     />
                   </div>
                 </SectionVisibilityGate>
               )}
-              {jwt && activeOrgId != null && (
+              {jwt && activeOrgId != null && usageRefusedOrg !== activeOrgId && (
                 <SectionVisibilityGate
-                  minRole={orgSettings.memberProgressViewMinRole}
+                  minRole={teamNamesFloor}
                   viewerRoleLevel={memberProgressViewerRole}
                   ready={memberProgressReady}
                 >
                   <div
                     className={cn(
                       "relative rounded-lg",
-                      sectionTintClass(orgSettings.memberProgressViewMinRole),
+                      sectionTintClass(teamNamesFloor),
                     )}
                     data-testid="section-team-usage"
                   >
                     <UsageRollup
                       jwt={jwt}
                       orgId={activeOrgId}
-                      action={
-                        <SectionVisibilityBadge
-                          minRole={orgSettings.memberProgressViewMinRole}
-                          canEdit={canEditVisibility}
-                          onChangeMinRole={async (next) => {
-                            await orgSettings.patch({ memberProgressViewMinRole: next })
-                          }}
-                          description={t("org.orgHome.usageVisibilityDescription")}
-                        />
-                      }
+                      onRefused={() => setUsageRefusedOrg(activeOrgId)}
+                      action={teamNamesBadge(t("org.orgHome.usageVisibilityDescription"))}
                     />
                   </div>
                 </SectionVisibilityGate>
               )}
               {jwt && activeOrgId != null && (
-                <SectionVisibilityGate
-                  minRole={ROLE.MAINTAINER}
-                  viewerRoleLevel={activeOrg?.role?.level ?? null}
+                // AQU-2068: every member sees the same % meter; it shows no
+                // amounts, so it needs no maintainer gate (the credit panels did).
+                <Section
+                  title={t("billing.meter.sectionTitle")}
+                  action={(activeOrg?.role?.level ?? 0) >= ROLE.MAINTAINER ? (
+                    <Link to={orgSettingsPath(activeOrgId, "billing")} className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+                      {t("billing.usage.open")}
+                    </Link>
+                  ) : undefined}
+                  data-testid="section-billing"
                 >
-                  <div
-                    className={cn("relative rounded-lg", sectionTintClass(ROLE.MAINTAINER))}
-                    data-testid="section-billing"
-                  >
-                    <BillingUsagePanel
-                      jwt={jwt}
-                      orgId={activeOrgId}
-                      orgRoleLevel={activeOrg?.role.level ?? 0}
-                    />
-                  </div>
-                </SectionVisibilityGate>
-              )}
-              {jwt && activeOrgId != null && (
-                <SectionVisibilityGate
-                  minRole={ROLE.MAINTAINER}
-                  viewerRoleLevel={activeOrg?.role?.level ?? null}
-                >
-                  <div
-                    className={cn("relative rounded-lg", sectionTintClass(ROLE.MAINTAINER))}
-                    data-testid="section-credits"
-                  >
-                    <CreditsPanel
-                      jwt={jwt}
-                      orgId={activeOrgId}
-                      orgRoleLevel={activeOrg?.role.level ?? 0}
-                      action={<SectionVisibilityBadge minRole={ROLE.MAINTAINER} />}
-                    />
-                  </div>
-                </SectionVisibilityGate>
+                  <OrgAiMeter
+                    jwt={jwt}
+                    orgId={activeOrgId}
+                    canManage={(activeOrg?.role?.level ?? 0) >= ROLE.MAINTAINER}
+                  />
+                </Section>
               )}
             </div>
           )}

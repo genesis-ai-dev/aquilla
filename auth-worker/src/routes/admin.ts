@@ -8,32 +8,40 @@
 //
 // Routes (mounted at /api/v2/admin):
 //   GET /me                    — { isPlatformAdmin: true } (only reachable past the gate)
-//   GET /admins                — the ADMIN_EMAILS allowlist joined to user accounts
+//   GET /admins                — the platform_admins rows (plus any ADMIN_EMAILS bootstrap) joined to user accounts
 //   GET /overview              — top-line counts (orgs, users, projects, active-7d)
 //   GET /orgs                  — every org + owner + member/project counts
 //   GET /users                 — every user
+//   GET /users/:userId         — one user + org and direct project memberships
+//   GET /orgs/:orgId/members   — one org's members with role, joined, last active
 //   GET /projects              — every project + org/creator + cell/word rollup + shared flag
 //   GET /activity              — cross-tenant activity_logs feed (?limit, ?since)
 //   GET /retention             — DAU/WAU/MAU, Day-N + weekly cohort retention (?days, ?asOf)
 //   POST /retention/report     — email the weekly|monthly recap to the caller now
 //   GET /credits/orgs          — all orgs with day/week credit spend + caps
 //   PATCH /credits/org/:orgId  — update per-org credit config (org_settings.credits)
+//   GET|POST /feedback-routes, PATCH|DELETE /feedback-routes/:id
+//                              — email routes for "Report a problem"
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
-import { parseAdminEmails, requirePlatformAdmin, requireAdminElevation, adminElevationRequired } from "../middleware/platform-admin"
+import { loadPlatformAdminEmails, requirePlatformAdmin, requireAdminElevation, adminElevationRequired } from "../middleware/platform-admin"
 import { resolveCreditConfig, readSpend } from "../lib/credits"
+import { countTargetLanesByOrg } from "../lib/billing/words"
 import { loadPlatformSettings, savePlatformSettings } from "../lib/platform-settings"
 import { getAllowedModels } from "../lib/ai-budget"
 import { aggregateAbResults } from "../lib/model-ab"
 import adminBillingRoutes from "./admin-billing"
 import { sendAdminElevationCodeEmail, sendRetentionReportEmail } from "../services/email"
+import { FEEDBACK_ROUTE_MAX_EMAILS, rowToRoute, type FeedbackRoute } from "../services/feedback-routes"
 import { hashPasswordWerkzeugScrypt, verifyPasswordWerkzeugScrypt } from "../utils/password"
 import { loadRetentionMetrics } from "../lib/retention-load"
 import { buildRetentionReport, reportWindow } from "../lib/retention-report"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
+import { countedFileSql, inCountedFileSql } from "../../../db/shared/counted-files"
+import { lessStructural } from "../services/org-permissions"
 import {
   ADMIN_ELEVATION_VERIFY_MAX_FAILURES,
   countRecentEvents,
@@ -234,9 +242,10 @@ admin.post("/elevation/verify", zValidator("json", elevationVerifySchema), async
 
   // OPS-35: elevations are now one row per (user, session) rather than one per
   // user, so lapsed rows no longer get overwritten by the next grant. Prune
-  // this operator's expired rows here — the same opportunistic-cleanup posture
-  // `pruneOldEvents` takes in utils/rate-limit.ts, and for the same reason
-  // (no scheduled job to hang it off).
+  // this operator's expired rows here, opportunistically: the rows are scoped
+  // to the one operator this request already identified, so the DELETE costs
+  // nothing extra. (The rate-limit tables' own prunes moved to the 5-minute
+  // cron in AQU-1843; this one stays here because it is per-operator.)
   await c.env.AQUILLA_PG.prepare(
     `DELETE FROM admin_elevations WHERE user_id = ? AND elevated_until <= now()`,
   )
@@ -292,13 +301,14 @@ admin.get("/migration-status", async (c) => {
 })
 
 /**
- * GET /api/v2/admin/admins — the ADMIN_EMAILS allowlist, joined to user
- * accounts by email. Allowlist entries without a matching users row are still
- * returned (hasAccount: false) so a typo'd or not-yet-registered email in
- * wrangler.toml is visible from the dashboard instead of silently inert.
+ * GET /api/v2/admin/admins — the platform admins (`platform_admins` rows, plus
+ * any `ADMIN_EMAILS` bootstrap), joined to user accounts by email. Entries
+ * without a matching users row are still returned (hasAccount: false) so a
+ * typo'd or not-yet-registered email in the table is visible from the
+ * dashboard instead of silently inert.
  */
 admin.get("/admins", async (c) => {
-  const allowlist = Array.from(parseAdminEmails(c.env)).sort((a, b) =>
+  const allowlist = Array.from(await loadPlatformAdminEmails(c.env)).sort((a, b) =>
     a.localeCompare(b),
   )
   if (allowlist.length === 0) return c.json({ admins: [] })
@@ -366,7 +376,7 @@ admin.get("/overview", async (c) => {
   })
 })
 
-/** GET /api/v2/admin/orgs — every org with owner + member/project counts. */
+/** GET /api/v2/admin/orgs — every org with owner + member/project/lane counts. */
 admin.get("/orgs", async (c) => {
   const { results } = await c.env.AQUILLA_PG.prepare(
     `SELECT o.id, o.name, o.created_at,
@@ -384,6 +394,14 @@ admin.get("/orgs", async (c) => {
     member_count: number
     project_count: number
   }>()
+  // AQU-1071: the billing band was only legible one org at a time, on the
+  // Billing tab. One grouped query gives the whole tenants list its active
+  // target-lane count — deliberately not a per-row subquery, which would add a
+  // query per org to a cross-tenant table.
+  const { byOrg } = await countTargetLanesByOrg(
+    c.env.AQUILLA_PG,
+    results.map((r) => r.id),
+  )
   return c.json({
     orgs: results.map((r) => ({
       id: r.id,
@@ -392,6 +410,55 @@ admin.get("/orgs", async (c) => {
       ownerUsername: r.owner_username,
       memberCount: r.member_count,
       projectCount: r.project_count,
+      activeLanguageCount: byOrg.get(r.id) ?? 0,
+    })),
+  })
+})
+
+/** A path id that must be a positive whole number, else null (the route 404s). */
+function parseNumericId(raw: string): number | null {
+  return /^\d+$/.test(raw) ? Number(raw) : null
+}
+
+/**
+ * GET /api/v2/admin/orgs/:orgId/members — everyone in one org with their org
+ * role (`roleLevel`; the client labels it), join date, and last activity.
+ * 404 when the org does not exist.
+ */
+admin.get("/orgs/:orgId/members", async (c) => {
+  const orgId = parseNumericId(c.req.param("orgId"))
+  if (orgId === null) return c.json({ error: "Org not found" }, 404)
+  const org = await c.env.AQUILLA_PG.prepare("SELECT id FROM organizations WHERE id = ?")
+    .bind(orgId)
+    .first<{ id: number }>()
+  if (!org) return c.json({ error: "Org not found" }, 404)
+  const { results } = await c.env.AQUILLA_PG.prepare(
+    `SELECT u.id AS user_id, u.username, u.display_name, u.email,
+            m.role_level, m.granted_at, m.last_active_at
+       FROM org_members m
+       JOIN users u ON u.id = m.user_id
+      WHERE m.org_id = ?
+      ORDER BY m.role_level DESC, LOWER(u.username)`,
+  )
+    .bind(orgId)
+    .all<{
+      user_id: number
+      username: string
+      display_name: string | null
+      email: string
+      role_level: number
+      granted_at: string | null
+      last_active_at: string | null
+    }>()
+  return c.json({
+    members: results.map((r) => ({
+      userId: r.user_id,
+      username: r.username,
+      displayName: r.display_name,
+      email: r.email,
+      roleLevel: r.role_level,
+      joinedAt: r.granted_at,
+      lastActiveAt: r.last_active_at,
     })),
   })
 })
@@ -471,6 +538,86 @@ admin.get("/users", async (c) => {
   })
 })
 
+/**
+ * GET /api/v2/admin/users/:userId — one user plus their org memberships and
+ * their direct project memberships (`project_members` rows). Access a person
+ * gets only through an org role or a team grant is not listed as a project
+ * here. 404 when the user does not exist.
+ */
+admin.get("/users/:userId", async (c) => {
+  const userId = parseNumericId(c.req.param("userId"))
+  if (userId === null) return c.json({ error: "User not found" }, 404)
+  const user = await c.env.AQUILLA_PG.prepare(
+    "SELECT id, username, email, display_name, created_at FROM users WHERE id = ?",
+  )
+    .bind(userId)
+    .first<{
+      id: number
+      username: string
+      email: string
+      display_name: string | null
+      created_at: string
+    }>()
+  if (!user) return c.json({ error: "User not found" }, 404)
+  const orgs = await c.env.AQUILLA_PG.prepare(
+    `SELECT o.id AS org_id, o.name, m.role_level, m.granted_at, m.last_active_at
+       FROM org_members m
+       JOIN organizations o ON o.id = m.org_id
+      WHERE m.user_id = ?
+      ORDER BY LOWER(COALESCE(o.name, ''))`,
+  )
+    .bind(userId)
+    .all<{
+      org_id: number
+      name: string | null
+      role_level: number
+      granted_at: string | null
+      last_active_at: string | null
+    }>()
+  const projects = await c.env.AQUILLA_PG.prepare(
+    `SELECT p.id AS project_id, p.name, p.org_id, o.name AS org_name,
+            p.archived_at, pm.role_level
+       FROM project_members pm
+       JOIN projects p ON p.id = pm.project_id
+       LEFT JOIN organizations o ON o.id = p.org_id
+      WHERE pm.user_id = ?
+      ORDER BY LOWER(p.name)`,
+  )
+    .bind(userId)
+    .all<{
+      project_id: string
+      name: string
+      org_id: number | null
+      org_name: string | null
+      archived_at: string | null
+      role_level: number
+    }>()
+  return c.json({
+    user: {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      displayName: user.display_name,
+      createdAt: user.created_at,
+    },
+    orgs: orgs.results.map((r) => ({
+      orgId: r.org_id,
+      name: r.name,
+      roleLevel: r.role_level,
+      joinedAt: r.granted_at,
+      lastActiveAt: r.last_active_at,
+    })),
+    projects: projects.results.map((r) => ({
+      projectId: r.project_id,
+      name: r.name,
+      orgId: r.org_id,
+      orgName: r.org_name,
+      archived: r.archived_at != null,
+      roleLevel: r.role_level,
+    })),
+  })
+})
+
 /** True when a PG boolean / 0-1 flag is on. */
 function asBool(value: boolean | number | null | undefined): boolean {
   return value === true || value === 1
@@ -479,13 +626,29 @@ function asBool(value: boolean | number | null | undefined): boolean {
 /** GET /api/v2/admin/projects — every project with org/creator + rollup + shared flag. */
 admin.get("/projects", async (c) => {
   const { results } = await c.env.AQUILLA_PG.prepare(
+    // AQU-1911: the cell counts follow the project's "count headings" answer,
+    // else its org's (the org dashboard's `lessStructural`), so a project
+    // reads the same validated % here as on its dashboards. Words never do,
+    // as on the dashboard. `filled_cells` and `last_activity_at` feed the
+    // dashboard's activity rule (portfolioActivityStatus): a project nobody
+    // has started translating is not stalled, and validating or recording is
+    // work. `file_section_progress.updated_at` is restamped by every
+    // counter-moving event, validations and takes included, where
+    // `files.last_edit_at` moves only on a cell write (AQU-950).
     `SELECT p.id, p.name, p.org_id, p.archived_at, p.created_at, p.deadline_at,
             o.name AS org_name,
             u.username AS creator_username,
-            COALESCE(SUM(f.cell_count), 0) AS total_cells,
-            COALESCE(SUM(f.approved_count), 0) AS validated_cells,
+            ${lessStructural('COALESCE(SUM(f.cell_count), 0)', 'COALESCE(SUM(f.structural_cell_count), 0)')} AS total_cells,
+            ${lessStructural('COALESCE(SUM(f.approved_count), 0)', 'COALESCE(SUM(f.structural_approved_count), 0)')} AS validated_cells,
+            ${lessStructural('COALESCE(SUM(f.filled_count), 0)', 'COALESCE(SUM(f.structural_filled_count), 0)')} AS filled_cells,
             COALESCE(SUM(f.word_count), 0) AS word_count,
             MAX(f.last_edit_at) AS last_edit_at,
+            GREATEST(
+              MAX(f.last_edit_at),
+              (SELECT MAX(fsp.updated_at) FROM file_section_progress fsp
+                WHERE fsp.project_id = p.id AND fsp.scope = 'file'
+                  AND ${inCountedFileSql('fsp', 'uncounted_activity_file')})
+            ) AS last_activity_at,
             (
               EXISTS (
                 SELECT 1 FROM project_members pm
@@ -510,7 +673,14 @@ admin.get("/projects", async (c) => {
        FROM projects p
        LEFT JOIN organizations o ON o.id = p.org_id
        LEFT JOIN users u ON u.id = p.created_by
-       LEFT JOIN files f ON f.project_id = p.id
+       -- AQU-1626: deleted files and hidden companions (cue sheets, caption
+       -- tracks) are not this project's work, so they stay out of the admin
+       -- rollup exactly as they stay out of the org dashboard's. In the JOIN,
+       -- not the WHERE: this is a LEFT join and a project whose only file is
+       -- hidden must still appear, at zero.
+       LEFT JOIN files f ON f.project_id = p.id AND ${countedFileSql('f')}
+       LEFT JOIN project_settings ps ON ps.project_id = p.id
+       LEFT JOIN org_settings os ON os.org_id = p.org_id
       GROUP BY p.id, o.name, u.username
       ORDER BY p.created_at DESC`,
   ).all<{
@@ -524,8 +694,10 @@ admin.get("/projects", async (c) => {
     creator_username: string | null
     total_cells: number
     validated_cells: number
+    filled_cells: number
     word_count: number
     last_edit_at: number | null
+    last_activity_at: number | string | null
     shared: boolean | number | null
   }>()
   return c.json({
@@ -540,8 +712,10 @@ admin.get("/projects", async (c) => {
       creatorUsername: r.creator_username,
       totalCells: r.total_cells,
       validatedCells: r.validated_cells,
+      filledCells: r.filled_cells,
       wordCount: r.word_count,
       lastEditAt: r.last_edit_at,
+      lastActivityAt: r.last_activity_at == null ? null : Number(r.last_activity_at),
       shared: asBool(r.shared),
     })),
   })
@@ -952,6 +1126,9 @@ const platformSettingsPatchSchema = z.object({
   aiUserDailyLimit:   z.number().int().nonnegative().optional(),
   aiGlobalDailyLimit: z.number().int().nonnegative().optional(),
   aiBudgetEnforce:    z.boolean().optional(),
+  // AQU-1869. Negative switches the platform spend ceiling off, so the bound is
+  // -1, not nonnegative — and 0 is a legitimate "no paid AI" panic position.
+  aiDailySpendCeilingUsd: z.number().min(-1).optional(),
   abTest: z
     .object({
       enabled: z.boolean(),
@@ -1104,6 +1281,201 @@ admin.post("/retention/report", zValidator("json", retentionReportSchema), async
     return c.json({ error: "email_unavailable", message: "Email is not configured in this environment." }, 503)
   }
   return c.json({ ok: true, subject: report.subject, asOf: current.asOf })
+})
+
+// ---------------------------------------------------------------------------
+// Feedback routes: who gets emailed when a user sends "Report a problem".
+// ---------------------------------------------------------------------------
+
+const feedbackRouteEmailsSchema = z
+  .array(z.string().trim().toLowerCase().email().max(254))
+  .min(1)
+  .max(FEEDBACK_ROUTE_MAX_EMAILS)
+  .transform((list) => [...new Set(list)])
+
+const feedbackRouteBodySchema = z.object({
+  orgId: z.number().int().positive(),
+  // Empty = the whole org.
+  projectIds: z.array(z.string().min(1)).max(500).default([]),
+  emails: feedbackRouteEmailsSchema,
+  label: z.string().trim().max(80).nullish(),
+  enabled: z.boolean().default(true),
+})
+
+const feedbackRoutePatchSchema = z.object({
+  projectIds: z.array(z.string().min(1)).max(500).optional(),
+  emails: feedbackRouteEmailsSchema.optional(),
+  label: z.string().trim().max(80).nullish(),
+  enabled: z.boolean().optional(),
+})
+
+/** The ids in `projectIds` that are not projects of `orgId`. */
+async function projectsOutsideOrg(
+  env: AuthHonoEnv["Bindings"],
+  orgId: number,
+  projectIds: string[],
+): Promise<string[]> {
+  if (projectIds.length === 0) return []
+  const { results } = await env.AQUILLA_PG.prepare(
+    `SELECT id FROM projects WHERE org_id = ? AND id IN (${projectIds.map(() => "?").join(", ")})`,
+  )
+    .bind(orgId, ...projectIds)
+    .all<{ id: string }>()
+  const inOrg = new Set((results ?? []).map((r) => r.id))
+  return projectIds.filter((id) => !inOrg.has(id))
+}
+
+async function listFeedbackRoutes(env: AuthHonoEnv["Bindings"], id?: number) {
+  const { results } = await env.AQUILLA_PG.prepare(
+    `SELECT r.id, r.org_id, r.project_ids, r.emails, r.label, r.enabled, r.created_at,
+            o.name AS org_name
+       FROM feedback_routes r LEFT JOIN organizations o ON o.id = r.org_id
+      ${id === undefined ? "" : "WHERE r.id = ?"}
+      ORDER BY r.id`,
+  )
+    .bind(...(id === undefined ? [] : [id]))
+    .all<{
+      id: number | string
+      org_id: number | string
+      project_ids: string | null
+      emails: string
+      label: string | null
+      enabled: boolean
+      created_at: string | null
+      org_name: string | null
+    }>()
+  const rows = results ?? []
+  const routes = rows.map((row) => ({ ...rowToRoute(row), orgName: row.org_name, createdAt: row.created_at }))
+  const wanted = [...new Set(routes.flatMap((r) => r.projectIds))]
+  const names = new Map<string, string>()
+  if (wanted.length > 0) {
+    const named = await env.AQUILLA_PG.prepare(
+      `SELECT id, name FROM projects WHERE id IN (${wanted.map(() => "?").join(", ")})`,
+    )
+      .bind(...wanted)
+      .all<{ id: string; name: string | null }>()
+    for (const p of named.results ?? []) names.set(p.id, p.name ?? p.id)
+  }
+  return routes.map((r) => ({
+    ...r,
+    projects: r.projectIds.map((pid) => ({ id: pid, name: names.get(pid) ?? pid })),
+  }))
+}
+
+async function auditFeedbackRoute(
+  env: AuthHonoEnv["Bindings"],
+  userId: number,
+  action: string,
+  detail: Record<string, unknown>,
+) {
+  await env.AQUILLA_PG.prepare(`INSERT INTO admin_audit_log (user_id, action, detail) VALUES (?, ?, ?)`)
+    .bind(userId, action, JSON.stringify(detail))
+    .run()
+}
+
+/** GET /api/v2/admin/feedback-routes — every route with its org and project names. */
+admin.get("/feedback-routes", async (c) => {
+  return c.json({ routes: await listFeedbackRoutes(c.env) })
+})
+
+/** POST /api/v2/admin/feedback-routes — add a route. 400 if a project is not in the org. */
+admin.post("/feedback-routes", zValidator("json", feedbackRouteBodySchema), async (c) => {
+  const user = c.get("user")
+  const body = c.req.valid("json")
+  const org = await c.env.AQUILLA_PG.prepare("SELECT id FROM organizations WHERE id = ?")
+    .bind(body.orgId)
+    .first<{ id: number }>()
+  if (!org) return c.json({ error: "org_not_found", message: "That org does not exist." }, 404)
+  const projectIds = [...new Set(body.projectIds)]
+  const stray = await projectsOutsideOrg(c.env, body.orgId, projectIds)
+  if (stray.length > 0) {
+    return c.json(
+      { error: "project_not_in_org", message: `These projects are not in that org: ${stray.join(", ")}`, projectIds: stray },
+      400,
+    )
+  }
+  const row = await c.env.AQUILLA_PG.prepare(
+    `INSERT INTO feedback_routes (org_id, project_ids, emails, label, enabled, created_by)
+     VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+  )
+    .bind(
+      body.orgId,
+      projectIds.length > 0 ? JSON.stringify(projectIds) : null,
+      JSON.stringify(body.emails),
+      body.label || null,
+      body.enabled,
+      user.id,
+    )
+    .first<{ id: number | string }>()
+  const id = Number(row?.id)
+  await auditFeedbackRoute(c.env, user.id, "feedback_route.create", {
+    id,
+    orgId: body.orgId,
+    projectCount: projectIds.length,
+    emailCount: body.emails.length,
+  })
+  const [created] = await listFeedbackRoutes(c.env, id)
+  return c.json({ route: created }, 201)
+})
+
+/** PATCH /api/v2/admin/feedback-routes/:id — change projects, emails, label or enabled. */
+admin.patch("/feedback-routes/:id", zValidator("json", feedbackRoutePatchSchema), async (c) => {
+  const user = c.get("user")
+  const id = parseInt(c.req.param("id"), 10)
+  if (!Number.isSafeInteger(id)) return c.json({ error: "bad_id" }, 400)
+  const patch = c.req.valid("json")
+  const existing = await c.env.AQUILLA_PG.prepare(
+    "SELECT id, org_id, project_ids, emails, label, enabled FROM feedback_routes WHERE id = ?",
+  )
+    .bind(id)
+    .first<Parameters<typeof rowToRoute>[0]>()
+  if (!existing) return c.json({ error: "not_found" }, 404)
+  const current: FeedbackRoute = rowToRoute(existing)
+
+  const projectIds = patch.projectIds ? [...new Set(patch.projectIds)] : current.projectIds
+  if (patch.projectIds) {
+    const stray = await projectsOutsideOrg(c.env, current.orgId, projectIds)
+    if (stray.length > 0) {
+      return c.json(
+        { error: "project_not_in_org", message: `These projects are not in that org: ${stray.join(", ")}`, projectIds: stray },
+        400,
+      )
+    }
+  }
+  await c.env.AQUILLA_PG.prepare(
+    `UPDATE feedback_routes
+        SET project_ids = ?, emails = ?, label = ?, enabled = ?, updated_at = now()
+      WHERE id = ?`,
+  )
+    .bind(
+      projectIds.length > 0 ? JSON.stringify(projectIds) : null,
+      JSON.stringify(patch.emails ?? current.emails),
+      patch.label === undefined ? current.label : patch.label || null,
+      patch.enabled ?? current.enabled,
+      id,
+    )
+    .run()
+  await auditFeedbackRoute(c.env, user.id, "feedback_route.update", {
+    id,
+    orgId: current.orgId,
+    changed: Object.keys(patch),
+  })
+  const [updated] = await listFeedbackRoutes(c.env, id)
+  return c.json({ route: updated })
+})
+
+/** DELETE /api/v2/admin/feedback-routes/:id */
+admin.delete("/feedback-routes/:id", async (c) => {
+  const user = c.get("user")
+  const id = parseInt(c.req.param("id"), 10)
+  if (!Number.isSafeInteger(id)) return c.json({ error: "bad_id" }, 400)
+  const existing = await c.env.AQUILLA_PG.prepare("SELECT org_id FROM feedback_routes WHERE id = ?")
+    .bind(id)
+    .first<{ org_id: number | string }>()
+  if (!existing) return c.json({ error: "not_found" }, 404)
+  await c.env.AQUILLA_PG.prepare("DELETE FROM feedback_routes WHERE id = ?").bind(id).run()
+  await auditFeedbackRoute(c.env, user.id, "feedback_route.delete", { id, orgId: Number(existing.org_id) })
+  return c.json({ ok: true })
 })
 
 export default admin

@@ -7,8 +7,33 @@
 // tool to call. `inputSchema` is JSON Schema (draft 2020-12 subset) so hosts can
 // validate arguments before dispatch.
 
-/** A single MCP tool definition as returned by tools/list. */
-export interface McpToolDef {
+import { PROJECT_SETTINGS_KEYS } from '../../../db/shared/project-settings-keys'
+
+/** MCP tool annotations (spec `ToolAnnotations`). Hosts use them to decide
+ *  when to ask the user before a call: ChatGPT's "ask before changes" setting
+ *  keys off readOnlyHint / destructiveHint, and app review requires them. */
+export interface McpToolAnnotations {
+  title: string
+  /** True when the tool never changes Aquilla state (staging included). */
+  readOnlyHint: boolean
+  /** True when the tool can overwrite or remove committed project content. */
+  destructiveHint: boolean
+  /** True when repeating the same call has no further effect. */
+  idempotentHint: boolean
+  /** Aquilla is a closed system: no tool reaches the open web. */
+  openWorldHint: false
+}
+
+/** Per-tool auth requirement (OpenAI Apps SDK `securitySchemes`). Every
+ *  Aquilla tool needs a signed-in user; OAuth scopes are the ask/act modes,
+ *  which the human picks on the consent page, so none is demanded per tool. */
+export interface McpSecurityScheme {
+  type: 'oauth2'
+  scopes: string[]
+}
+
+/** A tool as authored below, before annotations are attached. */
+interface McpToolSpec {
   name: string
   description: string
   inputSchema: {
@@ -19,11 +44,18 @@ export interface McpToolDef {
   }
 }
 
+/** A single MCP tool definition as returned by tools/list. */
+export interface McpToolDef extends McpToolSpec {
+  annotations: McpToolAnnotations
+  securitySchemes: McpSecurityScheme[]
+  _meta: { securitySchemes: McpSecurityScheme[] }
+}
+
 const projectIdProp = {
   projectId: { type: 'string', description: 'Aquilla project id (TEXT primary key).' },
 }
 
-export const MCP_TOOLS: McpToolDef[] = [
+const TOOL_SPECS: McpToolSpec[] = [
   {
     name: 'get_capabilities',
     description:
@@ -94,7 +126,8 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'Fetch a single project by id after checking the credential scope and that the owner ' +
       'has at least VIEWER role on it. Returns { id, name, org_id, archived, role, settings, ' +
-      'settingsVersion, settingsUpdatedAt } or a not_found / scope_denied / permission_denied ' +
+      'settingsVersion, settingsUpdatedAt, lanes } — lanes are { id, name, language, role } ' +
+      'for the lanes this caller may use — or a not_found / scope_denied / permission_denied ' +
       'tool error. `settingsVersion` is the live project-settings version — read it here ' +
       'before staging a PatchSettings/UpdateProjectSettings command, whose ifMatchVersion ' +
       'must equal it or prepare returns plan_stale. (REST: GET .../projects/:projectId.)',
@@ -109,7 +142,19 @@ export const MCP_TOOLS: McpToolDef[] = [
     name: 'get_project_settings',
     description:
       'Read a project\'s settings blob and its LIVE settings version (AQU-1176). Returns ' +
-      '{ projectId, settings, version, updatedAt }. Call this BEFORE patch_settings: ' +
+      '{ projectId, settings, builtinChecks, builtinChecksByLane, version, updatedAt, ' +
+      'translationInstructions, translationInstructionsStored }. `settings` is the raw stored ' +
+      'blob and holds only OVERRIDES. `builtinChecks` is READ-ONLY — every check in force as ' +
+      '[{ id, name, enabled, severity, overridden }], defaults with the project\'s ' +
+      '`algorithmicChecks` laid over them (`builtinChecksByLane` does the same per lane). ' +
+      'Turn a check on or off by patching `algorithmicChecks` (per lane: ' +
+      '`algorithmicChecksByLane`) — patching `builtinChecks` is refused, it is not a settings ' +
+      'key (AQU-2402). `translationInstructions` is the RESOLVED project ' +
+      'instructions — the exact text every drafting prompt carries (copilot, in-app agent ' +
+      'and its draft tool, DraftCells, Autopilot); `translationInstructionsStored: false` ' +
+      'means it is composed on read from the brief, a customized systemPrompt, Living Memory ' +
+      'instruction entries and the legacy agent brief until someone writes the key. ' +
+      'Call this BEFORE patch_settings: ' +
       '`version` is the value you pass as that tool\'s ifMatchVersion, and `settings` shows ' +
       'you the keys that already exist so you replace the right one. A project with no ' +
       'settings row yet reads as {} at version 0 (patch against 0 to create it). Needs ' +
@@ -133,10 +178,13 @@ export const MCP_TOOLS: McpToolDef[] = [
       'ifMatchVersion (the version from get_project_settings — stale values return ' +
       'plan_stale at prepare AND again at commit), changesetId (optional UUIDv7 for ' +
       'idempotency). JSON cannot express undefined, so a key cannot be deleted — write null. ' +
-      'Floors: `terminology` needs the org termbase-edit floor (default PROJECT_LEAD 500); ' +
-      'every other key needs MAINTAINER 600. The policy keys that govern agent oversight ' +
+      'Floors: every key needs MAINTAINER 600 (the language keys use the org language-edit ' +
+      'floor, default 600). `terminology` is retired (AQU-1724) and rejected — write key ' +
+      'terms with term.create / term.update events in an EmitEvents changeset. The policy ' +
+      'keys that govern agent oversight ' +
       'itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
-      'validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, ' +
+      'validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, ' +
+      'validationNamedUsersAudio, allowSelfValidationAudio, harmonize_min_role, ' +
       'contributeToGlobalTm, cellEditingFloor, agentAuthorship) are writable in the ' +
       'RESTRICTIVE direction ONLY (AQU-1282): an op that TIGHTENS oversight stages like any ' +
       'other write (still ask-mode, still human-approved), and one that would LOOSEN it ' +
@@ -156,7 +204,26 @@ export const MCP_TOOLS: McpToolDef[] = [
           items: {
             type: 'object',
             properties: {
-              key: { type: 'string', description: 'Top-level settings key, e.g. "targetLanes".' },
+              key: {
+                type: 'string',
+                // AQU-2402: the writable keys are NAMED here, generated from the
+                // registry so they cannot drift. This schema is the only place an
+                // agent on the OAuth connector can learn them: that surface
+                // rewrites this tool's description and drops describe_command
+                // altogether (external/mcp-chatgpt-tools.ts), so a key name had to
+                // be guessed one validation_failed at a time.
+                enum: [...PROJECT_SETTINGS_KEYS],
+                description:
+                  'Top-level settings key, e.g. "translationInstructions" (the one text every ' +
+                  'drafting prompt reads). The writable keys are: ' + PROJECT_SETTINGS_KEYS.join(', ') + '. ' +
+                  'Built-in checks are written as "algorithmicChecks" — ' +
+                  '{ "<checkId>": { "enabled": boolean, "severity"?: "major" | "minor" } } — which is NOT the ' +
+                  '`builtinChecks` shape get_project_settings reads them back as; per-lane overrides are ' +
+                  '"algorithmicChecksByLane". sourceLanguage, targetLanguage, targetLanes, and archivedLanes ' +
+                  'are not settings, and "terminology" is retired (AQU-1724) — write key terms with ' +
+                  'term.create / term.update events in an EmitEvents changeset. An unknown key is refused at ' +
+                  'prepare with the full key list and, where one is obvious, the key you meant.',
+              },
               value: { description: 'Any JSON value; replaces that key wholesale.' },
             },
             required: ['key', 'value'],
@@ -169,6 +236,92 @@ export const MCP_TOOLS: McpToolDef[] = [
         changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
       },
       required: ['projectId', 'ops', 'ifMatchVersion'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'prepare_set_brief',
+    description:
+      'Stage a SECTION-SCOPED write of the project translation brief as a changeset ' +
+      '(AQU-2407 — the MCP door onto the SetBrief command). Use this instead of ' +
+      'patch_settings { key: "translationBrief" }: that replaces the whole brief record ' +
+      'wholesale, so you must hand-write l2Markdown, l1Summary, version and updatedBy and ' +
+      'nothing checks they agree with the answers. Here you send ANSWERS ONLY — the server ' +
+      'merges them into the live brief (unnamed sections keep their value), reassembles ' +
+      'l2Markdown from the code-owned section order, stamps version / updatedAt / updatedBy ' +
+      'from this credential, and re-renders the L1 summary on commit so the brief reaches ' +
+      'the copilot. Args: projectId (required), parameters (partial map of section id → ' +
+      'answer text; call describe_command({ kind: "SetBrief" }) for the section ids — an ' +
+      'unknown id is validation_failed and stages nothing), freeformNotes (replaces the ' +
+      'notes block), ifMatchVersion (optional settings version from get_project_settings; ' +
+      'omitted, the live version is read and pinned for you), changesetId (optional ' +
+      'UUIDv7 for idempotency). At least one of parameters / freeformNotes is required. ' +
+      'Floor MAINTAINER; SetBrief must be the SOLE command in its changeset. Returns ' +
+      '{ changesetId, summary, digest, mode, approvalUrl? } exactly like prepare_translations ' +
+      '— nothing is applied until confirm_changeset (ask mode: a human approves first). The ' +
+      "commit receipt's briefSummary says whether the L1 summary rendered; if it did not, " +
+      'the sections are still committed — call regenerate_brief_summary.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        parameters: {
+          type: 'object',
+          description:
+            'Brief section id → answer text. Partial: only the named sections are written. ' +
+            'Section ids come from describe_command({ kind: "SetBrief" }); each answer caps ' +
+            'at 4000 characters.',
+          additionalProperties: { type: 'string' },
+        },
+        freeformNotes: {
+          type: 'string',
+          description: 'Replaces the brief\'s freeform notes block (≤ 8000 characters).',
+        },
+        ifMatchVersion: {
+          type: 'number',
+          description:
+            'Optional live SETTINGS version from get_project_settings (not the brief\'s own ' +
+            'version). Omit it and the server reads and pins the live version; pass it to ' +
+            'assert nothing changed since you read the brief (plan_stale on drift).',
+        },
+        changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'regenerate_brief_summary',
+    description:
+      "Stage a re-render of the translation brief's L1 summary from its CURRENT sections " +
+      '(AQU-2407 — the MCP door onto the RegenerateBriefSummary command). This is the ' +
+      'in-app "Regenerate summary" button: the server renders the summary with its own ' +
+      'prompt and 1600-char cap and writes l1Summary / l1GeneratedAt / l1ModelId back. Call ' +
+      'it when a brief was edited without a render, or when a prepare_set_brief receipt ' +
+      'reported briefSummary.rendered: false. While a project has not written ' +
+      'translationInstructions, this summary is what the brief contributes to every drafting ' +
+      'prompt (see parts.instructions in get_prompt_preview); once instructions are written ' +
+      'the summary reaches no prompt and this is a no-op for the AI. Args: projectId ' +
+      '(required), ifMatchVersion (optional settings version from get_project_settings; ' +
+      'omitted, the live version is read and pinned for you), changesetId (optional UUIDv7). ' +
+      'Floor MAINTAINER; sole command in its changeset. A brief with no filled section and no ' +
+      'notes is validation_failed ("nothing to summarize") — write it with prepare_set_brief ' +
+      'first. The model call runs at commit BEFORE the approval is consumed, so a failed ' +
+      'render answers job_failed / rate_limited and leaves the changeset committable for a ' +
+      'retry.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        ifMatchVersion: {
+          type: 'number',
+          description:
+            'Optional live SETTINGS version from get_project_settings. Omit it and the ' +
+            'server reads and pins the live version.',
+        },
+        changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
+      },
+      required: ['projectId'],
       additionalProperties: false,
     },
   },
@@ -265,6 +418,71 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
   },
   {
+    name: 'transcribe_audio',
+    description:
+      'Speech to text with word timings for supported languages, including low-resource languages. ' +
+      'Transcribes a cell\'s selected recorded take (fileId + cellId + laneId) or raw ' +
+      'audio { data: <base64>, format: "wav" } (16 kHz mono PCM16; long audio is cut into windows ' +
+      'for you). model: "auto" (default — Whisper for its 99 languages, Qwen3-ASR for Chinese ' +
+      'varieties, Omnilingual CTC for 1,600+ others), or force "whisper" | "qwen3-asr" | "omni-ctc" | ' +
+      '"omni-zs". "omni-zs" (Omnilingual zero-shot) learns the language from up to 10 of this lane\'s ' +
+      'own recorded + transcribed cells (picked automatically by source-text overlap, or name them ' +
+      'in exampleCellIds) — use it for a language no model has seen. It cold-starts: call ' +
+      'transcription_status { model: "omni-zs", warm: true } first and poll until state is "ready"; ' +
+      'a cold call fails with reason "asr_warming". language (BCP-47) defaults to the lane\'s. ' +
+      'Returns { text, words: [{ text, start, end }] (seconds), model, timingsApproximate, ' +
+      'creditsCharged }. SPENDS WORKSPACE CREDITS (metered GPU time for Omnilingual) and needs a ' +
+      'read-write project credential or an authorized organization-scoped MCP OAuth grant. WRITES NOTHING: to store the transcript, stage it with ' +
+      'prepare_translations (SetTranslation for a target take, SetTranscription for a source media ' +
+      'cell) so it goes through the normal approval gate. A stored webm take can ' +
+      'only go to omni-ctc / omni-zs, and must be at most 30 s (60 s for Whisper/Qwen WAV).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        laneId: { type: 'string', description: 'Target lane id (from get_project). Required with cellId, and for omni-zs.' },
+        fileId: { type: 'string', description: 'File of the cell whose selected take to transcribe.' },
+        cellId: { type: 'string', description: 'Cell whose selected recorded take to transcribe.' },
+        audio: {
+          type: 'object',
+          description: 'Raw audio instead of a cell: { data: base64, format: "wav" } — 16 kHz mono PCM16, up to 10 min.',
+          properties: { data: { type: 'string' }, format: { type: 'string', enum: ['wav'] } },
+          required: ['data', 'format'],
+          additionalProperties: false,
+        },
+        model: { type: 'string', enum: ['auto', 'whisper', 'qwen3-asr', 'omni-ctc', 'omni-zs'], description: 'Default "auto".' },
+        language: { type: 'string', description: 'BCP-47 tag, e.g. "luo" or "tpi-Latn". Defaults to the lane\'s language.' },
+        exampleCellIds: {
+          type: 'array', items: { type: 'string' },
+          description: 'omni-zs only: up to 10 cells in this lane whose recordings + text to learn from (2–30 s each). Omit to pick automatically.',
+        },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'transcription_status',
+    description:
+      'Is an Omnilingual model ready? The zero-shot model ("omni-zs") takes about 2 minutes to start ' +
+      'when cold. Pass warm: true to start it; warm-up uses workspace AI capacity. ' +
+      'Poll with warm: false every ~5 s until state is "ready" ' +
+      'before calling transcribe_audio with model "omni-zs". Returns { state: "cold"|"starting"|"ready", ' +
+      'estGpuSecPerAudioSec } — the second is the measured GPU-seconds per audio-second, for ' +
+      'estimating a batch\'s cost. Whisper and Qwen3-ASR need no warm-up. Refused when the ' +
+      'organization has turned zero-shot off.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        model: { type: 'string', enum: ['omni-zs', 'omni-ctc'], description: 'Default "omni-zs".' },
+        warm: { type: 'boolean', description: 'Start the model if it is cold. Default false.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'search_projects',
     description:
       'Full-text search SEVERAL projects in one call — the cross-project form of ' +
@@ -299,12 +517,13 @@ export const MCP_TOOLS: McpToolDef[] = [
       'Read project content. Omit fileId to LIST the project\'s files; provide fileId to ' +
       'READ that file\'s cells (source + target). Supports incremental reads: pass since ' +
       '(a server sequence) to fetch only changed cells, and limit/cursor for pagination. ' +
-      'Multi-language projects: a cell can carry one target per LANE (a language tag ' +
-      'registered in the project\'s settings.targetLanes, e.g. "es", "pt" — see ' +
-      'get_capabilities.multiLanguage). Pass lane to filter target cells to one lane ' +
-      '(source cells are always included); omit it to get every lane — each target row ' +
-      'carries its targetLang. Returns { data, nextCursor, ... }. Use this together with ' +
-      'search_project to gather context before staging translations.',
+      'Multi-language projects: a cell can carry one target per lane. Pass lane, a lane id ' +
+      'from get_project\'s lanes array (not a language tag). It is required. Each target ' +
+      'row carries its laneId. Every cell row carries `hidden` (AQU-1426): `true` means a ' +
+      'Project Lead PARKED that cell — it is out of the editor and out of every export, it ' +
+      'is not work, and you should not draft or report it. Bring one back with the ShowCell ' +
+      'command, or park one with HideCell. Returns { data, nextCursor, ... }. Use this ' +
+      'together with search_project to gather context before staging translations.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -316,7 +535,7 @@ export const MCP_TOOLS: McpToolDef[] = [
         lane: {
           type: 'string',
           description:
-            'Target-language lane filter (e.g. "es"). Only target cells in this lane are returned; omit for all lanes.',
+            'Required lane id (lanes.id from get_project). A language tag is not accepted.',
         },
       },
       required: ['projectId'],
@@ -379,14 +598,17 @@ export const MCP_TOOLS: McpToolDef[] = [
     name: 'get_prompt_preview',
     description:
       'See the prompt the project copilot would ACTUALLY send when drafting one cell — base ' +
-      'instructions after language substitution, the translation brief, the compiled rules ' +
-      'block (project/org rules plus terminology), the retrieved few-shot examples, and the ' +
+      'role text after language substitution, the project instructions, the Checks hint ' +
+      '(project/lane/org rules, style rules, Language-profile slots), the terminology block, ' +
+      'the retrieved few-shot examples, and the ' +
       'preceding approved-target discourse window — as both the assembled system+user ' +
-      'messages and the same content labeled by origin. Args: projectId, cellId, optional ' +
-      'targetLang (target-language lane tag; "" = default lane) and fileId (only needed when ' +
+      'messages and the same content labeled by origin (parts.brief / parts.rules / ' +
+      'parts.styleRules are deprecated aliases kept for one release — read parts.instructions, ' +
+      'parts.checks and parts.terminology). Args: projectId, cellId, optional ' +
+      'targetLang (required lane id from get_project, not a language tag) and fileId (only needed when ' +
       'the same cellId exists in more than one file). This is the verification half of prompt ' +
-      'tuning: after PatchSettings changes systemPrompt / completionSettings / ' +
-      'translationBrief / rules, or after a terminology entry lands, call this on a ' +
+      'tuning: after PatchSettings changes translationInstructions / draftingSettings / ' +
+      'rules, or after a terminology entry lands, call this on a ' +
       'representative cell to confirm the change actually reached the model instead of ' +
       'inferring it from a draft. Read-only — it drafts nothing and spends no credits. ' +
       'Returns not_found if the cell has no source row in this project, and ' +
@@ -400,26 +622,27 @@ export const MCP_TOOLS: McpToolDef[] = [
         cellId: { type: 'string', description: 'Cell id to preview the prompt for.' },
         targetLang: {
           type: 'string',
-          description: 'Target-language lane tag. Omit or "" for the project default lane.',
+          description: 'Required lane id (lanes.id from get_project). A language tag is not accepted.',
         },
         fileId: {
           type: 'string',
           description: 'Disambiguates a cellId present in more than one file.',
         },
       },
-      required: ['projectId', 'cellId'],
+      required: ['projectId', 'cellId', 'targetLang'],
       additionalProperties: false,
     },
   },
   {
     name: 'list_memory',
     description:
-      'Read a project’s Living Memory: the human-authored project brief plus every memory ' +
-      'entry the copilot learns from — examples (source→target pairs), decisions (standing ' +
+      'Read a project’s Living Memory: the resolved project instructions (`instructions`, ' +
+      'what every drafting prompt carries), the brief interview record, plus every memory ' +
+      'entry the in-app agent learns from — examples (source→target pairs), decisions (standing ' +
       'rendering rules), notes (per-cell rationale), and observations. Same rows a human ' +
       'sees on the project’s Memory page, newest first. Each entry carries its path, kind, ' +
       'status (proposed|approved|rejected|archived), full content, humanEdited, and ' +
-      '`inRetrieval` — whether the copilot is ACTUALLY being given it (only approved entries ' +
+      '`inRetrieval` — whether the in-app agent is ACTUALLY being given it (only approved entries ' +
       'within the index render cap are). Call this BEFORE proposing a memory entry: it shows ' +
       'whether one already exists at that path, whether a human approved it, and whether a ' +
       'human has edited it (human-edited entries are human-owned — raise a question instead ' +
@@ -448,14 +671,43 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
   },
   {
+    name: 'list_style_rules',
+    description:
+      'Read a project’s style rules: the natural-language rules in the Rules page’s Style rules ' +
+      'section, including the ones “Extract from knowledge base” proposed. Newest first, org-shared ' +
+      'rules included. Each row has id, instruction, category, scope, severity, enabled, status ' +
+      '(proposed|approved|rejected|archived), version, source (with sourceDocTitle when it cites a ' +
+      'knowledge document) and `inherited` (true = the org owns it; it cannot be reviewed through ' +
+      'this project). Only approved, enabled rules reach the copilot. To approve, reject or edit, ' +
+      'stage a ReviewStyleRules changeset (describe_command) and send each row’s version as ' +
+      'ifMatchVersion. Args: projectId, optional status, limit (1-500, default 100), cursor. ' +
+      'Errors: permission_denied, scope_denied, validation_failed (unknown status), rate_limited.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        status: {
+          type: 'string',
+          enum: ['proposed', 'approved', 'rejected', 'archived'],
+          description: 'Only rules in this state. Omit for all states (what the in-app list shows).',
+        },
+        limit: { type: 'number', description: 'Rules per page (1-500, default 100).' },
+        cursor: { type: 'string', description: 'Opaque cursor from a previous nextCursor.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'read_cell_memory',
     description:
-      'Show what the copilot’s memory retrieval would inject for ONE cell’s draft: the ' +
-      'project brief plus the approved-memory index it is given (path + first line per ' +
-      'entry, which is all the prompt carries — full text is fetched just-in-time). Use it ' +
-      'to predict what the copilot is working from before asking it to draft, or to explain ' +
+      'Show what the in-app agent’s memory retrieval would inject for ONE cell: the ' +
+      'project instructions plus the approved-memory index it is given (path + first line per ' +
+      'entry, which is all the prompt carries — full text is fetched just-in-time). The ' +
+      'drafting prompts carry the instructions but not this index. Use it ' +
+      'to predict what the agent is working from, or to explain ' +
       'a draft after the fact. NOTE the `retrieval.scope` field: retrieval is currently ' +
-      'PROJECT-scoped, i.e. the same brief and index for every cell in the project, with no ' +
+      'PROJECT-scoped, i.e. the same instructions and index for every cell in the project, with no ' +
       'per-cell ranking or filtering — do not assume this returned set was narrowed to your ' +
       'cell. `retrieval.truncated` tells you approved entries exist that are NOT being ' +
       'injected. Args: projectId, fileId, cellId. Errors: not_found (no such cell), ' +
@@ -482,7 +734,7 @@ export const MCP_TOOLS: McpToolDef[] = [
       'health or coverage yourself from read_content: your denominators will not match ' +
       'theirs. Args: projectId; optional fileId to scope to one file, lane for one ' +
       'target-language lane, limit/offset to page the per-file list. Returns ' +
-      '{ projectHealth, coverage, data: [{ fileId, name, health, coverage, ... }], ' +
+      '{ laneId, projectHealth, coverage, data: [{ fileId, name, health, coverage, ... }], ' +
       'nextCursor }. health is null for a file with no translated cells (not started, ' +
       'not unhealthy). Errors: scope_denied (403) if your credential is scoped to a ' +
       'different project, not_found (404) for an unknown fileId, rate_limited (429).',
@@ -491,7 +743,7 @@ export const MCP_TOOLS: McpToolDef[] = [
       properties: {
         ...projectIdProp,
         fileId: { type: 'string', description: 'Scope to one file; omit for the whole project (up to 200 files).' },
-        lane: { type: 'string', description: 'Target-language lane (e.g. "es"). Omit for the default lane.' },
+        lane: { type: 'string', description: 'Required lane id (lanes.id from get_project). A language tag is not accepted.' },
         limit: { type: 'number', description: 'Per-file page size.' },
         offset: { type: 'number', description: 'Per-file page offset.' },
       },
@@ -518,11 +770,98 @@ export const MCP_TOOLS: McpToolDef[] = [
       properties: {
         ...projectIdProp,
         fileId: { type: 'string', description: 'Scope the scan to one file; omit for the whole project.' },
-        lane: { type: 'string', description: 'Target-language lane (e.g. "es"). Omit for the default lane.' },
+        lane: { type: 'string', description: 'Required lane id (lanes.id from get_project). A language tag is not accepted.' },
         onlyDrift: { type: 'boolean', description: 'Return only concepts that have flagged cells.' },
         limit: { type: 'number', description: 'Findings page size.' },
         offset: { type: 'number', description: 'Findings page offset.' },
       },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_terms',
+    description:
+      'Read the project TERMBASE — the glossary concepts the copilot is told to honour and ' +
+      'the QA pass checks against. One entry per concept: conceptId, sourceTerm, renderings ' +
+      '(each preferred|admitted|forbidden), status (active = enforced now, draft = suggested ' +
+      'and awaiting review, deprecated = retired), notes, caseSensitive, matchOptions, and ' +
+      'created/updated timestamps. Same rows, same order (oldest first) as the in-app ' +
+      'Terminology page. Args: projectId; optional status to filter, includeDeleted to see ' +
+      'tombstoned entries (audit only), limit/cursor to page.\n\n' +
+      'READ THIS BEFORE STAGING A TERM. Two things it tells you that you cannot guess:\n' +
+      '1. Whether the concept already exists — staging a second concept for the same ' +
+      'sourceTerm does not merge, it gives the project two competing entries. To change an ' +
+      'existing one, send term.update with its conceptId.\n' +
+      '2. `matchOptions` — how the term MATCHES, which decides whether it fires at all. ' +
+      '`forms` are extra literal source forms treated as alternates of sourceTerm; ' +
+      '`excludedForms` are surfaces a human rejected; `affixes` allows the project\'s ' +
+      'configured prefixes/suffixes; `foldMarks` ignores combining marks. Matching is ' +
+      'otherwise EXACT, so in an inflected language a concept with no forms matches only the ' +
+      'lemma: "Боже Слово" with empty matchOptions flags none of its inflected forms. An ' +
+      'entry reporting `matchOptions: {}` is configured for exactly one surface form — if ' +
+      'read_term_consistency shows drift on it, missing `forms` is the first thing to check, ' +
+      'and the fix is a term.update carrying match.forms, not a new concept.\n\n' +
+      'Write terms with an EmitEvents changeset (REST POST .../projects/:projectId/changesets) ' +
+      'carrying term.create / term.update / term.approve / term.reject / term.delete — ' +
+      'describe_command({ kind: "EmitEvents" }) has the payloads. Every write goes through ' +
+      'the normal approval gate. Errors: scope_denied (403), not_found (404), ' +
+      'rate_limited (429).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        status: {
+          type: 'string',
+          enum: ['active', 'draft', 'deprecated'],
+          description: 'Only entries with this status; omit for all live entries.',
+        },
+        includeDeleted: {
+          type: 'boolean',
+          description: 'Include tombstoned entries (they carry deletedAt). Audit views only.',
+        },
+        limit: { type: 'number', description: 'Page size (default 50).' },
+        cursor: { type: 'string', description: "Opaque cursor from a previous page's nextCursor." },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_members',
+    description:
+      'Read the project MEMBERSHIP ROSTER — who has access, at what effective role, by which ' +
+      'grant path. One entry per person: userId, username, role (the canonical level: 100 ' +
+      'viewer · 200 commenter · 300 reviewer · 400 contributor · 500 project_lead · ' +
+      '600 maintainer · 700 owner), roleName, roleSource and direct. Highest role first. ' +
+      'Requires project MAINTAINER (600) — the same floor as changing membership; below it ' +
+      'you get permission_denied, not an empty list.\n\n' +
+      'READ THIS BEFORE STAGING A MEMBERSHIP CHANGE. Two fields decide which command is ' +
+      'legal, and neither can be guessed:\n' +
+      '1. `direct` — true when the person holds a `project_members` row. SetRole and ' +
+      'RemoveMember act ONLY on that row and are rejected with conflict ' +
+      '`not_a_direct_member` without one; somebody whose access comes from the org, a team ' +
+      'or being the project creator (direct: false) is given a row with InviteMember ' +
+      'instead. Conversely InviteMember on a direct member is rejected with conflict ' +
+      '`already_member` — re-role them with SetRole.\n' +
+      '2. `role` — the EFFECTIVE (max-wins) level the target cap is judged against: unless ' +
+      'you are OWNER (700) you cannot touch anyone whose role is >= your own, and never ' +
+      'yourself. Check here rather than discovering it as permission_denied on a staged plan.\n\n' +
+      'roleSource names the winning path: `override` (a direct row), `group` (a team grant), ' +
+      '`org` (an organization role), `creator` (they created the project). RemoveMember drops ' +
+      'the direct row only — org / team / creator paths are additive (AD-12) and still confer ' +
+      'access afterwards, so a removal can legitimately leave the person on this list at a ' +
+      'lower role.\n\n' +
+      'The response is { data, total, truncated, nextCursor: null }. This read does not page: ' +
+      'at most 500 rows come back, highest role first, and `truncated: true` with a larger ' +
+      '`total` means the project is reached by more people than that (an org whose every ' +
+      'member holds its projects through the org path) — the rows you get are the top of the ' +
+      'ladder, so the people a membership command could be aimed at are never the ones cut. ' +
+      'Errors: permission_denied (403), scope_denied (403), not_found (404), ' +
+      'rate_limited (429). This tool performs no membership writes.',
+    inputSchema: {
+      type: 'object',
+      properties: { ...projectIdProp },
       required: ['projectId'],
       additionalProperties: false,
     },
@@ -576,17 +915,24 @@ export const MCP_TOOLS: McpToolDef[] = [
       'MAINTAINER. `ifMatchVersion` must equal the live settings version or you get ' +
       'plan_stale (re-fetch the current version and re-prepare); the receipt carries the new ' +
       'version.\n' +
-      '  { kind: "LinkMedia", fileId, cellId, artifactId } — event-native (compiles to ' +
-      'cell.audio.attach + cell.audio.select). `artifactId` must reference an audio-kind ' +
-      'artifact already uploaded to this project via REST ' +
-      '`POST .../projects/:projectId/artifacts` with header `x-artifact-kind: audio` — MCP ' +
-      'is JSON-RPC text and cannot carry that binary upload itself. Multiple LinkMedia ' +
-      'commands may share one changeset with each other, but LinkMedia cannot mix with ' +
-      'SetTranslation/CreateProject/UpdateProjectSettings in the same changeset. Requires ' +
-      'CONTRIBUTOR.\n' +
+      '  { kind: "LinkMedia", fileId, cellId, artifactId, laneId, slot?, durationMs? } — ' +
+      'event-native (compiles to cell.audio.attach + cell.audio.select in the named lane). ' +
+      '`laneId` is REQUIRED and is a target lane\'s id from get_project — a take with no ' +
+      'lane is filed under the legacy default lane and never shows in a tagged lane\'s ' +
+      'Takes. `slot` is "recording" (default: a recorded take) or "generatedVoice" ' +
+      '(externally synthesized voice, reviewed and exported like in-app TTS); `durationMs` ' +
+      'is the clip length when you know it (the upload does no decoding). `artifactId` must ' +
+      'reference an audio-kind artifact uploaded to this project with upload_artifact ' +
+      '(or a separately authorized REST upload). The receipt\'s `media[]` ' +
+      'carries the native take audioId the app now plays (not the artifact\'s). Multiple ' +
+      'LinkMedia commands may share one changeset with each other, but LinkMedia cannot mix ' +
+      'with SetTranslation/CreateProject/UpdateProjectSettings in the same changeset. ' +
+      'Requires CONTRIBUTOR.\n' +
       '  { kind: "DraftCells", fileId, cellIds, laneId?, instructions? } — ask the PROJECT\'S ' +
       'OWN copilot to draft those cells instead of writing the text yourself, so the result ' +
-      'carries this project\'s terminology, example pairs and brief. Must be the SOLE command ' +
+      'carries this project\'s example pairs, preceding validated context and project ' +
+      'instructions (key terms are not in the drafting prompt — name term choices in ' +
+      '`instructions`, which reach it as "Directions for this run"). Must be the SOLE command ' +
       'in the changeset. `cellIds` is explicit and non-empty — wildcards are rejected; the ' +
       'per-changeset cap is the project\'s configured completion batch size (default 10, max ' +
       '50) and an over-cap request names the cap so you can split the work. Drafting spends ' +
@@ -609,7 +955,30 @@ export const MCP_TOOLS: McpToolDef[] = [
       'All three are STRUCTURAL: each must be the SOLE command in its changeset, each ' +
       'requires PROJECT_LEAD, and all three are refused on a file imported with preserved ' +
       'export slots (IDML/OOXML locators) because a structural change would break its ' +
-      'round-trip export. Call describe_command for the full rules.',
+      'round-trip export. Call describe_command for the full rules.\n' +
+      '  { kind: "HideCell", fileId, cellId } / { kind: "ShowCell", fileId, cellId } — PARK a ' +
+      'cell, reversibly, or bring it back. Hiding takes the row out of the editor for ' +
+      'everyone, in every language lane, and out of every export, but DELETES NOTHING: the ' +
+      'source text, every lane\'s translation, recordings, comments and validations survive ' +
+      'and return untouched on ShowCell. Prefer this over DeleteCell for a stray heading, an ' +
+      'import artefact, or a paragraph the client does not want translated — DeleteCell is ' +
+      'the destructive one. Both require PROJECT_LEAD. Several may share one changeset, but ' +
+      'they cannot mix with other kinds and hides cannot mix with shows (stage two plans). ' +
+      'Refused at prepare when the cell does not exist or is already in the state you asked ' +
+      'for. Cell reads carry `hidden` so you can see what is already parked and skip it.\n' +
+      '  { kind: "InviteMember", projectId, username, role } / ' +
+      '{ kind: "SetRole", projectId, username, role } / ' +
+      '{ kind: "RemoveMember", projectId, username } — MEMBERSHIP (AQU-2403). Call ' +
+      'list_members first: its `direct` field picks InviteMember (no row yet) over SetRole ' +
+      '(row exists), and its `role` is the effective level the caps are judged against. ' +
+      'Requires project MAINTAINER (600), and prepare ALWAYS stages these ask-mode whatever ' +
+      'the credential\'s mode — membership is governance, so every change passes a human at ' +
+      'the approvalUrl. You cannot grant a role above your own (permission_denied ' +
+      '`role_above_caller`), act on yourself (`self_target`), or touch anyone whose effective ' +
+      'role is >= yours unless you are OWNER (`target_outranks_caller`). Membership commands ' +
+      'batch with each other — at most 25, one per person — but never with other kinds, and ' +
+      'each command\'s projectId must equal the changeset\'s. RemoveMember drops the direct ' +
+      'row only; org / team / creator paths are additive (AD-12) and keep conferring access.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -618,11 +987,9 @@ export const MCP_TOOLS: McpToolDef[] = [
         translations: {
           type: 'array',
           description:
-            'SetTranslation entries to stage. Each may name a target-language lane via ' +
-            'laneId to write one of a multi-language project\'s targets (e.g. "es", "pt"); ' +
-            'omit laneId for the default lane. The lane must already be registered in the ' +
-            'project\'s settings.targetLanes (via UpdateProjectSettings) or prepare returns ' +
-            'validation_failed — see get_capabilities.multiLanguage for the full workflow.',
+            'SetTranslation entries to stage. laneId is required and is a lane id from ' +
+            'get_project (lanes[].id), not a language tag. Omitting it, or passing a tag, ' +
+            'is validation_failed. See get_capabilities.multiLanguage.',
           items: {
             type: 'object',
             properties: {
@@ -633,10 +1000,10 @@ export const MCP_TOOLS: McpToolDef[] = [
               laneId: {
                 type: 'string',
                 description:
-                  'Target-language lane (a registered settings.targetLanes tag, e.g. "es"). Omit for the default lane.',
+                  'Required lane id (lanes.id from get_project). A language tag is not accepted.',
               },
             },
-            required: ['cellId', 'fileId', 'value'],
+            required: ['cellId', 'fileId', 'value', 'laneId'],
             additionalProperties: false,
           },
         },
@@ -644,7 +1011,9 @@ export const MCP_TOOLS: McpToolDef[] = [
           type: 'array',
           description:
             'CreateOrg / CreateProject / UpdateProjectSettings / LinkMedia / DraftCells / ' +
-            'InsertCell / DeleteCell / SplitCell commands to stage (Agent API v1.1) — see this ' +
+            'InsertCell / DeleteCell / SplitCell / HideCell / ShowCell / InviteMember / ' +
+            'SetRole / RemoveMember commands to stage ' +
+            '(Agent API v1.1) — see this ' +
             'tool\'s description for per-kind shape, role gates, and sole-command rules. ' +
             'PlanImport is not accepted here (REST-only).',
           items: {
@@ -683,6 +1052,21 @@ export const MCP_TOOLS: McpToolDef[] = [
                     type: ['string', 'number'],
                     description: 'Target org id; omit for a personal (org-less) project.',
                   },
+                  lanes: {
+                    type: 'array',
+                    description: 'Language lanes to create with the project. Omit for an unnamed source lane.',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        role: { type: 'string', enum: ['source', 'target'] },
+                        language: { type: 'string', description: 'Language as entered by the user.' },
+                        name: { type: ['string', 'null'], description: 'Optional display-name override.' },
+                        code: { type: ['string', 'null'], description: 'Optional language-code override.' },
+                      },
+                      required: ['role', 'language'],
+                      additionalProperties: false,
+                    },
+                  },
                 },
                 required: ['kind', 'name'],
                 additionalProperties: false,
@@ -709,10 +1093,29 @@ export const MCP_TOOLS: McpToolDef[] = [
                   cellId: { type: 'string' },
                   artifactId: {
                     type: 'string',
-                    description: 'An audio-kind artifact id from the REST artifact upload endpoint.',
+                    description: 'An audio-kind artifact id returned by upload_artifact or a separately authorized REST upload.',
+                  },
+                  laneId: {
+                    type: 'string',
+                    description:
+                      'Required lane id (lanes.id from get_project) of the target lane the take ' +
+                      'belongs to. A language tag is not accepted.',
+                  },
+                  slot: {
+                    type: 'string',
+                    enum: ['recording', 'generatedVoice'],
+                    description:
+                      'Which take slot the clip lands in: "recording" (default) for a recorded ' +
+                      'take, "generatedVoice" for externally synthesized voice, reviewed and ' +
+                      'exported like in-app TTS.',
+                  },
+                  durationMs: {
+                    type: 'integer',
+                    minimum: 1,
+                    description: "The clip's length in milliseconds, when known — the upload does no decoding.",
                   },
                 },
-                required: ['kind', 'fileId', 'cellId', 'artifactId'],
+                required: ['kind', 'fileId', 'cellId', 'artifactId', 'laneId'],
                 additionalProperties: false,
               },
               {
@@ -731,14 +1134,14 @@ export const MCP_TOOLS: McpToolDef[] = [
                   laneId: {
                     type: 'string',
                     description:
-                      'Target-language lane (a registered settings.targetLanes tag). Omit for the default lane.',
+                      'Required lane id (lanes.id from get_project). A language tag is not accepted.',
                   },
                   instructions: {
                     type: 'string',
                     description: 'Optional extra steer for this batch, passed to the drafting prompt.',
                   },
                 },
-                required: ['kind', 'fileId', 'cellIds'],
+                required: ['kind', 'fileId', 'cellIds', 'laneId'],
                 additionalProperties: false,
               },
               {
@@ -797,7 +1200,7 @@ export const MCP_TOOLS: McpToolDef[] = [
                     items: {
                       type: 'object',
                       properties: {
-                        laneId: { type: 'string', description: 'Omit for the default lane.' },
+                        laneId: { type: 'string', description: 'Required lane id (lanes.id from get_project). A language tag is not accepted.' },
                         offset: { type: 'number' },
                       },
                       required: ['offset'],
@@ -809,6 +1212,93 @@ export const MCP_TOOLS: McpToolDef[] = [
                 required: ['kind', 'fileId', 'cellId', 'offset', 'targets'],
                 additionalProperties: false,
               },
+              {
+                type: 'object',
+                properties: {
+                  kind: {
+                    type: 'string',
+                    enum: ['HideCell', 'ShowCell'],
+                    description:
+                      'HideCell parks the cell (out of the editor in every lane, out of every ' +
+                      'export) without deleting anything; ShowCell brings it back with its ' +
+                      'text, translations, recordings, comments and validations intact.',
+                  },
+                  fileId: { type: 'string' },
+                  cellId: { type: 'string' },
+                },
+                required: ['kind', 'fileId', 'cellId'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: {
+                    type: 'string',
+                    enum: ['InviteMember', 'SetRole'],
+                    description:
+                      'InviteMember grants a person a NEW direct project_members row at ' +
+                      '`role`; SetRole changes the role on a row they already hold. They are ' +
+                      'not interchangeable: InviteMember on an existing direct member is ' +
+                      'rejected (conflict `already_member`) so an invite can never silently ' +
+                      'demote, and SetRole on somebody with no direct row is rejected ' +
+                      '(conflict `not_a_direct_member`) so a re-role can never silently grant ' +
+                      'new access. Call list_members first — its `direct` field is what picks ' +
+                      'between them.',
+                  },
+                  projectId: {
+                    type: 'string',
+                    description:
+                      'Must equal this tool call\'s projectId — the changeset\'s own project. ' +
+                      'Membership commands name their project explicitly so a batch cannot ' +
+                      'straddle two.',
+                  },
+                  username: {
+                    type: 'string',
+                    description:
+                      'The person\'s Aquilla username, as list_members reports it ' +
+                      '(case-insensitive). People are named by username on this API, not by ' +
+                      'email. An unknown name is not_found, never a silently created account.',
+                  },
+                  role: {
+                    type: 'number',
+                    enum: [100, 200, 300, 400, 500, 600, 700],
+                    description:
+                      'Canonical level: 100 viewer, 200 commenter, 300 reviewer, 400 ' +
+                      'contributor, 500 project_lead, 600 maintainer, 700 owner.',
+                  },
+                },
+                required: ['kind', 'projectId', 'username', 'role'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: {
+                    type: 'string',
+                    enum: ['RemoveMember'],
+                    description:
+                      'Drops the person\'s DIRECT project_members row. Org, team and creator ' +
+                      'grant paths are additive (AD-12) and are untouched, so somebody who ' +
+                      'also holds the project through one of those keeps access at that ' +
+                      'level — check roleSource in list_members before promising a removal ' +
+                      'ends their access. Rejected with conflict `not_a_direct_member` when ' +
+                      'there is no row to remove.',
+                  },
+                  projectId: {
+                    type: 'string',
+                    description:
+                      'Must equal this tool call\'s projectId — the changeset\'s own project. ' +
+                      'Membership commands name their project explicitly so a batch cannot ' +
+                      'straddle two.',
+                  },
+                  username: {
+                    type: 'string',
+                    description: 'The person\'s Aquilla username, as list_members reports it.',
+                  },
+                },
+                required: ['kind', 'projectId', 'username'],
+                additionalProperties: false,
+              },
             ],
           },
         },
@@ -818,14 +1308,38 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
   },
   {
+    name: 'upload_artifact',
+    description:
+      'Upload a source or audio artifact through MCP without replaying OAuth on REST. ' +
+      'Supply actual user-authorized bytes as UTF-8 text or canonical base64 (no data URL). ' +
+      'Maximum decoded size: 524288 bytes. This immediately stores an artifact, but ' +
+      'does not import content, attach audio, or spend transcription credits. ' +
+      'Returns artifactId for preview_import / prepare_import, prepare_link_media or ' +
+      'transcribe_audio. Existing project scope, write access, contributor permissions ' +
+      'and upload rate limits apply. For larger files use Aquilla or a separately ' +
+      'authorized REST client; never replay an MCP OAuth token on REST.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        name: { type: 'string', description: 'Original filename, including its extension.' },
+        kind: { type: 'string', enum: ['source', 'audio'] },
+        contentType: { type: 'string', description: 'MIME type; audio requires a supported audio MIME type.' },
+        encoding: { type: 'string', enum: ['utf8', 'base64'] },
+        data: { type: 'string', description: 'Original UTF-8 text or canonical base64 bytes, not a URL.' },
+      },
+      required: ['projectId', 'name', 'kind', 'contentType', 'encoding', 'data'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'preview_import',
     description:
       'Parse an uploaded source artifact with Aquilla\'s built-in importers and PREVIEW the ' +
       'result WITHOUT staging anything. This is step 2 of the artifact-first import ' +
-      'workflow: (1) upload the original file bytes via REST ' +
-      'POST .../projects/:projectId/artifacts with header "x-artifact-name" (25MB cap) — ' +
-      'upload is REST-only because MCP is JSON-RPC text and cannot carry a binary body ' +
-      '(from Claude Code, curl the upload); preserving the original in storage also enables ' +
+      'workflow: (1) upload_artifact stores original UTF-8/base64 bytes (512 KiB cap); ' +
+      'larger uploads need Aquilla or a separately authorized REST client. Never replay ' +
+      'MCP OAuth on REST. Preserving the original in storage also enables ' +
       'round-trip export later. (2) preview_import to check the parse. (3) prepare_import ' +
       'to stage a PlanImport changeset. (4) the normal confirm_changeset / approval flow. ' +
       'Server-parseable formats: txt, md, json, po, properties, obs, vtt, srt, sbv, csv, ' +
@@ -842,7 +1356,7 @@ export const MCP_TOOLS: McpToolDef[] = [
         ...projectIdProp,
         artifactId: {
           type: 'string',
-          description: 'A source artifact already uploaded via REST POST .../artifacts.',
+          description: 'A source artifact returned by upload_artifact or a separately authorized REST upload.',
         },
         fileType: {
           type: 'string',
@@ -875,9 +1389,8 @@ export const MCP_TOOLS: McpToolDef[] = [
       'is preserved for round-trip export). Nothing is applied here — like every write ' +
       'this returns { changesetId, summary, digest, mode, approvalUrl? } for the normal ' +
       'confirm_changeset flow (ask mode: a human must approve at the approvalUrl first). ' +
-      'Workflow: REST-upload the original bytes to POST .../projects/:projectId/artifacts ' +
-      '(25MB cap; upload is REST-only — MCP JSON-RPC cannot carry binary, so agents like ' +
-      'Claude Code should curl it), preview_import to check the parse, then this tool, ' +
+      'Workflow: upload_artifact stores the original bytes (512 KiB cap), then ' +
+      'preview_import checks the parse, then this tool stages the import, ' +
       'then confirm_changeset. Same formats/limits as preview_import (5000-cell cap, ' +
       'validation_failed above it); a multi-book USFM artifact must be staged one book per ' +
       'changeset via resultIndex. Requires PROJECT_LEAD role (the floor of the compiled ' +
@@ -888,7 +1401,7 @@ export const MCP_TOOLS: McpToolDef[] = [
         ...projectIdProp,
         artifactId: {
           type: 'string',
-          description: 'A source artifact already uploaded via REST POST .../artifacts.',
+          description: 'A source artifact returned by upload_artifact or a separately authorized REST upload.',
         },
         fileType: {
           type: 'string',
@@ -901,6 +1414,23 @@ export const MCP_TOOLS: McpToolDef[] = [
         resultIndex: {
           type: 'number',
           description: 'Which parsed file to stage when the parse yields several (multi-book USFM); required in that case.',
+        },
+        sourceTextDirection: {
+          type: 'string',
+          enum: ['ltr', 'rtl'],
+          description:
+            'Per-file source text direction (AQU-1471). OMIT IT for an ordinary import: direction ' +
+            "resolves to the project's sourceTextDirection setting and then to the source language, " +
+            'so a whole RTL project is one patch_settings call rather than one override per file. ' +
+            'Send it only for a file that runs against its project.',
+        },
+        targetTextDirection: {
+          type: 'string',
+          enum: ['ltr', 'rtl'],
+          description:
+            'Per-file target text direction (AQU-1471) — same rule as sourceTextDirection: for an ' +
+            "Arabic/Hebrew/Persian/Urdu project set the project's targetTextDirection setting once " +
+            'instead, and leave this unset.',
         },
         excludeFrontMatter: {
           type: 'boolean',
@@ -922,8 +1452,7 @@ export const MCP_TOOLS: McpToolDef[] = [
       'handed back to Paratext). Reconstructs the file from the ORIGINAL artifact ' +
       'preserved at import time with the current translations substituted in; ' +
       'untranslated segments keep their source text so the output stays valid. Args: ' +
-      'projectId, fileId (from read_content), lane (optional — which target-language ' +
-      'lane to export; omit for the default lane). Returns { fileName, contentType, ' +
+      'projectId, fileId (from read_content), lane (required lane id from get_project). Returns { fileName, contentType, ' +
       'exportMode, lossyVerseCount, bytes, content } where `content` is the file text. ' +
       'Read the fidelity fields before delivering: exportMode "round-trip" means ' +
       'translations were injected, "raw-original"/"raw-sidecar" means the file has no ' +
@@ -945,10 +1474,10 @@ export const MCP_TOOLS: McpToolDef[] = [
         lane: {
           type: 'string',
           description:
-            'Target-language lane to export (e.g. "es"). Omit for the default lane.',
+            'Required lane id (lanes.id from get_project). A language tag is not accepted.',
         },
       },
-      required: ['projectId', 'fileId'],
+      required: ['projectId', 'fileId', 'lane'],
       additionalProperties: false,
     },
   },
@@ -1069,3 +1598,89 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
   },
 ]
+type ToolKind = 'read' | 'spend' | 'stage' | 'upload' | 'commit' | 'discard'
+
+/**
+ * How each tool touches Aquilla state. Every tool MUST be listed (a test
+ * enforces it), so a new tool cannot ship without a deliberate choice.
+ *
+ *  read    — no state change at all.
+ *  spend   — no project state change, but it costs workspace credits each
+ *            call (so it is neither read-only nor idempotent).
+ *  upload  — stores an artifact without changing committed file content.
+ *  stage   — writes a pending changeset only; nothing in the project changes
+ *            until a confirm (and, in ask mode, a human approval).
+ *  commit  — applies a staged changeset: may overwrite translations, delete or
+ *            split cells, or change settings. The one destructive tool.
+ *  discard — drops a staged changeset; project content is untouched.
+ */
+export const TOOL_KINDS: Record<string, ToolKind> = {
+  get_capabilities: 'read',
+  get_identity_and_scope: 'read',
+  list_orgs: 'read',
+  list_projects: 'read',
+  get_project: 'read',
+  get_project_settings: 'read',
+  patch_settings: 'stage',
+  // AQU-2407: both stage a changeset only; the brief write (and the L1
+  // render it pays for) happens at confirm_changeset.
+  prepare_set_brief: 'stage',
+  regenerate_brief_summary: 'stage',
+  describe_command: 'read',
+  get_skill: 'read',
+  search_project: 'read',
+  find_similar_cells: 'read',
+  transcribe_audio: 'spend',
+  // Optional warm-up starts infrastructure and consumes workspace AI capacity.
+  transcription_status: 'spend',
+  search_projects: 'read',
+  read_content: 'read',
+  read_history: 'read',
+  read_comments: 'read',
+  get_prompt_preview: 'read',
+  list_memory: 'read',
+  read_cell_memory: 'read',
+  list_style_rules: 'read',
+  read_quality: 'read',
+  read_term_consistency: 'read',
+  list_terms: 'read',
+  list_members: 'read',
+  prepare_translations: 'stage',
+  upload_artifact: 'upload',
+  preview_import: 'read',
+  prepare_import: 'stage',
+  export_file: 'read',
+  get_changeset: 'read',
+  list_changesets: 'read',
+  wait_for_changeset: 'read',
+  confirm_changeset: 'commit',
+  discard_changeset: 'discard',
+}
+
+const OAUTH: McpSecurityScheme[] = [{ type: 'oauth2', scopes: [] }]
+
+function titleOf(name: string): string {
+  const words = name.split('_')
+  return [words[0][0].toUpperCase() + words[0].slice(1), ...words.slice(1)].join(' ')
+}
+
+function annotationsFor(spec: McpToolSpec): McpToolAnnotations {
+  // Unknown kinds fail closed: treat the tool as a destructive write.
+  const kind = TOOL_KINDS[spec.name] ?? 'commit'
+  return {
+    title: titleOf(spec.name),
+    readOnlyHint: kind === 'read',
+    destructiveHint: kind === 'commit',
+    idempotentHint: kind === 'read' || kind === 'discard',
+    openWorldHint: false,
+  }
+}
+
+export const MCP_TOOLS: McpToolDef[] = TOOL_SPECS.map((spec) => ({
+  ...spec,
+  annotations: annotationsFor(spec),
+  // Top-level field is the Apps SDK form; _meta mirrors it for hosts that only
+  // read namespaced metadata. Both say the same thing.
+  securitySchemes: OAUTH,
+  _meta: { securitySchemes: OAUTH },
+}))

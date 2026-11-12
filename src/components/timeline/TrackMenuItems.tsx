@@ -28,37 +28,47 @@
 // AND IF NOTHING IS OFFERED, THE MENU DOES NOT OPEN. See `trackMenuIsEmpty`.
 
 import type { ReactNode } from "react"
-import { FolderPlus, FolderMinus, Palette, Pencil, Trash2 } from "lucide-react"
+import { EyeOff, FolderPlus, FolderMinus, Palette, Pencil, Ruler, Rows3, Trash2 } from "lucide-react"
 import {
+  ContextMenuCheckboxItem,
   ContextMenuItem,
   ContextMenuRadioGroup,
-  ContextMenuRadioItem,
   ContextMenuSeparator,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
 } from "@/components/ui/context-menu"
 import {
-  TRACK_HUES,
   isColorableKind,
   parseTrackHue,
 } from "@/lib/timeline/track-colors"
 import { DEFAULT_TRACK_IDS, type TimelineTrack } from "@/lib/timeline/tracks"
+import { TrackColorSwatches } from "./TrackColorSwatches"
 import type { useT } from "@/lib/i18n/I18nProvider"
 
+/**
+ * PER-TRACK VALUES, not one value for the whole list — stage 3c. One call, so
+ * it is still a single enqueue.
+ *
+ * ITS OWN CALLBACK, LIKE RENAME, NOT PART OF `TrackEditingActions` (Sam,
+ * 2026-09-26). A colour is how a track LOOKS — the Audio view now draws a
+ * file's takes in it and offers the picker on projects that never turn track
+ * editing on — so it rides the maintainer clearance alone, and the server
+ * agrees (track-editing-authority.ts: colour is an ungated key).
+ */
+export type SetTrackColor = (updates: ReadonlyArray<{ trackId: string; color: string | null }>) => void
+
 export interface TrackEditingActions {
-  /**
-   * PER-TRACK VALUES, not one value for the whole list — stage 3c.
-   *
-   * Colour became two independent axes, so "make these five tracks lime" means
-   * "set each one's PRIMARY to lime and leave its own secondary alone", and the
-   * five resulting strings can all differ. One call, so it is still a single
-   * enqueue.
-   */
-  onSetColor(updates: ReadonlyArray<{ trackId: string; color: string | null }>): void
   onLeaveFolder(trackIds: readonly string[]): void
   onCreateFolderFrom(trackIds: readonly string[]): void
   onDelete(trackIds: readonly string[]): void
+  /**
+   * AQU-2252 (Sam, Oct 29): whether these tracks' takes set their lines'
+   * lengths — `false` makes them layers. Track editing, so it rides this
+   * clearance; absent while the file follows its source, where nothing sets a
+   * line's length.
+   */
+  onSetLineLengths?(trackIds: readonly string[], sets: boolean): void
 }
 
 /**
@@ -87,13 +97,44 @@ export const isAddedTrack = (track: TimelineTrack) => !DEFAULT_TRACK_IDS.has(tra
 export function trackMenuScopes({
   targets,
   canRename,
+  canColour,
   canEdit,
+  canPromote = false,
+  canHide = false,
+  canSetLengths = false,
+  busyIds,
 }: {
   targets: readonly TimelineTrack[]
   canRename: boolean
+  canColour: boolean
   canEdit: boolean
+  /** AQU-2252: track editing, while the file follows its recordings. */
+  canSetLengths?: boolean
+  /** AQU-1566: the file is a linked video with no rows and the person is a
+   *  maintainer, so a caption track may become its rows. */
+  canPromote?: boolean
+  /** AQU-1684: anyone may hide tracks on their own screen. */
+  canHide?: boolean
+  /** AQU-1684: tracks that may not be hidden right now — recording, or being
+   *  dragged. */
+  busyIds?: ReadonlySet<string>
 }) {
   const only = targets.length === 1 ? targets[0] : null
+
+  // AQU-1684: every track but a folder can be hidden — a folder is a heading,
+  // and closing it is how its tracks are put away. Offered while one of them
+  // is recording or being dragged too, but greyed out: the lane must not
+  // vanish from under the take or the pointer, and saying why beats a menu
+  // that changes shape mid-gesture.
+  const hideable = canHide ? targets.filter((tr) => tr.kind !== "folder") : []
+  const hideBusy = hideable.some((tr) => busyIds?.has(tr.id) ?? false)
+
+  // AQU-1566: one SOURCE caption track that has its own content, and only that.
+  // The server copies exactly one source caption file into the rows, so a
+  // selection of several, a target-text track, or a derived row with nothing
+  // behind it gets no item rather than one that would be refused.
+  const promotable = canPromote && only && only.kind === "source-subtitles" && only.contentFileId
+    ? only : null
 
   // ALL OF THEM OR NONE (Sam, 2026-08-24, revising the first rule). Colouring
   // "the two of these five that can take one" is the kind of partial success
@@ -104,6 +145,16 @@ export function trackMenuScopes({
   const colourable = allColourable ? targets : []
 
   const deletable = targets.filter(isAddedTrack)
+
+  // AQU-2252 (Sam, Oct 29): "Sets line lengths", on added AUDIO tracks only —
+  // the main track always sets them, and a folder or a text track holds no
+  // takes. All or nothing over the selection, like colour, and ticked only
+  // when every one of them sets them, so the tick never claims more than is
+  // true.
+  const allAudio = targets.length > 0 && targets.every((tr) => tr.kind === "audio")
+  const lengths = canSetLengths && allAudio
+    ? { tracks: [...targets], checked: targets.every((tr) => tr.setsLineLengths !== false) }
+    : null
 
   // THE FOLDERING VERBS ARE ALL-OR-NONE TOO, and for a sharper reason than
   // colour's. A folder is never inside another folder (track-groups never reads
@@ -127,22 +178,29 @@ export function trackMenuScopes({
 
   return {
     only,
+    promotable,
+    hideable,
+    hideBusy,
     rename: canRename ? only : null,
-    colourable: canEdit ? colourable : [],
+    colourable: canColour ? colourable : [],
     foldable: canEdit ? foldable : [],
     inAFolder: canEdit ? inAFolder : [],
     deletable: canEdit ? deletable : [],
+    lengths: canEdit ? lengths : null,
   }
 }
 
 /** Would this menu render nothing at all? Then it must not open. */
 export function trackMenuIsEmpty(scopes: ReturnType<typeof trackMenuScopes>): boolean {
   return (
+    scopes.promotable == null &&
+    scopes.hideable.length === 0 &&
     scopes.rename == null &&
     scopes.colourable.length === 0 &&
     scopes.foldable.length === 0 &&
     scopes.inAFolder.length === 0 &&
-    scopes.deletable.length === 0
+    scopes.deletable.length === 0 &&
+    scopes.lengths == null
   )
 }
 
@@ -150,7 +208,11 @@ export function trackMenuItems({
   targets,
   t,
   onRename,
+  onSetColor,
   editing,
+  onPromote,
+  onHide,
+  busyTrackIds,
 }: {
   /**
    * The tracks this menu acts on — the selection when the right-clicked row is
@@ -161,21 +223,65 @@ export function trackMenuItems({
   t: ReturnType<typeof useT>
   /** Maintainer clearance. NOT gated on the track-editing setting. */
   onRename?: (trackId: string) => void
+  /** Maintainer clearance too, and not gated on the setting either. */
+  onSetColor?: SetTrackColor
   /** Maintainer clearance AND the setting. Absent withholds every item below
    *  the separator — which is the whole affordance, not a disabled one. */
   editing?: TrackEditingActions
+  /** AQU-1566: "Use as this file's rows". Maintainer clearance on a linked
+   *  video with no rows; NOT gated on the track-editing setting (Sam). The
+   *  caller asks for confirmation before anything is written. */
+  onPromote?: (trackId: string) => void
+  /** AQU-1684: hide these tracks on this person's own screen. Everyone has it. */
+  onHide?: (trackIds: readonly string[]) => void
+  /** AQU-1684: tracks recording or being dragged, which may not be hidden now. */
+  busyTrackIds?: ReadonlySet<string>
 }): ReactNode {
   // ONE AUTHORITY, read here and by the trigger that decided to open at all.
-  const { rename, colourable, foldable, inAFolder, deletable } = trackMenuScopes({
+  const { promotable, hideable, hideBusy, rename, colourable, foldable, inAFolder, deletable, lengths } = trackMenuScopes({
     targets,
     canRename: Boolean(onRename),
+    canColour: Boolean(onSetColor),
     canEdit: Boolean(editing),
+    canPromote: Boolean(onPromote),
+    canHide: Boolean(onHide),
+    canSetLengths: Boolean(editing?.onSetLineLengths),
+    busyIds: busyTrackIds,
   })
+  const anythingBelowPromote = rename != null || colourable.length > 0 || lengths != null || foldable.length > 0
+    || inAFolder.length > 0 || deletable.length > 0
 
   const ids = (list: readonly TimelineTrack[]) => list.map((tr) => tr.id)
 
   return (
     <>
+      {/* AQU-1566: first, because on an empty linked video it is the one
+          thing this track is waiting for. */}
+      {onPromote && promotable && (
+        <ContextMenuItem onClick={() => onPromote(promotable.id)}>
+          <Rows3 className="h-3.5 w-3.5" />
+          {t("editor.timeline.trackUseAsRows")}
+        </ContextMenuItem>
+      )}
+      {onPromote && promotable && (hideable.length > 0 || anythingBelowPromote) && <ContextMenuSeparator />}
+
+      {/* AQU-1684: everyone's, and about this screen alone, so it sits above
+          the maintainers' items that change the file for everybody. */}
+      {onHide && hideable.length > 0 && (
+        <ContextMenuItem
+          disabled={hideBusy}
+          title={hideBusy ? t("editor.timeline.trackHideBusy") : undefined}
+          data-testid="tl-track-hide"
+          onClick={() => onHide(ids(hideable))}
+        >
+          <EyeOff className="h-3.5 w-3.5" />
+          {hideable.length > 1
+            ? t("editor.timeline.trackHideCount", { count: hideable.length })
+            : t("editor.timeline.trackHide")}
+        </ContextMenuItem>
+      )}
+      {onHide && hideable.length > 0 && anythingBelowPromote && <ContextMenuSeparator />}
+
       {/* Renaming is a single-track verb: there is one field and one name.
           With several selected it is simply absent rather than renaming an
           arbitrary one of them. */}
@@ -187,7 +293,7 @@ export function trackMenuItems({
       )}
       {/* Only when something actually follows it — a separator under the last
           item is a line with nothing beneath it. */}
-      {onRename && rename && (colourable.length > 0 || foldable.length > 0
+      {onRename && rename && (colourable.length > 0 || lengths != null || foldable.length > 0
         || inAFolder.length > 0 || deletable.length > 0) && <ContextMenuSeparator />}
 
       {/* AQU-646 stage 7: SIX SWATCHES, AND NOTHING ELSE (Sam, 2026-08-27:
@@ -199,7 +305,7 @@ export function trackMenuItems({
           the operating system, and a context menu closes on that — and with the
           custom picker gone so is the reason. A submenu recolours in one click
           instead of three, which is the whole point of simplifying it. */}
-      {editing && colourable.length > 0 && (
+      {onSetColor && colourable.length > 0 && (
         <ContextMenuSub>
           <ContextMenuSubTrigger>
             <Palette className="h-3.5 w-3.5" />
@@ -222,7 +328,7 @@ export function trackMenuItems({
               track nobody has coloured resolves to the default hue and so
               announces Green as current — which is honest, because Green is
               what it is drawn in. */}
-          <ContextMenuSubContent className="w-auto min-w-0 p-1">
+          <ContextMenuSubContent className="w-auto min-w-0 p-1.5">
             <ContextMenuRadioGroup
               // "Every one of them is already this", which is the only thing a
               // selected state could honestly mean across several tracks — so a
@@ -233,28 +339,29 @@ export function trackMenuItems({
                   : ""
               }
             >
-            {TRACK_HUES.map((hue) => {
-              return (
-                <ContextMenuRadioItem
-                  key={hue.id}
-                  value={hue.hex}
-                  className="gap-2"
-                  onClick={() =>
-                    editing.onSetColor(colourable.map((tr) => ({ trackId: tr.id, color: hue.id })))
-                  }
-                >
-                  <span
-                    aria-hidden
-                    className="h-3.5 w-3.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: hue.hex }}
-                  />
-                  {t(hue.labelKey as Parameters<typeof t>[0])}
-                </ContextMenuRadioItem>
-              )
-            })}
+            {/* Swatches only, three across (Sam, 2026-09-28) — the names stay
+                as each swatch's accessible name. */}
+            <TrackColorSwatches
+              onPick={(hueId) => onSetColor(colourable.map((tr) => ({ trackId: tr.id, color: hueId })))}
+            />
             </ContextMenuRadioGroup>
           </ContextMenuSubContent>
         </ContextMenuSub>
+      )}
+
+      {/* AQU-2252 (Sam, Oct 29): ticked, the tracks' takes set their lines'
+          lengths (every track's do by default — a new track is most often
+          another voice); unticked, they are layers — music, sound effects,
+          ambience — and play over the lines without changing them. */}
+      {editing?.onSetLineLengths && lengths && (
+        <ContextMenuCheckboxItem
+          checked={lengths.checked}
+          data-testid="tl-track-sets-line-lengths"
+          onCheckedChange={() => editing.onSetLineLengths?.(ids(lengths.tracks), !lengths.checked)}
+        >
+          <Ruler className="h-3.5 w-3.5" />
+          {t("editor.timeline.trackSetsLineLengths")}
+        </ContextMenuCheckboxItem>
       )}
 
       {/* Stage 2b: "Move to folder" is GONE. Sam, 2026-08-24: "there shouldn't

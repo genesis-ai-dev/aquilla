@@ -91,6 +91,31 @@ describe("GET /api/v1/projects/:projectId/members/:author/activity", () => {
     ])
   })
 
+  it("AQU-1566: leaves cues retimed on the timeline out of the files rollup", async () => {
+    // Retiming a caption-track chip or an audio cue edits a cell of a hidden
+    // timeline file; the panel lists files the member worked on.
+    const { db } = await makeTestDb({
+      files: [
+        FILE_ROW,
+        { id: "f-track", project_id: "proj-a", name: "Episode captions", event_id: "genesis-track", role: "timeline-content", anchor_file_id: "file-x" },
+        { id: "f-cues", project_id: "proj-a", name: "Episode audio cues", event_id: "genesis-cues", role: "audio-cues", anchor_file_id: "file-x" },
+      ],
+      cells: [
+        { ...CELL_ROW_BASE, cell_id: "c1", last_editor: "alice", word_count: 2 },
+        { ...CELL_ROW_BASE, file_id: "f-track", side: "source", cell_id: "t1", last_editor: "alice", word_count: 7 },
+        { ...CELL_ROW_BASE, file_id: "f-cues", side: "source", cell_id: "q1", last_editor: "alice", word_count: 9 },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x", role: 600 })
+    const res = (await handleMemberActivityReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/members/alice/activity",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { fileRollup: Array<{ fileId: string; cellsTouched: number }> }
+    expect(body.fileRollup).toEqual([expect.objectContaining({ fileId: "file-x", cellsTouched: 1 })])
+  })
+
   it("returns 403 when the caller's role is below the org's memberProgressViewMinRole floor", async () => {
     const { db } = await makeTestDb({
       organizations: [{ id: 1, name: "Org A" }],
@@ -106,6 +131,58 @@ describe("GET /api/v1/projects/:projectId/members/:author/activity", () => {
     )
     const res = (await handleMemberActivityReadRequest(req, envWith(db)))!
     expect(res.status).toBe(403)
+  })
+
+  // AQU-1771: a project can make the floor stricter than its org's, never looser.
+  async function statusFor(projectSettings: Record<string, unknown>, role: number): Promise<number> {
+    const { db } = await makeTestDb({
+      organizations: [{ id: 1, name: "Org A" }],
+      projects: [{ id: "proj-a", org_id: 1, name: "Proj A" }],
+      org_settings: [{ org_id: 1, settings: JSON.stringify({ memberProgressViewMinRole: 600 }) }],
+      project_settings: [{ project_id: "proj-a", settings: JSON.stringify(projectSettings), version: 1 }],
+      events: [makeEvent({ id: "e1", kind: "target.cell.commit", parent_id: null, server_seq: 1, author: "alice" })],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x", role })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/members/alice/activity",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    return (await handleMemberActivityReadRequest(req, envWith(db)))!.status
+  }
+
+  it("refuses a maintainer when the project raised the floor to owners (AQU-1771)", async () => {
+    expect(await statusFor({ memberProgressViewMinRole: 700 }, 600)).toBe(403)
+    expect(await statusFor({ memberProgressViewMinRole: 700 }, 700)).toBe(200)
+  })
+
+  // AQU-1771: a named person's activity is member-list information too.
+  it("refuses a caller who meets the progress floor but not the member-list floor", async () => {
+    const { db } = await makeTestDb({
+      organizations: [{ id: 1, name: "Org A" }],
+      projects: [{ id: "proj-a", org_id: 1, name: "Proj A" }],
+      org_settings: [{ org_id: 1, settings: JSON.stringify({ memberProgressViewMinRole: 400, rosterViewMinRole: 600 }) }],
+      events: [makeEvent({ id: "e1", kind: "target.cell.commit", parent_id: null, server_seq: 1, author: "alice" })],
+    })
+    const status = async (role: number) => {
+      const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x", role })
+      const req = new Request(
+        "https://w/api/v1/projects/proj-a/members/alice/activity",
+        { headers: { Authorization: `Bearer ${token}` } },
+      )
+      return (await handleMemberActivityReadRequest(req, envWith(db)))!.status
+    }
+    expect(await status(400)).toBe(403)
+    expect(await status(600)).toBe(200)
+  })
+
+  it("refuses a maintainer when the project raised its member list to owners (AQU-1771)", async () => {
+    expect(await statusFor({ rosterViewMinRole: 700 }, 600)).toBe(403)
+    expect(await statusFor({ rosterViewMinRole: 700 }, 700)).toBe(200)
+  })
+
+  it("ignores a project value below the org's floor (AQU-1771)", async () => {
+    expect(await statusFor({ memberProgressViewMinRole: 400 }, 400)).toBe(403)
+    expect(await statusFor({ memberProgressViewMinRole: 400 }, 600)).toBe(200)
   })
 
   it("allows a caller meeting the default MAINTAINER floor when the org has not configured one", async () => {

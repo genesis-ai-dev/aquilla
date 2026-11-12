@@ -11,6 +11,11 @@
 // · owner 700. Project roles resolve via resolveProjectRole (max-wins across
 // direct/group/org/creator). All routes require authMiddleware.
 //
+// OPS-53: every WRITE below additionally requires an ELEVATED session when the
+// caller clears its floor on platform-admin power alone — see
+// requireTermbaseWriteRole. The three reads do not. A caller in that position
+// gets 403 { error: "elevation required to <act> with platform-admin access" }.
+//
 // 1. POST /api/v2/projects/:id/termbase/publish        (maintainer 600+)
 //    Project must be org-owned (org_id NOT NULL). Sets org_published_termbase=true.
 //    → 200 { projectId, published: true }
@@ -19,7 +24,11 @@
 //
 // 2. DELETE /api/v2/projects/:id/termbase/publish      (maintainer 600+)
 //    Unpublish. Sets org_published_termbase=false. Existing subscriptions are
-//    NOT cascaded-deleted (left dangling but inert — the listing hides them).
+//    NOT cascaded-deleted and are left dangling but INERT: canReadTermbase
+//    re-checks the flag, so the Q19 grant evaporates at once. Route 4 still
+//    LISTS such a row, with published:false — the client hides it, not the
+//    server (corrected here on the 2026-11-09 pass; this comment previously
+//    claimed "the listing hides them", which listSubscriptions does not do).
 //    → 200 { projectId, published: false }
 //
 // 3. GET /api/v2/orgs/:orgId/published-termbases        (any org member)
@@ -47,15 +56,25 @@
 //    Reorder priority. Body { order: string[] } — array of termbaseProjectIds
 //    in desired precedence (index 0 = highest precedence = priority 0). Only
 //    rows that exist as subscriptions are updated; unknown ids are ignored.
+//    `order` holds at most MAX_SUBSCRIPTION_ORDER (500) ids of <=256 chars
+//    each (OPS-54); past either, zValidator answers 400 before the handler.
 //    → 200 { subscriptions: [...] }  (same shape as GET)
 //
 // 8. GET /api/v2/projects/:termbaseProjectId/termbase/concepts?subscriberProjectId=...
 //    The upstream published termbase's ACTIVE concepts, for a subscriber's
-//    enforcement merge (consumed by src/hooks/useSubscribedConcepts.ts).
+//    enforcement merge (consumed by src/hooks/useSubscribedConcepts.ts, which
+//    the editor workspace and Settings → Rules call — AQU-1721).
 //    Access is the Q19 implicit grant — canReadTermbase, NOT a role check on
-//    the upstream. Concepts are read from project_settings.settings.terminology
-//    (AD-3 thin-client: project terminology is synced as a top-level settings
-//    key, see src/lib/sync/project-settings.ts).
+//    the upstream. Concepts are read as the editor reads a project's own
+//    (lib/concepts-read.ts): the live rows of the `concepts` table, and the
+//    legacy settings.terminology blob only while the table has none. Autopilot
+//    reads subscribed termbases through the same function, and applies the
+//    same published / unarchived / same-org gate as canReadTermbase (AQU-1721).
+//    Renderings come back stamped with the SUBSCRIBER's lane ids: each one is
+//    mapped from the lane it has in the termbase to the subscriber lane of the
+//    same language (mapSubscribedConceptLanes, AQU-1777), so the editor's lane
+//    filter treats them like the project's own. A rendering no subscriber lane
+//    matches is left out.
 //    → 200 { concepts: Concept[] }   // status === "active" only
 //    → 400 { error: "subscriberProjectId required" }
 //    → 403 { error: "no termbase read access" }  (non-member / no subscription /
@@ -68,29 +87,89 @@
 // The resolver is `canReadTermbase` in services/org-permissions.ts; route #8
 // above is the termbase-data read endpoint that consumes it.
 
-import { Hono } from "hono"
+import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
-import { resolveProjectRole } from "../services/project-permissions"
+import { resolveProjectRole, type ResolvedRole } from "../services/project-permissions"
+import { roleWithoutUnelevatedAdmin } from "../services/elevation-gate"
 import { getEffectiveOrgRole, canReadTermbase } from "../services/org-permissions"
+import { readProjectConcepts } from "../lib/concepts-read"
+import { loadLaneRows } from "../lib/read-lane-language"
+import { mapSubscribedConceptLanes } from "../../../src/lib/terminology/rendering-lane"
 
 const termbase = new Hono<AuthHonoEnv>()
+
+// ──────────────────────────────────────────────────────────────────────────
+// OPS-53: the MAINTAINER floor below, with un-elevated platform-admin power
+// stripped out of it.
+//
+// `resolveProjectRole` contributes { source: "platform", level: 700 } for
+// every platform operator on every project on the platform, and
+// ROLE.MAINTAINER is 600 — so `role.level < ROLE.MAINTAINER` was false by
+// definition for an un-elevated admin JWT, on all five writes in this file.
+// AQU-1322's rule ("admin power applies only while elevated") reaches them for
+// two reasons neither of which is "one more un-gated write":
+//
+//   * `org_published_termbase` is not a setting, it is the org's CONSENT. Both
+//     the subscribe route below and `canReadTermbase` treat the flag as the
+//     upstream's permission to be read, so an operator who can flip it forges
+//     the only consent in the design — for a project they hold no grant on.
+//   * a subscription row is a STANDING cross-project read. The Q19 implicit
+//     grant is derived from the row at resolve time, so every viewer (100) of
+//     the subscriber reads the whole upstream termbase for as long as the row
+//     lives. Same shape as OPS-44's PAT, OPS-49's integration link and
+//     OPS-51's source link: the artefact outlives the authority that created
+//     it, so an elevation check at use time can never reach it.
+//
+// The floor is checked BEFORE narrowing, so a genuine below-floor member and a
+// non-member keep their byte-identical pre-OPS-53 refusals; only a caller who
+// cleared the floor on platform power alone sees the elevation wording. An
+// operator who genuinely maintains the project is unaffected, which is why
+// this de-escalates rather than refusing on `source === "platform"`.
+//
+// The three READS are deliberately left open — AQU-2003 priced un-elevated
+// platform access as read-only on our own content, not refused — and each one
+// says so at its own guard.
+// ──────────────────────────────────────────────────────────────────────────
+
+async function requireTermbaseWriteRole(
+  c: Context<AuthHonoEnv>,
+  projectId: string,
+  /** Spliced into the 403 as "elevation required to ${action} with …". */
+  action: string,
+): Promise<ResolvedRole | Response> {
+  const user = c.get("user")
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) return c.json({ error: "no access to project" }, 403)
+  if (role.level < ROLE.MAINTAINER) {
+    return c.json({ error: "role >= maintainer (600) required" }, 403)
+  }
+  const effective = await roleWithoutUnelevatedAdmin(c, user, projectId, role)
+  if (!effective || effective.level < ROLE.MAINTAINER) {
+    return c.json(
+      { error: `elevation required to ${action} with platform-admin access` },
+      403,
+    )
+  }
+  return effective
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // POST /api/v2/projects/:id/termbase/publish — publish (maintainer 600+)
 // ──────────────────────────────────────────────────────────────────────────
 
 termbase.post("/:id/termbase/publish", authMiddleware, async (c) => {
-  const user = c.get("user")
   const projectId = c.req.param("id") as string
 
-  const role = await resolveProjectRole(c.env, user, projectId)
-  if (!role) return c.json({ error: "no access to project" }, 403)
-  if (role.level < ROLE.MAINTAINER) {
-    return c.json({ error: "role >= maintainer (600) required" }, 403)
-  }
+  // Publishing IS the org's consent token for every read downstream of it.
+  const guard = await requireTermbaseWriteRole(
+    c,
+    projectId,
+    "publish a project's termbase to its org",
+  )
+  if (guard instanceof Response) return guard
 
   const project = await c.env.AQUILLA_PG.prepare(
     "SELECT org_id FROM projects WHERE id = ?",
@@ -116,14 +195,17 @@ termbase.post("/:id/termbase/publish", authMiddleware, async (c) => {
 // ──────────────────────────────────────────────────────────────────────────
 
 termbase.delete("/:id/termbase/publish", authMiddleware, async (c) => {
-  const user = c.get("user")
   const projectId = c.req.param("id") as string
 
-  const role = await resolveProjectRole(c.env, user, projectId)
-  if (!role) return c.json({ error: "no access to project" }, 403)
-  if (role.level < ROLE.MAINTAINER) {
-    return c.json({ error: "role >= maintainer (600) required" }, 403)
-  }
+  // Unpublishing evaporates the Q19 grant for every subscriber in the org at
+  // once (canReadTermbase re-checks the flag), so their enforcement
+  // terminology disappears. Not reversible by the subscribers.
+  const guard = await requireTermbaseWriteRole(
+    c,
+    projectId,
+    "unpublish a project's termbase",
+  )
+  if (guard instanceof Response) return guard
 
   await c.env.AQUILLA_PG.prepare(
     "UPDATE projects SET org_published_termbase = FALSE, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -228,15 +310,19 @@ termbase.post(
   authMiddleware,
   zValidator("json", subscribeBody),
   async (c) => {
-    const user = c.get("user")
     const projectId = c.req.param("id") as string
     const { termbaseProjectId, priority } = c.req.valid("json")
 
-    const role = await resolveProjectRole(c.env, user, projectId)
-    if (!role) return c.json({ error: "no access to project" }, 403)
-    if (role.level < ROLE.MAINTAINER) {
-      return c.json({ error: "role >= maintainer (600) required" }, 403)
-    }
+    // The row this writes is a standing read grant on the upstream for every
+    // member of this project. The UPSTREAM side needs no role check of its
+    // own: its consent is the published flag, which the publish route above
+    // now narrows — this route only ever reads that flag.
+    const guard = await requireTermbaseWriteRole(
+      c,
+      projectId,
+      "subscribe a project to an org termbase",
+    )
+    if (guard instanceof Response) return guard
 
     if (termbaseProjectId === projectId) {
       return c.json({ error: "cannot subscribe a project to its own termbase" }, 400)
@@ -306,15 +392,15 @@ termbase.post(
 
 // DELETE /api/v2/projects/:id/termbase/subscriptions/:termbaseProjectId — maintainer 600+
 termbase.delete("/:id/termbase/subscriptions/:termbaseProjectId", authMiddleware, async (c) => {
-  const user = c.get("user")
   const projectId = c.req.param("id") as string
   const termbaseProjectId = c.req.param("termbaseProjectId") as string
 
-  const role = await resolveProjectRole(c.env, user, projectId)
-  if (!role) return c.json({ error: "no access to project" }, 403)
-  if (role.level < ROLE.MAINTAINER) {
-    return c.json({ error: "role >= maintainer (600) required" }, 403)
-  }
+  const guard = await requireTermbaseWriteRole(
+    c,
+    projectId,
+    "unsubscribe a project from an org termbase",
+  )
+  if (guard instanceof Response) return guard
 
   await c.env.AQUILLA_PG.prepare(
     "DELETE FROM project_termbase_subscriptions WHERE project_id = ? AND termbase_project_id = ?",
@@ -326,22 +412,39 @@ termbase.delete("/:id/termbase/subscriptions/:termbaseProjectId", authMiddleware
 })
 
 // PATCH /api/v2/projects/:id/termbase/subscriptions — reorder (maintainer 600+)
-const reorderBody = z.object({ order: z.array(z.string().min(1)) })
+// OPS-54: `order` was uncapped and became one atomic `batch()` of N
+// statements, which db/shim/postgres.ts runs SERIALLY inside a single open
+// transaction — so one authenticated maintainer request could pin a pooled
+// Hyperdrive connection for as many round trips as it cared to send. This was
+// the only one of this worker's three per-element batch() sites with no caller
+// bound (routes/langquest.ts caps at 1000, routes/ai-interventions.ts at 60),
+// against 42 of the 57 z.array() schemas in routes/ carrying a .max(). The
+// client only ever sends the project's OWN subscriptions
+// (src/lib/terminology/subscriptions-api.ts), bounded by the published
+// termbases in one org, so 500 is far above any real ordering; the id length
+// matches routes/invites.ts's `projectIds`.
+const MAX_SUBSCRIPTION_ORDER = 500
+
+const reorderBody = z.object({
+  order: z.array(z.string().min(1).max(256)).max(MAX_SUBSCRIPTION_ORDER),
+})
 
 termbase.patch(
   "/:id/termbase/subscriptions",
   authMiddleware,
   zValidator("json", reorderBody),
   async (c) => {
-    const user = c.get("user")
     const projectId = c.req.param("id") as string
     const { order } = c.req.valid("json")
 
-    const role = await resolveProjectRole(c.env, user, projectId)
-    if (!role) return c.json({ error: "no access to project" }, 403)
-    if (role.level < ROLE.MAINTAINER) {
-      return c.json({ error: "role >= maintainer (600) required" }, 403)
-    }
+    // Priority decides which subscribed rendering wins in enforcement, so a
+    // reorder silently rewrites what the project's rules say.
+    const guard = await requireTermbaseWriteRole(
+      c,
+      projectId,
+      "reorder a project's termbase subscriptions",
+    )
+    if (guard instanceof Response) return guard
 
     // Index in the order array = priority. Only existing rows are updated;
     // unknown ids are silently ignored (DELETE/UPDATE no-ops on no match).
@@ -362,17 +465,6 @@ termbase.patch(
 // read via the Q19 implicit subscription grant (canReadTermbase).
 // ──────────────────────────────────────────────────────────────────────────
 
-interface Concept {
-  id: string
-  sourceTerm: string
-  renderings: Array<{ rendering: string; status: string }>
-  notes?: string
-  status: "active" | "draft" | "deprecated"
-  createdAt: string
-  createdBy?: string
-  updatedAt?: string
-}
-
 termbase.get("/:termbaseProjectId/termbase/concepts", authMiddleware, async (c) => {
   const user = c.get("user")
   const termbaseProjectId = c.req.param("termbaseProjectId") as string
@@ -388,28 +480,26 @@ termbase.get("/:termbaseProjectId/termbase/concepts", authMiddleware, async (c) 
   })
   if (!allowed) return c.json({ error: "no termbase read access" }, 403)
 
-  // Project terminology is persisted as a top-level key in the upstream's
-  // project_settings JSON (AD-3 thin-client; src/lib/sync/project-settings.ts).
-  // Read it directly here rather than round-tripping the settings route, which
-  // would require a role on the upstream we deliberately don't grant.
-  const row = await c.env.AQUILLA_PG.prepare(
-    "SELECT settings FROM project_settings WHERE project_id = ?",
+  // Read the upstream's termbase directly rather than round-tripping its
+  // settings or concepts routes, which would require a role on the upstream we
+  // deliberately don't grant. Since the concepts migration deletes the
+  // settings.terminology key, reading only that key returned nothing for every
+  // migrated termbase (AQU-1715).
+  const db = c.env.AQUILLA_PG
+  const [termbaseConcepts, termbaseLanes, subscriberLanes] = await Promise.all([
+    readProjectConcepts(db, termbaseProjectId),
+    loadLaneRows(db, termbaseProjectId),
+    loadLaneRows(db, subscriberProjectId),
+  ])
+  // AQU-1777: the renderings carry the TERMBASE's lane ids, which never equal
+  // the subscriber's. Rewrite them onto the subscriber's lanes by language
+  // here, so the editor's lane filter (conceptsForLaneTag over the
+  // subscriber's own rows) treats them exactly like local renderings.
+  const concepts = mapSubscribedConceptLanes(
+    termbaseConcepts.filter((concept) => concept.status === "active"),
+    termbaseLanes,
+    subscriberLanes,
   )
-    .bind(termbaseProjectId)
-    .first<{ settings: string }>()
-
-  let concepts: Concept[] = []
-  if (row?.settings) {
-    try {
-      const parsed = JSON.parse(row.settings) as { terminology?: Concept[] }
-      const all = Array.isArray(parsed.terminology) ? parsed.terminology : []
-      concepts = all.filter((c) => c.status === "active")
-    } catch {
-      // Corrupt settings JSON — return no concepts rather than 500ing the
-      // subscriber's enforcement merge.
-      concepts = []
-    }
-  }
 
   return c.json({ concepts })
 })

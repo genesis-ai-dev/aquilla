@@ -22,26 +22,29 @@ import {
 } from "@/lib/plan/plan-section"
 import { planUnitShortfall, type PlanShortfall } from "@/lib/plan/plan-status"
 import type { PlanSection } from "@/hooks/usePlanUnitSections"
-import { hexToRgba, parseTrackHue } from "@/lib/timeline/track-colors"
-import { PLAN_TONE } from "./plan-tone"
+import { PROGRESS_COLOR } from "@/lib/progress/progress-palette"
+import { useFrontMatterLabel } from "./use-plan-note"
 
 /**
- * The timeline's own hues, looked up by preset id exactly as `PlanBar` does, so
- * a retune in `track-colors.ts` lands on the bars and the tiles together. Two
- * surfaces that mean the same thing must never be tinted from two tables.
+ * Each medium's colour from the shared progress palette (AQU-1764, Sam
+ * 2026-10-13), the same table `PlanBar` draws from, so the bars and the tiles
+ * cannot drift apart: text in the text-validated blue, audio in the
+ * audio-validated magenta. Two surfaces that mean the same thing must never
+ * be tinted from two tables.
  */
 const HUE = {
-  text: parseTrackHue("azure"),
-  audio: parseTrackHue("cyan"),
+  text: PROGRESS_COLOR.textValidated,
+  audio: PROGRESS_COLOR.audioValidated,
 } as const
 
 /**
- * THE UNDERLINE'S LADDER IS NOT THE BARS' LADDER, and that is deliberate rather
- * than an oversight. `PlanBar` fills a whole 8px track, where 0.33 is plainly
- * visible; this is a three-pixel line under a tile the size of a fingernail, and
- * at a third alpha it disappears into the tile's own surface. So it starts at
- * half and climbs from there: a chapter missing everything draws at full
- * strength, one missing a couple of cells still draws hard enough to find.
+ * How strongly an underline half is drawn, which says how short the chapter is.
+ * It starts at half and climbs from there: this is a three-pixel line under a
+ * tile the size of a fingernail, and much fainter than half disappears into the
+ * tile's own surface. A chapter missing everything draws at full strength, one
+ * missing a couple of cells still draws hard enough to find. Applied as the
+ * half's opacity, which on a plain fill is the same as mixing its colour with
+ * transparent.
  */
 function underlineAlpha(short: number, total: number): number {
   if (short <= 0 || total <= 0) return 0
@@ -68,7 +71,12 @@ export const planTileChapter = planChapterNumber
  * audio counts validation at all. When AQU-490 lands and that constant flips,
  * the tiles flip with it instead of contradicting the row above them.
  */
-export function planSectionShortfall(section: PlanSection, hasAudio: boolean): PlanShortfall {
+export function planSectionShortfall(
+  section: PlanSection,
+  hasAudio: boolean,
+  /** AQU-955: false on an audio-only file — see `textFileIds`. */
+  hasText = true,
+): PlanShortfall {
   return planUnitShortfall(
     {
       fileId: "",
@@ -85,6 +93,7 @@ export function planSectionShortfall(section: PlanSection, hasAudio: boolean): P
       doneBy: null,
     },
     hasAudio,
+    hasText,
   )
 }
 
@@ -97,8 +106,8 @@ interface TileFacts {
   worst: number
 }
 
-function tileFacts(section: PlanSection, hasAudio: boolean): TileFacts {
-  const s = planSectionShortfall(section, hasAudio)
+function tileFacts(section: PlanSection, hasAudio: boolean, hasText: boolean): TileFacts {
+  const s = planSectionShortfall(section, hasAudio, hasText)
   return {
     textShort: s.toTranslate + s.toValidate,
     audioShort: s.toRecord + s.toAudioValidate,
@@ -107,7 +116,7 @@ function tileFacts(section: PlanSection, hasAudio: boolean): TileFacts {
 }
 
 export function PlanChapterGrid({
-  sections, showAudio, nearlyComplete, selectedKey, onSelect,
+  sections, showAudio, showText = true, nearlyComplete, selectedKey, onSelect,
 }: {
   /**
    * Already narrowed to this unit by `usePlanUnitSections`, and never empty:
@@ -120,6 +129,15 @@ export function PlanChapterGrid({
   sections: readonly PlanSection[]
   /** Whether this project records audio at all; the right half is drawn only then. */
   showAudio: boolean
+  /**
+   * AQU-955: whether this FILE carries text work — false on an audio-only file.
+   * The left half of every underline is then transparent and no tile is short
+   * on text it will never have, so the grid finally answers "which chapters
+   * still need recording" instead of reading fully short everywhere.
+   *
+   * Defaults to true so a caller written before this behaves exactly as it did.
+   */
+  showText?: boolean
   /**
    * AQU-1278: only a nearly-complete unit's tiles carry a count.
    *
@@ -134,7 +152,7 @@ export function PlanChapterGrid({
   selectedKey: string | null
   onSelect: (key: string) => void
 }) {
-  const t = useT()
+  const frontMatterLabel = useFrontMatterLabel()
 
   // POSITION BY THE PARSED NUMBER, NEVER BY ARRAY INDEX. A section row exists
   // only where cells exist, and AQU-1083's structural subtraction can empty one
@@ -192,6 +210,7 @@ export function PlanChapterGrid({
                 label={String(chapter)}
                 ariaSubject={String(chapter)}
                 showAudio={showAudio}
+                showText={showText}
                 showCount={nearlyComplete}
                 selected={selectedKey === section.key}
                 onSelect={onSelect}
@@ -211,9 +230,8 @@ export function PlanChapterGrid({
       {extras.length > 0 && (
         <div data-testid="plan-chapter-extras" className="flex flex-wrap gap-1">
           {extras.map(({ section, frontMatter }) => {
-            const label = frontMatter
-              ? t("org.projectOverview.plan.frontMatter")
-              : section.key
+            // AQU-1493: "Front matter", a label standing alone (Sam, 2026-10-03).
+            const label = frontMatter ? frontMatterLabel : section.key
             return (
               <PlanTile
                 key={section.key}
@@ -222,6 +240,7 @@ export function PlanChapterGrid({
                 ariaSubject={label}
                 wide
                 showAudio={showAudio}
+                showText={showText}
                 showCount={nearlyComplete}
                 selected={selectedKey === section.key}
                 onSelect={onSelect}
@@ -243,7 +262,14 @@ export function PlanChapterGrid({
  * grid it competed with the summary line directly beneath for the same glance.
  * A component export, so the file keeps its fast-refresh guarantee.
  */
-export function PlanGridLegend({ showAudio }: { showAudio: boolean }) {
+export function PlanGridLegend({
+  showAudio,
+  showText = true,
+}: {
+  showAudio: boolean
+  /** AQU-955: false on an audio-only file — the text swatch names nothing there. */
+  showText?: boolean
+}) {
   const t = useT()
   return (
     <div
@@ -254,14 +280,20 @@ export function PlanGridLegend({ showAudio }: { showAudio: boolean }) {
         <span aria-hidden className="h-2.5 w-2.5 rounded-[2px] bg-muted" />
         {t("org.projectOverview.plan.gridLegendComplete")}
       </span>
-      <span className="flex items-center gap-1">
-        <span
-          aria-hidden
-          className="h-2.5 w-2.5 rounded-[2px]"
-          style={{ backgroundColor: hexToRgba(HUE.text, LEGEND_ALPHA) }}
-        />
-        {t("org.projectOverview.plan.gridLegendTextShort")}
-      </span>
+      {/* Named only where the grid can draw it — the same rule the audio
+          swatch below has always followed. On an audio-only file the text half
+          of every underline is transparent. */}
+      {showText && (
+        <span className="flex items-center gap-1">
+          <span
+            aria-hidden
+            data-plan-legend="text"
+            className="h-2.5 w-2.5 rounded-[2px]"
+            style={{ backgroundColor: HUE.text, opacity: LEGEND_ALPHA }}
+          />
+          {t("org.projectOverview.plan.gridLegendTextShort")}
+        </span>
+      )}
       {/* Named only where the grid can draw it. On a text-only project the
           audio half of every underline is transparent, and a legend entry for
           a colour that is nowhere on screen is a question, not an answer. */}
@@ -269,8 +301,9 @@ export function PlanGridLegend({ showAudio }: { showAudio: boolean }) {
         <span className="flex items-center gap-1">
           <span
             aria-hidden
+            data-plan-legend="audio"
             className="h-2.5 w-2.5 rounded-[2px]"
-            style={{ backgroundColor: hexToRgba(HUE.audio, LEGEND_ALPHA) }}
+            style={{ backgroundColor: HUE.audio, opacity: LEGEND_ALPHA }}
           />
           {t("org.projectOverview.plan.gridLegendAudioShort")}
         </span>
@@ -291,7 +324,7 @@ export function PlanGridLegend({ showAudio }: { showAudio: boolean }) {
  * two hues is a third colour belonging to neither.
  */
 function PlanTile({
-  section, label, ariaSubject, wide = false, showAudio, showCount, selected, onSelect,
+  section, label, ariaSubject, wide = false, showAudio, showText = true, showCount, selected, onSelect,
 }: {
   section: PlanSection
   /** What the tile prints: the chapter number, or the whole key off the grid. */
@@ -301,12 +334,14 @@ function PlanTile({
   /** Off the numbered grid, where a key like "Scene 4" needs room to be read. */
   wide?: boolean
   showAudio: boolean
+  /** AQU-955: false on an audio-only file; the text half goes transparent. */
+  showText?: boolean
   showCount: boolean
   selected: boolean
   onSelect: (key: string) => void
 }) {
   const t = useT()
-  const { textShort, audioShort, worst } = tileFacts(section, showAudio)
+  const { textShort, audioShort, worst } = tileFacts(section, showAudio, showText)
   const complete = worst === 0
   // A numbered chapter names itself as one; anything off the numbered grid —
   // front matter, a one-chapter book, a document's own section — names itself
@@ -344,10 +379,10 @@ function PlanTile({
           data-testid={`plan-tile-badge-${section.key}`}
           // HANGS OFF THE CORNER, most of it outside the tile, so the number
           // underneath stays clear — sat mostly inside, it crowded a two-digit
-          // chapter. And it is the STATUS azure, the same rung the group
-          // header and the pill use, not the bar-fill blue: the bar's hue is
-          // tuned to be read as a fill at two alphas, and at full strength on
-          // a fifteen-pixel dot it is the loudest thing on the panel.
+          // chapter. And it is NEUTRAL, the text colour filled with the page
+          // colour for its digits: it was Nearly complete's blue, and since
+          // that status gave its blue up to the progress bars (AQU-1764), a
+          // blue bubble here would read as a bar's colour, not as a count.
           //
           // `z-10` IS THE OVERHANG'S OTHER HALF. Every tile is positioned, and
           // positioned boxes at z-index auto paint in tree order — so the tile
@@ -355,7 +390,7 @@ function PlanTile({
           // that reaches into the gap, and every badge but the last column's
           // came out shaved flat on one side. Lifting the badge out of that
           // order is what lets it actually sit on top of its neighbours.
-          className={`absolute -top-[5px] -end-[5px] z-10 flex h-[13px] min-w-[13px] items-center justify-center rounded-full px-[2.5px] text-[8.5px] leading-none font-bold text-white dark:text-[oklch(0.2_0.04_245)] ${PLAN_TONE.nearly_complete.dot}`}
+          className="absolute -top-[5px] -end-[5px] z-10 flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-foreground px-[2.5px] text-[8.5px] leading-none font-bold text-background"
         >
           {worst}
         </span>
@@ -375,20 +410,16 @@ function PlanTile({
           <span
             data-plan-underline="text"
             className="flex-1 rounded-[2px]"
-            style={{
-              backgroundColor: textShort > 0
-                ? hexToRgba(HUE.text, underlineAlpha(textShort, section.totalCount))
-                : "transparent",
-            }}
+            style={textShort > 0
+              ? { backgroundColor: HUE.text, opacity: underlineAlpha(textShort, section.totalCount) }
+              : { backgroundColor: "transparent" }}
           />
           <span
             data-plan-underline="audio"
             className="flex-1 rounded-[2px]"
-            style={{
-              backgroundColor: audioShort > 0
-                ? hexToRgba(HUE.audio, underlineAlpha(audioShort, section.totalCount))
-                : "transparent",
-            }}
+            style={audioShort > 0
+              ? { backgroundColor: HUE.audio, opacity: underlineAlpha(audioShort, section.totalCount) }
+              : { backgroundColor: "transparent" }}
           />
         </span>
       )}

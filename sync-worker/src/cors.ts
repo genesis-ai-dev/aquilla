@@ -13,10 +13,13 @@
 
 const BROWSER_PATH_PREFIXES = [
   "/events",
+  "/checking",
   "/cells/",
   "/cell-validators",
   "/import",
   "/api/v1/",
+  // MCP OAuth discovery (RFC 9728): browser-based MCP clients fetch it.
+  "/.well-known/oauth-protected-resource",
 ]
 
 export function isBrowserCorsPath(pathname: string): boolean {
@@ -46,16 +49,38 @@ const CORS_HEADERS: Record<string, string> = {
     "X-Artifact-Id",
     "X-Artifact-Name",
     "X-Artifact-Binding-Role",
+    // X-Artifact-Target-Lang: sent by the same source PUT whenever the import
+    // has a target lane, which is any lane but the default one (the default
+    // lane's tag is "", so the client omits the header and the preflight
+    // passed). Missing here, every target import into a NON-default lane died
+    // in the browser with "Failed to fetch" and wrote nothing — invisible for
+    // as long as the default lane was the only one anyone imported into
+    // (AQU-1631).
+    "X-Artifact-Target-Lang",
     "X-Artifact-Member-Path",
+    // Smart Extensions apiRev 7: a contributor's extension data-file import
+    // (POST /import) declares itself so it passes the pre-body role gate.
+    "X-Aquilla-Extension-Data",
+    // X-Doc-Name: the knowledge-base (reference document) upload's filename
+    // header, percent-encoded (AQU-1762). Same header the identity host already
+    // allows for the in-app upload, so a browser-based agent console can reach
+    // POST /api/v1/external/projects/:id/knowledge too.
+    "X-Doc-Name",
     "X-Artifact-Profile-Id",
     "X-Artifact-Profile-Version",
     "X-Artifact-Fidelity",
     "X-Update-Source-Sidecar",
+    // Sent by MCP streamable-HTTP clients on every request after initialize.
+    "Mcp-Protocol-Version",
+    // AQU-2299: the user's own ElevenLabs key on /api/v1/elevenlabs/* (BYOK).
+    // Missing here, every ElevenLabs call would die in the preflight.
+    "X-ElevenLabs-Key",
   ].join(", "),
   // AQU-276: expose custom response headers so the browser-side fetch() can
   // read them via res.headers.get(). Without Expose-Headers, only the CORS
   // safelisted headers (Content-Type, etc.) are readable from JS.
-  "Access-Control-Expose-Headers": "X-Export-Mode, X-Usfm-Lossy-Verse-Count",
+  // WWW-Authenticate: the MCP 401 challenge that starts OAuth discovery.
+  "Access-Control-Expose-Headers": "X-Export-Mode, X-Usfm-Lossy-Verse-Count, WWW-Authenticate",
   "Access-Control-Max-Age": "86400",
   Vary: "Origin",
 }

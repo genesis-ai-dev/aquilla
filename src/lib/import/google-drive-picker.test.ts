@@ -4,6 +4,7 @@
 
 import { describe, it, expect, afterEach, vi } from "vitest"
 import { openDrivePicker } from "./google-drive-picker"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 interface RecordedPicker {
   appId?: string
@@ -78,7 +79,7 @@ describe("openDrivePicker", () => {
       apiKey: "key-1",
       clientId: "123456789012-abc.apps.googleusercontent.com",
     })
-    await vi.waitFor(() => expect(recorded.callback).toBeDefined())
+    await vi.waitFor(() => expect(recorded.callback).toBeDefined(), { timeout: STALL_WATCHDOG_MS })
     recorded.callback?.({
       action: "picked",
       docs: [{ id: "f1", name: "qa-process.md", mimeType: "text/markdown" }],

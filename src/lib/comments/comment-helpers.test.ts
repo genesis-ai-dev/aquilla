@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import {
   extractMentions,
+  mentionDisplayText,
   renderCommentHtml,
   isThreadStale,
   stripAgentCommentMarker,
@@ -9,15 +10,31 @@ import {
 
 describe("extractMentions", () => {
   it("finds @username mentions", () => {
-    expect(extractMentions("Hey @alice check this")).toEqual(["alice"])
+    expect(extractMentions("Hey @[alice] check this")).toEqual(["alice"])
+    expect(extractMentions("Hey @alice check this")).toEqual([])
   })
 
   it("finds multiple mentions", () => {
-    expect(extractMentions("@alice and @bob_smith both")).toEqual(["alice", "bob_smith"])
+    expect(extractMentions("@[alice] and @[bob_smith] both")).toEqual(["alice", "bob_smith"])
   })
 
   it("deduplicates mentions", () => {
-    expect(extractMentions("@alice talked to @alice")).toEqual(["alice"])
+    expect(extractMentions("@[alice] talked to @[alice]")).toEqual(["alice"])
+  })
+
+  // AQU-761 bot walk: `@qa-bot-2`, offered by the picker, was stored as raw
+  // `@[qa-bot-2]` and never reached the bell because `-` failed the class.
+  it("accepts every character a roster username can hold", () => {
+    expect(extractMentions("Hey @[qa-bot-2], cc @[john.doe] and @[Élodie]")).toEqual([
+      "qa-bot-2",
+      "john.doe",
+      "Élodie",
+    ])
+  })
+
+  it("does not let a stray bracket or line break swallow the next token", () => {
+    expect(extractMentions("@[ @[alice]")).toEqual(["alice"])
+    expect(extractMentions("@[alice\n] @[bob]")).toEqual(["bob"])
   })
 
   it("ignores email-like patterns", () => {
@@ -52,7 +69,16 @@ describe("renderCommentHtml", () => {
   })
 
   it("renders mentions as styled spans", () => {
-    expect(renderCommentHtml("ping @alice please")).toBe('ping <span class="mention">@alice</span> please')
+    expect(renderCommentHtml("ping @[alice] please")).toBe(
+      'ping <span class="mention font-medium text-foreground">@alice</span> please',
+    )
+    expect(renderCommentHtml("ping @alice please")).toBe("ping @alice please")
+  })
+
+  it("renders a hyphenated mention as a chip", () => {
+    expect(renderCommentHtml("ping @[qa-bot-2]")).toBe(
+      'ping <span class="mention font-medium text-foreground">@qa-bot-2</span>',
+    )
   })
 
   it("escapes HTML to prevent XSS", () => {
@@ -62,6 +88,12 @@ describe("renderCommentHtml", () => {
 
   it("preserves newlines as <br>", () => {
     expect(renderCommentHtml("line one\nline two")).toBe("line one<br>line two")
+  })
+})
+
+describe("mentionDisplayText", () => {
+  it("shows a stored mention as @name and leaves typed text alone", () => {
+    expect(mentionDisplayText("ping @[qa-bot-2] and @alice")).toBe("ping @qa-bot-2 and @alice")
   })
 })
 

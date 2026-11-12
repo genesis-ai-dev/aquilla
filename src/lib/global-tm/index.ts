@@ -55,7 +55,7 @@ export class InMemoryGlobalTmStore implements GlobalTmStore {
 }
 
 export interface GovernanceResolvers {
-  /** True when the org is flagged enterprise (org_settings.settings.enterprise). */
+  /** True when the org's plan tier is enterprise (GET /api/v2/orgs/:id/plan). */
   isEnterpriseOrg(orgId: string): boolean
   /** True when the project's EFFECTIVE contributeToGlobalTm is false (C8). */
   isOptedOutProject(projectId: string): boolean

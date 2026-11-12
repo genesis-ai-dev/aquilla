@@ -1,0 +1,588 @@
+// Client-side export: one continuous WAV per chapter, verses concatenated
+// in verse order. (AQU-1201)
+//
+// The THIRD audio shape, and the one the Pattani Malay community-check needed.
+// `audio-by-character.ts` lays takes onto a mix timeline. `audio-per-line.ts`
+// zips one file per verse. Neither lets a reviewer press play once and hear a
+// chapter. This concatenates the takes they already have, in verse order, and
+// hands back a file they can play outside the editor.
+//
+// Keep it small. Skip verses with nothing recorded. Do not invent silence for
+// the gaps, do not report mixed takes, do not change the other two exports.
+// Decode + concat + WAV — the same primitives the character export already
+// uses, minus the timeline placement.
+//
+// AQU-1758 (Sam, Oct 29): the silence that IS in a book's playback stays in.
+// A pause someone dragged open before a verse's take, or between two pieces
+// of a cut take, plays as silence in the app, so it goes in as silence here,
+// and every piece of a cut take is stitched in (book-line-parts.ts).
+
+import { applyClipLevelPcm, levelFields } from "@/lib/export/clip-level"
+import JSZip from "jszip"
+
+import { resolvePcmWindow } from "@/lib/audio/pcm-window"
+import { concatPcm, TARGET_RATE } from "@/lib/audio/decode-mono"
+import { encodeWavPcm16 } from "@/lib/audio/wav-encode"
+import { parseFrontierAudioUrl } from "@/lib/audio/upload"
+import type { CellData } from "@/hooks/useCells"
+import { parseCanonicalRef } from "@/lib/progress/canonical-rollup"
+import { chapterLabelForCell } from "./chapter-scope"
+import { characterKey } from "./audio-by-character"
+import { defaultTrackTakeId, isSilencedForExport } from "./audio-validation-scope"
+import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
+import { bookLineParts } from "./book-line-parts"
+
+export interface ChapterClip {
+  cellId: string
+  audioId: string
+  url: string
+  book: string | null
+  chapter: string | null
+  verse: string | null
+  /** First number in the verse label, so "1-2" sorts with verse 1. */
+  verseSort: number
+  documentIndex: number
+  /** A chapter or section heading, placed by document order rather than a verse number. */
+  heading: boolean
+  trimStartMs?: number | null
+  trimEndMs?: number | null
+  /** AQU-2327: the take's volume and fades, applied as the timeline plays them. */
+  gainDb?: number | null
+  fadeInMs?: number | null
+  fadeOutMs?: number | null
+  /**
+   * AQU-965: validated-only withdrew this take, so the stitch writes a GAP of
+   * its length here instead of its audio.
+   *
+   * It stays in the group rather than being filtered out because this
+   * deliverable concatenates: dropping it would close the gap up and shorten
+   * the chapter, which is a chapter that silently disagrees with the one the
+   * reader hears in the app. The clip keeps its url and trim window so the gap
+   * can be sized from the take it replaces.
+   */
+  silenced?: boolean
+  /** The withdrawn take's own length, when the attachment knows it — the gap
+   *  is written from this without fetching anything. */
+  durationMs?: number | null
+  /**
+   * AQU-1758 (Sam, Oct 29): on a book, the line as playback lays it out — the
+   * silence of a pause someone dragged open before the take, then each piece
+   * of a cut take with the silence dragged open between them. Absent when the
+   * line is just its take (the fields above).
+   */
+  parts?: ChapterClipPart[]
+}
+
+/** One part of a book's line: silence, or a take (or a piece of one) with its
+ *  own trims and its own validation. */
+export type ChapterClipPart =
+  | { kind: "silence"; ms: number }
+  | ({ kind: "take" } & Pick<ChapterClip, "audioId" | "url" | "trimStartMs" | "trimEndMs" | "silenced" | "durationMs" | "gainDb" | "fadeInMs" | "fadeOutMs">)
+
+export interface GroupAudioByChapterOptions {
+  /**
+   * When true, a heading's take is stitched into its chapter at the place it
+   * occupies in the document. When false, headings are left out. They have no
+   * verse number, so treating them like any other unreferenced cell used to
+   * drop them into a leftover file of headings only.
+   */
+  includeChapterHeadings?: boolean
+}
+
+export interface ChapterGroup {
+  /** "MAT 1" when the cells carry canonical refs; "__file__" otherwise. */
+  key: string
+  book: string | null
+  chapter: string | null
+  clips: ChapterClip[]
+}
+
+export interface ChapterPreview {
+  chapterCount: number
+  clipCount: number
+  /** Verses/lines in the file that still have nothing recorded. */
+  missingCount: number
+}
+
+const FILE_GROUP_KEY = "__file__"
+
+/** AQU-2148: the take this cell actually ships — see `defaultTrackTakeId`. A
+ *  dead pointer in the recording slot falls through to the generated voice
+ *  instead of emitting a gap the editor says is a recorded line. */
+function bestAudioId(cell: CellData): string | null {
+  return defaultTrackTakeId(cell)
+}
+
+function canonicalOf(cell: CellData) {
+  return parseCanonicalRef(cell.group) ?? parseCanonicalRef(cell.context) ?? parseCanonicalRef(cell.section)
+}
+
+type VerseRef = ReturnType<typeof canonicalOf>
+
+/**
+ * Each cell's verse: its own address, or — for a line added in the app, which
+ * has none — the verse it sits under.
+ *
+ * AQU-1759: splitting a verse at its quotation marks so the quotation can be
+ * voiced by someone else leaves the quotation on a row with no address (that
+ * is how the USFM export reassembles the verse). Read as "no verse", its take
+ * fell out of the chapter into the leftover file, and the chapter played the
+ * narration with the speech missing. An added line belongs to the verse above
+ * it — the same rule progress and the USFM export already follow — so it
+ * joins that verse here, right after it in document order.
+ */
+function versesForCells(cells: readonly CellData[]): VerseRef[] {
+  let above: VerseRef = null
+  return cells.map((cell) => {
+    const own = canonicalOf(cell)
+    if (isChapterHeading(cell)) return own
+    if (own) {
+      above = own
+      return own
+    }
+    return isUserAddedLine(cell) ? above : null
+  })
+}
+
+function verseSortNumber(verse: string): number {
+  const n = parseInt(verse, 10)
+  return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY
+}
+
+function chapterSortValue(group: ChapterGroup): number {
+  if (group.chapter == null) return Number.POSITIVE_INFINITY
+  const n = parseInt(group.chapter, 10)
+  return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY
+}
+
+function isChapterHeading(cell: CellData): boolean {
+  return cell.type === "heading"
+}
+
+/** "GEN 1", "GEN 1:1", or "GEN 1:h:1" → the chapter those addresses share. */
+function chapterFromLabel(raw: string | null | undefined): { book: string; chapter: string; key: string } | null {
+  const label = chapterLabelForCell({ group: raw ?? "" })
+  if (!label) return null
+  const parts = label.split(/\s+/)
+  const chapter = parts.pop()
+  const book = parts.join(" ")
+  if (!chapter || !book) return null
+  return { book, chapter, key: label }
+}
+
+function chapterOfVerse(ref: VerseRef): { book: string; chapter: string; key: string } | null {
+  if (!ref) return null
+  return { book: ref.book, chapter: ref.chapter, key: `${ref.book} ${ref.chapter}` }
+}
+
+/**
+ * Which chapter each cell belongs to.
+ *
+ * A heading often has no verse ref of its own (USFM stores "GEN 1" on the
+ * section, and the editor cell may only still say `type: "heading"`). Those
+ * take the chapter of the next verse, or the previous verse when the heading
+ * closes the file. Other cells without a verse ref stay unassigned and collect
+ * into one file, as before.
+ */
+function chaptersForCells(
+  cells: CellData[],
+  verses: readonly VerseRef[],
+  includeChapterHeadings: boolean,
+): Array<{ book: string; chapter: string; key: string } | null> {
+  const direct = cells.map((cell, i) => {
+    if (isChapterHeading(cell)) {
+      if (!includeChapterHeadings) return null
+      return chapterFromLabel(cell.group) ?? chapterFromLabel(cell.section) ?? chapterFromLabel(cell.context)
+    }
+    return chapterOfVerse(verses[i])
+  })
+  if (!includeChapterHeadings) return direct
+  for (let i = 0; i < cells.length; i++) {
+    if (!isChapterHeading(cells[i]) || direct[i]) continue
+    let found: { book: string; chapter: string; key: string } | null = null
+    for (let j = i + 1; j < cells.length; j++) {
+      if (direct[j] && !isChapterHeading(cells[j])) {
+        found = direct[j]
+        break
+      }
+    }
+    if (!found) {
+      for (let j = i - 1; j >= 0; j--) {
+        if (direct[j] && !isChapterHeading(cells[j])) {
+          found = direct[j]
+          break
+        }
+      }
+    }
+    direct[i] = found
+  }
+  return direct
+}
+
+/**
+ * Verses stay in verse order. Headings slot in ahead of the first verse that
+ * follows them in the document, so a title recorded before 1:1 plays first
+ * even when the verse rows arrived out of order.
+ */
+function orderClips(clips: ChapterClip[]): ChapterClip[] {
+  if (!clips.some((c) => c.heading)) {
+    return [...clips].sort((a, b) => a.verseSort - b.verseSort || a.documentIndex - b.documentIndex)
+  }
+  const verses = clips
+    .filter((c) => !c.heading)
+    .sort((a, b) => a.verseSort - b.verseSort || a.documentIndex - b.documentIndex)
+  const headings = clips.filter((c) => c.heading).sort((a, b) => a.documentIndex - b.documentIndex)
+  const ordered: ChapterClip[] = []
+  let h = 0
+  for (const verse of verses) {
+    while (h < headings.length && headings[h].documentIndex < verse.documentIndex) {
+      ordered.push(headings[h])
+      h += 1
+    }
+    ordered.push(verse)
+  }
+  while (h < headings.length) {
+    ordered.push(headings[h])
+    h += 1
+  }
+  return ordered
+}
+
+/**
+ * Recorded takes, bucketed by chapter, each bucket in verse order.
+ *
+ * Verses with no take are omitted — a gap is a skip, not a pad of silence.
+ * Cells without a parseable BOOK CH:V ref (a subtitle file, a notes dump)
+ * collect into one group so the same export still produces a continuous listen.
+ * Chapter headings are the exception: they join their chapter only when
+ * `includeChapterHeadings` is set, and otherwise they are left out.
+ */
+export function groupAudioByChapter(
+  cells: CellData[],
+  opts?: GroupAudioByChapterOptions,
+): ChapterGroup[] {
+  const includeChapterHeadings = opts?.includeChapterHeadings === true
+  const verses = versesForCells(cells)
+  const chapters = chaptersForCells(cells, verses, includeChapterHeadings)
+  const order: string[] = []
+  const byKey = new Map<string, ChapterGroup>()
+
+  cells.forEach((cell, documentIndex) => {
+    if (isChapterHeading(cell) && !includeChapterHeadings) return
+    const audioId = bestAudioId(cell)
+    if (!audioId) return
+    const attachment = cell.attachments?.[audioId]
+    if (!attachment?.url) return
+
+    const ref = verses[documentIndex]
+    const chapter = chapters[documentIndex] ?? null
+    const heading = isChapterHeading(cell)
+    const key = chapter?.key ?? FILE_GROUP_KEY
+    let group = byKey.get(key)
+    if (!group) {
+      group = {
+        key,
+        book: chapter?.book ?? ref?.book ?? null,
+        chapter: chapter?.chapter ?? ref?.chapter ?? null,
+        clips: [],
+      }
+      byKey.set(key, group)
+      order.push(key)
+    }
+    group.clips.push({
+      cellId: cell.id,
+      audioId,
+      url: attachment.url,
+      book: chapter?.book ?? ref?.book ?? null,
+      chapter: chapter?.chapter ?? ref?.chapter ?? null,
+      verse: heading ? null : ref?.verse ?? null,
+      verseSort: ref && !heading ? verseSortNumber(ref.verse) : documentIndex,
+      documentIndex,
+      heading,
+      trimStartMs: attachment.trimStartMs ?? null,
+      trimEndMs: attachment.trimEndMs ?? null,
+      ...levelFields(attachment),
+      ...(isSilencedForExport(attachment)
+        ? { silenced: true, durationMs: attachment.durationMs ?? null }
+        : {}),
+      ...bookPartsFor(cell, audioId),
+    })
+  })
+
+  const groups = order.map((k) => byKey.get(k)!)
+  for (const group of groups) {
+    group.clips = orderClips(group.clips)
+  }
+  return groups.sort((a, b) => {
+    if (a.book && b.book && a.book !== b.book) return a.book.localeCompare(b.book)
+    return chapterSortValue(a) - chapterSortValue(b)
+  })
+}
+
+/**
+ * AQU-1758: a book's line as playback lays it out, when that is more than its
+ * take alone — a pause before it, or a cut take's pieces. Each piece keeps its
+ * own trims and its own validation (a withdrawn piece is a gap of its length).
+ */
+function bookPartsFor(cell: CellData, audioId: string): { parts: ChapterClipPart[] } | Record<string, never> {
+  const layout = bookLineParts(cell, audioId)
+  if (!layout || (layout.length === 1 && layout[0].kind === "take")) return {}
+  const parts: ChapterClipPart[] = []
+  for (const part of layout) {
+    if (part.kind === "silence") {
+      parts.push(part)
+      continue
+    }
+    const att = cell.attachments?.[part.attachmentId]
+    if (!att?.url) return {}
+    parts.push({
+      kind: "take",
+      audioId: part.attachmentId,
+      url: att.url,
+      trimStartMs: att.trimStartMs ?? null,
+      trimEndMs: att.trimEndMs ?? null,
+      ...levelFields(att),
+      ...(isSilencedForExport(att) ? { silenced: true, durationMs: att.durationMs ?? null } : {}),
+    })
+  }
+  return { parts }
+}
+
+/** Cheap read of who would be in the zip, before any fetch/decode. */
+export function previewAudioByChapter(
+  cells: CellData[],
+  opts?: GroupAudioByChapterOptions,
+): ChapterPreview {
+  const groups = groupAudioByChapter(cells, opts)
+  const recorded = new Set(groups.flatMap((g) => g.clips.map((c) => c.cellId)))
+  let missingCount = 0
+  for (const cell of cells) {
+    if (isChapterHeading(cell)) continue
+    if (!recorded.has(cell.id) && !bestAudioId(cell)) missingCount += 1
+  }
+  return {
+    chapterCount: groups.length,
+    clipCount: groups.reduce((n, g) => n + g.clips.length, 0),
+    missingCount,
+  }
+}
+
+/**
+ * How long a withdrawn take's gap is, in samples, from what the attachment
+ * already knew.
+ *
+ * The trim window first, exactly as the audible slice is taken
+ * (`resolvePcmWindow`): the stitch writes the length that WOULD have sounded,
+ * not the length of the stored clip, or a line trimmed down to three words
+ * would leave a gap the size of the whole take it was cut from. Returns null
+ * when the duration is unknown or the window is incoherent, and the caller
+ * then sizes the gap off the decoded samples rather than guessing.
+ */
+export function silencedGapSamples(
+  clip: Pick<ChapterClip, "durationMs" | "trimStartMs" | "trimEndMs">,
+  rate: number,
+): number | null {
+  const durationMs = clip.durationMs
+  if (durationMs == null || !Number.isFinite(durationMs) || durationMs < 0) return null
+  const start = Math.max(0, Math.min(durationMs, clip.trimStartMs ?? 0))
+  const end = clip.trimEndMs == null ? durationMs : Math.max(0, Math.min(durationMs, clip.trimEndMs))
+  // An inverted or empty window means the FULL clip downstream, so it means
+  // the full clip here too — the two must agree or the gap misreports the
+  // audio it stands in for.
+  const ms = end > start ? end - start : durationMs
+  return Math.max(0, Math.round((ms / 1000) * rate))
+}
+
+/** Filesystem-safe entry name for one chapter: `MAT_1.wav`. */
+export function chapterFileName(group: ChapterGroup): string {
+  if (group.key === FILE_GROUP_KEY) return "stitched.wav"
+  return `${characterKey(group.key)}.wav`
+}
+
+export interface ExportChapterArgs {
+  cells: CellData[]
+  projectId: string
+  fetchBytes: (args: { projectId: string; fileId: string; audioId: string; ext: string }) => Promise<Uint8Array>
+  decode: (bytes: Uint8Array) => Promise<Float32Array>
+  onProgress?: (done: number, total: number) => void
+  includeChapterHeadings?: boolean
+}
+
+export interface ExportChapterResult {
+  blob: Blob
+  /** `.wav` when the file holds one chapter; `.zip` when it holds several. */
+  extension: "wav" | "zip"
+  /** Filename suffix the dialog appends to the user-chosen stem. */
+  downloadSuffix: string
+  chapters: number
+  clips: number
+  skipped: number
+  /** AQU-965: takes withdrawn for want of validation, written as gaps. */
+  silenced: number
+}
+
+export async function exportAudioByChapter(args: ExportChapterArgs): Promise<ExportChapterResult> {
+  const groups = groupAudioByChapter(args.cells, {
+    includeChapterHeadings: args.includeChapterHeadings,
+  })
+  const cellById = new Map(args.cells.map((c) => [c.id, c]))
+  const totalClips = groups.reduce((n, g) => n + g.clips.length, 0)
+  const pcmByClip = new Map<string, Promise<Float32Array | null>>()
+  const chapterWavs: { name: string; blob: Blob }[] = []
+  let done = 0
+  let skipped = 0
+  let silenced = 0
+
+  /**
+   * One take's audio (or one piece's), its trims applied — or, withdrawn, a
+   * gap of the length it would have sounded. Null when it cannot be read; the
+   * caller skips the line.
+   */
+  const takeSamples = async (
+    cell: CellData,
+    take: Pick<ChapterClip, "cellId" | "audioId" | "url" | "trimStartMs" | "trimEndMs" | "silenced" | "durationMs" | "gainDb" | "fadeInMs" | "fadeOutMs">,
+  ): Promise<{ samples: Float32Array; silenced: boolean } | null> => {
+    // AQU-965: a withdrawn take is a GAP OF ITS OWN LENGTH, so the verses
+    // around it stay where the reader heard them. Written straight from the
+    // attachment's duration where it has one — the common case, and it costs
+    // no fetch of audio that is not going to ship. Where it has none the
+    // clip falls through to the decode below and the gap is sized from the
+    // samples, which is slower but exact.
+    const gap = take.silenced ? silencedGapSamples(take, TARGET_RATE) : null
+    if (gap != null) return { samples: new Float32Array(gap), silenced: true }
+    const parsed = parseFrontierAudioUrl(take.url)
+    if (!parsed) return null
+    const clipKey = `${parsed.audioId}.${parsed.ext}`
+    let pcmPromise = pcmByClip.get(clipKey)
+    if (!pcmPromise) {
+      pcmPromise = (async () => {
+        const generated = take.audioId === cell.selectedGeneratedVoiceAudioId
+        let bytes: Uint8Array | null = null
+        if (generated && parsed.ext === "webm") {
+          bytes = await args
+            .fetchBytes({ projectId: args.projectId, fileId: cell.fileId, audioId: parsed.audioId, ext: "wav" })
+            .catch(() => null)
+        }
+        if (bytes == null || bytes.length === 0) {
+          bytes = await args.fetchBytes({
+            projectId: args.projectId,
+            fileId: cell.fileId,
+            audioId: parsed.audioId,
+            ext: parsed.ext,
+          })
+        }
+        return bytes.length > 0 ? await args.decode(bytes) : null
+      })()
+      pcmByClip.set(clipKey, pcmPromise)
+    }
+    try {
+      const pcm = await pcmPromise
+      if (!pcm) return null
+      const win = resolvePcmWindow(pcm.length, TARGET_RATE, {
+        trimStartMs: take.trimStartMs,
+        trimEndMs: take.trimEndMs,
+      })
+      // AQU-2327: its volume and fades, as the timeline plays them.
+      const slice = applyClipLevelPcm(win.isFull ? pcm : pcm.subarray(win.start, win.end), TARGET_RATE, take)
+      // Withdrawn, and its length was not known up front — so it was decoded
+      // only to measure. The samples are discarded; the gap they sized ships.
+      return take.silenced
+        ? { samples: new Float32Array(slice.length), silenced: true }
+        : { samples: slice, silenced: false }
+    } catch (err) {
+      console.warn(`[audio-chapter] skipping clip ${take.audioId} (${take.cellId}):`, err)
+      return null
+    }
+  }
+
+  for (const group of groups) {
+    const pcmClips: Float32Array[] = []
+    for (const clip of group.clips) {
+      const cell = cellById.get(clip.cellId)!
+      // AQU-1758: a book's line as playback lays it out — the pause before the
+      // take and between a cut take's pieces as silence, every piece in it.
+      const parts: ChapterClipPart[] = clip.parts ?? [{ kind: "take", ...clip }]
+      const line: Float32Array[] = []
+      let lineSilenced = 0
+      let readable = true
+      for (const part of parts) {
+        if (part.kind === "silence") {
+          line.push(new Float32Array(Math.round((part.ms / 1000) * TARGET_RATE)))
+          continue
+        }
+        const take = await takeSamples(cell, { ...part, cellId: clip.cellId })
+        if (!take) {
+          readable = false
+          break
+        }
+        line.push(take.samples)
+        if (take.silenced) lineSilenced += 1
+      }
+      if (readable) {
+        pcmClips.push(...line)
+        silenced += lineSilenced
+      } else {
+        skipped += 1
+      }
+      done += 1
+      args.onProgress?.(done, totalClips)
+    }
+    if (pcmClips.length === 0) continue
+    const joined = concatPcm(pcmClips)
+    chapterWavs.push({ name: chapterFileName(group), blob: encodeWavPcm16(joined, TARGET_RATE) })
+  }
+
+  if (chapterWavs.length === 0) {
+    return {
+      blob: new Blob([], { type: "audio/wav" }),
+      extension: "wav",
+      downloadSuffix: "_stitched.wav",
+      chapters: 0,
+      clips: totalClips,
+      skipped,
+      silenced,
+    }
+  }
+
+  if (chapterWavs.length === 1) {
+    const only = chapterWavs[0]
+    const stem = only.name.replace(/\.wav$/i, "")
+    return {
+      blob: only.blob,
+      extension: "wav",
+      downloadSuffix: `_${stem}.wav`,
+      chapters: 1,
+      clips: totalClips,
+      skipped,
+      silenced,
+    }
+  }
+
+  const zip = new JSZip()
+  const used = new Set<string>()
+  for (const entry of chapterWavs) {
+    let name = entry.name
+    if (used.has(name.toLowerCase())) {
+      const dot = name.lastIndexOf(".")
+      let n = 2
+      let candidate = `${name.slice(0, dot)}_${n}${name.slice(dot)}`
+      while (used.has(candidate.toLowerCase())) {
+        n += 1
+        candidate = `${name.slice(0, dot)}_${n}${name.slice(dot)}`
+      }
+      name = candidate
+    }
+    used.add(name.toLowerCase())
+    zip.file(name, entry.blob)
+  }
+  const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" })
+  return {
+    blob,
+    extension: "zip",
+    downloadSuffix: "_audio-chapters.zip",
+    chapters: chapterWavs.length,
+    clips: totalClips,
+    skipped,
+    silenced,
+  }
+}

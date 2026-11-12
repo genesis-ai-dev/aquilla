@@ -6,6 +6,8 @@ import {
   jwtFor,
   openSeededProject,
   readSeededFileEvents,
+  readProjectedCells,
+  readCellHistory,
   seedProjectWithFile,
 } from "../../helpers/seed-project"
 
@@ -210,8 +212,8 @@ test("logout and second-user sign-in survive unavailable private storage", async
     "/project/private-storage-project/editor",
   ]) {
     await alice.goto(path)
-    await expect(alice.getByText("Sign in to see your workspace")).toBeVisible({ timeout: 30_000 })
-    await expect(alice.getByRole("link", { name: "Sign in", exact: true })).toHaveAttribute(
+    await expect(alice.getByText("Log in to see your workspace")).toBeVisible({ timeout: 30_000 })
+    await expect(alice.getByRole("link", { name: "Log in", exact: true })).toHaveAttribute(
       "href",
       `/login?next=${encodeURIComponent(path)}`,
     )
@@ -220,14 +222,89 @@ test("logout and second-user sign-in survive unavailable private storage", async
   }
 
   await alice.goto("/orgs/all")
-  await alice.getByRole("link", { name: "Sign in" }).click()
+  await alice.getByRole("link", { name: "Log in" }).click()
 
   await alice.getByLabel("Username or email").fill(bob.username)
   await alice.getByRole("textbox", { name: "Password" }).fill(bob.password)
-  await alice.getByRole("button", { name: "Sign in" }).click()
+  await alice.getByRole("button", { name: "Log in" }).click()
 
   await expect(alice.getByRole("button", { name: /Account menu: bob/i })).toBeVisible({
     timeout: 30_000,
   })
   await expect(alice.getByText(/couldn't safely finish switching accounts/i)).toHaveCount(0)
+})
+
+// AQU-2240: token minting may stall across a Firefox network transition.
+test("offline edits drain after repeated reconnects with the same author", async ({ alice }) => {
+  test.setTimeout(120_000)
+  const jwt = await jwtFor("alice")
+  const seeded = await seedProjectWithFile(jwt, { name: "Reconnect regression" })
+  const workspace = await openSeededProject(alice, seeded)
+  const values = ["First offline draft", "Second offline draft", "Final offline draft"]
+  for (const value of values) {
+    await alice.context().setOffline(true)
+    try {
+      await workspace.activateTargetCell(0)
+      await workspace.replaceActiveTargetText(0, value)
+      await workspace.blurEditor()
+      await expect(alice.getByRole("button", { name: /changes queued for server sync/ })).toBeVisible()
+    } finally { await alice.context().setOffline(false) }
+    await expect.poll(async () => {
+      const cells = await readProjectedCells(jwt, seeded, "target")
+      return cells.find((cell) => cell.cellId === seeded.cellIds[0])?.value
+    }, { timeout: 30_000 }).toBe(value)
+  }
+  const history = await readCellHistory(jwt, seeded, seeded.cellIds[0])
+  for (const value of values) {
+    const commits = history.filter((event) => event.kind === "target.cell.commit" && (event.payload as { value?: unknown }).value === value)
+    expect(commits).toHaveLength(1)
+    expect(commits[0].author).toBe("alice")
+  }
+})
+
+// AQU-2239: the server may accept a connection and never answer.
+test("logout clears local access when revocation never responds", async ({ alice }) => {
+  let release!: () => void
+  const held = new Promise<void>((resolve) => { release = resolve })
+  await alice.route("**/api/v2/auth/logout", async (route) => {
+    await held
+    await route.abort().catch(() => {})
+  })
+  try {
+    await new AccountSwitcherPage(alice).logOutCurrentAccount("alice")
+    await expect(alice.getByRole("button", { name: "Log in", exact: true })).toBeVisible({ timeout: 30_000 })
+    await alice.reload()
+    await expect(alice.getByText("Log in to see your workspace")).toBeVisible()
+  } finally {
+    release()
+    await alice.unrouteAll({ behavior: "wait" })
+  }
+})
+
+// AQU-2372: the account switch remounts project resolution while disconnected.
+test("offline account switch recovers the project on reconnect without Retry", async ({ alice }) => {
+  const bobSession = await ensureAuthState("bob")
+  const seeded = await seedProjectWithFile(bobSession.jwt, { name: "Account reconnect recovery" })
+  await alice.goto("/orgs/all")
+  await injectAdditionalSession(alice, bobSession)
+  // Alice is the seeded platform admin; both accounts can read Bob's project.
+  await openSeededProject(alice, seeded)
+  await alice.context().setOffline(true)
+  // Firefox's emulated offline mode can leave existing connections usable.
+  // Explicitly fail project reads as native Work Offline does, so the test
+  // actually exercises the unreachable state on every supported browser.
+  const projectReads = "**/api/v2/projects/**"
+  await alice.route(projectReads, route => route.abort("internetdisconnected"))
+  try {
+    await new AccountSwitcherPage(alice).openMenu("alice")
+    await alice.getByRole("menuitem", { name: /bob/i }).click()
+    await expect(alice.getByText("Can't reach the server — your project may still be available.")).toBeVisible()
+  } finally {
+    await alice.unroute(projectReads)
+    await alice.context().setOffline(false)
+  }
+  // Deliberately no Retry or navigation: the online event must recover it.
+  await expect(alice.getByRole("button", { name: "Account menu: bob" })).toBeVisible({ timeout: 30_000 })
+  await expect(alice.getByText("Can't reach the server — your project may still be available.")).toHaveCount(0)
+  await expect(alice.getByTestId("shell-dock").getByRole("button", { name: seeded.fileName, exact: true })).toBeVisible()
 })

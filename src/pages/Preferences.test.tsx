@@ -7,6 +7,7 @@ import { ThemeModeProvider } from "@/branding/ThemeMode"
 import { FontSizeProvider, FONT_SIZE_STORAGE_KEY } from "@/branding/FontSize"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { Preferences, PreferencesDialog } from "./Preferences"
+import { getTranslatorProfile } from "@/lib/translator-profile"
 
 // AQU-1277: OrgProvider loads the project directory via
 // fetchAccessibleProjectsResult, which catches its own network errors. Unmocked
@@ -61,6 +62,9 @@ describe("Preferences", () => {
   it("index shows General controls inline, then nav rows for nested sections", () => {
     renderAt("/preferences")
     expect(screen.getByRole("heading", { name: "Preferences" })).toBeInTheDocument()
+    // AQU-2261: Recording and Notifications follow you across devices now, so
+    // the page no longer says its preferences stay on this device.
+    expect(screen.getByText("Personal preferences that apply to you across all projects.")).toBeInTheDocument()
     expect(screen.getByText("General")).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "Theme" })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "App font size" })).toBeInTheDocument()
@@ -74,7 +78,7 @@ describe("Preferences", () => {
       [/Workspace/, "/preferences/workspace"],
       [/Translator profile/, "/preferences/profile"],
       [/AI provider keys/, "/preferences/provider-keys"],
-      [/Local models/, "/preferences/local-models"],
+      [/On-device AI models/, "/preferences/local-models"],
       [/Usage/, "/preferences/usage"],
     ]
     for (const [name, href] of rows) {
@@ -98,6 +102,8 @@ describe("Preferences", () => {
     renderAt("/preferences/privacy")
     expect(screen.getByRole("heading", { name: "Preferences" })).toBeInTheDocument()
     expect(screen.getByRole("switch", { name: "Share usage data" })).toBeInTheDocument()
+    // AQU-2263: the one Share usage data setting, as onboarding shows it.
+    expect(screen.getByTestId("share-usage-data")).toBeInTheDocument()
   })
 
   it("workspace settings use a right-side layout select and confirm switch", () => {
@@ -111,7 +117,8 @@ describe("Preferences", () => {
   it("translator profile renders one settings row per field", () => {
     renderAt("/preferences/profile")
     expect(screen.getByRole("heading", { name: "Translator profile" })).toBeInTheDocument()
-    expect(screen.getByLabelText("Assistant language")).toBeInTheDocument()
+    // AQU-2263: named for what it does, so it no longer shares a name with the project setting.
+    expect(screen.getByLabelText("The assistant answers me in")).toBeInTheDocument()
     expect(screen.getByLabelText("Age")).toBeInTheDocument()
     expect(screen.getByLabelText("Other relevant information")).toBeInTheDocument()
     expect(screen.queryByText("Profile fields")).not.toBeInTheDocument()
@@ -156,6 +163,23 @@ describe("Preferences", () => {
     expect(await screen.findByRole("option", { name: /မြန်မာ/ })).toBeInTheDocument()
   })
 
+  // AQU-2260 (Sam, Oct 29, option 2B): the UI language list grows with the
+  // app's catalogs, so it gets a search box. A reader can find their language
+  // by its own name or by its English one.
+  it("the UI language list has a search box that narrows it, by either name", async () => {
+    const user = userEvent.setup()
+    renderAt("/preferences")
+    await user.click(await screen.findByRole("combobox", { name: "UI language" }))
+    const search = await screen.findByRole("combobox", { name: "Search the list" })
+    await user.type(search, "fran")
+    expect(await screen.findByRole("option", { name: "Français" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "English" })).not.toBeInTheDocument()
+    await user.clear(search)
+    await user.type(search, "burmese")
+    expect(await screen.findByRole("option", { name: /မြန်မာ/ })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "Français" })).not.toBeInTheDocument()
+  })
+
   it("shows Default app font size for a fresh user and scales the root immediately", async () => {
     renderAt("/preferences")
     const trigger = screen.getByRole("combobox", { name: "App font size" })
@@ -182,7 +206,7 @@ describe("Preferences", () => {
     expect(document.documentElement.style.fontSize).toBe("14px")
 
     await userEvent.click(screen.getByRole("combobox", { name: "App font size" }))
-    await userEvent.click(await screen.findByRole("option", { name: "Extra Large" }))
+    await userEvent.click(await screen.findByRole("option", { name: "Extra large" }))
     expect(window.localStorage.getItem(FONT_SIZE_STORAGE_KEY)).toBe("extra-large")
     expect(document.documentElement.style.fontSize).toBe("20px")
   })
@@ -233,5 +257,69 @@ describe("PreferencesDialog", () => {
     await userEvent.click(screen.getByRole("button", { name: /close/i }))
     expect(screen.getByTestId("editor-background")).toBeInTheDocument()
     expect(screen.queryByTestId("preferences-dialog")).not.toBeInTheDocument()
+  })
+})
+
+// AQU-2259: "User → Username" in each project's settings was a person's own
+// setting, so it lives here now. Signed out, edits carry this name.
+describe("Preferences — name when signed out (AQU-2259)", () => {
+  it("is on the General card and remembered on this device", async () => {
+    renderAt("/preferences")
+    const input = await screen.findByLabelText("Name when signed out")
+    expect(input.closest("#pref-author-name")).not.toBeNull()
+    await userEvent.type(input, "Ana")
+    // AQU-2262: a typing field saves when you leave it, never half-typed.
+    expect(window.localStorage.getItem("aq.local-author-name.v1")).toBeNull()
+    await userEvent.tab()
+    expect(window.localStorage.getItem("aq.local-author-name.v1")).toBe("Ana")
+    expect(await screen.findByTestId("save-status-authorName")).toHaveTextContent("Saved")
+  })
+})
+
+// AQU-2262: the translator profile saves as you change it, a field at a time,
+// when you leave the field or pause, and says "Saved" beside it.
+describe("Preferences — translator profile saves as you change it (AQU-2262)", () => {
+  it("saves a field when you leave it, not on every keystroke", async () => {
+    renderAt("/preferences/profile")
+    const age = screen.getByLabelText("Age")
+    await userEvent.type(age, "34")
+    expect(getTranslatorProfile().age ?? "").toBe("")
+    await userEvent.tab()
+    expect(getTranslatorProfile().age).toBe("34")
+    expect(await screen.findByTestId("save-status-profile-age")).toHaveTextContent("Saved")
+  })
+
+  it("saves the longer note when you leave it, keeping its new lines", async () => {
+    renderAt("/preferences/profile")
+    const other = screen.getByLabelText(/other relevant information/i)
+    await userEvent.type(other, "Line one{Enter}Line two")
+    expect(getTranslatorProfile().otherInfo ?? "").toBe("")
+    await userEvent.tab()
+    expect(getTranslatorProfile().otherInfo).toBe("Line one\nLine two")
+  })
+})
+
+
+// AQU-2264: the recorder's and the timeline's preferences get a page of their
+// own, reached from the General card, like Workspace.
+describe("Preferences — Recording (AQU-2264)", () => {
+  it("has a Recording row on the General card that says where its settings live", () => {
+    renderAt("/preferences")
+    const row = screen.getByRole("link", { name: /^Recording/ })
+    expect(row).toHaveAttribute("href", "/preferences/recording")
+    // Signed in here (useFrontierSession is mocked with a session above).
+    expect(row).toHaveTextContent("Follows you")
+  })
+
+  it("opens the recorder's and the timeline's settings on its own page", () => {
+    renderAt("/preferences/recording")
+    expect(screen.getByRole("heading", { name: "Recording" })).toBeInTheDocument()
+    expect(screen.getByTestId("recording-prefs-scope").closest("p")).toHaveTextContent(
+      "How the recorder and the timeline work for you. They follow you:",
+    )
+    expect(screen.getByRole("tablist", { name: "Countdown" })).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Countdown beep" })).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Follow playhead" })).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Snap to neighboring edges" })).toBeInTheDocument()
   })
 })

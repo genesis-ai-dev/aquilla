@@ -23,6 +23,13 @@ export interface EmailService {
      *  to a routed inbox (support@…) or a reply lands nowhere. Workers-binding
      *  field is camelCase `replyTo` (REST is `reply_to`). */
     replyTo?: string
+    /** Files sent with the message. The whole message may not pass 5 MiB. */
+    attachments?: {
+      content: string | ArrayBuffer | ArrayBufferView
+      filename: string
+      type: string
+      disposition: "attachment" | "inline"
+    }[]
   }): Promise<{ messageId: string }>
 }
 
@@ -70,6 +77,12 @@ export interface Env {
   /** aquilla-sync-worker base URL for archive / file-delete notifications. */
   SYNC_WORKER_URL?: string
 
+  /** Service binding to aquilla-sync-worker (wrangler.toml [[env.<env>.services]]).
+   *  Same-zone global fetch to SYNC_WORKER_URL is answered by the zone origin,
+   *  not the Worker (AQU-2216), so in-app agent staging must go through this
+   *  binding when it is present. Unset in local dev, which uses SYNC_WORKER_URL. */
+  SYNC_WORKER?: { fetch: (input: string, init?: RequestInit) => Promise<Response> }
+
   /** PostHog project token (phc_…) — when set, 4xx/5xx responses are shipped
    *  to PostHog Logs (see posthog-logs.ts). Unset locally/e2e. */
   POSTHOG_KEY?: string
@@ -104,8 +117,19 @@ export interface Env {
    *  email includes a "join the community" CTA; when absent the email simply
    *  omits it (no dead link). Plain config var, not a secret. */
   DISCORD_INVITE_URL?: string
+  /** Webhook URL of the private channel that receives in-app feedback
+   *  (services/discord-feedback.ts). Worker SECRET: anyone holding it can post
+   *  to the channel. When absent the route still accepts the report and answers
+   *  `delivered: false` (local/e2e). */
+  DISCORD_FEEDBACK_WEBHOOK_URL?: string
 
   ENVIRONMENT?: string
+  /**
+   * AQU-730 read wall. Exact "1" or "true" hides ungranted target lanes from
+   * members below Maintainer. Set on deployed dev and prod after the lane
+   * backfill's grant phase. Local and e2e leave it unset.
+   */
+  LANE_READ_WALL?: string
 
   // ── One-way frontier-db-v2 identity bridge (AQU-713) ──────────────────
   /** Fail-closed rollout flag. Only the exact string "true" enables legacy
@@ -132,6 +156,10 @@ export interface Env {
    * trimmed + lowercased for matching.
    */
   ADMIN_EMAILS?: string
+  /** AQU-1352 P1: project-role resolver selector — "off" (default when unset:
+   *  today's per-table queries), "shadow" (today's answer + access_grants
+   *  parity log), "on" (access_grants view answers). See db/shared/project-roles.ts. */
+  ACCESS_GRANTS_RESOLVER?: string
 
   /**
    * Step-up "sudo" switch (middleware/platform-admin.ts). When "true", the
@@ -160,6 +188,42 @@ export interface Env {
   /** Dev/e2e only: override the OpenRouter API base (e.g. the scripted mock
    *  in scripts/mock-openrouter.ts). Never set in prod. */
   OPENROUTER_BASE_URL?: string
+  /** Aquilla Tools builder (prototype). A dedicated OpenRouter key/base for
+   *  build_tool calls, so builder spend is separable from chat/agent spend.
+   *  When the key is unset the builder falls back to OPENROUTER_API_KEY /
+   *  OPENROUTER_BASE_URL. TOOLS_BUILDER_MODEL overrides the builder model. */
+  TOOLS_BUILDER_API_KEY?: string
+  TOOLS_BUILDER_BASE_URL?: string
+  TOOLS_BUILDER_MODEL?: string
+  /** Smart Extensions read:web (aquilla.web.fetch): optional deployment-wide
+   *  allowlist of domains (comma-separated, manifest.web syntax). Unset = any
+   *  domain a user approves for an extension. */
+  TOOLS_WEB_ALLOWED_DOMAINS?: string
+  /** Omnilingual ASR Modal app base URL (infra/modal/omni_asr.py),
+   *  e.g. https://<workspace>--omnilingual-asr-web.modal.run. Unset = hosted
+   *  transcription for non-Whisper languages answers 503. */
+  OMNI_ASR_MODAL_URL?: string
+  /** Self-hosted Omnilingual ASR base URL (infra/selfhost), tried before
+   *  Modal; Modal takes over on a network error, timeout or 5xx. */
+  OMNI_ASR_PRIMARY_URL?: string
+  /** Secret: shared with the Modal app's `aquilla-omni-asr` secret, sent as
+   *  X-Omni-Secret. `wrangler secret put OMNI_SHARED_SECRET`. */
+  OMNI_SHARED_SECRET?: string
+  /** Multiplier on metered GPU cost for idle/cold-start time. Default 1.5. */
+  OMNI_ASR_AMORTIZATION?: string
+  /** Kill switch for Jev react decisions (lib/jev/decide.ts): "off" makes the
+   *  react loop use its fixed rules without calling Jev. Unset = on. */
+  JEV_REACT?: string
+  /** AQU-1690 kill switch for autopilot's Bible-data Jev questions
+   *  (lib/contextual/judge-expectations.ts): "off" leaves every question the
+   *  code cannot settle unanswered. Unset = on. */
+  JEV_BIBLE_QA?: string
+  /** Kill switch for smart edits (routes/ai-smart-edits.ts): "off" answers
+   *  every suggest request with no suggestions. Unset = on. */
+  SMART_EDITS?: string
+  /** Kill switch for the harmonizer (routes/ai-harmonize.ts): "off" answers
+   *  every passage request with no suggestions. Unset = on. */
+  HARMONIZER?: string
   /** Contextual pipeline (routes/contextual.ts) fast-tier model override.
    *  Default: openai/gpt-5.6-luna. */
   CONTEXTUAL_FAST_MODEL?: string
@@ -177,6 +241,21 @@ export interface Env {
   MONDAY_CLIENT_SECRET?: string
   /** Monday app Signing Secret — verifies webhook JWTs (secret). */
   MONDAY_SIGNING_SECRET?: string
+  /**
+   * AQU-1775: optional secret the Monday token encryption key is derived from
+   * instead of SECRET_KEY (lib/monday/crypto.ts mondayTokenKeyMaterial). Set
+   * on the dev worker only, so a production token copied to dev is unreadable
+   * there whatever the environment gate decides; unset keeps the SECRET_KEY
+   * derivation (production, local, e2e). Setting or rotating it makes every
+   * token encrypted before it unreadable — the org reconnects.
+   */
+  MONDAY_TOKEN_KEY?: string
+  /**
+   * LangQuest API base for project links (lib/langquest/client.ts). Unset ⇒
+   * https://next.langquest.org/api/v1; point a preview at
+   * https://next-preview.langquest.org/api/v1.
+   */
+  LANGQUEST_API_BASE?: string
   /** Monday app id (plain var; informational/config). */
   MONDAY_APP_ID?: string
   /** Monday app slug (plain var; informational/config). */
@@ -185,9 +264,35 @@ export interface Env {
    *  the Monday Developer Center (the SPA's /oauth/callback route; the SPA
    *  forwards code+state to the worker). Default: https://aquilla.app/oauth/callback. */
   MONDAY_REDIRECT_URI?: string
+
+  // ── Airtable integration (routes/airtable.ts, lib/airtable/*) — AQU-804 ──
+  /**
+   * Base URL of the Airtable Web API, default https://api.airtable.com. Set
+   * only to point a local stack at a stand-in Airtable (an unset value is
+   * what every deployment wants). The connection's personal access token
+   * lives encrypted in integration_connections, never here.
+   */
+  AIRTABLE_API_URL?: string
   /** API-facing origin for OAuth redirect + webhook URLs (e.g.
    *  https://api.aquilla.app/identity). Falls back to BASE_URL when unset. */
   BASE_URL_API?: string
+  /** OAuth issuer for MCP hosts (ChatGPT plugin, Claude, Codex): this
+   *  worker's public base, e.g. https://api.aquilla.app/identity. Must equal
+   *  the sync-worker's AUTH_WORKER_URL, which its protected-resource metadata
+   *  names as the authorization server. Falls back to the request origin. */
+  MCP_OAUTH_ISSUER?: string
+  /** Secret: the plain-text token OpenAI's plugin portal issues to verify we
+   *  own api.aquilla.app, served at /.well-known/openai-apps-challenge. */
+  OPENAI_APPS_CHALLENGE?: string
+  /** Local stacks only (honoured with WRANGLER_LOCAL=1): a JSON array of
+   *  client metadata documents served instead of fetching their client_id. */
+  MCP_OAUTH_PINNED_CLIENTS?: string
+  /** Zapier's pre-registered OAuth client (docs/ZAPIER.md). All three unset →
+   *  no Zapier client in this environment. The secret is a wrangler secret. */
+  ZAPIER_CLIENT_ID?: string
+  ZAPIER_CLIENT_SECRET?: string
+  /** https://zapier.com/dashboard/auth/oauth/return/App<ID>CLIAPI/ */
+  ZAPIER_REDIRECT_URI?: string
 
   // ── AQU-AGENT harness (routes/agent.ts new tools) ────────────────────────
   /** Base URL of the sandbox worker (aquilla-agent-sandbox). Local dev may
@@ -201,9 +306,34 @@ export interface Env {
   /** Per-run OpenRouter cost cap in whole cents. Default 500 (frames.ts). The
    *  run halts gracefully with a budget.exhausted frame at this ceiling. */
   AGENT_RUN_COST_CAP_CENTS?: string
+  /** Per-run Autopilot driver (src/contextual-run-do.ts) — AQU-1845. One
+   *  object per run; its alarm drives the run's waves and re-arms itself, so a
+   *  run outlives the request that started it instead of dying with that
+   *  request's `waitUntil` budget and waiting for the 5-minute cron. Optional:
+   *  where it is unbound (vitest route suites, an environment deployed before
+   *  the DO migration) routes/contextual.ts falls back to the in-request loop. */
+  CONTEXTUAL_RUN_DRIVER?: DurableObjectNamespace
+  /** Per-document knowledge-base indexing driver (src/knowledge-index-do.ts) —
+   *  AQU-2051. One object per document; its alarm runs the indexing job, so
+   *  summarizing a document of any size outlives the upload's ~30 s
+   *  `waitUntil` budget instead of being cut off mid-flight (AQU-2050).
+   *  Optional: where it is unbound (vitest route suites, an environment
+   *  deployed before the DO migration) routes/knowledge.ts falls back to the
+   *  in-request `waitUntil` job. */
+  KNOWLEDGE_INDEX_DRIVER?: DurableObjectNamespace
   /** Spans a project-wide autopilot start may drive at once. Lower it for a
    *  self-hosted upstream with few slots (see routes/contextual.ts). */
   CONTEXTUAL_MAX_CONCURRENCY?: string
+  /** AQU-1847 — aggregate autopilot span width one billing workspace may hold
+   *  across ALL its projects. Default 24. The per-project ceiling above
+   *  multiplies by project count without this; with it, two heavy projects in
+   *  one workspace share capacity instead of adding up. */
+  CONTEXTUAL_MAX_ORG_CONCURRENCY?: string
+  /** AQU-1847 — aggregate autopilot span width across the whole platform.
+   *  Default 96. Set BELOW the provider's real rate limit: autopilot takes a
+   *  lease and interactive chat/suggestions do not, so the gap is the headroom
+   *  that keeps user-facing calls responsive while autopilot runs hot. */
+  CONTEXTUAL_MAX_GLOBAL_CONCURRENCY?: string
   /** Hard cap on autopilot model requests in flight at once. Unset = uncapped.
    *  Set to the upstream's slot count when it has a fixed one; span concurrency
    *  bursts ~3x wider than it looks (verifier fan-out). */
@@ -211,6 +341,12 @@ export interface Env {
   /** "1" enables the per-call cost ledger (lib/cost-meter.ts). Off otherwise —
    *  no table, no writes. See docs/COST-METERING.md. */
   COST_METER?: string
+  /** "0" turns off Autopilot prompt/reply traces (lib/contextual/traces.ts).
+   *  On by default; rows expire after 30 days. */
+  CONTEXTUAL_TRACES?: string
+  /** "1" includes prompt/reply text in PostHog $ai_generation events for
+   *  Autopilot. Off by default: it sends translators' text to a third party. */
+  POSTHOG_LLM_CONTENT?: string
   /** R2 bucket `aquilla-snapshots` (same bucket sync-worker + agent-worker
    *  bind as SNAPSHOTS). The agent-artifacts upload route (routes/agent-artifacts.ts)
    *  writes attached files here so the sandbox's fetch-artifact can read them
@@ -232,6 +368,12 @@ export interface Env {
   //   Default (unset / "false"): LOG-ONLY mode — over-budget requests are logged
   //   but allowed through. Flip to "true" after sizing thresholds.
   AI_BUDGET_ENFORCE?: string
+  // AI_DAILY_SPEND_CEILING_USD: platform-wide daily spend ceiling in US dollars,
+  //   checked before every paid AI call (db/shared/ai-spend-ceiling.ts, AQU-1869).
+  //   Unlike the controls above this is NOT behind an enforce flag — it is the
+  //   floor that keeps the shared vendor keys solvent. Unset → $500/day. "0"
+  //   blocks all paid AI; "off"/"none"/"unlimited" switches the ceiling off.
+  AI_DAILY_SPEND_CEILING_USD?: string
 
   // ── Bible Aquifer reference data (bibletranslation.org) ──────────────────
   // Server-side proxy + agent integration of our scholarly reference API,
@@ -243,6 +385,9 @@ export interface Env {
   /** User-Agent sent to the Aquifer API — the live site 403s generic UAs.
    *  Default: "Aquilla/1.0 (+https://aquilla.app)". */
   AQUIFER_USER_AGENT?: string
+  /** AQU-1690: base URL of the Bible Knowledge Pack that autopilot reads
+   *  (lib/bkp/pack-loader.ts). Default https://bibletranslation.org/bkp/v1. */
+  BKP_BASE?: string
 
   // ── Org credit accounting (WS-AUTH-CREDITS) ──────────────────────────────
   // Platform-level defaults; per-org overrides live in org_settings.credits.
@@ -273,9 +418,16 @@ export interface Env {
   BILLING_CHAT_USAGE_REHEARSAL?: string
   /** Weekly allowance metering for any provider; retires legacy guards for metered calls. */
   BILLING_WEEKLY_USAGE_ENFORCE?: string
+  /** off | shadow | enforce — the one meter switch (db/shared/ai-entitlement.ts).
+   *  When set it wins over the two flags above (lib/billing/paid-call.ts). */
+  BILLING_METER_MODE?: string
   /** Sandbox billing opt-in: loopback locally, or the allowlisted hosts below
    *  on a development deployment. Test-mode key required either way. */
   BILLING_WORKSPACE_CHECKOUT_REHEARSAL?: string
+  /** Live new-plan sales switch; turning it off preserves paid webhooks/portal. */
+  BILLING_WORKSPACE_CHECKOUT_ENABLED?: string
+  /** Production API and app host allowlist. Live keys never run locally. */
+  BILLING_LIVE_HOSTS?: string
   /** Comma-separated API and app hosts allowed to run sandbox billing when
    *  ENVIRONMENT=development (e.g. api.dev.aquilla.app,dev.aquilla.app). */
   BILLING_SANDBOX_HOSTS?: string
@@ -315,9 +467,11 @@ export type Variables = {
 }
 
 /**
- * Row shape of the `users` table. Mirrors the schema in
- * `apps/identity/migrations/0001_initial.sql`. Legacy gitlab_* / stripe_*
- * columns were removed in the clean-break migration (2026-05-13).
+ * Row shape of the `users` table — the columns this worker types off its
+ * `SELECT *` lookups. The live schema is `db/postgres/schema.sql`, which also
+ * carries display_name / avatar_url / email_verified_at (read elsewhere, by
+ * their own row types). Legacy gitlab_* / stripe_* columns were removed in the
+ * clean-break migration (2026-05-13).
  */
 export interface UserRow {
   id: number
@@ -369,11 +523,15 @@ export interface JWTPayload {
    *  tracks the current token. Optional — tokens minted before this field
    *  existed have none, and refresh falls back to their `iat`. */
   sst?: number
+  /** Session family id: minted at login and carried across every sliding
+   *  refresh, so logout can revoke the whole refresh chain (not just the one
+   *  `jti` presented). Optional — older tokens have none. */
+  sid?: string
   [k: string]: unknown
 }
 
 /**
- * Sync-token claim shape — must match apps/sync/src/auth.ts.
+ * Sync-token claim shape — must match sync-worker/src/auth.ts.
  * See `docs/SYNC.md` (this repo) for the security model.
  */
 export interface SyncTokenClaims {
@@ -396,8 +554,8 @@ export interface SyncTokenClaims {
    * gates target-side writes + validate/unvalidate against these scopes.
    */
   scopes?: Array<{ kind: "lane" | "file"; value: string }>
-  /** AQU-730: additive per-lane role grants. ABSENT = no grants. Each entry
-   *  grants access to `lane` at `level`. */
+  /** AQU-730: additive per-lane role grants. ABSENT = no grants. `lane` is
+   *  `lanes.id`, not a language. Each entry grants that lane at `level`. */
   laneGrants?: Array<{ lane: string; level: number }>
   aud: "sync"
   iat: number
@@ -487,7 +645,8 @@ export interface ProjectRow {
   archived_at: string | null
 }
 
-/** Numeric ladder; mirrors src/lib/frontier/roles.ts and apps/sync/. */
+/** Numeric ladder; mirrors src/lib/frontier/roles.ts and
+ *  sync-worker/src/events/role-policy.ts. */
 export const ROLE = {
   VIEWER: 100,
   COMMENTER: 200,

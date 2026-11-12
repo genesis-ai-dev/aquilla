@@ -57,13 +57,18 @@ async function seedProject(): Promise<TestDb> {
       value: `source ${n}`, event_id: `src-evt-${n}`, last_edit_at: 1,
     })),
   })
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
   return tdb
 }
 
 /** N SetTranslation commands over N distinct cells — blast radius N. */
 function translationPlan(cellCount: number) {
   return Array.from({ length: cellCount }, (_, i) => ({
-    kind: 'SetTranslation', fileId: FILE, cellId: `cell-${i + 1}`, value: `v${i + 1}`,
+    kind: 'SetTranslation', fileId: FILE, cellId: `cell-${i + 1}`, laneId: 'deflane1', value: `v${i + 1}`,
   }))
 }
 
@@ -113,7 +118,7 @@ describe('session changesets — prepare', () => {
     const token = await sessionToken(1, 'alice', 400)
 
     const { res, body } = await call(env, req(token, '', 'POST', {
-      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola' }],
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'hola' }],
       // A session caller asking for act must still be forced to ask.
       autonomyMode: 'act',
     }))
@@ -167,7 +172,7 @@ describe('session changesets — delegated authority (P1 §2.3)', () => {
     const bob = await sessionToken(2, 'bob', 400)
 
     const { body: prep } = await call(env, req(alice, '', 'POST', {
-      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola' }],
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'hola' }],
     }))
     const id = prep.changeset.id as string
 
@@ -191,7 +196,7 @@ describe('session changesets — delegated authority (P1 §2.3)', () => {
 
     // Discard obeys the same rule on a second, still-staged plan.
     const { body: other } = await call(env, req(alice, '', 'POST', {
-      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-2', value: 'adios' }],
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-2', laneId: 'deflane1', value: 'adios' }],
     }))
     const { res: discarded, body: discardedBody } = await call(env, req(bob, `/${other.changeset.id}/discard`, 'POST'))
     expect(discarded.status).toBe(200)
@@ -204,7 +209,7 @@ describe('session changesets — delegated authority (P1 §2.3)', () => {
     const carol = await sessionToken(3, 'carol', 100) // viewer
 
     const { body: prep } = await call(env, req(alice, '', 'POST', {
-      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola' }],
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'hola' }],
     }))
     const id = prep.changeset.id as string
 
@@ -248,7 +253,7 @@ describe('session changesets — delegated authority (P1 §2.3)', () => {
     const env = makeEnv(tdb.db)
     const alice = await sessionToken(1, 'alice', 400)
     const { body: prep } = await call(env, req(alice, '', 'POST', {
-      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola' }],
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'hola' }],
     }))
     // A valid project-scoped token whose user has no path to the project at
     // all — no membership row, and not its creator (user 99 is, per the seed).
@@ -267,7 +272,7 @@ describe('session changesets — commit', () => {
     const token = await sessionToken(1, 'alice', 400)
 
     const { body: prep } = await call(env, req(token, '', 'POST', {
-      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola' }],
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'hola' }],
     }))
     const id = prep.changeset.id as string
 
@@ -314,15 +319,15 @@ describe('session changesets — list + discard', () => {
     const idBob = '00000000-0000-7000-8000-0000000000bb'
     await call(env, req(alice, '', 'POST', {
       id: idA,
-      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'one' }],
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'one' }],
     }))
     await call(env, req(alice, '', 'POST', {
       id: idB,
-      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'two' }],
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'two' }],
     }))
     await call(env, req(bob, '', 'POST', {
       id: idBob,
-      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'three' }],
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'three' }],
     }))
 
     // P1 §2.3: the inbox is the PROJECT's, filtered by floor — bob's plan is
@@ -383,7 +388,7 @@ describe('session changesets — list + discard', () => {
     const env = makeEnv(tdb.db)
     const token = await sessionToken(1, 'alice', 400)
     const { body: prep } = await call(env, req(token, '', 'POST', {
-      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola' }],
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'hola' }],
     }))
     const id = prep.changeset.id as string
 

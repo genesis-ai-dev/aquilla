@@ -270,3 +270,22 @@ describe("patch semantics", () => {
     expect((await planRow(db))!.done_by).toBe("user:1")
   })
 })
+
+describe("a linked Monday board (AQU-1770)", () => {
+  it("a target date change marks the project's Monday link dirty for the next push", async () => {
+    const { db } = await seed({
+      integration_connections: [
+        { id: "c1", org_id: "1", provider: "monday", account: "{}", access_token_enc: "x", created_by: "randall" },
+      ],
+      integration_links: [
+        { id: "l1", project_id: P, provider: "monday", connection_id: "c1", external_id: "b1", config: "{}", created_by: "randall" },
+      ],
+    })
+    const res = await post(db, { fileId: "f1", sectionKey: "", targetDate: "2026-11-01" })
+    expect(res.status).toBe(200)
+    const link = await db
+      .prepare("SELECT dirty_at FROM integration_links WHERE id = 'l1'")
+      .first<{ dirty_at: string | null }>()
+    expect(link!.dirty_at).not.toBeNull()
+  })
+})

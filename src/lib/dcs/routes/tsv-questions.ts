@@ -58,7 +58,7 @@ function combinedQuestionHtml(question: string, response: string): string {
 export const tsvQuestionsRoute: ResourceRoute = {
   id: "tsv-questions",
   matches: (entry, manifest) => isQuestions(entry, manifest),
-  parse: ({ entry, files }) => {
+  parse: ({ entry, projectId, files }) => {
     const repo = entry.fullName
     const out: DcsFile[] = []
 
@@ -93,7 +93,7 @@ export const tsvQuestionsRoute: ResourceRoute = {
       }
 
       out.push({
-        fileId: dcsFileId(repo, path),
+        fileId: dcsFileId(projectId, repo, path),
         name: path.split("/").pop() ?? path,
         sourcePath: path,
         bookCode: book,

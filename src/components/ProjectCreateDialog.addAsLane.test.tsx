@@ -7,14 +7,36 @@
 // (linked-target, consumes="source") with an upstream chosen, never for the
 // chain case (consumes="target"); clicking "Add as lane" PATCHes the
 // UPSTREAM project's settings.targetLanes (not the new project) and does
-// NOT create a project; the classic linked-project ("Create & Link") path
+// NOT create a project; the classic linked-project ("Create & link") path
 // stays available alongside it.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
-import { pickSelectOption } from "@/test-utils/select"
+import { pickComboboxOption } from "@/test-utils/combobox"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
 
+// AQU-1352: the destination picker fetches create-targets on open; submit waits
+// for it, so resolve to Personal (the server always lists it).
+// AQU-1561: the dialog reads the chosen upstream's file list so the lead can
+// pick which files to bring in. These tests are about everything else in the
+// create flow, so the list resolves to one file and stays all-checked — the
+// whole-project default, which keeps `linkProjectSource` carrying no `fileIds`
+// exactly as it did before that slice.
+vi.mock("@/lib/sync/link-source-preview", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/sync/link-source-preview")>()
+  return {
+    ...actual,
+    loadUpstreamFileChoices: vi
+      .fn()
+      .mockResolvedValue([{ id: "up-file-1", name: "MAT", clashes: false }]),
+  }
+})
+
+vi.mock("@/lib/sync/create-targets", () => ({
+  fetchCreateTargets: vi.fn().mockResolvedValue([
+    { kind: "personal", orgId: null, name: "Personal", path: ["Personal"], role: 700, teams: [] },
+  ]),
+}))
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
     session: { jwt: "tok", username: "wendi" },
@@ -53,6 +75,9 @@ vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
 })
 
 vi.mock("@/lib/sync/project-settings", () => ({
+  createProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "lane" } }),
+  renameProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "source-lane" } }),
+
   fetchProjectSettings: vi.fn(),
   patchProjectSettings: vi.fn(),
 }))
@@ -73,18 +98,18 @@ vi.mock("@/lib/store/project-index", () => ({
   createProject: vi.fn().mockResolvedValue(undefined),
 }))
 
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 
 import { createCloudProject } from "@/lib/sync/cloud-projects"
 import { linkProjectSource } from "@/lib/sync/archive"
 import { createProject } from "@/lib/store/project-index"
-import { fetchProjectSettings, patchProjectSettings } from "@/lib/sync/project-settings"
+import { createProjectLane, fetchProjectSettings } from "@/lib/sync/project-settings"
 
 const mockCreateCloudProject = vi.mocked(createCloudProject)
 const mockLinkProjectSource = vi.mocked(linkProjectSource)
 const mockCreateProject = vi.mocked(createProject)
 const mockFetchProjectSettings = vi.mocked(fetchProjectSettings)
-const mockPatchProjectSettings = vi.mocked(patchProjectSettings)
+const mockCreateProjectLane = vi.mocked(createProjectLane)
 
 async function pickCorpusSource() {
   fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
@@ -97,8 +122,10 @@ async function pickCorpusTarget() {
 async function openLinkedTargetWithUpstream(optionName: RegExp) {
   render(<ProjectCreateDialog onCreated={vi.fn()} />)
   fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+  // The wizard asks where the project comes from first (AQU-2105).
+  fireEvent.click(screen.getByTestId("project-source-scratch"))
 
-  fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+  fireEvent.change(screen.getByPlaceholderText("My translation project"), {
     target: { value: "French Episode 1" },
   })
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
@@ -110,7 +137,7 @@ async function openLinkedTargetWithUpstream(optionName: RegExp) {
 
   fireEvent.click(screen.getByText("Advanced: project shape"))
   fireEvent.click(screen.getByText(/Linked target/i))
-  await pickSelectOption(/Upstream project/i, optionName)
+  await pickComboboxOption(/Upstream project/i, optionName)
 }
 
 describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)", () => {
@@ -119,22 +146,14 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     mockLinkProjectSource.mockClear()
     mockCreateProject.mockClear()
     mockFetchProjectSettings.mockReset()
-    mockPatchProjectSettings.mockReset()
+    mockCreateProjectLane.mockReset()
     mockFetchProjectSettings.mockResolvedValue({
       version: 3,
       updatedAt: "2026-07-13T00:00:00.000Z",
       updatedBy: null,
       settings: { targetLanguage: "English", targetLanes: ["es"] },
     })
-    mockPatchProjectSettings.mockResolvedValue({
-      kind: "ok",
-      value: {
-        version: 4,
-        updatedAt: "2026-07-13T00:00:01.000Z",
-        updatedBy: { id: 1, username: "wendi" },
-        settings: { targetLanguage: "English", targetLanes: ["es", "French"] },
-      },
-    })
+    mockCreateProjectLane.mockResolvedValue({ kind: "ok", lane: { id: "lane" } } as never)
   })
 
   it("renders the recommendation for linked-target + consumes=source with an upstream chosen", async () => {
@@ -147,7 +166,9 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     const panel = screen.getByTestId("add-as-lane-panel")
     expect(panel).toBeTruthy()
     expect(screen.getByTestId("add-as-lane-btn")).toBeTruthy()
-    expect(screen.getByText(/Add it as a target lane on/i)).toBeTruthy()
+    // Sam, Oct 29: a lane is always a "Language lane", never a "target lane".
+    expect(screen.getByText(/Add it as a language lane on/)).toBeTruthy()
+    expect(within(panel).queryByText(/target lane/i)).toBeNull()
     // "English Source" appears both in the panel copy and the button label;
     // scope to the panel and accept either/both.
     expect(within(panel).getAllByText(/English Source/i).length).toBeGreaterThan(0)
@@ -190,12 +211,14 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     expect(screen.queryByTestId("add-as-lane-panel")).toBeNull()
     expect(screen.queryByTestId("add-as-lane-btn")).toBeNull()
     // The classic linked path stays fully available alongside the steer.
-    expect(screen.getByRole("button", { name: /Create & Link/i })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /Create & link/i })).toBeTruthy()
   })
 
   it("does not render when no upstream project is chosen yet", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
 
@@ -205,7 +228,9 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
   it("does not show the recommendation on self-contained clone + Its Source", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
-    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
+    fireEvent.change(screen.getByPlaceholderText("My translation project"), {
       target: { value: "French Episode 1" },
     })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
@@ -216,29 +241,27 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     })
     fireEvent.click(screen.getByText("Advanced: project shape"))
     // Self Contained is already checked — pick an upstream to reveal corpus choice.
-    await pickSelectOption(/Upstream project/i, /English Source/i)
+    await pickComboboxOption(/Upstream project/i, /English Source/i)
     pickCorpusSource()
 
     expect(screen.queryByTestId("add-as-lane-panel")).toBeNull()
   })
 
-  it("clicking 'Add as lane' PATCHes the UPSTREAM project's targetLanes and does NOT create a project", async () => {
+  it("clicking 'Add as lane' creates a lane on the UPSTREAM project and does NOT create a project", async () => {
     await openLinkedTargetWithUpstream(/English Source/i)
     pickCorpusSource()
 
     fireEvent.click(screen.getByTestId("add-as-lane-btn"))
 
     await waitFor(() => {
-      expect(mockPatchProjectSettings).toHaveBeenCalledTimes(1)
+      expect(mockCreateProjectLane).toHaveBeenCalledTimes(1)
     })
 
     expect(mockFetchProjectSettings).toHaveBeenCalledWith("tok", "upstream-1")
-    expect(mockPatchProjectSettings).toHaveBeenCalledWith(
-      "tok",
-      "upstream-1",
-      { targetLanes: ["es", "French"] },
-      3,
-    )
+    expect(mockCreateProjectLane).toHaveBeenCalledWith("tok", "upstream-1", {
+      name: "",
+      language: "French",
+    })
 
     // Success hint, and no project was ever created.
     await waitFor(() => {
@@ -250,16 +273,13 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
 
     // Dialog closes shortly after the success hint (deferred so the hint is
     // actually perceivable — see AddAsLaneRecommendation's closeTimerRef).
-    await waitFor(
-      () => {
-        expect(screen.queryByText("Create New Project")).toBeNull()
-      },
-      { timeout: 2000 },
-    )
+    await waitFor(() => {
+      expect(screen.queryByText("Create new project")).toBeNull()
+    })
   })
 
-  it("shows a friendly message on a 403 from the upstream settings PATCH", async () => {
-    mockPatchProjectSettings.mockResolvedValueOnce({ kind: "forbidden", required: 600, role: 400 })
+  it("shows a friendly message on a 403 from the upstream lane create", async () => {
+    mockCreateProjectLane.mockResolvedValueOnce({ kind: "error", message: "create failed (403)" })
 
     await openLinkedTargetWithUpstream(/English Source/i)
     pickCorpusSource()
@@ -281,7 +301,9 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
-    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
+    fireEvent.change(screen.getByPlaceholderText("My translation project"), {
       target: { value: "English Episode 1" },
     })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
@@ -292,17 +314,15 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     })
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
-    await pickSelectOption(/Upstream project/i, /English Source/i)
+    await pickComboboxOption(/Upstream project/i, /English Source/i)
     pickCorpusSource()
     fireEvent.click(screen.getByTestId("add-as-lane-btn"))
 
     await waitFor(() => {
-      expect(mockPatchProjectSettings).toHaveBeenCalledWith(
-        "tok",
-        "upstream-1",
-        { targetLanes: ["es", "English"] },
-        3,
-      )
+      expect(mockCreateProjectLane).toHaveBeenCalledWith("tok", "upstream-1", {
+        name: "",
+        language: "English",
+      })
     })
     expect(screen.queryByText(/already .* default target language/i)).toBeNull()
   })
@@ -320,9 +340,9 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     fireEvent.click(screen.getByTestId("add-as-lane-btn"))
 
     await waitFor(() => {
-      expect(screen.getByText(/already a lane on English Source/i)).toBeTruthy()
+      expect(screen.getByText(/already a language lane on English Source/i)).toBeTruthy()
     })
-    expect(mockPatchProjectSettings).not.toHaveBeenCalled()
+    expect(mockCreateProjectLane).not.toHaveBeenCalled()
   })
 
   it("disables the button below maintainer when the upstream's role is known", async () => {

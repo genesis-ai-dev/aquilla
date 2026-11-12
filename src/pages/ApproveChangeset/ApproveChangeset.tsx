@@ -16,7 +16,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
   approveChangeset,
+  commitChangeset,
   fetchChangesetApproval,
+  needsCommitOnApproval,
   rejectChangeset,
   type ChangesetApproval,
 } from "@/lib/agent/changeset-api"
@@ -26,6 +28,7 @@ import {
 } from "@/lib/agent/changeset-review"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { fmtLabeledDateTime } from "@/lib/format-date"
+import { projectOverviewPath } from "@/lib/navigation/org-paths"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { ChangeList, ImportPreviewView } from "@/components/changesets/ChangeList"
 
@@ -43,6 +46,10 @@ type ActionState =
   | { phase: "idle" }
   | { phase: "working" }
   | { phase: "approved" }
+  /** AQU-1673: approved AND committed here, because no agent was going to.
+   *  Distinct from `approved` so the page doesn't tell someone who imported a
+   *  CSV to "return to your agent". */
+  | { phase: "applied" }
   | { phase: "rejected" }
   | { phase: "error"; message: string }
 
@@ -84,6 +91,15 @@ export function ApproveChangeset() {
     try {
       // Digest ALWAYS comes from the GET payload — see the header comment.
       await approveChangeset(jwt, changesetId, load.data.digest)
+      // AQU-1673: an agent's plan is committed by the agent, which is watching
+      // for this approval. A session-staged plan (e.g. "Import as proposals")
+      // has nobody watching, so approving it here has to apply it too —
+      // otherwise this page says "Approved" over text that never lands.
+      if (needsCommitOnApproval(load.data)) {
+        await commitChangeset(jwt, load.data.projectId, changesetId)
+        setAction({ phase: "applied" })
+        return
+      }
       setAction({ phase: "approved" })
     } catch (err) {
       setAction({ phase: "error", message: messageForError(err) })
@@ -131,6 +147,14 @@ export function ApproveChangeset() {
               </p>
               <BackToProjectLink data={load.phase === "loaded" ? load.data : null} />
             </div>
+          ) : action.phase === "applied" ? (
+            <div className="flex flex-col items-center gap-2 py-4 text-center">
+              <CheckCircle2 className="h-8 w-8 text-emerald-600" />
+              <p className="text-sm font-medium">
+                {t("agent.changeset.appliedFull")}
+              </p>
+              <BackToProjectLink data={load.phase === "loaded" ? load.data : null} />
+            </div>
           ) : action.phase === "rejected" ? (
             <div className="flex flex-col items-center gap-2 py-4 text-center">
               <XCircle className="h-8 w-8 text-muted-foreground" />
@@ -174,7 +198,7 @@ function BackToProjectLink({ data }: { data: ApprovalData | null }) {
   if (!data) return null
   return (
     <Link
-      to={`/project/${data.projectId}`}
+      to={projectOverviewPath(data.projectId)}
       className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline"
     >
       <ArrowLeft className="h-3 w-3" />

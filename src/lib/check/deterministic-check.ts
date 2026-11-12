@@ -19,6 +19,33 @@
  *     The scan itself lives in `term-consistency-scan.ts` (re-exported below)
  *     so the Agent API's term-consistency read runs the same code — AQU-1231.
  *
+ *  3. Capitalization (AQU-1734) — mixed capitalization inside a word
+ *     (`tHe`), and headings that open with a lowercase letter. Corpus-scoped
+ *     on purpose: `tHe` and `kiSwahili` are structurally identical, so only
+ *     recurrence across the scoped cells tells a typo from the project's own
+ *     spelling. `learnCaseExceptions` derives those exceptions here and the
+ *     result reports them, so a reviewer can see what was let through. The
+ *     per-cell half of the same check (lowercase after sentence-final
+ *     punctuation or a paragraph/heading marker) needs no corpus and rides
+ *     the rule pass as the `capitalization` built-in instead.
+ *
+ *  4. Spelling (AQU-1737) — a project wordlist built from the target text,
+ *     and the rare forms that are near or sound-alike variants of a form the
+ *     project writes often. Corpus-scoped for the same reason as #3: nothing
+ *     inside one cell can tell a typo from this project's own spelling of a
+ *     name, only recurrence across the scope can. `src/lib/qa/spelling.ts`
+ *     holds the wordlist, the sound-alike fold and the suspicion rules; this
+ *     module only scopes them to the checked cells.
+ *
+ *  5. Quotation continuity (AQU-1733) — a quotation that opens in one cell
+ *     and is never closed. File-scoped by necessity: each cell on its own
+ *     looks balanced-enough, and the per-cell `unpaired-quotes` check goes
+ *     quiet whenever the source carries the same imbalance, which a source
+ *     that marks no quotations always does. The marks come from the Language
+ *     profile's `quoteMarks` slot, or are inferred from the checked cells'
+ *     own text, so the check needs no configuration and no feature flag. The
+ *     findings join the rule pass under the `unpaired-quotes` built-in.
+ *
  * Glosser drift is deferred (stretch goal in the spec): the bt-glosser builds
  * its alignment model from validated pairs at run time and a deterministic
  * "drift" verdict isn't specified yet.
@@ -28,8 +55,27 @@
 
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
-import { checkRulesForCell } from "@/lib/rules/rule-engine"
+import { checkRulesForCell, type CellCheckContext } from "@/lib/rules/rule-engine"
+import { bibleScanInfractions, type BibleFileScanInput } from "@/lib/rules/bible-check-rules"
+import { quoteContinuityCells, reconcileQuoteInfractions } from "@/lib/rules/quote-continuity-rules"
+import { inferQuoteMarks } from "../../../db/shared/quote-marks-inference"
+import type { LanguageProfile, QuoteMarksProfile } from "../../../db/shared/language-profile"
 import { semanticSourceText } from "@/lib/semantic-source-text"
+import {
+  findMixedCaseWords,
+  hasCasedLetters,
+  learnCaseExceptions,
+  type CaseExceptionProposal,
+} from "@/lib/qa/capitalization"
+import {
+  autoApprovedSpellings,
+  buildWordlist,
+  findSuspectedMisspellings,
+  wordsIn,
+  type AutoApprovedSpelling,
+  type SpellingFinding,
+  type SpellingScanOptions,
+} from "@/lib/qa/spelling"
 import { buildConceptRegex, buildTermRegex } from "@/lib/terminology/match"
 import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
 import type { CheckableCell, TermConsistencyFinding } from "@/lib/check/term-consistency-scan"
@@ -61,6 +107,22 @@ export interface RuleFindingGroup {
   infractions: RuleInfraction[]
 }
 
+export type {
+  AutoApprovedSpelling,
+  SpellingFinding,
+  SpellingSuspicion,
+  WordlistEntry,
+} from "@/lib/qa/spelling"
+
+/** One capitalization finding, grouped so a form is reported once, not per cell. */
+export interface CapitalizationFinding {
+  /** `mixed-case` groups by word form; `lowercase-heading-start` by nothing. */
+  code: "mixed-case" | "lowercase-heading-start"
+  /** The offending word form for `mixed-case` — raw content, never translated. */
+  form: string
+  cells: { cellId: string; cellLabel?: string }[]
+}
+
 export interface CheckRunResult {
   /** ISO timestamp of when the run finished. */
   ranAt: string
@@ -71,7 +133,20 @@ export interface CheckRunResult {
   checkedTermCount: number
   ruleFindings: RuleFindingGroup[]
   termFindings: TermConsistencyFinding[]
-  /** Total issue count: infraction rows + flagged term cells. */
+  /** AQU-1734: corpus-scoped capitalization findings (see `scanCapitalization`). */
+  capitalizationFindings: CapitalizationFinding[]
+  /** Forms the capitalization scan learned to allow, for a reviewer to confirm. */
+  caseExceptions: CaseExceptionProposal[]
+  /** AQU-1737: suspected misspellings, one entry per suspected word form. */
+  spellingFindings: SpellingFinding[]
+  /** Forms frequent enough to be approved without review, for the same reason. */
+  approvedSpellings: AutoApprovedSpelling[]
+  /** How many distinct word forms the wordlist holds — the spelling scope. */
+  wordlistSize: number
+  /**
+   * Total issue count: infraction rows + flagged term cells + capitalization
+   * cells + suspected spellings.
+   */
   totalFindingCount: number
 }
 
@@ -161,6 +236,117 @@ export function scanTermConsistency(
 }
 
 // ---------------------------------------------------------------------------
+// Capitalization scan (pure, synchronous — AQU-1734)
+// ---------------------------------------------------------------------------
+
+/** Cells whose `type` says the text is a section heading rather than body. */
+const HEADING_TYPES = new Set(["heading"])
+
+export interface CapitalizationScanResult {
+  findings: CapitalizationFinding[]
+  exceptions: CaseExceptionProposal[]
+}
+
+/**
+ * Corpus-scoped capitalization scan over the checked cells.
+ *
+ * Exceptions are learned from the cells themselves — a form recurring across
+ * the scope, or a lowercase-prefix family (`kiSwahili` / `kiNgozi`), is the
+ * project's own spelling and is reported as an exception instead of being
+ * flagged in every cell that uses it. Forms the SOURCE already writes that way
+ * are excepted outright, and caseless-script cells never produce findings.
+ */
+export function scanCapitalization(
+  cells: readonly { id: string; cellLabel?: string; translated: string; original: string; status: string; type?: string }[],
+): CapitalizationScanResult {
+  const translated = cells.filter((c) => c.status !== "empty" && c.translated.trim().length > 0)
+  if (translated.length === 0) return { findings: [], exceptions: [] }
+
+  const { exceptions, proposals } = learnCaseExceptions(
+    translated.map((c) => c.translated),
+    translated.map((c) => c.original),
+  )
+
+  const byForm = new Map<string, CapitalizationFinding["cells"]>()
+  const headingCells: CapitalizationFinding["cells"] = []
+
+  for (const cell of translated) {
+    for (const span of findMixedCaseWords(cell.translated, exceptions)) {
+      const list = byForm.get(span.matchedText)
+      if (list) {
+        if (!list.some((c) => c.cellId === cell.id)) list.push({ cellId: cell.id, cellLabel: cell.cellLabel })
+      } else {
+        byForm.set(span.matchedText, [{ cellId: cell.id, cellLabel: cell.cellLabel }])
+      }
+    }
+    // A heading is its own cell, so "a lowercase letter at the start of a
+    // section heading" is only decidable here, where the cell's type is known
+    // — a body cell may legitimately continue the previous verse's sentence.
+    if (cell.type && HEADING_TYPES.has(cell.type) && hasCasedLetters(cell.translated)) {
+      const first = /\p{L}/u.exec(cell.translated)?.[0]
+      if (first && first === first.toLowerCase() && first !== first.toUpperCase()) {
+        headingCells.push({ cellId: cell.id, cellLabel: cell.cellLabel })
+      }
+    }
+  }
+
+  const findings: CapitalizationFinding[] = [...byForm.entries()]
+    .map(([form, cs]): CapitalizationFinding => ({ code: "mixed-case", form, cells: cs }))
+    .sort((a, b) => b.cells.length - a.cells.length || a.form.localeCompare(b.form))
+  if (headingCells.length > 0) {
+    findings.push({ code: "lowercase-heading-start", form: "", cells: headingCells })
+  }
+  return { findings, exceptions: proposals }
+}
+
+// ---------------------------------------------------------------------------
+// Spelling scan (pure, synchronous — AQU-1737)
+// ---------------------------------------------------------------------------
+
+export interface SpellingScanResult {
+  findings: SpellingFinding[]
+  /** Forms let through on frequency alone, so the pass is never silent. */
+  approved: AutoApprovedSpelling[]
+  /** Distinct word forms in the project wordlist. */
+  wordlistSize: number
+}
+
+/**
+ * Corpus-scoped spelling scan over the checked cells.
+ *
+ * The wordlist is built from the TARGET text of the translated cells; the
+ * source text only contributes an exception list, because a name or brand the
+ * source already writes that way is not the translator's spelling (the same
+ * rule `scanCapitalization` applies).
+ *
+ * Approvals are session-local, like every other finding in this pass — the
+ * caller holds them (see `CheckFindingsDrawer`) and filters with
+ * `withoutApprovedSpellings`. Passing them back in through `opts.approved`
+ * keeps a re-run quiet; persisting them per project, and sharing them at org
+ * level per language, is the ticket's stretch goal and is not wired yet.
+ */
+export function scanSpelling(
+  cells: readonly { id: string; cellLabel?: string; translated: string; original: string; status: string }[],
+  opts: SpellingScanOptions = {},
+): SpellingScanResult {
+  const translated = cells.filter((c) => c.status !== "empty" && c.translated.trim().length > 0)
+  if (translated.length === 0) return { findings: [], approved: [], wordlistSize: 0 }
+
+  const wordlist = buildWordlist(translated)
+  const sourceForms = new Set<string>()
+  for (const cell of translated) {
+    for (const form of wordsIn(cell.original)) sourceForms.add(form)
+  }
+
+  const scanOpts: SpellingScanOptions = { ...opts, sourceForms: opts.sourceForms ?? sourceForms }
+  return {
+    findings: findSuspectedMisspellings(wordlist, scanOpts),
+    approved: autoApprovedSpellings(wordlist, scanOpts),
+    wordlistSize: wordlist.length,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Rule pass (pure, synchronous per cell)
 // ---------------------------------------------------------------------------
 
@@ -201,6 +387,49 @@ export interface CheckRunInput {
   concepts: readonly Concept[]
   /** Project-level source matching defaults (AQU-1271). */
   termMatching?: TermMatchingSettings
+  /**
+   * AQU-1688: a cell's extra check inputs (Bible data expectation and
+   * Language profile), the same ones the editor's live check uses. Omit it
+   * and the checks that need it report nothing.
+   */
+  contextFor?: (cell: CellData) => CellCheckContext | undefined
+  /**
+   * AQU-1697: what the file-level Bible data scans read (S1 headings, S8
+   * verse numbering). Their findings join the rule pass under their own
+   * built-in rules. Omit it and they report nothing.
+   */
+  bibleScan?: BibleFileScanInput | null
+  /**
+   * AQU-1737: spelling-scan knobs — the frequency thresholds, and the forms a
+   * reviewer has already approved (their findings are cleared outright).
+   */
+  spelling?: SpellingScanOptions
+  /**
+   * AQU-1733: the project's Language profile. Its `quoteMarks` slot decides
+   * the marks the cross-cell quotation pass reads; with the slot empty the
+   * pass infers them from the checked cells' own text, so a project that has
+   * never filled the slot still gets the check.
+   */
+  languageProfile?: LanguageProfile | null
+}
+
+/**
+ * The quotation marks the cross-cell pass reads: the project's recorded system
+ * if it has one, otherwise the system its own text shows. Validated cells
+ * decide when any of them quote anything — the same preference
+ * `inferQuoteMarks` applies on the Language profile card. Null when the slot
+ * is empty AND nothing in the file quotes anything: there is no system to
+ * check against, and a guessed one would fire on marks the project never used.
+ */
+export function resolveQuoteMarks(input: CheckRunInput): QuoteMarksProfile | null {
+  const slot = input.languageProfile?.quoteMarks
+  if (slot && slot.levels.length > 0) return slot
+  const translated = input.cells.filter((c) => c.status !== "empty" && c.translated.trim().length > 0)
+  if (translated.length === 0) return null
+  return inferQuoteMarks(
+    translated.map((c) => c.translated),
+    { validatedTexts: translated.filter((c) => c.status === "validated").map((c) => c.translated) },
+  )
 }
 
 const CHUNK_SIZE = 100
@@ -221,24 +450,52 @@ export async function runDeterministicCheck(
   const activeConcepts = input.concepts.filter((c) => c.status === "active")
 
   // Rule pass, chunked.
-  const infractions: RuleInfraction[] = []
+  let infractions: RuleInfraction[] = []
   for (let i = 0; i < input.cells.length; i += CHUNK_SIZE) {
     const chunk = input.cells.slice(i, i + CHUNK_SIZE)
     for (const cell of chunk) {
-      infractions.push(...checkRulesForCell(cell, cell.fileId, enabledRules))
+      infractions.push(...checkRulesForCell(cell, cell.fileId, enabledRules, input.contextFor?.(cell)))
     }
     if (i + CHUNK_SIZE < input.cells.length) await nextTick()
   }
+  // AQU-1697: the Bible data scans that need the whole file in order.
+  infractions.push(...bibleScanInfractions(input.cells, enabledRules, input.bibleScan))
+  // AQU-1733: the quotation a cell opens and no later cell closes — and, the
+  // other way round, the per-cell `unpaired-quotes` alarm on a verse that
+  // holds only a closing mark, which the file pairs perfectly well. Both need
+  // the whole file in order.
+  // Reading the project's quotation system costs a pass over the file's text,
+  // so yield first, as the term and capitalization passes below do. Reassigned
+  // rather than spliced: spreading a whole Bible's infractions into `push`
+  // would be one call with that many arguments.
+  await nextTick()
+  infractions = reconcileQuoteInfractions(
+    quoteContinuityCells(input.cells),
+    enabledRules,
+    resolveQuoteMarks(input),
+    infractions,
+  )
 
   // Term pass (regex over short strings; one pass is cheap, but yield first
   // so the rule pass's last chunk paints).
   await nextTick()
   const termFindings = scanTermConsistency(input.cells, activeConcepts, input.termMatching)
 
+  // Capitalization pass (AQU-1734): two passes over the same short strings —
+  // one to learn exceptions, one to flag what is left.
+  await nextTick()
+  const capitalization = scanCapitalization(input.cells)
+
+  // Spelling pass (AQU-1737): one pass to build the wordlist, one to suspect.
+  await nextTick()
+  const spelling = scanSpelling(input.cells, input.spelling)
+
   const flaggedTermCells = termFindings.reduce(
     (n, f) => n + f.flaggedCells.length,
     0,
   )
+
+  const capitalizationCells = capitalization.findings.reduce((n, f) => n + f.cells.length, 0)
 
   return {
     ranAt: new Date().toISOString(),
@@ -248,6 +505,12 @@ export async function runDeterministicCheck(
     checkedTermCount: activeConcepts.length,
     ruleFindings: groupInfractionsByRule(infractions, enabledRules),
     termFindings,
-    totalFindingCount: infractions.length + flaggedTermCells,
+    capitalizationFindings: capitalization.findings,
+    caseExceptions: capitalization.exceptions,
+    spellingFindings: spelling.findings,
+    approvedSpellings: spelling.approved,
+    wordlistSize: spelling.wordlistSize,
+    totalFindingCount:
+      infractions.length + flaggedTermCells + capitalizationCells + spelling.findings.length,
   }
 }

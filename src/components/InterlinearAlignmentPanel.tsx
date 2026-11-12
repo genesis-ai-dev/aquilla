@@ -27,9 +27,10 @@
  */
 
 import { useMemo } from "react"
-import { Check, X, HelpCircle } from "lucide-react"
+import { Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote, NoteOnClick } from "@/components/ui/info-note"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
   alignCell,
@@ -63,6 +64,20 @@ export interface InterlinearAlignmentPanelProps {
   /** Called when the user confirms or invalidates an alignment.
    *  Parent is responsible for persisting and passing a refreshed model. */
   onSeedChange: (seed: AlignmentSeed) => void
+  /**
+   * AQU-1408: may this viewer teach the alignment? Contributor(400)+, the same
+   * rung that may correct a back-translation and the same floor the
+   * `alignmentSeeds` settings carve-out enforces on the server.
+   *
+   * Below it the confirm/reject buttons render DISABLED with an explanation
+   * rather than vanishing or, worse, staying clickable: a click that the role
+   * floor then refuses is a control that does nothing and says nothing, which
+   * is the defect AQU-1408 was filed about in the first place.
+   *
+   * Defaults to true so a caller that does not know the viewer's role — and
+   * every existing caller — behaves exactly as before.
+   */
+  editable?: boolean
 }
 
 /**
@@ -89,6 +104,7 @@ function AlignmentRow({
   confirmed,
   invalidated,
   modelled = true,
+  editable = true,
   onConfirm,
   onInvalidate,
 }: {
@@ -98,6 +114,9 @@ function AlignmentRow({
   /** False for a decided pair the model no longer proposes: there is no
    *  confidence to show, only the decision. */
   modelled?: boolean
+  /** AQU-1408: contributor(400)+ may teach the alignment; below that the
+   *  buttons are disabled with an explanation. */
+  editable?: boolean
   onConfirm: () => void
   onInvalidate: () => void
 }) {
@@ -146,8 +165,9 @@ function AlignmentRow({
       </AppTooltip>
 
       {/* Confidence pill — only for a link the model currently proposes */}
+      {/* What the number is opens on a click of it, never a hover (AQU-2260). */}
       {modelled && (
-        <AppTooltip content={t("importExport.preview.confidencePercent", { percent: pct })}>
+        <NoteOnClick note={t("importExport.preview.confidencePercent", { percent: pct })} className="shrink-0">
           <span
             className={cn(
               "shrink-0 rounded-md px-1.5 py-px text-[9px] font-medium",
@@ -158,17 +178,16 @@ function AlignmentRow({
           >
             {pct}%
           </span>
-        </AppTooltip>
+        </NoteOnClick>
       )}
 
       {/* Action buttons — only when not already decided */}
-      {!confirmed && !invalidated && (
+      {!confirmed && !invalidated && editable && (
         <>
-          {/* AQU-240: tooltip/aria-label explains that confirming teaches the glosser */}
-          <AppTooltip
-            content={t("workspace.alignment.confirmTooltip", { srcToken: link.srcToken, tgtToken: link.tgtToken })}
-            className="max-w-xs"
-          >
+          {/* AQU-240: the aria-label explains that confirming teaches the
+              glosser. AQU-2260: the hover only names it; the section's (i)
+              says what ✓ and ✕ do. */}
+          <AppTooltip content={t("workspace.alignment.confirmTooltip")}>
             <Button
               type="button"
               variant="ghost"
@@ -180,11 +199,9 @@ function AlignmentRow({
               <Check />
             </Button>
           </AppTooltip>
-          {/* AQU-240: tooltip/aria-label explains that invalidating penalizes incorrect suggestions */}
-          <AppTooltip
-            content={t("workspace.alignment.rejectTooltip", { srcToken: link.srcToken, tgtToken: link.tgtToken })}
-            className="max-w-xs"
-          >
+          {/* AQU-240: the aria-label explains that invalidating penalizes
+              incorrect suggestions; the hover only names it (AQU-2260). */}
+          <AppTooltip content={t("workspace.alignment.rejectTooltip")}>
             <Button
               type="button"
               variant="ghost"
@@ -197,6 +214,23 @@ function AlignmentRow({
             </Button>
           </AppTooltip>
         </>
+      )}
+      {/* AQU-1408: below contributor the decision cannot be saved, so the
+          controls say so rather than accepting a click they will drop.
+          Disabled-with-a-reason, per 09-design-and-ux "Never disable silently". */}
+      {!confirmed && !invalidated && !editable && (
+        <AppTooltip content={t("workspace.alignment.contributorRequired")} disabledTriggerClassName="shrink-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            disabled
+            aria-label={t("workspace.alignment.contributorRequired")}
+            className="shrink-0 text-muted-foreground"
+          >
+            <Check />
+          </Button>
+        </AppTooltip>
       )}
       {confirmed && (
         <span className="shrink-0 text-[9px] font-medium text-emerald-600 dark:text-emerald-400">
@@ -249,16 +283,16 @@ function OriginalWordRow({ word }: { word: OriginalWordAlignment }) {
             </span>
             {/* i18n-exempt "lemma" is an AlignmentBasis tag, not copy */}
             {word.basis === "lemma" && (
-              <AppTooltip
-                content={t("workspace.alignment.originalViaLemmaTooltip", {
+              <NoteOnClick
+                note={t("workspace.alignment.originalViaLemmaTooltip", {
                   lemma: word.lemma ?? word.surface,
                 })}
-                className="max-w-xs"
+                className="ml-1.5"
               >
-                <span className="ml-1.5 rounded-md bg-amber-500/15 px-1.5 py-px text-[9px] font-medium text-amber-700 dark:text-amber-400">
+                <span className="rounded-md bg-amber-500/15 px-1.5 py-px text-[9px] font-medium text-amber-700 dark:text-amber-400">
                   {t("workspace.alignment.originalViaLemma")}
                 </span>
-              </AppTooltip>
+              </NoteOnClick>
             )}
           </>
         ) : (
@@ -288,11 +322,13 @@ function OriginalLanguageSection({ words }: { words: OriginalWordAlignment[] }) 
         <span className="text-[11px] text-muted-foreground/60">
           {t("workspace.alignment.originalSub")}
         </span>
-        <AppTooltip content={t("workspace.alignment.originalHelpTooltip")} className="max-w-xs">
-          <span className="cursor-help text-muted-foreground/60 hover:text-muted-foreground">
-            <HelpCircle className="h-3 w-3" />
-          </span>
-        </AppTooltip>
+        <InfoNote
+          label={t("common.aboutAria", { name: t("workspace.alignment.originalHeading") })}
+          className="text-muted-foreground/60"
+          iconClassName="h-3 w-3"
+        >
+          {t("workspace.alignment.originalHelpTooltip")}
+        </InfoNote>
       </div>
       <div className="flex flex-col gap-0.5">
         {words.map((word) => (
@@ -310,6 +346,7 @@ export function InterlinearAlignmentPanel({
   confirmedSeeds,
   onSeedChange,
   originalWords,
+  editable = true,
 }: InterlinearAlignmentPanelProps) {
   const t = useT()
   // AQU-241: derive whether the model has enough pairs for non-random results.
@@ -434,14 +471,13 @@ export function InterlinearAlignmentPanel({
           <span className="text-xs font-medium text-muted-foreground">
             {t("editor.bt.alignment")}
           </span>
-          <AppTooltip
-            content={t("workspace.alignment.helpTooltipShort")}
-            className="max-w-xs"
+          <InfoNote
+            label={t("common.aboutAria", { name: t("editor.bt.alignment") })}
+            className="text-muted-foreground/60"
+            iconClassName="h-3 w-3"
           >
-            <span className="cursor-help text-muted-foreground/60 hover:text-muted-foreground">
-              <HelpCircle className="h-3 w-3" />
-            </span>
-          </AppTooltip>
+            {t("workspace.alignment.helpTooltipShort")}
+          </InfoNote>
         </div>
         <p className="rounded-lg bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground">
           {t("workspace.alignment.insufficientData")}
@@ -472,14 +508,13 @@ export function InterlinearAlignmentPanel({
           <span className="text-xs font-medium text-muted-foreground">
             {t("editor.bt.alignment")}
           </span>
-          <AppTooltip
-            content={t("workspace.alignment.helpTooltipFull")}
-            className="max-w-xs"
+          <InfoNote
+            label={t("common.aboutAria", { name: t("editor.bt.alignment") })}
+            className="text-muted-foreground/60"
+            iconClassName="h-3 w-3"
           >
-            <span className="cursor-help text-muted-foreground/60 hover:text-muted-foreground">
-              <HelpCircle className="h-3 w-3" />
-            </span>
-          </AppTooltip>
+            {t("workspace.alignment.helpTooltipFull")}
+          </InfoNote>
         </div>
       )}
 
@@ -492,6 +527,7 @@ export function InterlinearAlignmentPanel({
                 key={rowKey(link)}
                 link={link}
                 modelled={modelled}
+                editable={editable}
                 confirmed={confirmedSet.has(key)}
                 invalidated={invalidatedSet.has(key)}
                 onConfirm={() => handleConfirm(link)}
@@ -522,6 +558,7 @@ export function InterlinearAlignmentPanel({
                 <AlignmentRow
                   key={rowKey(link)}
                   link={link}
+                  editable={editable}
                   confirmed={confirmedSet.has(key)}
                   invalidated={invalidatedSet.has(key)}
                   onConfirm={() => handleConfirm(link)}

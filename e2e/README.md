@@ -14,12 +14,41 @@ states, and keyboard chrome belong in Vitest/RTL (`src/**/*.test.tsx`).
 
 ## Prerequisites
 
-- **Docker** must be running. `scripts/e2e-up.ts` (via `pnpm test:e2e`) starts a
-  `postgres:16` container named `aquilla-dev-pg` on port 5432.
-  On a Mac that runtime is Colima (`colima start`). On a dedicated Linux CI box
-  use Docker Engine — see [docs/runbooks/hetzner-ci.md](../docs/runbooks/hetzner-ci.md).
-  `e2e-up.ts` execs into `aquilla-dev-pg`; it does not create the container.
-  `scripts/dev-stack.ts` and `scripts/hetzner-ci/ensure-e2e-runtime.sh` do.
+- **A Postgres 16 serving `127.0.0.1:5432`**, with a role `aquilla` (password
+  `aquilla`) and an admin connection that can `DROP`/`CREATE DATABASE`.
+  **Docker is one way to get that, not a prerequisite** (AQU-1820):
+  `scripts/e2e-up.ts` prefers the container and falls back to a local `psql`
+  when there is no Docker daemon, so the suite runs either way. A run that
+  reports *"no Docker, cannot run the e2e suite"* is reading an old version of
+  this list.
+
+  | Path | How to get it | Typical user |
+  | --- | --- | --- |
+  | **Docker** | a `postgres:16` container named `aquilla-dev-pg` publishing 5432. `e2e-up.ts` execs into it; it does **not** create it — `scripts/dev-stack.ts` and `scripts/hetzner-ci/ensure-e2e-runtime.sh` do. On a Mac the runtime is Colima (`colima start`, which `e2e-up.ts` will start for you); on a Linux CI box use Docker Engine — see [docs/runbooks/hetzner-ci.md](../docs/runbooks/hetzner-ci.md). | laptops, the Hetzner CI box |
+  | **Native Postgres** | `eval "$(bash scripts/e2e-pg-native.sh)"`. It finds the server binaries (`/usr/lib/postgresql/*/bin` or `PATH`), `initdb`s a throwaway cluster, starts it on loopback, creates the `aquilla` **SUPERUSER** role, and prints the one `export` the reset needs. Idempotent; `--stop` stops it. An already-running Homebrew/system Postgres on 5432 is used as-is. | sandboxes, containers and AFK agent runs with no Docker daemon |
+
+  The `aquilla` role needs `CREATE DATABASE` (hence SUPERUSER in the helper),
+  because each run drops and recreates `aquilla_e2e` (`aquilla_e2e_s<K>` per
+  shard) from `db/postgres/schema.sql`. The suite refuses to run against a
+  stale schema, and verifies with a sentinel row that the reset and the workers
+  reached the *same* server.
+
+- **`E2E_PG_ADMIN_URL`** — the admin connection used **only** on the
+  Docker-less path, for the `DROP DATABASE` / `CREATE DATABASE … OWNER aquilla`
+  pair. Default: `postgresql:///postgres` (the OS superuser over the default
+  unix socket — the Homebrew convention). Anything else, export what
+  `scripts/e2e-pg-native.sh` prints:
+
+  ```bash
+  export E2E_PG_ADMIN_URL="postgresql://aquilla:aquilla@127.0.0.1:5432/postgres"
+  ```
+
+  The container path ignores it (it runs `psql` as `aquilla` inside
+  `aquilla-dev-pg`). Export it from your shell profile, not just the shell you
+  test in: the **pre-push hook** runs `test:e2e:affected`, and without the
+  variable the reset falls back to `postgresql:///postgres` and fails with
+  `role "<you>" does not exist` mid-push.
+
 - **Three `pnpm install` runs** — one at the repo root, one in `auth-worker/`, one in
   `sync-worker/`:
 
@@ -35,12 +64,34 @@ states, and keyboard chrome belong in Vitest/RTL (`src/**/*.test.tsx`).
 > **9787**, sync **9788** for shard 0; +100 per extra shard) and frees those
 > ports on shutdown. It does **not** take `pnpm dev`'s 5173/8788/8789/9456.
 
+> **`pnpm dev` is Docker-only by design — with an escape hatch** (decided for
+> AQU-1820). `scripts/dev-stack.ts` manages the `aquilla-dev-pg` container
+> itself and has no `initdb` fallback, but it only manages a container when it
+> falls back to the default URL: give it `LOCAL_PG_URL` and Docker drops out of
+> `pnpm dev` too. No second provisioning path is planned inside `dev-stack.ts`.
+>
+> ```bash
+> eval "$(bash scripts/e2e-pg-native.sh)"                                    # or your own cluster
+> psql "$E2E_PG_ADMIN_URL" -c 'CREATE DATABASE aquilla_dev OWNER aquilla'    # once; dev-stack loads the schema
+> LOCAL_PG_URL=postgresql://aquilla:aquilla@127.0.0.1:5432/aquilla_dev pnpm dev
+> ```
+>
+> The agent sandbox worker (`:8790`) genuinely needs a container runtime; with
+> Docker down `pnpm dev` skips that one worker with a warning rather than
+> failing (`dev-stack.ts`, `bootSandbox`).
+
 ## Quick start
 
 ```bash
 # Install dependencies (see Prerequisites above)
 
 npx playwright install chromium
+
+# No Docker? Bring up a native Postgres first (prints the export to eval)
+eval "$(bash scripts/e2e-pg-native.sh)"
+
+# Then any of the gates below work unchanged, e.g. one spec:
+npx tsx scripts/e2e-up.ts -- e2e/specs/editor/formatting.smoke.spec.ts
 
 # Run the fast changed-file gate used by pre-push
 pnpm test:e2e:affected
@@ -236,6 +287,10 @@ E2E_HEARTBEAT_MS=10000 E2E_TEST_TIMEOUT_MS=90000 pnpm test:e2e:smoke
 E2E_GLOBAL_TIMEOUT_MS=2400000 E2E_STALL_TIMEOUT_MS=180000 pnpm test:e2e:smoke
 ```
 
+`E2E_LOCK=off` skips the per-machine slot lock that stops two e2e runs from
+killing each other's stack (emergency only). `E2E_LOCK_WAIT_SECONDS` (default
+1800) is how long a second run waits for the first to finish.
+
 If a shard produces no output for 30 seconds, the parent prints its PID and last
 line. After `E2E_STALL_TIMEOUT_MS` (two minutes by default), it terminates the
 stalled stack instead of leaving pre-push blocked indefinitely. Failure traces,
@@ -258,10 +313,12 @@ screenshots, video, and service logs are retained.
 - **Mock LLM not connected** → `VITE_LLM_BASE_URL` isn't being passed to Vite. Check
   `.env.test.local` contents during a run; it should be regenerated each time
   `e2e-up.ts` boots.
-- **Port already in use** → `e2e-up.ts` force-kills only its own block
-  (6173/9787/9788 for shard 0) at startup and again on shutdown. A live
-  `pnpm dev` on 5173/8788/8789 is left alone. If an e2e port is still held,
-  a previous shard was killed mid-boot — rerun; shutdown reaps leftovers.
+- **Port already in use** → `e2e-up.ts` takes the per-slot lock
+  (`aquilla-e2e-slot-<K>.lock` in the system temp dir) before it force-kills
+  only its own block (6173/9787/9788 for shard 0) at startup and again on
+  shutdown. A live `pnpm dev` on 5173/8788/8789 is left alone. A second run
+  on the same slot waits for the first instead of killing it. If an e2e port
+  is still held after the lock is acquired, it is leftover from a dead run.
 - **Many specs fail in 0.0s with `ECONNREFUSED 127.0.0.1:9787`** → this is not
   a product bug in those specs. Identity (auth-worker) died mid-suite, so
   `resetBackend()` cannot reach `POST /__test__/reset`. `e2e-up` now aborts the

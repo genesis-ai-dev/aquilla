@@ -70,6 +70,26 @@ describe("InlineAiError", () => {
     expect(screen.queryByText(/^Completion failed: 500/)).not.toBeInTheDocument()
   })
 
+  it("explains a protected-IDML refusal rather than 'didn't finish' (AQU-1964)", () => {
+    // The refusal is correct behaviour; the reviewer report was that the row
+    // said nothing. The cell id in the message is the anchor locator, so the
+    // raw text stays behind the info button.
+    const raw =
+      "The AI draft changed a protected IDML anchor in cell "
+      + "Stories/Story_u363.xml#/idPkg:Story[1]/Story[1]/ParagraphStyleRange[11]:part-1; "
+      + "a repair pass also failed. Nothing was saved. "
+      + "IDML anchor sequence does not match its metadata hash"
+    render(<InlineAiError message={raw} />)
+
+    const alert = screen.getByRole("alert")
+    expect(alert).toHaveTextContent("Protected formatting stopped this draft")
+    expect(alert).not.toHaveTextContent(/didn't finish/i)
+    expect(screen.queryByText(/Story_u363/)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /show error details/i }))
+    expect(screen.getByText(raw)).toBeInTheDocument()
+  })
+
   it("omits role=alert when an ancestor already announces the failure", () => {
     render(<InlineAiError message={OPENROUTER_413} announce={false} />)
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()

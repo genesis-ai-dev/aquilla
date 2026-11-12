@@ -1,3 +1,4 @@
+import { useT } from '@/lib/i18n/I18nProvider'
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useFrontierSession } from '@/hooks/useFrontierSession'
@@ -11,29 +12,31 @@ import type { BillingPlanSelection } from '@/lib/sync/billing-review'
 import { SessionHydrationError } from '@/components/SessionHydrationError'
 
 export function BillingSelection() {
+  const t = useT()
   const [params] = useSearchParams()
   const intent = readBillingIntent(params)
   const { session, loading, sessionLoadError, retrySessionLoad } = useFrontierSession()
   if (intent.kind !== 'paid') return <main className="mx-auto flex max-w-xl flex-col gap-4 p-8">
-    <h1 className="text-2xl font-semibold">Plan selection unavailable</h1>
-    <p>This link does not contain a supported plan and billing interval.</p>
-    <a href="/pricing">Compare plans</a>
+    <h1 className="text-2xl font-semibold">{t("billing.selection.unavailable")}</h1>
+    <p>{t("billing.selection.invalid")}</p>
+    <a href="/pricing">{t("billing.selection.compare")}</a>
   </main>
-  if (loading) return <p role="status">Loading your account…</p>
+  if (loading) return <p role="status">{t("billing.selection.loading")}</p>
   if (sessionLoadError && !session) return <SessionHydrationError retry={retrySessionLoad} />
   const path = billingSelectionPath(intent.selection)
   return <main className="mx-auto flex max-w-xl flex-col gap-6 p-8">
-    <h1 className="text-2xl font-semibold">Choose a workspace for this plan</h1>
-    <p>Review the plan against a workspace before purchasing. Paid checkout is coming soon.</p>
+    <h1 className="text-2xl font-semibold">{t("billing.selection.title")}</h1>
+    <p>{t("billing.selection.description")}</p>
     {!session || isJwtExpired(session.jwt) ? <>
-      <p>Sign in or create an account to keep your selected plan and billing interval.</p>
-      <Link to={loginPath({ next: path })}>Sign in to review plan</Link>
-      <Link to={onboardingForBillingNext(path)}>Create an account</Link>
+      <p>{t("billing.selection.signInHelp")}</p>
+      <Link to={loginPath({ next: path })}>{t("billing.selection.signIn")}</Link>
+      <Link to={onboardingForBillingNext(path)}>{t("billing.selection.create")}</Link>
     </> : <WorkspaceChoice key={`${session.jwt}:${path}`} jwt={session.jwt} selection={intent.selection} />}
-    <Link to="/app">Continue to Aquilla</Link>
+    <Link to="/app">{t("billing.selection.continue")}</Link>
   </main>
 }
 function WorkspaceChoice({ jwt, selection }: { jwt: string; selection: BillingPlanSelection }) {
+  const t = useT()
   const [orgs, setOrgs] = useState<MyOrg[] | null>(null)
   const [failed, setFailed] = useState(false)
   const [attempt, setAttempt] = useState(0)
@@ -48,15 +51,15 @@ function WorkspaceChoice({ jwt, selection }: { jwt: string; selection: BillingPl
   }, [jwt, attempt])
   const eligible = orgs?.filter(org => org.role.level >= 600)
   return <>
-    {!orgs && !failed && <p role="status">Loading workspaces…</p>}
+    {!orgs && !failed && <p role="status">{t("billing.selection.workspacesLoading")}</p>}
     {failed && <>
-      <p role="alert">Workspaces are unavailable. Please try again.</p>
-      <Button variant="outline" onClick={() => setAttempt(value => value + 1)}>Try workspaces again</Button>
+      <p role="alert">{t("billing.selection.workspacesUnavailable")}</p>
+      <Button variant="outline" onClick={() => setAttempt(value => value + 1)}>{t("billing.selection.retry")}</Button>
     </>}
-    {eligible?.length === 0 && <p>No workspace grants you billing authority. Create a workspace in Aquilla or ask its owner for access, then return to this link.</p>}
+    {eligible?.length === 0 && <p>{t("billing.selection.noWorkspace")}</p>}
     {eligible && eligible.length > 0 && <div className="flex flex-col gap-3">
       {eligible.map(org => <Button key={org.id} variant="outline" onClick={() => setSelected(org.id)}>
-        Review for {org.name ?? `workspace ${org.id}`}
+        {t("billing.selection.reviewFor", { workspace: org.name ?? t("billing.selection.workspaceFallback", { id: String(org.id) }) })}
       </Button>)}
     </div>}
     {selected !== null && <BillingPlanReview key={selected} jwt={jwt} orgId={selected}

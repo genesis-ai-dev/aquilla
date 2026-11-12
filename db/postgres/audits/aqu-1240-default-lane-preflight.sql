@@ -28,9 +28,9 @@
 --   assignments, artifact_bindings, scene_briefs, contextual_runs,
 --   contextual_drafts
 --   Lane scopes (not target_lang): project_member_scopes.value WHERE kind='lane'
---   Default-lane tag source: project_settings.target_language (migration 0054
---   generated column over settings->>'targetLanguage')
---   Named lanes registry: project_settings.target_lanes (settings->'targetLanes')
+--   Default-lane tag source: settings->>'targetLanguage' (0156 dropped the
+--   generated project_settings.target_language column)
+--   Named lanes registry: settings->'targetLanes' (0156 dropped target_lanes)
 --   Archived lanes: (settings::jsonb)->'archivedLanes' (JSON only, no generated col)
 --
 -- Interpretation (design §2.2)
@@ -55,11 +55,11 @@
 WITH project_lane_settings AS (
     SELECT
         ps.project_id,
-        ps.target_language,
-        ps.target_lanes,
-        NULLIF(BTRIM(ps.target_language), '') AS resolved_tag,
-        COALESCE(ps.target_lanes, '[]'::jsonb) AS target_lanes_json,
-        COALESCE(jsonb_array_length(ps.target_lanes), 0) AS target_lanes_count,
+        (ps.settings::jsonb)->>'targetLanguage' AS target_language,
+        (ps.settings::jsonb)->'targetLanes' AS target_lanes,
+        NULLIF(BTRIM((ps.settings::jsonb)->>'targetLanguage'), '') AS resolved_tag,
+        COALESCE((ps.settings::jsonb)->'targetLanes', '[]'::jsonb) AS target_lanes_json,
+        COALESCE(jsonb_array_length((ps.settings::jsonb)->'targetLanes'), 0) AS target_lanes_count,
         COALESCE((ps.settings::jsonb)->'archivedLanes', '[]'::jsonb) AS archived_lanes_json
     FROM project_settings ps
 ),
@@ -173,8 +173,8 @@ ORDER BY
 WITH project_lane_settings AS (
     SELECT
         ps.project_id,
-        NULLIF(BTRIM(ps.target_language), '') AS resolved_tag,
-        COALESCE(ps.target_lanes, '[]'::jsonb) AS target_lanes_json,
+        NULLIF(BTRIM((ps.settings::jsonb)->>'targetLanguage'), '') AS resolved_tag,
+        COALESCE((ps.settings::jsonb)->'targetLanes', '[]'::jsonb) AS target_lanes_json,
         COALESCE((ps.settings::jsonb)->'archivedLanes', '[]'::jsonb) AS archived_lanes_json
     FROM project_settings ps
 ),
@@ -244,8 +244,8 @@ ORDER BY
 WITH project_lane_settings AS (
     SELECT
         ps.project_id,
-        NULLIF(BTRIM(ps.target_language), '') AS resolved_tag,
-        COALESCE(ps.target_lanes, '[]'::jsonb) AS target_lanes_json,
+        NULLIF(BTRIM((ps.settings::jsonb)->>'targetLanguage'), '') AS resolved_tag,
+        COALESCE((ps.settings::jsonb)->'targetLanes', '[]'::jsonb) AS target_lanes_json,
         COALESCE((ps.settings::jsonb)->'archivedLanes', '[]'::jsonb) AS archived_lanes_json
     FROM project_settings ps
 ),
@@ -289,7 +289,7 @@ ORDER BY
 WITH blank_projects AS (
     SELECT ps.project_id
     FROM project_settings ps
-    WHERE NULLIF(BTRIM(ps.target_language), '') IS NULL
+    WHERE NULLIF(BTRIM((ps.settings::jsonb)->>'targetLanguage'), '') IS NULL
 ),
 empty_content AS (
     SELECT project_id, 'cells.target (side=target)' AS source, COUNT(*)::bigint AS row_count
@@ -329,7 +329,7 @@ ORDER BY ec.project_id, ec.source;
 WITH blank_projects AS (
     SELECT ps.project_id
     FROM project_settings ps
-    WHERE NULLIF(BTRIM(ps.target_language), '') IS NULL
+    WHERE NULLIF(BTRIM((ps.settings::jsonb)->>'targetLanguage'), '') IS NULL
 ),
 danger_projects AS (
     SELECT DISTINCT project_id
@@ -367,8 +367,8 @@ JOIN danger_projects dp ON dp.project_id = bp.project_id;
 WITH project_lane_settings AS (
     SELECT
         ps.project_id,
-        NULLIF(BTRIM(ps.target_language), '') AS resolved_tag,
-        COALESCE(ps.target_lanes, '[]'::jsonb) AS target_lanes_json,
+        NULLIF(BTRIM((ps.settings::jsonb)->>'targetLanguage'), '') AS resolved_tag,
+        COALESCE((ps.settings::jsonb)->'targetLanes', '[]'::jsonb) AS target_lanes_json,
         COALESCE((ps.settings::jsonb)->'archivedLanes', '[]'::jsonb) AS archived_lanes_json
     FROM project_settings ps
 ),
@@ -432,9 +432,9 @@ ORDER BY COALESCE(ec.empty_target_cells, 0) DESC, pc.project_id;
 \echo ''
 
 WITH multi_lane_projects AS (
-    SELECT ps.project_id, COALESCE(jsonb_array_length(ps.target_lanes), 0) AS target_lanes_count
+    SELECT ps.project_id, COALESCE(jsonb_array_length((ps.settings::jsonb)->'targetLanes'), 0) AS target_lanes_count
     FROM project_settings ps
-    WHERE COALESCE(jsonb_array_length(ps.target_lanes), 0) > 1
+    WHERE COALESCE(jsonb_array_length((ps.settings::jsonb)->'targetLanes'), 0) > 1
 ),
 per_project AS (
     SELECT
@@ -476,7 +476,7 @@ ORDER BY empty_target_cells DESC, project_id;
 WITH multi_lane_projects AS (
     SELECT ps.project_id
     FROM project_settings ps
-    WHERE COALESCE(jsonb_array_length(ps.target_lanes), 0) > 1
+    WHERE COALESCE(jsonb_array_length((ps.settings::jsonb)->'targetLanes'), 0) > 1
 ),
 has_implicit AS (
     SELECT DISTINCT project_id FROM (

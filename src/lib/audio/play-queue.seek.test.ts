@@ -161,6 +161,19 @@ describe("planAdvance", () => {
     expect(planAdvance(cells, 0, CLIP, 10.01)).toEqual({ kind: "seamless", index: 2 })
   })
 
+  it("AQU-981: lines sharing one whole recording (a range) play it once, then go on", () => {
+    // Genesis 1:1-3 uploaded as one file: a take of it on each of the three
+    // verses, every one over the same url, none trimmed; 1:4 has its own.
+    const RANGE = "frontier-audio://audio-v1-1700000000-range.wav"
+    const verse = (n: number, url: string, extra: Record<string, unknown> = {}) =>
+      textCell({ id: `v${n}`, selectedAudioId: `audio-v${n}-x.wav`, attachments: { [`audio-v${n}-x.wav`]: { type: "audio", url, ...extra } } as CellData["attachments"] })
+    const cells = [verse(1, RANGE), verse(2, RANGE), verse(3, RANGE), verse(4, OTHER)]
+    expect(planAdvance(cells, 0, RANGE, 9)).toEqual({ kind: "open", index: 3 })
+    // Lines given their own slices of the clip (Voice together's boundaries) still open each.
+    const sliced = [verse(1, RANGE, { trimEndMs: 3000 }), verse(2, RANGE, { trimStartMs: 3000, trimEndMs: 6000 }), verse(3, OTHER)]
+    expect(planAdvance(sliced, 0, RANGE, 3)).toEqual({ kind: "open", index: 1 })
+  })
+
   it("advance into a DUBBED section stays seamless on the source clip, NOT an element swap to the take (round 5)", () => {
     const cells = [mediaCell(0, 10), dubbedCell(10, 22)]
     expect(planAdvance(cells, 0, CLIP, 10.01)).toEqual({ kind: "seamless", index: 1 })

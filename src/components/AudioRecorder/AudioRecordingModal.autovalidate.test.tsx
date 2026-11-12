@@ -52,11 +52,27 @@ vi.mock("@/lib/audio/upload", async (importOriginal) => ({
   uploadCellAudio: vi.fn(async () => ({ audioId: "audio-c1-1-new", ext: "webm", url: "frontier-audio://audio-c1-1-new.webm" })),
   deleteCellAudio: vi.fn(async () => {}),
 }))
-vi.mock("@/lib/audio/bytes-cache", () => ({ audioCachePutBlob: vi.fn(async () => {}) }))
+vi.mock("@/lib/audio/bytes-cache", () => ({ audioCacheGet: vi.fn(async () => null), audioCachePutBlob: vi.fn(async () => {}) }))
 vi.mock("@/lib/audio/project-audio-state", () => ({ markProjectHasAudioDataSoon: vi.fn() }))
 vi.mock("@/lib/audio/transcribe-status", () => ({ setTranscribeStatus: vi.fn() }))
 vi.mock("@/lib/audio/transcribe", () => ({ transcribeCell: vi.fn(async () => {}) }))
-vi.mock("@/lib/audio/audio-coordinator", () => ({ pushAudioShortcutOverride: () => () => {} }))
+vi.mock("@/lib/audio/audio-coordinator", () => ({
+  pushAudioShortcutOverride: () => () => {},
+  setActiveAudio: () => {},
+  clearActiveAudioIf: () => {},
+  claimActiveAudio: () => {},
+  getActiveAudio: () => null,
+}))
+// AQU-1217: the ready screen's selected-take waveform has its own suite
+// (AudioRecordingModal.ready.test.tsx); here it is inert.
+vi.mock("@/hooks/useCellAudio", () => ({
+  useCellAudio: () => ({
+    state: "idle", error: null, isPlaying: false, currentTime: 0, duration: 0,
+    peaks: null, peaksState: "idle",
+    play: async () => {}, pause: () => {}, seek: () => {}, setVolume: () => {},
+    setTrim: () => {}, requestPeaks: async () => {}, ensureBytes: async () => new Uint8Array(),
+  }),
+}))
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
 
@@ -103,6 +119,9 @@ describe("AudioRecordingModal — a fresh recording validates itself (AQU-490)",
     await waitFor(() => expect(emitValidate).toHaveBeenCalledTimes(1))
     expect(emitValidate.mock.calls[0][0]).toMatchObject({
       projectId: "p1", fileId: "f1", cellId: "c1", audioId: "audio-c1-1-new.webm", author: "sam",
+      // AQU-1572: reported, but as the recorder's own vote, not a review.
+      auto: true,
+      surface: "recorder",
     })
     // The order is the rule: the vote names a take that must already exist.
     expect(emitAttach.mock.invocationCallOrder[0]).toBeLessThan(emitValidate.mock.invocationCallOrder[0])

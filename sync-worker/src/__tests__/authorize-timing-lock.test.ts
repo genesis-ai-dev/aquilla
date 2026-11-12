@@ -9,6 +9,7 @@ import { authorize } from "../events/authorize"
 import { makeTestToken } from "./helpers/auth"
 import { ROLE } from "../events/role-policy"
 import type { RawEvent } from "../events/types"
+import { projectSettingsRow } from "./helpers/project-settings-db"
 
 const SECRET = "test-secret-value-for-timing-lock"
 
@@ -22,7 +23,7 @@ function makeDb(options: { locked?: boolean; userInserted?: boolean }): AquillaD
           return {
             async first() {
               if (sql.includes("FROM project_settings")) {
-                return { settings: JSON.stringify(locked ? {} : { timingLocked: false }) }
+                return projectSettingsRow(sql, JSON.stringify(locked ? {} : { timingLocked: false }))
               }
               if (sql.includes("FROM cells")) {
                 return userInserted

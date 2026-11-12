@@ -1,9 +1,9 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useEffect, useRef, useState } from "react"
 import { Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { SettingsGroup } from "@/components/ui/page"
-import posthog from "@/lib/posthog"
 import { SETUP_CHECKLIST_COMPLETED } from "@/lib/event-names"
 import {
   Sheet,
@@ -20,10 +20,11 @@ import { ChecklistItem } from "./checklist/ChecklistItem"
 import { ImportFilesStep } from "./checklist/ImportFilesStep"
 import { AiInstructionsStep } from "./checklist/AiInstructionsStep"
 import { InviteStep } from "./checklist/InviteStep"
-import { ComingSoonStep } from "./checklist/ComingSoonStep"
+import { LinkStep } from "./checklist/LinkStep"
 import { AiModelsStep } from "./checklist/AiModelsStep"
 import { RoleGatedStep } from "./checklist/RoleGatedStep"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { projectMemoryPath } from "@/lib/navigation/org-paths"
 
 interface SetupChecklistDrawerProps {
   open: boolean
@@ -50,6 +51,10 @@ interface SetupChecklistDrawerProps {
   /** Opens the project's import dialog (owned by the parent). Required to
    *  power the "Import files" first step. */
   onOpenImport?: () => void
+  /** Hides the drawer (without dismissing setup) and navigates to `path`.
+   *  Powers the instructions step and the optional quality / terminology
+   *  link steps. */
+  onNavigate?: (path: string) => void
 }
 
 export function SetupChecklistDrawer({
@@ -62,7 +67,9 @@ export function SetupChecklistDrawer({
   onSharesChanged,
   onDismiss,
   onOpenImport,
+  onNavigate,
 }: SetupChecklistDrawerProps) {
+  const analytics = useAccountAnalytics()
   const t = useT()
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false)
   const allDone = state.completedCount === state.totalCount && state.totalCount > 0
@@ -78,9 +85,9 @@ export function SetupChecklistDrawer({
   useEffect(() => {
     if (allDone && !completionFired.current) {
       completionFired.current = true
-      posthog.capture(SETUP_CHECKLIST_COMPLETED, { project_id: project.id })
+      analytics.capture(SETUP_CHECKLIST_COMPLETED, { project_id: project.id })
     }
-  }, [allDone, project.id])
+  }, [allDone, project.id, analytics])
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange} disablePointerDismissal={inviteDialogOpen}>
@@ -143,7 +150,14 @@ export function SetupChecklistDrawer({
                 requiredRole={ROLE.MAINTAINER}
                 actionLabel={t("onboarding.checklist.aiInstructions.actionLabel")}
               >
-                <AiInstructionsStep project={project} onUpdated={onProjectUpdated} />
+                <AiInstructionsStep
+                  project={project}
+                  onOpen={
+                    onNavigate
+                      ? () => onNavigate(projectMemoryPath(project.id, "instructions"))
+                      : undefined
+                  }
+                />
               </RoleGatedStep>
             </ChecklistItem>
 
@@ -179,14 +193,22 @@ export function SetupChecklistDrawer({
               </RoleGatedStep>
             </ChecklistItem>
 
-            <ComingSoonStep
-              title={t("onboarding.checklist.comingSoon.standards.title")}
-              description={t("onboarding.checklist.comingSoon.standards.description")}
-            />
-            <ComingSoonStep
-              title={t("onboarding.checklist.comingSoon.glossary.title")}
-              description={t("onboarding.checklist.comingSoon.glossary.description")}
-            />
+            {onNavigate && (
+              <>
+                <LinkStep
+                  title={t("onboarding.checklist.standards.title")}
+                  description={t("onboarding.checklist.standards.description")}
+                  actionLabel={t("onboarding.checklist.standards.actionLabel")}
+                  onOpen={() => onNavigate(projectMemoryPath(project.id, "checks"))}
+                />
+                <LinkStep
+                  title={t("onboarding.checklist.glossary.title")}
+                  description={t("onboarding.checklist.glossary.description")}
+                  actionLabel={t("onboarding.checklist.glossary.actionLabel")}
+                  onOpen={() => onNavigate(`/project/${project.id}/terminology`)}
+                />
+              </>
+            )}
           </SettingsGroup>
         </div>
 

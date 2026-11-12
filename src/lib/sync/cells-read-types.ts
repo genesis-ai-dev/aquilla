@@ -1,13 +1,14 @@
+import type { FileExtensionMeta } from "../../../shared/tools/file-extension"
 // Types for the sync-worker read API (server-side reads, AD-3 v1 thin client).
 //
 // Mirror of the server's response shapes in:
 //   sync-worker/src/events/files-read-route.ts
 //   sync-worker/src/events/cells-read-route.ts
 //
-// These will move into `packages/data-model` in Phase 3 (one canonical
-// definition shared by every Worker + the web client). Until then we keep
-// them local — Phase 2's hook migration only depends on the surface
-// described here, not on its physical location.
+// Kept hand-authored here rather than shared: the `packages/` shared-libs
+// layout Phase 3 would have moved them into was abandoned, and the SPA's
+// tsconfig covers `src` only, so it cannot import the worker's own types.
+// Update both sides when the response shape changes.
 
 import type { AiDraftProvenance } from "./outbox-types"
 
@@ -31,8 +32,11 @@ export interface FileSummary {
   kind?: string | null
   /** The text file an audio-cue sibling annotates. Null on ordinary files. */
   anchorFileId?: string | null
-  sourceLanguage: string | null
-  targetLanguage: string | null
+  /** AQU-1596: what the file's header claimed at import. Import information,
+   *  never a lane's language — it can disagree with the lane the rows live in.
+   *  A language shown to a user comes off the lane, not off here. */
+  declaredSourceLanguage: string | null
+  declaredTargetLanguage: string | null
   sourceTextDirection?: "ltr" | "rtl" | null
   targetTextDirection?: "ltr" | "rtl" | null
   cellCount: number
@@ -40,6 +44,13 @@ export interface FileSummary {
   /** Target cells with content (TRIM(value) != ''): the "translated" count,
    *  distinct from approvedCount (validated). Matches the chapter-dot signal. */
   filledCount: number
+  /** AQU-2111: lines with a take of their own, and lines whose weakest chosen
+   *  take meets the project's AUDIO validation requirement — the figures an
+   *  audio-only file's progress actually lives on. Optional on the wire: a
+   *  sync-worker from before AQU-2111 sends neither, and absent must read as
+   *  "unknown", never as "nothing recorded". */
+  audioCount?: number
+  audioValidatedCount?: number
   wordCount: number
   /** Last cell.commit timestamp on this file. Null on freshly-created files. */
   lastEditAt: number | null
@@ -47,6 +58,9 @@ export interface FileSummary {
   deletedAt?: number | null
   /** AQU-656: original import blob exists. Absent on older sync-workers. */
   hasOriginalSource?: boolean
+  /** Smart Extensions apiRev 7: files.meta.extension (kind, tags, group,
+   *  owner, meta). Null/absent on ordinary files and older sync-workers. */
+  extension?: FileExtensionMeta | null
 }
 
 /**
@@ -65,6 +79,13 @@ export interface CellRow {
    * is shared by all lanes. Optional so cached/older responses parse.
    */
   targetLang?: string
+  /**
+   * AQU-1240: the lane's opaque `lanes.id`. Null/absent until AQU-1616's
+   * backfill has populated `cells.lane_id` (and on a cached/older response),
+   * so a consumer that keys by lane must fall back to `targetLang` — see
+   * `localLaneKey` in src/lib/offline/schema.ts.
+   */
+  laneId?: string | null
   value: string
   /** Rich-text variant. Null for plain-text cells. */
   valueHtml: string | null
@@ -109,6 +130,17 @@ export interface CellRow {
    * arrives parsed as an object (cells-read.ts normalizes a JSON string).
    */
   metadata?: Record<string, unknown> | null
+  /**
+   * AQU-1422: true while this cell is parked ("Hide cell"). Absent on a visible
+   * row — the server omits the key rather than sending `false` on every one of a
+   * Bible file's 30k rows.
+   *
+   * ONLY THE SOURCE ROW CARRIES IT. Read a cell's visibility off its source row,
+   * never off a target row: hiding is per cell, not per lane, and a target row
+   * created after the hide (a collaborator's in-flight translation, which must
+   * survive) has no flag of its own.
+   */
+  hidden?: boolean
 }
 
 /** Primary content kind of a segment. */

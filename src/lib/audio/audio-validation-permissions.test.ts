@@ -9,6 +9,8 @@ import {
   audioValidationScope,
   audioValidationTakes,
   canValidateTake,
+  lineValidationTakes,
+  takeVoteState,
 } from "./audio-validation-permissions"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 
@@ -137,6 +139,78 @@ describe("audioValidationTakes", () => {
       validatorCount: 0, validators: [], isGenerated: false, canValidate: true,
     })
   })
+
+  // AQU-2296: the seam the date line arrives through. The route sends the
+  // stamps on the attachment; the control reads them off the TAKE, and this
+  // is the one hop between — exactly where a new field gets silently dropped
+  // and leaves every name in the popover undated.
+  it("carries each validator's timestamp through to the take, and absent as empty", () => {
+    const withStamps = entry(
+      { a: { audioId: "a", slot: "recording", validatorCount: 2, validators: ["bo", "cy"], validatorDecidedTs: { bo: 1700, cy: 1800 } } },
+      { recording: "a" },
+    )
+    expect(audioValidationTakes(withStamps, {}, policy(), reason)[0].validatorDecidedTs)
+      .toEqual({ bo: 1700, cy: 1800 })
+
+    const noStamps = entry(
+      { a: { audioId: "a", slot: "recording", validatorCount: 1, validators: ["bo"] } },
+      { recording: "a" },
+    )
+    expect(audioValidationTakes(noStamps, {}, policy(), reason)[0].validatorDecidedTs).toEqual({})
+  })
+})
+
+// Decision 7: the timeline's "Approve this piece" asks about one piece only.
+describe("takeVoteState", () => {
+  const entry = (attachments: Record<string, unknown>, selected: Record<string, string>) =>
+    ({
+      attachments,
+      selectedBySlot: selected,
+      selectedAudioId: selected.recording ?? null,
+      selectedGeneratedVoiceAudioId: selected.generatedVoice ?? null,
+      audioTimings: {},
+    }) as unknown as CellAudioEntry
+  const cut = entry(
+    {
+      p1: { audioId: "p1", slot: "recording", trimStartMs: 0, validatorCount: 0, validators: [], recordedBy: "bo" },
+      p2: { audioId: "p2", slot: "recording", trimStartMs: 1000, pieceOf: "p1", validatorCount: 1, validators: ["ana"], recordedBy: "bo" },
+      p3: { audioId: "p3", slot: "recording", trimStartMs: 2000, pieceOf: "p1", validatorCount: 0, validators: [], recordedBy: "bo" },
+    },
+    { recording: "p1" },
+  )
+
+  it("answers for the one piece asked about, never for its siblings", () => {
+    expect(takeVoteState(cut, {}, policy(), "p2")).toEqual({ canVote: true, voted: true })
+    expect(takeVoteState(cut, {}, policy(), "p1")).toEqual({ canVote: true, voted: false })
+    expect(takeVoteState(cut, {}, policy(), "p3")).toEqual({ canVote: true, voted: false })
+  })
+
+  it("refuses the person who recorded the take on every piece when self-validation is off", () => {
+    for (const id of ["p1", "p2", "p3"]) {
+      expect(takeVoteState(cut, { allowSelfValidationAudio: false }, policy({ username: "bo" }), id).canVote).toBe(false)
+    }
+  })
+
+  // Slice 3A: the line's control needs to know a cut take's pieces, so a
+  // press opens them one by one instead of approving them all.
+  it("marks each piece of a cut take with its group, and a take never cut not at all", () => {
+    const withTrack = entry(
+      {
+        ...(cut.attachments as Record<string, unknown>),
+        n: { audioId: "n", slot: "track-2", validatorCount: 0, validators: [] },
+      },
+      { recording: "p1", "track-2": "n" },
+    )
+    const marks = Object.fromEntries(audioValidationTakes(withTrack, {}, policy(), () => "").map((t) => [t.audioId, t.pieceOf]))
+    expect(marks).toEqual({ n: undefined, p1: "p1", p2: "p1", p3: "p1" })
+  })
+
+  it("answers for a take never cut exactly as before", () => {
+    const whole = entry({ a: { audioId: "a", slot: "recording", validatorCount: 1, validators: ["ana"] } }, { recording: "a" })
+    expect(takeVoteState(whole, {}, policy(), "a")).toEqual({ canVote: true, voted: true })
+    expect(takeVoteState(whole, {}, policy({ username: "cy" }), "a")).toEqual({ canVote: true, voted: false })
+    expect(takeVoteState(whole, { validationRoleFloorAudio: "project_lead" }, policy(), "a")).toEqual({ canVote: false, voted: false })
+  })
 })
 
 describe("audioEntryFromCell", () => {
@@ -150,6 +224,20 @@ describe("audioEntryFromCell", () => {
     expect(audioValidationTakes(entry, {}, policy(), reason)[0]).toMatchObject({
       audioId: "take-1", validatorCount: 2, validators: ["bo"],
     })
+  })
+
+  // AQU-2296, second pass: the stamps were on the wire and in the control,
+  // and dropped HERE in between — so the audio popover shipped with names and
+  // no dates while the text popover beside it had both.
+  it("carries each validator's stamp through, for the date under their name", () => {
+    const entry = audioEntryFromCell({
+      attachments: {
+        "take-1": { slot: "recording", validatorCount: 1, validators: ["bo"], validatorDecidedTs: { bo: 1700 } },
+      },
+      selectedBySlot: { recording: "take-1" },
+      selectedAudioId: "take-1",
+    })!
+    expect(audioValidationTakes(entry, {}, policy(), reason)[0].validatorDecidedTs).toEqual({ bo: 1700 })
   })
 
   it("carries role through, so a source clip still does not count", () => {
@@ -175,5 +263,104 @@ describe("audioEntryFromCell", () => {
       selectedBySlot: { recording: "a" },
     })!
     expect(entry.attachments.a.slot).toBe("recording")
+  })
+})
+
+// Sam, 2026-09-30: in a dubbing file a subtitle line's takes live on the heard
+// lines performing it, and the line's audio check read only the row — "No
+// audio to validate" everywhere, and a vote on the heard line never showed.
+describe("lineValidationTakes — a line and the heard lines performing it", () => {
+  const cue = (id: string, audioId: string | null, over: { validators?: string[]; original?: string } = {}) => ({
+    id,
+    fileId: "cues",
+    original: over.original ?? id,
+    attachments: audioId
+      ? { [audioId]: { slot: "recording", validators: over.validators ?? [], validatorCount: over.validators?.length ?? 0 } }
+      : undefined,
+    selectedAudioId: audioId,
+  })
+  const row = { id: "line-1", fileId: "subs" }
+  const name = (c: { id: string; original?: string }) => `“${c.original ?? c.id}”`
+  const track = (_: unknown, slot: string) => (slot === "recording" ? "Target audio" : slot === "t2" ? "Track" : "?")
+
+  it("is the row's own takes, owned by the row, when nothing performs it", () => {
+    const own = {
+      ...row,
+      attachments: { t1: { slot: "recording" } },
+      selectedAudioId: "t1",
+    }
+    const { takes, ownerOf } = lineValidationTakes(own, undefined, {}, policy(), reason, name, track)
+    expect(takes.map((t) => t.audioId)).toEqual(["t1"])
+    expect(ownerOf.get("t1")).toEqual({ fileId: "subs", cellId: "line-1" })
+  })
+
+  it("takes the heard line's selected take, named by its words, voted on its cue", () => {
+    const heard = cue("cue-a", "ta", { validators: ["bo"], original: "Bring back some bread," })
+    const { takes, ownerOf } = lineValidationTakes(row, [{ cell: heard, hasTake: true }], {}, policy(), reason, name, track)
+    expect(takes).toEqual([
+      expect.objectContaining({ audioId: "ta", label: "“Bring back some bread,”", validators: ["bo"], canValidate: true }),
+    ])
+    expect(ownerOf.get("ta")).toEqual({ fileId: "cues", cellId: "cue-a" })
+  })
+
+  it("lists every part of a split line, and a part not yet recorded takes no vote", () => {
+    const { takes, ownerOf } = lineValidationTakes(
+      row,
+      [{ cell: cue("cue-a", "ta"), hasTake: true }, { cell: cue("cue-b", null), hasTake: false }],
+      {},
+      policy(),
+      reason,
+      name,
+      track,
+    )
+    expect(takes.map((t) => t.audioId)).toEqual(["ta", "unrecorded:cue-b"])
+    expect(takes[1]).toMatchObject({
+      unrecorded: true, canValidate: false, blockedReason: "blocked:unrecorded", label: "“cue-b”",
+    })
+    expect(ownerOf.get("unrecorded:cue-b")).toEqual({ fileId: "cues", cellId: "cue-b" })
+  })
+
+  it("applies the project's policy to a heard line's take as to the row's own", () => {
+    const heard = { ...cue("cue-a", "ta"), attachments: { ta: { slot: "recording", recordedBy: "ana" } } }
+    const { takes } = lineValidationTakes(
+      row, [{ cell: heard, hasTake: true }], { allowSelfValidationAudio: false }, policy(), reason, name, track,
+    )
+    expect(takes[0]).toMatchObject({ canValidate: false, blockedReason: "blocked:self" })
+  })
+})
+
+// Sam, 2026-09-30: every track numbers its own takes, so two tracks' takes
+// both read "Take 1" in the hover list.
+describe("lineValidationTakes — takes on more than one track", () => {
+  const name = (c: { id: string; original?: string }) => `“${c.original ?? c.id}”`
+  const track = (_: unknown, slot: string) => (slot === "recording" ? "Target audio" : "Track")
+  const twoTracks = (id: string, fileId: string, original?: string) => ({
+    id, fileId, original,
+    attachments: {
+      a: { slot: "recording", label: "Take 1" },
+      b: { slot: "t2", label: "Take 1" },
+    },
+    selectedBySlot: { recording: "a", t2: "b" },
+    selectedAudioId: "a",
+  })
+
+  it("names a line's own takes by track and take", () => {
+    const { takes } = lineValidationTakes(twoTracks("line-1", "subs"), undefined, {}, policy(), reason, name, track)
+    expect(new Set(takes.map((t) => t.label))).toEqual(new Set(["Target audio · Take 1", "Track · Take 1"]))
+  })
+
+  it("names a heard line's takes by its words, track and take", () => {
+    const heard = twoTracks("cue-a", "cues", "Bring back some bread,")
+    const { takes } = lineValidationTakes({ id: "line-1", fileId: "subs" }, [{ cell: heard, hasTake: true }], {}, policy(), reason, name, track)
+    expect(new Set(takes.map((t) => t.label))).toEqual(new Set([
+      "“Bring back some bread,” · Target audio · Take 1",
+      "“Bring back some bread,” · Track · Take 1",
+    ]))
+  })
+
+  it("keeps a single take's plain name", () => {
+    const one = { id: "line-1", fileId: "subs", attachments: { a: { slot: "recording", label: "Take 3" } }, selectedAudioId: "a" }
+    const { takes } = lineValidationTakes(one, undefined, {}, policy(), reason, name, track)
+    expect(takes[0].label).toBe("Take 3")
   })
 })

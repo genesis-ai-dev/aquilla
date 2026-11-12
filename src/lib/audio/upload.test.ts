@@ -1,12 +1,22 @@
-// Guard tests for uploadCellAudio's client-side size cap.
+// Guard tests for uploadCellAudio's client-side size handling.
 //
 // WHY: an oversized audio file used to travel all the way to sync-worker and
 // die there (worst case as an opaque 500 mid-arrayBuffer). The client must
-// refuse before any network I/O and explain the limit in plain language so
-// the user knows to compress or split the file.
+// never send one blindly.
+//
+// AQU-1853 changed what "oversized" means. A file over the single-request cap
+// (MAX_AUDIO_UPLOAD_BYTES) is no longer refused — it goes to R2 as a multipart
+// upload (routing is covered in multipart-upload.test.ts). Only a file past
+// the whole-object ceiling (MAX_AUDIO_OBJECT_BYTES) is refused outright, and
+// that refusal still has to happen before any network I/O and explain itself
+// in plain language.
 
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { uploadCellAudio, probeCellAudioPresent, MAX_AUDIO_UPLOAD_BYTES } from "./upload"
+import {
+  uploadCellAudio,
+  probeCellAudioPresent,
+  MAX_AUDIO_OBJECT_BYTES,
+} from "./upload"
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -54,23 +64,23 @@ describe("probeCellAudioPresent", () => {
 })
 
 describe("uploadCellAudio size guard", () => {
-  it("throws a friendly error before fetching when the blob exceeds the cap", async () => {
+  it("throws a friendly error before fetching when the blob exceeds the whole-object ceiling", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch")
     const getSyncToken = vi.fn(async () => "tok")
-    // A real 95 MB allocation is pointless in a unit test — only `size` is
+    // A real 2 GB allocation is pointless in a unit test — only `size` is
     // read before the guard fires.
-    const blob = { size: MAX_AUDIO_UPLOAD_BYTES + 1024 * 1024, type: "audio/mpeg" } as Blob
+    const blob = { size: MAX_AUDIO_OBJECT_BYTES + 1, type: "video/mp4" } as Blob
 
     await expect(
       uploadCellAudio({
         projectId: "p1",
         fileId: "f1",
         audioId: "audio-c1-1-abc",
-        ext: "mp3",
+        ext: "mp4",
         blob,
         getSyncToken,
       }),
-    ).rejects.toThrow(/96 MB.*limit is 95 MB.*compressed format like mp3/s)
+    ).rejects.toThrow(/2\.0 GB.*limit is 2\.0 GB.*Split the recording/s)
 
     // The guard must run before any token fetch or network round-trip.
     expect(getSyncToken).not.toHaveBeenCalled()

@@ -13,6 +13,8 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { PreviewPanel } from "@/components/import/PreviewPanel"
 import type { ImportResult } from "@/lib/import"
+import { parseTextFormat } from "@/lib/parsers/parse-text-formats"
+import { filmFetch } from "@/lib/parsers/frame-timecode.fixtures"
 
 const MB = 1024 * 1024
 
@@ -264,5 +266,142 @@ describe("PreviewPanel — AI-assisted imports (AQU-635)", () => {
 
     expect(screen.getByTestId("import-preview-notices")).toHaveTextContent("Review before importing")
     expect(screen.getByTestId("import-preview-notices")).toHaveTextContent("AI review was unavailable")
+  })
+})
+
+/**
+ * AQU-1731 — the import half of the Paratext-parity USFM structure checks.
+ *
+ * This drives the REAL parser (`parseTextFormat`) into the real preview panel
+ * rather than hand-building findings, so it covers the composition the ticket
+ * actually promises: a broken file reported, with refs, before anyone
+ * translates it. A synthetic findings array would pass even if
+ * `parse-text-formats.ts` never attached them.
+ */
+describe("PreviewPanel — USFM structure findings (AQU-1731)", () => {
+  const BROKEN_USFM =
+    `\\id GEN\n\\h Genesis\n\\c 1\n\\p\n` +
+    `\\v 1 In the beginning.\\f + \\ft An unclosed note.\n` +
+    `\\v 3 And the earth.\n` +
+    `\\v 3 Repeated verse.\n`
+
+  const parsedBrokenBook = (): ImportResult[] =>
+    parseTextFormat({ fileType: "usfm", text: BROKEN_USFM, name: "GEN.usfm" }) as unknown as ImportResult[]
+
+  it("reports the missing verse, the duplicate verse and the unclosed \\f with their refs", () => {
+    render(<PreviewPanel results={parsedBrokenBook()} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+
+    const panel = screen.getByTestId("usfm-structure-findings")
+    expect(panel).toHaveTextContent("Structure problems found in this file")
+    // The gap, with the ref it is missing from.
+    expect(panel).toHaveTextContent("GEN 1:2")
+    expect(panel).toHaveTextContent("No verse with this number in the chapter")
+    // The repeat, with its ref.
+    expect(panel).toHaveTextContent("GEN 1:3")
+    expect(panel).toHaveTextContent("This verse number appears more than once")
+    // The unclosed footnote, reported at the verse it was opened on.
+    expect(panel).toHaveTextContent("GEN 1:1")
+    expect(panel).toHaveTextContent("Marker \\f is never closed")
+  })
+
+  it("shows no structure panel for a clean file", () => {
+    const clean = parseTextFormat({
+      fileType: "usfm",
+      text: `\\id GEN\n\\h Genesis\n\\c 1\n\\p\n\\v 1 One.\n\\v 2 Two.\n`,
+      name: "GEN.usfm",
+    }) as unknown as ImportResult[]
+    render(<PreviewPanel results={clean} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    expect(screen.queryByTestId("usfm-structure-findings")).toBeNull()
+  })
+
+  it("sends the sidebar re-import choice instead of confirming a normal import", () => {
+    const choices = [
+      ["Update this file", "update"],
+      ["Make updated copy", "updated-copy"],
+      ["Make a blank copy", "blank"],
+    ] as const
+    for (const [label, choice] of choices) {
+      const onConfirm = vi.fn()
+      const view = render(<PreviewPanel results={RESULTS} onConfirm={onConfirm} onCancel={vi.fn()} reimport />)
+      expect(screen.queryByRole("button", { name: /confirm import/i })).toBeNull()
+      fireEvent.click(screen.getByRole("button", { name: label }))
+      expect(onConfirm).toHaveBeenCalledWith({ reimportChoice: choice })
+      view.unmount()
+    }
+  })
+
+  it("shows how many cells a re-import would add and update", () => {
+    render(
+      <PreviewPanel
+        results={RESULTS}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+        reimport
+        reimportChanges={{ added: 2, updated: 1, addedCells: [{ text: "A new line", number: 4 }], updatedCells: [{ text: "After", previous: "Before", number: 2 }] }}
+      />,
+    )
+    expect(screen.getByRole("region", { name: "Analysis" })).toBeTruthy()
+    expect(screen.getByTestId("reimport-changes")).toHaveTextContent("2 cells added")
+    expect(screen.getByTestId("reimport-changes")).toHaveTextContent("4 A new line")
+    expect(screen.getByTestId("reimport-changes")).toHaveTextContent("1 cell updated")
+    expect(screen.getByTestId("reimport-changes")).toHaveTextContent("2 Before → After")
+  })
+})
+
+describe("PreviewPanel — subtitle times that are frames written as hundredths (AQU-2197)", () => {
+  const cue = (i: number, start: number, end: number) => ({
+    id: `c${i}`, original: `Line ${i}`, translated: "", group: `g${i}`, type: "cue",
+    context: `00:01:${String(Math.floor(start) - 60).padStart(2, "0")}.${String(Math.round((start % 1) * 1000)).padStart(3, "0")} --> 00:01:${String(Math.floor(end) - 60).padStart(2, "0")}.${String(Math.round((end % 1) * 1000)).padStart(3, "0")}`,
+    start, end,
+  })
+  const strings = [cue(0, 66.15, 67.18), cue(1, 68.21, 69.05)]
+  const RESULT = [{
+    name: "TheChosen_101_en_AUDIO_ONLY.vtt",
+    strings,
+    framesAsHundredths: { times: 4, maxFrame: 23, suggested: "24", rates: ["23.976", "24", "25", "29.97", "30"] },
+  }] as unknown as ImportResult[]
+
+  it("warns, shows the converted times, and converts at the suggested rate on confirm", async () => {
+    const onConfirm = vi.fn()
+    render(<PreviewPanel results={RESULT} onConfirm={onConfirm} onCancel={vi.fn()} />)
+    expect(screen.getByTestId("frames-as-hundredths")).toHaveTextContent(/frame numbers written as hundredths/)
+    // The cue list shows the times the import will write: frame 15 of 24 is .625.
+    expect(screen.getByText(/00:01:06\.625 --> 00:01:07\.750/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /confirm import/i }))
+    await vi.waitFor(() => expect(onConfirm).toHaveBeenCalled())
+    const options = onConfirm.mock.calls[0][0]
+    expect([...options.frameRates]).toEqual([["TheChosen_101_en_AUDIO_ONLY.vtt", "24"]])
+  })
+
+  it("keeps the times as they are when the person says so", async () => {
+    const onConfirm = vi.fn()
+    render(<PreviewPanel results={RESULT} onConfirm={onConfirm} onCancel={vi.fn()} />)
+    fireEvent.click(screen.getByTestId("frames-as-hundredths-keep"))
+    expect(screen.getByText(/00:01:06\.150 --> 00:01:07\.180/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /confirm import/i }))
+    await vi.waitFor(() => expect(onConfirm).toHaveBeenCalled())
+    expect(onConfirm.mock.calls[0][0]?.frameRates).toBeUndefined()
+  })
+
+  it("says nothing for an ordinary subtitle file", () => {
+    render(<PreviewPanel results={[{ name: "ok.vtt", strings }] as unknown as ImportResult[]} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    expect(screen.queryByTestId("frames-as-hundredths")).toBeNull()
+  })
+
+  // Update existing, into a file with a linked film: the film's rate wins.
+  it("converts an update at the existing file's linked film's rate", async () => {
+    vi.stubGlobal("fetch", vi.fn(filmFetch("23.976")))
+    try {
+      const onConfirm = vi.fn()
+      render(<PreviewPanel results={RESULT} onConfirm={onConfirm} onCancel={vi.fn()}
+        filmUrls={new Map([["TheChosen_101_en_AUDIO_ONLY.vtt", "https://cdn.example.test/videos/preview-film/master.m3u8"]])} />)
+      await vi.waitFor(() => expect(screen.getByTestId("frames-as-hundredths-rate-source"))
+        .toHaveTextContent("Converted at 23.976 frames a second, the film's rate."))
+      fireEvent.click(screen.getByRole("button", { name: /confirm import/i }))
+      await vi.waitFor(() => expect(onConfirm).toHaveBeenCalled())
+      expect([...onConfirm.mock.calls[0][0].frameRates]).toEqual([["TheChosen_101_en_AUDIO_ONLY.vtt", "23.976"]])
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

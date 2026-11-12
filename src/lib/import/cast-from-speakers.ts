@@ -1,9 +1,17 @@
 import type { CharacterResolution, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import { VOICE_PALETTE, getVoiceLibrary } from "@/lib/audio/voices"
+import { buildCharacterCastWrite, type CharacterCastWrite } from "@/lib/audio/character-cast"
 
 export interface SpeakerAssignment {
   cellId: string
   speaker: string | undefined
+  /**
+   * AQU-2125: the import wrote `speaker` onto the line itself as its character
+   * (`metadata.cast_name`), so the line can be cast by character. False or
+   * absent for a line it could not name — a re-import keeps the line's own
+   * character, so its speaker still casts that one line.
+   */
+  castNamed?: boolean
 }
 
 export interface CastAdditions {
@@ -13,13 +21,31 @@ export interface CastAdditions {
   castAssignments: Record<string, string>
 }
 
+/**
+ * A verse reference, which Codex stores in the very same `cellLabel` field a
+ * subtitle notebook uses for a character (AQU-1942): optional leading digit for
+ * the numbered books, a 2–3 letter book code, `chapter:verse`, optionally a
+ * verse letter and a range — `GEN 1:1`, `1JN 2:3`, `MAT 5:1-10`, `PSA 23:1a`.
+ *
+ * This one is NOT a judgement about repetition, so it holds for a batch of any
+ * size: a Bible notebook labels every cell with its own reference, and a short
+ * file or a delta run over one changed file hands `castLikeSpeakers` too few
+ * labels for guard 2 to fire. Without this pattern a three-verse file minted
+ * three voices named after verses; `iloko_ilo_the_chosen` reached 31,170 of
+ * them that way. A reference cannot be a person's name, so it is rejected
+ * structurally rather than statistically.
+ */
+const SCRIPTURE_REFERENCE_LABEL = /^[1-3]?\s*[A-Z]{2,3}\s+\d+:\d+[a-z]?(?:\s*[-–]\s*\d+[a-z]?)?$/i
+
 /** Labels that are structurally identifiers, never a person's name: bare
  *  numbers and timecodes ("12", "00:01:23,456"), positional labels
- *  ("clip 3", "segment_12"), and media/subtitle filenames. */
+ *  ("clip 3", "segment_12"), media/subtitle filenames, and scripture
+ *  references ("GEN 1:1", "1JN 2:3-5" — see `SCRIPTURE_REFERENCE_LABEL`). */
 const NON_SPEAKER_LABEL: readonly RegExp[] = [
   /^\d+([.,:]\d+)*$/,
   /^(clip|cue|segment|section|cell|line|track|part|chunk|take|item|row)[\s_-]*\d+$/i,
   /\.(wav|mp3|m4a|aac|ogg|opus|flac|webm|mp4|mov|mkv|vtt|srt|txt|json)$/i,
+  SCRIPTURE_REFERENCE_LABEL,
 ]
 
 /** A label set this large is a big enough sample to judge whether it repeats. */
@@ -94,6 +120,34 @@ export function buildCastAdditions(
     castAssignments[cellId] = voiceId
   }
   return { voices, castAssignments }
+}
+
+/**
+ * What an import with speaker names stores (AQU-2125): the whole voice library
+ * and the whole project-wide cast map to persist.
+ *
+ * Lines the import named (`castNamed`) are cast by CHARACTER, exactly as a
+ * character sheet casts them — one entry per speaker, not per line. Lines it
+ * could not name keep today's one entry per line, on top of that, with the
+ * same voices.
+ */
+export function buildSpeakerCastWrite(
+  pairs: readonly SpeakerAssignment[],
+  settings: ProjectTtsSettings | undefined,
+  mintId: () => string,
+): CharacterCastWrite {
+  const named = buildCharacterCastWrite(
+    pairs.filter((p) => p.castNamed).map((p) => ({ cellId: p.cellId, castName: p.speaker })),
+    settings,
+    mintId,
+  )
+  const unnamed = pairs.filter((p) => !p.castNamed && p.speaker?.trim())
+  if (unnamed.length === 0) return named
+  const perLine = buildCastAdditions(unnamed, { ...(settings ?? {}), ...named }, mintId)
+  return {
+    voices: perLine.voices,
+    castAssignments: { ...named.castAssignments, ...perLine.castAssignments },
+  }
 }
 
 /**

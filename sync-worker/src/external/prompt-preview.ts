@@ -7,7 +7,7 @@
 //                             one file; otherwise the lowest-ordered match wins
 //
 // Why this exists: an agent can already PATCH the prompt-shaping settings
-// (systemPrompt, completionSettings, translationBrief, rules — see
+// (translationInstructions, draftingSettings, rules — see
 // commands-patch-settings.ts) but had no way to see what the copilot actually
 // receives after injection. Tuning was change-a-setting-then-guess. This route
 // closes the loop: it returns the assembled messages plus the labeled parts
@@ -34,15 +34,26 @@
 // Per-device provider overrides (user Settings, localStorage) are likewise
 // invisible to the server; `generation` reports the PROJECT's configuration.
 //
-// The system prompt resolves top-level `settings.systemPrompt` first (the key
-// PatchSettings writes), then `completionSettings.systemPrompt` (the copy the
-// SPA keeps in sync), then DEFAULT_SYSTEM_PROMPT (AQU-1283).
+// AQU-2342: the role text is always DEFAULT_SYSTEM_PROMPT (no longer
+// project-editable); the project's own guidance is the ONE instructions block
+// (`settings.translationInstructions`, or the legacy sources composed on read
+// by resolveTranslationInstructions — the same call the editor makes).
+//
+// AQU-2404: because that role text is fixed, a project that still stores a
+// customized `systemPrompt` gets a `warnings` entry saying where its text
+// actually went (into `parts.instructions` by migrate-on-read, or nowhere at
+// all once `translationInstructions` is stored) rather than a silently default
+// `parts.base`. The preview is the tool that proves a setting landed, so a
+// setting that lands nowhere has to be said out loud.
 //
 // Role floor: VIEWER, same as every other external read — this is a read of
 // configuration the caller can already read piecemeal (/projects, settings),
 // assembled. It performs no writes and mints no drafts.
 
 import { externalError } from "./errors"
+import { laneLanguage } from "../../../src/lib/lanes/lane-display"
+import { laneLanguageForTag } from "../../../src/lib/lanes/lane-language"
+import { stripTrailingBareMarkers } from "../../../src/lib/completion/strip-trailing-usfm-markers"
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "../events/lane-id-sql"
 import { branchingSearch } from "../lib/branching-search/algorithm"
 import { loadCorpus } from "../lib/branching-search/corpus"
@@ -50,15 +61,29 @@ import {
   applyBranchingSearchDefaults,
   loadBranchingSearchSettings,
 } from "../lib/branching-search/settings"
+import { resolveLane } from "../../../db/shared/lane-ref"
 import { loadProjectSettings } from "../../../db/shared/projects"
 import {
-  buildBriefBlock,
+  legacySystemPromptSetting,
+  loadTranslationInstructions,
+} from "../../../db/shared/load-translation-instructions"
+import { customSystemPromptText } from "../../../db/shared/translation-instructions"
+import { listProjectLanes } from "../../../db/shared/lanes"
+import { styleInstructionsForCells } from "../../../db/shared/style-instructions"
+import { readLanguageProfile } from "../../../db/shared/language-profile"
+import { conceptsForLane, mapSubscribedConceptLanes } from "../../../src/lib/terminology/rendering-lane"
+import {
+  buildChecksBlock,
   buildPrompt,
-  buildRulesBlock,
+  buildTerminologyBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
+  DEFAULT_MAX_INJECTED_TERMS,
   DEFAULT_SYSTEM_PROMPT,
+  instructionsPromptBlock,
   selectApprovedExamples,
+  selectInjectedTerms,
   type ChatMessage,
+  type InjectedTerm,
   type PromptRule,
   type ValidatedPair,
 } from "../../../src/lib/completion/prompt-build"
@@ -104,6 +129,7 @@ export interface PromptPreviewEnv {
 
 interface CellRow {
   file_id: string
+  canonical_ref: string | null
   value: string
   medium: string | null
   transcription: string | null
@@ -133,8 +159,8 @@ function effectiveSource(row: {
   medium: string | null
   transcription: string | null
 }): string {
-  if ((row.medium ?? "text") !== "media") return row.value
-  return row.transcription?.trim() ? row.transcription : ""
+  if ((row.medium ?? "text") !== "media") return stripTrailingBareMarkers(row.value)
+  return row.transcription?.trim() ? stripTrailingBareMarkers(row.transcription) : ""
 }
 
 /** Read a top-level settings key as a plain object, tolerating junk. */
@@ -182,13 +208,10 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
 }
 
 /** Labeled description of one injected term, so a caller can see WHICH
- *  terminology entry produced a line in the rules block. */
-export interface InjectedTerm {
-  conceptId: string
-  sourceTerm: string
-  approvedRenderings: string[]
-  forbiddenRenderings: string[]
-}
+ *  terminology entry produced a line in the rules block. Re-exported from the
+ *  shared builder: since AQU-2209 this list IS the builder's selection — the
+ *  concepts present in this cell's source — not the whole termbase. */
+export type { InjectedTerm }
 
 export interface PromptPreviewBody {
   projectId: string
@@ -203,16 +226,35 @@ export interface PromptPreviewBody {
   messages: ChatMessage[]
   /** The same content, labeled by where it came from. */
   parts: {
-    /** Base instructions after {sourceLanguage}/{targetLanguage} substitution,
-     *  before any injection. */
+    /** The FIXED role text after {sourceLanguage}/{targetLanguage}
+     *  substitution, before any injection. Not project-editable since
+     *  AQU-2342: a stored `systemPrompt` does not replace this, and a project
+     *  that still holds one gets a `warnings` entry saying so (AQU-2404). */
     base: string
-    /** The brief block, or "" when the project has no L1 summary. */
-    brief: string
-    /** The rules block (terminology + style rules), or "" when nothing injects. */
-    rules: string
+    /** The project-instructions block (AQU-2342), or "" when the project has
+     *  none. Sits right after `base`. */
+    instructions: string
+    /** AQU-2342: the Checks hint — org, project and lane rules, the style
+     *  rules in force for this cell (approved + enabled only) and the filled
+     *  Language-profile slots — or "" when nothing can be hinted. Sits after
+     *  `instructions`. The same builder every drafting path uses. */
+    checks: string
+    /** AQU-2342: the Terminology block — only the glossary concepts that occur
+     *  in this cell's source (`injectedTerms`), with their notes — or "". */
+    terminology: string
     injectedTerms: InjectedTerm[]
     examples: ValidatedPair[]
     precedingContext: { source: string; target: string }[]
+    /** @deprecated AQU-2342 compat alias, kept for one release: the same text
+     *  as `instructions`. Read `instructions`. */
+    brief: string
+    /** @deprecated AQU-2342 compat alias, kept for one release: the rule hints
+     *  of `checks` without the style rules, then `terminology` — what the old
+     *  rules block covered. Read `checks` and `terminology`. */
+    rules: string
+    /** @deprecated AQU-2342 compat alias, kept for one release: the style-rule
+     *  lines of `checks` on their own. Read `checks`. */
+    styleRules: string
   }
   /** What the draft call would be made WITH (project configuration; a
    *  per-device provider override in user Settings is invisible here). */
@@ -249,7 +291,7 @@ export async function buildPromptPreview(
 
   // ── the cell itself ──────────────────────────────────────────────────────
   const cellSql =
-    "SELECT file_id, value, medium, transcription, sequence_index " +
+    "SELECT file_id, canonical_ref, value, medium, transcription, sequence_index " +
     "FROM cells WHERE project_id = ? AND cell_id = ? AND side = 'source'" +
     (args.fileId ? " AND file_id = ?" : "") +
     " ORDER BY file_id LIMIT 1"
@@ -267,27 +309,47 @@ export async function buildPromptPreview(
   const sourceText = effectiveSource(cell)
 
   // ── settings ─────────────────────────────────────────────────────────────
-  const { settings } = await loadProjectSettings(db, projectId)
-  const completion = objectSetting(settings, "completionSettings")
-  const brief = objectSetting(settings, "translationBrief")
+  const { settings, lanes } = await loadProjectSettings(db, projectId)
+  // AQU-2259: the team's drafting settings (`draftingSettings`: retrieval,
+  // example format, provider, model, sampling). Each of its fields wins over
+  // the older nested `completionSettings` copy, which the SPA no longer
+  // writes.
+  const completion = {
+    ...objectSetting(settings, "completionSettings"),
+    ...objectSetting(settings, "draftingSettings"),
+  }
   const draftContext = objectSetting(settings, "draftContext")
 
-  const sourceLanguage = stringSetting(settings, "sourceLanguage")
-  // Default lane inherits the project target language; a named lane IS its own
-  // target language (resolveActiveTargetLanguage, project-workspace-lane-target.ts).
-  const targetLanguage = targetLang || stringSetting(settings, "targetLanguage")
+  // AQU-1593 / AQU-1595: both languages come from the lane row. `targetLang`
+  // is the lane's legacy_tag — an event key, and an 8-hex id when the language
+  // string was already taken. Settings are not consulted.
+  const sourceLane = (lanes ?? []).find((lane) => lane.role === "source")
+  const sourceLanguage = laneLanguage(sourceLane ?? { role: "source" }, {
+    role: "source",
+    legacyTag: sourceLane?.legacyTag ?? null,
+  })
+  const targetLanguage = laneLanguageForTag(targetLang, lanes) ?? ""
 
-  // Top-level `systemPrompt` is what PatchSettings writes and what the SPA
-  // syncs into completionSettings.systemPrompt (useProject.ts) — so it wins;
-  // the nested copy is the fallback for projects that only ever set it there.
-  const systemPrompt =
-    stringSetting(settings, "systemPrompt") ||
-    stringSetting(completion, "systemPrompt") ||
-    DEFAULT_SYSTEM_PROMPT
+  // AQU-2342: fixed role text + the one instructions text. A legacy prompt
+  // that only ever lived in the nested completionSettings copy still feeds
+  // migrate-on-read, exactly as the SPA's record overlay does.
+  //
+  // AQU-2422: that resolution is `legacySystemPromptSetting`, the SAME lookup
+  // the live drafting paths get inside `loadTranslationInstructions` — the
+  // blob is handed over raw, so this read cannot see a `systemPrompt` the
+  // draft call would not. It is re-derived here only for the warning below.
+  const systemPrompt = DEFAULT_SYSTEM_PROMPT
+  const legacySystemPrompt = legacySystemPromptSetting(settings)
+  // The legacy agent brief is read too, exactly as the editor gets it from the
+  // settings GET, so the preview and every server path resolve the same text.
+  const { text: instructions, stored: instructionsStored } = await loadTranslationInstructions(
+    db,
+    projectId,
+    settings,
+  )
   const topK = clampInt(completion.top_k, DEFAULT_APPROVED_EXAMPLE_COUNT, 1, MAX_TOP_K)
   const exampleFormat =
     completion.fewShotExampleFormat === "target-only" ? "target-only" : "source-and-target"
-  const briefSummary = stringSetting(brief, "l1Summary")
   const precedingCount = clampInt(
     draftContext.precedingTargetCells,
     DEFAULT_PRECEDING_TARGET_CELLS,
@@ -318,27 +380,53 @@ export async function buildPromptPreview(
     }
   }
 
-  // This project's OWN concepts, from the sync-worker projection (the
-  // `terminology` settings key is gone — see useRules' localConcepts note).
-  // Termbase SUBSCRIPTIONS are intentionally not compiled in: the client
-  // passes `subscribedConcepts: undefined` today because the upstream
-  // termbase-read route does not exist yet (useSubscribedConcepts' SWARM-TODO),
-  // so including them here would make the preview diverge from the real call.
+  // The concepts the editor compiles (useRules): first those of the termbases
+  // this project subscribes to, then this project's OWN concepts from the
+  // sync-worker projection (the `terminology` settings key is gone — see
+  // useRules' localConcepts note).
+  //
+  // The subscribed read mirrors the editor's (useSubscribedConcepts, through
+  // auth-worker route #8; AQU-1721): subscriptions in the order the
+  // subscriptions list shows (priority, then age), and each termbase's active
+  // live concepts, oldest first. A subscription counts only while its termbase
+  // is published, not archived, and in this project's org. That is the gate
+  // canReadTermbase puts on route #8, and autopilot applies it too.
+  //
+  // AQU-1777: a termbase's renderings carry ITS lane ids. Each termbase's
+  // concepts are mapped onto this project's lanes by language
+  // (mapSubscribedConceptLanes), as route #8 and autopilot map them, before
+  // the lane filter below, so the preview injects what the editor compiles.
+  type ConceptRow = {
+    concept_id: string
+    source_term: string
+    renderings: unknown
+    status: string
+    case_sensitive: number
+    notes: string | null
+  }
+  const subscribedRows = await db
+    .prepare(
+      "SELECT s.termbase_project_id, c.concept_id, c.source_term, c.renderings, c.status, c.case_sensitive, c.notes " +
+        "FROM project_termbase_subscriptions s " +
+        "JOIN projects sub ON sub.id = s.project_id " +
+        "JOIN projects tb ON tb.id = s.termbase_project_id " +
+        "JOIN concepts c ON c.project_id = s.termbase_project_id " +
+        "WHERE s.project_id = ? AND s.termbase_project_id <> s.project_id " +
+        "AND tb.org_published_termbase = TRUE AND tb.archived_at IS NULL AND tb.org_id = sub.org_id " +
+        "AND c.deleted_at IS NULL AND c.status = 'active' " +
+        "ORDER BY s.priority ASC, s.created_at ASC, s.termbase_project_id, c.created_at ASC, c.concept_id",
+    )
+    .bind(projectId)
+    .all<ConceptRow & { termbase_project_id: string }>()
   const conceptRows = await db
     .prepare(
-      "SELECT concept_id, source_term, renderings, status, case_sensitive " +
+      "SELECT concept_id, source_term, renderings, status, case_sensitive, notes " +
         "FROM concepts WHERE project_id = ? AND deleted_at IS NULL ORDER BY concept_id",
     )
     .bind(projectId)
-    .all<{
-      concept_id: string
-      source_term: string
-      renderings: unknown
-      status: string
-      case_sensitive: number
-    }>()
+    .all<ConceptRow>()
 
-  const concepts: CompiledConcept[] = conceptRows.results.map((row) => {
+  const toConcept = (row: ConceptRow): CompiledConcept => {
     const parsed: unknown =
       typeof row.renderings === "string" ? safeJson(row.renderings) : row.renderings
     const renderings = Array.isArray(parsed)
@@ -356,10 +444,37 @@ export async function buildPromptPreview(
       renderings,
       status: row.status,
       ...(row.case_sensitive ? { caseSensitive: true } : {}),
+      ...(row.notes?.trim() ? { notes: row.notes.trim() } : {}),
     }
-  })
+  }
+  // Rows arrive grouped by termbase in subscription order (the ORDER BY), and
+  // a Map keeps that order, so the mapped list stays subscribed-first.
+  const rowsByTermbase = new Map<string, ConceptRow[]>()
+  for (const row of subscribedRows.results) {
+    const rows = rowsByTermbase.get(row.termbase_project_id) ?? []
+    rows.push(row)
+    rowsByTermbase.set(row.termbase_project_id, rows)
+  }
+  const subscribedConcepts: CompiledConcept[] = []
+  for (const [termbaseProjectId, rows] of rowsByTermbase) {
+    const termbaseLanes = await listProjectLanes(db, termbaseProjectId)
+    subscribedConcepts.push(
+      ...mapSubscribedConceptLanes(rows.map(toConcept), termbaseLanes, lanes ?? []),
+    )
+  }
+  const concepts: CompiledConcept[] = [...subscribedConcepts, ...conceptRows.results.map(toConcept)]
 
-  const terminologyRules = compileConceptsToRulesCore(concepts, WORKER_COMPILE_LABELS)
+  const emptyLane = await resolveLane(db, projectId, { targetLang: "" })
+  const activeLane = emptyLane.laneId
+    ? await resolveLane(db, projectId, { targetLang })
+    : null
+  const visibleConcepts = !emptyLane.laneId
+    ? concepts
+    : !activeLane?.laneId
+      ? concepts.map((concept) => ({ ...concept, renderings: [] }))
+      : conceptsForLane(concepts, activeLane.laneId, emptyLane.laneId)
+
+  const terminologyRules = compileConceptsToRulesCore(visibleConcepts, WORKER_COMPILE_LABELS)
   const rules: ScopedPromptRule[] = forLane(
     [
       ...rulesSetting(orgSettings, "rules"),
@@ -369,18 +484,13 @@ export async function buildPromptPreview(
     targetLang,
   )
 
-  const injectedTerms: InjectedTerm[] = concepts
-    .filter((c) => c.status === "active")
-    .map((c) => ({
-      conceptId: c.id,
-      sourceTerm: c.sourceTerm,
-      approvedRenderings: c.renderings
-        .filter((r) => r.status === "preferred" || r.status === "admitted")
-        .map((r) => r.rendering),
-      forbiddenRenderings: c.renderings
-        .filter((r) => r.status === "forbidden")
-        .map((r) => r.rendering),
-    }))
+  // AQU-2209: report exactly what the prompt injects — the concepts whose
+  // source term occurs in THIS cell — by asking the builder that does the
+  // narrowing, never by re-deriving it from the full concept list. An agent
+  // tuning a termbase reads this to confirm a term landed, so a preview that
+  // listed all 722 concepts while the prompt carried two was worse than none.
+  const termSelection = selectInjectedTerms(rules, sourceText)
+  const injectedTerms: InjectedTerm[] = termSelection.injected
 
   // ── discourse window (D4): the approved target of preceding cells ────────
   const precedingContext = precedingCount
@@ -432,6 +542,20 @@ export async function buildPromptPreview(
     { source: sourceText },
   ])
 
+  // ── style rules: the Rules page's Style rules library (AQU-2195) ──────────
+  // The same selection the editor makes (ProjectWorkspace styleInstructionsFor):
+  // approved, enabled rules resolved against this cell's place in the
+  // applicability graph, with the org's shared rules included.
+  const styleInstructions = await styleInstructionsForCells(db, {
+    projectId,
+    fileId,
+    cells: [{ cellId, canonicalRef: cell.canonical_ref }],
+    settings,
+  })
+
+  // AQU-2342: the Language profile's filled slots join the checks hint.
+  const languageProfile = readLanguageProfile(settings.languageProfile)
+
   const messages = buildPrompt({
     sourceLanguage,
     targetLanguage,
@@ -439,11 +563,18 @@ export async function buildPromptPreview(
     sourceText,
     examples: [],
     rules,
+    styleInstructions,
+    languageProfile,
     validatedPairs: examples,
     exampleFormat,
-    briefSummary,
+    instructions,
     precedingContext,
   })
+
+  const instructionsBlock = instructionsPromptBlock(instructions)
+    .replace(/\{sourceLanguage\}/g, sourceLanguage)
+    .replace(/\{targetLanguage\}/g, targetLanguage)
+  const terminologyBlock = buildTerminologyBlock(rules, { sourceText })
 
   const warnings: { code: string; message: string }[] = []
   if (!sourceText.trim()) {
@@ -453,6 +584,46 @@ export async function buildPromptPreview(
         "this cell has no effective source text (an untranscribed media section, or an empty cell) — " +
         "the copilot refuses to draft it, and retrieval was skipped",
     })
+  }
+  if (termSelection.dropped > 0) {
+    warnings.push({
+      code: "terms_capped",
+      message:
+        `${termSelection.matched} glossary concepts occur in this source, more than the ` +
+        `${DEFAULT_MAX_INJECTED_TERMS}-term injection cap: the ${termSelection.dropped} ` +
+        "lowest-precedence matches (the project's own concepts before any subscribed " +
+        "termbase's) were left out of the prompt",
+    })
+  }
+  // AQU-2404: a stored `systemPrompt` never replaces `parts.base` — since
+  // AQU-2342 the role text is fixed, and the live draft path (auth-worker
+  // ai-draft-internal / the agent's draft tool) passes no systemPrompt either,
+  // so previewing the default IS the faithful answer. Silence was the bug: the
+  // key is still writable and still readable, so a caller who set it had no way
+  // to learn it changed nothing. Say where it went instead.
+  const customSystemPrompt = customSystemPromptText(legacySystemPrompt)
+  if (customSystemPrompt) {
+    warnings.push(
+      instructionsStored
+        ? {
+            code: "system_prompt_ignored",
+            message:
+              "this project stores a customized `systemPrompt`, but no drafting path reads it: since " +
+              "AQU-2342 the role text in `parts.base` is fixed and not project-editable, and the " +
+              "project's own guidance comes from the stored `translationInstructions` shown in " +
+              "`parts.instructions`. Put the custom wording in `translationInstructions` " +
+              "(PatchSettings) — editing `systemPrompt` changes no prompt.",
+          }
+        : {
+            code: "system_prompt_in_instructions",
+            message:
+              "this project stores a customized `systemPrompt` and has not written " +
+              "`translationInstructions` yet, so the hand-written part of that prompt is migrated ON " +
+              "READ into `parts.instructions` — it is deliberately NOT in `parts.base`, which is the " +
+              "fixed role text since AQU-2342. Writing `translationInstructions` makes the text " +
+              "explicit and stops `systemPrompt` feeding any prompt.",
+          },
+    )
   }
   if (/\\f\s/.test(sourceText) || sourceText.includes("\\f*")) {
     warnings.push({
@@ -478,11 +649,16 @@ export async function buildPromptPreview(
         base: systemPrompt
           .replace(/\{sourceLanguage\}/g, sourceLanguage)
           .replace(/\{targetLanguage\}/g, targetLanguage),
-        brief: buildBriefBlock(briefSummary),
-        rules: buildRulesBlock(rules),
+        instructions: instructionsBlock,
+        checks: buildChecksBlock(rules, styleInstructions, languageProfile),
+        terminology: terminologyBlock,
         injectedTerms,
         examples,
         precedingContext,
+        // AQU-2342: the pre-2342 part names, for one release (see the type).
+        brief: instructionsBlock,
+        rules: [buildChecksBlock(rules, [], languageProfile), terminologyBlock].filter(Boolean).join("\n\n"),
+        styleRules: buildChecksBlock([], styleInstructions, null),
       },
       generation: {
         provider:

@@ -61,6 +61,26 @@ function repoWithAudio(): string {
   return root
 }
 
+/** Add a target notebook whose attachments have NO pointer in the tree, so every
+ *  take in it fails oid resolution (the book-silently-dropped case). */
+function addBook(root: string, relPath: string, cellId: string, ...clips: string[]): void {
+  const attachments = Object.fromEntries(
+    clips.map((clip, i) => [
+      `clip-${i}`,
+      { url: `.project/attachments/files/${clip}`, type: "audio", createdAt: 200 + i },
+    ]),
+  )
+  fs.writeFileSync(path.join(root, `files/target/${relPath}.codex`), JSON.stringify({
+    metadata: { id: relPath, originalName: relPath },
+    cells: [{
+      kind: 2,
+      languageId: "scripture",
+      value: "text",
+      metadata: { id: cellId, type: "text", attachments },
+    }],
+  }))
+}
+
 function deps(over: Partial<AudioDeps> = {}): AudioDeps {
   return {
     copyObject: async () => {},
@@ -117,5 +137,34 @@ describe("migrateProjectAudio", () => {
     fs.rmSync(path.join(dir, ".project/attachments/pointers"), { recursive: true, force: true })
     await expect(migrateProjectAudio(deps(), { project: PROJECT, dir }))
       .rejects.toThrow("1 attachments have no LFS object id")
+  })
+
+  // AQU-1373: Pattani Malay came across with Luke and Mark but no Matthew. A
+  // book whose takes all fail oid resolution produces no CopyUnits, so the old
+  // `units.length === 0` guard never fired once ANY other book copied — the job
+  // went `done`, audio_applied_sha advanced, and the book was never retried.
+  it("fails the stage when one book lacks LFS pointers even though another book copies", async () => {
+    const dir = repoWithAudio()
+    addBook(dir, "MAT 1", "MAT 1:1", "missing-in-lfs.webm")
+
+    const copies: string[][] = []
+    await expect(migrateProjectAudio(deps({
+      copyObject: async (...args) => { copies.push(args) },
+    }), { project: PROJECT, dir })).rejects.toThrow(
+      /audio copy incomplete: 1 attachments have no LFS object id \(MAT 1: 1\)/,
+    )
+
+    // The book that DID resolve is still copied — the failure is a signal to
+    // retry, not a reason to discard work that landed.
+    expect(copies).toHaveLength(1)
+  })
+
+  it("names every book that lost takes, worst first", async () => {
+    const dir = repoWithAudio()
+    addBook(dir, "MAT 1", "MAT 1:1", "gone-a.webm")
+    addBook(dir, "MAT 2", "MAT 2:1", "gone-b.webm", "gone-c.webm")
+
+    await expect(migrateProjectAudio(deps(), { project: PROJECT, dir }))
+      .rejects.toThrow("3 attachments have no LFS object id (MAT 2: 2, MAT 1: 1)")
   })
 })

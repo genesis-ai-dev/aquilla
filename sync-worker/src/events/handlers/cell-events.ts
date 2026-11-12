@@ -34,6 +34,9 @@ import {
 } from '../event-projection'
 import { buildChainClaimStmt, eventQualifiedParentKey, type ChainSlot } from '../chain-claims'
 import { buildEventInsertStmt } from '../event-insert'
+import { eventLaneTag } from '../../../../src/lib/lanes/event-lane'
+import { ensureBlankTargetBridgeStmt } from '../../../../db/shared/lanes'
+import { grantNewLaneStmt } from '../../../../db/shared/lane-grants'
 import type { DispatchResult } from './types'
 
 export interface HandleCellEventOptions {
@@ -83,6 +86,10 @@ const AUDIO_ROLLUP_KINDS: ReadonlySet<string> = new Set([
   'cell.audio.remove',
   'cell.audio.validate',
   'cell.audio.unvalidate',
+  // AQU-1767: a cut adds a selected dub piece and resets both halves' votes.
+  'cell.audio.cut',
+  // AQU-1767 phase 2: undoing a removal un-deletes the cell's takes.
+  'source.cell.restore',
 ])
 
 function touchesAudioRollup(kind: string, touches: readonly ProjectionTable[]): boolean {
@@ -123,6 +130,25 @@ export function handleCellEvent(
   const stmts: AquillaStatement[] = [eventInsert]
   let projectionTouches: readonly ProjectionTable[] = []
   let counterFile: DispatchResult['counterFile']
+
+  // A bare create writes a source lane and no target lane. The editor still
+  // commits the default translation as tag ''. That one bridge is created
+  // here, before the cells write resolves lane_id, and in the same batch.
+  // The INSERT itself adds a row only when the project has no target lane
+  // (AQU-1615: a project that already has a tagged lane must not gain '').
+  // It is NOT the first projection statement: that one is the gated cells
+  // write, and its row count is what the route reads (AQU-1154).
+  if (
+    opts.updateProjection &&
+    event.kind.startsWith('target.cell.') &&
+    eventLaneTag(event.kind, event.payload) === ''
+  ) {
+    stmts.push(ensureBlankTargetBridgeStmt(db, event.projectId))
+    // AQU-1781: the bridge is a new target lane, and a new lane nobody is
+    // granted is unreadable to every member below Maintainer under the read
+    // wall. The grant rides the same batch as the lane that needs it.
+    stmts.push(grantNewLaneStmt(db, event.projectId, { legacyTag: '' }, null))
+  }
 
   // Atomic AD-2 arbitration: chain-arbitrated events claim their chain slot in
   // the same transaction, and the projection's cells write is gated on the

@@ -44,6 +44,7 @@ import {
   SlidersHorizontal,
   SpellCheck,
   SquareUserRound,
+  Table2,
   Users,
   Workflow,
 } from "lucide-react"
@@ -96,6 +97,7 @@ const LABEL_ICONS: Record<string, LucideIcon> = {
   Security: Shield,
   "AI provider keys": KeyRound,
   "Monday.com": Workflow,
+  Airtable: Table2,
   // Project workspace surfaces.
   Editor: BookOpenText,
   File: FileText,
@@ -154,6 +156,7 @@ export function deriveNavIcon(pathname: string): LucideIcon {
         }
         if (parts[1] === "providers") return KeyRound
         if (parts[1] === "monday") return Workflow
+        if (parts[1] === "airtable") return Table2
         // AQU-1131 — same icon as the project-level rules pane.
         if (parts[1] === "rules") return SpellCheck
         return NAV_PAGE_ICONS.settings

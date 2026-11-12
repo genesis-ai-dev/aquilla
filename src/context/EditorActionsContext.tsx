@@ -21,10 +21,56 @@ export interface EditorActionsContextValue {
   onInfractionClick?: (ruleId: string) => void
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
+  /**
+   * AQU-777: open the attachments drawer scrolled to one attachment. Fired by
+   * an attachment link under a cell. Here rather than on the row bag for this
+   * module's whole reason: the workspace owns the drawer state and renders it
+   * outside the table, so a row only needs a stable way to fire it.
+   */
+  onOpenAttachment?: (cellId: string, attachmentId: string) => void
+  /**
+   * AQU-777: this file's attachments, by cell id. Rows read their own group
+   * out of it to render the links under the cell and count the rail's badge.
+   *
+   * ONE MAP FOR THE FILE, not a per-row array, and that is the point: a fresh
+   * array per row would fail MemoizedRow's shallow compare for every rendered
+   * row on every attach. The map identity changes only when the file's
+   * attachments actually change.
+   */
+  attachmentsByCell?: ReadonlyMap<string, readonly import("@/lib/sync/cell-attachments-read-types").CellAttachmentRecord[]>
+  /**
+   * AQU-777: an attachment just landed on this cell, with a record shaped like
+   * the server's. The workspace merges it optimistically so the link shows
+   * before the outbox flush lands.
+   */
+  onAttachmentAdded?: (
+    record: import("@/lib/sync/cell-attachments-read-types").CellAttachmentRecord,
+  ) => void
   /** Opens the matching concept in the Terminology page. */
   onOpenTerminologyConcept?: (conceptId: string) => void
   onAiSetupNeeded?: () => void
-  onOpenRecording?: (cellId: string) => void
+  /** Open the recorder on a line, recording onto `slot` (the main track when
+   *  absent) — the Recording tab's New take names its take's track. */
+  onOpenRecording?: (cellId: string, slot?: string) => void
+  /**
+   * AQU-1758 / AQU-2291: "Train a voice from this recording" — New voice on
+   * the Train voice tab, this line's take already added as its first
+   * recording (the Recording tab's take; the timeline's take menu reaches the
+   * same workspace handler). Absent for someone who may not make voices.
+   */
+  onTrainFromTake?: (cellId: string, audioId: string) => void
+  /**
+   * AQU-2212: a voice picked for a line (and accepted) acts on it — a
+   * character, trained or ElevenLabs voice re-voices its take, an empty line reads its text, a stock voice
+   * regenerates a generated take; never over a person's recording.
+   */
+  onLineVoicePicked?: (cell: import("@/hooks/useCells").CellData, voiceId: string) => void
+  /** AQU-2212: the one-click "Change to …" / "Generate · …" for a line whose
+   *  voice and take disagree (lib/audio/line-voice `lineVoicePending`). */
+  onApplyLineVoice?: (cellId: string) => void
+  /** AQU-2212: "Add a voice…" from a line's voice dropdown — New voice on
+   *  Characters, the voice it adds cast on that line. */
+  onAddVoiceForLine?: (cellId: string) => void
   /**
    * 2026-08-07 (wire b): a plain row click, when the timeline is stacked
    * above the table — points the timeline at this cell (select the chip,
@@ -34,27 +80,36 @@ export interface EditorActionsContextValue {
   onMediaRowActivate?: (cellId: string) => void
   /**
    * 2026-08-07: the character gutter's PURE voice assignment (never
-   * synthesizes; applyToSpeaker covers every line sharing the cell's
-   * diarized cast_name). Ref-wrapped in the workspace so the context value
-   * stays identity-stable while cast data changes underneath.
+   * synthesizes). `scope` (Oct 23) says how far it reaches: this line, this
+   * character's lines in the file, or the character in every episode — see
+   * `CastScope`. Ref-wrapped in the workspace so the context value stays
+   * identity-stable while cast data changes underneath. Returns false when
+   * the pick was refused (no permission), so the Audio view doesn't act on it.
    */
   onAssignCastVoice?: (
     cell: import("@/hooks/useCells").CellData,
     voiceId: string,
-    opts?: { applyToSpeaker?: boolean },
-  ) => void
+    opts?: { scope?: import("@/lib/audio/character-cast").CastScope },
+  ) => boolean | void
   /**
    * Matt's QA (2026-08-21): the inverse — take the character OFF a line
    * without putting another in its place. Returns the row to the NC ring.
    * Clears the voice-map entry and the line's cast NAME only; the camera
    * angle and the client's line number are sheet data and survive.
-   * `applyToSpeaker` mirrors the assign side's checkbox: every line in the
-   * file sharing this cell's cast name goes back to NC together.
+   * `scope: "file"` takes it off every line in the file sharing this cell's
+   * cast name together. Removing a character is one file at a time, so the
+   * picker never sends `"everywhere"` here.
    */
   onClearCastVoice?: (
     cell: import("@/hooks/useCells").CellData,
-    opts?: { applyToSpeaker?: boolean },
+    opts?: { scope?: import("@/lib/audio/character-cast").CastScope },
   ) => void
+  /**
+   * How many lines in the file share this cast name — what the gutter
+   * picker's "Every «name» line in this file" would change (Sam, 2026-09-28).
+   * Asked only when the picker opens, never per row per render.
+   */
+  countCastLines?: (castName: string) => number
   /**
    * AQU-633: the current user's own lane/file scopes (empty/undefined =
    * unscoped). Rows gate the per-cell Validate affordance on this so a scoped
@@ -71,6 +126,12 @@ export interface EditorActionsContextValue {
    * identity-stable in the workspace.
    */
   onTakeSaved?: (cellId: string) => void
+  /**
+   * The cell's last recording was deleted from the Recording tab (2026-09-29)
+   * — the same reset of the target row the recorder's delete triggers.
+   * Identity-stable in the workspace, like `onTakeSaved`.
+   */
+  onLastTakeRemoved?: (cellId: string) => void
   /**
    * AQU-646 stage 3f: where this row's audio actually belongs.
    *
@@ -131,6 +192,35 @@ export interface EditorActionsContextValue {
   onInsertCellBeside?: (cellId: string, position: "above" | "below") => void
   /** Take this cell out, after the confirmation its inventory earns. */
   onRemoveCell?: (cellId: string) => void
+  /**
+   * AQU-1759: preview splitting this cell at its quotation marks, so each
+   * speaker gets a line (and a voice) of their own. Opens the workspace's
+   * confirmation; nothing is written until it is confirmed.
+   */
+  onSplitAtQuotes?: (cellId: string) => void
+  /**
+   * AQU-1422: park this cell, or bring it back. The reversible sibling of
+   * `onRemoveCell` — nothing is deleted, so it needs no confirmation and no
+   * Maintainer: the source text, every lane's translation, recordings, comments
+   * and validations are all still there and come back untouched.
+   *
+   * Absent ⇒ this person may not park cells here at all (the same gate as
+   * "Edit text": Project Lead and up on a cloud project whose source is neither
+   * live-linked nor DCS-pinned).
+   */
+  onSetCellHidden?: (cellId: string, hidden: boolean) => void
+  /**
+   * AQU-2308: open "Set a new milestone…" with this cell as the range's start.
+   *
+   * Only the cell is passed. The other edge, the file's cell order and its
+   * divisions all live in the workspace, which owns the store — so the row
+   * says which line the menu was opened on and nothing else, and a shift-click
+   * selection is read where the order to resolve it against exists.
+   *
+   * Absent ⇒ nobody here may set milestones (below Maintainer, or a
+   * live-linked downstream project), and the entry is not drawn at all.
+   */
+  onSetMilestone?: (cellId: string) => void
   /** Retime one line. The workspace's handler owns the lock check and the
    *  media-vs-text choice of event, so the menu adds nothing to it. */
   onRetimeCell?: (cellId: string, startSec: number, endSec: number) => void
@@ -141,6 +231,9 @@ export interface EditorActionsContextValue {
    */
   timingLocked?: boolean
   canUnlockTiming?: boolean
+  /** AQU-2204: the open file follows its recordings, so no source times are
+   *  shown — a line's "Edit timestamps" is unavailable, with the reason. */
+  followsRecordings?: boolean
   /** Takes a maintainer to the setting that holds the lock. Deliberately not
    *  a toggle: the lock is project-wide, so they should see its scope before
    *  changing it (Sam, 2026-09-09). */

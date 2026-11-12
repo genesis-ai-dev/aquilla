@@ -7,6 +7,31 @@ import {
   resetMilestoneSplitCacheForTests,
   setMilestoneSplit,
 } from "@/lib/store/milestone-split-pref"
+import {
+  getUnresolvedCommentHighlight,
+  resetUnresolvedCommentHighlightCacheForTests,
+  setUnresolvedCommentHighlight,
+} from "@/lib/store/unresolved-comment-highlight-pref"
+import {
+  getHealthScoreColorCoding,
+  resetHealthScoreColorCodingCacheForTests,
+  setHealthScoreColorCoding,
+} from "@/lib/store/health-score-color-coding-pref"
+import {
+  getVisibleStyleSegments,
+  resetVisibleStyleSegmentsCacheForTests,
+  setVisibleStyleSegments,
+} from "@/lib/store/visible-style-segments-pref"
+import {
+  __resetLowMemoryForTests,
+  getLowMemoryMode,
+  isLowMemoryActive,
+  setLowMemoryMode,
+} from "@/lib/perf/low-memory"
+import {
+  getBibleDataViewPrefs,
+  resetBibleDataViewPrefsCacheForTests,
+} from "@/lib/store/bible-data-view-prefs"
 import { DIRECTION_MISMATCH_TOAST_ID, ViewSettingsMenu } from "./ViewSettingsMenu"
 
 function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSettingsMenu>> = {}) {
@@ -53,6 +78,14 @@ beforeEach(() => {
   localStorage.clear()
   resetMilestoneSplitCacheForTests()
   setMilestoneSplit(false)
+  resetUnresolvedCommentHighlightCacheForTests()
+  setUnresolvedCommentHighlight(false)
+  resetHealthScoreColorCodingCacheForTests()
+  setHealthScoreColorCoding(false)
+  resetVisibleStyleSegmentsCacheForTests()
+  setVisibleStyleSegments(false)
+  setLowMemoryMode("auto")
+  __resetLowMemoryForTests()
 })
 
 afterEach(() => {
@@ -67,15 +100,34 @@ describe("ViewSettingsMenu popover", () => {
 
     const panel = screen.getByTestId("view-settings-popover")
     expect(panel).toBeTruthy()
+    const scroller = screen.getByTestId("view-settings-scroller")
+    expect(scroller).toHaveClass("overflow-y-auto")
+    expect(scroller).toHaveClass("overflow-x-hidden")
     expect(screen.getByRole("switch", { name: "Split into milestones" })).toBeTruthy()
     expect(screen.getByText("Show line numbers")).toBeTruthy()
     expect(screen.getByText("Show cell labels")).toBeTruthy()
     expect(screen.getByText("Target key terms")).toBeTruthy()
-    expect(screen.getByText("Text Direction")).toBeTruthy()
-    expect(screen.getByText("Font Size")).toBeTruthy()
+    expect(screen.getByText("Text direction")).toBeTruthy()
+    expect(screen.getByText("Font size")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("switch", { name: /Show line numbers/i }))
     expect(handlers.onLineNumbersChange).toHaveBeenCalledWith(false)
+    expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  it("scrolls the settings list and toggles visible style segments", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const scroller = screen.getByTestId("view-settings-scroller")
+    expect(scroller.className).toContain("overflow-y-auto")
+
+    const toggle = screen.getByRole("switch", { name: "Visible style segments" })
+    expect(toggle).not.toBeChecked()
+    fireEvent.click(toggle)
+
+    expect(screen.getByRole("switch", { name: "Visible style segments" })).toBeChecked()
+    expect(getVisibleStyleSegments()).toBe(true)
     expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
   })
 
@@ -103,6 +155,49 @@ describe("ViewSettingsMenu popover", () => {
     expect(handlers.onTargetKeyTermHighlightModeChange).toHaveBeenCalledWith("focused")
   })
 
+  it("switches low-memory mode from the device setting and keeps the popover open (AQU-1191)", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const modeTabs = screen.getByRole("tablist", { name: "Low-memory mode" })
+    expect(within(modeTabs).getByRole("tab", { name: "Auto" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+
+    fireEvent.click(within(modeTabs).getByRole("tab", { name: "On" }))
+
+    expect(getLowMemoryMode()).toBe("on")
+    expect(isLowMemoryActive()).toBe(true)
+    expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  // AQU-1191: the control is not gated on `fileOpen` the way the file-scoped
+  // rows above it are — it is a device setting, so it stays live when the rest
+  // of the popover greys out. NOTE this is a property of THIS component only:
+  // `ProjectWorkspace` mounts the whole file toolbar (and so this menu) only
+  // when a file is active, so in the running app the mode is not yet reachable
+  // with no file open. The QA bot walk on PR #897 caught that gap; making the
+  // menu reachable without a file is a separate change to a shared surface.
+  it("leaves low-memory mode enabled when fileOpen is false, unlike the file-scoped rows", () => {
+    renderViewSettings({ fileOpen: false })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const modeTabs = screen.getByRole("tablist", { name: "Low-memory mode" })
+    // These primitives mark disabled state with `aria-disabled`, not the
+    // `disabled` attribute, so assert the attribute the user's AT actually sees.
+    const off = within(modeTabs).getByRole("tab", { name: "Off" })
+    expect(off).not.toHaveAttribute("aria-disabled", "true")
+    // A file-scoped control in the same popover IS disabled at this point.
+    expect(screen.getByRole("switch", { name: "Show line numbers" }))
+      .toHaveAttribute("aria-disabled", "true")
+
+    fireEvent.click(off)
+
+    expect(getLowMemoryMode()).toBe("off")
+    expect(isLowMemoryActive()).toBe(false)
+  })
+
   it("changes source direction via the tabs", () => {
     const handlers = renderViewSettings()
 
@@ -124,7 +219,7 @@ describe("ViewSettingsMenu popover", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Decrease source font size" }))
     expect(handlers.onSourceFontSizeChange).toHaveBeenCalledWith(15)
-    expect(screen.queryByRole("button", { name: "Use app font size for target" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Reset to default" })).toBeNull()
   })
 
   it("steps font size from the Small scaled default (AQU-1170)", () => {
@@ -148,9 +243,30 @@ describe("ViewSettingsMenu popover", () => {
     fireEvent.click(screen.getByRole("button", { name: "Increase source font size" }))
     expect(handlers.onSourceFontSizeChange).toHaveBeenCalledWith(19)
 
-    fireEvent.click(screen.getByRole("button", { name: "Use app font size for target" }))
+    // AQU-2263: one "Reset to default" puts the pinned column back; the
+    // column that already follows Preferences is left alone.
+    fireEvent.click(screen.getByRole("button", { name: "Reset to default" }))
     expect(handlers.onTargetFontSizeReset).toHaveBeenCalledTimes(1)
-    expect(screen.queryByRole("button", { name: "Use app font size for source" })).toBeNull()
+    expect(handlers.onSourceFontSizeReset).not.toHaveBeenCalled()
+  })
+
+  // AQU-2263: the file's size is an override of the app font size in
+  // Preferences, so the menu says what that default is.
+  it("says the default from Preferences, and offers Reset to default only once a size is changed", () => {
+    renderViewSettings({ sourceFontSize: 14, targetFontSize: 14 })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    expect(screen.getByTestId("font-size-default")).toHaveTextContent("Default from Preferences: 14px")
+    expect(screen.queryByRole("button", { name: "Reset to default" })).toBeNull()
+  })
+
+  it("Reset to default puts both columns back when both were changed", () => {
+    const handlers = renderViewSettings({
+      sourceFontSize: 20, targetFontSize: 22, sourceFontSizeExplicit: true, targetFontSizeExplicit: true,
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    fireEvent.click(screen.getByRole("button", { name: "Reset to default" }))
+    expect(handlers.onSourceFontSizeReset).toHaveBeenCalledTimes(1)
+    expect(handlers.onTargetFontSizeReset).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -275,5 +391,209 @@ describe("ViewSettingsMenu direction display", () => {
     })
     expect(handlers.onTargetDirectionModeChange).not.toHaveBeenCalled()
     expect(handlers.onSourceDirectionModeChange).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-1259 (B): the reviewer's opt-in scanning view lives beside the other
+// editor view toggles and is a device preference, like the milestone split.
+describe("ViewSettingsMenu — highlight open comments", () => {
+  it("offers the toggle off by default and stores the opt-in", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const toggle = screen.getByRole("switch", { name: "Highlight open comments" })
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
+    expect(getUnresolvedCommentHighlight()).toBe(false)
+
+    fireEvent.click(toggle)
+
+    expect(getUnresolvedCommentHighlight()).toBe(true)
+    expect(
+      screen.getByRole("switch", { name: "Highlight open comments" }).getAttribute("aria-checked"),
+    ).toBe("true")
+  })
+
+  it("renders on from a stored preference and turns back off", () => {
+    setUnresolvedCommentHighlight(true)
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const toggle = screen.getByRole("switch", { name: "Highlight open comments" })
+    expect(toggle.getAttribute("aria-checked")).toBe("true")
+
+    fireEvent.click(toggle)
+
+    expect(getUnresolvedCommentHighlight()).toBe(false)
+  })
+
+  it("is disabled with no file open, since there are no rows to mark", () => {
+    renderViewSettings({ fileOpen: false })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+
+    const toggle = screen.getByRole("switch", { name: "Highlight open comments" })
+    expect(toggle.getAttribute("aria-disabled")).toBe("true")
+
+    fireEvent.click(toggle)
+
+    expect(getUnresolvedCommentHighlight()).toBe(false)
+  })
+})
+
+// AQU-1687: each person's options for the Voices enrichment. They exist only
+// where the project has Voices on, and they are device preferences, like the
+// milestone split: what one person likes to see while reading.
+describe("ViewSettingsMenu — Bible data", () => {
+  beforeEach(() => {
+    resetBibleDataViewPrefsCacheForTests()
+  })
+
+  it("has no Bible data section when the project does not show Voices", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+
+    expect(screen.queryByTestId("bible-data-view-settings")).toBeNull()
+    expect(screen.queryByRole("switch", { name: "Voice chips" })).toBeNull()
+  })
+
+  it("switches voice chips and speech rails, and picks the label language, for this device", () => {
+    renderViewSettings({ bibleDataVoicesEnabled: true })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const section = screen.getByTestId("bible-data-view-settings")
+    expect(within(section).getByText("Bible data")).toBeTruthy()
+
+    // Both on by default, and the label chain starts at the project's names.
+    const chips = within(section).getByRole("switch", { name: "Voice chips" })
+    const rails = within(section).getByRole("switch", { name: "Speech rails" })
+    expect(chips.getAttribute("aria-checked")).toBe("true")
+    expect(rails.getAttribute("aria-checked")).toBe("true")
+    expect(within(section).getByRole("radio", { name: "Project names" }).getAttribute("aria-checked")).toBe("true")
+
+    fireEvent.click(chips)
+    fireEvent.click(within(section).getByRole("radio", { name: "English names" }))
+
+    // AQU-1689: the Who's Who options stay at their defaults.
+    const expected = {
+      voiceChips: false,
+      speechRails: true,
+      labelMode: "english",
+      whosWhoHighlights: "hover",
+      impliedSubjectHints: "names",
+    }
+    expect(getBibleDataViewPrefs()).toEqual(expected)
+    // Survives a reload: stored on this device.
+    resetBibleDataViewPrefsCacheForTests()
+    expect(getBibleDataViewPrefs()).toEqual(expected)
+    expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  // AQU-1689: Who's Who's options appear where the project has Who's Who on,
+  // and only its own: a project with Voices off shows no voice switches.
+  it("offers Who's Who highlights and implied-subject hints where the project has Who's Who on", () => {
+    renderViewSettings({ bibleDataWhosWhoEnabled: true })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const section = screen.getByTestId("bible-data-view-settings")
+    expect(within(section).queryByRole("switch", { name: "Voice chips" })).toBeNull()
+
+    const highlights = within(section).getByRole("radiogroup", { name: "Who's Who highlights" })
+    const hints = within(section).getByRole("radiogroup", { name: "Implied-subject hints" })
+    expect(within(highlights).getByRole("radio", { name: "On hover or focus" }).getAttribute("aria-checked")).toBe("true")
+    expect(within(hints).getByRole("radio", { name: "Names only" }).getAttribute("aria-checked")).toBe("true")
+    // Names follow the same label chain as Voices.
+    expect(within(section).getByRole("radiogroup", { name: "Label language" })).toBeTruthy()
+
+    fireEvent.click(within(highlights).getByRole("radio", { name: "Always on" }))
+    fireEvent.click(within(hints).getByRole("radio", { name: "Off" }))
+
+    expect(getBibleDataViewPrefs()).toMatchObject({ whosWhoHighlights: "always", impliedSubjectHints: "off" })
+    resetBibleDataViewPrefsCacheForTests()
+    expect(getBibleDataViewPrefs()).toMatchObject({ whosWhoHighlights: "always", impliedSubjectHints: "off" })
+  })
+
+  // AQU-1692: offline with nothing cached, the editor shows no chips; this says why.
+  it("says when the open book's Bible data is not downloaded yet", () => {
+    renderViewSettings({
+      bibleDataVoicesEnabled: true,
+      bibleDataStatus: { book: "RUT", failure: "offline", orphanedCorrections: [] },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    expect(screen.getByTestId("bible-data-pack-status").textContent).toBe(
+      "The Bible data for this book isn't downloaded yet. It loads when you're back online.",
+    )
+  })
+
+  // AQU-1692: after a pack rebuild moves a speech, its correction applies to
+  // nothing. It is listed rather than lost, and a maintainer can remove it.
+  it("lists voice corrections the Bible data no longer matches, with Remove for a maintainer", () => {
+    const remove = vi.fn()
+    const moved = "sp:o080010100041-o080010100070"
+    renderViewSettings({
+      bibleDataVoicesEnabled: true,
+      bibleDataStatus: { book: "RUT", failure: null, orphanedCorrections: [moved] },
+      bibleVoiceCorrections: {
+        [moved]: { speaker: "person:Ruth", note: "We follow Ruth.", by: "mara", at: "2026-10-06T12:00:00Z" },
+      },
+      onRemoveVoiceCorrection: remove,
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const list = screen.getByTestId("bible-data-orphaned-corrections")
+    expect(list.textContent).toContain("1 voice correction no longer matches the Bible data:")
+    expect(list.textContent).toContain("RUT 1:10 · mara: We follow Ruth.")
+    expect(screen.queryByTestId("bible-data-pack-status")).toBeNull()
+    fireEvent.click(within(list).getByRole("button", { name: "Remove" }))
+    expect(remove).toHaveBeenCalledWith(moved)
+  })
+
+  it("has no Bible data section when the project shows neither Voices nor Who's Who", () => {
+    renderViewSettings({ bibleDataVoicesEnabled: false, bibleDataWhosWhoEnabled: false })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    expect(screen.queryByTestId("bible-data-view-settings")).toBeNull()
+  })
+})
+
+describe("ViewSettingsMenu — health score color coding", () => {
+  it("offers the toggle off by default and stores the opt-in", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const toggle = screen.getByRole("switch", { name: "Health score color coding" })
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
+    expect(getHealthScoreColorCoding()).toBe(false)
+
+    fireEvent.click(toggle)
+
+    expect(getHealthScoreColorCoding()).toBe(true)
+    expect(
+      screen.getByRole("switch", { name: "Health score color coding" }).getAttribute("aria-checked"),
+    ).toBe("true")
+  })
+
+  it("renders on from a stored preference and turns back off", () => {
+    setHealthScoreColorCoding(true)
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const toggle = screen.getByRole("switch", { name: "Health score color coding" })
+    expect(toggle.getAttribute("aria-checked")).toBe("true")
+
+    fireEvent.click(toggle)
+
+    expect(getHealthScoreColorCoding()).toBe(false)
+  })
+
+  it("is disabled with no file open, since there are no drafts to mark", () => {
+    renderViewSettings({ fileOpen: false })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+
+    const toggle = screen.getByRole("switch", { name: "Health score color coding" })
+    expect(toggle.getAttribute("aria-disabled")).toBe("true")
+
+    fireEvent.click(toggle)
+
+    expect(getHealthScoreColorCoding()).toBe(false)
   })
 })

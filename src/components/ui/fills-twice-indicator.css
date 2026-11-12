@@ -1,0 +1,31 @@
+/* Simulated fill for a costly model wait. The graphic is not the request. */
+
+.fills-twice-grow {
+  inset-inline-size: 0%;
+  animation-name: fills-twice-grow;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+.fills-twice-finish {
+  inset-inline-size: 100%;
+  transition-property: inset-inline-size;
+  transition-timing-function: ease-out;
+}
+
+@keyframes fills-twice-grow {
+  from {
+    inset-inline-size: 0%;
+  }
+  to {
+    inset-inline-size: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fills-twice-grow,
+  .fills-twice-finish {
+    animation: none;
+    transition: none;
+  }
+}

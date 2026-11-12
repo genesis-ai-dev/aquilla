@@ -28,19 +28,35 @@ import { randomUUID } from "node:crypto"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { gunzipSync } from "node:zlib"
 import type { Page } from "@playwright/test"
 import { extractMarkdownStrings } from "../../src/lib/parsers/markdown"
 import { extractUsfmStrings } from "../../src/lib/parsers/usfm"
+import {
+  parseHelloaoComplete,
+  type HelloaoComplete,
+} from "../../src/lib/parsers/helloao"
 import { aquillaImportMetadata, normalizeTranslatableStrings } from "../../src/lib/import/normalized-manifest"
 import { readPersistedSession } from "./auth-state"
-import { createProjectServerSide, updateProjectSettings } from "./frontier-api"
+import { createProjectServerSide, readProjectLanes, setProjectLanguagePair, updateProjectSettings } from "./frontier-api"
 import { postIdempotentJson } from "./idempotent-request"
 import { Workspace } from "./page-objects/Workspace"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+/** Matches `src/lib/sync/bulk-import.ts` CHUNK so a whole-Bible upload uses
+ * the same per-request write txn size as production. */
+const IMPORT_CHUNK = 1500
+const HELLOAO_BSB_FIXTURE = path.resolve(
+  __dirname,
+  "../fixtures/helloao/BSB.complete.json.gz",
+)
+
 const FRONTIER_BASE = process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
-const SYNC_BASE = `http://${process.env.VITE_SYNC_WORKER_HOST ?? "127.0.0.1:8788"}`
+// E2E_SYNC_BASE lets a deployed https target (the adversarial Jev suite) reuse
+// these helpers; the local stack keeps the plain-http default.
+const SYNC_BASE = process.env.E2E_SYNC_BASE
+  ?? `http://${process.env.VITE_SYNC_WORKER_HOST ?? "127.0.0.1:8788"}`
 
 const DEFAULT_FIXTURE = path.resolve(__dirname, "../fixtures/sample.md")
 
@@ -71,6 +87,7 @@ export async function mintSyncToken(jwt: string, projectId: string, fileId: stri
 
 export interface SeededFileEvent {
   id: string
+  cellId?: string
   kind: string
   author: string
   payload: unknown
@@ -92,24 +109,187 @@ export async function readSeededFileEvents(
   return ((await response.json()) as { events: SeededFileEvent[] }).events
 }
 
+interface ImportString {
+  id: string
+  original: string
+  originalHtml?: string
+  type?: string
+  group?: string
+  paragraphStart?: boolean
+}
+
+function cellsFromStrings(strings: ImportString[]) {
+  let prevCellId: string | null = null
+  const cells = strings.map((str, seq) => {
+    const cell = {
+      id: randomUUID(),
+      cellId: str.id,
+      anchorCellId: prevCellId,
+      value: str.original,
+      ...(str.originalHtml ? { valueHtml: str.originalHtml } : {}),
+      ...(str.type !== undefined ? { type: str.type } : {}),
+      ...(str.group ? { canonicalRef: str.group } : {}),
+      sequenceIndex: seq,
+      // useCells reads paragraphStart from `source.metadata.paragraphStart`
+      // (src/hooks/useCells.ts), not the top-level field — mirror
+      // buildBulkCellsWithSpeakers (src/lib/import.ts), which sets both.
+      ...(str.paragraphStart ? { paragraphStart: true, metadata: { paragraphStart: true } } : {}),
+    }
+    prevCellId = str.id
+    return cell
+  })
+  return { cells, cellIds: strings.map((s) => s.id) }
+}
+
+interface ImportFileMeta {
+  name: string
+  fileType: string
+  kind: string
+  importFormat: string
+  parserVersion: string
+}
+
+/** POST `/import` in production-sized chunks (file.create on the first). */
+async function importCellsIntoProject(
+  jwt: string,
+  projectId: string,
+  cells: ReturnType<typeof cellsFromStrings>["cells"],
+  file: ImportFileMeta,
+): Promise<{ fileId: string; cellIds: string[] }> {
+  const fileId = randomUUID()
+  const token = await mintSyncToken(jwt, projectId, fileId)
+  const importHeaders = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  }
+  const fileRow = { id: randomUUID(), role: "source", ...file }
+  for (let offset = 0; offset === 0 || offset < cells.length; offset += IMPORT_CHUNK) {
+    const chunk = cells.slice(offset, offset + IMPORT_CHUNK)
+    await postIdempotentJson({
+      url: `${SYNC_BASE}/import`,
+      headers: importHeaders,
+      body: {
+        projectId,
+        fileId,
+        cells: chunk,
+        clientTs: Date.now(),
+        ...(offset === 0 ? { file: fileRow } : {}),
+      },
+      operation: `bulk import chunk ${offset / IMPORT_CHUNK + 1}`,
+    })
+  }
+  await postIdempotentJson({
+    url: `${SYNC_BASE}/import`,
+    headers: importHeaders,
+    body: { projectId, fileId, cells: [], complete: true },
+    operation: "import finalize",
+  })
+  return { fileId, cellIds: cells.map((c) => c.cellId) }
+}
+
+/** Bulk-import markdown as a new file on an existing project (same `/import`
+ * path as `seedProjectWithFile`). */
+export async function importMarkdownIntoProject(
+  jwt: string,
+  projectId: string,
+  markdown: string,
+  fileName: string,
+): Promise<{ fileId: string; cellIds: string[] }> {
+  const { cells, cellIds } = cellsFromStrings(extractMarkdownStrings(markdown))
+  const imported = await importCellsIntoProject(jwt, projectId, cells, {
+    name: fileName,
+    fileType: "md",
+    kind: "md",
+    importFormat: "md",
+    parserVersion: "workspace-import-v1",
+  })
+  return { fileId: imported.fileId, cellIds }
+}
+
+/** Load the checked-in helloao BSB `complete.json` snapshot and parse it with
+ * the same producer as the import dialog (`parseHelloaoComplete`). Does not
+ * hit the network. Refresh: see `e2e/fixtures/helloao/README.md`. */
+export async function loadHelloaoBsbFixture(): Promise<{
+  name: string
+  id: string
+  strings: ReturnType<typeof parseHelloaoComplete>
+}> {
+  let gz: Buffer
+  try {
+    gz = await fs.readFile(HELLOAO_BSB_FIXTURE)
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === "ENOENT") {
+      throw new Error(
+        `Missing ${HELLOAO_BSB_FIXTURE}. Snapshot it with the curl in e2e/fixtures/helloao/README.md — this spec must not fetch bible.helloao.org at runtime.`,
+      )
+    }
+    throw error
+  }
+  const complete = JSON.parse(gunzipSync(gz).toString("utf8")) as HelloaoComplete
+  const name = complete.translation.englishName || complete.translation.name || "BSB"
+  return { name, id: complete.translation.id, strings: parseHelloaoComplete(complete) }
+}
+
+/** Import a helloao translation as a source file in production-sized chunks.
+ * Load the fixture with {@link loadHelloaoBsbFixture} first so parse is not
+ * confused with write-path latency. */
+export async function importHelloaoStringsIntoProject(
+  jwt: string,
+  projectId: string,
+  parsed: { name: string; id: string; strings: ReturnType<typeof parseHelloaoComplete> },
+): Promise<{ fileId: string; cellIds: string[] }> {
+  const { cells, cellIds } = cellsFromStrings(parsed.strings)
+  const imported = await importCellsIntoProject(jwt, projectId, cells, {
+    name: `${parsed.name} (${parsed.id})`,
+    fileType: "helloao",
+    kind: "helloao",
+    importFormat: "helloao",
+    parserVersion: "workspace-import-v1",
+  })
+  return { fileId: imported.fileId, cellIds }
+}
+
 /** Create a project and import a markdown or USFM fixture entirely server-side.
  * `jwt` comes from the fixture's session (the stack-namespaced sidecar is
  * written by ensureAuthState; pass `session.jwt` or re-read the sidecar). */
 export async function seedProjectWithFile(
   jwt: string,
-  opts: { name?: string; fixturePath?: string; steeringContext?: boolean } = {},
+  opts: {
+    name?: string
+    fixturePath?: string
+    steeringContext?: boolean
+    orgId?: number
+    /** AQU-1937: switch the project's Smart Extensions on (off by default
+     *  for every project). Defaults on for E2E_EDITOR=extension runs, whose
+     *  journeys drive the first-party extension editor. */
+    smartExtensions?: boolean
+  } = {},
 ): Promise<SeededProject> {
   const projectId = randomUUID()
   const projectName = opts.name ?? `Seeded ${projectId.slice(0, 8)}`
-  await createProjectServerSide(jwt, { id: projectId, name: projectName })
+  await createProjectServerSide(jwt, {
+    id: projectId, name: projectName, ...(opts.orgId === undefined ? {} : { orgId: opts.orgId }),
+  })
+  if (opts.smartExtensions ?? process.env.E2E_EDITOR === "extension") {
+    await updateProjectSettings(jwt, projectId, { smartExtensionsEnabled: true })
+  }
   // A seeded project stands in for one a team has actually set up: autopilot
   // refuses to start without both languages and an answered brief question
-  // (AQU-827). Pass `steeringContext: false` to seed the unconfigured project
-  // a spec covering that gate needs.
+  // (AQU-827). Languages are lane rows (AQU-1594 / AQU-1595): English on the
+  // source lane this create already inserted, and one Swahili target lane
+  // (the old settings `targetLanguage: "sw"`). Only the brief goes through
+  // the settings PUT.
+  //
+  // `steeringContext: false` is the unconfigured project a spec covering that
+  // gate needs: no brief, no target lane, and the source lane's language left
+  // empty. No current caller passes the flag; the meaning stays that opt-out.
   if (opts.steeringContext !== false) {
-    await updateProjectSettings(jwt, projectId, {
-      sourceLanguage: "en",
-      targetLanguage: "sw",
+    await setProjectLanguagePair(jwt, projectId, {
+      sourceLanguage: "English",
+      sourceCode: "en",
+      targetLanguage: "Swahili",
+      targetCode: "sw",
       translationBrief: { parameters: { purpose: "Seeded fixture project" } },
     })
   }
@@ -200,6 +380,10 @@ export interface ProjectedCellRow {
   aiDrafted: boolean
   /** Chain head for this side/lane — the event id the projection last applied. */
   eventId: string
+  /** Target rows: the lane's frozen tag (`''` = a legacy default lane). */
+  targetLang?: string
+  /** Target rows: the lane row's id. */
+  laneId?: string | null
 }
 
 /** Read a seeded file's cell rows straight from the sync-worker projection —
@@ -275,6 +459,44 @@ export async function readCellHistory(
   const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!r.ok) throw new Error(`cell history read failed: HTTP ${r.status} — ${await r.text()}`)
   return ((await r.json()) as { events: CellHistoryEventRow[] }).events
+}
+
+/** Commit one target value on the project's target lane through `POST
+ * /events` — the editor's own write path — so a cell has server-side history
+ * (and nothing in the browser's outbox) before a spec opens it. */
+export async function commitTargetServerSide(
+  jwt: string,
+  seeded: Pick<SeededProject, "projectId" | "fileId">,
+  cellId: string,
+  value: string,
+  author: "alice" | "bob" | "carol",
+): Promise<void> {
+  const lane = (await readProjectLanes(jwt, seeded.projectId))
+    .find((l) => l.role === "target" && !l.archivedAt)
+  if (!lane) throw new Error("seeded project has no target lane")
+  const token = await mintSyncToken(jwt, seeded.projectId, seeded.fileId)
+  const event = {
+    schemaVersion: 1,
+    id: randomUUID(),
+    projectId: seeded.projectId,
+    fileId: seeded.fileId,
+    cellId,
+    author,
+    parentId: null,
+    kind: "target.cell.commit",
+    payload: { value, laneId: lane.id },
+    clientTs: Date.now(),
+  }
+  const r = await fetch(`${SYNC_BASE}/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ events: [event] }),
+  })
+  if (!r.ok) throw new Error(`target commit failed: HTTP ${r.status} — ${await r.text()}`)
+  const body = (await r.json()) as { accepted?: unknown[]; rejected?: unknown[] }
+  if ((body.rejected ?? []).length > 0 || (body.accepted ?? []).length !== 1) {
+    throw new Error(`target commit was not accepted: ${JSON.stringify(body).slice(0, 500)}`)
+  }
 }
 
 /** Navigate an authed page straight into the seeded file's editor and wait

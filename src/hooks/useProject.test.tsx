@@ -6,6 +6,7 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { useProject } from "./useProject"
 import { getProject } from "@/lib/store/project-index"
 import { clearResolvedProjectSeeds, readResolvedProjectSeed } from "@/lib/sync/project-record-seed"
+import { announceProjectRecordChanged } from "@/lib/sync/project-record-changed"
 
 const API = "https://api.frontier.example"
 
@@ -172,6 +173,45 @@ describe("useProject — thin-client fetch (Phase 2c-β)", () => {
       "f-2",
       "f-3",
     ])
+  })
+
+  // AQU-1570: Project Settings is a route modal over a still-mounted page with
+  // its own useProject. When the dialog links a source project, the page behind
+  // must re-read the record — that is where the upstream's files show up.
+  it("re-resolves when another surface in the tab announces this project changed", async () => {
+    let files: Array<{ id: string; name: string; type: string; cellCount: number }> = []
+    const reads: string[] = []
+    global.fetch = vi.fn<typeof fetch>(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url
+      reads.push(url)
+      if (url === `${API}/api/v2/projects/p-linked`) {
+        return new Response(
+          JSON.stringify({
+            id: "p-linked",
+            name: "Downstream",
+            gitlabProjectId: null,
+            role: { level: 700, name: "owner", source: "creator" },
+            files,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as unknown as typeof fetch
+
+    const { result } = renderHook(() => useProject("p-linked", { includeSettings: false }))
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    expect(result.current.project?.files).toEqual([])
+
+    // Another project's change is not this page's business.
+    act(() => announceProjectRecordChanged("p-other"))
+    expect(reads).toHaveLength(1)
+
+    files = [{ id: "f-mat", name: "MAT", type: "usfm", cellCount: 1071 }]
+    act(() => announceProjectRecordChanged("p-linked"))
+
+    await waitFor(() => expect(result.current.project?.files.map((f) => f.id)).toEqual(["f-mat"]))
+    expect(reads).toHaveLength(2)
   })
 
   it("overlays device-local completion settings onto the server project", async () => {

@@ -10,9 +10,11 @@
 // { error: { code, message } } using the SAME stable codes as the REST surface,
 // so agents branch identically across adapters.
 
+import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { ExternalError } from './errors'
+import { uploadArtifact } from './mcp-artifact-upload'
 import type { ExternalErrorCode } from './errors'
-import { ROLE } from '../events/role-policy'
+import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
 import { assertCredentialScope } from './token-bridge'
 import { loadChangeset } from './store'
 import { approvalUrlFor, CHANGESET_ASK_TTL_MS, CHANGESET_TTL_MS } from './prepare'
@@ -24,9 +26,11 @@ import { uiOnlySection } from './ui-only'
 import { handleExternalReadRequest } from './read-routes'
 import { handleExternalCommentsRequest } from './comments-route'
 import { handleExternalMemoryReadRequest } from './memory-read-routes'
+import { handleExternalStyleRulesReadRequest } from './style-rules-read-routes'
 import { handleExternalExportRequest } from './export-route'
 import { handleExternalQualityRequest } from './quality-routes'
 import { handleExternalChangesetsRequest } from './changesets-route'
+import { handleExternalTranscriptionRequest } from './transcription-route'
 import { listProjectsForCredential } from './projects-list'
 import { loadProjectDetail } from './project-detail'
 import { listOrgsForCredential } from './orgs-list'
@@ -98,6 +102,8 @@ function bearer(token: string): Record<string, string> {
  *  `channel: 'mcp'` into the provenance envelope (§2) instead of the REST default. */
 const MCP_CHANNEL_HEADER: Record<string, string> = { 'x-aquilla-channel': 'mcp' }
 
+const makeRequest = (input: RequestInfo | URL, init?: RequestInit) => new Request(input, init)
+
 const EXTERNAL_ROOT = 'https://internal/api/v1/external'
 const EXTERNAL_BASE = `${EXTERNAL_ROOT}/projects`
 
@@ -107,11 +113,16 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
   return ok({
     apiVersion: 'v1',
     credentialMode: cred.mode,
+    // AQU-1242: the write ceiling, published beside the autonomy mode so an MCP
+    // agent plans against it instead of discovering it as a 403 on work it has
+    // already done. Read it as the gate on whether the write tools exist for
+    // you at all; credentialMode only governs writes you are permitted.
+    credentialAccess: cred.access,
     // The numbered golden path, so a weak agent doesn't have to reconstruct
     // the workflow from per-tool descriptions.
     quickstart: [
       '0. Setting up a partner project? get_skill { name: "project-setup" } and follow it (one ProjectSetup command, one approval).',
-      '1. get_identity_and_scope — confirm who you are, your mode (ask|act), and your org/project scope.',
+      '1. get_identity_and_scope — confirm who you are, your access (read|write), your mode (ask|act), and your org/project scope. access "read" means steps 4 and 5 will be refused: report that and stop rather than retrying.',
       '2. list_projects — find a projectId. Managing a whole workspace? list_orgs first, then list_projects { orgId } per org.',
       '3. read_content with just projectId to list files; add fileId to read cells. search_project for full-text search in one project, search_projects { projectIds: [...] } across several, find_similar_cells for translation-memory precedents. list_memory for what the copilot has learned about the project (and read_cell_memory for what it is given on one cell).',
       '4. prepare_translations — stage your writes as a changeset. Nothing is applied yet. Returns { changesetId, digest, summary, mode, approvalUrl? }.',
@@ -186,10 +197,13 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'keys with patch_settings { projectId, ops: [{ key, value }], ifMatchVersion } — a ' +
         'field-scoped write: keys you do not name stay byte-identical. `ifMatchVersion` must ' +
         'equal the live version at prepare AND commit (plan_stale on drift), so always read ' +
-        'before you patch. Floors: `terminology` needs the org termbase-edit floor (default ' +
-        'PROJECT_LEAD 500), every other key MAINTAINER 600. Policy keys governing agent ' +
+        'before you patch. Floors: MAINTAINER 600 for every key (the language keys use the ' +
+        'org language-edit floor, default 600). `terminology` is retired (AQU-1724) and ' +
+        'rejected — write key terms with term.create / term.update events in an EmitEvents ' +
+        'changeset. Policy keys governing agent ' +
         'oversight itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
-        'validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, ' +
+        'validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, ' +
+        'validationNamedUsersAudio, allowSelfValidationAudio, harmonize_min_role, ' +
         'contributeToGlobalTm, cellEditingFloor, agentAuthorship) are writable in the ' +
         'RESTRICTIVE direction ONLY (AQU-1282) — TIGHTENING oversight stages like any other ' +
         'write, LOOSENING it returns permission_denied naming the key in details.loosening. ' +
@@ -197,6 +211,58 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'PatchSettings must be the sole command in its changeset, and — like every write — ' +
         'applies only at confirm_changeset. Prefer it over the deprecated whole-blob ' +
         'UpdateProjectSettings, which can clobber keys you never read.',
+    },
+    // AQU-2407: the brief. Named explicitly because it lives INSIDE the
+    // settings blob, so an agent that found patch_settings first would write
+    // the whole translationBrief record by hand — l2Markdown, l1Summary and
+    // provenance included — and nothing checked those agreed with the answers.
+    translationBrief: {
+      writeTool: 'prepare_set_brief',
+      summaryTool: 'regenerate_brief_summary',
+      readVia: 'get_project_settings',
+      note:
+        'Write the brief with prepare_set_brief { projectId, parameters: { <sectionId>: ' +
+        '"answer" }, freeformNotes? } — ANSWERS ONLY: the server merges them into the live ' +
+        'brief, reassembles l2Markdown in the code-owned section order, stamps ' +
+        'version/updatedAt/updatedBy from your credential, and re-renders the L1 summary at ' +
+        'commit. describe_command({ kind: "SetBrief" }) lists the section ids. Do NOT write ' +
+        'the translationBrief key through patch_settings unless you deliberately want a raw ' +
+        'whole-record overwrite (still supported): hand-written l2Markdown/l1Summary are ' +
+        'never checked against the answers. If a receipt reports briefSummary.rendered: ' +
+        'false, the sections are committed but the summary is stale — call ' +
+        'regenerate_brief_summary. The brief reaches prompts only while ' +
+        'translationInstructions is unwritten (get_prompt_preview → parts.instructions).',
+    },
+    // AQU-1175: terminology. Named explicitly because the read and the write
+    // live on DIFFERENT surfaces (a read tool; the EmitEvents door) and because
+    // matching is exact by default — the two things an agent got wrong.
+    terminology: {
+      readTool: 'list_terms',
+      writeVia: 'EmitEvents',
+      eventKinds: ['term.create', 'term.update', 'term.approve', 'term.reject', 'term.delete'],
+      minRoleLevel: REQUIRED_ROLE['term.create'],
+      note:
+        'List the termbase with list_terms, then write through an EmitEvents changeset (REST ' +
+        'POST .../changesets) carrying term.* events — there is no bespoke term endpoint; the ' +
+        'event log IS the term surface (AQU-1179). ALWAYS list before you write: a second ' +
+        'term.create for a sourceTerm that already has a concept does not merge, it leaves the ' +
+        'project two competing entries — patch the existing conceptId with term.update ' +
+        'instead. term.create takes an explicit status (\'draft\' to propose, \'active\' to ' +
+        'enforce immediately); status is NOT patchable by term.update — use term.approve / ' +
+        'term.reject so the audit trail separates "edited" from "approved". Approving needs ' +
+        'the org termbase-edit floor.\n' +
+        'MATCHING IS EXACT unless you say otherwise. `match` on create/update carries ' +
+        'forms (extra literal source forms treated as alternates of sourceTerm), ' +
+        'excludedForms (surfaces a human rejected), affixes (allow the project\'s configured ' +
+        'prefixes/suffixes) and foldMarks (ignore combining marks). In an inflected language a ' +
+        'concept with no forms matches the lemma ONLY, so a term staged without match.forms ' +
+        'will read back as configured and still flag none of its inflected forms. Like ' +
+        'renderings, `match` is replaced wholesale when present and left untouched when ' +
+        'absent — so send the FULL option set you want, and `match: {}` to clear every ' +
+        'option back to defaults. An unrecognized key inside `match` is an error, not an ' +
+        'ignored extra: `{ form: [...] }` is rejected rather than silently clearing `forms`. ' +
+        'Verify a landed term with get_prompt_preview (injectedTerms) and ' +
+        'read_term_consistency.',
     },
     // AQU-1178: the permanent exclusions. Published from the same module the
     // REST discovery map and the external 404 hints read, so the three cannot
@@ -288,8 +354,13 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'bytes first via REST POST .../projects/:projectId/artifacts with header ' +
         '"x-artifact-kind: audio" (MCP is JSON-RPC text and cannot carry that binary body) — ' +
         'see limits.maxArtifactBytes for the size cap. Then stage LinkMedia via ' +
-        'prepare_translations\'s `commands` argument. Multiple LinkMedia commands may share ' +
-        'one changeset; LinkMedia cannot mix with any other command kind.',
+        'prepare_translations\'s `commands` argument with the target lane\'s `laneId` ' +
+        '(required — lanes.id from get_project; a take with no lane is filed under the ' +
+        'legacy default lane and never shows in a tagged lane\'s Takes) and an optional ' +
+        '`slot` ("recording", the default, or "generatedVoice" for externally synthesized ' +
+        'voice). The receipt\'s `media[]` carries the native take audioId the app plays. ' +
+        'Multiple LinkMedia commands may share one changeset; LinkMedia cannot mix with any ' +
+        'other command kind.',
     },
     structure: {
       mcpStagingTool: 'prepare_translations',
@@ -308,18 +379,43 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         '("blank" or "divide"); both halves come out unvalidated either way. MergeCells is ' +
         'NOT available — see docs/AGENT-API.md for why it is deferred.',
     },
+    membership: {
+      readTool: 'list_members',
+      mcpStagingTool: 'prepare_translations',
+      commitTool: 'confirm_changeset',
+      commandKinds: ['InviteMember', 'SetRole', 'RemoveMember'],
+      note:
+        'Read the roster with list_members, then stage InviteMember / SetRole / RemoveMember ' +
+        'via prepare_translations\'s `commands` argument and commit with confirm_changeset. ' +
+        'Receipt-only (a plain project_members row write, not an event). People are named by ' +
+        'USERNAME, not email, exactly as list_members reports them. Every one of these ' +
+        'requires project role >= MAINTAINER (600) and prepare ALWAYS stages them in ' +
+        'ask-mode regardless of the credential\'s mode — membership is governance, so each ' +
+        'change passes a human at the approvalUrl before it can commit. Caps, all ' +
+        'permission_denied: you cannot grant a role above your own (`role_above_caller`), ' +
+        'act on yourself (`self_target`), or touch anyone whose EFFECTIVE role is >= yours ' +
+        'unless you are OWNER (`target_outranks_caller`). list_members\'s `direct` field ' +
+        'picks the command — InviteMember needs no existing project_members row and is ' +
+        'rejected with conflict `already_member` if there is one; SetRole and RemoveMember ' +
+        'need one and are rejected with conflict `not_a_direct_member` without it. ' +
+        'RemoveMember drops the direct row only: org, team and creator grant paths are ' +
+        'additive (AD-12) and keep conferring access, so check roleSource before promising ' +
+        'that a removal ends somebody\'s access. Membership commands batch with each other ' +
+        '(at most 25, one per person) but never with other command kinds, and each ' +
+        'command\'s projectId must equal the changeset\'s. Receipt shape: { credentialId, ' +
+        'channel, changesetId, command: "Membership", appliedAt, projectId, membership[] }.',
+    },
     multiLanguage: {
       note:
-        'A project can hold MULTIPLE target languages at once via target-language lanes. A ' +
-        'lane is a language tag (e.g. "es", "pt") registered in the project\'s ' +
-        'settings.targetLanes array; every cell keeps one shared source plus one independent ' +
-        'target per lane. Omitting the lane everywhere uses the default lane (the project\'s ' +
-        'single targetLanguage) — existing single-language callers need no changes.',
+        'A project holds a source lane and any number of target lanes. Each lane has an id, ' +
+        'a name, a language, and a role. get_project returns the lanes you may use. Writes ' +
+        'and reads that mean a target lane take that id. A language tag is not a lane id ' +
+        'and is not aliased. Omitting the id is validation_failed and names GET /api/v1/external.',
       workflow: [
-        '1. Register the lanes once: get_project_settings for the live version, then patch_settings { ops: [{ key: "targetLanes", value: ["es", "pt"] }], ifMatchVersion } — a field-scoped write, so the rest of the settings blob is untouched.',
-        '2. Write per lane: each SetTranslation entry takes an optional laneId ("es" or "pt"). An unregistered laneId is rejected at prepare with validation_failed.',
-        '3. Read per lane: read_content takes an optional lane argument — target cells are filtered to that lane (source cells are always included). Omit it to get every lane (each target row carries its targetLang).',
-        '4. Importing a file can seed several lanes at once: PlanImport cells take variants: [{ laneId, content }] (REST-only).',
+        '1. Read lanes from get_project (lanes: [{ id, name, language, role }]). Create them with CreateProject or ProjectSetup (lanes: [{ role, language, name?, code? }]). Do not write sourceLanguage, targetLanguage, targetLanes, or archivedLanes.',
+        '2. Write per lane: laneId on SetTranslation is that id and is required. An unknown id, a tag, or a lane you cannot see is validation_failed with "lane does not exist".',
+        '3. Read per lane: read_content takes a required lane argument — the lane id. Target cells are filtered to that lane.',
+        '4. Importing a file names the lane by id: PlanImport cells take variants: [{ laneId, content }] (REST-only).',
       ],
       preconditionScope:
         'Preconditions and drift (plan_stale) are lane-scoped: concurrent edits to the SAME ' +
@@ -356,6 +452,12 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
       maxArtifactBytes: MAX_ARTIFACT_BYTES,
     },
     errorCodes: ERROR_CODES,
+    accessCeiling:
+      'access "read" is a read-only credential: prepare_translations, confirm_changeset and ' +
+      'artifact upload all fail with scope_denied, while every read, search and export tool ' +
+      'works normally. It is not retryable and not about your project role — only the human ' +
+      'who owns the token can lift it by minting a read-write one. access "write" is the ' +
+      'normal grant, and askModeFlow below then describes how a commit lands.',
     askModeFlow:
       'In ask mode you can prepare_translations but cannot commit directly. prepare returns ' +
       'an approvalUrl; surface it to a human who opens it in an authenticated Aquilla browser ' +
@@ -373,7 +475,12 @@ function getIdentityAndScope(cred: ApiCredentialContext): McpToolResult {
     // never disagree about what a token is allowed to learn.
     ...(cred.pii === true ? { userId: cred.userId, username: cred.username } : {}),
     mode: cred.mode,
+    // AQU-1242: same reason as the pii parity above — this tool is the MCP twin
+    // of REST GET /me, and the two must not disagree about what a token may do
+    // any more than about what it may learn.
+    access: cred.access,
     orgId: cred.orgId,
+    ...(cred.orgIds !== undefined ? { orgIds: cred.orgIds } : {}),
     projectId: cred.projectId,
     credentialId: cred.credentialId,
   })
@@ -396,7 +503,7 @@ async function listProjects(
   // credential's own scope — an org-scoped credential naming a different org
   // gets scope_denied, matching the REST route rather than returning [].
   const orgId = str(args, 'orgId')
-  if (orgId !== undefined && cred.orgId !== null && cred.orgId !== orgId) {
+  if (orgId !== undefined && !credentialAllowsOrganization(cred, orgId)) {
     return fail('scope_denied', 'credential is not scoped to this org')
   }
   // Shared with REST GET /api/v1/external/projects (projects-list.ts) so the
@@ -429,7 +536,10 @@ async function getProject(
   // AQU-1222: shared with the REST GET /projects/:projectId route so the two
   // adapters cannot drift — and so both carry settingsVersion, the number
   // PatchSettings.ifMatchVersion has to match.
-  const detail = await loadProjectDetail(db, projectId, resolved.level)
+  const detail = await loadProjectDetail(db, projectId, resolved.level, {
+    flag: env.LANE_READ_WALL,
+    userId: Number(cred.userId),
+  })
   if (!detail) return fail('not_found', `project ${projectId} not found`)
   return ok(detail)
 }
@@ -504,7 +614,7 @@ function getSkillTool(args: Record<string, unknown>): McpToolResult {
 // ── delegated reads ──────────────────────────────────────────────────────────
 
 async function runRead(env: ExternalEnv, token: string, path: string): Promise<McpToolResult> {
-  const req = new Request(`${EXTERNAL_BASE}/${path}`, { headers: bearer(token) })
+  const req = (env.mcpRequest ?? makeRequest)(`${EXTERNAL_BASE}/${path}`, { headers: bearer(token) })
   const res = await handleExternalReadRequest(req, env)
   if (!res) return fail('not_found', 'read route did not match')
   if (!res.ok) return delegatedError(res)
@@ -518,7 +628,7 @@ async function runMemoryRead(
   token: string,
   path: string,
 ): Promise<McpToolResult> {
-  const req = new Request(`${EXTERNAL_BASE}/${path}`, { headers: bearer(token) })
+  const req = (env.mcpRequest ?? makeRequest)(`${EXTERNAL_BASE}/${path}`, { headers: bearer(token) })
   const res = await handleExternalMemoryReadRequest(req, env)
   if (!res) return fail('not_found', 'memory read route did not match')
   if (!res.ok) return delegatedError(res)
@@ -542,6 +652,30 @@ async function listMemory(
   if (cursor) params.set('cursor', cursor)
   const qs = params.toString() ? `?${params.toString()}` : ''
   return runMemoryRead(env, token, `${encodeURIComponent(projectId)}/memory${qs}`)
+}
+
+async function listStyleRules(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  const params = new URLSearchParams()
+  const status = str(args, 'status')
+  if (status) params.set('status', status)
+  if (typeof args.limit === 'number') params.set('limit', String(args.limit))
+  const cursor = str(args, 'cursor')
+  if (cursor) params.set('cursor', cursor)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const req = (env.mcpRequest ?? makeRequest)(
+    `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/style-rules${qs}`,
+    { headers: bearer(token) },
+  )
+  const res = await handleExternalStyleRulesReadRequest(req, env)
+  if (!res) return fail('not_found', 'style-rules read route did not match')
+  if (!res.ok) return delegatedError(res)
+  return ok(await res.json())
 }
 
 async function readCellMemory(
@@ -576,6 +710,27 @@ async function searchProject(
   if (side) params.set('side', side)
   if (typeof args.limit === 'number') params.set('limit', String(args.limit))
   return runRead(env, token, `${encodeURIComponent(projectId)}/search?${params.toString()}`)
+}
+
+// Omnilingual ASR spec §7. Argument marshalling only: the REST route owns the
+// gate, windowing and the hop to auth-worker's shared billing path.
+async function runTranscription(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+  status: boolean,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  const { projectId: _omit, ...body } = args
+  const req = (env.mcpRequest ?? makeRequest)(
+    `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/transcriptions${status ? '/status' : ''}`,
+    { method: 'POST', headers: { ...bearer(token), 'Content-Type': 'application/json', ...MCP_CHANNEL_HEADER }, body: JSON.stringify(body) },
+  )
+  const res = await handleExternalTranscriptionRequest(req, env)
+  if (!res) return fail('not_found', 'transcription route did not match')
+  if (!res.ok) return delegatedError(res)
+  return ok(await res.json())
 }
 
 // AQU-1232: translation-memory retrieval. Same delegation shape as
@@ -627,7 +782,7 @@ async function searchProjects(
   if (side) params.set('side', side)
   if (typeof args.limit === 'number') params.set('limit', String(args.limit))
 
-  const req = new Request(`${EXTERNAL_ROOT}/search?${params.toString()}`, { headers: bearer(token) })
+  const req = (env.mcpRequest ?? makeRequest)(`${EXTERNAL_ROOT}/search?${params.toString()}`, { headers: bearer(token) })
   const res = await handleExternalReadRequest(req, env)
   if (!res) return fail('not_found', 'read route did not match')
   if (!res.ok) return delegatedError(res)
@@ -689,7 +844,7 @@ async function readComments(
   const cursor = str(args, 'cursor')
   if (cursor) params.set('cursor', cursor)
   const query = params.toString()
-  const req = new Request(
+  const req = (env.mcpRequest ?? makeRequest)(
     `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/comments${query ? `?${query}` : ''}`,
     { headers: bearer(token) },
   )
@@ -741,7 +896,7 @@ async function getPromptPreview(
 
 /** Same delegation shape as runRead, against the quality router. */
 async function runQualityRead(env: ExternalEnv, token: string, path: string): Promise<McpToolResult> {
-  const req = new Request(`${EXTERNAL_BASE}/${path}`, { headers: bearer(token) })
+  const req = (env.mcpRequest ?? makeRequest)(`${EXTERNAL_BASE}/${path}`, { headers: bearer(token) })
   const res = await handleExternalQualityRequest(req, env)
   if (!res) return fail('not_found', 'quality route did not match')
   if (!res.ok) return delegatedError(res)
@@ -769,6 +924,43 @@ async function readQuality(
   if (!projectId) return fail('validation_failed', 'projectId is required')
   const qs = qualityParams(args).toString()
   return runQualityRead(env, token, `${encodeURIComponent(projectId)}/quality${qs ? `?${qs}` : ''}`)
+}
+
+/**
+ * list_terms — the termbase read (AQU-1175).
+ *
+ * Not on `qualityParams`: this read pages by opaque cursor like the other list
+ * reads (comments, memory), not by fileId/lane — a termbase is project-scoped,
+ * it has no per-file slice.
+ */
+async function listTerms(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  const params = new URLSearchParams()
+  const status = str(args, 'status')
+  if (status) params.set('status', status)
+  if (args.includeDeleted === true) params.set('includeDeleted', '1')
+  if (typeof args.limit === 'number') params.set('limit', String(args.limit))
+  const cursor = str(args, 'cursor')
+  if (cursor) params.set('cursor', cursor)
+  const qs = params.toString()
+  return runQualityRead(env, token, `${encodeURIComponent(projectId)}/terms${qs ? `?${qs}` : ''}`)
+}
+
+/** AQU-2403: the governance roster (MAINTAINER-floored) that the InviteMember /
+ *  SetRole / RemoveMember commands are built from. */
+async function listMembers(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  return runRead(env, token, `${encodeURIComponent(projectId)}/members`)
 }
 
 async function readTermConsistency(
@@ -858,7 +1050,7 @@ async function stageCommands(
   const body: Record<string, unknown> = { commands }
   if (changesetId) body.id = changesetId
 
-  const req = new Request(`${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets`, {
+  const req = (env.mcpRequest ?? makeRequest)(`${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets`, {
     method: 'POST',
     headers: { ...bearer(token), 'Content-Type': 'application/json', ...MCP_CHANNEL_HEADER },
     body: JSON.stringify(body),
@@ -916,6 +1108,100 @@ async function patchSettings(
   return stageCommands(env, token, projectId, [command], str(args, 'changesetId'), ctx)
 }
 
+// ── translation brief (AQU-2407) ─────────────────────────────────────────────
+
+/**
+ * Resolve the `ifMatchVersion` the brief commands pin. Both tools make it
+ * OPTIONAL — unlike patch_settings, neither asks the agent to read-modify-write
+ * the key, so demanding the version only bought a mandatory extra round trip
+ * (and a hand-written brief record when the agent gave up and reached for
+ * patch_settings instead). Omitted, the live version is read here through the
+ * same delegated settings read `get_project_settings` serves, so the scope,
+ * role and throttle gates are identical; passed, it is honoured verbatim, which
+ * is how a caller asserts the brief has not moved since it read it.
+ */
+async function resolveSettingsVersion(
+  env: ExternalEnv,
+  token: string,
+  projectId: string,
+  args: Record<string, unknown>,
+): Promise<number | McpToolResult> {
+  if (args.ifMatchVersion !== undefined) {
+    if (typeof args.ifMatchVersion !== 'number' || !Number.isInteger(args.ifMatchVersion)) {
+      return fail(
+        'validation_failed',
+        'ifMatchVersion must be an integer settings version from get_project_settings — omit it to pin the live version',
+      )
+    }
+    return args.ifMatchVersion
+  }
+  const req = (env.mcpRequest ?? makeRequest)(
+    `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/settings`,
+    { headers: bearer(token) },
+  )
+  const res = await handleExternalReadRequest(req, env)
+  if (!res) return fail('not_found', 'read route did not match')
+  if (!res.ok) return delegatedError(res)
+  const body = (await res.json()) as { version?: unknown }
+  if (typeof body.version !== 'number') {
+    return fail('job_failed', 'settings read returned no version to pin')
+  }
+  return body.version
+}
+
+/** prepare_set_brief (AQU-2407): the dedicated MCP door onto SetBrief, so a
+ *  brief can be written as ANSWERS. Only argument marshalling lives here — the
+ *  section-id validation, the MAINTAINER floor, the sole-command rule, the
+ *  server-side merge + l2Markdown reassembly + provenance stamp, and the
+ *  best-effort L1 render all stay in commands-set-brief.ts. */
+async function prepareSetBriefTool(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  if (args.parameters === undefined && args.freeformNotes === undefined) {
+    return fail(
+      'validation_failed',
+      'pass parameters (section id → answer) and/or freeformNotes — describe_command({ kind: "SetBrief" }) lists the section ids',
+    )
+  }
+
+  const version = await resolveSettingsVersion(env, token, projectId, args)
+  if (typeof version !== 'number') return version
+
+  const command = {
+    kind: 'SetBrief',
+    projectId,
+    ...(args.parameters !== undefined ? { parameters: args.parameters } : {}),
+    ...(args.freeformNotes !== undefined ? { freeformNotes: args.freeformNotes } : {}),
+    ifMatchVersion: version,
+  }
+  return stageCommands(env, token, projectId, [command], str(args, 'changesetId'), ctx)
+}
+
+/** regenerate_brief_summary (AQU-2407): the dedicated MCP door onto
+ *  RegenerateBriefSummary — the agent's equivalent of the in-app "Regenerate
+ *  summary" button. The render, its metering and the empty-brief refusal are
+ *  commands-regenerate-brief.ts's, unchanged. */
+async function regenerateBriefSummaryTool(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+
+  const version = await resolveSettingsVersion(env, token, projectId, args)
+  if (typeof version !== 'number') return version
+
+  const command = { kind: 'RegenerateBriefSummary', projectId, ifMatchVersion: version }
+  return stageCommands(env, token, projectId, [command], str(args, 'changesetId'), ctx)
+}
+
 // ── delegated import parsing (preview_import / prepare_import) ───────────────
 
 /** Shared argument marshalling for the two import tools: both delegate to the
@@ -935,14 +1221,14 @@ async function runParseArtifact(
   if (!artifactId) return fail('validation_failed', 'artifactId is required')
 
   const body: Record<string, unknown> = { stage }
-  for (const key of ['fileType', 'fileName', 'sourceLanguage', 'targetLanguage', 'changesetId'] as const) {
+  for (const key of ['fileType', 'fileName', 'sourceLanguage', 'targetLanguage', 'sourceTextDirection', 'targetTextDirection', 'changesetId'] as const) {
     const v = str(args, key)
     if (v) body[key] = v
   }
   if (typeof args.resultIndex === 'number') body.resultIndex = args.resultIndex
   if (typeof args.excludeFrontMatter === 'boolean') body.excludeFrontMatter = args.excludeFrontMatter
 
-  const req = new Request(
+  const req = (env.mcpRequest ?? makeRequest)(
     `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/parse`,
     {
       method: 'POST',
@@ -996,6 +1282,7 @@ async function exportFile(
   env: ExternalEnv,
   token: string,
   args: Record<string, unknown>,
+  cred: ApiCredentialContext,
 ): Promise<McpToolResult> {
   const projectId = str(args, 'projectId')
   const fileId = str(args, 'fileId')
@@ -1008,7 +1295,7 @@ async function exportFile(
   const restPath = `/api/v1/external/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/export${qs}`
 
   const res = await handleExternalExportRequest(
-    new Request(`https://internal${restPath}`, { headers: bearer(token) }),
+    (env.mcpRequest ?? makeRequest)(`https://internal${restPath}`, { headers: bearer(token) }),
     { ...env, SNAPSHOTS: env.SNAPSHOTS },
   )
   if (!res) return fail('not_found', 'export route did not match')
@@ -1021,11 +1308,15 @@ async function exportFile(
   const exportMode = res.headers.get('X-Export-Mode') ?? 'round-trip'
   const lossyHeader = res.headers.get('X-Usfm-Lossy-Verse-Count')
 
+  const fallback = cred.oauthResource
+    ? 'Open the project in Aquilla and export from the app. MCP OAuth credentials cannot authorize REST downloads.'
+    : `Fetch the bytes with this separately authorized REST credential: GET ${restPath}`
+
   if (!contentType.startsWith('text/')) {
     return fail(
       'validation_failed',
-      `"${fileName}" exports as ${contentType}, which MCP (JSON-RPC text) cannot carry — ` +
-        `fetch the bytes over REST instead: GET ${restPath}`,
+      `"${fileName}" exports as ${contentType}, which this inline text export does not support. ` +
+        fallback,
       { restPath, contentType, exportMode },
     )
   }
@@ -1036,7 +1327,7 @@ async function exportFile(
     return fail(
       'validation_failed',
       `"${fileName}" is ${bytes} bytes, over the ${MCP_EXPORT_MAX_BYTES}-byte inline export ` +
-        `limit — fetch it over REST instead: GET ${restPath}`,
+        `limit. ${fallback}`,
       { restPath, bytes, maxBytes: MCP_EXPORT_MAX_BYTES, exportMode },
     )
   }
@@ -1067,7 +1358,7 @@ async function getChangeset(
   const changesetId = str(args, 'changesetId')
   if (!projectId) return fail('validation_failed', 'projectId is required')
   if (!changesetId) return fail('validation_failed', 'changesetId is required')
-  const req = new Request(
+  const req = (env.mcpRequest ?? makeRequest)(
     `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets/${encodeURIComponent(changesetId)}`,
     { headers: bearer(token) },
   )
@@ -1148,7 +1439,7 @@ async function listChangesets(
   if (cursor) qs.set('cursor', cursor)
 
   const suffix = qs.toString() ? `?${qs.toString()}` : ''
-  const req = new Request(
+  const req = (env.mcpRequest ?? makeRequest)(
     `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets${suffix}`,
     { headers: bearer(token) },
   )
@@ -1175,7 +1466,7 @@ async function waitForChangeset(
   const qs =
     typeof timeoutMs === 'number' ? `?timeoutMs=${encodeURIComponent(String(timeoutMs))}` : ''
 
-  const req = new Request(
+  const req = (env.mcpRequest ?? makeRequest)(
     `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets/${encodeURIComponent(changesetId)}/wait${qs}`,
     { headers: bearer(token) },
   )
@@ -1222,7 +1513,7 @@ async function confirmChangeset(
     return fail('plan_stale', 'digest does not match the stored plan — re-prepare')
   }
 
-  const req = new Request(
+  const req = (env.mcpRequest ?? makeRequest)(
     `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets/${encodeURIComponent(changesetId)}/commit`,
     { method: 'POST', headers: { ...bearer(token), ...MCP_CHANNEL_HEADER } },
   )
@@ -1251,7 +1542,7 @@ async function discardChangeset(
   const changesetId = str(args, 'changesetId')
   if (!projectId) return fail('validation_failed', 'projectId is required')
   if (!changesetId) return fail('validation_failed', 'changesetId is required')
-  const req = new Request(
+  const req = (env.mcpRequest ?? makeRequest)(
     `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets/${encodeURIComponent(changesetId)}/discard`,
     { method: 'POST', headers: bearer(token) },
   )
@@ -1296,6 +1587,10 @@ export async function callTool(
       return getSkillTool(args)
     case 'search_project':
       return searchProject(env, token, args)
+    case 'transcribe_audio':
+      return runTranscription(env, token, args, false)
+    case 'transcription_status':
+      return runTranscription(env, token, args, true)
     case 'find_similar_cells':
       return findSimilarCells(env, token, args)
     case 'search_projects':
@@ -1314,20 +1609,32 @@ export async function callTool(
       return listMemory(env, token, args)
     case 'read_cell_memory':
       return readCellMemory(env, token, args)
+    case 'list_style_rules':
+      return listStyleRules(env, token, args)
     case 'read_quality':
       return readQuality(env, token, args)
     case 'read_term_consistency':
       return readTermConsistency(env, token, args)
+    case 'list_terms':
+      return listTerms(env, token, args)
+    case 'list_members':
+      return listMembers(env, token, args)
     case 'prepare_translations':
       return prepareTranslations(env, token, args, ctx)
     case 'patch_settings':
       return patchSettings(env, token, args, ctx)
+    case 'prepare_set_brief':
+      return prepareSetBriefTool(env, token, args, ctx)
+    case 'regenerate_brief_summary':
+      return regenerateBriefSummaryTool(env, token, args, ctx)
+    case 'upload_artifact':
+      return uploadArtifact(env, token, args)
     case 'preview_import':
       return runParseArtifact(env, token, args, false)
     case 'prepare_import':
       return runParseArtifact(env, token, args, true)
     case 'export_file':
-      return exportFile(env, token, args)
+      return exportFile(env, token, args, cred)
     case 'get_changeset':
       return getChangeset(env, token, args)
     case 'list_changesets':

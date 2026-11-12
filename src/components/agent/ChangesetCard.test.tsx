@@ -32,6 +32,7 @@ import {
   changesetStatusBadgeClass,
   changesetStatusLabel,
   changesetStatusVariant,
+  isDecidedChangesetStatus,
   isTerminalChangesetStatus,
   testimonyEntriesFor,
 } from "@/lib/agent/changeset-review"
@@ -164,6 +165,33 @@ describe("ChangesetCard", () => {
     expect(screen.queryByRole("button", { name: /Approve/ })).not.toBeInTheDocument()
   })
 
+  it("collapses the staged diff once the reviewer has approved it (AQU-1639)", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).endsWith("/approval")) {
+        return { ok: true, json: async () => approvalPayload("staged") } as Response
+      }
+      if (String(url).endsWith("/approve")) {
+        return { ok: true, json: async () => ({ confirmationId: "conf-1" }) } as Response
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { container } = render(<ChangesetCard item={item()} />)
+    expect(await screen.findByText("new 1")).toBeInTheDocument()
+    const approveBtn = await screen.findByRole("button", { name: /Approve/ })
+    approveBtn.click()
+
+    // Answered: the proposal stops showing its changes as if still pending…
+    await waitFor(() => expect(screen.queryByText("new 1")).not.toBeInTheDocument())
+    expect(screen.queryByText(/and 2 more changes/i)).not.toBeInTheDocument()
+    expect(container.querySelector('[data-changeset-collapsed="true"]')).not.toBeNull()
+    // …but keeps the trace: summary, outcome chip and what happens next.
+    expect(screen.getByText("Import glossary.csv")).toBeInTheDocument()
+    expect(screen.getByText("Approved")).toBeInTheDocument()
+    expect(screen.getByText(/the agent can now commit/i)).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /View full details/ })).toBeInTheDocument()
+  })
   it("rejects in place and flips to Discarded", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (String(url).endsWith("/approval")) {
@@ -434,6 +462,23 @@ describe("ChangesetCard — live review (AQU-926 frames)", () => {
     expect(screen.queryByRole("button", { name: /Approve & apply/ })).not.toBeInTheDocument()
   })
 
+  it("collapses the staged diff once applied, leaving the receipt (AQU-1639)", async () => {
+    vi.stubGlobal("fetch", routedFetch({}))
+    const { container } = render(<ChangesetCard item={liveItem()} />)
+    expect(await screen.findByText("Im Anfang")).toBeInTheDocument()
+
+    fireEvent.click(await screen.findByRole("button", { name: /Approve & apply/ }))
+
+    await waitFor(() => expect(screen.getByText(/Applied 2 changes\./)).toBeInTheDocument())
+    // The applied proposal no longer re-states its whole diff.
+    expect(screen.queryByText("Im Anfang")).not.toBeInTheDocument()
+    expect(screen.queryByText("Und die Erde")).not.toBeInTheDocument()
+    expect(container.querySelector('[data-changeset-collapsed="true"]')).not.toBeNull()
+    // The trace stays: summary + Committed chip + the receipt line above.
+    expect(screen.getByText("Set 2 translations in Genesis")).toBeInTheDocument()
+    expect(screen.getByText("Committed")).toBeInTheDocument()
+  })
+
   it("gates Approve & apply behind per-item testimony confirmation", async () => {
     vi.stubGlobal(
       "fetch",
@@ -656,6 +701,24 @@ describe("changeset status helpers (P1 §1)", () => {
     expect(isTerminalChangesetStatus("superseded")).toBe(true)
     expect(isTerminalChangesetStatus("staged")).toBe(false)
   })
+
+  // AQU-1639: "decided" is narrower than "terminal". A decided card collapses
+  // its diff; stale/expired keep it, because the reviewer has to see what was
+  // staged to judge the drift and can still Refresh.
+  it("marks only the decided outcomes as decided", () => {
+    const cases: [string, boolean][] = [
+      ["committed", true],
+      ["discarded", true],
+      ["superseded", true],
+      ["stale", false],
+      ["expired", false],
+      ["staged", false],
+      ["committing", false],
+    ]
+    for (const [status, decided] of cases) {
+      expect(isDecidedChangesetStatus(status), status).toBe(decided)
+    }
+  })
 })
 
 describe("ChangesetCard — superseded (P1 §1/§5)", () => {
@@ -711,7 +774,8 @@ describe("ChangesetCard — assignment (P1 §2.2)", () => {
     )
     render(<ChangesetCard item={liveItem()} />)
 
-    expect(await screen.findByText("Routed to priya")).toBeInTheDocument()
+    expect(await screen.findByText("priya")).toBeInTheDocument()
+    expect(screen.getByText(/Routed to/)).toBeInTheDocument()
     expect(screen.getByText(/approves nothing/i)).toBeInTheDocument()
     // Assignment never changes status — it is still awaiting a person.
     expect(screen.getByText("Pending review")).toBeInTheDocument()
@@ -724,7 +788,9 @@ describe("ChangesetCard — assignment (P1 §2.2)", () => {
       routedFetch({ approval: () => json(liveApproval({ assignedToUserId: "77" })) }),
     )
     render(<ChangesetCard item={liveItem()} />)
-    expect(await screen.findByText("Routed to 77")).toBeInTheDocument()
+    const chip = await screen.findByText("User")
+    expect(chip.closest("[data-slot=user-chip]")).toHaveAttribute("data-user-id", "77")
+    expect(screen.queryByText("Routed to 77")).not.toBeInTheDocument()
   })
 
   it("renders no routing line when the changeset is unassigned", async () => {

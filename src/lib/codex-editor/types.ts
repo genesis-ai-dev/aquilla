@@ -47,6 +47,13 @@ export interface CodexData {
   /** Codex cell-merge marker: the cell's content was absorbed into another
    *  cell (heading consolidation, verse-range merge) and Codex hides it. */
   merged?: boolean;
+  /** Codex Source Editing Mode eye icon: the cell is PARKED — dropped from the
+   *  normal view, progress and every exporter, but its data is kept and an
+   *  unhide brings it back. Written on both the `.source` and the paired
+   *  `.codex` cell; unhide writes `false` rather than removing the key
+   *  (AQU-1425). Reversible, so unlike `deleted`/`merged` it must NOT migrate
+   *  as a retraction. */
+  hidden?: boolean;
   originalText?: string;
   globalReferences?: string[];
   /**
@@ -97,6 +104,17 @@ export interface CodexCellAttachment {
    * `target_offset_ms` for every take that predates it.
    */
   targetOffsetMs?: number | null;
+  /**
+   * AQU-2267: where this take sits FOLLOWING THE RECORDINGS, measured the same
+   * way from its line's start in that layout; `targetOffsetMs` is its place
+   * following the source. Undefined = no place of its own there, and that
+   * timing reads `targetOffsetMs` as it always has (every take before AQU-2267).
+   */
+  recordingsOffsetMs?: number | null;
+  /** AQU-2327: the clip's volume (dB) and fades (ms) — how it plays, never the recording. */
+  gainDb?: number | null;
+  fadeInMs?: number | null;
+  fadeOutMs?: number | null;
   /** SUB-48: this clip's event is still queued locally (saved on this device,
    *  not yet at the server). Drives the "saving…" hint on chips/rows. */
   pendingSync?: true;
@@ -120,12 +138,38 @@ export interface CodexCellAttachment {
    */
   validatorCount?: number;
   validators?: string[];
+  /**
+   * AQU-2296: username → when that person validated this take (server clock,
+   * ms) — the date under each name in "Audio validated by". Optional for the
+   * same reason the two above are; absent draws the name with no date line.
+   */
+  validatorDecidedTs?: Record<string, number>;
   role?: "dub" | "source";
   recordedBy?: string | null;
+  /** AQU-1767: the take this one was cut from (its piece group's root). */
+  pieceOf?: string | null;
+  /** Two-step transcription (0186): what ASR heard, kept through corrections. */
+  asrText?: string | null;
+  asrModel?: string | null;
+  /** Provenance of an AI cleanup while the transcript is still the AI's. */
+  transcriptAi?: { model: string; at: number; changes: number } | null;
   /** AQU-646 round 8: the take's permanent display name ("Take 3", or a
    *  rename). Carried so the Recording tab can head an added-track take with
    *  its own name rather than its track id. */
   label?: string | null;
+  /**
+   * AQU-965: this take was withdrawn from the export in flight, for want of
+   * validation. Set only on the COPIES an export's scoping step makes
+   * (`scopeAudioCellsForExport`) and never on a stored attachment or on
+   * anything a read path produces, so no surface outside an export in progress
+   * ever sees it.
+   *
+   * It marks rather than removes because what withdrawing means differs per
+   * deliverable — missing from the per-line zip, silence in place in a mixed
+   * or chapter track — and the url, `durationMs` and trim window have to
+   * survive for the chapter stitch to size the gap it writes.
+   */
+  silencedForExport?: true;
 }
 
 // Per-word timing for karaoke / forced-alignment / ASR output. Character
@@ -175,6 +219,16 @@ export interface CodexNotebookMetadata {
   lineNumbersEnabled?: boolean;
   textDirection?: "ltr" | "rtl";
   videoUrl?: string;
+  /** Which Codex importer produced the notebook (codex-editor's
+   *  `FileImporterType`: "usfm", "subtitles", "docx", "ebibleCorpus", …).
+   *  Absent on older notebooks. Typed as `string` because notebooks in the
+   *  wild carry values outside the current union. AQU-2211. */
+  importerType?: string;
+  /** The uploaded file's name ("MAT.idml", "mydoc.docx"). Rarely set in
+   *  practice — `originalName` usually carries the extension. AQU-2211. */
+  originalFileName?: string;
+  /** True for an audio import with no source text. AQU-2211. */
+  audioOnly?: boolean;
   sourceCreatedAt?: string;
   codexLastModified?: string;
   navigation?: unknown[];

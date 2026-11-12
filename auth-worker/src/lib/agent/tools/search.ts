@@ -1,10 +1,15 @@
 // search — project-wide full-text search, as one call.
 //
 // Sides: source/target cells (tsvector via websearch_to_tsquery — safe for
-// arbitrary user text), comments (ILIKE), terms (the project_settings
-// terminology JSON, matched in JS). Default searches both cell sides.
+// arbitrary user text), comments (ILIKE), terms (the project's live concepts,
+// read as the editor reads them, matched in JS). Default searches both cell
+// sides.
 
+import { readProjectConcepts, type StoredConcept } from "../../concepts-read"
 import { AliasMap } from "../compress"
+import { resolveLane, resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
+import { renderingsForLane } from "../../../../../src/lib/terminology/rendering-lane"
+import { notHiddenSql } from "../../hidden-cells-scope"
 import { clip } from "./read"
 import type { SearchHit, ToolOutcome } from "./types"
 
@@ -18,6 +23,10 @@ export interface SearchArgs {
 export interface SearchContext {
   projectId: string
   focusedFileId?: string
+  /** The active lane, as either its `lanes.id` or its legacy tag: resolved
+   *  to the id every lane-scoped query keys on (AQU-1610). `''` is the
+   *  project's former default lane. */
+  lane: string
   aliases: AliasMap
 }
 
@@ -41,11 +50,30 @@ async function searchCells(
   fileId: string | undefined,
   limit: number,
 ): Promise<SearchHit[]> {
-  const conditions = ["project_id = ?", "value_tsv @@ websearch_to_tsquery('simple', ?)"]
+  // AQU-1424: parked cells are not searchable. The anti-join rather than a bare
+  // hidden_at IS NULL, because this query matches EITHER side and the flag lives
+  // only on the shared source row. When searching target cells, scope to the
+  // active lane only.
+  const conditions = [
+    "project_id = ?",
+    "value_tsv @@ websearch_to_tsquery('simple', ?)",
+    notHiddenSql(),
+  ]
+  const { laneId } = await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)
   const binds: unknown[] = [ctx.projectId, q]
   if (side !== "both") {
     conditions.push("side = ?")
     binds.push(side)
+  }
+  if (side === "target") {
+    conditions.push("lane_id = ?")
+    binds.push(laneId)
+  } else if (side === "both") {
+    // A source row belongs to the SOURCE lane, so only target rows are scoped
+    // here — a bare lane filter would drop every source hit in any lane but
+    // the one being searched.
+    conditions.push("(side = 'source' OR lane_id = ?)")
+    binds.push(laneId)
   }
   if (fileId) {
     conditions.push("file_id = ?")
@@ -92,26 +120,54 @@ async function searchComments(
   }))
 }
 
+/** Only an active concept compiles to rules (the editor's checks, autopilot's
+ *  lint), so a draft or deprecated hit says that it is not enforced. */
+const TERM_STATUS_LABEL: Record<StoredConcept["status"], string> = {
+  active: "active",
+  draft: "draft, not enforced",
+  deprecated: "deprecated, not enforced",
+}
+
+/** "[active] grace → gracia (preferred), suerte (forbidden) — notes". The
+ *  status comes first, so a clipped line always keeps it. */
+function termSnippet(t: StoredConcept): string {
+  const renderings = t.renderings.map((r) => `${r.rendering} (${r.status})`).join(", ")
+  return `[${TERM_STATUS_LABEL[t.status]}] ${t.sourceTerm}` +
+    (renderings ? ` → ${renderings}` : "") +
+    (t.notes ? ` — ${t.notes}` : "")
+}
+
+// AQU-1714: every live concept is searchable, drafts and deprecated terms
+// included. Search is not enforcement. The editor's checks and autopilot's lint
+// use active concepts only, but the agent searches the termbase to learn what
+// the team has decided or proposed. Without drafts, it would report that the
+// team has not addressed a term that is waiting for review. Without deprecated
+// terms, it would lose the record that a rendering was retired on purpose, and
+// it could suggest that rendering again. Each hit carries its status, so a
+// proposal or a retired term never reads as binding. Matching uses the text
+// the team wrote (source term, renderings, notes), not ids or status labels.
+//
+// The terms are read as the editor reads them, through the same function as
+// autopilot and the termbase subscription route (readProjectConcepts): the
+// live `concepts` rows, and the legacy settings key only while there are none.
+// The concepts migration deletes that key, so a key left behind never adds
+// terms next to the table's or brings a deleted term back.
 async function searchTerms(db: AquillaDb, q: string, ctx: SearchContext, limit: number): Promise<SearchHit[]> {
-  const row = await db
-    .prepare("SELECT settings FROM project_settings WHERE project_id = ?")
-    .bind(ctx.projectId)
-    .first<{ settings: string }>()
-  if (!row) return []
-  let concepts: unknown[] = []
-  try {
-    const settings = JSON.parse(row.settings) as { terminology?: { concepts?: unknown[] } }
-    concepts = settings.terminology?.concepts ?? []
-  } catch {
-    return []
-  }
   const needle = q.toLowerCase()
   const hits: SearchHit[] = []
-  for (const raw of concepts) {
+  const empty = await resolveLane(db, ctx.projectId, { targetLang: "" })
+  const active = await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)
+  for (const term of await readProjectConcepts(db, ctx.projectId)) {
+    const renderings = !empty.laneId
+      ? term.renderings
+      : !active.laneId
+        ? []
+        : renderingsForLane(term.renderings, active.laneId, empty.laneId)
+    const visible = renderings === term.renderings ? term : { ...term, renderings }
     if (hits.length >= limit) break
-    const text = JSON.stringify(raw)
-    if (text.toLowerCase().includes(needle)) {
-      hits.push({ cellId: "", side: "terms", snippet: text.slice(0, 200) })
+    const text = [visible.sourceTerm, ...visible.renderings.map((r) => r.rendering), visible.notes ?? ""]
+    if (text.some((s) => s.toLowerCase().includes(needle))) {
+      hits.push({ cellId: "", side: "terms", snippet: termSnippet(visible).slice(0, 200) })
     }
   }
   return hits

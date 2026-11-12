@@ -53,8 +53,10 @@ import {
   injectOptimisticAudioAttachment,
   injectOptimisticAudioPlace,
   injectOptimisticAudioRemove,
+  injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged,
 } from "@/lib/audio/audio-attachments-bus"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const LONG: AudioAttachmentOut = {
   audioId: "audio-c1-100-long.webm", url: "frontier-audio://long", slot: "recording",
@@ -113,7 +115,7 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
     try {
       fetchMock.mockResolvedValue(serverEmpty())
       const { result } = mount()
-      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1), { timeout: STALL_WATCHDOG_MS })
 
       queued("evt-attach")
       act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT, "evt-attach"))
@@ -139,7 +141,7 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
     try {
       fetchMock.mockResolvedValue(serverLongSelected())
       const { result } = mount()
-      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1), { timeout: STALL_WATCHDOG_MS })
 
       queued("evt-select")
       act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT, "evt-select"))
@@ -168,7 +170,7 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
     try {
       fetchMock.mockResolvedValue(serverLongSelected())
       const { result } = mount()
-      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1), { timeout: STALL_WATCHDOG_MS })
 
       queued("evt-select")
       act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT, "evt-select"))
@@ -206,7 +208,7 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
       const GEN: AudioAttachmentOut = { ...SHORT, audioId: "audio-c1-300-gen.wav", slot: "generatedVoice" }
       fetchMock.mockResolvedValue(serverLongSelected()) // confirms neither overlay
       const { result } = mount()
-      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1), { timeout: STALL_WATCHDOG_MS })
 
       queued("evt-short")
       queued("evt-gen")
@@ -425,7 +427,7 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
     try {
       fetchMock.mockResolvedValue(serverLongSelected())
       const { result } = mount()
-      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1), { timeout: STALL_WATCHDOG_MS })
 
       queued("evt-drag")
       act(() => injectOptimisticAudioPlace("f1", "c1", { ...LONG, targetOffsetMs: 2500 }, "evt-drag"))
@@ -445,7 +447,7 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
     try {
       fetchMock.mockResolvedValue(serverLongSelected())
       const { result } = mount()
-      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1), { timeout: STALL_WATCHDOG_MS })
 
       act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT)) // no id at all
       vi.advanceTimersByTime(UNBOUND_TTL_MS + 1_000)
@@ -456,6 +458,72 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+// 2026-09-28 (Sam, Mark 1:3): a line with no imported source clip switches to
+// its generated voice by EMPTYING the recording slot — nothing to park it on.
+describe("optimistic overlay — emptying a slot", () => {
+  it("empties the slot while queued, keeps every take listed, across stale reads", async () => {
+    fetchMock.mockResolvedValue(serverLongSelected()) // the server still has LONG selected
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    queued("evt-deselect")
+    act(() => injectOptimisticAudioDeselect("f1", "c1", "recording", "evt-deselect"))
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    const entry = entryOf(result)
+    expect(entry?.selectedAudioId).toBeNull()
+    expect(entry?.attachments[LONG.audioId]).toBeDefined()
+    expect(entry?.attachments[SHORT.audioId]).toBeDefined()
+  })
+
+  it("a later selection in that slot wins", async () => {
+    fetchMock.mockResolvedValue(serverLongSelected())
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    queued("evt-deselect")
+    act(() => injectOptimisticAudioDeselect("f1", "c1", "recording", "evt-deselect"))
+    queued("evt-select")
+    act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT, "evt-select"))
+    expect(entryOf(result)?.selectedAudioId).toBe(SHORT.audioId)
+  })
+
+  it("yields to the server once it reads the slot empty", async () => {
+    fetchMock.mockResolvedValue(serverLongSelected())
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    queued("evt-deselect")
+    act(() => injectOptimisticAudioDeselect("f1", "c1", "recording", "evt-deselect"))
+    delivered("evt-deselect")
+    fetchMock.mockResolvedValue(cells({ attachments: { [LONG.audioId]: LONG, [SHORT.audioId]: SHORT } }))
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    expect(entryOf(result)?.selectedAudioId).toBeNull()
+    // Confirmed, so it is gone: a later server selection is not overridden.
+    fetchMock.mockResolvedValue(serverShortSelected())
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    expect(entryOf(result)?.selectedAudioId).toBe(SHORT.audioId)
+  })
+
+  it("a quarantined one yields at once — the recording really is still selected", async () => {
+    fetchMock.mockResolvedValue(serverLongSelected())
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    act(() => injectOptimisticAudioDeselect("f1", "c1", "recording", "evt-deselect"))
+    quarantined("evt-deselect")
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    expect(entryOf(result)?.selectedAudioId).toBe(LONG.audioId)
   })
 })
 
@@ -888,5 +956,73 @@ describe("non-claiming optimistic paint (duration measure backfill)", () => {
     expect(painted?.trimStartMs).toBe(500)
     expect(painted?.trimEndMs).toBe(1500)
     expect(painted?.durationMs).toBe(3210)
+  })
+})
+
+// AQU-2267: a move states the take's place in both timings, and the overlay
+// holds both until the server carries both. A move following the recordings
+// that the source's limits hold where it was (say, at the line's start) changes
+// only the recordings place — a read still carrying the old one must not
+// confirm it, or the chip springs back while the save is on its way.
+describe("optimistic overlay — a take's place in both timings (AQU-2267)", () => {
+  it("a move's overlay is NOT confirmed by a read still carrying the old place following the recordings", async () => {
+    const atSource = { ...LONG, targetOffsetMs: -1000 }
+    fetchMock.mockResolvedValue(cells({ attachments: { [LONG.audioId]: atSource }, selectedAudioId: LONG.audioId }))
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    queued("evt-move")
+    act(() => injectOptimisticAudioPlace("f1", "c1", { ...atSource, recordingsOffsetMs: 200 }, "evt-move"))
+    delivered("evt-move")
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    expect(entryOf(result)?.attachments[LONG.audioId]?.recordingsOffsetMs).toBe(200)
+  })
+
+  it("…and IS confirmed once the server carries both places", async () => {
+    const moved = { ...LONG, targetOffsetMs: -800, recordingsOffsetMs: 200 }
+    fetchMock.mockResolvedValue(cells({ attachments: { [LONG.audioId]: moved }, selectedAudioId: LONG.audioId }))
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+    delivered("evt-move2")
+    act(() => injectOptimisticAudioPlace("f1", "c1", moved, "evt-move2"))
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    const att = entryOf(result)?.attachments[LONG.audioId]
+    expect([att?.targetOffsetMs, att?.recordingsOffsetMs]).toEqual([-800, 200])
+  })
+
+  it("a second move onto a still-saving take overlays both places, not just the first", async () => {
+    fetchMock.mockResolvedValue(serverLongSelected())
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+    queued("evt-a")
+    queued("evt-b")
+    act(() => injectOptimisticAudioPlace("f1", "c1", { ...LONG, targetOffsetMs: -800, recordingsOffsetMs: 200 }, "evt-a"))
+    act(() => injectOptimisticAudioPlace("f1", "c1", { ...LONG, targetOffsetMs: -600, recordingsOffsetMs: 400 }, "evt-b"))
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    const att = entryOf(result)?.attachments[LONG.audioId]
+    expect([att?.targetOffsetMs, att?.recordingsOffsetMs]).toEqual([-600, 400])
+  })
+})
+
+describe("mergeCellsWithAudio — a take's place in both timings (AQU-2267)", () => {
+  it("carries the place following the recordings onto the cell, zero included", () => {
+    const base = { id: "c1", fileId: "f1", original: "", translated: "" } as unknown as CellData
+    const entry = (rec: number | null): CellAudioEntry => ({
+      attachments: { [LONG.audioId]: { ...LONG, targetOffsetMs: -1000, recordingsOffsetMs: rec } },
+      selectedAudioId: LONG.audioId,
+      selectedGeneratedVoiceAudioId: null,
+      audioTimings: {},
+    })
+    const [moved] = mergeCellsWithAudio([base], new Map([["c1", entry(0)]]))
+    expect(moved.attachments?.[LONG.audioId]?.recordingsOffsetMs).toBe(0)
+    const [never] = mergeCellsWithAudio([base], new Map([["c1", entry(null)]]))
+    expect(never.attachments?.[LONG.audioId]?.recordingsOffsetMs).toBeUndefined()
+    expect(never.attachments?.[LONG.audioId]?.targetOffsetMs).toBe(-1000)
   })
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defaultLocalPermissions, resolvePermissions, resolveEditorCapabilities, DCS_SOURCE_LOCK_REASON } from "./useProjectPermissions";
+import { defaultLocalPermissions, resolvePermissions, resolveEditorCapabilities, DCS_SOURCE_LOCK_REASON, archivedLaneReadOnlyLabel } from "./useProjectPermissions";
 import type { ProjectRecord } from "@/lib/parsers/types";
 import { ROLE } from "@/lib/frontier/roles";
 
@@ -230,3 +230,73 @@ describe("resolveEditorCapabilities — DCS upstream lockdown (hasDcsUpstream)",
     expect(caps.canEditSource).toBe(false);
   });
 });
+
+describe("resolveEditorCapabilities — archived lane (AQU-1463)", () => {
+  it("freezes the target side for a contributor sitting in an archived lane", () => {
+    const caps = resolveEditorCapabilities(withRole(ROLE.CONTRIBUTOR), {
+      archivedLaneLabel: "Spanish",
+    })
+    expect(caps.canEdit).toBe(false)
+    expect(caps.canValidate).toBe(false)
+    expect(caps.readOnlyLabel).toBe(archivedLaneReadOnlyLabel("Spanish"))
+    expect(caps.readOnlyLabel).toContain("Spanish")
+  })
+
+  it("freezes a maintainer too — AQU-1462 refuses their writes as well", () => {
+    const caps = resolveEditorCapabilities(withRole(ROLE.MAINTAINER), {
+      archivedLaneLabel: "Spanish",
+    })
+    expect(caps.canEdit).toBe(false)
+    expect(caps.canValidate).toBe(false)
+  })
+
+  it("freezes a local project's lane, which has no role ladder at all", () => {
+    const caps = resolveEditorCapabilities(localProject(), { archivedLaneLabel: "Spanish" })
+    expect(caps.canEdit).toBe(false)
+    expect(caps.canValidate).toBe(false)
+  })
+
+  it("says the member can still read, search, export and comment", () => {
+    // The lock is the target side only; the banner must not imply otherwise.
+    const label = archivedLaneReadOnlyLabel("Spanish")
+    expect(label).toMatch(/read/i)
+    expect(label).toMatch(/search/i)
+    expect(label).toMatch(/export/i)
+    expect(label).toMatch(/comment/i)
+  })
+
+  it("leaves source editing to the role, since archiving a target lane is not about source", () => {
+    const caps = resolveEditorCapabilities(withRole(ROLE.PROJECT_LEAD), {
+      archivedLaneLabel: "Spanish",
+    })
+    expect(caps.canEditSource).toBe(true)
+    expect(caps.sourceReadOnlyReason).toBeNull()
+  })
+
+  it("keeps the DCS source lock while the lane is frozen", () => {
+    const caps = resolveEditorCapabilities(withRole(ROLE.PROJECT_LEAD), {
+      archivedLaneLabel: "Spanish",
+      hasDcsUpstream: true,
+    })
+    expect(caps.canEditSource).toBe(false)
+    expect(caps.sourceReadOnlyReason).toBe(DCS_SOURCE_LOCK_REASON)
+  })
+
+  it("names the archived lane rather than the reader's role", () => {
+    // A reviewer in a frozen lane must not be told "you can validate".
+    const caps = resolveEditorCapabilities(withRole(ROLE.REVIEWER), {
+      archivedLaneLabel: "Spanish",
+    })
+    expect(caps.canValidate).toBe(false)
+    expect(caps.readOnlyLabel).not.toMatch(/reviewer/i)
+  })
+
+  it("is a no-op when the active lane is not archived", () => {
+    for (const opts of [undefined, {}, { archivedLaneLabel: null }]) {
+      const caps = resolveEditorCapabilities(withRole(ROLE.CONTRIBUTOR), opts)
+      expect(caps.canEdit).toBe(true)
+      expect(caps.canValidate).toBe(true)
+      expect(caps.readOnlyLabel).toBeNull()
+    }
+  })
+})

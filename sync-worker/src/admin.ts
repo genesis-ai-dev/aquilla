@@ -4,8 +4,26 @@
 // doesn't resolve).
 
 import { adminBearerMatches } from "./lib/admin-secret"
+import { runR2GcSweep, type R2GcCronEnv } from "./r2-gc-cron"
+import { formatR2GcReport } from "./r2-gc"
+import {
+  formatProjectionSnapshotReport,
+  runProjectionSnapshotSweep,
+  type ProjectionSnapshotCronEnv,
+} from "./projection-snapshot-cron"
+import {
+  formatProgressSelfHealReport,
+  runProgressSelfHealSweep,
+  type ProgressSelfHealCronEnv,
+} from "./progress-selfheal-cron"
+import {
+  formatLinkProvenanceSweep,
+  runLinkProvenanceRepair,
+  type LinkProvenanceEnv,
+} from "./events/link-provenance"
 
-export interface AdminEnv {
+export interface AdminEnv
+  extends R2GcCronEnv, ProjectionSnapshotCronEnv, ProgressSelfHealCronEnv, LinkProvenanceEnv {
   SNAPSHOTS: R2Bucket
   /**
    * Dedicated admin bearer. Preferred over SYNC_SECRET_KEY — see the auth note
@@ -51,12 +69,145 @@ export async function handleAdminRequest(
   // recognized resource hit with the wrong method.
   const inspectMatch = url.pathname.match(/^\/admin\/files\/([^/]+)\/([^/]+)\/inspect$/)
   const fileMatch = url.pathname.match(/^\/admin\/files\/([^/]+)\/([^/]+)$/)
-  if (!inspectMatch && !fileMatch) return new Response("not found", { status: 404 })
+  const gcMatch = url.pathname === "/admin/r2-gc"
+  const snapshotMatch = url.pathname === "/admin/projection-snapshot"
+  const selfHealMatch = url.pathname === "/admin/progress-selfheal"
+  const provenanceMatch = url.pathname === "/admin/link-provenance"
+  if (!inspectMatch && !fileMatch && !gcMatch && !snapshotMatch && !selfHealMatch && !provenanceMatch) {
+    return new Response("not found", { status: 404 })
+  }
 
   // Auth gate applies to every recognized admin route.
   const auth = request.headers.get("Authorization") ?? ""
   if (!adminBearerMatches(auth, env)) {
     return new Response("unauthorized", { status: 401 })
+  }
+
+  // POST /admin/r2-gc — run the AQU-1856 orphan sweep on demand and return the
+  // report. `?dryRun=1` is the reviewable mode the sweep ships with: it reads
+  // and classifies everything, reports counts/bytes/sample keys, and deletes
+  // nothing. Operator-only, and POST (not GET) because the default IS
+  // destructive. `?cursor=reset` restarts the walk from the top of the bucket
+  // instead of continuing from where the cron left off.
+  if (gcMatch) {
+    if (request.method !== "POST") return new Response("method not allowed", { status: 405 })
+    const dryRun = url.searchParams.get("dryRun") === "1"
+    const graceHours = Number(url.searchParams.get("graceHours"))
+    const maxProjects = Number(url.searchParams.get("maxProjects"))
+    const report = await runR2GcSweep(env, {
+      dryRun,
+      ...(Number.isFinite(graceHours) && graceHours >= 0
+        ? { graceMs: graceHours * 3_600_000 }
+        : {}),
+      ...(Number.isInteger(maxProjects) && maxProjects > 0 ? { maxProjects } : {}),
+      ...(url.searchParams.get("cursor") === "reset" ? { cursors: {} } : {}),
+    })
+    if (!report) {
+      return Response.json(
+        { ok: false, error: "sweep skipped — see worker logs (R2_GC_MODE=off, or refused)" },
+        { status: 503 },
+      )
+    }
+    return Response.json({ ok: true, report, summary: formatR2GcReport(report) })
+  }
+
+  // POST /admin/projection-snapshot — write projection snapshots now (AQU-1833)
+  // instead of waiting for the nightly sweep. `?projectId=` snapshots that one
+  // project and ignores both the cursor and the per-run caps, which is what an
+  // operator wants before an expensive rebuild. Without it, one bounded sweep
+  // runs exactly as the cron would; `?cursor=reset` restarts the walk from the
+  // top, and `?minNewEvents=0` forces a snapshot of a project that has barely
+  // moved. POST, not GET, because it writes.
+  if (snapshotMatch) {
+    if (request.method !== "POST") return new Response("method not allowed", { status: 405 })
+    const projectId = url.searchParams.get("projectId")
+    const minNewEvents = Number(url.searchParams.get("minNewEvents"))
+    const maxSnapshots = Number(url.searchParams.get("maxSnapshots"))
+    const report = await runProjectionSnapshotSweep(env, {
+      ...(projectId ? { onlyProjectId: projectId } : {}),
+      ...(Number.isInteger(minNewEvents) && minNewEvents >= 0 ? { minNewEvents } : {}),
+      ...(Number.isInteger(maxSnapshots) && maxSnapshots > 0 ? { maxSnapshots } : {}),
+      ...(url.searchParams.get("cursor") === "reset" ? { cursor: "" } : {}),
+    })
+    if (!report) {
+      return Response.json(
+        {
+          ok: false,
+          error:
+            "snapshot sweep skipped — see worker logs (PROJECTION_SNAPSHOT_MODE=off, no HYPERDRIVE, or refused)",
+        },
+        { status: 503 },
+      )
+    }
+    return Response.json({
+      ok: true,
+      report,
+      summary: formatProjectionSnapshotReport(report),
+    })
+  }
+
+  // POST /admin/progress-selfheal — run the AQU-2145 progress self-heal sweep
+  // now instead of waiting for the nightly cron. `?projectId=` narrows it to one
+  // project, which is what an operator wants after a bulk recording or
+  // validation burst on a known project rather than a whole-database pass.
+  // `?maxRepairs=` raises or lowers the per-run cap. POST, not GET, because it
+  // rewrites progress rows.
+  //
+  // The report distinguishes the two answers that matter: `repaired` is how many
+  // files were wrong, and `remaining` is how many the cap left for the next run.
+  // A healthy database answers 0 and 0.
+  if (selfHealMatch) {
+    if (request.method !== "POST") return new Response("method not allowed", { status: 405 })
+    const projectId = url.searchParams.get("projectId")
+    const maxRepairs = Number(url.searchParams.get("maxRepairs"))
+    const report = await runProgressSelfHealSweep(env, {
+      ...(projectId ? { onlyProjectId: projectId } : {}),
+      ...(Number.isInteger(maxRepairs) && maxRepairs > 0 ? { maxRepairs } : {}),
+    })
+    if (!report) {
+      return Response.json(
+        {
+          ok: false,
+          error:
+            "progress self-heal sweep skipped — see worker logs (PROGRESS_SELFHEAL_MODE=off, no HYPERDRIVE, or refused)",
+        },
+        { status: 503 },
+      )
+    }
+    return Response.json({
+      ok: true,
+      report,
+      summary: formatProgressSelfHealReport(report),
+    })
+  }
+
+  // POST /admin/link-provenance — give the files a source link brought into a
+  // project the type they were imported as and a `file_source_blobs` pointer at
+  // the upstream's original (AQU-2345). Every mirror window does this for the
+  // files it touches; this is the backfill for files linked before it did, and
+  // the repair for a project whose export still says "no source blob recorded".
+  // `?projectId=` repairs one project; without it every linked project is
+  // walked. `?dryRun=1` reports what would be written and writes nothing. POST,
+  // not GET, because it writes `files` type columns and pointer rows — never a
+  // cell, a translation or a validation.
+  if (provenanceMatch) {
+    if (request.method !== "POST") return new Response("method not allowed", { status: 405 })
+    const projectId = url.searchParams.get("projectId")
+    const dryRun = url.searchParams.get("dryRun") === "1"
+    const report = await runLinkProvenanceRepair(env, {
+      dryRun,
+      ...(projectId ? { onlyProjectId: projectId } : {}),
+    })
+    if (!report) {
+      return Response.json(
+        { ok: false, error: "link provenance repair skipped — see worker logs (no HYPERDRIVE, or refused)" },
+        { status: 503 },
+      )
+    }
+    if (projectId && report.projects.length === 0) {
+      return Response.json({ ok: false, error: "project has no source link" }, { status: 404 })
+    }
+    return Response.json({ ok: true, report, summary: formatLinkProvenanceSweep(report) })
   }
 
   // GET /admin/files/:projectId/:fileId/inspect — returns counts and sizes

@@ -18,7 +18,7 @@ import { MemoryRouter } from "react-router-dom"
 import type { Concept } from "@/lib/terminology/types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ConceptsReadError } from "@/lib/sync/concepts-read"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { renderWithTooltips } from "@/test-utils/tooltip"
 
 vi.mock("react-router-dom", async (orig) => ({
   ...(await orig<typeof import("react-router-dom")>()),
@@ -133,8 +133,9 @@ describe("GlossaryEditor — failed concepts read (AQU-1340)", () => {
     )
     await screen.findByTestId("concepts-read-error")
 
-    await expectTooltip(
-      screen.getByRole("button", { name: "Add term" }),
+    // AQU-2260: said once under the toolbar, not on a hover.
+    expect(screen.getByRole("button", { name: "Add term" })).toBeDisabled()
+    expect(screen.getByTestId("terminology-locked")).toHaveTextContent(
       "Terms cannot be added or imported until the termbase loads.",
     )
   })
@@ -157,10 +158,34 @@ describe("GlossaryEditor — failed concepts read (AQU-1340)", () => {
     )
     await screen.findByTestId("concepts-read-error")
 
+    const importBtn = screen.getByRole("button", { name: /Import/ })
+    expect(importBtn).toBeDisabled()
+    expect(screen.getByTestId("terminology-locked")).toHaveTextContent(/Project Lead/i)
+    expect(screen.getByTestId("terminology-locked").textContent).not.toMatch(/until the termbase loads/)
+  })
+
+  // AQU-872: Add term names the CONTRIBUTOR bar, since that is the role this
+  // viewer is short of for a suggestion — quoting the management floor would
+  // tell them to go get a permission they do not need.
+  it("names the contributor bar on Add term, still ahead of the failed read", async () => {
+    mockProject = {
+      id: "p1",
+      name: "P",
+      syncRole: { level: 100 },
+      termbaseEditMinRole: 500,
+    } as unknown as ProjectRecord
+    fetchConcepts.mockRejectedValue(readFailure())
+    renderWithTooltips(
+      <MemoryRouter initialEntries={["/project/p1/terminology"]}>
+        <GlossaryEditor />
+      </MemoryRouter>,
+    )
+    await screen.findByTestId("concepts-read-error")
+
     const add = screen.getByRole("button", { name: "Add term" })
     expect(add).toBeDisabled()
-    await expectTooltip(add, /Project lead/i)
-    expect(screen.getByRole("tooltip").textContent).not.toMatch(/until the termbase loads/)
+    expect(screen.getByTestId("terminology-locked")).toHaveTextContent(/at least Contributor access/i)
+    expect(screen.getByTestId("terminology-locked").textContent).not.toMatch(/until the termbase loads/)
   })
 
   it("recovers on Retry without a reload", async () => {

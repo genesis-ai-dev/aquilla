@@ -309,6 +309,11 @@ describe("audio R2 endpoints", () => {
     expect(safeAudioContentType(null)).toBe("application/octet-stream")
     expect(safeAudioContentType("image/svg+xml")).toBe("application/octet-stream")
     expect(safeAudioContentType("APPLICATION/JAVASCRIPT")).toBe("application/octet-stream")
+    for (const t of ["text/xsl", "application/xslt+xml", "application/rdf+xml", "application/mathml+xml", "multipart/x-mixed-replace", "application/pdf", "audio/x svg", "text/plain"]) {
+      expect(safeAudioContentType(t)).toBe("application/octet-stream")
+    }
+    expect(safeAudioContentType("video/mp4")).toBe("video/mp4")
+    expect(safeAudioContentType("application/ogg")).toBe("application/ogg")
   })
 
   it("records imported media as an immutable audio artifact and binding", async () => {
@@ -358,6 +363,35 @@ describe("audio R2 endpoints", () => {
       profile_id: "builtin:media",
       fidelity: "preserved-only",
     })
+  })
+
+  it("upserts the audio binding on the lane key", async () => {
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test", created_by: 1 }],
+      files: [{ id: "f1", project_id: "p1", name: "Interview", event_id: "ev1" }],
+    })
+    const env = { ...makeEnv(), AQUILLA_PG: db }
+    const token = await makeToken({ role: 500 })
+    const artifactId = "01900000-0000-7000-8000-000000000011"
+    const put = () => handleAudioRequest(new Request(
+      "https://w/audio/p1/f1/clip.wav",
+      {
+        method: "PUT",
+        body: new Uint8Array([7, 8, 9]),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "audio/wav",
+          "X-Artifact-Id": artifactId,
+        },
+      },
+    ), env as unknown as Parameters<typeof handleAudioRequest>[1])
+    const count = () => db.prepare(
+      `SELECT count(*)::int AS n FROM artifact_bindings WHERE artifact_id::text = ?`,
+    ).bind(artifactId).first<{ n: number }>()
+
+    expect((await put())?.status).toBe(200)
+    expect((await put())?.status).toBe(200)
+    expect((await count())?.n).toBe(1)
   })
 
   it("rejects an imported-media artifact id owned by another project", async () => {

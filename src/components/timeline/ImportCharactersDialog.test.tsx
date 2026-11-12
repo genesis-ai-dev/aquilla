@@ -93,6 +93,19 @@ describe("what it will do, before it does it", () => {
     expect(screen.queryByTestId("import-characters-mismatch")).not.toBeInTheDocument()
   })
 
+  it("says the sheet's timecode was read at the frame rate that lines it up (AQU-2197)", async () => {
+    // Video timecode — a frame after the seconds. Frame 12 of 24 is half a second.
+    await pick(CSV(row("00:00:10:12", "A"), row("00:00:20:06", "B")), {
+      getCells: () => [{ id: "c1", startTime: 10.5 }, { id: "c2", startTime: 20.25 }],
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("import-characters-timecode")).toHaveTextContent(
+        "read at 24 frames a second",
+      ),
+    )
+    expect(screen.getByTestId("import-characters-summary")).toHaveTextContent("2 lines get a character")
+  })
+
   it("warns when the camera column and the embedded angle disagree", async () => {
     // Never happens in episode 101 — this is the tripwire for a future file
     // where the redundancy stops being redundant.

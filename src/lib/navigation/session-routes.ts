@@ -1,8 +1,8 @@
 const PUBLIC_EXACT_PATHS = new Set([
   "/login",
+  "/signup",
   "/reset-password",
   "/verify-email",
-  "/privacy-policy",
   "/onboarding",
 ])
 

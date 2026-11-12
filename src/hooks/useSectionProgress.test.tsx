@@ -14,6 +14,25 @@ describe('useSectionProgress', () => {
   // below is only meaningful against a clean slate.
   beforeEach(() => invalidate.mockClear())
 
+  it('never rounds a chapter with outstanding cells up to 100% (AQU-1493)', () => {
+    // 199 of 200 is 99.5%. The sidebar's "complete" colour reads >= 100, so a
+    // rounded 100 also painted the chapter finished.
+    resource.mockReturnValue({
+      progress: {
+        fileId: 'file-1', revision: 7, validationCount: 1,
+        file: { totalCount: 200, filledCount: 199, validatedCount: 199, validationLevels: [199] },
+        sections: [{ key: 'PSA 119', totalCount: 200, filledCount: 199, validatedCount: 199, validationLevels: [199] }],
+      },
+      loading: false,
+      error: false,
+      retry: vi.fn(),
+    })
+    const { result } = renderHook(() => useSectionProgress('project-1', 'file-1', 1, vi.fn(async () => 'token')))
+    expect(result.current).toEqual([expect.objectContaining({
+      textCompleted: 99, textValidated: 99, textValidationLevels: [99],
+    })])
+  })
+
   it('maps compact server counts to sidebar percentages without loading cells', () => {
     resource.mockReturnValue({
       progress: {
@@ -61,7 +80,7 @@ describe('useSectionProgress', () => {
     )
     expect(invalidate).not.toHaveBeenCalled()
     rerender({ count: 2 })
-    await waitFor(() => expect(invalidate).toHaveBeenCalledWith('project-1', 'file-1'))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith('project-1', 'file-1', ''))
   })
 
   it('revalidates when the structural-cell policy changes (AQU-1083)', async () => {
@@ -77,7 +96,7 @@ describe('useSectionProgress', () => {
     )
     expect(invalidate).not.toHaveBeenCalled()
     rerender({ countStructural: false })
-    await waitFor(() => expect(invalidate).toHaveBeenCalledWith('project-1', 'file-1'))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith('project-1', 'file-1', ''))
   })
 
   it('does not revalidate on a re-render that changes neither policy', async () => {
@@ -95,5 +114,20 @@ describe('useSectionProgress', () => {
     rerender({ label: 'b' })
     rerender({ label: 'c' })
     expect(invalidate).not.toHaveBeenCalled()
+  })
+})
+
+describe('useSectionProgress — lane (AQU-2118)', () => {
+  it('reads, and revalidates, the lane it is given', () => {
+    resource.mockReturnValue({ progress: null, loading: true, error: false, retry: vi.fn() })
+    const getToken = vi.fn(async () => 'token')
+    const { rerender } = renderHook(
+      ({ count }: { count: number }) => useSectionProgress('project-1', 'file-1', count, getToken, true, 'fr'),
+      { initialProps: { count: 1 } },
+    )
+    expect(resource).toHaveBeenLastCalledWith('project-1', 'file-1', getToken, 'fr')
+    // A policy flip revalidates THAT lane's record, not the default lane's.
+    rerender({ count: 2 })
+    expect(invalidate).toHaveBeenCalledWith('project-1', 'file-1', 'fr')
   })
 })

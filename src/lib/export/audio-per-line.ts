@@ -23,20 +23,34 @@
 //   - in a MANIFEST, which covers every file including the webm ones and is
 //     the only form a spreadsheet or a script can read without parsing audio.
 //
-// Deliberately NO decoding. The character export has to decode because it
+// By default, NO decoding. The character export has to decode because it
 // resamples everything onto one timeline; this one copies the stored bytes
 // untouched, so it is lossless by construction and fast enough to run on an
 // episode with six hundred takes.
+//
+// AQU-1575 adds the other choice: every take re-encoded as 16-bit / 48 kHz /
+// mono WAV, the file a broadcast studio asks for (LOTE's vendor named exactly
+// that). The stored takes are not one format — Inworld writes 24 kHz WAV,
+// converted takes 22.05 kHz WAV, Gemini and MMS a compressed webm — so "keep the
+// originals" hands a studio a folder of mixed rates and codecs. The WAV choice
+// decodes through the same path the chapter export uses.
 
+import { applyClipLevelPcm, hasClipLevel } from "@/lib/export/clip-level"
 import JSZip from "jszip"
 
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
+import { TARGET_RATE } from "@/lib/audio/decode-mono"
+import { resolvePcmWindow } from "@/lib/audio/pcm-window"
+import { encodeWavPcm16 } from "@/lib/audio/wav-encode"
 import { isDefaultTrackSlot, slotForTrack } from "@/lib/timeline/track-slots"
 import type { TimelineTrack } from "@/lib/timeline/tracks"
-import { trimWav, withBwfTimestamp } from "./audio-bwf"
+import { readWavFormat, trimWav, withBwfTimestamp } from "./audio-bwf"
 import { targetChipGeom } from "@/lib/timeline/lane-timing"
+import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
+import { stripInternalIds } from "./internal-id-names"
+import { defaultTrackTakeId, isSilencedForExport } from "./audio-validation-scope"
 import {
   characterFileKey,
   characterIdentity,
@@ -44,8 +58,8 @@ import {
   type ResolveCharacterName,
 } from "./audio-by-character"
 
-/** Sample rate the BWF timestamp is expressed in. The stored WAVs are written
- *  at this rate by the recorder and the offline encoder alike. */
+/** The rate a BWF timestamp falls back to when a WAV's own `fmt ` cannot be
+ *  read. Only a fallback: see where the timestamp is written. */
 const BWF_RATE = 48000
 
 export interface PerLineClip {
@@ -72,6 +86,19 @@ export interface PerLineClip {
    *  and generated alike, so it comes off the attachment's `voiceId` — the
    *  discriminator stage 3 verified against all three synthesis paths. */
   generated?: boolean
+  /**
+   * AQU-1767: which PIECE of a cut take this is (1-based, in clip order).
+   * Absent for a take that was never cut. Each piece is its own file, named
+   * `…_L0047p2_…`, with its own timestamp — a DAW gets the pieces where the
+   * timeline has them, and joining them is a later choice.
+   */
+  piece?: number
+}
+
+/** AQU-1767: a line's take as its pieces — just itself when it was never cut. */
+function piecesOfTake(cell: CellData, audioId: string): string[] {
+  const ids = selectedPieceIds(cell.attachments, audioId)
+  return ids.length > 0 ? ids : [audioId]
 }
 
 /**
@@ -124,15 +151,30 @@ export function collectPerLineClips(
     }
 
     if (audioTracks.length === 0) {
-      const audioId = cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId
+      // AQU-2148: the slot that still has audio, not whichever pointer is set.
+      const audioId = defaultTrackTakeId(cell)
       if (!audioId) continue
-      const url = cell.attachments?.[audioId]?.url
-      if (!url) continue
-      clips.push({
-        ...base,
-        audioId,
-        url,
-        generated: audioId === cell.selectedGeneratedVoiceAudioId,
+      const pieces = piecesOfTake(cell, audioId)
+      pieces.forEach((pieceId, i) => {
+        const attachment = cell.attachments?.[pieceId]
+        const url = attachment?.url
+        if (!url) return
+        // AQU-965: validated-only withdrew this take. In THIS deliverable the
+        // omission is the absence of the file — the same shape an unrecorded
+        // line's absence already has — so there is nothing to write and the
+        // line numbering is untouched (it counts every timed line, recorded or
+        // not, so the remaining files keep the numbers they would have had).
+        // AQU-1767: the scope marks each piece of a cut take on its own, so a
+        // withdrawn piece drops only its own file and the others keep their
+        // piece numbers.
+        if (isSilencedForExport(attachment)) return
+        clips.push({
+          ...base,
+          audioId: pieceId,
+          url,
+          generated: audioId === cell.selectedGeneratedVoiceAudioId,
+          ...(pieces.length > 1 ? { piece: i + 1 } : {}),
+        })
       })
       continue
     }
@@ -140,22 +182,28 @@ export function collectPerLineClips(
     for (const track of audioTracks) {
       const isDefault = isDefaultTrackSlot(slotForTrack(track.id))
       const audioId = isDefault
-        ? (cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId)
+        ? defaultTrackTakeId(cell)
         : cell.selectedBySlot?.[track.id]
       if (!audioId) continue
-      const attachment = cell.attachments?.[audioId]
-      if (!attachment?.url) continue
-      clips.push({
-        ...base,
-        audioId,
-        url: attachment.url,
-        trackId: track.id,
-        trackName: track.name,
-        // On the default row the pointer names it; on an added track the one
-        // slot holds both kinds, so the take itself has to say.
-        generated: isDefault
-          ? audioId === cell.selectedGeneratedVoiceAudioId
-          : attachment.voiceId != null,
+      const pieces = piecesOfTake(cell, audioId)
+      pieces.forEach((pieceId, i) => {
+        const attachment = cell.attachments?.[pieceId]
+        if (!attachment?.url) return
+        // AQU-965, as above: a withdrawn take writes no file, on any track.
+        if (isSilencedForExport(attachment)) return
+        clips.push({
+          ...base,
+          audioId: pieceId,
+          url: attachment.url,
+          trackId: track.id,
+          trackName: track.name,
+          // On the default row the pointer names it; on an added track the one
+          // slot holds both kinds, so the take itself has to say.
+          generated: isDefault
+            ? audioId === cell.selectedGeneratedVoiceAudioId
+            : attachment.voiceId != null,
+          ...(pieces.length > 1 ? { piece: i + 1 } : {}),
+        })
       })
     }
   }
@@ -187,7 +235,16 @@ export function trackFolderNames(tracks: readonly { id: string; name: string }[]
   for (const track of tracks) {
     // No `|| "track"` fallback: `characterKey` already ends in `|| "unnamed"`,
     // so this cannot be empty and that arm was never reachable.
-    const base = characterFileKey(track.name)
+    //
+    // AQU-1461: an id is stripped out of the name FIRST. A track always derives a
+    // kind label ("Target audio", "Audio") when it has no override, so the id
+    // here comes from a stored rename, and a folder called
+    // `a89dec11-d60e-48c1-…/` tells whoever opens the zip nothing about which
+    // lane its takes are on. `characterFileKey` lands an all-id name on
+    // `NO_CHARACTER`, which is a character's word rather than a track's, so the
+    // readable part is taken first and only an empty result falls through.
+    const readable = stripInternalIds(track.name)
+    const base = readable.trim() ? characterFileKey(readable) : "track"
     let name = base
     let n = 2
     while (used.has(name.toLowerCase())) {
@@ -207,9 +264,14 @@ export function perLineFileName(
   ext: string,
   opts: { fileBase?: string; langCode: string },
 ): string {
-  const stem = opts.fileBase ? `${characterKey(opts.fileBase)}_` : ""
+  // AQU-1461: same guard as the character export — the stem is the file's
+  // display name, and an id in it rides into every entry of the zip.
+  const fileStem = opts.fileBase ? stripInternalIds(opts.fileBase) : ""
+  const stem = fileStem.trim() ? `${characterKey(fileStem)}_` : ""
   const line = String(clip.lineNumber).padStart(4, "0")
-  return `${stem}${opts.langCode}_L${line}_${characterFileKey(clip.character)}.${ext}`
+  // AQU-1767: a cut take's pieces are told apart right after the line number.
+  const piece = clip.piece != null ? `p${clip.piece}` : ""
+  return `${stem}${opts.langCode}_L${line}${piece}_${characterFileKey(clip.character)}.${ext}`
 }
 
 function csvCell(value: string | number | null): string {
@@ -277,6 +339,13 @@ export function buildManifestCsv(
   return [header, ...body].join("\n") + "\n"
 }
 
+/**
+ * AQU-1575: what each take becomes in the zip. "original" copies the stored
+ * file, whatever it is; "wav" re-encodes every take as 16-bit / 48 kHz / mono
+ * WAV.
+ */
+export type PerLineFormat = "original" | "wav"
+
 export interface ExportPerLineArgs {
   cells: CellData[]
   settings: ProjectTtsSettings | undefined
@@ -289,11 +358,22 @@ export interface ExportPerLineArgs {
   /** AQU-646 stage 4: the file's tracks. Absent ⇒ the single-track export,
    *  unchanged down to the zip entry names. */
   tracks?: readonly TimelineTrack[]
+  /** AQU-1575. Absent ⇒ "original", the export as it has always been. */
+  format?: PerLineFormat
+  /** Decode bytes → mono PCM at 48 kHz (production: decodeToMono48k).
+   *  Needed only for the "wav" format. */
+  decode?: (bytes: Uint8Array) => Promise<Float32Array>
 }
+
+/** How many clips ahead of the one being written are fetched (and decoded). */
+const PREFETCH = 6
 
 export async function exportAudioPerLine(
   args: ExportPerLineArgs,
 ): Promise<{ blob: Blob; files: number; clips: number; skipped: number; untimed: number; untrimmed: number }> {
+  const toWav = args.format === "wav"
+  const decode = args.decode
+  if (toWav && !decode) throw new Error("audio by line: the WAV format needs a decoder")
   const clips = collectPerLineClips(args.cells, args.settings, args.resolveName, args.tracks)
   const zip = new JSZip()
   const manifest: { name: string; clip: PerLineClip }[] = []
@@ -312,8 +392,78 @@ export async function exportAudioPerLine(
   // Takes that carry a trim this exporter could not apply — every non-WAV.
   // Reported rather than swallowed: the file is longer than the line sounds.
   let untrimmed = 0
-
+  // Fetching, and for "wav" decoding, run up to PREFETCH clips ahead of the
+  // one being written, so an 800-line export is not 800 round-trips laid end
+  // to end. Everything after the bytes arrive — naming, trimming, counting,
+  // the zip — still happens one clip at a time, in order.
+  //
+  // AQU-1575: a combined generation is attached under ONE id to every line it
+  // covers, so decodes are shared by stored id: one decode per take, dropped
+  // once the last line that uses it has been written. That holds about
+  // PREFETCH takes' audio at a time.
+  const keyOf = (clip: PerLineClip): string | null => {
+    const parsed = parseFrontierAudioUrl(clip.url)
+    return parsed ? `${parsed.audioId}.${parsed.ext}` : null
+  }
+  const sourceOf = async (clip: PerLineClip): Promise<{ bytes: Uint8Array; ext: string }> => {
+    const parsed = parseFrontierAudioUrl(clip.url)!
+    const cell = cellById.get(clip.cellId)!
+    // Lossless preference, same rule as the character export: a generated
+    // voice keeps its original WAV as an unattached sibling under the same
+    // id, and an export must never hand over the lossy copy.
+    // Off the CLIP, not the cell's default-track pointer: an added track's one
+    // slot holds recorded and generated takes alike, so the pointer describes
+    // a different track entirely and would call every added-track take
+    // "recorded" — handing over the lossy webm where a lossless WAV sibling
+    // exists.
+    if (clip.generated === true && parsed.ext === "webm") {
+      const wav = await args
+        .fetchBytes({ projectId: args.projectId, fileId: cell.fileId, audioId: parsed.audioId, ext: "wav" })
+        .catch(() => null)
+      if (wav && wav.length > 0) return { bytes: wav, ext: "wav" }
+    }
+    const stored = await args.fetchBytes({
+      projectId: args.projectId, fileId: cell.fileId, audioId: parsed.audioId, ext: parsed.ext,
+    })
+    if (stored.length === 0) throw new Error("empty audio")
+    return { bytes: stored, ext: parsed.ext }
+  }
+  const usesLeft = new Map<string, number>()
   for (const clip of clips) {
+    const key = keyOf(clip)
+    if (key) usesLeft.set(key, (usesLeft.get(key) ?? 0) + 1)
+  }
+  const decoded = new Map<string, Promise<Float32Array>>()
+  type Loaded = { pcm: Float32Array } | { bytes: Uint8Array; ext: string }
+  const leveled = (clip: PerLineClip) => hasClipLevel(cellById.get(clip.cellId)?.attachments?.[clip.audioId])
+  const load = (clip: PerLineClip): Promise<Loaded> | null => {
+    const key = keyOf(clip)
+    if (!key) return null
+    // AQU-2327: a take at its own volume or fades is decoded and written as
+    // WAV too — an export contains what you hear.
+    if (!((toWav || leveled(clip)) && decode)) return sourceOf(clip)
+    let pcm = decoded.get(key)
+    if (!pcm) {
+      pcm = sourceOf(clip).then((src) => decode(src.bytes))
+      decoded.set(key, pcm)
+    }
+    return pcm.then((p) => ({ pcm: p }))
+  }
+  const loading: (Promise<Loaded> | null)[] = []
+  const startLoading = (upTo: number) => {
+    while (loading.length < Math.min(upTo, clips.length)) {
+      const p = load(clips[loading.length])
+      // Awaited in order below; this only stops a failure that is still
+      // queued from being reported as unhandled.
+      p?.catch(() => {})
+      loading.push(p)
+    }
+  }
+
+  for (const [i, clip] of clips.entries()) {
+    startLoading(i + 1 + PREFETCH)
+    const loaded = loading[i]
+    loading[i] = null
     const parsed = parseFrontierAudioUrl(clip.url)
     if (!parsed) {
       skipped += 1
@@ -323,30 +473,50 @@ export async function exportAudioPerLine(
     }
     const cell = cellById.get(clip.cellId)!
     try {
-      // Lossless preference, same rule as the character export: a generated
-      // voice keeps its original WAV as an unattached sibling under the same
-      // id, and an export must never hand over the lossy copy.
-      // Off the CLIP, not the cell's default-track pointer: an added track's one
-      // slot holds recorded and generated takes alike, so the pointer describes
-      // a different track entirely and would call every added-track take
-      // "recorded" — handing over the lossy webm where a lossless WAV sibling
-      // exists.
-      const generated = clip.generated === true
-      let bytes: Uint8Array | null = null
-      let ext = parsed.ext
-      if (generated && parsed.ext === "webm") {
-        bytes = await args
-          .fetchBytes({ projectId: args.projectId, fileId: cell.fileId, audioId: parsed.audioId, ext: "wav" })
-          .catch(() => null)
-        if (bytes && bytes.length > 0) ext = "wav"
-        else bytes = null
-      }
-      if (bytes == null) {
-        bytes = await args.fetchBytes({
-          projectId: args.projectId, fileId: cell.fileId, audioId: parsed.audioId, ext: parsed.ext,
+      const got = await loaded!
+      const attachment = cell.attachments?.[clip.audioId]
+      let bytes: Uint8Array
+      let ext: string
+      if ((toWav || hasClipLevel(attachment)) && decode) {
+        // AQU-1575: decoded, cut to its trim and written as 16-bit / 48 kHz /
+        // mono — the chapter export's path. The source is the one above, so a
+        // generated take still starts from its lossless sibling where there is
+        // one, and only falls back to decoding the compressed webm.
+        const pcm = "pcm" in got ? got.pcm : new Float32Array(0)
+        if (pcm.length === 0) throw new Error("empty audio")
+        const win = resolvePcmWindow(pcm.length, TARGET_RATE, {
+          trimStartMs: attachment?.trimStartMs,
+          trimEndMs: attachment?.trimEndMs,
         })
+        const kept = applyClipLevelPcm(win.isFull ? pcm : pcm.subarray(win.start, win.end), TARGET_RATE, attachment)
+        bytes = new Uint8Array(await encodeWavPcm16(kept, TARGET_RATE).arrayBuffer())
+        ext = "wav"
+      } else {
+        if ("pcm" in got) throw new Error("unreachable: decoded without the wav format")
+        const source = got
+        bytes = source.bytes
+        ext = source.ext
+
+        // …AND WHAT IT PLAYS, NOT EVERYTHING THAT WAS RECORDED (2026-08-27).
+        //
+        // Sam's ruling: an export contains what you hear. A PCM WAV can be cut
+        // by byte range with no decoder, which keeps this format's no-decoding
+        // charter intact. Anything else — a webm mic take, an uploaded mp3 —
+        // comes back untouched and is counted, because those carry no embedded
+        // timestamp at all and travel on the manifest.
+        //
+        // FOR EVERY LINE, TIMED OR NOT (2026-09-29). This used to run only on a
+        // timed line, beside the timestamp: a take trimmed in the recorder on an
+        // untimed line went out with the silence or false start its trim hides,
+        // and uncounted, so nothing said so.
+        const before = bytes
+        bytes = trimWav(bytes, {
+          trimStartMs: attachment?.trimStartMs,
+          trimEndMs: attachment?.trimEndMs,
+        })
+        const wanted = attachment?.trimStartMs != null || attachment?.trimEndMs != null
+        if (wanted && bytes === before) untrimmed += 1
       }
-      if (bytes.length === 0) throw new Error("empty audio")
 
       if (clip.startSec == null) untimed += 1
       else {
@@ -359,30 +529,20 @@ export async function exportAudioPerLine(
         // position it USED to have. `targetChipGeom` is the same resolver the
         // lane draws with, so the DAW and the timeline now agree by
         // construction rather than by coincidence.
-        const attachment = cell.attachments?.[clip.audioId]
+        //
+        // `placeSec` is the take's AUDIBLE start — anchor plus head trim —
+        // which is why the bytes above are the trimmed ones: untrimmed, the
+        // line landed in a DAW late by exactly that trim, with the material
+        // the trim hides audible in front of it. That is the ordinary case:
+        // `take-margins.ts` gives every recorded take a head trim at birth.
         const geom = targetChipGeom(cell, attachment)
         const placeSec = geom?.start ?? clip.startSec
-        // …AND WHAT IT PLAYS, NOT EVERYTHING THAT WAS RECORDED (2026-08-27).
-        //
-        // `placeSec` is the take's AUDIBLE start — anchor plus head trim — so
-        // handing over the untrimmed bytes stamped with it put the line into a
-        // DAW late by exactly that trim, with the material the trim hides
-        // audible in front of it. And this is the ordinary case, not a rare
-        // one: `take-margins.ts` gives every recorded take a head trim at
-        // birth to undo the pre-roll anchor shift.
-        //
-        // Sam's ruling: an export contains what you hear. A PCM WAV can be cut
-        // by byte range with no decoder, which keeps this file's no-decoding
-        // charter intact. Anything else — a webm mic take, an uploaded mp3 —
-        // comes back untouched and is counted below, because those carry no
-        // embedded timestamp at all and travel on the manifest.
-        const before = bytes
-        bytes = trimWav(bytes, {
-          trimStartMs: attachment?.trimStartMs,
-          trimEndMs: attachment?.trimEndMs,
-        })
-        const wanted = attachment?.trimStartMs != null || attachment?.trimEndMs != null
-        if (wanted && bytes === before) untrimmed += 1
+        // AQU-1575: a BWF TimeReference is a count of THIS FILE'S samples, so
+        // it is written at the file's own rate. Not every stored WAV is 48 kHz:
+        // Inworld takes are 24 kHz and converted takes 22.05 kHz, and stamping
+        // those at 48,000 a second put them into a DAW at about twice their
+        // real time.
+        const rate = readWavFormat(bytes)?.sampleRate ?? BWF_RATE
         bytes = withBwfTimestamp(bytes, {
           // A hyphen, not an em dash: the bext fields are Latin-1 and the
           // writer turns anything above 0xFF into "?", so the pretty dash came
@@ -390,7 +550,7 @@ export async function exportAudioPerLine(
           description: `${clip.character} - line ${clip.lineNumber}`,
           originator: "Aquilla",
           originatorRef: clip.cellId,
-          timeReferenceSamples: placeSec * BWF_RATE,
+          timeReferenceSamples: placeSec * rate,
         })
       }
 
@@ -421,12 +581,20 @@ export async function exportAudioPerLine(
       console.warn(`[audio-per-line] skipping ${clip.audioId} (${clip.cellId}):`, err)
       skipped += 1
     }
+    const key = keyOf(clip)!
+    const left = (usesLeft.get(key) ?? 1) - 1
+    usesLeft.set(key, left)
+    if (left === 0) decoded.delete(key)
     done += 1
     args.onProgress?.(done, clips.length)
   }
 
   // The same `folders` the zip was built from — see `buildManifestCsv`.
-  if (manifest.length > 0) zip.file("manifest.csv", buildManifestCsv(manifest, folders.size > 0))
-  const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" })
+  if (manifest.length > 0) {
+    zip.file("manifest.csv", buildManifestCsv(manifest, folders.size > 0), { compression: "DEFLATE" })
+  }
+  // DEFLATE buys almost nothing on audio and costs a long hang at the end of a
+  // big export, so only the manifest is compressed.
+  const blob = await zip.generateAsync({ type: "blob", compression: "STORE" })
   return { blob, files: manifest.length, clips: clips.length, skipped, untimed, untrimmed }
 }

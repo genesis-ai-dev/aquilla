@@ -5,6 +5,7 @@ import {
   synthesizeGeminiTtsToWavBlob,
 } from "./gemini-tts"
 import { PRESET_VOICES } from "./voices"
+import { TTS_REQUEST_TIMEOUT_MS } from "./tts-engine-error"
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -82,5 +83,49 @@ describe("Gemini TTS audio", () => {
   it("defaults unknown PCM rates to 24kHz", () => {
     expect(sampleRateFromMimeType(undefined)).toBe(24000)
     expect(sampleRateFromMimeType("audio/L16")).toBe(24000)
+  })
+
+  // AQU-1156: an unbounded request left the cell's generate control spinning
+  // with no audio and no error. The request is now deadlined and a blown
+  // deadline surfaces as a named, retryable failure.
+  it("bounds the request with an abort signal", async () => {
+    let init: RequestInit | undefined
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, requestInit?: RequestInit) => {
+      init = requestInit
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ inlineData: { data: btoa("\0\0") } }] } }],
+      }), { status: 200 })
+    }))
+
+    await synthesizeGeminiTtsToWavBlob({ text: "Hello", apiKey: "key", voice: PRESET_VOICES[0] })
+
+    expect(init?.signal).toBeInstanceOf(AbortSignal)
+    expect(init?.signal?.aborted).toBe(false)
+  })
+
+  it("turns a blown deadline into a named, retryable error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      const err = new Error("The operation was aborted due to timeout")
+      err.name = "TimeoutError"
+      throw err
+    }))
+
+    await expect(synthesizeGeminiTtsToWavBlob({
+      text: "Hello",
+      apiKey: "key",
+      voice: PRESET_VOICES[0],
+    })).rejects.toThrow(
+      `Gemini TTS did not respond within ${TTS_REQUEST_TIMEOUT_MS / 1000}s`,
+    )
+  })
+
+  it("leaves non-timeout network failures alone", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch") }))
+
+    await expect(synthesizeGeminiTtsToWavBlob({
+      text: "Hello",
+      apiKey: "key",
+      voice: PRESET_VOICES[0],
+    })).rejects.toThrow("Failed to fetch")
   })
 })

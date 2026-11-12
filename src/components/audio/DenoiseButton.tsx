@@ -16,13 +16,16 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { isDenoisedAudioId } from "@/lib/audio/upload"
 import { isDenoiseSupported } from "@/lib/audio/denoise"
-import { denoiseTake } from "@/lib/audio/denoise-take"
+import { denoiseSplitTake, denoiseTake, type DenoiseTakeArgs } from "@/lib/audio/denoise-take"
+import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { emitCellAudioSelect } from "@/lib/sync/events-emit"
 import {
   injectOptimisticAudioAttachment,
   notifyAudioAttachmentsChanged,
 } from "@/lib/audio/audio-attachments-bus"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { categorizeAiError } from "@/lib/audio/ai-error"
+import { toUserFacingError } from "@/lib/errors/user-error"
 
 interface Props {
   projectId: string
@@ -40,6 +43,19 @@ interface Props {
   author: string
   session: FrontierSession | null
   editable: boolean
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /**
+   * AQU-1767 (Sam, 2026-10-14): the take is SPLIT — its live pieces, in clip
+   * order. Cleaning keeps the cuts (`denoiseSplitTake`), and Revert chooses
+   * the original take again, every piece of it.
+   */
+  pieces?: readonly AudioAttachmentOut[]
+  /** For a split take's Revert: the original take's first piece as it reads,
+   *  painted chosen at once (its whole group follows it). */
+  originalTake?: AudioAttachmentOut | null
+  /** AQU-2327: the take being cleaned (its track, kept part, places, level). */
+  source?: DenoiseTakeArgs["source"]
 }
 
 export function DenoiseButton(props: Props) {
@@ -47,7 +63,9 @@ export function DenoiseButton(props: Props) {
   const {
     projectId, fileId, cellId, selectedAudioId, selectedUrl,
     referenceAudioId, originalUrl, originalDurationMs, author, session, editable,
+    targetLang, pieces, originalTake, source,
   } = props
+  const split = pieces && pieces.length > 1 ? pieces : null
 
   const [processing, setProcessing] = useState(false)
   const [reverting, setReverting] = useState(false)
@@ -62,21 +80,34 @@ export function DenoiseButton(props: Props) {
     setError(null)
     setProcessing(true)
     try {
-      await denoiseTake({
-        projectId, fileId, cellId,
-        sourceAudioId: selectedAudioId,
-        sourceUrl: selectedUrl,
-        author,
-        session,
-      })
+      // Decision 11: an Undo step; the take cleaned is the one that played.
+      if (split) {
+        await denoiseSplitTake({
+          projectId, fileId, cellId, pieces: split, author, session, ...(targetLang ? { targetLang } : {}),
+          history: { selectedBefore: split[0].pieceOf ?? split[0].audioId },
+        })
+      } else {
+        await denoiseTake({
+          projectId, fileId, cellId,
+          sourceAudioId: selectedAudioId,
+          sourceUrl: selectedUrl,
+          author,
+          session,
+          ...(targetLang ? { targetLang } : {}),
+          ...(source ? { source } : {}),
+          history: { selectedBefore: selectedAudioId },
+        })
+      }
       // Success: the cleaned take is optimistically selected, so this component
       // re-renders into the "Noise removed" state on the next pass.
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      // AQU-510: route through AQU-891's categoriser so the reason reads in the
+      // active language instead of a raw model/decoder throw.
+      setError(categorizeAiError(e instanceof Error ? e.message : String(e)).body)
     } finally {
       setProcessing(false)
     }
-  }, [canRun, processing, projectId, fileId, cellId, selectedAudioId, selectedUrl, author, session])
+  }, [canRun, processing, projectId, fileId, cellId, selectedAudioId, selectedUrl, author, session, targetLang, split])
 
   const handleRevert = useCallback(async () => {
     if (!referenceAudioId || reverting) return
@@ -89,10 +120,17 @@ export function DenoiseButton(props: Props) {
       const revertP = emitCellAudioSelect({
         projectId, fileId, cellId,
         audioId: referenceAudioId,
-        slot: "recording",
+        // A split take may sit on an added track: choose on its own slot.
+        slot: split?.[0]?.slot ?? "recording",
+        ...(targetLang ? { targetLang } : {}),
         author,
       })
-      if (originalUrl) {
+      // A split take's original is painted as it really reads (its window and
+      // group), never as the bare clip below — which would show the whole
+      // recording as one take until the read caught up.
+      if (split) {
+        if (originalTake) injectOptimisticAudioAttachment(fileId, cellId, originalTake, revertP)
+      } else if (originalUrl) {
         injectOptimisticAudioAttachment(fileId, cellId, {
           audioId: referenceAudioId,
           url: originalUrl,
@@ -108,37 +146,36 @@ export function DenoiseButton(props: Props) {
       await revertP
       notifyAudioAttachmentsChanged(fileId)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      // AQU-510: localized reason, not the raw throw (no `context` noun —
+      // it would be interpolated untranslated).
+      setError(toUserFacingError(e).message)
     } finally {
       setReverting(false)
     }
-  }, [referenceAudioId, reverting, originalUrl, originalDurationMs, projectId, fileId, cellId, author])
+  }, [referenceAudioId, reverting, originalUrl, originalDurationMs, projectId, fileId, cellId, author, targetLang, split, originalTake])
 
   if (isDenoised) {
     return (
       <div className="flex flex-wrap items-center gap-1.5">
-        <AppTooltip content={t("workspace.denoise.removedTooltip")}>
-          <Badge
-            variant="outline"
-            className="border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-          >
-            <Check className="h-3 w-3" />
-            {t("workspace.denoise.removedBadge")}
-          </Badge>
-        </AppTooltip>
+        {/* The badge and the button carry their own words: no hover (AQU-2260). */}
+        <Badge
+          variant="outline"
+          className="border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+        >
+          <Check className="h-3 w-3" />
+          {t("workspace.denoise.removedBadge")}
+        </Badge>
         {referenceAudioId && (
-          <AppTooltip content={t("workspace.denoise.revertTooltip")}>
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              onClick={() => void handleRevert()}
-              disabled={!editable || reverting || !session?.jwt}
-            >
-              {reverting ? <Spinner className="size-3" /> : <RotateCcw className="h-3 w-3" />}
-              {t("workspace.denoise.revertButton")}
-            </Button>
-          </AppTooltip>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            onClick={() => void handleRevert()}
+            disabled={!editable || reverting || !session?.jwt}
+          >
+            {reverting ? <Spinner className="size-3" /> : <RotateCcw className="h-3 w-3" />}
+            {t("workspace.denoise.revertButton")}
+          </Button>
         )}
         {error && <span className="text-[11px] text-destructive">{error}</span>}
       </div>
@@ -147,11 +184,9 @@ export function DenoiseButton(props: Props) {
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <AppTooltip content={
-        !supported
-          ? "Noise removal isn't supported in this browser"
-          : "Remove background noise (on-device) — adds a cleaned take"
-      }>
+      {/* Its words name it; where this browser cannot run it, why opens on a
+          click on it (AQU-2260). */}
+      <AppTooltip content={!supported ? "Noise removal isn't supported in this browser" : null}>
         <Button
           type="button"
           size="xs"

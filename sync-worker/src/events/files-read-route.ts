@@ -1,7 +1,13 @@
 // Project-scoped file read routes.
 //
-//   GET /api/v1/projects/:projectId/files            (?trash=1, ?limit=&cursor=)
-//   GET /api/v1/projects/:projectId/files/:fileId
+//   GET /api/v1/projects/:projectId/files            (?trash=1, ?limit=&cursor=, ?lane=)
+//   GET /api/v1/projects/:projectId/files/:fileId    (?lane=)
+//
+// AQU-2118: `?lane=<tag>` pins the FILLED / APPROVED counters (and, AQU-2111,
+// the audio pair beside them) to that target lane's progress row — the
+// sidebar passes the lane its switcher shows.
+// Without it the counters stay pinned to the project's bridge / only lane,
+// byte-identical to before.
 //
 // The listing returns { files, nextCursor }. `limit` (max 500) turns on keyset
 // paging; `nextCursor` is null when there is no further page. Without `limit`
@@ -16,12 +22,23 @@
 // claim must match the path's :projectId. Token role is implicitly the
 // project-membership check (identity mints tokens only for members).
 
-import { verifyTokenForProject } from "../auth"
+import { readFileExtension, type FileExtensionMeta } from '../../../shared/tools/file-extension'
+import { verifyTokenForProject, type SyncTokenClaims } from "../auth"
 import { resolveCorpusMarker } from "./corpus-marker"
+import { usableSortIndex } from "./sort-index"
+import { loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
+import { sourceLaneIdSql, targetLaneIdSql } from "../../../db/shared/lane-sql"
+import { readDeclaredLanguages } from "../../../db/shared/file-declared-languages"
+import { notHiddenFileSql } from "../../../db/shared/counted-files"
+import { lanesForRequestedTag, legacyTagsForVisibleLanes } from "../../../src/lib/lanes/read-wall"
+import { laneTagAllowed, loadTargetLanes, visibleLanesForRead } from "./lane-read-wall"
+import { effectiveThresholdSql } from '../../../db/shared/validation-threshold'
 
 export interface FilesReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-730. Unset locally and in e2e. */
+  LANE_READ_WALL?: string
 }
 
 interface FileRowRaw {
@@ -36,6 +53,11 @@ interface FileRowRaw {
   cell_count: number
   approved_count: number
   filled_count: number
+  /** AQU-2111: the audio twin of the pair above, for this file's pinned lane.
+   *  Zero when the file has no projection row — `files` carries no audio
+   *  rollup to fall back on, exactly as the per-file progress read has it. */
+  audio_count: number
+  audio_validated_count: number
   word_count: number
   last_edit_at: number | null
   deleted_at: number | null
@@ -57,8 +79,12 @@ interface FileSummary {
    *  ordinary files. */
   anchorFileId: string | null
   eventId: string
-  sourceLanguage: string | null
-  targetLanguage: string | null
+  /** AQU-1596: what the file's header *claimed*, as import information. Never
+   *  a lane's language — a Macula file declares `hbo`, and a translation
+   *  imported into the French lane may declare Spanish. Surfaces that show a
+   *  language to a user read it off the lane, not off here. */
+  declaredSourceLanguage: string | null
+  declaredTargetLanguage: string | null
   sourceTextDirection: 'ltr' | 'rtl' | null
   targetTextDirection: 'ltr' | 'rtl' | null
   /** Timeline-segment-model order lens, read from meta. Null ⇒ client treats
@@ -89,20 +115,38 @@ interface FileSummary {
    *  the route's job is to forward it intact, not to judge it. */
   trackOverrides: Record<
     string,
-    { kind?: string; name?: string; order?: number; groupId?: string; color?: string; sourceTrackId?: string }
+    { kind?: string; name?: string; order?: number; groupId?: string; color?: string; sourceTrackId?: string; setsLineLengths?: boolean }
   > | null
   /** Sidebar folder. Null when the file is ungrouped. */
   corpusMarker: string | null
+  /** AQU-1569: hand-placed position within the sidebar group. Null when
+   *  nobody has reordered that group — the automatic order applies. */
+  sortIndex: number | null
   cellCount: number
   approvedCount: number
   /** Target cells with content (TRIM(value) != ''): the "translated" count. */
   filledCount: number
+  /**
+   * AQU-2111: lines with a take of their own, and lines whose weakest chosen
+   * take meets the project's AUDIO validation requirement.
+   *
+   * Same rules as the per-file progress read and the Dashboard's audio tiles:
+   * the weakest selected dub take decides, an imported source clip is not a
+   * recording, and the structural-cell policy subtracts from both halves. An
+   * audio-only project reads 0 translated here and always will — these are the
+   * numbers that say how much of it is done.
+   */
+  audioCount: number
+  audioValidatedCount: number
   wordCount: number
   lastEditAt: number | null
   /** AQU-272: epoch-ms when this file was soft-deleted, or null if active. */
   deletedAt: number | null
   /** AQU-656: original import blob exists (R2 or legacy raw_source). */
   hasOriginalSource: boolean
+  /** Smart Extensions apiRev 7: files.meta.extension (kind, tags, group,
+   *  owner, meta). Null on ordinary files. */
+  extension: FileExtensionMeta | null
 }
 
 /** Shape-check the recorded correction. `scale` is the only field that must be
@@ -122,10 +166,6 @@ function normalizeTimebase(raw: unknown): FileSummary['audioVttTimebase'] {
 
 function mapRow(row: FileRowRaw): FileSummary {
   let meta: {
-    source_language?: string
-    target_language?: string
-    sourceLanguage?: string
-    targetLanguage?: string
     source_text_direction?: string
     target_text_direction?: string
     sourceTextDirection?: string
@@ -137,6 +177,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     aquillaImport?: { audioVtt?: { timebase?: unknown } }
     corpusMarker?: unknown
     parserVersion?: unknown
+    sortIndex?: unknown
   } = {}
   try {
     meta = row.meta ? JSON.parse(row.meta) : {}
@@ -152,8 +193,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     kind: row.kind,
     anchorFileId: row.anchor_file_id,
     eventId: row.event_id,
-    sourceLanguage: meta.source_language ?? meta.sourceLanguage ?? null,
-    targetLanguage: meta.target_language ?? meta.targetLanguage ?? null,
+    ...readDeclaredLanguages(meta),
     sourceTextDirection: normalizeTextDirection(meta.source_text_direction ?? meta.sourceTextDirection),
     targetTextDirection: normalizeTextDirection(meta.target_text_direction ?? meta.targetTextDirection),
     orderedBy: meta.orderedBy ?? null,
@@ -162,13 +202,17 @@ function mapRow(row: FileRowRaw): FileSummary {
     audioVttTimebase: normalizeTimebase(meta.aquillaImport?.audioVtt?.timebase),
     trackOverrides: normalizeTrackOverrides(meta.trackOverrides),
     corpusMarker: resolveCorpusMarker(meta) ?? null,
+    sortIndex: usableSortIndex(meta.sortIndex) ?? null,
     cellCount: row.cell_count,
     approvedCount: row.approved_count,
     filledCount: row.filled_count,
+    audioCount: row.audio_count,
+    audioValidatedCount: row.audio_validated_count,
     wordCount: row.word_count,
     lastEditAt: row.last_edit_at,
     deletedAt: row.deleted_at ?? null,
     hasOriginalSource: Boolean(row.has_original_source),
+    extension: readFileExtension(meta),
   }
 }
 
@@ -221,14 +265,36 @@ export async function handleFilesReadRequest(
   if (!auth.ok) {
     return new Response(auth.reason, { status: auth.status })
   }
+  // null: wall off, Maintainer, or platform — the file clock stays.
+  // A set: newest file-scope progress clock among those lanes. The file
+  // clock is the max over every cell, including lanes this caller cannot
+  // see, and the list sorts by it.
+  const grantedTags = await grantedLaneTagsForFiles(env, projectId, auth.claims)
 
-  // Threshold-aware approved count. `files.approved_count` (maintained by
-  // fileCountersRecomputeStmt) counts `cells.validated`, which ignores the
-  // project's validationCount, so it is only the fallback for files that have
-  // no projected progress row. For projected files the count is the histogram
-  // mass at or above the threshold. The threshold is resolved ONCE in a CTE:
-  // the previous shape re-parsed `project_settings.settings` as jsonb inside a
-  // correlated subquery, i.e. per histogram bucket per file row.
+  // AQU-2118: an explicit `?lane=<tag>` pins the FILLED / APPROVED counters
+  // below to that lane's progress row instead of the legacy pin. The tag is
+  // resolved to its lane id here and BOUND into the `thr` CTE, never spliced.
+  // `pinnedLane` is null when no lane was named (the legacy pin), that lane's
+  // id, or '' for a tag no lane carries or one the lane read wall hides from
+  // this caller — which matches no row and takes no files-counter fallback,
+  // so filled and approved read 0 (see resolveLanePin).
+  const requestedLane = (url.searchParams.get("lane") ?? "").trim()
+  const pin = requestedLane ? await resolveLanePin(env, projectId, auth.claims, requestedLane) : null
+  const pinnedLane = pin === null ? null : pin.laneId
+
+  // Threshold-aware approved count from the default lane's progress row.
+  // `files.filled_count` and `files.approved_count` sum every target lane.
+  // A missing progress row uses them only when the project has at most one
+  // target lane — none yet counts as one, because the lanes row may not
+  // exist yet, and an archived lane still counts, because its cells stay in
+  // the sum. Then the sum is that lane, and it is the only fill before the
+  // first progress row. Two or more target lanes make a missing row an empty
+  // lane (0). The denominator still falls back to `files.cell_count` either
+  // way: distinct cells, shared by every lane. For a projected file the
+  // approved count is the histogram mass at or above the threshold. The
+  // threshold, and that lane count, are resolved ONCE in a CTE: the previous
+  // shape re-parsed `project_settings.settings` as jsonb inside a correlated
+  // subquery, i.e. per histogram bucket per file row.
   //
   // AQU-1083: the same CTE resolves whether this project counts structural
   // cells — its own answer, else its org's, else yes — from the STORED
@@ -241,12 +307,43 @@ export async function handleFilesReadRequest(
     // GREATEST(0, …) throughout: a file backfilled before its projection row
     // existed can carry a structural count without a matching total, and a
     // negative denominator would render as a nonsense percentage.
-    `GREATEST(0, COALESCE(p.total_count, f.cell_count) - ${less("COALESCE(p.structural_count, f.structural_cell_count)")}) AS cell_count, ` +
-    `CASE WHEN p.file_id IS NULL
+    // AQU-1599: the denominator and its structural share are facts about the
+    // SOURCE text, so they come off the source lane's row (`ps`). They used to
+    // ride the `target_lang = ''` row beside the counters below, which made
+    // every file in the list read 0 of 0 the moment that lane was archived.
+    //
+    // `p` sits between `ps` and the files counter because a row projected
+    // before AQU-1599 has no source-lane sibling until AQU-1616's recompute
+    // gives it one, and every lane's row carried the same denominator then —
+    // so the pinned lane's row still answers correctly, and the stale
+    // `files.cell_count` stays the last resort it has always been.
+    `GREATEST(0, COALESCE(ps.total_count, p.total_count, f.cell_count) - ${less("COALESCE(ps.structural_count, p.structural_count, f.structural_cell_count)")}) AS cell_count, ` +
+    `CASE WHEN p.file_id IS NOT NULL
+            THEN GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")})
+            WHEN thr.one_target_lane
             THEN GREATEST(0, f.approved_count - ${less("f.structural_approved_count")})
-            ELSE GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")})
+            ELSE 0
           END AS approved_count, ` +
-    `GREATEST(0, COALESCE(p.filled_count, f.filled_count) - ${less("COALESCE(p.structural_filled_count, f.structural_filled_count)")}) AS filled_count, ` +
+    `CASE WHEN p.file_id IS NOT NULL
+            THEN GREATEST(0, p.filled_count - ${less("p.structural_filled_count")})
+            WHEN thr.one_target_lane
+            THEN GREATEST(0, f.filled_count - ${less("f.structural_filled_count")})
+            ELSE 0
+          END AS filled_count, ` +
+    // AQU-2111: the audio pair, off the same pinned-lane row. There is no
+    // `files` counter to fall back on — the projection is the only source, as
+    // the per-file progress read already documents — so a file with no row
+    // reads 0, which is what that read reports for it too.
+    `CASE WHEN p.file_id IS NOT NULL
+            THEN GREATEST(0, p.audio_count - ${less("p.structural_audio_count")})
+            ELSE 0
+          END AS audio_count, ` +
+    // AQU-490: validated is the histogram mass at or above the project's AUDIO
+    // threshold, never the stored `audio_validated_count` (fixed at one vote).
+    `CASE WHEN p.file_id IS NOT NULL
+            THEN GREATEST(0, COALESCE(aa.approved, 0) - ${less("COALESCE(saa.approved, 0)")})
+            ELSE 0
+          END AS audio_validated_count, ` +
     "f.word_count, f.last_edit_at, f.deleted_at, " +
     "(b.file_id IS NOT NULL) AS has_original_source"
   // Anchored on the bound project id rather than on either table, so the CTE
@@ -254,23 +351,55 @@ export async function handleFilesReadRequest(
   // still gets its org's default, and the threshold still resolves from the
   // settings alone.
   const thresholdCte =
-    "WITH thr AS (SELECT LEAST(15, GREATEST(1, CASE WHEN (ps.settings::jsonb->>'validationCount') ~ '^[0-9]+$' " +
-    "THEN (ps.settings::jsonb->>'validationCount')::integer ELSE 1 END)) AS n, " +
-    "COALESCE(ps.count_structural, os.count_structural) = 'false' AS exclude_structural " +
-    "FROM (SELECT ?::text AS id) q " +
+    // AQU-1771: project → org → 1, from the generated columns.
+    `WITH thr AS (SELECT ${effectiveThresholdSql('ps.validation_count', 'os.validation_count')} AS n, ` +
+    // AQU-2111: resolved in the same CTE as the text threshold, and project →
+    // org → 1 by the same rule. A project that asks for two listens must not
+    // have its sidebar call a one-vote line validated.
+    `${effectiveThresholdSql('ps.validation_count_audio', 'os.validation_count_audio')} AS na, ` +
+    "COALESCE(ps.count_structural, os.count_structural) = 'false' AS exclude_structural, " +
+    // AQU-2118: the lane `?lane=` named, read by the progress join below. The
+    // files-counter fallback is for the lane whose fill that sum IS — the
+    // project's only target lane, named or not — and never for a '' pin,
+    // which names none.
+    "q.pinned_lane AS pinned_lane_id, " +
+    "COALESCE(q.pinned_lane, 'x') <> '' AND (SELECT COUNT(*) FROM lanes l WHERE l.project_id = q.id AND l.role = 'target') <= 1 AS one_target_lane " +
+    "FROM (SELECT ?::text AS id, ?::text AS pinned_lane) q " +
     "LEFT JOIN project_settings ps ON ps.project_id = q.id " +
     "LEFT JOIN projects pr ON pr.id = q.id " +
     "LEFT JOIN org_settings os ON os.org_id = pr.org_id)"
   const joins =
-    // AQU-538: file_section_progress now materializes one row per target lane.
-    // The files list is a cross-project legacy surface — pin it to the default
-    // lane ('') so N=1 stays byte-identical and N>1 files don't fan out into
-    // one listing row per lane.
-    " LEFT JOIN file_section_progress p ON p.project_id = f.project_id AND p.file_id = f.id AND p.scope = 'file' AND p.section_key = '' AND p.target_lang = ''" +
+    // AQU-538: file_section_progress now materializes one row per lane. Without
+    // `?lane=` the FILLED / APPROVED counters stay pinned to one lane so that
+    // N=1 stays byte-identical and an N>1 file does not fan out into one
+    // listing row per lane. AQU-2118: `?lane=<tag>` names the lane instead —
+    // the sidebar passes the one its switcher shows — and that pin is bound
+    // into `thr`, which is why `thr` is joined FIRST below (one row, ON true;
+    // its place in the join order changes nothing else).
+    //
+    // AQU-1599: pinned by LANE ID, not `target_lang = ''`. The source lane's
+    // row carries '' there too — its `legacy_tag` is NULL — so the old pin
+    // matched two rows per file and summed the default lane's translations
+    // onto the source lane's empty ones.
+    //
+    // AQU-1594: which lane. A project that still has the '' bridge stays
+    // pinned to it. A project whose only target lane is tagged with its
+    // language uses that lane. Several tagged lanes and no bridge match nothing
+    // here, so the file is not repeated once per lane. Neither join below adds
+    // a bind: each subquery reads `f.project_id`, and the bridge's tag is a
+    // literal.
     " LEFT JOIN thr ON true" +
+    ` LEFT JOIN file_section_progress p ON p.project_id = f.project_id AND p.file_id = f.id AND p.scope = 'file' AND p.section_key = '' AND p.lane_id = COALESCE(thr.pinned_lane_id, ${targetLaneIdSql("f.project_id", "''")}, ` +
+    "(SELECT CASE WHEN COUNT(*) = 1 THEN MIN(l.id) END FROM public.lanes l WHERE l.project_id = f.project_id AND l.role = 'target'))" +
+    // The lane-independent half of the same row set: the source lane's.
+    ` LEFT JOIN file_section_progress ps ON ps.project_id = f.project_id AND ps.file_id = f.id AND ps.scope = 'file' AND ps.section_key = '' AND ps.lane_id = ${sourceLaneIdSql("f.project_id")}` +
     " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.n, 1)) a ON true" +
     // AQU-1083: the structural share of the same buckets, for the subtraction.
     " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.structural_validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.n, 1)) sa ON true" +
+    // AQU-2111: the audio histogram and its structural share, at the AUDIO
+    // threshold.
+    " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.audio_validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.na, 1)) aa ON true" +
+    " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.structural_audio_validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.na, 1)) saa ON true" +
     " LEFT JOIN file_source_blobs b ON b.file_id = f.id AND b.project_id = f.project_id"
   const orderBy = "ORDER BY f.last_edit_at DESC NULLS LAST, f.name ASC, f.id ASC"
 
@@ -278,11 +407,16 @@ export async function handleFilesReadRequest(
   const trash = url.searchParams.get("trash") === "1"
 
   if (fileId) {
-    const sql = `${thresholdCte} SELECT ${columns} FROM files f${joins} WHERE f.project_id = ? AND f.id = ?`
+    const tagList = grantedTags === null ? [] : [...grantedTags]
+    const fileColumns = grantedTags === null
+      ? columns
+      : columns.replace("f.last_edit_at", `${visibleLastEditSql(tagList.length)} AS last_edit_at`)
+    const sql = `${thresholdCte} SELECT ${fileColumns} FROM files f${joins} WHERE f.project_id = ? AND f.id = ?`
     const row = await env.AQUILLA_PG.prepare(sql)
-      .bind(projectId, projectId, fileId)
+      .bind(projectId, pinnedLane, ...tagList, projectId, fileId)
       .first<FileRowRaw>()
     if (!row) return new Response("file not found", { status: 404 })
+    await settleLaneCounts(env, projectId, auth.claims, pin, [row])
     return Response.json({ file: mapRow(row) })
   }
 
@@ -297,16 +431,36 @@ export async function handleFilesReadRequest(
   if (cursorRaw && !cursor) return new Response("invalid cursor", { status: 400 })
 
   const tombstoneFilter = trash ? "deleted_at IS NOT NULL" : "deleted_at IS NULL"
-  const where: string[] = [`f.project_id = ?`, `f.${tombstoneFilter}`]
-  const binds: unknown[] = [projectId, projectId]
+  // AQU-1626: both listings drop the hidden companion files — the cue sheet an
+  // audio workflow records against, a linked video's caption track. They were
+  // never meant to appear in a file list (the client has always filtered them
+  // out of the sidebar by role), and an agent reading this API had no such
+  // filter, so a 500-cue track read back as 500 files' worth of untranslated
+  // work. The single-file fetch above deliberately keeps no such filter: the
+  // audio workflow follows `anchor_file_id` straight to its cue sheet, and a
+  // hidden file is ordinary readable content once you know its id.
+  // Smart Extensions apiRev 7: `?extensionData=1` also lists the extension
+  // data files (hidden everywhere else), for the extension host that owns them.
+  const hiddenFilter = url.searchParams.get("extensionData") === "1"
+    ? `(${notHiddenFileSql("f")} OR f.role = 'extension-data')`
+    : notHiddenFileSql("f")
+  const where: string[] = [`f.project_id = ?`, `f.${tombstoneFilter}`, hiddenFilter]
+  // Unrestricted: [threshold project, pinned lane, page project]. Restricted:
+  // the lane tags bind inside the clock subquery, which sits between the
+  // pinned lane and the page project.
+  const tagList = grantedTags === null ? [] : [...grantedTags]
+  const binds: unknown[] = grantedTags === null
+    ? [projectId, pinnedLane, projectId]
+    : [projectId, pinnedLane, ...tagList, projectId]
+  const clock = grantedTags === null ? "f.last_edit_at" : "f.visible_last_edit"
   if (cursor) {
     if (cursor.lastEditAt === null) {
       // Already inside the NULLS LAST tail: only later (name, id) NULL rows remain.
-      where.push("f.last_edit_at IS NULL AND (f.name > ? OR (f.name = ? AND f.id > ?))")
+      where.push(`${clock} IS NULL AND (f.name > ? OR (f.name = ? AND f.id > ?))`)
       binds.push(cursor.name, cursor.name, cursor.id)
     } else {
       where.push(
-        "(f.last_edit_at < ? OR f.last_edit_at IS NULL OR (f.last_edit_at = ? AND (f.name > ? OR (f.name = ? AND f.id > ?))))",
+        `(${clock} < ? OR ${clock} IS NULL OR (${clock} = ? AND (f.name > ? OR (f.name = ? AND f.id > ?))))`,
       )
       binds.push(cursor.lastEditAt, cursor.lastEditAt, cursor.name, cursor.name, cursor.id)
     }
@@ -316,17 +470,31 @@ export async function handleFilesReadRequest(
   // expand every file's histogram just to discard all but one page; on
   // PGlite that is the difference between ~60 ms and ~1.4 s at 1000 files.
   // The outer ORDER BY re-asserts the order the CTE produced.
+  //
+  // A restricted caller sorts by the granted-lane clock instead. That clock
+  // is one indexed MAX per file, computed before the page cut so the cursor
+  // matches the value the response returns. Histogram joins stay on the page.
+  const listColumns = grantedTags === null
+    ? columns
+    : columns.replace("f.last_edit_at", "f.visible_last_edit AS last_edit_at")
+  const listOrder = grantedTags === null
+    ? orderBy
+    : "ORDER BY f.visible_last_edit DESC NULLS LAST, f.name ASC, f.id ASC"
+  const pageFrom = grantedTags === null
+    ? "files f"
+    : `(SELECT f.*, ${visibleLastEditSql(tagList.length)} AS visible_last_edit FROM files f) f`
   const pageSql =
-    `SELECT * FROM files f WHERE ${where.join(" AND ")} ${orderBy}` +
+    `SELECT * FROM ${pageFrom} WHERE ${where.join(" AND ")} ${listOrder}` +
     (limit !== null ? " LIMIT ?" : "")
   if (limit !== null) binds.push(limit + 1)
   const sql =
-    `${thresholdCte}, page AS (${pageSql}) SELECT ${columns} FROM page f${joins} ${orderBy}`
+    `${thresholdCte}, page AS (${pageSql}) SELECT ${listColumns} FROM page f${joins} ${listOrder}`
   const result = await env.AQUILLA_PG.prepare(sql)
     .bind(...binds)
     .all<FileRowRaw>()
   const rows = result.results
   const page = limit !== null && rows.length > limit ? rows.slice(0, limit) : rows
+  await settleLaneCounts(env, projectId, auth.claims, pin, page)
   const last = page[page.length - 1]
   const nextCursor =
     limit !== null && rows.length > limit && last
@@ -340,6 +508,202 @@ export async function handleFilesReadRequest(
 }
 
 export const FILES_MAX_PAGE = 500
+
+/**
+ * `null` keeps `files.last_edit_at` (wall off, Maintainer, platform).
+ * A set is the legacy tags whose file-scope progress clocks this caller
+ * may see. Empty means no target lane, so the clock is null.
+ */
+async function grantedLaneTagsForFiles(
+  env: FilesReadEnv,
+  projectId: string,
+  claims: SyncTokenClaims,
+): Promise<ReadonlySet<string> | null> {
+  if (!env.AQUILLA_PG) return null
+  const visible = visibleLanesForRead(env.LANE_READ_WALL, claims)
+  if (visible === null) return null
+  const identities = await loadTargetLaneIdentities(env.AQUILLA_PG, projectId)
+  return legacyTagsForVisibleLanes(identities, visible) ?? new Set<string>()
+}
+
+/** Newest file-scope progress edit among the granted tags. No placeholders when there are no tags. */
+function visibleLastEditSql(tagCount: number): string {
+  if (tagCount === 0) return "NULL::bigint"
+  const placeholders = Array.from({ length: tagCount }, () => "?").join(", ")
+  // AQU-1599: the granted lanes are TARGET lanes, so the join says so rather
+  // than matching `target_lang`, which the source lane's row also carries ''
+  // in. Same binds, same positions — the tags move from the column to the
+  // lane row they came from.
+  return `(SELECT MAX(v.last_edit_at) FROM file_section_progress v
+     JOIN public.lanes vl
+       ON vl.project_id = v.project_id AND vl.id = v.lane_id AND vl.role = 'target'
+    WHERE v.project_id = f.project_id AND v.file_id = f.id
+      AND v.scope = 'file' AND v.section_key = ''
+      AND vl.legacy_tag IN (${placeholders}))`
+}
+
+/**
+ * AQU-2118: what `?lane=<tag>` pins the counters to.
+ *
+ * `laneId` is the named lane's id, or '' when no lane of this project carries
+ * the tag: that matches no progress row and takes no files-counter fallback,
+ * so filled and approved read 0 over the source denominator, as `/progress`
+ * reads an unknown tag (AQU-1977). `hidden` is the lane read wall refusing the
+ * lane to this caller (AQU-730): the listing is still served, every counter
+ * zeroed, as `/progress` answers it. The tag matches a lane the way the wall
+ * matches one — by legacy tag or display name, exactly once.
+ */
+interface LanePin {
+  laneId: string
+  hidden: boolean
+}
+
+async function resolveLanePin(
+  env: FilesReadEnv,
+  projectId: string,
+  claims: SyncTokenClaims,
+  lane: string,
+): Promise<LanePin> {
+  if (!env.AQUILLA_PG) return { laneId: "", hidden: true }
+  const matches = lanesForRequestedTag(await loadTargetLanes(env.AQUILLA_PG, projectId), lane)
+  const match = matches.length === 1 ? matches[0] : undefined
+  if (!match) return { laneId: "", hidden: false }
+  const visible = visibleLanesForRead(env.LANE_READ_WALL, claims)
+  if (!laneTagAllowed(visible, match.id)) return { laneId: "", hidden: true }
+  return { laneId: match.id, hidden: false }
+}
+
+/**
+ * The counters a response carries once the page is cut. No lane named: the
+ * legacy pin, with the read wall's replacement below. A named lane the wall
+ * allowed already carries its own numbers. A hidden one reads 0 of 0.
+ */
+async function settleLaneCounts(
+  env: FilesReadEnv,
+  projectId: string,
+  claims: SyncTokenClaims,
+  pin: LanePin | null,
+  rows: FileRowRaw[],
+): Promise<void> {
+  if (pin === null) return hideUngrantedDefaultLaneCounts(env, projectId, claims, rows)
+  if (pin.hidden) zeroCounters(rows)
+}
+
+function zeroCounters(rows: FileRowRaw[]): void {
+  for (const row of rows) {
+    row.cell_count = 0
+    row.filled_count = 0
+    row.approved_count = 0
+    // AQU-2111: the audio pair is lane-scoped exactly as the text pair is.
+    // Leaving it behind would publish, to a caller walled off from every
+    // target lane (or from the one `?lane=` named), the one set of counters
+    // that is not zero on an audio-only project.
+    row.audio_count = 0
+    row.audio_validated_count = 0
+  }
+}
+
+/**
+ * The files list's counters are pinned to the default lane so a project with
+ * several lanes does not fan out into one row per lane. That pin is the
+ * default lane's counts. When the wall is on and this caller was not granted
+ * that lane, replace those counts with the lanes they were granted. Every
+ * lane's progress row carries a copy of the same source-cell denominator
+ * (`total_count`, `structural_count`), so that denominator is taken once;
+ * filled and validated are the work on each lane and are summed. A grant of
+ * the default lane leaves the pin alone: it is one lane they can see, not a
+ * sum of the others.
+ */
+async function hideUngrantedDefaultLaneCounts(
+  env: FilesReadEnv,
+  projectId: string,
+  claims: SyncTokenClaims,
+  rows: FileRowRaw[],
+): Promise<void> {
+  if (!env.AQUILLA_PG || rows.length === 0) return
+  const visible = visibleLanesForRead(env.LANE_READ_WALL, claims)
+  if (visible === null) return
+  const identities = await loadTargetLaneIdentities(env.AQUILLA_PG, projectId)
+  const tags = legacyTagsForVisibleLanes(identities, visible) ?? new Set<string>()
+  if (tags.has("")) return
+
+  if (tags.size === 0) {
+    zeroCounters(rows)
+    return
+  }
+
+  const fileIds = rows.map((row) => row.id)
+  const tagList = [...tags]
+  const filePlaceholders = fileIds.map(() => "?").join(", ")
+  const tagPlaceholders = tagList.map(() => "?").join(", ")
+  const less = (amount: string) =>
+    `CASE WHEN COALESCE(thr.exclude_structural, false) THEN ${amount} ELSE 0 END`
+  const { results } = await env.AQUILLA_PG.prepare(
+    `WITH thr AS (
+       SELECT ${effectiveThresholdSql('ps.validation_count', 'os.validation_count')} AS n,
+              ${effectiveThresholdSql('ps.validation_count_audio', 'os.validation_count_audio')} AS na,
+              COALESCE(ps.count_structural, os.count_structural) = 'false' AS exclude_structural
+         FROM (SELECT ?::text AS id) q
+         LEFT JOIN project_settings ps ON ps.project_id = q.id
+         LEFT JOIN projects pr ON pr.id = q.id
+         LEFT JOIN org_settings os ON os.org_id = pr.org_id
+     )
+     SELECT p.file_id AS file_id,
+            MAX(GREATEST(0, p.total_count - ${less("p.structural_count")}))::int AS cell_count,
+            SUM(GREATEST(0, p.filled_count - ${less("p.structural_filled_count")}))::int AS filled_count,
+            SUM(GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")}))::int AS approved_count,
+            SUM(GREATEST(0, p.audio_count - ${less("p.structural_audio_count")}))::int AS audio_count,
+            SUM(GREATEST(0, COALESCE(aa.approved, 0) - ${less("COALESCE(saa.approved, 0)")}))::int AS audio_validated_count
+       FROM file_section_progress p
+       JOIN public.lanes pl
+         ON pl.project_id = p.project_id AND pl.id = p.lane_id AND pl.role = 'target'
+       CROSS JOIN thr
+       LEFT JOIN LATERAL (
+         SELECT SUM(entry.value::integer)::integer AS approved
+           FROM jsonb_each_text(p.validator_histogram) entry
+          WHERE entry.key::integer >= COALESCE(thr.n, 1)
+       ) a ON true
+       LEFT JOIN LATERAL (
+         SELECT SUM(entry.value::integer)::integer AS approved
+           FROM jsonb_each_text(p.structural_validator_histogram) entry
+          WHERE entry.key::integer >= COALESCE(thr.n, 1)
+       ) sa ON true
+       LEFT JOIN LATERAL (
+         SELECT SUM(entry.value::integer)::integer AS approved
+           FROM jsonb_each_text(p.audio_validator_histogram) entry
+          WHERE entry.key::integer >= COALESCE(thr.na, 1)
+       ) aa ON true
+       LEFT JOIN LATERAL (
+         SELECT SUM(entry.value::integer)::integer AS approved
+           FROM jsonb_each_text(p.structural_audio_validator_histogram) entry
+          WHERE entry.key::integer >= COALESCE(thr.na, 1)
+       ) saa ON true
+      WHERE p.project_id = ?
+        AND p.scope = 'file' AND p.section_key = ''
+        AND p.file_id IN (${filePlaceholders})
+        AND pl.legacy_tag IN (${tagPlaceholders})
+      GROUP BY p.file_id`,
+  )
+    .bind(projectId, projectId, ...fileIds, ...tagList)
+    .all<{
+      file_id: string
+      cell_count: number
+      filled_count: number
+      approved_count: number
+      audio_count: number
+      audio_validated_count: number
+    }>()
+
+  const byFile = new Map((results ?? []).map((row) => [row.file_id, row]))
+  for (const row of rows) {
+    const counts = byFile.get(row.id)
+    row.cell_count = counts ? Number(counts.cell_count) || 0 : 0
+    row.filled_count = counts ? Number(counts.filled_count) || 0 : 0
+    row.approved_count = counts ? Number(counts.approved_count) || 0 : 0
+    row.audio_count = counts ? Number(counts.audio_count) || 0 : 0
+    row.audio_validated_count = counts ? Number(counts.audio_validated_count) || 0 : 0
+  }
+}
 
 interface FilesCursor {
   lastEditAt: number | null

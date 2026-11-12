@@ -31,6 +31,10 @@ vi.mock("@/lib/sync/sync-token", async () => {
   }
 })
 
+// Desktop backend-reachability probe; null = unknown (web), the default.
+let backendReachable: boolean | null = null
+vi.mock("@/lib/offline/connectivity", () => ({ isOnline: async () => backendReachable }))
+
 // Pull useCellAudio after mocks are declared.
 import { useCellAudio } from "./useCellAudio"
 import { buildFrontierAudioUrl } from "@/lib/audio/upload"
@@ -203,6 +207,27 @@ describe("useCellAudio", () => {
 
     await act(async () => { await result.current.requestPeaks(64) })
     expect(result.current.peaksState).toBe("error")
+  })
+
+  // Ryder's report: Wi-Fi off, a clip that isn't on the device rendered a
+  // broken player. It must say "not available offline" and not touch the network.
+  it("surfaces offline-unavailable without fetching when the backend is unreachable and the clip isn't cached", async () => {
+    backendReachable = false
+    try {
+      const project = makeProject()
+      const cell = makeCell("a-offline", buildFrontierAudioUrl("a-offline", "webm"))
+      const { result } = renderHook(() => useCellAudio(project, cell, "file-1"))
+
+      await act(async () => { await result.current.play() })
+      expect(result.current.state).toBe("error")
+      expect(result.current.error?.kind).toBe("offline-unavailable")
+
+      await act(async () => { await result.current.requestPeaks(64) })
+      expect(result.current.peaksState).toBe("offline")
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally {
+      backendReachable = null
+    }
   })
 
   it("reuses the existing element on a second play (no new element, no fetch)", async () => {

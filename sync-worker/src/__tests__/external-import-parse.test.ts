@@ -11,7 +11,7 @@
 // multi-book USFM staging discipline; the MCP tool adapters; and a drift guard
 // keeping the (literal) discovery-map format list equal to the parser core's.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // commit.ts → events/route.ts → broadcast.ts → partyserver (cloudflare:*).
 vi.mock('partyserver', () => ({
@@ -247,6 +247,8 @@ interface ErrorBody {
   error: { code: string; message: string; details?: Record<string, unknown> }
 }
 
+afterEach(async () => { await tdb?.close() })
+
 let tdb: TestDb
 let bucket: ReturnType<typeof makeStubBucket>
 let env: ReturnType<typeof makeEnv>
@@ -257,6 +259,11 @@ beforeEach(async () => {
   bucket = makeStubBucket()
   env = makeEnv(tdb.db, bucket)
   leadToken = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
 })
 
 // ── REST: preview ────────────────────────────────────────────────────────────
@@ -288,14 +295,17 @@ describe('artifact parse — preview (REST)', () => {
 
   it('parses a bilingual CSV into cells with default-lane variants', async () => {
     const artifactId = await upload(env, leadToken, 'pairs.csv', CSV_BILINGUAL, 'text/csv')
-    const res = (await handleExternalArtifactsRequest(parseReq(leadToken, artifactId), env))!
+    const res = (await handleExternalArtifactsRequest(
+      parseReq(leadToken, artifactId, { laneId: 'deflane1' }),
+      env,
+    ))!
     expect(res.status).toBe(200)
     const body = (await res.json()) as PreviewBody
 
     expect(body.fileType).toBe('csv')
     expect(body.totalCells).toBe(3)
     expect(body.sampleCells[0].content).toBe('Hello')
-    expect(body.sampleCells[0].variants).toEqual([{ laneId: '', content: 'Bonjour' }])
+    expect(body.sampleCells[0].variants).toEqual([{ laneId: 'deflane1', content: 'Bonjour' }])
     // RFC-4180 quoting survives the round trip.
     expect(body.sampleCells[2].content).toBe('One, two')
   })
@@ -532,10 +542,10 @@ describe('artifact parse — stage (REST)', () => {
     ).toEqual(DOCX_PARITY_EXPECTED_CELLS.map((c) => c.original))
   })
 
-  it('stages a bilingual CSV whose PlanImport cells carry default-lane variants', async () => {
+  it('stages a bilingual CSV whose PlanImport cells carry the caller lane id', async () => {
     const artifactId = await upload(env, leadToken, 'pairs.csv', CSV_BILINGUAL, 'text/csv')
     const res = (await handleExternalArtifactsRequest(
-      parseReq(leadToken, artifactId, { stage: true }),
+      parseReq(leadToken, artifactId, { stage: true, laneId: 'deflane1' }),
       env,
     ))!
     expect(res.status).toBe(200)
@@ -550,7 +560,7 @@ describe('artifact parse — stage (REST)', () => {
     expect(commands[0].artifactId).toBe(artifactId)
     expect(commands[0].cells[1]).toMatchObject({
       content: 'Goodbye',
-      variants: [{ laneId: '', content: 'Au revoir' }],
+      variants: [{ laneId: 'deflane1', content: 'Au revoir' }],
     })
   })
 
@@ -693,7 +703,7 @@ interface UsfmCell {
   content: string
   type?: string
   canonicalRef?: string
-  metadata?: { usfmNotes?: { kind: string; caller: string; ref: string; text: string }[] }
+  metadata?: { usfmNotes?: { kind: string; caller: string; ref: string; text: string; raw?: string }[] }
 }
 
 async function setImportExcludeFrontMatter(value: boolean) {
@@ -729,8 +739,17 @@ describe('artifact parse — USFM content-only fidelity (AQU-1283)', () => {
 
     const v4 = cells.find((c) => c.canonicalRef === 'ACT 1:4')!
     expect(v4.content).toBe(ACT_1_4_TEXT)
+    // AQU-1295: `raw` rides along so export can put the note back exactly as
+    // it arrived. This note is why it has to: `\fqa` is flattened out of
+    // `text`, so a rebuild from the parsed fields would lose the sub-marker.
     expect(v4.metadata?.usfmNotes).toEqual([
-      { kind: 'footnote', caller: '+', ref: '1:4', text: 'Или: « Однажды, собрав их… »' },
+      {
+        kind: 'footnote',
+        caller: '+',
+        ref: '1:4',
+        text: 'Или: « Однажды, собрав их… »',
+        raw: '\\f + \\fr 1:4 \\ft Или: «\\fqa Однажды, собрав их…\\ft »\\f*',
+      },
     ])
     const v5 = cells.find((c) => c.canonicalRef === 'ACT 1:5')!
     expect(v5.content).toBe('Иоанн крестил водой.')
@@ -849,6 +868,74 @@ async function callMcpTool(
 }
 
 describe('MCP preview_import / prepare_import', () => {
+  it('bounds and validates uploads while retaining write and project restrictions', async () => {
+    await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1 WHERE id = $2', ['https://w/api/v1/external/mcp', CRED_LEAD])
+    const base = { projectId: PROJECT, name: 'fixture.txt', kind: 'source', contentType: 'text/plain', encoding: 'base64', data: 'TQ==' }
+    for (const change of [
+      { data: 'data:text/plain;base64,TQ==' }, { data: 'TR==' },
+      { data: 'TQ===' }, { data: '!!!!' },
+      { data: 'a'.repeat(4 * Math.ceil(524288 / 3) + 4) },
+      { encoding: 'utf8', data: '語'.repeat(200000) },
+      { kind: 'audio', contentType: 'text/html' },
+    ]) {
+      const response = await callMcpTool(leadToken, 'upload_artifact', { ...base, ...change })
+      expect(response.isError).toBe(true)
+      expect(response.payload.error).toMatchObject({ code: 'validation_failed' })
+    }
+    const outside = await callMcpTool(leadToken, 'upload_artifact', { ...base, projectId: 'outside' })
+    expect(outside.isError).toBe(true)
+    expect(outside.payload.error).toMatchObject({ code: 'scope_denied' })
+    await tdb.pg.query("UPDATE api_credentials SET access = 'read' WHERE id = $1", [CRED_LEAD])
+    const readonly = await callMcpTool(leadToken, 'upload_artifact', base)
+    expect(readonly.isError).toBe(true)
+    expect(readonly.payload.error).toMatchObject({ code: 'scope_denied' })
+    expect(await tdb.rows('artifacts')).toHaveLength(0)
+  })
+
+  it('uploads through resource-bound OAuth and commits text, binary and multi-book originals', async () => {
+    await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1 WHERE id = $2', ['https://w/api/v1/external/mcp', CRED_LEAD])
+    const docx = buildDocxParityFixture()
+    const multi = `${USFM_GENESIS}\n\\id EXO Test Bible\n\\c 1\n\\v 1 Now these are the names.`
+    const cases = [
+      { name: 'Genesis.usfm', contentType: 'text/plain', encoding: 'utf8', data: USFM_GENESIS, bytes: new TextEncoder().encode(USFM_GENESIS), count: 1 },
+      { name: DOCX_PARITY_FILE_NAME, contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', encoding: 'base64', data: Buffer.from(docx).toString('base64'), bytes: docx, count: 1 },
+      { name: 'books.usfm', contentType: 'text/plain', encoding: 'utf8', data: multi, bytes: new TextEncoder().encode(multi), count: 2 },
+    ]
+    let files = 0
+    for (const fixture of cases) {
+      const uploaded = await callMcpTool(leadToken, 'upload_artifact', {
+        projectId: PROJECT, name: fixture.name, kind: 'source',
+        contentType: fixture.contentType, encoding: fixture.encoding, data: fixture.data,
+      })
+      expect(uploaded.isError).toBe(false)
+      const artifactId = uploaded.payload.artifactId
+      const preview = await callMcpTool(leadToken, 'preview_import', { projectId: PROJECT, artifactId })
+      expect(preview.isError).toBe(false)
+      expect(preview.payload.results).toHaveLength(fixture.count)
+      for (let resultIndex = 0; resultIndex < fixture.count; resultIndex++) {
+        const staged = await callMcpTool(leadToken, 'prepare_import', { projectId: PROJECT, artifactId, resultIndex })
+        expect(staged.isError).toBe(false)
+        const committed = await callMcpTool(leadToken, 'confirm_changeset', {
+          projectId: PROJECT, changesetId: staged.payload.changesetId, digest: staged.payload.digest,
+        })
+        expect(committed.isError).toBe(false)
+        files++
+      }
+      expect(await tdb.rows('files')).toHaveLength(files)
+      const artifacts = await tdb.rows<{ id: string; r2_key: string }>('artifacts')
+      const artifact = artifacts.find(row => row.id === artifactId)!
+      const original = await bucket.get(artifact.r2_key)
+      expect(new Uint8Array(await original!.arrayBuffer())).toEqual(fixture.bytes)
+      const sources = await tdb.rows<{ r2_key: string }>('file_source_blobs')
+      expect(sources.filter(row => row.r2_key === artifact.r2_key)).toHaveLength(fixture.count)
+    }
+    const replay = await handleExternalArtifactsRequest(new Request(`https://w/api/v1/external/projects/${PROJECT}/artifacts`, {
+      method: 'POST', headers: { Authorization: `Bearer ${leadToken}`, 'x-artifact-name': 'replay.txt' }, body: 'no',
+    }), env)
+    expect(replay?.status).toBe(403)
+    expect(await replay!.json()).toMatchObject({ error: { code: 'permission_denied' } })
+  })
+
   it('preview_import returns the parse without staging; prepare_import stages and points at confirm_changeset', async () => {
     const artifactId = await upload(env, leadToken, 'Genesis.usfm', USFM_GENESIS)
 

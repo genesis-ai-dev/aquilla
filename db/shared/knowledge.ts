@@ -44,6 +44,17 @@ export interface KnowledgeDocMeta {
   r2Key: string
   docSummary: string | null
   indexStatus: KnowledgeIndexStatus
+  /** Why the last indexing run ended where it did, phrased for the uploader,
+   *  or null when it had nothing to report (AQU-2002). Carried on `ready` rows
+   *  too: a doc whose structure landed without summaries is indexed *and* has
+   *  something to say about it. */
+  indexError: string | null
+  /** How many nodes the last successful indexing run left in the doc's tree —
+   *  the "sections indexed" count (AQU-1766, AQU-1762). 0 means nothing was
+   *  indexed, which is what distinguishes a real index from an empty one, so
+   *  it is always a number and never null. Derived in SQL from `index_tree`
+   *  (see META_COLS) rather than shipped as the tree itself. */
+  nodeCount: number
   createdBy: string
   createdAt: string
   updatedAt: string
@@ -66,8 +77,19 @@ export type KnowledgeScopeRef = { projectId: string } | { orgId: number }
 // Row mapping
 // ──────────────────────────────────────────────────────────────────────────
 
+// `index_node_count` is DERIVED, not stored: the flattened node count of
+// `index_tree`, computed in SQL so every meta read carries "how much was
+// indexed" without shipping the tree to the caller (AQU-1766). `strict` is
+// load-bearing — in lax mode `$.**` auto-unwraps the root array and counts the
+// top-level nodes twice. `silent => true` keeps an unexpected tree shape from
+// turning a list read into a 500; it reports 0, which reads as "not indexed".
+const NODE_COUNT_COL = `jsonb_array_length(
+    jsonb_path_query_array(COALESCE(index_tree, '[]'::jsonb), 'strict $.**.id', '{}', true)
+  ) AS index_node_count`
+
 const META_COLS = `id, org_id, project_id, name, content_type, size_bytes, sha256,
-  r2_key, doc_summary, index_status, created_by, created_at, updated_at`
+  r2_key, doc_summary, index_status, index_error, ${NODE_COUNT_COL},
+  created_by, created_at, updated_at`
 
 interface Row {
   id: string
@@ -80,6 +102,8 @@ interface Row {
   r2_key: string
   doc_summary: string | null
   index_status: string
+  index_error: string | null
+  index_node_count: number | null
   created_by: string
   created_at: string
   updated_at: string
@@ -98,6 +122,10 @@ function rowToMeta(r: Row): KnowledgeDocMeta {
     r2Key: r.r2_key,
     docSummary: r.doc_summary,
     indexStatus: r.index_status as KnowledgeIndexStatus,
+    indexError: r.index_error ?? null,
+    // jsonb_array_length comes back as a number from postgres.js and PGlite
+    // alike; Number() guards a driver that hands integers back as strings.
+    nodeCount: Number(r.index_node_count ?? 0),
     createdBy: r.created_by,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -204,6 +232,21 @@ export async function listProjectDocs(db: AquillaDb, projectId: string): Promise
   return results.map(rowToMeta)
 }
 
+/** Project + org-inherited docs with each doc's index-node count — the "chunk
+ *  count" the Agent API publishes so a caller can tell an indexed doc from one
+ *  that merely uploaded (AQU-1762).
+ *
+ *  Kept as its own export because the Agent API's documented response shape
+ *  names it, but it no longer selects anything extra: the in-app card needs the
+ *  same count (AQU-1766), so `nodeCount` is part of every doc's meta and this
+ *  is `listProjectDocs`. */
+export async function listProjectDocsWithNodeCounts(
+  db: AquillaDb,
+  projectId: string,
+): Promise<(KnowledgeDocMeta & { nodeCount: number })[]> {
+  return listProjectDocs(db, projectId)
+}
+
 export async function listOrgDocs(db: AquillaDb, orgId: number): Promise<KnowledgeDocMeta[]> {
   const { results } = await db
     .prepare(`SELECT ${META_COLS} FROM knowledge_docs WHERE org_id = ? ORDER BY created_at DESC`)
@@ -233,23 +276,27 @@ export async function getDocTree(
 }
 
 /** No nodeId → full extracted text. nodeId → its char-range substring, or
- *  null when the id doesn't resolve in the doc's tree. */
+ *  null when the id doesn't resolve in the doc's tree.
+ *
+ *  `tree` is whatever the last indexing run left on the row. The indexing job
+ *  reads it to continue from the summaries already there instead of paying for
+ *  the whole document again (AQU-2050); it is null before the first run. */
 export async function getDocText(
   db: AquillaDb,
   docId: string,
   nodeId?: string,
-): Promise<{ meta: KnowledgeDocMeta; text: string } | null> {
+): Promise<{ meta: KnowledgeDocMeta; text: string; tree: KnowledgeNode[] | null } | null> {
   const row = await db
     .prepare(`SELECT ${META_COLS}, extracted_text, index_tree FROM knowledge_docs WHERE id = ?`)
     .bind(docId)
     .first<Row & { extracted_text: string; index_tree: unknown }>()
   if (!row) return null
   const meta = rowToMeta(row)
-  if (nodeId == null) return { meta, text: row.extracted_text }
   const tree = parseTree(row.index_tree)
+  if (nodeId == null) return { meta, text: row.extracted_text, tree }
   const node = resolveNode(tree, nodeId)
   if (!node) return null
-  return { meta, text: row.extracted_text.slice(node.charStart, node.charEnd) }
+  return { meta, text: row.extracted_text.slice(node.charStart, node.charEnd), tree }
 }
 
 /** Deletes the row and returns its r2Key (so the caller can delete the R2
@@ -262,20 +309,27 @@ export async function deleteDoc(db: AquillaDb, docId: string): Promise<string | 
   return row ? row.r2_key : null
 }
 
+/** Write the terminal outcome of one indexing run.
+ *
+ *  `indexError` is the run's own explanation (AQU-2002) and is always written,
+ *  including as `null` on a clean run — a stale reason left behind by an
+ *  earlier failure would outlive the retry that cleared it. */
 export async function setIndexResult(
   db: AquillaDb,
   docId: string,
   status: KnowledgeIndexStatus,
   tree: KnowledgeNode[] | null,
   docSummary: string | null,
+  indexError: string | null = null,
 ): Promise<void> {
   await db
     .prepare(
       `UPDATE knowledge_docs
-          SET index_status = ?, index_tree = ?::jsonb, doc_summary = ?, updated_at = now()
+          SET index_status = ?, index_tree = ?::jsonb, doc_summary = ?,
+              index_error = ?, updated_at = now()
         WHERE id = ?`,
     )
-    .bind(status, tree ? JSON.stringify(tree) : null, docSummary, docId)
+    .bind(status, tree ? JSON.stringify(tree) : null, docSummary, indexError, docId)
     .run()
 }
 

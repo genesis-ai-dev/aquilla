@@ -10,11 +10,13 @@ import type { AudioAssemblyArgs, AudioAssemblyResult } from "@/lib/export/audio-
 import type { FileAudioAttachmentsResponse } from "@/lib/sync/cell-audio-read-types"
 import { SourceExportError } from "@/lib/sync/source-export"
 import {
+  audioListingKey,
   buildProjectExport,
   egressSlug,
   type BuildProjectExportDeps,
 } from "./build-project-export"
 import type { EgressFileRef, EgressOptions, EgressProjectSelection } from "./types"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const cell = (over: Partial<CellData> = {}): CellData => ({
   id: "c1", fileId: "f1", original: "Hello", translated: "Bonjour", context: "", group: "",
@@ -77,7 +79,7 @@ const makeDeps = (over: Partial<BuildProjectExportDeps> = {}): BuildProjectExpor
     rawOriginal: true,
   }),
   fetchInjectedText: async ({ fileId, targetLang }) => `\\id ${fileId} lane=${targetLang ?? "default"}`,
-  assembleAudio: async () => ({ entries: [], skipped: [] }),
+  assembleAudio: async () => ({ entries: [], skipped: [], peakPcmBytes: 0 }),
   exportDocxFn: async () => ({ blob: new Blob(["DOCX-INJECTED"]) }),
   exportPptxFn: async () => ({ blob: new Blob(["PPTX-INJECTED"]) }),
   exportIdmlFn: async () => ({ blob: new Blob(["IDML-INJECTED"]) }),
@@ -210,6 +212,7 @@ describe("buildProjectExport — source docs, audio, dedupe", () => {
       {
         entries: [{ name: "000_c1_Mary.wav", data: new Blob(["wav"]) }],
         skipped: [{ cellId: "c2", reason: "empty audio clip" }],
+        peakPcmBytes: 0,
       },
       {
         entries: [],
@@ -217,6 +220,7 @@ describe("buildProjectExport — source docs, audio, dedupe", () => {
           { cellId: "c1", reason: "no audio" },
           { cellId: "c2", reason: "no audio" },
         ],
+        peakPcmBytes: 0,
       },
     ]
     let call = 0
@@ -240,6 +244,16 @@ describe("buildProjectExport — source docs, audio, dedupe", () => {
       { scope: "Notes.txt (audio, fr)", reason: "no audio on this file" },
     ])
     expect(assembleAudio.mock.calls[0][0]).toMatchObject({ mode: "separate-clips", fileSlug: "GEN" })
+  })
+
+  it("hands the WAV choice to the audio assembler (AQU-1575)", async () => {
+    const assembleAudio = vi.fn(async (_args: AudioAssemblyArgs) => ({ entries: [], skipped: [], peakPcmBytes: 0 }))
+    await buildProjectExport(
+      sel([{ id: "f1", name: "GEN.SFM", type: "usfm" }]),
+      opts({ textMode: "none", audioMode: "separate-clips", audioFormat: "wav" }),
+      makeDeps({ assembleAudio }),
+    )
+    expect(assembleAudio.mock.calls[0][0]).toMatchObject({ mode: "separate-clips", audioFormat: "wav" })
   })
 
   it("dedupes colliding entry paths with _2 suffixes instead of overwriting", async () => {
@@ -284,26 +298,53 @@ describe("buildProjectExport — source docs, audio, dedupe", () => {
     )
   })
 
-  it("uses orchestrator-prefetched audioListings without refetching, once per file across lanes", async () => {
+  // AQU-1591: keyed per (file, LANE), not per file. Audio used to be
+  // lane-independent — `cell_audio` had no lane column — so one listing served
+  // every lane and this test asserted exactly that. A take belongs to one lane
+  // now, so sharing a listing across lanes would write the same dubs into
+  // `audio/fr/` and `audio/de/` whichever language they were recorded in.
+  it("uses orchestrator-prefetched audioListings without refetching, one per (file, lane)", async () => {
     const fetchAudioAttachments = vi.fn<
       NonNullable<BuildProjectExportDeps["fetchAudioAttachments"]>
     >(async () => ({ cells: {} }))
     const assembleAudio = vi.fn(async (args: AudioAssemblyArgs): Promise<AudioAssemblyResult> => {
       // The merged listing must reach the assembler through the cells.
       expect(args.cells[0].selectedAudioId).toBe("a1")
-      return { entries: [], skipped: [] }
+      return { entries: [], skipped: [], peakPcmBytes: 0 }
     })
+    await buildProjectExport(
+      sel([{ id: "f1", name: "GEN.SFM", type: "usfm" }]),
+      opts({ textMode: "none", audioMode: "separate-clips", lanes: ["fr", "de"] }),
+      makeDeps({
+        audioListings: new Map([
+          [audioListingKey("f1", "fr"), listingWith("c1", "a1")],
+          [audioListingKey("f1", "de"), listingWith("c1", "a1")],
+        ]),
+        fetchAudioAttachments,
+        assembleAudio,
+      }),
+    )
+    expect(fetchAudioAttachments).not.toHaveBeenCalled()
+    expect(assembleAudio).toHaveBeenCalledTimes(2) // one per lane, each its own listing
+  })
+
+  // The other half of the same key: a pre-fetch under the OLD per-file key is a
+  // miss, so the builder fetches that lane's own listing rather than silently
+  // exporting another lane's takes.
+  it("fetches per lane when the pre-fetch did not key by lane", async () => {
+    const fetchAudioAttachments = vi.fn<
+      NonNullable<BuildProjectExportDeps["fetchAudioAttachments"]>
+    >(async () => ({ cells: {} }))
     await buildProjectExport(
       sel([{ id: "f1", name: "GEN.SFM", type: "usfm" }]),
       opts({ textMode: "none", audioMode: "separate-clips", lanes: ["fr", "de"] }),
       makeDeps({
         audioListings: new Map([["f1", listingWith("c1", "a1")]]),
         fetchAudioAttachments,
-        assembleAudio,
+        assembleAudio: async () => ({ entries: [], skipped: [], peakPcmBytes: 0 }),
       }),
     )
-    expect(fetchAudioAttachments).not.toHaveBeenCalled()
-    expect(assembleAudio).toHaveBeenCalledTimes(2) // one per lane, same listing
+    expect(fetchAudioAttachments.mock.calls.map((c) => c[3])).toEqual(["fr", "de"])
   })
 
   it("a failed attachments-listing fetch is a per-file transient skip, not a project abort", async () => {
@@ -318,7 +359,7 @@ describe("buildProjectExport — source docs, audio, dedupe", () => {
           if (fileId === "f1") throw new Error("audio-attachments failed: HTTP 500")
           return { cells: {} }
         },
-        assembleAudio: async () => ({ entries: [], skipped: [] }),
+        assembleAudio: async () => ({ entries: [], skipped: [], peakPcmBytes: 0 }),
       }),
     )
     expect(entries).toEqual([])
@@ -366,8 +407,8 @@ describe("buildProjectExport — transient-failure classification (cache poisoni
 
   it("per-clip 'audio failed:' skips from the assembler are transient; 'no audio' is not", async () => {
     const outcomes: AudioAssemblyResult[] = [
-      { entries: [], skipped: [{ cellId: "c1", reason: "no audio" }] },
-      { entries: [], skipped: [{ cellId: "c1", reason: "audio failed: HTTP 502" }] },
+      { entries: [], skipped: [{ cellId: "c1", reason: "no audio" }], peakPcmBytes: 0 },
+      { entries: [], skipped: [{ cellId: "c1", reason: "audio failed: HTTP 502" }], peakPcmBytes: 0 },
     ]
     for (const [i, outcome] of outcomes.entries()) {
       const { hadTransientFailures } = await buildProjectExport(
@@ -406,6 +447,29 @@ describe("buildProjectExport — source-doc honesty & slug safety", () => {
     expect(report.files[0].entries).toEqual(["source-documents/GEN.SFM"])
     expect(report.files[0].notes).toBeUndefined()
     expect(report.files[1].notes).toBeUndefined()
+  })
+
+  it("fetches plain-text source documents via raw mode, since /source now exports them translated", async () => {
+    // AQU-1472: without ?mode=raw the route returns the translation, and the
+    // "source documents" folder would quietly hold it as the original upload.
+    const fetchRawSource = vi.fn<NonNullable<BuildProjectExportDeps["fetchRawSource"]>>(
+      async () => ({
+        bytes: new TextEncoder().encode("ORIGINAL TEXT").buffer as ArrayBuffer,
+        rawOriginal: true,
+      }),
+    )
+    const fetchSidecar = vi.fn<NonNullable<BuildProjectExportDeps["fetchSidecar"]>>(
+      async () => new TextEncoder().encode("TRANSLATED").buffer as ArrayBuffer,
+    )
+    const { report } = await buildProjectExport(
+      sel([{ id: "f1", name: "blog.txt", type: "txt" }]),
+      opts({ textMode: "none", includeSourceDocs: true }),
+      makeDeps({ fetchRawSource, fetchSidecar }),
+    )
+    expect(fetchRawSource).toHaveBeenCalledTimes(1)
+    expect(fetchSidecar).not.toHaveBeenCalled()
+    expect(report.files[0].entries).toEqual(["source-documents/blog.txt"])
+    expect(report.files[0].notes).toBeUndefined()
   })
 
   it("records the injection-honesty note when the server predates raw mode", async () => {
@@ -475,7 +539,7 @@ describe("buildProjectExport — file×lane fetch concurrency", () => {
 
     let finished = 0
     while (finished < totalUnits) {
-      await vi.waitFor(() => expect(pendingReleases).toHaveLength(4))
+      await vi.waitFor(() => expect(pendingReleases).toHaveLength(4), { timeout: STALL_WATCHDOG_MS })
       await new Promise((r) => setTimeout(r, 0))
       expect(pendingReleases).toHaveLength(4)
       expect(inFlight).toBe(4)
@@ -531,7 +595,7 @@ describe("buildProjectExport — file×lane fetch concurrency", () => {
       makeDeps({ loadCellFiles }),
     )
 
-    await vi.waitFor(() => expect(releases.size).toBe(4))
+    await vi.waitFor(() => expect(releases.size).toBe(4), { timeout: STALL_WATCHDOG_MS })
     for (const key of ["fr:fast", "de:fast", "fr:slow", "de:slow"]) releases.get(key)!()
 
     const { entries, report } = await pending

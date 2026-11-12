@@ -7,6 +7,9 @@
  * it everywhere. It is a display setting, never a data change — the metadata
  * itself is untouched.
  *
+ * A key is a top-level metadata key or a `parent.child` path one level down
+ * (see `displayFieldValue`).
+ *
  * Scope is the project: keyed by projectId, never by file or cell. Stored in
  * localStorage so it survives reloads; device-local like the other editor
  * display prefs in this folder. Reactive via useSyncExternalStore so a toggle
@@ -119,6 +122,29 @@ export function displayFieldLabel(value: unknown): string | null {
     return parts.length ? parts.join(", ") : null
   }
   return null
+}
+
+/**
+ * The value a display-field key names on one cell's metadata, or undefined
+ * when the cell doesn't carry it. A key is a top-level metadata key, or
+ * `parent.child` for a field one level down — importers such as SDBH keep
+ * their fields under a namespace object (`metadata.sdbh.lemma`). An exact
+ * top-level key wins, so a flat key that itself contains a dot still resolves.
+ */
+export function displayFieldValue(
+  metadata: Record<string, unknown> | null | undefined,
+  key: string,
+): unknown {
+  if (!metadata) return undefined
+  if (Object.prototype.hasOwnProperty.call(metadata, key)) return metadata[key]
+  const dot = key.indexOf(".")
+  if (dot <= 0) return undefined
+  const parent = metadata[key.slice(0, dot)]
+  const child = key.slice(dot + 1)
+  if (parent == null || typeof parent !== "object" || Array.isArray(parent)) return undefined
+  return Object.prototype.hasOwnProperty.call(parent, child)
+    ? (parent as Record<string, unknown>)[child]
+    : undefined
 }
 
 /** Test-only: drop the in-memory cache so the next read reloads storage. */

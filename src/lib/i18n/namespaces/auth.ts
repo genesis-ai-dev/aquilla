@@ -34,12 +34,12 @@ const INVITE_COUNT_PLACEHOLDER =
 export const auth = defineNamespace({
   keys: {
     // --- Login (/login) ---------------------------------------------------
-    "auth.login.title": "Sign in",
+    "auth.login.title": "Log in",
     "auth.login.usernameLabel": "Username or email",
     "auth.login.passwordLabel": "Password",
     "auth.login.forgotPasswordLink": "Forgot password?",
-    "auth.login.submitDefault": "Sign in",
-    "auth.login.submitSigningIn": "Signing in…",
+    "auth.login.submitDefault": "Log in",
+    "auth.login.submitSigningIn": "Logging in…",
     "auth.login.submitMigrating": "Setting up your account and permissions…",
     "auth.login.migratingNote":
       "First-time sign-in may take a moment while we securely migrate your account.",
@@ -52,7 +52,7 @@ export const auth = defineNamespace({
     "auth.login.onboardingMigrationFailed":
       "We couldn't check this browser's existing local workspace. Retry to continue without risking your local projects.",
     "auth.login.aquillaUsernameLabel": "Aquilla username or email",
-    "auth.login.offlineNotice": "You're offline — connect to sign in",
+    "auth.login.offlineNotice": "You're offline — connect to log in",
     "auth.login.submitLoggingIn": "Logging in…",
     "auth.login.sessionLoadFailed":
       "We couldn't read this browser's saved session. Your accounts are still stored; try loading them again.",
@@ -68,6 +68,8 @@ export const auth = defineNamespace({
     "auth.signup.checklistNotContainsEmail": "Does not contain your email",
     "auth.signup.submitCreating": "Creating account…",
     "auth.signup.submitDefault": "Create account",
+    "auth.signup.identityTaken":
+      "An account with this username or email already exists. If you already use Codex, sign in with those credentials — your account and projects come across automatically.",
 
     // --- Reset password (/reset-password) ----------------------------------
     "auth.resetPassword.title": "Reset your password",
@@ -111,7 +113,7 @@ export const auth = defineNamespace({
 
     // --- Join / invite (/join/:token) ---------------------------------------
     "auth.join.invitedTitle": "You're invited",
-    "auth.join.joiningTitle": "Joining Project",
+    "auth.join.joiningTitle": "Joining project",
     "auth.join.couldntLoad": "Couldn't load invitation",
     "auth.join.checkConnection": "Check your connection and try again.",
     "auth.join.alreadyUsedTitle": "This link has already been used",
@@ -190,7 +192,7 @@ export const auth = defineNamespace({
 
     // --- Session-expired banner (global) ------------------------------------
     "auth.sessionExpired.message": "Your session expired.",
-    "auth.sessionExpired.signInAgain": "Sign in again",
+    "auth.sessionExpired.signInAgain": "Log in again",
     "auth.sessionExpired.continueSuffix": "to continue.",
   },
   context: {
@@ -343,6 +345,18 @@ export const auth = defineNamespace({
           "auth.login.createAccountLink, which is the link that merely opens this " +
           "form from the sign-in page; this one actually creates the account.",
       },
+      "auth.signup.identityTaken": {
+        description:
+          "Form-level message shown when account creation is refused because the " +
+          "username or email is already spoken for (AQU-1345). Deliberately says " +
+          "the SAME thing whether the identity already exists in this app or only " +
+          "in Codex, the companion product whose accounts are migrated on first " +
+          "sign-in — the sign-up form must not become a way to tell which system " +
+          "owns a name. Not an error to correct so much as a redirection: the way " +
+          "forward is to sign in instead, which is what the companion " +
+          "auth.login.submitDefault button beneath it does. 'Codex' is a product name " +
+          "— never translate it.",
+      },
       "auth.signup.failedWithDetail": {
         description:
           "Form-level error shown when account creation fails validation (e.g. " +
@@ -473,10 +487,7 @@ export const auth = defineNamespace({
         description:
           "Submit button label on the import flow's sign-in form while the " +
           "credentials are being checked. Present continuous, ends with an ellipsis " +
-          "glyph (…). This form says 'Log in' where the main sign-in page says " +
-          "'Sign in' (common.logIn vs auth.login.submitDefault), and this label is " +
-          "the progress form of the former — keep it consistent with whichever word " +
-          "you chose for common.logIn.",
+          "glyph (…). Keep it consistent with common.logIn and auth.login.submitDefault.",
       },
       "auth.login.sessionLoadFailed": {
         description:
@@ -869,7 +880,7 @@ export const auth = defineNamespace({
   surfaces: [
     {
       id: "auth",
-      title: "Sign in",
+      title: "Log in",
       route: "/login",
       notes:
         "Pre-authentication sign-in screen — the first screen a new translator sees, " +

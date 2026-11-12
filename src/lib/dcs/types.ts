@@ -15,6 +15,8 @@ export interface DcsCatalogEntry {
   owner: string // e.g. "unfoldingWord"
   fullName: string // "unfoldingWord/en_ult"
   subject: string // e.g. "Aligned Bible", "Translation Notes", "Open Bible Stories"
+  title?: string // e.g. "unfoldingWord® Literal Text"
+  abbreviation?: string // e.g. "ult"
   contentFormat: string // "usfm" | "markdown" | "tsv" | ...
   flavorType?: string // "scripture" | "gloss"
   ref: string // branch_or_tag_name, e.g. "v89"
@@ -98,10 +100,14 @@ export interface ResourceRoute {
   id: string // "usfm" | "obs" | "tsv-notes" | "tsv-questions" | "md-dict" | "md-manual"
   matches: (entry: DcsCatalogEntry, manifest: DcsManifest) => boolean
   /** Turn raw repo files (path → text) into translatable files/cells with stable
-   *  ids. `files` keys are repo-relative paths from the git tree. */
+   *  ids. `files` keys are repo-relative paths from the git tree.
+   *  `projectId` scopes the derived FILE ids to the destination project
+   *  (AQU-1891) — cell ids stay content-addressed / project-agnostic. */
   parse: (input: {
     entry: DcsCatalogEntry
     manifest: DcsManifest
+    /** Destination project — part of every derived file id (AQU-1891). */
+    projectId: string
     files: Map<string, string>
     options?: DcsImportOptions
   }) => DcsFile[]

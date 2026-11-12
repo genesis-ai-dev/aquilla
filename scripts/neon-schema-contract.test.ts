@@ -81,3 +81,48 @@ describe("Neon schema contract", () => {
     ])
   })
 })
+
+// 2026-09-28 OPSEC review: the original grant pattern required
+// `ON TABLE <one-identifier> TO app_runtime`, so it matched neither 0034's
+// single 30-table statement nor 0090's keyword-less `ON <table>`. Every table
+// granted that way — including `cells`, `events`, `files` and `comments` — was
+// therefore absent from the expected contract, and `pnpm neon:status` checked
+// no privilege at all for them.
+describe("app_runtime grant parsing", () => {
+  const grantSchema = `
+CREATE TABLE cells (project_id TEXT NOT NULL);
+CREATE TABLE events (project_id TEXT NOT NULL);
+CREATE TABLE lanes (id TEXT PRIMARY KEY);
+`
+  const grantMigration = `
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
+    cells,
+    events
+TO app_runtime;
+GRANT SELECT, INSERT ON lanes TO app_runtime;
+GRANT EXECUTE ON FUNCTION app_user_can_access_project(TEXT) TO app_runtime;
+`
+
+  it("captures every table in a multi-table GRANT", () => {
+    const expected = expectedSchemaContract(grantSchema, [grantMigration])
+    expect(expected.grants.get("cells")).toEqual(new Set(["SELECT", "INSERT", "UPDATE", "DELETE"]))
+    expect(expected.grants.get("events")).toEqual(new Set(["SELECT", "INSERT", "UPDATE", "DELETE"]))
+  })
+
+  it("captures a GRANT that omits the TABLE keyword", () => {
+    const expected = expectedSchemaContract(grantSchema, [grantMigration])
+    expect(expected.grants.get("lanes")).toEqual(new Set(["SELECT", "INSERT"]))
+  })
+
+  it("does not mistake GRANT EXECUTE ON FUNCTION for a table grant", () => {
+    const expected = expectedSchemaContract(grantSchema, [grantMigration])
+    expect([...expected.grants.keys()].sort()).toEqual(["cells", "events", "lanes"])
+  })
+
+  it("reports a multi-table grant missing from the live database", () => {
+    const expected = expectedSchemaContract(grantSchema, [grantMigration])
+    const live = cloneAsLive(expected)
+    live.grants.get("events")!.delete("DELETE")
+    expect(diffSchemaContract(expected, live)).toEqual(["missing app_runtime grant: events.DELETE"])
+  })
+})

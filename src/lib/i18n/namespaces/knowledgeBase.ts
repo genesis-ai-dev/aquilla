@@ -12,14 +12,17 @@ export const knowledgeBase = defineNamespace({
       "Add style guides, cultural background, commentary, and other reference documents for this project.",
     "knowledgeBase.orgDescription":
       "Add reference documents that every project in this organization can use.",
-    "knowledgeBase.useInDraftingLabel": "Use knowledge base in drafting",
-    "knowledgeBase.useInDraftingDescription":
-      "Use relevant passages from these documents when generating translations and predictions.",
     "knowledgeBase.upload": "Upload document",
     "knowledgeBase.uploading": "Uploading document…",
     "knowledgeBase.uploadSuccess": "Uploaded {name}.",
     "knowledgeBase.uploadError": "Could not upload {name}. Try again.",
-    "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX, or PDF · up to 25 MB",
+    // AQU-1763: "up to 25 MB" was the only limit shown, but it is just the
+    // upload cap (MAX_KB_ORIGINAL_BYTES). DOCX and PDF are additionally capped
+    // at MAX_KB_EXTRACT_INPUT_BYTES (2 MB) by the extractor and rejected above
+    // it, so a 5 MB DOCX failed against a dialog that had promised 25 MB. Both
+    // limits belong here — keep them in step with db/shared/knowledge.ts.
+    "knowledgeBase.acceptedFormats":
+      "Markdown, TXT, DOCX, or PDF · up to 25 MB (DOCX and PDF up to 2 MB)",
     "knowledgeBase.emptyTitle": "No knowledge documents yet",
     "knowledgeBase.emptyDescription":
       "Upload reference material to make it available to this project and its agents.",
@@ -30,6 +33,19 @@ export const knowledgeBase = defineNamespace({
     "knowledgeBase.status.pending": "Indexing…",
     "knowledgeBase.status.ready": "Indexed",
     "knowledgeBase.status.failed": "Indexing failed",
+    "knowledgeBase.status.stalled": "Indexing stalled",
+    // AQU-2002: a document whose structure was indexed but whose summaries the
+    // model leg could not produce. It is searchable and navigable — "failed"
+    // claimed otherwise, and sent the uploader to a retry button that could
+    // only fail again. The row carries the reason, shown verbatim beneath it.
+    "knowledgeBase.status.partial": "Indexed without summaries",
+    // AQU-1766: the four status words said nothing about WHEN the run that
+    // produced them happened, or HOW MUCH it indexed. A failure the uploader
+    // cannot date cannot be correlated with anything they changed, and
+    // "Indexed" over an empty index is indistinguishable from a good one.
+    "knowledgeBase.indexRunAt": "Last indexing run {when}",
+    "knowledgeBase.indexLastHeard": "Last heard from {when}",
+    "knowledgeBase.indexSections": "Sections indexed: {count}",
     "knowledgeBase.open": "View document",
     "knowledgeBase.openOriginal": "Open original",
     "knowledgeBase.reindex": "Try indexing again",
@@ -54,6 +70,43 @@ export const knowledgeBase = defineNamespace({
         "Knowledge Base controls, document states, dialogs, and notifications in the Living Memory project-settings surface.",
     },
     keys: {
+      "knowledgeBase.acceptedFormats": {
+        description:
+          "Help text under the knowledge-base upload control. States two "
+          + "different limits: 25 MB is the upload cap for every accepted "
+          + "format, and the 2 MB in parentheses is the lower cap that applies "
+          + "to DOCX and PDF only, because those are unpacked to extract text.",
+      },
+      "knowledgeBase.status.stalled": {
+        description:
+          "Badge on a document whose indexing job never reported back, so it is "
+          + "neither indexed nor formally failed. Distinct from "
+          + "knowledgeBase.status.pending (\"Indexing…\", still running) and from "
+          + "knowledgeBase.status.failed (the job reported an error). Shown with a "
+          + "retry action.",
+      },
+      "knowledgeBase.indexRunAt": {
+        description:
+          "Timestamp line under a knowledge document's index state, saying when "
+          + "the last indexing run reported back. Shown on a document whose "
+          + "indexing failed or finished without summaries, beneath the reason.",
+        placeholders: { when: "Formatted date and time of the last indexing run." },
+      },
+      "knowledgeBase.indexLastHeard": {
+        description:
+          "Timestamp line on a document whose indexing job never reported back "
+          + "at all (knowledgeBase.status.stalled). It says when the document was "
+          + "last heard from, not when a run finished — nothing finished.",
+        placeholders: { when: "Formatted date and time the document was last heard from." },
+      },
+      "knowledgeBase.indexSections": {
+        description:
+          "How much of an indexed document the index covers, shown on its card. "
+          + "A section is one node of the document's index — a heading or a block "
+          + "of paragraphs. Written as a label and a number so it reads the same "
+          + "for one section as for many; 0 is shown, and means the index is empty.",
+        placeholders: { count: "Number of indexed sections; may be 0." },
+      },
       "knowledgeBase.uploadSuccess": {
         description: "Toast shown after a knowledge document upload succeeds.",
         placeholders: { name: "Uploaded document filename." },

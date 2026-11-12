@@ -10,17 +10,33 @@ from pathlib import Path
 CACHES = {"node_modules", ".venv", ".pnpm-store", ".git"}
 INPUTS = {"package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml",
           ".npmrc", ".pnpmfile.cjs", ".pnpmfile.mjs"}
+# The host runner reads this file while the container works, to post progress.
+# Each entry is a finished step; the untrusted release code never writes here
+# (it starts only after the last entry, via the reviewed e2e-up).
+PROGRESS = Path("/tmp/aquilla-qa-progress.json")
+STEPS = []
+
+
+def progress(name, seconds, detail=""):
+    STEPS.append({"name": name, "seconds": round(seconds, 1), "detail": detail})
+    PROGRESS.write_text(json.dumps(STEPS))
 
 
 def dependency_identity(root):
-    """Conservative cache: exact manifests/locks, no patches/custom install hooks."""
+    """Conservative cache: exact manifests, locks and patch files; no custom install hooks.
+
+    pnpm patches (`patchedDependencies`) are exact inputs like a lockfile: the
+    patch file's bytes enter the digest, so a changed patch reinstalls and an
+    identical one reuses the harness's node_modules (which were installed with
+    the same patch applied).
+    """
     digest = hashlib.sha256()
     reusable = True
     for directory, children, files in os.walk(root):
         children[:] = sorted(name for name in children if name not in CACHES)
         for name in sorted(files):
             path = Path(directory) / name
-            if name not in INPUTS:
+            if name not in INPUTS and not name.endswith(".patch"):
                 continue
             relative = path.relative_to(root).as_posix()
             data = path.read_bytes()
@@ -29,8 +45,6 @@ def dependency_identity(root):
                 reusable = False
             if name == "package.json":
                 package = json.loads(data)
-                if "patchedDependencies" in data.decode():
-                    reusable = False
                 for phase in ("preinstall", "install", "postinstall", "prepare"):
                     script = package.get("scripts", {}).get(phase)
                     # Git hooks do not run in this archive-only CI checkout.
@@ -60,6 +74,28 @@ def drop_node_modules(root):
             children.remove("node_modules")
 
 
+BROWSER_ENV = ("VITE_AUTH_BASE", "VITE_FRONTIER_BASE", "VITE_CHAT_BASE", "VITE_SYNC_WORKER_HOST")
+
+
+def prebuild(root, bootstrap, env):
+    """Build the app before the workers start, so the build never shares the
+    container's memory cap with two wrangler dev servers (measured on the QA
+    host: stack ~1.6 GB anon + build on top kills the container at 2.2 GB).
+    Only when the reviewed e2e-up honours E2E_PREBUILT_DIST, else it would
+    build twice. Returns True when e2e-up must skip its own build step."""
+    if b"E2E_PREBUILT_DIST" not in bootstrap or not all(env.get(key) for key in BROWSER_ENV):
+        return False
+    build_env = {**env, "VITE_GOOGLE_CLIENT_ID": "", "VITE_GOOGLE_API_KEY": "",
+                 "NODE_OPTIONS": env.get("QA_BUILD_NODE_OPTIONS", "")}
+    shutil.rmtree(root / "dist", ignore_errors=True)
+    started = time.monotonic()
+    subprocess.run(["pnpm", "exec", "vite", "build", "--mode", "test", "--outDir", "dist"],
+                   cwd=root, env=build_env, check=True)
+    print(f"QA prebuild: test-mode dist ready in {time.monotonic() - started:.1f}s", flush=True)
+    progress("build", time.monotonic() - started, "test-mode dist")
+    return True
+
+
 def main():
     root = Path("/work")
     started = time.monotonic()
@@ -87,6 +123,9 @@ def main():
     # docker cp owns this archive as root in sticky /tmp. Container removal
     # deletes it; the unprivileged app does not need permission to unlink it.
     print(f"QA source/dependencies ready in {time.monotonic() - started:.1f}s; cached={cached}", flush=True)
+    progress("dependencies", time.monotonic() - started, "reused" if cached else "installed")
+    if prebuild(root, bootstrap, os.environ):
+        os.environ["E2E_PREBUILT_DIST"] = "1"
     os.chdir(root)
     os.execvp("pnpm", ["pnpm", "exec", "tsx", "scripts/e2e-up.ts"])
 

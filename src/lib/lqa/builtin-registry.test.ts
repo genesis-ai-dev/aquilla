@@ -8,12 +8,22 @@ describe("builtin-registry", () => {
       "target-equals-source",
       "placeholder-integrity",
       "number-integrity",
+      "number-integrity-extra",
       "end-punctuation-mismatch",
       "punctuation-integrity",
       "double-space",
       "repeated-word",
       "unpaired-symbols",
       "abbreviation-mismatch",
+      "usfm-structure",
+      "capitalization",
+      "footnote-quote-mismatch",
+      "corrupted-characters",
+      "unpaired-quotes",
+      "untranslated-fragment",
+      "length-ratio",
+      "scripture-reference",
+      "number-format",
     ])
   })
 
@@ -32,11 +42,16 @@ describe("builtin-registry", () => {
     }
   })
 
-  it("only abbreviation-mismatch is off by default", () => {
+  // length-ratio is off because normal length varies too much by language pair;
+  // scripture-reference (AQU-1735) because its book-name half needs the
+  // project's own book names first; number-format (AQU-2430) because it needs
+  // the target language, and because a language whose own digits CLDR records
+  // may still write Western ones on purpose.
+  it("only abbreviation-mismatch, length-ratio, scripture-reference and number-format are off by default", () => {
+    const off = new Set(["abbreviation-mismatch", "length-ratio", "scripture-reference", "number-format"])
     for (const id of BUILTIN_CHECK_IDS) {
       const def = BUILTIN_CHECKS[id]
-      if (id === "abbreviation-mismatch") expect(def.defaultEnabled).toBe(false)
-      else expect(def.defaultEnabled).toBe(true)
+      expect(def.defaultEnabled).toBe(!off.has(id))
     }
   })
 

@@ -19,20 +19,18 @@
 
 import { synthesizeForCell, setTtsStatus, ttsStatusKey } from "./tts"
 import { resolveCastVoice } from "./voices"
-import { resolveTtsProvider, isServerTtsProvider } from "./tts-providers"
-import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
+import { resolveTtsProvider, isServerTtsProvider, normalizeVoiceForProvider, effectiveTtsProvider } from "./tts-providers"
+import { buildAudioId, uploadCellAudio } from "./upload"
 import { uploadLosslessSiblingBestEffort } from "./lossless-sibling"
 import { canEncodeOpus, encodeMonoToWebmOpus } from "./opus-encode"
 import { decodeToMono48k, TARGET_RATE } from "./decode-mono"
 import { audioCachePutBlob } from "./bytes-cache"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
-import { convertToCloneVoice } from "./voice-clone"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
-import { synthesizeCellTts } from "@/lib/sync/tts"
-import { inworldSynthFieldsFromVoice } from "./inworld-voice-settings"
-import { inworldLanguageForRequest } from "./inworld-languages"
+import { synthesizeServerTts } from "./server-tts"
 import { effectiveSourceText } from "@/lib/cell-text"
+import { laneLanguageForTag, sourceLaneLanguage } from "@/lib/lanes/lane-language"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -52,6 +50,10 @@ export interface CombinedVoiceArgs {
   settings?: ProjectTtsSettings
   session: FrontierSession | null
   username: string
+  /** AQU-1462/1591: the lane this generation performs. Stamped on every attach,
+   *  so the shared clip belongs to that lane rather than to the default one.
+   *  Omitted for the default lane, which is what an absent tag resolves to. */
+  targetLang?: string
   onProgress?: (msg: string) => void
 }
 
@@ -62,7 +64,6 @@ export interface CombinedVoiceResult {
   url: string
   /** Voice the clip was synthesized with (for trim re-attach metadata). */
   voiceId: string
-  referenceAudioId?: string
   /** The cells that were actually voiced, in document order (post-cap). */
   cells: CellData[]
   /** True if the selection was capped (too many cells / too much text). */
@@ -101,52 +102,54 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
   const statusKeys = chosen.map((c) => ttsStatusKey(c.id))
   const setAll = (s: Parameters<typeof setTtsStatus>[1]) => { for (const k of statusKeys) setTtsStatus(k, s) }
 
-  const voice = resolveCastVoice(settings, chosen[0].id)
+  const voice = resolveCastVoice(settings, chosen[0])
   const provider = voice.provider ?? resolveTtsProvider(settings)
   const joined = chosen.map((c) => c.translated.trim()).join(SEPARATOR)
   const getSyncToken = audioSyncTokenFetcherForSession(session)
+  // AQU-1978: the languages of the lanes this clip performs, not the retired
+  // project-level pair (AQU-1594/1595), which is empty on a new project.
+  const targetLanguage = laneLanguageForTag(args.targetLang ?? "", project.lanes) ?? undefined
+  const sourceLanguage = sourceLaneLanguage(project.lanes) ?? undefined
 
   setAll({ kind: "synthesizing" })
   try {
     let audioId: string
     let ext: string
     let url: string
-    // Server-side branches (Inworld, clone) return WAV; the client-synth
+    // The server-side branch sets the stored clip's type; the client-synth
     // branch overrides when it compresses.
     let combinedMime = "audio/wav"
 
     if (isServerTtsProvider(provider)) {
-      // Server-side: one Inworld call for the whole joined clip; the worker
-      // stores it (native clone when a reference is set) and returns its id.
+      // Server-side (Inworld, or ElevenLabs with the user's key): one call for
+      // the whole joined clip; the worker stores it and returns its id.
       onProgress?.("Synthesizing combined clip…")
-      const language = inworldLanguageForRequest(voice, project.targetLanguage)
-      const result = await synthesizeCellTts(
-        {
-          projectId: project.id,
-          fileId,
-          cellId: chosen[0].id,
-          text: joined,
-          ...(language ? { language } : {}),
-          ...(voice.voiceName ? { voiceId: voice.voiceName } : {}),
-          ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
-          ...inworldSynthFieldsFromVoice(voice),
-        },
+      const engine = effectiveTtsProvider(provider)
+      const server = await synthesizeServerTts({
+        provider: engine,
+        voice: engine === "elevenlabs" ? normalizeVoiceForProvider(voice, engine) : voice,
+        projectId: project.id,
+        fileId,
+        cellId: chosen[0].id,
+        text: joined,
+        targetLanguage,
         getSyncToken,
-      )
-      audioId = result.audioId
-      ext = "wav"
-      url = result.url
+      })
+      audioId = server.result.audioId
+      ext = server.ext
+      combinedMime = server.mimeType
+      url = server.result.url
     } else {
       onProgress?.("Synthesizing combined clip…")
       const ttsBlob = await synthesizeForCell(joined, {
         projectTtsSettings: settings,
         cellVoiceId: voice.id,
         geminiContext: {
-          sourceLanguage: project.sourceLanguage,
-          targetLanguage: project.targetLanguage,
+          sourceLanguage,
+          targetLanguage,
           original: effectiveSourceText(chosen[0]),
           context: chosen[0].context,
-          cellLabel: chosen[0].cellLabel,
+          // AQU-2408: no cellLabel — a typed label is not voice direction.
         },
         onProgress: (p) => setAll(
           p.status === "ready" || (p.total > 0 && p.loaded >= p.total)
@@ -155,56 +158,41 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
         ),
       })
 
-      if (voice.referenceAudioId) {
-        onProgress?.("Applying voice clone…")
-        const conv = await convertToCloneVoice({
+      // FORTIFY: combined "voice together" clips are the LARGEST client-
+      // synth generations in the app (up to 12 cells of prosody in one
+      // file) and were still uploading raw WAV after the compression round
+      // shipped — the exact block generate-voice.ts uses, same fallback.
+      const baseId = buildAudioId(chosen[0].id)
+      let uploadBlob = ttsBlob
+      ext = "wav"
+      combinedMime = "audio/wav"
+      if (canEncodeOpus()) {
+        try {
+          const samples = await decodeToMono48k(new Uint8Array(await ttsBlob.arrayBuffer()))
+          const encoded = await encodeMonoToWebmOpus(samples, TARGET_RATE)
+          uploadBlob = encoded.blob
+          combinedMime = encoded.mimeType
+          ext = encoded.ext
+        } catch (e) {
+          console.warn("[combined-voice] opus compress failed; uploading WAV", e)
+        }
+      }
+      const res = await uploadCellAudio({ projectId: project.id, fileId, audioId: baseId, ext, blob: uploadBlob, getSyncToken })
+      audioId = res.audioId
+      url = res.url
+      // Local-first: the exact playable bytes are in hand — stock the byte
+      // cache so first playback/peaks/transcription need no re-download.
+      void audioCachePutBlob(res.audioId, ext, uploadBlob)
+      // Meeting note (2026-08-05): keep the original WAV obtainable — same
+      // base id, ext "wav", unattached, best-effort (see lossless-sibling).
+      if (ext === "webm") {
+        void uploadLosslessSiblingBestEffort({
           projectId: project.id,
           fileId,
-          referenceAudioId: voice.referenceAudioId,
-          source: ttsBlob,
+          audioId: baseId,
+          wavBlob: ttsBlob,
           getSyncToken,
         })
-        audioId = conv.audioId
-        ext = conv.ext
-        url = conv.url
-        await fetchCellAudio({ projectId: project.id, fileId, audioId: conv.audioId, ext: conv.ext, getSyncToken })
-      } else {
-        // FORTIFY: combined "voice together" clips are the LARGEST client-
-        // synth generations in the app (up to 12 cells of prosody in one
-        // file) and were still uploading raw WAV after the compression round
-        // shipped — the exact block generate-voice.ts uses, same fallback.
-        const baseId = buildAudioId(chosen[0].id)
-        let uploadBlob = ttsBlob
-        ext = "wav"
-        combinedMime = "audio/wav"
-        if (canEncodeOpus()) {
-          try {
-            const samples = await decodeToMono48k(new Uint8Array(await ttsBlob.arrayBuffer()))
-            const encoded = await encodeMonoToWebmOpus(samples, TARGET_RATE)
-            uploadBlob = encoded.blob
-            combinedMime = encoded.mimeType
-            ext = encoded.ext
-          } catch (e) {
-            console.warn("[combined-voice] opus compress failed; uploading WAV", e)
-          }
-        }
-        const res = await uploadCellAudio({ projectId: project.id, fileId, audioId: baseId, ext, blob: uploadBlob, getSyncToken })
-        audioId = res.audioId
-        url = res.url
-        // Local-first: the exact playable bytes are in hand — stock the byte
-        // cache so first playback/peaks/transcription need no re-download.
-        void audioCachePutBlob(res.audioId, ext, uploadBlob)
-        // Meeting note (2026-08-05): keep the original WAV obtainable — same
-        // base id, ext "wav", unattached, best-effort (see lossless-sibling).
-        if (ext === "webm") {
-          void uploadLosslessSiblingBestEffort({
-            projectId: project.id,
-            fileId,
-            audioId: baseId,
-            wavBlob: ttsBlob,
-            getSyncToken,
-          })
-        }
       }
     }
     const objectName = `${audioId}.${ext}`
@@ -221,7 +209,14 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
         slot: "generatedVoice",
         mimeType: combinedMime,
         voiceId: voice.id,
-        ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
+        // AQU-1591: a generated voice is a performance of ONE language, so it
+        // belongs to the lane it was generated in. Without the tag it landed in
+        // the default lane and was heard there instead.
+        ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+        // AQU-1572: one event per cell the clip was attached to, matching the
+        // per-cell shape of every other audio event.
+        audioOrigin: "generate",
+        surface: "voice-together",
         author: username,
       })
     }
@@ -231,7 +226,6 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
       audioId: objectName,
       url,
       voiceId: voice.id,
-      ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
       cells: chosen,
       truncated,
     }

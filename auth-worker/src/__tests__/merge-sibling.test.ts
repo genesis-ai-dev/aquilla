@@ -4,13 +4,17 @@
 // mocked at the fetch boundary:
 //   - role floor: 403 when below project_lead (500) on EITHER project;
 //   - validation errors: duplicate lane, archived donor, downstreams present;
-//   - success path: fold called with the right shape, lane registered on the
-//     host, donor archived + pointed at the host.
+//   - success path: fold called with the right shape, host lane record in
+//     place, donor archived + pointed at the host.
+//
+// AQU-2223: the host's `settings.targetLanes` is neither read nor written. The
+// lane row is the registry.
 
 import { env } from "cloudflare:test"
-import { describe, it, expect, vi, afterEach } from "vitest"
+import { describe, it, expect, vi, afterEach, beforeEach} from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
+import { laneDisplayName, laneLanguageCode } from "../../../src/lib/lanes/lane-display"
 
 async function seedProject(projectId: string, name: string, createdBy: number): Promise<void> {
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES (?, ?, ?)")
@@ -34,6 +38,25 @@ async function settingsOf(projectId: string): Promise<{ settings: Record<string,
     .first<{ settings: string; version: number }>()
   if (!row) return null
   return { settings: JSON.parse(row.settings) as Record<string, unknown>, version: Number(row.version) }
+}
+
+/** A target lane row on the host, plus one cell in it when `editor` is given. */
+async function seedHostLane(
+  projectId: string,
+  lane: { id: string; tag: string; name?: string | null; position?: number; editor?: string | null },
+): Promise<void> {
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position) VALUES (?, ?, 'target', ?, ?, NULL, ?, ?)",
+  )
+    .bind(lane.id, projectId, lane.tag, lane.name ?? null, lane.tag, lane.position ?? 0)
+    .run()
+  if (lane.editor === undefined) return
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, last_editor, lane_id)
+     VALUES (?, 'f1', 'c1', 'target', 'x', 'e1', 1, ?, ?)`,
+  )
+    .bind(projectId, lane.editor, lane.id)
+    .run()
 }
 
 function mockFold(body: unknown, status = 200) {
@@ -83,22 +106,54 @@ describe("POST /:projectId/merge-sibling — role floors", () => {
 })
 
 describe("POST /:projectId/merge-sibling — validation", () => {
-  it("400 when the lane already exists on the host", async () => {
+  it("accepts a lane of a language the host already has under another tag", async () => {
+    await seedUser(31, "u31")
+    await seedProject("host-lang", "Host", 31)
+    await seedProject("donor-lang", "Donor", 31)
+    await grant("host-lang", 31, 500)
+    await grant("donor-lang", 31, 500)
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, ?)",
+    )
+      .bind("host-lang", JSON.stringify({ targetLanes: ["Spanish"] }), 31)
+      .run()
+
+    const fetchSpy = mockFold({ merged: 0, skipped: [], lane: "es" })
+    const res = await post("host-lang", await jwtFor("u31"), { donorProjectId: "donor-lang", lane: "es" })
+    expect(res.status).toBe(200)
+    expect(fetchSpy).toHaveBeenCalled()
+  })
+
+  it("400 when a host lane with that tag already holds someone's work", async () => {
     await seedUser(3, "u3")
     await seedProject("host-c", "Host", 3)
     await seedProject("donor-c", "Donor", 3)
     await grant("host-c", 3, 500)
     await grant("donor-c", 3, 500)
-    await env.AQUILLA_PG.prepare(
-      "INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, ?)",
-    )
-      .bind("host-c", JSON.stringify({ targetLanes: ["fr"] }), 3)
-      .run()
+    await seedHostLane("host-c", { id: "lane-c1", tag: "fr", editor: "u3" })
 
     const fetchSpy = mockFold({ merged: 0, skipped: [], lane: "fr" })
     const res = await post("host-c", await jwtFor("u3"), { donorProjectId: "donor-c", lane: "fr" })
     expect(res.status).toBe(400)
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("ignores a tag only the host's settings registry lists", async () => {
+    await seedUser(32, "u32")
+    await seedProject("host-c2", "Host", 32)
+    await seedProject("donor-c2", "Donor", 32)
+    await grant("host-c2", 32, 500)
+    await grant("donor-c2", 32, 500)
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, ?)",
+    )
+      .bind("host-c2", JSON.stringify({ targetLanes: ["fr"] }), 32)
+      .run()
+
+    const fetchSpy = mockFold({ merged: 0, skipped: [], lane: "fr" })
+    const res = await post("host-c2", await jwtFor("u32"), { donorProjectId: "donor-c2", lane: "fr" })
+    expect(res.status).toBe(200)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
   it("400 when the donor is archived", async () => {
@@ -151,7 +206,7 @@ describe("POST /:projectId/merge-sibling — validation", () => {
 })
 
 describe("POST /:projectId/merge-sibling — success path", () => {
-  it("folds, registers the lane on the host, archives + points the donor", async () => {
+  it("folds, makes the host lane, archives + points the donor", async () => {
     await seedUser(7, "u7")
     await seedProject("host-g", "Host", 7)
     await seedProject("donor-g", "Donor", 7)
@@ -188,9 +243,14 @@ describe("POST /:projectId/merge-sibling — success path", () => {
     const sent = JSON.parse(String((init as RequestInit).body)) as { donorProjectId: string; lane: string }
     expect(sent).toEqual({ donorProjectId: "donor-g", lane: "swh" })
 
-    // Lane registered on the host settings.
-    const host = await settingsOf("host-g")
-    expect(readLanes(host?.settings)).toEqual(["swh"])
+    // The host lane record exists; the host's settings are not written.
+    const hostLane = await env.AQUILLA_PG.prepare(
+      "SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?",
+    )
+      .bind("host-g", "swh")
+      .first<{ id: string }>()
+    expect(hostLane).not.toBeNull()
+    expect(await settingsOf("host-g")).toBeNull()
 
     // Donor archived + carries the merge pointer.
     const donorRow = await env.AQUILLA_PG.prepare(
@@ -205,27 +265,32 @@ describe("POST /:projectId/merge-sibling — success path", () => {
     expect(donor?.settings.mergedLane).toBe("swh")
   })
 
-  it("appends to existing host lanes rather than replacing them", async () => {
+  it("adds a lane beside the host's existing lanes and leaves its settings alone", async () => {
     await seedUser(8, "u8")
     await seedProject("host-h", "Host", 8)
     await seedProject("donor-h", "Donor", 8)
     await grant("host-h", 8, 500)
     await grant("donor-h", 8, 500)
+    await seedHostLane("host-h", { id: "lane-h1", tag: "fr", editor: "u8" })
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 2, ?)",
     )
       .bind("host-h", JSON.stringify({ targetLanes: ["fr"], sourceLanguage: "en" }), 8)
       .run()
 
-    mockFold({ merged: 1, skipped: [], lane: "swh" })
+    mockFold({ merged: 0, skipped: [], lane: "swh" })
     const res = await post("host-h", await jwtFor("u8"), { donorProjectId: "donor-h", lane: "swh" })
     expect(res.status).toBe(200)
 
+    const { results } = await env.AQUILLA_PG.prepare(
+      "SELECT legacy_tag FROM lanes WHERE project_id = ? AND role = 'target' ORDER BY position, id",
+    )
+      .bind("host-h")
+      .all<{ legacy_tag: string }>()
+    expect(results.map((row) => row.legacy_tag)).toEqual(["fr", "swh"])
     const host = await settingsOf("host-h")
-    expect(readLanes(host?.settings)).toEqual(["fr", "swh"])
-    // Unrelated settings preserved, version bumped.
-    expect(host?.settings.sourceLanguage).toBe("en")
-    expect(host?.version).toBe(3)
+    expect(host?.settings).toEqual({ targetLanes: ["fr"], sourceLanguage: "en" })
+    expect(host?.version).toBe(2)
   })
 
   it("502 and no mutations when the fold fails", async () => {
@@ -248,7 +313,260 @@ describe("POST /:projectId/merge-sibling — success path", () => {
   })
 })
 
-function readLanes(settings: Record<string, unknown> | undefined): string[] {
-  const raw = settings?.targetLanes
-  return Array.isArray(raw) ? (raw as string[]) : []
-}
+// AQU-1550: the merged lane has to be a real lane — a `lanes` record. The fold
+// (mocked here) creates the record with the rows it writes; when it wrote none
+// this route creates it (AQU-2223), and it refuses a name the host already shows.
+describe("POST /:projectId/merge-sibling — the lane is a real lane (AQU-1550)", () => {
+  interface LaneRow {
+    /** AQU-1592: the stored freeform language. */
+    language: string | null
+    /** AQU-1592: null when the lane carries only a language. */
+    name: string | null
+    role: string
+    legacy_tag: string | null
+    lang_code: string | null
+  }
+
+  async function lanesOf(projectId: string): Promise<LaneRow[]> {
+    const { results } = await env.AQUILLA_PG.prepare(
+      "SELECT language, name, role, legacy_tag, lang_code FROM lanes WHERE project_id = ? ORDER BY position, id",
+    )
+      .bind(projectId)
+      .all<LaneRow>()
+    return results
+  }
+
+  async function seedLane(
+    projectId: string,
+    lane: {
+      id: string
+      /** AQU-1592: the freeform language. Defaults to '' when the test only cares about the name. */
+      language?: string
+      /** Null when the lane carries only a language. */
+      name: string | null
+      legacyTag: string
+      position: number
+    },
+  ): Promise<void> {
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position) VALUES (?, ?, 'target', ?, ?, NULL, ?, ?)",
+    )
+      .bind(lane.id, projectId, lane.language ?? "", lane.name, lane.legacyTag, lane.position)
+      .run()
+  }
+
+  it("leaves the host with a lane record for the tag, even when the fold had nothing to write", async () => {
+    await seedUser(10, "u10")
+    await seedProject("host-j", "Host", 10)
+    await seedProject("donor-j", "Donor", 10)
+    await grant("host-j", 10, 500)
+    await grant("donor-j", 10, 500)
+
+    // merged: 0 — the fold wrote no rows, so it created no lane either.
+    mockFold({ merged: 0, skipped: [], lane: "fr" })
+    const res = await post("host-j", await jwtFor("u10"), { donorProjectId: "donor-j", lane: "fr" })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { hostLaneId: string | null }
+
+    expect(await settingsOf("host-j")).toBeNull()
+    const lane = (await lanesOf("host-j")).find((row) => row.legacy_tag === "fr")
+    // AQU-1592: the tag IS the lane's language — tags are language labels. No
+    // derived name and no derived code are stored; laneDisplayName shows "fr"
+    // and laneLanguageCode derives "fr" from it at read time.
+    expect(lane).toEqual({
+      language: "fr",
+      name: null,
+      role: "target",
+      legacy_tag: "fr",
+      lang_code: null,
+    })
+    expect(laneDisplayName({ role: "target", language: lane!.language, name: lane!.name })).toBe("fr")
+    expect(
+      laneLanguageCode({ language: lane!.language, name: lane!.name, langCode: lane!.lang_code }),
+    ).toBe("fr")
+    // The response names the lane the route created, by id.
+    expect(body.hostLaneId).toMatch(/\S/)
+  })
+
+  it("400 and no fold when another of the host's lanes already shows that name", async () => {
+    await seedUser(11, "u11")
+    await seedProject("host-k", "Host", 11)
+    await seedProject("donor-k", "Donor", 11)
+    await grant("host-k", 11, 500)
+    await grant("donor-k", 11, 500)
+    // A lane added from the Languages screen: its tag is not its name.
+    await seedLane("host-k", { id: "lane-k1", name: "French", legacyTag: "lane-k1", position: 2 })
+
+    const fetchSpy = mockFold({ merged: 1, skipped: [], lane: "french" })
+    const res = await post("host-k", await jwtFor("u11"), { donorProjectId: "donor-k", lane: "french" })
+
+    expect(res.status).toBe(400)
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(await settingsOf("host-k")).toBeNull()
+  })
+
+  it("a retry goes ahead when an earlier attempt already created the lane record", async () => {
+    await seedUser(12, "u12")
+    await seedProject("host-l", "Host", 12)
+    await seedProject("donor-l", "Donor", 12)
+    await grant("host-l", 12, 500)
+    await grant("donor-l", 12, 500)
+    // The earlier fold wrote some rows (and so the record) and then failed
+    // before the donor was archived: the record holds only the merge's rows.
+    await seedLane("host-l", { id: "lane-l1", name: "fr", legacyTag: "fr", position: 2 })
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, last_editor, lane_id)
+       VALUES ('host-l', 'f1', 'c1', 'target', 'x', 'e1', 1, 'merge-sibling', 'lane-l1')`,
+    ).run()
+
+    const fetchSpy = mockFold({ merged: 4, skipped: [], lane: "fr" })
+    const res = await post("host-l", await jwtFor("u12"), { donorProjectId: "donor-l", lane: "fr" })
+
+    expect(res.status).toBe(200)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(await settingsOf("host-l")).toBeNull()
+    // Still one record for the tag.
+    expect((await lanesOf("host-l")).filter((row) => row.legacy_tag === "fr")).toHaveLength(1)
+  })
+})
+
+// AQU-1550: the sync worker's fold endpoint re-checks the caller's live role on
+// the donor (pen test 2026-09-29), so the service token has to say who the
+// caller is. It used to carry `userId: 0`, which no project grants anything to
+// — every merge through this route was refused with a 403 the fold mock here
+// could never produce. The real two-worker call is covered end to end in
+// e2e/specs/projects/merge-sibling.spec.ts; these pin the claims.
+describe("POST /:projectId/merge-sibling — the fold token names the caller (AQU-1550)", () => {
+  function foldTokenClaims(fetchSpy: ReturnType<typeof mockFold>): Record<string, unknown> {
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit
+    const token = new Headers(init.headers).get("Authorization")!.replace(/^Bearer /, "")
+    const payload = token.split(".")[1]!.replace(/-/g, "+").replace(/_/g, "/")
+    return JSON.parse(atob(payload)) as Record<string, unknown>
+  }
+
+  it("carries the caller's user id and how their donor role was granted", async () => {
+    await seedUser(13, "u13")
+    await seedProject("host-m", "Host", 13)
+    await seedProject("donor-m", "Donor", 99) // someone else's project...
+    await grant("host-m", 13, 500)
+    await grant("donor-m", 13, 500) // ...that the caller leads by a direct grant
+
+    const fetchSpy = mockFold({ merged: 1, skipped: [], lane: "fr" })
+    const res = await post("host-m", await jwtFor("u13"), { donorProjectId: "donor-m", lane: "fr" })
+    expect(res.status).toBe(200)
+
+    expect(foldTokenClaims(fetchSpy)).toMatchObject({
+      userId: 13,
+      projectId: "host-m",
+      role: 500,
+      src: "override",
+      aud: "sync",
+    })
+  })
+
+  it("marks a platform operator with no grant on the donor, the fold endpoint's one exemption", async () => {
+    // ADMIN_EMAILS is root@example.com in the test env (pg-test-env).
+    await seedUser(14, "root")
+    await seedProject("host-n", "Host", 99)
+    await seedProject("donor-n", "Donor", 99)
+
+    const fetchSpy = mockFold({ merged: 1, skipped: [], lane: "fr" })
+    const res = await post("host-n", await jwtFor("root"), { donorProjectId: "donor-n", lane: "fr" })
+    expect(res.status).toBe(200)
+
+    expect(foldTokenClaims(fetchSpy)).toMatchObject({ userId: 14, src: "platform" })
+  })
+})
+
+describe("POST /:projectId/merge-sibling — admin power needs elevation (OPS-44)", () => {
+  // Folding is irreversible and cross-tenant: resolveProjectRole gives a
+  // platform operator 500+ on BOTH sides of any merge. AQU-1322 already makes
+  // adding one member to one project require the emailed step-up code.
+  beforeEach(() => {
+    env.ADMIN_REQUIRE_ELEVATION = "true"
+  })
+  afterEach(() => {
+    env.ADMIN_REQUIRE_ELEVATION = undefined
+  })
+
+  const elevate = async (jwt: string) => {
+    const req = await app.request("/api/v2/admin/elevation/request", { method: "POST", headers: authHeader(jwt) }, env)
+    const { devCode } = (await req.json()) as { devCode?: string }
+    const res = await app.request(
+      "/api/v2/admin/elevation/verify",
+      { method: "POST", headers: authHeader(jwt), body: JSON.stringify({ code: devCode }) },
+      env,
+    )
+    expect(res.status).toBe(200)
+  }
+
+  it("un-elevated operator with no genuine grant on either side is refused", async () => {
+    await seedUser(40, "root")
+    await seedProject("host-e1", "Host", 99)
+    await seedProject("donor-e1", "Donor", 99)
+
+    const fetchSpy = mockFold({ merged: 1, skipped: [], lane: "fr" })
+    const res = await post("host-e1", await jwtFor("root"), { donorProjectId: "donor-e1", lane: "fr" })
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({
+      error: "elevation required to fold a sibling project with platform-admin access",
+    })
+    // The fold never reached the sync-worker.
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("the same operator folds once elevated", async () => {
+    await seedUser(41, "root")
+    await seedProject("host-e2", "Host", 99)
+    await seedProject("donor-e2", "Donor", 99)
+
+    const jwt = await jwtFor("root")
+    await elevate(jwt)
+    const fetchSpy = mockFold({ merged: 1, skipped: [], lane: "fr" })
+    const res = await post("host-e2", jwt, { donorProjectId: "donor-e2", lane: "fr" })
+    expect(res.status).toBe(200)
+    expect(fetchSpy).toHaveBeenCalled()
+  })
+
+  it("an operator who GENUINELY leads both projects is unaffected while un-elevated", async () => {
+    // The regression this guards: platform contributes 700, which outranks a
+    // genuine 500, so the resolved source reads "platform" for an operator who
+    // really does lead the project. Refusing them would lock operators out of
+    // their own work, so admin power is stripped and the floor re-applied to
+    // the genuine grant that remains.
+    await seedUser(42, "root")
+    await seedProject("host-e3", "Host", 99)
+    await seedProject("donor-e3", "Donor", 99)
+    await grant("host-e3", 42, 500)
+    await grant("donor-e3", 42, 500)
+
+    const fetchSpy = mockFold({ merged: 1, skipped: [], lane: "fr" })
+    const res = await post("host-e3", await jwtFor("root"), { donorProjectId: "donor-e3", lane: "fr" })
+    expect(res.status).toBe(200)
+    expect(fetchSpy).toHaveBeenCalled()
+  })
+
+  it("a genuine grant on only ONE side still needs elevation", async () => {
+    await seedUser(43, "root")
+    await seedProject("host-e4", "Host", 99)
+    await seedProject("donor-e4", "Donor", 99)
+    await grant("host-e4", 43, 500) // host genuine, donor by admin power only
+
+    const fetchSpy = mockFold({ merged: 1, skipped: [], lane: "fr" })
+    const res = await post("host-e4", await jwtFor("root"), { donorProjectId: "donor-e4", lane: "fr" })
+    expect(res.status).toBe(403)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("a non-admin lead is unaffected", async () => {
+    await seedUser(44, "u44")
+    await seedProject("host-e5", "Host", 99)
+    await seedProject("donor-e5", "Donor", 99)
+    await grant("host-e5", 44, 500)
+    await grant("donor-e5", 44, 500)
+
+    mockFold({ merged: 1, skipped: [], lane: "fr" })
+    const res = await post("host-e5", await jwtFor("u44"), { donorProjectId: "donor-e5", lane: "fr" })
+    expect(res.status).toBe(200)
+  })
+})

@@ -14,14 +14,25 @@ import { v7 as uuidv7 } from "uuid"
 import { extractPlaintextStrings } from "./plaintext"
 import { extractMarkdownStrings } from "./markdown"
 import { parseObsStories } from "./obs"
-import { extractVttStrings, extractSrtStrings } from "./subtitle"
+import {
+  extractVttStrings,
+  extractSrtStrings,
+  repairShortFormCueTimestamps,
+} from "./subtitle"
 import { parseCsvBilingual } from "./csv-bilingual"
 import { parseUsfmLossless } from "./usfm-lossless"
 import { extractJsonStrings } from "./json-i18n"
 import { extractPoStrings } from "./po"
 import { extractPropertiesStrings } from "./properties"
 import { extractSbvStrings } from "./sbv"
-import type { ParsedTextFileResult, TranslatableString } from "./core-types"
+import type {
+  CellUnit,
+  ParsedTextFileResult,
+  SubtitleCueRepair,
+  TranslatableString,
+} from "./core-types"
+import { checkUsfmStructure, type UsfmStructureFinding } from "./usfm-structure-check"
+import { detectFramesAsHundredths } from "./frame-timecode"
 
 /** DOM-free file types handled by this module (and therefore the parse worker). */
 export type TextParseFileType = "txt" | "md" | "json" | "po" | "properties" | "obs" | "vtt" | "srt" | "sbv" | "csv" | "tsv" | "usfm"
@@ -54,6 +65,10 @@ export interface TextParseRequest {
    *  matter from the emitted cells (per-project opt-out, AQU-634). Default:
    *  false (import front matter). */
   excludeFrontMatter?: boolean
+  /** txt/md only: what one cell is (AQU-1720). `paragraph` emits one cell per
+   *  non-empty paragraph with no sentence split and no length cap — the unit a
+   *  dubbing project generates one voice clip for. Default: `sentence`. */
+  cellUnit?: CellUnit
 }
 
 /** Parse one USFM book section into translatable cells (verse bodies + heading/
@@ -66,6 +81,10 @@ export function usfmSectionToStrings(
   bookId: string
   strings: TranslatableString[]
   duplicateRefs: string[]
+  /** Paratext-parity structure findings for this section (AQU-1731). Computed
+   *  here so BOTH USFM import paths — plain single-file and per-book Paratext
+   *  project — report the same findings from one place. */
+  structureFindings: UsfmStructureFinding[]
 } {
   const doc = parseUsfmLossless(section, { excludeFrontMatter: opts?.excludeFrontMatter })
   const bookId = doc.bookId || "unknown"
@@ -83,6 +102,7 @@ export function usfmSectionToStrings(
       section: `${bookId} ${v.chapter}`,
       type: "verse" as const,
       paragraphStart: v.paragraphStart,
+      paragraphMarker: v.paragraphMarker,
     })),
     // Headings include book-name/title/TOC + intro when excludeFrontMatter is
     // false (AQU-634 default). When opted out, parseUsfmLossless already omits
@@ -95,6 +115,7 @@ export function usfmSectionToStrings(
       section: h.chapter > 0 ? `${bookId} ${h.chapter}` : bookId,
       type: h.kind,
       paragraphStart: undefined as boolean | undefined,
+      paragraphMarker: undefined as string | undefined,
     })),
   ].sort((a, b) => a.order - b.order)
   const strings: TranslatableString[] = allSpans.map((s) => ({
@@ -107,8 +128,53 @@ export function usfmSectionToStrings(
     globalReferences: [s.ref],
     type: s.type,
     ...(s.paragraphStart ? { paragraphStart: true } : {}),
+    ...(s.paragraphMarker ? { paragraphMarker: s.paragraphMarker } : {}),
   }))
-  return { bookId, strings, duplicateRefs }
+  return { bookId, strings, duplicateRefs, structureFindings: checkUsfmStructure(section) }
+}
+
+/**
+ * Parse a subtitle file, repairing WebVTT's short-form cue timestamps on the
+ * way in and counting what the parser still refused (AQU-2119).
+ *
+ * `extractVttStrings` only matches strict `HH:MM:SS.mmm`, but WebVTT permits
+ * the hours-less short form (`01:03.209 --> 01:03.667`). An unmatched
+ * timestamp line never opens a cue, so the payload lines under it are swallowed
+ * as junk and the cue disappears WITH ITS WORDS — silent loss, not an untimed
+ * row. Every other VTT path in the app already pads the text first
+ * (`import/audio-vtt.ts`, `import-file-target.ts`,
+ * `timeline/subtitle-source-import.ts`, `import/youtube-captions.ts`); the
+ * Upload-files path reached the parser raw and lost those cues.
+ *
+ * SRT needs no padding — `padTimestamp` only matches a `.` fraction and SRT
+ * writes `,` — so it parses the ORIGINAL text. The loose `-->` count is still
+ * the honest denominator for "how many timestamp lines produced no cue", so
+ * both formats report that.
+ */
+function parseSubtitleFormat(
+  fileType: "vtt" | "srt",
+  text: string,
+  name: string,
+): ParsedTextFileResult {
+  const repaired = repairShortFormCueTimestamps(text)
+  const strings =
+    fileType === "vtt" ? extractVttStrings(repaired.text) : extractSrtStrings(text)
+  const cueRepair: SubtitleCueRepair = {
+    repairedShortForm: fileType === "vtt" ? repaired.repaired : 0,
+    // Never negative: a `-->` inside a NOTE block inflates the loose count
+    // without the parser having refused anything.
+    droppedCues: Math.max(0, repaired.cueLines - strings.length),
+  }
+  const clean = cueRepair.repairedShortForm === 0 && cueRepair.droppedCues === 0
+  // AQU-2197: times that are frame numbers written as hundredths. Reported,
+  // never fixed silently: only a person knows the file's frame rate.
+  const framesAsHundredths = detectFramesAsHundredths(strings)
+  return {
+    name,
+    strings,
+    ...(clean ? {} : { cueRepair }),
+    ...(framesAsHundredths ? { framesAsHundredths } : {}),
+  }
 }
 
 /**
@@ -119,12 +185,12 @@ export function usfmSectionToStrings(
  * run off the main thread, and inside the sync-worker's Agent API).
  */
 export function parseTextFormat(req: TextParseRequest): ParsedTextFileResult[] {
-  const { fileType, text, name, excludeFrontMatter } = req
+  const { fileType, text, name, excludeFrontMatter, cellUnit } = req
   switch (fileType) {
     case "txt":
-      return [{ name, strings: extractPlaintextStrings(text) }]
+      return [{ name, strings: extractPlaintextStrings(text, { cellUnit }) }]
     case "md":
-      return [{ name, strings: extractMarkdownStrings(text) }]
+      return [{ name, strings: extractMarkdownStrings(text, { cellUnit }) }]
     case "json":
       return [{ name, strings: extractJsonStrings(text) }]
     case "po":
@@ -134,9 +200,8 @@ export function parseTextFormat(req: TextParseRequest): ParsedTextFileResult[] {
     case "obs":
       return [{ name, strings: parseObsStories(text, name) }]
     case "vtt":
-      return [{ name, strings: extractVttStrings(text) }]
     case "srt":
-      return [{ name, strings: extractSrtStrings(text) }]
+      return [parseSubtitleFormat(fileType, text, name)]
     case "sbv":
       return [{ name, strings: extractSbvStrings(text) }]
     case "csv":
@@ -149,20 +214,19 @@ export function parseTextFormat(req: TextParseRequest): ParsedTextFileResult[] {
         ? text.split(/(?=\\id\s)/).filter((s) => s.trim().length > 0)
         : [text]
       return sections.map((section) => {
-        const { bookId, strings, duplicateRefs } = usfmSectionToStrings(section, {
+        const { bookId, strings, structureFindings } = usfmSectionToStrings(section, {
           excludeFrontMatter,
         })
-        if (duplicateRefs.length > 0) {
-          console.warn(
-            `[usfm import] ${name}: ${duplicateRefs.length} duplicate verse ref(s) — ` +
-              `${duplicateRefs.slice(0, 5).join(", ")}${duplicateRefs.length > 5 ? `, +${duplicateRefs.length - 5} more` : ""}`,
-          )
-        }
+        // AQU-1731: duplicate refs used to reach a `console.warn` here and
+        // nowhere else. They are now `verse-duplicate` findings alongside the
+        // rest of the chapter/verse and marker checks, carried to the import
+        // preview so a broken file is reported before anyone translates it.
         return {
           name: name === bookId ? bookId : sections.length > 1 ? bookId : name,
           strings,
           rawSource: section,
           rawSourceFormat: "usfm",
+          ...(structureFindings.length > 0 ? { structureFindings } : {}),
         }
       })
     }

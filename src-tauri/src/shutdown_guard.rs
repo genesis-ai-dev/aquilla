@@ -58,7 +58,33 @@ pub fn confirm_offline_shutdown(state: State<'_, ShutdownGuardState>) {
     state.notify.notify_one();
 }
 
-fn begin_graceful_exit(app: &AppHandle, notify: Arc<Notify>) {
+/// Invoked by `OfflineLeaderWatchdog.tsx` when the offline store's leader
+/// worker has stopped persisting writes. A page reload can't fix every case:
+/// WKWebView can leave an unloaded page's busy leader frozen, still holding
+/// the OPFS files, until the WebContent process exits
+/// (livestorejs/livestore#244). Runs the same save handshake as a quit, then
+/// relaunches the app.
+#[tauri::command]
+pub fn restart_app(app: AppHandle, state: State<'_, ShutdownGuardState>) {
+    exit_after_handshake(&app, &state, |app| app.restart());
+}
+
+/// False if a shutdown is already under way. `after` may never return (Windows `install()` exits).
+pub fn exit_after_handshake<F>(app: &AppHandle, state: &ShutdownGuardState, after: F) -> bool
+where
+    F: FnOnce(&AppHandle) + Send + 'static,
+{
+    if !claim_shutdown(&state.exiting) {
+        return false;
+    }
+    begin_graceful_exit(app, state.notify.clone(), after);
+    true
+}
+
+fn begin_graceful_exit<F>(app: &AppHandle, notify: Arc<Notify>, after: F)
+where
+    F: FnOnce(&AppHandle) + Send + 'static,
+{
     let app_handle = app.clone();
     if let Err(err) = app_handle.emit(PREPARE_SHUTDOWN_EVENT, ()) {
         log::warn!("[shutdown_guard] failed to emit {PREPARE_SHUTDOWN_EVENT}: {err}");
@@ -72,6 +98,9 @@ fn begin_graceful_exit(app: &AppHandle, notify: Arc<Notify>) {
                 "[shutdown_guard] webview did not confirm offline shutdown within {SHUTDOWN_TIMEOUT:?}; exiting anyway"
             );
         }
+        // `exiting` is already claimed, so the exit this triggers passes
+        // straight through the hooks below instead of re-running the handshake.
+        after(&app_handle);
         app_handle.exit(0);
     });
 }
@@ -86,7 +115,7 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
             return;
         }
         api.prevent_close();
-        begin_graceful_exit(app, state.notify.clone());
+        begin_graceful_exit(app, state.notify.clone(), |_| {});
     }
 }
 
@@ -99,7 +128,7 @@ pub fn handle_run_event(app: &AppHandle, event: RunEvent) {
             return;
         }
         api.prevent_exit();
-        begin_graceful_exit(app, state.notify.clone());
+        begin_graceful_exit(app, state.notify.clone(), |_| {});
     }
 }
 

@@ -11,6 +11,7 @@
 
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import type { FileProgressResponse, SectionProgressDetailResponse } from "./file-progress-resource"
+import { progressPercent } from "./progress-percent"
 
 export interface VerseRollup {
   ref: string // e.g. "GEN 1:1"
@@ -106,9 +107,8 @@ function pairCells(rows: CellRow[]): RollupCell[] {
   return out
 }
 
-function pct(num: number, denom: number): number {
-  return denom > 0 ? Math.round((num / denom) * 100) : 0
-}
+// AQU-1493: never 100 while a cell in the unit is outstanding.
+const pct = progressPercent
 
 function numericCompare(a: string, b: string): number {
   const na = Number(a)

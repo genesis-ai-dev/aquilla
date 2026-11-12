@@ -28,7 +28,9 @@ const MASKED_SURFACES = [
   "src/components/TranslatedEditor.tsx",
   "src/components/EditorTable.tsx",
   "src/components/CommentThread.tsx",
-  "src/components/CommentsPage.tsx",
+  // AQU-1958: the comment-list body is rendered by the thread card, shared by
+  // the project Comments page and the org-wide comments view.
+  "src/components/comments-thread-card.tsx",
 ]
 
 describe("OPS-3 session-replay masking", () => {
@@ -44,7 +46,7 @@ describe("OPS-3 session-replay masking", () => {
 
   it("keeps replay opt-in, so masking is defence in depth rather than the only control", () => {
     const config = read("src/lib/posthog.ts")
-    expect(config).toContain("opt_out_capturing_by_default")
+    expect(config).toContain("analyticsAccount.eligible()")
     expect(config).toContain("disable_session_recording")
   })
 

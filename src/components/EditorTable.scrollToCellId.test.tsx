@@ -7,10 +7,10 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { createRef } from "react"
-import type { ReactNode } from "react"
+import { StrictMode, createRef, useEffect, useRef } from "react"
+import type { ComponentProps, ReactNode } from "react"
 import { EditorTable, type EditorTableHandle } from "./EditorTable"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
@@ -94,10 +94,12 @@ function makeStore(rows: CellRow[]): CellStore {
   return store
 }
 
-function renderTable(store: CellStore) {
+type TableExtras = Pick<ComponentProps<typeof EditorTable>, "sourceLineEditing" | "orderedBy" | "parallelBibles">
+
+function renderTable(store: CellStore, initial: TableExtras = {}) {
   const ref = createRef<EditorTableHandle>()
   const qc = new QueryClient()
-  render(
+  const tree = (extras: TableExtras = {}) => (
     <QueryClientProvider client={qc}>
       <EditorActionsProvider value={{ myScopes: [] }}>
         <EditorTable
@@ -120,14 +122,57 @@ function renderTable(store: CellStore) {
           cellLabelsEnabled={false}
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
+          {...extras}
         />
       </EditorActionsProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
-  return ref
+  const { rerender } = render(tree(initial))
+  return {
+    get current() { return ref.current },
+    rerender: (extras: TableExtras) => rerender(tree(extras)),
+  }
+}
+
+vi.mock("@/lib/parsers/helloao", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/parsers/helloao")>("@/lib/parsers/helloao")
+  return {
+    ...actual,
+    fetchHelloaoTranslations: vi.fn(async () => []),
+    fetchHelloaoChapter: vi.fn(async () => ({
+      translation: { id: "BSB" },
+      book: { id: "JHN", numberOfChapters: 21 },
+      chapter: { number: 3, content: [1, 2, 3].map((n) => ({ type: "verse", number: n, content: [`BSB verse ${n}`] })) },
+    })),
+    prefetchHelloaoChapter: vi.fn(),
+  }
+})
+
+function verseRow(cellId: string, ref: string | null, type = "text"): CellRow {
+  return {
+    cellId, side: "source", value: `src-${cellId}`, valueHtml: null, type,
+    canonicalRef: ref, anchorCellId: null, eventId: `${cellId}-source`,
+    sourceEventId: null, lastEditor: null, lastEditAt: 1, validated: false, wordCount: 1,
+  } as CellRow
 }
 
 describe("EditorTableHandle.scrollToCellId (AQU-646)", () => {
+  it("lands on the same display row with Bible verses making the rows taller", async () => {
+    const ref = renderTable(
+      makeStore([verseRow("h", "JHN 3", "heading"), verseRow("v1", "JHN 3:1"), verseRow("v2", "JHN 3:2"), verseRow("v3", "JHN 3:3")]),
+      {
+        orderedBy: undefined,
+        parallelBibles: { projectId: project.id, projectDefaults: ["BSB"], canSetProjectDefaults: false, onSetProjectDefaults: async () => true },
+      },
+    )
+    // happy-dom measures 0px, so the Bibles stack under the source text.
+    await screen.findByText("BSB verse 3")
+    expect(document.querySelector('[data-cell-id="h"] [data-testid="bible-stack"]')).toBeNull()
+    scrollToIndex.mockClear()
+    expect(ref.current?.scrollToCellId("v3")).toBe(true)
+    expect(scrollToIndex).toHaveBeenCalledWith(expect.objectContaining({ index: 3 }))
+  })
+
   it("resolves the DISPLAY index on a time-ordered file whose store order ≠ time order", () => {
     // Store order: late, early — display (time) order re-sorts to early, late.
     const ref = renderTable(makeStore([
@@ -141,18 +186,137 @@ describe("EditorTableHandle.scrollToCellId (AQU-646)", () => {
     expect(scrollToIndex).toHaveBeenCalledWith(expect.objectContaining({ index: 1 }))
   })
 
-  it("flash adds the codex-search-flash ring after a frame", async () => {
+  // Whether a row is pulsing. Either marker: the class is how the table drew
+  // the pulse before AQU-1493, the attribute is how it draws it now. What
+  // these tests hold is that the row pulses, and keeps pulsing.
+  const pulsing = (el: Element | null) =>
+    Boolean(el && (el.classList.contains("codex-search-flash") || el.hasAttribute("data-row-flash")))
+  const frames = async (n: number) => {
+    for (let i = 0; i < n; i++) await new Promise((r) => requestAnimationFrame(() => r(null)))
+  }
+
+  it("flash pulses the row after a frame", async () => {
     const ref = renderTable(makeStore([mediaRow("m1", 0, 5_000)]))
     const ok = ref.current?.scrollToCellId("m1", { flash: true })
     expect(ok).toBe(true)
-    await new Promise((r) => requestAnimationFrame(() => r(null)))
-    await new Promise((r) => requestAnimationFrame(() => r(null)))
-    const el = document.querySelector('[data-cell-id="m1"]')
-    expect(el?.classList.contains("codex-search-flash")).toBe(true)
+    await frames(2)
+    expect(pulsing(document.querySelector('[data-cell-id="m1"]'))).toBe(true)
+  })
+
+  it("keeps pulsing when React re-renders the row with a new className (AQU-1493)", async () => {
+    // The plan board's "Go to first untranslated" lands while the project's
+    // line-editing permission is still loading. When it arrives the row's
+    // className gains `group/rowstrip`, and React wrote the whole attribute
+    // back — taking a pulse added as a class with it, ~30ms after it began.
+    const ref = renderTable(makeStore([mediaRow("m1", 0, 5_000)]))
+    ref.current?.scrollToCellId("m1", { flash: true })
+    await frames(2)
+    const row = document.querySelector('[data-cell-id="m1"]')
+    expect(pulsing(row)).toBe(true)
+
+    ref.rerender({
+      sourceLineEditing: {
+        head: null,
+        afterCell: new Map(),
+        untimed: true,
+        rowActions: () => ({ above: null, below: null, remove: null }),
+      },
+    })
+    const after = document.querySelector('[data-cell-id="m1"]')
+    // The re-render really did rewrite the row's className…
+    expect(after?.className).toContain("group/rowstrip")
+    // …and the pulse is still on it.
+    expect(pulsing(after)).toBe(true)
+  })
+
+  it("pulses when the parent asks from its mount effect, under StrictMode (AQU-1493)", async () => {
+    // The workspace's deep-link consumer is a PARENT effect that fires in the
+    // commit that mounts the table. StrictMode then replays the table's
+    // effects, cleanups included — a cleanup that cancelled the pulse took it
+    // away from every link that opened the editor.
+    const store = makeStore([mediaRow("m1", 0, 5_000)])
+    function Parent() {
+      const ref = useRef<EditorTableHandle>(null)
+      // Parked once and consumed once, as the workspace's link park is: the
+      // replayed effect finds nothing left to do.
+      const pending = useRef<string | null>("m1")
+      useEffect(() => {
+        if (!pending.current) return
+        if (ref.current?.scrollToCellId(pending.current, { flash: true })) pending.current = null
+      }, [])
+      return (
+        <QueryClientProvider client={new QueryClient()}>
+          <EditorActionsProvider value={{ myScopes: [] }}>
+            <EditorTable
+              ref={ref} project={project} cellStore={store} username="tester" activeLane=""
+              orderedBy="time" isCompletionConfigured={false} isCompletionAvailable={false}
+              completing={new Map()} examples={new Map()} errors={new Map()} previews={new Map()}
+              onCompleteSingle={() => {}} onCompleteBatch={() => {}} healthMap={new Map()}
+              lineNumbersEnabled={false} cellLabelsEnabled={false}
+              sourceTextDirection="ltr" targetTextDirection="ltr"
+            />
+          </EditorActionsProvider>
+        </QueryClientProvider>
+      )
+    }
+    render(<StrictMode><Parent /></StrictMode>)
+    await frames(3)
+    expect(pulsing(document.querySelector('[data-cell-id="m1"]'))).toBe(true)
   })
 
   it("returns false for an unknown id", () => {
     const ref = renderTable(makeStore([mediaRow("m1", 0, 5_000)]))
     expect(ref.current?.scrollToCellId("nope")).toBe(false)
+  })
+
+  it("centres by default and tops the viewport for a view-switch resume (AQU-2153)", () => {
+    const ref = renderTable(makeStore([mediaRow("m1", 0, 5_000)]))
+    scrollToIndex.mockClear()
+    ref.current?.scrollToCellId("m1")
+    expect(scrollToIndex).toHaveBeenCalledWith(expect.objectContaining({ viewPosition: 0.5 }))
+    scrollToIndex.mockClear()
+    // Putting back the row that WAS at the top: centring it would land the
+    // reader half a screen above where they left off.
+    ref.current?.scrollToCellId("m1", { align: "top" })
+    expect(scrollToIndex).toHaveBeenCalledWith(expect.objectContaining({ viewPosition: 0 }))
+  })
+})
+
+describe("EditorTableHandle.getTopVisibleCellId (AQU-2153)", () => {
+  /** happy-dom lays nothing out: place each rendered row by its DISPLAY index,
+   *  scrolled so the third one crosses the viewport's top edge at y=0. */
+  function stubRowGeometry() {
+    const asRect = (top: number) => ({
+      top, bottom: top + 100, height: 100, y: top, left: 0, right: 0, width: 0, x: 0, toJSON() {},
+    }) as DOMRect
+    return vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const index = Number((this as HTMLElement).dataset?.index)
+      const isRow = this.hasAttribute("data-cell-id") && Number.isInteger(index)
+      return isRow ? asRect(index * 100 - 250) : asRect(0)
+    })
+  }
+
+  it("names the row at the viewport's top edge in DISPLAY order", () => {
+    // Store order: late, mid, early — display (time) order is early, mid, late.
+    const ref = renderTable(makeStore([
+      mediaRow("late", 20_000, 30_000),
+      mediaRow("mid", 10_000, 20_000),
+      mediaRow("early", 0, 10_000),
+    ]))
+    const rects = stubRowGeometry()
+    try {
+      // Display index 2 is "late"; the store's index 2 is "early" — the
+      // store-space answer is exactly the row the user is NOT looking at.
+      expect(ref.current?.getTopVisibleCellId()).toBe("late")
+    } finally {
+      rects.mockRestore()
+    }
+  })
+
+  it("says null rather than row 0 when no row is measurable", () => {
+    // A remembered row 0 would scroll the view being resumed to the top —
+    // which is the bug this resume exists to fix.
+    const ref = renderTable(makeStore([mediaRow("m1", 0, 5_000)]))
+    expect(ref.current?.getTopVisibleCellId()).toBeNull()
   })
 })

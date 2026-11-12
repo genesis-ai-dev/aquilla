@@ -34,7 +34,7 @@ function isObsStoryFile(path: string): boolean {
 export const obsRoute: ResourceRoute = {
   id: "obs",
   matches: (entry, manifest) => isObs(entry, manifest),
-  parse: ({ entry, files }) => {
+  parse: ({ entry, projectId, files }) => {
     const repo = entry.fullName
     const out: DcsFile[] = []
 
@@ -66,7 +66,7 @@ export const obsRoute: ResourceRoute = {
       })
 
       out.push({
-        fileId: dcsFileId(repo, path),
+        fileId: dcsFileId(projectId, repo, path),
         name: frames[0].section ?? base,
         sourcePath: path,
         cells,

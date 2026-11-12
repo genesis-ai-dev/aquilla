@@ -237,6 +237,35 @@ describe("recordCredit", () => {
     expect(row?.units).toBe(3)
   })
 
+  it("stores fractional units as whole units — intent: units is an INTEGER column; hosted " +
+    "transcription passed its WAV duration (2.067 s) straight through, Postgres rejected the " +
+    "upsert (22P02) and the graceful degrade silently dropped the org's usage row", async () => {
+    await recordCredit(env.AQUILLA_PG, 1, 1, "llm", 0.03, 2.067)
+
+    const row = await env.AQUILLA_PG
+      .prepare("SELECT raw_cost_cents, units FROM org_credit_usage_daily WHERE org_id=1 AND user_id=1 AND rail='llm' AND date_utc=?")
+      .bind(today())
+      .first<{ raw_cost_cents: number; units: number }>()
+
+    expect(row).not.toBeNull()
+    expect(row?.raw_cost_cents).toBeCloseTo(0.03, 9)
+    // A partial unit consumed is a unit billed — ceil, exactly as creditsFor does.
+    expect(row?.units).toBe(3)
+  })
+
+  it("keeps the cost row when units is not a finite number — intent: raw_cost_cents is the " +
+    "$-truth; a bad units value must cost the ledger zero units, never the whole row", async () => {
+    await recordCredit(env.AQUILLA_PG, 1, 1, "agent", 4, Number.NaN)
+
+    const row = await env.AQUILLA_PG
+      .prepare("SELECT raw_cost_cents, units FROM org_credit_usage_daily WHERE org_id=1 AND user_id=1 AND rail='agent' AND date_utc=?")
+      .bind(today())
+      .first<{ raw_cost_cents: number; units: number }>()
+
+    expect(row?.raw_cost_cents).toBe(4)
+    expect(row?.units).toBe(0)
+  })
+
   it("degrades silently when the table is missing — intent: migration-not-yet-applied must never crash a route", async () => {
     await pg.exec("DROP TABLE IF EXISTS org_credit_usage_daily")
     // Should not throw.
@@ -262,6 +291,19 @@ describe("readSpend", () => {
     expect(spend.dayCredits).toBe(0)
     expect(spend.weekCredits).toBe(0)
     expect(spend.agentDayCredits).toBe(0)
+  })
+
+  // AQU-1871: org 0 is the no-org bucket every project-less AI call lands in,
+  // so a caller with no real org to bill must read its own rows, not the whole
+  // shared bucket — otherwise one person's spend is everybody else's cap.
+  it("narrows to one user's rows when userId is given — intent: a shared fallback " +
+     "bucket must still cap per person", async () => {
+    await insertRawRow(0, 1, today(), "llm", 10)
+    await insertRawRow(0, 2, today(), "llm", 90)
+    const whole = await readSpend(env.AQUILLA_PG, 0, defaultCfg)
+    const mine = await readSpend(env.AQUILLA_PG, 0, defaultCfg, 1)
+    expect(whole.dayCredits).toBe(400) // (10 + 90) × 4 — the pooled reading
+    expect(mine.dayCredits).toBe(40)   // 10 × 4 — only this user's spend
   })
 
   it("converts raw cents to credits using markup — intent: markup applied at read, not write", async () => {

@@ -1,9 +1,11 @@
 // Encode mono PCM samples to a 16-bit WAV blob. No Web Audio needed —
 // pure DataView writes — so it is unit-testable in happy-dom.
 //
-// Two entry points, one header writer: encodeWavPcm16 takes Float32 (offline
+// Three entry points, one header writer: encodeWavPcm16 takes Float32 (offline
 // paths — TTS fallback, reference extraction), encodeWavPcm16Chunks takes the
-// Int16 buffers the capture worklet already produced (live takes). They must
+// Int16 buffers the capture worklet already produced (live takes), and
+// encodeWavPcm16Blobs takes PCM16 parts already moved off the heap into blob
+// storage (the egress audio modes, which stitch whole files). All three must
 // stay byte-identical for equivalent input; wav-encode.test.ts asserts it.
 
 /** Bytes in the canonical RIFF/WAVE PCM header written below. recording-limits
@@ -49,6 +51,37 @@ export function wavHeaderPcm16(dataBytes: number, sampleRate: number): ArrayBuff
   writeStr(36, "data")
   dv.setUint32(40, dataBytes, true)
   return buffer
+}
+
+/**
+ * Quantise Float32 samples into the 16-bit domain every WAV body uses.
+ *
+ * Callers drop the Float32 the moment this returns: PCM16 is half the bytes
+ * and is exactly what gets written, so nothing downstream needs the floats.
+ * That halving is why the egress audio modes can stitch hours of clips
+ * without the tab's heap carrying the whole file (AQU-1862).
+ */
+export function toPcm16(samples: Float32Array): Pcm16Chunk {
+  const out = new Int16Array(samples.length) as Pcm16Chunk
+  for (let i = 0; i < samples.length; i++) out[i] = quantisePcm16(samples[i])
+  return out
+}
+
+/**
+ * Encode a WAV over PCM16 byte parts that already live OUTSIDE the JS heap.
+ *
+ * Same output as encodeWavPcm16Chunks, but each part is a Blob the browser
+ * stores (and spills to disk) for us, so peak heap is one part no matter how
+ * long the result is. The egress audio modes build their concatenations and
+ * timeline stems this way — a one-hour voice stem is ~345 MB of WAV, which is
+ * a tab crash as a typed array and a file-backed blob here (AQU-1862).
+ */
+export function encodeWavPcm16Blobs(parts: readonly Blob[], sampleRate: number): Blob {
+  let dataBytes = 0
+  for (const p of parts) dataBytes += p.size
+  const all: BlobPart[] = [wavHeaderPcm16(dataBytes, sampleRate)]
+  for (const p of parts) all.push(p)
+  return new Blob(all, { type: "audio/wav" })
 }
 
 export function encodeWavPcm16(samples: Float32Array, sampleRate: number): Blob {

@@ -128,6 +128,30 @@ describe("redactCaptureEvent", () => {
     expect(out?.$set_once?.$initial_current_url).toBe(`https://aquilla.app/join/${REDACTED}`)
   })
 
+  it("redacts an $exception's page URL and leaves its exception payload alone", () => {
+    // AQU-1572: the noise filter that runs first (analytics-noise.ts) keeps a
+    // real exception from a deployed page; what survives must keep its
+    // message, stack and `app_env` intact — only URL-shaped properties change.
+    const exceptionList = [
+      {
+        type: "TypeError",
+        value: "Cannot read properties of undefined (reading 'cells')",
+        stacktrace: { type: "raw", frames: [{ filename: "https://aquilla.app/assets/index.js" }] },
+      },
+    ]
+    const out = redactCaptureEvent({
+      event: "$exception",
+      properties: {
+        $exception_list: exceptionList,
+        $current_url: "https://aquilla.app/link/access-token",
+        app_env: "production",
+      },
+    })
+    expect(out?.properties?.$exception_list).toBe(exceptionList)
+    expect(out?.properties?.app_env).toBe("production")
+    expect(out?.properties?.$current_url).toBe(`https://aquilla.app/link/${REDACTED}`)
+  })
+
   it("never drops an event", () => {
     const event = { event: "user logged in", properties: { project_id: "p1" } }
     expect(redactCaptureEvent(event)).toEqual(event)

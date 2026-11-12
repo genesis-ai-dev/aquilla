@@ -1,0 +1,10 @@
+# Same pins as the Modal image in infra/modal/omni_asr.py (see the comments
+# there: fairseq2n 0.6 pins torch 2.8.0, and pyarrow 22+ needs numpy 2).
+omnilingual-asr==0.2.0
+torch==2.8.0
+torchaudio==2.8.0
+pyarrow==21.0.0
+httpx==0.27.2
+fastapi[standard]==0.115.14
+# Only so the server can import shared helpers from infra/modal/omni_asr.py.
+modal

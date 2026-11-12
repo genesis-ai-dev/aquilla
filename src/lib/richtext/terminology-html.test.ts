@@ -123,4 +123,32 @@ describe("decorateTermsInHtml", () => {
     ).querySelector("[data-source-term]")!
     expect(plain.getAttribute("role")).toBeNull()
   })
+
+  // AQU-1272: this path matched the concept's headword STRING, so it disagreed
+  // with enforcement and the stats on affixed / differently-pointed occurrences
+  // and on alternate forms — the plain-text path had the same gap.
+  it("marks a prefixed occurrence of a pointed term with the project's affix inventory", () => {
+    const out = decorateTermsInHtml(
+      "בְּרֵאשִׁית <b>וְהָאָ֗רֶץ</b> הָיְתָה",
+      [concept("הָאָ֗רֶץ")],
+      { termMatching: { prefixes: ["ו", "ה", "ב", "ל"], suffixes: ["ים"] } },
+    )
+    const marks = parse(out).querySelectorAll("[data-source-term]")
+
+    expect(marks).toHaveLength(1)
+    expect(marks[0]).toHaveTextContent("וְהָאָ֗רֶץ")
+    // The entry looks itself up, not the inflection that matched.
+    expect(marks[0].getAttribute("data-source-term")).toBe("הָאָ֗רֶץ")
+  })
+
+  it("marks an alternate form and leaves an excluded one alone", () => {
+    const out = decorateTermsInHtml(
+      "<b>shalom</b> in Graceland",
+      [concept("peace", { match: { forms: ["shalom"], excludedForms: ["Graceland"] } })],
+    )
+    const marks = parse(out).querySelectorAll("[data-source-term]")
+
+    expect(marks).toHaveLength(1)
+    expect(marks[0]).toHaveTextContent("shalom")
+  })
 })

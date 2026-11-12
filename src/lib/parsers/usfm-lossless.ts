@@ -140,6 +140,14 @@ export interface UsfmVerse {
    *  prior verse-boundary event and this \v). Absent/false = continuation.
    *  The verse boundary is never altered — this is a grouping signal only. */
   paragraphStart?: boolean
+  /** AQU-2184: the bare marker name that opened this verse's paragraph —
+   *  "p", "m", "q1", "pi2", "li" … — present exactly when `paragraphStart` is
+   *  and a styling marker (not a lone `\b`) was the one that opened it.
+   *  Absent when a `\c` alone began the group, since a chapter break carries
+   *  no paragraph style of its own. This is the only record of poetry level:
+   *  the marker lives between verse spans, so nothing downstream can tell a
+   *  `\q2` line from a `\p` paragraph without it. */
+  paragraphMarker?: string
   /** AQU-1068: offset of this span's own MARKER — the backslash in `\v 5` —
    *  as opposed to `textStart`, which is the first character after it. Needed
    *  to REMOVE a verse: skipping one by its text offsets alone strips the words
@@ -274,7 +282,15 @@ export function parseUsfmLossless(raw: string, opts?: ParseUsfmOptions): UsfmDoc
   // the verse text content on the same line.
   //
   // Scan backwards from k-1 and stop at the first prior \v or \c.
+  //
+  // AQU-2184: WHICH marker it was, not just that there was one. A bare \q1
+  // ahead of a verse is the only record that the verse opens a poetry line at
+  // level 1 — it sits outside every verse span, so it is gone after import
+  // unless it is captured here. `paragraphStart` alone cannot tell \p from
+  // \q2, which is the difference between prose and an indented poetry line on
+  // the HTML export's page.
   const verseIsParagraphStart = new Set<number>()  // marker-list indices of \v entries
+  const verseParagraphMarker = new Map<number, string>()
   for (let k = 0; k < markers.length; k++) {
     if (markers[k].name !== "v") continue
     for (let j = k - 1; j >= 0; j--) {
@@ -291,8 +307,16 @@ export function parseUsfmLossless(raw: string, opts?: ParseUsfmOptions): UsfmDoc
       // Only count bare paragraph markers (no content on the same line).
       // Content-bearing paragraph markers (e.g. \q2 text) are intra-verse
       // continuations and must not bleed into the next verse.
+      if (mj.name === "b" && mj.rest.trim() === "") {
+        // \b is vertical space, not a paragraph style: it opens a group but
+        // says nothing about prose vs poetry, so keep scanning back for the
+        // marker that does (`\q1` then `\b` then `\v` is still a poetry line).
+        verseIsParagraphStart.add(k)
+        continue
+      }
       if (PARAGRAPH_START_MARKERS.has(mj.name) && mj.rest.trim() === "") {
         verseIsParagraphStart.add(k)
+        verseParagraphMarker.set(k, mj.name)
         break
       }
     }
@@ -341,6 +365,7 @@ export function parseUsfmLossless(raw: string, opts?: ParseUsfmOptions): UsfmDoc
         textEnd,
         markerStart: m.start,
         ...(verseIsParagraphStart.has(i) ? { paragraphStart: true } : {}),
+        ...(verseParagraphMarker.has(i) ? { paragraphMarker: verseParagraphMarker.get(i) } : {}),
       })
       continue
     }

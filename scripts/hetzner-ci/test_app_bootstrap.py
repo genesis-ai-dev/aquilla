@@ -2,7 +2,23 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from app_bootstrap import dependency_identity, clear_source
+from unittest import mock
+import app_bootstrap
+from app_bootstrap import dependency_identity, clear_source, prebuild
+
+
+class ProgressFileTests(unittest.TestCase):
+    def test_each_finished_step_is_appended_for_the_host_runner(self):
+        # The runner polls this file to update the release comment while the
+        # container works; it must be valid JSON after every step.
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(app_bootstrap, 'PROGRESS', Path(tmp) / 'progress.json'), \
+                mock.patch.object(app_bootstrap, 'STEPS', []):
+            app_bootstrap.progress('dependencies', 169.64, 'installed')
+            app_bootstrap.progress('build', 20.7, 'test-mode dist')
+            steps = json.loads((Path(tmp) / 'progress.json').read_text())
+            self.assertEqual([s['name'] for s in steps], ['dependencies', 'build'])
+            self.assertEqual(steps[0], {'name': 'dependencies', 'seconds': 169.6, 'detail': 'installed'})
 
 
 class DependencyCacheTests(unittest.TestCase):
@@ -21,11 +37,23 @@ class DependencyCacheTests(unittest.TestCase):
             manifest.write_text(json.dumps({'scripts': {'postinstall': 'node generate.js'}}))
             self.assertFalse(dependency_identity(root)[1])
 
-    def test_custom_configuration_and_patches_disable_reuse(self):
+    def test_identical_patches_reuse_and_changed_patches_reinstall(self):
+        # A pnpm patch is an exact input like the lockfile. The harness installed
+        # with the same patch applied, so an identical patch must not cost every
+        # job a ~170 s reinstall; a changed patch must.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / 'package.json').write_text('{"pnpm":{"patchedDependencies":{"x":"x.patch"}}}')
-            self.assertFalse(dependency_identity(root)[1])
+            (root / 'package.json').write_text('{"pnpm":{"patchedDependencies":{"x@1.0.0":"patches/x@1.0.0.patch"}}}')
+            (root / 'patches').mkdir()
+            (root / 'patches/x@1.0.0.patch').write_text('--- a\n+++ b\n')
+            before = dependency_identity(root)
+            self.assertTrue(before[1])
+            (root / 'patches/x@1.0.0.patch').write_text('--- a\n+++ b\n+changed\n')
+            self.assertNotEqual(before[0], dependency_identity(root)[0])
+
+    def test_custom_configuration_disables_reuse(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
             (root / 'package.json').write_text('{}')
             for name in ('.npmrc', '.pnpmfile.cjs'):
                 (root / name).write_text('custom')
@@ -57,6 +85,40 @@ class DependencyCacheTests(unittest.TestCase):
             self.assertFalse((root / 'src').exists())
             self.assertFalse((root / 'auth-worker/package.json').exists())
             self.assertFalse((root / 'link').exists())
+
+
+class PrebuildTests(unittest.TestCase):
+    """The build must run before the wrangler workers exist: on the 3.8 GB QA host
+    the two together exceed the container cap, which is how job 1850 died."""
+    ENV = {'VITE_AUTH_BASE': 'http://127.0.0.1:9787', 'VITE_FRONTIER_BASE': 'http://127.0.0.1:9787',
+           'VITE_CHAT_BASE': 'http://127.0.0.1:9787/chat', 'VITE_SYNC_WORKER_HOST': '127.0.0.1:9788',
+           'QA_BUILD_NODE_OPTIONS': '--max-old-space-size=1536'}
+
+    def test_builds_once_with_the_browser_urls_when_e2e_up_can_skip_its_build(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch('app_bootstrap.subprocess.run') as run:
+            root = Path(tmp)
+            (root / 'dist').mkdir()
+            self.assertTrue(prebuild(root, b'... process.env.E2E_PREBUILT_DIST === "1" ...', self.ENV))
+            self.assertFalse((root / 'dist').exists(), 'a stale dist must never be served')
+            run.assert_called_once()
+            args, kwargs = run.call_args
+            self.assertEqual(args[0][:4], ['pnpm', 'exec', 'vite', 'build'])
+            self.assertIn('--mode', args[0]) and self.assertIn('test', args[0])
+            self.assertEqual(kwargs['env']['VITE_AUTH_BASE'], 'http://127.0.0.1:9787')
+            self.assertEqual(kwargs['env']['VITE_GOOGLE_CLIENT_ID'], '')
+            self.assertEqual(kwargs['env']['NODE_OPTIONS'], '--max-old-space-size=1536')
+            self.assertTrue(kwargs['check'])
+
+    def test_an_older_e2e_up_builds_itself_so_nothing_builds_twice(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch('app_bootstrap.subprocess.run') as run:
+            self.assertFalse(prebuild(Path(tmp), b'runOnce("npx", ["vite", "build"])', self.ENV))
+            run.assert_not_called()
+
+    def test_missing_browser_urls_leave_the_build_to_e2e_up(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch('app_bootstrap.subprocess.run') as run:
+            env = {key: value for key, value in self.ENV.items() if key != 'VITE_SYNC_WORKER_HOST'}
+            self.assertFalse(prebuild(Path(tmp), b'E2E_PREBUILT_DIST', env))
+            run.assert_not_called()
 
 
 if __name__ == '__main__':

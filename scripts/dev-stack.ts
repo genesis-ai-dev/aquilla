@@ -22,7 +22,7 @@
 //   * Loads db/postgres/schema.sql into the local Postgres on first create,
 //     and on every later boot reconciles drift additively (CREATE TABLE /
 //     ADD COLUMN IF NOT EXISTS for anything schema.sql has that the live
-//     container lacks — never drops data).
+//     container lacks, CREATE OR REPLACE for its views — never drops data).
 // All steps are safe to run on every boot.
 //
 // Lifecycle: writes a managed `.env.development.local` so the Vite client
@@ -70,7 +70,9 @@ import {
   prepareArtifactBindingSchema,
 } from "./dev-stack-artifact-schema"
 import { parsePgSchema } from "./dev-stack-schema-parser"
+import { reconcilePgViews } from "./dev-stack-schema-views"
 import { finalizeProgressSchema } from "./dev-stack-progress-schema"
+import { finalizeDecisionSchema } from "./dev-stack-decision-schema"
 import {
   resolveConfiguredAgentSandbox,
   type AgentSandboxConnection,
@@ -98,12 +100,23 @@ const SYNC_PORT = Number(process.env.DEV_STACK_SYNC_PORT) || 8789
 // the local auth worker at a deployed sandbox, or let Wrangler start the
 // container locally when a compatible Docker engine is available.
 const AGENT_PORT = Number(process.env.DEV_STACK_AGENT_PORT) || 8790
+// Optional public URL (e.g. a `cloudflared tunnel --url http://127.0.0.1:8789`)
+// for the sync-worker. Cloud services that fetch from it — the Modal
+// Omnilingual zero-shot example audio and diarization — cannot reach
+// 127.0.0.1. When set, identity's SYNC_WORKER_URL and sync's
+// DIARIZATION_PUBLIC_BASE both use it, so the example-URL allow-list matches.
+const SYNC_PUBLIC_URL = process.env.DEV_STACK_SYNC_PUBLIC_URL?.trim().replace(/\/+$/, "") || ""
 const AGENT_SANDBOX_KEY_DEV = "dev-sandbox-key"
 const DEFAULT_VITE_PORT = 5173
 // Scripted OpenRouter mock (scripts/mock-openrouter.ts) — booted when the
 // identity worker has no real OPENROUTER_API_KEY, so the agent/chat paths
 // work end-to-end locally with a deterministic model.
 const MOCK_LLM_PORT = Number(process.env.DEV_STACK_MOCK_LLM_PORT) || 9456
+// ElevenLabs mock (scripts/mock-elevenlabs.ts, AQU-2299) — booted when
+// sync-worker/.dev.vars sets no ELEVENLABS_BASE_URL. ElevenLabs is BYOK, so the
+// mock is what makes the engine usable locally: connect with
+// "test-elevenlabs-key" (see the mock's header for the other test keys).
+const MOCK_ELEVENLABS_PORT = Number(process.env.DEV_STACK_MOCK_ELEVENLABS_PORT) || 9457
 
 // D1→Neon migration (AQU-146): auth-worker + sync-worker bind HYPERDRIVE and
 // swap AQUILLA_PG for a Postgres shim (see auth-worker/src/index.ts). Under
@@ -203,6 +216,14 @@ function identityHasRealOpenRouterKey(): boolean {
   const m = readFileSync(p, "utf8").match(/^OPENROUTER_API_KEY\s*=\s*"?([^"\n]*)"?\s*$/m)
   const key = m?.[1]?.trim() ?? ""
   return key !== "" && key !== "mock"
+}
+
+/** True when sync-worker/.dev.vars points ElevenLabs at a real (or custom) origin. */
+function syncHasElevenLabsBaseUrl(): boolean {
+  const p = path.join(SYNC_DIR, ".dev.vars")
+  if (!existsSync(p)) return false
+  const m = readFileSync(p, "utf8").match(/^ELEVENLABS_BASE_URL\s*=\s*"?([^"\n]*)"?\s*$/m)
+  return (m?.[1]?.trim() ?? "") !== ""
 }
 
 /** Explicit remote/custom sandbox endpoint, if configured for local dev. */
@@ -350,7 +371,12 @@ async function ensurePgSchema(url: string): Promise<void> {
 function backfillMissingLocalProgress(): void {
   const result = spawnSync(
     "npx",
-    ["tsx", "scripts/neon-backfill-progress.ts", "--missing-books"],
+    // AQU-1493: --unreferenced-lines catches Scripture files whose stored line
+    // placements (cell_plan_keys) predate where lines with no reference count
+    // now (added lines with the line above, headings with the verse below). It
+    // walks only files holding such a line, and selects nothing once the
+    // stored rows agree, so later boots pay a read and no rewrite.
+    ["tsx", "scripts/neon-backfill-progress.ts", "--missing-books", "--unreferenced-lines"],
     {
       cwd: REPO_ROOT,
       env: { ...process.env, AQUILLA_DATABASE_URL: PG_URL },
@@ -368,15 +394,15 @@ function backfillMissingLocalProgress(): void {
 }
 
 /**
- * Additive-only drift repair: create tables (plus their indexes) and add
- * columns that schema.sql has but the live container lacks. Never drops or
- * rewrites anything, so it's safe on every boot.
+ * Additive-only drift repair: create tables (plus their indexes), add columns
+ * and (re)create the views that schema.sql has but the live container lacks.
+ * Never drops or rewrites table data, so it's safe on every boot.
  */
 async function reconcilePgSchema(
   client: import("pg").Client,
   schemaSql: string,
 ): Promise<void> {
-  const { tables, indexesByTable } = parsePgSchema(schemaSql)
+  const { tables, indexesByTable, views } = parsePgSchema(schemaSql)
   const { rows } = await client.query(
     `SELECT table_name, column_name FROM information_schema.columns
      WHERE table_schema = 'public'`,
@@ -439,52 +465,44 @@ async function reconcilePgSchema(
   patched.push(...await finalizeSourceBlobSchema(client, run))
   patched.push(...await finalizeChangesetSchema(client, run))
   patched.push(...await finalizeAuthTokenSchema(client, run))
+  patched.push(...await finalizeDecisionSchema(client, run))
 
   if (tables.has("artifact_bindings")) {
     patched.push(...await finalizeArtifactBindingSchema(client, run))
   }
 
-  // AQU-538 (migrations 0057 expand + 0061 contract): the cells PK gained the
-  // target_lang lane. The generic loop above adds the column, but a drifted
-  // container still carries the 4-column PK — and Postgres rejects
-  // `ON CONFLICT (…, target_lang)` without a matching unique constraint,
-  // 500-ing every commit. Local dev has no old workers serving, so we skip the
-  // production expand/contract dance and rebuild the PK straight to the 5-column
-  // form here; all pre-lane rows carry '' so it's trivially unique. Idempotent
-  // (skipped once target_lang is in the PK).
+  // AQU-1420: row identity is lane_id. A container created before that still
+  // has target_lang in the primary key, and Postgres rejects the new
+  // ON CONFLICT (…, lane_id) until the key matches. Local dev has no old
+  // workers serving, so rebuild straight to the lane_id key. Idempotent
+  // (skipped once lane_id is in the PK). lane_id is NOT NULL, so the key
+  // cannot collapse two rows that never received a lane.
   const { rows: pkCols } = await client.query(
     `SELECT a.attname FROM pg_index i
      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
      WHERE i.indrelid = 'cells'::regclass AND i.indisprimary`,
   )
-  if (!(pkCols as { attname: string }[]).some((r) => r.attname === "target_lang")) {
+  if (!(pkCols as { attname: string }[]).some((r) => r.attname === "lane_id")) {
     await run(
       `ALTER TABLE cells DROP CONSTRAINT cells_pkey;
-       ALTER TABLE cells ADD PRIMARY KEY (project_id, file_id, cell_id, side, target_lang)`,
-      "rebuilding the cells primary key with target_lang (migrations 0057+0061)",
+       ALTER TABLE cells ADD PRIMARY KEY (project_id, file_id, cell_id, lane_id)`,
+      "rebuilding the cells primary key on lane_id (AQU-1420)",
     )
-    patched.push("rebuilt cells PK with target_lang")
+    patched.push("rebuilt cells PK on lane_id")
   }
 
-  // AQU-538 (migrations 0058 expand + 0062 contract): cell_validators and file_section_progress gained
-  // target_lang in their PKs so validations and progress rollups are per-lane.
-  // Same rationale as the cells rebuild above — the generic loop adds the
-  // column, but a drifted container keeps the pre-lane PK and Postgres rejects
-  // the lane-qualified `ON CONFLICT` / upsert. All pre-lane rows carry '' so
-  // the new key is trivially unique. Idempotent (skipped once target_lang is
-  // in the PK).
   const { rows: validatorPkCols } = await client.query(
     `SELECT a.attname FROM pg_index i
      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
      WHERE i.indrelid = 'cell_validators'::regclass AND i.indisprimary`,
   )
-  if (!(validatorPkCols as { attname: string }[]).some((r) => r.attname === "target_lang")) {
+  if (!(validatorPkCols as { attname: string }[]).some((r) => r.attname === "lane_id")) {
     await run(
       `ALTER TABLE cell_validators DROP CONSTRAINT cell_validators_pkey;
-       ALTER TABLE cell_validators ADD PRIMARY KEY (project_id, file_id, cell_id, target_lang, username)`,
-      "rebuilding the cell_validators primary key with target_lang (migrations 0058+0062)",
+       ALTER TABLE cell_validators ADD PRIMARY KEY (project_id, file_id, cell_id, lane_id, username)`,
+      "rebuilding the cell_validators primary key on lane_id (AQU-1420)",
     )
-    patched.push("rebuilt cell_validators PK with target_lang")
+    patched.push("rebuilt cell_validators PK on lane_id")
   }
 
   const { rows: progressPkCols } = await client.query(
@@ -492,13 +510,13 @@ async function reconcilePgSchema(
      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
      WHERE i.indrelid = 'file_section_progress'::regclass AND i.indisprimary`,
   )
-  if (!(progressPkCols as { attname: string }[]).some((r) => r.attname === "target_lang")) {
+  if (!(progressPkCols as { attname: string }[]).some((r) => r.attname === "lane_id")) {
     await run(
       `ALTER TABLE file_section_progress DROP CONSTRAINT file_section_progress_pkey;
-       ALTER TABLE file_section_progress ADD PRIMARY KEY (project_id, file_id, scope, section_key, target_lang)`,
-      "rebuilding the file_section_progress primary key with target_lang (migrations 0058+0062)",
+       ALTER TABLE file_section_progress ADD PRIMARY KEY (project_id, file_id, scope, section_key, lane_id)`,
+      "rebuilding the file_section_progress primary key on lane_id (AQU-1420)",
     )
-    patched.push("rebuilt file_section_progress PK with target_lang")
+    patched.push("rebuilt file_section_progress PK on lane_id")
   }
 
   await finalizeProgressSchema(run)
@@ -522,6 +540,9 @@ async function reconcilePgSchema(
     )
     patched.push("rebuilt changesets_status_check with 'committing'")
   }
+
+  // Views last: every table and column they read is in place by now.
+  patched.push(...await reconcilePgViews(client, run, views))
 
   if (patched.length) {
     console.log(
@@ -619,6 +640,19 @@ async function main(): Promise<void> {
     cleanup.push(() => killChildTree(mockLlm))
   }
 
+  const useMockElevenLabs = !WITHOUT_SYNC && !syncHasElevenLabsBaseUrl()
+  if (useMockElevenLabs) {
+    await freePort(MOCK_ELEVENLABS_PORT)
+    console.log(`[dev-stack] starting mock ElevenLabs on :${MOCK_ELEVENLABS_PORT}… (no ELEVENLABS_BASE_URL in sync-worker/.dev.vars)`)
+    const mockElevenLabs = spawn(
+      "npx",
+      ["tsx", "scripts/mock-elevenlabs.ts", String(MOCK_ELEVENLABS_PORT)],
+      { cwd: REPO_ROOT, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } },
+    )
+    attachOutput(mockElevenLabs, "mock-elevenlabs", openLogFile(path.join(LOG_DIR, "mock-elevenlabs.log")), VERBOSE)
+    cleanup.push(() => killChildTree(mockElevenLabs))
+  }
+
   // Boot the agent sandbox worker (best-effort). Its container image builds on
   // first `wrangler dev` and can be slow; if it never comes up we warn and
   // continue rather than tearing the whole stack down. Booted BEFORE identity
@@ -704,7 +738,7 @@ async function main(): Promise<void> {
       // never reaches c.env, so the prod URL from wrangler.toml [vars] would
       // win and local calls would silently hit prod (found independently by
       // both the linked-projects and PD7 live QA passes).
-      "--var", `SYNC_WORKER_URL:http://127.0.0.1:${SYNC_PORT}`,
+      "--var", `SYNC_WORKER_URL:${SYNC_PUBLIC_URL || `http://127.0.0.1:${SYNC_PORT}`}`,
       "--var", "ENVIRONMENT:development",
       // AQU-AGENT §6: point the harness (auth-worker) at the local sandbox
       // service. Only passed when the agent-worker actually came up — absent
@@ -737,7 +771,12 @@ async function main(): Promise<void> {
         // sync-worker also binds HYPERDRIVE → same local Postgres.
         WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: PG_URL,
       },
-      extraArgs: ["--persist-to", PERSIST_DIR],
+      extraArgs: [
+        "--persist-to", PERSIST_DIR,
+        ...(SYNC_PUBLIC_URL ? ["--var", `DIARIZATION_PUBLIC_BASE:${SYNC_PUBLIC_URL}`] : []),
+        // --var (not process env): only `--var` lands in the Worker's env.
+        ...(useMockElevenLabs ? ["--var", `ELEVENLABS_BASE_URL:http://127.0.0.1:${MOCK_ELEVENLABS_PORT}`] : []),
+      ],
       logFile: openLogFile(path.join(LOG_DIR, "sync.log")),
       streamToParent: VERBOSE,
     })
@@ -842,6 +881,11 @@ async function main(): Promise<void> {
       : WITHOUT_MOCK_LLM
         ? `         llm      -> skipped (--no-mock-llm; hosted chat 500s without OPENROUTER_API_KEY)`
         : `         llm      -> OpenRouter (real key from auth-worker/.dev.vars)`,
+    useMockElevenLabs
+      ? `         11labs   -> http://127.0.0.1:${MOCK_ELEVENLABS_PORT}/  (mock — connect with key "test-elevenlabs-key")`
+      : sync
+        ? `         11labs   -> ELEVENLABS_BASE_URL from sync-worker/.dev.vars (bring your own key)`
+        : `         11labs   -> skipped (--no-sync)`,
     `         state    -> ${path.relative(REPO_ROOT, PERSIST_DIR)}/  (delete to reset local Wrangler state)`,
     "[dev-stack] press Ctrl+C to stop",
     "",

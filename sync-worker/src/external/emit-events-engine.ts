@@ -28,6 +28,8 @@ import {
   writeCommittedReceipt,
   type EventsWriteResponse,
 } from './commit-gates'
+import { locateEvents, locateRejections, rejectedWarnings } from './rejected-warnings'
+import { emitEventsTelemetry, reviewTelemetryAllowed, sendReviewTelemetry, telemetrySourceFor } from './review-telemetry'
 import { stageAndRespond } from './stage'
 import { mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
@@ -35,6 +37,10 @@ import { PROJECT_SENTINEL_FILE_ID as PROJECT_SENTINEL } from '../events/authoriz
 import { handleEventsWriteRequest } from '../events/route'
 import { ROLE, requiredRoleForForeignComment, roleLabel } from '../events/role-policy'
 import { resolveCommentFloors } from '../events/comment-floors'
+import { loadProjectSettings } from '../../../db/shared/projects'
+import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
+import { archiveCheckApplies } from '../../../src/lib/lanes/archived-lane'
+import { laneContextFrom, resolveTargetLaneId, stampStoredLaneId } from './external-lane'
 import type { CommentScope, EventKind, RawEvent } from '../events/types'
 import type {
   ChangesetReceipt,
@@ -48,7 +54,6 @@ import type {
   TestimonySummaryEntry,
 } from './types'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
-
 /** Kinds whose payload pins the live target head (and source, for repin). */
 const PIN_KINDS = new Set([
   'cell.validate',
@@ -170,7 +175,16 @@ function collectRefs(events: readonly EmitEventInput[]) {
   const assignmentIds = new Set<string>()
   const conceptIds = new Set<string>()
   for (const e of events) {
-    if (PIN_KINDS.has(e.kind) || e.kind === 'cell.waive' || e.kind === 'cell.unwaive') {
+    if (
+      PIN_KINDS.has(e.kind) ||
+      e.kind === 'cell.waive' ||
+      e.kind === 'cell.unwaive' ||
+      // AQU-1426: HideCell/ShowCell desugar to this kind. It takes no pin (the
+      // event sets a flag and never touches the chain), but the cell has to
+      // still EXIST at commit — the projection's UPDATE would otherwise match
+      // zero rows and land an event with no effect, silently.
+      e.kind === 'source.cell.visibility.set'
+    ) {
       cellRefs.push({ fileId: e.fileId!, cellId: e.cellId!, ...(e.laneId ? { laneId: e.laneId } : {}) })
     }
     if (e.kind === 'comment.create') {
@@ -224,10 +238,35 @@ export async function prepareEmitEvents(
   projectId: string,
   id: string,
   autonomyMode: 'ask' | 'act',
-  cmd: EmitEventsCommand,
+  requested: EmitEventsCommand,
   env: ExternalEnv,
   callerRoleLevel: number,
 ): Promise<Response> {
+  // AQU-1615: a named laneId is lanes.id. Resolve it before head pins, so the
+  // staged plan and its preconditions address the row. A tag is not a lane.
+  let cmd = requested
+  if (requested.events.some((e) => e.laneId !== undefined)) {
+    const projectSettings = await loadProjectSettings(db, projectId)
+    const { visible: visibleLaneIds } = await visibleTagsForMember(
+      db,
+      env.LANE_READ_WALL,
+      projectId,
+      Number(cred.userId),
+      callerRoleLevel,
+    )
+    const laneCtx = laneContextFrom(projectSettings.lanes ?? [], visibleLaneIds)
+    const events = []
+    for (const [i, e] of requested.events.entries()) {
+      if (e.laneId === undefined) {
+        events.push(e)
+        continue
+      }
+      const resolved = resolveTargetLaneId(e.laneId, `events[${i}].laneId`, laneCtx)
+      if (!resolved.ok) return errorResponse('validation_failed', resolved.message)
+      events.push({ ...e, laneId: resolved.lane.id })
+    }
+    cmd = { ...requested, events }
+  }
   const refs = collectRefs(cmd.events)
   const hasTerms = cmd.events.some((e) => TERM_EMIT_KINDS.has(e.kind))
   const [states, files, comments, assignments, concepts, termbaseFloor, commentFloors] = await Promise.all([
@@ -456,7 +495,14 @@ export async function prepareEmitEvents(
         label: '',
       })
   }
-  for (const entry of byKind.values()) entry.label = emitKindEffectLabel(entry.kind, entry.count)
+  for (const entry of byKind.values()) {
+    // AQU-1426: hand the label one representative payload — a kind that carries
+    // a direction (source.cell.visibility.set: hide vs show) cannot be phrased
+    // from kind + count alone. Safe because prepare refuses a plan that mixes
+    // the two directions, so the first event of a group speaks for all of them.
+    const sample = normalized.find((e) => e.kind === entry.kind)?.payload
+    entry.label = emitKindEffectLabel(entry.kind, entry.count, sample)
+  }
   // AQU-1184 guardrail 2: name every staged validation cell-by-cell, with the
   // text as the server currently reads it, so the approver endorses specific
   // sentences rather than a count. Batches are capped at
@@ -494,30 +540,52 @@ export async function prepareEmitEvents(
   })
 }
 
+/** targetLang is the frozen tag; laneId is lanes.id. Both go on the event. */
+function laneFields(stamp: { targetLang?: string; laneId?: string }): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  if (stamp.targetLang !== undefined) out.targetLang = stamp.targetLang
+  if (stamp.laneId !== undefined) out.laneId = stamp.laneId
+  return out
+}
+
+/** AQU-1462: stamp the lane so authorize can refuse an archived one. */
+function withLaneStamp(
+  kind: string,
+  stamp: { targetLang?: string; laneId?: string },
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!archiveCheckApplies(kind)) return payload
+  return { ...payload, ...laneFields(stamp) }
+}
+
 /** Build the compiled payload for one plan event, filling server-resolved pins
  *  from the stored precondition and minted ids from the planned ledger. */
 function compilePayload(
   e: EmitEventInput,
   pin: CellPrecondition | undefined,
   planned: { commentId?: string; assignmentId?: string; conceptId?: string } | undefined,
+  stamp: { targetLang?: string; laneId?: string },
 ): Record<string, unknown> | null {
   switch (e.kind) {
     case 'cell.validate':
       if (!pin?.targetHeadEventId) return null
-      return { editEventId: pin.targetHeadEventId, ...(e.laneId ? { targetLang: e.laneId } : {}) }
+      return { editEventId: pin.targetHeadEventId, ...laneFields(stamp) }
     case 'cell.unvalidate':
       if (!pin?.targetHeadEventId) return null
       return {
         editEventId: pin.targetHeadEventId,
         ...(e.payload.targetUsername !== undefined ? { targetUsername: e.payload.targetUsername } : {}),
-        ...(e.laneId ? { targetLang: e.laneId } : {}),
+        ...laneFields(stamp),
       }
     case 'cell.backtranslation.set':
       if (!pin?.targetHeadEventId) return null
-      return { ...e.payload, targetEventId: pin.targetHeadEventId }
+      return withLaneStamp(e.kind, stamp, { ...e.payload, targetEventId: pin.targetHeadEventId })
     case 'target.cell.repin':
       if (!pin?.targetHeadEventId || !pin.sourceEventId) return null
-      return { sourceEventId: pin.sourceEventId, expectedTargetEventId: pin.targetHeadEventId }
+      return withLaneStamp(e.kind, stamp, {
+        sourceEventId: pin.sourceEventId,
+        expectedTargetEventId: pin.targetHeadEventId,
+      })
     case 'comment.create': {
       const scope: CommentScope =
         e.fileId && e.cellId
@@ -544,10 +612,10 @@ function compilePayload(
       return {
         ...e.payload,
         assignmentId: (e.payload.assignmentId as string | undefined) ?? planned?.assignmentId ?? uuidv7(),
-        ...(e.laneId ? { targetLang: e.laneId } : {}),
+        ...laneFields(stamp),
       }
     case 'assignment.reassign':
-      return { ...e.payload, ...(e.laneId !== undefined ? { targetLang: e.laneId } : {}) }
+      return { ...e.payload, ...laneFields(stamp) }
     case 'term.create':
       return {
         ...e.payload,
@@ -556,7 +624,8 @@ function compilePayload(
     default:
       // comment.edit/delete/resolve, cell.waive/unwaive, file.*,
       // assignment.unassign: the normalized payload IS the wire payload.
-      return { ...e.payload }
+      // AQU-1462 stamps targetLang only for kinds the archive check reads.
+      return withLaneStamp(e.kind, stamp, { ...e.payload })
   }
 }
 
@@ -601,6 +670,18 @@ export async function commitEmitEvents(
       if (e.kind === 'cell.waive' || e.kind === 'cell.unwaive' || (e.kind === 'comment.create' && e.cellId)) {
         const s = states.get(laneCellKey(e.fileId!, e.cellId!, e.kind === 'comment.create' ? undefined : e.laneId))
         if (!s || (!s.sourceExists && !s.targetExists)) {
+          return stale(`events[${i}]: cell ${e.cellId} no longer exists`)
+        }
+      }
+      // AQU-1426 hide/show: the flag lives on the SOURCE row, so a surviving
+      // target row is not enough — a deleted source row means there is nothing
+      // left to park. Deliberately NOT re-checking the cell's current
+      // visibility: the compiled event SETS the flag rather than toggling it, so
+      // a human hiding the same cell between prepare and approval leaves commit
+      // landing exactly the state that was approved.
+      if (e.kind === 'source.cell.visibility.set') {
+        const s = states.get(laneCellKey(e.fileId!, e.cellId!))
+        if (!s?.sourceExists) {
           return stale(`events[${i}]: cell ${e.cellId} no longer exists`)
         }
       }
@@ -654,10 +735,14 @@ export async function commitEmitEvents(
   const eventsByFile = new Map<string, RawEvent[]>()
   const allEventIds: string[] = []
 
+  // A current plan stores lanes.id. An older staged tag is stamped as
+  // targetLang only, so the event still lands.
+  const laneRows = (await loadProjectSettings(db, projectId)).lanes ?? []
   for (const [i, e] of cmd.events.entries()) {
     const planned = cs.plannedIds?.emitEvents?.[i]
     const pin = e.cellId ? pins.get(laneCellKey(e.fileId!, e.cellId, e.laneId)) : undefined
-    const payload = compilePayload(e, pin, planned)
+    const stamp = stampStoredLaneId(e.laneId, laneRows)
+    const payload = compilePayload(e, pin, planned, stamp)
     if (payload === null) {
       return errorResponse('job_failed', `events[${i}]: stored plan is missing its precondition pin`)
     }
@@ -711,12 +796,16 @@ export async function commitEmitEvents(
     }
   }
 
+  // AQU-1571: a refusal names the file and line the agent sent, so it can tell
+  // which validation (say, its own edit) was refused. Comment and term events
+  // were routed under the project sentinel and read back blank.
+  const where = locateEvents([...eventsByFile.values()].flat())
   if (acceptedIds.size === 0 && rejected.length > 0) {
     const anyForbidden = rejected.some((r) => r.status === 403)
     return errorResponse(
       anyForbidden ? 'permission_denied' : 'job_failed',
       'no events were applied',
-      { rejected },
+      { rejected: locateRejections(rejected, where) },
     )
   }
 
@@ -724,10 +813,7 @@ export async function commitEmitEvents(
   const appliedIds = allEventIds.filter((eid) => acceptedIds.has(eid))
   await stampProvenance(db, provenance, appliedIds)
 
-  const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  const warnings: ChangesetWarning[] = [...cs.summary.warnings, ...rejectedWarnings(rejected, where)]
   const receipt: ChangesetReceipt = {
     eventIds: appliedIds,
     appliedCount: appliedIds.length,
@@ -736,5 +822,22 @@ export async function commitEmitEvents(
     committedAt: new Date().toISOString(),
   }
   await writeCommittedReceipt(db, cs.id, receipt, confirmationId)
+
+  // AQU-1572: report the validations that landed — after the terminal write,
+  // and only the accepted events, so a refused, stale or still-staged plan
+  // reports nothing. allEventIds[i] is cmd.events[i]'s compiled id. A
+  // session commit reports only with the person's analytics switch on.
+  if (reviewTelemetryAllowed(request, channel)) {
+    sendReviewTelemetry(
+      env,
+      ctx,
+      cred.username,
+      emitEventsTelemetry(
+        projectId,
+        cmd.events.filter((_, i) => acceptedIds.has(allEventIds[i])),
+        telemetrySourceFor(channel),
+      ),
+    )
+  }
   return Response.json({ receipt })
 }

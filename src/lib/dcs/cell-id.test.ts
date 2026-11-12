@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { v5 as uuidv5 } from "uuid"
-import { DCS_NS, dcsCellId, dcsEventId, dcsFileId } from "./cell-id"
+import { DCS_NS, dcsCellId, dcsEventId, dcsFileId, dcsLegacyFileId } from "./cell-id"
 
 describe("dcs cell-id (deterministic uuidv5, spec §5)", () => {
   it("DCS_NS is a fixed, valid UUID (the never-change namespace)", () => {
@@ -63,10 +63,32 @@ describe("dcs cell-id (deterministic uuidv5, spec §5)", () => {
     expect(inProjA).toBe(dcsEventId("proj-A", "unfoldingWord/en_ult", "84c73ba0", cellId))
   })
 
-  it("dcsFileId is deterministic per (repo, key)", () => {
-    const a = dcsFileId("unfoldingWord/en_ult", "57-TIT.usfm")
-    expect(a).toBe(dcsFileId("unfoldingWord/en_ult", "57-TIT.usfm"))
-    expect(a).toBe(uuidv5("unfoldingWord/en_ult|file|57-TIT.usfm", DCS_NS))
-    expect(a).not.toBe(dcsFileId("unfoldingWord/en_ult", "58-PHM.usfm"))
+  it("dcsFileId is deterministic per (project, repo, key)", () => {
+    const a = dcsFileId("proj-A", "unfoldingWord/en_ult", "57-TIT.usfm")
+    expect(a).toBe(dcsFileId("proj-A", "unfoldingWord/en_ult", "57-TIT.usfm"))
+    expect(a).toBe(uuidv5("proj-A|unfoldingWord/en_ult|file|57-TIT.usfm", DCS_NS))
+    expect(a).not.toBe(dcsFileId("proj-A", "unfoldingWord/en_ult", "58-PHM.usfm"))
+  })
+
+  it("dcsFileId is PROJECT-SCOPED: same (repo,path) in two projects → DIFFERENT file ids", () => {
+    // AQU-1891: the `files` table's PK is the file id ALONE, and file.create
+    // upserts ON CONFLICT(id). Without the project in the seed, the second
+    // project to import a resource lands its file.create on the FIRST
+    // project's rows: it gets cells but no files, its file list is empty and
+    // the source-original upload 404s.
+    const inProjA = dcsFileId("proj-A", "unfoldingWord/en_ult", "57-TIT.usfm")
+    const inProjB = dcsFileId("proj-B", "unfoldingWord/en_ult", "57-TIT.usfm")
+    expect(inProjA).not.toBe(inProjB)
+    // …and the SAME project stays deterministic across calls (idempotent re-import).
+    expect(inProjA).toBe(dcsFileId("proj-A", "unfoldingWord/en_ult", "57-TIT.usfm"))
+  })
+
+  it("dcsLegacyFileId still reproduces the pre-AQU-1891 project-agnostic id", () => {
+    // The read-side compatibility shim: projects imported before the scope
+    // landed hold file rows under this id, and the delta/repair paths must
+    // keep recognising it.
+    const legacy = dcsLegacyFileId("unfoldingWord/en_ult", "57-TIT.usfm")
+    expect(legacy).toBe(uuidv5("unfoldingWord/en_ult|file|57-TIT.usfm", DCS_NS))
+    expect(legacy).not.toBe(dcsFileId("proj-A", "unfoldingWord/en_ult", "57-TIT.usfm"))
   })
 })

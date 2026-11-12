@@ -1,61 +1,8 @@
-import { deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
-
-/** User-facing project health labels — single source of truth. */
-export const PROJECT_STATUS_LABEL = {
-  overdue: "Overdue",
-  behindPlan: "Behind plan",
-  soon: "Due soon",
-  stalled: "Stalled",
-  onTrack: "On track",
-  archived: "Archived",
-} as const
-
-export type ProjectAttentionKind = "overdue" | "behind-plan" | "soon" | "stalled"
-
-export interface ProjectAttentionReason {
-  kind: ProjectAttentionKind
-  label: string
-}
-
-const STALE_MS = 14 * 24 * 60 * 60 * 1000
-
-export type PortfolioActivityStatus = "not-started" | "stalled" | "active"
-
-/**
- * A project with no translated cells hasn't stalled — it just hasn't started
- * yet. We key "not-started" on translation progress (`filledCells`), NOT on a
- * null `lastEditAt`: importing source text stamps `files.last_edit_at` (source
- * cells carry `last_edit_at` = import time), so an imported-but-untranslated
- * project has a non-null `lastEditAt` even though no translation work has
- * happened. Gating on `lastEditAt == null` mislabeled those projects "Stalled"
- * once the import aged past the stale window (AQU-639).
- */
-export function portfolioActivityStatus(p: PortfolioProject, now: number): PortfolioActivityStatus {
-  if (p.filledCells === 0) return "not-started"
-  if (p.lastEditAt == null || now - p.lastEditAt > STALE_MS) return "stalled"
-  return "active"
-}
-
-/** Why an org portfolio project needs attention (deadline + activity). */
-export function portfolioAttentionReasons(p: PortfolioProject, now: number): ProjectAttentionReason[] {
-  const reasons: ProjectAttentionReason[] = []
-  const dl = deadlineStatus(p, now)
-  if (dl === "overdue") reasons.push({ kind: "overdue", label: PROJECT_STATUS_LABEL.overdue })
-  else if (dl === "soon") reasons.push({ kind: "soon", label: PROJECT_STATUS_LABEL.soon })
-  if (portfolioActivityStatus(p, now) === "stalled") {
-    reasons.push({ kind: "stalled", label: PROJECT_STATUS_LABEL.stalled })
-  }
-  // AQU-1097: a project can be comfortably inside its own deadline while units
-  // inside it are already late. That is the thing a PM overseeing many
-  // languages needs to see without opening each project.
-  //
-  // It gets its OWN kind and its own word. Reusing "Overdue" made one label
-  // mean two different things — the rollup count, the attention filter, the
-  // sort rank and the deadline tooltip all still mean the project's own
-  // deadline — so a row could read Overdue while every other surface agreed
-  // the project was fine, and nothing told the reader which was meant.
-  if (dl !== "overdue" && (p.unitsOverdue ?? 0) > 0) {
-    reasons.push({ kind: "behind-plan", label: PROJECT_STATUS_LABEL.behindPlan })
-  }
-  return reasons
-}
+export {
+  PROJECT_STATUS_LABEL,
+  portfolioActivityStatus,
+  portfolioAttentionReasons,
+  type PortfolioActivityStatus,
+  type ProjectAttentionKind,
+  type ProjectAttentionReason,
+} from "@/lib/frontier/portfolio-metrics"

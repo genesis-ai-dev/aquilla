@@ -2,6 +2,7 @@
 //
 //   GET /api/v1/external/projects/:projectId/quality?fileId=&lane=&limit=&offset=
 //   GET /api/v1/external/projects/:projectId/terms/consistency?fileId=&lane=&onlyDrift=1
+//   GET /api/v1/external/projects/:projectId/terms?status=&includeDeleted=1&limit=&cursor=
 //
 // Why this exists: health scoring, coverage and term consistency all shipped
 // in the product but had no API read, so an agent asked "which terms are
@@ -21,6 +22,11 @@
 //                headings/paratextual exclusion when it lands — this route
 //                inherits automatically, by construction. There is no
 //                denominator here to keep in step.
+//   - termbase → delegates to `concepts-read-route.ts`, the SAME internal route
+//                the in-app Terminology surface reads (AQU-1175), so the
+//                termbase an agent lists is byte-for-byte the one a translator
+//                sees — including `matchOptions.forms`, the inflection
+//                variants that decide whether a term matches at all.
 //   - terms    → runs the SPA's own scan, imported from
 //                `src/lib/check/term-consistency-scan.ts` (the same function
 //                the in-app "Check file" pass calls), over cells loaded from
@@ -38,11 +44,13 @@
 // to another project gets `scope_denied` 403.
 
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "../events/lane-id-sql"
+import { applyRenderingLaneScope, renderingLaneScope } from "../events/rendering-lane-scope"
 import { handleHealthRollupRequest } from "../events/health-rollup-route"
 import { handleProgressReadRequest, type FileProgressResponse } from "../events/progress-read-route"
-import { handleConceptsReadRequest } from "../events/concepts-read-route"
+import { handleConceptsReadRequest, type ConceptRowOut } from "../events/concepts-read-route"
 import { handleFilesReadRequest } from "../events/files-read-route"
 import { externalError } from "./errors"
+import { resolveExternalLaneParam } from "./external-lane"
 import { paginate, parsePageParams } from "./pagination"
 import { mintInternalToken } from "./read-routes"
 import {
@@ -60,6 +68,7 @@ import {
 
 const QUALITY_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/quality$/
 const TERM_CONSISTENCY_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/terms\/consistency$/
+const TERMS_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/terms$/
 
 /** Files considered by one project-wide quality read. Matches
  *  health-rollup-route.ts's own MAX_FILES so the two agree on scope. */
@@ -149,8 +158,10 @@ export interface ExternalFileQuality {
   coverage: ExternalFileCoverage
   /** Endorsements a cell needs to count as validated in this project. */
   validationCount: number
-  /** `file-counter-fallback` means the progress projection has no rows for
-   *  this file yet and the `files` counters answered instead. */
+  /** `file-counter-fallback` means this lane has no progress rows yet.
+   *  The total is `files.cell_count`. Filled and validated come from the
+   *  `files` counters when the project has at most one target lane, and are
+   *  0 when it has more, because those counters sum every target lane. */
   coverageSource: FileProgressResponse["source"]
 }
 
@@ -177,12 +188,23 @@ async function handleQuality(
   if (!authed.ok) return authed.response
   const ctx = authed.ctx
   const db = env.AQUILLA_PG as AquillaDb
-  const limited = await checkReadRateLimit(db, ctx.credential.credentialId)
+  const limited = await checkReadRateLimit(db, ctx.credential)
   if (limited) return limited
 
   const url = new URL(request.url)
   const fileIdFilter = url.searchParams.get("fileId")
-  const lane = url.searchParams.get("lane") ?? ""
+  const resolvedLane = await resolveExternalLaneParam(
+    db,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(ctx.credential.userId),
+    ctx.role,
+    url.searchParams.get("lane"),
+    "lane",
+  )
+  if (!resolvedLane.ok) return externalError("validation_failed", resolvedLane.message, 400)
+  const laneId = resolvedLane.lane.id
+  const lane = resolvedLane.lane.legacyTag ?? ""
   const { limit, offset } = parsePageParams(url)
 
   const scope = await resolveScopeFiles(env, ctx, projectId, fileIdFilter)
@@ -190,9 +212,12 @@ async function handleQuality(
 
   // Health: one delegated call covers the whole scope (the rollup route
   // iterates the project's files itself, or one file with ?fileId=).
+  // Always pass the tag, including `''`. A missing health param means every
+  // granted tag when the read wall is on. Progress is the opposite: a missing
+  // param already means the blank bridge, so that query stays omitted below.
   const healthSearch = new URLSearchParams()
   if (fileIdFilter !== null) healthSearch.set("fileId", fileIdFilter)
-  if (lane) healthSearch.set("lane", lane)
+  healthSearch.set("lane", lane)
   const healthRes = await handleHealthRollupRequest(
     await internalRequest(
       env,
@@ -275,7 +300,7 @@ async function handleQuality(
   const page = paginate(perFile, offset, limit)
   return Response.json({
     projectId,
-    lane,
+    laneId,
     /** Same value the project health ring shows: cell-weighted mean over files. */
     projectHealth: health.projectHealth,
     /** Translated cells the health mean was taken over. */
@@ -343,25 +368,51 @@ async function loadScanCells(
   }))
 }
 
-async function loadConcepts(
+/**
+ * The project's termbase, straight off the internal concepts route.
+ *
+ * ONE fetcher for both term surfaces on purpose (AQU-1175): the consistency
+ * scan below and the `/terms` list read must agree on what the termbase IS.
+ * If the list said a concept carried `forms: ["Божого Слова"]` and the scan
+ * ran against a different decode of the same row, an agent would fix a drift
+ * that the check would keep reporting.
+ */
+async function fetchConceptRows(
   env: ExternalReadsEnv,
   ctx: AuthedContext,
   projectId: string,
-): Promise<{ ok: true; concepts: CheckableConcept[] } | { ok: false; response: Response }> {
+  includeDeleted: boolean,
+): Promise<{ ok: true; rows: ConceptRowOut[] } | { ok: false; response: Response }> {
+  const search = includeDeleted ? "includeDeleted=1" : ""
   const res = await handleConceptsReadRequest(
-    await internalRequest(env, ctx, projectId, "", `/api/v1/projects/${encodeURIComponent(projectId)}/concepts`),
+    await internalRequest(
+      env,
+      ctx,
+      projectId,
+      "",
+      `/api/v1/projects/${encodeURIComponent(projectId)}/concepts`,
+      search,
+    ),
     env,
   )
   if (!res) return { ok: false, response: externalError("not_found", "concepts route did not match", 404) }
   if (!res.ok) {
     return { ok: false, response: externalError("validation_failed", await res.text(), res.status) }
   }
-  const body = (await res.json()) as {
-    concepts: { conceptId: string; sourceTerm: string; status: string; renderings: { rendering: string; status: string }[] }[]
-  }
+  const body = (await res.json()) as { concepts?: ConceptRowOut[] }
+  return { ok: true, rows: body.concepts ?? [] }
+}
+
+async function loadConcepts(
+  env: ExternalReadsEnv,
+  ctx: AuthedContext,
+  projectId: string,
+): Promise<{ ok: true; concepts: CheckableConcept[] } | { ok: false; response: Response }> {
+  const fetched = await fetchConceptRows(env, ctx, projectId, false)
+  if (!fetched.ok) return fetched
   return {
     ok: true,
-    concepts: (body.concepts ?? []).map((c) => ({
+    concepts: fetched.rows.map((c) => ({
       id: c.conceptId,
       sourceTerm: c.sourceTerm,
       status: c.status,
@@ -385,12 +436,23 @@ async function handleTermConsistency(
   if (!authed.ok) return authed.response
   const ctx = authed.ctx
   const db = env.AQUILLA_PG as AquillaDb
-  const limited = await checkReadRateLimit(db, ctx.credential.credentialId)
+  const limited = await checkReadRateLimit(db, ctx.credential)
   if (limited) return limited
 
   const url = new URL(request.url)
   const fileIdFilter = url.searchParams.get("fileId")
-  const lane = url.searchParams.get("lane") ?? ""
+  const resolvedLane = await resolveExternalLaneParam(
+    db,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(ctx.credential.userId),
+    ctx.role,
+    url.searchParams.get("lane"),
+    "lane",
+  )
+  if (!resolvedLane.ok) return externalError("validation_failed", resolvedLane.message, 400)
+  const laneId = resolvedLane.lane.id
+  const lane = resolvedLane.lane.legacyTag ?? ""
   const onlyDrift = url.searchParams.get("onlyDrift") === "1"
   const { limit, offset } = parsePageParams(url)
 
@@ -407,7 +469,12 @@ async function handleTermConsistency(
     lane,
   )
 
-  const findings: ExternalTermConsistencyFinding[] = scanTermConsistency(cells, concepts.concepts)
+  const renderingScope = await renderingLaneScope(db, projectId, lane)
+  const laneConcepts = concepts.concepts.map((concept) => ({
+    ...concept,
+    renderings: applyRenderingLaneScope(concept.renderings, renderingScope),
+  }))
+  const findings: ExternalTermConsistencyFinding[] = scanTermConsistency(cells, laneConcepts)
     .map((f) => ({ ...f, consistencyPercent: percent(f.consistentCount, f.totalOccurrences) }))
     .filter((f) => !onlyDrift || f.flaggedCells.length > 0)
 
@@ -416,7 +483,7 @@ async function handleTermConsistency(
   return Response.json({
     projectId,
     fileId: fileIdFilter,
-    lane,
+    laneId,
     /** Source cells the scan ran over (capped — see `truncated`). */
     scannedCells: cells.length,
     truncated: cells.length >= MAX_SCAN_CELLS,
@@ -426,6 +493,99 @@ async function handleTermConsistency(
     flaggedCellCount,
     onlyDrift,
     ...paginate(findings, offset, limit),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/external/projects/:projectId/terms   (AQU-1175)
+// ---------------------------------------------------------------------------
+
+/** Concept statuses a caller may filter on. */
+const TERM_STATUSES: ReadonlySet<string> = new Set(["active", "draft", "deprecated"])
+
+/**
+ * One termbase entry as the Agent API reports it.
+ *
+ * This is `ConceptRowOut` minus `projectId` (it is already in the envelope),
+ * with `matchOptions` PROMOTED to a documented, always-present shape rather
+ * than a nullable blob. That promotion is the point of the read: a `null`
+ * match_options column means "all defaults", and an agent that cannot tell
+ * "no variants configured" from "variants unknown" cannot decide whether a
+ * term needs `forms` adding — which is the whole Ukrainian inflection problem
+ * this ticket exists for.
+ */
+export interface ExternalTermEntry {
+  conceptId: string
+  sourceTerm: string
+  renderings: ConceptRowOut["renderings"]
+  notes: string | null
+  status: ConceptRowOut["status"]
+  caseSensitive: boolean
+  /** Resolved matching options. Absent columns report as `{}`, never null. */
+  matchOptions: NonNullable<ConceptRowOut["matchOptions"]>
+  createdBy: string | null
+  createdAt: number
+  updatedAt: number
+  /** Non-null only on an `includeDeleted=1` read. */
+  deletedAt: number | null
+}
+
+function toTermEntry(row: ConceptRowOut): ExternalTermEntry {
+  return {
+    conceptId: row.conceptId,
+    sourceTerm: row.sourceTerm,
+    renderings: row.renderings,
+    notes: row.notes,
+    status: row.status,
+    caseSensitive: row.caseSensitive,
+    matchOptions: row.matchOptions ?? {},
+    createdBy: row.createdBy,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    deletedAt: row.deletedAt,
+  }
+}
+
+async function handleTermsList(
+  request: Request,
+  env: ExternalReadsEnv,
+  projectId: string,
+): Promise<Response> {
+  const authed = await authenticateAndScope(request, env, projectId)
+  if (!authed.ok) return authed.response
+  const ctx = authed.ctx
+  const db = env.AQUILLA_PG as AquillaDb
+  const limited = await checkReadRateLimit(db, ctx.credential)
+  if (limited) return limited
+
+  const url = new URL(request.url)
+  const status = url.searchParams.get("status")
+  if (status !== null && !TERM_STATUSES.has(status)) {
+    return externalError(
+      "validation_failed",
+      "status must be 'active', 'draft' or 'deprecated'",
+      400,
+    )
+  }
+  const includeDeleted = url.searchParams.get("includeDeleted") === "1"
+  const { limit, offset } = parsePageParams(url)
+
+  const fetched = await fetchConceptRows(env, ctx, projectId, includeDeleted)
+  if (!fetched.ok) return fetched.response
+
+  // Filter BEFORE paginating, so `status=draft` pages through drafts rather
+  // than through whichever drafts happened to land in the first 50 rows.
+  const all = fetched.rows
+    .filter((r) => status === null || r.status === status)
+    .map(toTermEntry)
+
+  return Response.json({
+    projectId,
+    status,
+    includeDeleted,
+    /** Entries matching the filter, before paging. */
+    termCount: all.length,
+    ...paginate(all, offset, limit),
   })
 }
 
@@ -445,6 +605,11 @@ export async function handleExternalQualityRequest(
 
   match = url.pathname.match(TERM_CONSISTENCY_RE)
   if (match) return handleTermConsistency(request, env, decodeURIComponent(match[1]))
+
+  // After TERM_CONSISTENCY_RE: both live under .../terms, and this one is the
+  // shorter path. Each pattern is anchored, so the order is belt-and-braces.
+  match = url.pathname.match(TERMS_RE)
+  if (match) return handleTermsList(request, env, decodeURIComponent(match[1]))
 
   return null
 }

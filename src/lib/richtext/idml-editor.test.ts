@@ -5,11 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { validateIdmlTranslation, type IdmlFormatMetadataV2 } from "@aquilla/idml-roundtrip"
 import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
 import {
+  IDML_PARAGRAPH_NODE_NAME,
   IDML_SLOT_NODE_NAME,
   IDML_TOKEN_NODE_NAME,
   editableIdmlRangesIn,
   hasIdmlCellMetadata,
   idmlDeletionRange,
+  idmlBoundarySlotPosition,
   idmlEditablePlainOffsetPosition,
   idmlEditableSlotOffsetPosition,
   idmlEditorExtensions,
@@ -502,6 +504,114 @@ describe("IDML trailing break caret box", () => {
   })
 })
 
+/**
+ * AQU-1962: Anastasia's Russian BSB cells — a space added between two words
+ * InDesign split across adjacent character runs ("книги" | "Бытие") merged back
+ * together. These assertions hold the invariant on the SCHEMA: a slot document
+ * parsed with no parse options keeps the whitespace at a run boundary, so no
+ * caller has to remember `preserveWhitespace` to avoid losing a translator's
+ * space.
+ */
+describe("boundary whitespace survives the hydrate round trip (AQU-1962)", () => {
+  const BOUNDARY_SOURCE =
+    `<p data-idml-version="2">`
+    + `<span data-idml-slot="0" data-idml-character-style="${STYLE_BODY}" data-idml-protected="slot">of the book</span>`
+    + `<span data-idml-slot="1" data-idml-character-style="${STYLE_GLUE}" data-idml-protected="slot">Genesis</span>`
+    + `</p>`
+
+  const BOUNDARY_METADATA: IdmlFormatMetadataV2 = {
+    version: 2,
+    slotCount: 2,
+    editableSlotIndexes: [0, 1],
+    protectedTokenCount: 0,
+    anchorSequenceHash: createHash("sha256").update([
+      `slot:0:editable:${STYLE_BODY}`,
+      `slot:1:editable:${STYLE_GLUE}`,
+    ].join("\u0000")).digest("hex"),
+  }
+
+  const BOUNDARY_CONFIGURATION = {
+    kind: "ready",
+    context: { sourceHtml: BOUNDARY_SOURCE, metadata: BOUNDARY_METADATA },
+  } satisfies IdmlEditorConfiguration
+
+  const targetWith = (first: string, second: string) =>
+    `<p data-idml-version="2">`
+    + `<span data-idml-slot="0" data-idml-character-style="${STYLE_BODY}" data-idml-protected="slot">${first}</span>`
+    + `<span data-idml-slot="1" data-idml-character-style="${STYLE_GLUE}" data-idml-protected="slot">${second}</span>`
+    + `</p>`
+
+  const hydrate = (targetHtml: string) => {
+    const prepared = prepareIdmlEditorContent(BOUNDARY_CONFIGURATION, targetHtml, "")
+    expect(prepared.error).toBeNull()
+    const editor = createEditor(vi.fn(), prepared.html, BOUNDARY_CONFIGURATION.context)
+    return editor
+  }
+
+  it("keeps a space typed at the END of the preceding run", () => {
+    const editor = hydrate(targetWith("книги ", "Бытие"))
+    expect(serializeIdmlEditorDocument(editor.state.doc))
+      .toBe(targetWith("книги ", "Бытие"))
+    expect(editor.state.doc.textBetween(0, editor.state.doc.content.size)).toBe("книги Бытие")
+  })
+
+  it("keeps a space typed at the START of the following run", () => {
+    const editor = hydrate(targetWith("книги", " Бытие"))
+    expect(serializeIdmlEditorDocument(editor.state.doc))
+      .toBe(targetWith("книги", " Бытие"))
+    expect(editor.state.doc.textBetween(0, editor.state.doc.content.size)).toBe("книги Бытие")
+  })
+
+  it("keeps the space across a re-hydrate from a remote revalidate", () => {
+    const editor = hydrate(targetWith("книги ", "Бытие"))
+    editor.commands.setContent(
+      prepareIdmlEditorContent(BOUNDARY_CONFIGURATION, targetWith("книги", " Бытие"), "").html,
+    )
+    expect(serializeIdmlEditorDocument(editor.state.doc))
+      .toBe(targetWith("книги", " Бытие"))
+  })
+
+  it("still rejects an edit that changes a protected anchor", () => {
+    const onRejected = vi.fn()
+    const editor = createEditor(onRejected)
+    const locked = nodePosition(editor, IDML_SLOT_NODE_NAME, 1) + 1
+    editor.view.dispatch(editor.state.tr.insertText(" ", locked))
+    expect(onRejected).toHaveBeenCalled()
+  })
+})
+
+describe("idmlBoundarySlotPosition (AQU-1962)", () => {
+  it("snaps a caret between two runs into the run before it", () => {
+    const editor = createEditor(vi.fn(), GLUE_TARGET, GLUE_CONTEXT)
+    const slotOne = nodePosition(editor, IDML_SLOT_NODE_NAME)
+    const boundary = slotOne + editor.state.doc.nodeAt(slotOne)!.nodeSize
+    expect(editor.state.doc.resolve(boundary).parent.type.name)
+      .toBe(IDML_PARAGRAPH_NODE_NAME)
+    // One position back is inside the preceding run, at its content end.
+    expect(idmlBoundarySlotPosition(editor.state.doc, boundary)).toBe(boundary - 1)
+  })
+
+  it("takes the following run when the caret opens the paragraph", () => {
+    const editor = createEditor(vi.fn(), GLUE_TARGET, GLUE_CONTEXT)
+    const first = nodePosition(editor, IDML_SLOT_NODE_NAME)
+    expect(idmlBoundarySlotPosition(editor.state.doc, first)).toBe(first + 1)
+  })
+
+  it("leaves a caret already inside a run alone", () => {
+    const editor = createEditor(vi.fn(), GLUE_TARGET, GLUE_CONTEXT)
+    const inside = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+    expect(idmlBoundarySlotPosition(editor.state.doc, inside)).toBeNull()
+  })
+
+  it("resolves nothing at a boundary with no editable run beside it", () => {
+    // Default fixture: slot 0, a protected tab token, then the locked slot 1.
+    const editor = createEditor()
+    const token = nodePosition(editor, IDML_TOKEN_NODE_NAME)
+    const afterToken = token + editor.state.doc.nodeAt(token)!.nodeSize
+    expect(idmlBoundarySlotPosition(editor.state.doc, afterToken)).toBeNull()
+  })
+})
+
 describe("sanitizeIdmlSlotInsertion (AQU-758)", () => {
   it("collapses doubled spaces and drops leading/trailing spaces on paste into an empty slot", () => {
     expect(sanitizeIdmlSlotInsertion("  hello   world  ", "", "", "paste")).toBe("hello world")
@@ -525,8 +635,8 @@ describe("sanitizeIdmlSlotInsertion (AQU-758)", () => {
     expect(sanitizeIdmlSlotInsertion("keep nbsp", "x", "y", "paste")).toBe("keep nbsp")
   })
 
-  it("blocks a leading space typed into an empty slot", () => {
-    expect(sanitizeIdmlSlotInsertion(" ", "", "", "type")).toBe("")
+  it("keeps a space typed as the first character of a slot", () => {
+    expect(sanitizeIdmlSlotInsertion(" ", "", "", "type")).toBe(" ")
   })
 
   it("blocks a second consecutive space typed after an existing space", () => {

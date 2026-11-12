@@ -50,6 +50,13 @@ export interface CompletionBatchProgress {
    * (AQU-361). False while cells are still actively being generated.
    */
   finished: boolean
+  /**
+   * AQU-1377: the run was refused before it started because the AI service is
+   * unreachable. `completeBatch` used to `return` silently here, so clicking
+   * Translate on a selection did nothing at all — no banner, no drafts, no
+   * error. This flag lets the banner say so instead of the click going quiet.
+   */
+  unavailable?: boolean
 }
 
 let _progress: CompletionBatchProgress | null = null
@@ -192,6 +199,29 @@ export function clearBatchCompletionProgress(runId?: number) {
  */
 export function dismissBatchCompletionSummary() {
   setCompletionBatchProgress(null)
+  _abortController = null
+}
+
+/**
+ * AQU-1377: report that a batch was refused before it started because the AI
+ * service is unreachable. Supersedes any retained summary so the newest thing
+ * the user did is what the banner talks about, and marks the pseudo-run
+ * `finished` so nothing treats it as live progress. Dismissed by the same
+ * dismissBatchCompletionSummary() the failure summary uses.
+ */
+export function reportBatchCompletionUnavailable() {
+  // Never talk over a run that is still generating: its progress bar is the more
+  // useful thing on screen, and a refused second click already has that banner
+  // as feedback. Only a finished summary (or an idle store) is replaced.
+  if (_progress && !_progress.finished) return
+  setCompletionBatchProgress({
+    total: 0,
+    done: 0,
+    cancelled: false,
+    failed: 0,
+    finished: true,
+    unavailable: true,
+  })
   _abortController = null
 }
 

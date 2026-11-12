@@ -122,11 +122,13 @@ async function seedMarketing(db: AquillaDb): Promise<{
     .bind(M_PROJECT_ID, userId, ROLE.OWNER, userId)
     .run()
 
-  // AQU-1240 slice 8: first-class lanes must exist before cell writes so the
-  // inserts below resolve a non-NULL lane_id (source lane + '' default target
-  // lane). Idempotent upsert; safe on every reseed.
+  // AQU-1594: the demo is a new project. Source lane plus one target lane
+  // whose legacy tag is the language — not the old `''` bridge.
   await ensureProjectLanes(db, M_PROJECT_ID, {
-    settings: { sourceLanguage: SOURCE_LANG, targetLanguage: TARGET_LANG },
+    lanes: [
+      { role: "source", language: SOURCE_LANG },
+      { role: "target", language: TARGET_LANG, legacyTag: TARGET_LANG },
+    ],
   })
 
   // Idempotent content reseed: drop any prior demo file/cells/events first.
@@ -190,9 +192,9 @@ async function seedMarketing(db: AquillaDb): Promise<{
       .prepare(
         `INSERT INTO cells (project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash, lane_id)
          VALUES (?, ?, ?, 'target', ?, NULL, 'verse', ?, ?, ?, ?, ?, ?, ?, ?, NULL,
-                 (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ''))`,
+                 (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?))`,
       )
-      .bind(M_PROJECT_ID, M_FILE_ID, cellId, target, ref, prevCellId, tgtEventId, srcEventId, M_USERNAME, now, hasTarget ? 1 : 0, words(target), M_PROJECT_ID)
+      .bind(M_PROJECT_ID, M_FILE_ID, cellId, target, ref, prevCellId, tgtEventId, srcEventId, M_USERNAME, now, hasTarget ? 1 : 0, words(target), M_PROJECT_ID, TARGET_LANG)
       .run()
 
     totalWords += words(source) + words(target)

@@ -23,15 +23,52 @@ import {
   sandboxExec,
   sandboxFetchArtifact,
   sandboxReadFile,
+  sandboxTenant,
 } from "../lib/agent/sandbox-client"
 import { MAX_SANDBOX_PROGRAM_CHARS } from "../../../shared/import-contract"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
+import { logVendorTimeout, vendorDeadline } from "../../../shared/vendor-timeouts"
+import { admitLlmCall, legacyLedgers, LlmRefusedError, projectOrgId } from "../lib/billing/paid-llm"
+import { providerRejectedPreModel } from "../lib/billing/chat-usage"
+import { admitSandboxTime, secondsSince } from "../lib/billing/sandbox-meter"
+
+/**
+ * AQU-1848: the sandbox pool refused us because it is saturated, not broken.
+ *
+ * Thrown so every sandbox call in the handler below can be guarded the same
+ * way and still run the shared `finally` cleanup, and caught at the bottom to
+ * answer 503 + Retry-After instead of the generic 502 "parser failed". The
+ * distinction matters to the person: one says "try again in a moment", the
+ * other says "this file cannot be imported".
+ */
+class SandboxBusyError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "SandboxBusyError"
+  }
+}
+
+/**
+ * Fail fast on a saturated pool. `busy` is set by the sandbox client when the
+ * agent-worker answers `pool_busy`; retrying the model against a full pool
+ * would just burn credits and the user's time.
+ */
+function throwIfBusy(outcome: { available: false; reason: string; busy?: boolean }): void {
+  if (outcome.busy) throw new SandboxBusyError(outcome.reason)
+}
 
 const imports = new Hono<{ Bindings: Env; Variables: Variables }>()
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 const MIN_IMPORT_ROLE = 500
 const MAX_INPUT_BYTES = 25 * 1024 * 1024
 const MAX_RESULT_BYTES = 8 * 1024 * 1024
+/** Parser-model output cap — also the bound the meter reserves against. */
+const PARSER_MAX_TOKENS = 10_000
+/** The longest one import can hold its container: artifact copy, the 60 s
+ *  inspection, then two attempts of a 120 s parse, a 10 s size probe and a
+ *  read, plus the model calls in between. Only the reservation; the ledger
+ *  gets the measured seconds. */
+const IMPORT_CONTAINER_MAX_SECONDS = 600
 
 const unitSchema = z.object({
   sourceText: z.string().min(1).max(100_000),
@@ -268,7 +305,7 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
   const user = c.get("user")
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role || role.level < MIN_IMPORT_ROLE) {
-    return c.json({ error: "project_lead_required", message: "Project lead access is required to import files." }, 403)
+    return c.json({ error: "project_lead_required", message: "Project Lead access is required to import files." }, 403)
   }
   if (!c.env.OPENROUTER_API_KEY) {
     return c.json({ error: "import_parser_unavailable", message: "AI import parsing is not configured" }, 503)
@@ -307,62 +344,116 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
     || DEFAULT_LLM_MODEL_ID
   const aiGuard = await runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env)
   if (!aiGuard.ok) return c.json(aiGuard.body, aiGuard.status)
-  const project = await c.env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
-    .bind(projectId).first<{ org_id: number | null }>()
-  const orgId = project?.org_id ?? 0
-  const credits = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
-  if (!credits.ok) {
-    return c.json({ error: "credit_cap_exceeded", reason: credits.reason, message: "LLM credit cap reached. Contact your org admin." }, 429)
+
+  // AQU-2063: each parser-model call is admitted by checkAiEntitlement (which
+  // runs the platform spend ceiling) and settles its usage.cost on the weekly
+  // meter. A refusal ends the import with the 402/503 contract.
+  const projectOrg = await projectOrgId(c.env.AQUILLA_PG, projectId)
+  const orgId = projectOrg ?? 0
+  const paidScope = { orgId: projectOrg, userId: user.id, projectId, rail: "llm" as const }
+  // One ledger per call (paid-call.ts): the legacy credit/word guards and
+  // ledgers are the record only while the meter is off.
+  const legacy = legacyLedgers(c.env, c.req.url)
+  if (legacy) {
+    const credits = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
+    if (!credits.ok) {
+      return c.json({ error: "credit_cap_exceeded", reason: credits.reason, message: "LLM credit cap reached. Contact your org admin." }, 429)
+    }
+    const words = await wordGuard(c.env.AQUILLA_PG, orgId)
+    if (!words.ok) return c.json(wordCapBody(words.reason), 429)
   }
-  const words = await wordGuard(c.env.AQUILLA_PG, orgId)
-  if (!words.ok) return c.json(wordCapBody(words.reason), 429)
+
+  // AQU-2066: container time on the `sandbox` rail. Reserved before a
+  // container can start; settled with the measured seconds once it is gone.
+  // Metered even for an org on its own keys: the container is ours.
+  const containerTime = await admitSandboxTime(
+    c.env.AQUILLA_PG, c.env, { orgId: projectOrg, userId: user.id, projectId }, IMPORT_CONTAINER_MAX_SECONDS,
+    { requestUrl: c.req.url },
+  )
+  if (!containerTime.ok) return c.json(containerTime.body, containerTime.status)
 
   const sessionId = `import-${crypto.randomUUID()}`
+  // AQU-1848: the pool counts concurrency per user, so one project lead cannot
+  // hold every container with back-to-back imports.
+  const tenant = sandboxTenant(user.id)
   const key = r2Key(c.env, projectId, sessionId)
+  const containerStartedAt = Date.now()
   try {
     await c.env.SNAPSHOTS.put(key, bytes, { httpMetadata: { contentType: mime } })
-    const loaded = await sandboxFetchArtifact(c.env, sessionId, { key, path: "/workspace/input" }, signal)
-    if (!loaded.available) throw new Error(loaded.reason)
-    const inspected = await sandboxExec(c.env, sessionId, { language: "python", code: IMPORT_INSPECT_PROGRAM, timeoutMs: 60_000 }, signal)
-    if (!inspected.available) throw new Error(inspected.reason)
+    const loaded = await sandboxFetchArtifact(c.env, sessionId, { key, path: "/workspace/input" }, signal, tenant)
+    if (!loaded.available) {
+      throwIfBusy(loaded)
+      throw new Error(loaded.reason)
+    }
+    const inspected = await sandboxExec(c.env, sessionId, { language: "python", code: IMPORT_INSPECT_PROGRAM, timeoutMs: 60_000 }, signal, tenant)
+    if (!inspected.available) {
+      throwIfBusy(inspected)
+      throw new Error(inspected.reason)
+    }
     if (!inspected.data.ok || !inspected.data.stdout.trim()) {
       throw new Error(inspected.data.stderr || "Sandbox could not inspect the file")
     }
 
     let previousError: string | undefined
     for (let attempt = 0; attempt < 2; attempt++) {
-      const upstream = await fetch(openRouterUrl(c.env), {
-        method: "POST",
-        headers: { Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model,
-          messages: parserPrompt({
-            fileName,
-            mime,
-            sourceLanguage,
-            targetLanguage,
-            inspection: inspected.data.stdout.slice(0, 64 * 1024),
-            previousError,
-          }),
-          temperature: 0,
-          max_tokens: 10_000,
-          stream: false,
-          ...openRouterExtras(c.env.OPENROUTER_BASE_URL, "high"),
-          response_format: { type: "json_object" },
-        }),
-        signal,
+      // AQU-1849: a deadline PER ATTEMPT on the provider's answer
+      // (`stream: false`, so the headers wait for the whole completion),
+      // linked to the client's signal. The outer catch turns a blown one into
+      // the route's import_parser_failed 502, with the vendor named in the logs.
+      const messages = parserPrompt({
+        fileName,
+        mime,
+        sourceLanguage,
+        targetLanguage,
+        inspection: inspected.data.stdout.slice(0, 64 * 1024),
+        previousError,
       })
+      const call = await admitLlmCall(c.env.AQUILLA_PG, c.env, paidScope, {
+        model,
+        promptChars: messages.reduce((n, m) => n + m.content.length, 0),
+        maxOutputTokens: PARSER_MAX_TOKENS,
+      }, { requestUrl: c.req.url })
+      if (!call.ok) throw new LlmRefusedError(call)
+      const deadline = vendorDeadline("openRouterNonStreaming", signal)
+      let upstream: Response
+      try {
+        upstream = await fetch(openRouterUrl(c.env), {
+          method: "POST",
+          headers: { Authorization: `Bearer ${call.apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: 0,
+            max_tokens: PARSER_MAX_TOKENS,
+            stream: false,
+            ...openRouterExtras(c.env.OPENROUTER_BASE_URL, "high"),
+            response_format: { type: "json_object" },
+          }),
+          signal: deadline.signal,
+        })
+
+      } catch (err) {
+        if (deadline.timedOut()) logVendorTimeout("openRouterNonStreaming", err)
+        throw err
+      } finally {
+        deadline.clear()
+      }
       if (!upstream.ok) {
         const detail = await upstream.text().catch(() => "")
+        // A gateway-side 4xx proves no generation ran; anything else stays held.
+        if (providerRejectedPreModel(upstream.status, detail)) await call.release()
         throw new Error(detail.slice(0, 500) || `Parser model returned ${upstream.status}`)
       }
       const body = await upstream.json() as {
         choices?: Array<{ message?: { content?: string } }>
         usage?: { cost?: number }
       }
-      const rawCostCents = typeof body.usage?.cost === "number" && body.usage.cost > 0 ? body.usage.cost * 100 : 1
-      await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", rawCostCents, 1)
-      await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", countWords(fileName))
+      const settled = await call.settleFrom(body)
+      if (legacy) {
+        const rawCostCents = settled !== undefined && settled > 0 ? settled : 1
+        await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", rawCostCents, 1)
+        await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", countWords(fileName))
+      }
       const content = body.choices?.[0]?.message?.content
       if (!content) {
         previousError = "The model returned no parser program"
@@ -382,8 +473,9 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
         language: "python",
         code: `${cleanup}${proposal.code}`,
         timeoutMs: 120_000,
-      }, signal)
+      }, signal, tenant)
       if (!executed.available) {
+        throwIfBusy(executed)
         previousError = executed.reason.slice(0, 1000)
         continue
       }
@@ -395,7 +487,8 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
         language: "python",
         code: "from pathlib import Path\nprint(Path('/workspace/result.json').stat().st_size)",
         timeoutMs: 10_000,
-      }, signal)
+      }, signal, tenant)
+      if (!measured.available) throwIfBusy(measured)
       const resultBytes = measured.available && measured.data.ok
         ? Number(measured.data.stdout.trim())
         : Number.NaN
@@ -409,8 +502,9 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
         previousError = `Parser output exceeded ${MAX_RESULT_BYTES} bytes`
         continue
       }
-      const result = await sandboxReadFile(c.env, sessionId, "/workspace/result.json", MAX_RESULT_BYTES, signal)
+      const result = await sandboxReadFile(c.env, sessionId, "/workspace/result.json", MAX_RESULT_BYTES, signal, tenant)
       if (!result.available) {
+        throwIfBusy(result)
         previousError = result.reason.slice(0, 1000)
         continue
       }
@@ -448,16 +542,32 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
     }
     throw new Error(previousError || "The sandbox parser could not produce a valid import")
   } catch (error) {
+    if (error instanceof LlmRefusedError) {
+      return c.json(error.refusal.body, error.refusal.status)
+    }
+    if (error instanceof SandboxBusyError) {
+      // Transient saturation, not a bad file. Say so, and say when to retry —
+      // this is the "waiting for a sandbox" state the user sees.
+      console.warn("Sandbox import deferred — pool saturated:", error.message)
+      return c.json({
+        error: "sandbox_busy",
+        message: error.message,
+      }, 503, { "Retry-After": "15" })
+    }
     console.error("Sandbox import parsing failed:", error)
     return c.json({
       error: "import_parser_failed",
-      message: error instanceof Error ? error.message : String(error),
+      message: "The sandbox parser could not produce a valid import",
     }, 502)
   } finally {
     await Promise.allSettled([
       c.env.SNAPSHOTS.delete(key),
       sandboxDestroy(c.env, sessionId),
     ])
+    // From the first container call until teardown returned: the span the
+    // container could be running. A pool refusal still settles its few
+    // seconds rather than proving no container ran.
+    await containerTime.settleSeconds(secondsSince(containerStartedAt))
   }
 })
 

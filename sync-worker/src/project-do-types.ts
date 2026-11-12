@@ -10,6 +10,7 @@ export type OutboxEventKind =
   | "source.cell.delete"
   | "source.cell.reorder"
   | "source.cell.metadata.patch"
+  | "source.cell.restore"
   | "target.cell.create"
   | "target.cell.commit"
   | "target.cell.delete"
@@ -25,11 +26,16 @@ export type OutboxEventKind =
   // gating anything, so nothing broke; caught while adding AQU-490's pair.
   | "cell.audio.rename"
   | "cell.audio.trim"
+  | "cell.audio.gain"
   | "cell.audio.place"
+  | "cell.audio.cut"
   | "cell.audio.measure"
   | "cell.audio.validate"
   | "cell.audio.unvalidate"
   | "file.create"
+  // AQU-2308: hand-set milestones (file-scoped, non-chain-mutating).
+  | "file.milestone.set"
+  | "file.milestone.remove"
 
 export interface OutboxRawEvent {
   id: string

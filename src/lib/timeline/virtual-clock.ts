@@ -35,6 +35,7 @@
 
 import { useSyncExternalStore } from "react"
 import type { VideoController } from "./video-controller"
+import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
 
 /**
  * How often the position is republished.
@@ -76,7 +77,45 @@ let durationSec = 0
 let driving = false
 let timer: ReturnType<typeof setInterval> | null = null
 
+/**
+ * AQU-2251: a stretch the clock jumps — from anywhere in [start, end) straight
+ * to `to`, the start of the next line it plays (Infinity: the clock's end).
+ * Sorted and apart; worked out by silent-lines' `clockJumps`.
+ */
+export interface ClockJump {
+  start: number
+  end: number
+  to: number
+}
+
+/**
+ * AQU-2251 ("Skip lines with nothing to play"): the stretches this clock jumps.
+ *
+ * WALKED IN `computeSec`, NOT APPLIED AFTER A BEAT. The position is worked out
+ * from the wall clock, so the jumps have to be part of that sum: a beat that
+ * comes late — a background tab runs timers once a second — still lands where
+ * a clock that skipped the silence would be, rather than having played it,
+ * and no beat publishes a position inside a stretch it skips. Seeking from an
+ * effect after each beat got both wrong, and waited on a render each time.
+ */
+let jumps: readonly ClockJump[] = []
+
 const listeners = new Set<() => void>()
+
+/**
+ * THE CLOCK TAKES THE FLOOR WHEN IT STARTS (2026-09-30). One sound at a time:
+ * a take playing on a waveform, or a chip's preview, stops when the timeline
+ * starts — the play queue has done this since 09-29, and a subtitle file with
+ * neither film nor source audio runs on this clock instead, so pressing play
+ * there left the take sounding under the timeline (found in the throttled
+ * browser pass). Holding the floor also means the next thing to start stops
+ * the clock. Released on pause, stop and at the end, like a chip preview.
+ */
+const clockAudio: ActiveAudioController = {
+  isPlaying: () => getVirtualClockPlaying(),
+  play: async () => { virtualClockPlay() },
+  pause: () => { virtualClockPause() },
+}
 
 /**
  * Republish, then wake the subscribers — in that order, always.
@@ -102,8 +141,36 @@ function subscribe(listener: () => void): () => void {
 function computeSec(): number {
   if (!playing) return anchorSec
   const elapsed = (performance.now() - anchorMs) / 1000
-  const raw = anchorSec + elapsed * rate
+  const raw = walk(anchorSec, elapsed * rate)
   return durationSec > 0 ? Math.min(raw, durationSec) : raw
+}
+
+/** Where `by` seconds of playing take the clock from `from`, over every jump on
+ *  the way in no time. A jump to the end waits for a known end. */
+function walk(from: number, by: number): number {
+  let pos = from
+  let left = by
+  for (let i = firstJumpEndingAfter(pos); i < jumps.length; i++) {
+    const j = jumps[i]
+    if (j.start > pos + left) break
+    const to = Number.isFinite(j.to) ? j.to : durationSec > 0 ? durationSec : null
+    if (to == null) break
+    if (j.start > pos) left -= j.start - pos
+    pos = Math.max(pos, to)
+  }
+  return pos + left
+}
+
+/** The first jump that ends after `sec` (the jumps are sorted and apart). */
+function firstJumpEndingAfter(sec: number): number {
+  let lo = 0
+  let hi = jumps.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (jumps[mid].end > sec) hi = mid
+    else lo = mid + 1
+  }
+  return lo
 }
 
 /** Re-anchor at the CURRENT position. Called on every change that would
@@ -144,6 +211,7 @@ export function tickVirtualClock(): void {
     reanchor(durationSec)
     playing = false
     stopTimer()
+    clearActiveAudioIf(clockAudio)
   }
   notify()
 }
@@ -173,6 +241,8 @@ export function stopVirtualClock(): void {
   driving = false
   playing = false
   anchorSec = 0
+  jumps = []
+  clearActiveAudioIf(clockAudio)
   notify()
 }
 
@@ -184,6 +254,7 @@ export function virtualClockPlay(): void {
   playing = true
   reanchor(anchorSec)
   startTimer()
+  claimActiveAudio(clockAudio)
   notify()
 }
 
@@ -192,6 +263,7 @@ export function virtualClockPause(): void {
   reanchor()
   playing = false
   stopTimer()
+  clearActiveAudioIf(clockAudio)
   notify()
 }
 
@@ -200,6 +272,25 @@ export function virtualClockSeek(sec: number): void {
   const clamped = Number.isFinite(sec) ? Math.max(0, durationSec > 0 ? Math.min(sec, durationSec) : sec) : 0
   reanchor(clamped)
   notify()
+}
+
+/**
+ * A timeline seek on a file the clock owns (AQU-1118). Every seek moves the
+ * head; only "Play from this cue" (`play`) also starts the clock, so that
+ * button means "play from here" on a film-less file exactly as it does on a
+ * linked video (AQU-1117). A chip click or a table-row click passes no `play`
+ * and stays cue-only.
+ *
+ * Never starts while the recorder is open: the take owns the device, and
+ * nothing auto-resumes once it closes. Already playing, it jumps and keeps
+ * playing, because `virtualClockPlay` is a no-op on a running clock.
+ */
+export function virtualClockSeekFromTimeline(
+  sec: number,
+  opts: { play?: boolean; recorderOpen: boolean },
+): void {
+  virtualClockSeek(Math.max(0, sec))
+  if (opts.play === true && !opts.recorderOpen) virtualClockPlay()
 }
 
 /** Rate re-anchors FIRST, so the seconds already elapsed keep their old rate
@@ -215,6 +306,15 @@ export function setVirtualClockVolume(next: number): void {
   const clamped = Math.max(0, Math.min(1, next))
   if (!Number.isFinite(next) || volume === clamped) return
   volume = clamped
+  notify()
+}
+
+/** AQU-2251: hand the clock the stretches it jumps (null: none). Re-anchors
+ *  first while playing, so the time already played keeps the jumps it had
+ *  rather than being walked again over the new ones. */
+export function setVirtualClockJumps(next: readonly ClockJump[] | null): void {
+  if (playing) reanchor()
+  jumps = next ?? []
   notify()
 }
 
@@ -278,6 +378,8 @@ export function resetVirtualClockForTests(): void {
   rate = 1
   volume = 1
   durationSec = 0
+  jumps = []
+  clearActiveAudioIf(clockAudio)
   notify()
 }
 

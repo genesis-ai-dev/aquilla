@@ -10,6 +10,7 @@ export const nav = defineNamespace({
     // switch (AQU-353). Shared by every entry point that toggles this lens so
     // the name can never drift ("Audio" vs the old sidebar "Voice"). --
     "nav.lens.audio": "Audio",
+    "nav.lens.transcribe": "Transcribe",
     "nav.lens.media": "Media",
 
     // -- NavHistoryControls: back/forward arrows + hold-for-history popover --
@@ -27,10 +28,10 @@ export const nav = defineNamespace({
     "nav.historyControls.noPreviouslyViewed": "No previously viewed pages",
 
     // -- AccountSwitcher: account menu + auth dialogs --
-    "nav.account.addTitle": "Add Frontier account",
-    "nav.account.loginTitle": "Log in to Frontier",
-    "nav.account.signupTitle": "Create a Frontier account",
-    "nav.account.newToFrontier": "New to Frontier?",
+    "nav.account.addTitle": "Add Aquilla account",
+    "nav.account.loginTitle": "Log in to Aquilla",
+    "nav.account.signupTitle": "Create an Aquilla Account",
+    "nav.account.newToFrontier": "New to Aquilla?",
     "nav.account.menuLabel": "Account menu: {username}",
     "nav.account.preferences": "Preferences",
     "nav.account.addAnotherAccount": "Add another account",
@@ -49,13 +50,18 @@ export const nav = defineNamespace({
     "nav.help.docs": "Help",
     "nav.help.discord": "Discord server",
     "nav.help.contactSupport": "Contact support",
-    "nav.help.report": "Report",
+
+    // -- Feedback (AQU-1548): the Help menu's last item, which opens the
+    // report dialog. It replaced the "Report" label (nav.help.report, removed)
+    // when AQU-1028's standalone shell button was folded back into the menu. --
+    "nav.feedback.buttonLabel": "Feedback",
 
     // -- LeftDock: tab rail + expand affordance --
     "nav.dock.filesTab": "Files",
     "nav.dock.agentTab": "Agent",
     "nav.dock.agentUnread": "{count} unread",
     "nav.dock.expandSidebar": "Expand sidebar",
+    "nav.dock.hidePanel": "Hide sidebar panel",
     "nav.shell.openSidebar": "Open sidebar",
     "nav.shell.navigation": "Navigation",
 
@@ -127,23 +133,31 @@ export const nav = defineNamespace({
     "nav.workspaceActions.batchValidateAudio.description": plural({
       one: "Adds your validation to {takes} take that you have not signed off yet. Generated voices are skipped.",
       other: "Adds your validation to {takes} takes that you have not signed off yet. Generated voices are skipped.",
-    }),
+    }, "takes"),
     "nav.workspaceActions.batchValidate.title": "Batch validate text",
-    "nav.workspaceActions.batchValidate.description": plural(
+    // AQU-1507: the old `…batchValidate.description` promised the file's whole
+    // unvalidated count — untranslated cells and cells already signed off by
+    // the reader included — while the run validates only what
+    // `isBulkValidatableByMe` accepts. It is replaced (not reworded) so the
+    // translated catalogs cannot keep serving the number that was wrong: this
+    // key states what THIS run will do, and the skipped cells are named by the
+    // shared `editor.batchValidate.skip.*` clauses after it.
+    "nav.workspaceActions.batchValidate.willValidate": plural(
       {
         one:
-          "This marks eligible human-authored or human-edited cells as validated " +
-          "under your name. Untouched AI drafts are excluded and still need " +
-          "individual review. ({unvalidated} cell is currently unvalidated.)",
+          "This validates {count} eligible cell under your name — committed " +
+          "text you have not signed off yet.",
         other:
-          "This marks eligible human-authored or human-edited cells as validated " +
-          "under your name. Untouched AI drafts are excluded and still need " +
-          "individual review. ({unvalidated} cells are currently unvalidated.)",
+          "This validates {count} eligible cells under your name — committed " +
+          "text you have not signed off yet.",
       },
-      "unvalidated",
+      "count",
     ),
-    // Optional trailing clause (AQU-586 per-run cap), concatenated after the
-    // description above — same composition as moreAfterThis.
+    "nav.workspaceActions.batchValidate.nothingToValidate":
+      "Nothing in this file can be batch-validated right now.",
+    // Optional trailing clause (AQU-586 per-run cap), concatenated last in the
+    // confirmation body built from the keys above — same composition as
+    // moreAfterThis.
     "nav.workspaceActions.batchValidate.capNote": plural(
       {
         one:
@@ -156,7 +170,6 @@ export const nav = defineNamespace({
       "cap",
     ),
     "nav.workspaceActions.export": "Export",
-    "nav.workspaceActions.importIntoFile": "Import target translations into this file",
     "nav.workspaceActions.transcribeAll.label": "Transcribe all audio",
     "nav.workspaceActions.transcribeAll.title": "Transcribe all audio in this file",
     "nav.workspaceActions.transcribeAll.description": plural(
@@ -181,6 +194,44 @@ export const nav = defineNamespace({
       "n",
     ),
     "nav.workspaceActions.synthAll.confirmLabel": "Generate audio",
+    "nav.workspaceActions.changeVoiceAll.label": "Change voice of existing audio",
+    "nav.workspaceActions.changeVoiceAll.title": "Change voice",
+    "nav.workspaceActions.changeVoiceAll.description": plural(
+      {
+        one:
+          "Converts {n} cell to its assigned character or trained voice. A take " +
+          "already in that voice stays. Nothing is generated from text.",
+        other:
+          "Converts {n} cells to each assigned character or trained voice. A take " +
+          "already in that voice stays. Nothing is generated from text.",
+      },
+      "n",
+    ),
+    "nav.workspaceActions.changeVoiceAll.confirmLabel": "Change voice",
+    // AQU-1759: split every line that mixes narration and quoted speech.
+    "nav.workspaceActions.splitQuotes.label": "Split lines at quotes",
+    "nav.workspaceActions.splitQuotes.title": "Split lines at their quotation marks?",
+    "nav.workspaceActions.splitQuotes.description": plural({
+      one:
+        "{count} line in this file holds more than one speaker. Split at its quotation marks it " +
+        "becomes {lines} lines, so each speaker can have their own voice. Every language lane shares " +
+        "the new lines. Every existing translation is marked for review, so it has to be done again. " +
+        "A translation that splits the same way is divided between the new lines. Any other stays " +
+        "whole on the first line.",
+      other:
+        "{count} lines in this file hold more than one speaker. Split at their quotation marks they " +
+        "become {lines} lines, so each speaker can have their own voice. Every language lane shares " +
+        "the new lines. Every existing translation is marked for review, so it has to be done again. " +
+        "A translation that splits the same way is divided between the new lines. Any other stays " +
+        "whole on the first line.",
+    }),
+    "nav.workspaceActions.splitQuotes.multiLaneWarning":
+      "Splitting changes the source all language lanes share. Each language lane's translations of " +
+      "these lines are marked so they have to be done again, and each language lane keeps the voice " +
+      "it already gave a line on that line's new narration.",
+    "nav.workspaceActions.splitQuotes.none":
+      "No line in this file holds more than one speaker at its quotation marks, so there is nothing to split.",
+    "nav.workspaceActions.splitQuotes.confirmLabel": "Split lines",
     // AQU-365: the checkbox on the workspace-action confirmation dialog above
     // (distinct from ConfirmActionDialog's generic default, since this one
     // names WHY the checkbox matters — attribution). e2e asserts this exact
@@ -198,6 +249,15 @@ export const nav = defineNamespace({
     "nav.workspaceActions.deleteFile.confirmLabel": "Move to Recently deleted",
 
     // -- ProjectWorkspace: fileMenuItems (chapter-row "File options" ⋯ menu) --
+    // AQU-358: headings naming each run of items in the chapter-row ⋯ menu.
+    // The menu absorbed what used to be a labelled chevron dropdown sitting
+    // beside it, so the groups say what they hold instead of being divided by
+    // anonymous lines.
+    "nav.fileMenu.section.editorTools": "Editor tools",
+    "nav.fileMenu.section.runs": "Run on this file",
+    "nav.fileMenu.section.view": "View & navigate",
+    "nav.fileMenu.section.file": "This file",
+
     "nav.fileMenu.diarizing": "Diarizing…",
     "nav.fileMenu.applying": "Applying…",
     "nav.fileMenu.diarizeFailed": "Diarize failed",
@@ -218,8 +278,6 @@ export const nav = defineNamespace({
     "nav.version.copiedAriaLabel": "Build info copied",
     "nav.version.copyAriaLabel": "Copy build info",
     "nav.version.copiedLabel": "Copied",
-    "nav.version.copiedTooltip": "Copied to clipboard",
-    "nav.version.copyTooltip": "Click to copy\n{buildInfo}",
 
     // -- EnvironmentTag: non-production backend warning beside the build info --
     "nav.environment.development": "Dev data",
@@ -244,7 +302,7 @@ export const nav = defineNamespace({
     "nav.beta.title": "Heads up — we're in beta",
     "nav.beta.description":
       "Things might move around, break, or change without warning. That's the deal for now.",
-    "nav.beta.pointEvolving": "The UI is actively evolving",
+    "nav.beta.pointEvolving": "The UI is changing",
     "nav.beta.pointFeatures": "Features may appear or disappear",
     "nav.beta.pointFeedback": "Your feedback shapes what we build next",
     "nav.beta.joinDiscord": "Join our Discord",
@@ -254,7 +312,7 @@ export const nav = defineNamespace({
     "nav.report.descriptionEnabled":
       "Describe what went wrong. Your report will be sent along with session context.",
     "nav.report.descriptionDisabled":
-      "Analytics are off — your report won't be sent automatically. You can copy it to share manually.",
+      "Analytics are off, so no session replay is attached — your message still reaches the Aquilla team.",
     "nav.report.thanks": "Thanks — report received.",
     "nav.report.replayLinked": "Session replay linked to the report.",
     "nav.report.descriptionFieldLabel": "Description",
@@ -262,8 +320,21 @@ export const nav = defineNamespace({
     "nav.report.descriptionRequired": "Description is required",
     "nav.report.capturedContext": "Captured context:",
     "nav.report.analyticsOffNotice":
-      "Usage data collection is off. Enable it in Preferences if you'd like reports to be sent automatically — or use \"Copy report\" to share it manually.",
+      "Usage data collection is off, so this report carries no session replay. Enable it in Preferences if you'd like future reports to include one.",
     "nav.report.sendReport": "Send report",
+    "nav.report.sending": "Sending…",
+    "nav.report.sendFailed":
+      "Couldn't send your report. Check your connection and try again, or copy it to share another way.",
+    "nav.report.notDelivered":
+      "Report received, but this environment has no mail delivery configured — the team won't be emailed.",
+    "nav.report.attachScreenshot": "Attach a screenshot",
+    "nav.report.capturingScreenshot": "Choose what to share…",
+    "nav.report.retakeScreenshot": "Retake",
+    "nav.report.removeScreenshot": "Remove screenshot",
+    "nav.report.screenshotAttached": "Screenshot attached",
+    "nav.report.screenshotAlt": "Screenshot attached to this report",
+    "nav.report.screenshotFailed":
+      "Couldn't capture a screenshot. You can still send the report without one.",
     "nav.report.copyReport": "Copy report",
     "nav.report.copied": "Copied!",
 
@@ -272,16 +343,20 @@ export const nav = defineNamespace({
     "nav.fileRow.expandSections": "Expand sections",
     "nav.fileRow.collapse": "Collapse",
     "nav.fileRow.expand": "Expand",
-    "nav.fileRow.timelineOrderedTooltip": "Timeline-ordered (timecodes are the spine)",
-    "nav.fileRow.timelineOrderedFile": "Timeline-ordered file",
     "nav.fileRow.importedAsTooltip": "{name} (imported as {originalName})",
     "nav.fileRow.progressAriaLabel": "{translated}% translated, {validated}% validated",
+    "nav.fileRow.audioProgressAriaLabel": "{recorded}% recorded, {audioValidated}% audio validated",
+    "nav.fileRow.progressWithAudioAriaLabel":
+      "{translated}% translated, {validated}% validated, {recorded}% recorded, {audioValidated}% audio validated",
     "nav.fileRow.fileActions": "File actions",
     // Export menu item reuses nav.workspaceActions.export (same phrase, same act).
     // Assign-work menu item reuses dialog.assign.title (same phrase, same act).
-    "nav.fileRow.suggestionTooltip":
-      "A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar.",
     "nav.fileRow.applyRenameSuggestion": "Apply rename suggestion",
+    // AQU-1569: the keyboard/touch route to the same reorder the drag does.
+    "nav.fileRow.moveUp": "Move up",
+    "nav.fileRow.moveDown": "Move down",
+    "nav.fileRow.notAssignedToYou": "Not assigned to you. You can still open it.",
+    "nav.fileRow.notAssignedTooltip": "{name} — not assigned to you. You can still open it.",
 
     // -- ExpandableFileList --
     "nav.fileList.filterFiles": "Filter files",
@@ -293,7 +368,17 @@ export const nav = defineNamespace({
     "nav.fileList.collapseGroup": "Collapse {group}",
     "nav.fileList.renameGroup": "Rename {group}",
     "nav.fileList.ungroupedLabel": "Ungrouped",
-    "nav.fileList.jumpToTestament": "Jump to Testament",
+    "nav.fileList.jumpToTestament": "Jump to testament",
+
+    // -- ExpandableFileList: hand-placed file order (AQU-1569) --
+    "nav.fileList.reorderHandle": "Reorder {name}",
+    "nav.fileList.reorderWrongGroup": "A file can only be reordered inside its own group. Use \u201cMove to corpus\u2026\u201d to put it somewhere else.",
+    "nav.fileList.regroupHint": "Drop to move {name} into {group}.",
+    "nav.fileList.regroupStaysInGroup": "{name} is filed under {group} by its book code, so it cannot be moved out of it this way. Rename the group, or give the file a group of its own.",
+    "nav.fileList.resetOrder": "Reset the order of {group}",
+    "nav.fileList.resetOrderTitle": "Put {group} back in automatic order?",
+    "nav.fileList.resetOrderDescription": "The files in this group go back to the order Aquilla picks for them. Everyone on the project sees the change. Nothing else about the files is touched.",
+    "nav.fileList.resetOrderConfirm": "Reset order",
 
     // -- OutboxInspectorPopover --
     "nav.outbox.popoverAriaLabel": "Pending changes",
@@ -344,7 +429,7 @@ export const nav = defineNamespace({
     "nav.outbox.allCaughtUpTitle": "You’re all caught up",
     "nav.outbox.allCaughtUpDescription": "Every local change has been synced.",
     "nav.outbox.overflowMore": "+{count} more queued…",
-    "nav.outbox.footerPending": "Edits stay saved locally until they sync.",
+    "nav.outbox.footerPending": "Edits stay saved on this device until they sync.",
     "nav.outbox.footerSynced": "Local changes sync automatically.",
     "nav.outbox.statusPending": "Pending",
     "nav.outbox.statusRetrying": "Retrying",
@@ -409,19 +494,26 @@ export const nav = defineNamespace({
           "long translation there only affects the tooltip/aria-label, not layout).",
       },
 
-      // -- EditorModeToggle / audio-lens-label.ts (AQU-353) --
+      // -- EditorModeToggle (AQU-353; AQU-1758: one Media lens on every file) --
       "nav.lens.audio": {
         description:
-          "Second tab of the header Text/Audio segmented lens switch, for a cell-" +
-          "ordered file: reveals the cast library, transport and per-line speaker " +
-          "chips over the same cells the Text tab edits. Short — sits beside a Pencil-" +
-          "icon 'Text' tab in a two-tab segmented control.",
+          "The bare word 'Audio' as a short heading: the Audio column of the " +
+          "organization's project table and the Audio side of the character " +
+          "check. (It named the editor's second view until that view became Media " +
+          "on every file.) Short — a column heading or a button label.",
+      },
+      "nav.lens.transcribe": {
+        description:
+          "Third tab of the header lens switch, offered when the file has audio: a view for " +
+          "transcribing each line's audio and cleaning the transcript up with AI. Short — sits " +
+          "beside the Text and Media tabs in a segmented control.",
       },
       "nav.lens.media": {
         description:
-          "Same second lens tab as nav.lens.audio, relabelled for a time-ordered " +
-          "(timeline) file where the lens shows separate media segments rather than " +
-          "audio attached to text cells.",
+          "Second tab of the header Text/Media segmented lens switch, on every " +
+          "file: the timeline stacked over the same table the Text tab edits, with " +
+          "the cast library and the playback strip. Short — sits beside a Pencil-" +
+          "icon 'Text' tab in a segmented control.",
       },
 
       // -- NavHistoryControls --
@@ -505,7 +597,7 @@ export const nav = defineNamespace({
       "nav.account.newToFrontier": {
         description:
           "Prompt text preceding the 'Create an account' link at the bottom of the " +
-          "login form. 'Frontier' is the identity provider's product name — keep it " +
+          "login form. 'Aquilla' is the identity provider's product name — keep it " +
           "untranslated.",
       },
       "nav.account.menuLabel": {
@@ -573,9 +665,13 @@ export const nav = defineNamespace({
       "nav.help.contactSupport": {
         description: "Dropdown item that opens a mailto: link to the support address.",
       },
-      "nav.help.report": {
+      // -- Feedback (AQU-1548) --
+      "nav.feedback.buttonLabel": {
         description:
-          "Dropdown item that opens the 'Report a problem' dialog (nav.report.*).",
+          "Last item in the app shell's Help ('?') dropdown; it opens the " +
+          "'Report a problem' dialog (nav.report.*). The word should read as an " +
+          "invitation to tell the team anything rather than as a fault report.",
+        maxLength: 12,
       },
 
       // -- LeftDock --
@@ -599,7 +695,10 @@ export const nav = defineNamespace({
       "nav.dock.expandSidebar": {
         description:
           "Tooltip and accessible name for the button on the collapsed 40px icon rail " +
-          "that expands the dock back open to the Files tab.",
+          "that restores the last open dock panel (or the first available one).",
+      },
+      "nav.dock.hidePanel": {
+        description: "Hide the sidebar's content panel while keeping its icon rail and the current main view.",
       },
       "nav.shell.openSidebar": {
         description:
@@ -769,22 +868,33 @@ export const nav = defineNamespace({
         description: "Heading of the confirmation dialog for the action above.",
         maxLength: 24,
       },
-      "nav.workspaceActions.batchValidate.description": {
+      "nav.workspaceActions.batchValidate.willValidate": {
         description:
-          "Body of the confirmation dialog above. nav.workspaceActions." +
-          "batchValidate.capNote (if the project caps per-run batch size) is " +
-          "concatenated directly after this string with no added space — end this " +
-          "string with its own closing parenthesis and no trailing space.",
+          "First sentence of the confirmation body above, stating how many cells " +
+          "this run will actually sign off — NOT how many the file has left " +
+          "unvalidated (AQU-1507: they differ whenever a cell is untranslated, an " +
+          "untouched AI draft, outside the reader's assignment, or already theirs). " +
+          "A skipped-cells clause and then batchValidate.capNote are concatenated " +
+          "after it, each with its own leading space, so end this string with a " +
+          "period and no trailing space.",
         placeholders: {
-          unvalidated: "How many cells in the file are not yet validated.",
+          count: "How many cells this run will validate. Selects the plural form.",
         },
         maxLength: 500,
       },
+      "nav.workspaceActions.batchValidate.nothingToValidate": {
+        description:
+          "Stands in for willValidate when the run would validate nothing at all, " +
+          "so the dialog never opens with a promise it cannot keep. Neutral, not " +
+          "an error — the reasons follow in the skipped clause after it. Ends with " +
+          "a period and no trailing space.",
+        maxLength: 160,
+      },
       "nav.workspaceActions.batchValidate.capNote": {
         description:
-          "Optional clause appended after nav.workspaceActions.batchValidate." +
-          "description (see that key's note) when the project caps how many " +
-          "cells one batch-validate run processes. Leading space is intentional.",
+          "Optional clause appended last in that confirmation body when the " +
+          "project caps how many cells one batch-validate run processes. Leading " +
+          "space is intentional.",
         placeholders: {
           cap: "The project's configured per-run validation cap.",
         },
@@ -794,18 +904,9 @@ export const nav = defineNamespace({
         description:
           "Primary file-scoped action that opens the export dialog. Imperative verb.",
       },
-      "nav.workspaceActions.importIntoFile": {
-        description:
-          "AQU-503: secondary action-menu item, distinct from " +
-          "nav.workspaceActions.import — this one is file-scoped and populates the " +
-          "open file's TARGET column from an already-translated document. Must keep " +
-          "a word equivalent to 'target' so it isn't confused with the primary " +
-          "source import.",
-        maxLength: 60,
-      },
       "nav.workspaceActions.transcribeAll.label": {
         description:
-          "Secondary action-menu item (Audio lens) that runs Whisper transcription " +
+          "Secondary action-menu item (Media) that runs Whisper transcription " +
           "on every recorded-but-untimed cell in the file.",
         maxLength: 32,
       },
@@ -826,7 +927,7 @@ export const nav = defineNamespace({
       },
       "nav.workspaceActions.synthAll.label": {
         description:
-          "Secondary action-menu item (Audio lens) that generates AI voice for " +
+          "Secondary action-menu item (Media) that generates AI voice for " +
           "every translated-but-unrecorded cell in the file.",
         maxLength: 40,
       },
@@ -844,6 +945,67 @@ export const nav = defineNamespace({
       "nav.workspaceActions.synthAll.confirmLabel": {
         description: "Confirm button of the dialog above.",
         maxLength: 24,
+      },
+      "nav.workspaceActions.changeVoiceAll.label": {
+        description:
+          "Secondary action-menu item (Media) that keeps every cell's existing " +
+          "recording and makes it sound like the character or trained voice assigned to that cell. " +
+          "Contrast with 'Generate AI voice for empty cells', which makes new audio " +
+          "from text.",
+        maxLength: 40,
+      },
+      "nav.workspaceActions.changeVoiceAll.title": {
+        description: "Heading of the confirmation dialog for the action above.",
+        maxLength: 32,
+      },
+      "nav.workspaceActions.changeVoiceAll.description": {
+        description:
+          "Body of the confirmation dialog above. The point to keep: only the speaker's " +
+          "sound changes, and a take already in its voice is left as it is.",
+        placeholders: {
+          n: "How many cells will be converted. Takes already in their assigned voice are not included.",
+        },
+        maxLength: 200,
+      },
+      "nav.workspaceActions.changeVoiceAll.confirmLabel": {
+        description: "Confirm button of the dialog above.",
+        maxLength: 24,
+      },
+      "nav.workspaceActions.splitQuotes.label": {
+        description:
+          "Menu item in the file's \u22ef menu. It cuts every line that mixes narration and " +
+          "quoted speech at its quotation marks, so each speaker can be given a separate " +
+          "voice. \"Quotes\" means quotation marks.",
+        maxLength: 32,
+      },
+      "nav.workspaceActions.splitQuotes.title": {
+        description: "Heading of the confirmation dialog for the action above. A question.",
+        maxLength: 48,
+      },
+      "nav.workspaceActions.splitQuotes.description": {
+        description:
+          "Body of that dialog: how many lines will be split, what they become, and what " +
+          "happens to existing translations.",
+        placeholders: {
+          count: "How many lines of the file hold more than one speaker. One or more.",
+          lines: "How many lines those become in total. Always more than the first number.",
+        },
+      },
+      "nav.workspaceActions.splitQuotes.none": {
+        description:
+          "Body of that dialog when the file has no line to split. The dialog then offers " +
+          "only Close.",
+      },
+      "nav.workspaceActions.splitQuotes.confirmLabel": {
+        description: "Confirm button of that dialog. Imperative.",
+        maxLength: 24,
+      },
+      "nav.workspaceActions.splitQuotes.multiLaneWarning": {
+        description:
+          "Extra paragraph on that dialog when the project has two or more target " +
+          "lanes. Says the split changes the source all lanes share, without saying how " +
+          "many lanes there are, marks each lane's translations to be done again, and " +
+          "keeps each lane's existing voice on the new narration lines.",
       },
       "nav.workspaceActions.confirmAttribution": {
         description:
@@ -880,6 +1042,34 @@ export const nav = defineNamespace({
       },
 
       // -- ProjectWorkspace: fileMenuItems (chapter-row 'File options' ⋯ menu) --
+      "nav.fileMenu.section.editorTools": {
+        description:
+          "Heading over the first group of the chapter-row 'File options' ⋯ menu: " +
+          "the whole-view editor passes ('Draft as you read', 'Check file'). Not " +
+          "clickable — it names the items under it.",
+        maxLength: 20,
+      },
+      "nav.fileMenu.section.runs": {
+        description:
+          "Heading over the ⋯ menu group that runs a bulk job across the open " +
+          "file (AI drafting, batch validation, transcription, synthesis, " +
+          "diarization). Not clickable — it names the items under it.",
+        maxLength: 24,
+      },
+      "nav.fileMenu.section.view": {
+        description:
+          "Heading over the ⋯ menu group that changes what the editor shows or " +
+          "jumps within the file ('View settings', 'Next unfinished'). Not " +
+          "clickable — it names the items under it.",
+        maxLength: 24,
+      },
+      "nav.fileMenu.section.file": {
+        description:
+          "Heading over the ⋯ menu group that acts on the file itself (rename, " +
+          "move, assign, segment, analyze, export, delete). Not clickable — it " +
+          "names the items under it.",
+        maxLength: 20,
+      },
       "nav.fileMenu.diarizing": {
         description:
           "Transient state of the 'Diarize' action-menu item while speaker " +
@@ -899,7 +1089,7 @@ export const nav = defineNamespace({
       },
       "nav.fileMenu.diarize": {
         description:
-          "Action-menu item (Audio lens) that runs speaker diarization on the " +
+          "Action-menu item (Media) that runs speaker diarization on the " +
           "file's audio. Default/idle state of nav.fileMenu.diarizing.",
         maxLength: 24,
       },
@@ -917,7 +1107,7 @@ export const nav = defineNamespace({
       },
       "nav.fileMenu.useFileSpeakerAsVoice": {
         description:
-          "Action-menu item (Audio lens, after diarization) that adopts the file's " +
+          "Action-menu item (Media, after diarization) that adopts the file's " +
           "detected speaker as a reusable cast voice.",
         maxLength: 40,
       },
@@ -961,16 +1151,6 @@ export const nav = defineNamespace({
         description:
           "Visible text on the build-info button for ~1.5s after a successful click, " +
           "replacing the version string.",
-      },
-      "nav.version.copiedTooltip": {
-        description: "Tooltip shown right after a successful copy of the build info.",
-      },
-      "nav.version.copyTooltip": {
-        description:
-          "Tooltip shown before the user clicks, inviting them to copy the build info. " +
-          "{buildInfo} is untranslated technical text (version number, git branch, " +
-          "commit SHA) rendered on the line(s) after the invitation.",
-        placeholders: { buildInfo: "Untranslated version/branch/SHA build string." },
       },
 
       // -- EnvironmentTag (AQU-1022) --
@@ -1125,10 +1305,9 @@ export const nav = defineNamespace({
       },
       "nav.report.analyticsOffNotice": {
         description:
-          "Amber notice shown only when analytics consent is off, pointing the user at " +
-          "Preferences and at the 'Copy report' fallback. Contains a literal quoted " +
-          "phrase matching nav.report.copyReport's wording — keep them consistent if " +
-          "either is retranslated.",
+          "Amber notice shown only when analytics consent is off. Since AQU-1028 the " +
+          "report itself always reaches the team over the network, so this explains the " +
+          "one thing consent still governs: whether a session replay is attached.",
         screenshot: "confirm-dialog",
       },
       "nav.report.sendReport": {
@@ -1145,6 +1324,71 @@ export const nav = defineNamespace({
         description:
           "Replaces nav.report.copyReport's label for a moment right after a " +
           "successful copy.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.sending": {
+        description:
+          "Disabled state of the submit button while the report (and any attached " +
+          "screenshot) is uploading.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.sendFailed": {
+        description:
+          "Error shown in the dialog when the upload failed — offline, or the server " +
+          "refused it. Points at retrying or at the Copy report fallback.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.notDelivered": {
+        description:
+          "Shown after a successful submit in an environment whose worker has no mail " +
+          "binding (local dev, E2E): the report was stored but no email was sent.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.attachScreenshot": {
+        description:
+          "Button that starts a screen capture to attach to the report. Opens the " +
+          "browser's own share-picker, so the label promises an attachment, not an " +
+          "instant grab.",
+        screenshot: "confirm-dialog",
+        maxLength: 24,
+      },
+      "nav.report.capturingScreenshot": {
+        description:
+          "Disabled label on the attach button while the browser's screen-share picker " +
+          "is open and the user has not chosen a surface yet.",
+        screenshot: "confirm-dialog",
+        maxLength: 24,
+      },
+      "nav.report.retakeScreenshot": {
+        description:
+          "Button next to the attached screenshot thumbnail that discards it and starts " +
+          "a fresh capture.",
+        screenshot: "confirm-dialog",
+        maxLength: 12,
+      },
+      "nav.report.removeScreenshot": {
+        description:
+          "Accessible label for the button that detaches the captured screenshot from " +
+          "the report.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.screenshotAttached": {
+        description:
+          "Caption beside the thumbnail confirming an image will be sent with the report.",
+        screenshot: "confirm-dialog",
+        maxLength: 24,
+      },
+      "nav.report.screenshotAlt": {
+        description:
+          "Alt text for the thumbnail preview of the captured screenshot inside the " +
+          "dialog.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.screenshotFailed": {
+        description:
+          "Error shown when the screen capture itself failed (not when the user simply " +
+          "dismissed the picker, which is silent). Reassures that the report can still " +
+          "be sent without an image.",
         screenshot: "confirm-dialog",
       },
 
@@ -1164,14 +1408,6 @@ export const nav = defineNamespace({
       "nav.fileRow.expand": {
         description: "Accessible name for the chevron toggle in its collapsed state.",
       },
-      "nav.fileRow.timelineOrderedTooltip": {
-        description:
-          "Tooltip on the small waveform icon shown next to files whose cells are " +
-          "ordered by timecode rather than sequence.",
-      },
-      "nav.fileRow.timelineOrderedFile": {
-        description: "Accessible label for the same timeline-ordered indicator icon.",
-      },
       "nav.fileRow.importedAsTooltip": {
         description:
           "Tooltip on a file's name showing both its current (possibly renamed) name " +
@@ -1190,20 +1426,64 @@ export const nav = defineNamespace({
           validated: "Percent of the file's cells validated, 0-100.",
         },
       },
+      "nav.fileRow.audioProgressAriaLabel": {
+        description:
+          "AQU-2111: the same slot's label on a file whose target language has no " +
+          "written form, so the row draws only the audio bar. 'Recorded' is lines " +
+          "that have a take; 'audio validated' is lines whose recording has been " +
+          "signed off.",
+        placeholders: {
+          recorded: "Percent of the file's lines with a recording, 0-100.",
+          audioValidated: "Percent of the file's lines whose audio is validated, 0-100.",
+        },
+      },
+      "nav.fileRow.progressWithAudioAriaLabel": {
+        description:
+          "AQU-2111: the same slot's label on a file that has both target text and " +
+          "recordings, so the row draws a text bar above an audio bar.",
+        placeholders: {
+          translated: "Percent of the file's cells translated, 0-100.",
+          validated: "Percent of the file's cells validated, 0-100.",
+          recorded: "Percent of the file's lines with a recording, 0-100.",
+          audioValidated: "Percent of the file's lines whose audio is validated, 0-100.",
+        },
+      },
       "nav.fileRow.fileActions": {
         description:
           "Tooltip and accessible name for the ⋯ button that opens the file's context " +
           "menu (rename, move, export, assign work, delete).",
       },
-      "nav.fileRow.suggestionTooltip": {
-        description:
-          "Tooltip on the sparkle icon shown when an automatic cleaner-name suggestion " +
-          "is available for this file. Longer than most nav tooltips — allowed to wrap " +
-          "(max-w-xs on the tooltip), so it isn't length-constrained like the rest of " +
-          "this namespace.",
-      },
       "nav.fileRow.applyRenameSuggestion": {
         description: "Accessible name for the same sparkle 'apply suggestion' button.",
+      },
+      "nav.fileRow.moveUp": {
+        description:
+          "Menu item on a sidebar file row that moves the file one position earlier " +
+          "within its own corpus group (AQU-1569) \u2014 the keyboard and touch route to " +
+          "the same reorder the drag handle does. Shown only to roles that may " +
+          "reorder, and disabled on the first file in the group. Keep it short: it " +
+          "sits in a narrow row menu beside Rename and Export.",
+      },
+      "nav.fileRow.moveDown": {
+        description:
+          "Mirrors nav.fileRow.moveUp for the other direction; disabled on the last " +
+          "file in the group.",
+      },
+      "nav.fileRow.notAssignedToYou": {
+        description:
+          "Screen-reader-only text on a dimmed file row (AQU-894), carrying the same " +
+          "meaning the dimming carries visually. Both sentences matter: the second one " +
+          "is what keeps it from being heard as a locked file.",
+      },
+      "nav.fileRow.notAssignedTooltip": {
+        description:
+          "Tooltip on a dimmed file row (AQU-894): this project uses assignments, the " +
+          "reader holds some, and this file isn't one of theirs. The second sentence is " +
+          "load-bearing — the row is only de-emphasised, never locked, and without it the " +
+          "dimming reads as 'you may not open this'. Keep both parts.",
+        placeholders: {
+          name: "The file's name, or the '{name} (imported as {original})' form when it was renamed on import.",
+        },
       },
 
       // -- ExpandableFileList --
@@ -1248,6 +1528,68 @@ export const nav = defineNamespace({
           "identity string 'Ungrouped' the code branches on (is-this-the-synthetic-" +
           "bucket, rename eligibility, …) is NOT this key and stays English — only this " +
           "display copy is translated.",
+      },
+      "nav.fileList.reorderHandle": {
+        description:
+          "Accessible name for the grip a Project Lead drags to move a file to a new " +
+          "position inside its own sidebar group (AQU-1569). Shown only to roles that " +
+          "may reorder. {name} is the file's own display name.",
+        placeholders: { name: "The file's display name." },
+      },
+      "nav.fileList.reorderWrongGroup": {
+        description:
+          "Live-region message shown when a file is dragged over a DIFFERENT corpus " +
+          "group than its own on a surface that cannot move it there (AQU-1569; since " +
+          "AQU-1702 the editor sidebar CAN, so this is the fallback for a file list " +
+          "wired without the move handler). \u201cMove to corpus\u2026\u201d names the " +
+          "separate menu action that does change a file's group \u2014 keep it worded " +
+          "identically to fileDetails.moveToCorpus in this locale.",
+      },
+      "nav.fileList.regroupHint": {
+        description:
+          "Live-region message while a file is held over a DIFFERENT corpus group that " +
+          "will accept it (AQU-1702). Releasing moves the file into that group at the " +
+          "marked slot. {name} is the dragged file, {group} the group under the pointer.",
+        placeholders: {
+          name: "The dragged file's display name.",
+          group: "The group under the pointer, as its header reads.",
+        },
+      },
+      "nav.fileList.regroupStaysInGroup": {
+        description:
+          "Live-region message refusing a cross-group drop that could not be written " +
+          "(AQU-1702): the file is a Bible book, so with no group of its own Aquilla " +
+          "files it under its testament \u2014 dropping it on Ungrouped would appear to " +
+          "do nothing. {name} is the dragged file, {group} the group it stays in.",
+        placeholders: {
+          name: "The dragged file's display name.",
+          group: "The group the file is filed under regardless (its testament).",
+        },
+      },
+      "nav.fileList.resetOrder": {
+        description:
+          "Tooltip and accessible name for the control on a corpus/group header that " +
+          "discards the hand-placed file order and returns the group to the order the " +
+          "app derives from the file names (AQU-1569). Offered only when some file in " +
+          "the group has actually been placed by hand.",
+        placeholders: { group: "The corpus/group's own label." },
+      },
+      "nav.fileList.resetOrderTitle": {
+        description:
+          "Title of the confirmation asked before discarding a group's hand-placed " +
+          "file order. Phrased as a question.",
+        placeholders: { group: "The corpus/group's own label." },
+      },
+      "nav.fileList.resetOrderDescription": {
+        description:
+          "Body of that confirmation. It has to say two things: the order becomes the " +
+          "automatic one again, and the reset is shared with the whole project rather " +
+          "than being this browser's own view.",
+      },
+      "nav.fileList.resetOrderConfirm": {
+        description:
+          "The confirming button of that dialog. The cancelling button reuses " +
+          "common.cancel.",
       },
       "nav.fileList.jumpToTestament": {
         description:

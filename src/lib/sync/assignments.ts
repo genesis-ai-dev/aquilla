@@ -11,9 +11,40 @@ import { FRONTIER_BASE } from "../frontier/auth"
 import { fetchWithTimeout } from "../frontier/orgs"
 import { UserError } from "@/lib/errors/user-error"
 import { v7 as uuidv7 } from "uuid"
+import { laneTagForAssignment } from "./assignment-lane"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { buildRawEvent } from "./events-emit"
 import { fetchSyncToken } from "./sync-token"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
+
+/**
+ * AQU-1969: what an assignment hands out. 'translate' is every assignment made
+ * before kinds existed and the dialogs' default; 'validate' gives a person only
+ * the approving, and its progress counts their OWN approvals.
+ */
+export type AssignmentKind = "translate" | "validate"
+
+/**
+ * AQU-1969: one medium's share of a validate assignment (mirrors the server's
+ * auth-worker/src/services/assignment-validation.ts). Every line of the scope
+ * is in exactly one of: validated, waiting, left — or out of `total` entirely
+ * when it is not theirs to approve (self-validation off, and they wrote or
+ * recorded it). `changed` is the part of "left" they had approved before it
+ * moved.
+ */
+export interface ValidationCounts {
+  total: number
+  validated: number
+  /** No translation (text) or no recording (audio) yet. */
+  waiting: number
+  /** Approved an earlier version, not this one. Inside "left". */
+  changed: number
+}
+
+export interface ValidationProgress {
+  text: ValidationCounts
+  audio: ValidationCounts
+}
 
 /** Per-assignee rollup for the manager workload view (mirrors the server). */
 export interface AssigneeWorkload {
@@ -40,9 +71,22 @@ export interface OrgWorkloadAssignment {
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' / absent = default lane. */
   targetLang?: string
+  /** Display name from the lane row. Absent on older servers. */
+  laneName?: string | null
   cellsTotal: number
   cellsDone: number
   deadline: string | null
+  /**
+   * AQU-2294: when the assignment was handed out (epoch ms). OPTIONAL ON THE
+   * WIRE: the SPA and the workers deploy separately, so a page talking to a
+   * worker that predates the field must render the row without an "Assigned"
+   * date rather than break.
+   */
+  createdAt?: number
+  /** AQU-1969: absent on older servers, which only had translate assignments. */
+  kind?: AssignmentKind
+  /** AQU-1969: a validate assignment's own-approval progress. */
+  validation?: ValidationProgress
 }
 
 /** A single open assignment in the caller's inbox (mirrors the server). */
@@ -57,15 +101,41 @@ export interface MyAssignment {
   fileId: string | null
   /** Display name for `fileId` from `files.name`; null when `fileId` is null. */
   fileName?: string | null
+  /**
+   * AQU-894: every file the assignment's resolved cells touch, so the sidebar
+   * can say which files are this person's. `fileId` above is one arbitrary
+   * member of this set and cannot answer that for a multi-file scope.
+   *
+   * OPTIONAL ON THE WIRE on purpose, for the same reason as
+   * `UnitAssignment.chapters`: the SPA and the workers deploy separately, and
+   * a page talking to a worker that predates this field must fall back (to
+   * `fileId`) rather than conclude the person is assigned nothing.
+   */
+  fileIds?: string[]
   scopeKind: string
   scopeLabel: string
+  /**
+   * AQU-1628: the assignment's resolved source cell ids, sent ONLY for a
+   * 'cells' scope — the one scope whose extent cannot be re-derived from
+   * `scopeLabel`. Absent for 'books'/'chapters' (and on older servers), so a
+   * reader must branch on `scopeKind`, never on this being empty.
+   */
+  cellIds?: string[]
   /** AQU-538 (§3.5): target-language lane. '' / absent = default lane. */
   targetLang?: string
+  /** Display name from the lane row. Absent on older servers. */
+  laneName?: string | null
+  /** Opaque lane id. A deep link may use this in place of the tag. */
+  laneId?: string | null
   deadline: string | null
   note: string | null
+  /** AQU-1969: for a validate assignment, the lines theirs to approve and the ones they have. */
   cellsTotal: number
   cellsDone: number
   createdAt: number
+  /** AQU-1969: absent on older servers, which only had translate assignments. */
+  kind?: AssignmentKind
+  validation?: ValidationProgress
 }
 
 /**
@@ -93,9 +163,43 @@ export async function getMyAssignments(jwt: string, projectId: string): Promise<
   return ((await res.json()) as { assignments: MyAssignment[] }).assignments
 }
 
+/** An open assignment the caller handed out (mirrors the server). */
+export interface GivenAssignment {
+  assignmentId: string
+  /** Routes the unassign event's sync token; null when the scope resolved to no cells. */
+  fileId: string | null
+  assigneeUserId: number
+  username: string | null
+  scopeLabel: string
+  /** '' = default lane. */
+  targetLang: string
+  cellsTotal: number
+  cellsDone: number
+  /** AQU-1969: absent on older servers. */
+  kind?: AssignmentKind
+}
+
+/**
+ * AQU-581: the open assignments the caller handed out in one project — what a
+ * lane coordinator can take back. Any project member (only ever their own).
+ */
+export async function getAssignmentsGivenByMe(jwt: string, projectId: string): Promise<GivenAssignment[]> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/assignments/given`,
+    { headers: { Authorization: `Bearer ${jwt}` } },
+  )
+  if (!res.ok) throw new UserError(res.status, "", "project")
+  return ((await res.json()) as { assignments: GivenAssignment[] }).assignments
+}
+
 /** An inbox assignment with its project name, from the org-wide read. */
 export interface MyOrgAssignment extends MyAssignment {
   projectName: string
+  /**
+   * Media redesign slice 2: what the assignment's language delivers. Null when
+   * nobody has chosen; absent from an older server. Both read as Text.
+   */
+  laneDelivers?: LaneDelivers | null
 }
 
 /**
@@ -141,6 +245,39 @@ export async function getProjectAssignments(
   return ((await res.json()) as { roster: AssigneeWorkload[] }).roster
 }
 
+/** AQU-1969: one open validate assignment on the Team card (mirrors the server). */
+export interface ValidationAssignment {
+  assignmentId: string
+  assigneeUserId: number
+  username: string | null
+  scopeLabel: string
+  /** The lane it is pinned to, as the legacy tag. */
+  targetLang: string
+  laneName?: string | null
+  deadline: string | null
+  validation: ValidationProgress
+}
+
+/**
+ * AQU-1969: the Team card's whole read — the per-person translate roster
+ * `getProjectAssignments` returns, plus each open validate assignment with its
+ * assignee's own approvals, furthest behind first. One request: the server
+ * answers both from the same route, behind the same floors. `validations` is
+ * empty from a server that predates it.
+ */
+export async function getProjectTeamProgress(
+  jwt: string,
+  projectId: string,
+): Promise<{ roster: AssigneeWorkload[]; validations: ValidationAssignment[] }> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/assignments/all`,
+    { headers: { Authorization: `Bearer ${jwt}` } },
+  )
+  if (!res.ok) throw new UserError(res.status, "", "project")
+  const body = (await res.json()) as { roster: AssigneeWorkload[]; validations?: ValidationAssignment[] }
+  return { roster: body.roster, validations: body.validations ?? [] }
+}
+
 /**
  * One live assignment covering ONE planning unit, with that person's OWN
  * progress inside it (mirrors UnitAssignment on the server — AQU-1278).
@@ -150,10 +287,10 @@ export async function getProjectAssignments(
  * part of it that lands in the unit on screen. That is the only grain at which
  * "Anna: 940 of 950" can be read against the unit's own bar directly above it.
  *
- * `translated`/`validated` are measured in the lane the caller asked for;
- * `recorded`/`audioValidated` are lane-independent, because `cell_audio` has
- * no target_lang column — one recording is the recording, whichever text lane
- * you are looking at.
+ * All four are measured in the lane the caller asked for. `recorded` and
+ * `audioValidated` were lane-independent until AQU-1591, when a take came to
+ * belong to the lane it performs: a line voiced in one language no longer
+ * reads as recorded in another.
  *
  * `targetLang` is the lane the ASSIGNMENT is pinned to (AQU-538 §3.5, '' = the
  * default lane), which need not be the lane being viewed — see
@@ -165,12 +302,23 @@ export interface UnitAssignment {
   username: string | null
   scopeLabel: string
   targetLang: string
+  /** Display name from the lane row. Absent on older servers. */
+  laneName?: string | null
   deadline: string | null
   cellsTotal: number
   translated: number
   validated: number
   recorded: number
   audioValidated: number
+  /** AQU-1969: absent on older servers, which only had translate assignments. */
+  kind?: AssignmentKind
+  /**
+   * AQU-1969: a validate assignment's own approvals inside this unit, in the
+   * ASSIGNMENT's lane (an approval belongs to one language). The four counts
+   * above are still the unit's lines in the viewed lane; a validate row reads
+   * this instead.
+   */
+  validation?: ValidationProgress
   /**
    * AQU-1278: the same counts per chapter, canonically ordered, so the panel
    * can name WHERE a person's outstanding work is and which chapters of the
@@ -290,6 +438,25 @@ async function postAssignmentEvent(
   }
 }
 
+/**
+ * One assigned unit of an assignment's scope:
+ *   - `fileId` alone          -> every source line in the file ('books')
+ *   - `fileId` + `chapter`    -> that chapter's lines ('chapters')
+ *   - `fileId` + `cellIds`    -> exactly those lines ('cells', AQU-1628)
+ *
+ * `cellIds` are source cell ids, the same ids the editor selects by. Sending
+ * the file alone for a selection is what AQU-1628 fixed: the assignee got the
+ * whole file while the label still said "N segment(s)".
+ */
+export interface AssignmentScopeEntry {
+  fileId: string
+  chapter?: string
+  cellIds?: string[]
+}
+
+/** How the server resolves `scope` into assignment_cells. */
+export type AssignmentScopeKind = "books" | "chapters" | "cells"
+
 export interface CreateAssignmentArgs {
   jwt: string
   projectId: string
@@ -299,17 +466,26 @@ export interface CreateAssignmentArgs {
   /** The manager's username (stamped as the event author; server re-verifies). */
   author: string
   assigneeUserId: number
-  /** One book (fileId only) or chapter (fileId + "BOOK CH") per entry. */
-  scope: { fileId: string; chapter?: string }[]
-  scopeKind: "books" | "chapters"
+  /** One book, chapter or explicit line set per entry. */
+  scope: AssignmentScopeEntry[]
+  scopeKind: AssignmentScopeKind
   scopeLabel: string
   /**
    * AQU-538 (§3.5): target-language lane to pin this assignment to. Omit or ''
    * for the default lane — the field is dropped from the event payload when ''.
+   * `''` is that lane's `legacy_tag`, the permanent bridge for old events.
    */
   targetLang?: string
+  /**
+   * AQU-1601 / AQU-1612: the lane row's id, stamped beside `targetLang` when
+   * the caller has the row. Omitted when the project has no lane rows yet
+   * (before the AQU-1616 backfill). The two forms must name the same lane.
+   */
+  laneId?: string
   deadline?: string | null
   note?: string | null
+  /** AQU-1969: omitted or 'translate' = today's assignment, the default. */
+  kind?: AssignmentKind
 }
 
 /**
@@ -319,6 +495,11 @@ export interface CreateAssignmentArgs {
  */
 export async function createAssignment(args: CreateAssignmentArgs): Promise<string> {
   const assignmentId = uuidv7()
+  // AQU-538 / AQU-729: omit the lane on the wire for the default lane.
+  // '', a missing value, and the word "default" are that lane — the product
+  // cannot store a lane named "default". An explicit tag is kept.
+  const targetLang = laneTagForAssignment(args.targetLang)
+  const laneId = args.laneId?.trim() || undefined
   const event = buildRawEvent({
     kind: "assignment.create",
     projectId: args.projectId,
@@ -331,10 +512,13 @@ export async function createAssignment(args: CreateAssignmentArgs): Promise<stri
       scope: args.scope,
       scopeLabel: args.scopeLabel,
       assigneeUserId: args.assigneeUserId,
-      // AQU-538: omit the lane on the wire when it's the default ('').
-      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+      ...(targetLang ? { targetLang } : {}),
+      ...(laneId ? { laneId } : {}),
       ...(args.deadline !== undefined ? { deadline: args.deadline } : {}),
       ...(args.note !== undefined ? { note: args.note } : {}),
+      // AQU-1969: only a validate assignment names its kind, so a translate
+      // assignment's event is byte-for-byte what it was before kinds existed.
+      ...(args.kind === "validate" ? { kind: "validate" } : {}),
     },
   })
 
@@ -359,6 +543,8 @@ export interface CreateBulkFileAssignmentsArgs {
   /** AQU-538 (§3.5): one lane applied to every assignment in the batch. */
   targetLang?: string
   note?: string | null
+  /** AQU-1969: one kind applied to every assignment in the batch. */
+  kind?: AssignmentKind
 }
 
 export interface BulkFileAssignmentResult {
@@ -402,6 +588,7 @@ export async function createBulkFileAssignments(
         targetLang: args.targetLang,
         deadline: args.deadline,
         note: args.note,
+        kind: args.kind,
       }),
     ),
   )

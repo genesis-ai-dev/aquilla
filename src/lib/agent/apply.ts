@@ -1,3 +1,4 @@
+import posthog from "@/lib/posthog"
 /**
  * apply.ts — turn server-staged agent events into REAL events on the
  * existing client write path.
@@ -20,6 +21,8 @@ import { enqueueEvent } from "@/lib/sync/events-emit"
 import type { OutboxPayloadFor } from "@/lib/sync/outbox-types"
 import type { StagedEvent } from "./protocol"
 import { isSupportedApplyKind } from "./role-floors"
+import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
+import { captureCellValidation } from "@/lib/cell-telemetry"
 
 /**
  * Sentinel fileId for project-scoped comment.* events.
@@ -61,6 +64,7 @@ export async function applyStagedEvent(
   ev: StagedEvent,
   ctx: ApplyContext,
 ): Promise<string> {
+  const analytics = posthog.scope(undefined, ctx.author)
   if (!isSupportedApplyKind(ev.kind)) throw new UnsupportedAgentEventError(ev.kind)
 
   switch (ev.kind) {
@@ -71,8 +75,11 @@ export async function applyStagedEvent(
       const live = ctx.resolveCell?.(ev.cellId)
       // Same precedence as the editor's commit paths (commitCompletedCell):
       // freshest known chain head → staged pin → source genesis fallback.
-      const parentId =
-        live?.targetEventId ?? ev.parentId ?? live?.sourceEventId ?? null
+      // AQU-1578: an optimistic placeholder head ("") counts as unknown.
+      const parentId = resolveTargetCommitParent({
+        pending: [live?.targetEventId, ev.parentId],
+        sourceEventId: live?.sourceEventId,
+      })
       const { eventId } = await enqueueEvent({
         kind: "target.cell.commit",
         projectId: ctx.projectId,
@@ -171,6 +178,19 @@ export async function applyStagedEvent(
         author: ctx.author,
         payload: { ...ev.payload, editEventId } as OutboxPayloadFor<"cell.validate">,
       })
+      // AQU-1572: this path enqueues the event itself rather than through
+      // `emitCellValidate`, so the emit seam never sees it and it reports its
+      // own line here, after the enqueue, in the seam's shape. The person
+      // approved it, but the agent chose the line, so `source: "agent"`.
+      captureCellValidation(true, {
+        medium: "text",
+        projectId: ctx.projectId,
+        fileId: ev.fileId,
+        cellId: ev.cellId,
+        lane: typeof ev.payload.targetLang === "string" ? ev.payload.targetLang : "",
+        source: "agent",
+        surface: "proposal",
+      }, analytics)
       return eventId
     }
   }

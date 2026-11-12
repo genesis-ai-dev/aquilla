@@ -224,3 +224,88 @@ describe("aggregatePostEditMetrics", () => {
     expect(result.byWeek[0].weekStart < result.byWeek[1].weekStart).toBe(true)
   })
 })
+
+// ── Per-file rollup (AQU-1321) ───────────────────────────────────────────────
+
+describe("byFile rollup", () => {
+  /** Mirrors the shape the extractor emits, with only the fields byFile reads. */
+  function pair(
+    fileId: string,
+    ned: number,
+    acceptedAsIs: boolean,
+    fileName?: string,
+  ) {
+    return {
+      cellId: `c${_seq++}`,
+      fileId,
+      ...(fileName !== undefined ? { fileName } : {}),
+      aiValue: "a",
+      humanValue: "b",
+      ned,
+      insertions: 0,
+      deletions: 0,
+      substitutions: 1,
+      author: "alice",
+      humanTs: new Date("2024-01-10T00:00:00Z").getTime(),
+      aiTs: 0,
+      acceptedAsIs,
+      reviewTimeMs: 1000,
+    }
+  }
+
+  it("averages edit distance and counts as-is approvals per file", () => {
+    const result = aggregatePostEditMetrics([
+      pair("f1", 0, true, "Genesis"),
+      pair("f1", 0.4, false, "Genesis"),
+      pair("f2", 0.9, false, "Exodus"),
+    ])
+
+    const genesis = result.byFile.find((f) => f.fileId === "f1")
+    expect(genesis).toEqual({
+      fileId: "f1",
+      fileName: "Genesis",
+      avgNed: 0.2,
+      count: 2,
+      acceptedAsIsCount: 1,
+    })
+    const exodus = result.byFile.find((f) => f.fileId === "f2")
+    expect(exodus?.count).toBe(1)
+    expect(exodus?.acceptedAsIsCount).toBe(0)
+  })
+
+  it("orders heaviest-sampled first, then by id so refreshes do not shuffle rows", () => {
+    // Two files tied on count must not swap places between reads — a table that
+    // reorders under the reader on every Refresh is unreadable.
+    const result = aggregatePostEditMetrics([
+      pair("bbb", 0.1, false),
+      pair("aaa", 0.2, false),
+      pair("ccc", 0.3, false),
+      pair("ccc", 0.4, false),
+    ])
+    expect(result.byFile.map((f) => f.fileId)).toEqual(["ccc", "aaa", "bbb"])
+  })
+
+  it("keeps the bucket usable when no file name was supplied", () => {
+    // Older callers pass only an id; the table falls back to showing it rather
+    // than rendering an empty cell.
+    const result = aggregatePostEditMetrics([pair("f1", 0.5, false)])
+    expect(result.byFile[0].fileName).toBeUndefined()
+    expect(result.byFile[0].fileId).toBe("f1")
+  })
+
+  it("is empty for no pairs, alongside the other rollups", () => {
+    expect(aggregatePostEditMetrics([]).byFile).toEqual([])
+  })
+
+  it("carries the file name the extractor was given onto each pair", () => {
+    // The name has to survive extraction, or byFile can only ever label by UUID.
+    const ai = aiCommit("draft text", 1000)
+    const human = humanCommit("draft text edited", "alice", 2000)
+    const approval = validate(human.id, "alice", 3000)
+    const pairs = extractPostEditPairs([ai, human, approval], "c1", "f9", "Leviticus")
+
+    expect(pairs).toHaveLength(1)
+    expect(pairs[0].fileName).toBe("Leviticus")
+    expect(aggregatePostEditMetrics(pairs).byFile[0].fileName).toBe("Leviticus")
+  })
+})

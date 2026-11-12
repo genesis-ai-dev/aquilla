@@ -4,6 +4,7 @@
 // (search + TanStack sort headers). "Add a member" opens a dialog with tabs:
 // add people from the org, or create an invite link.
 
+import { LockedNote } from "@/components/ui/locked-note"
 import { useMemo, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import {
@@ -18,27 +19,25 @@ import {
 } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
-import {
-  MenuItem,
-  MenuSeparator,
-  MenuSub,
-  MenuSubContent,
-  MenuSubTrigger,
-} from "@/components/ui/menu-parts"
+import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { RoleLabel } from "@/components/RoleLabel"
-import { RevokeAllDialog } from "@/components/ProjectMembersPage"
+import { RevokeAllDialog } from "@/components/ProjectSettings/RevokeAllDialog"
 import { AddProjectMemberDialog } from "@/components/ProjectSettings/AddProjectMemberDialog"
+import { RoleDialog } from "@/components/access/RoleDialog"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { useProjectScopePath } from "@/hooks/useProjectScopePath"
+import { ScopeBreadcrumb } from "@/components/access/ScopeBreadcrumb"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { type ProjectMember } from "@/lib/frontier/members"
+import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
 import {
-  ROLE, PROJECT_ROLE_OPTIONS, humanRoleName, roleDescription,
-} from "@/lib/frontier/roles"
+  callerLevelFromRoster, canManageProjectMembers, roleChangeBlock,
+} from "@/lib/frontier/member-grants"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
@@ -65,22 +64,36 @@ function memberMatchesFilter(m: ProjectMember, filter: AccessFilter): boolean {
 }
 
 export function MembersSection({ projectId }: { projectId: string }) {
+  const scopePath = useProjectScopePath(projectId)
   const t = useT()
   const { session } = useFrontierSession()
   const {
     members, isLoading, error, rosterHidden, refresh, add, addMany, remove,
   } = useProjectMembers(projectId)
 
-  const callerMaxRole = ROLE.MAINTAINER
   const callerUsername = session?.username ?? null
   const hasJwt = Boolean(session?.jwt)
+
+  // AQU-853: derive the caller's own effective role from the roster — the
+  // same derivation SharePanel has used since AQU-285 (F-A4) — instead of
+  // assuming MAINTAINER. Without it this pane offered every reader a role
+  // picker up to Maintainer and let the server answer 403, which is exactly
+  // the "the option didn't appear / didn't work" confusion this ticket is
+  // about. `null` while the roster is still loading; the server stays the
+  // security boundary either way.
+  const callerLevel = useMemo(
+    () => callerLevelFromRoster(members, callerUsername),
+    [members, callerUsername],
+  )
+  const canManageMembers = canManageProjectMembers(callerLevel)
 
   const [accessFilter, setAccessFilter] = useState<AccessFilter>("all")
   const [addOpen, setAddOpen] = useState(false)
   const [removeTarget, setRemoveTarget] = useState<ProjectMember | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<ProjectMember | null>(null)
-
-  const grantableRoles = PROJECT_ROLE_OPTIONS.filter((r) => r.level <= callerMaxRole)
+  // AQU-2289: Change role opens the one RoleDialog (project list, capped at
+  // the caller's own role) instead of a submenu that saved on first click.
+  const [roleTarget, setRoleTarget] = useState<ProjectMember | null>(null)
 
   const tableData = useMemo(
     () => members.filter((m) => memberMatchesFilter(m, accessFilter)),
@@ -100,7 +113,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
           const m = row.original
           const sourceKey = SOURCE_LABEL_KEYS[m.role.source]
           return (
-            <UsernameWithAvatar username={m.username}>
+            <UsernameWithAvatar userId={m.userId} username={m.username}>
               <span className="truncate text-xs font-normal text-muted-foreground">
                 {sourceKey ? t(sourceKey) : m.role.source}
               </span>
@@ -157,6 +170,19 @@ export function MembersSection({ projectId }: { projectId: string }) {
   return (
     <>
       <div id="section-members" data-testid="settings-members-section" className="space-y-4">
+        {/* AQU-1352 §3.9 rule 1: the scope's breadcrumb is the page title. */}
+        {scopePath.length > 0 && (
+          <h2 className="font-heading text-base font-semibold" data-testid="settings-members-scope">
+            <ScopeBreadcrumb path={scopePath} />
+          </h2>
+        )}
+        {/* AQU-2260: below the Project lead floor nothing here can be
+            changed; one line says so, instead of a hover on Add a member. */}
+        {!canManageMembers && (
+          <LockedNote placement="section" testId="settings-members-locked">
+            {t("projectSettings.members.roleChangeNeedsRole", { role: resolveRoleName(t, ROLE.PROJECT_LEAD) })}
+          </LockedNote>
+        )}
         {error && (
           <div className="flex items-center gap-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -214,6 +240,10 @@ export function MembersSection({ projectId }: { projectId: string }) {
                 <Button
                   className="ml-auto shrink-0"
                   onClick={openAddDialog}
+                  // AQU-853 AC-3: below the project_lead floor the server 403s
+                  // every grant, so the control is disabled; the line at the
+                  // top of the section says why.
+                  disabled={!canManageMembers}
                 >
                   {t("org.membersPage.orgTable.addMemberTitle")}
                 </Button>
@@ -223,37 +253,39 @@ export function MembersSection({ projectId }: { projectId: string }) {
             renderRowMenuItems={(m) => {
               const isSelf = callerUsername !== null && m.username === callerUsername
               const isLocked = m.role.source === "org" || m.role.source === "creator"
+              const block = roleChangeBlock({
+                callerLevel,
+                targetLevel: m.role.level,
+                isSelf,
+                isLocked,
+              })
+              const canChangeRole = block === null
               const canRemoveDirect =
-                !isLocked && !isSelf && m.role.source === "override"
-              const canChangeRole = !isLocked && !isSelf
+                canManageMembers && !isLocked && !isSelf && m.role.source === "override"
+              const canRevoke = canManageMembers && hasJwt && !isSelf
+              // AQU-853 AC-3: when the block is about the CALLER's own role
+              // (not about this row), say so instead of rendering nothing.
+              const roleBlockNote =
+                block === "caller-below-floor"
+                  ? t("projectSettings.members.roleChangeNeedsRole", {
+                      role: resolveRoleName(t, ROLE.PROJECT_LEAD),
+                    })
+                  : block === "target-outranks-caller"
+                    ? t("projectSettings.members.roleChangeOutranked")
+                    : null
               return (
                 <>
                   {canChangeRole && (
-                    <MenuSub>
-                      <MenuSubTrigger>
-                        <ShieldUser className="size-4" />
-                        {t("org.membersPage.changeRoleAria")}
-                      </MenuSubTrigger>
-                      <MenuSubContent className="min-w-72 max-w-96">
-                        {grantableRoles.map((r) => (
-                          <MenuItem
-                            key={r.level}
-                            onClick={() => void add(m.username, r.level)}
-                            className="items-start"
-                          >
-                            <span className="flex min-w-0 flex-col gap-0.5">
-                              <span>
-                                <RoleLabel name={r.name} plain className="font-medium" />
-                                {r.level === m.role.level ? " (current)" : ""}
-                              </span>
-                              <span className="text-xs font-normal whitespace-normal text-muted-foreground">
-                                {roleDescription(r.level)}
-                              </span>
-                            </span>
-                          </MenuItem>
-                        ))}
-                      </MenuSubContent>
-                    </MenuSub>
+                    <MenuItem onClick={() => setRoleTarget(m)}>
+                      <ShieldUser className="size-4" />
+                      {t("org.membersPage.changeRoleAria")}
+                    </MenuItem>
+                  )}
+                  {roleBlockNote && (
+                    <MenuItem disabled className="items-start">
+                      <ShieldUser className="size-4" />
+                      <span className="whitespace-normal">{roleBlockNote}</span>
+                    </MenuItem>
                   )}
                   {canRemoveDirect && (
                     <MenuItem onClick={() => setRemoveTarget(m)}>
@@ -261,7 +293,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
                       {t("projectSettings.members.removeDirectAccess")}
                     </MenuItem>
                   )}
-                  {hasJwt && !isSelf && (
+                  {canRevoke && (
                     <>
                       {(canChangeRole || canRemoveDirect) && <MenuSeparator />}
                       <MenuItem
@@ -273,7 +305,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
                       </MenuItem>
                     </>
                   )}
-                  {!canChangeRole && !canRemoveDirect && !(hasJwt && !isSelf) && (
+                  {!canChangeRole && !roleBlockNote && !canRemoveDirect && !canRevoke && (
                     <MenuItem disabled>{t("projectSettings.members.noActionsAvailable")}</MenuItem>
                   )}
                 </>
@@ -295,22 +327,41 @@ export function MembersSection({ projectId }: { projectId: string }) {
 
       <AddProjectMemberDialog
         projectId={projectId}
+        scopePath={scopePath}
         open={addOpen}
         onOpenChange={setAddOpen}
         members={members}
         addMany={addMany}
+        callerLevel={callerLevel}
+      />
+
+      <RoleDialog
+        open={roleTarget !== null}
+        onOpenChange={(open) => { if (!open) setRoleTarget(null) }}
+        mode="change"
+        level="project"
+        callerLevel={callerLevel}
+        name={roleTarget?.username ?? ""}
+        currentLevel={roleTarget?.role.level ?? null}
+        summary={t("org.roleDialog.projectChangeSummary")}
+        onSave={async (level) => {
+          if (roleTarget) await add(roleTarget.username, level)
+        }}
       />
 
       <ConfirmActionDialog
         open={removeTarget !== null}
         onOpenChange={(open) => { if (!open) setRemoveTarget(null) }}
-        title={t("org.membersPage.removeMemberTitle")}
+        title={t("projectSettings.members.removeDirectAccess")}
         description={
           removeTarget
-            ? `Remove ${removeTarget.username}'s direct ${humanRoleName(removeTarget.role.level)} access to this project? Any access via org, team, or creator status is unaffected — use "Revoke all" to review every path.`
+            ? t("projectSettings.members.removeDirectAccessDescription", {
+                username: removeTarget.username,
+                role: resolveRoleName(t, removeTarget.role.level),
+              })
             : ""
         }
-        confirmLabel="Remove"
+        confirmLabel={t("projectSettings.members.removeDirectAccess")}
         variant="destructive"
         onConfirm={() => {
           if (removeTarget) void remove(removeTarget.userId)

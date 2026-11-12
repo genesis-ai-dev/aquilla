@@ -1,7 +1,7 @@
 // Flow B (2026-08-05, simplified 2026-08-06; file-scoped in the pre-merge
-// round): linking a video under Free timing warns it will stay hidden — link
-// anyway or cancel. No combined switch-and-link action: keeps the privilege
-// story simple for this release.
+// round; AQU-2204): linking a film to a file that follows its recordings says
+// the file will then follow its source — link the film or cancel. No separate
+// switch action: linking is what switches it.
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { LinkVideoTimingDialog } from "./LinkVideoTimingDialog"
@@ -13,7 +13,7 @@ function renderDialog() {
 }
 
 describe("LinkVideoTimingDialog", () => {
-  it("link-anyway links (video stays hidden)", () => {
+  it("linking goes ahead on confirm", () => {
     const h = renderDialog()
     fireEvent.click(screen.getByTestId("link-video-anyway"))
     expect(h.onLinkAnyway).toHaveBeenCalledTimes(1)
@@ -27,9 +27,11 @@ describe("LinkVideoTimingDialog", () => {
     expect(h.onLinkAnyway).not.toHaveBeenCalled()
   })
 
-  it("offers NO mode-switch action — that authority is the toolbar control's", () => {
+  it("says linking makes the file follow its source, and that nothing is lost (AQU-2204)", () => {
     renderDialog()
     expect(screen.queryByTestId("link-video-switch")).toBeNull()
-    expect(screen.getByText(/a maintainer can change\s+that any time with the timing control in the Media timeline/)).toBeInTheDocument()
+    expect(screen.getByText(/Linking a film makes this file follow its source/)).toBeInTheDocument()
+    expect(screen.getByText(/No recordings\s+or times change/)).toBeInTheDocument()
+    expect(screen.getByTestId("link-video-anyway")).toHaveTextContent("Link the film")
   })
 })

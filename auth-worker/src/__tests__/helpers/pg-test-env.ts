@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
 import { PostgresDb, type PgExecutor } from "../../../../db/shim/postgres"
-import { installTestLaneFill } from "../../../../db/shared/test-lane-fill"
+import { installTestLaneFill, rewriteTestLaneResolve } from "../../../../db/shared/test-lane-fill"
 
 const SCHEMA = readFileSync(
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../db/postgres/schema.sql"),
@@ -28,8 +28,15 @@ const SCHEMA = readFileSync(
 export const pg = new PGlite({ parsers: { 20: (v: string) => Number(v), 1700: (v: string) => Number(v) } })
 
 function pgliteExecutor(db: PGlite): PgExecutor {
-  const wrap = (q: { query: PGlite["query"]; transaction?: PGlite["transaction"] }): PgExecutor => ({
+  const wrap = (q: { query: PGlite["query"]; exec: PGlite["exec"]; transaction?: PGlite["transaction"] }): PgExecutor => ({
     async run(sql, params) {
+      sql = rewriteTestLaneResolve(sql)
+      // postgres.js sends a parameterless unsafe() over the simple protocol,
+      // which accepts several statements (migration replays rely on it).
+      if (params.length === 0) {
+        const last = (await q.exec(sql)).at(-1)
+        return { rows: (last?.rows ?? []) as Record<string, unknown>[], rowCount: last?.affectedRows ?? last?.rows.length ?? 0 }
+      }
       const r = await q.query<Record<string, unknown>>(sql, params as unknown[])
       return { rows: r.rows, rowCount: (r as { affectedRows?: number }).affectedRows ?? r.rows.length }
     },
@@ -95,9 +102,15 @@ export const env = {
   AI_ALLOWED_MODELS: undefined as string | undefined,
   AI_USER_DAILY_REQUEST_LIMIT: undefined as string | undefined,
   AI_GLOBAL_DAILY_REQUEST_LIMIT: undefined as string | undefined,
+  // Platform AI spend ceiling (AQU-1869). Undefined → the module's $500/day
+  // default, which an empty ledger never reaches, so existing suites are
+  // unaffected. The spend-ceiling suite overrides it per test.
+  AI_DAILY_SPEND_CEILING_USD: undefined as string | undefined,
   AGENT_MODEL_DEFAULT: undefined as string | undefined,
   // Site-admin identity by email: "root" (root@example.com) is the test admin.
   ADMIN_EMAILS: "root@example.com" as string | undefined,
+  // AQU-730. Suites that exercise the wall set this to "1" and clear it after.
+  LANE_READ_WALL: undefined as string | undefined,
   // Step-up elevation OFF by default so existing admin-route tests stay open;
   // the elevation suite sets it per-test.
   ADMIN_REQUIRE_ELEVATION: undefined as string | undefined,

@@ -93,7 +93,8 @@ describe("GET /files — approved count after the rewrite", () => {
       files: [
         { id: "f1", project_id: "proj-a", name: "One", approved_count: 99, last_edit_at: 2 },
         { id: "f2", project_id: "proj-a", name: "Two", approved_count: 99, last_edit_at: 1 },
-        // No progress row → legacy files.approved_count fallback.
+        // No progress row. The progress rows above mint one target lane, so
+        // the files counter is that lane.
         { id: "f3", project_id: "proj-a", name: "Three", approved_count: 7, last_edit_at: 0 },
       ],
       project_settings: [{ project_id: "proj-a", settings: JSON.stringify({ validationCount: 2 }), version: 1 }],

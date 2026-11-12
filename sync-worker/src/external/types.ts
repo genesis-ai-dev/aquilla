@@ -1,5 +1,7 @@
 // Shared types for the changeset engine.
 
+import type { IdentityTransport } from './identity-bridge'
+import type { TextDirection } from '../../../db/shared/text-direction'
 import type { EventsRouteEnv } from '../events/route'
 import type { Command } from './commands'
 import type { PatchSettingsOp } from './commands-patch-settings'
@@ -7,7 +9,15 @@ import type { CellPrecondition } from './preconditions'
 
 /** Environment for the external API — a superset of the /events perimeter env
  *  (the compiled events are routed back through handleEventsWriteRequest). */
-export type ExternalEnv = EventsRouteEnv & {
+export type ExternalEnv = EventsRouteEnv & IdentityTransport & {
+  /** AQU-730 read wall. Unset locally and in e2e. */
+  /** Request-local trusted MCP delegation factory, never a network header. */
+  mcpRequest?: (input: RequestInfo | URL, init?: RequestInit) => Request
+  /** Public base of this worker (origin + mount prefix), set by the MCP route
+   *  for in-process delegation whose synthetic URL has no real origin. Used to
+   *  mint URLs a third party fetches (transcription example audio). */
+  externalPublicBase?: string
+  LANE_READ_WALL?: string
   /** Base URL for the ask-mode approval deep link. */
   BASE_URL?: string
   /** R2 media/original-import blob bucket (artifact bytes). */
@@ -18,6 +28,13 @@ export type ExternalEnv = EventsRouteEnv & {
    *  internal drafting endpoint with the SYNC_SECRET_KEY shared secret, the
    *  same server-to-server pattern as monday-notify.ts. */
   AUTH_WORKER_URL?: string
+  /** AQU-1572: PostHog project token for the validation and audio events of
+   *  committed changesets (review-telemetry.ts). Blank or unset = no events. */
+  POSTHOG_KEY?: string
+  /** PostHog ingest host. Defaults to EU (posthog-logs.ts, AQU-854). */
+  POSTHOG_HOST?: string
+  /** Deployment profile ("production", "development", "local"), sent as `app_env`. */
+  ENVIRONMENT?: string
 }
 
 /** A skipped / warned item — nothing is ever silently dropped (§3). */
@@ -31,6 +48,10 @@ export interface ChangesetWarning {
     /** ProjectSetup (AQU-1294): a plan step whose end-state already existed, so
      *  it is skipped rather than applied. A healthy outcome, not a problem. */
     | 'superseded_step'
+    /** AQU-1852: the apply stopped partway. The receipt's `eventIds` are the
+     *  events that DID land; the changeset is still `committing`, so retrying
+     *  the commit resumes from there without duplicating them. */
+    | 'apply_incomplete'
   fileId: string
   cellId: string
   message: string
@@ -132,10 +153,17 @@ export interface ChangesetSummary {
    *  AddNote): the command kind, so the human on /approve/:id sees WHICH
    *  lifecycle op they're approving instead of an empty "No changes
    *  summarized." box (design §2 / blind-approval fix). */
-  command?: ReceiptOnlyCommandKind | 'AddExample' | 'AddDecision' | 'RetireExample' | 'AddNote'
+  command?: ReceiptOnlyCommandKind | 'AddExample' | 'AddDecision' | 'RetireExample' | 'AddNote' | 'ReviewStyleRules'
   /** AQU-1228 memory commands: the memory path being written or retired, plus
    *  a one-line preview, so the human on /approve/:id sees the actual effect. */
   memoryWrites?: { path: string; action: 'add' | 'retire'; preview: string }[]
+  /** AQU-2195 ReviewStyleRules: how many rules get each decision, and each
+   *  rule's id, action and (clipped) instruction, so the human on /approve/:id
+   *  can see what is being approved or rejected. */
+  styleRuleReviews?: {
+    counts: { approve: number; reject: number; update: number }
+    items: { ruleId: string; action: 'approve' | 'reject' | 'update'; instruction: string }[]
+  }
   /** CreateProject: the project name being created. RenameProject: the new
    *  name. ArchiveProject / UnarchiveProject: the project's current name, so
    *  the approval box names what is being trashed or restored. */
@@ -199,6 +227,14 @@ export interface ChangesetSummary {
   testimony?: TestimonySummaryEntry[]
   /** InsertCell / DeleteCell / SplitCell: the one structural effect line. */
   structure?: StructureSummaryEntry
+  /** ProjectSetup (AQU-1471): the text direction the files this plan creates
+   *  will actually render in, resolved the way the editor resolves it — the
+   *  import's own override, else the project's `sourceTextDirection` /
+   *  `targetTextDirection` (including one this same plan is writing), else the
+   *  language. A string so the approval page's flat number/string filter renders
+   *  it as its own line: an agent setting up a 49-file Arabic project can read
+   *  "rtl" off the receipt instead of opening a file to find out. */
+  importTextDirection?: string
   warnings: ChangesetWarning[]
 }
 
@@ -237,11 +273,12 @@ export interface StructurePlan {
   /** Rows to re-point, each with its pinned head and minted reorder id. */
   reanchor: { cellId: string; parentEventId: string; eventId: string }[]
   /** Target rows to drop (Delete, and Split with `targets: 'blank'`). */
-  targetDeletes?: { lane: string; eventId: string }[]
+  targetDeletes?: { lane: string; laneId?: string; eventId: string }[]
   /** Split with `targets: 'divide'`: per lane, the pinned target head, the two
    *  halves of the translation, and the minted commit ids for each. */
   targetSplits?: {
     lane: string
+    laneId?: string
     parentEventId: string
     headValue: string
     tailValue: string
@@ -335,6 +372,11 @@ export interface PlannedEventIds {
     artifactId: string
     attachEventId: string
     selectEventId: string
+    /** AQU-2086: the take's native audio id — cell-seeded like a recorded
+     *  take's (db/shared/audio-id.ts), minted at prepare so a crash-retry
+     *  copies to and attaches the SAME id. Absent on plans staged before
+     *  AQU-2086; commit then falls back to the artifact's own audio_id. */
+    audioId?: string
   }[]
   /** InsertCell / DeleteCell / SplitCell: the whole structural plan — minted
    *  event ids, pinned parent heads, and the prepare-time cut text. */
@@ -375,6 +417,13 @@ export type ProjectSetupStep =
       resultIndex?: number
       sourceLanguage?: string
       targetLanguage?: string
+      /** AQU-1471: the per-file direction override this import carried, if any —
+       *  pinned so commit stamps what the approver read. Absent means the
+       *  project setting (then the language) decides at read time. */
+      sourceTextDirection?: TextDirection
+      targetTextDirection?: TextDirection
+      /** Lane id for translations this artifact already carries. */
+      laneId?: string
       /** Cell count from the prepare-time parse. Commit re-parses the (immutable)
        *  artifact and fails the step if the count moved — the approver approved
        *  a file of this size. */
@@ -418,6 +467,20 @@ export interface ChangesetReceipt {
   committedAt: string
   /** PlanImport: the created file's id. */
   fileId?: string
+  /** AQU-2086 LinkMedia: one entry per attach that landed. */
+  media?: LinkMediaReceiptEntry[]
+}
+
+/** AQU-2086: what a committed LinkMedia command actually attached — the native
+ *  take id the app plays and lists (NOT the artifact's audio_id, which is only
+ *  the upload's storage name), with the slot and lane it took. */
+export interface LinkMediaReceiptEntry {
+  fileId: string
+  cellId: string
+  artifactId: string
+  audioId: string
+  slot: string
+  laneId?: string
 }
 
 /** AQU-1185: one applied membership change, recorded on the receipt so the
@@ -504,9 +567,11 @@ export interface ProjectSetupVerification {
    *  carried a `brief` block it is true only if the L1 summary was re-rendered
    *  inside this commit — a plan that wrote sections but left yesterday's L1
    *  standing reports `false`, because the copilot is still reading the old
-   *  brief. prompt-preview's `parts.brief` is then run for real on the first
-   *  source cell of the first created file (no files: the L1 must be non-empty)
-   *  to confirm the fresh summary is actually injected. */
+   *  brief. prompt-preview's `parts.instructions` is then run for real on the
+   *  first source cell of the first created file (no files: the L1 must be
+   *  non-empty) to confirm the fresh summary is actually injected. AQU-2342:
+   *  the brief reaches prompts only through the instructions composed on read,
+   *  so a project with written `translationInstructions` reports `false`. */
   briefReachesCopilot: boolean
   /** The evidence behind `briefReachesCopilot` (AQU-1323) — always present on a
    *  fully applied plan, and always carrying a `reason` when the answer is false. */
@@ -552,6 +617,23 @@ export interface MemoryWriteReceipt {
   note?: string
 }
 
+/** AQU-2195 receipt for ReviewStyleRules. Receipt-only like the memory writes.
+ *  Names every rule's resulting status and version, in command order. */
+export interface StyleRuleReviewReceipt {
+  credentialId: string
+  channel: ProvenanceChannel
+  changesetId: string
+  command: 'ReviewStyleRules'
+  appliedAt: string
+  projectId: string
+  rules: {
+    ruleId: string
+    action: 'approve' | 'reject' | 'update'
+    status: string
+    version: number
+  }[]
+}
+
 /** The full stored plan, as persisted in `changesets`. */
 export interface StoredChangeset {
   id: string
@@ -582,7 +664,7 @@ export interface StoredChangeset {
    *  landed — commit falls back to minting for backward compat. */
   plannedIds: PlannedEventIds | null
   digest: string
-  receipt: ChangesetReceipt | ReceiptOnlyReceipt | MemoryWriteReceipt | null
+  receipt: ChangesetReceipt | ReceiptOnlyReceipt | MemoryWriteReceipt | StyleRuleReviewReceipt | null
   confirmationId: string | null
   createdAt: string
   expiresAt: string

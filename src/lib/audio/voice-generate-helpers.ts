@@ -6,11 +6,13 @@
 import { generateAndAttachCellVoice } from "./generate-voice"
 import { resolveCastVoice } from "./voices"
 import { effectiveSourceText } from "@/lib/cell-text"
+import { laneLanguageForTag, sourceLaneLanguage } from "@/lib/lanes/lane-language"
 import { setTtsStatus, ttsStatusKey, synthesizeForCell } from "./tts"
 import { AiModelConsentDeniedError } from "./ai-consent"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
+import type { TelemetrySurface } from "@/lib/cell-telemetry"
 
 export interface GenerateCellVoiceArgs {
   /**
@@ -28,7 +30,6 @@ export interface GenerateCellVoiceArgs {
   voiceId?: string
   /** Round 8c: the TTS take's permanent name (unset → backfilled later). */
   label?: string
-  diffusionSteps?: number
   /**
    * AQU-646 stage 3f: the words to speak, when they are not the cell's own.
    *
@@ -50,6 +51,12 @@ export interface GenerateCellVoiceArgs {
    * own id, as before.
    */
   voiceCellId?: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** AQU-1572: see `GenerateAndAttachArgs.surface`. */
+  surface?: TelemetrySurface
+  /** Decision 11: see `GenerateAndAttachArgs.history`. */
+  history?: { selectedBefore: string | null }
 }
 
 /**
@@ -58,7 +65,7 @@ export interface GenerateCellVoiceArgs {
  * (status is surfaced via the per-cell tts badge, not thrown).
  */
 export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<boolean> {
-  const { project, cell, session, username, voiceId, label, diffusionSteps, slot } = args
+  const { project, cell, session, username, voiceId, label, slot } = args
   const text = (args.text ?? cell.translated)?.trim()
   // Not a failure — there is simply nothing to say. Every caller already gates
   // its control on the same emptiness, so this returns quietly, as before.
@@ -105,22 +112,30 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
           // The linked subtitle's assignment when there is one — see
           // `voiceCellId`. Falls back to this cell's own, which is every
           // non-cue arrangement.
-          args.voiceCellId ?? cell.id,
+          // AQU-2125: this cell itself (not its id) so its character is found.
+          args.voiceCellId ?? cell,
           cell.ttsSettings?.voiceId,
         ).id,
+      // AQU-1978: the languages of the LANES this voice belongs to. The
+      // project-level pair is retired (AQU-1594/1595) and empty on a new
+      // project, which left Inworld with no language and the default voice
+      // picked for none — on every regenerate, voice-panel and batch voice.
       geminiContext: {
-        sourceLanguage: project.sourceLanguage,
-        targetLanguage: project.targetLanguage,
+        sourceLanguage: sourceLaneLanguage(project.lanes) ?? undefined,
+        targetLanguage: laneLanguageForTag(args.targetLang ?? "", project.lanes) ?? undefined,
         // SUB-28: media sections speak through their transcript, not the filename.
         original: effectiveSourceText(cell),
         context: cell.context,
-        cellLabel: cell.cellLabel,
+        // AQU-2408: no cellLabel — a typed label is a note on the line, not
+        // voice direction (docs/decisions/0007). The placeholder renders empty.
       },
       session,
       username,
-      diffusionSteps,
       ...(label ? { label } : {}),
+      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       onProgress,
+      ...(args.surface ? { surface: args.surface } : {}),
+      ...(args.history ? { history: args.history } : {}),
     })
     setTtsStatus(statusKey, { kind: "idle" })
     return true

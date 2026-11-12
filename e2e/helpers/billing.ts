@@ -19,7 +19,7 @@ export async function recordTestWorkspacePlan(orgId: number) {
     return await recordInitialWorkspaceEntitlement(db, {
       orgId, catalog: manifest,
       prices: manifest.bindings.map(b => stripeCatalogResponse(`/v1/prices/${b.priceId}`) as StripePriceInput),
-      offer: 'team_20x', interval: 'year', quantity: 1,
+      offer: 'team', interval: 'year', quantity: 1,
       subscriptionId: `sub_e2e_${orgId}`, customerId: `cus_e2e_${orgId}`,
       paidThrough: new Date(Date.now() + 86400000 * 365).toISOString(),
       activatedAt: new Date(Date.now() - 86400000).toISOString(),
@@ -28,12 +28,14 @@ export async function recordTestWorkspacePlan(orgId: number) {
 }
 
 /** Browser coverage consumes persisted facts; signed-event production is covered
- * by billing-workspace-checkout.test.ts against real Postgres. */
+ * by billing-workspace-checkout.test.ts against real Postgres. The paid period
+ * ends 8 days back, past the 7-day past-due grace (AQU-2058), so access is Free. */
 export async function recordTestWorkspaceFailure(orgId: number) {
   const db = testBillingDb()
   try {
     const saved = await db.prepare(`UPDATE workspace_subscription_state
-      SET payment_failed = true, revision = revision + 1 WHERE org_id = ? RETURNING org_id`)
+      SET payment_failed = true, paid_through = now() - interval '8 days',
+        revision = revision + 1 WHERE org_id = ? RETURNING org_id`)
       .bind(orgId).first()
     if (!saved) throw new Error('Billing state not seeded')
   } finally { await db.close() }

@@ -73,3 +73,33 @@ describe("ConfirmActionDialog — AQU-271 file-delete copy", () => {
     expect(onConfirm).toHaveBeenCalledOnce()
   })
 })
+
+// A dead-end confirmation (batch validate with nothing this reader can
+// validate): the body already says so, so there is nothing to acknowledge and
+// no confirm that would only fail. Walk 10-02, w1 area 6.
+describe("ConfirmActionDialog — an action that can do nothing here", () => {
+  it("offers only Close: no acknowledgement and no confirm button", () => {
+    const onConfirm = vi.fn()
+    const onOpenChange = vi.fn()
+    render(
+      <ConfirmActionDialog
+        open={true}
+        onOpenChange={onOpenChange}
+        title="Batch validate text"
+        description="Only the people this project names can validate text."
+        confirmLabel="Validate text"
+        checkboxLabel="I understand this records my name."
+        canConfirm={false}
+        onConfirm={onConfirm}
+      />,
+    )
+    expect(screen.getByText("Only the people this project names can validate text.")).toBeTruthy()
+    expect(screen.queryByRole("checkbox")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Validate text" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
+    // The dialog's corner X is also named "Close"; the footer one has the text.
+    fireEvent.click(screen.getAllByRole("button", { name: "Close" }).find((b) => b.textContent === "Close")!)
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    expect(onConfirm).not.toHaveBeenCalled()
+  })
+})

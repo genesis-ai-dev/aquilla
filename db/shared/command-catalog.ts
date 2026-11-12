@@ -8,6 +8,8 @@
 // (dynamic checks — org overrides, per-event floors — happen at prepare).
 
 import { settingsKeyDocLines } from './project-settings-keys'
+import { BIBLE_CHECK_META, TEXT_CHECK_IDS, TEXT_CHECK_META } from './builtin-checks'
+import { BIBLE_CHECK_IDS } from './bible-checks/types'
 import { POLICY_DIRECTION_TABLE } from './policy-direction'
 
 export type CommandTier = 'prepared' | 'structural' | 'testimony' | 'governance'
@@ -36,6 +38,14 @@ const PATCH_SETTINGS_KEY_DOC = settingsKeyDocLines()
   .map((line) => `\`${line}\``)
   .join(', ')
 
+// AQU-2192: the Rules page's check names, mapped to the ids `algorithmicChecks` is keyed by.
+const PATCH_SETTINGS_CHECKS_DOC = `Built-in checks (Rules page name → id, default): ${TEXT_CHECK_IDS.map((id) => {
+  const m = TEXT_CHECK_META[id]
+  return `"${m.name}" → \`${id}\` (${m.defaultEnabled ? 'on' : 'off'}, ${m.defaultSeverity})`
+}).join('; ')}. Bible data checks, present only while the project's Bible data checks are on (all default on): ${BIBLE_CHECK_IDS.map((id) => `"${BIBLE_CHECK_META[id].name}" → \`${id}\``).join('; ')}.
+To override a check, write \`algorithmicChecks\` as a map from id to \`{ enabled, severity? }\`, e.g. \`{ "usfm-structure": { "enabled": false }, "footnote-quote-mismatch": { "enabled": false } }\`. Omit \`severity\` for the default; a check with no entry keeps its default. The op replaces the whole map, so start from \`settings.algorithmicChecks\` (GET .../settings) and add to it. \`algorithmicChecksByLane\` is \`{ [laneTag]: that same map }\` (\`""\` is the default lane); a lane's entry for a check replaces the project-wide entry for that check, and other checks fall through. \`rules\` holds only your own regex rules, never built-in checks. The "Style rules" section of the Rules page is a different store and cannot be written through \`rules\`. To approve, reject or edit those, use ReviewStyleRules.`
+
+
 /** AQU-1282: the per-key restrictive direction, rendered from the same table the
  *  enforcing helper uses (db/shared/policy-direction.ts) so the doc an agent
  *  reads and the rule it hits cannot drift. */
@@ -58,13 +68,13 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = [
     tier: 'prepared',
     agentReachable: true,
     paramsDoc: `### SetTranslation
-Params: \`{ fileId, cellId, value, valueHtml?, laneId? }\` — batch many per changeset.
+Params: \`{ fileId, cellId, value, valueHtml?, laneId }\` — batch many per changeset. \`laneId\` is required.
 Compiles to \`target.cell.commit\` through the /events perimeter.
 Gotchas:
-- \`laneId\` must already be registered in the project's targetLanes (register via PatchSettings first); omit for the default lane.
+- \`laneId\` is \`lanes.id\`, from GET /api/v1/external/projects/:projectId (\`lanes\`). A language tag is not accepted. Omitting it is \`validation_failed\` and names the discovery endpoint.
 - Duplicate (cell, lane) targets in one changeset dedupe with a warning — last wins.
 - Committing resets the cell's validation state by design.
-Example: \`{ "kind": "SetTranslation", "fileId": "f1", "cellId": "c3", "value": "En el principio…" }\``,
+Example: \`{ "kind": "SetTranslation", "fileId": "f1", "cellId": "c3", "laneId": "a1b2c3d4", "value": "En el principio…" }\``,
   },
   {
     kind: 'LinkMedia',
@@ -74,8 +84,8 @@ Example: \`{ "kind": "SetTranslation", "fileId": "f1", "cellId": "c3", "value": 
     tier: 'prepared',
     agentReachable: true,
     paramsDoc: `### LinkMedia
-Params: \`{ fileId, cellId, artifactId }\` — the artifact must be audio-kind, same project.
-Compiles to \`cell.audio.attach\` + \`cell.audio.select\`; bytes are copied into the app's native audio layout so playback works everywhere.
+Params: \`{ fileId, cellId, artifactId, laneId, slot?, durationMs? }\` — the artifact must be audio-kind, same project. \`laneId\` is the target lane's \`lanes.id\` (required — a take with no lane is filed under the legacy default lane and never shows in a tagged lane's Takes); \`slot\` is \`"recording"\` (default: a recorded take) or \`"generatedVoice"\` (externally synthesized voice, reviewed and exported like in-app TTS); \`durationMs\` is the clip length when known (the upload does no decoding).
+Compiles to \`cell.audio.attach\` + \`cell.audio.select\` in that lane. The take gets a cell-seeded native audio id — reported as \`receipt.media[].audioId\`, not the upload's audioId — and the bytes are copied into the app's native audio layout, so the Takes list, the Target track, playback and the dubbing export treat it like a recorded take.
 Gotcha: upload the artifact first (REST artifact endpoint with \`x-artifact-kind: audio\`); LinkMedia-only changesets cannot mix other commands.`,
   },
   {
@@ -86,12 +96,13 @@ Gotcha: upload the artifact first (REST artifact endpoint with \`x-artifact-kind
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### PlanImport
-Params: \`{ fileName, fileType, artifactId?, manifest?, cells: [{ content, canonicalRef?, … }] }\`.
+Params: \`{ fileName, fileType, artifactId?, manifest?, sourceTextDirection?, targetTextDirection?, cells: [{ content, canonicalRef?, … }] }\`.
 Sole command in its changeset; cap 5000 cells. Compiles to \`file.create\` + N \`source.cell.create\`.
 Gotchas:
 - Prefer parsing an uploaded artifact server-side (artifact parse endpoint / preview_import) and staging from its results, so the original is preserved for round-trip export.
 - Cells may carry per-lane \`variants\` for multi-language imports.
-- Duplicate file names are a staleness precondition — prepare warns, commit re-checks.`,
+- Duplicate file names are a staleness precondition — prepare warns, commit re-checks.
+- \`sourceTextDirection\` / \`targetTextDirection\` (\`"ltr"\`/\`"rtl"\`) stamp THIS ONE FILE and are for the exception only. For a whole RTL project set the project-level \`targetTextDirection\` with PatchSettings instead (AQU-1471) — an absent override resolves to that setting, then to the language, on every read.`,
   },
   {
     kind: 'CreateProject',
@@ -101,11 +112,11 @@ Gotchas:
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### CreateProject
-Params: \`{ name, projectId?, orgId?, sourceLanguage?, targetLanguage? }\` — sole command; forced ask-mode regardless of credential mode.
+Params: \`{ name, projectId?, orgId?, lanes? }\` — sole command; forced ask-mode regardless of credential mode.
 Requires org MAINTAINER (600) on the target org; project-scoped credentials can never create projects.
 The field set is CLOSED: any other key is \`validation_failed\` naming it. Nothing is silently ignored.
 - \`name\` must be a REAL name, not a placeholder: derive it from what you are importing (the source folder or file name, the publication/curriculum title, the language pair), or ask the human. Content-free names ("default", "untitled", "new project", "unnamed", …) are rejected with \`validation_failed\` — the name is what humans see in the workspace forever after.
-- \`sourceLanguage\` / \`targetLanguage\` seed the settings blob at creation (landing at settings version 1, exactly as the UI's create-then-patch does). Send \`targetLanguage: ""\` for a source-only project.
+- \`lanes\` is \`[{ role: "source" | "target", language, name?, code? }]\`. They become lane rows. The four project-level language keys are not written. Omit \`lanes\` for a source lane with no language.
 - Every OTHER settings key goes through \`PatchSettings\` after the create — it owns the version guard and the per-key role floors a create cannot honor.
 - Membership is not set here: use the \`InviteMember\` / \`SetRole\` family. A \`members\` field is rejected, not swallowed.
 - There is no project \`description\` field in the product; sending one is rejected.
@@ -179,15 +190,20 @@ Example: \`{ "kind": "CreateOrg", "name": "Partner Co" }\``,
     agentReachable: true,
     paramsDoc: `### PatchSettings
 Params: \`{ projectId, ops: [{ key, value }], ifMatchVersion }\` — sole command; top-level settings keys only; each op replaces that key's value wholesale (one op per key — duplicates are rejected).
-Floors: \`terminology\` needs the org's termbase-edit floor (default PROJECT_LEAD 500); every other key needs MAINTAINER 600.
-Policy keys — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, agentAuthorship — govern the oversight of your own work, and are writable in the RESTRICTIVE DIRECTION ONLY (AQU-1282). Tightening stages like any other write; loosening is \`permission_denied\` with \`details.loosening: [{ key, current, proposed, reason }]\`. The direction is computed against the LIVE blob at prepare AND again at commit, so a human loosening a key mid-flight cannot let your staged plan land as a loosening write. Restrictive direction per key:
+Floors: every key needs MAINTAINER 600. sourceLanguage, targetLanguage, targetLanes, and archivedLanes are not settings and are rejected — languages and lanes are lane rows (CreateProject or ProjectSetup \`lanes\`).
+\`terminology\` is RETIRED (AQU-1724): key terms live in the concepts table, so prepare rejects a \`terminology\` op with \`validation_failed\`. Write terms with \`term.create\` / \`term.update\` events in an EmitEvents changeset (read the termbase with \`list_terms\` first).
+Policy keys — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, agentAuthorship, rosterViewMinRole, memberProgressViewMinRole — govern the oversight of your own work, and are writable in the RESTRICTIVE DIRECTION ONLY (AQU-1282). Tightening stages like any other write; loosening is \`permission_denied\` with \`details.loosening: [{ key, current, proposed, reason }]\`. The direction is computed against the LIVE blob at prepare AND again at commit, so a human loosening a key mid-flight cannot let your staged plan land as a loosening write. Restrictive direction per key:
 ${POLICY_DIRECTION_DOC}
 Valid keys, with the value type each holds: ${PATCH_SETTINGS_KEY_DOC}. \`null\` clears any key (JSON cannot carry undefined, so there is no "delete").
+${PATCH_SETTINGS_CHECKS_DOC}
 Gotchas:
 - A key not on that list is a typo, not a new setting: prepare rejects it with \`validation_failed\` naming the key, and a wrong value type is rejected the same way naming the expected type. Nothing reaches the approval queue either way.
 - \`ifMatchVersion\` must equal the live settings version at prepare AND commit (plan_stale on drift) — read it first.
+- Checks and rules: \`rules\`, \`rulePenalties\`, \`algorithmicChecks\` and \`algorithmicChecksByLane\` are checked field by field; a wrong shape or an unknown field is \`validation_failed\` naming it. Read \`builtinChecks\` from GET .../settings to see what is on; \`settings\` alone shows only overrides.
 - Prefer this over UpdateProjectSettings (deprecated whole-blob replace).
-Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "targetLanes", "value": ["es","pt"] }], "ifMatchVersion": 7 }\``,
+- RTL projects: set \`targetTextDirection: "rtl"\` ONCE here rather than per file (AQU-1471). It is the project's DEFAULT — resolution is per-file-row → this setting → the language — so it covers every file, present and future, and a file that really runs the other way keeps its own override. \`"auto"\`, and an absent key, mean "take it from the language", which already answers Arabic/Hebrew/Persian/Urdu/… by name or ISO code; set it explicitly when the language name is one Aquilla cannot read.
+- \`translationInstructions\` (string, ≤ 8000 chars) is THE text every drafting prompt reads — copilot, prompt-preview, the in-app agent and its draft tool, DraftCells, Autopilot — injected once, right after the fixed role text. Until it is written, prompts compose it on read from the brief, a customized \`systemPrompt\`, Living Memory instruction/standard entries, the decision log (\`projectFacts\`), the legacy agent brief and approved \`decisions/\` memories; once written, those are ignored by every prompt. Answering an Autopilot decision card and approving an AddDecision append a line to it. GET .../settings returns the resolved text as \`translationInstructions\`.
+Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "translationInstructions", "value": "Plain register for rural youth; keep divine names as in the 1999 Bible." }], "ifMatchVersion": 7 }\``,
   },
   {
     kind: 'SetBrief',
@@ -197,28 +213,28 @@ Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "targe
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### SetBrief
-Params: \`{ projectId, parameters?, freeformNotes?, ifMatchVersion }\` — sole command; at least one of \`parameters\`/\`freeformNotes\`.
+Params: \`{ projectId, parameters?, freeformNotes?, ifMatchVersion }\` — sole command; at least one of \`parameters\`/\`freeformNotes\`. Over MCP use the \`prepare_set_brief\` tool (AQU-2407), where \`ifMatchVersion\` is optional — omitted, the server pins the live settings version; \`prepare_translations\`'s \`commands\` argument does not accept this kind.
 \`parameters\` is a PARTIAL map of brief section id → answer text: named sections are replaced, every unnamed section keeps its live value. Section ids (interview order):
 - Purpose & audience: \`purpose\`, \`audience\`, \`useAndMedium\`, \`motiveSponsor\`
 - Standards: \`sourceTexts\`, \`targetVariety\`, \`registerNaturalness\`, \`literalness\`, \`keyTerms\`, \`constraints\`, \`qualityBar\`
-Writes the \`translationBrief\` key of the project settings blob — the same record the in-app brief builder reads, so an API-set brief satisfies the autopilot brief gate exactly like a hand-typed one.
+Writes the \`translationBrief\` key of the project settings blob — the same record the in-app brief builder reads. The brief is interview data: prompts never read it directly. \`translationInstructions\` is THE source every drafting prompt reads; until a maintainer writes it, the brief (its L1 summary, else its answered sections) is composed into the instructions on read — which is also how an API-set brief clears the Autopilot instructions gate. Once instructions are written, the brief no longer reaches any prompt.
 Gotchas:
 - An unknown section id is \`validation_failed\` (nothing is staged) — it is never silently dropped.
 - Section text caps at 4000 chars; \`freeformNotes\` at 8000.
 - \`ifMatchVersion\` is the SETTINGS version (not the brief's own \`version\`) and must match at prepare AND commit (plan_stale on drift) — read it first.
-- The copilot reads only the brief's rendered L1 summary (\`translationBrief.l1Summary\`), so on commit the summary is regenerated automatically when the drafting backend is reachable — the receipt's \`briefSummary\` says whether it rendered (and bumps the settings version once more). If it did not, the sections are still committed; run \`RegenerateBriefSummary\` to re-render.
+- On commit the brief's L1 summary is regenerated automatically when the drafting backend is reachable — the receipt's \`briefSummary\` says whether it rendered (and bumps the settings version once more). If it did not, the sections are still committed (and still feed un-written instructions as "Heading: answer" lines); run \`RegenerateBriefSummary\` to re-render.
 Example: \`{ "kind": "SetBrief", "projectId": "p1", "parameters": { "audience": "Rural youth, 15–25" }, "ifMatchVersion": 7 }\``,
   },
   {
     kind: 'RegenerateBriefSummary',
     title: 'Regenerate brief summary',
-    oneLiner: 'Re-render the brief’s L1 summary so the copilot sees the current sections.',
+    oneLiner: 'Re-render the brief’s L1 summary from its current sections.',
     minRoleLevel: MAINTAINER,
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### RegenerateBriefSummary
-Params: \`{ projectId, ifMatchVersion }\` — sole command; REST changesets only (like SetBrief, not offered through the MCP prepare tools).
-Renders \`translationBrief.l1Summary\` from the brief's CURRENT sections + notes with the same prompt and 1600-char cap the in-app "Regenerate summary" button uses, and writes \`l1Summary\` / \`l1GeneratedAt\` / \`l1ModelId\` back through the version-guarded settings write. The L1 is the ONLY part of the brief the copilot's prompt injects (see \`parts.brief\` in the prompt-preview read), so this is how a brief written by SetBrief — or edited in-app without regenerating — reaches the AI.
+Params: \`{ projectId, ifMatchVersion }\` — sole command; stage it with the \`regenerate_brief_summary\` MCP tool (AQU-2407, \`ifMatchVersion\` optional there) or a REST changeset. \`prepare_translations\`'s \`commands\` argument does not accept this kind.
+Renders \`translationBrief.l1Summary\` from the brief's CURRENT sections + notes with the same prompt and 1600-char cap the in-app "Regenerate summary" button uses, and writes \`l1Summary\` / \`l1GeneratedAt\` / \`l1ModelId\` back through the version-guarded settings write. Prompts read \`translationInstructions\`, not the brief: while a project has not written instructions, the L1 summary is what the brief contributes to them on read (see \`parts.instructions\` in the prompt-preview read), so this refreshes that contribution. Once \`translationInstructions\` is written, the summary no longer reaches any prompt.
 Gotchas:
 - Needs at least one filled section or \`freeformNotes\`; otherwise \`validation_failed\` "nothing to summarize" (nothing staged).
 - \`ifMatchVersion\` is the SETTINGS version and must match at prepare AND commit (plan_stale on drift). A successful commit bumps it by one.
@@ -234,24 +250,26 @@ Example: \`{ "kind": "RegenerateBriefSummary", "projectId": "p1", "ifMatchVersio
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### ProjectSetup
-Params: \`{ projectId, settings?, brief?, members?, imports? }\` — sole command; at least one block. REST changesets only (like SetBrief, not offered through the MCP prepare tools). ALWAYS ask-mode: one changeset, one approval URL, one commit.
+Params: \`{ projectId, settings?, lanes?, brief?, members?, imports? }\` — sole command; at least one block. REST changesets only — it is not offered through the MCP prepare tools. ALWAYS ask-mode: one changeset, one approval URL, one commit.
 The server expands it into a fixed step order and chains the version guards ITSELF, which is why \`plan_stale\` cannot occur inside a plan:
 1. \`settings\` — non-policy keys, one write.
 2. \`settings\` — policy keys, restrictive direction only, re-checked against the LIVE blob at commit.
-3. \`brief\` — \`{ parameters?, freeformNotes? }\`, merged into the live brief exactly as SetBrief does, then the L1 summary is re-rendered so it reaches the copilot.
+3. \`brief\` — \`{ parameters?, freeformNotes? }\`, merged into the live brief exactly as SetBrief does, then the L1 summary is re-rendered. The brief reaches prompts only through \`translationInstructions\` composed on read — so it is ignored when the plan's \`settings\` (or the live blob) sets \`translationInstructions\`.
 4. \`members\` — \`[{ username, role }]\`, upsert (invite a new person, re-role a member) through the Membership gate.
-5. \`imports\` — \`[{ artifactId, fileName, fileType?, resultIndex?, sourceLanguage?, targetLanguage? }]\`, in array order: each artifact is parsed server-side and applied as a PlanImport.
+5. \`lanes\` — \`[{ role, language, name?, code? }]\`, created as lane rows before the settings write. \`settings.sourceLanguage\`, \`targetLanguage\`, \`targetLanes\`, and \`archivedLanes\` are rejected.
+6. \`imports\` — \`[{ artifactId, fileName, fileType?, resultIndex?, sourceLanguage?, targetLanguage?, sourceTextDirection?, targetTextDirection?, laneId? }]\`, in array order: each artifact is parsed server-side and applied as a PlanImport. \`laneId\` is required when the artifact already has translations, and it is a lane id.
 6. The verification receipt (below).
 Gotchas:
 - The project must already EXIST. The spec's \`project\` create-in-plan block is NOT supported — artifacts are project-scoped, so a plan carrying imports cannot target a project that does not exist yet. Passing \`project\` is \`validation_failed\` with \`details.field: "project"\`: create it with CreateProject (its own approval) first.
-- Never guess these four — they come from the partner, not from you: \`settings.sourceLanguage\`, \`settings.targetLanguage\`, \`brief.parameters.sourceTexts\`, \`brief.parameters.keyTerms\`. See the \`project-setup\` skill.
+- Never guess the lane languages or these brief fields — they come from the partner, not from you: \`lanes[].language\`, \`brief.parameters.sourceTexts\`, \`brief.parameters.keyTerms\`. See the \`project-setup\` skill.
 - Every prepare rejection NAMES the offending field in \`details.field\`: unknown/mistyped settings key, a policy write that would loosen, an unknown brief section, a duplicate \`fileName\` inside the plan or against an existing active file.
 - Limits: \`imports\` ≤ 10 (each ≤ the PlanImport cell cap), \`members\` ≤ 25.
 - Floor is the MAX of the constituent floors (MAINTAINER, plus the org's termbase/language floors when those keys are named).
+- Text direction (AQU-1471): put \`targetTextDirection: "rtl"\` in the plan's \`settings\` block for an RTL project — the receipt's \`importTextDirection\` then reports the direction the plan's files will actually render in, resolved against the settings this plan LEAVES BEHIND (per-import override → the setting → the language). A per-import \`sourceTextDirection\`/\`targetTextDirection\` is for the odd file that runs against the project.
 - Failure semantics: the commit stops at the first failing step and returns \`job_failed\` with \`details.receipt\` (\`completedSteps\`, \`failedStep\`). Applied steps STAY applied; committing the same changeset again resumes at the failed step and skips the rest. Steps whose end-state already existed at prepare are marked \`superseded\` and reported as \`superseded_step\` warnings.
 - Policy keys a human loosened between prepare and commit are DROPPED (the rest of the plan still applies) and listed in \`verification.policyKeysNotApplied\`.
 - Receipt carries \`verification: { settingsVersion, members[{username,role}], files[{fileId,name,cellCount,cellsWithMarkup}], briefReachesCopilot, briefDetails, policyKeysNotApplied }\`. \`briefReachesCopilot\` is a FRESHNESS claim, not an emptiness one: with a \`brief\` block it is true only if the L1 summary was re-rendered inside this commit AND the real prompt-preview run on the first source cell of the first created file carries it. If it is false, \`briefDetails.reason\` says why and the brief is NOT reaching the AI — run RegenerateBriefSummary. \`briefDetails.truncated\` means the summary hit the 1600-char cap and dropped some committed sections; it can accompany a \`true\`.
-Example: \`{ "kind": "ProjectSetup", "projectId": "p1", "settings": { "sourceLanguage": "ru", "targetLanguage": "sty", "contributeToGlobalTm": false }, "brief": { "parameters": { "audience": "Rural youth" } }, "members": [{ "username": "gulsifa", "role": 600 }], "imports": [{ "artifactId": "01a0…", "fileName": "Acts", "fileType": "usfm" }] }\``,
+Example: \`{ "kind": "ProjectSetup", "projectId": "p1", "lanes": [{ "role": "source", "language": "ru" }, { "role": "target", "language": "sty" }], "settings": { "contributeToGlobalTm": false }, "brief": { "parameters": { "audience": "Rural youth" } }, "members": [{ "username": "gulsifa", "role": 600 }], "imports": [{ "artifactId": "01a0…", "fileName": "Acts", "fileType": "usfm" }] }\``,
   },
   {
     kind: 'UpdateProjectSettings',
@@ -302,7 +320,7 @@ Example: \`{ "kind": "SetTranscription", "fileId": "f1", "cellId": "c3", "transc
     agentReachable: true,
     paramsDoc: `### SetTiming
 Params: \`{ fileId, cellId?, startMs?, endMs?, timingMode? }\` \u2014 at least one of (startMs+endMs) or timingMode.
-\`startMs\`/\`endMs\` (both together, cellId required) compile to \`cell.retime\` (CONTRIBUTOR 400); \`timingMode\` ("dubbing" | "audioFirst" | null) compiles to \`file.timing.set\` for the whole FILE (MAINTAINER 600). A command carrying both needs the higher floor.
+\`startMs\`/\`endMs\` (both together, cellId required) compile to \`cell.retime\` (CONTRIBUTOR 400); \`timingMode\` ("dubbing" | "audioFirst" | null) compiles to \`file.timing.set\` for the whole FILE (PROJECT_LEAD 500). A command carrying both needs the higher floor.
 Gotchas:
 - MILLISECONDS MUST BE INTEGERS. A fractional value is rejected at prepare with the offending number in the message (AQU-927: ms columns are BIGINT and one float used to fail every event in its flush). Round before sending; this surface will not round for you.
 - Projects default to TIMING LOCKED: while \`timingLocked\` is not exactly false, a retime needs MAINTAINER (600) unless the cell is a line someone added by hand. Prepare refuses rather than staging a plan you could not commit.
@@ -317,10 +335,11 @@ Example: \`{ "kind": "SetTiming", "fileId": "f1", "cellId": "c3", "startMs": 240
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### SetTrackOverride
-Params: \`{ fileId, trackId, patch }\` \u2014 \`patch\` is \`{ kind?, name?, order?, groupId?, color?, sourceTrackId? }\` or \`null\` to DELETE the override entry. Inside a patch, null clears that one field; an absent key leaves it alone.
+Params: \`{ fileId, trackId, patch }\` \u2014 \`patch\` is \`{ kind?, name?, order?, groupId?, color?, sourceTrackId?, setsLineLengths? }\` or \`null\` to DELETE the override entry. Inside a patch, null clears that one field; an absent key leaves it alone.
 Compiles to \`file.track.set\`, merged into \`files.meta.trackOverrides[trackId]\`. Track structure is file structure \u2014 MAINTAINER (600).
 Gotchas:
 - TWO GATES. Restructuring patches (anything beyond \`name\`/\`order\`, and every \`patch: null\` delete) additionally require the project's \`allowTrackEditing\` \u2014 with it off, even an OWNER is refused. Renames and reorders stay ungated. Turn it on with PatchSettings first.
+- \`setsLineLengths: false\` makes an added track a layer (music, effects): while the file follows its recordings, its takes set no line's length. Every track sets them by default; the four derived tracks cannot be changed.
 - \`trackId\` must match /^[A-Za-z0-9_-]{1,64}$/; the four derived ids (source-subtitles, source-audio, target-subtitles, target-audio) are reserved and cannot be given a \`kind\`.
 Example: \`{ "kind": "SetTrackOverride", "fileId": "f1", "trackId": "target-audio", "patch": { "name": "Dub \u2014 ES" } }\``,
   },
@@ -344,21 +363,22 @@ Allowed kinds:
 - Back-translation (400+): \`cell.backtranslation.set\` \`{ btText, btHtml?, polished? }\` — needs fileId + cellId.
 - Staleness (400+): \`target.cell.repin\` \`{}\` — needs fileId + cellId.
 - File lifecycle (500+): \`file.rename\` \`{ name }\` · \`file.delete\` \`{}\` · \`file.restore\` \`{}\` — need fileId.
-- Assignments (500+): \`assignment.create\` \`{ scopeKind: 'books'|'chapters', scope: [{ fileId, chapter? }], scopeLabel, assigneeUserId, deadline?, note?, assignmentId? }\` · \`assignment.reassign\` \`{ assignmentId, assigneeUserId }\` · \`assignment.unassign\` \`{ assignmentId }\`.
-- Terminology (400+ to suggest; the org's termbase floor — default 500 — to bind): \`term.create\` \`{ sourceTerm, renderings: [{ rendering, status: 'preferred'|'admitted'|'forbidden' }], status: 'draft'|'active', notes?, caseSensitive?, conceptId? }\` · \`term.update\` \`{ conceptId, sourceTerm?, renderings?, notes?, caseSensitive? }\` · \`term.delete\` \`{ conceptId }\` · \`term.approve\` \`{ conceptId }\` · \`term.reject\` \`{ conceptId, mode: 'delete'|'deprecate' }\` — project-level, so omit fileId/cellId.
+- Assignments (500+): \`assignment.create\` \`{ scopeKind: 'books'|'chapters'|'cells', scope: [{ fileId, chapter?, cellIds? }], scopeLabel, assigneeUserId, deadline?, note?, assignmentId? }\` — \`cellIds\` (exactly those source lines) is required for \`'cells'\` and rejected otherwise · \`assignment.reassign\` \`{ assignmentId, assigneeUserId }\` · \`assignment.unassign\` \`{ assignmentId }\`.
+- Terminology (400+ to suggest; the org's termbase floor — default 500 — to bind): \`term.create\` \`{ sourceTerm, renderings: [{ rendering, status: 'preferred'|'admitted'|'forbidden' }], status: 'draft'|'active', notes?, caseSensitive?, match?, conceptId? }\` · \`term.update\` \`{ conceptId, sourceTerm?, renderings?, notes?, caseSensitive?, match? }\` · \`term.delete\` \`{ conceptId }\` · \`term.approve\` \`{ conceptId }\` · \`term.reject\` \`{ conceptId, mode: 'delete'|'deprecate' }\` — project-level, so omit fileId/cellId. \`match\` is \`{ forms?: string[], excludedForms?: string[], affixes?: boolean, foldMarks?: boolean }\` — see the terminology gotcha below.
 
 Not here: target text (use SetTranslation), source edits, cell structure (split/merge/insert/delete), audio (use LinkMedia), imports (use PlanImport), reorders/retimes, membership, and project lifecycle. Rules and Living Memory are not event-sourced at all — rules go through PatchSettings, memory through the agent-memory API — so they cannot be emitted here.
 Gotchas:
 - Head pins (editEventId / targetEventId / sourceEventId / expectedTargetEventId) are SERVER-RESOLVED from the live projection at prepare — omit them; a supplied value is rejected. Commit re-checks the pins (plan_stale on drift).
 - Every referenced cell/comment/file/assignment/concept must exist at prepare — one bad reference rejects the whole plan (no silent skips).
 - Terminology: \`status: 'active'\` on create, and every update/delete/approve/reject, are BINDING writes gated by the org's termbase floor; \`status: 'draft'\` is a suggestion any contributor may stage. \`term.create\` naming an existing concept is rejected (use \`term.update\`) — omit \`conceptId\` and the server mints one. Status is not patchable via \`term.update\`; approve/reject are their own kinds so the audit trail keeps them apart.
+- Terminology matching is EXACT unless \`match\` says otherwise, and that is usually the difference between a term that works and one that silently never fires: \`forms\` are extra literal source surfaces treated as alternates of \`sourceTerm\`, \`excludedForms\` are surfaces a human rejected, \`affixes\` allows the project's configured prefixes/suffixes, \`foldMarks\` ignores combining marks. In an inflected language a concept with no \`forms\` matches the lemma ONLY (\`Боже Слово\` flags none of its inflected forms), so list the forms you need. \`match\` is replaced wholesale when present and left untouched when absent — send the full option set, and \`{}\` to clear it. An unrecognized key inside \`match\` is REJECTED, not ignored, so a \`forms\`/\`form\` typo fails loudly instead of quietly clearing your options. Read the existing termbase first with \`list_terms\`; \`forms\`/\`excludedForms\` hold at most 100 entries each.
 - payload shapes match the app's event vocabulary — call describe_command or docs before hand-building unfamiliar payloads.
 
 Validation guardrails (\`cell.validate\` / \`cell.unvalidate\`; AQU-1184) — these are policy, not preferences, and no parameter turns any of them off:
 - **AI-drafted text cannot be validated through this API.** A \`cell.validate\` whose cell is still an unreviewed machine draft (\`ai_drafted\`) is rejected at prepare with \`validation_failed\` naming that cell, and it rejects the WHOLE plan. This mirrors the in-app rule that AI output is reviewed one cell at a time. To validate such a cell, a human edits or validates it in the app first (either clears the marker); an agent cannot clear it on its own behalf.
 - **Explicit cells only.** Every event names one \`(fileId, cellId)\`. There is no wildcard, glob, range, \`"*"\`, or "validate all" form — such a value is simply a cell id that does not exist, and prepare rejects the plan.
 - **Every staged validation is itemized for the approver.** The effect summary lists each cell id with the text as the server reads it, so approval endorses specific sentences, not a count. Validations are testimony tier: review UIs confirm them per item and never bulk-apply them.
-- **Project validation policy still governs the commit.** The compiled events go through the /events perimeter as the credential's own user, so the validation role floor, the validator allowlist, and \`allowSelfValidation\` apply exactly as they do in the app — a credential cannot validate what its owner could not.
+- **Project validation policy still governs the commit.** The compiled events go through the /events perimeter as the credential's own user, so the validation role floor, the validator allowlist, and \`allowSelfValidation\` apply exactly as they do in the app — a credential cannot validate what its owner could not. When the policy refuses only some events, the commit applies the rest and lists each refusal in \`receipt.warnings\` as \`{ code: "rejected", fileId, cellId, message }\` naming the refused line; when it refuses every event, the commit fails and \`error.details.rejected\` names each line the same way.
 Example: \`{ "kind": "EmitEvents", "events": [{ "kind": "term.create", "payload": { "sourceTerm": "covenant", "renderings": [{ "rendering": "заповіт", "status": "preferred" }], "status": "draft" } }] }\``,
   },
   {
@@ -458,15 +478,16 @@ Gotchas:
   {
     kind: 'AddExample',
     title: 'Add example',
-    oneLiner: 'Record a source-to-target example pair the copilot reuses on similar lines.',
+    oneLiner: 'Record a source-to-target example pair in the in-app agent\'s working memory.',
     minRoleLevel: CONTRIBUTOR,
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### AddExample
 Params: \`{ slug, source, target, note?, rationale? }\` — sole command. Writes the Living Memory entry \`examples/<slug>.md\`.
 \`slug\` is a lowercase dash-separated slug (max 64 chars); re-using a slug SUPERSEDES that entry (the previous version is archived, never erased).
+It is agent working memory: once approved, the in-app agent's chat sees it in its memory index. It does NOT reach the drafting prompts — their examples are the project's VALIDATED cells, picked per line automatically. To teach every draft a pair, validate a cell that uses it (or add the term to the termbase).
 Gotchas:
-- Landing state depends on who approved the changeset: an ask-mode approval by a PROJECT_LEAD(500)+ lands it \`approved\` (live in the copilot's next prompt); anything else lands it \`proposed\` and a lead must approve it in the in-app Memory surface first. The receipt's \`memoryStatus\` says which — don't assume.
+- Landing state depends on who approved the changeset: an ask-mode approval by a PROJECT_LEAD(500)+ lands it \`approved\`; anything else lands it \`proposed\` and a lead must approve it in the in-app Memory surface first. The receipt's \`memoryStatus\` says which — don't assume.
 - A path already held by a HUMAN-EDITED memory is refused (permission_denied) — a human owns that entry; edit it in-app.
 - source/target/note/rationale cap at 2000 chars; content matching a secret pattern is rejected.
 Example: \`{ "kind": "AddExample", "slug": "lord-as-hospod", "source": "the LORD", "target": "Господь" }\``,
@@ -474,16 +495,17 @@ Example: \`{ "kind": "AddExample", "slug": "lord-as-hospod", "source": "the LORD
   {
     kind: 'AddDecision',
     title: 'Add decision',
-    oneLiner: 'Record a standing rendering decision that binds future copilot drafts.',
+    oneLiner: 'Record a standing translation decision; once approved it is appended to the project instructions.',
     minRoleLevel: CONTRIBUTOR,
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### AddDecision
 Params: \`{ slug, decision, rationale? }\` — sole command. Writes the Living Memory entry \`decisions/<slug>.md\`.
-State a decision as a standing instruction ("render X as Y, never Z"), not as a report of one edit — it is injected into every subsequent copilot prompt.
+State a decision as a standing instruction ("render X as Y, never Z"), not as a report of one edit. When it is APPROVED its text is appended to the project instructions (settings.translationInstructions) — the one text every drafting prompt reads (copilot, prompt preview, agent chat, draft tool, DraftCells, Autopilot). The \`decisions/<slug>.md\` entry stays as the record.
 Gotchas:
 - Same approval rule as AddExample: \`approved\` only on an ask-mode approval by PROJECT_LEAD(500)+, else \`proposed\`. Read \`memoryStatus\` on the receipt.
-- Re-using a slug supersedes the prior decision (archived, not erased). A human-edited holder is refused.
+- Re-using a slug supersedes the prior decision (archived, not erased) and appends the new text; the old line stays in the instructions until a maintainer edits them. A human-edited holder is refused.
+- Refused (\`conflict\`) when the instructions are full (8000 characters) — shorten them first.
 Example: \`{ "kind": "AddDecision", "slug": "divine-name", "decision": "Render Lord as Господь, never Пан." }\``,
   },
   {
@@ -505,18 +527,38 @@ Example: \`{ "kind": "AddNote", "fileId": "f1", "cellId": "GEN 1:1", "note": "Ke
   {
     kind: 'RetireExample',
     title: 'Retire example',
-    oneLiner: 'Drop an example from copilot retrieval without erasing its history.',
+    oneLiner: 'Archive an agent example memory without erasing its history.',
     minRoleLevel: PROJECT_LEAD,
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### RetireExample
 Params: \`{ slug, rationale? }\` — sole command. Archives the APPROVED memory at \`examples/<slug>.md\`.
-Retirement is a retrieval change, not a delete: the row keeps its content and history, and the copilot simply stops receiving it. The in-app Memory surface shows it as archived.
+Retirement is an archive, not a delete: the row keeps its content and history, and the in-app agent's memory index stops listing it. The in-app Memory surface shows it as archived.
 Gotchas:
-- PROJECT_LEAD(500)+ — un-publishing memory the whole project's copilot reads is a review-tier act, unlike adding.
+- PROJECT_LEAD(500)+ — un-publishing approved memory is a review-tier act, unlike adding.
 - Rejected with \`not_found\` when nothing is currently APPROVED at that slug (a \`proposed\` entry is rejected in-app instead, not retired here).
 - A human-edited entry is refused (permission_denied) — retire it from the in-app Memory surface.
 Example: \`{ "kind": "RetireExample", "slug": "lord-as-hospod", "rationale": "Superseded by the divine-name decision." }\``,
+  },
+  {
+    kind: 'ReviewStyleRules',
+    title: 'Review style rules',
+    oneLiner: 'Approve, reject or edit proposed style rules in bulk (Rules > Style rules).',
+    minRoleLevel: PROJECT_LEAD,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### ReviewStyleRules
+Params: \`{ projectId, decisions: [{ ruleId, action, ifMatchVersion, patch? }] }\` — sole command. \`action\` is \`approve\`, \`reject\` or \`update\`. \`projectId\` must match the changeset's project.
+Acts on the rules in the Style rules section of the Rules page (\`style_rules\`), the ones "Extract from knowledge base" proposes. List them first: \`GET /api/v1/external/projects/:projectId/style-rules?status=proposed\` (MCP: \`list_style_rules\`); each row carries the \`id\` and \`version\` to send back.
+- \`approve\` / \`reject\`: the rule must be \`proposed\`. Approving puts it into drafting prompts (only approved, enabled rules reach the copilot); rejecting keeps the row, marked rejected.
+- \`update\`: \`patch\` is required and only allowed here. Fields: \`instruction\`, \`category\`, \`severity\`, \`enabled\`. It edits the rule and leaves its status alone, marks it human-edited and bumps \`version\`. To edit then approve, stage two changesets (one rule appears once per command).
+- \`ifMatchVersion\` is the \`version\` you read. A rule that changed since then refuses the whole batch with \`plan_stale\`.
+Gotchas:
+- PROJECT_LEAD(500)+, the in-app review floor. In ask mode the human who confirms must hold it too; act mode with a PROJECT_LEAD credential applies directly.
+- At most 500 decisions per command and one decision per rule; split larger passes across changesets.
+- ALL OR NOTHING. Commit checks every decision against the live rows and writes only if all pass. A missing rule, an org-inherited rule (managed at the org level, shown with \`inherited: true\` on the list), a rule in the wrong state for its action, or a stale version refuses the whole commit with \`details.decisions: [{ index, ruleId, code: not_found|org_inherited|invalid_state|stale_version, message }]\` and changes nothing. Prepare runs the same check, so most of these surface before a human is asked.
+- The receipt lists each rule's \`ruleId\`, \`action\`, new \`status\` and \`version\`. Approve and reject leave \`version\` as it was; only \`update\` bumps it.
+Example: \`{ "kind": "ReviewStyleRules", "projectId": "p1", "decisions": [{ "ruleId": "01J...", "action": "approve", "ifMatchVersion": 1 }, { "ruleId": "01K...", "action": "reject", "ifMatchVersion": 1 }, { "ruleId": "01L...", "action": "update", "ifMatchVersion": 1, "patch": { "severity": "major" } }] }\``,
   },
   {
     kind: 'InsertCell',
@@ -551,6 +593,41 @@ Gotchas:
 - A lane that gains a translation between prepare and commit makes the plan stale rather than silently leaving an orphan.`,
   },
   {
+    kind: 'HideCell',
+    title: 'Hide cell',
+    oneLiner: 'Park a cell — out of translation and exports, reversibly.',
+    minRoleLevel: PROJECT_LEAD,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### HideCell
+Params: \`{ fileId, cellId }\` — batch several per changeset; cannot mix with other command kinds, and cannot mix with ShowCell (stage the hides and the shows as two plans).
+Compiles to \`source.cell.visibility.set\` (\`hidden: true\`) through the /events perimeter, at the same PROJECT_LEAD floor the editor's own **Hide cell** menu item uses.
+**This is the REVERSIBLE one.** Hiding takes the row out of the editor for everyone, in every language lane, and out of every export — but deletes NOTHING. The source text, every lane's translation, recordings, comments and validations survive and come back untouched on ShowCell. Reach for this, not DeleteCell, for a stray heading, a marker that bled through an import, or a paragraph the client does not want translated.
+Gotchas:
+- Sugar over EmitEvents: the staged plan you read back holds the equivalent \`source.cell.visibility.set\` events, not a \`HideCell\` entry. Behavior is identical either way. The raw EmitEvents door does NOT accept the kind — these named commands are the way in.
+- Refused at prepare when the cell does not exist, or is ALREADY hidden (a no-op plan is not worth a human's approval). Naming one cell twice in a plan is refused for the same reason.
+- Hiding is per CELL, not per lane: one command hides the row in every target language. There is no per-lane hide.
+- A translation a collaborator saves while the cell is hidden still applies and is there when you show it again — hiding is not a lock.
+- Cell reads carry \`hidden\` so you can tell what is already parked and skip it; a hidden cell is not work.
+Example: \`{ "kind": "HideCell", "fileId": "f1", "cellId": "c7" }\``,
+  },
+  {
+    kind: 'ShowCell',
+    title: 'Show cell',
+    oneLiner: 'Bring a hidden cell back with everything it had.',
+    minRoleLevel: PROJECT_LEAD,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### ShowCell
+Params: \`{ fileId, cellId }\` — batch several per changeset; cannot mix with other command kinds, and cannot mix with HideCell.
+Compiles to \`source.cell.visibility.set\` (\`hidden: false\`) through the /events perimeter, at the PROJECT_LEAD floor. The exact inverse of HideCell: the row returns in its ORIGINAL position with its source text, every lane's translation, recordings, comments and validation state as they were — nothing was ever deleted.
+Gotchas:
+- Sugar over EmitEvents, same as HideCell; the staged plan holds \`source.cell.visibility.set\` events.
+- Refused at prepare when the cell does not exist or is NOT currently hidden.
+- Find what to show: list the file's cells and look for \`hidden: true\` (the flag rides the SOURCE row — a target row never carries it).
+Example: \`{ "kind": "ShowCell", "fileId": "f1", "cellId": "c7" }\``,
+  },
+  {
     kind: 'SplitCell',
     title: 'Split cell',
     oneLiner: 'Cut one cell’s source text at an offset into two cells.',
@@ -562,14 +639,14 @@ Params: \`{ fileId, cellId, offset, targets: "blank" | "divide", targetOffsets?,
 The original keeps \`value.slice(0, offset)\` (a \`source.cell.commit\`, so its chain head advances); a new cell carrying \`value.slice(offset)\` is created directly after it.
 \`targets\` is required and never inferred:
 - \`"blank"\` deletes the existing translations outright.
-- \`"divide"\` cuts each lane's translation at an explicit offset — \`targetOffsets: [{ laneId?, offset }]\` must name EVERY lane that has a translation, or the plan is rejected. A lane you leave out is never silently blanked.
+- \`"divide"\` cuts each lane's translation at an explicit offset — \`targetOffsets: [{ laneId, offset }]\` must name EVERY visible lane that has a translation, by lane id, or the plan is rejected. A lane you leave out is never silently blanked.
 VALIDATION: both halves come out unvalidated either way — 'blank' removes the target rows that held the validation, and 'divide' re-commits them, which resets validation because the chain head moved.
 Gotchas:
 - \`offset\` must be inside the text (both halves non-empty), else validation_failed at prepare.
 - Refused on cells carrying structured source/target HTML — a plain-text offset cannot cut markup safely; use \`"blank"\` and re-translate.
 - Refused on a file with preserved export slots (IDML/OOXML), and on a cell addressed by canonical ref in a file whose original source is kept for lossless export: the second half cannot reuse the ref, so it would vanish from the deliverable.
 - The second half inherits the original's \`type\` but NOT its canonical ref.
-Example: \`{ "kind": "SplitCell", "fileId": "f1", "cellId": "c3", "offset": 42, "targets": "divide", "targetOffsets": [{ "offset": 51 }] }\``,
+Example: \`{ "kind": "SplitCell", "fileId": "f1", "cellId": "c3", "offset": 42, "targets": "divide", "targetOffsets": [{ "laneId": "a1b2c3d4", "offset": 51 }] }\``,
   },
   {
     kind: 'DraftCells',
@@ -579,15 +656,15 @@ Example: \`{ "kind": "SplitCell", "fileId": "f1", "cellId": "c3", "offset": 42, 
     tier: 'prepared',
     agentReachable: true,
     paramsDoc: `### DraftCells
-Params: \`{ fileId, cellIds: [...], laneId?, instructions? }\` — sole command in its changeset.
-Asks the APP to draft instead of writing the text yourself, so the output carries this project's terminology, few-shot pairs and translation brief. Drafting runs once, at prepare; the generated text is materialized into \`target.cell.commit\` events marked \`ai_drafted\`, exactly like an in-app draft — so a human reviews it as AI work, and \`aiDraft\` is visible in cell reads until they edit or validate it.
+Params: \`{ fileId, cellIds: [...], laneId, instructions? }\` — sole command in its changeset. \`laneId\` is required.
+Asks the APP to draft instead of writing the text yourself, so the output carries this project's few-shot pairs, preceding validated context and project instructions (\`translationInstructions\`, resolved — see GET .../settings). Key terms are NOT in the drafting prompt: name a term choice in \`instructions\`, which reaches the model as "Directions for this run". Drafting runs once, at prepare; the generated text is materialized into \`target.cell.commit\` events marked \`ai_drafted\`, exactly like an in-app draft — so a human reviews it as AI work, and \`aiDraft\` is visible in cell reads until they edit or validate it.
 Gotchas:
 - \`cellIds\` is EXPLICIT and non-empty. Wildcards ("*", "all") are rejected — there is no "draft everything".
 - Cap per changeset = the project's configured completion batch size (default 10, max 50). Over-cap requests are rejected naming the cap; split the work across changesets.
 - Spend meters through the org's credit ledger on the agent rail. An exhausted org fails with \`rate_limited\` and NOTHING is staged.
 - No auto-commit: the result is a staged changeset like any other, subject to the same approval gate and one-hour expiry.
-- \`laneId\` must already be registered in the project's targetLanes; omit for the default lane.
-Example: \`{ "kind": "DraftCells", "fileId": "f1", "cellIds": ["c3", "c4", "c5"] }\``,
+- \`laneId\` is \`lanes.id\` from GET /api/v1/external/projects/:projectId. A language tag is not accepted. Omitting it is \`validation_failed\` and names the discovery endpoint.
+Example: \`{ "kind": "DraftCells", "fileId": "f1", "cellIds": ["c3", "c4", "c5"], "laneId": "a1b2c3d4" }\``,
   },
 ] as const
 

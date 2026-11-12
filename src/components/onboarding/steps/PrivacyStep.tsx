@@ -1,18 +1,17 @@
 import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
-import { FieldLabel } from "@/components/ui/field"
-import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
+import { ShareUsageDataSetting } from "@/components/settings/ShareUsageDataSetting"
+import { useState } from "react"
+import { readSignupAnalyticsChoice, confirmSignupAnalyticsChoice } from "@/lib/signup-analytics-choice"
 import { ShieldCheck, ChevronLeft } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 export function PrivacyStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
   const t = useT()
-  const { enabled, setEnabled } = useAnalyticsConsent()
+  const [enabled, setEnabled] = useState(() => readSignupAnalyticsChoice()?.allowed ?? true)
 
-  // Persist the current choice (default included) so it counts as an explicit
-  // decision and this step is skipped on future onboarding runs.
+  // The checked switch is only a draft. Confirmation does not start collection.
   const handleContinue = () => {
-    setEnabled(enabled)
+    confirmSignupAnalyticsChoice(enabled)
     onNext()
   }
 
@@ -28,32 +27,14 @@ export function PrivacyStep({ onNext, onBack }: { onNext: () => void; onBack: ()
         </p>
       </div>
 
-      <div className="rounded-lg border bg-card p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <FieldLabel htmlFor="analytics-consent" className="text-sm font-medium">
-              {t("onboarding.privacy.shareUsageData")}
-            </FieldLabel>
-            <p className="text-xs text-muted-foreground">
-              {t("onboarding.step.privacy.shareDescription")}
-            </p>
-          </div>
-          <Switch
-            id="analytics-consent"
-            checked={enabled}
-            onCheckedChange={setEnabled}
-          />
-        </div>
-        {!enabled && (
-          <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
-            {t("onboarding.privacy.disabledWarning")}
-          </p>
-        )}
+      {/* AQU-2263: the same Share usage data setting as Preferences. */}
+      <div className="rounded-lg border bg-card text-start">
+        <ShareUsageDataSetting enabled={enabled} onEnabledChange={setEnabled} />
       </div>
 
       <div className="space-y-2">
         <Button size="lg" onClick={handleContinue} className="w-full">
-          {t("onboarding.common.continue")}
+          {t(enabled ? "onboarding.privacy.agreeContinue" : "onboarding.privacy.continueWithoutSharing")}
         </Button>
         <Button variant="ghost" size="sm" onClick={onBack} className="w-full">
           <ChevronLeft className="h-4 w-4 rtl:rotate-180" />
@@ -62,8 +43,11 @@ export function PrivacyStep({ onNext, onBack }: { onNext: () => void; onBack: ()
       </div>
 
       <p className="text-center text-xs text-muted-foreground">
+        {t("onboarding.privacy.collectionStarts")}
+      </p>
+      <p className="text-center text-xs text-muted-foreground">
         {t("onboarding.step.privacy.footer")}{" "}
-        <a href="/privacy-policy" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+        <a href="/privacy" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
           {t("onboarding.step.privacy.policyLink")}
         </a>.
       </p>

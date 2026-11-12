@@ -17,6 +17,29 @@ export function isVisible(startSec: number, endSec: number, viewStartSec: number
   return startSec < viewEndSec && viewStartSec < endSec
 }
 
+/**
+ * The horizontal offset the track column can actually be at: never below 0,
+ * never past `scrollWidth - clientWidth`. The editor remembers its scroll
+ * offset in state, and every visible-window calculation (the ruler's labels,
+ * which cards render) reads that number.
+ *
+ * WHY. A zoom asks for an offset that keeps its anchor still, and on a
+ * timeline shorter than the view it can't scroll at all. The browser quietly
+ * keeps the column at 0 and fires no scroll event (nothing moved), so the
+ * remembered offset was left at the number asked for. Each zoom-in made it
+ * bigger, until the window began past the timeline's end and the ruler drew no
+ * labels. (Walk r3, 2026-10-05: an empty Free timing file is about two seconds
+ * long, and three zoom-ins remembered 139, 319 and 554 px of scroll.)
+ *
+ * An unmeasured column (clientWidth 0, before layout or in a test DOM) keeps
+ * the requested offset, as before.
+ */
+export function clampScrollLeft(left: number, scrollWidth: number, clientWidth: number): number {
+  const wanted = Number.isFinite(left) ? Math.max(0, left) : 0
+  if (!(clientWidth > 0)) return wanted
+  return Math.min(wanted, Math.max(0, scrollWidth - clientWidth))
+}
+
 /** At or above this width a chip draws its full corner — normal zoom is here. */
 export const CHIP_RADIUS_FULL_PX = 40
 /** At or below this width a chip is dead square. */

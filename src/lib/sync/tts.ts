@@ -1,6 +1,6 @@
 // Client lib for the hosted Inworld TTS endpoint (sync-worker).
 //
-// Mirrors voice-clone.ts (convertToCloneVoice): uses syncWorkerHttpOrigin() for
+// Mirrors voice-clone.ts (convertToLibraryVoice): uses syncWorkerHttpOrigin() for
 // the base URL and a sync token (scoped to projectId+fileId) for auth.
 //
 // The returned audioId is a valid cell-audio object in R2 — callers can:
@@ -8,7 +8,13 @@
 //   (b) pass audioId as sourceAudioId to /api/v1/voice/convert (use case 3).
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
-import { errorFromHostedTts } from "@/lib/audio/tts-engine-error"
+import { timeoutSignal } from "./fetch-timeout"
+import {
+  TTS_REQUEST_TIMEOUT_MS,
+  errorFromHostedTts,
+  errorFromTtsTimeout,
+  isAbortTimeout,
+} from "@/lib/audio/tts-engine-error"
 import { parseInworldSupportedLanguages } from "@/lib/audio/inworld-supported-languages"
 import type { SyncTokenForFile } from "../audio/upload"
 
@@ -19,9 +25,12 @@ export interface SynthesizeCellTtsArgs {
   cellId?: string
   /** The text to synthesize. */
   text: string
-  /** Inworld stock voice id (e.g. "Dennis") or a previously cloned voiceId. */
+  /** Inworld stock voice id (e.g. "Dennis"), an Instant Clone id made in
+   *  Inworld, or a published Voice Design id. */
   voiceId?: string
-  /** Reference clip id for voice cloning (from /api/v1/voice/reference/*). */
+  /** Inworld instant clone: the voice's reference clip (from
+   *  /api/v1/voice/reference/*). The worker clones it once (cached) and reads
+   *  the line with the cloned voice instead of `voiceId`. */
   referenceAudioId?: string
   /** BCP-47 language tag. */
   language?: string
@@ -75,14 +84,25 @@ export async function synthesizeCellTts(
   if (args.deliveryMode !== undefined) body.deliveryMode = args.deliveryMode
   if (args.audioQuality !== undefined) body.audioQuality = args.audioQuality
 
-  const res = await fetch(`${syncWorkerHttpOrigin()}/api/v1/voice/tts`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  })
+  // AQU-1156: bounded. `timeoutSignal` is the shared older-WebKit guard (see
+  // fetch-timeout.ts) — where AbortSignal.timeout is missing it returns
+  // undefined and we degrade to the browser socket timeout rather than losing
+  // the request entirely.
+  let res: Response
+  try {
+    res = await fetch(`${syncWorkerHttpOrigin()}/api/v1/voice/tts`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: timeoutSignal(TTS_REQUEST_TIMEOUT_MS),
+    })
+  } catch (err) {
+    if (isAbortTimeout(err)) throw errorFromTtsTimeout("Inworld TTS", TTS_REQUEST_TIMEOUT_MS)
+    throw err
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "")

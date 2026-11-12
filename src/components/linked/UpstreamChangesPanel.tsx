@@ -153,6 +153,10 @@ export function UpstreamChangesPanel({
       cellId: item.cellId,
       sourceEventId: newSourceEventId,
       expectedTargetEventId: item.target.eventId,
+      // AQU-1902: repin the lane this target row belongs to. With no lane the
+      // repin addressed the default lane, which projects created today lack.
+      targetLang: item.target.targetLang,
+      ...(item.target.laneId ? { laneId: item.target.laneId } : {}),
       author: username,
     })
     const { fetchCellsByIds } = await import("@/lib/sync/cells-read")

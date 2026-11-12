@@ -25,11 +25,13 @@ import { exportSrt } from "./exporters/srt"
  *  orchestrators and are file-scoped anyway, the project report which is
  *  project-scoped BY ITSELF and writes one document rather than a zip of
  *  per-file ones, vtt which needs
- *  per-project ttsSettings not available in the zip path, docx/pptx which
+ *  per-project ttsSettings not available in the zip path, docx/pptx/json which
  *  require the raw sidecar bytes from the server, plain-text-dump which
- *  is advanced/single-file only, and metadata-csv which has its own
- *  project-scope path in ExportDialog that flattens all cells into one sheet). */
-export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character" | "audio-by-line" | "character-sheets" | "project-report" | "vtt" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml">
+ *  is advanced/single-file only, metadata-csv which has its own
+ *  project-scope path in ExportDialog that flattens all cells into one sheet,
+ *  and html, whose project zip is pages plus an index rather than one entry
+ *  per file — `exporters/html-project.ts` builds that one, AQU-2183). */
+export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "vtt" | "docx" | "pptx" | "idml" | "json" | "plain-text-dump" | "metadata-csv" | "sdbh-xml" | "html">
 
 export interface ProjectFileCellsInput {
   fileId: string

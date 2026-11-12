@@ -8,7 +8,7 @@
 // transport-level failures (bad credential -> 401, unknown tool + unknown method
 // -> JSON-RPC errors).
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // commit path: mcp-handlers -> changesets-route -> commit.ts -> events/route ->
 // broadcast.ts -> partyserver (cloudflare:*). Stub it as the changeset suite does.
@@ -20,6 +20,8 @@ vi.mock('partyserver', () => ({
 
 import { handleExternalMcpRequest } from '../external/mcp-route'
 import { MCP_TOOLS } from '../external/mcp-tools'
+import { CHATGPT_TOOLS } from '../external/mcp-chatgpt-tools'
+import { handleExternalReadRequest } from '../external/read-routes'
 import { PLAN_IMPORT_MAX_CELLS } from '../external/commands'
 import { MAX_ARTIFACT_BYTES } from '../external/artifacts-route'
 import { mintApiToken } from '../../../db/shared/api-credentials'
@@ -74,6 +76,11 @@ async function seed(): Promise<TestDb> {
       },
     ],
   })
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
   return tdb
 }
 
@@ -104,6 +111,8 @@ function toolPayload(result: { content: { text: string }[]; isError?: boolean })
   return { payload: JSON.parse(result.content[0].text), isError: result.isError === true }
 }
 
+afterEach(async () => { await tdb?.close() })
+
 let tdb: TestDb
 beforeEach(async () => {
   tdb = await seed()
@@ -123,7 +132,10 @@ describe('MCP transport', () => {
     expect(body.id).toBe(1)
     expect(body.result.protocolVersion).toBe('2025-06-18')
     expect(body.result.capabilities).toEqual({ tools: {} })
-    expect(body.result.serverInfo).toEqual({ name: 'aquilla', version: '0.1.0' })
+    expect(body.result.serverInfo).toEqual({ name: 'aquilla', title: 'Aquilla', version: '0.2.0' })
+    // Cross-tool guidance for hosts that read server instructions (ChatGPT).
+    expect(body.result.instructions).toContain('get_capabilities')
+    expect(body.result.instructions).toContain('approvalUrl')
   })
 
   it('initialize pins the default protocol version for an unknown client version', async () => {
@@ -195,7 +207,26 @@ describe('MCP transport', () => {
 })
 
 describe('MCP tools/list', () => {
-  it('returns all 29 tools each with an input schema', async () => {
+  it.each([false, true])('reports model warm-up side effects for OAuth=%s', async (oauth) => {
+    const token = await credToken(tdb)
+    if (oauth) {
+      await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1 WHERE id = $2', [
+        'https://w/api/v1/external/mcp', CRED_1,
+      ])
+    }
+    const res = await rpc(makeEnv(tdb.db), token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })
+    const body = await res.json() as { result: { tools: typeof MCP_TOOLS } }
+    const status = body.result.tools.find(tool => tool.name === 'transcription_status')
+    expect(status).toMatchObject({
+      inputSchema: { properties: { warm: { type: 'boolean' } } },
+      annotations: {
+        readOnlyHint: false, destructiveHint: false,
+        idempotentHint: false, openWorldHint: false,
+      },
+    })
+  })
+
+  it('returns all 37 tools each with an input schema', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb)
     const res = await rpc(env, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })
@@ -209,15 +240,27 @@ describe('MCP tools/list', () => {
         // AQU-1294 skills.
         'get_skill',
         'list_changesets',
-        'list_memory', 'list_orgs', 'list_projects', 'patch_settings', 'prepare_import',
+        // AQU-2403 membership roster read.
+        'list_members',
+        'list_memory', 'list_orgs', 'list_projects',
+        // AQU-2195 style-rule read.
+        'list_style_rules',
+        // AQU-1175 termbase read.
+        'list_terms',
+        'patch_settings', 'prepare_import',
+        // AQU-2407 brief writes.
+        'prepare_set_brief', 'regenerate_brief_summary',
         'prepare_translations', 'preview_import', 'read_cell_memory', 'read_comments',
         'read_content', 'read_history',
         // AQU-1231 quality reads.
         'read_quality', 'read_term_consistency',
-        'search_project', 'search_projects', 'wait_for_changeset',
+        'search_project', 'search_projects',
+        // Omnilingual ASR spec §7.
+        'transcribe_audio', 'transcription_status',
+        'upload_artifact', 'wait_for_changeset',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(29)
+    expect(body.result.tools).toHaveLength(37)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)
@@ -277,7 +320,8 @@ describe('MCP tools/call — reads', () => {
     expect(p.projectLifecycle.commitTool).toBe('confirm_changeset')
     // AQU-538: multi-target-language lanes are self-described — an agent can
     // learn the register → write-per-lane → read-per-lane workflow from here.
-    expect(p.multiLanguage.note).toContain('targetLanes')
+    expect(p.multiLanguage.note).toContain('lane id')
+    expect(p.multiLanguage.note).not.toContain('targetLanes')
     expect(p.multiLanguage.workflow.join(' ')).toContain('laneId')
     expect(p.linkMedia.mcpStagingTool).toBe('prepare_translations')
     expect(p.linkMedia.commitTool).toBe('confirm_changeset')
@@ -408,7 +452,7 @@ describe('MCP tools/call — reads', () => {
     // read_content with fileId -> read cells.
     const cellsRes = await rpc(env, token, {
       jsonrpc: '2.0', id: 10, method: 'tools/call',
-      params: { name: 'read_content', arguments: { projectId: PROJECT, fileId: FILE } },
+      params: { name: 'read_content', arguments: { projectId: PROJECT, fileId: FILE, lane: 'deflane1' } },
     })
     const cells = toolPayload(((await cellsRes.json()) as any).result)
     expect((cells.payload as any).data.length).toBeGreaterThan(0)
@@ -421,7 +465,7 @@ describe('MCP tools/call — reads', () => {
 
     const qualityRes = await rpc(env, token, {
       jsonrpc: '2.0', id: 20, method: 'tools/call',
-      params: { name: 'read_quality', arguments: { projectId: PROJECT, fileId: FILE } },
+      params: { name: 'read_quality', arguments: { projectId: PROJECT, fileId: FILE, lane: 'deflane1' } },
     })
     const quality = toolPayload(((await qualityRes.json()) as any).result)
     expect(quality.isError).toBe(false)
@@ -431,13 +475,49 @@ describe('MCP tools/call — reads', () => {
 
     const termsRes = await rpc(env, token, {
       jsonrpc: '2.0', id: 21, method: 'tools/call',
-      params: { name: 'read_term_consistency', arguments: { projectId: PROJECT, onlyDrift: true } },
+      params: { name: 'read_term_consistency', arguments: { projectId: PROJECT, lane: 'deflane1', onlyDrift: true } },
     })
     const terms = toolPayload(((await termsRes.json()) as any).result)
     expect(terms.isError).toBe(false)
     expect((terms.payload as any).onlyDrift).toBe(true)
     // No termbase seeded in this suite — the scan runs and finds nothing.
     expect((terms.payload as any).data).toEqual([])
+  })
+
+  it('list_terms reaches the termbase read and reports matchOptions (AQU-1175)', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    // A concept with inflection variants and one without, so the response
+    // distinguishes "configured for variants" from "lemma only".
+    await tdb.pg.query(
+      `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status, case_sensitive, match_options, created_at, updated_at)
+       VALUES ('c-word', $1, 'Боже Слово', $2::jsonb, 'active', 0, $3::jsonb, 1000, 1000),
+              ('c-plain', $1, 'grace', $2::jsonb, 'draft', 0, NULL, 2000, 2000)`,
+      [
+        PROJECT,
+        JSON.stringify([{ rendering: 'Word of God', status: 'preferred' }]),
+        JSON.stringify({ forms: ['Божого Слова'] }),
+      ],
+    )
+
+    const res = await rpc(env, token, {
+      jsonrpc: '2.0', id: 22, method: 'tools/call',
+      params: { name: 'list_terms', arguments: { projectId: PROJECT } },
+    })
+    const { payload, isError } = toolPayload(((await res.json()) as any).result)
+    expect(isError).toBe(false)
+    expect((payload as any).termCount).toBe(2)
+    const byId = Object.fromEntries((payload as any).data.map((t: any) => [t.conceptId, t]))
+    expect(byId['c-word'].matchOptions).toEqual({ forms: ['Божого Слова'] })
+    expect(byId['c-plain'].matchOptions).toEqual({})
+
+    // The status filter reaches the route through the tool's query mapping.
+    const draftRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 23, method: 'tools/call',
+      params: { name: 'list_terms', arguments: { projectId: PROJECT, status: 'draft' } },
+    })
+    const draft = toolPayload(((await draftRes.json()) as any).result)
+    expect((draft.payload as any).data.map((t: any) => t.conceptId)).toEqual(['c-plain'])
   })
 
   it('a tool argument error is an isError tool result, not a transport error', async () => {
@@ -475,8 +555,11 @@ describe('MCP tools/call — settings + command discovery', () => {
     )
   }
 
-  it('get_project_settings returns the blob and its live version', async () => {
-    await seedSettings({ targetLanguage: 'fr', brief: 'Keep it plain.' }, 4)
+  it('get_project_settings returns the blob, its live version, and the resolved instructions', async () => {
+    await seedSettings(
+      { targetLanguage: 'fr', brief: 'Keep it plain.', translationBrief: { l1Summary: 'For rural youth.' } },
+      4,
+    )
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb)
     const res = await rpc(env, token, {
@@ -487,6 +570,11 @@ describe('MCP tools/call — settings + command discovery', () => {
     expect(isError).toBe(false)
     expect((payload as any).version).toBe(4)
     expect((payload as any).settings.targetLanguage).toBe('fr')
+    // AQU-2342: the text every drafting prompt carries, composed on read here.
+    expect(payload).toMatchObject({
+      translationInstructions: 'For rural youth.',
+      translationInstructionsStored: false,
+    })
   })
 
   it('get_project_settings on a project outside the credential scope is denied', async () => {
@@ -687,6 +775,199 @@ describe('MCP tools/call — settings + command discovery', () => {
     expect(isError).toBe(true)
     expect((payload as any).error.message).toContain('get_project_settings')
   })
+
+  // AQU-2407: the brief lives INSIDE the settings blob, so patch_settings was
+  // the only MCP door onto it — and it replaces a key wholesale, which meant
+  // hand-writing l2Markdown, l1Summary and the provenance fields and hoping
+  // they agreed with the answers.
+  const BRIEF_KEY = 'translationBrief'
+
+  /** Env with the brief-summary backend wired, plus a stub for it. Returns the
+   *  URLs it was called with, so "prepare stages only" is checkable. */
+  function envWithRenderer(summary: string, model = 'test/brief-model') {
+    const calls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        calls.push(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url)
+        return Response.json({ summary, model })
+      }),
+    )
+    return { env: { ...makeEnv(tdb.db), AUTH_WORKER_URL: 'https://identity.test' }, calls }
+  }
+
+  async function storedSettings(): Promise<Record<string, any>> {
+    const rows = await tdb.rows<{ settings: string; version: number }>('project_settings')
+    return { ...JSON.parse(rows[0].settings), __version: rows[0].version }
+  }
+
+  it('prepare_set_brief takes answers only — the server assembles l2Markdown, stamps provenance, and renders the summary', async () => {
+    await promoteToMaintainer()
+    await seedSettings({ systemPrompt: 'keep' }, 1)
+    const { env, calls } = envWithRenderer('Plain-register translation for rural youth.')
+    const token = await credToken(tdb)
+
+    const stageRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 60, method: 'tools/call',
+      params: {
+        name: 'prepare_set_brief',
+        arguments: {
+          projectId: PROJECT,
+          parameters: { audience: 'Rural youth, 15-25' },
+          freeformNotes: 'Keep verse numbers.',
+        },
+      },
+    })
+    const staged = toolPayload(((await stageRes.json()) as any).result)
+    expect(staged.isError, JSON.stringify(staged.payload)).toBe(false)
+    const { changesetId, digest } = staged.payload as { changesetId: string; digest: string }
+    // Staging is not the render: the model is only called at commit.
+    expect(calls).toHaveLength(0)
+
+    const commitRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 61, method: 'tools/call',
+      params: { name: 'confirm_changeset', arguments: { projectId: PROJECT, changesetId, digest } },
+    })
+    const committed = toolPayload(((await commitRes.json()) as any).result)
+    expect(committed.isError, JSON.stringify(committed.payload)).toBe(false)
+
+    const stored = await storedSettings()
+    const brief = stored[BRIEF_KEY]
+    expect(brief.parameters.audience).toBe('Rural youth, 15-25')
+    expect(brief.freeformNotes).toBe('Keep verse numbers.')
+    // None of these four was sent by the caller — they are the server's.
+    expect(brief.l2Markdown).toContain('Rural youth, 15-25')
+    expect(brief.updatedBy).toBe('alice')
+    expect(brief.l1Summary).toBe('Plain-register translation for rural youth.')
+    expect(brief.l1ModelId).toBe('test/brief-model')
+    // Field-scoped like patch_settings: the sibling key is untouched.
+    expect(stored.systemPrompt).toBe('keep')
+    vi.unstubAllGlobals()
+  })
+
+  it('prepare_set_brief pins the live settings version when ifMatchVersion is omitted, and honours one that is passed', async () => {
+    await promoteToMaintainer()
+    await seedSettings({ systemPrompt: 'keep' }, 7)
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+
+    const auto = await rpc(env, token, {
+      jsonrpc: '2.0', id: 62, method: 'tools/call',
+      params: {
+        name: 'prepare_set_brief',
+        arguments: { projectId: PROJECT, parameters: { purpose: 'Church planting' } },
+      },
+    })
+    const staged = toolPayload(((await auto.json()) as any).result)
+    expect(staged.isError, JSON.stringify(staged.payload)).toBe(false)
+    expect((staged.payload as any).summary.ifMatchVersion).toBe(7)
+
+    const stale = await rpc(env, token, {
+      jsonrpc: '2.0', id: 63, method: 'tools/call',
+      params: {
+        name: 'prepare_set_brief',
+        arguments: { projectId: PROJECT, parameters: { purpose: 'Church planting' }, ifMatchVersion: 99 },
+      },
+    })
+    const { payload, isError } = toolPayload(((await stale.json()) as any).result)
+    expect(isError).toBe(true)
+    expect((payload as any).error.code).toBe('plan_stale')
+  })
+
+  it('prepare_set_brief refuses an empty patch and an unknown section id, staging nothing', async () => {
+    await promoteToMaintainer()
+    await seedSettings({ systemPrompt: 'keep' }, 1)
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+
+    const empty = await rpc(env, token, {
+      jsonrpc: '2.0', id: 64, method: 'tools/call',
+      params: { name: 'prepare_set_brief', arguments: { projectId: PROJECT } },
+    })
+    const emptyResult = toolPayload(((await empty.json()) as any).result)
+    expect(emptyResult.isError).toBe(true)
+    expect((emptyResult.payload as any).error.code).toBe('validation_failed')
+    expect((emptyResult.payload as any).error.message).toContain('describe_command')
+
+    const unknown = await rpc(env, token, {
+      jsonrpc: '2.0', id: 65, method: 'tools/call',
+      params: {
+        name: 'prepare_set_brief',
+        arguments: { projectId: PROJECT, parameters: { audiance: 'typo' } },
+      },
+    })
+    const unknownResult = toolPayload(((await unknown.json()) as any).result)
+    expect(unknownResult.isError).toBe(true)
+    expect((unknownResult.payload as any).error.code).toBe('validation_failed')
+
+    const stored = await storedSettings()
+    expect(stored[BRIEF_KEY]).toBeUndefined()
+    expect(stored.__version).toBe(1)
+  })
+
+  it('regenerate_brief_summary re-renders the L1 of a brief written in-app, without touching its sections', async () => {
+    await promoteToMaintainer()
+    await seedSettings(
+      {
+        [BRIEF_KEY]: {
+          version: 2,
+          updatedAt: '2026-09-01T00:00:00.000Z',
+          updatedBy: 'human',
+          parameters: { purpose: 'Liturgical reading' },
+          freeformNotes: '',
+          l2Markdown: '# Translation Brief\n\n## Purpose & audience\n\n### Purpose / skopos\nLiturgical reading',
+          l1Summary: 'stale summary',
+          l1GeneratedAt: '2026-09-01T00:00:00.000Z',
+          l1ModelId: 'old/model',
+        },
+      },
+      3,
+    )
+    const { env, calls } = envWithRenderer('A liturgical, meaning-based translation.', 'test/brief-model-2')
+    const token = await credToken(tdb)
+
+    const stageRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 66, method: 'tools/call',
+      params: { name: 'regenerate_brief_summary', arguments: { projectId: PROJECT } },
+    })
+    const staged = toolPayload(((await stageRes.json()) as any).result)
+    expect(staged.isError, JSON.stringify(staged.payload)).toBe(false)
+    expect((staged.payload as any).summary.command).toBe('RegenerateBriefSummary')
+    expect((staged.payload as any).summary.ifMatchVersion).toBe(3)
+    expect(calls).toHaveLength(0)
+
+    const { changesetId, digest } = staged.payload as { changesetId: string; digest: string }
+    const commitRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 67, method: 'tools/call',
+      params: { name: 'confirm_changeset', arguments: { projectId: PROJECT, changesetId, digest } },
+    })
+    const committed = toolPayload(((await commitRes.json()) as any).result)
+    expect(committed.isError, JSON.stringify(committed.payload)).toBe(false)
+
+    const brief = (await storedSettings())[BRIEF_KEY]
+    expect(brief.l1Summary).toBe('A liturgical, meaning-based translation.')
+    expect(brief.l1ModelId).toBe('test/brief-model-2')
+    expect(brief.parameters.purpose).toBe('Liturgical reading')
+    vi.unstubAllGlobals()
+  })
+
+  it('regenerate_brief_summary refuses a brief with nothing to summarize rather than burning a model call', async () => {
+    await promoteToMaintainer()
+    await seedSettings({ systemPrompt: 'keep' }, 1)
+    const { env, calls } = envWithRenderer('never used')
+    const token = await credToken(tdb)
+
+    const res = await rpc(env, token, {
+      jsonrpc: '2.0', id: 68, method: 'tools/call',
+      params: { name: 'regenerate_brief_summary', arguments: { projectId: PROJECT } },
+    })
+    const { payload, isError } = toolPayload(((await res.json()) as any).result)
+    expect(isError).toBe(true)
+    expect((payload as any).error.code).toBe('validation_failed')
+    expect((payload as any).error.message).toMatch(/nothing to summarize/i)
+    expect(calls).toHaveLength(0)
+    vi.unstubAllGlobals()
+  })
 })
 
 describe('MCP tools/call — changesets', () => {
@@ -700,7 +981,7 @@ describe('MCP tools/call — changesets', () => {
         name: 'prepare_translations',
         arguments: {
           projectId: PROJECT,
-          translations: [{ cellId: 'cell-1', fileId: FILE, value: 'Au commencement' }],
+          translations: [{ cellId: 'cell-1', fileId: FILE, laneId: 'deflane1', value: 'Au commencement' }],
         },
       },
     })
@@ -740,7 +1021,7 @@ describe('MCP tools/call — changesets', () => {
       jsonrpc: '2.0', id: 14, method: 'tools/call',
       params: {
         name: 'prepare_translations',
-        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, value: 'x' }] },
+        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, laneId: 'deflane1', value: 'x' }] },
       },
     })
     const prepPayload = toolPayload(((await prepRes.json()) as any).result).payload as any
@@ -765,7 +1046,7 @@ describe('MCP tools/call — changesets', () => {
       jsonrpc: '2.0', id: 16, method: 'tools/call',
       params: {
         name: 'prepare_translations',
-        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, value: 'x' }] },
+        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, laneId: 'deflane1', value: 'x' }] },
       },
     })
     const prepPayload = toolPayload(((await prepRes.json()) as any).result).payload as any
@@ -797,7 +1078,7 @@ describe('MCP tools/call — changesets', () => {
       jsonrpc: '2.0', id: 18, method: 'tools/call',
       params: {
         name: 'prepare_translations',
-        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, value: 'x' }] },
+        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, laneId: 'deflane1', value: 'x' }] },
       },
     })
     const prepPayload = toolPayload(((await prepRes.json()) as any).result).payload as any
@@ -832,7 +1113,7 @@ describe('MCP tools/call — changesets', () => {
         jsonrpc: '2.0', id: 21, method: 'tools/call',
         params: {
           name: 'prepare_translations',
-          arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, value }] },
+          arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, laneId: 'deflane1', value }] },
         },
       })
       ids.push((toolPayload(((await res.json()) as any).result).payload as any).changesetId)
@@ -873,7 +1154,7 @@ describe('MCP tools/call — changesets', () => {
       jsonrpc: '2.0', id: 24, method: 'tools/call',
       params: {
         name: 'prepare_translations',
-        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, value: 'x' }] },
+        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, laneId: 'deflane1', value: 'x' }] },
       },
     })
     const prepPayload = toolPayload(((await prepRes.json()) as any).result).payload as any
@@ -976,7 +1257,7 @@ describe('MCP tools/call — v1.1 commands via the generic `commands` argument',
         name: 'prepare_translations',
         arguments: {
           projectId: PROJECT,
-          translations: [{ cellId: 'cell-1', fileId: FILE, value: 'x' }],
+          translations: [{ cellId: 'cell-1', fileId: FILE, laneId: 'deflane1', value: 'x' }],
           commands: [{ kind: 'CreateProject', name: 'Nested project' }],
         },
       },
@@ -984,5 +1265,148 @@ describe('MCP tools/call — v1.1 commands via the generic `commands` argument',
     const { payload, isError } = toolPayload(((await res.json()) as any).result)
     expect(isError).toBe(true)
     expect((payload as any).error.code).toBe('validation_failed')
+  })
+})
+
+describe('resource-bound OAuth uses the same engine through reviewable tools', () => {
+  const resource = 'https://w/api/v1/external/mcp'
+  async function oauthToken() {
+    const token = await credToken(tdb)
+    await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1 WHERE id = $2', [resource, CRED_1])
+    return token
+  }
+  async function invoke(token: string, name: string, args: Record<string, unknown>) {
+    const response = await rpc(makeEnv(tdb.db), token, {
+      jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args },
+    })
+    expect(response.status).toBe(200)
+    return await response.json() as {
+      result?: { content: { text: string }[]; isError?: boolean },
+      error?: { code: number; message: string },
+    }
+  }
+
+  it('lists individual operations and refuses undeclared or generic commands', async () => {
+    const token = await oauthToken()
+    const list = await rpc(makeEnv(tdb.db), token, { jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    expect(await list.json()).toMatchObject({ result: { tools: CHATGPT_TOOLS } })
+    expect((await invoke(token, 'describe_command', { kind: 'EmitEvents' })).error?.code).toBe(-32602)
+    const forbidden = await invoke(token, 'prepare_translations', {
+      projectId: PROJECT, commands: [{ kind: 'DeleteCell', fileId: FILE, cellId: 'cell-1' }],
+    })
+    expect(toolPayload(forbidden.result!).payload).toMatchObject({ error: { code: 'validation_failed' } })
+    const injected = await invoke(token, 'prepare_delete_cell', {
+      projectId: PROJECT, updates: [{ kind: 'EmitEvents', fileId: FILE, cellId: 'cell-1' }],
+    })
+    expect(toolPayload(injected.result!).payload).toMatchObject({ error: { code: 'validation_failed' } })
+    expect(await tdb.rows('changesets')).toEqual([])
+  })
+
+  it('stages translations, commits through events, and reads actual saved content', async () => {
+    const token = await oauthToken()
+    const proposed = await invoke(token, 'prepare_translations', {
+      projectId: PROJECT,
+      translations: [{ fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'En el principio' }],
+    })
+    expect(proposed.result?.isError).not.toBe(true)
+    const plan = toolPayload(proposed.result!).payload as { changesetId: string; digest: string }
+    const commit = await invoke(token, 'confirm_changeset', { projectId: PROJECT, changesetId: plan.changesetId, digest: plan.digest })
+    expect(commit.result?.isError).not.toBe(true)
+    const read = await invoke(token, 'read_content', { projectId: PROJECT, fileId: FILE, lane: 'deflane1' })
+    expect(JSON.stringify(toolPayload(read.result!).payload)).toContain('En el principio')
+    const events = await tdb.rows<{ kind: string }>('events')
+    expect(events.some(e => e.kind === 'target.cell.commit')).toBe(true)
+    expect(events.some(e => e.kind === 'cell.validate')).toBe(false)
+  })
+
+  it('enforces real permission floors for independently declared operations', async () => {
+    const token = await oauthToken()
+    const proposed = await invoke(token, 'prepare_delete_cell', {
+      projectId: PROJECT, updates: [{ fileId: FILE, cellId: 'cell-1' }],
+    })
+    expect(toolPayload(proposed.result!).payload).toMatchObject({ error: { code: 'permission_denied' } })
+    expect((await tdb.rows('cells')).length).toBe(1)
+  })
+
+  it('marshals a fixed operation through the real command validator', async () => {
+    const token = await oauthToken()
+    await tdb.pg.query('UPDATE project_members SET role_level = 500 WHERE project_id = $1', [PROJECT])
+    const staged = await invoke(token, 'prepare_hide_cells', {
+      projectId: PROJECT, updates: [{ fileId: FILE, cellId: 'cell-1' }],
+    })
+    expect(staged.result?.isError).not.toBe(true)
+    const rows = await tdb.rows<{ commands: { kind: string }[] }>('changesets')
+    expect(rows[0].commands).toMatchObject([{ kind: 'EmitEvents', events: [{ kind: 'source.cell.visibility.set', fileId: FILE, cellId: 'cell-1', payload: { hidden: true } }] }])
+    const plan = toolPayload(staged.result!).payload as { changesetId: string; digest: string }
+    const committed = await invoke(token, 'confirm_changeset', { projectId: PROJECT, changesetId: plan.changesetId, digest: plan.digest })
+    expect(committed.result?.isError).not.toBe(true)
+    const read = await invoke(token, 'read_content', { projectId: PROJECT, fileId: FILE, lane: 'deflane1' })
+    expect(toolPayload(read.result!).payload).toMatchObject({ data: expect.arrayContaining([expect.objectContaining({ cellId: 'cell-1', hidden: true })]) })
+  })
+
+  it('rejects REST replay and alias-host replay without a spoofable delegation header', async () => {
+    const token = await oauthToken()
+    const rest = await handleExternalReadRequest(new Request('https://w/api/v1/external/me', {
+      headers: { Authorization: `Bearer ${token}`, 'x-aquilla-channel': 'mcp', 'x-aquilla-resource': resource },
+    }), makeEnv(tdb.db))
+    expect(rest?.status).toBe(401)
+    const alias = await handleExternalMcpRequest(new Request('https://other/api/v1/external/mcp', {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    }), makeEnv(tdb.db))
+    expect(alias?.status).toBe(401)
+    expect(alias?.headers.get('WWW-Authenticate')).toContain('invalid_token')
+  })
+
+  it('checks revocation again on subsequent MCP calls', async () => {
+    const token = await oauthToken()
+    expect((await invoke(token, 'list_projects', {})).result?.isError).not.toBe(true)
+    await tdb.pg.query('UPDATE api_credentials SET revoked_at = now() WHERE id = $1', [CRED_1])
+    const response = await rpc(makeEnv(tdb.db), token, { jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    expect(response.status).toBe(401)
+  })
+
+  it('refuses a stored legacy operation after the credential becomes OAuth-bound', async () => {
+    const token = await credToken(tdb)
+    await tdb.pg.query('UPDATE project_members SET role_level = 500 WHERE project_id = $1', [PROJECT])
+    const response = await invoke(token, 'prepare_translations', {
+      projectId: PROJECT,
+      commands: [{ kind: 'SetSource', fileId: FILE, cellId: 'cell-1', value: 'Changed source' }],
+    })
+    expect(response.result?.isError).not.toBe(true)
+    const plan = toolPayload(response.result!).payload as { changesetId: string; digest: string }
+    await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1 WHERE id = $2', [resource, CRED_1])
+    const commit = await invoke(token, 'confirm_changeset', {
+      projectId: PROJECT, changesetId: plan.changesetId, digest: plan.digest,
+    })
+    expect(toolPayload(commit.result!).payload).toMatchObject({ error: { code: 'validation_failed' } })
+    expect((await tdb.rows<{ status: string }>('changesets'))[0].status).toBe('staged')
+  })
+})
+
+// Zapier (docs/ZAPIER.md) holds a REST-audience OAuth token. It must reach the
+// REST API it was granted for, and must not be usable as an MCP credential:
+// the MCP tool profile assumes an MCP host, not a third-party automation.
+describe('REST-audience OAuth (Zapier)', () => {
+  const restResource = 'https://api.aquilla.app/sync/api/v1/external'
+  async function restToken() {
+    const token = await credToken(tdb)
+    await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1 WHERE id = $2', [restResource, CRED_1])
+    return token
+  }
+
+  it('is accepted by the REST API', async () => {
+    const token = await restToken()
+    const rest = await handleExternalReadRequest(new Request('https://w/api/v1/external/me', {
+      headers: { Authorization: `Bearer ${token}` },
+    }), makeEnv(tdb.db))
+    expect(rest?.status).toBe(200)
+    expect(await rest!.json()).toMatchObject({ credentialId: CRED_1 })
+  })
+
+  it('is refused by the MCP endpoint', async () => {
+    const token = await restToken()
+    const response = await rpc(makeEnv(tdb.db), token, { jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    expect(response.status).toBe(401)
   })
 })

@@ -160,10 +160,16 @@ Two rules follow, and they matter if you touch the marketing pages:
 - **Marketing pages must not read identity while rendering.** They are prerendered at build time
   and edge-cached, so their markup has to be the same for everyone. The nav's "Open app" link is
   unconditionally `/app`; it used to branch on the `aq_hint` cookie.
-- **Steer signed-in visitors with additive UI, never by mutating existing UI.** `AppEntryBanner`
-  appears alongside the hero rather than rewriting the call to action, so there's no flicker when
-  the session check resolves. `src/prerender/marketing-pages.test.tsx` fails if identity-dependent
-  markup leaks into the prerendered page.
+- **Steer signed-in visitors after mount — and that now includes rewriting the CTAs.** The
+  original rule here was "additive UI, never a mutation", on the grounds that rewriting a call to
+  action flickers when the session check resolves. Product reversed it (AQU-834): a signed-in
+  visitor must not be marketed a sign-up, so every "Sign up free" on the marketing pages becomes
+  "Open app" once a stored session is found, and the brief signed-out→signed-in swap on load is
+  accepted. What has **not** changed is the rule above it — the first render is still signed-out,
+  so the prerendered page stays identical for every visitor; `src/prerender/marketing-pages.test.tsx`
+  fails if identity-dependent markup leaks into it. The swap lives in the `aquilla-marketing`
+  repo (`useHasActiveSession` + the per-page CTA branches), which is also where the
+  `AppEntryBanner` strip this bullet used to describe has since been retired.
 
 ### 1.3 Every unknown URL returns HTTP 200 (soft 404)
 
@@ -210,11 +216,12 @@ The homepage links to both case studies (good). Neither case study links to the 
 `/beta`. Add cross-links — a short "more stories" block at the foot of each case study. Cheap,
 and it's the standard fix for pages that never get crawled deeply.
 
-### 1.7 `/privacy-policy` is still client-rendered
+### 1.7 `/privacy-policy` is still client-rendered — DONE (AQU-2243)
 
-It's a SPA route (`src/pages/PrivacyPolicy.tsx`), so it ships as an empty shell. It's a real page
-people look for. Either promote it to a prerendered marketing entry, or accept it and move on —
-but decide deliberately rather than leaving it as an accident.
+Decided: there is one policy, and it is the prerendered marketing page at `/privacy`. The SPA
+route and its second, stale copy of the text (`src/pages/PrivacyPolicy.tsx`) are gone, and the
+app Worker 301s `/privacy-policy` → `/privacy` so the bookmarked address keeps working and
+crawlers consolidate on the live page.
 
 ---
 

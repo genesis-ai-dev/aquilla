@@ -8,11 +8,12 @@ import {
   InputGroupText,
 } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { InfoNote, NoteOnClick } from "@/components/ui/info-note"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
 import { useExactUserLookup } from "@/hooks/useExactUserLookup"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 
 /**
@@ -50,6 +51,8 @@ interface Props {
   disabled?: boolean
   /** Optional id wired to a <label htmlFor="…"> in the parent. */
   inputId?: string
+  /** Element id of a visible reason, set on the input as aria-describedby. */
+  describedBy?: string
   /** Show the mode toggle (username / email). When false, the component
    * stays in `value.mode` permanently — useful for surfaces that don't
    * support email invites yet. */
@@ -98,6 +101,7 @@ export function UsernameTypeahead({
   onChange,
   disabled,
   inputId,
+  describedBy,
   showModeToggle = true,
   placeholder,
   excludedUserIds = [],
@@ -106,7 +110,7 @@ export function UsernameTypeahead({
   suggestions,
   emptySuggestionsHint,
 }: Props) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const [open, setOpen] = useState(false)
   // Anchored below the input by default (`top`), flipped above (`bottom`)
   // when the viewport can't fit the dropdown underneath — e.g. an add-member
@@ -120,7 +124,7 @@ export function UsernameTypeahead({
   const containerRef = useRef<HTMLDivElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const { query, results, isLoading, lastFetchOk } = useUserSearch(
-    value.mode === "username" ? value.raw : "",
+    !disabled && value.mode === "username" ? value.raw : "",
     undefined,
     undefined,
     scopedSearch
@@ -263,45 +267,55 @@ export function UsernameTypeahead({
     <div ref={containerRef} className="relative space-y-1">
       <div className="flex items-center gap-1.5">
         {showModeToggle && (
-          <div className="inline-flex shrink-0 rounded-md border bg-muted/20 p-0.5 text-[10px]">
-            <AppTooltip content={t("workspace.typeahead.usernameModeTooltip")}>
-              <span className="inline-flex">
-                <button
-                  type="button"
-                  onClick={() => handleSwitchMode("username")}
-                  disabled={disabled}
-                  className={`rounded px-1.5 py-0.5 ${
-                    value.mode === "username"
-                      ? "bg-background text-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
+          // AQU-1153: the mode switch is the app's shared Tabs control, not a
+          // hand-rolled pill pair, so it reads identically to every other
+          // two-way switch (cf. the voice-design mode tabs). AQU-2260 (Sam,
+          // Oct 29): labelled tabs say nothing on hover; what each mode does
+          // is one (i) beside them, opened on click.
+          <>
+            <Tabs
+              value={value.mode}
+              onValueChange={(next) => handleSwitchMode(next as RecipientMode)}
+              className="shrink-0 gap-0"
+            >
+              <TabsList>
+                <TabsTrigger value="username" disabled={disabled}>
                   {t("workspace.typeahead.usernameModeLabel")}
-                </button>
-              </span>
-            </AppTooltip>
-            <AppTooltip content={t("workspace.typeahead.emailModeTooltip")} className="max-w-xs">
-              <span className="inline-flex">
-                <button
-                  type="button"
-                  onClick={() => handleSwitchMode("email")}
-                  disabled={disabled}
-                  className={`rounded px-1.5 py-0.5 ${
-                    value.mode === "email"
-                      ? "bg-background text-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
+                </TabsTrigger>
+                <TabsTrigger value="email" disabled={disabled}>
                   {t("common.email")}
-                </button>
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <InfoNote
+              label={t("common.aboutAria", {
+                name: new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format([
+                  t("workspace.typeahead.usernameModeLabel"),
+                  t("common.email"),
+                ]),
+              })}
+              testId="typeahead-mode-info"
+            >
+              <span className="flex flex-col gap-1.5">
+                <span>
+                  <span className="font-medium">{t("workspace.typeahead.usernameModeLabel")}</span>
+                  {" — "}
+                  {t("workspace.typeahead.usernameModeTooltip")}
+                </span>
+                <span>
+                  <span className="font-medium">{t("common.email")}</span>
+                  {" — "}
+                  {t("workspace.typeahead.emailModeTooltip")}
+                </span>
               </span>
-            </AppTooltip>
-          </div>
+            </InfoNote>
+          </>
         )}
 
         <InputGroup className="flex-1">
           <InputGroupInput
             id={inputId}
+            aria-describedby={describedBy}
             type={value.mode === "email" ? "email" : "text"}
             inputMode={value.mode === "email" ? "email" : undefined}
             autoComplete="off"
@@ -335,11 +349,12 @@ export function UsernameTypeahead({
           />
           {value.mode === "username" && value.resolved && (
             <InputGroupAddon align="inline-end">
-              <AppTooltip content={t("workspace.typeahead.verifiedTooltip")}>
+              {/* AQU-2260: what the mark means opens on click, not hover. */}
+              <NoteOnClick note={t("workspace.typeahead.verifiedTooltip")} align="end">
                 <InputGroupText className="rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 text-[10px]">
                   <Check /> {t("workspace.typeahead.verifiedBadge")}
                 </InputGroupText>
-              </AppTooltip>
+              </NoteOnClick>
             </InputGroupAddon>
           )}
         </InputGroup>
@@ -526,6 +541,7 @@ export function UsernameTypeahead({
                         </span>
                         <span className="min-w-0 flex-1 truncate">
                           <UsernameWithAvatar
+                            userId={u.id}
                             username={u.username}
                             size="xs"
                             nameClassName="text-sm font-normal"
@@ -547,6 +563,7 @@ export function UsernameTypeahead({
                       }`}
                     >
                       <UsernameWithAvatar
+                        userId={u.id}
                         username={u.username}
                         size="xs"
                         nameClassName="text-sm font-normal"

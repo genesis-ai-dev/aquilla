@@ -26,6 +26,25 @@ export function resolveDeepLinkLane(
   return availableLanes.includes(param) ? param : ''
 }
 
+/**
+ * `?lane=` accepts a legacy tag or a lane id. An id resolves to that lane's
+ * tag, which is what the editor stores. An unknown value still falls back
+ * to the default lane.
+ */
+export function resolveDeepLinkLaneSelection(
+  param: string | null | undefined,
+  lanes: readonly { id: string; legacyTag: string | null }[],
+  availableLanes: readonly string[],
+): string | null {
+  if (param === null || param === undefined) return null
+  const byId = lanes.find((lane) => lane.id === param)
+  if (byId) {
+    const tag = byId.legacyTag ?? ""
+    return availableLanes.includes(tag) ? tag : ""
+  }
+  return resolveDeepLinkLane(param, availableLanes)
+}
+
 /** Preserve the important distinction between an absent lane and `?lane=`. */
 export function resolveDeepLinkLaneFromSearchParams(
   searchParams: Pick<URLSearchParams, "get" | "has">,
@@ -86,4 +105,90 @@ export function defaultLaneDraftReviewHref(
   cellId?: string | null,
 ): string {
   return editorCellHref(projectId, fileId, cellId, "")
+}
+
+/**
+ * Query flag on an editor cell link: also OPEN that cell's comment thread
+ * (AQU-1259), rather than only scrolling the row into view.
+ *
+ * The distinction is the whole point of the flag. `?cellId=` is a position —
+ * every surface that links into the editor uses it, and none of them wants a
+ * side panel forced open. A link that came from a comment is different: the
+ * user clicked a specific thread, so landing them on the row with the thread
+ * still collapsed makes them hunt for the thing they just clicked. Only the
+ * comment surfaces set this, and only they should.
+ */
+export const OPEN_COMMENTS_PARAM = "comments"
+
+/** The comment (often a reply) a deep link asks the open thread to scroll to. */
+export const FOCUS_COMMENT_PARAM = "commentId"
+
+/**
+ * The cell whose comment thread a deep link asks to have open, or `null`.
+ *
+ * Requires BOTH halves: the flag alone names no cell, and `?cellId=` alone is
+ * the ordinary scroll-into-view link every other surface builds. Reading them
+ * together here — rather than in the component — is what keeps "which links
+ * open a panel" one testable rule instead of a condition buried in an effect.
+ */
+export function openCommentsCellFromSearchParams(
+  searchParams: Pick<URLSearchParams, "get">,
+): string | null {
+  if (searchParams.get(OPEN_COMMENTS_PARAM) !== "1") return null
+  const cellId = searchParams.get("cellId")
+  return cellId ? cellId : null
+}
+
+/**
+ * Open the editor on one cell AND open that cell's comment thread.
+ *
+ * Deliberately not a flag on `editorCellHref`: that builder always emits
+ * `?lane=`, and the comment surfaces are not lane-scoped — a thread belongs to
+ * a cell, not to one target language, so forcing a lane here would silently
+ * move the reader into a language they were not reading (see
+ * `resolveDeepLinkLane` on why an ABSENT lane is the correct "leave it alone").
+ */
+export function editorCommentHref(
+  projectId: string,
+  fileId: string,
+  cellId?: string | null,
+  commentId?: string | null,
+): string {
+  const base = `/project/${encodeURIComponent(projectId)}/editor/file/${encodeURIComponent(fileId)}`
+  if (!cellId) return base
+  const query = [
+    `cellId=${encodeURIComponent(cellId)}`,
+    `${OPEN_COMMENTS_PARAM}=1`,
+    commentId ? `${FOCUS_COMMENT_PARAM}=${encodeURIComponent(commentId)}` : "",
+  ].filter(Boolean).join("&")
+  return `${base}?${query}`
+}
+
+/**
+ * The comment a deep link asks the open thread to scroll to and highlight,
+ * or `null` when the link only names the cell.
+ */
+export function focusedCommentFromSearchParams(
+  searchParams: Pick<URLSearchParams, "get">,
+): string | null {
+  const commentId = searchParams.get(FOCUS_COMMENT_PARAM)
+  return commentId ? commentId : null
+}
+
+/**
+ * Search string after the comments panel closes.
+ *
+ * Drops the open flag and the focused comment so the URL no longer asks the
+ * editor to open the thread. `cellId` stays: it is the row the editor is on,
+ * and a bare cell link must not reopen the panel. When neither comment param
+ * is present the original string is returned unchanged, so a close that did
+ * not come from a deep link does not rewrite the address.
+ */
+export function searchWithoutCommentDeepLink(search: string): string {
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search)
+  if (!params.has(OPEN_COMMENTS_PARAM) && !params.has(FOCUS_COMMENT_PARAM)) return search
+  params.delete(OPEN_COMMENTS_PARAM)
+  params.delete(FOCUS_COMMENT_PARAM)
+  const next = params.toString()
+  return next ? `?${next}` : ""
 }

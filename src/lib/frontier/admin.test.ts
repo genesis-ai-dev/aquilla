@@ -6,7 +6,9 @@ import {
   getAdminUsers,
   getAdminProjects,
   getAdminActivity,
+  verifyAdminElevation,
 } from "./admin"
+import { onElevationGranted } from "@/lib/errors/elevation-required-signal"
 
 const ORIG = global.fetch
 
@@ -84,5 +86,27 @@ describe("admin list endpoints unwrap their envelope", () => {
     expect(err).toBeInstanceOf(Error)
     expect((err as Error).message).not.toMatch(/HTTP\s*403/)
     expect((err as Error).name).toBe("UserError")
+  })
+})
+
+describe("verifyAdminElevation (OPS-44)", () => {
+  it("announces the step-up once the code verifies, so held outbox work can retry", async () => {
+    const granted = vi.fn()
+    const unsubscribe = onElevationGranted(granted)
+    mockJson({ elevatedUntil: "2026-10-14T19:00:00.000Z" })
+    await expect(verifyAdminElevation("jwt", "123456")).resolves.toEqual({
+      elevatedUntil: "2026-10-14T19:00:00.000Z",
+    })
+    expect(granted).toHaveBeenCalledTimes(1)
+    unsubscribe()
+  })
+
+  it("stays quiet when the code is refused", async () => {
+    const granted = vi.fn()
+    const unsubscribe = onElevationGranted(granted)
+    mockJson({ error: "invalid code" }, 400)
+    await expect(verifyAdminElevation("jwt", "000000")).rejects.toMatchObject({ name: "UserError" })
+    expect(granted).not.toHaveBeenCalled()
+    unsubscribe()
   })
 })

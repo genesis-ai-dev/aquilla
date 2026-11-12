@@ -16,19 +16,23 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
-import type { Concept, TermMatchOptions, TermRendering } from "@/lib/terminology/types"
+import type { Concept, ConceptExternalIds, TermMatchOptions, TermRendering } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import type { TermMatchingSettings } from "@/lib/terminology/types"
 import type { CellData } from "@/hooks/useCells"
+import { violationCellRef } from "@/lib/terminology/violations-inbox"
 import { TranslatedEditor } from "@/components/TranslatedEditor"
 import type { TranslatedEditorCommit } from "@/components/TranslatedEditor"
 import { emitTargetCellCommit } from "@/lib/sync/events-emit"
 import { EquivalentsPanel } from "@/components/EquivalentsPanel"
 import { TermFormsSection } from "@/components/terminology/TermFormsSection"
-import { predictEquivalents } from "@/lib/terminology/equivalents"
-import { matchesConcept, matchesTerm } from "@/lib/terminology/match"
+import { BibleEntityLinkSection } from "@/components/terminology/BibleEntityLinkSection"
+import { predictEquivalents, type PredictedEquivalent } from "@/lib/terminology/equivalents"
+import { matchesConcept } from "@/lib/terminology/match"
+import { deriveTermVerdict } from "@/lib/terminology/verdict"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
+import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 
 // ─── Status label helper ──────────────────────────────────────────────────────
 
@@ -113,23 +117,7 @@ function deriveVerdict(
   translated: string,
   termMatching?: TermMatchingSettings,
 ): Verdict {
-  // AQU-1271: source side via the shared CONCEPT matcher (wildcards, extra
-  // forms, mark folding, project affixes, exclusions) so this page's verdicts
-  // agree with the rule engine and the editor chips.
-  if (!matchesConcept(original, concept, termMatching)) return "na"
-
-  const approved = concept.renderings.filter(
-    (r) => r.status === "preferred" || r.status === "admitted",
-  )
-  const forbidden = concept.renderings.filter((r) => r.status === "forbidden")
-
-  if (forbidden.some((f) => matchesTerm(translated, f.rendering))) return "infringed"
-  if (approved.length > 0) {
-    return approved.some((a) => matchesTerm(translated, a.rendering))
-      ? "enforced"
-      : "infringed"
-  }
-  return "enforced"
+  return deriveTermVerdict(concept, original, translated, termMatching)
 }
 
 // ─── Verdict chip ─────────────────────────────────────────────────────────────
@@ -169,6 +157,8 @@ interface OccurrenceRowProps {
   translated: string
   canEdit: boolean
   projectId: string
+  /** AQU-1902: the lane these occurrences are read from — edits commit to it. */
+  activeLane: string
   username: string
   onOptimisticEdit: (
     cell: { cellId: string; fileId: string },
@@ -177,14 +167,18 @@ interface OccurrenceRowProps {
   onCellCommitted: () => void
   onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
   termMatching?: TermMatchingSettings
+  /** AQU-2076: name of the file the cell lives in, when the caller knows it. */
+  fileName?: string
 }
 
 function OccurrenceRow({
   cell,
+  fileName,
   concept,
   translated,
   canEdit,
   projectId,
+  activeLane,
   username,
   onOptimisticEdit,
   onCellCommitted,
@@ -193,6 +187,7 @@ function OccurrenceRow({
 }: OccurrenceRowProps) {
   const t = useT()
   const verdict = deriveVerdict(concept, cell.original, translated, termMatching)
+  const refLabel = violationCellRef(cell) ?? t("terminology.violations.unnamedCell")
   const [editing, setEditing] = useState(false)
 
   const handleCommit = useCallback(
@@ -202,11 +197,16 @@ function OccurrenceRow({
         projectId,
         fileId: cell.fileId,
         cellId: cell.id,
-        parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+        // AQU-1578: never chain on the optimistic placeholder head "".
+        parentId: resolveTargetCommitParent({ targetEventId: cell.targetEventId, sourceEventId: cell.sourceEventId }),
         sourceEventId: cell.sourceEventId ?? null,
         value,
         valueHtml,
         author: username,
+        // AQU-1902: the occurrences are read from this lane (useTermOccurrences
+        // `lane`), so the inline edit commits to it. Omitting it addressed the
+        // default lane, which projects created today do not have.
+        targetLang: activeLane,
       })
         .then(() => onCellCommitted())
         .catch((err: unknown) => {
@@ -219,6 +219,7 @@ function OccurrenceRow({
       cell.targetEventId,
       cell.sourceEventId,
       projectId,
+      activeLane,
       username,
       onOptimisticEdit,
       onCellCommitted,
@@ -232,9 +233,19 @@ function OccurrenceRow({
         verdict === "infringed" && "bg-destructive/5 -mx-2 px-2 rounded",
       )}
     >
-      {/* Cell ref */}
-      <span className="w-24 shrink-0 font-mono text-[11px] text-muted-foreground pt-0.5">
-        {cell.context || cell.group || cell.id.slice(0, 8)}
+      {/* Cell ref. AQU-2076: same label as the violations list (AQU-663) —
+          a cell with no ref reads "Untitled cell" plus its file, never a
+          fragment of the internal id. */}
+      <span className="flex w-24 shrink-0 flex-col pt-0.5 text-[11px] text-muted-foreground">
+        <span className="font-mono">{refLabel}</span>
+        {fileName && (
+          <span
+            className="truncate"
+            title={t("terminology.violations.inFile", { file: fileName })}
+          >
+            {fileName}
+          </span>
+        )}
       </span>
 
       {/* Source snippet */}
@@ -283,7 +294,7 @@ function OccurrenceRow({
           size="icon-sm"
           className="shrink-0"
           aria-label={t("terminology.termDetail.goToCellAria", {
-            ref: cell.context || cell.group || cell.id.slice(0, 8),
+            ref: refLabel,
           })}
           onClick={() => onJumpToCell({ cellId: cell.id, fileId: cell.fileId })}
         >
@@ -298,10 +309,34 @@ function OccurrenceRow({
 
 export interface TerminologyTermDetailProps {
   concept: Concept
-  /** All cells for the project (or the active file). Filtered internally. */
+  /**
+   * Cells to list. The glossary passes one server page of confirmed
+   * occurrences; this view still confirms each row with the matcher.
+   */
   cells: CellData[]
+  /** Exact match count from the server scan, when the list is only one page. */
+  occurrenceTotal?: number
+  enforcedTotal?: number
+  infringedTotal?: number
+  /** Source surfaces counted across the whole scan, not just `cells`. */
+  discoveredForms?: ReadonlyArray<{ surface: string; count: number; excluded: boolean }>
+  /** False when the server stopped before the end of the project. */
+  scanComplete?: boolean
+  hasMore?: boolean
+  onLoadMore?: () => void
+  /**
+   * When set, suggested renderings are not computed from `cells` (that corpus
+   * is only the matches, which degenerates the contrast). The parent scans
+   * the project when the user asks.
+   */
+  onScanSuggestions?: () => void
+  suggestions?: PredictedEquivalent[]
+  suggestionsLoading?: boolean
   canEdit: boolean
   projectId: string
+  /** AQU-1902: legacy tag of the lane the occurrences are read from (`''` =
+   *  a legacy default lane). Inline edits commit to this lane. */
+  activeLane?: string
   username: string
   onClose: () => void
   /** Called after any commit so the parent can trigger a revalidate. */
@@ -320,8 +355,12 @@ export interface TerminologyTermDetailProps {
   onPromoteRendering?: (conceptId: string, target: string) => void | Promise<void>
   /** True while the parent is still fetching cells for the examples list. */
   examplesLoading?: boolean
+  /** Set when the occurrence read failed. The list must not look simply empty. */
+  loadError?: string | null
   /** Jump to this occurrence in the editor. */
   onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
+  /** AQU-2076: project files, so each occurrence row can name its file. */
+  files?: Array<{ id: string; name: string }>
   /**
    * AQU-1006 follow-up: replace this concept's rendering list.
    *
@@ -348,6 +387,14 @@ export interface TerminologyTermDetailProps {
   onCaseSensitiveChange?: (conceptId: string, caseSensitive: boolean) => void | Promise<void>
   /** Offered when the project has no prefix/suffix inventory yet. */
   onSetUpAffixes?: () => void
+  /**
+   * AQU-1693: show the "Bible person, place or group" section. The caller sets
+   * it only while `isBibleEntityLinkAvailable(project)`; `defaultBook` is the
+   * book the picker lists first.
+   */
+  bibleLink?: { defaultBook?: string }
+  /** AQU-1693: link this concept to a Bible entity, or unlink it (`undefined`). */
+  onExternalIdsChange?: (conceptId: string, externalIds: ConceptExternalIds | undefined) => void | Promise<void>
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -357,6 +404,7 @@ export function TerminologyTermDetail({
   cells,
   canEdit,
   projectId,
+  activeLane = "",
   username,
   onClose,
   onCellCommitted,
@@ -364,14 +412,33 @@ export function TerminologyTermDetail({
   canManageTermbase = false,
   onPromoteRendering,
   examplesLoading = false,
+  loadError = null,
   onJumpToCell,
+  files,
   onRenderingsChange,
   termMatching,
   onMatchChange,
   onCaseSensitiveChange,
   onSetUpAffixes,
+  bibleLink,
+  onExternalIdsChange,
+  occurrenceTotal,
+  enforcedTotal,
+  infringedTotal,
+  discoveredForms,
+  scanComplete = true,
+  hasMore = false,
+  onLoadMore,
+  onScanSuggestions,
+  suggestions,
+  suggestionsLoading = false,
 }: TerminologyTermDetailProps) {
   const t = useT()
+  const fileNameById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const f of files ?? []) m.set(f.id, f.name)
+    return m
+  }, [files])
   // Per-cell translated values — optimistic updates are already reflected via
   // the parent's useCells applyOptimisticTargetEdit before this renders.
   const occurrences = useMemo(
@@ -380,6 +447,9 @@ export function TerminologyTermDetail({
   )
 
   const { enforced, infringed } = useMemo(() => {
+    if (enforcedTotal !== undefined && infringedTotal !== undefined) {
+      return { enforced: enforcedTotal, infringed: infringedTotal }
+    }
     let enforced = 0
     let infringed = 0
     for (const c of occurrences) {
@@ -388,18 +458,21 @@ export function TerminologyTermDetail({
       else if (v === "infringed") infringed++
     }
     return { enforced, infringed }
-  }, [occurrences, concept, termMatching])
+  }, [occurrences, concept, termMatching, enforcedTotal, infringedTotal])
 
-  // Predicted target equivalents over the loaded bilingual cell pairs. χ² + EM
-  // cross-check; results stay "AI-assumed" until explicitly promoted.
+  // Suggested renderings need term-absent pairs, not just the occurrence
+  // page. Callers that pass `onScanSuggestions` own that scan.
   const predicted = useMemo(
     () =>
-      predictEquivalents(
-        cells.map((c) => ({ source: c.original, target: c.translated })),
-        concept.sourceTerm,
-      ),
-    [cells, concept.sourceTerm],
+      onScanSuggestions
+        ? suggestions ?? []
+        : predictEquivalents(
+            cells.map((c) => ({ source: c.original, target: c.translated })),
+            concept.sourceTerm,
+          ),
+    [onScanSuggestions, suggestions, cells, concept.sourceTerm],
   )
+  const occurrenceCount = occurrenceTotal ?? occurrences.length
 
   const handlePromoteEquivalent = useCallback(
     (target: string) => {
@@ -450,7 +523,9 @@ export function TerminologyTermDetail({
   }, [newRendering, concept.renderings, concept.id, onRenderingsChange])
 
   return (
-    <div className="flex flex-col min-h-screen bg-background">
+    // AQU-1272: the e2e page object scopes its "N occurrences" assertion to
+    // this panel — page-wide, the same string appears in the term list too.
+    <div className="flex flex-col min-h-screen bg-background" data-testid="term-detail">
       {/* Header */}
       <header className="flex items-center gap-3 border-b px-4 py-3">
         <Button
@@ -540,13 +615,17 @@ export function TerminologyTermDetail({
         {!examplesLoading && (
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span>
-            <RichMessage
-              k="terminology.common.occurrenceCount"
-              count={occurrences.length}
-              values={{
-                count: <span className="font-medium text-foreground">{occurrences.length}</span>,
-              }}
-            />
+            {scanComplete ? (
+              <RichMessage
+                k="terminology.common.occurrenceCount"
+                count={occurrenceCount}
+                values={{
+                  count: <span className="font-medium text-foreground">{occurrenceCount}</span>,
+                }}
+              />
+            ) : (
+              <span>{t("terminology.termDetail.atLeastCount", { count: occurrenceCount })}</span>
+            )}
           </span>
           {occurrences.length > 0 && (
             <>
@@ -567,12 +646,21 @@ export function TerminologyTermDetail({
         <TermFormsSection
           concept={concept}
           cells={cells}
+          forms={discoveredForms}
           termMatching={termMatching}
           canEdit={canManageTermbase && Boolean(onMatchChange)}
           onMatchChange={onMatchChange}
           onCaseSensitiveChange={onCaseSensitiveChange}
           onSetUpAffixes={onSetUpAffixes}
         />
+        {bibleLink && onExternalIdsChange && (
+          <BibleEntityLinkSection
+            concept={concept}
+            canEdit={canManageTermbase}
+            defaultBook={bibleLink.defaultBook}
+            onChange={onExternalIdsChange}
+          />
+        )}
       </div>
 
       {/* Managed renderings / predicted equivalents don't need the cell query. */}
@@ -583,6 +671,8 @@ export function TerminologyTermDetail({
           predicted={examplesLoading ? [] : predicted}
           canPromote={canManageTermbase && Boolean(onPromoteRendering)}
           onPromote={handlePromoteEquivalent}
+          onRequestScan={onScanSuggestions && suggestions === undefined ? onScanSuggestions : undefined}
+          scanLoading={suggestionsLoading}
         />
       </div>
 
@@ -594,7 +684,9 @@ export function TerminologyTermDetail({
         </div>
       ) : (
         <main className="flex-1 overflow-y-auto px-4 py-2">
-        {occurrences.length === 0 ? (
+        {loadError ? (
+          <p className="py-16 text-center text-sm text-destructive">{loadError}</p>
+        ) : occurrences.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
             <Minus className="h-8 w-8 opacity-30" />
             <p className="text-sm">{t("terminology.termDetail.noOccurrences")}</p>
@@ -614,10 +706,12 @@ export function TerminologyTermDetail({
                 <OccurrenceRow
                   key={cell.id}
                   cell={cell}
+                  fileName={fileNameById.get(cell.fileId)}
                   concept={concept}
                   translated={cell.translated}
                   canEdit={canEdit}
                   projectId={projectId}
+                  activeLane={activeLane}
                   username={username}
                   onOptimisticEdit={onOptimisticEdit}
                   onCellCommitted={onCellCommitted}
@@ -626,6 +720,13 @@ export function TerminologyTermDetail({
                 />
               ))}
             </ul>
+            {hasMore && onLoadMore && (
+              <div className="flex justify-center py-4">
+                <Button type="button" variant="outline" size="sm" onClick={onLoadMore}>
+                  {t("terminology.termDetail.loadMore")}
+                </Button>
+              </div>
+            )}
           </>
         )}
       </main>

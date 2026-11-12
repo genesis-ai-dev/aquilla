@@ -1,15 +1,29 @@
 import "fake-indexeddb/auto"
 import "@testing-library/jest-dom/vitest"
 import { afterEach, expect, vi } from "vitest"
-import { cleanup } from "@testing-library/react"
+import { cleanup, configure } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { resetWindowFocusRevalidateForTests } from "@/lib/sync/window-focus-revalidate"
 import { resetAllRequestCoalescersForTests } from "@/lib/request-coalescer"
 import { clearResolvedProjectSeeds } from "@/lib/sync/project-record-seed"
+import { resetLoadedPersonPrefsForTests } from "@/lib/prefs/person-prefs-reset"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 import {
   createOffMachineFetchGuard,
   takeOffMachineRequestViolations,
 } from "./test-setup.fetch-guard"
+
+// Every findBy* / waitFor waits for observable state, so its timeout is a stall
+// watchdog, not a speed limit (AGENTS.md rule 15, AQU-1749). The default 1 s
+// failed correct tests on a loaded machine. The default onTimeout stays, so a
+// stalled wait still prints the DOM.
+configure({ asyncUtilTimeout: STALL_WATCHDOG_MS })
+
+// English ships with the app, so a test that renders English needs no catalog.
+// Installing every catalog here (AQU-2090) was 47% of the CI unit job: 15 MB of
+// locale modules evaluated again in each isolated worker, for every test file
+// (AQU-1991). A test that asserts text in another locale imports
+// "@/test-utils/all-catalogs" itself.
 
 // Block unit tests from reaching anything off this machine (AQU-1277). The
 // auth/sync base URLs fall back to production when VITE_AUTH_BASE is unset, so
@@ -23,6 +37,14 @@ globalThis.fetch = createOffMachineFetchGuard(globalThis.fetch, () => {
   return [testPath, currentTestName].filter(Boolean).join(" › ") || "unknown test"
 })
 
+// happy-dom ≥20.14 implements Element.getAnimations, so Base UI no longer
+// unmounts a closed popup synchronously: it waits a frame for exit animations
+// that never run here (no CSS animation engine), and an assertion straight
+// after a close sees the popup still mounted. This is Base UI's declared switch
+// for runtimes like this one (@base-ui/react/global.d.ts); real-browser exit
+// timing is covered by e2e.
+Object.assign(globalThis, { BASE_UI_ANIMATIONS_DISABLED: true })
+
 // Stub PostHog globally. A real VITE_POSTHOG_KEY in a developer's .env makes
 // src/lib/posthog.ts call posthog.init() at import time, which tries to fetch a
 // remote config script that happy-dom refuses to load (DOMException), crashing
@@ -31,7 +53,32 @@ globalThis.fetch = createOffMachineFetchGuard(globalThis.fetch, () => {
 // this with their own vi.mock. The Proxy returns a fresh no-op for every method
 // so we never have to enumerate PostHog's API surface here.
 vi.mock("@/lib/posthog", () => ({
-  default: new Proxy({}, { get: () => vi.fn() }),
+  default: new Proxy({}, { get: (_target, key) => key === "scope" ? () => new Proxy({}, { get: (_target, prop) => prop === "enabled" ? () => true : vi.fn() }) : vi.fn() }),
+}))
+
+// Optional analytics is isolated in ordinary product tests, just like the SDK
+// above. Consent/network integration tests explicitly unmock this controller.
+vi.mock("@/lib/analytics-account", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/analytics-account")>()
+  const state = { generation: 0, accountId: null, username: null, decision: null, ready: false, saving: false, error: false }
+  return { ...actual, analyticsAccount: {
+    getSnapshot: () => state, subscribe: () => () => {}, eligible: () => false, eligibleForSession: vi.fn(() => false),
+    activate: vi.fn(async () => {}), refresh: vi.fn(async () => {}),
+    invalidate: vi.fn(), suspend: vi.fn(), choose: vi.fn(async () => {}),
+  } }
+})
+vi.mock("@/hooks/useAccountAnalytics", async () => {
+  const { default: posthog } = await import("@/lib/posthog")
+  return { useAccountAnalytics: () => posthog }
+})
+
+// AQU-2262: Project settings host the undo history when no workspace does, and
+// the history reads and writes its copy on the server as it opens. Every
+// settings test would make that request. Here the server copy answers as if
+// offline (the history stays on the device); a test of the real one calls
+// vi.unmock("@/lib/history/history-remote").
+vi.mock("@/lib/history/history-remote", () => ({
+  httpHistoryRemote: () => ({ read: async () => null, write: async () => null }),
 }))
 
 // happy-dom has no layout engine, so the real LegendList may paint zero items.
@@ -116,6 +163,13 @@ afterEach(() => {
   // test that mounts the same id on the warm path (ready at once, then a
   // revalidated record) while it still reads as a cold-load test.
   clearResolvedProjectSeeds()
+  // AQU-2264: the preferences that follow the person cache their reads and
+  // hold a session and a send timer; a fresh tab starts with none of them.
+  // Through its seam, not person-prefs itself: an import here is evaluated
+  // before a test file's vi.mock() calls, and person-prefs reaches
+  // frontier/auth, orgs and elevation. See person-prefs-reset.ts and
+  // test-setup.imports.test.ts.
+  resetLoadedPersonPrefsForTests()
 
   // The guard throws at the call site, but callers routinely wrap fetch in
   // try/catch, which would swallow it and leave the test green despite a

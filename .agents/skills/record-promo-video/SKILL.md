@@ -9,6 +9,17 @@ Produces a persona-targeted trailer that combines **emotional storytelling** (Ho
 
 ---
 
+## Creative direction before production
+
+For a new product film or substantial visual redirection, use the installed
+`edit-video` skill's `references/product-direction.md` workflow and
+`motion-reference-scout`: inspect named references, offer three storyboard
+directions, then show one still per scene before full animation. Preserve an
+approved values story; the framework below is a starting point, not an override
+of the user's story. Real app surfaces can separate into dimensional close-ups
+when their provenance remains clear. Do not present simulated interactions as
+proof. Minor director notes do not restart the whole selection process.
+
 ## The key insight: promo = hook + walkthrough clips + CTA
 
 The old approach (Ken-Burns over static screenshots) produces trailers that look slick but feel hollow — the viewer never sees the app actually working. The fix: **interleave real walkthrough clips** from doc-mode recordings into the promo's Hormozi structure.

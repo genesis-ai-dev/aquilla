@@ -119,7 +119,7 @@ export async function readZipLiteEntryBytes(
   if (entry.compressionMethod !== METHOD_DEFLATE) {
     throw new Error(`ZIP entry "${name}" uses unsupported compression method ${entry.compressionMethod}.`)
   }
-  return inflateRaw(data)
+  return inflateRaw(data, entry.uncompressedSize)
 }
 
 /** Inflate one member and decode it as UTF-8 (BOM stripped). */
@@ -133,7 +133,13 @@ export async function readZipLiteEntryText(
   return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
 }
 
-async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
+// Backstop for zip64 members, whose 32-bit size field reads 0xFFFFFFFF.
+const MAX_INFLATED_BYTES = 256 * 1024 * 1024
+
+/** `maxBytes` is the central directory's declared size, which an attacker
+ *  controls; inflation is bounded by it so a lying header cannot produce a
+ *  zip bomb that `assertSafeZipLiteArchive`'s declared-size check misses. */
+async function inflateRaw(data: Uint8Array, maxBytes: number): Promise<Uint8Array> {
   if (typeof DecompressionStream === "undefined") {
     throw new Error("DecompressionStream is unavailable — cannot inflate ZIP members on this platform.")
   }
@@ -156,7 +162,27 @@ async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
     .write(chunk)
     .then(() => writer.close())
     .catch(() => {})
-  return new Uint8Array(await new Response(stream.readable).arrayBuffer())
+  const limit = Math.min(maxBytes, MAX_INFLATED_BYTES)
+  const reader = stream.readable.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.length
+    if (total > limit) {
+      void reader.cancel().catch(() => {})
+      throw new Error("ZIP member inflates past its declared size.")
+    }
+    chunks.push(value)
+  }
+  const out = new Uint8Array(total)
+  let at = 0
+  for (const c of chunks) {
+    out.set(c, at)
+    at += c.length
+  }
+  return out
 }
 
 function findEocd(view: DataView, length: number): number {

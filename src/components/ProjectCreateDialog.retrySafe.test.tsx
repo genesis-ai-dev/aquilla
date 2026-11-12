@@ -10,6 +10,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
 
+// AQU-1352: the destination picker fetches create-targets on open; submit waits
+// for it, so resolve to Personal (the server always lists it).
+vi.mock("@/lib/sync/create-targets", () => ({
+  fetchCreateTargets: vi.fn().mockResolvedValue([
+    { kind: "personal", orgId: null, name: "Personal", path: ["Personal"], role: 700, teams: [] },
+  ]),
+}))
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
     session: { jwt: "tok", username: "wendi" },
@@ -38,7 +45,24 @@ vi.mock("@/lib/sync/project-settings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sync/project-settings")>()
   return {
     ...actual,
-    fetchProjectSettings: vi.fn(),
+    fetchProjectSettings: vi.fn().mockResolvedValue({
+      version: 0,
+      updatedAt: "2026-07-13T00:00:00.000Z",
+      updatedBy: null,
+      settings: {},
+      lanes: [
+        {
+          id: "source-lane",
+          role: "source",
+          language: "",
+          name: null,
+          langCode: null,
+          legacyTag: "",
+          position: 0,
+          archivedAt: null,
+        },
+      ],
+    }),
     patchProjectSettings: vi.fn().mockResolvedValue({
       kind: "ok",
       value: {
@@ -48,6 +72,8 @@ vi.mock("@/lib/sync/project-settings", async (importOriginal) => {
         settings: {},
       },
     }),
+    createProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "lane" } }),
+    renameProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "source-lane" } }),
   }
 })
 
@@ -55,7 +81,7 @@ vi.mock("@/lib/store/project-index", () => ({
   createProject: vi.fn().mockResolvedValue(undefined),
 }))
 
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 
 import { createCloudProject } from "@/lib/sync/cloud-projects"
 import { createProject } from "@/lib/store/project-index"
@@ -69,7 +95,7 @@ function createdIdAt(call: number): string {
 }
 
 function fillBasics(name = "Russian BSB") {
-  fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+  fireEvent.change(screen.getByPlaceholderText("My translation project"), {
     target: { value: name },
   })
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
@@ -81,7 +107,7 @@ function fillBasics(name = "Russian BSB") {
 }
 
 function clickCreate() {
-  fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+  fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
 }
 
 describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => {
@@ -99,7 +125,10 @@ describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => 
       .mockResolvedValue(undefined)
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillBasics()
 
     clickCreate()
@@ -108,7 +137,7 @@ describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => 
     })
     // The create failed, so the dialog stays open (not the local-create path)
     // and no local project row was written yet.
-    expect(screen.getByText("Create New Project")).toBeTruthy()
+    expect(screen.getByText("Create new project")).toBeTruthy()
     expect(mockCreateProject).not.toHaveBeenCalled()
 
     clickCreate()
@@ -129,18 +158,24 @@ describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
 
     // Session 1: create "Russian BSB" successfully → dialog closes.
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillBasics("Russian BSB")
     clickCreate()
     await waitFor(() => {
       expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
     })
     await waitFor(() => {
-      expect(screen.queryByText("Create New Project")).toBeNull()
+      expect(screen.queryByText("Create new project")).toBeNull()
     })
 
     // Session 2: reopen and create a project with the SAME name.
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillBasics("Russian BSB")
     clickCreate()
     await waitFor(() => {

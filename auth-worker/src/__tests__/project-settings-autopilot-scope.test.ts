@@ -77,7 +77,6 @@ describe("project-settings autopilot carve-out (AQU-1246)", () => {
   it("lets a project lead opt the project in", async () => {
     await seed()
     const res = await patchProjectSettings("dan", {
-      sourceLanguage: "en", // unchanged echo — the client sends the whole object
       autopilotEnabled: true,
     })
     expect(res.status).toBe(200)
@@ -86,7 +85,7 @@ describe("project-settings autopilot carve-out (AQU-1246)", () => {
 
   it("lets a maintainer opt the project in", async () => {
     await seed()
-    const res = await patchProjectSettings("bob", { sourceLanguage: "en", autopilotEnabled: true })
+    const res = await patchProjectSettings("bob", { autopilotEnabled: true })
     expect(res.status).toBe(200)
     expect((await storedSettings()).autopilotEnabled).toBe(true)
   })
@@ -94,7 +93,6 @@ describe("project-settings autopilot carve-out (AQU-1246)", () => {
   it("403s a contributor opting the project in — server-enforced, not just a hidden toggle", async () => {
     await seed()
     const res = await patchProjectSettings("carla", {
-      sourceLanguage: "en",
       autopilotEnabled: true,
     })
     expect(res.status).toBe(403)
@@ -106,7 +104,6 @@ describe("project-settings autopilot carve-out (AQU-1246)", () => {
     // to yank a surface the team is mid-run on, any more than reveal one.
     await seed('{"sourceLanguage":"en","autopilotEnabled":true}')
     const res = await patchProjectSettings("carla", {
-      sourceLanguage: "en",
       autopilotEnabled: false,
     })
     expect(res.status).toBe(403)
@@ -122,7 +119,7 @@ describe("project-settings autopilot carve-out (AQU-1246)", () => {
       sourceLanguage: "fr",
       autopilotEnabled: true,
     })
-    expect(bundled.status).toBe(403)
+    expect(bundled.status).toBe(400)
     const stored = await storedSettings()
     expect(stored.autopilotEnabled).toBeUndefined()
     expect(stored.sourceLanguage).toBe("en")
@@ -132,7 +129,7 @@ describe("project-settings autopilot carve-out (AQU-1246)", () => {
     // Sanity: the carve-out did not lower the floor for everything else.
     await seed()
     const res = await patchProjectSettings("dan", { sourceLanguage: "fr" })
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(400)
     expect((await storedSettings()).sourceLanguage).toBe("en")
   })
 
@@ -145,7 +142,7 @@ describe("project-settings autopilot carve-out (AQU-1246)", () => {
       sourceLanguage: "fr",
       autopilotEnabled: true, // echoed, unchanged
     })
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(400)
     expect((await storedSettings()).sourceLanguage).toBe("en")
   })
 })

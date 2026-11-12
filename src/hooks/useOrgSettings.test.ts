@@ -218,7 +218,7 @@ describe("useOrgSettings — write floor matches server (AQU-255 follow-up)", ()
     const lead = renderHook(() => useOrgSettings(1, 500))
     await waitFor(() => expect(lead.result.current.hasFetched).toBe(true))
     expect(lead.result.current.canEdit).toBe(false)
-    // Project leads can still *request* promotion (server floor is 500 there).
+    // Project Leads can still *request* promotion (server floor is 500 there).
     expect(lead.result.current.canRequestPromotion).toBe(true)
 
     const maintainer = renderHook(() => useOrgSettings(1, 600))
@@ -326,6 +326,81 @@ describe("useOrgSettings — rollback on rejected writes (AQU-255 follow-up)", (
 
     expect(result.current.orgRules.map((r) => r.id)).toEqual(["r1", "r2"])
     expect(result.current.version).toBe(4)
+  })
+
+  it("a save whose reply lacks the override counts keeps the last known counts (AQU-1771)", async () => {
+    // The reset prompt reads these before each change; losing them after one
+    // save meant it never came back.
+    mockFetchResponse = { ...serverTruth(), validationCountOverrides: 1, countStructuralOverrides: 2 }
+    vi.mocked(restClient.patchOrgSettings).mockResolvedValueOnce({
+      kind: "ok",
+      value: { orgId: 1, settings: { validationCount: 2 }, version: 4, updatedAt: null, updatedBy: 9 },
+    })
+
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.validationCountOverrides).toBe(1))
+
+    await act(async () => {
+      await result.current.patch({ validationCount: 2 })
+    })
+
+    expect(result.current.version).toBe(4)
+    expect(result.current.validationCountOverrides).toBe(1)
+    expect(result.current.countStructuralOverrides).toBe(2)
+  })
+
+  it("keeps the media defaults' override counts across a save too (AQU-1768)", async () => {
+    mockFetchResponse = { ...serverTruth(), mediaDefaultOverrides: { timingLocked: 2 } }
+    vi.mocked(restClient.patchOrgSettings).mockResolvedValueOnce({
+      kind: "ok",
+      value: { orgId: 1, settings: { timingLocked: false }, version: 4, updatedAt: null, updatedBy: 9 },
+    })
+
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.mediaDefaultOverrides.timingLocked).toBe(2))
+    await act(async () => {
+      await result.current.patch({ timingLocked: false })
+    })
+    expect(result.current.mediaDefaultOverrides.timingLocked).toBe(2)
+  })
+
+  it("a reply that carries the counts replaces them, so a reset to 0 sticks", async () => {
+    mockFetchResponse = { ...serverTruth(), validationCountOverrides: 1 }
+    vi.mocked(restClient.patchOrgSettings).mockResolvedValueOnce({
+      kind: "ok",
+      value: { orgId: 1, settings: {}, version: 4, updatedAt: null, updatedBy: 9, validationCountOverrides: 0 },
+    })
+
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.validationCountOverrides).toBe(1))
+    await act(async () => {
+      await result.current.patch({ validationCount: 3 })
+    })
+    expect(result.current.validationCountOverrides).toBe(0)
+  })
+
+  it("names the projects behind each count, and a save whose reply lacks them keeps them (AQU-1938)", async () => {
+    const genesis = { total: 1, projects: [{ id: "p1", name: "Genesis" }] }
+    mockFetchResponse = {
+      ...serverTruth(),
+      validationCountOverrides: 1,
+      overrideProjects: { validationCount: genesis },
+    }
+    vi.mocked(restClient.patchOrgSettings).mockResolvedValueOnce({
+      kind: "ok",
+      value: { orgId: 1, settings: { validationCount: 2 }, version: 4, updatedAt: null, updatedBy: 9 },
+    })
+
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.overrideProjects.validationCount).toEqual(genesis))
+    // Not sent: the line keeps its bare count.
+    expect(result.current.overrideProjects.validationCountAudio).toBeNull()
+
+    await act(async () => {
+      await result.current.patch({ validationCount: 2 })
+    })
+    expect(result.current.version).toBe(4)
+    expect(result.current.overrideProjects.validationCount).toEqual(genesis)
   })
 })
 
@@ -490,10 +565,9 @@ describe("useOrgSettings — assignmentMinRole (AQU-1037)", () => {
   })
 })
 
-// AQU-1086: languageEditMinRole — the second write-gating permission-policy
-// key. Unlike the termbase floor its default is MAINTAINER (600), i.e. the
-// behaviour before the setting existed; an org opts IN by lowering it.
-describe("useOrgSettings — languageEditMinRole (AQU-1086)", () => {
+// AQU-1086 / AQU-984: languageEditMinRole. Absence is "never set" and resolves
+// to PROJECT_LEAD (500). A stored number, including an explicit 600, is kept.
+describe("useOrgSettings — languageEditMinRole (AQU-1086 / AQU-984)", () => {
   function makeLanguageResponse(languageEditMinRole?: number): OrgSettingsResponse {
     return {
       orgId: 1,
@@ -504,14 +578,21 @@ describe("useOrgSettings — languageEditMinRole (AQU-1086)", () => {
     }
   }
 
-  it("defaults to maintainer (600) when the org has not set it", async () => {
+  it("defaults to project lead (500) when the org has not set it", async () => {
     mockFetchResponse = makeLanguageResponse()
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.languageEditMinRole).toBe(500)
+  })
+
+  it("keeps an explicit maintainer floor (600)", async () => {
+    mockFetchResponse = makeLanguageResponse(600)
     const { result } = renderHook(() => useOrgSettings(1, 700))
     await waitFor(() => expect(result.current.hasFetched).toBe(true))
     expect(result.current.languageEditMinRole).toBe(600)
   })
 
-  it("reads an explicitly lowered floor (project lead 500)", async () => {
+  it("reads an explicitly stored project-lead floor (500)", async () => {
     mockFetchResponse = makeLanguageResponse(500)
     const { result } = renderHook(() => useOrgSettings(1, 700))
     await waitFor(() => expect(result.current.hasFetched).toBe(true))
@@ -522,7 +603,7 @@ describe("useOrgSettings — languageEditMinRole (AQU-1086)", () => {
     mockFetchResponse = makeLanguageResponse(9999)
     const { result } = renderHook(() => useOrgSettings(1, 700))
     await waitFor(() => expect(result.current.hasFetched).toBe(true))
-    expect(result.current.languageEditMinRole).toBe(600)
+    expect(result.current.languageEditMinRole).toBe(500)
   })
 })
 
@@ -826,5 +907,31 @@ describe("orgRules identity (AQU-1104)", () => {
     expect(result.current.orgRules).toBe(afterFetch)
     expect(afterFetch).toBe(beforeFetch)
     expect(afterFetch).toEqual([])
+  })
+})
+
+// A setting changed in another tab used to reach an open editor only on reload.
+describe("useOrgSettings — re-reads when the tab comes back", () => {
+  it("fetches again on return, but not more than once per 10 seconds", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000)
+    mockFetchResponse = makeResponse()
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    const fetches = () => vi.mocked(restClient.fetchOrgSettings).mock.calls.length
+    const first = fetches()
+
+    // Straight back: too soon to ask again.
+    now.mockReturnValue(1_005_000)
+    act(() => { window.dispatchEvent(new Event("focus")) })
+    expect(fetches()).toBe(first)
+
+    // Later, another tab saved; returning picks up the new version.
+    mockFetchResponse = { ...makeResponse(), version: 2, settings: { countStructuralCells: false } }
+    now.mockReturnValue(1_020_000)
+    act(() => { window.dispatchEvent(new Event("focus")) })
+    await waitFor(() => expect(result.current.version).toBe(2))
+    expect(result.current.countStructuralCells).toBe(false)
+    expect(fetches()).toBe(first + 1)
+    now.mockRestore()
   })
 })

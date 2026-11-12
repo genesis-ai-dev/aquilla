@@ -5,6 +5,7 @@
 // the plan with a digest, and inserts a staged changeset (idempotent on the
 // client-supplied UUIDv7 id). Nothing is applied here — ask/act commit does that.
 
+import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { ExternalError, errorResponse, toErrorResponse } from './errors'
 import { AUTH_HINT } from './discovery-route'
 import {
@@ -14,6 +15,7 @@ import {
   laneCellKey,
   requiredRoleForCommand,
   PLAN_IMPORT_MAX_CELLS,
+  SET_TRANSLATION_MAX_COMMANDS,
   type Command,
   type CreateOrgCommand,
   type StructureCommand,
@@ -32,7 +34,12 @@ import {
 } from './commands'
 import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
 import { prepareOrgMember } from './org-members-engine'
-import { changedPolicyKeys, preparePatchSettings, previewSettingValue } from './commands-patch-settings'
+import {
+  changedPolicyKeys,
+  preparePatchSettings,
+  previewSettingValue,
+  retiredTerminologyBlobDenial,
+} from './commands-patch-settings'
 import { assertWithinBatchCap, requestDrafts } from './commands-draft-cells'
 import { completionBatchSizeFromSettings } from '../../../db/shared/completion-batch'
 import {
@@ -42,11 +49,19 @@ import {
 } from './commands-membership'
 import { isProjectLifecycleCommand, prepareProjectLifecycle } from './commands-project-lifecycle'
 import { renameFileToEmitEvents } from './commands-rename-file'
+import {
+  isVisibilityCommand,
+  requestedHidden,
+  visibilityToEmitEvents,
+  VISIBILITY_MAX_COMMANDS,
+  type VisibilityCommand,
+} from './commands-hide-cell'
 import { prepareSetBrief } from './commands-set-brief'
 import { prepareProjectSetup } from './prepare-project-setup'
 import type { ProjectSetupCommand } from './commands-project-setup'
 import { prepareRegenerateBriefSummary } from './commands-regenerate-brief'
 import { isMemoryCommand, prepareMemoryCommand } from './commands-memory'
+import { isStyleRuleCommand, prepareStyleRuleCommand } from './commands-style-rules'
 import { prepareEmitEvents } from './emit-events-engine'
 import { prepareCellFields } from './cell-fields-engine'
 import { isCellFieldCommand, CELL_FIELDS_MAX_COMMANDS, type CellFieldCommand } from './commands-cell-fields'
@@ -54,12 +69,16 @@ import { prepareStructure } from './structure-engine'
 import { resolveCellStates, type CellPrecondition } from './preconditions'
 import { uuidv7 } from './uuid'
 import { stageAndRespond } from './stage'
-import { assertCredentialScope } from './token-bridge'
+import { assertCredentialMayWrite, assertCredentialScope } from './token-bridge'
 import type { ChangesetSummary, ChangesetWarning, ExternalEnv, PlannedEventIds } from './types'
-import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings } from '../../../db/shared/projects'
-import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
+import { buildAudioId } from '../../../db/shared/audio-id'
+import { laneContextFrom, laneIdRequiredMessage, resolveTargetLaneId } from './external-lane'
+import { languagesEqual } from '../../../src/lib/language-normalize'
+import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
+import { enforceRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
 import { ROLE } from '../events/role-policy'
 import { resolveAssignmentAuthority } from '../events/assignment-authority'
 
@@ -68,17 +87,12 @@ import { resolveAssignmentAuthority } from '../events/assignment-authority'
 // (mcp-handlers, changesets-route, tests).
 export { approvalUrlFor, CHANGESET_ASK_TTL_MS, CHANGESET_TTL_MS } from './stage'
 
-function bearer(request: Request): string | null {
-  const h = request.headers.get('Authorization') ?? ''
-  return h.startsWith('Bearer ') ? h.slice(7) : null
-}
-
 // [Pen test] API security & data exposure (2026-08-20): the external Agent
 // API's only throttle was on /search (2026-07-30 pen test) — every mutating
 // route, including this one, was unlimited. A leaked or malicious PAT could
 // stage unbounded changesets. Wide enough that a real agent loop staging a
 // plan every few seconds never trips it.
-const PREPARE_MAX_PER_CREDENTIAL = 300
+const PREPARE_MAX_PER_USER = 300
 
 /**
  * CreateOrg throttle (AQU-1221): at most 5 org-creation changesets staged per
@@ -87,14 +101,14 @@ const PREPARE_MAX_PER_CREDENTIAL = 300
  * whole new TENANT, so a runaway loop is not merely noisy — it litters the
  * user's org switcher and the platform-admin views with junk tenants that a
  * human then has to clean up. Deliberately far tighter than the generic
- * PREPARE_MAX_PER_CREDENTIAL: a legitimate partner-onboarding agent creates one
+ * PREPARE_MAX_PER_USER: a legitimate partner-onboarding agent creates one
  * org and moves on, so five in a quarter-hour is already generous.
  *
  * Counted at PREPARE. Every CreateOrg is forced to ask-mode, so a human
  * approval already gates each commit; throttling the staging step is what stops
  * an agent from flooding that human's approval queue in the first place.
  */
-export const CREATE_ORG_MAX_PER_CREDENTIAL = 5
+export const CREATE_ORG_MAX_PER_USER = 5
 
 /** PAT-authenticated entrypoint (REST + the MCP adapter's synthetic request):
  *  resolves the credential, parses the body, and hands off to the shared core
@@ -107,15 +121,21 @@ export async function handlePrepare(
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
 
-  const cred = await validateApiCredential(db, bearer(request) ?? "", request.headers.get('CF-Connecting-IP'))
+  const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
 
-  const identifier = `credential:${cred.credentialId}`
-  const recent = await countRecentRateLimitEvents(db, 'external_prepare', identifier)
-  if (recent >= PREPARE_MAX_PER_CREDENTIAL) {
+  // AQU-1843: atomic, keyed on the credential's owner, and FAIL CLOSED —
+  // staging a changeset runs the planning engines and writes a row, so a
+  // limiter outage must not uncap it.
+  const prepareLimit = await enforceRateLimit(db, {
+    kind: 'external_prepare',
+    identifier: userRateLimitIdentifier(cred.userId),
+    limit: PREPARE_MAX_PER_USER,
+    failMode: 'closed',
+  })
+  if (!prepareLimit.allowed) {
     return errorResponse('rate_limited', 'changeset staging rate limit exceeded, slow down')
   }
-  await recordRateLimitEvent(db, 'external_prepare', identifier)
 
   let body: unknown
   try {
@@ -143,13 +163,34 @@ export async function prepareChangesetCore(
   projectId: string,
   raw: Record<string, unknown>,
 ): Promise<Response> {
+  // AQU-1242: a read-only credential cannot stage anything. Checked FIRST —
+  // ahead of command validation and every scope/role gate — because a plan this
+  // token could never commit is pure waste, and the refusal should name the
+  // reason rather than arriving later as a puzzling commit failure. Applies to
+  // every prepare path (PAT, MCP, parse-and-stage); the session principal is
+  // always 'write', so the in-app surface is untouched.
+  try {
+    assertCredentialMayWrite(cred, 'stage a changeset')
+  } catch (err) {
+    return toErrorResponse(err)
+  }
+
   // Validate the batch BEFORE the project-existence scope check: a
   // receipt-only CreateProject (W2-A) files its changeset under a
   // not-yet-existing project id and so takes its own path that must skip
   // assertCredentialScope (which would 404 the absent project).
   const validated = validateCommands(raw.commands)
   if (!validated.ok) {
-    return errorResponse('validation_failed', 'invalid commands', validated.issues)
+    // A missing lane id has to say where to find one. The generic
+    // "invalid commands" wrapper would hide that.
+    const laneIssue = validated.issues.find((issue) =>
+      issue.message.includes('GET /api/v1/external') || issue.message.includes('are not settings'),
+    )
+    return errorResponse(
+      'validation_failed',
+      laneIssue?.message ?? 'invalid commands',
+      validated.issues,
+    )
   }
 
   // Effective autonomy: the credential is a ceiling; a request may downgrade
@@ -323,6 +364,16 @@ export async function prepareChangesetCore(
     return prepareMemoryCommand(db, cred, projectId, id, autonomyMode, memoryCommand, env)
   }
 
+  // AQU-2195 ReviewStyleRules: sole command, receipt-only, its own PROJECT_LEAD
+  // check and live-state validation, so it skips the generic role gate below.
+  const styleRuleCommand = validated.commands.find(isStyleRuleCommand)
+  if (styleRuleCommand) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'ReviewStyleRules must be the only command in a changeset')
+    }
+    return prepareStyleRuleCommand(db, cred, projectId, id, autonomyMode, styleRuleCommand, env)
+  }
+
   // Live role/membership gate (§2 — resolve the caller's CURRENT role on every
   // call, never a role baked into the credential). Scope alone (checked above)
   // does not imply membership: a non-member with a project-scoped credential
@@ -367,7 +418,7 @@ export async function prepareChangesetCore(
       return errorResponse('validation_failed', 'DraftCells must be the only command in a changeset')
     }
     try {
-      pending = await expandDraftCells(db, env, cred, projectId, draftCells)
+      pending = await expandDraftCells(db, env, cred, projectId, draftCells, resolvedRole.level)
     } catch (err) {
       return toErrorResponse(err)
     }
@@ -424,6 +475,95 @@ export async function prepareChangesetCore(
     )
   }
 
+  // HideCell / ShowCell (AQU-1426): sugar over EmitEvents, like RenameFile.
+  // Desugared AFTER its own live-state preconditions, because the EmitEvents
+  // engine collects cell references only for the kinds it knows — it would stage
+  // a hide of a cell that does not exist without a word. The role gate above
+  // already enforced the PROJECT_LEAD floor (requiredRoleForCommand returns
+  // `source.cell.visibility.set`'s own perimeter floor verbatim), so a plan the
+  // caller could never commit is refused rather than staged.
+  const visibility: VisibilityCommand[] = validated.commands.filter(isVisibilityCommand)
+  if (visibility.length > 0) {
+    if (visibility.length !== validated.commands.length) {
+      return errorResponse(
+        'validation_failed',
+        'HideCell and ShowCell cannot be mixed with other command kinds in one changeset',
+      )
+    }
+    if (visibility.length > VISIBILITY_MAX_COMMANDS) {
+      return errorResponse(
+        'validation_failed',
+        `too many HideCell/ShowCell commands in one changeset (max ${VISIBILITY_MAX_COMMANDS})`,
+      )
+    }
+    // One DIRECTION per changeset. Not a technical limit — the approval page
+    // groups its effect lines by event kind, and hide and show are one kind, so
+    // a mixed plan would render as a single sentence that is a lie in one
+    // direction. "Park these" and "bring these back" are also two different
+    // decisions to ask a human to consent to.
+    const wantHidden = requestedHidden(visibility[0])
+    const mixed = visibility.find((c) => requestedHidden(c) !== wantHidden)
+    if (mixed) {
+      return errorResponse(
+        'validation_failed',
+        'HideCell and ShowCell cannot share one changeset — stage the hides and the shows as two plans',
+      )
+    }
+    // A cell named twice in one plan is a caller mistake, not a batch: the
+    // second command is a no-op the approver cannot see, and the "already in
+    // that state" check below would not catch it (both are checked against the
+    // same live row).
+    const seen = new Set<string>()
+    for (const c of visibility) {
+      const key = laneCellKey(c.fileId, c.cellId)
+      if (seen.has(key)) {
+        return errorResponse(
+          'validation_failed',
+          `${c.kind} names cell ${c.cellId} in file ${c.fileId} twice — one entry per cell`,
+        )
+      }
+      seen.add(key)
+    }
+    const visibilityStates = await resolveCellStates(
+      db,
+      projectId,
+      visibility.map((c) => ({ fileId: c.fileId, cellId: c.cellId })),
+    )
+    for (const c of visibility) {
+      const state = visibilityStates.get(laneCellKey(c.fileId, c.cellId))
+      if (!state?.sourceExists) {
+        return errorResponse(
+          'validation_failed',
+          `cell ${c.cellId} does not exist in file ${c.fileId}`,
+        )
+      }
+      // Refusing the no-op is the point: an agent that believes it hid a cell it
+      // had already hidden has lost track of the file, and staging a plan whose
+      // whole effect is nothing wastes a human's approval. Commit does NOT
+      // re-check this — the compiled event SETS a flag rather than toggling one,
+      // so a human hiding the same cell in between leaves commit landing exactly
+      // the state that was approved (idempotent), not a stale plan.
+      if (state.sourceHidden === requestedHidden(c)) {
+        return errorResponse(
+          'validation_failed',
+          requestedHidden(c)
+            ? `cell ${c.cellId} in file ${c.fileId} is already hidden`
+            : `cell ${c.cellId} in file ${c.fileId} is not hidden`,
+        )
+      }
+    }
+    return prepareEmitEvents(
+      db,
+      cred,
+      projectId,
+      id,
+      autonomyMode,
+      visibilityToEmitEvents(visibility),
+      env,
+      resolvedRole.level,
+    )
+  }
+
   // Cell-structure commands (AQU-1234): sole command per changeset. A
   // structural edit is one indivisible rewrite of a file's anchor chain — two
   // of them in one plan could name each other's cells and would have to be
@@ -455,7 +595,16 @@ export async function prepareChangesetCore(
         'PlanImport must be the only command in a changeset',
       )
     }
-    return preparePlanImport(db, cred, projectId, id, autonomyMode, planImports[0], env)
+    return preparePlanImport(
+      db,
+      cred,
+      projectId,
+      id,
+      autonomyMode,
+      planImports[0],
+      env,
+      resolvedRole.level,
+    )
   }
 
   // LinkMedia takes its own prepare path (per-cell audio attach, not a
@@ -471,35 +620,47 @@ export async function prepareChangesetCore(
         'LinkMedia cannot be mixed with other command kinds in one changeset',
       )
     }
-    return prepareLinkMedia(db, cred, projectId, id, autonomyMode, linkMedia, env)
+    return prepareLinkMedia(db, cred, projectId, id, autonomyMode, linkMedia, env, resolvedRole.level)
   }
 
   // Past the PlanImport branch every remaining command is a SetTranslation —
   // either the caller's own, or the ones DraftCells just materialized.
-  const setCommands = pending.filter(
+  let setCommands = pending.filter(
     (c): c is SetTranslationCommand => c.kind === 'SetTranslation',
   )
 
-  // AQU-538 lanes: a SetTranslation naming a lane must target a lane the
-  // workspace can select — same rule (and same teaching message) as PlanImport
-  // variants. Settings are only loaded when a lane is actually named, so the
-  // lane-less common case costs no extra query.
-  if (setCommands.some((c) => c.laneId)) {
-    const projectSettings = await loadProjectSettings(db, projectId)
-    const registeredLanes = new Set(
-      Array.isArray(projectSettings.settings.targetLanes)
-        ? projectSettings.settings.targetLanes.filter((lane): lane is string => typeof lane === 'string')
-        : [],
+  // AQU-1852: refuse an over-cap plan HERE, before the lane resolution, the
+  // precondition read and the id ledger. Staging a plan the apply path cannot
+  // land put the failure in front of a human approver instead of the caller
+  // that built it, so the cap is named at prepare and costs nothing.
+  if (setCommands.length > SET_TRANSLATION_MAX_COMMANDS) {
+    return errorResponse(
+      'validation_failed',
+      `too many SetTranslation commands in one changeset (${setCommands.length} > ${SET_TRANSLATION_MAX_COMMANDS}) — split the work into several changesets`,
+      { maxCommands: SET_TRANSLATION_MAX_COMMANDS, requested: setCommands.length },
     )
+  }
+
+  // AQU-1615: laneId is lanes.id. A tag is not a lane, and omitting it is not
+  // the former default lane. A lane the caller cannot see is "lane does not
+  // exist", the same answer as a missing id (AQU-1462).
+  {
+    const projectSettings = await loadProjectSettings(db, projectId)
+    const { visible: visibleLaneIds } = await visibleTagsForMember(
+      db,
+      env.LANE_READ_WALL,
+      projectId,
+      Number(cred.userId),
+      resolvedRole.level,
+    )
+    const laneCtx = laneContextFrom(projectSettings.lanes ?? [], visibleLaneIds)
+    const resolved: SetTranslationCommand[] = []
     for (const [index, c] of setCommands.entries()) {
-      if (c.laneId && !registeredLanes.has(c.laneId)) {
-        return errorResponse(
-          'validation_failed',
-          `commands[${index}] targets unregistered lane "${c.laneId}"; register it in the project's settings.targetLanes with UpdateProjectSettings first`,
-          { registeredLanes: [...registeredLanes] },
-        )
-      }
+      const lane = resolveTargetLaneId(c.laneId, `commands[${index}]`, laneCtx)
+      if (!lane.ok) return errorResponse('validation_failed', lane.message)
+      resolved.push({ ...c, laneId: lane.lane.id })
     }
+    setCommands = resolved
   }
 
   // De-dupe commands by target (cell, lane) — the same cell in two lanes is two
@@ -599,9 +760,24 @@ async function expandDraftCells(
   cred: ApiCredentialContext,
   projectId: string,
   cmd: DraftCellsCommand,
+  callerRoleLevel: number,
 ): Promise<Command[]> {
   const projectSettings = await loadProjectSettings(db, projectId)
   assertWithinBatchCap(cmd, completionBatchSizeFromSettings(projectSettings.settings))
+  const { visible: visibleLaneIds } = await visibleTagsForMember(
+    db,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(cred.userId),
+    callerRoleLevel,
+  )
+  const lane = resolveTargetLaneId(
+    cmd.laneId,
+    'DraftCells.laneId',
+    laneContextFrom(projectSettings.lanes ?? [], visibleLaneIds),
+  )
+  if (!lane.ok) throw new ExternalError('validation_failed', lane.message)
+  const laneId = lane.lane.id
 
   const { drafts } = await requestDrafts(env, {
     projectId,
@@ -609,6 +785,9 @@ async function expandDraftCells(
     fileId: cmd.fileId,
     cellIds: cmd.cellIds,
     ...(cmd.instructions !== undefined ? { instructions: cmd.instructions } : {}),
+    // The draft bridge still speaks the lane's frozen tag. The staged
+    // SetTranslation keeps the id.
+    laneId: lane.lane.legacyTag ?? '',
   })
 
   // Only ever stage cells the caller actually asked for: the plan a human
@@ -630,7 +809,7 @@ async function expandDraftCells(
     fileId: cmd.fileId,
     cellId: d.cellId,
     value: d.value,
-    ...(cmd.laneId ? { laneId: cmd.laneId } : {}),
+    laneId,
     ...(d.aiDraft !== undefined && d.aiDraft !== null ? { aiDraft: d.aiDraft } : {}),
   }))
 }
@@ -649,6 +828,7 @@ async function preparePlanImport(
   autonomyMode: 'ask' | 'act',
   cmd: PlanImportCommand,
   env: ExternalEnv,
+  callerRoleLevel: number,
 ): Promise<Response> {
   if (cmd.cells.length === 0) {
     return errorResponse('validation_failed', 'PlanImport.cells must be non-empty')
@@ -722,28 +902,40 @@ async function preparePlanImport(
     }
   }
 
-  // Target lane ids are language tags in the current lane model. Reject an
-  // unregistered lane instead of committing data the workspace cannot select.
+  // AQU-1615: a variant's laneId is lanes.id. The staged plan stores that id.
   const projectSettings = await loadProjectSettings(db, projectId)
-  const registeredLanes = new Set(
-    Array.isArray(projectSettings.settings.targetLanes)
-      ? projectSettings.settings.targetLanes.filter((lane): lane is string => typeof lane === 'string')
-      : [],
+  const { visible: visibleLaneIds } = await visibleTagsForMember(
+    db,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(cred.userId),
+    callerRoleLevel,
   )
+  const laneCtx = laneContextFrom(projectSettings.lanes ?? [], visibleLaneIds)
   for (const [cellIndex, cell] of cmd.cells.entries()) {
+    const cellLanes = new Set<string>()
     for (const [variantIndex, variant] of (cell.variants ?? []).entries()) {
-      if (variant.laneId && !registeredLanes.has(variant.laneId)) {
+      const where = `PlanImport.cells[${cellIndex}].variants[${variantIndex}].laneId`
+      // PlanImport does not create lanes. '' is the parse placeholder, an
+      // omission, not the blank bridge and not a language match.
+      if (variant.laneId === undefined || variant.laneId === '') {
+        return errorResponse('validation_failed', laneIdRequiredMessage(where))
+      }
+      const resolved = resolveTargetLaneId(variant.laneId, where, laneCtx)
+      if (!resolved.ok) return errorResponse('validation_failed', resolved.message)
+      if (cellLanes.has(resolved.lane.id)) {
         return errorResponse(
           'validation_failed',
-          `PlanImport.cells[${cellIndex}].variants[${variantIndex}] targets unregistered lane "${variant.laneId}"; register it with UpdateProjectSettings first`,
+          `PlanImport.cells[${cellIndex}].variants[${variantIndex}] writes the same lane as an earlier variant`,
         )
       }
-      const effectiveLanguage = variant.laneId || cmd.targetLanguage || ''
-      if (variant.languageTag && variant.languageTag !== effectiveLanguage) {
+      cellLanes.add(resolved.lane.id)
+      variant.laneId = resolved.lane.id
+      if (variant.languageTag && !languagesEqual(variant.languageTag, resolved.lane.language)) {
         return errorResponse(
           'validation_failed',
           `PlanImport.cells[${cellIndex}].variants[${variantIndex}].languageTag must match its lane language`,
-          { laneId: variant.laneId, expectedLanguageTag: effectiveLanguage },
+          { laneId: resolved.lane.id, expectedLanguageTag: resolved.lane.language },
         )
       }
     }
@@ -860,6 +1052,17 @@ async function stageReceiptOnlyChangeset(
 }
 
 /**
+ * AQU-2086: the native take id for a LinkMedia attach — cell-seeded like a
+ * recorded take's (db/shared/audio-id.ts), carrying the artifact's extension so
+ * the audio route and the `frontier-audio://` url keep their `<id>.<ext>` shape.
+ */
+function linkMediaAudioId(cellId: string, artifactAudioId: string | null): string {
+  const id = buildAudioId(cellId)
+  const dot = artifactAudioId ? artifactAudioId.lastIndexOf('.') : -1
+  return artifactAudioId && dot >= 0 ? `${id}.${artifactAudioId.slice(dot + 1)}` : id
+}
+
+/**
  * Prepare a LinkMedia changeset (Agent API v1.1 §3): for each attach command,
  * verify the target cell exists in the live projection and the referenced
  * artifact exists, is kind `audio`, and belongs to this project, then stage the
@@ -869,6 +1072,13 @@ async function stageReceiptOnlyChangeset(
  * artifact + cell existence are re-checked directly at commit (plan_stale on
  * disappearance), so no per-cell head is pinned (attaching audio does not
  * conflict with a concurrent text edit on the same cell).
+ *
+ * AQU-2086: each command's `laneId` is resolved here exactly as SetTranslation's
+ * (lanes.id, visible to this caller, not archived) and stored resolved, and the
+ * take's native audio id is minted here too — cell-seeded like a recorded
+ * take's, so the SPA's provenance rule (db/shared/audio-id.ts) reads it as a
+ * dub. Both ride the plan so commit, and a crash-retry of it, attach the same
+ * take to the same lane.
  */
 async function prepareLinkMedia(
   db: AquillaDb,
@@ -878,14 +1088,39 @@ async function prepareLinkMedia(
   autonomyMode: 'ask' | 'act',
   cmds: LinkMediaCommand[],
   env: ExternalEnv,
+  roleLevel: number,
 ): Promise<Response> {
-  // Resolve live state for every target cell in one query.
-  const cellStates = await resolveCellStates(db, projectId, cmds)
+  // Resolve live state for every target cell in one query. Lane-less on
+  // purpose: the state map is keyed per lane, and LinkMedia's cell check asks
+  // whether the cell exists at all (source or any lane's target), not whether
+  // it has a translation in the take's lane.
+  const cellStates = await resolveCellStates(
+    db,
+    projectId,
+    cmds.map(({ fileId, cellId }) => ({ fileId, cellId })),
+  )
   const plannedLinkMedia: NonNullable<PlannedEventIds['linkMedia']> = []
 
-  for (const cmd of cmds) {
-    // LinkMedia is lane-independent — the default-lane state entry still
-    // reports source/any-lane-target existence for the cell.
+  // AQU-2086: the lane each take belongs to. A tag is not a lane, and omitting
+  // the id is not the former default lane (AQU-1615) — the cell existence
+  // check below stays lane-independent, because the lane is about where the
+  // take is READ: a tagged lane's editor view lists only its own takes.
+  const projectSettings = await loadProjectSettings(db, projectId)
+  const { visible: visibleLaneIds } = await visibleTagsForMember(
+    db,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(cred.userId),
+    roleLevel,
+  )
+  const laneCtx = laneContextFrom(projectSettings.lanes ?? [], visibleLaneIds)
+  const resolvedCmds: LinkMediaCommand[] = []
+
+  for (const [index, cmd] of cmds.entries()) {
+    const lane = resolveTargetLaneId(cmd.laneId, `commands[${index}].laneId`, laneCtx)
+    if (!lane.ok) return errorResponse('validation_failed', lane.message)
+    // LinkMedia's cell check is lane-independent — the default-lane state entry
+    // still reports source/any-lane-target existence for the cell.
     const s = cellStates.get(laneCellKey(cmd.fileId, cmd.cellId))
     if (!s || (!s.sourceExists && !s.targetExists)) {
       return errorResponse(
@@ -894,9 +1129,9 @@ async function prepareLinkMedia(
       )
     }
     const artifact = await db
-      .prepare(`SELECT id, kind FROM artifacts WHERE id::text = ? AND project_id = ?`)
+      .prepare(`SELECT id, kind, audio_id FROM artifacts WHERE id::text = ? AND project_id = ?`)
       .bind(cmd.artifactId, projectId)
-      .first<{ id: string; kind: string }>()
+      .first<{ id: string; kind: string; audio_id: string | null }>()
     if (!artifact) {
       return errorResponse('validation_failed', `artifact ${cmd.artifactId} not found in project`)
     }
@@ -909,7 +1144,9 @@ async function prepareLinkMedia(
       artifactId: cmd.artifactId,
       attachEventId: uuidv7(),
       selectEventId: uuidv7(),
+      audioId: linkMediaAudioId(cmd.cellId, artifact.audio_id),
     })
+    resolvedCmds.push({ ...cmd, laneId: lane.lane.id, slot: cmd.slot ?? 'recording' })
   }
 
   const summary: ChangesetSummary = { mediaLinked: cmds.length, warnings: [] }
@@ -921,7 +1158,7 @@ async function prepareLinkMedia(
     createdByUserId: String(cred.userId),
     credentialId: cred.credentialId,
     autonomyMode,
-    commands: [...cmds],
+    commands: resolvedCmds,
     preconditions: [],
     summary,
     plannedIds,
@@ -944,8 +1181,7 @@ async function prepareCreateProject(
   cmd: CreateProjectCommand,
   env: ExternalEnv,
 ): Promise<Response> {
-  // Scope: a project-scoped credential can NEVER create a project. (Act tokens
-  // are project-scoped at mint, so CreateProject is ask-mode-only by design.)
+  // Scope: a project-scoped credential cannot create another project.
   if (cred.projectId != null) {
     return errorResponse('scope_denied', 'a project-scoped credential cannot create projects')
   }
@@ -961,7 +1197,7 @@ async function prepareCreateProject(
 
   // An org-scoped credential may only create into its own org.
   const targetOrgStr = orgId == null ? null : String(orgId)
-  if (cred.orgId != null && cred.orgId !== targetOrgStr) {
+  if (!credentialAllowsOrganization(cred, targetOrgStr)) {
     return errorResponse('scope_denied', 'credential org scope does not match the target org')
   }
 
@@ -1005,12 +1241,9 @@ async function prepareCreateProject(
     projectName: cmd.name,
     newProjectId: definitiveProjectId,
     targetOrg: orgId == null ? 'personal' : String(orgId),
-    // AQU-1223: the seeded language pair is part of what the approver is
-    // authorizing, so it belongs in the effect summary rather than only in the
-    // raw command body.
-    ...(cmd.sourceLanguage !== undefined || cmd.targetLanguage !== undefined
+    ...(cmd.lanes !== undefined && cmd.lanes.length > 0
       ? {
-          newProjectLanguages: `${cmd.sourceLanguage || 'none'} → ${cmd.targetLanguage || 'none'}`,
+          newProjectLanguages: cmd.lanes.map((lane) => `${lane.role}:${lane.language}`).join(', '),
         }
       : {}),
     warnings: [],
@@ -1054,20 +1287,26 @@ async function prepareCreateOrg(
   if (cred.projectId != null) {
     return errorResponse('scope_denied', 'a project-scoped credential cannot create organizations')
   }
-  if (cred.orgId != null) {
+  if (cred.orgId != null || cred.orgIds !== undefined) {
     return errorResponse('scope_denied', 'an org-scoped credential cannot create organizations')
   }
 
-  // Per-credential creation throttle (see CREATE_ORG_MAX_PER_CREDENTIAL).
-  const identifier = `credential:${cred.credentialId}`
-  const recent = await countRecentRateLimitEvents(db, 'external_create_org', identifier)
-  if (recent >= CREATE_ORG_MAX_PER_CREDENTIAL) {
+  // Per-user creation throttle (see CREATE_ORG_MAX_PER_USER). AQU-1843: atomic,
+  // keyed on the owner — minting more PATs used to multiply this cap, which is
+  // exactly the abuse the cap exists to stop — and FAIL CLOSED, because this
+  // one mints tenants.
+  const createOrgLimit = await enforceRateLimit(db, {
+    kind: 'external_create_org',
+    identifier: userRateLimitIdentifier(cred.userId),
+    limit: CREATE_ORG_MAX_PER_USER,
+    failMode: 'closed',
+  })
+  if (!createOrgLimit.allowed) {
     return errorResponse(
       'rate_limited',
-      `organization creation rate limit exceeded (max ${CREATE_ORG_MAX_PER_CREDENTIAL} per 15 minutes per credential), slow down`,
+      `organization creation rate limit exceeded (max ${CREATE_ORG_MAX_PER_USER} per 15 minutes per user), slow down`,
     )
   }
-  await recordRateLimitEvent(db, 'external_create_org', identifier)
 
   // Ask-mode is FORCED, as for CreateProject: an agent must never mint a tenant
   // unattended, whatever mode its credential holds. `autonomyMode` is ignored.
@@ -1132,6 +1371,9 @@ async function prepareUpdateProjectSettings(
       { policyKeys: changedPolicy },
     )
   }
+  // AQU-1724: nor the retired `terminology` key (an unchanged echo passes).
+  const retired = retiredTerminologyBlobDenial(cmd.settings, current.settings)
+  if (retired) return retired
 
   const plannedIds: PlannedEventIds = {
     updateProjectSettings: { version: cmd.ifMatchVersion },

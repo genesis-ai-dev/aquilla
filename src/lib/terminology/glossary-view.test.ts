@@ -5,6 +5,7 @@ import {
   partitionConcepts,
   canEditTermbase,
   canEditTermCells,
+  canSuggestTerm,
   resolveTermbaseEditFloor,
   DEFAULT_TERMBASE_EDIT_MIN_ROLE,
 } from "./glossary-view"
@@ -128,6 +129,32 @@ describe("canEditTermbase", () => {
   })
   it("keeps the unknown-role escape hatch under any floor", () => {
     expect(canEditTermbase(null, 600)).toBe(true)
+  })
+})
+
+// AQU-872: suggesting a term is a strictly lower bar than managing the
+// termbase, and it is deliberately INDEPENDENT of the org's floor — raising
+// the floor restricts who may approve, never who may propose.
+describe("canSuggestTerm", () => {
+  it("lets a contributor (400) and above propose a term", () => {
+    expect(canSuggestTerm({ level: 400 })).toBe(true)
+    expect(canSuggestTerm({ level: 500 })).toBe(true)
+    expect(canSuggestTerm({ level: 700 })).toBe(true)
+  })
+  it("refuses a viewer / commenter / reviewer", () => {
+    expect(canSuggestTerm({ level: 100 })).toBe(false)
+    expect(canSuggestTerm({ level: 200 })).toBe(false)
+    expect(canSuggestTerm({ level: 300 })).toBe(false)
+  })
+  it("keeps the unknown-role escape hatch", () => {
+    expect(canSuggestTerm(null)).toBe(true)
+    expect(canSuggestTerm(undefined)).toBe(true)
+  })
+  it("stays open to a contributor however high the org raises the MANAGEMENT floor", () => {
+    // The two questions are asked of different things: the floor gates
+    // approving a term into force, and a draft forces nothing.
+    expect(canEditTermbase({ level: 400 }, 600)).toBe(false)
+    expect(canSuggestTerm({ level: 400 })).toBe(true)
   })
 })
 

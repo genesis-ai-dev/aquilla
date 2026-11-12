@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import type { Store } from "@livestore/livestore"
-import { getOfflineStore, isTauriRuntime } from "@/lib/offline/store"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
+import { startConnectivityProbe } from "@/lib/offline/connectivity"
 import type { schema } from "@/lib/offline/schema"
 
 export interface OfflineStoreContextValue {
@@ -30,8 +31,15 @@ export function OfflineStoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isTauriRuntime()) return
+    // Hand the Rust connectivity loop the API base this build talks to, so it
+    // probes the right environment. Done from this app-wide Tauri bootstrap
+    // rather than from ConnectivityStatusChip, which only mounts in the editor.
+    startConnectivityProbe()
     let cancelled = false
-    getOfflineStore()
+    // AQU-2091: the store module (LiveStore and its engine) loads only here,
+    // inside the desktop app; the browser never fetches it.
+    import("@/lib/offline/store")
+      .then(({ getOfflineStore }) => getOfflineStore())
       .then((store) => {
         if (!cancelled) setState({ store, loading: false, error: null })
       })

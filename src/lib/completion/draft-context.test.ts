@@ -3,7 +3,7 @@
 // filename — and skip untranscribed sections entirely.
 
 import { describe, it, expect } from "vitest"
-import { gatherPrecedingContext, gatherFollowingSource } from "./draft-context"
+import { gatherPrecedingContext, gatherFollowingSource, mergeInRunDraftContext } from "./draft-context"
 
 const text = (id: string, original: string, translated = "", status = "unvalidated") =>
   ({ id, fileId: "f1", original, translated, status })
@@ -39,5 +39,54 @@ describe("draft-context — media sections (SUB-28)", () => {
       { source: "and the word" },
       { source: "was with god" },
     ])
+  })
+})
+
+describe("mergeInRunDraftContext (AQU-1386)", () => {
+  const approved = [
+    { source: "s1", target: "t1" },
+    { source: "s2", target: "t2" },
+  ]
+  const drafts = [
+    { source: "s3", target: "d3" },
+    { source: "s4", target: "d4" },
+  ]
+
+  it("appends this run's drafts after the approved window, newest last", () => {
+    expect(mergeInRunDraftContext(approved, drafts, 10)).toEqual([
+      { source: "s1", target: "t1" },
+      { source: "s2", target: "t2" },
+      { source: "s3", target: "d3", draft: true },
+      { source: "s4", target: "d4", draft: true },
+    ])
+  })
+
+  it("marks every carried draft, and nothing approved", () => {
+    const out = mergeInRunDraftContext(approved, drafts, 10)
+    expect(out.filter((r) => r.draft)).toHaveLength(2)
+    expect(out.slice(0, 2).every((r) => r.draft === undefined)).toBe(true)
+  })
+
+  it("applies the budget to the COMBINED list, keeping the nearest rows", () => {
+    // The point of the window is proximity. A run's fresh drafts are the
+    // closest context there is, so they displace the oldest approved rows
+    // rather than being appended past the budget.
+    expect(mergeInRunDraftContext(approved, drafts, 3)).toEqual([
+      { source: "s2", target: "t2" },
+      { source: "s3", target: "d3", draft: true },
+      { source: "s4", target: "d4", draft: true },
+    ])
+  })
+
+  it("returns nothing at budget 0", () => {
+    // `slice(-0)` is `slice(0)` and would hand back the ENTIRE run. A project
+    // that turned the discourse window off must get an empty window.
+    expect(mergeInRunDraftContext(approved, drafts, 0)).toEqual([])
+    expect(mergeInRunDraftContext(approved, drafts, -1)).toEqual([])
+  })
+
+  it("is the identity on the approved window when the run has drafted nothing", () => {
+    // The first call of a run must be byte-identical to today's behaviour.
+    expect(mergeInRunDraftContext(approved, [], 5)).toEqual(approved)
   })
 })

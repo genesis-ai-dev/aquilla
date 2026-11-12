@@ -7,7 +7,10 @@
 import { useMemo } from "react"
 import type { FileType, FileReference } from "@/lib/parsers/types"
 import { AssignModal } from "@/components/AssignModal"
+import type { AssignLaneOption } from "@/lib/sync/assignment-lane"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { useProjectLaneStaffing } from "@/hooks/useProjectLaneStaffing"
+import { ROLE } from "@/lib/frontier/roles"
 
 const EMPTY_SELECTION: ReadonlySet<string> = new Set()
 
@@ -17,6 +20,8 @@ export interface OrgLaneAssignModalProps {
   lane: string
   /** Extra (non-default) lane tags on the project — enables the lane select. */
   targetLanes: string[]
+  /** AQU-1977: the project's own live languages, in order. See AssignModal's `lanes`. */
+  lanes?: readonly AssignLaneOption[]
   /**
    * AQU-728: display name of the default ('') lane — the project's own default
    * target language. Threaded to AssignModal so the lane select labels the
@@ -40,6 +45,7 @@ export function OrgLaneAssignModal({
   projectId,
   lane,
   targetLanes,
+  lanes,
   defaultLaneLabel,
   files,
   roleLevel,
@@ -52,6 +58,14 @@ export function OrgLaneAssignModal({
   onClose,
 }: OrgLaneAssignModalProps) {
   const { members } = useProjectMembers(projectId)
+  // AQU-2047: the same lane-staffing read the project overview uses. Below
+  // project lead the route refuses, and a missing answer leaves the menu as
+  // it was rather than emptying it.
+  const { teamLanes } = useProjectLaneStaffing(
+    projectId,
+    jwt,
+    roleLevel >= ROLE.PROJECT_LEAD,
+  )
 
   const projectFiles = useMemo<FileReference[]>(
     () =>
@@ -75,6 +89,8 @@ export function OrgLaneAssignModal({
       activeFileId={null}
       projectFiles={projectFiles}
       targetLanes={targetLanes}
+      lanes={lanes}
+      teamLanes={teamLanes}
       defaultLane={lane}
       defaultLaneLabel={defaultLaneLabel}
       members={members}

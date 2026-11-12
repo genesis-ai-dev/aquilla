@@ -27,6 +27,10 @@ describe('isGatedTrackPatch — the ungated half', () => {
     ['clearing a rename back to the default label', { name: null }],
     ['clearing an order back to the derived seat', { order: null }],
     ['a rename and a reorder together', { name: 'Spanish VO', order: 2 }],
+    // Sam, 2026-09-26: a colour is how a track looks, like its name — the
+    // Audio view offers the picker on projects that never turn editing on.
+    ['recolouring', { color: 'cyan' }],
+    ['clearing a colour', { color: null }],
   ]
 
   for (const [label, patch] of ungated) {
@@ -40,9 +44,12 @@ describe('isGatedTrackPatch — the gated half', () => {
   const gated: Array<[string, unknown]> = [
     ['creating a track', { kind: 'audio', name: 'Spanish VO', order: 4, sourceTrackId: 'source-subtitles' }],
     ['creating a folder', { kind: 'folder', name: 'Dubs' }],
-    ['recolouring', { color: 'teal' }],
-    ['clearing a colour', { color: null }],
+    // A colour does not launder a restructuring field riding with it.
+    ['a recolour that also moves the track into a folder', { color: 'cyan', groupId: 'grp-1' }],
     ['setting an alignment', { sourceTrackId: 'source-subtitles' }],
+    // AQU-2252: whether a track's takes set its lines' lengths changes what
+    // the timeline holds, so it is track editing, not presentation.
+    ['making a track a layer', { setsLineLengths: false }],
     ['ejecting a track from its folder', { groupId: null }],
     // THE ONE THAT LOOKS UNGATED AND IS NOT. A folder drop writes both fields
     // in one patch, because a rejected second event would leave the track half
@@ -68,7 +75,7 @@ describe('isGatedTrackPatch — the gated half', () => {
   // "Reset this row to its defaults" reads innocently, but the projection
   // implements it as `meta #- ARRAY['trackOverrides', <id>]` — it drops the
   // WHOLE entry — so resetting the dub row also clears its colour, its group
-  // and its rename in one write. Three of those four are gated fields.
+  // and its rename in one write, and a group is a gated field.
   it('gates a reset on a DERIVED track, which clears its colour and group too', () => {
     expect(isGatedTrackPatch({ trackId: 'target-audio', patch: null })).toBe(true)
   })

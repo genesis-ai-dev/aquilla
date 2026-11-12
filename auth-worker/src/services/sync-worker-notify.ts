@@ -111,6 +111,36 @@ export async function notifySyncWorkerOfProjectSettingsChange(
 }
 
 /**
+ * AQU-1828: tell the project's DO that one of its progress-sync links (Monday,
+ * or Airtable — AQU-804) was created, reconfigured, enabled/disabled or
+ * deleted. The DO caches "this project has no link" to stop nudging us on
+ * every edit, and this is what drops that cache — without it, linking a
+ * project would not start pushing until the DO's backstop TTL lapsed. The
+ * sync-worker endpoint keeps its Monday name; it was the first provider.
+ * Best-effort: the link write is already durable.
+ */
+export async function notifySyncWorkerOfSyncLinkChange(
+  env: Pick<Env, "SYNC_WORKER_URL" | "SYNC_SECRET_KEY">,
+  projectId: string,
+): Promise<void> {
+  if (!env.SYNC_WORKER_URL || !env.SYNC_SECRET_KEY) return
+  try {
+    await fetch(
+      `${env.SYNC_WORKER_URL.replace(/\/$/, "")}/admin/projects/${encodeURIComponent(projectId)}/monday-link-changed`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.SYNC_SECRET_KEY}`,
+          "Content-Type": "application/json",
+        },
+      },
+    )
+  } catch (err) {
+    console.warn(`sync-worker link-change notification failed for ${projectId}:`, err)
+  }
+}
+
+/**
  * Contextual-pipeline progress fan-out (design §8, slice D1): forward one
  * `contextual.*` frame to the sync-worker so the per-project DO can broadcast
  * it to connected editors (the pill's live progress). Frame shapes mirror

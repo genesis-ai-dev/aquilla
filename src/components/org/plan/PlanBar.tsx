@@ -1,45 +1,28 @@
-// AQU-1092…1098: one lane of progress as a SEGMENTED bar in one hue.
+// AQU-1092…1098: one lane of progress as a SEGMENTED bar.
 //
 // Two figures share a single track: the outer measure (translated, recorded)
 // and the inner one it contains (validated). Validated is a subset of
 // translated, so the track reads left to right as three exclusive states —
-// validated, done but not yet validated, nothing yet — in one hue at two
-// strengths. That is the timeline's own palette rule (Sam, 2026-08-27): one
-// solid hue per thing, drawn at alphas over whatever is behind it, SAME ALPHAS
-// IN BOTH THEMES, so every shade follows the theme instead of being redefined
-// for it. See `track-colors.ts`, whose hues and rungs this reuses.
+// validated, done but not yet validated, nothing yet.
 //
-// The hues are the timeline's Azure and Cyan rather than the Progress card's
-// amber and emerald, on purpose. Amber is Due soon and emerald is Done on this
-// board, and a bar in either would read as a status it does not have. Blue is
-// In progress, which is the one status a progress bar can agree with. Sam is
-// raising the card's palette separately.
+// THE SHARED PROGRESS PALETTE (AQU-1764, Sam 2026-10-13): text is blue and
+// audio magenta, the dark step validated and the light step done, drawn by
+// the same `ProgressSplitBar` as every other busy progress surface. Until then
+// this bar borrowed the timeline's Azure and Cyan at two alphas, because the
+// Progress card's amber and emerald read here as Due soon and Done; the card
+// now uses this palette too, and In progress no longer wears a blue of its
+// own, so the bars and the statuses cannot be mistaken for each other.
 //
-// The two fills never overlap. Drawn as two adjacent segments so each rung is
-// exactly its alpha; stacked, the inner would composite to a third value that
-// belongs to no ladder.
+// Plan units carry no AI-draft count, so the text bar has no striped part.
 
 import type { ReactNode } from "react"
-import { AppTooltip } from "@/components/ui/tooltip"
-import { hexToRgba, parseTrackHue } from "@/lib/timeline/track-colors"
+import { cn } from "@/lib/utils"
+import { ProgressSplitBar } from "@/components/progress/ProgressSplitBar"
+import { audioProgressSegments, textProgressSegments } from "@/lib/progress/progress-palette"
 
 export type PlanBarTone = "text" | "audio"
 
-/** The timeline's own hues, looked up by preset id so a retune there lands here. */
-const HUE: Record<PlanBarTone, string> = {
-  text: parseTrackHue("azure"),
-  audio: parseTrackHue("cyan"),
-}
-
-/**
- * The chip ladder's two fill rungs, with the bar's own meanings: a third says
- * done, two thirds says verified. Named here rather than imported from the
- * chips, because "generated" and "translated" are different claims that
- * happen to share a strength.
- */
-const ALPHA = { done: 0.33, validated: 0.67 } as const
-
-export function PlanBar({ label, outer, inner, tone, aria, tips }: {
+export function PlanBar({ label, outer, inner, tone, aria, tips, showCounts = false }: {
   /** Omitted where the caller supplies its own leading gutter (a chapter number). */
   label?: string
   /** Percentage 0–100 of the containing measure. */
@@ -50,18 +33,27 @@ export function PlanBar({ label, outer, inner, tone, aria, tips }: {
   aria: string
   /**
    * AQU-1278, round 7 (Sam, 2026-09-17): what each percentage STANDS FOR, as
-   * a sentence — "1,530 of 1,533 validated" — shown on hover and read by a
-   * screen reader in its place. Percentages stay in print everywhere, and the
-   * count with its "of" lives here, one hover away, because on a dubbing
+   * a sentence — "1,530 of 1,533 validated" — read by a screen reader in its
+   * place, and printed under the bar in the details panel (`showCounts`).
+   * Percentages stay in print everywhere, and the count with its "of" lives
+   * there, one click away, because on a dubbing
    * project the audio bar's total is the cue sheet's and not the file's, and
    * printing that on every bar was more than the panel could carry.
    */
   tips?: { outer: string; inner: string }
+  /**
+   * AQU-2260 (Sam, Oct 29, third pass): print the counts under the bar, as a
+   * plain line. The details panel does; the board's rows do not, and nothing
+   * shows them on hover any more.
+   */
+  showCounts?: boolean
 }) {
-  const hue = HUE[tone]
-  const validated = Math.max(0, Math.min(inner, outer))
-  const done = Math.max(0, outer - validated)
-  return (
+  // The two percentages the readout prints, so the bar and the numbers beside
+  // it can never disagree.
+  const segments = tone === "text"
+    ? textProgressSegments({ validated: inner, translated: outer, total: 100 })
+    : audioProgressSegments({ validated: inner, recorded: outer, total: 100 })
+  const bar = (
     // No `title`: the bar used to repeat its two percentages in a sentence on
     // hover, and the numbers now say more than that sentence did.
     <span className="flex items-center gap-2" aria-label={aria}>
@@ -71,32 +63,25 @@ export function PlanBar({ label, outer, inner, tone, aria, tips }: {
         </span>
       )}
       {/* Same track as the Progress card's bars: 8px, fully rounded, muted. */}
-      <span className="relative h-2 min-w-[52px] flex-1 overflow-hidden rounded-full bg-muted">
-        {validated > 0 && (
-          <span
-            data-plan-fill="validated"
-            className={`absolute inset-y-0 start-0 ${done === 0 ? "rounded-e-full" : ""}`}
-            style={{ width: `${validated}%`, backgroundColor: hexToRgba(hue, ALPHA.validated) }}
-          />
-        )}
-        {done > 0 && (
-          <span
-            data-plan-fill="done"
-            className="absolute inset-y-0 rounded-e-full"
-            style={{
-              insetInlineStart: `${validated}%`,
-              width: `${done}%`,
-              backgroundColor: hexToRgba(hue, ALPHA.done),
-            }}
-          />
-        )}
-      </span>
+      <ProgressSplitBar segments={segments} height={8} className="min-w-[52px] flex-1" />
       {/* 72px, not 60: "100% | 100%" is the widest this reads and it has to
           fit without wrapping, or the row grows a line on the very unit that
           is finished. A flex box rather than right-aligned text so the
           `Readout` inside can pin its divider to the slot's centre. */}
       <span className="flex w-[72px] shrink-0 items-center text-[11px] tabular-nums text-muted-foreground">
         <Readout left={`${outer}%`} right={`${inner}%`} leftTip={tips?.outer} rightTip={tips?.inner} />
+      </span>
+    </span>
+  )
+  if (!showCounts || !tips) return bar
+  return (
+    <span className="flex flex-col gap-0.5">
+      {bar}
+      <span
+        data-testid={`plan-bar-counts-${tone}`}
+        className={cn("text-[11px] tabular-nums text-muted-foreground", label != null && "ps-8")}
+      >
+        {tips.outer} · {tips.inner}
       </span>
     </span>
   )
@@ -162,8 +147,8 @@ export function PlanRule({ className = "" }: { className?: string }) {
 }
 
 /**
- * One figure of a readout: a hover target that says what the figure stands
- * for. Without a `tip` it is the bare figure.
+ * One figure of a readout, named for a screen reader by what it stands for.
+ * Without a `tip` it is the bare figure.
  *
  * NOT A TAB STOP (Sam, 2026-09-17). It carried `tabIndex={0}` so a keyboard
  * could reach the tooltip, and the cost was out of all proportion: four of
@@ -177,15 +162,11 @@ export function PlanRule({ className = "" }: { className?: string }) {
  */
 function ReadoutFigure({ tip, children }: { tip?: string; children: ReactNode }) {
   if (!tip) return <>{children}</>
+  // AQU-2260: no hover. The sentence is the figure's name for a screen
+  // reader; the details panel prints the counts for everyone.
   return (
-    <AppTooltip content={tip}>
-      <span
-        aria-label={tip}
-        data-testid="plan-readout-figure"
-        className="cursor-default rounded-sm underline-offset-[3px] decoration-dotted hover:underline"
-      >
-        {children}
-      </span>
-    </AppTooltip>
+    <span aria-label={tip} data-testid="plan-readout-figure">
+      {children}
+    </span>
   )
 }

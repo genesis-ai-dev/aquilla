@@ -140,6 +140,51 @@ describe("POST /api/v1/ai/agent/internal/draft-cells", () => {
     expect(events?.n).toBe(0)
   })
 
+  // AQU-2342: DraftCells drafts with the ONE project instructions block —
+  // composed on read here from the brief summary and the legacy agent brief —
+  // and the caller's per-call text rides as this run's directions.
+  it("carries the resolved project instructions once and labels the per-call directions", async () => {
+    await seedProject({
+      roleLevel: 400,
+      settings: { translationBrief: { l1Summary: "Plain register for rural youth." } },
+    })
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_briefs (project_id, content, updated_by, version, updated_at)
+       VALUES (?, 'Keep divine names as in the 1999 Bible.', NULL, 1, now())`,
+    )
+      .bind(PROJECT)
+      .run()
+    const calls = mockDraftModel(["uno", "dos"])
+
+    const res = await draftReq(`Bearer ${env.SYNC_SECRET_KEY}`, { ...baseBody, instructions: "Use vosotros." })
+    expect(res.status).toBe(200)
+    const block =
+      "Project instructions (follow these):\nPlain register for rural youth.\n\nKeep divine names as in the 1999 Bible."
+    for (const call of calls) {
+      const messages = call.body.messages as { content: string }[]
+      expect(messages[0].content.split(block)).toHaveLength(2)
+      expect(messages[0].content).not.toContain("Project brief")
+      // AQU-2342: the run's directions close the system prompt's guidance
+      // (after instructions, checks, terms, examples, context).
+      expect(messages[0].content).toContain("This run's directions")
+      expect(messages[0].content).toContain("- Use vosotros.")
+      expect(messages[0].content.indexOf(block)).toBeLessThan(messages[0].content.indexOf("- Use vosotros."))
+    }
+  })
+
+  it("drafts into a named lane (AQU-1447) and rejects an empty laneId", async () => {
+    await seedProject({ roleLevel: 400 })
+    mockDraftModel(["Entwurf eins", "Entwurf zwei"])
+
+    const ok = await draftReq(`Bearer ${env.SYNC_SECRET_KEY}`, { ...baseBody, laneId: "ab12cd34" })
+    expect(ok.status).toBe(200)
+    const body = (await ok.json()) as { drafts: { value: string }[] }
+    expect(body.drafts.map((d) => d.value)).toEqual(["Entwurf eins", "Entwurf zwei"])
+
+    const empty = await draftReq(`Bearer ${env.SYNC_SECRET_KEY}`, { ...baseBody, laneId: "" })
+    expect(empty.status).toBe(400)
+  })
+
   it("denies a caller below the contributor floor without spending", async () => {
     await seedProject({ roleLevel: 100 })
     const calls = mockDraftModel(["never"])

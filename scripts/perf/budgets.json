@@ -1,0 +1,38 @@
+{
+  "$comment": [
+    "AQU-1868 Big Bible performance budgets. `pnpm perf:measure` fails when a",
+    "number here is missed, so these are the contract — not a log of what the",
+    "last run happened to do.",
+    "",
+    "Scope: the LOCAL dev stack (`pnpm dev`) against the default fixture",
+    "(66 files, 31,102 cells). They are stall ceilings, not stopwatch targets:",
+    "generous enough that a slower supported machine passes, tight enough that",
+    "a path going file-proportional fails. Do not tighten them to the fastest",
+    "machine in the room — AGENTS.md rule 15.",
+    "",
+    "These values are the OPENING ceilings, set from the 2026-10-10 scaling",
+    "audit's intent rather than from a measured baseline. Re-baseline them on",
+    "the first real run: `pnpm perf:measure --suggest-budgets` prints this file",
+    "with the run's numbers plus headroom. Record in the commit message which",
+    "machine and which fixture size produced them."
+  ],
+  "max": {
+    "project.open.p95Ms": 3000,
+    "files.read.p95Ms": 1500,
+    "progress.read.p95Ms": 1500,
+    "cells.read.page.p95Ms": 1200,
+    "cells.read.full.p95Ms": 15000,
+    "events.commit.p95Ms": 2500,
+    "editor.open.readyMs": 20000,
+    "editor.open.longTaskCount": 12,
+    "editor.open.longTaskTotalMs": 4000,
+    "rules.open.readyMs": 20000,
+    "rules.open.longTaskCount": 12,
+    "rules.open.longTaskTotalMs": 4000,
+    "presence.ping.p95Ms": 1500
+  },
+  "min": {
+    "events.commit.throughputPerSec": 2,
+    "presence.sockets.open": 50
+  }
+}

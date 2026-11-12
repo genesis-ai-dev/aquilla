@@ -20,6 +20,8 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'source.cell.reorder': { anchorCellId: null },
     'source.cell.metadata.patch': { version: 1, metadata: {} },
     'source.cell.reanchor': { anchorCellId: null },
+    'source.cell.visibility.set': { hidden: true },
+    'source.cell.restore': {},
     'target.cell.create': { cellId: 'cell-1', value: 'x' },
     'target.cell.commit': { value: 'x' },
     'target.cell.delete': {},
@@ -37,7 +39,9 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'file.rename': { name: 'Genesis (renamed)' },
     'file.delete': {},
     'file.restore': {},
+    'file.revision': { revisionN: 1, parentRevisionN: null, artifactSha256: 'a'.repeat(64), stamp: 'docx@1', optionsHash: 'o', manifestR2Key: 'revisions/p/f/1.json', unitCount: 0, counts: { equal: 0, changed: 0, moved: 0, inserted: 0, deleted: 0 }, origin: 'import' },
     'cell.backtranslation.set': { btText: 'hello', targetEventId: 'evt-tgt-1', polished: false },
+    'cell.gloss.set': { glossText: 'hello', targetEventId: 'evt-tgt-1' },
     'comment.create': { commentId: 'cmt-1', scope: { kind: 'project' }, body: 'hi', parentCommentId: null },
     'comment.edit': { commentId: 'cmt-1', body: 'updated' },
     'comment.delete': { commentId: 'cmt-1' },
@@ -52,10 +56,13 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'assignment.unassign': { assignmentId: 'as-1' },
     'project.link-source': { sourceProjectId: 'upstream-proj-1' },
     'cast.assign': { castName: 'Narrator' },
+    'cell.label.set': { label: 'Pericope' },
     'cell.retime': { startMs: 0, endMs: 1000 },
     'cell.audio.rename': { audioId: 'audio-1.wav', label: 'Take 3' },
     'cell.audio.trim': { audioId: 'audio-1.wav', trimStartMs: 250, trimEndMs: 3000 },
+    'cell.audio.gain': { audioId: 'audio-1.wav', gainDb: -3, fadeInMs: 300, fadeOutMs: null },
     'cell.audio.place': { audioId: 'audio-1.wav', targetOffsetMs: -250 },
+    'cell.audio.cut': { audioId: 'audio-1.wav', atMs: 1500, newAudioId: 'audio-2.wav' },
     'cell.link.set': {
       kind: 'text-audio',
       toFileId: 'file-audio-cues',
@@ -64,12 +71,26 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
       origin: 'auto',
       confidence: 0.92,
     },
+    'cell.attachment.add': {
+      attachmentId: 'att-1',
+      objectName: 'att-1.png',
+      name: 'layout.png',
+      mimeType: 'image/png',
+      sizeBytes: 2048,
+    },
+    'cell.attachment.remove': { attachmentId: 'att-1' },
     'cell.audio.measure': { audioId: 'audio-1.wav', durationMs: 1000 },
     'cell.lane.retime': { subtitleStartMs: 0, subtitleEndMs: 1000 },
     'file.video.set': { coreMediaUrl: 'https://cdn/v.mp4' },
     'file.timing.set': { timingMode: 'audioFirst' },
     'file.corpus.set': { corpusMarker: 'Treasure Hunt Bible' },
+    'file.extension.set': { extension: { kind: 'reference', tags: ['uw'] } },
+    'file.reorder': { sortIndex: 1024 },
     'file.track.set': { trackId: 'source-subtitles', patch: { name: 'Captions' } },
+    'file.milestone.set': {
+      milestoneId: 'ms-1', name: 'The storm', startCellId: 'cell-1', endCellId: 'cell-2',
+    },
+    'file.milestone.remove': { milestoneId: 'ms-1' },
     'source.cell.mirror': {
       value: 'x',
       upstream: { projectId: 'proj-up', cellId: 'cell-1', eventId: 'evt-up-1', seq: 1, side: 'source', contentHash: 'abc' },
@@ -89,7 +110,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     kind,
     projectId: 'proj-a',
     fileId: 'file-x',
-    cellId: kind === 'file.create' || kind === 'file.rename' || kind === 'file.delete' || kind === 'file.restore' || kind === 'file.corpus.set' ? undefined : 'cell-1',
+    cellId: kind === 'file.create' || kind === 'file.rename' || kind === 'file.delete' || kind === 'file.restore' || kind === 'file.revision' || kind === 'file.corpus.set' || kind === 'file.extension.set' || kind === 'file.reorder' ? undefined : 'cell-1',
     parentId: null,
     author: 'alice',
     payload: payloads[kind],
@@ -134,10 +155,13 @@ describe('dispatchEvent', () => {
     const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 1, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
-    // 1 events INSERT + 1 chain-claim INSERT (AD-2 atomic arbitration)
-    // + 1 cells UPSERT + 1 files-counter recompute = 4
+    // 1 events INSERT
+    // + 1 blank-target bridge (AQU-1615; inserts only when the project has no target lane)
+    // + 1 grant for that bridge (AQU-1781)
+    // + 1 chain-claim INSERT (AD-2 atomic arbitration)
+    // + 1 cells UPSERT + 1 files-counter recompute = 6
     // (Postgres auto-maintains FTS via the value_tsv generated column).
-    expect(outcome.result.stmts.length).toBe(4)
+    expect(outcome.result.stmts.length).toBe(6)
     expect(outcome.result.dirtyTables).toContain('events')
     expect(outcome.result.dirtyTables).toContain('cells')
     expect(outcome.result.dirtyTables).toContain('files')
@@ -149,9 +173,10 @@ describe('dispatchEvent', () => {
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     // 1 events INSERT + 1 validator UPSERT + 1 ai_drafted clear (AQU-292)
-    // + 1 validated recompute + 1 endorsement_count recompute (AD-14 pass 1)
-    // + 1 files-counter recompute (approved_count moves) = 6
-    expect(outcome.result.stmts.length).toBe(6)
+    // + 1 validated recompute + 1 reviewLanes clear (sidebar re-import)
+    // + 1 endorsement_count recompute (AD-14 pass 1)
+    // + 1 files-counter recompute (approved_count moves) = 7
+    expect(outcome.result.stmts.length).toBe(7)
     expect(outcome.result.dirtyTables).toContain('cell_validators')
     expect(outcome.result.dirtyTables).toContain('files')
   })

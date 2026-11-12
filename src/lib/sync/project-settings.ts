@@ -1,4 +1,6 @@
 import { FRONTIER_API_URL } from "./sync-token"
+import type { ProjectOrgPolicy, ProjectVisibilityFloors, VisibilityFloorView } from "./project-org-policy"
+import { RETIRED_LANE_SETTINGS_KEYS } from "../../../db/shared/retired-lane-settings"
 import { t } from "@/lib/i18n/standalone"
 import { ROLE, type RoleLevel } from "@/lib/frontier/roles"
 import type {
@@ -10,9 +12,14 @@ import type {
   BuiltinCheckId,
 } from "@/lib/parsers/types"
 import type { Concept } from "@/lib/terminology/types"
-import type { LivingMemoryEntry } from "@/lib/parsers/types"
+import type { CellUnit, LivingMemoryEntry } from "@/lib/parsers/types"
 import type { TranslationBrief } from "@/lib/brief/types"
+import type { InheritedFromLink } from "@/lib/sync/inherited-settings"
 import type { DraftContextSettings } from "@/lib/completion/draft-context"
+import type { DirectionMode } from "@/lib/text-direction"
+import type { MediaDefaults } from "../../../db/shared/media-setting-defaults"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
+import type { DraftingSettings } from "../../../db/shared/drafting-settings"
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
@@ -40,16 +47,58 @@ export type CellEditingTier =
   | "maintainer"
 
 /**
+ * AQU-2408: the stored `cellLabelFloor` vocabulary — who may type a label on a
+ * cell. Two rungs by decision (Matt, 2026-11-05); an absent key reads as
+ * maintainer. Same two-copy arrangement as `CellEditingTier`: the server's
+ * copy is `db/shared/cell-label-floor.ts`.
+ */
+export type CellLabelTier = "maintainer" | "project_lead"
+
+/**
  * The synced subset of project-wide fields. Mirrors the server's settings
  * JSON. Top-level keys only — replacing `rules` replaces the whole array.
  *
- * Device-local fields (apiKey, endpoint, audio strategy, experimental flags,
- * TTS, dismissed-banner state) are deliberately absent.
+ * Device-local fields (every AI key, audio loading, Git auto-sync,
+ * experimental flags, dismissed-banner state) are deliberately absent.
  */
 export interface ProjectWideSettings {
   sourceLanguage?: string
   targetLanguage?: string
+  /**
+   * AQU-1471: the project's DEFAULT text direction per side — the answer to
+   * "this project's target language is right-to-left", asked once instead of
+   * once per file.
+   *
+   * "auto", and an ABSENT key, mean "take it from the language"
+   * (`languageDefaultDirection`), which is what every project did before these
+   * keys existed. A per-file direction still wins over this, and nothing copies
+   * this onto the file rows: resolution happens on every read
+   * (db/shared/text-direction.ts states the order), so switching
+   * `targetLanguage` to Arabic moves every file that has no override with it.
+   */
+  sourceTextDirection?: DirectionMode
+  targetTextDirection?: DirectionMode
+  /** AQU-2342: THE project instructions every AI draft reads (copilot,
+   *  Autopilot, the agent). Absent → composed on read from the legacy sources
+   *  (db/shared/translation-instructions.ts resolveTranslationInstructions). */
+  translationInstructions?: string
+  /** Legacy (AQU-2342): no prompt reads it except as a migrate-on-read source
+   *  for `translationInstructions`. */
   systemPrompt?: string
+  /**
+   * AQU-2259: the team's AI drafting settings — the "AI Instructions" card
+   * (examples retrieved, context window, batch sizes, example format,
+   * assistant language), the model choice (provider, endpoint, model, max
+   * tokens, temperature) and the Health penalty. Every reader takes them from
+   * here through the overlay (src/hooks/project-settings-overlay.ts), which
+   * lays them over the record's `completionSettings`. NEVER an AI key: those
+   * stay on the device, in Preferences or with the organization, and the
+   * server refuses one here (db/shared/drafting-settings.ts). Absent until a
+   * maintainer saves one or this browser's old values are uploaded once
+   * (src/lib/completion/drafting-settings.ts); until then each browser keeps
+   * reading its own copy, as before.
+   */
+  draftingSettings?: DraftingSettings
   rules?: TranslationRule[]
   rulePenalties?: RulePenalties
   /** Built-in check overrides (enable/severity). Synced like `rules` —
@@ -57,6 +106,12 @@ export interface ProjectWideSettings {
    *  full merged object. Project-wide so LQA severity is consistent across
    *  devices/members (same rationale as `rulePenalties`). */
   algorithmicChecks?: Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>>
+  /** AQU-1906: per-target-lane built-in check overrides, keyed by the lane's
+   *  legacy tag (`''` = the default lane). Replaces wholesale like
+   *  `algorithmicChecks`, so a writer sends the full merged map. Absent means
+   *  every lane shares the project-wide overrides, which is what every project
+   *  had before this key existed. */
+  algorithmicChecksByLane?: Record<string, Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>>>
   validationCount?: number
   validationCountAudio?: number
   /**
@@ -70,6 +125,33 @@ export interface ProjectWideSettings {
    * did before this existed.
    */
   countStructuralCells?: boolean
+  /**
+   * AQU-1391: does validating a cell copy its translation into the other cells
+   * in the same file whose source text is identical?
+   *
+   * ABSENT means "use the organization's default" (which is ON unless the org
+   * opted out) — the same three-state shape as `countStructuralCells` above,
+   * and for the same reason: null would be a fourth thing the resolver has no
+   * meaning for, so choosing the default deletes the key.
+   */
+  autoPropagateRepetitions?: boolean
+  /**
+   * AQU-1771: this project's own floors for who sees its member list and
+   * each member's progress — role levels, stricter-only. The project enforces
+   * the higher of this and its org's floor, so a value at or below the org's
+   * means nothing. ABSENT means "follow the organization"; choosing the org's
+   * floor deletes the key.
+   */
+  rosterViewMinRole?: number
+  memberProgressViewMinRole?: number
+  /**
+   * AQU-2305: this project's own floor for importing a NEW source file — a
+   * role level, stricter-only over its org's `importMinRole` (AQU-2304). The
+   * project enforces the higher of the two, so a value at or below the org's
+   * means nothing. ABSENT means "follow the organization"; choosing the org's
+   * floor deletes the key.
+   */
+  importMinRole?: number
   validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
@@ -118,18 +200,31 @@ export interface ProjectWideSettings {
    */
   cellEditingFloor?: CellEditingTier
   /**
+   * AQU-2408: who may type a label on a cell (the Label row in the cell's
+   * expansion panel). Absent = maintainer. A product rule enforced where the
+   * field is drawn (`src/lib/cell-label-gate.ts`); the sync perimeter applies
+   * only the event's static floor, project lead. See
+   * docs/decisions/0007-cell-labels-are-metadata-never-cast.md.
+   */
+  cellLabelFloor?: CellLabelTier
+  /**
    * AQU-646 stage 2: may this project's timelines be RESTRUCTURED — tracks
    * added and deleted, grouped into folders, recoloured?
    *
-   * OFF unless explicitly turned on, and it is a SECOND gate rather than a
-   * floor change: `file.track.set` is already maintainer-floored, so this
-   * answers *whether*, not *who*, and with it off the write is refused even to
-   * an owner. Multi-track is capability for clients who want it; a project that
-   * never turns it on should not be able to tell it was built.
+   * ON UNLESS EXPLICITLY TURNED OFF (AQU-2214, Sam, after the ETEN demo). It
+   * shipped the other way round — multi-track read as capability for the
+   * clients who asked for it, so a project that never turned it on was not
+   * supposed to be able to tell it was built. Adding a track turned out to be
+   * the ordinary case, so the DEFAULT flipped and the gate did not: it is
+   * still a SECOND gate rather than a floor change (`file.track.set` is
+   * already maintainer-floored, so this answers *whether*, not *who*), and an
+   * explicit `false` here — or inherited from the org — still refuses the
+   * write to an owner. Only the unset reading changed, on the client and at
+   * the perimeter alike; a project or org that already chose keeps its choice.
    *
    * RENAME AND DRAG-TO-REORDER ARE DELIBERATELY NOT GATED ON THIS. Both already
-   * ship, and a new setting defaulting to off must not silently take an
-   * existing capability away from every project that has one. They stay
+   * shipped before the setting existed, which must not take an existing
+   * capability away from a project that switches this OFF. They stay
    * maintainer-only, which is what they were.
    *
    * NOTE HOW THIS DIFFERS FROM `cellEditingFloor` ABOVE. Two differences now.
@@ -146,6 +241,14 @@ export interface ProjectWideSettings {
    * track editing off" should mean.
    */
   allowTrackEditing?: boolean
+  /**
+   * AQU-1758 (Sam's decision 7): does the media view show its dubbing tools —
+   * the top bar's Film button and the timeline's Sources menu? Unset, a
+   * project of books and documents hides them and any other shows them
+   * (lib/media/film-and-sources.ts). Only shows or hides controls; it is not
+   * a permission, and nothing on the server reads it.
+   */
+  filmAndSources?: boolean
   /**
    * AQU-1246: does this project get the experimental Autopilot surface at all?
    *
@@ -170,6 +273,22 @@ export interface ProjectWideSettings {
    * keep it; see `isAutopilotVisible` in src/lib/features/flags.ts.
    */
   autopilotEnabled?: boolean
+  /**
+   * AQU-2041: when on, a project lead can create, edit, and assign voices on
+   * the lanes they can write. Absent or false keeps voice management at
+   * maintainer. Only a maintainer can change this key. Turning it off leaves
+   * voices that were already created.
+   */
+  projectLeadsManageVoices?: boolean
+  /**
+   * AQU-1937: the per-project "Smart Extensions" switch. Absent / false = the
+   * project is exactly today's Aquilla: the native editor, the built-in
+   * importers, and no extensions UI or routes (auth-worker refuses the tools
+   * API). True = the extensions UI, the Smart Extension editor as the default
+   * (switch-back stays) and extension importers (the first-party Door43 one)
+   * in Import. Maintainer (600)+, the ordinary settings floor.
+   */
+  smartExtensionsEnabled?: boolean
   /**
    * AQU-186: minimum role level required to trigger a harmonization sweep on
    * this project. Default (absent) = project_lead (500). Configurable up to
@@ -212,6 +331,45 @@ export interface ProjectWideSettings {
    * See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
    */
   bibleResourcesEnabled?: boolean
+  /**
+   * The team's default Parallel Bibles versions (helloao translation ids, in
+   * panel order). A translator with no pins of their own for this project sees
+   * these. Project lead (500)+ may set them — a patch that changes only this
+   * key is a carve-out below the maintainer floor, validated and re-checked by
+   * the server (db/shared/parallel-bible-versions.ts).
+   */
+  parallelBibleVersions?: string[]
+  /**
+   * AQU-1686: one explicit switch per Bible data enrichment
+   * (db/shared/bible-enrichments.ts). A missing id means that enrichment's
+   * default, and `bibleResourcesEnabled` off turns every one of them off.
+   * Maintainer floor, like the rest of the blob. Read server-side through the
+   * `bible_enrichments` generated column (auth-worker/src/lib/aquifer/gate.ts).
+   */
+  bibleEnrichments?: import("../../../db/shared/bible-enrichments").BibleEnrichmentSettings
+  /**
+   * AQU-1688: facts about the target language that Bible data checks need,
+   * one optional slot each (db/shared/language-profile.ts). A check whose slot
+   * is empty is dormant. Maintainer floor, like the rest of the blob. Written
+   * whole, so a writer merges over the stored value to keep other slots.
+   */
+  languageProfile?: import("../../../db/shared/language-profile").LanguageProfile
+  /**
+   * AQU-1691: the decision log — the team's answers to Autopilot's questions
+   * (db/shared/project-facts.ts). Typed `unknown[]` on purpose: read it
+   * through `readProjectFacts`, and write it with `upsertProjectFact` /
+   * `removeProjectFact`, which keep an entry this version cannot read.
+   * Maintainer floor, like the rest of the blob; an answer on a question card
+   * writes it server-side (db/shared/project-facts-write.ts).
+   */
+  projectFacts?: unknown[]
+  /**
+   * AQU-1692: maintainers' corrections of who speaks a Bible Knowledge Pack
+   * speech, and to whom, keyed by speech id (db/shared/bible-voice-overrides.ts).
+   * Maintainer floor, like the rest of the blob; the settings route refuses a
+   * malformed map.
+   */
+  bibleVoiceOverrides?: import("../../../db/shared/bible-voice-overrides").BibleVoiceOverrides
   /**
    * Knowledge base drafting toggle (spec docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
    * When true, translation generation + predictions inject KB string-search
@@ -257,9 +415,32 @@ export interface ProjectWideSettings {
    * cells. In-body section headings and Psalm titles import in both modes.
    */
   importExcludeFrontMatter?: boolean
+  /** AQU-1720: what one imported cell is for docx/txt/md uploads. `paragraph`
+   *  emits one cell per non-empty paragraph with no sentence split and no
+   *  length cap — the unit a dubbing/podcast project generates one voice clip
+   *  for. Absent/`sentence` (the default) keeps the segmenting behaviour that
+   *  suits subtitle and document work. Formats whose cell identity comes from
+   *  the format itself (USFM verses, subtitle cues, key/value resources) are
+   *  unaffected. */
+  importCellUnit?: CellUnit
+  /** Typing " or ' in the translation editor produces curly quotes in the
+   *  target language's style (src/lib/richtext/smart-quotes.ts). Absent/false
+   *  (the default) leaves straight quotes alone. */
+  smartQuotes?: boolean
   /** AQU-646 SUB-53: dubbing (the default, and the meaning of absent) or
    *  audio-first. See the AudioTimingMode doc comment in parsers/types.ts. */
   audioTimingMode?: AudioTimingMode
+  /**
+   * The agent team's autonomy dial (v3 of the agent social workspace):
+   * whether the team may pick up work on its own (`initiative`), whether it
+   * responds to human edits it sees land (`react`), and what either loop is
+   * allowed to do (`scope`). Absent means ALL OFF — the behaviour of every
+   * project that never opted in — and is read that way server-side too, so a
+   * missing key can never be mistaken for consent. Project-wide rather than
+   * device-local on purpose: autonomy only one collaborator could see would
+   * be autonomy nobody agreed to. See `@/lib/agent/agent-mode`.
+   */
+  agentMode?: import("@/lib/agent/agent-mode").AgentMode
   /**
    * AQU-646: may anyone below maintainer move a chip on the timeline?
    *
@@ -294,6 +475,12 @@ export interface ProjectWideSettings {
    * whole map: writers must send the full merged object.
    */
   fileGenres?: Record<string, string>
+  /**
+   * AQU-1075: which settings this project copies from its upstream, and which
+   * of those the maintainer has detached. Absent on a project that has not
+   * been offered the choice. The server owns `knowledgeDocCopies`.
+   */
+  inheritedFromLink?: InheritedFromLink
 }
 
 /** Absent means dubbing — the behaviour every project had before SUB-53. */
@@ -320,6 +507,18 @@ export function resolveTimingLocked(
   settings: Pick<ProjectWideSettings, "timingLocked"> | null | undefined,
 ): boolean {
   return settings?.timingLocked !== false
+}
+
+/**
+ * The role level `cellLabelFloor` admits. Never null: an absent key, and any
+ * value this build does not recognise, read as MAINTAINER — the highest rung
+ * offered, so a tier a newer client invents can never LOWER the floor here.
+ * Keep in lock-step with `db/shared/cell-label-floor.ts`.
+ */
+export function resolveCellLabelFloor(
+  settings: Pick<ProjectWideSettings, "cellLabelFloor"> | null | undefined,
+): RoleLevel {
+  return settings?.cellLabelFloor === "project_lead" ? ROLE.PROJECT_LEAD : ROLE.MAINTAINER
 }
 
 /**
@@ -355,10 +554,34 @@ export function resolveCellEditingFloor(
   }
 }
 
+/**
+ * Who last saved the shared settings, as the identity worker sends it: the
+ * saver's user id (`project_settings.updated_by`, a number, or a string id for
+ * an agent-sourced save). The object form is what this type used to promise
+ * and the server never sent; it stays accepted so a server that does send a
+ * name is shown it. Read it through `settingsEditorName`.
+ */
+export type ProjectSettingsEditor = number | string | { id: number; username: string } | null
+
+/** The saver's username when the response carries one, else null. A bare id
+ *  is not a name: the General page printed "Last edited by undefined" by
+ *  reading `.username` off a number (walk 10-02). */
+export function settingsEditorName(editor: ProjectSettingsEditor | undefined): string | null {
+  if (editor == null || typeof editor !== "object") return null
+  return typeof editor.username === "string" && editor.username !== "" ? editor.username : null
+}
+
 export interface ProjectSettingsResponse {
+  /**
+   * AQU-2342: the agent's legacy free-text brief (`project_briefs`), sent while
+   * the project has stored no `translationInstructions`, so the copilot
+   * migrates on read from exactly the sources the server paths do. "" or
+   * absent otherwise (and on a server that predates it).
+   */
+  legacyProjectBriefText?: string
   version: number
   updatedAt: string
-  updatedBy: { id: number; username: string } | null
+  updatedBy: ProjectSettingsEditor
   settings: ProjectWideSettings
   /**
    * AQU-1083: the org default this project inherits when `settings` carries no
@@ -370,6 +593,66 @@ export interface ProjectSettingsResponse {
    * Optional: a server that predates this simply omits it.
    */
   orgCountStructuralCells?: boolean | null
+  /**
+   * AQU-1771: the org's defaults for how many validations a cell / a take
+   * needs, used when `settings` carries no `validationCount` /
+   * `validationCountAudio` of its own. Null when the org set none (or the
+   * project has no org); then the threshold is 1.
+   */
+  orgValidationCount?: number | null
+  orgValidationCountAudio?: number | null
+  /**
+   * AQU-1768: the org's media defaults (valid values only; empty when it set
+   * none). A project with no value of its own for one of these keys follows
+   * the org's; the server gates resolve the same way.
+   */
+  orgMediaDefaults?: MediaDefaults
+  /**
+   * AQU-1771: the rest of the org's policy this project's surfaces apply —
+   * both visibility floors, assignment authority, the repetition default, the
+   * export floor — carried here so a member outside the org gets the org's
+   * real values. Optional: a server that predates it omits it. See
+   * src/lib/sync/project-org-policy.ts.
+   */
+  orgPolicy?: ProjectOrgPolicy
+  /** AQU-1771: each visibility floor as the org sets it, as this project sets it, and as enforced. */
+  visibilityFloors?: ProjectVisibilityFloors
+  /** AQU-2305: the import floor as the org sets it, as this project sets it, and as enforced. */
+  importFloor?: VisibilityFloorView
+  /** Lane rows. Optional: a server that predates AQU-1418 omits them. */
+  lanes?: ProjectLaneView[]
+}
+
+export interface ProjectLaneView {
+  id: string
+  role: "source" | "target"
+  /**
+   * AQU-1592: the freeform language the user typed, never derived. Null on a
+   * row that predates migration 0152, and absent from a server that predates
+   * it — read it through `laneLanguage` / `laneDisplayName`
+   * (src/lib/lanes/lane-display.ts), which fall back to `name`.
+   */
+  language?: string | null
+  /** Optional display override. Null means "display the language". */
+  name: string | null
+  /** Optional BCP 47 override. Null means "derive from the language on read". */
+  langCode: string | null
+  legacyTag: string | null
+  position: number
+  archivedAt: string | null
+  /**
+   * AQU-1954: does every file owe audio in this language? Off, a file counts
+   * this language's audio only once it has a recording in it. Absent from a
+   * server that predates migration 0173, which reads as off.
+   */
+  recordsAudio?: boolean
+  /**
+   * Media redesign slice 1: what this language delivers — Text, Audio, or
+   * Text and audio. Null is "not chosen yet" (a language that had "Records
+   * audio" on before this existed), which counts as before and asks for a
+   * choice. Absent from a server that predates migration 0187.
+   */
+  delivers?: LaneDelivers | null
 }
 
 export type PatchResult =
@@ -378,11 +661,241 @@ export type PatchResult =
   | { kind: "forbidden"; required: number; role: number }
   | { kind: "error"; status: number; message: string }
 
+/** The `{error}` an API refusal carries, or the raw body when it is not that. */
+function errorMessageFrom(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown }
+    if (typeof parsed?.error === "string" && parsed.error.trim()) return parsed.error
+  } catch {
+    /* not JSON — the body is the best message there is */
+  }
+  return body
+}
+
 function authHeaders(jwt: string): HeadersInit {
   return {
     "Content-Type": "application/json",
     Authorization: `Bearer ${jwt}`,
   }
+}
+
+export type RenameLaneResult =
+  | { kind: "ok"; lane: ProjectLaneView }
+  | { kind: "duplicate" }
+  /** AQU-1592: the code override is not a well-formed BCP 47 tag. */
+  | { kind: "malformed_code" }
+  | { kind: "error"; message: string }
+
+/**
+ * AQU-1592: a 400 from the lane endpoints names which field the server
+ * rejected. Only `malformed_code` gets its own message on the screen; every
+ * other problem stays the generic invalid-name path the UI already had.
+ */
+async function isMalformedCode(res: Response): Promise<boolean> {
+  if (res.status !== 400) return false
+  try {
+    const body = (await res.json()) as { error?: unknown }
+    return body.error === "malformed_code"
+  } catch {
+    return false
+  }
+}
+
+/**
+ * AQU-1592: the identity fields the languages screen may edit. Omit a field to
+ * leave it as it is; `null` on `name` or `code` clears that override.
+ */
+export interface LaneIdentityEdit {
+  name?: string | null
+  language?: string
+  code?: string | null
+}
+
+/** PATCH /api/v2/projects/:id/lanes/:laneId. Language-edit floor. */
+export async function renameProjectLane(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  edit: string | LaneIdentityEdit,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<RenameLaneResult> {
+  const patchBody: LaneIdentityEdit = typeof edit === "string" ? { name: edit } : edit
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}`,
+      {
+        method: "PATCH",
+        headers: authHeaders(jwt),
+        body: JSON.stringify(patchBody),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (res.status === 409) return { kind: "duplicate" }
+  if (await isMalformedCode(res)) return { kind: "malformed_code" }
+  if (!res.ok) {
+    return { kind: "error", message: `rename failed (${res.status})` }
+  }
+  const body = (await res.json()) as { lane: ProjectLaneView }
+  return { kind: "ok", lane: body.lane }
+}
+
+export type CreateLaneResult =
+  | { kind: "ok"; lane: ProjectLaneView }
+  | { kind: "duplicate" }
+  /** AQU-1592: the code override is not a well-formed BCP 47 tag. */
+  | { kind: "malformed_code" }
+  | { kind: "error"; message: string }
+
+/** POST /api/v2/projects/:id/lanes. Language-edit floor. */
+export async function createProjectLane(
+  jwt: string,
+  projectId: string,
+  /** AQU-1784: `allowDuplicateName` accepts a display name that duplicates an
+   *  active lane's — sent by the languages screen, which shows the collision
+   *  inline before the save. Omitted everywhere else, where a duplicate is
+   *  still refused with `{ kind: "duplicate" }`. */
+  input: {
+    name: string
+    language: string
+    code?: string | null
+    allowDuplicateName?: boolean
+    /** Media redesign slice 1: what the language delivers. Omitted, Text. */
+    delivers?: LaneDelivers
+  },
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<CreateLaneResult> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes`,
+      {
+        method: "POST",
+        headers: authHeaders(jwt),
+        body: JSON.stringify(input),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (res.status === 409) return { kind: "duplicate" }
+  if (await isMalformedCode(res)) return { kind: "malformed_code" }
+  if (!res.ok) return { kind: "error", message: `create failed (${res.status})` }
+  const body = (await res.json()) as { lane: ProjectLaneView }
+  return { kind: "ok", lane: body.lane }
+}
+
+export type SetLaneDeliversResult =
+  | { kind: "ok"; lane: ProjectLaneView | null }
+  /** The caller is below the project's language-edit floor. */
+  | { kind: "forbidden" }
+  | { kind: "error"; message: string }
+
+/** Media redesign slice 1: POST /api/v2/projects/:id/lanes/:laneId/delivers. */
+export async function setProjectLaneDelivers(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  delivers: LaneDelivers,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<SetLaneDeliversResult> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}/delivers`,
+      {
+        method: "POST",
+        headers: authHeaders(jwt),
+        body: JSON.stringify({ delivers }),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (res.status === 403) return { kind: "forbidden" }
+  if (!res.ok) return { kind: "error", message: `save failed (${res.status})` }
+  const body = (await res.json().catch(() => null)) as { lane?: ProjectLaneView } | null
+  return { kind: "ok", lane: body?.lane ?? null }
+}
+
+/** POST /api/v2/projects/:id/lanes/:laneId/archive. */
+export async function setProjectLaneArchived(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  archived: boolean,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<{ kind: "ok" } | { kind: "error"; message: string }> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}/archive`,
+      {
+        method: "POST",
+        headers: authHeaders(jwt),
+        body: JSON.stringify({ archived }),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (!res.ok) return { kind: "error", message: `archive failed (${res.status})` }
+  return { kind: "ok" }
+}
+
+/** AQU-1464: the newest target edit in one lane, as the archive dialog shows it. */
+export interface LaneLastChange {
+  /** Epoch milliseconds of the edit. */
+  at: number
+  /** The editing member's username, or null when the row records no editor. */
+  by: string | null
+}
+
+/**
+ * `lastChange: null` means the lane has genuinely never been edited — the
+ * server answered. An `error` means the lookup FAILED and the answer is
+ * unknown; callers must say so rather than rendering "no changes yet", which
+ * would read as a safe-to-archive signal the server never gave.
+ */
+export type LaneLastChangeResult =
+  | { kind: "ok"; lastChange: LaneLastChange | null }
+  | { kind: "error"; message: string }
+
+/**
+ * GET /api/v2/projects/:id/lanes/:laneId/last-change. Language-edit floor —
+ * the same one that guards archiving, so a Contributor gets 403 → `error`.
+ */
+export async function fetchLaneLastChange(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<LaneLastChangeResult> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}/last-change`,
+      { method: "GET", headers: authHeaders(jwt) },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (!res.ok) return { kind: "error", message: `last-change failed (${res.status})` }
+  let body: { lastChange?: { at?: unknown; by?: unknown } | null }
+  try {
+    body = (await res.json()) as typeof body
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  const raw = body.lastChange
+  if (!raw) return { kind: "ok", lastChange: null }
+  // Defend the formatter: a non-finite or non-positive stamp would render as an
+  // "Invalid date" or a 1970 date, which is worse than admitting we don't know.
+  const at = typeof raw.at === "number" ? raw.at : Number(raw.at)
+  if (!Number.isFinite(at) || at <= 0) return { kind: "ok", lastChange: null }
+  return { kind: "ok", lastChange: { at, by: typeof raw.by === "string" && raw.by ? raw.by : null } }
 }
 
 /**
@@ -450,12 +963,20 @@ export async function fetchProjectSettings(
 
 /**
  * PATCH /api/v2/projects/:id/settings. The HTTP handler replaces the entire
- * settings blob (no per-key merge) — send a complete blob. Per-key merge is
- * only available via the `useProjectSettings` hook and the Agent API
- * PatchSettings command. Caller must include `ifMatchVersion`; mismatched
- * version returns `{kind: "conflict", latest}`. Sub-PROJECT_LEAD callers get
- * `{kind: "forbidden", required, role}`.
+ * settings blob (no per-key merge). The four retired lane keys are omitted
+ * here; the server rejects a body that includes them and keeps the stored
+ * copies. Per-key merge is only available via the `useProjectSettings` hook
+ * and the Agent API PatchSettings command. Caller must include
+ * `ifMatchVersion`; mismatched version returns `{kind: "conflict", latest}`.
+ * Sub-PROJECT_LEAD callers get `{kind: "forbidden", required, role}`.
  */
+/** Drop the retired language keys. The server rejects a body that includes them. */
+function settingsForPatch(settings: ProjectWideSettings): ProjectWideSettings {
+  const next: ProjectWideSettings = { ...settings }
+  for (const key of RETIRED_LANE_SETTINGS_KEYS) delete next[key]
+  return next
+}
+
 export async function patchProjectSettings(
   jwt: string,
   projectId: string,
@@ -470,7 +991,7 @@ export async function patchProjectSettings(
       {
         method: "PATCH",
         headers: authHeaders(jwt),
-        body: JSON.stringify({ settings, ifMatchVersion }),
+        body: JSON.stringify({ settings: settingsForPatch(settings), ifMatchVersion }),
       },
     )
   } catch (e) {
@@ -494,6 +1015,57 @@ export async function patchProjectSettings(
     const body = (await res.json().catch(() => ({}))) as { required?: number; role?: number }
     return { kind: "forbidden", required: body.required ?? 500, role: body.role ?? 0 }
   }
+  // AQU-1943: the server's refusals carry `{error}`, and a settings refusal is
+  // now something a user has to read (the TTS cap names the limit and their
+  // actual count). Handing the raw JSON to a toast showed them the braces.
   const text = await res.text().catch(() => "")
-  return { kind: "error", status: res.status, message: text }
+  return { kind: "error", status: res.status, message: errorMessageFrom(text) }
+}
+
+/**
+ * AQU-2101: what the voice copy did.
+ * `saved` — the server accepted it. Apply the same copy locally.
+ * `unsaved` — the request never landed (network, 5xx, version conflict)
+ * after a few tries. Do not paint a local copy the server does not have.
+ * `refused` — the server rejected the body or the role. Same: leave local alone.
+ */
+export type SplitCastCopyStatus = "saved" | "unsaved" | "refused"
+
+const SPLIT_CAST_ATTEMPTS = 3
+
+function splitCastRefused(status: number): boolean {
+  return status === 400 || status === 403 || status === 422
+}
+
+/**
+ * AQU-2101: ask the server to copy each lane's cast of these rows onto the new
+ * narration pieces. The server holds every lane, including ones this client
+ * was not shown. `fileId` is how it checks the new pieces really were split
+ * from those rows.
+ */
+export async function postSplitCastCopies(
+  jwt: string,
+  projectId: string,
+  fileId: string,
+  splits: readonly { cellId: string; sameKindAsFirst: readonly string[] }[],
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<SplitCastCopyStatus> {
+  const body = JSON.stringify({ fileId, splits })
+  for (let attempt = 0; attempt < SPLIT_CAST_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(
+        `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/split-casts`,
+        {
+          method: "POST",
+          headers: authHeaders(jwt),
+          body,
+        },
+      )
+      if (res.ok) return "saved"
+      if (splitCastRefused(res.status)) return "refused"
+    } catch {
+      // A dropped request is worth another try. A refusal is not.
+    }
+  }
+  return "unsaved"
 }

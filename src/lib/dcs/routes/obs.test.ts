@@ -4,6 +4,8 @@ import { dcsCellId, dcsFileId } from "../cell-id"
 import { contentHash } from "../content-hash"
 import type { DcsCatalogEntry, DcsManifest } from "../types"
 
+const PROJECT_ID = "proj-1"
+
 const OBS_ENTRY: DcsCatalogEntry = {
   name: "en_obs",
   owner: "unfoldingWord",
@@ -63,11 +65,12 @@ describe("obsRoute parse()", () => {
     const out = obsRoute.parse({
       entry: OBS_ENTRY,
       manifest: OBS_MANIFEST,
+      projectId: PROJECT_ID,
       files: new Map([["content/01.md", STORY_01]]),
     })
     expect(out).toHaveLength(1)
     const file = out[0]
-    expect(file.fileId).toBe(dcsFileId("unfoldingWord/en_obs", "content/01.md"))
+    expect(file.fileId).toBe(dcsFileId(PROJECT_ID, "unfoldingWord/en_obs", "content/01.md"))
     expect(file.name).toBe("1. The Creation")
 
     expect(file.cells).toHaveLength(2)
@@ -94,6 +97,7 @@ describe("obsRoute parse()", () => {
       obsRoute.parse({
         entry: OBS_ENTRY,
         manifest: OBS_MANIFEST,
+        projectId: PROJECT_ID,
         files: new Map([["content/01.md", STORY_01]]),
       })
     const a = run()
@@ -106,6 +110,7 @@ describe("obsRoute parse()", () => {
     const out = obsRoute.parse({
       entry: OBS_ENTRY,
       manifest: OBS_MANIFEST,
+      projectId: PROJECT_ID,
       files: new Map([
         ["content/01.md", STORY_01],
         ["content/front/intro.md", "# Intro\n\nNot a story."],

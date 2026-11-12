@@ -26,12 +26,14 @@ import {
   planPct,
   planUnitExpectsAudio,
   planUnitIsNearlyComplete,
+  planUnitShowsWayToWork,
   planUnitLabel,
+  planUnitExpectsText,
   planUnitShortfall,
   planUnitStatus,
   type PlanUnit,
 } from "@/lib/plan/plan-status"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { UserChip } from "@/components/UserChip"
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { PlanBar, PlanRule } from "./PlanBar"
@@ -185,10 +187,12 @@ export const PlanRow = memo(function PlanRow({
   now,
   selected,
   showAudio,
+  textFiles,
   showStatus = false,
   onSelect,
   audioFiles,
   shortChapters,
+  frontMatterShort = false,
   onOpenShortfall,
   assignees,
 }: {
@@ -209,15 +213,27 @@ export const PlanRow = memo(function PlanRow({
    * count stands in, which is right for one row and wrong for a board.
    */
   audioFiles?: ReadonlySet<string>
+  /**
+   * AQU-955: files that carry text work, from `textFileIds` over the WHOLE
+   * board. Optional for the same reason `audioFiles` is; omitted, the unit's
+   * own expectation stands in.
+   */
+  textFiles?: ReadonlySet<string>
   /** Labels of the chapters still short, already ordered — e.g. ["12", "40"]. */
   shortChapters?: string[]
+  /**
+   * AQU-1493: the book's front matter is short too (its title or intro, or a
+   * line added above its first verse), which no chapter label covers.
+   */
+  frontMatterShort?: boolean
   /** Opens the editor at the first outstanding cell. Absent → plain text. */
   onOpenShortfall?: (unit: PlanUnit) => void
   assignees?: readonly PlanRowAssignee[]
 }) {
   const t = useT()
   const { locale } = useI18n()
-  const status = planUnitStatus(unit, now, audioFiles)
+  const hasText = textFiles ? textFiles.has(unit.fileId) : planUnitExpectsText(unit)
+  const status = planUnitStatus(unit, now, audioFiles, textFiles)
   const translated = planPct(unit.filledCount, unit.totalCount)
   const validated = planPct(unit.validatedCount, unit.totalCount)
   // AQU-1278: against the CUE SHEET on a dubbing project, whose cell count is
@@ -225,16 +241,27 @@ export const PlanRow = memo(function PlanRow({
   const audioTotal = planAudioTotal(unit)
   const recorded = planPct(unit.audioCount, audioTotal)
   const audioValidated = planPct(unit.audioValidatedCount, audioTotal)
-  const note = usePlanRowNote(unit, now, audioFiles)
+  const note = usePlanRowNote(unit, now, audioFiles, textFiles)
   const readoutTips = usePlanReadoutTips()
 
   const hasAudio = audioFiles ? audioFiles.has(unit.fileId) : planUnitExpectsAudio(unit)
-  const shortfall = planUnitShortfall(unit, hasAudio)
-  const nearly = planUnitIsNearlyComplete(unit, now, audioFiles)
+  const shortfall = planUnitShortfall(unit, hasAudio, hasText)
+  const nearly = planUnitIsNearlyComplete(unit, now, audioFiles, textFiles)
+  // AQU-1974: the ways to the remaining cells — the link, the chapter names —
+  // also belong to a unit marked done with work left in it.
+  const showsWayToWork = planUnitShowsWayToWork(unit, now, audioFiles, textFiles)
   const shortfallText = usePlanShortfallText(shortfall)
   // Null from the renderer means nothing is outstanding, which on a unit nobody
   // has marked done is itself the news — see `nothingLeft` in the catalog.
   const leftToDo = nearly ? (shortfallText ?? t("org.projectOverview.plan.nothingLeft")) : null
+  // AQU-1494 (Sam, 2026-10-03): a unit somebody marked done can have work in
+  // it again — a setting that counts headings, a line added, an edit that
+  // un-validated a cell. It stays in Done, because the mark is a person's
+  // decision and the board never takes it back on its own; but it no longer
+  // hides what came back. Same counts and words as every other row.
+  const doneWithWork = unit.doneAt != null && shortfallText !== null
+    ? t("org.projectOverview.plan.markedDoneWithWork", { work: shortfallText })
+    : null
 
   const label = planUnitLabel(unit)
   const nameCellRef = useRef<HTMLSpanElement>(null)
@@ -258,7 +285,7 @@ export const PlanRow = memo(function PlanRow({
   // click. Sam, 2026-09-16: a date is not a reason to withhold the way to the
   // work. `leftToDo` non-null is `nearlyComplete`; `shortfallText` non-null
   // rules out "Nothing left", which has no cell to land on.
-  const openable = leftToDo !== null && shortfallText !== null && onOpenShortfall !== undefined
+  const openable = showsWayToWork && shortfallText !== null && onOpenShortfall !== undefined
 
   // WHERE the outstanding cells are, named for any nearly-complete unit whose
   // chapters are known. Dated or not: a row three cells from finished is
@@ -273,7 +300,7 @@ export const PlanRow = memo(function PlanRow({
   // conjunction are locale business, and Intl already owns them.
   const chapterList = shortChapters ?? []
   let whereText: string | null = null
-  if (leftToDo !== null && shortfallText !== null && chapterList.length > 0) {
+  if (showsWayToWork && shortfallText !== null && chapterList.length > 0) {
     const named = chapterList.slice(0, WHERE_CHAPTERS_NAMED)
     const rest = chapterList.length - named.length
     // CONJUNCTION when the list is complete — "12 and 40" — and the plain unit
@@ -283,6 +310,15 @@ export const PlanRow = memo(function PlanRow({
     whereText = rest > 0
       ? t("org.projectOverview.plan.shortfallWhereMore", { count: rest, list })
       : t("org.projectOverview.plan.shortfallWhere", { count: chapterList.length, list })
+  }
+  // AQU-1493: front matter is not a chapter, so it is named in its own words,
+  // first because it comes first in the book. Without this a row whose open
+  // cells sat partly in a book's title or above its first verse named only
+  // chapters, and a row short only there named nothing.
+  if (showsWayToWork && shortfallText !== null && frontMatterShort) {
+    whereText = whereText
+      ? t("org.projectOverview.plan.shortfallWhereWithFrontMatter", { chapters: whereText })
+      : t("org.projectOverview.plan.frontMatter")
   }
 
   /** Two fragments under the separator a translator chose, or whichever exists. */
@@ -335,10 +371,10 @@ export const PlanRow = memo(function PlanRow({
   const openLabel = pair(leftToDo, openDestination)
 
   /**
-   * The shortfall as the row draws it: azure, and clickable when there is a
-   * cell to land on. One function because it renders on line 1 or line 2
-   * depending on whether the unit has a date, and the two must be the same
-   * thing — the same colour, the same testid, the same click.
+   * The shortfall as the row draws it: a link when there is a cell to land on.
+   * One function because it renders on line 1 or line 2 depending on whether
+   * the unit has a date, and the two must be the same thing — the same look,
+   * the same testid, the same click.
    *
    * NOT A <button>. The row is itself a button, and a button inside a button
    * is invalid HTML that React warns about and that some browsers un-nest
@@ -348,15 +384,17 @@ export const PlanRow = memo(function PlanRow({
    * selecting the row: this link means "take me to the work", not "tell me
    * more about it".
    */
-  const shortfallNode = (text: string) => {
+  const shortfallNode = (text: string, toneClass?: string) => {
     const node = (
     <span
-      // Azure, the same rung the "Go to first…" link in the inspector uses:
-      // the mockup draws the shortfall as a link, and in the foreground colour
-      // it only admitted to being clickable on hover.
-      className={`font-medium ${PLAN_TONE.in_progress.text}${
+      // The mockup draws the shortfall as a link. It was azure, until that
+      // blue went to the progress bars (AQU-1764); in the text colour it now
+      // carries a standing underline, the same look as the inspector's "Go to
+      // first…" link, because without one it only admitted to being clickable
+      // on hover. Inside the amber done-with-work line it keeps the amber.
+      className={`font-medium ${toneClass ?? "text-foreground"}${
         openable
-          ? " cursor-pointer rounded-sm underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          ? ` cursor-pointer rounded-sm underline ${toneClass ? "decoration-current/40 hover:decoration-current focus-visible:decoration-current" : "decoration-foreground/40 hover:decoration-foreground focus-visible:decoration-foreground"} underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring`
           : ""
       }`}
       role={openable ? "button" : undefined}
@@ -383,7 +421,8 @@ export const PlanRow = memo(function PlanRow({
     // fact; that it is also a way to the first unrecorded take is not obvious
     // from the words, and the aria-label above is for readers who cannot see
     // the pointer change (Sam, 2026-09-17). Only an openable node gets one —
-    // "Nothing left" goes nowhere and should not promise to.
+    // "Nothing left" goes nowhere and should not promise to. AQU-2260 keeps
+    // it: the hover NAMES what the click does, which a hover may do.
     return openable && openDestination
       ? <AppTooltip content={openDestination}>{node}</AppTooltip>
       : node
@@ -400,6 +439,27 @@ export const PlanRow = memo(function PlanRow({
    * " · " here would be untranslated copy in a .tsx.
    */
   const line2Node: ReactNode = (() => {
+    // Amber, the board's "needs attention" colour, in place of "marked <date>":
+    // the date is in the side panel, and this is the line that changed.
+    if (doneWithWork !== null && shortfallText !== null) {
+      // AQU-1974: "Marked done · <3 cells to validate> · chapters 12 and 40",
+      // the count a link to the first of them, like any other row's. The
+      // templates are rendered around the sentinel and split on it, as below,
+      // so the words and separators stay the translator's.
+      const [before, after] = t("org.projectOverview.plan.markedDoneWithWork", { work: PAIR_SLOT }).split(PAIR_SLOT)
+      const marked = <>{before}{shortfallNode(shortfallText, PLAN_TONE.soon.text)}{after}</>
+      const [lead, tail] = whereText
+        ? t("org.projectOverview.plan.shortfallPair", { first: PAIR_SLOT, second: whereText }).split(PAIR_SLOT)
+        : ["", ""]
+      return (
+        <span
+          className={`font-medium ${PLAN_TONE.soon.text}`}
+          data-testid={`plan-done-with-work-${unit.fileId}-${unit.sectionKey}`}
+        >
+          {lead}{marked}{tail}
+        </span>
+      )
+    }
     if (line2Shortfall === null) return line2Text ?? "—"
     const node = shortfallNode(line2Shortfall)
     if (line2Text === null) return node
@@ -445,17 +505,9 @@ export const PlanRow = memo(function PlanRow({
                 className="shrink-0 -space-x-1.5 *:data-[slot=avatar]:ring-background"
                 aria-label={t("org.projectOverview.plan.assignedTo")}
               >
-                {assignees.slice(0, shown).map((a) => {
-                  // A username is nullable on the wire. The numeric id is a poor
-                  // label but an honest one, and it still colours and initials
-                  // deterministically, so the same person keeps the same chip.
-                  const name = a.username ?? `#${a.userId}`
-                  return (
-                    <AppTooltip key={a.userId} content={name}>
-                      <InitialsAvatar name={name} size="xs" />
-                    </AppTooltip>
-                  )
-                })}
+                {assignees.slice(0, shown).map((a) => (
+                  <UserChip key={a.userId} userId={a.userId} username={a.username} avatarOnly size="xs" />
+                ))}
                 {overflow > 0 && (
                   <AvatarGroupCount
                     className="size-5 text-[9px] font-semibold"
@@ -489,15 +541,23 @@ export const PlanRow = memo(function PlanRow({
         </span>
 
         <span className="flex flex-col gap-1.5">
-          <PlanBar
-            label={t("org.projectOverview.plan.textBarLabel")}
-            outer={translated}
-            inner={validated}
-            tone="text"
-            aria={t("org.projectOverview.plan.textBarsAria", { translated, validated })}
-            tips={readoutTips("text", unit.filledCount, unit.validatedCount, unit.totalCount)}
-          />
-          {showAudio && (
+          {/* AQU-955: an audio-only file has no text bar. Pinned at 0% it was
+              not a neutral extra — it was the only bar a PM could see on the
+              row, and it said the book had not been started. */}
+          {hasText && (
+            <PlanBar
+              label={t("org.projectOverview.plan.textBarLabel")}
+              outer={translated}
+              inner={validated}
+              tone="text"
+              aria={t("org.projectOverview.plan.textBarsAria", { translated, validated })}
+              tips={readoutTips("text", unit.filledCount, unit.validatedCount, unit.totalCount)}
+            />
+          )}
+          {/* AQU-1954 (Sam, 2026-10-14): only on a row whose file carries
+              audio. A 0% bar under a book of a file nobody records said the
+              book was behind on audio while its status, rightly, ignored it. */}
+          {showAudio && hasAudio && (
             <PlanBar
               label={t("org.projectOverview.plan.audioBarLabel")}
               outer={recorded}

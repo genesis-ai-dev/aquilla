@@ -97,8 +97,12 @@ function toFold(e: PersistedEvent): FoldEvent {
 }
 
 // Bulk-insert fold rows into a fresh PGlite, then run the same counter pass.
-async function buildFold(db: TestDb, events: PersistedEvent[]): Promise<void> {
-  const rows = foldProjection(events.map(toFold))
+async function buildFold(
+  db: TestDb,
+  events: PersistedEvent[],
+  legacyEmptyLaneId?: string | null,
+): Promise<void> {
+  const rows = foldProjection(events.map(toFold), { legacyEmptyLaneId })
   for (const [table, list] of Object.entries(rows)) {
     for (const row of list as Array<Record<string, unknown>>) {
       const cols = Object.keys(row)
@@ -124,13 +128,24 @@ function normalize(table: string, rows: Array<Record<string, unknown>>): string 
   return JSON.stringify(clean, null, 2)
 }
 
-async function assertParity(events: PersistedEvent[]): Promise<void> {
+async function assertParity(
+  events: PersistedEvent[],
+  legacyEmptyLaneId?: string,
+): Promise<void> {
   const ref = await makeTestDb()
   const fold = await makeTestDb()
   try {
+    if (legacyEmptyLaneId) {
+      for (const db of [ref, fold]) {
+        await db.pg.query(
+          `INSERT INTO lanes (id, project_id, role, legacy_tag, position) VALUES ($1, $2, 'target', '', 0)`,
+          [legacyEmptyLaneId, PROJECT],
+        )
+      }
+    }
     await replayCanonical(ref.db, events)
-    await buildFold(fold, events)
-    for (const table of ["cells", "cell_validators", "files", "comments"]) {
+    await buildFold(fold, events, legacyEmptyLaneId)
+    for (const table of ["cells", "cell_validators", "files", "comments", "concepts"]) {
       const a = normalize(table, await ref.rows(table))
       const b = normalize(table, await fold.rows(table))
       expect(b, `table ${table} diverged from canonical`).toBe(a)
@@ -219,5 +234,45 @@ describe("foldProjection parity with canonical replay", () => {
       }
     }
     await assertParity(events)
+  })
+
+  it("term events stamp a missing laneId with the legacy empty lane and keep one that is set", async () => {
+    const empty = "aaaaaaaa"
+    const create = ev({
+      kind: "term.create",
+      payload: {
+        conceptId: "cpt-1",
+        sourceTerm: "grace",
+        status: "active",
+        renderings: [
+          { rendering: "favor", status: "preferred" },
+          { rendering: "gracia", status: "preferred", laneId: "bbbbbbbb" },
+        ],
+      },
+    })
+    const update = ev({
+      kind: "term.update",
+      payload: {
+        conceptId: "cpt-1",
+        renderings: [
+          { rendering: "favour", status: "admitted" },
+          { rendering: "gracia", status: "forbidden", laneId: "bbbbbbbb" },
+        ],
+      },
+    })
+    await assertParity([create, update], empty)
+  })
+
+  it("term events leave laneId unset when the project has no empty lane", async () => {
+    const create = ev({
+      kind: "term.create",
+      payload: {
+        conceptId: "cpt-2",
+        sourceTerm: "covenant",
+        status: "draft",
+        renderings: [{ rendering: "alliance", status: "preferred" }],
+      },
+    })
+    await assertParity([create])
   })
 })

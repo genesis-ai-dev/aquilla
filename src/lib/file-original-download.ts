@@ -20,7 +20,7 @@ function toastOriginalError(err: unknown): void {
   })
 }
 
-/** Click handler: same shape as `exportSourceFile` (mint → fetch → blob save). */
+/** Click handler: mint a token → fetch → blob save. */
 export async function downloadImportedOriginal(args: {
   projectId: string
   file: { id: string; name: string; type: string; originalName?: string }

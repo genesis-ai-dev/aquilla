@@ -57,21 +57,34 @@ if (command === process.env.PUSH_TEST_FAIL) process.exit(17)
 }
 
 describe("pre-push validation", () => {
-  it("runs only the secret scan and affected E2E with clean Git variables", () => {
+  it("checks the worktree install, then scans secrets and runs affected E2E", () => {
     const { result, entries, commands } = push()
     expect(result.status, result.stderr).toBe(0)
     expect(entries.every(({ gitDir, gitWorkTree, gitIndex }) =>
       gitDir === undefined && gitWorkTree === undefined && gitIndex === undefined,
     )).toBe(true)
-    expect(commands).toEqual(["run scan:secrets", "run test:e2e:affected"])
+    expect(commands).toEqual([
+      "exec tsx scripts/assert-worktree-node-modules.ts",
+      "run scan:secrets",
+      "run test:e2e:affected",
+    ])
     expect(entries.at(-1)?.refs).toBe("refs/heads/feature abc refs/heads/feature def")
     expect(commands.join("\n")).not.toMatch(/build:workers-build|deploy:/)
+  })
+
+  it("blocks the push when the worktree node_modules check fails", () => {
+    const { result, commands } = push("exec tsx scripts/assert-worktree-node-modules.ts")
+    expect(result.status).toBe(17)
+    expect(commands).toEqual(["exec tsx scripts/assert-worktree-node-modules.ts"])
   })
 
   it("blocks tests and the push when credential scanning fails", () => {
     const { result, commands } = push("run scan:secrets")
     expect(result.status).toBe(17)
-    expect(commands).toEqual(["run scan:secrets"])
+    expect(commands).toEqual([
+      "exec tsx scripts/assert-worktree-node-modules.ts",
+      "run scan:secrets",
+    ])
   })
 
   it("preserves a failing affected E2E exit status", () => {

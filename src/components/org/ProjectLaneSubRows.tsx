@@ -1,10 +1,12 @@
 // AQU-538 §3.2 — expanded per-lane detail for an OrgHome project row.
 //
-// One sub-row per lane: lane label | translated % (bar) | validated % | last
-// activity (short calendar date, datetime on hover) | actions. Actions:
+// One sub-row per lane: lane label | translated % (bar) | text validated % /
+// audio validated % (AQU-2179) | last activity (short calendar date, datetime
+// on hover) | actions. Actions:
 //   Open   → the workspace at that lane (/project/:id/editor?lane=<tag>)
 //   Assign → AssignModal pre-scoped to the lane (via OrgLaneAssignModal)
-//   Staff  → StaffLanePopover (add-person-to-lane in one gesture)
+//   Staff  → StaffLanePopover (put a person on the lane in one gesture, and
+//            — AQU-1998 — take one of the people already on it off again)
 //
 // Rendered inside DataTable's `renderSubRow` slot, so the outer element is a
 // TableRow whose single full-width cell hosts the lane grid.
@@ -15,16 +17,23 @@ import { TableCell, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { StaffLanePopover } from "@/components/StaffLanePopover"
 import {
-  laneTranslatedPct,
+  laneAudioValidatedPct,
+  laneDeliversAudioOnly,
+  laneOwesAudio,
+  laneStartedPct,
+  laneTextValidatedPct,
   laneValidatedPct,
   type PortfolioLane,
 } from "@/lib/frontier/portfolio"
 import { laneChipLabel, safePct } from "./project-lanes"
+import { textProgressSegments } from "@/lib/progress/progress-palette"
+import { ProgressSplitBar } from "@/components/progress/ProgressSplitBar"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 
 export interface ProjectLaneSubRowsProps {
   projectId: string
+  projectName?: string | null
   lanes: PortfolioLane[]
   defaultLaneLabel: string
   colSpan: number
@@ -35,14 +44,15 @@ export interface ProjectLaneSubRowsProps {
   onStaffed?: () => void
 }
 
-function laneOpenTo(projectId: string, lane: string): string {
-  return lane
-    ? `/project/${projectId}/editor?lane=${encodeURIComponent(lane)}`
-    : `/project/${projectId}/editor`
+function laneOpenTo(projectId: string, lane: { lane: string; laneId?: string | null }): string {
+  const key = lane.laneId || lane.lane
+  if (!key) return `/project/${projectId}/editor?lane=`
+  return `/project/${projectId}/editor?lane=${encodeURIComponent(key)}`
 }
 
 export function ProjectLaneSubRows({
   projectId,
+  projectName,
   lanes,
   defaultLaneLabel,
   colSpan,
@@ -59,30 +69,63 @@ export function ProjectLaneSubRows({
       <TableCell colSpan={colSpan} className="bg-muted/20 p-0">
         <div className="divide-y">
           {lanes.map((lane) => {
-            const label = laneChipLabel(lane.lane, defaultLaneLabel, t("org.projectOverview.laneDefaultFallback"))
-            const tpct = safePct(laneTranslatedPct(lane))
+            const label = laneChipLabel(lane.lane, defaultLaneLabel, t("org.projectOverview.laneDefaultFallback"), lane.name)
+            // Media redesign slice 1: an Audio language reads its recorded share.
+            const tpct = safePct(laneStartedPct(lane))
+            // The bar keeps the language's DONE share (AQU-2167), unchanged.
             const vpct = safePct(laneValidatedPct(lane))
+            // AQU-2179: the printed figure splits into the two halves the
+            // project overview's Languages table prints (AQU-2178), measured
+            // the same way, so the two surfaces cannot disagree about one
+            // language. A row shows only the halves its language owes.
+            const owesAudio = laneOwesAudio(lane)
+            const deliversText = !laneDeliversAudioOnly(lane)
             const lastEdit = lane.lastEditAt
             return (
               <div
-                key={lane.lane || "__default__"}
+                key={lane.laneId || lane.lane || "__default__"}
                 data-testid={`project-lane-row-${projectId}-${lane.lane}`}
                 className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 text-sm"
               >
                 <span className="min-w-[6rem] font-medium">{label}</span>
 
                 <span className="flex min-w-[9rem] flex-1 items-center gap-2">
-                  <span className="h-1.5 w-full max-w-[8rem] overflow-hidden rounded-full bg-muted" aria-hidden>
-                    <span className="block h-full rounded-full bg-primary" style={{ width: `${tpct}%` }} />
-                  </span>
-                  <span className="tabular-nums text-muted-foreground" aria-label={t("org.orgHome.pctTranslated", { pct: tpct })}>
+                  {/* AQU-1764: the shared two-part bar — validated, then
+                      translated but not validated — ending at the translated
+                      figure beside it; the validated figure follows. */}
+                  <ProgressSplitBar
+                    segments={textProgressSegments({ validated: vpct, translated: tpct, total: 100 })}
+                    height={6}
+                    className="w-full max-w-[8rem]"
+                  />
+                  <span
+                    className="tabular-nums text-muted-foreground"
+                    aria-label={
+                      laneDeliversAudioOnly(lane)
+                        ? t("org.orgHome.pctRecorded", { pct: tpct })
+                        : t("org.orgHome.pctTranslated", { pct: tpct })
+                    }
+                  >
                     {tpct}%
                   </span>
                 </span>
 
-                <span className="tabular-nums text-muted-foreground" aria-label={t("org.orgHome.pctValidated", { pct: vpct })}>
-                  {t("org.orgHome.pctValidated", { pct: vpct })}
-                </span>
+                {deliversText && (
+                  <span
+                    className="tabular-nums text-muted-foreground"
+                    data-testid={`project-lane-text-validated-${projectId}-${lane.lane}`}
+                  >
+                    {t("org.orgHome.pctTextValidated", { pct: safePct(laneTextValidatedPct(lane)) })}
+                  </span>
+                )}
+                {owesAudio && (
+                  <span
+                    className="tabular-nums text-muted-foreground"
+                    data-testid={`project-lane-audio-validated-${projectId}-${lane.lane}`}
+                  >
+                    {t("org.orgHome.pctAudioValidated", { pct: safePct(laneAudioValidatedPct(lane)) })}
+                  </span>
+                )}
 
                 <span className="min-w-[6rem] text-xs text-muted-foreground">
                   {lastEdit != null
@@ -92,7 +135,7 @@ export function ProjectLaneSubRows({
 
                 <span className="ms-auto flex items-center gap-1.5">
                   <Button
-                    render={<Link to={laneOpenTo(projectId, lane.lane)} />}
+                    render={<Link to={laneOpenTo(projectId, lane)} />}
                     size="xs"
                     variant="outline"
                   >
@@ -110,7 +153,9 @@ export function ProjectLaneSubRows({
                   <StaffLanePopover
                     projectId={projectId}
                     lane={lane.lane}
+                    laneId={lane.laneId}
                     laneLabel={label}
+                    projectName={projectName}
                     orgId={orgId}
                     onDone={onStaffed}
                     trigger={

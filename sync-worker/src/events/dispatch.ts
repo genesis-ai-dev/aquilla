@@ -20,7 +20,13 @@ import { handleFileRename } from './handlers/file-rename'
 import { handleFileVideoSet } from './handlers/file-video-set'
 import { handleFileTimingSet } from './handlers/file-timing-set'
 import { handleFileCorpusSet } from './handlers/file-corpus-set'
+import { handleFileReorder } from './handlers/file-reorder'
+import { handleFileExtensionSet } from './handlers/file-extension-set'
 import { handleFileTrackSet } from './handlers/file-track-set'
+import {
+  handleFileMilestoneRemove,
+  handleFileMilestoneSet,
+} from './handlers/file-milestone-events'
 import { handleFileDelete, handleFileRestore } from './handlers/file-delete-restore'
 import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
 import { handleTermEvent, type TermEventKind } from './handlers/term-events'
@@ -77,6 +83,8 @@ export function dispatchEvent(
     case 'source.cell.reorder':
     case 'source.cell.metadata.patch':
     case 'source.cell.reanchor':
+    case 'source.cell.visibility.set':
+    case 'source.cell.restore':
     case 'target.cell.create':
     case 'target.cell.commit':
     case 'target.cell.delete':
@@ -90,11 +98,15 @@ export function dispatchEvent(
     case 'cell.audio.remove':
     case 'cell.audio.rename':
     case 'cell.audio.trim':
+    case 'cell.audio.gain':
     case 'cell.audio.place':
+    case 'cell.audio.cut':
     case 'cell.audio.measure':
     case 'cell.audio.validate':
     case 'cell.audio.unvalidate':
     case 'cell.link.set':
+    case 'cell.attachment.add':
+    case 'cell.attachment.remove':
       return {
         ok: true,
         result: handleCellEvent(
@@ -182,12 +194,53 @@ export function dispatchEvent(
         ),
       }
 
+    case 'file.extension.set':
+      return {
+        ok: true,
+        result: handleFileExtensionSet(
+          db,
+          authed as AuthorizedEvent<'file.extension.set'>,
+          serverTs,
+          opts.serverSeq,
+        ),
+      }
+
+    case 'file.reorder':
+      return {
+        ok: true,
+        result: handleFileReorder(
+          db,
+          authed as AuthorizedEvent<'file.reorder'>,
+          serverTs,
+          opts.serverSeq,
+        ),
+      }
+
     case 'file.track.set':
       // The only handler that validates a payload shape, so the only one that
       // can refuse — it returns the outcome itself rather than a bare result.
       return handleFileTrackSet(
         db,
         authed as AuthorizedEvent<'file.track.set'>,
+        serverTs,
+        opts.serverSeq,
+      )
+
+    case 'file.milestone.set':
+      // AQU-2308. Like file.track.set, these two validate their payload and so
+      // return the outcome themselves: a blank name or an unusable id must come
+      // back as a per-event refusal, not a throw that 500s the whole POST.
+      return handleFileMilestoneSet(
+        db,
+        authed as AuthorizedEvent<'file.milestone.set'>,
+        serverTs,
+        opts.serverSeq,
+      )
+
+    case 'file.milestone.remove':
+      return handleFileMilestoneRemove(
+        db,
+        authed as AuthorizedEvent<'file.milestone.remove'>,
         serverTs,
         opts.serverSeq,
       )
@@ -222,7 +275,9 @@ export function dispatchEvent(
       }
 
     case 'cell.backtranslation.set':
+    case 'cell.gloss.set':
     case 'cast.assign':
+    case 'cell.label.set':
     case 'cell.retime':
     case 'cell.lane.retime':
     case 'source.cell.mirror':
@@ -276,6 +331,12 @@ export function dispatchEvent(
       }
       return { ok: true, result: { stmts: [], eventFrame: linkFrame, dirtyTables: [] } }
     }
+
+    case 'file.revision':
+      // AQU-2459: written by the revisions route in-process (it calls
+      // buildEventProjectionStmts directly). A client cannot mint one — its
+      // manifest is in R2 and its cells projection is set-based there.
+      return { ok: false, status: 400, reason: 'file.revision is written by the revisions route, not POST /events' }
 
     default: {
       // Exhaustiveness check.

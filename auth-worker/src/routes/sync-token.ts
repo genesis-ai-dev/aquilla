@@ -5,7 +5,7 @@
 // Request: { projectId, fileId } + Bearer JWT.
 // Response: { token, expiresIn: 900, role: { level, name, source } }.
 //
-// Token claims must match apps/sync/src/auth.ts SyncTokenClaims:
+// Token claims must match sync-worker/src/auth.ts SyncTokenClaims:
 //   { userId, username, projectId, fileId, role, aud: "sync", iat, exp }
 // Signed HS256 with SYNC_SECRET_KEY (distinct from SECRET_KEY).
 //
@@ -27,6 +27,7 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware } from "../middleware/auth"
+import { hasActiveElevation } from "../middleware/platform-admin"
 import type { AuthHonoEnv } from "../middleware/auth"
 import type { SyncTokenResponse } from "../types"
 import { isPathSafeId, mintSyncTokenForUser } from "../services/sync-token-mint"
@@ -66,7 +67,27 @@ syncToken.post(
     const user = c.get("user")
     const { projectId, fileId } = c.req.valid("json")
 
-    const minted = await mintSyncTokenForUser(c.env, user, projectId, fileId)
+    // OPS-44: a mint whose only grant path is platform-admin power needs the
+    // same step-up elevation AQU-1322 demands for grant-management writes.
+    // The resulting token carries `src: "platform"`, which the sync-worker
+    // exempts from its live membership re-check (events/route.ts) and from
+    // the lane read wall (events/lane-read-wall.ts) — so this one mint reaches
+    // further than anything the admin console's own gate protects.
+    //
+    // AQU-2003: reads are reopened. An un-elevated platform-only caller now
+    // gets a Viewer (100) token instead of a 403, so a platform admin can open
+    // another tenant's project read-only (Ryder + Matthew, 2026-10-16).
+    // User-content writes are refused by the sync-worker's role floors plus an
+    // explicit rule in events/authorize.ts (a platform token below Contributor
+    // writes nothing, whatever an org's floors say). The one exception is the
+    // link-sync trigger, which any genuine Viewer can also fire and which
+    // writes only server-authored mirror data. The step-up code re-mints at
+    // the full platform level. The elevation_required arm below remains for a
+    // failed genuine-role lookup.
+    const minted = await mintSyncTokenForUser(c.env, user, projectId, fileId, {
+      platformElevated: await hasActiveElevation(c),
+      platformViewWithoutElevation: true,
+    })
     if (minted.ok) {
       const response: SyncTokenResponse = {
         token: minted.token,
@@ -105,6 +126,15 @@ syncToken.post(
       // but the mint core's union requires the case.
       case "unsafe_id":
         return c.json({ error: "projectId or fileId contains unsafe characters" }, 400)
+      // OPS-44: platform-admin power was the only grant path and this session
+      // is not elevated. 403 rather than 503: this is a genuine permission
+      // answer (elevate, then retry), not the transient DB blip AQU-996
+      // reserves 503 for.
+      case "elevation_required":
+        return c.json(
+          { error: "elevation required to mint a project sync token with platform-admin access" },
+          403,
+        )
     }
   },
 )

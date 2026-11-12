@@ -17,8 +17,13 @@
  *    `editEventId` from the payload as `lastEditEventId` if a later commit
  *    didn't already overwrite it. Idempotent (set semantics).
  *  - cell.unvalidate: removes the author from `activeValidators`.
- *  - cell.waive: upserts a RuleWaiver for the payload `ruleId` (set semantics
- *    keyed by ruleId). cell.unwaive removes it. Unlike validators, a waiver is
+ *  - AQU-2296: the same three rules apply to `validatorDecidedTs` (username →
+ *    when they voted): a validate stamps the event's own clock, an unvalidate
+ *    drops that name, and a commit clears the lot with the approvals.
+ *  - cell.waive: upserts a RuleWaiver (set semantics keyed by
+ *    (ruleId, matchHash) — AQU-1740, matching the projection's primary key, so
+ *    waiving a second finding of the same rule does not replace the first).
+ *    cell.unwaive removes the one with that key. Unlike validators, a waiver is
  *    NOT cleared by a new commit — it stays until explicitly unwaived.
  *
  * Events are applied in `enqueuedAt` order so out-of-order user actions resolve
@@ -28,6 +33,7 @@
 
 import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
 import type { RuleWaiver } from "@/lib/parsers/types"
+import { waiverKey } from "@/lib/rules/waivers"
 import type { OutboxRecord } from "./outbox"
 import type { CqrsEventKind, CqrsPayloadFor } from "./outbox-types"
 
@@ -36,7 +42,22 @@ export interface OverlayInput {
   /** Outbox records, oldest-first. Caller passes only events scoped to the
    *  file in question; the helper does not filter by fileId. */
   pending: ReadonlyArray<OutboxRecord>
+  /** AQU-1506: the active target lane ('' = default). A queued commit or
+   *  validate belongs to one lane's row, so it may only overlay that lane's
+   *  view — otherwise a pending validate on `fr` reads as "you validated this"
+   *  on the default lane, the same wrong answer the server read used to give.
+   *  Waivers are deliberately exempt: `cell_waivers` has no lane column, so a
+   *  waiver is per cell and applies in every lane. */
+  lane?: string
 }
+
+/** Event kinds whose outbox record describes ONE lane's target row. */
+const LANE_SCOPED_KINDS: ReadonlySet<string> = new Set([
+  "target.cell.create",
+  "target.cell.commit",
+  "cell.validate",
+  "cell.unvalidate",
+])
 
 export function applyOutboxOverlay(
   input: OverlayInput,
@@ -46,18 +67,32 @@ export function applyOutboxOverlay(
   // also lets downstream audit diffs skip untouched cells by identity.
   const out = new Map(input.base)
   const owned = new Set<string>()
+  const lane = input.lane ?? ""
 
   for (const rec of input.pending) {
     const ev = rec.event
     const cellId = ev.cellId
     if (!cellId) continue
 
+    // Skip before the stub below is synthesized: an off-lane event must leave
+    // no trace on this lane's map at all. `targetLang` is omitted on the wire
+    // for the default lane, so absent means ''.
+    if (LANE_SCOPED_KINDS.has(ev.kind)) {
+      const evLane = (ev.payload as { targetLang?: string } | undefined)?.targetLang ?? ""
+      if (evLane !== lane) continue
+    }
+
     // Synthesize a stub for cells the user touched offline before the projection
     // ever caught up — keeps the map consistent for callers that just lookup by
     // cellId.
     let stats = out.get(cellId)
     if (stats && !owned.has(cellId)) {
-      stats = { ...stats, activeValidators: [...stats.activeValidators], waivers: [...stats.waivers] }
+      stats = {
+        ...stats,
+        activeValidators: [...stats.activeValidators],
+        validatorDecidedTs: { ...stats.validatorDecidedTs },
+        waivers: [...stats.waivers],
+      }
       out.set(cellId, stats)
     }
     owned.add(cellId)
@@ -69,6 +104,7 @@ export function applyOutboxOverlay(
         lastEditAt: null,
         lastEditEventId: null,
         activeValidators: [],
+        validatorDecidedTs: {},
         waivers: [],
       }
       out.set(cellId, stats)
@@ -81,6 +117,8 @@ export function applyOutboxOverlay(
       // New edit drops prior approvals — server-side projection works the same way:
       // cells.validated is recomputed against the *current* edit_event_id.
       stats.activeValidators = []
+      // AQU-2296: the stamps belong to the approvals that just lapsed.
+      stats.validatorDecidedTs = {}
     } else if (ev.kind === "cell.validate") {
       const p = ev.payload as CqrsPayloadFor<"cell.validate">
       // If the commit happened earlier in the outbox we already wrote
@@ -93,6 +131,9 @@ export function applyOutboxOverlay(
         if (!stats.activeValidators.includes(ev.author)) {
           stats.activeValidators.push(ev.author)
         }
+        // AQU-2296: the queued event's own clock, so the popover shows the
+        // date at once rather than waiting for the server's `decided_ts`.
+        stats.validatorDecidedTs = { ...stats.validatorDecidedTs, [ev.author]: ev.clientTs }
       }
     } else if (ev.kind === "cell.unvalidate") {
       const p = ev.payload as CqrsPayloadFor<"cell.unvalidate">
@@ -100,24 +141,124 @@ export function applyOutboxOverlay(
         stats.activeValidators = stats.activeValidators.filter(
           (u) => u !== ev.author,
         )
+        const { [ev.author]: _withdrawn, ...keptStamps } = stats.validatorDecidedTs ?? {}
+        stats.validatorDecidedTs = keptStamps
       }
     } else if (ev.kind === "cell.waive") {
       const p = ev.payload as CqrsPayloadFor<"cell.waive">
-      // Set semantics by ruleId: a re-waive replaces the prior entry.
+      // Set semantics by (ruleId, matchHash): a re-waive of the SAME finding
+      // replaces its entry; a waive of another finding of the same rule adds a
+      // second one, exactly as the projection's primary key does.
+      const key = waiverKey(p.ruleId, p.matchHash)
       const next: RuleWaiver = {
         ruleId: p.ruleId,
+        ...(p.matchHash ? { matchHash: p.matchHash } : {}),
         waivedAt: new Date(ev.clientTs).toISOString(),
         waivedBy: ev.author,
         ...(p.reason ? { reason: p.reason } : {}),
       }
-      stats.waivers = [...stats.waivers.filter((w) => w.ruleId !== p.ruleId), next]
+      stats.waivers = [
+        ...stats.waivers.filter((w) => waiverKey(w.ruleId, w.matchHash) !== key),
+        next,
+      ]
     } else if (ev.kind === "cell.unwaive") {
       const p = ev.payload as CqrsPayloadFor<"cell.unwaive">
-      stats.waivers = stats.waivers.filter((w) => w.ruleId !== p.ruleId)
+      const key = waiverKey(p.ruleId, p.matchHash)
+      stats.waivers = stats.waivers.filter(
+        (w) => waiverKey(w.ruleId, w.matchHash) !== key,
+      )
     }
   }
 
   return out
+}
+
+
+// ── Post-flush shadow ──
+//
+// The overlay above lives exactly as long as the outbox record does. The
+// flusher deletes the record the instant `POST /events` succeeds, but the
+// server stats map only learns about the event from a LATER targeted refetch
+// (`revalidateCellStats`) — validate/unvalidate cannot be derived from the
+// POST response the way commits are (see `flush-applied.ts`). Between the
+// delete and that refetch landing, the pill drew the pre-click server state:
+// validated → unvalidated → validated, a flash as wide as one GET round trip.
+//
+// A shadow bridges that window the way `optimisticEditsRef` does for cell
+// text: when a cell's last pending record leaves the outbox, its overlaid
+// stats entry is pinned until the base map's entry for that cell is replaced
+// (any refetch, targeted or full, swaps in a fresh object). A record that left
+// because it was QUARANTINED (status `failed`) is never shadowed — the server
+// refused it, and the base state is the truth (AQU-274).
+
+export interface FlushShadow {
+  /** The overlaid entry as it read the moment before the record was deleted. */
+  stats: CellAuditStats
+  /** `base.get(cellId)` at that moment; the shadow clears when this changes. */
+  baseAtFlush: CellAuditStats | undefined
+}
+
+export type FlushShadowState = ReadonlyMap<string, FlushShadow>
+
+export interface ReconcileFlushShadowsInput {
+  base: ReadonlyMap<string, CellAuditStats>
+  /** Pending (non-quarantined) records, as passed to `applyOutboxOverlay`. */
+  pending: ReadonlyArray<OutboxRecord>
+  /** Cells with a `failed` record right now: their disappearance from
+   *  `pending` was a refusal, not a flush. */
+  failedCellIds: ReadonlySet<string>
+  /** `applyOutboxOverlay` result for this `base` + `pending`. */
+  overlaid: ReadonlyMap<string, CellAuditStats>
+  /** Cells that had a pending record on the previous call. */
+  prevPendingCellIds: ReadonlySet<string>
+  /** The previous call's `overlaid` map — the values a flushed cell showed. */
+  prevOverlaid: ReadonlyMap<string, CellAuditStats> | null
+  prev: FlushShadowState
+}
+
+export interface ReconcileFlushShadowsResult {
+  shadows: FlushShadowState
+  /** `overlaid` with live shadows applied. Same reference as `overlaid` when
+   *  no shadow is live. */
+  out: ReadonlyMap<string, CellAuditStats>
+}
+
+export function pendingCellIds(pending: ReadonlyArray<OutboxRecord>): Set<string> {
+  const ids = new Set<string>()
+  for (const rec of pending) if (rec.event.cellId) ids.add(rec.event.cellId)
+  return ids
+}
+
+export function reconcileFlushShadows(input: ReconcileFlushShadowsInput): ReconcileFlushShadowsResult {
+  const next = new Map<string, FlushShadow>()
+  const nowPending = pendingCellIds(input.pending)
+  // Keep shadows the server has not yet caught up on. A cell with a NEW pending
+  // record is drawn by the overlay instead, and re-shadowed when that flushes.
+  for (const [cellId, shadow] of input.prev) {
+    if (input.base.get(cellId) !== shadow.baseAtFlush) continue
+    if (input.failedCellIds.has(cellId)) continue
+    next.set(cellId, shadow)
+  }
+  // Pin cells whose last pending record just left the outbox.
+  if (input.prevOverlaid) {
+    for (const cellId of input.prevPendingCellIds) {
+      if (nowPending.has(cellId)) continue
+      if (input.failedCellIds.has(cellId)) continue
+      const shown = input.prevOverlaid.get(cellId)
+      if (!shown) continue
+      // The refetch may already have landed (fast server, slow IDB delete):
+      // then the base agrees and there is nothing to bridge.
+      if (input.base.get(cellId) === shown) continue
+      next.set(cellId, { stats: shown, baseAtFlush: input.base.get(cellId) })
+    }
+  }
+  if (next.size === 0) return { shadows: next, out: input.overlaid }
+  const out = new Map(input.overlaid)
+  for (const [cellId, shadow] of next) {
+    if (nowPending.has(cellId)) continue
+    out.set(cellId, shadow.stats)
+  }
+  return { shadows: next, out }
 }
 
 export type { CqrsEventKind }

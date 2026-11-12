@@ -5,6 +5,7 @@ import type { ToastManagerAddOptions } from "@base-ui/react/toast"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { setToastUndoAt, undoShortcutOwner } from "@/lib/history/arbiter"
 import { XIcon, CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
 
 const toastManager = ToastPrimitive.createToastManager()
@@ -32,11 +33,30 @@ function withDedupeId<Data extends object>(
   }
 }
 
+/**
+ * Toasts whose latest change came through `toast.update` (AQU-2125). The pulse
+ * means "that happened again", which is what a repeated `add` is; an update is
+ * a progress count ticking or a loading toast turning into its result, and a
+ * character import that reports every tenth line would otherwise throb the
+ * whole way through.
+ */
+const quietUpdates = new Set<string>()
+
 const toast = {
   ...toastManager,
   add<Data extends object = object>(options: ToastManagerAddOptions<Data>) {
-    return toastManager.add(withDedupeId(options))
+    const deduped = withDedupeId(options)
+    if (deduped.id != null) quietUpdates.delete(deduped.id)
+    return toastManager.add(deduped)
   },
+  update: ((id, updates) => {
+    quietUpdates.add(id)
+    return toastManager.update(id, updates)
+  }) as typeof toastManager.update,
+  close: ((id) => {
+    if (id != null) quietUpdates.delete(id)
+    return toastManager.close(id)
+  }) as typeof toastManager.close,
 }
 
 function ToastProvider({ ...props }: ToastPrimitive.Provider.Props) {
@@ -52,7 +72,7 @@ function ToastViewport({ className, ...props }: ToastPrimitive.Viewport.Props) {
     <ToastPrimitive.Viewport
       data-slot="toast-viewport"
       className={cn(
-        "pointer-events-none fixed inset-x-4 bottom-4 z-50 mx-auto w-auto max-w-sm outline-none sm:right-4 sm:left-auto sm:mx-0 sm:w-full",
+        "pointer-events-none fixed inset-x-4 bottom-4 z-[100] mx-auto w-auto max-w-sm outline-none sm:right-4 sm:left-auto sm:mx-0 sm:w-full",
         className
       )}
       {...props}
@@ -129,34 +149,150 @@ function ToastItem({
 }) {
   const [pulsing, setPulsing] = React.useState(false)
   const updateKey = toastItem.updateKey ?? 0
+  const secondaryAction = secondaryActionFromToast(toastItem.data)
+  // AQU-2175: a button keeps its full width, so sharing the row with the
+  // message crushed the message into a one-word column. The buttons get their
+  // own row underneath — rendered only when there is one, so a plain notice
+  // keeps today's single row with no trailing gap.
+  const hasActions = toastItem.actionProps != null || secondaryAction != null
 
   React.useEffect(() => {
-    // First paint is updateKey 0 — skip. Only upserts pulse.
-    if (updateKey === 0) return
+    // First paint is updateKey 0 — skip. Only upserts pulse, and only repeats:
+    // an update (progress, a result) stays still.
+    if (updateKey === 0 || quietUpdates.has(toastItem.id)) return
     setPulsing(true)
     const settle = window.setTimeout(() => setPulsing(false), 120)
     return () => window.clearTimeout(settle)
-  }, [updateKey])
+  }, [updateKey, toastItem.id])
 
   return (
     <Toast toast={toastItem}>
       <ToastPulse pulsing={pulsing}>
         <ToastContent>
-          <ToastIcon type={toastItem.type} />
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <ToastTitle />
-            <ToastDescription />
+          <div className="flex items-start gap-3">
+            <ToastIcon type={toastItem.type} icon={iconFromToast(toastItem.data)} />
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <ToastTitle />
+              <ToastDescription />
+            </div>
+            <ToastClose className="-mt-1" />
           </div>
-          <ToastAction />
-          <ToastClose />
+          {hasActions && (
+            <div
+              data-slot="toast-actions"
+              className="flex flex-wrap items-center justify-end gap-2"
+            >
+              <ToastSecondaryAction toastId={toastItem.id} action={secondaryAction} />
+              <ToastAction />
+            </div>
+          )}
         </ToastContent>
       </ToastPulse>
     </Toast>
   )
 }
 
+function iconFromToast(data: object | undefined): React.ReactNode | null {
+  if (!data || !("icon" in data)) return null
+  const icon = (data as { icon?: unknown }).icon
+  return React.isValidElement(icon) ? icon : null
+}
+
+/**
+ * A second button beside `actionProps`, passed as `data.secondaryAction`
+ * (AQU-1486: "Validate all" next to "Undo"). Base UI's toast carries one
+ * action; this one closes its toast after running, as the primary does.
+ */
+export interface ToastSecondaryActionData {
+  label: string
+  onClick: () => void
+}
+
+function secondaryActionFromToast(data: object | undefined): ToastSecondaryActionData | null {
+  if (!data || !("secondaryAction" in data)) return null
+  const action = (data as { secondaryAction?: unknown }).secondaryAction
+  if (!action || typeof action !== "object") return null
+  const { label, onClick } = action as { label?: unknown; onClick?: unknown }
+  return typeof label === "string" && typeof onClick === "function"
+    ? { label, onClick: onClick as () => void }
+    : null
+}
+
+function ToastSecondaryAction({
+  toastId,
+  action,
+}: {
+  toastId: string
+  action: ToastSecondaryActionData | null
+}) {
+  const manager = ToastPrimitive.useToastManager()
+  if (!action) return null
+  return (
+    <Button
+      data-slot="toast-secondary-action"
+      variant="outline"
+      size="sm"
+      className="shrink-0"
+      onClick={() => {
+        action.onClick()
+        manager.close(toastId)
+      }}
+    >
+      {action.label}
+    </Button>
+  )
+}
+
+function undoFromToast(data: object | undefined): (() => void) | null {
+  if (!data || !("undo" in data)) return null
+  const undo = (data as { undo?: unknown }).undo
+  return typeof undo === "function" ? (undo as () => void) : null
+}
+
+/** Ctrl/Cmd+Z belongs to the field when the user is typing. */
+function isTextEntry(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  const tag = target.tagName
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"
+}
+
 function ToastList() {
   const { toasts } = ToastPrimitive.useToastManager()
+
+  // AQU-1767: when each Undo toast first appeared, so the shortcut arbiter can
+  // tell whether it is newer than the edit history's newest step.
+  const firstSeenRef = React.useRef(new Map<string, number>())
+  React.useEffect(() => {
+    const seen = firstSeenRef.current
+    const live = new Set(toasts.map((item) => item.id))
+    for (const id of [...seen.keys()]) if (!live.has(id)) seen.delete(id)
+    const pending = toasts.find((item) => item.actionProps != null && undoFromToast(item.data) != null)
+    if (pending && !seen.has(pending.id)) seen.set(pending.id, Date.now())
+    setToastUndoAt(pending ? (seen.get(pending.id) ?? null) : null)
+  }, [toasts])
+  React.useEffect(() => () => setToastUndoAt(null), [])
+
+  React.useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.repeat || event.altKey || event.shiftKey) return
+      if (event.key !== "z" && event.key !== "Z") return
+      if (!event.ctrlKey && !event.metaKey) return
+      if (isTextEntry(event.target)) return
+      // AQU-1767: the edit history answers the shortcut when its step is the
+      // newer of the two; only one of them may fire.
+      if (undoShortcutOwner() !== "toast") return
+      const pending = toasts.find(
+        (item) => item.actionProps != null && undoFromToast(item.data) != null,
+      )
+      const undo = pending ? undoFromToast(pending.data) : null
+      if (!undo) return
+      event.preventDefault()
+      undo()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [toasts])
 
   return toasts.map((toastItem) => (
     <ToastItem key={toastItem.id} toast={toastItem} />
@@ -168,7 +304,7 @@ function ToastContent({ className, ...props }: ToastPrimitive.Content.Props) {
     <ToastPrimitive.Content
       data-slot="toast-content"
       className={cn(
-        "flex h-full items-center gap-3 overflow-hidden p-4 transition-opacity duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] data-behind:opacity-0 data-expanded:opacity-100",
+        "flex h-full flex-col justify-center gap-2 overflow-hidden p-4 transition-opacity duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] data-behind:opacity-0 data-expanded:opacity-100",
         className
       )}
       {...props}
@@ -239,49 +375,49 @@ function ToastClose({
   )
 }
 
-function ToastIcon({ type }: { type: string | undefined }) {
-  let icon: React.ReactNode = null
+function ToastIcon({ type, icon }: { type: string | undefined; icon?: React.ReactNode | null }) {
+  let glyph: React.ReactNode = icon ?? null
 
   if (type === "success") {
-    icon = (
+    glyph = (
       <CircleCheckIcon aria-hidden="true" />
     )
   }
 
   if (type === "info") {
-    icon = (
+    glyph = (
       <InfoIcon aria-hidden="true" />
     )
   }
 
   if (type === "warning") {
-    icon = (
+    glyph = (
       <TriangleAlertIcon aria-hidden="true" />
     )
   }
 
   if (type === "error") {
-    icon = (
+    glyph = (
       <OctagonXIcon className="text-destructive" aria-hidden="true" />
     )
   }
 
   if (type === "loading") {
-    icon = (
+    glyph = (
       <Loader2Icon className="animate-spin" aria-hidden="true" />
     )
   }
 
-  if (!icon) {
+  if (!glyph) {
     return null
   }
 
   return (
     <span
       data-slot="toast-icon"
-      className="shrink-0 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4"
+      className="mt-0.5 shrink-0 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4"
     >
-      {icon}
+      {glyph}
     </span>
   )
 }

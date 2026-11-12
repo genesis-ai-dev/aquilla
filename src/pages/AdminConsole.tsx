@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Navigate, useNavigate } from "react-router-dom"
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
-import { Page, PageHeader, Section, STAT_TILE_GRID } from "@/components/ui/page"
+import { Page, PageHeader, Section } from "@/components/ui/page"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAdminElevation } from "@/hooks/useAdminElevation"
@@ -28,18 +28,21 @@ import {
   type AdminAdmin,
 } from "@/lib/frontier/admin"
 import { projectsNeedingAttention } from "@/lib/admin/insights"
-import { AdminOverviewHome } from "@/components/admin/AdminOverviewHome"
+import { AdminOverviewHome, type OverviewTile } from "@/components/admin/AdminOverviewHome"
 import { AdminTenantsSection } from "@/components/admin/AdminTenantsSection"
 import { AdminTeamsSection } from "@/components/admin/AdminTeamsSection"
 import { AdminPeopleSection } from "@/components/admin/AdminPeopleSection"
-import { AdminProjectsSection } from "@/components/admin/AdminProjectsSection"
+import { AdminProjectsSection, type Lens } from "@/components/admin/AdminProjectsSection"
+import { AdminOrgView } from "@/components/admin/AdminOrgView"
+import { AdminPersonView } from "@/components/admin/AdminPersonView"
 import { AdminActivityTimeline } from "@/components/admin/AdminActivityTimeline"
 import { AdminPlatformSection } from "@/components/admin/AdminPlatformSection"
 import { AdminRetentionSection } from "@/components/admin/AdminRetentionSection"
 import { AdminMigrationSection } from "@/components/admin/AdminMigrationSection"
 import { AdminElevationGate } from "@/components/admin/AdminElevationGate"
+import { AdminInvitesSection } from "@/components/admin/AdminInvitesSection"
 
-type Tab = "overview" | "retention" | "migration" | "tenants" | "teams" | "people" | "projects" | "activity" | "platform"
+type Tab = "overview" | "retention" | "migration" | "tenants" | "teams" | "people" | "projects" | "activity" | "platform" | "invites"
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "overview", label: "Overview" },
   { key: "retention", label: "Retention" },
@@ -50,12 +53,13 @@ const TABS: Array<{ key: Tab; label: string }> = [
   { key: "projects", label: "Projects" },
   { key: "activity", label: "Activity" },
   { key: "platform", label: "Platform" },
+  { key: "invites", label: "Invites & links" },
 ]
 
 /**
  * Site-wide admin console (/admin). Cross-tenant: read-only oversight
  * (Overview, Retention, Tenants, Teams, People, Projects, Activity) plus the editable
- * Platform tab (AI settings, compute credits, Field Plan billing). Gated by
+ * Platform tab (AI settings, AI credits, Field Plan billing). Gated by
  * `useAdminElevation` — UX only; every /api/v2/admin/* call is enforced
  * server-side against the ADMIN_EMAILS allowlist behind the step-up elevation
  * gate. A non-admin who forces the route is redirected to their org overview.
@@ -72,7 +76,55 @@ export function AdminConsole() {
   } = useAdminElevation()
   const { setActiveOrg } = useActiveOrg()
   const navigate = useNavigate()
-  const [tab, setTab] = useState<Tab>("overview")
+  // The tab lives in the URL so a reload or a shared link reopens the same view.
+  // Switching tabs drops the deeper keys (sub-tab, billing search) with it.
+  const [params, setParams] = useSearchParams()
+  const tabParam = params.get("tab")
+  const tab: Tab = TABS.some((t) => t.key === tabParam) ? (tabParam as Tab) : "overview"
+  const setTab = useCallback(
+    (next: Tab) => setParams(next === "overview" ? {} : { tab: next }),
+    [setParams],
+  )
+  // Drill-down state also lives in the URL, so Back and shared links work:
+  //   ?tab=tenants&org=<id>   one org      ?tab=people&user=<id>   one person
+  //   ?tab=projects&lens=...  Projects with a starting filter
+  //   ?tab=people&sort=lastActive  People, most recently active first
+  const orgIdParam = Number(params.get("org"))
+  const userIdParam = Number(params.get("user"))
+  const lensParam = params.get("lens")
+  const startLens: Lens =
+    lensParam === "needs-attention" || lensParam === "active" || lensParam === "archived"
+      ? lensParam
+      : "all"
+  const startPeopleSort = params.get("sort") === "lastActive" ? "lastActive" : "name"
+  const selectOrg = useCallback(
+    (orgId: number) => setParams({ tab: "tenants", org: String(orgId) }),
+    [setParams],
+  )
+  const selectUser = useCallback(
+    (userId: number) => setParams({ tab: "people", user: String(userId) }),
+    [setParams],
+  )
+  const openTile = useCallback(
+    (tile: OverviewTile) => {
+      switch (tile) {
+        case "orgs":
+          return setParams({ tab: "tenants" })
+        case "teams":
+          return setParams({ tab: "teams" })
+        case "users":
+          return setParams({ tab: "people" })
+        case "activeProjects":
+          return setParams({ tab: "projects", lens: "active" })
+        case "activeUsers":
+          return setParams({ tab: "people", sort: "lastActive" })
+        case "needAttention":
+          return setParams({ tab: "projects", lens: "needs-attention" })
+      }
+    },
+    [setParams],
+  )
+  const [selectedInvitesOrgId, setSelectedInvitesOrgId] = useState<number | null>(null)
 
   const [overview, setOverview] = useState<AdminOverview | null>(null)
   const [orgs, setOrgs] = useState<AdminOrg[]>([])
@@ -92,6 +144,14 @@ export function AdminConsole() {
     (orgId: number) => {
       setActiveOrg(orgId)
       navigate(orgHomePath(orgId))
+    },
+    [setActiveOrg, navigate],
+  )
+
+  const openOrgPath = useCallback(
+    (orgId: number, subpath: string) => {
+      setActiveOrg(orgId)
+      navigate(orgPath(orgId, subpath))
     },
     [setActiveOrg, navigate],
   )
@@ -149,6 +209,10 @@ export function AdminConsole() {
     void refresh()
   }, [refresh])
 
+  const selectedOrg = useMemo(
+    () => (orgIdParam > 0 ? (orgs.find((o) => o.id === orgIdParam) ?? null) : null),
+    [orgs, orgIdParam],
+  )
   const atRiskCount = useMemo(() => projectsNeedingAttention(projects, Date.now()).length, [projects])
 
   // Non-admins have no business here — send them back to their overview.
@@ -191,7 +255,8 @@ export function AdminConsole() {
                 users={users}
                 projects={projects}
                 activity={activity}
-                onOpenOrg={openOrg}
+                onOpenOrg={selectOrg}
+                onOpenTile={openTile}
                 onViewProjects={() => setTab("projects")}
                 onViewActivity={() => setTab("activity")}
               />
@@ -202,7 +267,29 @@ export function AdminConsole() {
           <TabsContent value="migration">{jwt && <AdminMigrationSection jwt={jwt} />}</TabsContent>
 
           <TabsContent value="tenants">
-            <AdminTenantsSection orgs={orgs} teams={teams} onOpenOrg={openOrg} />
+            {selectedOrg && jwt ? (
+              <AdminOrgView
+                key={selectedOrg.id}
+                jwt={jwt}
+                org={selectedOrg}
+                projects={projects}
+                teams={teams}
+                tenantsHref="/admin?tab=tenants"
+                onOpenInApp={openOrg}
+                onSelectUser={selectUser}
+              />
+            ) : (
+              <AdminTenantsSection
+                orgs={orgs}
+                teams={teams}
+                onSelectOrg={selectOrg}
+                onOpenOrgPath={openOrgPath}
+                onOpenInvites={(orgId) => {
+                  setSelectedInvitesOrgId(orgId)
+                  setTab("invites")
+                }}
+              />
+            )}
           </TabsContent>
 
           <TabsContent value="teams">
@@ -210,11 +297,32 @@ export function AdminConsole() {
           </TabsContent>
 
           <TabsContent value="people">
-            <AdminPeopleSection users={users} admins={admins} />
+            {Number.isInteger(userIdParam) && userIdParam > 0 && jwt ? (
+              <AdminPersonView
+                key={userIdParam}
+                jwt={jwt}
+                userId={userIdParam}
+                peopleHref="/admin?tab=people"
+                onSelectOrg={selectOrg}
+              />
+            ) : (
+              <AdminPeopleSection
+                users={users}
+                admins={admins}
+                onSelectUser={selectUser}
+                initialSort={startPeopleSort}
+              />
+            )}
           </TabsContent>
 
           <TabsContent value="projects">
-            <AdminProjectsSection projects={projects} />
+            <AdminProjectsSection
+              // Remount so a tile's starting filter applies.
+              key={startLens}
+              projects={projects}
+              initialLens={startLens}
+              onSelectOrg={selectOrg}
+            />
           </TabsContent>
 
           <TabsContent value="activity">
@@ -224,6 +332,18 @@ export function AdminConsole() {
           </TabsContent>
 
           <TabsContent value="platform">{jwt && <AdminPlatformSection jwt={jwt} />}</TabsContent>
+
+          <TabsContent value="invites">
+            {jwt && (
+              <AdminInvitesSection
+                jwt={jwt}
+                orgs={orgs}
+                projects={projects}
+                users={users}
+                initialOrgId={selectedInvitesOrgId ?? undefined}
+              />
+            )}
+          </TabsContent>
         </div>
       </Tabs>
     )
@@ -256,19 +376,7 @@ function ConsoleSkeleton() {
       className="min-h-[34rem]"
       templateClassName="min-h-[34rem]"
     >
-      <div className="flex flex-col gap-6">
-        <Skeleton className="h-8 w-72 rounded-md" />
-        <div className={STAT_TILE_GRID}>
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-[88px] rounded-lg border bg-card" />
-          ))}
-        </div>
-        <Skeleton className="h-48 rounded-lg border bg-card" />
-        <div className="grid gap-6 lg:grid-cols-2">
-          <Skeleton className="h-40 rounded-lg border bg-card" />
-          <Skeleton className="h-40 rounded-lg border bg-card" />
-        </div>
-      </div>
+      <LoadingCursor className="text-xl" />
     </LoadingTemplate>
   )
 }

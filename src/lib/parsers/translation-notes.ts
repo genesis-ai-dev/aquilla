@@ -16,10 +16,21 @@
 //   (for the three-column format: cols[0] + " " + cols[1] + ":" + cols[2])
 // - Note ID (4th column when named "id") → stored in metadata
 // - Support reference (5th column when named "supportreference") → stored in metadata
+// - The original-language quote and its occurrence are read out as their own
+//   fields and carried in `cell.metadata` (AQU-527) — see below
 // - All remaining columns are concatenated into the note body (tab-separated)
 // - Rows that can't produce a valid canonical_ref are counted as skipped
 //
 // Each TSV row becomes one TranslatableString entry (one cell in Aquilla).
+//
+// AQU-527: `OrigQuote`/`Quote` and `Occurrence` used to be tab-joined into the
+// body with the note prose, which is how the editor's notes sidebar ended up
+// rendering an undifferentiated run of Greek, a digit and English. They are now
+// separated like every other untranslated column, and ride in
+// `TranslatableString.metadata` under the SAME keys the DCS resource route
+// writes (`quote` / `occurrence` / `supportReference`), so one display path in
+// the sidebar serves cells from either importer — see
+// `@/lib/notes/note-metadata`.
 
 import { v7 as uuidv7 } from "uuid"
 import type { TranslatableString } from "./types"
@@ -31,6 +42,11 @@ export interface TranslationNote {
   noteId?: string
   /** Support reference / tags (e.g. a resource container URL or tag string) */
   supportRef?: string
+  /** The original-language phrase the note is about (`OrigQuote`/`Quote`), when
+   *  the row carries one. This is the field UW called their biggest factor. */
+  origQuote?: string
+  /** Raw `Occurrence` column — which instance of `origQuote` in the verse. */
+  occurrence?: string
   /** The formatted note body (may include Markdown) */
   body: string
 }
@@ -84,6 +100,8 @@ export function parseTnTsv(tsvText: string): TnParseResult {
   const iReference = col(["reference", "ref"])
   const iId = col(["id"])
   const iSupportRef = col(["supportreference", "support_reference", "supportref", "tags"])
+  const iQuote = col(["origquote", "orig_quote", "quote"])
+  const iOccurrence = col(["occurrence", "occurrences"])
 
   const threeCol = iBook !== -1 && iChapter !== -1 && iVerse !== -1
 
@@ -122,6 +140,9 @@ export function parseTnTsv(tsvText: string): TnParseResult {
 
     const noteId = iId !== -1 ? (cols[iId] ?? "").trim() || undefined : undefined
     const supportRef = iSupportRef !== -1 ? (cols[iSupportRef] ?? "").trim() || undefined : undefined
+    const origQuote = iQuote !== -1 ? (cols[iQuote] ?? "").trim() || undefined : undefined
+    const occurrence =
+      iOccurrence !== -1 ? (cols[iOccurrence] ?? "").trim() || undefined : undefined
 
     // Build body from remaining columns (everything not already consumed as metadata).
     // Collect indices of known metadata columns so we can skip them for the body.
@@ -135,6 +156,8 @@ export function parseTnTsv(tsvText: string): TnParseResult {
     }
     if (iId !== -1) metaCols.add(iId)
     if (iSupportRef !== -1) metaCols.add(iSupportRef)
+    if (iQuote !== -1) metaCols.add(iQuote)
+    if (iOccurrence !== -1) metaCols.add(iOccurrence)
 
     const bodyParts = cols
       .map((c, idx) => (metaCols.has(idx) ? null : c.trim()))
@@ -144,8 +167,19 @@ export function parseTnTsv(tsvText: string): TnParseResult {
     const note: TranslationNote = { canonicalRef, body }
     if (noteId) note.noteId = noteId
     if (supportRef) note.supportRef = supportRef
+    if (origQuote) note.origQuote = origQuote
+    if (occurrence) note.occurrence = occurrence
 
     notes.push(note)
+
+    // Untranslated reference columns ride in the cell's metadata bucket, keyed
+    // exactly as the DCS resource route keys them (AQU-527). Only present keys
+    // are written, so a row without a quote produces no metadata at all rather
+    // than a bucket of nulls.
+    const cellMetadata: Record<string, string> = {}
+    if (origQuote) cellMetadata.quote = origQuote
+    if (occurrence) cellMetadata.occurrence = occurrence
+    if (supportRef) cellMetadata.supportReference = supportRef
 
     // Build the section label: "BOOK CH" derived from canonicalRef "BOOK CH:V"
     const colonIdx = canonicalRef.indexOf(":")
@@ -160,6 +194,7 @@ export function parseTnTsv(tsvText: string): TnParseResult {
       section,
       globalReferences: [canonicalRef],
       type: "text",
+      ...(Object.keys(cellMetadata).length > 0 ? { metadata: cellMetadata } : {}),
     })
   }
 

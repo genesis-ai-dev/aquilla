@@ -12,6 +12,7 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { username: "tester" }, loading: false }),
 }))
 let projectCellsEnabled = false
+let violationsEnabled = false
 let projectCellsLoading = false
 let projectCellFiles: Array<{ id: string; cells: Array<{
   id: string
@@ -34,6 +35,43 @@ vi.mock("@/hooks/useProjectCells", () => ({
     return { files: projectCellFiles, isLoading: projectCellsLoading, isTruncated: false }
   },
 }))
+let occurrenceCells: Array<{
+  id: string
+  fileId: string
+  original: string
+  translated: string
+  context: string
+  group: string
+  type: string
+  status: string
+  validationStatus: string
+  activeValidators: string[]
+  validationHistory: unknown[]
+  history: unknown[]
+  threads: unknown[]
+}> = []
+let occurrenceLoading = false
+vi.mock("@/hooks/useTerminologyViolations", () => ({
+  useTerminologyViolations: ({ enabled }: { enabled?: boolean }) => {
+    violationsEnabled = Boolean(enabled)
+    return { rows: [], isLoading: false, error: null, scanComplete: true, truncated: false }
+  },
+}))
+vi.mock("@/hooks/useTermOccurrences", () => ({
+  useTermOccurrences: () => ({
+    cells: occurrenceCells,
+    total: occurrenceCells.length,
+    enforced: 0,
+    infringed: 0,
+    scanComplete: true,
+    isLoading: occurrenceLoading,
+    error: null,
+    hasMore: false,
+    loadMore: () => {},
+    revalidate: () => {},
+    applyOptimisticTargetEdit: () => {},
+  }),
+}))
 
 const patchSettings = vi.fn().mockResolvedValue({ kind: "ok" })
 // Writes must become term.* events — never a settings-blob PATCH. The blob is
@@ -49,6 +87,14 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitTermDelete: (input: unknown) => emitTermDelete(input),
   emitTermApprove: (input: unknown) => emitTermApprove(input),
   emitTermReject: (input: unknown) => emitTermReject(input),
+}))
+// AQU-1693: the "Link to a Bible person, place or group" picker reads the
+// Bible Knowledge Pack directly.
+const loadManifest = vi.fn()
+const loadLayer = vi.fn()
+vi.mock("@/lib/bible-data/pack-client", () => ({
+  loadManifest: () => loadManifest(),
+  loadLayer: (layer: string, book: string) => loadLayer(layer, book),
 }))
 let mockProject: ProjectRecord
 let mockProjectLoading = false
@@ -83,7 +129,8 @@ vi.mock("@/components/TranslatedEditor", () => ({
 import { GlossaryEditor } from "./GlossaryEditor"
 import { useProject } from "@/hooks/useProject"
 import { minimalProjectRecord } from "@/lib/sync/cloud-projects"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { renderWithTooltips } from "@/test-utils/tooltip"
+import { JESUS, jhn4People } from "@/lib/bible-data/__fixtures__/jhn4"
 
 function concept(p: Partial<Concept>): Concept {
   return {
@@ -99,9 +146,14 @@ function concept(p: Partial<Concept>): Concept {
 beforeEach(() => {
   patchSettings.mockClear()
   for (const m of [emitTermCreate, emitTermUpdate, emitTermDelete, emitTermApprove, emitTermReject]) m.mockClear()
+  loadManifest.mockReset().mockResolvedValue({ ok: true, value: { books: { JHN: { layers: ["people"], bytes: {} } } } })
+  loadLayer.mockReset().mockResolvedValue({ ok: true, value: jhn4People() })
   projectCellsEnabled = false
+  violationsEnabled = false
   projectCellsLoading = false
   projectCellFiles = []
+  occurrenceCells = []
+  occurrenceLoading = false
   mockProjectLoading = false
   mockProject = {
     id: "p1",
@@ -128,7 +180,7 @@ describe("GlossaryEditor", () => {
 
     const status = screen.getByRole("status", { name: "Loading terminology" })
     expect(status).toHaveAttribute("aria-busy", "true")
-    expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
+    expect(status.querySelector("[data-slot='loading-cursor']")).not.toBeNull()
     expect(screen.getByTestId("loading-panel-template")).toBeInTheDocument()
     expect(screen.queryByText("grace")).not.toBeInTheDocument()
   })
@@ -172,6 +224,50 @@ describe("GlossaryEditor", () => {
     expect(emitTermUpdate.mock.calls[0][0]).toMatchObject({
       renderings: [{ rendering: "gracia", status: "admitted" }],
     })
+  })
+
+  it("exports TBX for the active lane only", async () => {
+    // A person on the French lane must not download the Spanish renderings.
+    // The button passes the lane-filtered list plus the lane rows, so xml:lang
+    // is that lane's language and the lane id note survives.
+    const workspaceProject = {
+      id: "p1",
+      name: "P",
+      lanes: [
+        { id: "lane-empty", role: "target", language: "English", name: null, langCode: null, legacyTag: "", position: 0, archivedAt: null },
+        { id: "lane-fr", role: "target", language: "French", name: null, langCode: null, legacyTag: "fr", position: 1, archivedAt: null },
+        { id: "lane-es", role: "target", language: "Spanish", name: null, langCode: null, legacyTag: "es", position: 2, archivedAt: null },
+      ],
+      terminology: [
+        concept({
+          renderings: [
+            { rendering: "faveur", status: "preferred", laneId: "lane-fr" },
+            { rendering: "gracia", status: "preferred", laneId: "lane-es" },
+          ],
+        }),
+      ],
+    } as unknown as ProjectRecord
+    const blobs: Blob[] = []
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+      blobs.push(blob as Blob)
+      return "blob:tbx"
+    })
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+    try {
+      renderEditor({ project: workspaceProject, patchSettings, activeLane: "fr" })
+      fireEvent.click(screen.getByRole("button", { name: "Export TBX" }))
+      expect(blobs).toHaveLength(1)
+      const xml = await blobs[0].text()
+      expect(xml).toContain("faveur")
+      expect(xml).not.toContain("gracia")
+      expect(xml).toContain('xml:lang="French"')
+      expect(xml).toContain('<termNote type="aquillaLaneId">lane-fr</termNote>')
+    } finally {
+      createObjectURL.mockRestore()
+      revokeObjectURL.mockRestore()
+      click.mockRestore()
+    }
   })
 
   it("renders the workspace-owned glossary immediately without a duplicate project resolve", () => {
@@ -251,18 +347,20 @@ describe("GlossaryEditor", () => {
     expect(add).toBeEnabled()
   })
 
-  it("defers project cell loading until a cell-backed surface is requested", () => {
+  it("loads violations from the server scan instead of every project cell", () => {
     mockProject.files = [{ id: "f1", name: "sample.md", type: "md", createdAt: "", cellCount: 1 }]
     renderEditor()
+    expect(violationsEnabled).toBe(false)
     expect(projectCellsEnabled).toBe(false)
 
     fireEvent.click(screen.getByRole("button", { name: "Violations" }))
-    expect(projectCellsEnabled).toBe(true)
+    expect(violationsEnabled).toBe(true)
+    expect(projectCellsEnabled).toBe(false)
   })
 
   it("opens a concept immediately while examples still load", () => {
     mockProject.files = [{ id: "f1", name: "sample.md", type: "md", createdAt: "", cellCount: 1 }]
-    projectCellsLoading = true
+    occurrenceLoading = true
     renderEditor()
 
     fireEvent.click(screen.getByRole("button", { name: /open details for grace/i }))
@@ -271,6 +369,8 @@ describe("GlossaryEditor", () => {
     expect(screen.getAllByText("favor").length).toBeGreaterThan(0)
     expect(screen.queryByRole("status", { name: "Loading term details" })).not.toBeInTheDocument()
     expect(screen.getByText(/loading examples/i)).toBeInTheDocument()
+    // Opening a term must not download every file's cells.
+    expect(projectCellsEnabled).toBe(false)
   })
 
   it("derives rapid rendering mutations from the latest optimistic glossary", async () => {
@@ -300,7 +400,10 @@ describe("GlossaryEditor", () => {
 // the REAL `emitConceptDelta`, so the assertion is the event shape that reaches
 // the outbox — the contract a second user's projection depends on.
 describe("GlossaryEditor merge duplicates (AQU-1337)", () => {
-  const MERGE_BUTTON = "Merge duplicate concepts"
+  // AQU-2077: the accessible name IS the visible text — the button carried an
+  // aria-label of "Merge duplicate concepts", which left the visible label out
+  // of the accessible name (WCAG 2.5.3, Label in Name).
+  const MERGE_BUTTON = "Merge duplicates"
 
   function seedDuplicates() {
     mockProject.terminology = [
@@ -331,6 +434,16 @@ describe("GlossaryEditor merge duplicates (AQU-1337)", () => {
     seedDuplicates()
     renderEditor()
     expect(screen.getByRole("button", { name: MERGE_BUTTON })).toBeEnabled()
+  })
+
+  // AQU-2077: a voice-control user who says "Merge duplicates" must reach the
+  // button, so its visible text has to be part of its accessible name.
+  it("exposes an accessible name that contains the button's visible text", () => {
+    seedDuplicates()
+    renderEditor()
+    const merge = screen.getByTestId("merge-duplicates-btn")
+    expect(merge).toHaveAccessibleName(expect.stringContaining("Merge duplicates"))
+    expect(merge.textContent).toContain("Merge duplicates")
   })
 
   it("merges into the first-selected survivor as one term.update plus a term.delete per loser", async () => {
@@ -394,7 +507,12 @@ describe("GlossaryEditor merge duplicates (AQU-1337)", () => {
 // editor. The hand-built fixture above has no role at all and only ever
 // exercised the fail-open path, which is how that shipped.
 describe("GlossaryEditor role gating (AQU-208)", () => {
-  const TERMBASE_CONTROLS = ["Suggest terms", "Import", "Export CSV", "Export TBX", "Add term"]
+  // AQU-872 split these in two: everything that binds the project asks the
+  // org's termbase floor, while Add term asks only whether the caller may
+  // SUGGEST (contributor). `TERMBASE_CONTROLS` is still the full row, used by
+  // the cases where the caller is at or above the floor and so gets all of it.
+  const MANAGEMENT_CONTROLS = ["Suggest terms", "Import", "Export CSV", "Export TBX"]
+  const TERMBASE_CONTROLS = [...MANAGEMENT_CONTROLS, "Add term"]
 
   function hydrated(level: number, name: string, termbaseEditMinRole?: number): ProjectRecord {
     return {
@@ -421,23 +539,20 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
   /** One occurrence of "grace" whose target is still empty — the exact cell the
    *  QA walk opened an editor on as a viewer. */
   function seedOccurrence() {
-    projectCellFiles = [{
-      id: "f1",
-      cells: [{
-        id: "cell-1",
-        fileId: "f1",
-        original: "by grace alone",
-        translated: "",
-        context: "GEN 1:8",
-        group: "GEN 1",
-        type: "text",
-        status: "unvalidated",
-        validationStatus: "none",
-        activeValidators: [],
-        validationHistory: [],
-        history: [],
-        threads: [],
-      }],
+    occurrenceCells = [{
+      id: "cell-1",
+      fileId: "f1",
+      original: "by grace alone",
+      translated: "",
+      context: "GEN 1:8",
+      group: "GEN 1",
+      type: "text",
+      status: "unvalidated",
+      validationStatus: "none",
+      activeValidators: [],
+      validationHistory: [],
+      history: [],
+      threads: [],
     }]
   }
 
@@ -448,22 +563,64 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
   })
 
   it.each([
-    [100, "viewer", /Viewers cannot perform this action — you need at least Project lead access/],
-    [400, "contributor", /Contributors cannot perform this action — you need at least Project lead access/],
-  ])("keeps the termbase controls visible but disabled for level %i, with the role tooltip", async (level, name, tip) => {
+    [100, "viewer", /Viewers cannot perform this action — you need at least Project Lead access/],
+    [400, "contributor", /Contributors cannot perform this action — you need at least Project Lead access/],
+  ])("keeps the MANAGEMENT controls visible but disabled for level %i, with the reason once under the toolbar", async (level, name, tip) => {
     renderAs(hydrated(level, name))
 
-    for (const control of TERMBASE_CONTROLS) {
+    for (const control of MANAGEMENT_CONTROLS) {
       expect(screen.getByRole("button", { name: control })).toBeDisabled()
     }
-    await expectTooltip(screen.getByRole("button", { name: "Add term" }), tip)
+    // AQU-2260: said once on the page, never on a hover.
+    expect(screen.getByTestId("terminology-locked")).toHaveTextContent(tip)
+    expect(screen.getAllByText(tip)).toHaveLength(1)
 
-    // Disabled is not merely cosmetic: the create dialog cannot be opened.
-    fireEvent.click(screen.getByRole("button", { name: "Add term" }))
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    // Disabled is not merely cosmetic: the import picker cannot be opened.
+    fireEvent.click(screen.getByRole("button", { name: "Suggest terms" }))
+    expect(emitTermCreate).not.toHaveBeenCalled()
     // The read-only surfaces stay reachable for every role.
     expect(screen.getByRole("button", { name: "Violations" })).toBeEnabled()
     expect(screen.getByText("grace")).toBeInTheDocument()
+  })
+
+  // AQU-872: Add term is the one control that does NOT ride the management
+  // floor. A translator building a glossary as they work may propose a term;
+  // what they cannot do is put it into force.
+  it("refuses even a suggestion below contributor, naming the contributor bar", async () => {
+    renderAs(hydrated(100, "viewer"))
+
+    const add = screen.getByRole("button", { name: "Add term" })
+    expect(add).toBeDisabled()
+    expect(screen.getByTestId("terminology-locked")).toHaveTextContent(
+      /Viewers cannot perform this action — you need at least Contributor access/,
+    )
+    fireEvent.click(add)
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("lets a contributor add a term, and files it as a draft rather than an active one", async () => {
+    renderAs(hydrated(400, "contributor"))
+
+    const add = screen.getByRole("button", { name: "Add term" })
+    expect(add).toBeEnabled()
+    fireEvent.click(add)
+    const dialog = screen.getByRole("dialog")
+    // The form says which of the two things it is about to do.
+    expect(within(dialog).getByText(/Saved as a suggestion for review/i)).toBeInTheDocument()
+    fireEvent.change(within(dialog).getByPlaceholderText(/new source term/i), {
+      target: { value: "mercy" },
+    })
+    fireEvent.change(within(dialog).getByPlaceholderText(/^rendering$/i), {
+      target: { value: "misericordia" },
+    })
+    fireEvent.click(within(dialog).getByRole("button", { name: /add term/i }))
+
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalled())
+    expect(emitTermCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "p1", sourceTerm: "mercy", status: "draft" }),
+    )
+    // A draft is never an approval: no term.approve rides along with it.
+    expect(emitTermApprove).not.toHaveBeenCalled()
   })
 
   it("enables the termbase controls for a project lead", () => {
@@ -480,18 +637,17 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
   it("gates Merge duplicates on the termbase floor like every other termbase write", async () => {
     const duplicates = [concept({}), concept({ id: "c2" })]
     const { unmount } = renderAs({ ...hydrated(400, "contributor"), terminology: duplicates })
-    const merge = screen.getByRole("button", { name: "Merge duplicate concepts" })
+    const merge = screen.getByRole("button", { name: "Merge duplicates" })
     expect(merge).toBeDisabled()
-    await expectTooltip(
-      merge,
-      /Contributors cannot perform this action — you need at least Project lead access/,
+    expect(screen.getByTestId("terminology-locked")).toHaveTextContent(
+      /Contributors cannot perform this action — you need at least Project Lead access/,
     )
     fireEvent.click(merge)
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
     unmount()
 
     renderAs({ ...hydrated(500, "project_lead"), terminology: duplicates })
-    fireEvent.click(screen.getByRole("button", { name: "Merge duplicate concepts" }))
+    fireEvent.click(screen.getByRole("button", { name: "Merge duplicates" }))
     expect(screen.getByRole("dialog")).toBeInTheDocument()
   })
 
@@ -503,12 +659,11 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
     }
   })
 
-  it("names the org's configured floor in the tooltip, not the default", async () => {
+  it("names the org's configured floor in the lock line, not the default", async () => {
     renderAs(hydrated(500, "project_lead", 600))
 
-    await expectTooltip(
-      screen.getByRole("button", { name: "Import" }),
-      /Project leads cannot perform this action — you need at least Maintainer access/,
+    expect(screen.getByTestId("terminology-locked")).toHaveTextContent(
+      /Project Leads cannot perform this action — you need at least Maintainer access/,
     )
   })
 
@@ -531,5 +686,157 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
 
     expect(screen.getByTestId("inline-cell-editor")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /remove rendering favor/i })).not.toBeInTheDocument()
+  })
+})
+
+// AQU-684: the import button is the only place a partner's FLEx dictionary
+// reaches the termbase, and it used to branch on a `.tbx` extension alone —
+// so a LIFT export was read as delimited text and imported as nothing at all.
+// These drive the real input element, so the file → format detection → parser
+// → event chain is exercised as one path rather than three mocked halves.
+describe("GlossaryEditor — term-base file import (AQU-684)", () => {
+  const FLEX_EXPORT = `<?xml version="1.0" encoding="UTF-8"?>
+<lift producer="SIL.FLEx 9.1.19" version="0.13">
+  <entry guid="g1"><lexical-unit><form lang="pmy"><text>trang</text></form></lexical-unit>
+    <sense><gloss lang="en"><text>light</text></gloss></sense></entry>
+</lift>`
+
+  function pickFile(container: HTMLElement, name: string, body: string) {
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')
+    if (!input) throw new Error("import file input not rendered")
+    fireEvent.change(input, { target: { files: [new File([body], name, { type: "text/plain" })] } })
+    return input
+  }
+
+  it("imports a FLEx LIFT export picked from the import button", async () => {
+    const { container } = renderEditor()
+
+    pickFile(container, "Lexicon.lift", FLEX_EXPORT)
+
+    // Gloss became the source term, vernacular headword the rendering.
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalled())
+    expect(emitTermCreate.mock.calls[0][0]).toMatchObject({
+      sourceTerm: "light",
+      renderings: [{ rendering: "trang", status: "preferred" }],
+    })
+  })
+
+  it("still routes a LIFT export whose extension was lost in transit", async () => {
+    const { container } = renderEditor()
+
+    pickFile(container, "Lexicon.xml", FLEX_EXPORT)
+
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalled())
+    expect(emitTermCreate.mock.calls[0][0]).toMatchObject({ sourceTerm: "light" })
+  })
+
+  it("offers LIFT to the file picker alongside the formats it already took", () => {
+    const { container } = renderEditor()
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input?.accept).toContain(".lift")
+    expect(input?.accept).toContain(".tbx")
+    expect(input?.accept).toContain(".csv")
+  })
+
+  it("reports a file that yields no terms instead of looking like it worked", async () => {
+    const { container } = renderEditor()
+
+    pickFile(container, "empty.lift", `<lift version="0.13"></lift>`)
+
+    expect(await screen.findByText("Import failed")).toBeInTheDocument()
+    expect(emitTermCreate).not.toHaveBeenCalled()
+  })
+
+  // AQU-1693: a shared termbase keeps its Bible entity links, so nobody has
+  // to link Jesus again in the project that imports it.
+  it("keeps a TBX entry's Bible entity link through the import into term.create", async () => {
+    const { container } = renderEditor()
+
+    pickFile(
+      container,
+      "shared.tbx",
+      `<martif><text><body><termEntry id="c-jesus">
+        <xref type="externalCrossReference" target="acai:person:Jesus.2">ACAI person:Jesus.2</xref>
+        <langSet xml:lang="source"><tig><term>Jesus</term></tig></langSet>
+      </termEntry></body></text></martif>`,
+    )
+
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalled())
+    expect(emitTermCreate.mock.calls[0][0]).toMatchObject({ externalIds: { acai: "person:Jesus.2" } })
+  })
+})
+
+// AQU-1693: "Link to a Bible person, place or group" on the term detail page.
+// The control shows only with this device's Bible data experiment AND the
+// project's Bible data switch (the picker reads the pack directly). The link
+// itself is plain data: whatever the flags say, no other edit may touch it.
+describe("GlossaryEditor — link a concept to a Bible entity (AQU-1693)", () => {
+  const jesus = (p: Partial<Concept> = {}) => concept({ sourceTerm: "Jesus", renderings: [{ rendering: "Yesus", status: "preferred" }], ...p })
+  const bibleProject = (p: Partial<ProjectRecord> = {}) =>
+    ({
+      id: "p1",
+      name: "P",
+      files: [{ id: "f1", name: "JHN", type: "usfm" }],
+      experimentalFlags: { bibleData: true },
+      terminology: [jesus()],
+      ...p,
+    }) as unknown as ProjectRecord
+  const openDetail = () => renderEditor({}, "/project/p1/terminology?concept=c1")
+
+  it("links the concept to the person picked from the book it occurs in, as one term.update", async () => {
+    mockProject = bibleProject()
+    occurrenceCells = [{
+      id: "cell-1", fileId: "f1", original: "Jesus answered", translated: "", context: "JHN 4:10", group: "JHN 4",
+      type: "text", status: "empty", validationStatus: "none", activeValidators: [], validationHistory: [], history: [], threads: [],
+    }]
+    openDetail()
+
+    fireEvent.click(await screen.findByRole("button", { name: "Link to a Bible person, place or group" }))
+    // The headword's person is suggested first, from the book of the first occurrence.
+    const suggested = await screen.findByTestId("term-bible-link-suggested")
+    expect(loadLayer).toHaveBeenCalledWith("people", "JHN")
+    fireEvent.click(within(suggested).getByRole("button", { name: /Jesus/ }))
+
+    await waitFor(() => expect(emitTermUpdate).toHaveBeenCalled())
+    expect(emitTermUpdate.mock.calls[0][0]).toEqual({
+      projectId: "p1",
+      conceptId: "c1",
+      author: "tester",
+      externalIds: { acai: JESUS },
+    })
+  })
+
+  it("unlinks with `{}`, the value that clears the stored link", async () => {
+    mockProject = bibleProject({ terminology: [jesus({ externalIds: { acai: JESUS } })] })
+    openDetail()
+
+    expect(await screen.findByTestId("term-bible-link-current")).toHaveTextContent("Linked to")
+    fireEvent.click(screen.getByRole("button", { name: "Unlink" }))
+
+    await waitFor(() => expect(emitTermUpdate).toHaveBeenCalled())
+    expect(emitTermUpdate.mock.calls[0][0]).toMatchObject({ externalIds: {} })
+  })
+
+  it("offers nothing and reads no pack with the experiment off, and a rendering edit leaves the link alone", async () => {
+    mockProject = bibleProject({
+      experimentalFlags: {},
+      terminology: [jesus({ externalIds: { acai: JESUS }, renderings: [{ rendering: "Yesus", status: "preferred" }, { rendering: "Isa", status: "admitted" }] })],
+    })
+    openDetail()
+
+    fireEvent.click(await screen.findByRole("button", { name: /remove rendering Isa/i }))
+    await waitFor(() => expect(emitTermUpdate).toHaveBeenCalled())
+    expect(emitTermUpdate.mock.calls[0][0]).not.toHaveProperty("externalIds")
+    expect(screen.queryByTestId("term-bible-link")).toBeNull()
+    expect(loadManifest).not.toHaveBeenCalled()
+  })
+
+  it("offers nothing with the project's Bible data switch off, even with the experiment on", async () => {
+    mockProject = bibleProject({ bibleResourcesEnabled: false })
+    openDetail()
+
+    expect(await screen.findByRole("button", { name: /close detail/i })).toBeInTheDocument()
+    expect(screen.queryByTestId("term-bible-link")).toBeNull()
+    expect(loadManifest).not.toHaveBeenCalled()
   })
 })

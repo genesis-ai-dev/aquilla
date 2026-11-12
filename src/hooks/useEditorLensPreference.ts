@@ -9,7 +9,8 @@ const storageKey = (projectId: string): string => `${STORAGE_PREFIX}${projectId}
 const readLens = (projectId: string): EditorLens => {
   if (typeof window === "undefined") return "text";
   try {
-    return window.localStorage.getItem(storageKey(projectId)) === "audio" ? "audio" : "text";
+    const stored = window.localStorage.getItem(storageKey(projectId));
+    return stored === "audio" || stored === "transcribe" ? stored : "text";
   } catch {
     return "text";
   }

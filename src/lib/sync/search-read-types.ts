@@ -13,6 +13,23 @@ export interface SearchResult {
   snippet: string
   /** FTS5 rank score. Lower is better (best matches first). */
   rank: number
+  /**
+   * Opposite-side cell value at the same (fileId, cellId). Null when that
+   * side has no row. Absent only on responses from a server that predates
+   * the field.
+   */
+  pairedValue?: string | null
+  /**
+   * Verse address (`GEN 1:1`), from the source row when the matched row has
+   * none. Absent on a server that predates the field.
+   */
+  canonicalRef?: string | null
+  /** Source cell type (`verse`, `heading`, …). */
+  cellType?: string | null
+  /** Section title, cell label, or import display label. May be a bare number. */
+  placeLabel?: string | null
+  /** 1-based place among the file's visible source cells. */
+  position?: number | null
 }
 
 export interface SearchResponse {
@@ -23,6 +40,12 @@ export interface FetchSearchOptions {
   side?: "source" | "target"
   /** Server clamps to [1, 500]; default 50. */
   limit?: number
+  /** Case-sensitive literal/regexp match. Off keeps the default FTS search. */
+  matchCase?: boolean
+  /** Whole word. Off keeps the default FTS search. */
+  wholeWord?: boolean
+  /** Query is a regular expression. Off keeps the default FTS search. */
+  useRegexp?: boolean
 }
 
 export interface ParallelPassageResult extends SearchResult {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { idmlTelemetryProperties } from "./telemetry"
+import { idmlDraftRejectionProperties, idmlTelemetryProperties } from "./telemetry"
 
 describe("IDML non-content telemetry", () => {
   it("emits only aggregate contract fields and typed failure codes", () => {
@@ -44,5 +44,44 @@ describe("IDML non-content telemetry", () => {
       validation_duration_ms: 13,
     })
     expect(JSON.stringify(properties)).not.toMatch(/secret|Stories\//i)
+  })
+})
+
+describe("IDML draft rejection telemetry (AQU-1964)", () => {
+  it("counts the refusal by code and mode, carrying no locator or text", () => {
+    const properties = idmlDraftRejectionProperties({
+      cells: [{
+        metadata: {
+          idml: {
+            version: 2,
+            editableSlotIndexes: [0, 2],
+            protectedTokenCount: 3,
+          },
+          sourceText: "must not escape",
+        },
+      }],
+      diagnostics: [{
+        code: "ANCHOR_REORDERED",
+        severity: "error",
+        message: "Secret source detail",
+        memberPath: "Stories/Story_u363.xml",
+      }],
+      mode: "single",
+      repairAttempted: true,
+    })
+
+    expect(properties).toEqual({
+      profile_version: 2,
+      unit_count: 1,
+      editable_slot_count: 2,
+      protected_token_count: 3,
+      failure_codes: ["ANCHOR_REORDERED"],
+      mapping_failures: 0,
+      export_size_delta: 0,
+      validation_duration_ms: 0,
+      draft_mode: "single",
+      repair_attempted: true,
+    })
+    expect(JSON.stringify(properties)).not.toMatch(/secret|Stories\/|part-/i)
   })
 })

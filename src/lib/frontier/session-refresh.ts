@@ -23,7 +23,7 @@
  */
 
 import { AUTH_BASE } from "./auth"
-import { loadActiveSession, saveSession } from "./session-store"
+import { loadActiveSession, replaceActiveSessionJwt } from "./session-store"
 
 /** `iat`/`exp`, in seconds, from a JWT's unverified payload. */
 interface JwtLifetime {
@@ -37,15 +37,29 @@ interface JwtLifetime {
  * whenever the answer isn't knowable, so callers stay on the do-nothing path.
  */
 export function jwtLifetime(token: string | null | undefined): JwtLifetime | null {
+  const payload = unverifiedJwtPayload(token)
+  if (typeof payload?.iat !== "number" || typeof payload.exp !== "number") return null
+  return { iat: payload.iat, exp: payload.exp }
+}
+
+/**
+ * The account a JWT was minted for (`sub`, the username), unverified. For
+ * deciding whose locally kept data a token may read, never for trusting it.
+ */
+export function jwtSubject(token: string | null | undefined): string | null {
+  const sub = unverifiedJwtPayload(token)?.sub
+  return typeof sub === "string" && sub !== "" ? sub : null
+}
+
+function unverifiedJwtPayload(token: string | null | undefined): Record<string, unknown> | null {
   if (!token) return null
   try {
     const parts = token.split(".")
     if (parts.length !== 3) return null
     // atob requires standard base64; JWT uses base64url — swap - and _
     const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/")
-    const payload = JSON.parse(atob(padded)) as { iat?: unknown; exp?: unknown }
-    if (typeof payload.iat !== "number" || typeof payload.exp !== "number") return null
-    return { iat: payload.iat, exp: payload.exp }
+    const payload: unknown = JSON.parse(atob(padded))
+    return payload && typeof payload === "object" ? (payload as Record<string, unknown>) : null
   } catch {
     return null
   }
@@ -108,12 +122,33 @@ async function runRefresh(): Promise<boolean> {
 
   let nextJwt: string
   try {
-    const res = await fetch(`${AUTH_BASE}/api/v2/auth/refresh`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${previousJwt}` },
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort()
+        reject(new DOMException("Session renewal timed out", "TimeoutError"))
+      }, 15_000)
     })
-    if (!res.ok) return false
-    const body = (await res.json()) as { access_token?: unknown }
+    // Race the entire exchange, not just headers. Some browsers leave fetch
+    // pending across reconnects; abort alone cannot guarantee lock release.
+    let body: { access_token?: unknown }
+    try {
+      body = await Promise.race([
+        deadline,
+        (async () => {
+          const res = await fetch(`${AUTH_BASE}/api/v2/auth/refresh`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${previousJwt}` },
+            signal: controller.signal,
+          })
+          if (!res.ok) return {}
+          return await res.json() as { access_token?: unknown }
+        })(),
+      ])
+    } finally {
+      clearTimeout(timer)
+    }
     if (typeof body.access_token !== "string" || body.access_token.length === 0) {
       return false
     }
@@ -128,16 +163,11 @@ async function runRefresh(): Promise<boolean> {
   // Below the server's half-life gate the endpoint echoes the same token back.
   if (nextJwt === previousJwt) return false
 
-  // Re-read before writing. The user may have logged out, switched accounts or
-  // re-authenticated while the request was in flight; writing blind would
-  // resurrect a session they just left, or clobber a newer credential with a
-  // token minted from the older one.
+  // Compare and replace in the same transaction as logout/account switching.
+  // A separate read followed by saveSession can resurrect a removed account.
   try {
-    const current = await loadActiveSession()
-    if (current?.jwt !== previousJwt) return false
-    await saveSession({ ...current, jwt: nextJwt })
+    return await replaceActiveSessionJwt(previousJwt, nextJwt)
   } catch {
     return false
   }
-  return true
 }

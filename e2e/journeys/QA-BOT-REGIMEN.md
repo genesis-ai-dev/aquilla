@@ -7,103 +7,186 @@ bot already proved. Humans spend their attention on taste and on what the bots
 could not prove.
 
 Related: [PR-BOT.md](PR-BOT.md) (how a PR is walked),
+[RELEASE-CUT.md](RELEASE-CUT.md) (how a release branch is cut),
 [DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md) (branches,
 deploy commands, calver tags).
 
 ## The line
 
 ```
-PR ──walk + review──▶ dev ──bot cuts──▶ release/YYYY/MM/DD ──QA triggers──▶ prod + tag YYYY.MM.DD.NN
+PR ──walk PASS + review + green checks──▶ dev ──bot cuts──▶ release/YYYY/MM/DD-NN ──smart Jev──▶ a person deploys──▶ tag YYYY.MM.DD.NN
 ```
+
+Adversarial Jev attacks deployed `dev` once a day and files Linear tickets. It
+is not a stage on this line.
 
 | Stage | Who acts | Gate |
 | --- | --- | --- |
-| PR → `dev` | Agents (merge themselves) | Evidence below. No required human reviewer. |
-| `dev` → release branch | Release bot | `node scripts/release-plan.mjs` says `cut: true`. |
-| Release → prod | QA (Kieran, Matthew) | Checks only the gaps, then `pnpm run deploy:aquilla`. |
+| PR → `dev` | The agent who opened it | Walk **PASS** at the head sha, no proven unresolved finding, required checks green. The one other walk that merges is a **BLOCKED** the PR's own pending migration explains; its proof comes after merge, on dev ([PR-BOT.md](PR-BOT.md), *Re-walk on dev after merge*). |
+| `dev` → release branch | **Release cut** workflow, after each deploy's tag push or a button press | `node scripts/release-plan.mjs` says `cut: true`. |
+| Release HEAD → deploy | A person, after smart Jev | A smart-Jev `FAIL` holds that HEAD. `PASS`, inconclusive, and harness unavailable do not. |
+| Release → prod | Kieran or Matthew | Always a person. The tag is `YYYY.MM.DD.NN`. See "Deployment ownership" in [DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md). |
 
 ## 1. Pull request: verify once
 
-An agent may merge its own PR into `dev` when all of these hold at the PR's
-**current head sha**:
+An agent may merge its own pull request into `dev` when all of these hold at
+the pull request's **current head sha**:
 
-- The bot walk comment ([PR-BOT.md](PR-BOT.md)) is **PASS** for that sha.
+- The bot walk comment ([PR-BOT.md](PR-BOT.md)) is **PASS** for that sha, or
+  **BLOCKED** with a `Blocked by: pending migration <file>` line: the one
+  BLOCKED a preview cannot clear, because nobody applies a branch's migration
+  to the shared development database before the merge deploys it.
 - The review agent has no unresolved finding it could prove (a failing test, a
   reproduced bug). Unproven suspicions do not block.
-- Required status checks are green.
+- Required checks are green. Those checks are the `ci.yml` jobs: lint
+  (including `i18n:check` and the secret scan), unit tests, worker tests, and
+  `pnpm neon:check`.
+
+Leave it open when the label is `on hold`, the base is not `dev`, or it is
+stacked on an open parent. A base that is another open pull request's head is
+stacked. GitHub Actions does not click merge. Auto-merge cannot read `on hold`
+or a stacked parent, so the agent merges.
 
 Evidence is pinned to the sha. A push after the walk makes the evidence stale;
-walk again before merging.
+walk again before merging. A push after `ci.yml` makes that run stale too; wait
+for the new run.
 
-**Inconclusive is a checker bug, not QA work.** A FLAKY or BLOCKED walk means
+**Inconclusive is a checker bug, not QA work.** A `FLAKY` or `BLOCKED` walk means
 the bot could not prove the effect. Fix the journey's outcome check (read the
 API or the DOM state directly) so the next walk is conclusive. Do not hand the
-item to a human to "just look at it". Every inconclusive result that reaches
-QA is re-checking we chose not to automate.
+item to a human to "just look at it", and do not merge it. The exception is
+the pending-migration `BLOCKED` above: no outcome check can fix a schema the
+preview does not have, so that PR merges on review and green checks, dev
+deploys it with its migration, and the bot re-walks it there
+([PR-BOT.md](PR-BOT.md), *Re-walk on dev after merge*). The planner still
+holds it: a migration is a holding area, and only `release:approved` clears
+that.
 
-## 2. Cutting a release: small batches, one in flight
+`scripts/release-plan.mjs` reads the same walk comment later and holds a cut
+unless the walk is `PASS` or `none`.
 
-The release bot runs on a schedule (hourly is fine) and does only this:
+Branch protection on `dev` requires those `ci.yml` jobs. The Cloudflare preview
+can stay required. Admins are exempt today (`enforce_admins` is false). The
+trial only works if that account does not merge around a red check.
+
+## 2. Cutting a release: one in flight, no ceiling
+
+The **Release cut** workflow cuts the branch. It runs after every production
+deploy (the calver tag push starts it) and when a person presses its button;
+it never deploys and never touches production. Full mechanics, hard stops,
+and the comment template are in [RELEASE-CUT.md](RELEASE-CUT.md); the summary:
 
 1. `git fetch origin --tags` and fetch `release/*`.
-2. Run `node scripts/release-plan.mjs`. It returns JSON: `cut`, `reason`,
-   `tier`, and the unreleased PRs with their risk `areas`. Do not second-guess
-   it; the rules are in code on purpose.
-3. If `cut` is false, stop. Post nothing.
-4. If `cut` is true, create `release/YYYY/MM/DD` (today, UTC) from `origin/dev`,
-   push it, and post the release notes below where QA watches.
+2. Run `node scripts/release-plan.mjs`. It returns JSON: `cut`, `hold`,
+   `reason`, `branch`, `sha`, `areas`, and the PRs in the slice. Do not
+   second-guess it; the rules are in code on purpose.
+3. If `cut` is false, stop. The run summary gives the reason.
+4. If `cut` is true, create the named `branch` at the named `sha` — not the
+   tip of `dev` — push it, and post the release notes below as a comment
+   on that commit, where QA and the deployer both find it.
 
-The bot never deploys and never tags. The plan's rules:
+Deploying is always a person's call (see "Deployment ownership" in
+[DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md)).
+`hold` does not change who deploys; it changes how much a person checks
+first (§3) before running `pnpm run deploy:aquilla` themselves.
+
+The plan's rules:
 
 - **One release in flight.** A release branch whose HEAD has no calver tag is
-  waiting for QA or deploy; no new cut happens until it ships. New merges roll
-  into the next release instead of piling onto this one. The release branch is
-  the freeze; `dev` keeps moving.
-- **Small batches.** Cut at 4 unreleased PRs, or when the oldest has waited 24
-  hours. Small batches make each QA pass short and each rollback cheap.
-- **Risk tier from paths.** A PR is high risk if it touches migrations, the
-  sync engine, auth, or deploy infra (see `HIGH_RISK` in
-  `scripts/release-plan.mjs`). The release is high risk if any PR is.
+  waiting for QA or deploy; no new cut happens until it ships or is deleted.
+  New merges roll into the next release instead of piling onto this one. The
+  release branch is the freeze; `dev` keeps moving.
+- **No queue, no ceiling.** The instant the in-flight release closes, the
+  next slice cuts at whatever's ready in `dev` right then — however many PRs
+  that is. Waiting for a fixed count or a clock only means a hotfix
+  cherry-picked onto the closed branch has to be re-cherry-picked onto every
+  slice cut before `dev` catches up; cutting immediately means `dev` already
+  carries the fix.
+- **A PR holds** when it touches a migration or the deploy machinery itself
+  (see `HOLDING_AREAS` in `scripts/release-plan.mjs`), or when its walk is
+  anything other than `PASS` or `none`. The oldest waiting PR holding cuts it
+  alone, immediately, with `hold: true`. A holding PR behind an already-ready
+  run ships that run immediately instead of waiting for it.
+- **Released means picked, and no cut goes below production.** A release
+  branch is cherry-picks of `dev` merges, so the calver tag is not on `dev`.
+  The plan treats a `dev` PR as released once the tagged tip carries its
+  pick (the `(cherry picked from commit …)` line in the body, or the same
+  `Merge pull request #N` subject), and reports `floor`, the newest `dev`
+  commit production runs. A slice never cuts below `floor`: PRs older than
+  a hotfix that went out ahead of them ship together, at `floor`, and hold
+  together if any one of them holds.
+- **Sync and auth are noted, not held.** A PR touching `sync-worker/src/`,
+  `src/lib/sync/`, `db/shim/`, or `auth-worker/src/` ships in the ordinary
+  slice; its area is listed in `areas` so a person can see it.
+- **Smart Jev runs the current release HEAD, after any pile-on, before a
+  person deploys.** The HEAD Jev tests is not always the sha the plan cut.
+  When the slice is held, a person checks that pull request and ready pull
+  requests are added onto the branch. Jev runs after that pile-on. Only a result for the branch's current HEAD counts. A `FAIL` means that HEAD does not deploy: push a new commit, and Jev runs again. `INCONCLUSIVE` and `HARNESS UNAVAILABLE` do not hold. The Hetzner service starts from a push
+  to `refs/heads/release/YYYY/MM/DD-NN`. See
+  [smart-testing-webhook.md](../../docs/runbooks/smart-testing-webhook.md).
+- **Adversarial Jev does not affect the cut or the deploy.** Once a day, at
+  09:00 UTC, it attacks deployed `dev` and files Linear tickets. Its advisory
+  `pr` job attacks each pull request's own preview and keeps one comment on
+  the PR (red only when the harness said nothing about the commit, AQU-1899).
+  Neither job runs on a release preview or on production. A release preview
+  writes to the shared dev database, and a preview sync worker cannot call a
+  preview auth worker. Smart Jev is the release run because the Hetzner stack
+  boots app, auth, and sync with a fresh database.
 
 ### Release notes template
 
 ```
-## Release release/2026/09/24 · tier: low · 4 PRs
+## Release release/2026/09/24-02 · 4 PRs · areas: sync
 
-| PR | Title | Walk @ merged sha | Risk areas |
+| PR | Title | Walk @ head sha | Areas |
 | --- | --- | --- | --- |
 | #771 | Remove Inworld companion preset | PASS | — |
-| #772 | Comment thread polish | PASS | — |
-| #773 | Export raw mode fix | FLAKY | — |
+| #772 | Comment thread polish | PASS | sync |
+| #773 | Export raw mode fix | fail | — |
 | #774 | Retention tab copy | none (docs only) | — |
 
-Needs a human: #773 (walk not conclusive).
+Needs a human: #773 (walk fail).
 ```
 
-"Walk @ merged sha" is the PR bot's status for the sha that merged. Anything
-other than PASS goes in "Needs a human". Docs-only or test-only PRs may be
-`none` without needing a human.
+"Walk @ head sha" is the PR bot's status for the PR's own final head sha, not
+the merge commit that landed on `dev` — the bot's walk comment is posted
+against the PR, before it merges. Anything other than PASS or `none` goes in
+"Needs a human". Docs-only or test-only PRs may be `none` without needing a
+human.
 
-## 3. QA at release: check the gaps, then ship
+## 3. Smart Jev, then a person deploys
 
-QA opens the release branch's preview and checks **only**:
+Every slice waits for smart Jev on the branch's **current HEAD**, then for a
+person to run the deploy command. `hold` changes what happens before that run.
+
+A held slice (`hold: true`) is cut as that pull request alone. A person checks
+it, then ready pull requests are added onto the branch. That pile-on moves
+HEAD. Jev's result for the cut sha does not count. Jev runs the new HEAD.
+
+An ordinary slice (`hold: false`) is already the HEAD people would deploy.
+The push that cuts it starts Jev. There is no pile-on.
+
+Read the commit comment on that HEAD (`<!-- aquilla-smart-tests -->`):
+
+- **FAIL** — a journey verdict of `FAIL (model-free check)` or `PRODUCT FAILURE`.
+  That HEAD does not deploy. A new commit starts Jev again.
+- **PASS**, **INCONCLUSIVE**, and **HARNESS UNAVAILABLE** do not hold the
+  deploy. A person deploys, then the tag is applied to production.
+
+A held slice, before the pile-on, is also where a person checks **only**:
 
 1. Rows listed under "Needs a human".
-2. For a **high** tier release: the interactions between PRs in the risky
-   areas (for example a migration plus a sync change), and that the migration
-   is safe for the previous release's code.
+2. For a migration or deploy-infra hold: that the change is safe for the
+   previous release's code still running in production, and, where the slice
+   also carries a sync or auth area, the interaction between them.
 3. Taste: does anything in this batch feel wrong, off-brand, or confusing?
 
 QA does **not** re-walk PASS rows. If QA finds itself repeating a check, that
 check belongs in a journey; file it so the bot does it next time.
 
-Then:
-
-- **Low tier:** deploy the same day. QA's job here is the stop button, not a
-  sign-off.
-- **High tier:** a person deploys it deliberately and watches the live checks.
-
-Deploy from a clean checkout of the release branch with
+Do not deploy a HEAD whose smart-Jev comment is **FAIL**. Deploy from a clean
+checkout of the release branch, checked out by name (not
+a detached HEAD — the branch guard and the tag script both need it), with
 `pnpm run deploy:aquilla`. It refuses to publish if prod has pending
 migrations, and it tags the verified deploy `YYYY.MM.DD.NN`. That tag ends
 the release's "in flight" state, so the bot can cut the next one.
@@ -115,8 +198,9 @@ Anyone may stop a release. Stopping is cheap and expected, never blame.
 - **Before deploy:** push a fix to the release branch (cherry-pick from `dev`
   when it is already fixed there), or drop the release: delete the untagged
   branch and let the bot cut again after the fix merges to `dev`.
-- **After deploy:** roll back first, then diagnose. Hotfixes are
-  cherry-picks onto the same release branch; redeploying tags the next `NN`.
+- **After deploy:** roll back first, then diagnose. A hotfix is a
+  cherry-pick onto the branch that was deployed; redeploying tags the next
+  `NN` in that date's series, independent of the branch's own `-NN` suffix.
 - Every stop gets a follow-up: which check should have caught it? Add that
   check to a journey or a test, so the same class of problem is caught at the
   PR next time.

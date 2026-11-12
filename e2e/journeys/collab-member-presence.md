@@ -9,7 +9,7 @@ Smoke twin: `e2e/specs/collab/member-presence-popover.smoke.spec.ts`
 
 ## Steps
 
-1. Alice creates a project from the org **Projects** page: click **New Project**, fill **Project title**, **Source Language**, **Target language(s)**, click **Create Project**.
+1. Alice creates a project from the org **Projects** page: click **New project**, then **Start from scratch**, fill **Project name**, **Source language**, **Language lanes**, click **Create project**.
 2. Alice opens **Project settings**, then the **Members** page, then clicks **Add a member**.
 3. Alice types `bob` into the **Aquilla username** field, ticks the `bob` suggestion checkbox, and clicks **Add**. Bob's row appears in the members table with role **Contributor**.
 4. Alice opens the project's editor.

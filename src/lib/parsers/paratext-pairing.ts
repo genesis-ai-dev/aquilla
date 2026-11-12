@@ -31,6 +31,9 @@ export interface PairedRow {
   /** Target text (the consultant's translation). Empty when absent. */
   targetText: string
   paragraphStart?: boolean
+  /** AQU-2184: the paragraph's own USFM marker ("p", "q1", …) when one opened
+   *  the block. Carries poetry level through to the HTML export. */
+  paragraphMarker?: string
 }
 
 export interface PairedBook {
@@ -106,6 +109,7 @@ export function pairSourceTarget(
         type: "verse" as const,
         targetText: verse.text.trim(),
         paragraphStart: verse.paragraphStart,
+        paragraphMarker: verse.paragraphMarker,
       })),
       ...doc.headings.map((heading) => ({
         order: heading.textStart,
@@ -113,6 +117,7 @@ export function pairSourceTarget(
         type: heading.kind,
         targetText: heading.text.trim(),
         paragraphStart: undefined,
+        paragraphMarker: undefined as string | undefined,
       })),
     ].sort((a, b) => a.order - b.order)
 
@@ -138,6 +143,7 @@ export function pairSourceTarget(
         sourceText,
         targetText: span.targetText,
         ...(span.paragraphStart ? { paragraphStart: true } : {}),
+        ...(span.paragraphMarker ? { paragraphMarker: span.paragraphMarker } : {}),
       }
     })
 
@@ -187,6 +193,8 @@ export interface BilingualCell {
   sourceText: string
   targetText: string
   paragraphStart?: boolean
+  /** AQU-2184: see `PairedRow.paragraphMarker`. */
+  paragraphMarker?: string
 }
 
 export interface BilingualBookPlan {
@@ -231,6 +239,7 @@ export function buildBilingualPlan(
       sourceText: r.sourceText,
       targetText: r.targetText,
       ...(r.paragraphStart ? { paragraphStart: true } : {}),
+      ...(r.paragraphMarker ? { paragraphMarker: r.paragraphMarker } : {}),
     })),
     bothCount: book.bothCount,
     sourceOnlyCount: book.sourceOnlyCount,

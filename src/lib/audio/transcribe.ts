@@ -1,3 +1,4 @@
+import { usesHostedTranscription } from "./transcription-preference"
 // Main-thread orchestrator: audio bytes → 16kHz Float32 PCM → Whisper worker
 // → word-level timings. No Y.Doc dependency — timings are written back via the
 // Postgres event log (cell.audio.attach with timings payload).
@@ -15,9 +16,14 @@ import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import { applyCorrections } from "./transcript-corrections"
 import { loadTranscriptCorrections } from "@/lib/store/transcript-corrections-store"
 import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
-import { resolvePcmWindow, type PcmTrimWindow } from "./pcm-window"
+import { keepSpans, resolvePcmWindow, type KeepSpan, type PcmTrimWindow } from "./pcm-window"
+import { hasSharedClipPcm, sharedClipWindow } from "./shared-clip-pcm"
+import { decodeSharedClipPcm } from "./shared-clip-decode"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import type { WordTiming } from "@/lib/codex-editor/types"
+import { wasTakeUndone } from "./undone-takes"
 import { t } from "@/lib/i18n/standalone"
+import { transcribeHosted, type ZeroShotCellContext } from "./transcribe-hosted"
 import type {
   ResultMessage,
   ErrorMessage,
@@ -38,15 +44,51 @@ export interface TranscriptionProgress {
 export interface TranscriptionResult {
   text: string
   chunks: Array<{ text: string; start: number; end: number }>
+  /** Hosted only: the model the server actually ran. */
+  model?: string
+  /** Hosted Omnilingual: the word times were spread, not aligned. */
+  timingsApproximate?: boolean
+  /** AQU-1681: hosted transcription says whether `chunks` are words or
+   *  whole segments. Absent from older servers and from on-device Whisper. */
+  granularity?: "word" | "segment" | "none"
 }
 
 export interface TranscriptionOptions {
+  session?: FrontierSession | null
+  projectId?: string
   language?: string
+  /** The lane's raw language tag, for the hosted path (the server routes by
+   *  it). `language` is the Whisper-mapped code the local worker needs. */
+  languageTag?: string
+  /** A take on a cell: what a zero-shot hosted run draws its examples from. */
+  zeroShot?: ZeroShotCellContext
+  /** A hosted zero-shot run is waiting for the model to start. */
+  onWaitingForModel?: (waiting: boolean) => void
   model?: string
   onProgress?: (p: TranscriptionProgress) => void
   /** AQU-646: transcribe only this window of the clip (shared imported clip →
    *  per-cell segment). Absent = whole clip (recorded takes). */
   trim?: PcmTrimWindow
+  /**
+   * AQU-1767: only these parts of the trim window are heard (a split take's
+   * pieces, seconds from the window's start). The gaps are dropped before ASR,
+   * and the word times come back on the window's clock as `trim` alone gives
+   * them. Absent = the whole window.
+   */
+  keep?: readonly KeepSpan[]
+  /** The Transcribe button. A stored Cancel stays quiet on save, and this
+   *  press brings the download prompt back. */
+  askAgain?: boolean
+  /** AQU-1681: `trim` is one row of a recording shared by many rows, known
+   *  by this key. The whole clip is then decoded once for all of them
+   *  (shared-clip-pcm.ts) instead of once per row. */
+  sharedClipKey?: string
+  /** AQU-1681: with `sharedClipKey`, the caller may pass no bytes when the
+   *  clip is already decoded; this reads them if it is not after all. */
+  loadClipBytes?: () => Promise<Uint8Array>
+  /** AQU-1681: hosted only — wait out the per-user limit instead of failing
+   *  (see `HostedTranscriptionOptions.onRateLimited`). */
+  onRateLimited?: (retryAfterSeconds: number) => Promise<void>
 }
 
 const WHISPER_SAMPLE_RATE = 16000
@@ -175,6 +217,33 @@ export async function audioBytesToWhisperPcm(bytes: Uint8Array, trim?: PcmTrimWi
 }
 
 /**
+ * A recording's bytes for transcription: this device's cache first (a take
+ * that has not finished uploading is there and nowhere else), else the
+ * sync-worker, written through to the cache for the next row or the player.
+ */
+export async function readClipBytes(args: {
+  projectId: string
+  fileId: string
+  audioId: string
+  ext: string
+  session: FrontierSession | null
+}): Promise<Uint8Array> {
+  const local = await audioCacheGet(args.audioId, args.ext)
+  if (local) return local
+  const fetched = await fetchCellAudio({
+    projectId: args.projectId,
+    fileId: args.fileId,
+    audioId: args.audioId,
+    ext: args.ext,
+    getSyncToken: makeAudioSyncTokenFetcher(() => args.session),
+  })
+  // Write through so a later transcribe/play hits the cache (mirrors
+  // useCellAudio.ensureBytes). Non-fatal if OPFS is unavailable.
+  void audioCachePut(args.audioId, args.ext, fetched)
+  return fetched
+}
+
+/**
  * Run Whisper on the given audio bytes. Returns the transcript text and
  * word-level timing chunks.
  */
@@ -182,10 +251,37 @@ export async function transcribeAudio(
   bytes: Uint8Array,
   opts: TranscriptionOptions = {},
 ): Promise<TranscriptionResult> {
-  const consented = await requestAiModelConsent(WHISPER_MODEL)
+  const toPcm = () => opts.sharedClipKey && opts.trim
+    ? sharedClipWindow(
+        opts.sharedClipKey,
+        opts.trim,
+        () => (bytes.byteLength > 0 || !opts.loadClipBytes ? bytes : opts.loadClipBytes()),
+        // AQU-1886: a long recording is decoded a minute at a time, so the
+        // one decode a batch does is itself bounded.
+        (whole) => decodeSharedClipPcm(whole, (clip) => audioBytesToWhisperPcm(clip)),
+      )
+    : audioBytesToWhisperPcm(bytes, opts.trim)
+  if (usesHostedTranscription(opts.session, opts.projectId)) {
+    const kept = keepSpans(await toPcm(), opts.keep, WHISPER_SAMPLE_RATE)
+    return onWindowClock(await transcribeHosted(kept.pcm, {
+      jwt: opts.session!.jwt,
+      projectId: opts.projectId!,
+      username: opts.session!.username,
+      language: opts.languageTag ?? opts.language,
+      zeroShot: opts.zeroShot,
+      onWaitingForModel: opts.onWaitingForModel,
+      ...(opts.onRateLimited ? { onRateLimited: opts.onRateLimited } : {}),
+    }), kept.toWindowSec)
+  }
+  const consented = await requestAiModelConsent(WHISPER_MODEL, { askAgain: opts.askAgain })
   if (!consented) throw new AiModelConsentDeniedError(WHISPER_MODEL.id)
-  const pcm = await audioBytesToWhisperPcm(bytes, opts.trim)
-  return runWhisperOnPcm(pcm, opts)
+  const kept = keepSpans(await toPcm(), opts.keep, WHISPER_SAMPLE_RATE)
+  return onWindowClock(await runWhisperOnPcm(kept.pcm, opts), kept.toWindowSec)
+}
+
+/** AQU-1767: word times from a joined buffer, put back on the window's clock. */
+function onWindowClock(result: TranscriptionResult, toWindowSec: (sec: number) => number): TranscriptionResult {
+  return { ...result, chunks: result.chunks.map((c) => ({ ...c, start: toWindowSec(c.start), end: toWindowSec(c.end) })) }
 }
 
 /**
@@ -277,6 +373,65 @@ export interface TranscribeCellArgs {
    * trim wipe). An explicit argument cannot be silently omitted by a stub.
    */
   slot?: string
+  /**
+   * AQU-1462: lane the member is working in. Omitted for the default lane.
+   *
+   * AQU-1978: the timings ride a re-attach, and the server scopes that
+   * re-attach's sibling-deselect to the lane the event names. With no tag it
+   * named the `''` lane, so saving a Spanish take's word timings on an old
+   * multi-language project deselected the `''` lane's chosen take on that
+   * line. Every caller is working in a lane and passes it.
+   *
+   * Not sent for a SOURCE segment: the shared programme clip is no lane's
+   * take, and a source transcription is a shared write (see authorize.ts).
+   */
+  targetLang?: string
+  /** Set by the Transcribe button so a prior Cancel shows the prompt again. */
+  askAgain?: boolean
+  /** The batch's "Use automatic": this run skips zero-shot whatever the
+   *  account chose. */
+  forceAutoModel?: boolean
+  /** Two-step transcription: what ASR heard (before learned corrections), the
+   *  transcript that was stored, and the model that ran. Called once, after
+   *  the attach is queued. */
+  onTranscribed?: (result: { heard: string; transcript: string; model: string; timings: WordTiming[] }) => void
+  /**
+   * AQU-1767 (Sam, 2026-10-14): the live pieces of a SPLIT take, in clip order.
+   * The take is transcribed whole — every piece, together, and nothing a
+   * piece leaves out — and the timings land on `cell.selectedAudioId`.
+   */
+  pieces?: ReadonlyArray<{ trimStartMs?: number | null; trimEndMs?: number | null }>
+  /** AQU-1681: a batch waits out the hosted per-user limit rather than
+   *  failing the row (see `HostedTranscriptionOptions.onRateLimited`). */
+  onRateLimited?: (retryAfterSeconds: number) => Promise<void>
+  /**
+   * AQU-1681: this row's words, already recognised as part of a minute-long
+   * stretch of the shared recording (transcribe-chunked.ts). The row's audio
+   * is then neither read nor sent anywhere; everything after recognition —
+   * learned corrections, alignment, the attach that stores the transcript —
+   * is exactly as for a row transcribed on its own.
+   */
+  prerecognised?: TranscriptionResult
+}
+
+/**
+ * AQU-1767: a split take's pieces as one trim window (first start to last end)
+ * and the spans within it that are heard, in seconds from its start. A piece
+ * with no end runs to the clip's end.
+ */
+export function splitTakeWindow(
+  pieces: ReadonlyArray<{ trimStartMs?: number | null; trimEndMs?: number | null }>,
+): { trim: PcmTrimWindow; keep: KeepSpan[] } {
+  const startMs = Math.min(...pieces.map((p) => p.trimStartMs ?? 0))
+  const ends = pieces.map((p) => p.trimEndMs ?? null)
+  const endMs = ends.some((e) => e == null) ? null : Math.max(...(ends as number[]))
+  return {
+    trim: { trimStartMs: startMs > 0 ? startMs : null, trimEndMs: endMs },
+    keep: pieces.map((p) => ({
+      startSec: ((p.trimStartMs ?? 0) - startMs) / 1000,
+      endSec: p.trimEndMs == null ? Infinity : (p.trimEndMs - startMs) / 1000,
+    })),
+  }
 }
 
 // Test seam: transcribeCell calls transcribeAudio through this binding so
@@ -299,7 +454,7 @@ export function __setTranscribeAudioForTests(fn: typeof transcribeAudio | null):
  * was denied. Never throws — errors are stored in transcribe-status.
  */
 export async function transcribeCell(args: TranscribeCellArgs): Promise<number> {
-  const { cell, session, projectId, language, slot: slotArg } = args
+  const { cell, session, projectId, language, slot: slotArg, targetLang, askAgain, prerecognised } = args
   const audioId = cell.selectedAudioId
   if (!audioId) return 0
 
@@ -319,39 +474,40 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
     return 0
   }
 
+  // AQU-646 / SUB-29: is this the SOURCE CLIP shared by the file's rows, or
+  // somebody's take? (See the trim below.) Decided before the bytes are read
+  // because, AQU-1681, a source clip already decoded for an earlier row of
+  // the batch need not be read at all — for a feature-length recording that
+  // read is tens of megabytes per row.
+  const isMediaCell = cell.medium === "media"
+  const isSourceSegment = isMediaCell && !audioIdSeededWith(audioId, cell.id)
+  const sharedClipKey = isSourceSegment ? `${frontier.audioId}.${frontier.ext}` : undefined
+  // AQU-1681: nothing to read when the words are already here.
+  const clipHeld = prerecognised !== undefined || (sharedClipKey !== undefined && hasSharedClipPcm(sharedClipKey))
+
   // Local-first (FRO-355): a just-recorded take's bytes live in the OPFS cache
   // even before — or without — a successful R2 upload, so transcription can run
   // offline and while signed out. Only the network fallback needs a JWT, so the
   // sign-in guard moves below the cache probe.
-  const cached = await audioCacheGet(frontier.audioId, frontier.ext)
-  if (!cached && !session?.jwt) {
+  const cached = clipHeld ? null : await audioCacheGet(frontier.audioId, frontier.ext)
+  if (!clipHeld && !cached && !session?.jwt) {
     setTranscribeStatus(audioId, { kind: "error", message: t("audio.error.signInToTranscribe") })
     return 0
   }
 
   setTranscribeStatus(audioId, { kind: "loading", loaded: 0, total: 0, file: "" })
 
+  const readBytes = async (): Promise<Uint8Array> =>
+    cached ?? readClipBytes({ projectId, fileId: cell.fileId, audioId: frontier.audioId, ext: frontier.ext, session })
+
   const t0 = Date.now()
   try {
-    let bytes = cached
-    if (!bytes) {
-      const getSyncToken = makeAudioSyncTokenFetcher(() => session)
-      bytes = await fetchCellAudio({
-        projectId,
-        fileId: cell.fileId,
-        audioId: frontier.audioId,
-        ext: frontier.ext,
-        getSyncToken,
-      })
-      // Write through so a later transcribe/play hits the cache (mirrors
-      // useCellAudio.ensureBytes). Non-fatal if OPFS is unavailable.
-      void audioCachePut(frontier.audioId, frontier.ext, bytes)
-    }
+    const bytes = clipHeld ? new Uint8Array(0) : await readBytes()
 
     setTranscribeStatus(audioId, { kind: "transcribing" })
 
     // AQU-646: imported media segments share one clip — transcribe only this
-    // cell's trim window. Recorded takes have no trims (whole clip). And route
+    // cell's trim window (and, AQU-1210, a take only its kept part). And route
     // the language through the Whisper tag mapper (raw project language names
     // were being fed to transformers.js verbatim; unmapped → auto-detect).
     //
@@ -360,15 +516,52 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
     // speech: whole-clip transcription, timings against the translation, and
     // it must NEVER write the section's source transcription. Provenance
     // comes from the audioId seed (source clip = fileId, takes = cellId).
-    const isMediaCell = cell.medium === "media"
-    const isSourceSegment = isMediaCell && !audioIdSeededWith(audioId, cell.id)
+    // AQU-1210: a TAKE is transcribed through its trim too, so the transcript
+    // is of the part that plays — the operator trimmed that silence (or a
+    // false start) off for a reason. An untrimmed take is still the whole clip.
+    // Unlike a source section, a take's word times stay on the CLIP's clock
+    // (WordTiming.t0 is "seconds from the start of the audio clip"), so they
+    // are shifted back by the head trim below.
+    // AQU-1767: a split take's window runs from its first piece's start to its
+    // last piece's end, and only the pieces themselves are kept within it.
+    const split = !isSourceSegment && args.pieces && args.pieces.length > 1 ? splitTakeWindow(args.pieces) : null
+    const takeTrim = split
+      ? split.trim
+      : !isSourceSegment && attachment &&
+        ((attachment.trimStartMs ?? 0) > 0 || attachment.trimEndMs != null)
+        ? { trimStartMs: attachment.trimStartMs ?? null, trimEndMs: attachment.trimEndMs ?? null }
+        : undefined
     const trim = isSourceSegment
       ? { trimStartMs: attachment?.trimStartMs ?? null, trimEndMs: attachment?.trimEndMs ?? null }
-      : undefined
+      : takeTrim
+    const takeHeadSec = takeTrim?.trimStartMs ? takeTrim.trimStartMs / 1000 : 0
 
-    const raw = await transcribeAudioImpl(bytes, {
+    const raw = prerecognised ?? await transcribeAudioImpl(bytes, {
+      session,
+      projectId,
       language: whisperLanguageFromTag(language) ?? undefined,
+      // Omnilingual spec §4: the hosted path sends the raw tag and the server
+      // decides between Whisper and Omnilingual.
+      ...(language ? { languageTag: language } : {}),
+      // Zero-shot learns from the lane's takes, so only a take can use it;
+      // the shared source clip is no lane's speech.
+      ...(!isSourceSegment && session && !args.forceAutoModel ? {
+        zeroShot: {
+          cellId: cell.id,
+          fileId: cell.fileId,
+          ...(targetLang ? { lane: targetLang } : {}),
+          getSyncToken: makeAudioSyncTokenFetcher(() => session),
+        },
+      } : {}),
+      onWaitingForModel: (waiting) => {
+        setTranscribeStatus(audioId, waiting ? { kind: "transcribing", waiting: "model" } : { kind: "transcribing" })
+      },
+      askAgain,
       trim,
+      ...(split ? { keep: split.keep } : {}),
+      // Read only if the held clip went away in the meantime.
+      ...(sharedClipKey && trim ? { sharedClipKey, loadClipBytes: readBytes } : {}),
+      ...(args.onRateLimited ? { onRateLimited: args.onRateLimited } : {}),
       onProgress: (p) => {
         setTranscribeStatus(audioId, {
           kind: "loading",
@@ -404,11 +597,16 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
     // karaoke decoration maps them against the TipTap doc, so align against
     // cell.translated (transcript offsets as fallback when counts mismatch).
     const transcriptText = result.text.trim()
+    let storedTimings: WordTiming[] = []
     if (result.chunks.length > 0 || (isSourceSegment && transcriptText)) {
       // AQU-646: for SOURCE segments align timings against the transcript itself
       // (there's no target text yet — the transcript IS the text karaoke maps);
       // takes (incl. dub takes on media cells) align against the translation.
-      const timings = alignChunks(result.chunks, isSourceSegment ? transcriptText : cell.translated)
+      const aligned = alignChunks(result.chunks, isSourceSegment ? transcriptText : cell.translated)
+      const timings = takeHeadSec > 0
+        ? aligned.map((w) => ({ ...w, t0: w.t0 + takeHeadSec, t1: w.t1 + takeHeadSec }))
+        : aligned
+      storedTimings = timings
       // Signed-out transcribes (cache hit) have no session — the emit queues
       // to the local outbox and can throw a role-gate error, so swallow it:
       // transcription itself succeeded, and the timings re-emit on a manual
@@ -419,7 +617,10 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
       // handlers flush the outbox and revalidate the cell the moment this
       // promise settles; a fire-and-forget emit let that flush race ahead of
       // the IDB write, so the transcript only surfaced after a manual refresh.
-      await emitCellAudioAttach({
+      // Decision 11: the take was undone while it was being transcribed. A
+      // re-attach would bring it back (see undone-takes.ts), so the timings
+      // stay in memory only.
+      if (!wasTakeUndone(audioId)) await emitCellAudioAttach({
         projectId,
         fileId: cell.fileId,
         cellId: cell.id,
@@ -456,11 +657,19 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         // guard is attachment PROVENANCE, not cell medium, so a dub take
         // recorded onto a media section can never clobber its transcript.
         ...(isSourceSegment && transcriptText ? { transcription: transcriptText } : {}),
+        // Two-step transcription: what ASR heard, BEFORE learned corrections,
+        // so the pair kept for cleanup shows the real ASR error.
+        ...(raw.text.trim() ? { asr: { text: raw.text.trim(), model: raw.model ?? "unknown" } } : {}),
+        // AQU-1978: a take's timings are written in the take's own lane, so
+        // the re-attach can never deselect another language's take.
+        ...(!isSourceSegment && targetLang ? { targetLang } : {}),
         author: session?.username ?? "local",
       }).catch((err) => {
         console.warn("[transcribe] emitCellAudioAttach failed (timings not persisted):", err)
       })
     }
+
+    args.onTranscribed?.({ heard: raw.text.trim(), transcript: transcriptText, model: raw.model ?? "unknown", timings: storedTimings })
 
     setTranscribeStatus(audioId, {
       kind: "done",

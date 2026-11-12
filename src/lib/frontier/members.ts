@@ -1,7 +1,10 @@
 import { FRONTIER_BASE, AUTH_BASE } from "./auth";
 import { UserError } from "@/lib/errors/user-error";
+import { throwIfElevationRequired } from "./elevation";
 import { ROLE } from "@/lib/frontier/roles";
 import { createRequestCoalescer } from "@/lib/request-coalescer";
+import type { ScopePath } from "@/lib/access/types";
+import type { MemberLaneAccess } from "@/lib/lanes/lane-access-choice";
 
 export interface LookedUpUser {
   id: number;
@@ -44,6 +47,21 @@ export interface ProjectMember {
    * Empty when the user has access through only one path.
    */
   secondarySources: SecondarySrc[];
+  /**
+   * AQU-1352 §3.7: server-derived origin fields (additive; absent on older
+   * payloads). Computed by auth-worker services/roster-origins.ts.
+   */
+  effective?: { roleLevel: number; source: ProjectMemberRole["source"] | "platform" };
+  /** Direct role on this project, null when none. */
+  direct?: number | null;
+  /** Scope path of the winning team/org grant; null when not inherited. */
+  inheritedFrom?: ScopePath | null;
+  /** Rule 4 dry-run: access left after removing the direct grant; null = none. */
+  afterDirectRemoval?: {
+    roleLevel: number;
+    source: ProjectMemberRole["source"] | "platform";
+    from: ScopePath | null;
+  } | null;
 }
 
 /**
@@ -72,6 +90,19 @@ export function partitionMembers(members: ProjectMember[]): {
     else orgAccessMembers.push(m);
   }
   return { projectMembers, orgAccessMembers };
+}
+
+/**
+ * AQU-2194: whether anyone besides the caller is on the project to give
+ * language work to. Maintainers and owners (the project's creator among them)
+ * are listed too, but they run the project; a PM looking for a linguist and
+ * finding only them has nobody to hand the work to.
+ */
+export function hasLanguageWorker(
+  members: readonly ProjectMember[],
+  callerUserId: number | null,
+): boolean {
+  return members.some((m) => m.userId !== callerUserId && m.role.level < ROLE.MAINTAINER)
 }
 
 function authHeaders(jwt: string): HeadersInit {
@@ -130,6 +161,7 @@ const rosterCoalescer = createRequestCoalescer<ProjectRosterResult>({ cacheTtlMs
  *  next read is one cheap GET). */
 export function invalidateProjectRosters(): void {
   rosterCoalescer.invalidate()
+  mentionCoalescer.invalidate()
 }
 
 async function fetchProjectRosterUncached(
@@ -151,6 +183,49 @@ async function fetchProjectRosterUncached(
   if (!res.ok) throw new UserError(res.status, "", "project");
   const body = (await res.json()) as { members: ProjectMember[] };
   return { kind: "ok", members: body.members };
+}
+
+/** One row of GET …/mention-candidates (AQU-1815): no email, by design. */
+export interface MentionCandidateRow {
+  userId: number
+  username: string
+}
+
+export interface MentionCandidatesResult {
+  candidates: MentionCandidateRow[]
+  /** True when the list is the caller's lane-scoped subset, not the roster. */
+  restricted: boolean
+}
+
+const mentionCoalescer = createRequestCoalescer<MentionCandidatesResult>({ cacheTtlMs: ROSTER_CACHE_TTL_MS })
+
+/**
+ * GET /api/v2/projects/:id/mention-candidates — who the caller may @mention
+ * in a comment (AQU-1815). Unlike the roster read this never 403s on the org
+ * roster floor: below it the server answers with the caller's lane-mates
+ * plus Maintainer and above. No access (403/404) is an empty, unrestricted
+ * list, as for a local-only project; real failures still throw.
+ */
+export async function fetchMentionCandidates(
+  jwt: string,
+  projectId: string,
+  opts?: { fresh?: boolean },
+): Promise<MentionCandidatesResult> {
+  const key = `${jwt}|${projectId}`
+  return mentionCoalescer.run(
+    key,
+    async () => {
+      const res = await fetch(
+        `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/mention-candidates`,
+        { headers: authHeaders(jwt) },
+      )
+      if (res.status === 403 || res.status === 404) return { candidates: [], restricted: false }
+      if (!res.ok) throw new UserError(res.status, "", "project")
+      const body = (await res.json()) as Partial<MentionCandidatesResult>
+      return { candidates: body.candidates ?? [], restricted: body.restricted === true }
+    },
+    { fresh: opts?.fresh },
+  )
 }
 
 /**
@@ -217,16 +292,18 @@ export async function addProjectMember(
   jwt: string,
   projectId: string,
   username: string,
-  role: number
+  role: number,
+  laneAccess?: MemberLaneAccess,
 ): Promise<ProjectMember> {
   const res = await fetch(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members`,
     {
       method: "POST",
       headers: authHeaders(jwt),
-      body: JSON.stringify({ username, role }),
+      body: JSON.stringify({ username, role, ...laneAccess }),
     }
   );
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new UserError(res.status, text, "project");
@@ -257,16 +334,23 @@ export interface MemberGrantResult {
 export async function addProjectMembers(
   jwt: string,
   projectId: string,
-  members: Array<{ username: string; role: number }>
+  members: Array<{
+    username: string
+    role: number
+    laneAccess?: MemberLaneAccess
+  }>
 ): Promise<MemberGrantResult[]> {
   const res = await fetch(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members`,
     {
       method: "POST",
       headers: authHeaders(jwt),
-      body: JSON.stringify({ members }),
+      body: JSON.stringify({
+        members: members.map(({ username, role, laneAccess }) => ({ username, role, ...laneAccess })),
+      }),
     }
   );
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new UserError(res.status, text, "project");
@@ -284,11 +368,64 @@ export async function removeProjectMember(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members/${userId}`,
     { method: "DELETE", headers: authHeaders(jwt) }
   );
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new UserError(res.status, text, "project");
   }
   invalidateProjectRosters();
+}
+
+/** AQU-1993: the outcome of leaving a project. */
+export interface LeaveProjectResult {
+  /** True when a surviving org / team / creator path still grants access. */
+  stillHasAccess: boolean;
+  /** Which path survived, when one did. */
+  remainingSource: ProjectMemberRole["source"] | "platform" | null;
+}
+
+/**
+ * AQU-1993: the caller has no individual grant to give up — their access is
+ * inherited, so leaving the project is not theirs to do.
+ */
+export class NoDirectMembershipError extends Error {
+  constructor() {
+    super("no_direct_membership");
+    this.name = "NoDirectMembershipError";
+  }
+}
+
+/**
+ * DELETE /api/v2/projects/:projectId/members/me — leave the project
+ * (AQU-1993). Self-service, unlike `removeProjectMember`, which is the
+ * maintainer+ moderation route.
+ *
+ * Only a direct grant can be given up. Access inherited from the
+ * organization, a team, or being the project's creator survives, and the
+ * result says so rather than implying the project is gone.
+ */
+export async function leaveProject(
+  jwt: string,
+  projectId: string
+): Promise<LeaveProjectResult> {
+  const res = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members/me`,
+    { method: "DELETE", headers: authHeaders(jwt) }
+  );
+  if (res.status === 409) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    if (body?.error === "no_direct_membership") throw new NoDirectMembershipError();
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new UserError(res.status, text, "project");
+  }
+  const body = (await res.json()) as LeaveProjectResult;
+  invalidateProjectRosters();
+  return {
+    stillHasAccess: Boolean(body.stillHasAccess),
+    remainingSource: body.remainingSource ?? null,
+  };
 }
 
 export interface RevokeAllResult {
@@ -329,6 +466,7 @@ export async function revokeAllProjectAccess(
       headers: authHeaders(jwt),
     },
   )
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) {
     const text = await res.text().catch(() => "")
     throw new UserError(res.status, text, "project")
@@ -366,6 +504,7 @@ export async function createRemoteProject(
       ...(orgId != null ? { orgId } : {}),
     }),
   });
+  await throwIfElevationRequired(res, "project");
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new UserError(res.status, text, "project");

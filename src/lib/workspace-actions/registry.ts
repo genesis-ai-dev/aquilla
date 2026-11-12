@@ -1,9 +1,10 @@
-import { Plus, Sparkles, Download, CheckSquare, Upload, Mic, Wand2 } from "lucide-react"
+import { Plus, Sparkles, Download, CheckSquare, Mic, Wand2, AudioLines, Quote } from "lucide-react"
 import type {
   WorkspaceAction, WorkspaceActionContext,
 } from "./types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { canPerform } from "@/lib/sync/role-policy"
+import { batchValidateConfirmDescription } from "@/lib/review/batch-validate-summary"
 
 // AQU-365: viewers (and any role below the action's server floor) must not
 // see these buttons at all — clicking them either persists a write server
@@ -56,13 +57,19 @@ export const workspaceActions: WorkspaceAction[] = [
     // affordance (WorkspaceHeaderActions) rather than vanishing; `isAvailable`
     // is what makes the click itself refuse. Fails OPEN on an unknown role, so
     // local/legacy projects with no syncRole are unaffected.
-    isAvailable: (c) => roleAllows(c, "file.create"),
+    //
+    // AQU-1365: the same dialog now also brings in a translation of a file
+    // already in the project, which only commits target cells
+    // (`target.cell.commit`, CONTRIBUTOR 400). So the action opens from
+    // Contributor up; the dialog greys out New source text below Project lead.
+    isAvailable: (c) => roleAllows(c, "file.create") || roleAllows(c, "target.cell.commit"),
     isDefault: (c) => c.activeFileId == null,
     run: (_c, args) => args.openImport(),
   },
   {
     id: "run-completions", labelKey: "nav.workspaceActions.runCompletions.label", icon: Sparkles, group: "primary",
-    isAvailable: (c) => c.activeFileId != null && roleAllows(c, "target.cell.commit"),
+    opensFileModal: "draft-next",
+    isAvailable: (c) => c.activeFileId != null && !c.audioOnlyLane && roleAllows(c, "target.cell.commit"),
     isDefault: (c) => {
       if (!c.activeFileId) return false
       const p = c.fileProgress.get(c.activeFileId)
@@ -89,8 +96,9 @@ export const workspaceActions: WorkspaceAction[] = [
   },
   {
     id: "complete-all", labelKey: "nav.workspaceActions.completeAll.label", icon: Sparkles, group: "primary",
+    opensFileModal: "draft-all",
     isAvailable: (c) => {
-      if (!c.activeFileId) return false
+      if (!c.activeFileId || c.audioOnlyLane) return false
       if (!roleAllows(c, "target.cell.commit")) return false
       const p = c.fileProgress.get(c.activeFileId)
       return !!p && p.total > 0 && p.translated < p.total
@@ -112,7 +120,8 @@ export const workspaceActions: WorkspaceAction[] = [
   },
   {
     id: "batch-validate", labelKey: "nav.workspaceActions.batchValidate.label", icon: CheckSquare, group: "primary",
-    isAvailable: (c) => c.activeFileId != null && roleAllows(c, "cell.validate"),
+    opensFileModal: "validate",
+    isAvailable: (c) => c.activeFileId != null && !c.audioOnlyLane && roleAllows(c, "cell.validate"),
     isDefault: (c) => {
       if (!c.activeFileId) return false
       const p = c.fileProgress.get(c.activeFileId)
@@ -120,18 +129,25 @@ export const workspaceActions: WorkspaceAction[] = [
     },
     requiresConfirmation: {
       titleKey: "nav.workspaceActions.batchValidate.title",
-      description: (c, t) => {
+      // AQU-1507: this body used to be built from file progress —
+      // `total - validated` — which counts untranslated cells, untouched AI
+      // drafts, cells this reader had already signed off and cells outside
+      // their assignment, none of which the run touches. It promised "83 cells
+      // are currently unvalidated" on a file where the run validated zero.
+      // The count now comes from the very summary the run consumes
+      // (`ctx.batchValidateSummary`), so the two cannot drift: change the
+      // eligibility predicate and this number follows.
+      description: (c, t, joinList) => {
         if (!c.activeFileId) return ""
-        const p = c.fileProgress.get(c.activeFileId)
-        const unvalidated = p ? p.total - p.validated : 0
+        const summary = c.batchValidateSummary?.()
+        if (!summary) return t("editor.batchValidate.noTarget")
         // AQU-586: a project may cap how many eligible cells one batch-validate
-        // processes. 0/undefined keeps the "all eligible" behavior.
-        const cap = c.project.completionSettings?.validationBatchSize
-        const capNote =
-          typeof cap === "number" && cap > 0
-            ? t("nav.workspaceActions.batchValidate.capNote", { cap })
-            : ""
-        return t("nav.workspaceActions.batchValidate.description", { unvalidated }) + capNote
+        // processes. 0/undefined keeps the "all eligible" behavior. The cap is
+        // already applied inside the summary; it is passed again so the note
+        // explaining "run again to continue" survives a run it did not trim.
+        return batchValidateConfirmDescription(
+          summary, t, joinList, c.project.completionSettings?.validationBatchSize,
+        )
       },
       // Same imperative as the selection toolbar's button — reuse it rather
       // than mint a duplicate string in this namespace. It names its half now
@@ -139,6 +155,15 @@ export const workspaceActions: WorkspaceAction[] = [
       // "Validate" key stays for the agent card, whose per-row button is not
       // text-specific and whose accessible name already carries the reference.
       confirmLabelKey: "editor.selection.validateText",
+      // Same summary as the body: a run that would validate nothing (no
+      // permission, nothing here, nothing eligible) cannot be confirmed. The
+      // walk on 10-02 ticked the box, pressed "Validate text" and got only the
+      // body's sentence back as an error toast.
+      canConfirm: (c) => {
+        if (!c.activeFileId) return false
+        const summary = c.batchValidateSummary?.()
+        return !!summary && summary.validatable.length > 0
+      },
     },
     run: (_c, args) => args.runBatchValidate(),
   },
@@ -181,14 +206,6 @@ export const workspaceActions: WorkspaceAction[] = [
     run: (_c, args) => args.runExport(),
   },
   {
-    // AQU-503: the label must carry the word "target" so PMs looking for the
-    // "Target Import" option can find it — this file-scoped importer populates
-    // the open file's TARGET column, distinct from the primary "Import" (source).
-    id: "import-into-file", labelKey: "nav.workspaceActions.importIntoFile", icon: Upload, group: "secondary",
-    isAvailable: (c) => c.activeFileId != null,
-    run: (_c, args) => args.runImportIntoFile(),
-  },
-  {
     id: "transcribe-all", labelKey: "nav.workspaceActions.transcribeAll.label", icon: Mic, group: "secondary",
     isAvailable: (c) => c.activeFileId != null && (c.audioCounts?.untranscribed ?? 0) > 0,
     requiresConfirmation: {
@@ -203,7 +220,7 @@ export const workspaceActions: WorkspaceAction[] = [
   },
   {
     id: "synth-all", labelKey: "nav.workspaceActions.synthAll.label", icon: Wand2, group: "secondary",
-    isAvailable: (c) => c.activeFileId != null && (c.audioCounts?.unsynthesized ?? 0) > 0,
+    isAvailable: (c) => c.activeFileId != null && !c.audioOnlyLane && (c.audioCounts?.unsynthesized ?? 0) > 0,
     requiresConfirmation: {
       titleKey: "nav.workspaceActions.synthAll.title",
       description: (c, t) => {
@@ -213,5 +230,37 @@ export const workspaceActions: WorkspaceAction[] = [
       confirmLabelKey: "nav.workspaceActions.synthAll.confirmLabel",
     },
     run: (_c, args) => args.runSynthAll(),
+  },
+  {
+    id: "change-voice-all", labelKey: "nav.workspaceActions.changeVoiceAll.label", icon: AudioLines, group: "secondary",
+    isAvailable: (c) => c.activeFileId != null && (c.audioCounts?.voiceChangeable ?? 0) > 0,
+    requiresConfirmation: {
+      titleKey: "nav.workspaceActions.changeVoiceAll.title",
+      description: (c, t) => {
+        const n = c.audioCounts?.voiceChangeable ?? 0
+        return t("nav.workspaceActions.changeVoiceAll.description", { n })
+      },
+      confirmLabelKey: "nav.workspaceActions.changeVoiceAll.confirmLabel",
+    },
+    run: (_c, args) => args.runChangeVoiceAll(),
+  },
+  {
+    // AQU-1759: the row menu's "Split at quotes", for every line of the file
+    // at once — a chapter of John has dozens of verses mixing narration and
+    // speech. The count in the confirmation comes from the same scan the run
+    // splits from, and a file with nothing to split says so with no confirm.
+    id: "split-quotes", labelKey: "nav.workspaceActions.splitQuotes.label", icon: Quote, group: "secondary",
+    isAvailable: (c) => c.activeFileId != null && (c.canSplitAtQuotes?.() ?? false),
+    requiresConfirmation: {
+      titleKey: "nav.workspaceActions.splitQuotes.title",
+      description: (c, t) => {
+        const summary = c.quoteSplitSummary?.()
+        if (!summary || summary.rows === 0) return t("nav.workspaceActions.splitQuotes.none")
+        return t("nav.workspaceActions.splitQuotes.description", { count: summary.rows, lines: summary.lines })
+      },
+      confirmLabelKey: "nav.workspaceActions.splitQuotes.confirmLabel",
+      canConfirm: (c) => (c.quoteSplitSummary?.().rows ?? 0) > 0,
+    },
+    run: (_c, args) => args.runSplitAtQuotes(),
   },
 ]

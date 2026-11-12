@@ -12,6 +12,7 @@ import { dispatchEvent } from '../events/dispatch'
 import { authorize, type AuthorizedEvent } from '../events/authorize'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
+import { projectSettingsRow } from './helpers/project-settings-db'
 
 const SECRET = 'test-secret'
 
@@ -42,7 +43,19 @@ async function authorizeTrackSetRaw(payload: unknown, role: number) {
     payload,
     clientTs: 1000,
   } as unknown as RawEvent<'file.track.set'>
-  return await authorize(token, raw, SECRET)
+  // Shape tests authorize against a valid content-ownership boundary. Real
+  // ownership and missing-database cases live in authorize-track-content.
+  const hasContent = (payload as { patch?: { contentFileId?: unknown } })?.patch?.contentFileId !== undefined
+  const db = hasContent ? {
+    prepare(sql: string) {
+      return { bind() { return { async first() {
+        return sql.includes('project_settings')
+          ? projectSettingsRow(sql, JSON.stringify({ allowTrackEditing: true }))
+          : { id: 'owned-content' }
+      } } } }
+    },
+  } as unknown as AquillaDb : undefined
+  return await authorize(token, raw, SECRET, db)
 }
 
 function makeNoOpD1(): AquillaDb {
@@ -99,6 +112,37 @@ describe('file.track.set — role floor', () => {
 })
 
 describe('file.track.set — accepted writes', () => {
+  it('accepts a text track pinned to independent cue content', async () => {
+    const authed = await authorizeTrackSet({
+      trackId: 'captions-track',
+      patch: { kind: 'source-subtitles', name: 'Captions', contentFileId: 'caption-content' },
+    })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  it('accepts explicit backfill of the default text track', async () => {
+    const authed = await authorizeTrackSet({
+      trackId: 'source-subtitles', patch: { contentFileId: 'caption-content' },
+    })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  it.each(['', 'bad/path', 'x'.repeat(201), 42, [], {}].map(contentFileId => ({ contentFileId })))(
+    'rejects unusable content file identity: $contentFileId', async ({ contentFileId }) => {
+      const authed = await authorizeTrackSet({
+        trackId: 'captions-track', patch: { kind: 'source-subtitles', contentFileId },
+      })
+      expectRejected(dispatch(authed), /unusable contentFileId/)
+    },
+  )
+
+  it('rejects a content reference back to the timeline itself', async () => {
+    const authed = await authorizeTrackSet({
+      trackId: 'captions-track', patch: { kind: 'source-subtitles', contentFileId: 'file-x' },
+    })
+    expectRejected(dispatch(authed), /own content/)
+  })
+
   it('routes an upsert to the handler: events INSERT + files UPDATE', async () => {
     const authed = await authorizeTrackSet({
       trackId: '9f1c3a7e-2b40-4d55-8e0a-6c1d2f3a4b5c',
@@ -191,6 +235,20 @@ describe('file.track.set — accepted writes', () => {
   // handed that id could never have its kind set, for no reason at all, since
   // nothing DERIVES a folder and there is no row for the delta to collide
   // with. If someone collapses the two sets again, this fails.
+  // AQU-2252 (Sam, Oct 29): an added track can be made a LAYER — its takes
+  // stop setting their lines' lengths while the file follows its recordings.
+  // Stored only when it differs from the default (every track sets them), and
+  // cleared back to that default with null.
+  it('accepts making an added track a layer', async () => {
+    const authed = await authorizeTrackSet({ trackId: 'trk-1', patch: { setsLineLengths: false } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  it('accepts clearing it back to the default', async () => {
+    const authed = await authorizeTrackSet({ trackId: 'trk-1', patch: { setsLineLengths: null } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
   it("treats 'folder' as an ordinary track id, not a reserved one", async () => {
     const authed = await authorizeTrackSet({ trackId: 'folder', patch: { kind: 'audio' } })
     expect(dispatch(authed).ok).toBe(true)
@@ -309,6 +367,19 @@ describe('file.track.set — rejected writes', () => {
       'a sourceTrackId on a default track',
       { trackId: 'target-audio', patch: { sourceTrackId: 'source-subtitles' } },
       /sets sourceTrackId on default track target-audio/,
+    ],
+    // ── AQU-2252 ──────────────────────────────────────────────────────────
+    [
+      'a non-boolean setsLineLengths',
+      { trackId: 'trk-1', patch: { setsLineLengths: 'no' } },
+      /unusable setsLineLengths/,
+    ],
+    // The Language lane's main track always sets its lines' lengths: it is
+    // what a line's length is measured from when nothing else is.
+    [
+      'setsLineLengths on a default track',
+      { trackId: 'target-audio', patch: { setsLineLengths: false } },
+      /sets setsLineLengths on default track target-audio/,
     ],
   ]
 

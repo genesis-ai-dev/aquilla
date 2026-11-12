@@ -49,10 +49,18 @@ export interface SearchHit {
   snippet: string
 }
 
+/** A file the agent asked the user to choose from (AQU-1468). */
+export interface FileCandidate {
+  id: string
+  name: string
+}
+
 export interface ToolResultData {
   cells?: PassageRow[]
   examples?: ExamplePair[]
   hits?: SearchHit[]
+  /** Set on a failed read/draft that asks "which file?"; rendered as buttons. */
+  candidates?: FileCandidate[]
 }
 
 // ── SSE frames (server → client), `data:`-prefixed JSON lines ─────────────
@@ -64,7 +72,11 @@ export type AgentFrame =
   | { type: 'code_result'; step: number; ok: boolean; summary: string; data?: ToolResultData } // summary: compressed result block (what the model saw), ≤2000 chars for UI
   | { type: 'proposal'; proposal: AgentProposal }
   | { type: 'aquifer_proposal'; proposal: AquiferPublishProposal }
-  | { type: 'progress'; label: string; done: number; total: number } // bulk-job heartbeat
+  // bulk-job heartbeat. AQU-1536: `done`/`total` are optional — a producer
+  // that runs one batched call and cannot count finished work items omits
+  // them and lets the label carry the stage, rather than reporting a `0/N`
+  // that can only jump straight to `N/N` and reads as a stalled run.
+  | { type: 'progress'; label: string; done?: number; total?: number }
   | { type: 'usage'; promptTokens: number; completionTokens: number; costCredits: number }
   | { type: 'done'; runId: string; status: 'ok' | 'capped' | 'error' }
   | { type: 'error'; message: string }
@@ -80,7 +92,10 @@ export type AgentFrame =
   | { type: 'memory.proposed'; runId: string; memoryId: string; path: string; preview: string }
   | { type: 'brief.proposed'; runId: string; proposalId: string; preview: string }
   | { type: 'budget'; runId: string; spentCredits: number; capCredits: number }
-  | { type: 'budget.exhausted'; runId: string; spentCredits: number; capCredits: number; reason?: 'weekly_allowance' }
+  // AQU-2313: `reason` names the limit that applied — this run's own cost cap
+  // or the workspace's weekly allowance. Absent on a pre-AQU-2313 server,
+  // which sent the frame only for the per-run cap.
+  | { type: 'budget.exhausted'; runId: string; spentCredits: number; capCredits: number; reason?: 'weekly_allowance' | 'run_cost_cap' }
 
 // ── Staged proposal shape ──────────────────────────────────────────────────
 
@@ -89,6 +104,13 @@ export interface AgentProposal {
   runId: string
   events: StagedEvent[]         // resolved: real UUIDs, real parentId/sourceEventId
   summary: string               // human line: "Draft 12 cells in MRK 4"
+  /**
+   * AQU-2398: the events are mutually-exclusive ALTERNATIVE wordings of one
+   * cell, not a set of changes to apply together. The reviewer picks exactly
+   * one and the rest are discarded unwritten (AlternativesCard). Additive and
+   * optional: absent on every ordinary proposal, and on a pre-AQU-2398 server.
+   */
+  alternatives?: boolean
 }
 
 export interface StagedEvent {
@@ -131,7 +153,7 @@ export interface AgentRunRequest {
   sessionId?: string
   /** ≤10 turns, client truncates. With sessionId: exactly the new user turn. */
   messages: { role: 'user' | 'assistant'; content: string }[]
-  context?: { fileId?: string; cellId?: string }
+  context?: { fileId?: string; cellId?: string; lane?: string }
   /**
    * User-level translator profile (all fields optional, free-text). Injected as
    * JSON into the agent's system prompt to tailor answers and pick the reply
@@ -148,6 +170,13 @@ export interface AgentRunRequest {
     geographicalSetting?: string
     otherInfo?: string
   }
+  /**
+   * AQU-2263: the language the person uses Aquilla in (its English name). The
+   * assistant answers in the person's own language, else the project's
+   * language for the team, else the language of their latest message, and in
+   * this one only when that can't be told.
+   */
+  appLanguage?: string
   /**
    * Files the user attached in the composer, already uploaded as project
    * artifacts (POST /api/v2/projects/:id/agent-artifacts). The server tells the

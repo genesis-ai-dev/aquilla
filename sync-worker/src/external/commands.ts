@@ -8,7 +8,16 @@
 // dependency-free.
 
 import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
-import type { AiDraftProvenance } from '../events/types'
+import type { ExternalLaneSpec } from '../../../db/shared/lanes'
+import {
+  laneIdRequiredMessage,
+  parseLaneSpecs,
+  RETIRED_LANE_SETTINGS_KEYS,
+  RETIRED_LANE_SETTINGS_MESSAGE,
+} from './external-lane'
+import type { AiDraftProvenance, ImportedOriginProvenance } from '../events/types'
+import { IMPORTED_ORIGIN_FILENAME_MAX } from '../events/types'
+import { normalizeTextDirection, type TextDirection } from '../../../db/shared/text-direction'
 import {
   validatePlanImportManifest,
   type PlanImportCell,
@@ -16,7 +25,6 @@ import {
   type PlanImportVariant,
 } from './import-manifest'
 import {
-  staticPatchSettingsFloor,
   validatePatchSettingsCommand,
   type PatchSettingsCommand,
 } from './commands-patch-settings'
@@ -36,10 +44,6 @@ import {
   isCellFieldKind,
   validateCellFieldCommand,
   type CellFieldCommand,
-  type SetSourceCommand,
-  type SetTimingCommand,
-  type SetTrackOverrideCommand,
-  type SetTranscriptionCommand,
 } from './commands-cell-fields'
 import {
   MEMBERSHIP_FLOOR,
@@ -85,11 +89,23 @@ import {
   type MemoryCommand,
 } from './commands-memory'
 import {
+  STYLE_RULE_REVIEW_ROLE,
+  isStyleRuleCommand,
+  validateStyleRuleCommand,
+  type ReviewStyleRulesCommand,
+} from './commands-style-rules'
+import {
   isStructureCommandKind,
   structureCommandFloor,
   validateStructureCommand,
   type StructureCommand,
 } from './commands-structure'
+import {
+  isVisibilityCommandKind,
+  validateVisibilityCommand,
+  visibilityCommandFloor,
+  type VisibilityCommand,
+} from './commands-hide-cell'
 
 /** True for the four AQU-1228 Living Memory command kinds. Narrows a raw
  *  `kind` string BEFORE validation, unlike `isMemoryCommand` which narrows an
@@ -148,6 +164,12 @@ export type {
   StructureCommand,
 } from './commands-structure'
 export { isStructureCommandKind } from './commands-structure'
+export type {
+  HideCellCommand,
+  ShowCellCommand,
+  VisibilityCommand,
+} from './commands-hide-cell'
+export { isVisibilityCommand, isVisibilityCommandKind } from './commands-hide-cell'
 export { cellKey, laneCellKey } from './cell-keys'
 export { isCellFieldCommand } from './commands-cell-fields'
 
@@ -158,11 +180,9 @@ export interface SetTranslationCommand {
   cellId: string
   value: string
   valueHtml?: string
-  /** Target-language lane (AQU-538): a language tag registered in the
-   *  project's settings.targetLanes (e.g. "es", "pt"). Omit for the default
-   *  lane. Prepare rejects an unregistered lane — register it with
-   *  UpdateProjectSettings first. */
-  laneId?: string
+  /** Target lane id (`lanes.id`). Required. A language tag is not accepted.
+   *  Read the ids from GET /api/v1/external/projects/:projectId. */
+  laneId: string
   /** SERVER-MINTED (AQU-1186). Set only by the DraftCells prepare path when it
    *  materializes the copilot's output into SetTranslation commands; it makes
    *  the compiled commit carry `ai_suggestion` + `ai_draft`, so the cell lands
@@ -170,6 +190,14 @@ export interface SetTranslationCommand {
    *  rebuilds every command from known keys only, so a caller CANNOT set this
    *  on a hand-written SetTranslation — provenance is never self-asserted. */
   aiDraft?: AiDraftProvenance
+  /** AQU-1673: CALLER-SUPPLIED import provenance — the name of the file this
+   *  value was read out of, stamped onto the compiled commit as
+   *  `imported_origin`. Unlike `aiDraft` this is accepted from the caller,
+   *  because it asserts no authorship and gates nothing: it is a descriptive
+   *  label that lets a reviewer tell imported text from AI-drafted text. It
+   *  never sets `ai_suggestion`, so an imported cell does not read back as an
+   *  AI draft. */
+  importOrigin?: ImportedOriginProvenance
 }
 
 /** Create a file and its source cells via the changeset pipeline (AQU-533 §5).
@@ -181,6 +209,13 @@ export interface PlanImportCommand {
   fileType: string
   sourceLanguage?: string
   targetLanguage?: string
+  /** AQU-1471: per-file text direction, stamped onto the created file row. OMIT
+   *  IT unless this one file really runs against the project — absent means the
+   *  project's `sourceTextDirection`/`targetTextDirection` setting decides (and
+   *  below that, the language), so a whole RTL project is one PatchSettings
+   *  rather than one override per import. */
+  sourceTextDirection?: TextDirection
+  targetTextDirection?: TextDirection
   /** Optional uploaded artifact to preserve + link to the created file. */
   artifactId?: string
   /** Optional normalized profile/recipe selected by the unified importer. */
@@ -209,12 +244,10 @@ export interface CreateProjectCommand {
   name: string
   /** Target org id (numeric, or its string form). Omit for a personal project. */
   orgId?: string | number
-  /** Seed `settings.sourceLanguage` at creation — the same key the UI's create
-   *  flow patches immediately after createCloudProject. Omit to leave unset. */
-  sourceLanguage?: string
-  /** Seed `settings.targetLanguage` at creation. Omit (or '') for a
-   *  source-only project, mirroring the UI's source-only shape. */
-  targetLanguage?: string
+  /** Lanes to create with the project. Each is role, language, optional name,
+   *  optional code. They become lane rows; the four project-level language
+   *  keys are not written. Omit for a source lane with no language. */
+  lanes?: ExternalLaneSpec[]
 }
 
 /** The complete accepted key set for a CreateProject command body (AQU-1223).
@@ -226,8 +259,7 @@ export const CREATE_PROJECT_FIELDS: readonly string[] = [
   'projectId',
   'name',
   'orgId',
-  'sourceLanguage',
-  'targetLanguage',
+  'lanes',
 ]
 
 /** Create an organization (AQU-1221, receipt-only like CreateProject). Applies
@@ -264,15 +296,38 @@ export interface UpdateProjectSettingsCommand {
  *  cell.audio.attach + cell.audio.select events. The artifact must be an
  *  `audio`-kind artifact in the same project (uploaded via the REST artifact
  *  endpoint with `x-artifact-kind: audio`). */
+/** AQU-2086: the two slots of the default target-audio track a LinkMedia take
+ *  may land in. `cell_audio.slot` is an open string (an added track addresses
+ *  its takes by its own track id), but the Agent API names only these two —
+ *  the ones the Takes list, the Target track and the dubbing export read. */
+export const LINK_MEDIA_SLOTS = ['recording', 'generatedVoice'] as const
+export type LinkMediaSlot = (typeof LINK_MEDIA_SLOTS)[number]
+
+/** AQU-2086: sanity bound on a caller-stated clip length (24 h). */
+export const LINK_MEDIA_MAX_DURATION_MS = 24 * 60 * 60 * 1000
+
 export interface LinkMediaCommand {
   kind: 'LinkMedia'
   fileId: string
   cellId: string
   artifactId: string
+  /** AQU-2086: `lanes.id` of the target lane the take belongs to. Required, as
+   *  for SetTranslation (AQU-1615): a take that names no lane is filed under
+   *  the legacy '' lane, and a tagged lane's editor view lists only its own
+   *  takes — the commit succeeded and the cell still said "No takes yet". */
+  laneId: string
+  /** AQU-2086: which slot the clip takes. Absent = `recording` (a recorded
+   *  take); `generatedVoice` lands externally synthesized voice where in-app
+   *  TTS takes live, reviewed and exported the same way. */
+  slot?: LinkMediaSlot
+  /** AQU-2086: the clip's length in ms when the caller knows it. The artifact
+   *  upload does no decoding, so this is the only way a take arrives with one. */
+  durationMs?: number
 }
 
 export type Command =
   | MemoryCommand
+  | ReviewStyleRulesCommand
   | SetTranslationCommand
   | PlanImportCommand
   | CreateProjectCommand
@@ -291,11 +346,22 @@ export type Command =
   | ProjectSetupCommand
   | OrgMemberCommand
   | StructureCommand
+  | VisibilityCommand
 
 /** Hard cap on source cells per PlanImport changeset. Above this the plan is
  *  rejected with validation_failed — the manifest-in-R2 pattern for larger
  *  imports is a Wave-3 TRACE (see docs/swarm/AGENT-API-TRACES.md). */
 export const PLAN_IMPORT_MAX_CELLS = 5000
+
+/** Hard cap on SetTranslation commands per changeset (AQU-1852). Above this the
+ *  plan is rejected at PREPARE with validation_failed naming the cap, rather
+ *  than staged and then failing at apply — an approver must never be shown a
+ *  plan the engine cannot land. Matched to PLAN_IMPORT_MAX_CELLS: a whole book
+ *  of target commits is the largest batch the apply path pages through, and the
+ *  prepare-time precondition lookup is paged to match
+ *  (CELL_KEY_LOOKUP_ROWS, lib/cell-key-lookup.ts). Larger batches split into
+ *  several changesets. */
+export const SET_TRANSLATION_MAX_COMMANDS = 5000
 
 /** Longest org name CreateOrg will stage (AQU-1221). The column is TEXT; this
  *  is a sanity bound so an agent cannot park a document in the org switcher. */
@@ -333,6 +399,19 @@ export interface CommandValidationIssue {
 export type ValidateCommandsResult =
   | { ok: true; commands: Command[] }
   | { ok: false; issues: CommandValidationIssue[] }
+
+/** AQU-1673: validate caller-supplied import provenance and rebuild it from
+ *  known keys only. Returns null when the shape is wrong so the caller can
+ *  report a named validation issue rather than stage unlabelled proposals. */
+export function parseImportOrigin(raw: unknown): ImportedOriginProvenance | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const o = raw as Record<string, unknown>
+  if (typeof o.fileName !== 'string') return null
+  const fileName = o.fileName.trim()
+  if (fileName.length === 0 || fileName.length > IMPORTED_ORIGIN_FILENAME_MAX) return null
+  if (typeof o.importedAt !== 'number' || !Number.isFinite(o.importedAt)) return null
+  return { fileName, importedAt: o.importedAt }
+}
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0
@@ -419,12 +498,31 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         issues.push({ index, message: 'SetTranslation.valueHtml must be a string when present' })
         return
       }
-      if (c.laneId !== undefined && (!isNonEmptyString(c.laneId) || c.laneId.length > 64)) {
-        issues.push({
-          index,
-          message: 'SetTranslation.laneId must be a non-empty string (max 64 chars) when present — omit it for the default lane',
-        })
+      if (c.laneId === undefined) {
+        issues.push({ index, message: laneIdRequiredMessage('SetTranslation.laneId') })
         return
+      }
+      if (!isNonEmptyString(c.laneId) || c.laneId.length > 64) {
+        issues.push({ index, message: 'SetTranslation.laneId lane does not exist' })
+        return
+      }
+      // AQU-1673: parsed, never passed through. A caller may label a value as
+      // imported, but only in this exact shape — the rebuilt command carries
+      // the two known keys and nothing else, so provenance cannot smuggle
+      // extra fields into the compiled event payload.
+      let importOrigin: ImportedOriginProvenance | undefined
+      if (c.importOrigin !== undefined) {
+        const parsed = parseImportOrigin(c.importOrigin)
+        if (!parsed) {
+          issues.push({
+            index,
+            message:
+              'SetTranslation.importOrigin must be { fileName: non-empty string (max ' +
+              `${IMPORTED_ORIGIN_FILENAME_MAX} chars), importedAt: finite epoch-ms number } when present`,
+          })
+          return
+        }
+        importOrigin = parsed
       }
       commands.push({
         kind: 'SetTranslation',
@@ -432,7 +530,8 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         cellId: c.cellId,
         value: c.value,
         ...(c.valueHtml !== undefined ? { valueHtml: c.valueHtml } : {}),
-        ...(c.laneId !== undefined ? { laneId: c.laneId } : {}),
+        laneId: c.laneId,
+        ...(importOrigin ? { importOrigin } : {}),
       })
       return
     }
@@ -457,6 +556,14 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         issues.push({ index, message: 'PlanImport.artifactId must be a non-empty string when present' })
         return
       }
+      let directionInvalid = false
+      for (const key of ['sourceTextDirection', 'targetTextDirection'] as const) {
+        if (c[key] !== undefined && normalizeTextDirection(c[key]) === null) {
+          issues.push({ index, message: `PlanImport.${key} must be "ltr" or "rtl" when present` })
+          directionInvalid = true
+        }
+      }
+      if (directionInvalid) return
       if (!Array.isArray(c.cells)) {
         issues.push({ index, message: 'PlanImport.cells must be an array' })
         return
@@ -570,8 +677,20 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
           }
           variants = []
           for (const [variantIndex, rawVariant] of rc.variants.entries()) {
-            if (!isPlainObject(rawVariant) || typeof rawVariant.laneId !== 'string' || typeof rawVariant.content !== 'string') {
+            if (!isPlainObject(rawVariant) || typeof rawVariant.content !== 'string') {
               issues.push({ index, message: `PlanImport.cells[${cellIndex}].variants[${variantIndex}] has invalid required fields` })
+              cellInvalid = true
+              return
+            }
+            // Omitted and '' are the same omission. A language tag is a string
+            // and falls through; prepare rejects it as a lane that does not exist.
+            if (typeof rawVariant.laneId !== 'string' || rawVariant.laneId === '') {
+              issues.push({
+                index,
+                message: laneIdRequiredMessage(
+                  `PlanImport.cells[${cellIndex}].variants[${variantIndex}].laneId`,
+                ),
+              })
               cellInvalid = true
               return
             }
@@ -625,6 +744,8 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         fileType: c.fileType,
         ...(c.sourceLanguage !== undefined ? { sourceLanguage: c.sourceLanguage as string } : {}),
         ...(c.targetLanguage !== undefined ? { targetLanguage: c.targetLanguage as string } : {}),
+        ...(c.sourceTextDirection !== undefined ? { sourceTextDirection: c.sourceTextDirection as TextDirection } : {}),
+        ...(c.targetTextDirection !== undefined ? { targetTextDirection: c.targetTextDirection as TextDirection } : {}),
         ...(c.artifactId !== undefined ? { artifactId: c.artifactId as string } : {}),
         ...(manifest ? { manifest } : {}),
         cells,
@@ -643,8 +764,8 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
             `CreateProject does not accept ${unknown.map((k) => `\`${k}\``).join(', ')} — ` +
             `accepted fields are ${CREATE_PROJECT_FIELDS.filter((k) => k !== 'kind')
               .map((k) => `\`${k}\``)
-              .join(', ')}. Project settings beyond the language pair are written with ` +
-            `PatchSettings; membership is InviteMember/SetRole.`,
+              .join(', ')}. Languages are lanes, not settings keys. Other project ` +
+            `settings are written with PatchSettings; membership is InviteMember/SetRole.`,
         })
         return
       }
@@ -684,23 +805,21 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         issues.push({ index, message: 'CreateProject.orgId must be a string or number when present' })
         return
       }
-      // '' is meaningful for targetLanguage (the UI's source-only shape writes
-      // exactly that), so these are string-checked, not non-empty-checked.
-      if (c.sourceLanguage !== undefined && typeof c.sourceLanguage !== 'string') {
-        issues.push({ index, message: 'CreateProject.sourceLanguage must be a string when present' })
-        return
-      }
-      if (c.targetLanguage !== undefined && typeof c.targetLanguage !== 'string') {
-        issues.push({ index, message: 'CreateProject.targetLanguage must be a string when present' })
-        return
+      let lanes: ExternalLaneSpec[] | undefined
+      if (c.lanes !== undefined) {
+        const parsed = parseLaneSpecs(c.lanes, 'CreateProject.lanes')
+        if (!parsed.ok) {
+          issues.push({ index, message: parsed.message })
+          return
+        }
+        lanes = parsed.lanes
       }
       commands.push({
         kind: 'CreateProject',
         ...(c.projectId !== undefined ? { projectId: c.projectId as string } : {}),
         name,
         ...(c.orgId !== undefined ? { orgId: c.orgId as string | number } : {}),
-        ...(c.sourceLanguage !== undefined ? { sourceLanguage: c.sourceLanguage } : {}),
-        ...(c.targetLanguage !== undefined ? { targetLanguage: c.targetLanguage } : {}),
+        ...(lanes !== undefined ? { lanes } : {}),
       })
       return
     }
@@ -741,6 +860,12 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       }
       if (!isPlainObject(c.settings)) {
         issues.push({ index, message: 'UpdateProjectSettings.settings must be a plain object' })
+        return
+      }
+      const settingsBlob = c.settings as Record<string, unknown>
+      const retired = RETIRED_LANE_SETTINGS_KEYS.filter((key) => key in settingsBlob)
+      if (retired.length > 0) {
+        issues.push({ index, message: RETIRED_LANE_SETTINGS_MESSAGE })
         return
       }
       if (
@@ -826,8 +951,20 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    // AQU-2195 ReviewStyleRules — receipt-only, sole command.
+    if (isStyleRuleCommand(c as { kind: string })) {
+      const cmd = validateStyleRuleCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     if (isStructureCommandKind(c.kind)) {
       const cmd = validateStructureCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
+    // AQU-1426 HideCell / ShowCell — one validator for the pair.
+    if (isVisibilityCommandKind(c.kind)) {
+      const cmd = validateVisibilityCommand(c, index, issues)
       if (cmd) commands.push(cmd)
       return
     }
@@ -844,11 +981,43 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         issues.push({ index, message: 'LinkMedia.artifactId must be a non-empty string' })
         return
       }
+      // AQU-2086: the lane is required and is lanes.id, exactly as SetTranslation's.
+      if (c.laneId === undefined) {
+        issues.push({ index, message: laneIdRequiredMessage('LinkMedia.laneId') })
+        return
+      }
+      if (!isNonEmptyString(c.laneId) || c.laneId.length > 64) {
+        issues.push({ index, message: 'LinkMedia.laneId lane does not exist' })
+        return
+      }
+      if (c.slot !== undefined && !LINK_MEDIA_SLOTS.includes(c.slot as LinkMediaSlot)) {
+        issues.push({
+          index,
+          message: `LinkMedia.slot must be one of ${LINK_MEDIA_SLOTS.map((s) => `"${s}"`).join(', ')} when present`,
+        })
+        return
+      }
+      if (
+        c.durationMs !== undefined &&
+        (typeof c.durationMs !== 'number' ||
+          !Number.isInteger(c.durationMs) ||
+          c.durationMs <= 0 ||
+          c.durationMs > LINK_MEDIA_MAX_DURATION_MS)
+      ) {
+        issues.push({
+          index,
+          message: `LinkMedia.durationMs must be a positive integer of milliseconds (at most ${LINK_MEDIA_MAX_DURATION_MS}) when present`,
+        })
+        return
+      }
       commands.push({
         kind: 'LinkMedia',
         fileId: c.fileId,
         cellId: c.cellId,
         artifactId: c.artifactId,
+        laneId: c.laneId,
+        ...(c.slot !== undefined ? { slot: c.slot as LinkMediaSlot } : {}),
+        ...(c.durationMs !== undefined ? { durationMs: c.durationMs } : {}),
       })
       return
     }
@@ -896,11 +1065,12 @@ export function requiredRoleForCommand(
   ) {
     return ROLE.MAINTAINER
   }
-  // PatchSettings also takes its own path (dynamic per-key floors, incl. the
-  // org termbase floor for `terminology`); this static value is the honest
-  // index-filtering floor per the command catalog.
+  // PatchSettings also takes its own path (dynamic per-key floors). Every key's
+  // DEFAULT floor is MAINTAINER now that `terminology` is retired (AQU-1724):
+  // an org that lowers `languageEditMinRole` admits its leads at prepare and
+  // commit, and this static value stays the conservative default.
   if (c.kind === 'PatchSettings') {
-    return staticPatchSettingsFloor(c)
+    return ROLE.MAINTAINER
   }
   // SetBrief also takes its own receipt-only path; MAINTAINER is the honest
   // floor (the same one PatchSettings applies to the translationBrief key).
@@ -976,12 +1146,23 @@ export function requiredRoleForCommand(
   if (isMemoryCommand(c)) {
     return memoryCommandFloor(c)
   }
+  // AQU-2195: style-rule review is the in-app review floor (PROJECT_LEAD).
+  if (isStyleRuleCommand(c)) {
+    return STYLE_RULE_REVIEW_ROLE
+  }
   // InsertCell / DeleteCell / SplitCell: PROJECT_LEAD, for the same reason
   // EmitEvents floors source.cell.* there — this surface never runs the app's
   // per-event `allowLineCreation` carve-out, so restructuring source rows stays
   // a re-import-shaped act. See commands-structure.ts.
   if (c.kind === 'InsertCell' || c.kind === 'DeleteCell' || c.kind === 'SplitCell') {
     return structureCommandFloor()
+  }
+  // AQU-1426 HideCell / ShowCell: whatever floor `source.cell.visibility.set`
+  // carries at the /events perimeter (PROJECT_LEAD). Asked of role-policy, not
+  // restated, so this surface cannot drift below the perimeter that would refuse
+  // the compiled event anyway — see commands-hide-cell.ts.
+  if (isVisibilityCommandKind(c.kind)) {
+    return visibilityCommandFloor()
   }
   return REQUIRED_ROLE['target.cell.commit']
 }

@@ -1,8 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { act } from "react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 import { KnowledgeBaseSurface } from "./KnowledgeBaseSurface"
-import type { KnowledgeDocument } from "@/lib/frontier/knowledge-base"
+import {
+  KB_INDEX_STALE_MS,
+  KnowledgeBaseApiError,
+  type KnowledgeDocument,
+} from "@/lib/frontier/knowledge-base"
 
 const api = vi.hoisted(() => ({
   list: vi.fn(),
@@ -14,8 +19,12 @@ const api = vi.hoisted(() => ({
   reindex: vi.fn(),
 }))
 
-vi.mock("@/lib/frontier/knowledge-base", () => {
+// Only the network calls are faked — the staleness rule is real behaviour under
+// test, not a stub (AQU-1376).
+vi.mock("@/lib/frontier/knowledge-base", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/frontier/knowledge-base")>()
   return {
+    ...actual,
     listKnowledgeDocuments: api.list,
     getKnowledgeDocument: api.detail,
     getKnowledgeDocumentContent: api.content,
@@ -44,6 +53,8 @@ function doc(overrides: Partial<KnowledgeDocument> = {}): KnowledgeDocument {
     r2Key: "kb/project/project-1/project-doc",
     docSummary: "A concise style guide.",
     indexStatus: "ready",
+    indexError: null,
+    nodeCount: 12,
     createdBy: "alice",
     createdAt: "2026-08-16T00:00:00.000Z",
     updatedAt: "2026-08-16T00:00:00.000Z",
@@ -60,7 +71,14 @@ beforeEach(() => {
   }))
   api.content.mockResolvedValue("Use formal language.")
   api.original.mockResolvedValue(new Blob(["original"]))
-  api.upload.mockResolvedValue(doc({ id: "uploaded", name: "new.md", indexStatus: "pending" }))
+  // A just-created row comes back with updated_at = now(), which is what keeps it
+  // on the "Indexing…" side of the staleness window (AQU-1376).
+  api.upload.mockResolvedValue(doc({
+    id: "uploaded",
+    name: "new.md",
+    indexStatus: "pending",
+    updatedAt: new Date().toISOString(),
+  }))
   api.remove.mockResolvedValue(undefined)
   api.reindex.mockResolvedValue(undefined)
 })
@@ -71,14 +89,12 @@ describe("KnowledgeBaseSurface", () => {
       doc(),
       doc({ id: "org-doc", projectId: null, orgId: 7, scope: "org", name: "org-guide.pdf" }),
     ])
-    const onCheckedChange = vi.fn()
 
     render(
       <KnowledgeBaseSurface
         scope={{ kind: "project", id: "project-1" }}
         jwt="jwt"
         canManage
-        drafting={{ checked: false, disabled: false, onCheckedChange }}
       />,
     )
 
@@ -90,8 +106,9 @@ describe("KnowledgeBaseSurface", () => {
       .not.toBeInTheDocument()
     expect(screen.getAllByRole("button", { name: "Delete document" })).toHaveLength(1)
 
-    fireEvent.click(screen.getByRole("switch", { name: "Use knowledge base in drafting" }))
-    expect(onCheckedChange).toHaveBeenCalledWith(true)
+    // AQU-2342: knowledge documents never reach a drafting prompt, so the
+    // surface offers no "use in drafting" switch.
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument()
   })
 
   it("uploads a supported original and renders the returned pending document", async () => {
@@ -107,6 +124,45 @@ describe("KnowledgeBaseSurface", () => {
     await waitFor(() => expect(api.upload).toHaveBeenCalledWith({ kind: "org", id: 7 }, "jwt", file))
     expect(await screen.findByText("new.md")).toBeInTheDocument()
     expect(screen.getByText("Indexing…")).toBeInTheDocument()
+  })
+
+  // AQU-1499: a partner's .docx can be refused for a reason that names its own
+  // fix (re-save it from Word). The generic "Try again." alone sends them back
+  // round a retry that cannot succeed, so the server's reason is shown with it.
+  it("shows the server's reason when an upload is rejected", async () => {
+    const reason =
+      "could not extract text: the document is too complex to read: word/document.xml is 39.5 MB, " +
+      'over the 64 MB limit. Re-saving the file from Word ("Save As" a new .docx) usually shrinks it.'
+    api.upload.mockRejectedValue(new KnowledgeBaseApiError(422, reason))
+    const { container } = render(
+      <KnowledgeBaseSurface scope={{ kind: "org", id: 7 }} jwt="jwt" canManage showTitle={false} />,
+    )
+    await screen.findByText("No knowledge documents yet")
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    const file = new File(["bytes"], "The Real God_Arabic (1).docx")
+
+    fireEvent.change(input, { target: { files: [file] } })
+
+    await waitFor(() =>
+      expect(toastMock.add).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "error", description: reason }),
+      ),
+    )
+  })
+
+  it("reports an upload failure the server did not explain with the generic message alone", async () => {
+    api.upload.mockRejectedValue(new Error("network down"))
+    const { container } = render(
+      <KnowledgeBaseSurface scope={{ kind: "org", id: 7 }} jwt="jwt" canManage showTitle={false} />,
+    )
+    await screen.findByText("No knowledge documents yet")
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+
+    fireEvent.change(input, { target: { files: [new File(["x"], "notes.md")] } })
+
+    await waitFor(() => expect(toastMock.add).toHaveBeenCalled())
+    const options = toastMock.add.mock.calls.at(-1)?.[0] as { description?: string }
+    expect(options.description).toBeUndefined()
   })
 
   it("opens the extracted document content in an accessible dialog", async () => {
@@ -132,5 +188,290 @@ describe("KnowledgeBaseSurface", () => {
 
     await waitFor(() => expect(api.remove).toHaveBeenCalledWith({ kind: "org", id: 7 }, "jwt", "project-doc"))
     await waitFor(() => expect(screen.queryByText("style-guide.md")).not.toBeInTheDocument())
+  })
+  // AQU-1376: a doc whose indexing job died shows the same "Indexing…" as one
+  // that is genuinely mid-run, with no retry — QA had to escalate to ops.
+  it("offers the uploader a retry on a doc whose indexing job never came back", async () => {
+    api.list.mockResolvedValue([
+      doc({
+        id: "stalled-doc",
+        name: "stalled.md",
+        indexStatus: "pending",
+        docSummary: null,
+        updatedAt: new Date(Date.now() - (KB_INDEX_STALE_MS + 60_000)).toISOString(),
+      }),
+    ])
+
+    render(<KnowledgeBaseSurface scope={{ kind: "project", id: "project-1" }} jwt="jwt" canManage />)
+
+    const card = (await screen.findByText("stalled.md")).closest('[data-slot="card"]') as HTMLElement
+    // Distinct from "Indexing…" — the state is readable without backend access.
+    expect(within(card).getByText("Indexing stalled")).toBeInTheDocument()
+    expect(within(card).queryByText("Indexing…")).not.toBeInTheDocument()
+    // AQU-1766: a stall is dated by when the doc was last heard from, which is
+    // the only thing a stalled row knows — no run ever reported back, so it
+    // must not claim one did.
+    expect(within(card).getByText(/^Last heard from /)).toBeInTheDocument()
+    expect(within(card).queryByText(/Last indexing run/)).not.toBeInTheDocument()
+
+    fireEvent.click(within(card).getByRole("button", { name: "Try indexing again" }))
+    await waitFor(() => expect(api.reindex).toHaveBeenCalledWith(
+      { kind: "project", id: "project-1" },
+      "jwt",
+      "stalled-doc",
+    ))
+    // The retry restarts the window: the row goes back to plain "Indexing…" and
+    // stops offering the button that just fired.
+    await waitFor(() => expect(within(card).getByText("Indexing…")).toBeInTheDocument())
+    expect(within(card).queryByRole("button", { name: "Try indexing again" }))
+      .not.toBeInTheDocument()
+  })
+
+  // AQU-2002: a doc whose summaries the model leg could not write is indexed —
+  // searchable, navigable — so it must not wear the failure badge. What the
+  // uploader was missing was the reason, which is the only thing that tells
+  // them whether pressing retry can achieve anything.
+  it("reads a doc indexed without summaries as indexed, with the server's reason and a retry", async () => {
+    api.list.mockResolvedValue([
+      doc({
+        id: "degraded-doc",
+        name: "commentary.pdf",
+        docSummary: null,
+        indexStatus: "ready",
+        indexError:
+          "The summarizing model refused the request for billing reasons — " +
+          "the OpenRouter account is out of credit.",
+      }),
+    ])
+
+    render(<KnowledgeBaseSurface scope={{ kind: "project", id: "project-1" }} jwt="jwt" canManage />)
+
+    const card = (await screen.findByText("commentary.pdf")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(card).getByText("Indexed without summaries")).toBeInTheDocument()
+    expect(within(card).queryByText("Indexing failed")).not.toBeInTheDocument()
+    expect(within(card).getByText(/out of credit/)).toBeInTheDocument()
+
+    // The retry is offered, and taking it drops the stale reason with the status.
+    fireEvent.click(within(card).getByRole("button", { name: "Try indexing again" }))
+    await waitFor(() => expect(api.reindex).toHaveBeenCalledWith(
+      { kind: "project", id: "project-1" },
+      "jwt",
+      "degraded-doc",
+    ))
+    await waitFor(() => expect(within(card).getByText("Indexing…")).toBeInTheDocument())
+    expect(within(card).queryByText(/out of credit/)).not.toBeInTheDocument()
+  })
+
+  it("still reads a failed index as a failure, with the reason it reported", async () => {
+    api.list.mockResolvedValue([
+      doc({
+        id: "failed-doc",
+        name: "scan.pdf",
+        docSummary: null,
+        indexStatus: "failed",
+        indexError: "This document has no extractable text, so there is nothing to index.",
+      }),
+    ])
+
+    render(<KnowledgeBaseSurface scope={{ kind: "project", id: "project-1" }} jwt="jwt" canManage />)
+
+    const card = (await screen.findByText("scan.pdf")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(card).getByText("Indexing failed")).toBeInTheDocument()
+    expect(within(card).getByText(/no extractable text/)).toBeInTheDocument()
+    // AQU-1766: the reason is dated, so the uploader can line the failure up
+    // with whatever they changed. A failed doc indexed nothing, so no count.
+    expect(within(card).getByText(/^Last indexing run /)).toBeInTheDocument()
+    expect(within(card).queryByText(/Sections indexed/)).not.toBeInTheDocument()
+  })
+
+  // AQU-1766: "Indexed" over an empty index read exactly like "Indexed" over a
+  // whole book, so nobody could tell a real index from one that covered
+  // nothing — the question that sent LOTE to worker logs in AQU-1763.
+  it("states how much an indexed doc covers, and says so even when it covers nothing", async () => {
+    api.list.mockResolvedValue([
+      doc({ id: "rich-doc", name: "handbook.md", nodeCount: 1234 }),
+      doc({ id: "empty-doc", name: "blank.md", docSummary: null, nodeCount: 0 }),
+    ])
+
+    render(<KnowledgeBaseSurface scope={{ kind: "project", id: "project-1" }} jwt="jwt" canManage />)
+
+    const rich = (await screen.findByText("handbook.md")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(rich).getByText("Sections indexed: 1,234")).toBeInTheDocument()
+    // A clean run has nothing to say beyond the count — no reason, no date.
+    expect(within(rich).queryByText(/Last indexing run/)).not.toBeInTheDocument()
+
+    const empty = (await screen.findByText("blank.md")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(empty).getByText("Sections indexed: 0")).toBeInTheDocument()
+  })
+
+  // AQU-1766 / AQU-2002: a doc indexed without summaries carries both halves —
+  // what it does have, and why the rest is missing, dated.
+  it("dates the run on a doc indexed without summaries, alongside its count", async () => {
+    api.list.mockResolvedValue([
+      doc({
+        id: "degraded-doc",
+        name: "commentary.pdf",
+        docSummary: null,
+        nodeCount: 8,
+        indexError: "The summarizing model is rate-limiting us. Try again shortly.",
+      }),
+    ])
+
+    render(<KnowledgeBaseSurface scope={{ kind: "project", id: "project-1" }} jwt="jwt" canManage />)
+
+    const card = (await screen.findByText("commentary.pdf")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(card).getByText(/Sections indexed: 8 · Last indexing run /)).toBeInTheDocument()
+  })
+
+  // AQU-1766: a row whose timestamp the server could not express is a contract
+  // break, not a date — rendering it would put "Invalid Date" on the card.
+  it("renders no run line when the document's timestamp is unreadable", async () => {
+    api.list.mockResolvedValue([
+      doc({ id: "odd-doc", name: "odd.md", docSummary: null, updatedAt: "not-a-date" }),
+    ])
+
+    render(<KnowledgeBaseSurface scope={{ kind: "project", id: "project-1" }} jwt="jwt" canManage />)
+
+    const card = (await screen.findByText("odd.md")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(card).queryByText(/Sections indexed/)).not.toBeInTheDocument()
+    expect(within(card).queryByText(/Last indexing run|Last heard from/)).not.toBeInTheDocument()
+  })
+
+  it("leaves a doc that is still genuinely indexing as pending, with no retry", async () => {
+    api.list.mockResolvedValue([
+      doc({
+        id: "fresh-doc",
+        name: "fresh.md",
+        indexStatus: "pending",
+        docSummary: null,
+        updatedAt: new Date(Date.now() - 5_000).toISOString(),
+      }),
+    ])
+
+    render(<KnowledgeBaseSurface scope={{ kind: "project", id: "project-1" }} jwt="jwt" canManage />)
+
+    const card = (await screen.findByText("fresh.md")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(card).getByText("Indexing…")).toBeInTheDocument()
+    // A premature retry would cancel a run that was about to land.
+    expect(within(card).queryByRole("button", { name: "Try indexing again" }))
+      .not.toBeInTheDocument()
+  })
+})
+
+// AQU-2028: indexing settles server-side and sends no event, so the open list
+// has to re-read itself while anything is pending. Without it a row stayed on
+// "Indexing…" until a reload, then turned into a false "Indexing stalled".
+describe("KnowledgeBaseSurface while a document is indexing", () => {
+  const POLL_MS = 5_000
+  const scope = { kind: "project", id: "project-1" } as const
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  async function tick(ms = POLL_MS) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms)
+    })
+  }
+
+  function pending(overrides: Partial<KnowledgeDocument> = {}) {
+    return doc({
+      id: "fresh-doc",
+      name: "fresh.md",
+      indexStatus: "pending",
+      docSummary: null,
+      updatedAt: new Date().toISOString(),
+      ...overrides,
+    })
+  }
+
+  it("settles a pending row without a reload, then stops re-reading", async () => {
+    api.list
+      .mockResolvedValueOnce([pending()])
+      .mockResolvedValue([pending({ indexStatus: "ready", docSummary: "Done." })])
+
+    render(<KnowledgeBaseSurface scope={scope} jwt="jwt" canManage />)
+    const card = (await screen.findByText("fresh.md")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(card).getByText("Indexing…")).toBeInTheDocument()
+
+    await tick()
+    await waitFor(() => expect(within(card).getByText("Indexed")).toBeInTheDocument())
+    expect(api.list).toHaveBeenCalledTimes(2)
+
+    // Nothing pending any more: the list is not read again.
+    await tick(POLL_MS * 4)
+    expect(api.list).toHaveBeenCalledTimes(2)
+  })
+
+  it("never re-reads a list with nothing pending", async () => {
+    api.list.mockResolvedValue([doc()])
+
+    render(<KnowledgeBaseSurface scope={scope} jwt="jwt" canManage />)
+    await screen.findByText("style-guide.md")
+
+    await tick(POLL_MS * 4)
+    expect(api.list).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the rows on screen when a re-read fails, and settles on the next one", async () => {
+    api.list
+      .mockResolvedValueOnce([pending()])
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValue([pending({ indexStatus: "ready" })])
+
+    render(<KnowledgeBaseSurface scope={scope} jwt="jwt" canManage />)
+    const card = (await screen.findByText("fresh.md")).closest('[data-slot="card"]') as HTMLElement
+
+    await tick()
+    await waitFor(() => expect(api.list).toHaveBeenCalledTimes(2))
+    expect(within(card).getByText("Indexing…")).toBeInTheDocument()
+    expect(screen.queryByText("Could not load the knowledge base.")).not.toBeInTheDocument()
+
+    await tick()
+    await waitFor(() => expect(within(card).getByText("Indexed")).toBeInTheDocument())
+  })
+
+  it("does not let a re-read that left before an upload drop the uploaded row", async () => {
+    let answerStaleRead: (docs: KnowledgeDocument[]) => void = () => {}
+    api.list
+      .mockResolvedValueOnce([pending()])
+      .mockImplementationOnce(() => new Promise<KnowledgeDocument[]>((resolve) => {
+        answerStaleRead = resolve
+      }))
+      .mockResolvedValue([pending()])
+
+    const { container } = render(<KnowledgeBaseSurface scope={scope} jwt="jwt" canManage />)
+    await screen.findByText("fresh.md")
+
+    // The re-read leaves, and is still out when the upload lands.
+    await tick()
+    await waitFor(() => expect(api.list).toHaveBeenCalledTimes(2))
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(input, { target: { files: [new File(["Reference"], "new.md", { type: "text/markdown" })] } })
+    expect(await screen.findByText("new.md")).toBeInTheDocument()
+
+    // It answers with the list as it was before the upload.
+    await act(async () => {
+      answerStaleRead([pending()])
+    })
+    expect(screen.getByText("new.md")).toBeInTheDocument()
+  })
+
+  it("still flags a document whose job never came back as stalled", async () => {
+    // Pending on the server and stays that way, a little short of the window.
+    const almostStale = new Date(Date.now() - (KB_INDEX_STALE_MS - POLL_MS / 2)).toISOString()
+    api.list.mockResolvedValue([pending({ updatedAt: almostStale })])
+
+    render(<KnowledgeBaseSurface scope={scope} jwt="jwt" canManage />)
+    const card = (await screen.findByText("fresh.md")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(card).getByText("Indexing…")).toBeInTheDocument()
+
+    await tick()
+    await waitFor(() => expect(within(card).getByText("Indexing stalled")).toBeInTheDocument())
   })
 })

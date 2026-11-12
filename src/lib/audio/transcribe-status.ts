@@ -8,7 +8,8 @@ import { useSyncExternalStore } from "react"
 export type TranscribeStatus =
   | { kind: "idle" }
   | { kind: "loading"; loaded: number; total: number; file: string }
-  | { kind: "transcribing" }
+  /** `waiting: "model"` — a zero-shot take queued behind the model's cold start. */
+  | { kind: "transcribing"; waiting?: "model" }
   | { kind: "done"; wordCount: number; durationMs: number }
   | { kind: "error"; message: string }
 

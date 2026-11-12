@@ -5,7 +5,7 @@
 // whether the same take looks like the same take in both.
 
 import { describe, expect, it } from "vitest"
-import { envelopePoints, envelopePath, VERTICAL_INSET_PX } from "./waveform-shape"
+import { envelopePathD, envelopePoints, envelopePath, VERTICAL_INSET_PX } from "./waveform-shape"
 
 describe("envelopePoints", () => {
   it("puts one point per bin, at the bin's CENTRE", () => {
@@ -59,5 +59,21 @@ describe("envelopePath", () => {
 
   it("is total on no points", () => {
     expect(envelopePath([], 20)).toBe("")
+  })
+})
+
+describe("envelopePathD", () => {
+  it("is exactly the timeline chip's figure, so every surface draws the same take", () => {
+    const peaks = new Float32Array([0.2, 1, 0.5])
+    expect(envelopePathD(peaks, 46)).toBe(envelopePath(envelopePoints(peaks, 46), 23))
+  })
+
+  it("accepts a plain array, as test doubles and live buffers pass", () => {
+    expect(envelopePathD([0.2, 1, 0.5], 46)).toBe(envelopePathD(new Float32Array([0.2, 1, 0.5]), 46))
+  })
+
+  it("draws nothing into a box with no height", () => {
+    expect(envelopePathD([1, 1], 0)).toBe("")
+    expect(envelopePathD([1, 1], Number.NaN)).toBe("")
   })
 })

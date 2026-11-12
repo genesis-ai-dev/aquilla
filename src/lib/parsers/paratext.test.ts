@@ -12,7 +12,7 @@ const NAV_SETTINGS = `﻿<ScriptureText>
   <BooksPresent>1111110000</BooksPresent>
   <LanguageIsoCode>arb:::</LanguageIsoCode>
   <Language>Standard Arabic</Language>
-  <FullName>Biblica® Open New Arabic Version 2012</FullName>
+  <FullName>Example Open New Arabic Version 2012</FullName>
   <Encoding>65001</Encoding>
   <Name>arONAV12</Name>
   <Guid>b17e246951402e505b6b6eed2f01d5bd60b7bee5</Guid>
@@ -20,7 +20,7 @@ const NAV_SETTINGS = `﻿<ScriptureText>
   <FileNamePrePart />
   <FileNamePostPart>arONAV12.SFM</FileNamePostPart>
   <Versification>4</Versification>
-  <Copyright>&lt;p&gt;Copyright © 2012 by Biblica&lt;/p&gt;</Copyright>
+  <Copyright>&lt;p&gt;Copyright © 2012 by Example Publisher&lt;/p&gt;</Copyright>
 </ScriptureText>`
 
 const NAV_BOOKNAMES = `﻿<?xml version="1.0" encoding="utf-8"?>
@@ -34,7 +34,7 @@ describe("parseParatextSettings", () => {
   it("extracts the headline metadata", () => {
     const s = parseParatextSettings(NAV_SETTINGS)
     expect(s.name).toBe("arONAV12")
-    expect(s.fullName).toBe("Biblica® Open New Arabic Version 2012")
+    expect(s.fullName).toBe("Example Open New Arabic Version 2012")
     expect(s.language).toBe("Standard Arabic")
     expect(s.languageIsoCode).toBe("arb")
     expect(s.versification).toBe("4")

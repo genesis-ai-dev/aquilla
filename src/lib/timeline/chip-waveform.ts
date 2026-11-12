@@ -15,7 +15,7 @@
 // They are normalised so the loudest bin is 1.0 — strictly upward, never down
 // (peaks.ts only scales when `max < 1`), so a clipped take is left alone.
 
-import { envelopePath, envelopePoints } from "@/lib/audio/waveform-shape"
+import { envelopePathD } from "@/lib/audio/waveform-shape"
 import type { TargetChipGeom } from "./lane-timing"
 
 export interface ChipWaveformWindow {
@@ -98,8 +98,7 @@ export function chipWaveformWindow(args: {
  * on zoom and is rebuilt only when the peaks or the row height change.
  */
 export function waveformPathD(peaks: Float32Array, chipH: number): string {
-  if (!Number.isFinite(chipH) || chipH <= 0) return ""
-  return envelopePath(envelopePoints(peaks, chipH), chipH / 2)
+  return envelopePathD(peaks, chipH)
 }
 
 function clamp(n: number, lo: number, hi: number): number {

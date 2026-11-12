@@ -2,10 +2,14 @@
  * AQU-266: Global error boundary + crash telemetry.
  *
  * Wraps the router output so that any unhandled render throw shows a branded
- * recovery screen rather than a white screen of death. Also registers
- * window.onerror + unhandledrejection handlers that funnel uncaught errors into
- * posthog.captureException (consent-gated via the posthog module which already
- * respects isAnalyticsEnabled() on init and responds to onAnalyticsConsentChange).
+ * recovery screen rather than a white screen of death, and reports the throw
+ * via posthog.captureException (consent-gated via the posthog module which
+ * already respects isAnalyticsEnabled() on init and responds to
+ * onAnalyticsConsentChange). Also registers window error + unhandledrejection
+ * handlers for chunk-reload recovery; uncaught errors reach PostHog through its
+ * own exception autocapture (AQU-1572, see the handlers below). AQU-1966 adds
+ * the `vite:preloadError` handler, which is the only one that sees a stale
+ * chunk whose rejection the calling code catches itself.
  *
  * SWARM-TODO(AQU-266): UI-QA — force a render throw (e.g. via a dev-only query
  * param ?__crash=1 or React devtools) and confirm the branded recovery screen
@@ -19,6 +23,21 @@ import { Button } from "@/components/ui/button"
 import posthog from "@/lib/posthog"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
+import {
+  CHUNK_HOST_UNREACHABLE_EVENT,
+  chunkLoadKey,
+  isChunkLoadError,
+  probeChunkHost,
+  recoverFromChunkError,
+  recoverFromChunkErrorWhenReachable,
+} from "@/lib/chunk-reload"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
+
+function recoverChunk(error: unknown) {
+  // Desktop assets are local; probing the web version endpoint is not useful.
+  if (isTauriRuntime()) recoverFromChunkError(error)
+  else void recoverFromChunkErrorWhenReachable(error)
+}
 
 // ---------------------------------------------------------------------------
 // Dev-only crash trigger: appending ?__crash=1 to any URL while
@@ -37,77 +56,63 @@ function DevCrashTrigger() {
 }
 
 // ---------------------------------------------------------------------------
-// Chunk-load recovery (RES-3 / audit QW-4): after a redeploy, stale lazy-route
-// chunks 404 ("Failed to fetch dynamically imported module" etc.). One forced
-// reload usually fixes it (the new HTML references the new chunk hashes). The
-// sessionStorage flag guards against a reload loop on a genuinely broken
-// deploy; it is re-armed on the next successful page load so a later deploy
-// mid-session gets its own one-shot reload.
+// Chunk-load recovery (RES-3 / audit QW-4 / AQU-1405): after a redeploy, stale
+// lazy-route chunks 404 ("Failed to fetch dynamically imported module" etc.).
+// One forced reload fixes it — the new HTML references the new chunk hashes.
+// The guard, the "Updating …" notice, and the per-chunk one-shot rule live in
+// src/lib/chunk-reload.ts so the window-level handlers below and the boundary
+// share exactly one implementation.
 // ---------------------------------------------------------------------------
-const CHUNK_LOAD_PATTERNS = [
-  "Failed to fetch dynamically imported module",
-  "Importing a module script failed",
-  "Loading chunk",
-  "ChunkLoadError",
-]
-
-export function isChunkLoadError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err)
-  return CHUNK_LOAD_PATTERNS.some((p) => msg.includes(p))
-}
-
-export const CHUNK_RELOAD_KEY = "aq:chunk-reload-attempted"
-
-/** True if this error triggered the one-shot reload (caller should bail). */
-function maybeReloadForChunkError(err: unknown): boolean {
-  if (!isChunkLoadError(err)) return false
-  try {
-    if (sessionStorage.getItem(CHUNK_RELOAD_KEY)) return false
-    sessionStorage.setItem(CHUNK_RELOAD_KEY, "1")
-  } catch {
-    return false // sessionStorage unavailable — fall through to the error UI
-  }
-  window.location.reload()
-  return true
-}
 
 // ---------------------------------------------------------------------------
 // Window-level error handlers — registered once when the module first loads.
-// Both forward to posthog.captureException; consent-gating is already baked
-// into posthog.ts (opt_out_capturing_by_default + onAnalyticsConsentChange).
+// They exist for chunk-reload recovery, which must run on every uncaught error.
+//
+// Unowned global errors may originate in an inactive account’s background work.
+// Keep recovery here; optional reporting belongs to account-scoped producers.
 // ---------------------------------------------------------------------------
 if (typeof window !== "undefined") {
   window.addEventListener("error", (event: ErrorEvent) => {
     const err = event.error instanceof Error
       ? event.error
       : new Error(event.message || "Unknown window.onerror")
-    posthog.captureException(err, { properties: { source: "window.onerror" } })
-    maybeReloadForChunkError(err)
+    // Global errors have no reliable account owner; only scoped errors are sent.
+    recoverChunk(err)
   })
 
   window.addEventListener("unhandledrejection", (event: PromiseRejectionEvent) => {
     const err = event.reason instanceof Error
       ? event.reason
       : new Error(String(event.reason ?? "Unhandled promise rejection"))
-    posthog.captureException(err, { properties: { source: "unhandledrejection" } })
-    maybeReloadForChunkError(err)
+    // A rejected background task may belong to an inactive account.
+    recoverChunk(err)
   })
 
-  // Re-arm the one-shot chunk reload once a page load has succeeded. Lazy
-  // chunks load on navigation — after `load` — so clearing here cannot re-arm
-  // a tight loop: each reload only re-arms once the page has fully booted.
-  const clearChunkReloadFlag = () => {
-    try {
-      sessionStorage.removeItem(CHUNK_RELOAD_KEY)
-    } catch {
-      // sessionStorage unavailable — nothing to re-arm
-    }
-  }
-  if (document.readyState === "complete") {
-    clearChunkReloadFlag()
-  } else {
-    window.addEventListener("load", clearChunkReloadFlag, { once: true })
-  }
+  // AQU-1966: the two handlers above only ever see a chunk failure that nobody
+  // caught — an uncaught throw or an unhandled rejection. Most of this app's
+  // dynamic imports are awaited inside a try/catch that owns the failure:
+  // ExportDialog loads every exporter with `await import(…)` under one
+  // `catch (e)` that renders the message as "export failed", and the audio
+  // denoiser, the upstream-changes panel and the workspace's sync helpers do
+  // the same. After a deploy those rejections never reach `window`, so a
+  // translator on a day-old tab was told their export broke rather than that
+  // the app had updated — the misattributed "random breakage" in this ticket.
+  //
+  // Vite dispatches `vite:preloadError` from the preload helper itself, before
+  // the rejection is handed to the caller, so it is the only hook that covers a
+  // dynamic import whose failure is caught locally. The event is left to run
+  // its course (no `preventDefault`), so when the one reload per chunk is
+  // already spent the caller still shows its own failure path instead of the
+  // click going dead.
+  //
+  // The event only exists in a build, where Vite wraps each dynamic import in
+  // its `__vitePreload` helper — the dev server serves native `import()`. That
+  // matches the bug, which only happens when hashed assets are replaced by a
+  // deploy. Nothing here disables `build.modulePreload`; if anything ever does,
+  // this handler stops firing and the swallowed-rejection hole reopens.
+  window.addEventListener("vite:preloadError", (event: Event) => {
+    recoverChunk((event as Event & { payload?: unknown }).payload)
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -122,29 +127,50 @@ if (typeof window !== "undefined") {
 function ErrorFallback({
   onReload,
   isChunkError,
+  offlineChunk,
+  online,
   compact,
+  boundary,
 }: {
   onReload: () => void
   isChunkError?: boolean
+  offlineChunk?: boolean
+  online?: boolean
   compact?: boolean
+  /** Which boundary is showing, mirrored into `data-boundary` — see the
+   * data-slot note below. */
+  boundary: string
 }) {
   const t = useT()
   return (
-    <div className={cn("flex items-center justify-center p-8", compact ? "h-full" : "min-h-screen")}>
+    // AQU-642: `data-slot` + `data-boundary` are the only machine-readable
+    // signal that a render throw replaced a surface with this screen. The e2e
+    // Workspace page object races them against the first cell row, so an
+    // editor that crashed at mount fails immediately and names the boundary
+    // instead of burning the readiness budget on a `[data-cell-id]` locator
+    // that can never appear. Keep them in sync with
+    // e2e/helpers/page-objects/Workspace.ts.
+    <div
+      data-slot="error-boundary-fallback"
+      data-boundary={boundary}
+      className={cn("flex items-center justify-center p-8", compact ? "h-full" : "min-h-screen")}
+    >
       <div className="flex max-w-sm flex-col items-center gap-2 text-center">
         <div className="text-muted-foreground">
           <AlertTriangle className="h-10 w-10" aria-hidden />
         </div>
         <h3 className="text-base font-medium">
-          {isChunkError ? "App updated — reload needed" : "Something went wrong"}
+          {offlineChunk ? t("workspace.errorBoundary.offlineTitle") : isChunkError ? "App updated — reload needed" : "Something went wrong"}
         </h3>
         <p className="text-sm text-muted-foreground">
-          {isChunkError
+          {offlineChunk
+            ? t(online ? "workspace.errorBoundary.reconnectedDescription" : "workspace.errorBoundary.offlineDescription")
+            : isChunkError
             ? "A new version of the app was deployed. Your work is saved locally — reload to pick it up."
             : "An unexpected error occurred. Your work is saved locally — reload to continue."}
         </p>
         <div className="mt-2">
-          <Button type="button" variant="outline" onClick={onReload}>
+          <Button type="button" variant="outline" disabled={offlineChunk && !online} onClick={onReload}>
             {t("workspace.errorBoundary.reload")}
           </Button>
         </div>
@@ -162,46 +188,132 @@ interface Props {
    * nested inside bounded chrome (e.g. AppShell's main content card) rather
    * than at the app root. */
   compact?: boolean
+  /**
+   * AQU-849: render a local fallback instead of the full-screen recovery UI.
+   * Used by side panels, where a render throw must stay inside the panel and
+   * must not push the user into a page reload — calling `reset` clears the
+   * boundary so the subtree remounts and refetches in place.
+   */
+  fallback?: (reset: () => void) => ReactNode
+  /** Names this boundary in crash telemetry, so ops can tell which surface
+   * threw (the 2026-08-10 pane crash was reported with no error text). */
+  label?: string
 }
 
 interface State {
   hasError: boolean
   isChunkError: boolean
+  offlineChunk: boolean
+  online: boolean
 }
 
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props)
-    this.state = { hasError: false, isChunkError: false }
+    this.state = { hasError: false, isChunkError: false, offlineChunk: false, online: navigator.onLine }
   }
 
   static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, isChunkError: isChunkLoadError(error) }
+    const chunk = isChunkLoadError(error)
+    return { hasError: true, isChunkError: chunk, offlineChunk: chunk && !navigator.onLine, online: navigator.onLine }
+  }
+
+  // Keep the offline explanation after reconnect; a rejected React.lazy import
+  // is cached, so resetting this boundary alone cannot retry the screen.
+  private chunkErrorKey?: string
+  private hostUnreachable = false
+  private mounted = false
+  private checkingHost = false
+  private retryTimer?: ReturnType<typeof setTimeout>
+
+  private checkHost = async () => {
+    if (this.checkingHost || !this.mounted) return
+    this.checkingHost = true
+    clearTimeout(this.retryTimer)
+    const online = await probeChunkHost()
+    this.checkingHost = false
+    if (!this.mounted || !this.hostUnreachable) return
+    this.setState({ online })
+    // Safari may never emit an online event after an outage. Poll only while
+    // this failed screen is mounted; recovery remains an explicit user action.
+    if (!online) this.retryTimer = setTimeout(() => { void this.checkHost() }, 5_000)
+  }
+
+  private onHostUnreachable = (event: Event) => {
+    if ((event as CustomEvent<string>).detail !== this.chunkErrorKey) return
+    this.hostUnreachable = true
+    this.setState({ offlineChunk: true, online: false })
+    clearTimeout(this.retryTimer)
+    this.retryTimer = setTimeout(() => { void this.checkHost() }, 5_000)
+  }
+
+  private updateConnection = () => {
+    if (this.hostUnreachable) void this.checkHost()
+    else this.setState({ online: navigator.onLine })
+  }
+
+  private onFocus = () => { if (this.hostUnreachable) void this.checkHost() }
+
+  componentDidMount() {
+    this.mounted = true
+    window.addEventListener("online", this.updateConnection)
+    window.addEventListener("offline", this.updateConnection)
+    window.addEventListener("focus", this.onFocus)
+    window.addEventListener(CHUNK_HOST_UNREACHABLE_EVENT, this.onHostUnreachable)
+  }
+
+  componentWillUnmount() {
+    this.mounted = false
+    clearTimeout(this.retryTimer)
+    window.removeEventListener("online", this.updateConnection)
+    window.removeEventListener("offline", this.updateConnection)
+    window.removeEventListener("focus", this.onFocus)
+    window.removeEventListener(CHUNK_HOST_UNREACHABLE_EVENT, this.onHostUnreachable)
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    this.chunkErrorKey = isChunkLoadError(error) ? chunkLoadKey(error) : undefined
+    // Not a duplicate of PostHog's autocapture (AQU-1572): React 19 reports an
+    // error a boundary caught to console.error, never to window.onerror, and
+    // `capture_exceptions: true` leaves console errors alone — so this is the
+    // only capture of a render throw. The second argument is the event's
+    // property bag itself; wrapping it in `{ properties: … }` filed all three
+    // under one nested `properties` key instead of as event properties.
     posthog.captureException(error, {
-      properties: {
-        source: "react_error_boundary",
-        componentStack: info.componentStack,
-      },
+      source: "react_error_boundary",
+      boundary: this.props.label ?? "root",
+      componentStack: info.componentStack,
     })
     // Stale-chunk render throws get one automatic reload before showing the
-    // "App updated" fallback (see maybeReloadForChunkError above).
-    maybeReloadForChunkError(error)
+    // "App updated" fallback (see @/lib/chunk-reload).
+    recoverChunk(error)
   }
 
   private handleReload = () => {
     window.location.reload()
   }
 
+  /** Clears the boundary so the subtree remounts — the in-place recovery a
+   * panel-level fallback offers instead of a page reload. */
+  private handleReset = () => {
+    this.setState({ hasError: false, isChunkError: false, offlineChunk: false })
+  }
+
   render() {
     if (this.state.hasError) {
+      // A stale-chunk error is only fixable by reloading, so local fallbacks
+      // still defer to the full recovery screen for that one case.
+      if (this.props.fallback && !this.state.isChunkError) {
+        return this.props.fallback(this.handleReset)
+      }
       return (
         <ErrorFallback
           onReload={this.handleReload}
           isChunkError={this.state.isChunkError}
+          offlineChunk={this.state.offlineChunk}
+          online={this.state.online}
           compact={this.props.compact}
+          boundary={this.props.label ?? "root"}
         />
       )
     }

@@ -1,10 +1,17 @@
 import { getBookName } from "@/lib/file-labeling/bible-book-names"
+import { aiSectionMilestones, type BoundarySource } from "@/lib/import/ai-sections"
+import { areAiSectionMilestonesEnabled } from "@/lib/import/ai-sections-flag"
 import {
   FALLBACK_MILESTONE_SIZE,
   TIMELINE_MILESTONE_MS,
 } from "@/lib/import/milestones"
 import { translate } from "@/lib/i18n/translate"
 import type { ImportMilestone, ImportMilestoneKind } from "../../shared/import-contract"
+import type { FileMilestone } from "../../db/shared/file-milestones"
+import {
+  isAppInventedMilestoneKind,
+  planUserMilestones,
+} from "@/lib/editor/user-milestone-spans"
 
 /**
  * `ImportMilestone.label`/`shortLabel` are a wire-format field (see
@@ -33,6 +40,17 @@ export interface MilestoneNavigationCell {
   metadata?: Record<string, unknown> | null
 }
 
+/** AQU-2308: a hand-set milestone listed UNDER a division the file supplied. */
+export interface NamedSubdivision {
+  key: string
+  /** The name exactly as typed. */
+  label: string
+  shortLabel: string
+  firstCellId: string
+  firstIndex: number
+  cellIds: readonly string[]
+}
+
 export interface DerivedMilestoneNavigation {
   milestoneByCellId: ReadonlyMap<string, ImportMilestone>
   orderedMilestones: readonly {
@@ -40,6 +58,13 @@ export interface DerivedMilestoneNavigation {
     firstCellId: string
     firstIndex: number
     cellIds: readonly string[]
+    /**
+     * AQU-2308: hand-set milestones nested inside this division, in file
+     * order. Present only on divisions the FILE supplied — a hand-set
+     * milestone over app-invented cells replaces them instead, and becomes a
+     * top-level entry of its own.
+     */
+    named?: readonly NamedSubdivision[]
   }[]
 }
 
@@ -51,15 +76,49 @@ export function readImportMilestone(
   return milestone(envelope?.milestone)
 }
 
+export interface MilestoneNavigationOptions {
+  /**
+   * Scored cell boundaries for this file, from AQU-1386's seam cache (AQU-1387).
+   *
+   * Passed in rather than read from the cache here so this module stays a pure
+   * derivation: the hook that owns the cache decides when answers exist, and a
+   * test can hand over a fixture. Absent — the default — leaves navigation
+   * exactly as it was.
+   */
+  boundaries?: BoundarySource
+  /**
+   * Override the AI-section kill switch. Omitted, the switch decides; `false`
+   * is how a surface that must show stable divisions opts out regardless.
+   */
+  aiSections?: boolean
+  /**
+   * AQU-2308: the file's hand-set milestones, as stored (`useFileMilestones`).
+   *
+   * Passed in rather than read here for the same reason `boundaries` is: this
+   * module stays a pure derivation, the hook owns the fetch, and a test can
+   * hand over a fixture. Absent — the default — leaves navigation exactly as
+   * it was.
+   */
+  userMilestones?: readonly FileMilestone[]
+}
+
 /**
  * Build navigation in the caller's display order. New imports use persisted
  * assignments; legacy imports derive from canonical refs, normalized addresses,
  * Biblica metadata, structural headings, timing, then deterministic parts.
+ *
+ * When `options.boundaries` has answers, the app-invented divisions — "Part N"
+ * and the 5-minute buckets, and only those — are replaced by AI sections cut at
+ * the scored boundaries (AQU-1387). Divisions read out of the file are never
+ * touched, which is a structural guarantee rather than a rule to remember: the
+ * overlay only ever looks at `part` and `time-range` assignments.
  */
 export function deriveMilestoneNavigation(
   cells: readonly MilestoneNavigationCell[],
+  options: MilestoneNavigationOptions = {},
 ): DerivedMilestoneNavigation {
-  const seeds = cells.map(legacyMilestoneSeed)
+  const rawSeeds = cells.map(legacyMilestoneSeed)
+  const seeds = identityPreservingSeeds(rawSeeds)
   const scriptureMode = seeds.some((seed) => (
     seed?.key.startsWith("scripture:") || seed?.key.startsWith("story:OBS:")
   ))
@@ -115,12 +174,56 @@ export function deriveMilestoneNavigation(
     }
   }
 
+  // AQU-1164 lets a persisted generic `part` inherit the identity around it, so
+  // the header no longer swaps to "Part N" mid-file. The cell is still one the
+  // app invented a division for, so the AI overlay may re-cut it (AQU-1387);
+  // when the overlay is off or has no answers the inherited identity stands.
+  // Scripture mode ignored `part` seeds before AQU-1164 too, so it is left out.
+  const inheritedPart = (index: number) => !scriptureMode && rawSeeds[index]?.kind === "part"
+
+  // AQU-2308: hand-set milestones are planned against the divisions as the
+  // file left them, BEFORE the AI overlay runs. That order is what makes "the
+  // overlay never re-cuts a hand-set milestone" structural rather than a rule
+  // to remember: by the time `applyAiSections` looks, a replaced run no longer
+  // reads as app-invented, so the overlay has nothing to take there.
+  const plan = planUserMilestones(
+    cells.map((cell) => cell.id),
+    resolved,
+    options.userMilestones ?? [],
+  )
+  for (const placement of plan.placements) {
+    if (placement.mode !== "replace") continue
+    for (let index = placement.startIndex; index <= placement.endIndex; index += 1) {
+      resolved[index] = placement.milestone
+    }
+  }
+  // `inheritedPart` reads the RAW seeds, so a cell a hand-set milestone just
+  // took over could still answer yes and be re-cut out from under it. Exclude
+  // the replaced indices explicitly.
+  applyAiSections(
+    cells,
+    resolved,
+    options,
+    (index) => inheritedPart(index) && !plan.replacedIndices.has(index),
+  )
+
+  // A hand-set milestone taken out of the middle of an app-invented division
+  // leaves the cells either side of it in one group under one key, which would
+  // list them as a single entry that silently spans the milestone. Splitting
+  // the leftovers into their own contiguous runs is what produces the honest
+  // "Part 1 · The storm · Part 2".
+  if (plan.replacedIndices.size > 0) {
+    splitInterruptedRuns(resolved, plan.replacedIndices)
+    renumberParts(resolved)
+  }
+
   const milestoneByCellId = new Map<string, ImportMilestone>()
   const groups = new Map<string, {
     milestone: ImportMilestone
     firstCellId: string
     firstIndex: number
     cellIds: string[]
+    named?: NamedSubdivision[]
   }>()
   cells.forEach((cell, index) => {
     const assignment = resolved[index]
@@ -138,9 +241,122 @@ export function deriveMilestoneNavigation(
     }
   })
 
+  // Nested placements are attached after grouping, so the parent division's
+  // own cellIds — and therefore its figures — are exactly what they were.
+  for (const placement of plan.placements) {
+    if (placement.mode !== "nest") continue
+    const parent = groups.get(placement.parentKey)
+    if (!parent) continue
+    const cellIds = cells
+      .slice(placement.startIndex, placement.endIndex + 1)
+      .map((cell) => cell.id)
+    if (cellIds.length === 0) continue
+    ;(parent.named ??= []).push({
+      key: placement.milestone.key,
+      label: placement.milestone.label,
+      shortLabel: placement.milestone.shortLabel,
+      firstCellId: cellIds[0],
+      firstIndex: placement.startIndex,
+      cellIds,
+    })
+  }
+
   return {
     milestoneByCellId,
     orderedMilestones: [...groups.values()],
+  }
+}
+
+/**
+ * Give each contiguous run of an app-invented division its own key.
+ *
+ * Only runs a hand-set milestone interrupted are touched: the first run keeps
+ * the original key so nothing that remembered it (an active-key, a deep link)
+ * breaks, and each later run gets a suffixed one so it lists as its own entry.
+ *
+ * Re-keying does not re-LABEL. `renumberParts` below renumbers "Part N",
+ * because that number is pure invention and a repeated one reads as one
+ * part listed twice. A
+ * 5-minute bucket's label is its clock range, which stays true of both halves
+ * of a split bucket, so two rows may legitimately read "05:00–10:00" — that is
+ * what they both are.
+ */
+function splitInterruptedRuns(
+  resolved: ImportMilestone[],
+  replacedIndices: ReadonlySet<number>,
+): void {
+  const runsSeen = new Map<string, number>()
+  let previousKey: string | undefined
+  for (let index = 0; index < resolved.length; index += 1) {
+    const division = resolved[index]
+    if (replacedIndices.has(index) || !isAppInventedMilestoneKind(division?.kind)) {
+      previousKey = undefined
+      continue
+    }
+    const originalKey = division.key
+    if (previousKey === originalKey) continue
+    previousKey = originalKey
+    const seen = (runsSeen.get(originalKey) ?? 0) + 1
+    runsSeen.set(originalKey, seen)
+    if (seen === 1) continue
+    // Re-key this whole run.
+    const splitKey = `${originalKey}#${seen}`
+    for (let member = index; member < resolved.length; member += 1) {
+      if (resolved[member]?.key !== originalKey) break
+      resolved[member] = { ...division, key: splitKey }
+    }
+    previousKey = splitKey
+  }
+}
+
+/**
+ * Number "Part N" over the parts that are actually listed.
+ *
+ * "Part N" is an invention of the app's, numbered by position in the file. A
+ * part KEEPS the number the file gave it unless an earlier part already holds
+ * that number or a higher one, in which case it takes the next free one. So
+ * the numbers only ever climb, and:
+ *
+ *   * a milestone strictly inside a part, which splits it into two runs that
+ *     both still read "Part 1", gives the second run "Part 2" and moves every
+ *     later part up one — never the same number twice;
+ *   * a milestone that takes over whole parts, or the ends of them, leaves
+ *     every other part's number alone. AQU-2310: renaming "Part 1" to
+ *     "Opening" must not turn "Part 2" into "Part 1" — a person who just
+ *     renamed Part 1 would read a new "Part 1" as their rename not taking.
+ *
+ * The cost is a visible gap when a milestone takes over a whole part in the
+ * middle ("Part 1 · The storm · Part 3"), which is also exactly what renaming
+ * Part 2 means. (AQU-2308 renumbered every part over itself, gap-free, which
+ * relabelled the neighbours of every rename.)
+ */
+function renumberParts(resolved: ImportMilestone[]): void {
+  const ordinalByKey = new Map<string, number>()
+  let highest = 0
+  for (const division of resolved) {
+    if (division?.kind !== "part") continue
+    if (ordinalByKey.has(division.key)) continue
+    const own = Number.parseInt(division.shortLabel, 10)
+    const ordinal = Number.isFinite(own) && own > highest ? own : highest + 1
+    ordinalByKey.set(division.key, ordinal)
+    highest = ordinal
+  }
+  if (ordinalByKey.size === 0) return
+  const relabelled = new Map<string, ImportMilestone>()
+  for (let index = 0; index < resolved.length; index += 1) {
+    const division = resolved[index]
+    if (division?.kind !== "part") continue
+    let next = relabelled.get(division.key)
+    if (!next) {
+      const ordinal = ordinalByKey.get(division.key) ?? 1
+      next = {
+        ...division,
+        label: translate(undefined, "editor.milestone.label.part", { number: ordinal }),
+        shortLabel: String(ordinal),
+      }
+      relabelled.set(division.key, next)
+    }
+    resolved[index] = next
   }
 }
 
@@ -167,6 +383,75 @@ export function cellIdsForMilestonePage(
     if (subsection) return subsection.cellIds
   }
   return entry.cellIds
+}
+
+/**
+ * Replace app-invented divisions with AI sections, in place.
+ *
+ * Works run by run rather than over the whole file: a file can be part
+ * structured and part not (a USFM with an unreferenced tail, a transcript with
+ * one titled segment), and only the unstructured stretches are the app's to
+ * re-cut. Each run is planned independently with the seam indices offset to the
+ * run's start, so a section can never straddle a division that came out of the
+ * file.
+ */
+function applyAiSections(
+  cells: readonly MilestoneNavigationCell[],
+  resolved: ImportMilestone[],
+  options: MilestoneNavigationOptions,
+  inheritedPart: (index: number) => boolean,
+): void {
+  const { boundaries } = options
+  if (!boundaries) return
+  if (!(options.aiSections ?? areAiSectionMilestonesEnabled())) return
+
+  let runStart: number | null = null
+  for (let index = 0; index <= cells.length; index += 1) {
+    const invented = index < cells.length
+      && (isAppInventedKind(resolved[index]?.kind) || inheritedPart(index))
+    if (invented) {
+      if (runStart === null) runStart = index
+      continue
+    }
+    if (runStart === null) continue
+    replaceRun(cells, resolved, runStart, index - 1, boundaries)
+    runStart = null
+  }
+}
+
+/** Divisions the app made up when the file offered none. */
+function isAppInventedKind(kind: ImportMilestoneKind | undefined): boolean {
+  return kind === "part" || kind === "time-range"
+}
+
+function replaceRun(
+  cells: readonly MilestoneNavigationCell[],
+  resolved: ImportMilestone[],
+  start: number,
+  end: number,
+  boundaries: BoundarySource,
+): void {
+  const timeline = resolved[start]?.kind === "time-range"
+  const assignments = aiSectionMilestones(
+    cells.slice(start, end + 1).map((cell) => ({
+      key: cell.id,
+      text: cell.original,
+      ...(cell.startMs === undefined ? {} : { startMs: cell.startMs }),
+    })),
+    (seam) => boundaries(start + seam),
+    {
+      clockPrefix: timeline,
+      // A run whose cells are all empty gets the bare vocabulary word; the
+      // milestone's shortLabel still carries the ordinal, so the picker can
+      // tell two of them apart. Composing "Section" + a number here would be
+      // the frame-filling this module's header argues against.
+      fallbackLabel: () => translate(undefined, "editor.milestone.vocab.section"),
+    },
+  )
+  if (!assignments) return
+  for (let index = 0; index < assignments.length; index += 1) {
+    resolved[start + index] = assignments[index]
+  }
 }
 
 function legacyMilestoneSeed(cell: MilestoneNavigationCell): ImportMilestone | undefined {
@@ -331,6 +616,29 @@ function fallbackMilestones(cells: readonly MilestoneNavigationCell[]): ImportMi
   return assignments
 }
 
+/**
+ * AQU-1164: `part` is the only milestone kind that carries no identity — it is
+ * the deterministic 50-cell "Part N" label used when a file offers nothing
+ * better. A file that has real identity somewhere (a Scripture chapter, a
+ * Biblica chapter, a heading section, an IDML story, a slide, a group) must not
+ * swap its header to "Part N" partway down just because some of its cells were
+ * persisted with the generic fallback — those cells belong to the book or
+ * section already in effect. Dropping the generic seeds lets the inheritance
+ * below carry the surrounding identity across them, exactly as it already does
+ * for a cell that has no seed at all.
+ *
+ * A file that is generic all the way through keeps its persisted `Part N`
+ * labels untouched: there is no identity to inherit, so "Part N" is the
+ * deliberate answer rather than a mid-file surprise.
+ */
+function identityPreservingSeeds(
+  seeds: readonly (ImportMilestone | undefined)[],
+): (ImportMilestone | undefined)[] {
+  const hasIdentity = seeds.some((seed) => seed && seed.kind !== "part")
+  if (!hasIdentity) return [...seeds]
+  return seeds.map((seed) => (seed?.kind === "part" ? undefined : seed))
+}
+
 function isScriptureMilestone(value: ImportMilestone | undefined): value is ImportMilestone {
   return Boolean(
     value
@@ -358,6 +666,11 @@ function isMilestoneKind(value: string | undefined): value is ImportMilestoneKin
     || value === "time-range"
     || value === "group"
     || value === "part"
+    || value === "ai-section"
+    // "user" is here for completeness of the guard, but a persisted import
+    // envelope can never legitimately carry it: a hand-set milestone is its
+    // own record, assembled below rather than read off a cell (AQU-2308).
+    || value === "user"
 }
 
 function friendlyMemberLabel(memberPath: string, fallback: string): string {

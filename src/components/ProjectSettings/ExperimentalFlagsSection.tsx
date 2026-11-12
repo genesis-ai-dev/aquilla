@@ -26,7 +26,8 @@ import { Switch } from "@/components/ui/switch"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
 import { FLAGS } from "@/lib/features/flags"
-import { AUTOPILOT_EDIT_ROLE_FLOOR } from "@/hooks/useProjectSettings"
+import { CheckingLinkCreator } from "@/components/checking/CheckingLinkCreator"
+import { AUTOPILOT_EDIT_ROLE_FLOOR, SETTINGS_EDIT_ROLE_FLOOR } from "@/hooks/useProjectSettings"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { getProject, patchProject, updateProject } from "@/lib/store/project-index"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -37,6 +38,8 @@ export function ExperimentalFlagsSection({
   autopilotEnabled,
   roleLevel,
   onSetAutopilotEnabled,
+  smartExtensionsEnabled,
+  onSetSmartExtensionsEnabled,
 }: {
   projectId: string
   /** Server-hydrated record from the parent's read hook. Used only to upsert
@@ -53,22 +56,39 @@ export function ExperimentalFlagsSection({
   /** Write the project-wide opt-in through the shared settings PATCH. Omit on
    *  surfaces that have no settings hook — the row then renders read-only. */
   onSetAutopilotEnabled?: (enabled: boolean) => void
+  /** AQU-1937: the project-wide Smart Extensions switch (Maintainer+). */
+  smartExtensionsEnabled?: boolean
+  onSetSmartExtensionsEnabled?: (enabled: boolean) => void
 }) {
   const { t } = useI18n()
-  const [flags, setFlags] = useState<Record<string, boolean> | undefined>(undefined)
+  // Tagged with the project they belong to: the settings route reuses this
+  // component across projects, and one project's toggles must never be shown
+  // for, or merged into, the next one's.
+  const [state, setState] = useState<{ projectId: string; flags: Record<string, boolean> } | undefined>(undefined)
+  const flags = state?.projectId === projectId ? state.flags : undefined
 
   // Seed from IDB directly — the parent's `project` comes from the server
-  // read hook, which never carries device-local flags.
+  // read hook, which never carries device-local flags. A key the user has
+  // already toggled keeps the user's value: the read can resolve after that
+  // click with a snapshot from before its write, and replacing the state
+  // wholesale reverted the switch while IDB kept the new value (AQU-1947).
   useEffect(() => {
     let cancelled = false
     void getProject(projectId).then((local) => {
-      if (!cancelled) setFlags(local?.experimentalFlags)
+      if (cancelled) return
+      setState((prev) => ({
+        projectId,
+        flags: { ...local?.experimentalFlags, ...(prev?.projectId === projectId ? prev.flags : undefined) },
+      }))
     })
     return () => { cancelled = true }
   }, [projectId])
 
   const setFlag = useCallback((key: string, value: boolean) => {
-    setFlags((prev) => ({ ...prev, [key]: value }))
+    setState((prev) => ({
+      projectId,
+      flags: { ...(prev?.projectId === projectId ? prev.flags : undefined), [key]: value },
+    }))
     void (async () => {
       const patched = await patchProject(projectId, (latest) => ({
         ...latest,
@@ -90,6 +110,9 @@ export function ExperimentalFlagsSection({
   const canOptIn = Boolean(onSetAutopilotEnabled)
     && (roleLevel == null || roleLevel >= AUTOPILOT_EDIT_ROLE_FLOOR)
 
+  const canToggleExtensions = Boolean(onSetSmartExtensionsEnabled)
+    && (roleLevel == null || roleLevel >= SETTINGS_EDIT_ROLE_FLOOR)
+
   // Legacy registry entries are read-only grandfathers — never offered as a
   // toggle (see the module header).
   const deviceFlags = Object.entries(FLAGS).filter(([, def]) => !def.legacy)
@@ -98,6 +121,7 @@ export function ExperimentalFlagsSection({
     <div id="section-experimental">
       <SettingsGroup label={t("autopilot.settings.experimentalTitle")}>
         <SettingsRow
+          saveId="autopilotEnabled"
           label={<label htmlFor="experimental-autopilot">{t("autopilot.settings.autopilotLabel")}</label>}
           description={t("autopilot.settings.autopilotDescription")}
           control={
@@ -111,6 +135,23 @@ export function ExperimentalFlagsSection({
                 disabled={!canOptIn}
                 onCheckedChange={(checked) => onSetAutopilotEnabled?.(checked)}
                 aria-label={t("autopilot.settings.autopilotLabel")}
+              />
+            </DisabledFieldTooltip>
+          }
+        />
+        <SettingsRow
+          saveId="smartExtensionsEnabled"
+          label={<label htmlFor="experimental-smart-extensions">{t("extensions.flag.label")}</label>}
+          description={t("extensions.flag.description")}
+          control={
+            <DisabledFieldTooltip disabled={!canToggleExtensions} tooltip={t("extensions.flag.roleHint")}>
+              <Switch
+                id="experimental-smart-extensions"
+                checked={smartExtensionsEnabled ?? false}
+                disabled={!canToggleExtensions}
+                onCheckedChange={(checked) => onSetSmartExtensionsEnabled?.(checked)}
+                aria-label={t("extensions.flag.label")}
+                data-testid="smart-extensions-switch"
               />
             </DisabledFieldTooltip>
           }
@@ -131,6 +172,7 @@ export function ExperimentalFlagsSection({
           />
         ))}
       </SettingsGroup>
+      {flags?.communityChecking === true && <CheckingLinkCreator key={projectId} projectId={projectId} />}
       <p className="mt-2 px-4 text-xs text-muted-foreground">
         {t("autopilot.settings.experimentalDescription")}
       </p>

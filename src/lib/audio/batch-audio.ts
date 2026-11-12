@@ -4,51 +4,39 @@
 //   1. Filter cells to those with work to do.
 //   2. Run them sequentially with a small concurrency window (default: 2).
 //   3. Maintain a cancellation flag so the AudioBulkProgressBanner can stop it.
-//   4. Expose progress via a lightweight pub-sub store so the banner re-renders.
+//   4. Expose progress via a lightweight pub-sub store (`batch-progress.ts`)
+//      so the banner re-renders.
 //
 // Progress is intentionally separate from the per-cell transcribe-status /
 // tts-status stores — the banner shows aggregate throughput, per-cell badges
 // show per-cell state.
 
-import { useSyncExternalStore } from "react"
+import { addBatchWait, getBatchProgress, removeBatchWait, setBatchProgress, type BatchKind } from "./batch-progress"
 
-// ---------------------------------------------------------------------------
-// Progress store
-// ---------------------------------------------------------------------------
+export { getBatchProgress, useBatchProgress, type BatchKind, type BatchProgress } from "./batch-progress"
 
-export type BatchKind = "transcribe" | "synth" | "measure"
-
-export interface BatchProgress {
-  kind: BatchKind
-  total: number
-  done: number
-  /** Signals were cancelled; in-flight cells may still complete. */
-  cancelled: boolean
-}
-
-let _progress: BatchProgress | null = null
-const _listeners = new Set<() => void>()
-
-function notify() {
-  for (const l of _listeners) l()
-}
-
-export function getBatchProgress(): BatchProgress | null {
-  return _progress
-}
-
-function setBatchProgress(p: BatchProgress | null) {
-  _progress = p
-  notify()
-}
-
-function subscribe(listener: () => void): () => void {
-  _listeners.add(listener)
-  return () => { _listeners.delete(listener) }
-}
-
-export function useBatchProgress(): BatchProgress | null {
-  return useSyncExternalStore(subscribe, getBatchProgress, () => null)
+/**
+ * AQU-1681: wait out the hosted transcription limit, showing the banner when
+ * the batch carries on. Checks the cancel flag every second so Cancel does not
+ * have to sit out a 15-minute window; throws when cancelled.
+ */
+async function waitOutTranscriptionLimit(
+  retryAfterSeconds: number,
+  onWaiting?: (untilMs: number | null) => void,
+): Promise<void> {
+  // A second over what the limiter asked for, so the retry lands in the new window.
+  const until = Date.now() + Math.ceil(retryAfterSeconds + 1) * 1000
+  addBatchWait(until)
+  onWaiting?.(until)
+  try {
+    while (Date.now() < until) {
+      if (_transcribeCancelFlag) throw new Error("transcription cancelled")
+      await new Promise<void>((resolve) => setTimeout(resolve, Math.min(1000, until - Date.now())))
+    }
+  } finally {
+    removeBatchWait(until)
+    onWaiting?.(null)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -61,30 +49,40 @@ const CONCURRENCY = 2
  * Run `fn` over `items` with a sliding concurrency window.
  * Stops accepting new work when `isCancelled()` returns true (in-flight jobs
  * complete naturally).
+ *
+ * AQU-1722: exported as `runBatchJobs` so the selection-driven voice batch
+ * (`batch-voice.ts`) runs on THIS queue rather than standing up a second one.
+ * One queue means one progress slot, one banner, and one Cancel button — two
+ * would both write `_progress` and the banner's Cancel would reach whichever
+ * happened to be on screen.
  */
-async function runBatch<T>(
+export async function runBatchJobs<T>(
   items: T[],
   fn: (item: T) => Promise<unknown>,
   opts: {
     kind: BatchKind
     isCancelled: () => boolean
-    onItemDone: () => void
+    onItemDone: (item: T) => void
+    /** AQU-1681: how many units of progress an item is (a minute of a
+     *  recording is all of its rows). Default 1. */
+    weightOf?: (item: T) => number
   },
 ): Promise<void> {
   const { kind, isCancelled, onItemDone } = opts
-  const total = items.length
+  const weightOf = opts.weightOf ?? (() => 1)
+  const total = items.reduce((n, item) => n + weightOf(item), 0)
   let done = 0
   let idx = 0
 
   setBatchProgress({ kind, total, done, cancelled: false })
 
   async function runNext(): Promise<void> {
-    while (idx < total) {
+    while (idx < items.length) {
       if (isCancelled()) break
       const item = items[idx++]
       await fn(item)
-      done++
-      onItemDone()
+      done += weightOf(item)
+      onItemDone(item)
       setBatchProgress({
         kind,
         total,
@@ -106,7 +104,14 @@ async function runBatch<T>(
 
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { transcribeCell } from "./transcribe"
+import { transcribeCell, type TranscriptionResult } from "./transcribe"
+import { planTranscriptionChunks, transcribeChunk, type TranscriptionChunk } from "./transcribe-chunked"
+import { sourceClipWindowSeconds } from "./transcribe-hosted"
+import { pinSharedClipPcm } from "./shared-clip-pcm"
+import { usesHostedTranscription } from "./transcription-preference"
+import { getTranscriptionModel } from "./transcription-model"
+import { batchAudioSeconds, zeroShotBatchCostLine } from "./zero-shot-batch"
+import { confirmZeroShotBatch } from "./omni-warmup-toast"
 import { audioIdSeededWith } from "./upload"
 import { getTranscribeStatus } from "./transcribe-status"
 import { generateCellVoice } from "./voice-generate-helpers"
@@ -125,6 +130,17 @@ export function cancelBatchSynth() {
   _synthCancelFlag = true
 }
 
+/** AQU-1722: arm the synth cancel flag for a fresh run. Shared by
+ *  `runSynthAll` and the selection-driven voice batch, which share the flag
+ *  because they share the one progress slot the banner's Cancel targets. */
+export function resetBatchSynthCancel() {
+  _synthCancelFlag = false
+}
+
+export function isBatchSynthCancelled(): boolean {
+  return _synthCancelFlag
+}
+
 export function cancelBatchMeasure() {
   _measureCancelFlag = true
 }
@@ -139,6 +155,12 @@ export interface TranscribeAllArgs {
   targetLanguage?: string
   /** @deprecated single-language callers; used as targetLanguage fallback. */
   language?: string
+  /**
+   * AQU-1462: lane the member is working in. Omitted for the default lane.
+   * AQU-1978: forwarded to every take's timings re-attach (see
+   * `TranscribeCellArgs.targetLang`) — not the language above, the lane's tag.
+   */
+  targetLang?: string
   /** AQU-928: run every cell that HAS audio, not just the ones missing a
    *  transcript. For an explicitly chosen scope — the sections the user
    *  selected on the timeline — "already transcribed" is not a reason to do
@@ -154,6 +176,14 @@ export interface TranscribeAllArgs {
    * transcribing, so a caller can tell "no work" from "no progress yet".
    */
   onProgress?: (done: number, total: number) => void
+  /** The project's org, so a zero-shot batch can show its share of the
+   *  week's remaining credits. Without it the confirm shows credits. */
+  orgId?: number | null
+  /** @internal — test seam for the zero-shot confirm toast. */
+  confirmZeroShot?: typeof confirmZeroShotBatch
+  /** AQU-1681: the hosted limit paused the batch until this time (epoch ms);
+   *  null when it carries on. For a caller showing its own progress. */
+  onWaiting?: (untilMs: number | null) => void
 }
 
 /** AQU-928: is there any audio on this cell to run ASR over? The first gate of
@@ -193,7 +223,7 @@ export function isSourceSegmentSelected(c: CellData): boolean {
  */
 export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
   const { cells, projectId, session } = args
-  const targetLang = args.targetLanguage ?? args.language
+  const targetLanguage = args.targetLanguage ?? args.language
 
   const targets = cells.filter((c) => {
     // AQU-928: a forced run keeps only the "has audio" half of the gate — the
@@ -208,32 +238,91 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
 
   if (targets.length === 0) return
 
+  // A zero-shot batch shows its cost first; a single run never does.
+  let forceAutoModel = false
+  if (session && usesHostedTranscription(session, projectId)
+    && getTranscriptionModel(session.username) === "omni-zs") {
+    const costLine = await zeroShotBatchCostLine({
+      jwt: session.jwt, projectId, orgId: args.orgId, audioSec: batchAudioSeconds(targets),
+    })
+    const choice = await (args.confirmZeroShot ?? confirmZeroShotBatch)({ count: targets.length, costLine })
+    if (choice === "cancel") return
+    forceAutoModel = choice === "auto"
+  }
+
   _transcribeCancelFlag = false
   args.onProgress?.(0, targets.length)
   let completed = 0
 
-  await runBatch(
-    targets,
-    (cell) =>
-      transcribeCell({
-        cell,
-        session,
-        projectId,
-        // AQU-646/SUB-29: language follows the audio by PROVENANCE — source
-        // segments are source speech; every take (incl. dub takes on media
-        // cells) voices the target text.
-        language: isSourceSegmentSelected(cell) ? (args.sourceLanguage ?? targetLang) : targetLang,
-      }),
-    {
-      kind: "transcribe",
-      isCancelled: () => _transcribeCancelFlag,
-      onItemDone: () => {
-        // The per-cell badge handles its own state; this is for whoever is
-        // watching the whole batch rather than one line.
-        args.onProgress?.(++completed, targets.length)
+  // AQU-646/SUB-29: language follows the audio by PROVENANCE — source
+  // segments are source speech; every take (incl. dub takes on media cells)
+  // voices the target text.
+  const languageFor = (cell: CellData) =>
+    isSourceSegmentSelected(cell) ? (args.sourceLanguage ?? targetLanguage) : targetLanguage
+  const waitForLimit = (retryAfterSeconds: number) => waitOutTranscriptionLimit(retryAfterSeconds, args.onWaiting)
+  const transcribeRow = (cell: CellData, prerecognised?: TranscriptionResult) =>
+    transcribeCell({
+      cell,
+      session,
+      projectId,
+      language: languageFor(cell),
+      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+      ...(forceAutoModel ? { forceAutoModel } : {}),
+      // AQU-1681: a batch waits out the hosted limit instead of failing rows.
+      onRateLimited: waitForLimit,
+      ...(prerecognised ? { prerecognised } : {}),
+    })
+
+  // AQU-1681: a recording split into many rows is sent a minute at a time
+  // (transcribe-chunked.ts), so an episode's ~900 rows are ~55 hosted
+  // requests rather than ~900 against a limit of 60 per 15 minutes. Hosted
+  // only: on-device Whisper has no limit, and keeps its row-at-a-time run. A
+  // forced run (the sections the user selected) also stays row by row: the
+  // person asked for those rows again, one Transcribe press each. A "minute"
+  // is as long as the account's model takes in one request — 30 s when the
+  // audio goes to Omnilingual.
+  const plan = !args.force && session && usesHostedTranscription(session, projectId)
+    ? planTranscriptionChunks(
+        targets,
+        sourceClipWindowSeconds(session.username, args.sourceLanguage ?? targetLanguage) * 1000,
+      )
+    : { chunks: [] as TranscriptionChunk[], single: targets }
+  type Job = { chunk: TranscriptionChunk } | { cell: CellData }
+  const jobs: Job[] = [...plan.chunks.map((chunk) => ({ chunk })), ...plan.single.map((cell) => ({ cell }))]
+  const weightOf = (job: Job) => ("chunk" in job ? job.chunk.rows.length : 1)
+
+  // The decoded recording stays for the whole run, waits included.
+  const unpin = pinSharedClipPcm()
+  try {
+    await runBatchJobs(
+      jobs,
+      (job) =>
+        "chunk" in job
+          ? transcribeChunk(job.chunk, {
+              session: session!,
+              projectId,
+              language: languageFor(job.chunk.rows[0]!.cell),
+              onRateLimited: waitForLimit,
+              onWarming: waitForLimit,
+              transcribeRow,
+              isCancelled: () => _transcribeCancelFlag,
+            })
+          : transcribeRow(job.cell),
+      {
+        kind: "transcribe",
+        isCancelled: () => _transcribeCancelFlag,
+        weightOf,
+        onItemDone: (job) => {
+          // The per-cell badge handles its own state; this is for whoever is
+          // watching the whole batch rather than one line.
+          completed += weightOf(job)
+          args.onProgress?.(completed, targets.length)
+        },
       },
-    },
-  )
+    )
+  } finally {
+    unpin()
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +345,8 @@ export interface SynthAllArgs {
    * Absent ⇒ each cell speaks its own text onto itself.
    */
   resolveTargets?: (cell: CellData) => SynthTarget[]
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
 }
 
 /** AQU-646: a cell needs synthesis when it has translated text but no
@@ -405,7 +496,7 @@ export async function runMeasureAll(args: MeasureAllArgs): Promise<MeasureAllRes
 
   _measureCancelFlag = false
 
-  await runBatch(
+  await runBatchJobs(
     targets,
     async ({ cellId, att }) => {
       try {
@@ -506,16 +597,18 @@ export async function runSynthAll(args: SynthAllArgs): Promise<void> {
 
   _synthCancelFlag = false
 
-  await runBatch(
+  await runBatchJobs(
     targets,
     (t) =>
       generateCellVoice({
         project,
         cell: t.cell,
+        ...(args.targetLang ? { targetLang: args.targetLang } : {}),
         session,
         username,
         text: t.text,
         voiceCellId: t.voiceCellId,
+        surface: "generate-all", // AQU-1572
       }),
     {
       kind: "synth",

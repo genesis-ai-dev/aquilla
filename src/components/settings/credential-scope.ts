@@ -16,6 +16,10 @@ export function scopeLabel(
   orgs: OrgSummary[],
   projects: CloudProjectSummary[],
 ): string {
+  if (cred.orgIds !== undefined) {
+    return cred.orgIds.map((id) => orgs.find((org) => String(org.id) === id)?.name
+      ?? t("onboarding.apiTokens.scope.orgFallback", { id })).join(", ")
+  }
   if (cred.projectId) {
     const p = projects.find((p) => p.id === cred.projectId)
     return p ? p.name : t("onboarding.apiTokens.scope.projectFallback", { id: cred.projectId })

@@ -33,6 +33,23 @@ export function formatBuildLabel({ version, branch, sha, builtAt }: BuildIdentit
     .join(" · ")
 }
 
+/**
+ * AQU-1523: the variant for a fixed-width left rail, which drops the branch in
+ * every environment rather than only on production.
+ *
+ * `formatBuildLabel` already treats the branch as the expendable field (it is
+ * "noise" on the production line). In a 224px sidebar it is expendable
+ * everywhere: at the footer's 10px monospace a glyph is ~6.5px, so the full
+ * four-field label needs ~228px on `dev` and far more on a preview build named
+ * after its PR branch — more than the row has, which is how the label came to
+ * render as `v0`. Version, sha and date are what support reads off a
+ * screenshot; the branch stays in the hover tooltip and the copy payload
+ * (`formatBuildInfo`), which are not width-bound.
+ */
+export function formatBuildRailLabel({ version, sha, builtAt }: BuildIdentity): string {
+  return [`v${version}`, sha, formatBuildDay(builtAt)].filter(Boolean).join(" · ")
+}
+
 /** Copyable/hoverable detail: the label plus the exact build coordinates. */
 export function formatBuildInfo(identity: BuildIdentity): string {
   const lines = [formatBuildLabel(identity), `build: ${identity.branch}@${identity.sha}`]

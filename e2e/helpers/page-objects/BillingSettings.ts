@@ -9,6 +9,34 @@ export class BillingSettingsPage {
     this.page = page
   }
 
+  async openPlatformBilling(navigate = true) {
+    if (navigate) await this.page.goto('/admin')
+    await this.page.getByRole('tab', { name: /^Platform$/i }).click()
+    await this.page.getByRole('tab', { name: /^Billing$/i }).click()
+  }
+
+  /** The org list is paged, so find the org by id rather than hoping it is on page one. */
+  async showOrg(orgId: number) {
+    await this.page.getByLabel('Search name, owner or org id…').fill(String(orgId))
+    // The search is applied (and kept in the URL) once typing pauses.
+    await expect(this.page).toHaveURL(new RegExp(`[?&]q=${orgId}(&|$)`))
+    await expect(this.page.getByTestId(`weekly-allowance-${orgId}`)).toBeVisible()
+  }
+
+  async setWeeklyAllowance(orgId: number, allowance: number) {
+    await this.openPlatformBilling()
+    await this.showOrg(orgId)
+    const field = this.page.getByTestId(`weekly-allowance-${orgId}`)
+    await expect(field).toBeVisible()
+    await field.fill(String(allowance))
+    const saved = this.page.waitForResponse(response =>
+      response.url().includes(`/billing/org/${orgId}/weekly-allowance`)
+      && response.request().method() === 'PATCH' && response.ok())
+    await field.press('Tab')
+    await saved
+    await expect(field).toHaveValue(String(allowance))
+  }
+
   async reviewSelectedPlan(selection: BillingPlanSelection, workspaceName: string) {
     await this.page.goto(billingSelectionPath(selection))
     await expect(this.page.getByRole('heading', { name: 'Choose a workspace for this plan' })).toBeVisible()
@@ -16,15 +44,16 @@ export class BillingSettingsPage {
     await this.page.getByRole('button', { name: `Review for ${workspaceName}`, exact: true }).click()
   }
 
-  async expectIncompatibleWorkspace() {
-    await expect(this.page.getByRole('region', { name: 'Review selected plan' }))
-      .toContainText('This plan does not match the workspace type')
-    await expect(this.page.getByRole('button', { name: 'Checkout coming soon' })).toHaveCount(0)
+  async expectWorkspaceTypeAccepted() {
+    const region = this.page.getByRole('region', { name: 'Review selected plan' })
+    await expect(region).toBeVisible()
+    await expect(region).not.toContainText('Checking workspace and current prices')
+    await expect(region).not.toContainText('This plan does not match the workspace type')
   }
 
   async openWorkspace(orgId: number) {
     await this.page.goto(`/orgs/${orgId}/settings/billing`)
-    await expect(this.page.getByRole('heading', { name: 'Billing & usage', exact: true })).toBeVisible()
+    await expect(this.page.getByRole('heading', { name: 'Billing', exact: true })).toBeVisible()
     await expect(this.page.getByTestId('billing-workspace')).toBeVisible()
   }
 

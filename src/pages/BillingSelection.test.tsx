@@ -11,7 +11,7 @@ vi.mock('@/lib/frontier/auth', () => ({ isJwtExpired: (value: string) => value =
 vi.mock('@/lib/frontier/orgs', () => ({ listMyOrgs: (...args: unknown[]) => list(...args) }))
 vi.mock('@/components/org/BillingPlanReview', () => ({ BillingPlanReview: ({ orgId, selection }: { orgId: number; selection: unknown }) =>
   <div data-testid="review">{JSON.stringify({ orgId, selection })}</div> }))
-const path = '/billing/select?offer=team-20x&interval=annual&quantity=1&audience=team'
+const path = '/billing/select?offer=team&interval=annual&quantity=1&audience=team'
 function view(url = path) { return <MemoryRouter initialEntries={[url]}><BillingSelection /></MemoryRouter> }
 beforeEach(() => { jwt = 'active'; list.mockReset(); list.mockResolvedValue([
   { id: 1, name: 'Personal', role: { level: 700 } },
@@ -23,7 +23,7 @@ it.each([null, 'expired'])('preserves selection in login and signup links for %s
   render(view())
   const login = new URL(screen.getByRole('link', { name: 'Sign in to review plan' }).getAttribute('href')!, 'https://test')
   const next = new URL(login.searchParams.get('next')!, 'https://test')
-  expect(readBillingIntent(next.searchParams)).toEqual({ kind: 'paid', selection: { offer: 'team_20x', interval: 'year', quantity: 1 } })
+  expect(readBillingIntent(next.searchParams)).toEqual({ kind: 'paid', selection: { offer: 'team', interval: 'year', quantity: 1 } })
   const signup = new URL(screen.getByRole('link', { name: 'Create an account' }).getAttribute('href')!, 'https://test')
   expect(readBillingIntent(signup.searchParams)).toEqual(readBillingIntent(next.searchParams))
   expect(list).not.toHaveBeenCalled()
@@ -36,7 +36,7 @@ it('requires an explicit workspace choice and filters users without billing auth
   expect(screen.queryByRole('button', { name: 'Review for Guest org' })).not.toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Review for Team' }))
   expect(screen.getByTestId('review')).toHaveTextContent('"orgId":2')
-  expect(screen.getByTestId('review')).toHaveTextContent('"offer":"team_20x"')
+  expect(screen.getByTestId('review')).toHaveTextContent('"offer":"team"')
 })
 it('rejects malformed links before loading workspaces', () => {
   render(view('/billing/select?offer=pro&interval=year&quantity=999'))

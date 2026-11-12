@@ -42,9 +42,29 @@ export const dcsEventId = (
 ): string => uuidv5(`${projectId}|${repo}|${sha}|${cellId}`, DCS_NS)
 
 /**
- * Deterministic file id for a DCS-imported file (a book / story / note file).
- * `key` is the repo-relative path or book/story key; the `|file|` infix keeps
- * the file-id space disjoint from the cell-id space so they can never collide.
+ * Deterministic file id for a DCS-imported file (a book / story / note file),
+ * scoped to the destination PROJECT. `key` is the repo-relative path or
+ * book/story key; the `|file|` infix keeps the file-id space disjoint from the
+ * cell-id space so they can never collide.
+ *
+ * AQU-1891: projectId is part of the seed because the `files` table's primary
+ * key is the file id ALONE (unlike `cells`, which is already project-scoped).
+ * Without the scope, a second project importing a resource the first already
+ * imported derives the SAME file ids, so its `file.create` upserts onto the
+ * first project's rows (`ON CONFLICT(id)`): the second project ends up with
+ * cells but no file rows — an empty file list and a 404 on the source-original
+ * upload — and the first project's file metadata can be overwritten. This
+ * mirrors the scope `dcsEventId` already carries for the same reason.
  */
-export const dcsFileId = (repo: string, key: string): string =>
+export const dcsFileId = (projectId: string, repo: string, key: string): string =>
+  uuidv5(`${projectId}|${repo}|file|${key}`, DCS_NS)
+
+/**
+ * The PRE-AQU-1891 (project-agnostic) file-id formula. Projects imported before
+ * the scope was added hold file rows keyed by this id, so the upstream-update
+ * and repair paths must still recognise it — see `resolveHeldFileId` in
+ * delta.ts. NEVER mint new ids with this: it is a read-side compatibility
+ * shim only.
+ */
+export const dcsLegacyFileId = (repo: string, key: string): string =>
   uuidv5(`${repo}|file|${key}`, DCS_NS)

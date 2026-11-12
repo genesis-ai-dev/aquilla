@@ -8,20 +8,20 @@
     "build:workers-build": "node ../scripts/assert-workers-build-env.mjs && pnpm run type-check",
     "deploy:workers-build": "node ../scripts/cloudflare-build-deploy.mjs sync",
     "deploy": "pnpm --dir .. run deploy:aquilla:sync",
-    "type-check": "tsc --noEmit",
+    "type-check": "tsc --noEmit && tsc --noEmit -p tsconfig.runtime.json",
     "test": "vitest run"
   },
   "dependencies": {
-    "hono": "^4.13.5",
+    "hono": "^4.13.16",
     "partyserver": "^0.5.10",
-    "postgres": "^3.4.9"
+    "postgres": "^4.0.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260901.1",
-    "@electric-sql/pglite": "^0.5.8",
-    "@types/node": "^26.4.1",
+    "@cloudflare/workers-types": "^5.20261102.1",
+    "@electric-sql/pglite": "^0.5.14",
+    "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.11",
-    "wrangler": "^4.128.0"
+    "vitest": "^5.0.5",
+    "wrangler": "^4.156.1"
   }
 }

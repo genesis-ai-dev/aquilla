@@ -10,7 +10,9 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import {
   CheckFindingsDrawer,
   checkScopeSummary,
@@ -39,6 +41,11 @@ const baseResult: CheckRunResult = {
   checkedTermCount: 8,
   ruleFindings: [],
   termFindings: [],
+  capitalizationFindings: [],
+  caseExceptions: [],
+  spellingFindings: [],
+  approvedSpellings: [],
+  wordlistSize: 0,
   totalFindingCount: 0,
 }
 
@@ -143,6 +150,50 @@ describe("CheckFindingsDrawer", () => {
     expect(onNavigateToCell).toHaveBeenCalledWith("c1")
   })
 
+  it("accounts for learned capitalization exceptions even on a clean result (AQU-1734)", () => {
+    render(
+      <CheckFindingsDrawer
+        result={{ ...baseResult, caseExceptions: [{ form: "ki-", occurrences: 40 }] }}
+        running={false} cells={[]}
+        onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}}
+      />,
+    )
+    expect(screen.getByText(/no issues found/)).toBeInTheDocument()
+    expect(screen.getByText(/Not flagged .* ki-/)).toBeInTheDocument()
+  })
+
+  it("renders capitalization findings and names the exceptions it learned (AQU-1734)", () => {
+    const onNavigateToCell = vi.fn()
+    const cells = [makeCell("c1", "MAT 1:1", "Alisema tHe neno"), makeCell("c2", "MRK 1:16", "mwito wa Simoni")]
+    const result: CheckRunResult = {
+      ...baseResult,
+      capitalizationFindings: [
+        { code: "mixed-case", form: "tHe", cells: [{ cellId: "c1", cellLabel: "MAT 1:1" }] },
+        { code: "lowercase-heading-start", form: "", cells: [{ cellId: "c2", cellLabel: "MRK 1:16" }] },
+      ],
+      caseExceptions: [{ form: "ki-", occurrences: 40, examples: ["kiNgozi", "kiSwahili"] }],
+      totalFindingCount: 2,
+    }
+
+    render(
+      <CheckFindingsDrawer
+        result={result} running={false} cells={cells}
+        onClose={() => {}} onRetry={() => {}} onNavigateToCell={onNavigateToCell}
+      />,
+    )
+
+    expect(screen.getByText("Capitalization (2)")).toBeInTheDocument()
+    // The offending form is raw cell content — rendered verbatim, not translated.
+    expect(screen.getByText("tHe")).toBeInTheDocument()
+    expect(screen.getByText("1 cell writes a capital inside this word")).toBeInTheDocument()
+    expect(screen.getByText("Heading starts with a lowercase letter")).toBeInTheDocument()
+    // What was let through is visible rather than silent.
+    expect(screen.getByText(/Not flagged .* ki-/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText("MAT 1:1"))
+    expect(onNavigateToCell).toHaveBeenCalledWith("c1")
+  })
+
   it("offers the existing comment affordance per flagged cell", () => {
     const onOpenComments = vi.fn()
     const result: CheckRunResult = {
@@ -222,5 +273,149 @@ describe("findingCellLabel", () => {
   it("falls back to the id only when the cell is unknown or untimed", () => {
     expect(findingCellLabel(undefined, "uuid-1")).toBe("uuid-1")
     expect(findingCellLabel(mk({ context: "GEN 1:1" }), "uuid-2")).toBe("uuid-2")
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. A
+// finding's card shows what it is and is the way to it, so it has no hover.
+describe("CheckFindingsDrawer — a finding's card has no hover", () => {
+  it("shows nothing on hover over a finding's card", async () => {
+    const cells = [makeCell("c2", "MAT 1:16", "Masihi")]
+    const result: CheckRunResult = {
+      ...baseResult,
+      termFindings: [{
+        conceptId: "k1", sourceTerm: "Χριστός", approvedRenderings: ["Kristo"],
+        totalOccurrences: 2, consistentCount: 1,
+        renderingUsage: [{ rendering: "Kristo", cellIds: ["c1"] }],
+        flaggedCells: [{ cellId: "c2", cellLabel: "MAT 1:16" }],
+      }],
+      totalFindingCount: 1,
+    }
+    render(
+      <TooltipProvider delay={0}>
+        <CheckFindingsDrawer result={result} running={false} cells={cells}
+          onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}} />
+      </TooltipProvider>,
+    )
+    await userEvent.setup().hover(screen.getByText("MAT 1:16"))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+  })
+})
+
+// AQU-1737: the spelling section is the one place in this panel a reviewer
+// makes a decision, so what is pinned here is that the decision is per FORM
+// and takes every occurrence with it — and that nothing was let through
+// silently.
+describe("CheckFindingsDrawer — spelling (AQU-1737)", () => {
+  const spellingResult = (): CheckRunResult => ({
+    ...baseResult,
+    spellingFindings: [
+      {
+        form: "Yeesu",
+        occurrences: 2,
+        suggestion: "Yesu",
+        suggestionOccurrences: 14,
+        reason: "sound-alike",
+        cells: [
+          { cellId: "c1", cellLabel: "MRK 1:1" },
+          { cellId: "c2", cellLabel: "MRK 1:5" },
+        ],
+      },
+    ],
+    approvedSpellings: [{ form: "Yesu", occurrences: 140 }],
+    wordlistSize: 320,
+    totalFindingCount: 1,
+  })
+
+  it("names the suspected form, the usual spelling and how often it is written", () => {
+    render(
+      <CheckFindingsDrawer
+        result={spellingResult()} running={false}
+        cells={[makeCell("c1", "MRK 1:1", "Yeesu akasema")]}
+        onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}}
+      />,
+    )
+    expect(screen.getByText("Spelling (1)")).toBeInTheDocument()
+    // Both forms are raw cell content — rendered verbatim, never translated.
+    expect(screen.getByText("Yeesu")).toBeInTheDocument()
+    expect(screen.getByText(/Sounds like "Yesu", which this text writes 14 times/)).toBeInTheDocument()
+  })
+
+  it("approving a spelling clears every occurrence at once, not one cell of it", async () => {
+    const user = userEvent.setup()
+    render(
+      <TooltipProvider delay={0}>
+        <CheckFindingsDrawer
+          result={spellingResult()} running={false}
+          cells={[makeCell("c1", "MRK 1:1", "Yeesu akasema"), makeCell("c2", "MRK 1:5", "Yeesu alijibu")]}
+          onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}}
+        />
+      </TooltipProvider>,
+    )
+    // Both occurrences are on the one card.
+    expect(screen.getByText("MRK 1:1")).toBeInTheDocument()
+    expect(screen.getByText("MRK 1:5")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: /Approve the spelling "Yeesu"/ }))
+
+    expect(screen.queryByText("Yeesu")).toBeNull()
+    expect(screen.queryByText("MRK 1:1")).toBeNull()
+    expect(screen.queryByText("MRK 1:5")).toBeNull()
+    expect(screen.getByText("Spelling (0)")).toBeInTheDocument()
+    expect(screen.getByText(/1 spelling approved — every occurrence cleared/)).toBeInTheDocument()
+  })
+
+  it("keeps an approved spelling cleared when the check runs again", async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(
+      <TooltipProvider delay={0}>
+        <CheckFindingsDrawer
+          result={spellingResult()} running={false}
+          cells={[makeCell("c1", "MRK 1:1", "Yeesu akasema")]}
+          onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}}
+        />
+      </TooltipProvider>,
+    )
+    await user.click(screen.getByRole("button", { name: /Approve the spelling "Yeesu"/ }))
+
+    // A fresh run returns the same finding; the reviewer's decision stands.
+    rerender(
+      <TooltipProvider delay={0}>
+        <CheckFindingsDrawer
+          result={{ ...spellingResult(), ranAt: "2026-06-11T21:00:00.000Z" }} running={false}
+          cells={[makeCell("c1", "MRK 1:1", "Yeesu akasema")]}
+          onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}}
+        />
+      </TooltipProvider>,
+    )
+    expect(screen.queryByText("Yeesu")).toBeNull()
+    expect(screen.getByText("Spelling (0)")).toBeInTheDocument()
+  })
+
+  it("names what frequency let through, and the size of the wordlist it built", () => {
+    render(
+      <CheckFindingsDrawer
+        result={spellingResult()} running={false}
+        cells={[makeCell("c1", "MRK 1:1", "Yeesu akasema")]}
+        onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}}
+      />,
+    )
+    expect(screen.getByText(/written often enough in this text to be treated as correct: Yesu/))
+      .toBeInTheDocument()
+    expect(screen.getByText(/Wordlist: 320 word forms/)).toBeInTheDocument()
+  })
+
+  it("a spelling finding's cell reference navigates to the cell", () => {
+    const onNavigateToCell = vi.fn()
+    render(
+      <CheckFindingsDrawer
+        result={spellingResult()} running={false}
+        cells={[makeCell("c1", "MRK 1:1", "Yeesu akasema")]}
+        onClose={() => {}} onRetry={() => {}} onNavigateToCell={onNavigateToCell}
+      />,
+    )
+    fireEvent.click(screen.getByText("MRK 1:1"))
+    expect(onNavigateToCell).toHaveBeenCalledWith("c1")
   })
 })

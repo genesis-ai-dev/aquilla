@@ -1,6 +1,6 @@
 // Types for the sync-worker AD-13 passages route.
 //
-// Mirror of `apps/sync/src/events/branching-search-passages-route.ts`.
+// Mirror of `sync-worker/src/events/branching-search-passages-route.ts`.
 
 export interface PassageCell {
   cellId: string

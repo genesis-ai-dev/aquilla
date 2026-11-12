@@ -1,3 +1,4 @@
+import { suspendAnalytics } from "@/lib/analytics-boundary"
 import { openDB } from "idb"
 import type { FrontierSession } from "./types"
 
@@ -52,6 +53,7 @@ let crossTabChannel: BroadcastChannel | null = null
 let externalReconcileQueued = false
 
 function scheduleExternalReconcile(): void {
+  suspendAnalytics()
   if (externalReconcileQueued) return
   externalReconcileQueued = true
   queueMicrotask(() => {
@@ -337,6 +339,7 @@ export async function patchSessionEmails(updates: Record<string, string>): Promi
 }
 
 export async function addSession(s: FrontierSession): Promise<void> {
+  suspendAnalytics()
   return mutateEnvelope((env) => {
     const key = sessionKey(s)
     env.sessions[key] = s
@@ -345,6 +348,7 @@ export async function addSession(s: FrontierSession): Promise<void> {
 }
 
 export async function activateSession(key: string): Promise<void> {
+  suspendAnalytics()
   return mutateEnvelope((env) => {
     if (!(key in env.sessions)) throw new Error(`Unknown session key: ${key}`)
     env.active = key
@@ -352,6 +356,7 @@ export async function activateSession(key: string): Promise<void> {
 }
 
 export async function removeSession(key: string): Promise<void> {
+  suspendAnalytics()
   return mutateEnvelope((env) => {
     if (!(key in env.sessions)) return false
     delete env.sessions[key]
@@ -368,8 +373,25 @@ export async function loadActiveSession(): Promise<FrontierSession | null> {
   return env.sessions[env.active] ?? null
 }
 
+/** Replace a renewed credential only while that exact session is still active.
+ * The comparison and write share the envelope transaction with logout/switching.
+ * Unlike saveSession, renewal must never add or activate an account.
+ */
+export async function replaceActiveSessionJwt(previousJwt: string, nextJwt: string): Promise<boolean> {
+  suspendAnalytics()
+  let replaced = false
+  await mutateEnvelope((env) => {
+    const current = env.active ? env.sessions[env.active] : undefined
+    if (!current || current.jwt !== previousJwt) return false
+    current.jwt = nextJwt
+    replaced = true
+  })
+  return replaced
+}
+
 // Backward-compat: existing login path uses saveSession. It adds-and-activates.
 export async function saveSession(s: FrontierSession): Promise<void> {
+  suspendAnalytics()
   return mutateEnvelope((env) => {
     const key = sessionKey(s)
     env.sessions[key] = s
@@ -382,6 +404,7 @@ export async function loadSession(): Promise<FrontierSession | null> {
 }
 
 export async function clearSession(): Promise<void> {
+  suspendAnalytics()
   return mutateEnvelope((env) => {
     env.active = null
     env.sessions = {}

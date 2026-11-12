@@ -4,6 +4,7 @@
 // delete-cleans-R2, and reindex.
 import { env } from "cloudflare:test"
 import { describe, it, expect, vi, afterEach } from "vitest"
+import { zipSync, strToU8 } from "fflate"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { ROLE } from "../types"
@@ -205,6 +206,9 @@ describe("knowledge routes — project upload floor", () => {
     )
     expect(originalRes.status).toBe(200)
     expect(originalRes.headers.get("content-type")).toContain("text/markdown")
+    // Uploaded bytes must never render inline on the API origin.
+    expect(originalRes.headers.get("content-disposition")).toMatch(/^attachment;/)
+    expect(originalRes.headers.get("x-content-type-options")).toBe("nosniff")
   })
 })
 
@@ -456,6 +460,23 @@ describe("knowledge routes — validation", () => {
     const body = (await res.json()) as { error: { code: string } }
     expect(body.error.code).toBe("validation_failed")
   })
+
+  // AQU-1499: the reason has to travel. A bare `catch` here used to flatten
+  // every extraction failure into "could not extract text", so a partner whose
+  // .docx was refused for a fixable reason got a message no retry could clear
+  // and no hint that re-saving the file fixes it.
+  it("a .docx the extractor refuses → 422 whose message carries the reason", async () => {
+    const jwt = await setup()
+    stubIndexingFetch()
+    // A valid zip that is not a .docx: the extractor's "no word/document.xml"
+    // path, reached through the real route.
+    const notADocx = zipSync({ "unrelated.xml": strToU8("<foo/>") })
+    const res = await uploadDoc(PROJECT, jwt, notADocx, "mislabelled.docx", new FakeBucket())
+    expect(res.status).toBe(422)
+    const body = (await res.json()) as { error: { code: string; message: string } }
+    expect(body.error.code).toBe("validation_failed")
+    expect(body.error.message).toContain("word/document.xml")
+  })
 })
 
 describe("knowledge routes — delete cleans R2", () => {
@@ -519,5 +540,219 @@ describe("knowledge routes — reindex", () => {
         .first<{ index_status: string }>()
       expect(row?.index_status).toBe("ready")
     })
+  })
+
+  // AQU-2002: "re-index is idempotent". The claim is the UPDATE itself, so a
+  // second request for a job already in flight starts no duplicate and — this
+  // is the part that bit — does not reset the staleness clock out from under
+  // the running job.
+  it("a reindex while a job is already in flight is a no-op, not a second job", async () => {
+    await seedUser(1, "owner")
+    await seedProject(PROJECT, 1)
+    const jwt = await jwtFor("owner")
+    stubIndexingFetch()
+    const bucket = new FakeBucket()
+
+    const uploadRes = await uploadDoc(
+      PROJECT, jwt, new TextEncoder().encode("# x\ny"), "a.md", bucket, { OPENROUTER_API_KEY: "k" },
+    )
+    const { doc } = (await uploadRes.json()) as { doc: { id: string } }
+    // Let the upload's own job finish first, or its terminal write lands after
+    // the staging below and the row is no longer a live job (AQU-2063 gave the
+    // job an entitlement check, which made that race visible).
+    await vi.waitFor(async () => {
+      const row = await env.AQUILLA_PG.prepare("SELECT index_status FROM knowledge_docs WHERE id = ?")
+        .bind(doc.id)
+        .first<{ index_status: string }>()
+      expect(row?.index_status).toBe("ready")
+    })
+
+    // Where a live job leaves the row: pending, written just now.
+    await env.AQUILLA_PG.prepare(
+      `UPDATE knowledge_docs SET index_status = 'pending', updated_at = now() WHERE id = ?`,
+    ).bind(doc.id).run()
+    const before = await env.AQUILLA_PG.prepare(
+      "SELECT updated_at FROM knowledge_docs WHERE id = ?",
+    ).bind(doc.id).first<{ updated_at: string }>()
+
+    const res = await app.request(
+      `/api/v2/projects/${PROJECT}/knowledge/${doc.id}/reindex`,
+      { method: "POST", headers: authHeader(jwt) },
+      testEnvWith(bucket, { OPENROUTER_API_KEY: "k" }),
+    )
+
+    expect(res.status).toBe(202)
+    expect(await res.json()).toEqual({ ok: true, alreadyIndexing: true })
+    const after = await env.AQUILLA_PG.prepare(
+      "SELECT index_status, updated_at FROM knowledge_docs WHERE id = ?",
+    ).bind(doc.id).first<{ index_status: string; updated_at: string }>()
+    expect(after?.index_status).toBe("pending")
+    // (PGlite hands back a Date where the live shim hands back a string.)
+    expect(String(after?.updated_at)).toBe(String(before?.updated_at))
+  })
+
+  it("retrying a doc clears the reason the last run left behind (AQU-2002)", async () => {
+    await seedUser(1, "owner")
+    await seedProject(PROJECT, 1)
+    const jwt = await jwtFor("owner")
+    stubIndexingFetch()
+    const bucket = new FakeBucket()
+
+    const uploadRes = await uploadDoc(
+      PROJECT, jwt, new TextEncoder().encode("# x\ny"), "a.md", bucket, { OPENROUTER_API_KEY: "k" },
+    )
+    const { doc } = (await uploadRes.json()) as { doc: { id: string } }
+    await env.AQUILLA_PG.prepare(
+      `UPDATE knowledge_docs
+          SET index_status = 'ready', index_error = 'The summarizing model returned HTTP 402.'
+        WHERE id = ?`,
+    ).bind(doc.id).run()
+
+    const res = await app.request(
+      `/api/v2/projects/${PROJECT}/knowledge/${doc.id}/reindex`,
+      { method: "POST", headers: authHeader(jwt) },
+      testEnvWith(bucket, { OPENROUTER_API_KEY: "k" }),
+    )
+    expect(res.status).toBe(202)
+    expect(await res.json()).toEqual({ ok: true })
+
+    await vi.waitFor(async () => {
+      const row = await env.AQUILLA_PG.prepare(
+        "SELECT index_status, index_error FROM knowledge_docs WHERE id = ?",
+      ).bind(doc.id).first<{ index_status: string; index_error: string | null }>()
+      expect(row?.index_status).toBe("ready")
+      expect(row?.index_error).toBeNull()
+    })
+  })
+})
+
+// AQU-2051: indexing moved off the request's ~30 s `waitUntil` budget onto a
+// per-document Durable Object. The route's job is now only the handoff, and
+// these guard the two halves of that contract: with the binding present it
+// hands off exactly once and runs no in-request job (which would race the alarm
+// and pay for every summary twice), and the response the client sees is the
+// same `pending` row at the same speed as before. The suites above cover the
+// other half — they run with no binding, so each one proves the `waitUntil`
+// fallback still indexes end to end.
+describe("knowledge routes — indexing handoff (AQU-2051)", () => {
+  /** A KNOWLEDGE_INDEX_DRIVER namespace that records the jobs posted to it. */
+  function fakeDriver() {
+    const names: string[] = []
+    const jobs: unknown[] = []
+    return {
+      names,
+      jobs,
+      namespace: {
+        idFromName(name: string) {
+          names.push(name)
+          return { name }
+        },
+        get() {
+          return {
+            async fetch(_url: string, init: RequestInit) {
+              jobs.push(JSON.parse(String(init.body)))
+              return new Response(null, { status: 202 })
+            },
+          }
+        },
+      },
+    }
+  }
+
+  it("upload hands the doc to the driver once and leaves the row pending", async () => {
+    await seedUser(1, "owner")
+    await seedProject(PROJECT, 1)
+    const jwt = await jwtFor("owner")
+    stubIndexingFetch()
+    const bucket = new FakeBucket()
+    const driver = fakeDriver()
+
+    const res = await uploadDoc(PROJECT, jwt, new TextEncoder().encode("# x\ny"), "a.md", bucket, {
+      OPENROUTER_API_KEY: "k",
+      KNOWLEDGE_INDEX_DRIVER: driver.namespace,
+    })
+    expect(res.status).toBe(201)
+    const { doc } = (await res.json()) as { doc: { id: string; indexStatus: string } }
+    expect(doc.indexStatus).toBe("pending")
+
+    expect(driver.jobs).toEqual([{ docId: doc.id }])
+    // One object per document is what makes "one job per document" true.
+    expect(driver.names).toEqual([doc.id])
+
+    // The row stays where the handoff left it: nothing indexed in-request.
+    const row = await env.AQUILLA_PG.prepare("SELECT index_status FROM knowledge_docs WHERE id = ?")
+      .bind(doc.id)
+      .first<{ index_status: string }>()
+    expect(row?.index_status).toBe("pending")
+  })
+
+  it("reindex hands off once, and a reindex of a live job hands off not at all", async () => {
+    await seedUser(1, "owner")
+    await seedProject(PROJECT, 1)
+    const jwt = await jwtFor("owner")
+    stubIndexingFetch()
+    const bucket = new FakeBucket()
+    const driver = fakeDriver()
+    const driverEnv = { OPENROUTER_API_KEY: "k", KNOWLEDGE_INDEX_DRIVER: driver.namespace }
+
+    const uploadRes = await uploadDoc(
+      PROJECT, jwt, new TextEncoder().encode("# x\ny"), "a.md", bucket, driverEnv,
+    )
+    const { doc } = (await uploadRes.json()) as { doc: { id: string } }
+    expect(driver.jobs).toHaveLength(1)
+
+    // Terminal, so the retry's claim succeeds.
+    await env.AQUILLA_PG.prepare(`UPDATE knowledge_docs SET index_status = 'ready' WHERE id = ?`)
+      .bind(doc.id)
+      .run()
+    const retry = await app.request(
+      `/api/v2/projects/${PROJECT}/knowledge/${doc.id}/reindex`,
+      { method: "POST", headers: authHeader(jwt) },
+      testEnvWith(bucket, driverEnv),
+    )
+    expect(retry.status).toBe(202)
+    expect(await retry.json()).toEqual({ ok: true })
+    expect(driver.jobs).toEqual([{ docId: doc.id }, { docId: doc.id }])
+
+    // The row-level debounce still holds with the driver in place: a second
+    // request for a job already in flight never reaches an object at all.
+    const second = await app.request(
+      `/api/v2/projects/${PROJECT}/knowledge/${doc.id}/reindex`,
+      { method: "POST", headers: authHeader(jwt) },
+      testEnvWith(bucket, driverEnv),
+    )
+    expect(await second.json()).toEqual({ ok: true, alreadyIndexing: true })
+    expect(driver.jobs).toHaveLength(2)
+  })
+
+  it("a refused handshake starts no in-request job — the alarm may already be armed", async () => {
+    await seedUser(1, "owner")
+    await seedProject(PROJECT, 1)
+    const jwt = await jwtFor("owner")
+    stubIndexingFetch()
+    const bucket = new FakeBucket()
+
+    const namespace = {
+      idFromName: (name: string) => ({ name }),
+      get: () => ({
+        fetch: async () => {
+          throw new Error("stub unreachable")
+        },
+      }),
+    }
+
+    const res = await uploadDoc(PROJECT, jwt, new TextEncoder().encode("# x\ny"), "a.md", bucket, {
+      OPENROUTER_API_KEY: "k",
+      KNOWLEDGE_INDEX_DRIVER: namespace,
+    })
+    expect(res.status).toBe(201)
+    const { doc } = (await res.json()) as { doc: { id: string } }
+
+    // Stays pending for the read-side staleness window to surface a retry,
+    // rather than being double-indexed by a local fallback.
+    const row = await env.AQUILLA_PG.prepare("SELECT index_status FROM knowledge_docs WHERE id = ?")
+      .bind(doc.id)
+      .first<{ index_status: string }>()
+    expect(row?.index_status).toBe("pending")
   })
 })

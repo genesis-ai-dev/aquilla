@@ -256,3 +256,30 @@ describe("OutboxInspectorPopover failed records (SUB-9)", () => {
     expect(await screen.findByText(/2 pending · 1 failed/i)).toBeInTheDocument()
   })
 })
+
+describe("OutboxInspectorPopover held for admin step-up (OPS-44)", () => {
+  it("shows a held record as pending, with no 'not allowed' alert and no Discard", async () => {
+    const held = {
+      ...makeRecord(1),
+      lastAttemptAt: 2_001,
+      // Stamped by the flusher (ELEVATION_HOLD_REASON); still pending.
+      lastError: { status: 403, reason: "waiting for admin verification" },
+    } as unknown as OutboxRecord
+    render(
+      <OutboxInspectorPopover
+        trigger={<button type="button">open inspector</button>}
+        records={[held]}
+        pendingCount={1}
+        onRetryNow={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /open inspector/i }))
+
+    expect(await screen.findByText(/1 pending/i)).toBeInTheDocument()
+    expect(screen.queryByText(/weren.t allowed/i)).not.toBeInTheDocument()
+    const row = within(screen.getByRole("list")).getAllByRole("listitem")[0]
+    fireEvent.click(within(row).getAllByRole("button")[0]) // expand the row
+    expect(await within(row).findByText(/waiting for admin verification/)).toBeInTheDocument()
+    expect(within(row).queryByRole("button", { name: /discard this change/i })).not.toBeInTheDocument()
+  })
+})

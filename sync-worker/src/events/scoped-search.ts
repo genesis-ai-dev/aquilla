@@ -1,8 +1,9 @@
 // Scoped search helpers — Step 5 of the v3 search permission model.
 //
 // This module is the SINGLE choke-point for all FTS5 cell-search queries.
-// Every search surface MUST route through `queryScopedSearch` or
-// `queryScopedExact` — both accept a `VerifiedProjectId` rather than a raw
+// Every search surface MUST route through `queryScopedSearch`,
+// `queryScopedPattern`, or `queryScopedExact` — each accepts a
+// `VerifiedProjectId` rather than a raw
 // string, so passing an un-verified projectId is a TypeScript compile error.
 //
 // The permission boundary is structural, not advisory:
@@ -13,8 +14,20 @@
 //   - The `AND cells.project_id = ?` predicate is hardcoded here, not supplied
 //     by the caller, so it cannot be accidentally omitted.
 
+import { targetVisibilityClause } from "./lane-read-wall"
 import type { SyncTokenClaims } from "../auth"
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "./lane-id-sql"
+import { notHiddenSql, visibleSourceSql } from "./hidden-cells-scope"
+import { inCountedFileSql } from "../../../db/shared/counted-files"
+import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
+import {
+  findPatternError,
+  findTextMatches,
+  markedSnippet,
+  postgresCanRunRegexp,
+  type TextFindOptions,
+} from "../../../db/shared/find-pattern"
+import { withLongOperationTimeout } from "../../../db/shim/postgres"
 
 // ---------------------------------------------------------------------------
 // Branded type — the permission gate
@@ -53,6 +66,29 @@ export interface SearchResultOut {
   /** FTS5 snippet with `<mark>...</mark>` highlights around matched terms. */
   snippet: string
   rank: number
+  /**
+   * The opposite-side cell value at the same (file_id, cell_id), if it
+   * exists. null when there is no paired cell (e.g. a target row whose
+   * source was never imported). Find & Replace shows this so a reviewer
+   * can check the source without leaving the panel (AQU-1011).
+   */
+  pairedValue: string | null
+  /**
+   * Verse address for this cell, taken from the source row when the matched
+   * row (often the target) has none. `GEN 1:1`. Null when the cell has no
+   * canonical reference.
+   */
+  canonicalRef: string | null
+  /** Source cell type (`verse`, `heading`, `paratext`, …). Null when unset. */
+  cellType: string | null
+  /**
+   * A human label stored on the cell (section title, cell label, cast name,
+   * or import display label). Null when the cell has none. May still be a
+   * bare number or an id — the client decides whether it is readable.
+   */
+  placeLabel: string | null
+  /** 1-based place of this cell among the file's visible source cells. */
+  position: number | null
 }
 
 export interface ParallelPassageRow extends SearchResultOut {
@@ -68,13 +104,81 @@ export interface ParallelPassageRow extends SearchResultOut {
 // Raw DB row shapes (internal only)
 // ---------------------------------------------------------------------------
 
-interface SearchRowRaw {
+interface LocationRowRaw {
+  canonical_ref: string | null
+  cell_type: string | null
+  place_label: string | null
+  position: number | string | null
+}
+
+interface SearchRowRaw extends LocationRowRaw {
   cell_id: string
   file_id: string
   side: "source" | "target"
   value: string
   snippet: string
   rank: number
+  paired_value: string | null
+}
+
+/**
+ * Where a hit sits, so Find & Replace can name the verse instead of the
+ * file and cell ids. The source row owns the address: a target hit often
+ * has a null `canonical_ref` of its own. `position` counts visible source
+ * cells in file order so a notes row can be "file name, line N".
+ */
+const LOCATION_SELECT = `
+  COALESCE(loc.source_canonical_ref, NULLIF(BTRIM(cells.canonical_ref), '')) AS canonical_ref,
+  COALESCE(loc.source_type, NULLIF(BTRIM(cells.type), '')) AS cell_type,
+  COALESCE(
+    loc.source_place_label,
+    NULLIF(BTRIM(cells.metadata #>> '{aquillaImport,milestone,label}'), ''),
+    NULLIF(BTRIM(cells.metadata #>> '{cellLabel}'), ''),
+    NULLIF(BTRIM(cells.metadata #>> '{cast_name}'), ''),
+    NULLIF(BTRIM(cells.metadata #>> '{aquillaImport,displayLabel}'), '')
+  ) AS place_label,
+  (
+    SELECT 1 + COUNT(*)::int
+    FROM cells AS earlier
+    WHERE earlier.project_id = cells.project_id
+      AND earlier.file_id = cells.file_id
+      AND earlier.side = 'source'
+      AND earlier.hidden_at IS NULL
+      AND earlier.cell_id <> cells.cell_id
+      AND (COALESCE(earlier.sequence_index, 1e300), earlier.cell_id)
+        < (COALESCE(loc.source_sequence, 1e300), cells.cell_id)
+  ) AS position`
+
+const LOCATION_FROM = `LEFT JOIN LATERAL (
+  SELECT
+    NULLIF(BTRIM(src.canonical_ref), '') AS source_canonical_ref,
+    NULLIF(BTRIM(src.type), '') AS source_type,
+    src.sequence_index AS source_sequence,
+    COALESCE(
+      NULLIF(BTRIM(src.metadata #>> '{aquillaImport,milestone,label}'), ''),
+      NULLIF(BTRIM(src.metadata #>> '{cellLabel}'), ''),
+      NULLIF(BTRIM(src.metadata #>> '{cast_name}'), ''),
+      NULLIF(BTRIM(src.metadata #>> '{aquillaImport,displayLabel}'), '')
+    ) AS source_place_label
+  FROM cells AS src
+  WHERE src.project_id = cells.project_id
+    AND src.file_id = cells.file_id
+    AND src.cell_id = cells.cell_id
+    AND src.side = 'source'
+  LIMIT 1
+) AS loc ON TRUE`
+
+function locationFromRow(row: LocationRowRaw): Pick<
+  SearchResultOut,
+  "canonicalRef" | "cellType" | "placeLabel" | "position"
+> {
+  const position = row.position == null || row.position === "" ? null : Number(row.position)
+  return {
+    canonicalRef: row.canonical_ref?.trim() || null,
+    cellType: row.cell_type?.trim() || null,
+    placeLabel: row.place_label?.trim() || null,
+    position: position != null && Number.isFinite(position) ? position : null,
+  }
 }
 
 interface ExactRowRaw extends SearchRowRaw {
@@ -172,6 +276,8 @@ export function sanitizeFtsAnyTerm(raw: string, maxTerms = 40): string | null {
 
 const DEFAULT_LIMIT = 50
 const MAX_LIMIT = 500
+/** Rows read when a regexp cannot be pushed into Postgres. A Bible is ~31k verses a side. */
+const PATTERN_SCAN_CAP = 80_000
 
 function clampLimit(n: number | undefined): number {
   if (n === undefined) return DEFAULT_LIMIT
@@ -181,6 +287,40 @@ function clampLimit(n: number | undefined): number {
 // ---------------------------------------------------------------------------
 // queryScopedSearch — ranked free-text search
 // ---------------------------------------------------------------------------
+
+/**
+ * Lane read wall for search. `null` = every lane. A walled caller sees source
+ * rows plus target rows in their granted lanes — for the matched row AND for
+ * the opposite-side `paired` value, which would otherwise leak another lane's
+ * translation through a source-side hit.
+ */
+export type SearchLaneWall = readonly string[] | null
+
+function wallFor(alias: string, laneIds: SearchLaneWall): { sql: string; binds: unknown[] } {
+  return (
+    targetVisibilityClause({ laneIds, sideExpr: `${alias}.side`, laneIdExpr: `${alias}.lane_id` }) ?? {
+      sql: "",
+      binds: [],
+    }
+  )
+}
+
+/** Pairing subselect: the opposite-side value, restricted to visible lanes. */
+function pairedSubselect(laneIds: SearchLaneWall): { sql: string; binds: unknown[] } {
+  const w = wallFor("paired", laneIds)
+  return {
+    sql: [
+      "  (SELECT paired.value FROM cells AS paired",
+      "    WHERE paired.project_id = cells.project_id",
+      "      AND paired.file_id = cells.file_id",
+      "      AND paired.cell_id = cells.cell_id",
+      "      AND paired.side = CASE cells.side WHEN 'source' THEN 'target' ELSE 'source' END",
+      `    ${w.sql}`,
+      "    LIMIT 1) AS paired_value,",
+    ].join(" "),
+    binds: w.binds,
+  }
+}
 
 /**
  * Run an FTS5 ranked search over `cells_fts` for the given project. The
@@ -194,12 +334,14 @@ export async function queryScopedSearch(
   db: AquillaDb,
   verifiedProjectId: VerifiedProjectId,
   q: string,
-  opts: { side?: "source" | "target"; limit?: number },
+  opts: { side?: "source" | "target"; limit?: number; laneIds: SearchLaneWall },
 ): Promise<SearchResultOut[]> {
   const ftsQuery = sanitizeFtsQuery(q)
   if (!ftsQuery) return []
 
   const limit = clampLimit(opts.limit)
+  const paired = pairedSubselect(opts.laneIds)
+  const cellWall = wallFor("cells", opts.laneIds)
 
   // FTS5 JOIN: cells_fts.rowid lines up with cells.rowid via the virtual
   // table's external-content binding (migration 0003).
@@ -218,16 +360,37 @@ export async function queryScopedSearch(
     "  cells.side AS side,",
     "  cells.value AS value,",
     "  ts_headline('simple', cells.value, plainto_tsquery('simple', ?), 'StartSel=<mark>,StopSel=</mark>,MaxWords=16,MinWords=1,MaxFragments=1') AS snippet,",
-    "  ts_rank(cells.value_tsv, plainto_tsquery('simple', ?)) AS rank",
+    "  ts_rank(cells.value_tsv, plainto_tsquery('simple', ?)) AS rank,",
+    // One opposite-side value, never a row multiplier. A target hit has a
+    // single source lane; a source hit may have several target lanes, and
+    // LIMIT 1 keeps the hit list one row per matched cell (AQU-1011).
+    paired.sql,
+    LOCATION_SELECT,
     "FROM cells",
+    LOCATION_FROM,
     "WHERE cells.value_tsv @@ plainto_tsquery('simple', ?)",
     "AND cells.project_id = ?",
+    // AQU-1424: a parked cell is not searchable. The anti-join is required
+    // rather than `cells.hidden_at IS NULL` because this query matches EITHER
+    // side and the flag lives only on the shared source row — reading it off the
+    // matched row would let every target-side hit through. It also settles
+    // Find & Replace, whose candidates are these results.
+    `AND ${notHiddenSql("cells")}`,
+    // AQU-1626: and neither is a cell inside a deleted file or a hidden
+    // companion (a cue sheet, a caption track). A cue is timecode text, so
+    // searching a dubbed project returned pages of machine rows above the
+    // script the person was actually looking for.
+    `AND ${inCountedFileSql("cells")}`,
   ]
-  const binds: unknown[] = [q, q, q, verifiedProjectId]
+  const binds: unknown[] = [q, q, ...paired.binds, q, verifiedProjectId]
 
   if (opts.side !== undefined) {
     parts.push("AND cells.side = ?")
     binds.push(opts.side)
+  }
+  if (cellWall.sql) {
+    parts.push(cellWall.sql)
+    binds.push(...cellWall.binds)
   }
   parts.push("ORDER BY rank DESC")
   parts.push("LIMIT ?")
@@ -243,7 +406,134 @@ export async function queryScopedSearch(
     value: row.value,
     snippet: row.snippet,
     rank: row.rank,
+    pairedValue: row.paired_value ?? null,
+    ...locationFromRow(row),
   }))
+}
+
+// ---------------------------------------------------------------------------
+// queryScopedPattern — match case / whole word / regexp
+// ---------------------------------------------------------------------------
+
+export interface PatternSearchOptions extends TextFindOptions {
+  laneIds: SearchLaneWall
+  side?: "source" | "target"
+  limit?: number
+}
+
+/**
+ * Project-scoped search that honors the find-widget flags. The default FTS
+ * path stays in `queryScopedSearch`; this runs only when match case, whole
+ * word, or regexp is on, and the hits are whatever `findTextMatches` accepts
+ * so Replace highlights the same spans the list returned.
+ *
+ * A literal query is a `position()` filter (case via `lower`). A regular
+ * expression Postgres ARE can run is a `~` / `~*` filter. JavaScript-only
+ * constructs (`\b`, lookaround, `\p{}`) are matched in the worker after a
+ * project-scoped read, because sending them to `~` would search for the wrong
+ * thing (`\b` is a backspace in ARE).
+ */
+export async function queryScopedPattern(
+  db: AquillaDb,
+  verifiedProjectId: VerifiedProjectId,
+  q: string,
+  opts: PatternSearchOptions,
+): Promise<SearchResultOut[]> {
+  const find: TextFindOptions = {
+    matchCase: opts.matchCase === true,
+    wholeWord: opts.wholeWord === true,
+    useRegexp: opts.useRegexp === true,
+  }
+  if (findPatternError(q, find)) throw new Error("invalid regexp")
+
+  const limit = clampLimit(opts.limit)
+  const paired = pairedSubselect(opts.laneIds)
+  const cellWall = wallFor("cells", opts.laneIds)
+  const pgRegexp = find.useRegexp === true && postgresCanRunRegexp(q)
+  const fetchLimit = find.useRegexp === true && !pgRegexp
+    ? PATTERN_SCAN_CAP
+    : find.wholeWord || find.useRegexp
+      ? MAX_LIMIT
+      : limit
+
+  const parts: string[] = [
+    "SELECT",
+    "  cells.cell_id AS cell_id,",
+    "  cells.file_id AS file_id,",
+    "  cells.side AS side,",
+    "  cells.value AS value,",
+    paired.sql,
+    LOCATION_SELECT,
+    "FROM cells",
+    LOCATION_FROM,
+    "WHERE cells.project_id = ?",
+    `AND ${notHiddenSql("cells")}`,
+    `AND ${inCountedFileSql("cells")}`,
+  ]
+  const binds: unknown[] = [...paired.binds, verifiedProjectId]
+
+  if (!find.useRegexp) {
+    parts.push(
+      find.matchCase
+        ? "AND position(? in cells.value) > 0"
+        : "AND position(lower(?) in lower(cells.value)) > 0",
+    )
+    binds.push(q)
+  } else if (pgRegexp) {
+    parts.push(find.matchCase ? "AND cells.value ~ ?" : "AND cells.value ~* ?")
+    binds.push(q)
+  }
+
+  if (opts.side !== undefined) {
+    parts.push("AND cells.side = ?")
+    binds.push(opts.side)
+  }
+  if (cellWall.sql) {
+    parts.push(cellWall.sql)
+    binds.push(...cellWall.binds)
+  }
+  parts.push("ORDER BY cells.cell_id, cells.side")
+  parts.push("LIMIT ?")
+  binds.push(fetchLimit)
+
+  let result: { results: PatternRowRaw[] }
+  try {
+    result = await db.prepare(parts.join(" ")).bind(...binds).all<PatternRowRaw>()
+  } catch (err) {
+    // JS accepted the pattern and Postgres did not. Match in the worker
+    // instead of failing the search.
+    const message = err instanceof Error ? err.message : String(err)
+    if (!pgRegexp || !/invalid regular expression/i.test(message)) throw err
+    const scanParts = parts.filter((part) => !part.startsWith("AND cells.value ~"))
+    const scanBinds = binds.filter((_, i) => i !== paired.binds.length + 1)
+    scanBinds[scanBinds.length - 1] = PATTERN_SCAN_CAP
+    result = await db.prepare(scanParts.join(" ")).bind(...scanBinds).all<PatternRowRaw>()
+  }
+  const out: SearchResultOut[] = []
+  for (const row of result.results) {
+    const hits = findTextMatches(row.value, q, find)
+    if (hits.length === 0) continue
+    out.push({
+      cellId: row.cell_id,
+      fileId: row.file_id,
+      side: row.side,
+      value: row.value,
+      snippet: markedSnippet(row.value, hits[0]),
+      rank: hits[0].index,
+      pairedValue: row.paired_value ?? null,
+      ...locationFromRow(row),
+    })
+    if (out.length >= limit) break
+  }
+  return out
+}
+
+interface PatternRowRaw extends LocationRowRaw {
+  cell_id: string
+  file_id: string
+  side: "source" | "target"
+  value: string
+  paired_value: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -265,12 +555,14 @@ export async function queryScopedExact(
   db: AquillaDb,
   verifiedProjectId: VerifiedProjectId,
   exactText: string,
-  opts: { side?: "source" | "target"; limit?: number },
+  opts: { side?: "source" | "target"; limit?: number; laneIds: SearchLaneWall },
 ): Promise<ParallelPassageRow[]> {
   const ftsQuery = sanitizeFtsExactPhrase(exactText)
   if (!ftsQuery) return []
 
   const limit = clampLimit(opts.limit)
+  const pairedWall = wallFor("paired", opts.laneIds)
+  const cellWall = wallFor("cells", opts.laneIds)
 
   // The LEFT JOIN on `paired` fetches the opposite-side cell at the same
   // logical address. CASE flips source↔target so one query covers both
@@ -285,21 +577,35 @@ export async function queryScopedExact(
     "  cells.value AS value,",
     "  ts_headline('simple', cells.value, phraseto_tsquery('simple', ?), 'StartSel=<mark>,StopSel=</mark>,MaxWords=16,MinWords=1,MaxFragments=1') AS snippet,",
     "  ts_rank(cells.value_tsv, phraseto_tsquery('simple', ?)) AS rank,",
-    "  paired.value AS paired_value",
+    "  paired.value AS paired_value,",
+    LOCATION_SELECT,
     "FROM cells",
+    LOCATION_FROM,
     "LEFT JOIN cells AS paired",
     "  ON  paired.project_id = cells.project_id",
     "  AND paired.file_id    = cells.file_id",
     "  AND paired.cell_id    = cells.cell_id",
     "  AND paired.side       = CASE cells.side WHEN 'source' THEN 'target' ELSE 'source' END",
+    pairedWall.sql,
     "WHERE cells.value_tsv @@ phraseto_tsquery('simple', ?)",
     "AND cells.project_id = ?",
+    // AQU-1424: as in queryScoped — parked cells leave the results, and with
+    // them the Find & Replace candidate list built from those results.
+    `AND ${notHiddenSql("cells")}`,
+    // AQU-1626: likewise deleted files and hidden companions. This one matters
+    // twice over: Find & Replace WRITES to what it finds, and a replace into a
+    // cue sheet corrupts a timecode nobody was editing.
+    `AND ${inCountedFileSql("cells")}`,
   ]
-  const binds: unknown[] = [exactText, exactText, exactText, verifiedProjectId]
+  const binds: unknown[] = [exactText, exactText, ...pairedWall.binds, exactText, verifiedProjectId]
 
   if (opts.side !== undefined) {
     parts.push("AND cells.side = ?")
     binds.push(opts.side)
+  }
+  if (cellWall.sql) {
+    parts.push(cellWall.sql)
+    binds.push(...cellWall.binds)
   }
   parts.push("ORDER BY rank DESC")
   parts.push("LIMIT ?")
@@ -316,6 +622,7 @@ export async function queryScopedExact(
     snippet: row.snippet,
     rank: row.rank,
     pairedValue: row.paired_value,
+    ...locationFromRow(row),
   }))
 }
 
@@ -381,6 +688,9 @@ export async function querySourceNeighbors(
     "WHERE c.value_tsv @@ to_tsquery('simple', ?)",
     "AND c.project_id = ?",
     "AND c.side = 'source'",
+    // AQU-1424: a parked cell is neither a neighbor nor a precedent. `c` IS the
+    // source row here, so the flag can be read off it directly.
+    `AND ${visibleSourceSql("c")}`,
   ]
   const binds: unknown[] = [tsq, tsq, verifiedProjectId]
 
@@ -465,7 +775,7 @@ export async function querySimilarSourceCells(
 
   const parts: string[] = [
     "SELECT c.cell_id AS cell_id, c.file_id AS file_id, c.value AS source_value,",
-    "       t.value AS target_value, t.target_lang AS target_lang,",
+    "       t.value AS target_value, " + wireLegacyTagSql("t") + " AS target_lang,",
     "       ts_rank(c.value_tsv, to_tsquery('simple', ?)) AS rank",
     "FROM cells c",
     "JOIN cells t",
@@ -477,6 +787,9 @@ export async function querySimilarSourceCells(
     "WHERE c.value_tsv @@ to_tsquery('simple', ?)",
     "AND c.project_id = ?",
     "AND c.side = 'source'",
+    // AQU-1424: a parked cell is neither a neighbor nor a precedent. `c` IS the
+    // source row here, so the flag can be read off it directly.
+    `AND ${visibleSourceSql("c")}`,
   ]
   const binds: unknown[] = [tsq, tsq, verifiedProjectId]
 
@@ -518,25 +831,6 @@ export async function querySimilarSourceCells(
 const DEFAULT_MAX_ASKERS = 5000
 /** Cap on OR-terms per asker — mirrors the 40-term slice in querySourceNeighbors. */
 const MAX_QUERY_TERMS = 40
-
-/** Hard per-statement ceiling for neighbors retrieval (AQU-1005). The unscoped
- *  predecessor of this query ran for minutes on large projects and saturated
- *  the shared compute (client aborts at 15s don't cancel the server-side
- *  query); the ceiling turns any future regression into a fast, loud error
- *  instead of a silent convoy. */
-const NEIGHBOR_STATEMENT_TIMEOUT_MS = 20_000
-
-/** Run `fn` with a transaction-local statement_timeout when the executor
- *  supports transactions (the Postgres shim and PGlite both do); fall back to
- *  an unbounded plain run otherwise. The interpolated value is a module-local
- *  integer constant, never caller input. */
-async function withNeighborTimeout<T>(db: AquillaDb, fn: (h: AquillaDb) => Promise<T>): Promise<T> {
-  if (!db.transaction) return fn(db)
-  return db.transaction(async (tx) => {
-    await tx.prepare(`SET LOCAL statement_timeout = ${NEIGHBOR_STATEMENT_TIMEOUT_MS}`).run()
-    return fn(tx)
-  })
-}
 
 /**
  * Batched replacement for the per-cell `querySourceNeighbors` N+1 (AQU-641).
@@ -583,6 +877,9 @@ export async function queryFileSourceNeighbors(
     "   AND t.cell_id = s.cell_id AND t.side = 'target'" +
     "   AND " + targetLaneDualReadSql("t") +
     "  WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'" +
+    // AQU-1424: a parked cell does not ASK for neighbors either — nothing will
+    // be drafted into it while it is hidden.
+    "    AND " + visibleSourceSql("s") +
     "    AND t.value <> '' AND t.validated = 0" +
     "  LIMIT ?" +
     ") " +
@@ -602,27 +899,34 @@ export async function queryFileSourceNeighbors(
     "   AND tc.cell_id = c.cell_id AND tc.side = 'target' AND tc.value <> ''" +
     "   AND " + targetLaneDualReadSql("tc") +
     "  WHERE c.project_id = ? AND c.file_id = ? AND c.side = 'source'" +
+    // AQU-1424: and it is not offered AS a neighbor.
+    "    AND " + visibleSourceSql("c") +
     "    AND c.cell_id <> a.asker_id" +
     "    AND c.value_tsv @@ to_tsquery('simple', q.terms)" +
     "  ORDER BY rank DESC" +
     "  LIMIT ?" +
     ") n ON q.terms IS NOT NULL"
 
-  const result = await withNeighborTimeout(db, (h) =>
-    h
-      .prepare(sql)
-      .bind(
-        ...targetLaneDualReadBinds(verifiedProjectId, targetLang),
-        verifiedProjectId,
-        fileId,
-        maxAskers,
-        ...targetLaneDualReadBinds(verifiedProjectId, targetLang),
-        verifiedProjectId,
-        fileId,
-        topK,
-      )
-      .all<{ asker_id: string; cell_id: string; value: string; target_value: string; rank: number }>(),
-  )
+  // Per-statement ceiling (AQU-1005). The unscoped predecessor of this query
+  // ran for minutes on large projects and saturated the shared compute (a
+  // client abort at 15s does not cancel the server-side query); the ceiling
+  // turns any future regression into a fast, loud error instead of a silent
+  // convoy. Since AQU-1876 the value lives in the shim's
+  // LONG_OPERATION_TIMEOUTS registry, which is the one list of operations
+  // allowed to outrun DEFAULT_STATEMENT_TIMEOUT_MS.
+  const result = await withLongOperationTimeout(db, "confidence-neighbors")
+    .prepare(sql)
+    .bind(
+      ...targetLaneDualReadBinds(verifiedProjectId, targetLang),
+      verifiedProjectId,
+      fileId,
+      maxAskers,
+      ...targetLaneDualReadBinds(verifiedProjectId, targetLang),
+      verifiedProjectId,
+      fileId,
+      topK,
+    )
+    .all<{ asker_id: string; cell_id: string; value: string; target_value: string; rank: number }>()
 
   const byAsker = new Map<string, ValidatedNeighbor[]>()
   for (const row of result.results ?? []) {

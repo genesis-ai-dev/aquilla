@@ -4,7 +4,7 @@
  * rows (workspace sidebar, settings NavRows) reuse LIVING_MEMORY_ICON +
  * projectMemoryPath instead of this component so the references stay aligned.
  */
-import { BrainCircuit } from "lucide-react"
+import { BrainCircuit, Target } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
@@ -15,9 +15,16 @@ import { projectMemoryPath } from "@/lib/navigation/org-paths"
 /** The one Living Memory glyph — matches `page-icons.ts` ("Project memory"). */
 export const LIVING_MEMORY_ICON = BrainCircuit
 
+/** The one translation-brief glyph. Lives here, beside the Living Memory
+ *  glyph, because two surfaces now row the brief — the Living Memory index
+ *  (LIVING_MEMORY_SECTIONS) and project settings' AI & completion pane
+ *  (AQU-1672) — and a settings import of LivingMemoryPage for it would drag
+ *  that whole page into the settings bundle. */
+export const BRIEF_ICON = Target
+
 interface LivingMemoryButtonProps {
   projectId: string
-  /** Target section pane (e.g. "instructions", "quality"); omit for the index. */
+  /** Target section pane (e.g. "instructions", "checks"); omit for the index. */
   section?: string
   /** Minimal variant — the label moves into a tooltip + aria-label. */
   iconOnly?: boolean

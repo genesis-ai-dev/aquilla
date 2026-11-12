@@ -9,6 +9,8 @@ interface AssignmentLaneBadgeProps {
   defaultLaneLabel: string
   /** Localized placeholder when no target language is configured. */
   fallbackLabel: string
+  /** Lane row name, when the assignment payload carries one. */
+  laneName?: string | null
   className?: string
 }
 
@@ -17,9 +19,10 @@ export function AssignmentLaneBadge({
   targetLang = "",
   defaultLaneLabel,
   fallbackLabel,
+  laneName,
   className,
 }: AssignmentLaneBadgeProps) {
-  const label = laneChipLabel(targetLang, defaultLaneLabel, fallbackLabel)
+  const label = laneChipLabel(targetLang, defaultLaneLabel, fallbackLabel, laneName)
   return (
     <Badge variant="outline" className={cn("shrink-0", className)}>
       {label}

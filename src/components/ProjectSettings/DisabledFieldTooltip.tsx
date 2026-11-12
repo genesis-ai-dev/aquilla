@@ -1,32 +1,39 @@
 import type { ReactNode } from "react"
 import { ArrowRight, ArrowUpRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
-import { cn } from "@/lib/utils"
+import { LockedControl, useLockPlacement } from "@/components/ui/locked-note"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 /**
- * Compact GitHub-style permission hint: one line naming who can edit, and a
- * next-action control (open the privileged-members modal, or the permission
- * docs). Lives inside DisabledFieldTooltip so the explanation is on the
- * locked control, not a page-level banner.
+ * Who can change a locked setting, and a next step: open the list of those
+ * people, or the permission docs. Drawn inline in a lock line (AQU-2260): atop
+ * a locked section it reads "Only Maintainers can change these settings.",
+ * beneath a single control "Only Maintainers can change this.". `role` is the
+ * role's plural name, already translated.
  */
 export function PermissionLockHint({
+  role,
   title,
   onView,
   href,
   linkLabel,
 }: {
-  title: string
+  role?: string
+  /** A sentence of its own, for a reason that is not a role. */
+  title?: string
   onView?: () => void
   href?: string
   linkLabel: string
 }) {
+  const t = useT()
+  const placement = useLockPlacement()
+  const sentence =
+    title ??
+    (placement === "section"
+      ? t("settings.locked.section", { role: role ?? "" })
+      : t("settings.locked.control", { role: role ?? "" }))
   const actionClassName =
-    "-mx-1.5 h-auto px-1.5 py-0.5 has-data-[icon=inline-end]:pe-1.5"
+    "h-auto px-0 py-0 text-xs font-medium text-foreground/80 underline-offset-2 hover:bg-transparent hover:underline has-data-[icon=inline-end]:pe-0"
   const link = onView ? (
     <Button type="button" variant="ghost" size="xs" className={actionClassName} onClick={onView}>
       {linkLabel}
@@ -46,48 +53,37 @@ export function PermissionLockHint({
   ) : null
 
   return (
-    <div className="flex flex-col items-start gap-1">
-      <p className="font-medium text-popover-foreground">{title}</p>
+    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5">
+      <span>{sentence}</span>
       {link}
-    </div>
+    </span>
   )
 }
 
-// Shows `tooltip` only when the wrapped field is disabled — pass-through
-// otherwise. Wrapping editable inputs in TooltipTrigger broke typing because
-// the trigger's pointer/focus behavior was racing the input's own focus
-// management; rendering the children bare when editable sidesteps that
-// entirely while keeping the disabled-reason hint where it's useful.
+/**
+ * A control that may be locked for you, with why beneath it — one short line,
+ * never a hover (AQU-2260). Editable, it is the control and nothing more.
+ * Inside a section whose top line already says why, it stays quiet. (The name
+ * is from when this was a tooltip; every locked setting still comes through
+ * here.)
+ */
 export function DisabledFieldTooltip({
   disabled,
   tooltip,
   children,
+  align = "end",
+  noteClassName,
 }: {
   disabled: boolean
   tooltip: ReactNode
   children: ReactNode
+  /** Under a control at the right of a settings row by default. */
+  align?: "start" | "end"
+  noteClassName?: string
 }) {
-  if (!disabled || !tooltip) return <>{children}</>
-  const rich = typeof tooltip !== "string"
   return (
-    <Tooltip>
-      <TooltipTrigger
-        delay={200}
-        closeOnClick={false}
-        render={<span className="block" />}
-      >
-        {children}
-      </TooltipTrigger>
-      <TooltipContent
-        side="bottom"
-        align="center"
-        className={cn(
-          rich &&
-            "inline-flex max-w-64 flex-col items-start gap-1 pt-2",
-        )}
-      >
-        {tooltip}
-      </TooltipContent>
-    </Tooltip>
+    <LockedControl locked={disabled} reason={tooltip} align={align} noteClassName={noteClassName}>
+      {children}
+    </LockedControl>
   )
 }

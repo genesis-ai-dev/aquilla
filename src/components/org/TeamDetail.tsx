@@ -5,6 +5,9 @@ import { AlertTriangle, FolderGit2, Settings, ShieldUser, Unlink, UserMinus, Use
 import { AppShell } from "@/components/AppShell"
 import { MemberMultiSelect } from "@/components/MemberMultiSelect"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { TeamLaneChecks } from "./TeamLaneChecks"
+import { TeamRoleSelect } from "./TeamRoleSelect"
+import { useCurrentTargetLanes } from "@/hooks/useCurrentTargetLanes"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
@@ -15,15 +18,24 @@ import {
   DataTableRowActionsButton,
 } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
+import { ScopeBreadcrumb } from "@/components/access/ScopeBreadcrumb"
+import { EffectiveRoleCell } from "@/components/access/EffectiveRoleCell"
+import { GrantOriginBadge } from "@/components/access/GrantOriginBadge"
+import { InheritedRoleControl } from "@/components/access/InheritedRoleControl"
+import { formatScopePath } from "@/lib/access/scope-path"
+import type { GrantOrigin, ScopePath } from "@/lib/access/types"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Field, FieldLabel, FieldSeparator } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import { GrantScopeNotice } from "@/components/GrantScopeNotice"
 import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { Page, EmptyState, NotFoundIcon, TableEmptyState } from "@/components/ui/page"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -36,32 +48,29 @@ import {
   attachProject,
   changeProjectRole,
   detachProject,
+  setTeamMemberRole,
+  setTeamProjectLanes,
   type TeamDetail as TeamDetailType,
 } from "@/lib/frontier/teams"
 import { listOrgMembers, addOrgMember, type OrgMember } from "@/lib/frontier/orgs"
+import type { MemberGrantResult } from "@/lib/frontier/members"
 import {
   fetchAccessibleProjectsResult,
   projectsResultError,
   type CloudProjectSummary,
 } from "@/lib/sync/cloud-projects"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { SearchSelect } from "@/components/ui/search-select"
 import { RoleLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
+import { RoleDialog } from "@/components/access/RoleDialog"
+import { roleChoices } from "@/lib/frontier/role-choices"
 import {
   ALL_ROLE_LEVELS,
-  ALL_ROLE_OPTIONS,
   ROLE,
   humanRoleName,
-  roleDisplayText,
+  resolveRoleName,
   roleHelpText,
-  roleName,
+  type RoleT,
 } from "@/lib/frontier/roles"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
@@ -72,11 +81,12 @@ type TeamTab = "overview" | "projects" | "members"
 type TeamMember = TeamDetailType["members"][number]
 type TeamProject = TeamDetailType["projects"][number]
 
-function roleLabel(roleLevel: number | null | undefined): string {
+/** The role as its chip shows it (AQU-2332): the catalog's name, for the chip's note label. */
+function roleLabel(t: RoleT, roleLevel: number | null | undefined): string {
   if (roleLevel == null) return "Unknown"
   // Fall back to the canonical humanized name — never a raw numeric (FRO-368).
   return ALL_ROLE_LEVELS.includes(roleLevel as (typeof ALL_ROLE_LEVELS)[number])
-    ? roleDisplayText(roleName(roleLevel))
+    ? resolveRoleName(t, roleLevel)
     : humanRoleName(roleLevel)
 }
 
@@ -112,7 +122,7 @@ function CopyEmailButton({ email }: { email: string }) {
 }
 
 export function TeamDetail() {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const { groupId } = useParams<{ groupId: string }>()
   const groupIdNum = groupId != null ? Number(groupId) : null
   const { activeOrgId, activeOrg } = useActiveOrg()
@@ -125,6 +135,11 @@ export function TeamDetail() {
   const isOwner = (activeOrg?.role.level ?? 0) >= 700
 
   const [team, setTeam] = useState<TeamDetailType | null>(null)
+  // AQU-1352 P2: org maintainer+, or a team maintainer on this team, may set
+  // team roles, capped at their own level (server enforces the same gate).
+  const myTeamRole = team?.members.find((m) => m.username === session?.username)?.teamRoleLevel ?? 0
+  const teamRoleCap = Math.max(activeOrg?.role.level ?? 0, myTeamRole)
+  const canEditTeamRoles = teamRoleCap >= 600
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const teamRequestRef = useRef(0)
@@ -146,6 +161,11 @@ export function TeamDetail() {
   const [attachingProject, setAttachingProject] = useState(false)
   const [selectedProjectId, setSelectedProjectId] = useState("")
   const [selectedRole, setSelectedRole] = useState<number>(ROLE.VIEWER)
+  const [attachLaneIds, setAttachLaneIds] = useState<string[]>([])
+  const [attachLaneProject, setAttachLaneProject] = useState("")
+  const { lanes: attachLanes, ready: attachLanesReady } = useCurrentTargetLanes(
+    attachingProject && selectedProjectId ? selectedProjectId : null,
+  )
 
   // Add member UI state — multi-select (AQU-735): stage several org members via
   // MemberMultiSelect (same checkbox combobox as named validators) and grant
@@ -154,16 +174,45 @@ export function TeamDetail() {
   const [stagedUsernames, setStagedUsernames] = useState<string[]>([])
   const [addBusy, setAddBusy] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
+  // AQU-2238: the outside-the-org path. The picker can only ever offer people
+  // already on the org roster, so staffing a team with someone external used to
+  // mean org add → team add → org remove. This free-text username/email goes
+  // straight to the team as a guest, leaving the org roster untouched.
+  const [externalIdentifier, setExternalIdentifier] = useState("")
 
-  // Change-role dialog (owners only) — opened from the row actions menu.
+  // AQU-2289: Change role on a member (their organization role, owners only)
+  // and on an attached project (the team's grant) both open the one
+  // RoleDialog, with the organization's or the project's list of roles.
   const [roleChangeTarget, setRoleChangeTarget] = useState<TeamMember | null>(null)
-  const [roleChangeLevel, setRoleChangeLevel] = useState("")
-  const [roleChangeBusy, setRoleChangeBusy] = useState(false)
-
-  // Change team-grant role on an attached project — opened from the projects row menu.
   const [projectRoleTarget, setProjectRoleTarget] = useState<TeamProject | null>(null)
-  const [projectRoleLevel, setProjectRoleLevel] = useState("")
-  const [projectRoleBusy, setProjectRoleBusy] = useState(false)
+  // The chooser's organization role caps both lists (the server refuses a
+  // team grant above it).
+  const callerOrgLevel = activeOrg?.role.level ?? null
+
+  const [laneEditTarget, setLaneEditTarget] = useState<TeamProject | null>(null)
+  const [laneEditIds, setLaneEditIds] = useState<string[]>([])
+  const [laneEditReadyFor, setLaneEditReadyFor] = useState<string | null>(null)
+  const [laneEditBusy, setLaneEditBusy] = useState(false)
+  const { lanes: editLanes, ready: editLanesReady } = useCurrentTargetLanes(laneEditTarget?.id ?? null)
+
+  useEffect(() => {
+    if (!attachingProject || !attachLanesReady || !selectedProjectId) return
+    if (attachLaneProject === selectedProjectId) return
+    setAttachLaneProject(selectedProjectId)
+    setAttachLaneIds(attachLanes.map((lane) => lane.id))
+  }, [attachingProject, attachLanesReady, selectedProjectId, attachLanes, attachLaneProject])
+
+  useEffect(() => {
+    if (!laneEditTarget || !editLanesReady) return
+    if (laneEditReadyFor === laneEditTarget.id) return
+    setLaneEditReadyFor(laneEditTarget.id)
+    if (laneEditTarget.lanesExplicit) {
+      const allowed = new Set(editLanes.map((lane) => lane.id))
+      setLaneEditIds((laneEditTarget.laneIds ?? []).filter((id) => allowed.has(id)))
+    } else {
+      setLaneEditIds(editLanes.map((lane) => lane.id))
+    }
+  }, [laneEditTarget, editLanesReady, editLanes, laneEditReadyFor])
 
   const refetch = useCallback(async () => {
     const request = ++teamRequestRef.current
@@ -207,7 +256,7 @@ export function TeamDetail() {
         void notifySessionExpiredIfCurrent(jwt)
       }
       setOrgMembers([])
-      setAddError(toUserFacingError(error, "organization members").message)
+      setAddError(toUserFacingError(error, "org").message)
     })
     return () => { cancelled = true }
   }, [isAdmin, jwt, activeOrgId, teamScopeKey])
@@ -245,20 +294,48 @@ export function TeamDetail() {
     [orgProjects, team?.projects],
   )
 
+  // AQU-2238 / AQU-1030: a guest's reach is exactly this team's attached
+  // projects — nothing org-wide, and no org-roster entry. An unattached team
+  // grants nothing yet, and saying so beats an invite that looks like it worked
+  // and shows the person an empty workspace.
+  const externalGrantSentence = useMemo(() => {
+    const names = (team?.projects ?? []).map((project) => project.name)
+    return names.length === 0
+      ? t("org.teamDetail.outsideOrgScopeNoProjects")
+      : t("org.teamDetail.outsideOrgScopeWithProjects", {
+          projects: new Intl.ListFormat(locale, { type: "conjunction", style: "long" }).format(names),
+        })
+  }, [team?.projects, t, locale])
+
   function closeAddMember() {
     setAddingMember(false)
     setStagedUsernames([])
+    setExternalIdentifier("")
     setAddError(null)
   }
 
   async function handleAddMembers() {
-    if (!jwt || activeOrgId == null || groupIdNum == null || stagedUsernames.length === 0) return
+    if (!jwt || activeOrgId == null || groupIdNum == null) return
+    const external = externalIdentifier.trim()
+    if (stagedUsernames.length === 0 && !external) return
     setAddBusy(true)
     setAddError(null)
     try {
-      // ONE batch request — the endpoint is non-atomic and returns per-person
-      // results in request order, so one rejected person never sinks the rest.
-      const results = await addTeamMembers(jwt, activeOrgId, groupIdNum, stagedUsernames)
+      // ONE batch request per path — the endpoint is non-atomic and returns
+      // per-person results in request order, so one rejected person never
+      // sinks the rest. The outside-the-org invite is its own request because
+      // `external` waives the org-roster requirement for the WHOLE request
+      // (AQU-2238), and the picker path must keep failing closed: someone who
+      // silently lost their org membership should still be rejected there.
+      const results: MemberGrantResult[] = []
+      if (stagedUsernames.length > 0) {
+        results.push(...(await addTeamMembers(jwt, activeOrgId, groupIdNum, stagedUsernames)))
+      }
+      if (external) {
+        results.push(
+          ...(await addTeamMembers(jwt, activeOrgId, groupIdNum, [external], { external: true })),
+        )
+      }
       await refetch()
       const failures = results.filter((r) => !r.ok)
       if (failures.length === 0) {
@@ -266,11 +343,15 @@ export function TeamDetail() {
         return
       }
       // Keep only the people who failed staged for a retry; drop the successes.
-      // Name each failure with its reason — no silent all-or-nothing.
-      setStagedUsernames(failures.map((f) => f.username))
+      // Name each failure with its reason — no silent all-or-nothing. The
+      // external identifier is kept in its own field, never folded into the
+      // org-member picker (it is not an org member — that is the point).
+      const failed = new Set(failures.map((f) => f.username))
+      setStagedUsernames(stagedUsernames.filter((username) => failed.has(username)))
+      setExternalIdentifier(external && failed.has(external) ? external : "")
       setAddError(
         failures
-          .map((f) => `${f.username} (${f.error?.message ?? "couldn't be added"})`)
+          .map((f) => `${f.username} (${f.error?.message ?? t("org.teamDetail.couldntBeAddedFallback")})`)
           .join(", "),
       )
     } catch (err) {
@@ -290,6 +371,8 @@ export function TeamDetail() {
     setAttachingProject(false)
     setSelectedProjectId("")
     setSelectedRole(ROLE.VIEWER)
+    setAttachLaneIds([])
+    setAttachLaneProject("")
   }
 
   function openAttachProject() {
@@ -300,7 +383,9 @@ export function TeamDetail() {
 
   async function handleAttachProject() {
     if (!jwt || activeOrgId == null || groupIdNum == null || !selectedProjectId) return
-    await attachProject(jwt, activeOrgId, groupIdNum, selectedProjectId, selectedRole)
+    if (attachLanes.length > 0 && attachLaneIds.length === 0) return
+    const laneIds = attachLanes.length > 0 ? attachLaneIds : undefined
+    await attachProject(jwt, activeOrgId, groupIdNum, selectedProjectId, selectedRole, laneIds)
     closeAttachProject()
     await refetch()
   }
@@ -317,47 +402,40 @@ export function TeamDetail() {
     await refetch()
   }, [jwt, activeOrgId, refetch])
 
-  function openRoleChange(member: TeamMember) {
-    setRoleChangeTarget(member)
-    setRoleChangeLevel(member.roleLevel != null ? String(member.roleLevel) : String(ROLE.VIEWER))
+  /**
+   * AQU-2289: who has an organization Change role here — the same rule as the
+   * org member list. Owners only; never for an organization Owner, whose role
+   * is locked once granted (AQU-952); and never for someone outside the org
+   * (AQU-2238): an organization role is saved by adding them to the org, which
+   * would quietly undo their team-only invite.
+   */
+  function canChangeOrgRole(member: TeamMember): boolean {
+    return isOwner && member.roleLevel != null && member.roleLevel !== ROLE.OWNER
   }
 
-  function closeRoleChange() {
-    setRoleChangeTarget(null)
-    setRoleChangeLevel("")
-    setRoleChangeBusy(false)
+  function openLaneEdit(project: TeamProject) {
+    setLaneEditTarget(project)
+    setLaneEditReadyFor(null)
+    setLaneEditIds([])
   }
 
-  async function confirmRoleChange() {
-    if (!roleChangeTarget || !roleChangeLevel) return
-    setRoleChangeBusy(true)
+  function closeLaneEdit() {
+    setLaneEditTarget(null)
+    setLaneEditIds([])
+    setLaneEditReadyFor(null)
+    setLaneEditBusy(false)
+  }
+
+  async function confirmLaneEdit() {
+    if (!jwt || activeOrgId == null || groupIdNum == null || !laneEditTarget) return
+    if (editLanes.length > 0 && laneEditIds.length === 0) return
+    setLaneEditBusy(true)
     try {
-      await handleChangeMemberRole(roleChangeTarget.username, Number(roleChangeLevel))
-      closeRoleChange()
+      await setTeamProjectLanes(jwt, activeOrgId, groupIdNum, laneEditTarget.id, laneEditIds)
+      closeLaneEdit()
+      await refetch()
     } finally {
-      setRoleChangeBusy(false)
-    }
-  }
-
-  function openProjectRoleChange(project: TeamProject) {
-    setProjectRoleTarget(project)
-    setProjectRoleLevel(String(project.grantedRoleLevel))
-  }
-
-  function closeProjectRoleChange() {
-    setProjectRoleTarget(null)
-    setProjectRoleLevel("")
-    setProjectRoleBusy(false)
-  }
-
-  async function confirmProjectRoleChange() {
-    if (!projectRoleTarget || !projectRoleLevel) return
-    setProjectRoleBusy(true)
-    try {
-      await handleChangeProjectRole(projectRoleTarget.id, Number(projectRoleLevel))
-      closeProjectRoleChange()
-    } finally {
-      setProjectRoleBusy(false)
+      setLaneEditBusy(false)
     }
   }
 
@@ -432,7 +510,7 @@ export function TeamDetail() {
         header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.name")} />,
         meta: { className: "min-w-0" },
         cell: ({ row }) => (
-          <UsernameWithAvatar username={row.original.username} size="xs" nameClassName="font-normal" />
+          <UsernameWithAvatar userId={row.original.userId} username={row.original.username} size="xs" nameClassName="font-normal" />
         ),
       },
       {
@@ -456,26 +534,104 @@ export function TeamDetail() {
         meta: { className: "w-[7.5rem] whitespace-nowrap" },
         cell: ({ row }) => {
           const m = row.original
+          // AQU-2238: no org_members row is the normal state for a guest added
+          // straight to this team, so name it instead of reporting "Unknown".
+          // Its note opens on a click of the label (AQU-2260: never a hover).
           if (m.roleLevel == null) {
-            return <span className="text-sm text-muted-foreground">{t("autopilot.evidence.status.unknown")}</span>
+            return (
+              <NoteOnClick
+                note={t("org.teamDetail.outsideOrgRoleTooltip")}
+                className="text-sm text-muted-foreground"
+              >
+                {t("org.teamDetail.outsideOrgRole")}
+              </NoteOnClick>
+            )
           }
 
           const label = <RoleLabel name={m.roleLevel} />
 
           // Owners change roles via the actions menu dialog — badge is display-only.
-          // Non-owners get a tooltip explaining the org-level lock.
+          // Non-owners get a note explaining the org-level lock, opened by a
+          // click on the role (AQU-2260: never a hover).
           if (isOwner) return label
 
           return (
-            <AppTooltip content={lockedOrgRoleTooltip(m.roleLevel)} className="max-w-xs">
-              <span
-                tabIndex={0}
-                className="inline-flex cursor-help"
-                aria-label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(m.roleLevel) })}
-              >
-                {label}
-              </span>
-            </AppTooltip>
+            <NoteOnClick
+              note={lockedOrgRoleTooltip(m.roleLevel)}
+              label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(t, m.roleLevel) })}
+            >
+              {label}
+            </NoteOnClick>
+          )
+        },
+      },
+      {
+        id: "teamRole",
+        accessorFn: (m) => m.teamRoleLevel ?? 0,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.teamDetail.teamRoleColumn")} />,
+        meta: { className: "w-[16rem] whitespace-nowrap" },
+        cell: ({ row }) => {
+          const m = row.original
+          const current = m.teamRoleLevel ?? null
+          const canEditRow = canEditTeamRoles && (current ?? 0) <= teamRoleCap
+          // AQU-1352 §3.7 rule 1: a NULL team role inherits the org role; a set
+          // one is a direct grant at this team. The effective role is the higher.
+          // AQU-2238: a guest has no org role to inherit, so never offer the
+          // org as the source of their team role — the team's project grants
+          // are the whole of their access.
+          const orgRef = activeOrgId != null && activeOrg?.name && m.roleLevel != null
+            ? { type: "org" as const, id: String(activeOrgId), name: activeOrg.name }
+            : null
+          const origin: GrantOrigin = current == null
+            ? { kind: "inherited", from: orgRef ? [orgRef] : undefined }
+            : { kind: "direct" }
+          const orgLevel = m.roleLevel ?? null
+          const effective = current == null ? orgLevel : Math.max(current, orgLevel ?? 0)
+          const effectiveOrigin: GrantOrigin = current != null && current >= (orgLevel ?? 0)
+            ? { kind: "direct" }
+            : { kind: "inherited", from: orgRef ? [orgRef] : undefined }
+          const select = (
+            <TeamRoleSelect
+              username={m.username}
+              value={current}
+              canEdit={canEditRow}
+              maxLevel={teamRoleCap}
+              onChange={async (level) => {
+                if (!jwt || activeOrgId == null || groupIdNum == null) return
+                try {
+                  await setTeamMemberRole(jwt, activeOrgId, groupIdNum, m.userId, level)
+                  await refetch()
+                } catch (error) {
+                  toast.add({
+                    type: "error",
+                    title: t("org.teamDetail.teamRoleUpdateFailed"),
+                    description: toUserFacingError(error, "team").message,
+                  })
+                }
+              }}
+            />
+          )
+          return (
+            <span className="inline-flex items-center gap-2">
+              <GrantOriginBadge origin={origin} />
+              {/* Editors keep the select: choosing a team role is how a direct
+                  team grant is created. Read-only viewers get "Set at <org>". */}
+              {canEditRow ? select : (
+                <InheritedRoleControl origin={origin} hrefFor={(scope) => (scope.type === "org" ? `/orgs/${scope.id}/members` : undefined)}>
+                  {select}
+                </InheritedRoleControl>
+              )}
+              {/* Only when the org role outranks the team role; otherwise the
+                  Role column / select already say it. */}
+              {current != null && effective !== current && (
+                <EffectiveRoleCell
+                  className="text-xs text-muted-foreground"
+                  directRoleLevel={current}
+                  effectiveRoleLevel={effective}
+                  effectiveOrigin={effectiveOrigin}
+                />
+              )}
+            </span>
           )
         },
       },
@@ -511,10 +667,20 @@ export function TeamDetail() {
         ),
       },
     ],
-    [isOwner, t],
+    [isOwner, t, canEditTeamRoles, teamRoleCap, jwt, activeOrgId, activeOrg?.name, groupIdNum, refetch],
   )
 
   const teamDescription = team?.description?.trim() || null
+  // AQU-2140: the team page is the overview. The control links there (the same
+  // path row-click and create already use) and reveals members plus projects.
+  const teamOverviewHref =
+    activeOrgId != null && groupIdNum != null
+      ? orgPath(activeOrgId, `/teams/${groupIdNum}`)
+      : null
+  const teamScopePath: ScopePath = [
+    ...(activeOrgId != null && activeOrg?.name ? [{ type: "org" as const, id: String(activeOrgId), name: activeOrg.name }] : []),
+    ...(team ? [{ type: "team" as const, id: String(team.id), name: team.name }] : []),
+  ]
 
   return (
     <AppShell
@@ -551,93 +717,76 @@ export function TeamDetail() {
               />
             ) : (
             <>
-              {isOwner && (
-                <Dialog
-                  open={roleChangeTarget !== null}
-                  onOpenChange={(open) => { if (!open) closeRoleChange() }}
-                >
-                  <DialogContent className="max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>
-                        {roleChangeTarget
-                          ? t("org.teamDetail.changeRoleTitleFor", { name: roleChangeTarget.username })
-                          : t("org.membersPage.changeRoleAria")}
-                      </DialogTitle>
-                      <DialogDescription>
-                        {t("org.membersPage.orgTable.changeRoleDescription")}
-                      </DialogDescription>
-                    </DialogHeader>
-                    <RoleSelect
-                      options={ALL_ROLE_OPTIONS}
-                      value={roleChangeLevel ? Number(roleChangeLevel) : null}
-                      onValueChange={(level) => setRoleChangeLevel(String(level))}
-                      className="w-full!"
-                      aria-label={
-                        roleChangeTarget
-                          ? `Role for ${roleChangeTarget.username}`
-                          : "New role"
-                      }
-                    />
-                    <DialogFooter>
-                      <Button type="button" variant="outline" onClick={closeRoleChange} disabled={roleChangeBusy}>
-                        {t("common.cancel")}
-                      </Button>
-                      <Button
-                        type="button"
-                        onClick={() => void confirmRoleChange()}
-                        disabled={!roleChangeLevel || roleChangeBusy}
-                      >
-                        {roleChangeBusy && <Spinner data-icon="inline-start" />}
-                        {roleChangeBusy ? "Saving…" : "Save"}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              )}
+              <RoleDialog
+                open={roleChangeTarget !== null}
+                onOpenChange={(open) => { if (!open) setRoleChangeTarget(null) }}
+                mode="change"
+                level="org"
+                callerLevel={callerOrgLevel}
+                name={roleChangeTarget?.username ?? ""}
+                currentLevel={roleChangeTarget?.roleLevel ?? null}
+                summary={t("org.roleDialog.orgChangeSummary")}
+                details={t("org.roleDialog.orgRoleDetails")}
+                onSave={async (level) => {
+                  if (roleChangeTarget) await handleChangeMemberRole(roleChangeTarget.username, level)
+                }}
+                errorMessage={(e) => {
+                  const uf = toUserFacingError(e, "org")
+                  return uf.category === "forbidden" ? t("org.roleDialog.orgChangeForbidden") : uf.message
+                }}
+              />
+
+              <RoleDialog
+                open={projectRoleTarget !== null}
+                onOpenChange={(open) => { if (!open) setProjectRoleTarget(null) }}
+                mode="change"
+                level="project"
+                callerLevel={callerOrgLevel}
+                name={projectRoleTarget?.name ?? ""}
+                currentLevel={projectRoleTarget?.grantedRoleLevel ?? null}
+                summary={t("org.teamDetail.projectRoleDialogDescription")}
+                onSave={async (level) => {
+                  if (projectRoleTarget) await handleChangeProjectRole(projectRoleTarget.id, level)
+                }}
+              />
 
               {isAdmin && (
                 <Dialog
-                  open={projectRoleTarget !== null}
-                  onOpenChange={(open) => { if (!open) closeProjectRoleChange() }}
+                  open={laneEditTarget !== null}
+                  onOpenChange={(open) => { if (!open) closeLaneEdit() }}
                 >
                   <DialogContent className="max-w-md">
                     <DialogHeader>
-                      <DialogTitle>
-                        {projectRoleTarget
-                          ? t("org.teamDetail.changeRoleTitleFor", { name: projectRoleTarget.name })
-                          : t("org.membersPage.changeRoleAria")}
-                      </DialogTitle>
+                      <DialogTitle>{t("projectSettings.share.laneChoiceLegend")}</DialogTitle>
                       <DialogDescription>
-                        {t("org.teamDetail.projectRoleDialogDescription")}
+                        {laneEditTarget?.name}
                       </DialogDescription>
                     </DialogHeader>
-                    <RoleSelect
-                      options={ALL_ROLE_OPTIONS}
-                      value={projectRoleLevel ? Number(projectRoleLevel) : null}
-                      onValueChange={(level) => setProjectRoleLevel(String(level))}
-                      className="w-full!"
-                      aria-label={
-                        projectRoleTarget
-                          ? `Role for ${projectRoleTarget.name}`
-                          : "Granted role"
-                      }
-                    />
+                    {editLanesReady && editLanes.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">{t("projectSettings.languages.noAdditionalLanes")}</p>
+                    ) : (
+                      <TeamLaneChecks
+                        lanes={editLanes}
+                        selected={laneEditIds}
+                        onChange={setLaneEditIds}
+                        disabled={laneEditBusy}
+                      />
+                    )}
                     <DialogFooter>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={closeProjectRoleChange}
-                        disabled={projectRoleBusy}
-                      >
+                      <Button type="button" variant="outline" onClick={closeLaneEdit} disabled={laneEditBusy}>
                         {t("common.cancel")}
                       </Button>
                       <Button
                         type="button"
-                        onClick={() => void confirmProjectRoleChange()}
-                        disabled={!projectRoleLevel || projectRoleBusy}
+                        onClick={() => void confirmLaneEdit()}
+                        disabled={
+                          laneEditBusy ||
+                          !editLanesReady ||
+                          (editLanes.length > 0 && laneEditIds.length === 0)
+                        }
                       >
-                        {projectRoleBusy && <Spinner data-icon="inline-start" />}
-                        {projectRoleBusy ? "Saving…" : "Save"}
+                        {laneEditBusy && <Spinner data-icon="inline-start" />}
+                        {laneEditBusy ? t("common.saving") : t("common.save")}
                       </Button>
                     </DialogFooter>
                   </DialogContent>
@@ -665,8 +814,9 @@ export function TeamDetail() {
                   )}
                 >
                   <div className={cn("min-w-0", teamDescription && "space-y-1")}>
+                    {/* AQU-1352 §3.9 rule 1: the scope breadcrumb (org › team) is the title. */}
                     <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">
-                      {team.name}
+                      <ScopeBreadcrumb path={teamScopePath} />
                     </h1>
                     {teamDescription ? (
                       <p className="max-w-prose text-sm text-muted-foreground whitespace-pre-wrap">
@@ -694,14 +844,24 @@ export function TeamDetail() {
                 <TabsList aria-label={t("org.teamDetail.sectionsAriaLabel")}>
                   <TabsTrigger value="projects">{t("nav.projects")}</TabsTrigger>
                   <TabsTrigger value="members">{t("editor.navTitle.members")}</TabsTrigger>
-                  <TabsTrigger value="overview" disabled>
-                    {t("editor.navTitle.overview")}
-                  </TabsTrigger>
+                  {teamOverviewHref ? (
+                    <Link
+                      to={teamOverviewHref}
+                      onClick={() => setTab("overview")}
+                      className={cn(
+                        "inline-flex items-center justify-center rounded-md px-2 py-1 text-sm font-medium whitespace-nowrap",
+                        tab === "overview"
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-foreground/60 hover:text-foreground",
+                      )}
+                    >
+                      {t("editor.navTitle.overview")}
+                    </Link>
+                  ) : null}
                 </TabsList>
 
-                <TabsContent value="overview" />
-
-                <TabsContent value="projects" className="space-y-4">
+                <div className="flex flex-col gap-8">
+                <div className="space-y-4" hidden={tab !== "projects" && tab !== "overview"}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <h2 className="font-heading text-base font-medium text-foreground">{t("nav.projects")}</h2>
@@ -726,28 +886,26 @@ export function TeamDetail() {
                           </DialogDescription>
                         </DialogHeader>
                         <div className="flex w-full flex-col gap-3">
-                          <Select
-                            items={attachableProjects.map((op) => ({ value: op.id, label: op.name }))}
+{/* AQU-2260: every project in the org, so a search box. */}
+                          <SearchSelect
+                            aria-label={t("org.teamDetail.projectToAttachAriaLabel")}
+                            className="w-full"
+                            options={attachableProjects.map((op) => ({ value: op.id, label: op.name }))}
                             value={selectedProjectId}
-                            onValueChange={(v) => setSelectedProjectId(v ?? "")}
-                          >
-                            <SelectTrigger aria-label={t("org.teamDetail.projectToAttachAriaLabel")} className="w-full">
-                              <SelectValue placeholder={t("org.teamDetail.selectProjectPlaceholder")} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectGroup>
-                                {attachableProjects.map((op) => (
-                                  <SelectItem key={op.id} value={op.id}>{op.name}</SelectItem>
-                                ))}
-                              </SelectGroup>
-                            </SelectContent>
-                          </Select>
+                            onValueChange={setSelectedProjectId}
+                            placeholder={t("org.teamDetail.selectProjectPlaceholder")}
+                          />
                           <RoleSelect
-                            options={ALL_ROLE_OPTIONS}
+                            options={roleChoices("project", { callerLevel: callerOrgLevel })}
                             value={selectedRole}
                             onValueChange={setSelectedRole}
                             aria-label={t("org.teamDetail.grantedRoleAriaLabel")}
                             className="w-full"
+                          />
+                          <TeamLaneChecks
+                            lanes={attachLanes}
+                            selected={attachLaneIds}
+                            onChange={setAttachLaneIds}
                           />
                           {attachableProjects.length === 0 && (
                             <p className="text-xs text-muted-foreground">
@@ -762,7 +920,11 @@ export function TeamDetail() {
                           <Button
                             type="button"
                             onClick={handleAttachProject}
-                            disabled={!selectedProjectId}
+                            disabled={
+                              !selectedProjectId ||
+                              !attachLanesReady ||
+                              (attachLanes.length > 0 && attachLaneIds.length === 0)
+                            }
                           >
                             {t("editor.media.attach")}
                           </Button>
@@ -799,9 +961,12 @@ export function TeamDetail() {
                       renderRowMenuItems={(p) =>
                         isAdmin ? (
                           <>
-                            <MenuItem onClick={() => openProjectRoleChange(p)}>
+                            <MenuItem onClick={() => setProjectRoleTarget(p)}>
                               <ShieldUser className="size-4" />
                               {t("org.membersPage.changeRoleAria")}
+                            </MenuItem>
+                            <MenuItem onClick={() => openLaneEdit(p)}>
+                              {t("projectSettings.share.laneChoiceLegend")}
                             </MenuItem>
                             <MenuSeparator />
                             <MenuItem
@@ -831,9 +996,9 @@ export function TeamDetail() {
                       className={ADMIN_TABLE_PANEL_CLASS}
                       dense
                     />
-                </TabsContent>
+                </div>
 
-                <TabsContent value="members" className="space-y-4">
+                <div className="space-y-4" hidden={tab !== "members" && tab !== "overview"}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <h2 className="font-heading text-base font-medium text-foreground">
@@ -846,58 +1011,96 @@ export function TeamDetail() {
                   </div>
 
                   {isAdmin && (
-                    <Dialog open={addingMember} onOpenChange={(o) => { if (!o) closeAddMember() }}>
-                      <DialogContent className="max-w-md gap-4">
-                        <DialogHeader>
-                          <DialogTitle>
-                            {t("org.teamDetail.addMembersDialogTitle", { name: team.name })}
-                          </DialogTitle>
-                        </DialogHeader>
-                        <div className="flex w-full flex-col gap-2">
-                          <div className="w-full">
-                            <MemberMultiSelect
-                              id="team-add-members"
-                              aria-label={t("org.teamDetail.membersToAddAriaLabel")}
-                              className="w-full!"
-                              members={availableOrgMembers.map((m) => m.username)}
-                              value={stagedUsernames}
-                              disabled={availableOrgMembers.length === 0}
-                              placeholder={t("org.teamDetail.selectMembersPlaceholder")}
-                              searchPlaceholder="Search members…"
-                              searchLabel="Search members"
-                              emptyMessage={t("org.teamDetail.noMembersMatch")}
-                              onValueChange={(next) => {
-                                setAddError(null)
-                                setStagedUsernames(next)
-                              }}
-                            />
+                    // AQU-2289: the one RoleDialog. A team has no role to pick
+                    // here: new members take the team's project grants, and
+                    // their team role is set afterwards in the Team role
+                    // column (the team's own three roles).
+                    <RoleDialog
+                      open={addingMember}
+                      onOpenChange={(o) => { if (!o) closeAddMember() }}
+                      mode="add"
+                      level="team"
+                      callerLevel={callerOrgLevel}
+                      title={t("org.access.addPeopleTo", { path: formatScopePath(teamScopePath) })}
+                      summary={t("org.roleDialog.teamAddSummary")}
+                      people={{
+                        kind: "custom",
+                        body: (
+                          <div className="flex w-full flex-col gap-2">
+                            <div className="w-full">
+                              <MemberMultiSelect
+                                id="team-add-members"
+                                aria-label={t("org.teamDetail.membersToAddAriaLabel")}
+                                className="w-full!"
+                                members={availableOrgMembers.map((m) => m.username)}
+                                value={stagedUsernames}
+                                disabled={availableOrgMembers.length === 0}
+                                placeholder={t("org.teamDetail.selectMembersPlaceholder")}
+                                searchPlaceholder={t("org.teamDetail.searchMembersPlaceholder")}
+                                searchLabel={t("org.roleDialog.searchMembersLabel")}
+                                emptyMessage={t("org.teamDetail.noMembersMatch")}
+                                onValueChange={(next) => {
+                                  setAddError(null)
+                                  setStagedUsernames(next)
+                                }}
+                              />
+                            </div>
+                            {availableOrgMembers.length === 0 && stagedUsernames.length === 0 && (
+                              <p className="text-xs text-muted-foreground">
+                                {t("org.teamDetail.allMembersAddedNotice")}
+                              </p>
+                            )}
+                            {/* AQU-2238: the picker lists org members only, so an
+                                outside person is unreachable through it. This is
+                                the direct invite-to-team path — a team-scoped
+                                guest grant, no org-roster entry. AQU-1030: the
+                                scope sentence names exactly what they will and
+                                won't see. */}
+                            <FieldSeparator />
+                            <Field>
+                              <FieldLabel htmlFor="team-add-external">
+                                {t("org.teamDetail.outsideOrgLabel")}
+                              </FieldLabel>
+                              <Input
+                                id="team-add-external"
+                                autoComplete="off"
+                                value={externalIdentifier}
+                                placeholder={t("org.teamDetail.outsideOrgPlaceholder")}
+                                className="h-9"
+                                onChange={(e) => {
+                                  setAddError(null)
+                                  setExternalIdentifier(e.target.value)
+                                }}
+                              />
+                            </Field>
+                            <GrantScopeNotice sentence={externalGrantSentence} />
+                            {addError && (
+                              <p role="alert" className="text-xs text-destructive">
+                                {t("org.teamDetail.addErrorPrefix", { error: addError })}
+                              </p>
+                            )}
                           </div>
-                          {availableOrgMembers.length === 0 && stagedUsernames.length === 0 && (
-                            <p className="text-xs text-muted-foreground">
-                              {t("org.teamDetail.allMembersAddedNotice")}
-                            </p>
-                          )}
-                          {addError && (
-                            <p role="alert" className="text-xs text-destructive">
-                              {t("org.teamDetail.addErrorPrefix", { error: addError })}
-                            </p>
-                          )}
-                        </div>
-                        <DialogFooter className="mt-0">
-                          <Button type="button" variant="outline" onClick={closeAddMember}>
-                            {t("common.cancel")}
-                          </Button>
-                          <Button
-                            type="button"
-                            onClick={handleAddMembers}
-                            disabled={stagedUsernames.length === 0 || addBusy}
-                          >
-                            {addBusy && <Spinner data-icon="inline-start" />}
-                            {addBusy ? "Adding…" : "Add"}
-                          </Button>
-                        </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
+                        ),
+                        footer: (
+                          <DialogFooter className="mt-0">
+                            <Button type="button" variant="outline" onClick={closeAddMember}>
+                              {t("common.cancel")}
+                            </Button>
+                            <Button
+                              type="button"
+                              onClick={handleAddMembers}
+                              disabled={
+                                (stagedUsernames.length === 0 && externalIdentifier.trim().length === 0) ||
+                                addBusy
+                              }
+                            >
+                              {addBusy && <Spinner data-icon="inline-start" />}
+                              {addBusy ? t("common.adding") : t("common.add")}
+                            </Button>
+                          </DialogFooter>
+                        ),
+                      }}
+                    />
                   )}
 
                   <DataTable
@@ -928,9 +1131,9 @@ export function TeamDetail() {
                       rowClassName="group"
                       renderRowMenuItems={(m) => (
                         <>
-                          {isOwner && (
+                          {canChangeOrgRole(m) && (
                             <>
-                              <MenuItem onClick={() => openRoleChange(m)}>
+                              <MenuItem onClick={() => setRoleChangeTarget(m)}>
                                 <ShieldUser className="size-4" />
                                 {t("org.membersPage.changeRoleAria")}
                               </MenuItem>
@@ -939,6 +1142,8 @@ export function TeamDetail() {
                           )}
                           <DisabledFieldTooltip
                             disabled={!isAdmin}
+                            align="start"
+                            noteClassName="px-2 pb-1.5"
                             tooltip={REMOVE_REQUIRES_MAINTAINER_TOOLTIP}
                           >
                             <MenuItem
@@ -975,7 +1180,8 @@ export function TeamDetail() {
                       className={ADMIN_TABLE_PANEL_CLASS}
                       dense
                     />
-                </TabsContent>
+                </div>
+                </div>
               </Tabs>
               </div>
             </>

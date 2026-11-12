@@ -44,19 +44,20 @@ import {
 import { EmptyState } from "@/components/ui/empty"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Section, SettingsGroup, SettingsRow } from "@/components/ui/page"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Section } from "@/components/ui/page"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { Spinner } from "@/components/ui/spinner"
-import { Switch } from "@/components/ui/switch"
 import { toast } from "@/components/ui/toast"
 import { DateTooltip } from "@/components/ui/date-tooltip"
-import { formatNumber } from "@/lib/i18n/format"
-import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { formatDateTime, formatNumber } from "@/lib/i18n/format"
+import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import {
   deleteKnowledgeDocument,
   getKnowledgeDocument,
   getKnowledgeDocumentContent,
   getKnowledgeDocumentOriginal,
+  isKnowledgeIndexStalled,
+  KnowledgeBaseApiError,
   listKnowledgeDocuments,
   reindexKnowledgeDocument,
   uploadKnowledgeDocument,
@@ -69,11 +70,6 @@ interface KnowledgeBaseSurfaceProps {
   jwt: string | null
   canManage: boolean
   showTitle?: boolean
-  drafting?: {
-    checked: boolean
-    disabled: boolean
-    onCheckedChange: (checked: boolean) => Promise<void> | void
-  }
 }
 
 interface ViewerState {
@@ -89,18 +85,71 @@ function formatBytes(bytes: number, locale: string): string {
   return `${formatNumber(bytes / (1024 * 1024), locale, { maximumFractionDigits: 1 })} MB`
 }
 
-function statusVariant(status: KnowledgeDocument["indexStatus"]) {
-  if (status === "failed") return "destructive" as const
-  if (status === "pending") return "outline" as const
-  return "secondary" as const
+/** A stalled doc reads as a failure, because that is what it is — the job that
+ *  owned it is gone (AQU-1376). A doc indexed without its summaries is not a
+ *  failure and must not read as one (AQU-2002) — it is searchable and
+ *  navigable — but it isn't the clean "Indexed" either, so it gets the neutral
+ *  outline and the reason underneath. */
+function statusVariant(doc: KnowledgeDocument, stalled: boolean) {
+  if (doc.indexStatus === "failed" || stalled) return "destructive" as const
+  if (doc.indexStatus === "pending") return "outline" as const
+  return doc.indexError ? "outline" as const : "secondary" as const
 }
+
+/** Which status message a row shows. `indexError` on a `ready` doc means the
+ *  structure landed without summaries (AQU-2002). */
+function statusKey(doc: KnowledgeDocument, stalled: boolean) {
+  if (stalled) return "knowledgeBase.status.stalled" as const
+  if (doc.indexStatus === "ready" && doc.indexError) return "knowledgeBase.status.partial" as const
+  return `knowledgeBase.status.${doc.indexStatus}` as const
+}
+
+/** What the last indexing run has to say about itself beyond its badge and its
+ *  reason: when it was heard from, and — once something is indexed — how much
+ *  (AQU-1766).
+ *
+ *  `updatedAt` is the row's own clock: the moment the run wrote its outcome, or
+ *  for a `pending` row the moment it was queued. A date the uploader can read
+ *  is what makes a failure correlatable with whatever they changed, and a
+ *  section count is what tells "Indexed" over 40 sections apart from "Indexed"
+ *  over nothing.
+ *
+ *  Returns null while a doc is genuinely mid-run (nothing to date yet, nothing
+ *  indexed yet) and when the timestamp is unreadable — a server contract break
+ *  must not render "Invalid Date" at someone. */
+function indexRunLine(
+  doc: KnowledgeDocument,
+  stalled: boolean,
+  t: TFunction,
+  locale: string,
+): string | null {
+  const at = Date.parse(doc.updatedAt)
+  if (Number.isNaN(at)) return null
+  if (stalled) return t("knowledgeBase.indexLastHeard", { when: formatDateTime(at, locale) })
+  if (doc.indexStatus === "pending") return null
+  if (doc.indexStatus === "failed") {
+    return t("knowledgeBase.indexRunAt", { when: formatDateTime(at, locale) })
+  }
+  // Indexed, with or without summaries: the count is the useful half, and the
+  // reason line above already carries the "what" when there is one.
+  const sections = t("knowledgeBase.indexSections", { count: formatNumber(doc.nodeCount, locale) })
+  return doc.indexError
+    ? `${sections} · ${t("knowledgeBase.indexRunAt", { when: formatDateTime(at, locale) })}`
+    : sections
+}
+
+/** How often the open list re-reads itself while a doc is pending (AQU-2028).
+ *  Indexing runs server-side and sends no event when it settles, so without
+ *  this a row stayed on "Indexing…" until a reload — and then flipped to a
+ *  false "stalled" once the AQU-1376 window passed. The same tick re-checks
+ *  the stall, which also produces no event. */
+const PENDING_POLL_MS = 5_000
 
 export function KnowledgeBaseSurface({
   scope,
   jwt,
   canManage,
   showTitle = true,
-  drafting,
 }: KnowledgeBaseSurfaceProps) {
   const t = useT()
   const { locale } = useI18n()
@@ -123,7 +172,18 @@ export function KnowledgeBaseSurface({
   const [pendingDelete, setPendingDelete] = useState<KnowledgeDocument | null>(null)
   const [viewer, setViewer] = useState<ViewerState | null>(null)
 
+  /**
+   * AQU-2028: bumped by every list read and by every local change (upload,
+   * re-index, delete). A read only lands if nothing has bumped it since it
+   * started, so a re-read that left before an upload can't drop the new row,
+   * and one that left before a re-index can't put the old status back.
+   */
+  const listGenRef = useRef(0)
+  /** A pending-doc re-read still in flight; the next tick skips rather than stacks. */
+  const pollInFlightRef = useRef(false)
+
   const load = useCallback(async () => {
+    const gen = ++listGenRef.current
     if (!jwt) {
       setDocs([])
       setLoading(false)
@@ -132,7 +192,8 @@ export function KnowledgeBaseSurface({
     setLoading(true)
     setLoadFailed(false)
     try {
-      setDocs(await listKnowledgeDocuments(stableScope, jwt))
+      const next = await listKnowledgeDocuments(stableScope, jwt)
+      if (gen === listGenRef.current) setDocs(next)
     } catch {
       setLoadFailed(true)
     } finally {
@@ -143,6 +204,41 @@ export function KnowledgeBaseSurface({
   useEffect(() => {
     void load()
   }, [load])
+
+  /** The quiet re-read behind the pending poll: no spinner, and a failure keeps
+   *  the rows already on screen — the next tick simply tries again. */
+  const refreshPending = useCallback(async () => {
+    if (!jwt || pollInFlightRef.current) return
+    pollInFlightRef.current = true
+    const gen = ++listGenRef.current
+    try {
+      const next = await listKnowledgeDocuments(stableScope, jwt)
+      if (gen === listGenRef.current) setDocs(next)
+    } catch {
+      // Keep what is shown; this is a background check, not a load.
+    } finally {
+      pollInFlightRef.current = false
+    }
+  }, [jwt, stableScope])
+
+  // Only tick while something is actually pending; an all-settled list has
+  // nothing to re-read or re-evaluate, so the poll stops with the last pending
+  // row (AQU-2028).
+  const hasPendingDoc = useMemo(() => docs.some((doc) => doc.indexStatus === "pending"), [docs])
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!hasPendingDoc) return
+    // No synchronous first tick: a `now` left over from an earlier render is only
+    // ever too *old*, which can delay the stalled badge by one interval but can
+    // never flag a live job early — the direction to err in.
+    const timer = window.setInterval(() => {
+      setNow(Date.now())
+      // A hidden tab has no one to show the badge to; it catches up on the
+      // first tick after it is shown again.
+      if (document.visibilityState !== "hidden") void refreshPending()
+    }, PENDING_POLL_MS)
+    return () => window.clearInterval(timer)
+  }, [hasPendingDoc, refreshPending])
 
   const visibleDocs = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase(locale)
@@ -155,10 +251,21 @@ export function KnowledgeBaseSurface({
     setUploading(true)
     try {
       const doc = await uploadKnowledgeDocument(stableScope, jwt, file)
+      listGenRef.current++
       setDocs((current) => [doc, ...current.filter((item) => item.id !== doc.id)])
       toast.add({ type: "success", title: t("knowledgeBase.uploadSuccess", { name: file.name }) })
-    } catch {
-      toast.add({ type: "error", priority: "high", title: t("knowledgeBase.uploadError", { name: file.name }) })
+    } catch (err) {
+      // AQU-1499: show the server's reason when it sent one. "Try again" is
+      // actively misleading for a rejection that no retry can clear (a .docx
+      // whose word/document.xml is too bloated to read) — the reason names the
+      // fix, so the uploader is not left guessing.
+      const reason = err instanceof KnowledgeBaseApiError ? err.serverMessage : undefined
+      toast.add({
+        type: "error",
+        priority: "high",
+        title: t("knowledgeBase.uploadError", { name: file.name }),
+        ...(reason ? { description: reason } : {}),
+      })
     } finally {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ""
@@ -200,8 +307,17 @@ export function KnowledgeBaseSurface({
     setReindexingId(doc.id)
     try {
       await reindexKnowledgeDocument(stableScope, jwt, doc.id)
+      listGenRef.current++
+      // The server restarts updated_at along with the status (AQU-1376); mirror
+      // that here or a retried doc would still read as stalled and keep
+      // offering the button that just fired.
       setDocs((current) => current.map((item) =>
-        item.id === doc.id ? { ...item, indexStatus: "pending" } : item,
+        item.id === doc.id
+          // The server clears index_error along with the status (AQU-2002);
+          // leaving it here would show the last run's reason against a run
+          // that has only just started.
+          ? { ...item, indexStatus: "pending", indexError: null, updatedAt: new Date().toISOString() }
+          : item,
       ))
       toast.add({ type: "success", title: t("knowledgeBase.reindexing") })
     } catch {
@@ -217,6 +333,7 @@ export function KnowledgeBaseSurface({
     setDeletingId(doc.id)
     try {
       await deleteKnowledgeDocument(stableScope, jwt, doc.id)
+      listGenRef.current++
       setDocs((current) => current.filter((item) => item.id !== doc.id))
       setPendingDelete(null)
       toast.add({ type: "success", title: t("knowledgeBase.deleteSuccess", { name: doc.name }) })
@@ -254,24 +371,6 @@ export function KnowledgeBaseSurface({
 
   return (
     <div className="flex flex-col gap-6">
-      {drafting ? (
-        <SettingsGroup>
-          <SettingsRow
-            label={<label htmlFor="knowledge-base-drafting">{t("knowledgeBase.useInDraftingLabel")}</label>}
-            description={t("knowledgeBase.useInDraftingDescription")}
-            control={
-              <Switch
-                id="knowledge-base-drafting"
-                checked={drafting.checked}
-                onCheckedChange={(checked) => void drafting.onCheckedChange(checked)}
-                disabled={drafting.disabled}
-                aria-label={t("knowledgeBase.useInDraftingLabel")}
-              />
-            }
-          />
-        </SettingsGroup>
-      ) : null}
-
       <Section
         title={showTitle ? t("knowledgeBase.title") : undefined}
         description={showTitle ? description : undefined}
@@ -314,7 +413,9 @@ export function KnowledgeBaseSurface({
         {loading ? (
           <div className="flex flex-col gap-3" aria-label={t("common.loading")}>
             {Array.from({ length: 3 }).map((_, index) => (
-              <Skeleton key={index} className="h-28 w-full" />
+              <div key={index} className="flex h-28 w-full flex-col gap-2 rounded-lg border p-4">
+                {index === 0 ? <LoadingCursor /> : null}
+              </div>
             ))}
           </div>
         ) : loadFailed ? (
@@ -340,6 +441,8 @@ export function KnowledgeBaseSurface({
             {visibleDocs.map((doc) => {
               const inherited = scopeKind === "project" && doc.scope === "org"
               const manageable = canManage && !inherited
+              const stalled = isKnowledgeIndexStalled(doc, now)
+              const runLine = indexRunLine(doc, stalled, t, locale)
               return (
                 <Card key={doc.id} size="sm">
                   <CardHeader>
@@ -353,15 +456,33 @@ export function KnowledgeBaseSurface({
                     <CardAction>
                       <div className="flex items-center gap-2">
                         {inherited ? <Badge variant="outline">{t("common.org")}</Badge> : null}
-                        <Badge variant={statusVariant(doc.indexStatus)}>
-                          {t(`knowledgeBase.status.${doc.indexStatus}`)}
+                        <Badge variant={statusVariant(doc, stalled)}>
+                          {t(statusKey(doc, stalled))}
                         </Badge>
                       </div>
                     </CardAction>
                   </CardHeader>
-                  {doc.docSummary || inherited ? (
+                  {doc.docSummary || doc.indexError || runLine || inherited ? (
                     <CardContent className="flex flex-col gap-2">
                       {doc.docSummary ? <p className="text-sm text-muted-foreground">{doc.docSummary}</p> : null}
+                      {/* AQU-2002: the server's own sentence, shown as sent. A
+                          badge alone told the uploader nothing they could act
+                          on — and "Try indexing again" on a document whose
+                          model leg is out of credit is worse than nothing. */}
+                      {doc.indexError ? (
+                        <p className={doc.indexStatus === "failed"
+                          ? "text-xs text-destructive"
+                          // Missing summaries are a note, not an alarm: the
+                          // document works, so the row must not read red.
+                          : "text-xs text-muted-foreground"}>
+                          {doc.indexError}
+                        </p>
+                      ) : null}
+                      {/* AQU-1766: when the run was heard from, and how much it
+                          indexed. A reason with no date cannot be lined up with
+                          anything the uploader did, and "Indexed" says nothing
+                          about whether the index has any sections in it. */}
+                      {runLine ? <p className="text-xs text-muted-foreground">{runLine}</p> : null}
                       {inherited ? <p className="text-xs text-muted-foreground">{t("knowledgeBase.readOnlyHelp")}</p> : null}
                     </CardContent>
                   ) : null}
@@ -374,7 +495,7 @@ export function KnowledgeBaseSurface({
                       <ExternalLink data-icon="inline-start" />
                       {t("knowledgeBase.openOriginal")}
                     </Button>
-                    {manageable && doc.indexStatus === "failed" ? (
+                    {manageable && (doc.indexStatus === "failed" || stalled || doc.indexError) ? (
                       <Button variant="ghost" size="sm" onClick={() => void handleReindex(doc)} disabled={reindexingId === doc.id}>
                         {reindexingId === doc.id
                           ? <Spinner data-icon="inline-start" />
@@ -405,8 +526,7 @@ export function KnowledgeBaseSurface({
           <DialogBody className="flex flex-col gap-5">
             {viewer?.loading ? (
               <div className="flex flex-col gap-3" aria-label={t("common.loading")}>
-                <Skeleton className="h-4 w-1/3" />
-                <Skeleton className="h-56 w-full" />
+                <LoadingCursor />
               </div>
             ) : viewer?.failed ? (
               <EmptyState variant="inline" icon={TriangleAlert} title={t("knowledgeBase.loadError")} />

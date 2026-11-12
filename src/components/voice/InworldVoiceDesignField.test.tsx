@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { useState } from "react"
-import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { InworldVoiceDesignField, type InworldDesignSelection } from "./InworldVoiceDesignField"
 import { designInworldVoice, synthesizeCellTts } from "@/lib/sync/tts"
@@ -12,7 +12,7 @@ import {
   inworldDesignPresetPrompt,
 } from "@/lib/audio/inworld-voice-design"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { expectClickNote, renderWithTooltips } from "@/test-utils/tooltip"
 
 vi.mock("@/lib/sync/tts", () => ({
   designInworldVoice: vi.fn(),
@@ -37,6 +37,31 @@ vi.mock("@/lib/audio/voice-clone", () => ({
 
 const session = { jwt: "tok", username: "dev" } as FrontierSession
 const LONG_PROMPT = "A middle-aged male voice with a clear British accent speaking at a steady pace and with a warm, neutral tone."
+
+type StubAudio = {
+  src: string
+  pause: ReturnType<typeof vi.fn>
+  play: ReturnType<typeof vi.fn>
+  removeAttribute: ReturnType<typeof vi.fn>
+  load: ReturnType<typeof vi.fn>
+}
+
+function stubPreviewAudios(): StubAudio[] {
+  const elements: StubAudio[] = []
+  class PreviewAudio {
+    src = ""
+    onended: (() => void) | null = null
+    pause = vi.fn()
+    play = vi.fn().mockResolvedValue(undefined)
+    removeAttribute = vi.fn()
+    load = vi.fn()
+    constructor() {
+      elements.push(this)
+    }
+  }
+  vi.stubGlobal("Audio", PreviewAudio)
+  return elements
+}
 
 function renderField(opts: {
   prompt?: string
@@ -119,15 +144,19 @@ describe("InworldVoiceDesignField", () => {
     expect(designInworldVoice).not.toHaveBeenCalled()
   })
 
-  it("explains Freeform and Structured on hover", async () => {
+  // AQU-2260 (Sam, Oct 29): nothing explains itself on hover. The two modes
+  // are told apart behind one (i) beside them, on a click.
+  it("explains Freeform and Structured behind the (i) beside them", async () => {
     renderField()
     const freeformHelp =
       "Describe the voice in your own words, and we build the full voice profile from it"
     const structuredHelp =
       "Edit the voice profile directly for full control over the voice's nuances"
+    await userEvent.setup().hover(screen.getByRole("tab", { name: "Freeform" }))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
     expect(screen.queryByRole("tooltip")).toBeNull()
-    await expectTooltip(screen.getByRole("tab", { name: "Freeform" }), freeformHelp)
-    await expectTooltip(screen.getByRole("tab", { name: "Structured" }), structuredHelp)
+    await expectClickNote(screen.getByRole("button", { name: "About Voice design mode" }), freeformHelp)
+    expect(document.querySelector('[data-slot="popover-content"]')).toHaveTextContent(structuredHelp)
   })
 
   it("explains the preview script behind an info icon on the label", async () => {
@@ -137,7 +166,8 @@ describe("InworldVoiceDesignField", () => {
     expect(screen.queryByRole("tooltip")).toBeNull()
     expect(screen.queryByText(help)).toBeNull()
     const hint = screen.getByRole("button", { name: "About the preview script" })
-    await expectTooltip(hint, help)
+    // AQU-2260: on a click, never a hover.
+    await expectClickNote(hint, help)
     expect(screen.getByLabelText("Preview script")).toHaveAccessibleName("Preview script")
   })
 
@@ -290,6 +320,139 @@ describe("InworldVoiceDesignField", () => {
     await waitFor(() => expect(pause.mock.calls.length).toBeGreaterThan(paused))
   })
 
+  it("plays a designed preview, toggles it off, and stops the previous element when another starts", async () => {
+    const elements = stubPreviewAudios()
+    vi.mocked(designInworldVoice).mockResolvedValue([
+      { voiceId: "ws__design-voice-a", previewText: "Hello", previewAudio: "UklGRQ==" },
+      { voiceId: "ws__design-voice-b", previewText: "Hello", previewAudio: "SUQz" },
+    ])
+    const user = userEvent.setup()
+    const { unmount } = renderField({ prompt: LONG_PROMPT })
+    await user.click(screen.getByRole("button", { name: "Generate previews" }))
+    await waitFor(() => {
+      expect(elements[0]?.play).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole("button", { name: "Stop preview 1" })).toBeTruthy()
+    })
+    expect(elements[0].src).toContain("UklGRQ")
+    expect(elements).toHaveLength(1)
+
+    await user.click(screen.getByRole("button", { name: "Stop preview 1" }))
+    expect(elements[0].pause).toHaveBeenCalledTimes(1)
+    expect(elements[0].removeAttribute).toHaveBeenCalledWith("src")
+    expect(elements[0].load).toHaveBeenCalled()
+    expect(elements[0].src).toBe("")
+    expect(screen.getByRole("button", { name: "Play preview 1" })).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: "Play preview 2" }))
+    await waitFor(() => {
+      expect(elements[1]?.play).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole("button", { name: "Stop preview 2" })).toBeTruthy()
+    })
+    expect(elements[1].src).toContain("SUQz")
+    expect(screen.getByRole("button", { name: "Play preview 1" })).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: "Play preview 1" }))
+    await waitFor(() => {
+      expect(elements[2]?.play).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole("button", { name: "Stop preview 1" })).toBeTruthy()
+    })
+    const previousPausedAt = elements[1].pause.mock.invocationCallOrder[0]
+    const nextPlayedAt = elements[2].play.mock.invocationCallOrder[0]
+    expect(previousPausedAt).toBeLessThan(nextPlayedAt)
+    expect(elements[1].src).toBe("")
+    expect(screen.getByRole("button", { name: "Play preview 2" })).toBeTruthy()
+
+    unmount()
+    expect(elements[2].pause).toHaveBeenCalled()
+    expect(elements[2].src).toBe("")
+  })
+
+  it("ignores a preview play() that settles after a later preview has replaced it", async () => {
+    const settlers: Array<(() => void) | undefined> = []
+    const elements: Array<{ src: string; pause: ReturnType<typeof vi.fn> }> = []
+    vi.stubGlobal(
+      "Audio",
+      class {
+        src = ""
+        onended: (() => void) | null = null
+        pause = vi.fn()
+        removeAttribute = vi.fn()
+        load = vi.fn()
+        play = vi.fn().mockImplementation(
+          () => new Promise<void>((resolve) => { settlers.push(resolve) }),
+        )
+        constructor() {
+          elements.push(this)
+        }
+      },
+    )
+    vi.mocked(designInworldVoice).mockResolvedValue([
+      { voiceId: "ws__design-voice-a", previewText: "Hello", previewAudio: "UklGRQ==" },
+      { voiceId: "ws__design-voice-b", previewText: "Hello", previewAudio: "SUQz" },
+    ])
+    const user = userEvent.setup()
+    renderField({ prompt: LONG_PROMPT })
+    await user.click(screen.getByRole("button", { name: "Generate previews" }))
+    await waitFor(() => expect(settlers).toHaveLength(1))
+    expect(screen.getByRole("button", { name: "Play preview 1" })).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: "Play preview 2" }))
+    await waitFor(() => expect(settlers).toHaveLength(2))
+    expect(elements[0].pause).toHaveBeenCalled()
+    settlers[1]?.()
+    await waitFor(() => expect(screen.getByRole("button", { name: "Stop preview 2" })).toBeTruthy())
+    settlers[0]?.()
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Stop preview 2" })).toBeTruthy()
+      expect(screen.getByRole("button", { name: "Play preview 1" })).toBeTruthy()
+    })
+  })
+
+  it("halts the element and revokes a saved blob url on unmount", async () => {
+    const elements = stubPreviewAudios()
+    vi.mocked(fetchVoiceReference).mockResolvedValue(new Uint8Array([1, 2, 3]))
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:design-preview")
+    const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+    const user = userEvent.setup()
+    const { unmount } = renderField({
+      existingVoiceId: "ws__design-voice-saved",
+      existingPreviewAudioId: "design-preview-1.wav",
+    })
+    await user.click(screen.getByRole("button", { name: "Play saved voice" }))
+    await waitFor(() => {
+      expect(elements[0]?.play).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole("button", { name: "Stop saved voice" })).toBeTruthy()
+    })
+    expect(elements[0].src).toBe("blob:design-preview")
+    unmount()
+    expect(elements[0].pause).toHaveBeenCalled()
+    expect(elements[0].src).toBe("")
+    expect(revoke).toHaveBeenCalledWith("blob:design-preview")
+  })
+
+  it("does not revoke a non-blob saved preview url on unmount", async () => {
+    const elements = stubPreviewAudios()
+    vi.mocked(synthesizeCellTts).mockResolvedValue({
+      audioId: "audio-tts-saved",
+      durationSeconds: 2,
+      objectName: "audio-tts-saved.wav",
+      url: "frontier-audio://audio-tts-saved.wav",
+    })
+    vi.mocked(parseFrontierAudioUrl).mockReturnValue({ audioId: "audio-tts-saved", ext: "wav" })
+    vi.mocked(getCellAudioStreamUrl).mockResolvedValue("https://stream.example/audio-tts-saved.wav")
+    const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+    const user = userEvent.setup()
+    const { unmount } = renderField({ existingVoiceId: "ws__design-voice-saved" })
+    await user.click(screen.getByRole("button", { name: "Play saved voice" }))
+    await waitFor(() => {
+      expect(elements[0]?.play).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole("button", { name: "Stop saved voice" })).toBeTruthy()
+    })
+    unmount()
+    expect(elements[0].pause).toHaveBeenCalled()
+    expect(revoke).not.toHaveBeenCalled()
+  })
+
   it("explains that an already-published designed voice can be left as-is", () => {
     renderField({ existingVoiceId: "ws__design-voice-saved" })
     expect(screen.getByText("Saved voice")).toBeTruthy()
@@ -411,6 +574,29 @@ describe("InworldVoiceDesignField", () => {
     const alert = await screen.findByRole("alert")
     expect(alert).toHaveTextContent("Inworld 400: designPrompt too long")
     expect(alert).toHaveClass("select-text")
+  })
+
+  it("replaces the bare voice-provider 502 with the next click (AQU-1755)", async () => {
+    vi.mocked(designInworldVoice).mockRejectedValue(
+      new Error("Inworld TTS failed (502): voice provider request failed"),
+    )
+    const user = userEvent.setup()
+    renderField({ prompt: LONG_PROMPT })
+    await user.click(screen.getByRole("button", { name: "Generate previews" }))
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent(/Try again later/)
+    expect(alert).toHaveTextContent(/built-in voice/)
+    expect(alert).not.toHaveTextContent("502")
+  })
+
+  it("replaces a missing sync token with a sign-in step (AQU-1755)", async () => {
+    vi.mocked(designInworldVoice).mockRejectedValue(new Error("designInworldVoice: no sync token"))
+    const user = userEvent.setup()
+    renderField({ prompt: LONG_PROMPT })
+    await user.click(screen.getByRole("button", { name: "Generate previews" }))
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent(/Sign in again, then click Generate previews/)
+    expect(alert).not.toHaveTextContent("no sync token")
   })
 
   it("switches to Structured with a key: value textarea", async () => {

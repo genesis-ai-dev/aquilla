@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
+import { renderWithTooltips, expectClickNote } from "@/test-utils/tooltip"
 import { ProjectCard } from "./ProjectCard"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -61,6 +62,16 @@ beforeEach(() => {
 })
 
 describe("ProjectCard health ring", () => {
+  it("counts the media file without exposing its hidden caption tracks", () => {
+    const base = { type: "vtt" as const, createdAt: "2026-09-30", cellCount: 2 }
+    const project = makeProject({ files: [
+      { ...base, id: "video", name: "Video", role: "source" },
+      { ...base, id: "captions", name: "Captions", role: "timeline-content" },
+      { ...base, id: "cues", name: "Audio cues", role: "audio-cues" },
+    ] })
+    render(<ProjectCard project={project} onClick={() => {}} />)
+    expect(screen.getByText(/1\s+file/)).toBeInTheDocument()
+  })
   it("renders HealthRing with the rollup value for a server-side project", () => {
     projectHealthStub = 72
     const project = makeProject()
@@ -200,5 +211,26 @@ describe("ProjectCard long unbroken project name (AQU-332)", () => {
     expect(badgeCluster?.className).toContain("shrink-0")
     // The git badge stays visible alongside the (now multi-line) title.
     expect(screen.getByText("git")).toBeInTheDocument()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): the card's badges explain themselves on a click,
+// never on hover — and that click stays on the badge: it does not open the
+// project.
+describe("ProjectCard badges", () => {
+  it("says what Inactive means on click, without opening the project", async () => {
+    const onClick = vi.fn()
+    renderWithTooltips(<ProjectCard project={makeProject({ isActive: false } as Partial<ProjectRecord>)} onClick={onClick} />)
+    await expectClickNote(screen.getByTestId("inactive-badge").closest("button")!, /cannot be edited until reactivated/)
+    expect(onClick).not.toHaveBeenCalled()
+  })
+
+  it("says the role is yours on click, without opening the project", async () => {
+    const onClick = vi.fn()
+    renderWithTooltips(<ProjectCard project={makeProject()} onClick={onClick} />)
+    const role = screen.getAllByRole("button").find((b) => b.dataset.slot === "note-on-click")
+    expect(role).toBeDefined()
+    await expectClickNote(role!, "Your role on this project")
+    expect(onClick).not.toHaveBeenCalled()
   })
 })

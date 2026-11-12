@@ -77,8 +77,9 @@ describe("InterlinearAlignmentPanel — insufficient data (AQU-241)", () => {
         onSeedChange={noop}
       />,
     )
-    // No ✓/✕ buttons when in the empty state.
-    expect(screen.queryByRole("button")).not.toBeInTheDocument()
+    // No ✓/✕ buttons when in the empty state (the section's (i) is the only
+    // button, AQU-2260).
+    expect(screen.queryByRole("button", { name: /confirm|reject/i })).not.toBeInTheDocument()
   })
 
   it("renders normally (or returns null) when pairCount >= MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT", () => {
@@ -199,6 +200,90 @@ describe("InterlinearAlignmentPanel — ✓/✕ button explanations (AQU-240)", 
   })
 })
 
+// ── AQU-1408: who may teach the alignment ────────────────────────────────────
+
+describe("InterlinearAlignmentPanel — confirm/reject role gate (AQU-1408)", () => {
+  /** A warm model with one unambiguous association, so rows actually render. */
+  function warmModel(): AlignmentModel {
+    const n = MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT + 10
+    const pairs = Array.from({ length: n }, () => ({ source: "god", target: "gott" }))
+    return buildAlignmentModel(pairs, [])
+  }
+
+  it("offers confirm/reject to a contributor", () => {
+    render(
+      <InterlinearAlignmentPanel
+        sourceText="god"
+        targetText="gott"
+        alignmentModel={warmModel()}
+        confirmedSeeds={noSeeds}
+        onSeedChange={noop}
+        editable
+      />,
+    )
+    expect(screen.queryAllByRole("button", { name: /^confirm alignment:/i }).length).toBeGreaterThan(0)
+    expect(screen.queryAllByRole("button", { name: /^reject alignment:/i }).length).toBeGreaterThan(0)
+  })
+
+  it("below contributor, the control is disabled and SAYS WHY rather than dropping the click", () => {
+    // The whole point of AQU-1408 §6: a button that accepts a click the role
+    // floor then refuses is indistinguishable from a broken feature.
+    const onSeedChange = vi.fn()
+    render(
+      <InterlinearAlignmentPanel
+        sourceText="god"
+        targetText="gott"
+        alignmentModel={warmModel()}
+        confirmedSeeds={noSeeds}
+        onSeedChange={onSeedChange}
+        editable={false}
+      />,
+    )
+
+    // Anchored on the colon: the locked button's own label ends "...confirm or
+    // reject alignments", which an unanchored /reject alignment/ would match.
+    expect(screen.queryAllByRole("button", { name: /^confirm alignment:/i })).toHaveLength(0)
+    expect(screen.queryAllByRole("button", { name: /^reject alignment:/i })).toHaveLength(0)
+
+    const locked = screen.getAllByRole("button", {
+      name: /contributor\+ required to confirm or reject alignments/i,
+    })
+    expect(locked.length).toBeGreaterThan(0)
+    expect((locked[0] as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.click(locked[0])
+    expect(onSeedChange).not.toHaveBeenCalled()
+  })
+
+  it("still shows the alignment itself below contributor — reading is not gated", () => {
+    render(
+      <InterlinearAlignmentPanel
+        sourceText="god"
+        targetText="gott"
+        alignmentModel={warmModel()}
+        confirmedSeeds={noSeeds}
+        onSeedChange={noop}
+        editable={false}
+      />,
+    )
+    expect(screen.getAllByText("god").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("gott").length).toBeGreaterThan(0)
+  })
+
+  it("defaults to editable, so a caller that does not know the role behaves as before", () => {
+    render(
+      <InterlinearAlignmentPanel
+        sourceText="god"
+        targetText="gott"
+        alignmentModel={warmModel()}
+        confirmedSeeds={noSeeds}
+        onSeedChange={noop}
+      />,
+    )
+    expect(screen.queryAllByRole("button", { name: /^confirm alignment:/i }).length).toBeGreaterThan(0)
+  })
+})
+
 // ── AQU-241: section header tooltip ──────────────────────────────────────────
 
 describe("InterlinearAlignmentPanel — section header tooltip (AQU-241)", () => {
@@ -213,14 +298,11 @@ describe("InterlinearAlignmentPanel — section header tooltip (AQU-241)", () =>
         onSeedChange={noop}
       />,
     )
-    // AppTooltip is mocked to render its content unconditionally (see mock above) —
-    // Base UI's real hover/focus tooltip isn't reliably driveable in happy-dom.
-    // The text must mention both confirm and reject/invalidate to satisfy AQU-240.
-    const tooltipContents = screen.getAllByTestId("tooltip-content")
-    const helpTooltip = tooltipContents.find((el) =>
-      /confirm.*reject|reject.*confirm/i.test(el.textContent ?? ""),
-    )
-    expect(helpTooltip).toBeTruthy()
+    // AQU-2260: the help is behind the section's (i), on a click. The text
+    // must mention both confirm and reject/invalidate to satisfy AQU-240.
+    fireEvent.click(screen.getByRole("button", { name: "About Alignment" }))
+    const note = document.querySelector('[data-slot="popover-content"]')
+    expect(note?.textContent ?? "").toMatch(/confirm.*reject|reject.*confirm/i)
   })
 })
 

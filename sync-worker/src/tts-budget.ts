@@ -137,3 +137,39 @@ export async function runTtsGuard(
 
   return { ok: true }
 }
+
+// ── Unknown-duration fallback (AQU-1872) ─────────────────────────────────────
+
+/**
+ * Average speaking rate used to estimate a clip's length from its text.
+ * 15 chars/s ≈ 150 wpm at ~6 characters per word (including the space) —
+ * the middle of the range for narration-paced read-aloud speech.
+ */
+export const TTS_ESTIMATE_CHARS_PER_SECOND = 15
+
+/** Floor for the estimate: even a one-word clip costs the provider something. */
+export const TTS_ESTIMATE_MIN_SECONDS = 1
+
+/**
+ * Estimate a clip's billable seconds from the text that was synthesized.
+ *
+ * WHY this exists: Inworld reports duration two ways — word-end timestamps,
+ * else the WAV header (see `wavDurationSeconds`). When both are absent or
+ * unparseable (a provider that stops sending `timestampInfo`, a container we
+ * cannot read), the clip used to be recorded as **0 seconds**: it counted
+ * toward no daily budget and no credit ledger, so synthesis through that path
+ * was silently free and invisible to every ceiling.
+ *
+ * Documented formula (AQU-1872):
+ *   seconds = max(TTS_ESTIMATE_MIN_SECONDS,
+ *                 text.length / TTS_ESTIMATE_CHARS_PER_SECOND)
+ *
+ * Deliberately conservative — it under-charges a slow reading rather than
+ * over-charging someone for audio we failed to measure. It is a floor on the
+ * charge, never a replacement for a duration we *can* read.
+ */
+export function estimateTtsSecondsFromText(text: string): number {
+  const chars = typeof text === "string" ? text.trim().length : 0
+  if (chars === 0) return TTS_ESTIMATE_MIN_SECONDS
+  return Math.max(TTS_ESTIMATE_MIN_SECONDS, chars / TTS_ESTIMATE_CHARS_PER_SECOND)
+}

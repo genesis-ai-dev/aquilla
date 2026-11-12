@@ -1,0 +1,320 @@
+// aquilla.web.fetch, server side (apiRev 6). The extension's sandbox keeps
+// `connect-src 'none'`; the host asks this worker to GET a URL on the
+// extension's behalf. Everything a hostile extension (or a hostile site it
+// points at) could abuse is checked here, not in the browser:
+//
+//   - https only, port 443, no userinfo; GET only; no cookies, credentials or
+//     auth headers forwarded (a fixed, minimal header set).
+//   - The host must be on the extension's declared + user-approved domain list
+//     (and on the optional deployment-wide allowlist), re-checked on EVERY
+//     redirect hop (redirect: "manual", at most MAX_REDIRECTS).
+//   - SSRF: IP literals, local/internal names and any name that RESOLVES to a
+//     private, loopback, link-local, CGNAT, multicast or reserved address are
+//     refused (DNS over HTTPS, before each hop).
+//   - 15 s timeout (40 s for importers; shared/tools/timeouts.ts), 12 MB body
+//     cap (streamed, aborted past the cap), text/JSON content types only. A
+//     slow or oversized answer fails with how long / how much, and what to ask
+//     for instead.
+//   - Conditional requests (If-None-Match / If-Modified-Since) for the
+//     response cache (web-fetch-cache.ts); a 304 comes back as such.
+// Pure apart from the injected fetch/resolve, so every rule is unit-tested.
+
+import { blockedHostReason, hostAllowed, isIpLiteral } from "../../../../shared/tools/web-domains"
+import { WEB_FETCH_DNS_TIMEOUT_MS, WEB_FETCH_TIMEOUT_MS } from "../../../../shared/tools/timeouts"
+
+export { WEB_FETCH_IMPORTER_TIMEOUT_MS, WEB_FETCH_TIMEOUT_MS } from "../../../../shared/tools/timeouts"
+// Aligned ULT books reach ~5.2 MB (JER); 12 MB covers every book with room to spare.
+export const WEB_FETCH_MAX_BYTES = 12 * 1024 * 1024
+export const WEB_FETCH_MAX_REDIRECTS = 3
+/** Per user, per 15-minute window (auth_rate_limit_events). */
+export const WEB_FETCH_MAX_PER_WINDOW = 300
+/**
+ * apiRev 7: the window for an IMPORTER (an extension that declares
+ * write:files). An unfoldingWord resource set pulled book by book is about
+ * 66 books × 6 per-book repos (ULT, UST, UGNT/UHB, TN, TQ, TWL) ≈ 400 raw files,
+ * plus a manifest/catalog read per repo; a "check for updates" pass afterwards
+ * re-reads the changed books. 1,200 lets one full import AND a refresh pass fit
+ * in a window with room for a retry, while still capping one user at ~1.3
+ * requests a second against the upstream (Door43 rate-limits heavy use). The
+ * resources that would need thousands of files (en_tw's ~1,000 articles) are
+ * one request as a zipball through `as: "bytes"`.
+ */
+export const WEB_FETCH_IMPORTER_MAX_PER_WINDOW = 1200
+/** apiRev 7: binary bodies (`as: "bytes"`, zipballs). en_tw's zipball is ~9 MB;
+ *  20 MB leaves room while keeping the worker far inside its memory budget. */
+export const WEB_FETCH_MAX_BINARY_BYTES = 20 * 1024 * 1024
+
+export class WebFetchError extends Error {
+  code: string
+  status: number
+  constructor(code: string, message: string, status = 400) {
+    super(message)
+    this.code = code
+    this.status = status
+    this.name = "WebFetchError"
+  }
+}
+
+export type Resolver = (host: string) => Promise<string[]>
+
+export interface WebFetchDeps {
+  fetch: typeof fetch
+  resolve: Resolver
+}
+
+export interface WebFetchResult {
+  status: number
+  contentType: string
+  body: unknown
+  /** The final URL after redirects. */
+  url: string
+  bytes: number
+  /** Upstream caching headers (for web-fetch-cache.ts). */
+  etag?: string | null
+  lastModified?: string | null
+  cacheControl?: string | null
+}
+
+const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`
+const NARROWER = "ask for a narrower listing (filters, paging, fewer fields) or fetch details only when they are needed"
+
+const TEXT_TYPES = /^(text\/[a-z0-9.+-]+|application\/(json|[a-z0-9.-]+\+json|xml|[a-z0-9.-]+\+xml|x-ndjson|tab-separated-values))$/i
+
+// ── Address checks ────────────────────────────────────────────────────────
+
+function v4ToInt(ip: string): number | null {
+  const parts = ip.split(".").map(Number)
+  if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) return null
+  return ((parts[0] << 24) >>> 0) + (parts[1] << 16) + (parts[2] << 8) + parts[3]
+}
+
+const V4_BLOCKED: [string, number][] = [
+  ["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12],
+  ["192.0.0.0", 24], ["192.0.2.0", 24], ["192.88.99.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["198.51.100.0", 24],
+  ["203.0.113.0", 24], ["224.0.0.0", 4], ["240.0.0.0", 4],
+]
+
+function v4Blocked(ip: string): boolean {
+  const n = v4ToInt(ip)
+  if (n === null) return true
+  return V4_BLOCKED.some(([base, bits]) => {
+    const b = v4ToInt(base) as number
+    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0
+    return ((n & mask) >>> 0) === ((b & mask) >>> 0)
+  })
+}
+
+/** Whether a resolved address is anything but public unicast. */
+export function isPrivateAddress(ip: string): boolean {
+  const a = ip.trim().toLowerCase().replace(/^\[|\]$/g, "")
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(a)) return v4Blocked(a)
+  if (!a.includes(":")) return true
+  // IPv4-mapped / -compatible / NAT64 forms carry an IPv4 address at the end.
+  const tail = /(\d+\.\d+\.\d+\.\d+)$/.exec(a)
+  if (tail && (a.startsWith("::ffff:") || a.startsWith("::") || a.startsWith("64:ff9b:"))) return v4Blocked(tail[1])
+  // The same forms written in hex ("::ffff:a00:1", "64:ff9b::7f00:1"): refuse outright.
+  if (a.startsWith("::") || a.startsWith("64:ff9b:")) return true
+  if (a === "::" || a === "::1") return true
+  const first = parseInt(a.split(":")[0] || "0", 16)
+  if (Number.isNaN(first)) return true
+  if ((first & 0xfe00) === 0xfc00) return true // fc00::/7 unique local
+  if ((first & 0xffc0) === 0xfe80) return true // fe80::/10 link-local
+  if ((first & 0xff00) === 0xff00) return true // ff00::/8 multicast
+  if (first === 0x2001 && a.startsWith("2001:db8")) return true // documentation
+  return false
+}
+
+/** DNS over HTTPS (Cloudflare's resolver): A + AAAA for one name. */
+export function dohResolver(fetchImpl: typeof fetch): Resolver {
+  return async (host) => {
+    const ask = async (type: "A" | "AAAA") => {
+      const res = await fetchImpl(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=${type}`, {
+        headers: { Accept: "application/dns-json" },
+        signal: AbortSignal.timeout(WEB_FETCH_DNS_TIMEOUT_MS),
+      })
+      if (!res.ok) throw new WebFetchError("dns_failed", `could not resolve ${host}`, 502)
+      const body = (await res.json()) as { Answer?: { type: number; data: string }[] }
+      return (body.Answer ?? []).filter((r) => r.type === 1 || r.type === 28).map((r) => r.data)
+    }
+    const [a, aaaa] = await Promise.all([ask("A"), ask("AAAA")])
+    return [...a, ...aaaa]
+  }
+}
+
+// ── URL checks ────────────────────────────────────────────────────────────
+
+/** Parse and check one URL against the approved domains (no network). */
+export function checkWebUrl(raw: string, domains: readonly string[], deploymentAllow: readonly string[] | null): URL {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new WebFetchError("invalid_url", "the URL is not valid")
+  }
+  if (url.protocol !== "https:") throw new WebFetchError("invalid_url", "only https URLs can be fetched")
+  if (url.username || url.password) throw new WebFetchError("invalid_url", "URLs with credentials are not allowed")
+  if (url.port && url.port !== "443") throw new WebFetchError("invalid_url", "only the default https port is allowed")
+  const host = url.hostname.toLowerCase()
+  const blocked = blockedHostReason(host)
+  if (blocked) throw new WebFetchError("host_blocked", blocked, 403)
+  if (!hostAllowed(host, domains)) throw new WebFetchError("host_not_allowed", `${host} is not one of the sites this extension may read (${domains.join(", ") || "none"})`, 403)
+  if (deploymentAllow && !hostAllowed(host, deploymentAllow)) throw new WebFetchError("host_not_allowed", `${host} is not allowed on this Aquilla deployment`, 403)
+  return url
+}
+
+async function assertPublic(host: string, resolve: Resolver): Promise<void> {
+  if (isIpLiteral(host)) throw new WebFetchError("host_blocked", "IP addresses are not allowed", 403)
+  const addrs = await resolve(host)
+  if (addrs.length === 0) throw new WebFetchError("dns_failed", `${host} does not resolve`, 502)
+  const bad = addrs.find(isPrivateAddress)
+  if (bad) throw new WebFetchError("host_blocked", `${host} resolves to a private or reserved address`, 403)
+}
+
+async function readCapped(
+  res: Response,
+  cap: number,
+  progress: { bytes: number } = { bytes: 0 },
+  signal?: AbortSignal,
+): Promise<{ text: string; bytes: number; raw: Uint8Array }> {
+  const tooLarge = () => new WebFetchError("too_large", `the response is larger than ${cap / 1024 / 1024} MB; ${NARROWER}`, 413)
+  const declared = Number(res.headers.get("content-length") ?? "")
+  if (Number.isFinite(declared) && declared > cap) throw tooLarge()
+  if (!res.body) return { text: "", bytes: 0, raw: new Uint8Array(0) }
+  const reader = res.body.getReader()
+  // The deadline covers the BODY too, whatever the runtime does with fetch's
+  // own signal: cancelling the reader ends a pending read.
+  const onAbort = () => void reader.cancel().catch(() => {})
+  signal?.addEventListener("abort", onAbort)
+  const chunks: Uint8Array[] = []
+  let bytes = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (signal?.aborted) {
+        const err = new Error("aborted")
+        err.name = "TimeoutError"
+        throw err
+      }
+      if (done) break
+      bytes += value.byteLength
+      progress.bytes = bytes
+      if (bytes > cap) {
+        await reader.cancel().catch(() => {})
+        throw tooLarge()
+      }
+      chunks.push(value)
+    }
+  } finally {
+    signal?.removeEventListener("abort", onAbort)
+  }
+  const all = new Uint8Array(bytes)
+  let at = 0
+  for (const c of chunks) {
+    all.set(c, at)
+    at += c.byteLength
+  }
+  return { text: new TextDecoder().decode(all), bytes, raw: all }
+}
+
+/** Base64 without a stack-busting String.fromCharCode(...bigArray). */
+export function toBase64(bytes: Uint8Array): string {
+  let out = ""
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    out += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  }
+  return btoa(out)
+}
+
+/** GET `raw` for an extension whose approved sites are `domains`. */
+export async function proxyWebFetch(
+  input: {
+    url: string
+    as: "text" | "json" | "bytes"
+    domains: readonly string[]
+    deploymentAllow: readonly string[] | null
+    /** Upstream budget (default WEB_FETCH_TIMEOUT_MS; importers get longer). */
+    timeoutMs?: number
+    /** Revalidate a cached copy: a 304 answers { status: 304 }. */
+    conditional?: { etag?: string | null; lastModified?: string | null }
+  },
+  deps: WebFetchDeps,
+): Promise<WebFetchResult> {
+  let url = checkWebUrl(input.url, input.domains, input.deploymentAllow)
+  const timeoutMs = input.timeoutMs ?? WEB_FETCH_TIMEOUT_MS
+  const signal = AbortSignal.timeout(timeoutMs)
+  const progress = { bytes: 0 }
+  const timedOut = () =>
+    new WebFetchError(
+      "timeout",
+      `the site took longer than ${Math.round(timeoutMs / 1000)} s to answer${progress.bytes > 0 ? ` (${mb(progress.bytes)} received so far)` : ""}; ${NARROWER}`,
+      504,
+    )
+  const isAbort = (err: unknown) => err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")
+  const conditionalHeaders: Record<string, string> = {}
+  if (input.conditional?.etag) conditionalHeaders["If-None-Match"] = input.conditional.etag
+  if (input.conditional?.lastModified) conditionalHeaders["If-Modified-Since"] = input.conditional.lastModified
+  for (let hop = 0; ; hop++) {
+    await assertPublic(url.hostname, deps.resolve)
+    let res: Response
+    try {
+      const doFetch = deps.fetch
+      res = await doFetch(url.toString(), {
+        method: "GET",
+        redirect: "manual",
+        signal,
+        // A fixed header set: nothing of the user's (cookies, Authorization) ever leaves.
+        headers: {
+          Accept: input.as === "bytes" ? "*/*" : "text/plain, text/*, application/json;q=0.9, */*;q=0.1",
+          "User-Agent": "Aquilla-Extensions/1 (+https://aquilla.app)",
+          ...conditionalHeaders,
+        },
+      })
+    } catch (err) {
+      if (isAbort(err)) throw timedOut()
+      console.warn("[tools/web-fetch] upstream error:", err instanceof Error ? `${err.name}: ${err.message}` : String(err))
+      throw new WebFetchError("fetch_failed", "the site could not be reached", 502)
+    }
+    const cacheHeaders = { etag: res.headers.get("etag"), lastModified: res.headers.get("last-modified"), cacheControl: res.headers.get("cache-control") }
+    if (res.status === 304) {
+      await res.body?.cancel().catch(() => {})
+      return { status: 304, contentType: "", body: null, url: url.toString(), bytes: 0, ...cacheHeaders }
+    }
+    if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
+      if (hop >= WEB_FETCH_MAX_REDIRECTS) throw new WebFetchError("too_many_redirects", "the site redirected too many times", 502)
+      url = checkWebUrl(new URL(res.headers.get("location") as string, url).toString(), input.domains, input.deploymentAllow)
+      continue
+    }
+    const contentType = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase()
+    if (res.ok && input.as !== "bytes" && !TEXT_TYPES.test(contentType)) {
+      await res.body?.cancel().catch(() => {})
+      throw new WebFetchError("unsupported_type", `only text and JSON can be fetched (got ${contentType || "no content type"})`, 415)
+    }
+    let read: { text: string; bytes: number; raw: Uint8Array }
+    try {
+      read = await readCapped(res, input.as === "bytes" ? WEB_FETCH_MAX_BINARY_BYTES : WEB_FETCH_MAX_BYTES, progress, signal)
+    } catch (err) {
+      if (isAbort(err)) throw timedOut()
+      throw err
+    }
+    const { text, bytes, raw } = read
+    // apiRev 7: bytes travel as base64; the host turns them back into an ArrayBuffer.
+    if (input.as === "bytes") return { status: res.status, contentType, body: toBase64(raw), url: url.toString(), bytes, ...cacheHeaders }
+    let body: unknown = text
+    if (input.as === "json" && res.ok) {
+      try {
+        body = JSON.parse(text)
+      } catch {
+        throw new WebFetchError("invalid_json", "the response is not valid JSON", 502)
+      }
+    }
+    return { status: res.status, contentType, body, url: url.toString(), bytes, ...cacheHeaders }
+  }
+}
+
+/** TOOLS_WEB_ALLOWED_DOMAINS: an optional deployment-wide allowlist (comma-separated,
+ *  same syntax as manifest.web). Unset = any domain a user approves. The org-level
+ *  allowlist this is the hook for would replace it with a per-org setting. */
+export function deploymentAllowlist(value: string | undefined): string[] | null {
+  const list = (value ?? "").split(",").map((d) => d.trim().toLowerCase()).filter(Boolean)
+  return list.length ? list : null
+}

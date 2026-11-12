@@ -1,3 +1,4 @@
+import { usesHostedTranscription } from "./transcription-preference"
 // AQU-646: auto-transcription after a media import. Sam's confirmed expected
 // behavior is that importing an MP3 SURFACES SOURCE TEXT — the user should not
 // have to find the Transcribe button before the text view fills in.
@@ -14,6 +15,7 @@
 
 import { requestAiModelConsent, WHISPER_MODEL } from "./ai-consent"
 import { runTranscribeAll } from "./batch-audio"
+import { getTranscribeStatus } from "./transcribe-status"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -109,16 +111,42 @@ export interface AutoTranscribeArgs {
   sourceLanguage?: string
   targetLanguage?: string
   /** Runs after the batch settles — the caller flushes the outbox (the
-   *  transcript emits queue there) and revalidates so text appears promptly. */
+   *  transcript emits queue there) and revalidates so text appears promptly.
+   *  AQU-1917: only runs when the batch actually produced transcripts — a run
+   *  the ASR backend rejected goes to `onFailed` instead, so a caller may
+   *  report success from here. */
   onDone?: () => void | Promise<void>
   /** Sam, 2026-08-18: "it takes a minute to transcribe everything so there
    *  should be a toast that shows that it's loading." Stays silent for a
    *  consent denial or a file with nothing to do, so no toast ever appears for
    *  a run that never happened. */
   onProgress?: (done: number, total: number) => void
+  /** AQU-1681: the hosted transcription limit paused the run until this time
+   *  (epoch ms), or null when it carries on — so a progress toast can say so
+   *  instead of looking stuck for up to a quarter of an hour. */
+  onWaiting?: (untilMs: number | null) => void
   /** The batch threw. Only matters to a caller that put something on screen in
    *  `onProgress` and now has to take it back down. */
   onFailed?: (message: string) => void
+}
+
+/**
+ * The error the batch left on the seeded rows' audio, or null if it left none.
+ *
+ * AQU-1917: an imported media file's rows all share ONE source-clip audioId,
+ * so transcribe status is per CLIP, not per row. That is enough to tell "the
+ * run produced nothing" from "the run produced transcripts" — the distinction
+ * the post-import report got wrong — and deliberately not used to count
+ * individual failed rows, which this status cannot support.
+ */
+function batchLeftAnError(cells: CellData[]): string | null {
+  for (const cell of cells) {
+    const audioId = cell.selectedAudioId
+    if (!audioId) continue
+    const status = getTranscribeStatus(audioId)
+    if (status.kind === "error") return status.message
+  }
+  return null
 }
 
 /**
@@ -127,7 +155,9 @@ export interface AutoTranscribeArgs {
  */
 export async function autoTranscribeImportedMedia(args: AutoTranscribeArgs): Promise<void> {
   try {
-    const consented = await requestAiModelConsent(WHISPER_MODEL)
+    const consented = usesHostedTranscription(args.session, args.projectId)
+      ? true
+      : await requestAiModelConsent(WHISPER_MODEL)
     if (!consented) return
     await runTranscribeAll({
       cells: args.seed.cells,
@@ -136,7 +166,18 @@ export async function autoTranscribeImportedMedia(args: AutoTranscribeArgs): Pro
       sourceLanguage: args.sourceLanguage,
       targetLanguage: args.targetLanguage,
       onProgress: args.onProgress,
+      ...(args.onWaiting ? { onWaiting: args.onWaiting } : {}),
     })
+    // AQU-1917: a row whose ASR call failed sets an error status and
+    // RESOLVES — `runTranscribeAll` only throws when the batch itself dies.
+    // So a run in which the ASR endpoint rejected everything still reached
+    // `onDone` and was reported as a success ("Transcribed N sections of
+    // …"), telling the user text had landed when none had.
+    const failure = batchLeftAnError(args.seed.cells)
+    if (failure !== null) {
+      args.onFailed?.(failure)
+      return
+    }
     await args.onDone?.()
   } catch (e) {
     console.warn("[auto-transcribe] post-import batch failed:", e)

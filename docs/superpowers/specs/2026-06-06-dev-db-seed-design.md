@@ -170,6 +170,17 @@ Content (project-scoped): `events`, `files`, `cells`, `cell_validators`,
 `assignment_cells`, `diarization_jobs`, `file_source_blobs`, `checkpoints`,
 `snapshots`.
 
+**Revised 2026-10-14 (AQU-1953).** The lane rollout (AQU-1240) added a composite
+foreign key `(project_id, lane_id) → lanes` on the content tables, which this
+design predates. The project group now also carries `lanes` and
+`project_member_lane_roles` (before any content row), and the content group
+`cell_audio_validators` and `file_section_progress`. Project-scoped tables the
+seed never carries but which reference seeded rows without `ON DELETE CASCADE`
+(`artifact_bindings`, `scene_briefs`, `contextual_runs`, `contextual_drafts`,
+`workspace_usage_requests`) are cleared by the loader before its reverse-order
+deletes. `scripts/lib/seed-tables.test.ts` checks the list against
+`db/postgres/schema.sql`. Operator procedure: `docs/runbooks/seed-project-to-local.md`.
+
 Excluded: `password_reset_tokens`, `project_invites`, `activity_logs`.
 
 ## Non-goals

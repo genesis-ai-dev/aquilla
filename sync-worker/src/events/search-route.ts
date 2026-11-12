@@ -10,20 +10,24 @@
 //   limit — optional. Default 50, max 500.
 //
 // /search returns:
-//   { results: [{ cellId, fileId, side, value, snippet, rank }] }
+//   { results: [{ cellId, fileId, side, value, snippet, rank, pairedValue,
+//                canonicalRef, cellType, placeLabel, position }] }
 //
 // /search/passages additionally returns the opposite-side cell value:
-//   { results: [{ cellId, fileId, side, value, snippet, rank, pairedValue }] }
+//   { results: [{ cellId, fileId, side, value, snippet, rank, pairedValue,
+//                canonicalRef, cellType, placeLabel, position }] }
 //
 // Auth: sync-token JWT scoped to `projectId`; minimum role viewer (100).
 //
 // SQL is not emitted here — all FTS5 execution is delegated to scoped-search.ts,
 // which is the single structural choke-point for project-scoped FTS queries.
 
+import { grantedLaneIds, visibleLanesForRead } from "./lane-read-wall"
 import { verifyTokenForProject } from "../auth"
 import {
   makeVerifiedProjectId,
   queryScopedSearch,
+  queryScopedPattern,
   queryScopedExact,
   // Re-exported so existing tests importing sanitizeFtsQuery from this module
   // continue to compile without modification (Task 7 will migrate them).
@@ -39,6 +43,7 @@ export { sanitizeFtsQuery }
 export interface SearchReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  LANE_READ_WALL?: string
 }
 
 // /search must be anchored with $ so it does NOT match /search/passages.
@@ -48,6 +53,10 @@ const PASSAGES_PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/search\/passages$/
 
 const DEFAULT_LIMIT = 50
 const MAX_LIMIT = 500
+// [Pen test] API security (2026-10-22): `q` is attacker-controlled and, with
+// regexp=1, compiled as a pattern. Bounding its length bounds the cost of
+// pathological patterns without touching any realistic search.
+const MAX_QUERY_LENGTH = 500
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -60,7 +69,13 @@ const MAX_LIMIT = 500
  */
 function parseCommonParams(
   url: URL,
-): { error: Response } | { sideFilter: "source" | "target" | undefined; limit: number } {
+): { error: Response } | {
+  sideFilter: "source" | "target" | undefined
+  limit: number
+  matchCase: boolean
+  wholeWord: boolean
+  useRegexp: boolean
+} {
   const qSide = url.searchParams.get("side")
   let sideFilter: "source" | "target" | undefined = undefined
   if (qSide !== null) {
@@ -79,7 +94,18 @@ function parseCommonParams(
     }
   }
 
-  return { sideFilter, limit }
+  return {
+    sideFilter,
+    limit,
+    matchCase: flagOn(url, "case"),
+    wholeWord: flagOn(url, "word"),
+    useRegexp: flagOn(url, "regexp"),
+  }
+}
+
+function flagOn(url: URL, name: string): boolean {
+  const value = url.searchParams.get(name)
+  return value === "1" || value === "true"
 }
 
 /**
@@ -94,7 +120,7 @@ function mapSearchError(err: unknown): Response {
   // "no results" UI instead of an error banner.
   const message = err instanceof Error ? err.message : String(err)
   console.error('search request failed:', message)
-  if (/syntax error|fts5/i.test(message)) {
+  if (/syntax error|fts5|invalid regexp|invalid regular expression/i.test(message)) {
     return new Response('invalid search query', { status: 400 })
   }
   return new Response('search failed', { status: 500 })
@@ -136,21 +162,41 @@ export async function handleSearchReadRequest(
   // Build the structural permission gate: VerifiedProjectId can only come
   // from verified JWT claims, and queryScopedSearch only accepts that type.
   const verifiedProjectId = makeVerifiedProjectId(auth.claims)
+  // Lane read wall: a lane-limited member must not read other lanes by searching.
+  const laneIds = await grantedLaneIds(
+    env.AQUILLA_PG,
+    projectId,
+    visibleLanesForRead(env.LANE_READ_WALL, auth.claims),
+  )
 
   const q = url.searchParams.get("q")
   if (q === null || q.trim() === "") {
     return new Response("missing q", { status: 400 })
   }
+  if (q.length > MAX_QUERY_LENGTH) {
+    return new Response("q too long", { status: 400 })
+  }
 
   const parsed = parseCommonParams(url)
   if ("error" in parsed) return parsed.error
-  const { sideFilter, limit } = parsed
+  const { sideFilter, limit, matchCase, wholeWord, useRegexp } = parsed
 
   try {
-    const results = await queryScopedSearch(env.AQUILLA_PG, verifiedProjectId, q, {
-      side: sideFilter,
-      limit,
-    })
+    const pattern = matchCase || wholeWord || useRegexp
+    const results = pattern
+      ? await queryScopedPattern(env.AQUILLA_PG, verifiedProjectId, q, {
+          side: sideFilter,
+          limit,
+          matchCase,
+          wholeWord,
+          useRegexp,
+          laneIds,
+        })
+      : await queryScopedSearch(env.AQUILLA_PG, verifiedProjectId, q, {
+          side: sideFilter,
+          limit,
+          laneIds,
+        })
     return Response.json({ results })
   } catch (err) {
     return mapSearchError(err)
@@ -192,10 +238,19 @@ export async function handleSearchPassagesRequest(
 
   // Same structural permission gate as the ranked-search route.
   const verifiedProjectId = makeVerifiedProjectId(auth.claims)
+  // Lane read wall: a lane-limited member must not read other lanes by searching.
+  const laneIds = await grantedLaneIds(
+    env.AQUILLA_PG,
+    projectId,
+    visibleLanesForRead(env.LANE_READ_WALL, auth.claims),
+  )
 
   const q = url.searchParams.get("q")
   if (q === null || q.trim() === "") {
     return new Response("missing q", { status: 400 })
+  }
+  if (q.length > MAX_QUERY_LENGTH) {
+    return new Response("q too long", { status: 400 })
   }
 
   const parsed = parseCommonParams(url)
@@ -206,6 +261,7 @@ export async function handleSearchPassagesRequest(
     const results = await queryScopedExact(env.AQUILLA_PG, verifiedProjectId, q, {
       side: sideFilter,
       limit,
+      laneIds,
     })
     return Response.json({ results })
   } catch (err) {

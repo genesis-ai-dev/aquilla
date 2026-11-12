@@ -21,7 +21,7 @@ describe("GET /api/v2/users/search?scoped=1 (AQU-321)", () => {
       "INSERT INTO organizations (id, name, owner_user_id) VALUES (10, 'Test Org', 200)",
     ).run()
     await env.AQUILLA_PG.prepare(
-      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (10, 200, 400, 200)",
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (10, 200, 600, 200)",
     ).run()
     await env.AQUILLA_PG.prepare(
       "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (10, 201, 400, 200)",
@@ -86,9 +86,12 @@ describe("GET /api/v2/users/search?scoped=1 (AQU-321)", () => {
       { method: "GET", headers: authHeader(await jwtFor("global-alice")) },
       env,
     )
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as { users: Array<{ username: string }> }
-    expect(body.users.map((u) => u.username)).not.toContain("global-bob")
+    // AQU-625: no roster she can see, so the search is rejected rather than
+    // answered with an empty list she could keep walking.
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { rosterHidden?: boolean; users?: unknown }
+    expect(body.rosterHidden).toBe(true)
+    expect(body.users).toBeUndefined()
   })
 
   it("platform admin may still opt into unscoped search for cross-tenant support", async () => {
@@ -106,6 +109,17 @@ describe("GET /api/v2/users/search?scoped=1 (AQU-321)", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { users: Array<{ username: string }> }
     expect(body.users.map((u) => u.username)).toContain("global-carol")
+
+    // The Share field sends scoped=1. An admin with no org membership can
+    // still see every roster, so that request stays 200 and stays scoped.
+    const scoped = await app.request(
+      "/api/v2/users/search?prefix=global-c&scoped=1",
+      { method: "GET", headers: authHeader(await jwtFor("root")) },
+      env,
+    )
+    expect(scoped.status).toBe(200)
+    const scopedBody = (await scoped.json()) as { users: Array<{ username: string }> }
+    expect(scopedBody.users.map((u) => u.username)).not.toContain("global-carol")
   })
 
   it("scoped search excludes the caller themselves", async () => {
@@ -115,7 +129,7 @@ describe("GET /api/v2/users/search?scoped=1 (AQU-321)", () => {
       "INSERT INTO organizations (id, name, owner_user_id) VALUES (20, 'Solo Org', 230)",
     ).run()
     await env.AQUILLA_PG.prepare(
-      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (20, 230, 400, 230)",
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (20, 230, 600, 230)",
     ).run()
 
     const res = await app.request(
@@ -127,5 +141,70 @@ describe("GET /api/v2/users/search?scoped=1 (AQU-321)", () => {
     const body = (await res.json()) as { users: Array<{ username: string }> }
     // self-searcher should NOT appear in their own scoped search results
     expect(body.users.map((u) => u.username)).not.toContain("self-searcher")
+  })
+
+  it("rejects search when the caller cannot see a member roster (AQU-625)", async () => {
+    await seedUser(800, "hidden-contrib")
+    await seedUser(801, "visible-lead")
+    await seedUser(802, "roster-bob")
+    await seedUser(803, "open-contrib")
+    await seedUser(804, "roster-pal")
+
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (80, 'Closed Roster', 801)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (81, 'Open Roster', 803)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_settings (org_id, settings) VALUES (81, ?)",
+    )
+      .bind(JSON.stringify({ rosterViewMinRole: 400 }))
+      .run()
+    for (const [orgId, userId, role] of [
+      [80, 800, 400],
+      [80, 801, 500],
+      [80, 802, 400],
+      [81, 803, 400],
+      [81, 804, 400],
+    ] as const) {
+      await env.AQUILLA_PG.prepare(
+        "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (?, ?, ?, ?)",
+      )
+        .bind(orgId, userId, role, userId)
+        .run()
+    }
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj-aqu-625', 'Roster', 80, 802)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-aqu-625', 800, 400, 801)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-aqu-625', 801, 500, 801)",
+    ).run()
+
+    const cases = [
+      { username: "hidden-contrib", prefix: "roster-b", status: 403 as const },
+      { username: "visible-lead", prefix: "roster-b", status: 200 as const, contains: "roster-bob" },
+      { username: "open-contrib", prefix: "roster-p", status: 200 as const, contains: "roster-pal" },
+    ]
+    for (const c of cases) {
+      const res = await app.request(
+        `/api/v2/users/search?prefix=${c.prefix}&scoped=1`,
+        { method: "GET", headers: authHeader(await jwtFor(c.username)) },
+        env,
+      )
+      expect({ username: c.username, status: res.status }).toEqual({
+        username: c.username,
+        status: c.status,
+      })
+      const body = (await res.json()) as { rosterHidden?: boolean; users?: Array<{ username: string }> }
+      if (c.status === 403) {
+        expect(body.rosterHidden).toBe(true)
+      } else {
+        expect(body.users?.map((u) => u.username)).toContain(c.contains)
+      }
+    }
   })
 })

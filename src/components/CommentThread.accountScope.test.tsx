@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { CommentThread } from "./CommentThread"
 import {
@@ -45,16 +46,18 @@ describe("CommentThread account-scoped drafts", () => {
       />,
     )
     const textbox = screen.getByRole("textbox")
-    expect(textbox).toHaveValue("alice draft")
+    expect(textbox).toHaveTextContent("alice draft")
 
     act(() => setClientLocalStorageOwner("bob"))
-    expect(textbox).toHaveValue("")
-    fireEvent.change(textbox, { target: { value: "bob draft" } })
+    expect(textbox).toHaveTextContent("")
+    const user = userEvent.setup()
+    await user.click(textbox)
+    await user.type(textbox, "bob draft")
     await waitFor(() => expect(localStorage.getItem(
       ownerScopedLocalStorageKey("comment-draft:project-1:cell-1:thread-1"),
     )).toBe("bob draft"))
 
     act(() => setClientLocalStorageOwner("alice"))
-    expect(textbox).toHaveValue("alice draft")
+    expect(textbox).toHaveTextContent("alice draft")
   })
 })

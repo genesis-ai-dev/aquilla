@@ -36,7 +36,11 @@ and target-format writers beyond the imported original are still open. Full deta
 in `docs/swarm/AGENT-API-TRACES.md`. Rate limiting is now complete: `/search` (2026-07-30 pen
 test), changeset prepare/commit, and artifact upload (2026-08-20 pen test), plus `/me`,
 `/projects`, project/file/cell GETs, artifact meta/content/inspect, and changeset GET/discard
-(2026-08-27 pen test) are all throttled per credential.
+(2026-08-27 pen test) are all throttled. AQU-1843 made every one of those checks a
+single atomic counter upsert keyed on the credential's **owner** rather than the
+credential — minting a second PAT no longer buys a second budget — and made the
+money-spending and write routes fail *closed* when the limiter itself is unavailable,
+while the free paginated reads keep failing open.
 
 ---
 
@@ -121,6 +125,8 @@ economics) lives in the AQU-533 comment thread, not here.
   real use case requires it.
 - Carry an **autonomy ceiling** (`ask` or `act`, below), expiry, last-used metadata,
   rotation, and emergency revocation.
+- Carry an **access ceiling** (`read` or `write`, AQU-1242) — orthogonal to autonomy.
+  See "Access ceiling" below.
 - **Live role/membership resolution on every call** — a credential never outlives or
   exceeds the user's current role. Every command passes the same per-action permission
   checks as the in-app path.
@@ -141,7 +147,7 @@ fact about a person, not a preference. An agent needs none of it to translate. S
 | Layer | Default | Who can change it |
 | --- | --- | --- |
 | Author fields (`lastEditor` on cells, `author` on history) | stable per-project pseudonym `u_xxxxxxxx` | credential `pii` flag |
-| `GET /me` / `get_identity_and_scope` | `credentialId` + mode + scope; no `userId`/`username` | credential `pii` flag |
+| `GET /me` / `get_identity_and_scope` | `credentialId` + mode + access + scope; no `userId`/`username` | credential `pii` flag |
 | Project-wide | authorship exposed pseudonymously | project setting `agentAuthorship` |
 
 - **Pseudonyms are HMAC(SYNC_SECRET_KEY, projectId ‖ author)**, truncated to 8 hex. Stable
@@ -165,6 +171,38 @@ the external boundary — the internal SPA read path legitimately shows real nam
 
 Auth transport: personal access tokens for the initial developer preview; OAuth 2.1
 for broadly compatible remote MCP (connector directories) as a fast follow.
+
+### Access ceiling (AQU-1242)
+
+`access` answers a different question from `mode`: **may this token change anything at
+all?** `mode` is the autonomy dial for writes that are already permitted — an ask-mode
+token still writes, with a human at the approval page.
+
+- **`write`** (the default, and what every token minted before migration 0113 carries)
+  — the original grant: stage, commit, upload artifacts.
+- **`read`** — the whole API is read-only. Changeset prepare, changeset commit and
+  artifact upload answer `403 scope_denied`; reads, search, history and export are
+  unaffected. `GET /me` reports `access: "read"` with a hint saying so, so an agent
+  learns the ceiling from discovery rather than from a refusal on work it already did.
+
+A read-only refusal is **not** retryable and is not about the caller's project role:
+only a human minting a new token can lift it. That is why it is `scope_denied` rather
+than `permission_denied` — the token's scope is what falls short, exactly as it does
+for an out-of-scope org or project.
+
+Enforced at three depths, the deepest being load-bearing: prepare and commit refuse
+early so an agent does not build a plan it can never apply, and `mintInternalSyncToken`
+(the one door every external event write passes — the engine never constructs an
+`AuthorizedEvent` itself) refuses unconditionally, so a write path added later is
+refused even if it forgets the route-level check.
+
+Access is fixed at mint time and cannot be raised by any API call. It is a ceiling like
+every other: the caller's live project role is still resolved per call, so a read-only
+token can only ever narrow what its owner could already do.
+
+Not yet scoped finer than read/write — per-book, per-file and per-interaction-type
+scoping is tracked separately (see AQU-1242's follow-up); a book-scoped token would have
+to filter every read surface, and a half-filtered one would restrict in appearance only.
 
 ### Autonomy modes
 
@@ -271,26 +309,41 @@ Initial command set:
   pinned to `sourceEventId`, parented on the prior target event)
 - `LinkMedia` (attach audio/alignment relationships)
 
-### Multi-language projects: target-language lanes
+### Multi-language projects: lanes by id
 
-A project can hold several target languages at once via AQU-538 **lanes** — a lane is
-a language tag (e.g. `es`, `pt`) registered in the project settings array
-`settings.targetLanes`; every cell keeps one shared source plus one independent
-target row/chain per lane. The external surface is lane-aware end to end:
+A project holds a source lane and any number of target lanes. Each lane is a row
+(`lanes.id`, name, language, role). A language tag is not a lane id and is not
+aliased. Agents read `GET /api/v1/external` and then
+`GET /api/v1/external/projects/:projectId`, which returns the lanes that caller
+may see (`lanes: [{ id, name, language, role }]`). A lane the caller cannot see
+is absent, the same as one that does not exist.
 
-1. **Register lanes** (once): `UpdateProjectSettings` writing `settings.targetLanes:
-   ["es", "pt"]` (merge into the existing blob; pass the live `ifMatchVersion`).
-2. **Write per lane**: `SetTranslation` takes an optional `laneId` — the compiled
-   `target.cell.commit` is stamped `payload.targetLang` and lands on that lane's row
-   and chain slot. An unregistered `laneId` is rejected at prepare
-   (`validation_failed`). Omitted `laneId` = the default lane (unchanged behavior).
-3. **Read per lane**: `GET .../files/:fileId/cells?lane=es` (and the MCP
-   `read_content` `lane` argument) filters target cells to one lane; source cells are
-   always included. Without `lane`, every lane's targets are returned, each carrying
-   its `targetLang`.
+1. **Create lanes**: `CreateProject` or `ProjectSetup` take
+   `lanes: [{ role, language, name?, code? }]`. They do not write
+   `sourceLanguage`, `targetLanguage`, `targetLanes`, or `archivedLanes`.
+   `PatchSettings` and `UpdateProjectSettings` reject those four keys and point
+   at lanes.
+2. **Write per lane**: `laneId` is required on `SetTranslation`, `DraftCells`,
+   `PlanImport` variants, `SplitCell` `targetOffsets`, and the `EmitEvents`
+   kinds that address one target cell (`cell.validate`, `cell.unvalidate`,
+   `cell.backtranslation.set`, `target.cell.repin`). The value is `lanes.id`.
+   Omitting it is `validation_failed` and the message names
+   `GET /api/v1/external`. An unknown id, a tag, or a lane the caller cannot
+   see is `validation_failed` with `lane does not exist` (no name, no
+   "archived"). A visible archived lane is `validation_failed` naming that lane
+   as archived. The compiled event still stores the lane's frozen tag as
+   `payload.targetLang` and the id as `payload.laneId`.
+3. **Read per lane**: `GET .../files/:fileId/cells?lane=<id>` (and export,
+   quality, and the MCP `read_content` `lane` argument) require that id.
+   Prompt preview takes `?targetLang=<id>` — the value is the lane id, not a
+   language tag. Cells come back with `laneId`. Quality and term consistency
+   return `laneId` (the lane's id, including the blank bridge). Similar results
+   return `laneId` and omit rows on a lane the caller cannot see.
 4. **Import several lanes at once**: each `PlanImport` cell takes
-   `variants: [{ laneId, languageTag?, content, contentHtml? }]` sharing that cell's
-   source.
+   `variants: [{ laneId, languageTag?, content, contentHtml? }]`. `laneId` is
+   the lane's id. A bilingual parse passes the same id. A ProjectSetup import
+   that omits it lands on the single target lane that plan leaves; with none
+   or several, `laneId` is required.
 
 Preconditions and drift are lane-scoped — the same cell edited concurrently in two
 different lanes never triggers `plan_stale` across lanes. The self-discovery
@@ -393,11 +446,13 @@ CRUD surface with MCP bolted on.
 | Orgs | `list_orgs` — **implemented** (AQU-1236): the orgs a credential covers, `{ id, name, role, role_source }`. REST: `GET …/orgs` and `GET …/orgs/:orgId/projects` |
 | Projects | `list_projects` (optional `orgId` filter — AQU-1236), `get_project`, `create_project`, `update_project` |
 | Artifacts | `create_artifact_upload`, `inspect_artifact` |
-| Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm, docx; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). `docx` is parsed by the SAME `extractDocxStrings` the in-app Import dialog runs (AQU-1237 moved it off `DOMParser`/JSZip onto the platform-only `xml-lite`/`zip-lite` readers), so an agent import and a browser import of one file yield identical cells. Still DOM-bound and not yet server-parseable: pptx, html, xliff, tmx, usx, idml. **USFM is content-only (AQU-1283):** the `agent:usfm` profile declares `fidelity: "content-only"` and now delivers it — footnotes/endnotes/cross-refs are lifted out of `value` into `metadata.usfmNotes[{ kind, caller, ref, text }]`, character markers are unwrapped, paragraph/poetry markers become line breaks, and USFM `~` becomes a space, so a cell value carries no `\` marker. The original bytes still round-trip on export through the preserved artifact. **`excludeFrontMatter` defaults to the project's `importExcludeFrontMatter` setting** when the request omits it; both the preview and the stage envelope echo `excludeFrontMatter: { value, source: "request" \| "project-setting" \| "default" }`, and the preview reports exactly what the commit will contain. |
-| Reading | `search_project`, `search_projects` (cross-project, explicit id list, max 10 — AQU-1236), `read_content`, `read_history`, `read_comments`, `find_similar_cells`, `get_prompt_preview`, `list_memory`, `read_cell_memory` |
+| Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm, docx; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). `docx` is parsed by the SAME `extractDocxStrings` the in-app Import dialog runs (AQU-1237 moved it off `DOMParser`/JSZip onto the platform-only `xml-lite`/`zip-lite` readers), so an agent import and a browser import of one file yield identical cells. Still DOM-bound and not yet server-parseable: pptx, html, xliff, tmx, usx, idml. **USFM is content-only (AQU-1283):** the `agent:usfm` profile declares `fidelity: "content-only"` and now delivers it — footnotes/endnotes/cross-refs are lifted out of `value` into `metadata.usfmNotes[{ kind, caller, ref, text, raw }]`, character markers are unwrapped, paragraph/poetry markers become line breaks, and USFM `~` becomes a space, so a cell value carries no `\` marker. Export substitutes translations into the preserved original artifact, and **re-attaches each verse's `usfmNotes` to its translation (AQU-1295)** — appended at the end of the verse, restored from `raw` where the importer captured it — so a translated verse keeps its notes instead of losing them with the replaced span. This is the one place the two importers deliberately differ and still agree on the exported file: the in-app import is lossless (markers stay in cell text and the translator edits them in place), the agent import is content-only (markers are parked in metadata and the exporter puts the notes back). **`excludeFrontMatter` defaults to the project's `importExcludeFrontMatter` setting** when the request omits it; both the preview and the stage envelope echo `excludeFrontMatter: { value, source: "request" \| "project-setting" \| "default" }`, and the preview reports exactly what the commit will contain. |
+| Reading | `search_project`, `search_projects` (cross-project, explicit id list, max 10 — AQU-1236), `read_content`, `read_history`, `read_comments`, `find_similar_cells`, `get_prompt_preview`, `list_memory`, `read_cell_memory`, `list_terms` (AQU-1175 — the termbase) |
 | Quality | `read_quality`, `read_term_consistency` — **implemented (AQU-1231)**: per-file health (0-100) + coverage (total/filled/validated + percentages) and the project rollup; and the term-consistency drift list (per active concept: occurrences, consistent count/percent, which approved rendering was used in which cells, and the cells that used none). Both are PARITY reads — `read_quality` delegates to the internal `health-rollup` and `files/:fileId/progress` routes the in-app health ring and progress surfaces read, and `read_term_consistency` runs the SPA's own scan (`src/lib/check/term-consistency-scan.ts`, shared with the in-app "Check file" pass). Whatever counting rules the progress projection applies (e.g. AQU-1083's headings/paratextual exclusion) the API inherits by construction — there is no second denominator to keep in step. REST equivalents: `GET …/projects/:projectId/quality` and `GET …/projects/:projectId/terms/consistency` (both take optional `fileId`, `lane`; the latter also `onlyDrift=1`). |
 | Translation | `prepare_translations` |
+| Transcription | `transcribe_audio`, `transcription_status` — **implemented (Omnilingual ASR, 2026-10-16)**: speech to text with word timings for a cell's selected take or raw WAV, including low-resource languages through Omnilingual zero-shot. Output only; store results with a changeset (`SetTranslation` for a target take, `SetTranscription` for a source media cell). See the addendum at the end. |
 | Verification | `run_checks` — structured, actionable failures (e.g. `"term 'covenant' rendered 3 ways: [refs]"`), never a bare 400. The term-consistency half of this now exists as `read_term_consistency` (above); `run_checks` remains unimplemented for the RULE pass. |
+| Membership | `list_members` — **implemented (AQU-2403)**: the project roster, `{ userId, username, role, roleName, roleSource, direct }`, highest role first, alongside `total` and `truncated` (capped at 500 rows, not paged: the rows kept are the top of the ladder, so a cut never hides somebody a membership command could be aimed at). Floored at MAINTAINER 600, the same floor as changing membership, so the read half of governance is never visible to a credential that cannot act on it; a caller below the floor gets `permission_denied`, not an empty list. `role` is the EFFECTIVE (max-wins, AD-12) level — the same number `commands-membership.ts`'s target cap is judged against, resolved through the shared `resolveFromGrants` so the roster and the gate cannot drift. `direct` says whether a `project_members` row exists, which is what picks the command: `SetRole`/`RemoveMember` act on that row only and 409 `not_a_direct_member` without one, while `InviteMember` 409s `already_member` with one. `roleSource` (`override`/`group`/`org`/`creator`) is why `RemoveMember` is not revocation — the other paths are additive and survive it. REST: `GET …/projects/:projectId/members`. The three write commands (`InviteMember`, `SetRole`, `RemoveMember` — AQU-1185) now have MCP staging via `prepare_translations`'s `commands` argument and, on the OAuth connector, the dedicated `prepare_invite_member` / `prepare_set_role` / `prepare_remove_member` tools; prepare forces ask-mode on all three, so an `act` credential still cannot re-role a project's staff without a human at the approvalUrl. People are named by USERNAME, not email. |
 | Changesets | `get_changeset`, `confirm_changeset`, `discard_changeset` |
 | Jobs | `get_job` |
 | Export | `prepare_export`, `get_export` — shipped instead as the synchronous `export_file` (AQU-858); the job-shaped pair is still open |
@@ -683,7 +738,7 @@ it live in the same thread the people on the project are reading.
 Parity epic AQU-1181 item 7: agents could only write text they wrote themselves, and had
 no way to tell a pending AI draft from a committed human value.
 
-- **New command — `DraftCells`** (`{ fileId, cellIds, laneId?, instructions? }`, sole
+- **New command — `DraftCells`** (`{ fileId, cellIds, laneId, instructions? }`, sole
   command, CONTRIBUTOR). Runs the **project's own copilot** over the named cells and stages
   the result as one changeset. It is a *prepare-time expansion*: drafting happens once, at
   prepare, and the generated text is materialized into ordinary `SetTranslation` commands
@@ -723,7 +778,7 @@ never seen.
 
 - **`GET /api/v1/external/projects/:projectId/settings`** — `{ projectId, settings,
   version, updatedAt }` (`read-routes.ts`). Same credential/scope/role gate and
-  per-credential throttle as every other project read (VIEWER floor; wrong-project PAT
+  per-user throttle as every other project read (VIEWER floor; wrong-project PAT
   gets `scope_denied`). A project with no `project_settings` row reads as `{}` at
   version 0 — patch against 0 to create it. `updated_by` is deliberately NOT echoed:
   this is an agent-facing surface and that id names a human.
@@ -822,7 +877,7 @@ path can add concepts, but nothing showed what the copilot actually receives aft
 injection. An agent had to change a setting, draft a cell, and infer.
 
 - **New read** — `GET /api/v1/external/projects/:projectId/cells/:cellId/prompt-preview`
-  (optional `targetLang=<lane>`, `fileId=<id>`), MCP tool `get_prompt_preview`. Returns
+  (required `targetLang=<lane id>`, optional `fileId=<id>`), MCP tool `get_prompt_preview`. Returns
   the assembled `messages` (system + user, exactly as sent) alongside `parts` — base
   instructions after language substitution, the brief block, the compiled rules block,
   `injectedTerms`, the retrieved `examples`, and the preceding approved-target discourse
@@ -976,6 +1031,17 @@ changesets with no invented semantics, and it is what the workspace does today.
 Found while standing up the IBT Siberian Tatar pilot (`sibtatar`) end-to-end through this
 API. Four gaps, all on the path every partner USFM import takes.
 
+- **Notes survive a translated export (AQU-1295).** Content-only import parks a verse's
+  notes in `metadata.usfmNotes`, and export used to replace the whole verse span with the
+  translation — so every note on a translated verse left the file silently (294 of them on
+  Biblica's NRT Acts, invisible until someone proofread the typeset book). The export plan
+  now re-attaches a verse's own notes to its translation, at the end of the verse. Offsets
+  are not preserved: a translation is a different length and word order, so the source
+  offset addresses nothing in it. Placing a note back at its right point inside a
+  translated verse needs a translator — that is option A in the ticket, and a separate
+  piece of work. `X-Usfm-Lossy-Verse-Count` is unchanged and stays conservative: it still
+  counts a verse whose span held any intra-verse marker, including one whose only markers
+  were notes that are now restored.
 - **Imports are content-only for real (AQU-1283).** See the Ingestion row above. Cell
   `value` no longer carries `\` markers; footnotes move to `metadata.usfmNotes`;
   `importExcludeFrontMatter` is honoured on the agent path and echoed back with its
@@ -1015,3 +1081,450 @@ API. Four gaps, all on the path every partner USFM import takes.
   into a `ProjectSetup` body with every blank named. `GET /api/v1/external/skills` serves
   the sequencing prose itself, so the workflow lives in one server-owned place instead of
   each partner's chat history.
+
+## Status addendum (2026-09-26, AQU-1426 — HideCell / ShowCell)
+
+AQU-1422 gave the editor a reversible **Hide cell**: a per-cell park flag that takes a row
+out of translation and out of every export without deleting anything. Two commands give an
+agent the same act, implemented in `sync-worker/src/external/commands-hide-cell.ts`:
+
+- **`HideCell`** `{ fileId, cellId }` → `source.cell.visibility.set` with `hidden: true`.
+- **`ShowCell`** `{ fileId, cellId }` → the same kind with `hidden: false`.
+
+**Why they exist.** Before them an agent's only way to get a cell out of a file was
+`DeleteCell`, which hard-deletes the row and is refused outright while the cell owns a
+comment, a validator or an audio take. A stray heading or an import artefact needed the
+destructive tool or a human. Hiding deletes nothing: source text, every lane's translation,
+recordings, comments and validations survive and come back untouched on `ShowCell`.
+
+Both are **sugar over `EmitEvents`**, exactly like `RenameFile` — prepare desugars them and
+hands the plan to the EmitEvents engine, so existence checks, prepare-time event ids, the
+approval gate, the provenance envelope and the `/events` perimeter round-trip are the same
+code path every other command uses. The staged plan you read back therefore holds
+`source.cell.visibility.set` events, not a `HideCell` entry.
+
+The kind is deliberately **NOT** on `ALLOWED_EMIT_KINDS`: the raw EmitEvents door still
+refuses it, and these two named commands are the only way in. That is what makes the act
+discoverable (`describe_command`, the role-filtered index, `get_capabilities.commands`) and
+what lets the discovery surfaces say the thing that matters — this is the reversible one.
+
+Rules:
+
+- **`PROJECT_LEAD`**, taken from `REQUIRED_ROLE['source.cell.visibility.set']` rather than
+  restated, so this surface cannot drift below the perimeter that would refuse the event.
+  A Contributor-scoped credential gets the standard role error and nothing is staged.
+- Several may share one changeset, but they cannot mix with other command kinds, and hides
+  cannot mix with shows — the approval page groups its effect lines by event kind, and one
+  sentence cannot honestly describe both directions. Naming one cell twice is refused too.
+- Prepare refuses a cell that does not exist, or one already in the state asked for: a plan
+  whose whole effect is nothing is not worth a human's approval.
+- Commit re-checks that the **source row** still exists (the flag lives there, so a surviving
+  target row is not enough) but deliberately does **not** re-check the current visibility: the
+  compiled event *sets* the flag rather than toggling it, so a human hiding the same cell
+  between prepare and approval leaves commit landing exactly the state that was approved.
+- Hiding is per **cell**, not per lane — one command hides the row in every target language.
+- Cell reads over REST and the MCP `read_content` tool carry an explicit `hidden` boolean per
+  cell, stamped at the agent boundary (`stampCellVisibility` in `read-routes.ts`). The shared
+  serializer still OMITS the key on a visible row for the SPA's sake (a 30k-cell Bible file
+  would pay ~15 bytes a row for a field false on all but a handful); an agent gets the
+  explicit boolean because an absent key is indistinguishable from "this server does not know
+  about hiding". The flag rides the SOURCE row, so a cell's visibility is resolved from there
+  and stamped onto every row of that cell; a cell whose source row is not in the payload at
+  all (possible on a `since=` delta read) carries no `hidden` key rather than a false one.
+
+Out of scope here, each its own issue: the editor's own menu item and reveal toggle
+(AQU-1422), exports (AQU-1423), progress/health/drafting/search (AQU-1424), the Codex
+migration (AQU-1425).
+
+## Status addendum (2026-09-27, AQU-1175 — termbase read + inflection variants)
+
+Terminology was the one settings-adjacent surface an agent could write but not read, and
+the field that decides whether a term matches at all was being dropped on the way in.
+AQU-1176 / AQU-1222 shipped settings read + `PatchSettings`, and AQU-1179 put `term.*` on
+the EmitEvents allowlist; this closes the remaining two gaps and documents a trap in the
+rules engine.
+
+- **New read** — `GET /api/v1/external/projects/:projectId/terms` (optional
+  `status=active|draft|deprecated`, `includeDeleted=1`, `limit`, `cursor`), MCP tool
+  `list_terms`. One entry per concept: `conceptId`, `sourceTerm`, `renderings`
+  (`preferred|admitted|forbidden`), `status`, `notes`, `caseSensitive`, `matchOptions`,
+  `createdBy`, `createdAt`/`updatedAt`, `deletedAt`. Oldest first, VIEWER floor, standard
+  external rate limit. A **parity read**: it delegates to `concepts-read-route.ts`, the same
+  internal route the in-app Terminology page reads, and `read_term_consistency` now shares
+  the same fetcher — so the termbase an agent lists and the termbase the drift scan runs
+  against cannot diverge.
+- **`matchOptions` is always an object, never null.** The column is nullable and `null`
+  means "all defaults", but an agent that cannot distinguish "no variants configured" from
+  "variants unknown" cannot decide whether a term needs fixing. `{}` says: configured for
+  exactly one surface form.
+- **Read before you write.** A second `term.create` for a `sourceTerm` that already has a
+  concept does not merge — it leaves the project two competing entries. Patch the existing
+  `conceptId` with `term.update`.
+
+### `match` (inflection variants) now reaches the projection — it used to be dropped
+
+`term.create` / `term.update` accept `match: { forms?, excludedForms?, affixes?, foldMarks? }`:
+
+| field | meaning |
+| --- | --- |
+| `match.forms` | extra literal source forms treated as alternates of `sourceTerm` |
+| `match.excludedForms` | matched surface forms a human rejected (compared after folding) |
+| `match.affixes` | allow the project's configured prefixes/suffixes around the term |
+| `match.foldMarks` | ignore combining marks (vowel points, accents) on both sides |
+
+The event kinds, `concepts.match_options` and the in-app Terminology UI have carried this
+since AQU-1006, but the EmitEvents payload validators never named `match`, so it was
+**silently dropped off every term written through this API** — a caller got a 200, an
+applied changeset, and a concept matching one surface form. Matching is exact by default,
+so in an inflected language that meant terminology through the Agent API was effectively
+unusable: exact-match on `Боже Слово` flags none of its inflected forms. `match` is now
+validated and forwarded, replaced wholesale when present and left untouched when absent
+(the same rule as `renderings`, for the same reason — no per-item identity to merge on), so
+send the full option set you want and `match: {}` to clear every option back to defaults.
+`forms`/`excludedForms` are capped at 100 entries each, because every entry becomes an
+alternate in a regex that runs on each keystroke in the editor.
+
+An **unrecognized key inside `match` is rejected**, unlike the extra payload keys the other
+validators drop. `{ form: [...] }` for `forms` would otherwise filter down to `{}` — i.e.
+silently clear the options the caller was trying to set, and return 200 for it. Inside the
+one field whose entire history is "silently dropped", a typo has to be an error.
+
+Verify a landed term with `get_prompt_preview` (`injectedTerms`) and `read_term_consistency`.
+
+### Caveat: rule patterns are compiled WITHOUT the `u` flag
+
+A rule you stage through `PatchSettings` (`rules[]`) is evaluated by
+`src/lib/rules/rule-engine.ts`, which compiles `new RegExp(pattern, "g" + caseFlag)` — no
+`u` flag. Only terminology-derived rules (`id` prefixed `term:`) opt into `u`, because the
+shared matcher's boundary patterns need `\p{L}`; user- and agent-authored patterns
+deliberately do not, so that a pattern valid without `u` is never silently invalidated by
+becoming illegal under `u`.
+
+The consequence for an agent is worse than a rejected pattern: **Unicode property escapes
+and `\u{...}` braces still COMPILE without `u`, and quietly mean something else.** Verified
+behaviour:
+
+| pattern | with `u` | as your rule is actually compiled (no `u`) |
+| --- | --- | --- |
+| `\p{L}+` | any letters | matches the literal text `p{L}` — `\p` is an identity escape |
+| `\u{0301}` | U+0301 | matches 301 consecutive `u` characters (`{0301}` parses as a quantifier) |
+| `\p{Cyrillic}` | *invalid property name — throws* | matches literal `p{Cyrillic}` |
+
+So a rule written in the `u` dialect does not error, does not warn, and does not fire on
+the text you meant — it silently matches nothing (or, worse, something unrelated). Nothing
+surfaces in the changeset summary or in `read_quality`, because as far as the API is
+concerned the pattern is a valid regex.
+
+Write patterns in the non-`u` dialect instead: explicit ranges (`[\u0400-\u04FF]` for
+Cyrillic, verified to work in both modes), `\uXXXX` escapes rather than `\u{...}`, and
+literal characters where you can. Then **confirm the rule fires** against a cell you know
+violates it — `read_quality` after the commit — rather than trusting the changeset receipt.
+
+## Status addendum (2026-10-16, Zapier plan workstream B — trigger feeds)
+
+Polling integrations (Zapier first) need newest-first feeds with stable ids. Three
+reads were added; there are still no webhooks.
+
+- **`GET /projects/:projectId/activity?kinds=&fileId=&limit=&cursor=`**
+  (`sync-worker/src/external/activity-route.ts`). Newest first:
+  `{ items: [{ id, kind, fileId, cellId, serverSeq, serverTs, author?, data }], nextCursor }`.
+  - The cursor is a keyset on `server_seq` (`server_seq < cursor`, served by
+    `idx_events_project_seq_id`), not the offset cursor in `pagination.ts`. Events that
+    land between two calls sort above every cursor already issued, so a walk never
+    repeats or skips. Pollers re-read page 1 and dedupe on `id`. An unreadable cursor
+    is a 400, never a silent restart.
+  - Each call scans at most the 5,000 newest events below the cursor. There is no
+    `kind` index on purpose (it would slow writes on `events`), so a rare-kind filter
+    may return a short or empty page plus a `nextCursor` pointing below the window.
+  - `*.mirror` and `link.cursor.advance` never appear.
+  - `data` is a per-kind allowlist (`projectActivityData`): comment `commentId/body/
+    parentCommentId/viaAgent/scope`, target/source cell `value` (+ `laneId/targetLang`,
+    `aiDrafted`), validate `editEventId` + lane, file `name/fileType/bookCode`. Every
+    other kind returns `{}`. Raw payloads would leak validator and assignee identities
+    (e.g. `cell.unvalidate.targetUsername`).
+  - `author` goes through `pii.ts` like every read; `@[username]` mentions inside a
+    comment body get the same treatment (pseudonym, or `@[someone]` under `none`).
+  - The lane read wall applies: lane-scoped kinds on lanes the caller cannot read are
+    dropped after the cursor is fixed, so filtering can shorten a page but never skip.
+- **`GET /projects/:projectId/changesets/pending?limit=`**
+  (`pending-changesets-route.ts`). Staged, unexpired changesets from any credential,
+  newest first, Maintainer+ only: `{ data: [{ id, createdAt, summary, author?,
+  approvalUrl }], nextCursor: null }`. `summary` keeps only numeric counts, `command`,
+  and `{ kind, count }` per entry of an EmitEvents plan's `events` (so a staged comment
+  is not an empty summary), because several summary fields are names. No `credentialId`, `commands` or `receipt`.
+  Mounted from the read router, because `changesets-route.ts` would treat `pending` as
+  a changeset id.
+- **`?sort=created`** on `GET /projects` and `GET /projects/:projectId/files` lists
+  newest first. Any other `sort` value is a 400.
+
+## Status addendum (2026-10-16, Omnilingual ASR — agent transcription)
+
+Spec: `docs/superpowers/specs/2026-10-16-omnilingual-asr.md` §7.
+
+**Tools.** `transcribe_audio` and `transcription_status`. REST:
+`POST /api/v1/external/projects/:projectId/transcriptions` and
+`POST /api/v1/external/projects/:projectId/transcriptions/status`.
+
+**What it does.** Transcribes either a cell's selected recorded take
+(`laneId` + `fileId` + `cellId`) or raw audio (`audio: { data, format: "wav" }`,
+16 kHz mono PCM16, up to 10 min). Returns
+`{ text, words: [{ text, start, end }], model, timingsApproximate, creditsCharged }`.
+Times are seconds from the start of the whole clip.
+
+**Models.** `model` is `auto` (default) | `whisper` | `qwen3-asr` | `omni-ctc` | `omni-zs`.
+`auto` picks Whisper for its 99 languages, Qwen3-ASR for Chinese varieties, and
+Omnilingual CTC for any other language code. It never picks zero-shot. `language`
+(BCP-47) defaults to the lane's language code.
+
+**Zero-shot (`omni-zs`).** It learns the language from up to 10 of the lane's own
+takes that have a transcript (2–30 s each). By default the examples are ranked by
+word overlap with the cell's source text, then validation, then length near 8–15 s;
+`exampleCellIds` names them instead. It cold-starts in about 2 minutes, so warm it first.
+
+**Same terms as the app.** Every request window goes to auth-worker's
+`POST /api/v1/audio/internal/transcriptions` (shared `SYNC_SECRET_KEY`, like
+DraftCells). That route runs the same code as the in-app route: the org's
+`transcription.zeroShotEnabled` gate, the AI spend ceiling, the per-user rate limit,
+the weekly-allowance reservation, and settlement on provider cost (Whisper/Qwen) or
+metered GPU-seconds (Omnilingual). `creditsCharged` is that settlement in credit units;
+it is `null` while a provider cost is still being reconciled.
+
+**Credentials.** Ordinary REST callers need a **project-scoped** `aqk_` credential with
+**read-write** access (the call spends credits), and a contributor role or higher.
+
+Organization-scoped MCP OAuth connections can transcribe within their selected
+organizations and live project permissions. The MCP request remains resource-bound;
+its token cannot be replayed on ordinary REST. Write access, Contributor permissions
+and project credit admission still apply.
+
+**Windowing.** WAV is cut server-side: 30 s windows for Omnilingual, 60 s for
+Whisper/Qwen. Each boundary moves back up to 2 s to the quietest 20 ms frame, so
+a word is not split. A stored compressed take (webm/ogg) cannot be decoded in a
+Worker, so it must fit one window. webm goes only to `omni-ctc`/`omni-zs`, because
+OpenRouter does not document webm input.
+
+**Errors.**
+
+| Situation | Code | `details.reason` |
+| --- | --- | --- |
+| Zero-shot model is cold | `job_failed` | `asr_warming` (with `retryAfterSeconds` and `nextStep`) |
+| Org turned zero-shot off | `permission_denied` | `zero_shot_disabled` |
+| No usable examples in the lane | `validation_failed` | `zs_no_examples` |
+| A webm take was sent to Whisper/Qwen | `validation_failed` | `audio_format_unsupported_for_model` |
+| Allowance or credit cap reached | `rate_limited` | — |
+
+**Preview limitation.** A PR-preview sync-worker cannot call a preview auth-worker
+(see `docs/DEPLOYMENT-ENVIRONMENTS.md`), so these tools work on dev and prod only.
+
+### Worked example: a Dholuo lane (`luo`), zero-shot
+
+```jsonc
+// 1. Warm the model and poll until it is ready (~2 min when cold).
+{ "name": "transcription_status", "arguments": { "projectId": "p1", "model": "omni-zs", "warm": true } }
+// → { "state": "starting", "estGpuSecPerAudioSec": 0.5 }
+{ "name": "transcription_status", "arguments": { "projectId": "p1", "model": "omni-zs" } }
+// → { "state": "ready", "estGpuSecPerAudioSec": 0.5 }
+
+// 2. Transcribe one cell's take. Examples come from the lane's own recordings.
+{ "name": "transcribe_audio", "arguments": {
+    "projectId": "p1", "laneId": "a1b2c3d4", "fileId": "jhn", "cellId": "JHN 1:1",
+    "model": "omni-zs" } }
+// → { "text": "Chakruok ne Wach ni", "words": [{ "text": "Chakruok", "start": 0.42, "end": 1.1 }, …],
+//     "model": "omni-zs", "timingsApproximate": false, "creditsCharged": 1.9 }
+
+// 3. To keep it, stage it as the lane's text. The approval gate applies as for any write.
+{ "name": "prepare_translations", "arguments": { "projectId": "p1", "commands": [
+    { "kind": "SetTranslation", "laneId": "a1b2c3d4", "fileId": "jhn", "cellId": "JHN 1:1",
+      "value": "Chakruok ne Wach ni" } ] } }
+```
+
+A take in a target lane is a recording of that lane's text, so its transcript
+is stored with `SetTranslation`. A source media cell's transcript uses
+`SetTranscription` instead (project-lead floor). Call `describe_command` for the
+exact parameters before staging either.
+
+## Status addendum (2026-10-26, AQU-2192 — built-in checks and rules over the settings surface)
+
+An agent could neither see nor set a project's checks. The built-in checks that are
+on by default are never stored, so the raw `settings` blob showed nothing about them,
+and PatchSettings accepted any object for `rules`, `rulePenalties`,
+`algorithmicChecks` and `algorithmicChecksByLane`.
+
+- **Reading.** `GET .../projects/:projectId/settings` and `GET .../projects/:projectId`
+  (and the MCP `get_project_settings` / `get_project`) now carry two more fields beside
+  `settings`: `builtinChecks`, `[{ id, name, enabled, severity, overridden }]` for the
+  whole project, and `builtinChecksByLane`, the same list for each lane that has its own
+  `algorithmicChecksByLane` entries, keyed by lane tag (`""` is the default lane). A lane
+  entry replaces the project-wide entry for that check, as on the Rules page. Bible data
+  checks (`bkp:…` ids) are listed only while the project's Bible data checks are on. A
+  lane the caller cannot see is left out. `settings` itself is unchanged: it is the raw
+  stored blob that PatchSettings patches against.
+- **Writing.** The four keys now have checked shapes (shown by
+  `describe_command("PatchSettings")`). To turn checks off on a web-article project:
+
+  ```json
+  { "kind": "PatchSettings", "projectId": "p1", "ifMatchVersion": 7, "ops": [
+    { "key": "algorithmicChecks", "value": {
+      "usfm-structure": { "enabled": false },
+      "footnote-quote-mismatch": { "enabled": false } } } ] }
+  ```
+
+  The op replaces the whole `algorithmicChecks` value, so start from the stored map in
+  `settings.algorithmicChecks` and add to it. Omit `severity` to keep the default. The
+  command's doc maps each Rules page name ("USFM markers") to its id (`usfm-structure`).
+  Unknown check ids, unknown fields and a `type: "builtin"` rule are rejected with the
+  field named. Rules read back from `settings.rules` can be patched unchanged.
+- **Not covered.** The "Style rules" section of the Rules page lives in the `style_rules`
+  table (auth-worker `/api/v2/projects/:id/style-rules`). It is a different store and is
+  not reachable through the `rules` key. AQU-2195 (below) covers it.
+- **Source of truth.** Check ids, English names and defaults live in
+  `db/shared/builtin-checks.ts`; the Rules page and this read both resolve from it.
+
+## Status addendum (2026-10-27, AQU-2195 — style rules: list and review)
+
+"Extract from knowledge base" can propose hundreds of style rules, and until now only a
+person in the Rules page could read or decide them. An agent with a project credential
+can now do the whole pass.
+
+- **Reading.** `GET .../projects/:projectId/style-rules` (MCP `list_style_rules`). Needs
+  VIEWER, and a read-only credential works. Optional `?status=proposed|approved|rejected|archived`
+  (anything else is `validation_failed`) and `limit` (default 100, max 500) + `cursor`.
+  Each rule carries `id`, `instruction`, `category`, `scope`, `severity`, `enabled`, `status`,
+  `version`, `humanEdited` and `source`; a rule that cites a knowledge document also carries
+  `sourceDocTitle`. `inherited: true` marks a rule the project's org shares: it shows up here
+  as it does in the app, and it cannot be reviewed through the project. The rows, the
+  status filter and the ordering (newest first) come from the same code as the in-app list.
+- **Writing.** One command, `ReviewStyleRules`, a sole command in its changeset:
+
+  ```json
+  { "kind": "ReviewStyleRules", "projectId": "p1", "decisions": [
+    { "ruleId": "01J...", "action": "approve", "ifMatchVersion": 1 },
+    { "ruleId": "01K...", "action": "reject", "ifMatchVersion": 1 },
+    { "ruleId": "01L...", "action": "update", "ifMatchVersion": 1, "patch": { "severity": "major" } } ] }
+  ```
+
+  `approve` and `reject` need a `proposed` rule. `update` takes a `patch` (required there,
+  refused elsewhere) of `instruction`, `category`, `severity` and `enabled`, marks the rule
+  human-edited and bumps its `version`; its status stays as it was. Editing a rule and
+  approving it takes two changesets, because a rule appears once per command.
+- **Floor.** PROJECT_LEAD, the in-app review floor: checked at prepare (`permission_denied`
+  below it) and re-resolved at commit. In ask mode the human who confirms must hold
+  PROJECT_LEAD too, and a confirmation from anyone lower refuses the commit without
+  consuming it. Unlike a Living Memory proposal there is no "lands as proposed" fallback:
+  approving a rule changes every later draft. Act mode with a PROJECT_LEAD credential
+  applies directly.
+- **Batch and atomicity.** At most 500 decisions per command, one per rule; split a longer
+  pass across changesets. Commit locks the rule rows, checks every decision, and writes
+  nothing unless all of them pass, in one transaction. A missing rule, an org-inherited
+  rule, a rule in the wrong state for its action, or a stale version refuses the whole
+  commit with `details.decisions: [{ index, ruleId, code, message }]` where `code` is
+  `not_found`, `org_inherited`, `invalid_state` or `stale_version`. Any `stale_version`
+  makes the error `plan_stale`: re-read the list and stage again. Prepare runs the same
+  check against the live rows, so most refusals arrive before a human is asked.
+- **Receipt.** `receipt.rules` lists each rule's `ruleId`, `action`, new `status` and
+  `version`. Approve and reject leave `version` unchanged (the in-app review does not bump
+  it either); only `update` does. `reviewed_by` is the credential owner's username, as with
+  the in-app route.
+- **Prompt preview.** `GET .../cells/:cellId/prompt-preview` returns the style rules as
+  lines of the Checks hint, `parts.checks` (AQU-2342: one checks block with the project, lane
+  and org rules and the Language-profile slots), and in the assembled system message. It carries what the
+  editor's drafting call carries: approved, enabled rules (the project's and its org's) that
+  apply to that cell through the applicability graph. Proposed, rejected, archived and
+  disabled rules never appear.
+
+## Status addendum (2026-11-03, AQU-2342 — one place for AI instructions: changes for callers)
+
+Every drafting prompt now reads ONE project text, `settings.translationInstructions`
+(see `docs/AI-GUIDANCE.md`). Until a project writes it, it is composed on read from the old
+sources (brief, a customized `systemPrompt`, Living Memory instruction/standard entries, the
+decision log, the legacy agent brief, approved `decisions/` memories). What an external caller
+sees differently:
+
+- **Prompt preview — part names changed.** `GET .../cells/:cellId/prompt-preview` returns
+  `parts.instructions` (the instructions block), `parts.checks` (one Checks hint: project, lane
+  and org rules, the style rules in force for the cell, the filled Language-profile slots) and
+  `parts.terminology` (only the concepts that occur in the cell's source, with their notes).
+  The old `parts.brief`, `parts.rules` and `parts.styleRules` are **deprecated aliases kept for
+  one release**, then removed: `brief` equals `instructions`; `rules` is the rule hints of
+  `checks` (no style rules) followed by `terminology`, roughly what the old rules block
+  covered; `styleRules` is the style-rule lines of `checks` on their own. Their text follows
+  the new block format, not the old one. Read the new names.
+- **The legacy brief reads return the instructions.** `GET .../memory`'s `legacyBrief.content`
+  (external) and the in-app `GET /api/v2/projects/:id/brief` now carry the RESOLVED
+  instructions text, the one prompts actually use, in the same shape. The brief row's
+  `version` is unchanged, so `PUT .../brief` with `ifMatchVersion` still works — but once a
+  project has written instructions, the brief row no longer reaches any prompt. Write
+  `translationInstructions` with PatchSettings instead.
+- **Settings read.** `GET .../settings` adds `translationInstructions` (resolved) and
+  `translationInstructionsStored` beside the raw `settings` blob.
+- **Decisions append.** Approving an AddDecision (or a `decisions/` memory in the app) appends
+  its text to the instructions; a full instructions box refuses the approval with `conflict`.
+- **Brief proposals.** `propose_brief_update` is retired from the agent's tools; a legacy call
+  becomes a `decisions/instructions-<hash>.md` memory proposal. Brief proposals that were still
+  pending are moved into the memory queue the same way the first time the project's memory
+  list is read (`GET /api/v2/projects/:id/agent-memory`): the memory carries
+  `provenance.briefProposalId`, and the proposal is closed as `rejected` with
+  `reviewed_by = "aqu-2342:moved-to-decisions"`. A proposal whose text breaks the memory
+  rules (over 10 KB, a secret-looking string) is left pending. The `/brief/proposals` routes
+  still answer, unchanged; approving one there writes the legacy brief row only.
+
+## Status addendum (2026-11-05, AQU-2402 — unknown settings keys name the keys themselves)
+
+Setting a built-in check through the Claude/ChatGPT **OAuth connector** was a guessing
+game. `PatchSettings` refused an unrecognised key with "call
+`describe_command("PatchSettings")` for the valid keys" — and that tool is deliberately
+absent from the OAuth profile's tool list (`external/mcp-chatgpt-tools.ts`:
+`MCP_TOOLS.filter(t => t.name !== 'describe_command')`), so the only hint on offer could
+not be followed. The key was found by reading a Linear title.
+
+- **The refusal names the keys.** `validateSettingsKeyValue` now returns
+  `unknownSettingsKeyMessage(key)` (`db/shared/project-settings-keys.ts`): the key that was
+  sent, the writable key the caller probably meant where one is unambiguous, and then
+  every writable key, generated from `PROJECT_SETTINGS_KEYS`. `describe_command` is still
+  cited for the per-key *types*, but it is no longer the only way out.
+- **The read name points at the write key.** `SETTINGS_KEY_ALIASES` maps the obvious
+  wrong names onto the right one — above all `builtinChecks` → `algorithmicChecks` (a read
+  returns the checks under a name that cannot be written back) and `builtinChecksByLane` →
+  `algorithmicChecksByLane`, plus `checks`, `qualityChecks`, `brief`, `instructions`,
+  `tts`. `suggestSettingsKey` also folds case and separators (`algorithmic_checks`), and
+  stays silent when a probe matches more than one key.
+- **Every bad op is reported.** `validatePatchSettingsCommand` used to return at the first
+  problem, so `details` carried only `ops[0]` and each wrong key cost its own round trip.
+  It now reports one issue per bad op and refuses the command once at the end.
+- **The tool schema names them too.** `patch_settings`'s `ops[].key` carries the writable
+  keys as a JSON Schema `enum` plus the same list in prose, so a caller holding nothing
+  but the tool list can turn a check on or off. The OAuth profile rewrites tool
+  *descriptions* but keeps `inputSchema`, which is why the list lives there.
+  `get_project_settings` now says in so many words that `builtinChecks` is read-only and
+  `algorithmicChecks` is the key that writes it.
+
+## Status addendum (2026-11-05, AQU-2407 — the brief is writable as answers over MCP)
+
+`SetBrief` and `RegenerateBriefSummary` existed on the REST changeset surface but on no MCP
+tool, so an MCP-only agent that wanted to set a brief reached for `patch_settings { key:
+"translationBrief" }` and wrote the whole record by hand: `parameters`, `freeformNotes`,
+`l2Markdown`, `l1Summary`, `version`, `updatedAt`, `updatedBy`, `l1GeneratedAt`. That works
+and still does — but nothing checks that a hand-written `l2Markdown` / `l1Summary` agree
+with the answers, and the provenance fields are whatever the agent typed.
+
+- **`prepare_set_brief { projectId, parameters?, freeformNotes?, ifMatchVersion?,
+  changesetId? }`** — the MCP door onto `SetBrief`. Answers only: the server merges the
+  named sections into the live brief (unnamed sections keep their value), reassembles
+  `l2Markdown` in the code-owned section order, stamps `version` / `updatedAt` /
+  `updatedBy` from the credential, and re-renders the L1 summary best-effort at commit. All
+  of that is `commands-set-brief.ts`, unchanged — `mcp-handlers.ts` marshals arguments and
+  nothing else.
+- **`regenerate_brief_summary { projectId, ifMatchVersion?, changesetId? }`** — the MCP door
+  onto `RegenerateBriefSummary`: the agent's equivalent of the in-app "Regenerate summary"
+  button, for a brief whose sections were committed without a render (the commit receipt's
+  `briefSummary.rendered: false`) or edited in-app without one.
+- **`ifMatchVersion` is OPTIONAL on both tools**, unlike `patch_settings`. Neither command
+  asks the caller to read-modify-write the key, so the mandatory version only bought a
+  round trip — and an agent that gave up on it reached for `patch_settings`. Omitted, the
+  handler reads the live version through the same delegated settings read
+  `get_project_settings` serves (identical scope, role and throttle gates) and pins it;
+  passed, it is honoured verbatim, which is how a caller asserts the brief has not moved
+  since it read it. Drift still answers `plan_stale` at prepare and again at commit.
+- **`get_capabilities.translationBrief`** names both tools beside `get_project_settings`,
+  because the brief lives *inside* the settings blob and an agent that found
+  `patch_settings` first had no reason to look further.

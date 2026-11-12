@@ -38,6 +38,8 @@ says "deprecated: prefer PatchSettings") · **PatchSettings** (structural, 500) 
 **InviteMember / SetRole / RemoveMember** (governance, 600 — always ask-mode; see §2).
 AQU-1228 adds the Living Memory writes: **AddExample** / **AddDecision** / **AddNote**
 (structural, 400) and **RetireExample** (structural, 500).
+AQU-2195 adds **ReviewStyleRules** (structural, 500): bulk approve / reject / update of
+style rules, receipt-only and all-or-nothing; see AGENT-API.md's AQU-2195 addendum.
 
 ### Membership — InviteMember / SetRole / RemoveMember (AQU-1185)
 
@@ -89,15 +91,20 @@ change (`kind`, `userId`, `username`, `role`, `previousRole`) as the audit recor
   `patchProjectSettingsShared` in `db/shared/projects.ts`). One op per key — a duplicate key is
   `validation_failed` (a settings op is authored intent, not a loop batch; last-wins would hide a bug).
 - Per-key floors: `terminology` → org `termbaseEditMinRole` (read `org_settings`, default 500);
-  `sourceLanguage` / `targetLanguage` / `targetLanes` / `archivedLanes` → org
-  `languageEditMinRole` (read `org_settings`, default 600 — AQU-1086); everything else 600
-  (MAINTAINER). A batch takes the MAX floor across its ops, so lowering one floor never widens
-  another key. Both org floors are resolved at prepare **and** re-resolved at commit; the
-  catalog's static floor advertises each key's *default*, so an org that lowers
-  `languageEditMinRole` makes the catalog conservative rather than permissive.
+  everything else 600 (MAINTAINER). A batch takes the MAX floor across its ops, so lowering
+  one floor never widens another key. The org floor is resolved at prepare **and**
+  re-resolved at commit; the catalog's static floor advertises the key's *default*, so an
+  org that lowers `termbaseEditMinRole` makes the catalog conservative rather than permissive.
+- `sourceLanguage`, `targetLanguage`, `targetLanes`, and `archivedLanes` are not settings
+  (AQU-1615). `PatchSettings` and `UpdateProjectSettings` reject them at validation, before
+  any lane row would be created, with a message that points at `CreateProject` /
+  `ProjectSetup` `lanes: [{ role, language, name?, code? }]`. The in-app
+  `languageEditMinRole` floor still applies to the app's own settings write; it does not
+  reopen these keys on the external API.
 - **POLICY_SETTINGS_KEYS** (exported const) — `agentMemoryAutonomy`, `validationRoleFloor`,
   `validationNamedUsers`, `validationCount`, `validationCountAudio`, `allowSelfValidation`,
-  `harmonize_min_role`, `contributeToGlobalTm`, `cellEditingFloor` (AQU-1068),
+  their audio twins `validationRoleFloorAudio`, `validationNamedUsersAudio` and
+  `allowSelfValidationAudio` (AQU-1571), `harmonize_min_role`, `contributeToGlobalTm`, `cellEditingFloor` (AQU-1068),
   `agentAuthorship` (AQU-1180 — the switch that hides translator identity from agents) —
   are writable in the **restrictive direction only** (AQU-1282). A write that TIGHTENS
   oversight stages like any other (still ask-mode, still human-approved); one that would
@@ -121,7 +128,7 @@ change (`kind`, `userId`, `username`, `role`, `previousRole`) as the audit recor
 
 ```ts
 { kind: 'EmitEvents',
-  events: { kind: string; fileId?: string; cellId?: string; laneId?: string;
+  events: { kind: string; fileId?: string; cellId?: string; laneId?: string; // required lanes.id on cell.validate, cell.unvalidate, cell.backtranslation.set, target.cell.repin
             payload?: Record<string, unknown> }[] }
 ```
 
@@ -157,6 +164,13 @@ change (`kind`, `userId`, `username`, `role`, `previousRole`) as the audit recor
   their own kinds, so the audit trail keeps "edited" apart from "made binding"); a `term.create`
   naming a live concept is rejected rather than upserted over it; a `term.approve` of a non-draft
   is rejected rather than applied as a projection no-op.
+  `match` (AQU-1175) carries the per-concept matching options — `forms`, `excludedForms`,
+  `affixes`, `foldMarks` — on create and update, and is what makes a term match anything beyond
+  its lemma; matching is exact without it, so a term staged without `forms` in an inflected
+  language flags none of its inflected surfaces. It replaces wholesale when present and is left
+  untouched when absent (the `renderings` rule), `{}` clears it, and an unrecognized key inside
+  it is REJECTED rather than dropped — the validator used to omit `match` entirely, which is
+  exactly how a `forms`/`form` typo would otherwise clear a caller's options behind a 200.
 - Explicitly NOT allowlisted: `target.cell.commit` (use SetTranslation), `source.cell.*`,
   `cell.audio.*` (use LinkMedia), reorders/retimes/mirrors, `file.timing.set`, `file.create`,
   cell structure (split/merge/insert/delete), membership, and project lifecycle. Rules and Living

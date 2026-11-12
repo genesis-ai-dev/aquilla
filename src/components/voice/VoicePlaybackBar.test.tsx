@@ -5,8 +5,8 @@
  * volume) and that play-all is disabled when no line has voiced audio.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { act, render, screen, fireEvent } from "@testing-library/react"
 import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 
 // No session → useFileAudioAttachments bails before any network read and
@@ -29,6 +29,9 @@ vi.mock("@/lib/audio/play-queue", async (importActual) => {
 // speed test can put the bar in the film-driven state without a video element.
 const videoController = vi.hoisted(() => ({ setRate: vi.fn(), setVolume: vi.fn() }))
 const transportSource = vi.hoisted(() => ({ value: "queue" as "queue" | "video" }))
+// AQU-1565 follow-up: what the bar asked the transport, so a test can see the
+// playback source it read from the store.
+const transportArgs = vi.hoisted(() => ({ last: null as null | { playbackSource?: string } }))
 vi.mock("@/lib/timeline/video-controller", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/timeline/video-controller")>()
   return { ...actual, useVideoController: () => videoController }
@@ -37,18 +40,43 @@ vi.mock("@/hooks/useTransportForFile", async (importActual) => {
   const actual = await importActual<typeof import("@/hooks/useTransportForFile")>()
   return {
     ...actual,
-    useTransportForFile: (args: Parameters<typeof actual.useTransportForFile>[0]) => ({
-      ...actual.useTransportForFile(args),
-      source: transportSource.value,
+    useTransportForFile: (args: Parameters<typeof actual.useTransportForFile>[0]) => {
+      transportArgs.last = args
+      return {
+        ...actual.useTransportForFile(args),
+        source: transportSource.value,
+      }
+    },
+  }
+})
+
+// Lets a test hold the file's attachment read open (a signed-in cold load).
+const audioRead = vi.hoisted(() => ({ hasLoaded: true }))
+vi.mock("@/hooks/useFileAudioAttachments", async (importActual) => {
+  const actual = await importActual<typeof import("@/hooks/useFileAudioAttachments")>()
+  return {
+    ...actual,
+    useFileAudioAttachments: (...args: Parameters<typeof actual.useFileAudioAttachments>) => ({
+      ...actual.useFileAudioAttachments(...args),
+      hasLoaded: audioRead.hasLoaded,
     }),
   }
 })
 
+// Counts the bar's own programme layouts (AQU-1758), laying out as ever.
+vi.mock("@/lib/timeline/programme", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/timeline/programme")>()
+  return { ...actual, layOutProgramme: vi.fn(actual.layOutProgramme) }
+})
+
 import { VoicePlaybackBar } from "./VoicePlaybackBar"
-import { startQueue, setQueueRate } from "@/lib/audio/play-queue"
+import { startQueue, setQueueRate, __setQueuePlaybackForTests } from "@/lib/audio/play-queue"
+import { layOutProgramme } from "@/lib/timeline/programme"
+import { TimingModeControl } from "@/components/timeline/TimingModeControl"
 import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
+import { __resetPlaybackSourceForTests, setPlaybackSource } from "@/lib/audio/playback-source"
 
 function cell(over: Partial<CellData> = {}): CellData {
   return {
@@ -87,6 +115,28 @@ describe("VoicePlaybackBar", () => {
     const play = screen.getByLabelText("Play all") as HTMLButtonElement
     expect(play.disabled).toBe(false)
     expect(screen.getByText("Press play to listen")).toBeTruthy()
+  })
+
+  // AQU-1643: a source clip arriving with the read hands the file from the
+  // picture to the queue, so a press before it lands went to the wrong engine.
+  it("holds play-all until the file's audio has been read", () => {
+    transportSource.value = "video"
+    audioRead.hasLoaded = false
+    try {
+      const { rerender } = render(
+        <VoicePlaybackBar cells={[cell()]} projectId="p" session={null} settings={undefined} />,
+      )
+      const play = screen.getByLabelText("Play all") as HTMLButtonElement
+      expect(play.disabled).toBe(true)
+      expect(screen.queryByText("Press play to listen")).toBeNull()
+      expect(screen.queryByText("No voiced lines yet")).toBeNull()
+      audioRead.hasLoaded = true
+      rerender(<VoicePlaybackBar cells={[cell()]} projectId="p" session={null} settings={undefined} />)
+      expect((screen.getByLabelText("Play all") as HTMLButtonElement).disabled).toBe(false)
+    } finally {
+      transportSource.value = "queue"
+      audioRead.hasLoaded = true
+    }
   })
 
   it("renders nested below content under now-playing", () => {
@@ -213,5 +263,186 @@ describe("VoicePlaybackBar — playback speed", () => {
     pickSpeed("0.75x")
     expect(setQueueRate).toHaveBeenCalledWith(0.75)
     expect(videoController.setRate).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-2251 (Sam, Oct 29): following the source on a file with a film, a hidden
+// line is passed through, not jumped — the film and its sound play on across
+// it. Next and previous line step to it like any other line.
+describe("VoicePlaybackBar — a hidden line on a film's clock", () => {
+  const seek = vi.fn()
+  const cells = [
+    cell({ id: "a", startTime: 0, endTime: 2 } as Partial<CellData>),
+    cell({ id: "b", startTime: 3, endTime: 5, hidden: true } as Partial<CellData>),
+    cell({ id: "c", startTime: 6, endTime: 8 } as Partial<CellData>),
+  ]
+  beforeEach(() => {
+    transportSource.value = "video"
+    seek.mockClear()
+    ;(videoController as unknown as { seek: typeof seek }).seek = seek
+  })
+  afterEach(() => {
+    transportSource.value = "queue"
+    __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 })
+  })
+
+  it("next line goes to the hidden line, not past it", () => {
+    act(() => __setQueuePlaybackForTests({ cellId: null, currentTime: 0.5, playing: false, duration: 8 }))
+    render(<VoicePlaybackBar cells={cells} projectId="p1" session={null} settings={undefined} />)
+    fireEvent.click(screen.getByLabelText("Next line"))
+    expect(seek).toHaveBeenLastCalledWith(3)
+  })
+
+  it("previous line goes back to the hidden line, not past it", () => {
+    act(() => __setQueuePlaybackForTests({ cellId: null, currentTime: 6.5, playing: false, duration: 8 }))
+    render(<VoicePlaybackBar cells={cells} projectId="p1" session={null} settings={undefined} />)
+    fireEvent.click(screen.getByLabelText("Previous line"))
+    expect(seek).toHaveBeenLastCalledWith(3)
+  })
+})
+
+// AQU-1565 follow-up. WHY: on a YouTube file with an uploaded recording the bar
+// must drive the same engine the pane is sounding, which is the video's own
+// sound until the person picks the recording. The bar reads that choice from
+// the shared store, per file.
+describe("VoicePlaybackBar — the chosen sound", () => {
+  const YT = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+  const media = cell({
+    id: "m1", medium: "media", type: "media", original: "episode.wav",
+    selectedAudioId: "f1-clip", attachments: { "f1-clip": { url: "frontier-audio://f1-clip.wav", type: "audio" } },
+  })
+
+  it("asks for the video's own sound by default, and the recording once picked", () => {
+    __resetPlaybackSourceForTests()
+    localStorage.removeItem("aquilla:playbackSource:f1")
+    const { rerender } = render(
+      <VoicePlaybackBar cells={[media]} projectId="p" session={null} settings={undefined} coreMediaUrl={YT} videoPaneOnScreen />,
+    )
+    expect(transportArgs.last?.playbackSource).toBe("video")
+    act(() => setPlaybackSource("f1", "recording"))
+    rerender(
+      <VoicePlaybackBar cells={[media]} projectId="p" session={null} settings={undefined} coreMediaUrl={YT} videoPaneOnScreen />,
+    )
+    expect(transportArgs.last?.playbackSource).toBe("recording")
+    localStorage.removeItem("aquilla:playbackSource:f1")
+    __resetPlaybackSourceForTests()
+  })
+
+  it("asks for the recording on a streamed film, as it always did", () => {
+    render(
+      <VoicePlaybackBar cells={[media]} projectId="p" session={null} settings={undefined} coreMediaUrl="https://cdn/ep.m3u8" videoPaneOnScreen />,
+    )
+    expect(transportArgs.last?.playbackSource).toBe("recording")
+  })
+})
+
+// Media redesign, layout (Sam, Oct 27): the media view's transport is a thin
+// strip along its bottom — the time, previous · play · next, speed, volume,
+// and nothing else.
+describe("VoicePlaybackBar — the media view's strip", () => {
+  it("is 32 px with the time at the left, the three transport buttons, then speed and volume", () => {
+    render(<VoicePlaybackBar variant="strip" cells={[cell()]} projectId="p" session={null} settings={undefined} />)
+    const strip = screen.getByTestId("media-play-strip")
+    expect(strip.className).toContain("h-8")
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 0:00")
+    const centre = screen.getByTestId("top-transport")
+    expect(Array.from(centre.querySelectorAll("button")).map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Previous line",
+      "Play all",
+      "Next line",
+    ])
+    expect(screen.getByTestId("transport-speed")).toBeInTheDocument()
+    expect(screen.getByTestId("transport-volume")).toBeInTheDocument()
+    // No "now playing" line, no scrubber, no status.
+    expect(screen.queryByRole("slider", { name: "Seek" })).toBeNull()
+    expect(strip).not.toHaveTextContent(/Nothing playing|Press play/)
+  })
+
+  it("drops the time first on a narrow view (a container query), never the buttons", () => {
+    render(<VoicePlaybackBar variant="strip" cells={[cell()]} projectId="p" session={null} settings={undefined} />)
+    expect(screen.getByTestId("transport-time").className).toMatch(/\bhidden\b.*@md:inline/)
+    expect(screen.getByTestId("transport-play").className).not.toContain("hidden")
+  })
+})
+
+// AQU-1758, from the removal's own screenshots: before anything played, a
+// book's strip read "0:00 / 0:00"; while Ruth 1 played it read "1:16 / 1:27"
+// beside a Timing control saying "1 min 28 s long". Both are the same number —
+// the chapter laid out end to end, 87.94 s — and the strip floored it.
+describe("VoicePlaybackBar — the strip's length (AQU-1758)", () => {
+  const take = (id: string, ms: number): CellData => {
+    const audioId = `audio-${id}-1700000000-take.wav`
+    return cell({
+      id, cellLabel: id, translated: "",
+      selectedAudioId: audioId,
+      attachments: { [audioId]: { type: "audio", url: "frontier-audio://take", durationMs: ms } },
+    } as Partial<CellData>)
+  }
+  // A book: no times, two recorded verses, 87.94 s laid end to end.
+  const BOOK = [take("v1", 43_700), take("v2", 44_240)]
+  const strip = () => (
+    <VoicePlaybackBar variant="strip" cells={BOOK} projectId="p" session={null} settings={undefined} freeTiming />
+  )
+  beforeEach(() => {
+    transportSource.value = "queue"
+    __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 })
+  })
+
+  it("shows the book's laid-out length before anything plays", () => {
+    expect(layOutProgramme(BOOK).programme.totalSec).toBeCloseTo(87.94, 2)
+    render(strip())
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 1:28")
+  })
+
+  it("states that length as the Timing menu does, while it plays too", async () => {
+    // Board 55: the length is in the Timing menu, beside each choice.
+    render(<TimingModeControl mode="audioFirst" onChange={() => {}} sourceUnavailable lengths={{ audioFirst: 87.94 }} />)
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    expect(await screen.findByTestId("tl-timing-mode-audioFirst-length")).toHaveTextContent("1 min 28 s")
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    act(() => __setQueuePlaybackForTests({ cellId: "v1", currentTime: 79.46, playing: true, duration: 87.94 }))
+    render(strip())
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("1:19 / 1:28")
+    act(() => __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 }))
+  })
+
+  // The timeline and the play queue each lay the same lines out already; the
+  // strip's own layout is only for the length before play.
+  it("lays nothing out while it plays: the queue gives the length then", () => {
+    act(() => __setQueuePlaybackForTests({ cellId: "v1", currentTime: 10, playing: true, duration: 87.94 }))
+    vi.mocked(layOutProgramme).mockClear()
+    const { rerender } = render(strip())
+    // A generate lands on a line mid-play.
+    rerender(<VoicePlaybackBar variant="strip" cells={[...BOOK]} projectId="p" session={null} settings={undefined} freeTiming />)
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:10 / 1:28")
+    expect(layOutProgramme).not.toHaveBeenCalled()
+    act(() => __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 }))
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 1:28")
+  })
+
+  it("keeps a file that follows its source as it was before play", () => {
+    render(<VoicePlaybackBar variant="strip" cells={BOOK} projectId="p" session={null} settings={undefined} />)
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 0:00")
+  })
+
+  // Found in the browser, Oct 29: with the last line hidden, the strip read
+  // 0:18 while it played and 0:20 after a reload, because before play it laid
+  // the lines out with the hidden line's music still running on past its end.
+  it("before play, leaves out what a hidden line would play, as the queue does (AQU-2252)", () => {
+    const TRACK = "01a17e67-ef58-74f7-a093-be935876197b"
+    const music = `audio-v3-1700000500-music.wav`
+    const v3 = {
+      ...take("v3", 2_900),
+      hidden: true,
+      selectedBySlot: { [TRACK]: music },
+    } as CellData
+    v3.attachments = { ...v3.attachments, [music]: { type: "audio", url: "frontier-audio://music", slot: TRACK, durationMs: 30_000, targetOffsetMs: 0 } } as never
+    const cells = [...BOOK, v3]
+    const tracks = { layerTrackSlots: [TRACK] }
+    // Laid out as drawn, v3's 30 s of music runs on to 1:58; played, v3 is
+    // hidden and its music with it, so the chapter ends with v3's own line.
+    expect(layOutProgramme(cells, tracks).programme.totalSec).toBeCloseTo(117.94, 2)
+    render(<VoicePlaybackBar variant="strip" cells={cells} projectId="p" session={null} settings={undefined} freeTiming programmeTracks={tracks} />)
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 1:31")
   })
 })

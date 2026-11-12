@@ -14,12 +14,13 @@ abA wait --load networkidle >/dev/null
 
 # 1. Alice creates the project.
 abA open "$BASE/orgs/$ORG/projects" >/dev/null && abA wait --load networkidle >/dev/null
-abA find role button click --name "New Project" >/dev/null || fail "New Project button"
-abA wait --text "Create New Project" >/dev/null || fail "create dialog"
-abA find label "Project title" fill "$NAME" >/dev/null || fail "title field"
-abA find label "Source Language" fill "en" >/dev/null || fail "source field"
-abA find label "Target language(s)" fill "fr" >/dev/null || fail "target field"
-abA find role button click --name "Create Project" >/dev/null || fail "Create Project button"
+abA find role button click --name "New project" >/dev/null || fail "New project button"
+abA wait --text "Create new project" >/dev/null || fail "create dialog"
+abA find testid "project-source-scratch" click >/dev/null || fail "Start from scratch (AQU-2105 source step)"
+abA find label "Project name" fill "$NAME" >/dev/null || fail "name field"
+abA find label "Source language" fill "en" >/dev/null || fail "source field"
+abA find label "Language lanes" fill "fr" >/dev/null || fail "lanes field"
+abA find role button click --name "Create project" >/dev/null || fail "Create project button"
 abA wait --text "Open project" >/dev/null || fail "overview did not load"
 projectUrl=$(abA get url)
 projectId=$(printf '%s' "$projectUrl" | sed -n 's#.*/projects/\([^/?#]*\).*#\1#p')
@@ -95,7 +96,11 @@ abA wait "[data-cell-id]" >/dev/null || fail "editor did not show cells"
 openRef=$(abA snapshot -i -c | grep -o 'button "Open cell details" \[ref=e[0-9]*' | grep -o 'e[0-9]*$' | head -1)
 [ -n "$openRef" ] || fail "Open cell details button not in snapshot"
 abA click "@$openRef" >/dev/null || fail "click Open cell details"
-abA wait --fn "document.body.innerText.includes('Retrieval support')" >/dev/null || fail "row did not expand"
+# AQU-764: the expansion panel's first tab is named "Health" (was "Retrieval
+# support"). Match the tab itself rather than body text — "Health" is a short
+# word that also appears on the project health surfaces, so an innerText probe
+# could pass before the row actually expanded.
+abA wait --fn "[...document.querySelectorAll('[role=tab]')].some(t => t.textContent.trim() === 'Health')" >/dev/null || fail "row did not expand"
 addRef=$(abA snapshot -i -c | grep -o 'button "Add comment" \[ref=e[0-9]*' | grep -o 'e[0-9]*$' | head -1)
 [ -n "$addRef" ] || fail "Add comment button not in snapshot"
 abA click "@$addRef" >/dev/null || fail "click Add comment"

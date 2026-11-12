@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react"
+import { SearchSelect } from "@/components/ui/search-select"
+import { SettingMovedNote } from "@/components/settings/SettingMovedNote"
+import { settingMovedNotesShowing } from "@/lib/settings/setting-moved"
+import { authorNameFor, LOCAL_AUTHOR_NAME_SETTING_ID } from "@/lib/store/local-author-name"
+import { notifySmartExtensionsChanged } from "@/lib/tools/smart-extensions-enabled"
 import { Navigate, useLocation, useParams, useNavigate, useSearchParams, type Location } from "react-router-dom"
 import {
   isProjectEditorPath,
@@ -8,26 +13,16 @@ import {
   withSettingsReturn,
 } from "@/lib/navigation/org-paths"
 import {
-  Check, CheckCircle, XCircle, ChevronDown, Save, Sparkles,
+  CheckCircle, XCircle, Sparkles,
   SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines, Plug, FlaskConical,
   Users,
 } from "lucide-react"
-import { toast } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
+import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
-import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
-import { Input } from "@/components/ui/input"
-import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { OptionalMark } from "@/components/ui/field"
 import { Slider } from "@/components/ui/slider"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -45,11 +40,16 @@ import {
   DialogBody,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
 import { DisabledFieldTooltip, PermissionLockHint } from "./ProjectSettings/DisabledFieldTooltip"
+import {
+  InheritedFieldNote,
+  InheritedSettingsSection,
+  useUpstreamProjectName,
+} from "./ProjectSettings/InheritedSettingsChoice"
+import { parseInheritedFromLink, type InheritFieldId } from "@/lib/sync/inherited-settings"
 import { PrivilegedMembersDialog } from "./ProjectSettings/PrivilegedMembersDialog"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
@@ -57,20 +57,43 @@ import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Page, PageHeader, SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { useProject } from "@/hooks/useProject"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
-import { getProject, updateProject } from "@/lib/store/project-index"
+import { overlaySettings } from "@/hooks/project-settings-overlay"
+import { patchProject } from "@/lib/store/project-index"
+import { SaveStatus, SaveStatusProvider } from "@/lib/settings/save-status"
+import type { CommitInfo } from "@/lib/settings/useCommitOnPause"
+import { CommitNumberInput, CommitTextInput } from "@/components/settings/CommitInput"
+import { useSettingsCommit } from "@/components/ProjectSettings/useSettingsCommit"
+import { useSettingsStepKinds, type DeviceSettingKey } from "@/components/ProjectSettings/useSettingsStepKinds"
+import {
+  DEVICE_SETTING_LABELS,
+  DRAFTING_FIELD_LABELS,
+  sharedSettingLabel,
+  type DraftingField,
+} from "@/components/ProjectSettings/setting-labels"
+import { HistoryControls } from "@/components/history/HistoryControls"
+import { isSettingsStep } from "@/lib/history/settings-steps"
+import { useHistoryReporter } from "@/components/history/useHistoryReporter"
+import { holdHistoryScope } from "@/lib/history/history"
+import { httpHistoryRemote } from "@/lib/history/history-remote"
+import { useHistoryShortcuts } from "@/lib/history/useHistory"
 import {
   DEFAULT_APPROVED_EXAMPLE_COUNT,
-  DEFAULT_COMPLETION_MAX_TOKENS,
   fetchModels,
   normalizeCompletionMaxTokens,
   resolveProvider,
 } from "@/lib/completion/completion-service"
-import { buildCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
+import {
+  CUSTOM_PRESETS,
+  endpointForPresetChange,
+  presetIdForEndpoint,
+  presetLabel,
+} from "@/lib/completion/provider-presets"
+import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type {
   AudioMediaStrategy,
+  CellUnit,
   CompletionProvider,
-  CompletionSettings,
   ContextSize,
   DecaySettings,
   ProjectRecord,
@@ -78,10 +101,25 @@ import type {
 import {
   AUDIO_MEDIA_STRATEGY_LABELS,
   projectHasScriptureFiles,
-  resolveBibleResourcesEnabled,
 } from "@/lib/parsers/types"
-import { resolveTimingLocked } from "@/lib/sync/project-settings"
+import { isAutopilotVisible } from "@/lib/features/flags"
+import { isBibleDataExperimentOn } from "@/lib/bible-data/experiment"
+import type { BibleEnrichmentSettings } from "../../db/shared/bible-enrichments"
+import type { MediaDefaults } from "../../db/shared/media-setting-defaults"
+import { BibleDataSection } from "./ProjectSettings/BibleDataSection"
+import { ChecksRow, InstructionsRow } from "./ProjectSettings/AiGuidanceRows"
+import {
+  resolveTimingLocked,
+  createProjectLane,
+  renameProjectLane,
+  setProjectLaneArchived,
+  setProjectLaneDelivers,
+  fetchLaneLastChange,
+  settingsEditorName,
+  type LaneLastChangeResult,
+} from "@/lib/sync/project-settings"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
+import { RepetitionPropagationProjectSection } from "./ProjectSettings/RepetitionPropagationProjectSection"
 import { StructuralCellsProjectSection } from "./ProjectSettings/StructuralCellsProjectSection"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { TermMatchingSection } from "./ProjectSettings/TermMatchingSection"
@@ -90,32 +128,44 @@ import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
 import { MondayIntegrationSection } from "./ProjectSettings/MondayIntegrationSection"
+import { AirtableIntegrationSection } from "./ProjectSettings/AirtableIntegrationSection"
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
+import { LinkSourceSection } from "./ProjectSettings/LinkSourceSection"
 import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
-import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
+import { LanguagesSection, type LaneDeliversOutcome } from "./ProjectSettings/LanguagesSection"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { MembersSection } from "./ProjectSettings/MembersSection"
-import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
+import { LeaveProjectSection } from "./ProjectSettings/LeaveProjectSection"
+import { ProjectVisibilitySection } from "./ProjectSettings/ProjectVisibilitySection"
+import { KeyInUseLine } from "@/components/settings/KeyInUseLine"
+import { completionKeyInUse, geminiKeyInUse } from "@/lib/settings/key-in-use"
+import { useUserProviderOverride } from "@/lib/store/user-provider-override"
+import { projectTranslationInstructions } from "@/lib/instructions/project-instructions"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 import { readCursor } from "@/lib/dcs/cursor"
 import { UpstreamChangesPanel } from "./linked/UpstreamChangesPanel"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useOrg } from "@/hooks/useOrg"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
+import { resolveProjectPolicy } from "@/lib/sync/project-org-policy"
 import { useActiveOrgOptional } from "@/context/OrgContext"
 import { ApiKeyField } from "./ApiKeyField"
 import { SettingsNav, type SettingsSection } from "./ProjectSettings/SettingsNav"
 import { BackLink, NavList, NavRow } from "@/components/ui/nav-list"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
-import type { CellEditingTier, ProjectWideSettings } from "@/lib/sync/project-settings"
+import type { CellEditingTier, CellLabelTier } from "@/lib/sync/project-settings"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
+import { CELL_EDITING_FLOOR_OPTIONS, CELL_LABEL_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
+import { OrgDefaultSource, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
+import { ProjectImportFloorSection } from "@/components/ProjectSettings/ProjectImportFloorSection"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { ElevenLabsConnectCard } from "@/components/voice/elevenlabs/ElevenLabsConnectCard"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
-import { renameProject } from "@/lib/sync/cloud-projects"
-import { UserError } from "@/lib/errors/user-error"
 import { usePostEditMetrics } from "@/lib/metrics/use-post-edit-metrics"
 import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSection"
 
@@ -128,10 +178,10 @@ import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSect
  * implemented but not ready to expose in the UI yet. Keep the code — flip this
  * flag to `true` when we want it back in settings nav + main content.
  *
- * Also re-enable the skipped smoke specs:
- *   - e2e/specs/projects/project-settings-termbase-sharing.smoke.spec.ts
- *   - e2e/specs/projects/project-settings-termbase-publish-toggle.smoke.spec.ts
- *   - e2e/specs/projects/termbase-subscribe-unsubscribe.smoke.spec.ts
+ * Smoke coverage has to be written, not un-skipped: the three specs this note
+ * used to name (project-settings-termbase-sharing, -publish-toggle,
+ * termbase-subscribe-unsubscribe) are not in e2e/specs/projects/, and no
+ * termbase sharing spec exists anywhere under e2e/ today.
  *
  * Backend routes + TermbaseSharingSection.tsx remain live; only settings UI
  * entry points are gated here.
@@ -139,64 +189,22 @@ import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSect
  */
 const SHOW_TERMBASE_SHARING_IN_SETTINGS = false
 
+/** AQU-1768: an org with no media defaults, as one stable value. */
+const NO_ORG_MEDIA_DEFAULTS: MediaDefaults = Object.freeze({})
+
+
 /**
- * AQU-1068: the cell-editing tiers, in the order they are offered.
- *
- * The reset default leads, matching every other floor control on this page;
- * the rest climb the ladder, matching RosterProgressSection and
- * TermbaseEditSection.
- *
- * The labels used to be DESCRIPTIVE — "Maintainers and project leads", "Anyone
- * who can edit" — on the theory that they said who is admitted more plainly
- * than a bare rank. Matthew's review overruled that (Sam approved, 2026-09-08):
- * an admin who has just set someone's role on the Members panel should not have
- * to work out which bespoke phrase covers that rank, so this is the standard
- * ladder, spelled the standard way, and only "No one" — which is not a role —
- * keeps a phrase of its own.
- *
- * `level` is what makes the two-tier labelling work, exactly as in
- * RosterProgressSection: FLOOR_LABEL supplies the short word for the closed
- * trigger and the message key the fuller row in the open list. "No one" has no
- * level and therefore no FLOOR_LABEL entry, so it shows its row text in both.
+ * AQU-1720: what one cell is when a docx/txt/md file is imported. A dubbing
+ * project generates one voice clip per cell, so a cell cut at a comma is an
+ * unusable clip — "paragraph" makes the transcript paragraph the cell.
  */
-const CELL_EDITING_FLOOR_OPTIONS: readonly {
-  value: CellEditingTier
-  /** Ladder level this tier admits, or null for "none" — which is a refusal,
-   *  not a rank, and so has no place on the ladder. */
-  level: number | null
+const IMPORT_CELL_UNIT_OPTIONS: readonly {
+  value: CellUnit
   labelKey: MessageKey
 }[] = [
-  { value: "none", level: null, labelKey: "projectSettings.cellEditing.optionNone" },
-  { value: "commenter", level: ROLE.COMMENTER, labelKey: "projectSettings.cellEditing.optionCommenter" },
-  { value: "reviewer", level: ROLE.REVIEWER, labelKey: "projectSettings.cellEditing.optionReviewer" },
-  { value: "contributor", level: ROLE.CONTRIBUTOR, labelKey: "projectSettings.cellEditing.optionContributor" },
-  { value: "project_lead", level: ROLE.PROJECT_LEAD, labelKey: "projectSettings.cellEditing.optionProjectLead" },
-  { value: "maintainer", level: ROLE.MAINTAINER, labelKey: "projectSettings.cellEditing.optionMaintainer" },
+  { value: "sentence", labelKey: "projectSettings.import.cellUnitOptionSentence" },
+  { value: "paragraph", labelKey: "projectSettings.import.cellUnitOptionParagraph" },
 ]
-
-// Well-known OpenAI-compatible providers. Exactly one of `label`/`labelKey` is
-// set per entry: `labelKey` for the two real English descriptions ("Local /
-// self-hosted…", "Other…"), translated at render via presetLabel() below.
-// The rest are brand names — i18n-exempt, left untranslated in every locale
-// like any other product/company name (OpenRouter and OpenAI are already in
-// ATOMIC_TERMS; Groq/Together AI/Mistral/DeepSeek aren't yet, but are the
-// same kind of string).
-const CUSTOM_PRESETS: { id: string; label?: string; labelKey?: MessageKey; endpoint: string; requiresKey: boolean; keyHint?: string }[] = [
-  { id: "local", labelKey: "projectSettings.advancedLlm.presetLocalLabel", endpoint: "http://localhost:8000", requiresKey: false },
-  { id: "openrouter", label: "OpenRouter", endpoint: "https://openrouter.ai/api/v1", requiresKey: true, keyHint: "sk-or-..." },
-  { id: "openai", label: "OpenAI", endpoint: "https://api.openai.com/v1", requiresKey: true, keyHint: "sk-..." },
-  { id: "groq", label: "Groq", endpoint: "https://api.groq.com/openai/v1", requiresKey: true, keyHint: "gsk_..." },
-  { id: "together", label: "Together AI", endpoint: "https://api.together.xyz/v1", requiresKey: true },
-  { id: "mistral", label: "Mistral", endpoint: "https://api.mistral.ai/v1", requiresKey: true },
-  { id: "deepseek", label: "DeepSeek", endpoint: "https://api.deepseek.com/v1", requiresKey: true },
-  { id: "custom", labelKey: "projectSettings.advancedLlm.presetCustomLabel", endpoint: "", requiresKey: false },
-]
-
-/** Resolves a CUSTOM_PRESETS entry's display label: translated when `labelKey`
- * is set, else the literal (untranslated brand name). */
-function presetLabel(t: TFunction, preset: { label?: string; labelKey?: MessageKey }): string {
-  return preset.labelKey ? t(preset.labelKey) : (preset.label ?? "")
-}
 
 /**
  * Re-wraps already-known literal substrings of a translated sentence in inline
@@ -230,29 +238,15 @@ function withStyledTerms(
   })
 }
 
-function presetIdForEndpoint(endpoint: string): string {
-  const trimmed = endpoint.trim().replace(/\/+$/, "").toLowerCase()
-  if (!trimmed) return "local"
-  for (const p of CUSTOM_PRESETS) {
-    if (!p.endpoint) continue
-    const base = p.endpoint.toLowerCase()
-    if (trimmed === base || trimmed.startsWith(base)) return p.id
-  }
-  return "custom"
-}
-
-interface Baseline {
+/** Every setting on the page, as saved: what the controls show (AQU-2262). */
+interface SavedSettings {
   name: string
-  sourceLanguage: string
-  targetLanguage: string
-  username: string
   provider: CompletionProvider
   endpoint: string
   apiKey: string
   model: string
   maxTokens: number
   temperature: number
-  llmHealthPenalty: number
   top_k: number
   contextSize: ContextSize
   useOnlyValidatedExamples: boolean
@@ -262,26 +256,35 @@ interface Baseline {
   validationBatchSize: number
   autoSyncEnabled: boolean
   autoSyncInterval: number
-  validationCount: number
-  validationCountAudio: number
+  /** AQU-1771: the project's own numbers; null = take the organization's default. */
+  validationCount: number | null
+  validationCountAudio: number | null
   validationRoleFloor: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers: string[]
   allowSelfValidation: boolean
   // AQU-490: the audio policy. Separate keys, never fallbacks for the text
   // ones.
-  validationRoleFloorAudio: "reviewer" | "project_lead" | "maintainer"
+  // AQU-1768: these five are the project's OWN values; null = it follows the
+  // organization's default (then each setting's built-in default).
+  validationRoleFloorAudio: "reviewer" | "project_lead" | "maintainer" | null
   validationNamedUsersAudio: string[]
-  allowSelfValidationAudio: boolean
+  allowSelfValidationAudio: boolean | null
   /** AQU-646: may people add lines into the timeline's silences? */
-  cellEditingFloor: CellEditingTier
+  cellEditingFloor: CellEditingTier | null
+  /** AQU-2408: who may type a label on a cell; null = maintainer (the default). */
+  cellLabelFloor: CellLabelTier | null
   /** AQU-646 stage 2: may this project's timelines be restructured? */
-  allowTrackEditing: boolean
-  timingLocked: boolean
+  allowTrackEditing: boolean | null
+  /** AQU-1758: Film and Sources in the media view; null = the project's kind decides. */
+  filmAndSources: boolean | null
+  timingLocked: boolean | null
   harmonize_min_role: "project_lead" | "maintainer"
   /** AQU-460: EXPLICIT persisted value only. `undefined` = no explicit choice
    *  yet — the effective (displayed) state is derived via
    *  `resolveBibleResourcesEnabled`, not defaulted here. */
   bibleResourcesEnabled: boolean | undefined
+  /** AQU-1686: EXPLICIT enrichment choices only; a missing id shows its default. */
+  bibleEnrichments: BibleEnrichmentSettings
   decaySettings: DecaySettings | undefined
   audioMediaStrategy: AudioMediaStrategy
   geminiApiKey: string
@@ -289,15 +292,16 @@ interface Baseline {
   /** AQU-634: when true, USFM imports exclude book-name/title/TOC + intro-block
    *  front matter. Absent/false imports front matter (the default). */
   importExcludeFrontMatter: boolean
+  /** AQU-1720: what one imported cell is for docx/txt/md uploads. */
+  importCellUnit: CellUnit
+  /** Curly quotes as you type in the cell editor. Absent/false is off. */
+  smartQuotes: boolean
   termMatching: TermMatchingSettings
 }
 
-function buildBaseline(project: ProjectRecord): Baseline {
+function readSavedSettings(project: ProjectRecord): SavedSettings {
   return {
     name: project.name,
-    sourceLanguage: project.sourceLanguage,
-    targetLanguage: project.targetLanguage,
-    username: project.username || "local",
     provider: project.completionSettings ? resolveProvider(project.completionSettings) : "frontier",
     endpoint: project.completionSettings?.endpoint ?? "",
     apiKey: project.completionSettings?.apiKey ?? "",
@@ -306,7 +310,6 @@ function buildBaseline(project: ProjectRecord): Baseline {
     // default snapshots (512/4096) are upgraded to the current default.
     maxTokens: normalizeCompletionMaxTokens(project.completionSettings?.maxTokens),
     temperature: project.completionSettings?.temperature ?? 0.3,
-    llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,
     top_k: project.completionSettings?.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT,
     contextSize: project.completionSettings?.contextSize ?? "medium",
     useOnlyValidatedExamples: true,
@@ -317,49 +320,94 @@ function buildBaseline(project: ProjectRecord): Baseline {
     validationBatchSize: project.completionSettings?.validationBatchSize ?? 0,
     autoSyncEnabled: project.syncSettings?.autoSync.enabled ?? false,
     autoSyncInterval: project.syncSettings?.autoSync.intervalMinutes ?? 5,
-    validationCount: readValidationCount(project),
-    validationCountAudio: readValidationCountAudio(project),
+    // AQU-1771: `project` here carries only the project's own blob (this page
+    // passes includeSettings: false, and overlays without org defaults), so
+    // an absent value means "Organization default", not 1.
+    validationCount: project.validationCount == null ? null : readValidationCount(project),
+    validationCountAudio: project.validationCountAudio == null ? null : readValidationCountAudio(project),
     validationRoleFloor: project.validationRoleFloor ?? "reviewer",
     validationNamedUsers: project.validationNamedUsers ?? [],
     allowSelfValidation: project.allowSelfValidation ?? true,
-    validationRoleFloorAudio: project.validationRoleFloorAudio ?? "reviewer",
+    // AQU-1768: absent = "Organization default", not the built-in value. The
+    // built-ins (reviewer, self-validation on, cell editing nobody, track
+    // editing off, timing LOCKED) now apply only when the organization sets
+    // none either; the controls below resolve them for display.
+    validationRoleFloorAudio: project.validationRoleFloorAudio ?? null,
     validationNamedUsersAudio: project.validationNamedUsersAudio ?? [],
-    allowSelfValidationAudio: project.allowSelfValidationAudio ?? true,
-    // Off unless a project has said otherwise: the affordance is speculative
-    // and underdeveloped, so absent must read as off, not as unset.
-    cellEditingFloor: project.cellEditingFloor ?? "none",
-    // Off unless a project has said otherwise. Multi-track is capability for
-    // clients who want it, and a project that never turns it on should not be
-    // able to tell it was built.
-    allowTrackEditing: project.allowTrackEditing ?? false,
-    // AQU-646: absent means LOCKED, so the box starts ticked on every project
-    // that predates the setting. See resolveTimingLocked.
-    timingLocked: resolveTimingLocked(project),
+    allowSelfValidationAudio: typeof project.allowSelfValidationAudio === "boolean" ? project.allowSelfValidationAudio : null,
+    cellEditingFloor: project.cellEditingFloor ?? null,
+    cellLabelFloor: project.cellLabelFloor ?? null,
+    allowTrackEditing: typeof project.allowTrackEditing === "boolean" ? project.allowTrackEditing : null,
+    filmAndSources: typeof project.filmAndSources === "boolean" ? project.filmAndSources : null,
+    timingLocked: typeof project.timingLocked === "boolean" ? project.timingLocked : null,
     harmonize_min_role: project.harmonize_min_role ?? "project_lead",
     // AQU-460: preserve "unset" — do NOT default to false here, that would
     // make an unset scripture project look explicitly off in the diff/baseline.
     bibleResourcesEnabled: project.bibleResourcesEnabled,
+    // AQU-1686: explicit choices only — never fill in the defaults, or Save
+    // would pin today's defaults onto the project.
+    bibleEnrichments: project.bibleEnrichments ?? {},
     decaySettings: project.decaySettings,
     audioMediaStrategy: project.audioMediaStrategy ?? "lazy",
     geminiApiKey: project.ttsSettings?.apiKey ?? "",
     precedingTargetCells: project.draftContext?.precedingTargetCells ?? DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
     importExcludeFrontMatter: project.importExcludeFrontMatter ?? false,
+    importCellUnit: project.importCellUnit ?? "sentence",
+    smartQuotes: project.smartQuotes ?? false,
     termMatching: project.termMatching ?? { prefixes: [], suffixes: [] },
   }
 }
 
-function decayEqual(a: DecaySettings | undefined, b: DecaySettings | undefined): boolean {
-  if (a === b) return true
-  if (!a || !b) return false
-  return JSON.stringify(a) === JSON.stringify(b)
+/** The provenance line under the project name. The settings response names
+ *  the saver only by id, so without a username it gives the date alone rather
+ *  than "Last edited by undefined" (walk 10-02). */
+function lastEditedLine(name: string | null, date: string, t: TFunction): string {
+  return name
+    ? t("projectSettings.shared.lastEdited", { name, date })
+    : t("projectSettings.shared.lastEditedOn", { date })
 }
 
 interface ProjectSettingsProps {
   modal?: boolean
 }
 
-export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
+/**
+ * AQU-2031: the `?focus=` vocabulary a caller may deep-link to on a settings
+ * pane, mapped to the element scrolled into view. `block` is per target: a card
+ * goes to the top of the pane, a single field inside a card only moves far
+ * enough to be on screen (so a short project does not scroll at all).
+ */
+/** The headings the settings index lists its rows under, in order. */
+const HUB_ORDER = ["project", "aiMedia", "quality", "integrations"] as const
+type SettingsHub = (typeof HUB_ORDER)[number]
+
+const SETTINGS_FOCUS_TARGETS: Record<string, { elementId: string; block: ScrollLogicalPosition }> = {
+  languages: { elementId: "section-languages", block: "start" },
+  "add-lane": { elementId: "add-lane-field", block: "nearest" },
+  // AQU-2306: the org Security page's "N projects are stricter than this" list
+  // links each project here, to the card that holds its own import floor.
+  import: { elementId: "section-import", block: "start" },
+}
+
+/**
+ * AQU-2262: every setting saves the moment it changes, says so quietly beside
+ * itself, and is one step in the app's Undo. The status of each setting lives
+ * in a provider around the page.
+ */
+export function ProjectSettings(props: ProjectSettingsProps = {}) {
+  return (
+    <SaveStatusProvider>
+      <ProjectSettingsPage {...props} />
+    </SaveStatusProvider>
+  )
+}
+
+function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   const t = useT()
+  // The dialog opens with the focus on itself, not on its first button: that
+  // is the settings Undo, so Space or Enter on opening would undo a settings
+  // change, even one from an earlier session (Nov 2 shortcut review).
+  const surfaceRef = useRef<HTMLDivElement>(null)
   const { id, section: sectionParam } = useParams<{ id: string; section?: string }>()
   const navigate = useNavigate()
   const location = useLocation()
@@ -411,18 +459,31 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     reasonCannotEdit,
     canEditLanguages,
     reasonCannotEditLanguages,
+    canEditCountStructural,
+    reasonCannotEditCountStructural,
     languageEditFloor,
     patch: patchShared,
     version: sharedVersion,
     updatedAt: sharedUpdatedAt,
     updatedBy: sharedUpdatedBy,
-    conflict: sharedConflict,
-    dismissConflict,
     hasFetched: sharedSettingsFetched,
     settings: sharedSettingsBlob,
+    lanes: sharedLanes,
+    refreshAfterWrite: refreshSharedSettingsAfterWrite,
     // AQU-1083: what "Organization default" currently resolves to, from the
     // same response as the value it is the fallback for.
     orgCountStructuralCells,
+    // AQU-1771: what "Organization default" means for the two counts.
+    orgValidationCount,
+    orgValidationCountAudio,
+    // AQU-1771: the rest of the org policy, carried for this project.
+    orgPolicy: carriedOrgPolicy,
+    visibilityFloors: carriedVisibilityFloors,
+    // AQU-2305: the import floor this project enforces, split three ways.
+    importFloor: carriedImportFloor,
+    // AQU-1768: what "Organization default" means for the media settings.
+    // Defaulted for callers (and test doubles) that predate the field.
+    orgMediaDefaults = NO_ORG_MEDIA_DEFAULTS,
   } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null, {
     // AQU-1086: the org's language-edit floor rides on the project record, so
     // the language fields below can be enabled for a project lead when the org
@@ -430,6 +491,25 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     languageEditMinRole: project?.languageEditMinRole,
     roleTelemetry,
   })
+
+  const inheritedConfig = useMemo(
+    () => parseInheritedFromLink(sharedSettingsBlob?.inheritedFromLink),
+    [sharedSettingsBlob],
+  )
+  const inheritedUpstreamName = useUpstreamProjectName(project?.sourceProjectId ?? null)
+  const detachInherited = useCallback(
+    (field: InheritFieldId) => {
+      if (!inheritedConfig) return
+      void patchShared({
+        inheritedFromLink: {
+          ...inheritedConfig,
+          receive: { ...inheritedConfig.receive, [field]: false },
+          detached: { ...inheritedConfig.detached, [field]: true },
+        },
+      })
+    },
+    [inheritedConfig, patchShared],
+  )
 
   // Org context for the termbase-sharing section. The user's org; the section's
   // server calls re-validate org-membership / org-ownership, so a mismatch just
@@ -440,12 +520,30 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // AQU-485: Members is a privacy-gated settings pane. Hide it entirely for
   // callers below rosterViewMinRole — no "Roster hidden" disclosure, no nav
   // row. Local (unsynced) projects have no org floor, so the pane stays.
+  //
+  // AQU-1771: the floor is the one THIS project enforces — its org's, or its
+  // own when stricter — and comes with the project's settings, so a member
+  // outside the org gets the org's real values rather than built-in defaults.
   const rosterOrgId = project?.orgId ?? activeOrg?.activeOrgId ?? null
-  const { canViewRoster } = useOrgSettings(
+  const orgSettingsForProject = useOrgSettings(
     rosterOrgId,
     activeOrg?.activeOrg?.role?.level,
     project?.syncRole?.level ?? null,
   )
+  const projectPolicy = resolveProjectPolicy({
+    orgPolicy: carriedOrgPolicy,
+    visibilityFloors: carriedVisibilityFloors,
+    importFloor: carriedImportFloor,
+    projectSettings: sharedSettingsBlob,
+    org: orgSettingsForProject,
+    roleLevel: project?.syncRole?.level ?? null,
+    // A synced project's own stricter floor arrives with its settings.
+    projectSettingsFetched: !isCloudProject || sharedSettingsFetched,
+  })
+  const orgAutoPropagateRepetitions = projectPolicy.autoPropagateRepetitions
+  const canViewRoster =
+    projectPolicy.ready
+    && (project?.syncRole?.level ?? 0) >= projectPolicy.rosterViewMinRole.effective
   const canSeeMembers = !isCloudProject || canViewRoster
   const [privilegedOpen, setPrivilegedOpen] = useState(false)
   // project.files is a fresh array each render; key on the file ids. The key is
@@ -458,6 +556,89 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     [metricsFilesKey],
   )
   const getJwt = useCallback(() => session?.jwt ?? null, [session?.jwt])
+
+  // AQU-1816: the lane-row endpoints write around `patchShared`, which is the
+  // only path that told the page behind this modal (overview, workspace) that
+  // the settings row moved — so a lane added here stayed invisible behind the
+  // dialog until a reload (the AQU-1570 shape, for lanes). Every lane write
+  // below re-reads through `refreshSharedSettingsAfterWrite`, which broadcasts
+  // first and then refreshes this instance.
+  //
+  // AQU-1592: the languages screen sends the identity fields the user touched —
+  // the language, or a nullable name/code override. A null clears an override
+  // rather than writing a derived value back.
+  const renameLane = useCallback(async (
+    laneId: string,
+    edit: { name?: string | null; language?: string; code?: string | null },
+  ) => {
+    const jwt = session?.jwt
+    if (!jwt || !id) return "invalid" as const
+    const result = await renameProjectLane(jwt, id, laneId, edit)
+    if (result.kind === "ok") {
+      await refreshSharedSettingsAfterWrite()
+      return "ok" as const
+    }
+    if (result.kind === "duplicate") return "duplicate" as const
+    if (result.kind === "malformed_code") return "malformed_code" as const
+    return "invalid" as const
+  }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
+
+  const createLane = useCallback(async (
+    input: {
+      name: string
+      language: string
+      code?: string | null
+      /** AQU-1784: the section already warned about the duplicate inline. */
+      allowDuplicateName?: boolean
+      /** Media redesign: the add form's Delivers choice. */
+      delivers?: LaneDelivers
+    },
+  ) => {
+    const jwt = session?.jwt
+    if (!jwt || !id) return "invalid" as const
+    const result = await createProjectLane(jwt, id, input)
+    if (result.kind === "ok") {
+      await refreshSharedSettingsAfterWrite()
+      return "ok" as const
+    }
+    if (result.kind === "duplicate") return "duplicate" as const
+    if (result.kind === "malformed_code") return "malformed_code" as const
+    return "invalid" as const
+  }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
+
+  // Media redesign slice 1: the "Delivers" choice on one language row.
+  const setLaneDelivers = useCallback(async (laneId: string, delivers: LaneDelivers): Promise<LaneDeliversOutcome> => {
+    const jwt = session?.jwt
+    if (!jwt || !id) return "error"
+    const result = await setProjectLaneDelivers(jwt, id, laneId, delivers)
+    if (result.kind === "forbidden") return "forbidden"
+    if (result.kind !== "ok") {
+      return typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "error"
+    }
+    await refreshSharedSettingsAfterWrite()
+    return "ok"
+  }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
+
+  const setLaneArchived = useCallback(async (laneId: string, archived: boolean) => {
+    const jwt = session?.jwt
+    if (!jwt || !id) return false
+    const result = await setProjectLaneArchived(jwt, id, laneId, archived)
+    if (result.kind !== "ok") return false
+    await refreshSharedSettingsAfterWrite()
+    return true
+  }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
+
+  // AQU-1464: the archive confirmation asks when the lane was last translated in.
+  // No session or project id means we genuinely cannot answer — report that as an
+  // error so the dialog says "unavailable" instead of implying the lane is idle.
+  const loadLaneLastChange = useCallback(
+    async (laneId: string): Promise<LaneLastChangeResult> => {
+      const jwt = session?.jwt
+      if (!jwt || !id) return { kind: "error", message: "no session" }
+      return fetchLaneLastChange(jwt, id, laneId)
+    },
+    [session?.jwt, id],
+  )
   const {
     metrics: postEditMetrics,
     isLoading: metricsLoading,
@@ -477,14 +658,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     [getJwt, id],
   )
 
-  // Server enforces MAINTAINER (600) for settings writes. Explain the lock on
-  // the control itself (GitHub-style hint), not with a page-level banner.
+  // Server enforces MAINTAINER (600) for settings writes. AQU-2260: a card
+  // locked as a whole says so once under its heading; a single locked control
+  // says so beneath it — never on hover.
   const privilegedRole = resolveRoleName(t, ROLE.MAINTAINER, { plural: true })
   const roleLockHint = (
     <PermissionLockHint
-      title={t("projectSettings.permission.onlyRoleCanModify", {
-        role: privilegedRole,
-      })}
+      role={privilegedRole}
       onView={id ? () => setPrivilegedOpen(true) : undefined}
       href={id ? undefined : PERMISSION_DOCS_URL}
       linkLabel={
@@ -500,6 +680,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     reasonCannotEdit === "offline" ? t("projectSettings.permission.reconnectToEdit")
     : reasonCannotEdit === "role" ? roleLockHint
     : null
+  // AQU-2259: the AI cards are shared now, so a locked one says why once, at
+  // its top, rather than on a hover over each of its fourteen controls.
+  const sharedLockedLine = canEditShared ? null
+    : reasonCannotEdit === "offline" ? t("projectSettings.permission.reconnectToEdit")
+    : t("projectSettings.permission.onlyRoleCanModify", { role: privilegedRole })
 
   // AQU-1086: the language fields sit behind the org's configurable
   // languageEditMinRole, so their lock hint must name the role the user
@@ -508,9 +693,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const languagePrivilegedRole = resolveRoleName(t, languageEditFloor, { plural: true })
   const languageRoleLockHint = (
     <PermissionLockHint
-      title={t("projectSettings.permission.onlyRoleCanModify", {
-        role: languagePrivilegedRole,
-      })}
+      role={languagePrivilegedRole}
       onView={id ? () => setPrivilegedOpen(true) : undefined}
       href={id ? undefined : PERMISSION_DOCS_URL}
       linkLabel={
@@ -527,6 +710,28 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     : reasonCannotEditLanguages === "role" ? languageRoleLockHint
     : null
 
+  // AQU-1912: "Count headings" is a project-lead setting (AQU-1083), so its
+  // lock hint names Project leads, not the page-wide Maintainer floor.
+  const structuralPrivilegedRole = resolveRoleName(t, ROLE.PROJECT_LEAD, { plural: true })
+  const structuralRoleLockHint = (
+    <PermissionLockHint
+      role={structuralPrivilegedRole}
+      onView={id ? () => setPrivilegedOpen(true) : undefined}
+      href={id ? undefined : PERMISSION_DOCS_URL}
+      linkLabel={
+        id
+          ? t("projectSettings.permission.viewPrivilegedMembers", {
+              role: structuralPrivilegedRole,
+            })
+          : t("error.permissionDenied.learnMore")
+      }
+    />
+  )
+  const structuralDisabledTooltip =
+    reasonCannotEditCountStructural === "offline" ? t("projectSettings.permission.reconnectToEdit")
+    : reasonCannotEditCountStructural === "role" ? structuralRoleLockHint
+    : null
+
   // AQU-765: renaming a synced project now persists to the server rename
   // endpoint (maintainer+). Local (unsynced) projects keep their name editable
   // — their IDB record is the source of truth. For a cloud project below the
@@ -537,194 +742,147 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     !isCloudProject || (projectRoleLevel != null && projectRoleLevel >= ROLE.MAINTAINER)
   const renameDisabledTooltip = canRenameProject ? null : roleLockHint
 
-  // Baseline is the last-saved snapshot of every field on the page. The diff
-  // between baseline and the form state determines `isDirty` and which writes
-  // we actually have to fire on Save.
-  const [baseline, setBaseline] = useState<Baseline | null>(null)
-
-  // Draft state — what the user is currently editing. Seeded once from the
-  // baseline; never overwritten by background project re-renders (that's what
-  // caused the "typed letter flashes then disappears" bug under auto-save).
-  const [name, setName] = useState("")
-  // AQU-765: inline validation for an empty/whitespace-only rename.
-  const [nameError, setNameError] = useState<string | null>(null)
-  const [sourceLanguage, setSourceLanguage] = useState("")
-  const [targetLanguage, setTargetLanguage] = useState("")
-  const [username, setUsername] = useState("")
-  const [provider, setProvider] = useState<CompletionProvider>("frontier")
-  const [endpoint, setEndpoint] = useState("")
-  const [apiKey, setApiKey] = useState("")
-  const [presetId, setPresetId] = useState<string>("local")
-  const [model, setModel] = useState("")
-  const [maxTokens, setMaxTokens] = useState(DEFAULT_COMPLETION_MAX_TOKENS)
-  const [temperature, setTemperature] = useState(0.3)
-  const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)
-  const [topK, setTopK] = useState(DEFAULT_APPROVED_EXAMPLE_COUNT)
-  const [contextSize, setContextSize] = useState<ContextSize>("medium")
-  const [useOnlyValidatedExamples, setUseOnlyValidatedExamples] = useState(true)
-  const [fewShotExampleFormat, setFewShotExampleFormat] = useState<"source-and-target" | "target-only">("source-and-target")
-  const [mainChatLanguage, setMainChatLanguage] = useState("")
-  const [completionBatchSize, setCompletionBatchSize] = useState(MAX_BATCH_COMPLETIONS)
-  const [validationBatchSize, setValidationBatchSize] = useState(0)
-  const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
-  const [autoSyncInterval, setAutoSyncInterval] = useState(5)
-  const [validationCount, setValidationCount] = useState(1)
-  const [validationCountAudio, setValidationCountAudio] = useState(1)
-  const [validationRoleFloor, setValidationRoleFloor] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
-  const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
-  const [allowSelfValidation, setAllowSelfValidation] = useState(true)
-  const [validationRoleFloorAudio, setValidationRoleFloorAudio] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
-  const [validationNamedUsersAudio, setValidationNamedUsersAudio] = useState<string[]>([])
-  const [allowSelfValidationAudio, setAllowSelfValidationAudio] = useState(true)
-  const [cellEditingFloor, setCellEditingFloor] = useState<CellEditingTier>("none")
-  const [allowTrackEditing, setAllowTrackEditing] = useState(false)
-  const [timingLocked, setTimingLocked] = useState(true)
-  // AQU-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
-  const [harmonizeMinRole, setHarmonizeMinRole] = useState<"project_lead" | "maintainer">("project_lead")
-  // AQU-460: EXPLICIT persisted value only — `undefined` means no explicit
-  // choice yet. The switch displays the DERIVED effective value (see render);
-  // this state only ever holds what will be persisted on Save.
-  const [bibleResourcesEnabled, setBibleResourcesEnabled] = useState<boolean | undefined>(undefined)
-  const [decaySettings, setDecaySettings] = useState<DecaySettings | undefined>(undefined)
-  const [audioMediaStrategy, setAudioMediaStrategy] = useState<AudioMediaStrategy>("lazy")
-  const [precedingTargetCells, setPrecedingTargetCells] = useState(DEFAULT_DRAFT_CONTEXT.precedingTargetCells)
-  // AQU-634: per-project USFM front-matter opt-out.
-  const [importExcludeFrontMatter, setImportExcludeFrontMatter] = useState(false)
-  // AQU-1271: project-wide affix inventory for terminology prefix/suffix matching.
-  const [termMatching, setTermMatching] = useState<TermMatchingSettings>({ prefixes: [], suffixes: [] })
+  // AQU-2262: no draft and no Save bar. Every control shows the SAVED value
+  // and saves the moment it changes (a typing field when you pause or leave
+  // it). The shared settings come from this page's settings hook, optimistic
+  // overlay included, laid over this browser's copy of the project, which
+  // holds the settings kept on this device. Before this page's settings GET
+  // lands, the shared values shown are defaults, so nothing changes from them.
+  const showsShared = sharedSettingsFetched || !isCloudProject
+  const live = useMemo(
+    () => readSavedSettings(
+      project
+        ? (showsShared ? overlaySettings(project, sharedSettingsBlob ?? {}) : project)
+        : ({ name: "" } as ProjectRecord),
+    ),
+    [project, showsShared, sharedSettingsBlob],
+  )
+  const canChangeShared = canEditShared && showsShared
+  const {
+    name, provider, endpoint, apiKey, model, maxTokens, temperature,
+    top_k: topK, contextSize, fewShotExampleFormat,
+    main_chat_language: mainChatLanguage, completionBatchSize, validationBatchSize,
+    autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
+    validationRoleFloor, validationNamedUsers, allowSelfValidation,
+    validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
+    cellEditingFloor, cellLabelFloor, allowTrackEditing, filmAndSources, timingLocked, harmonize_min_role: harmonizeMinRole,
+    bibleResourcesEnabled, bibleEnrichments, decaySettings, audioMediaStrategy, geminiApiKey,
+    precedingTargetCells, importExcludeFrontMatter, importCellUnit, smartQuotes, termMatching,
+  } = live
+  // Sam, Oct 28: each (i) opens its explanation beneath the setting's title.
+  const [lockInfoOpen, toggleLockInfo] = useInfoOpen()
+  const [trackEditingInfoOpen, toggleTrackEditingInfo] = useInfoOpen()
+  const [filmInfoOpen, toggleFilmInfo] = useInfoOpen()
+  // AQU-1768: the value in force for each — the project's own, else the
+  // organization's default, else the built-in one. What the disabled control
+  // shows while the project follows the organization, and where "Set for this
+  // project" starts from.
+  const effectiveTimingLocked = resolveTimingLocked({ timingLocked: timingLocked ?? orgMediaDefaults.timingLocked })
+  // AQU-2214: the built-in default is ON — the project's own choice first, then
+  // the organization's, then on.
+  const effectiveAllowTrackEditing = allowTrackEditing ?? orgMediaDefaults.allowTrackEditing ?? true
+  const effectiveCellEditingFloor: CellEditingTier = cellEditingFloor ?? orgMediaDefaults.cellEditingFloor ?? "none"
+  // AQU-2408: no organization default — the built-in one is maintainer.
+  const effectiveCellLabelFloor: CellLabelTier = cellLabelFloor ?? "maintainer"
   // Pre-merge round: the Media timeline's timing mode moved OUT of Project
   // Settings — it is FILE-level now (file.timing.set), controlled from the
   // timeline toolbar with the same maintainer floor.
 
+  // ── Saving as you change ─────────────────────────────────────────────
+  // Each change is one Undo step in the person's history for this project
+  // ("Change: <setting>"), and says how it went beside the setting.
+  const historyUser = authorNameFor(session?.username, project?.username)
+  const commit = useSettingsCommit({
+    projectId: id ?? null,
+    project: project ?? null,
+    onRenamed: refresh,
+    username: historyUser,
+    isCloudProject,
+    settings: sharedSettingsBlob ?? {},
+    patch: patchShared,
+    getJwt,
+    t,
+  })
+  const setShared = (key: string, value: unknown) =>
+    void commit.shared(key, sharedSettingLabel(key), [{ key, value }])
+  const setDrafting = (field: DraftingField, value: unknown, typed?: CommitInfo<unknown>) => {
+    void commit.shared(`draftingSettings.${field}`, DRAFTING_FIELD_LABELS[field], [{ key: "draftingSettings", field, value }], typed)
+    // The workspace's "pick a provider" prompt stops asking once the team's
+    // drafting settings were set here, as a Save used to tell it.
+    if (id) void patchProject(id, (p) => (p.aiProviderChosen ? p : { ...p, aiProviderChosen: true }))
+  }
+  const setDevice = (key: DeviceSettingKey, value: unknown, typed?: CommitInfo<unknown>) =>
+    void commit.device(key, DEVICE_SETTING_LABELS[key], key, value, typed)
+  const setSyncSettings = (enabled: boolean, intervalMinutes: number, typed?: CommitInfo<unknown>) =>
+    setDevice("syncSettings", { autoSync: { enabled, intervalMinutes: Math.max(1, intervalMinutes) } }, typed)
+  // The temperature while its slider is dragged; it saves when let go.
+  const [draggedTemperature, setDraggedTemperature] = useState<number | null>(null)
+
+  // The history: this page records steps, and when it is open on its own (no
+  // workspace behind it) it hosts the project's history, so Undo, the History
+  // panel and Cmd/Ctrl+Z work here. Over the workspace this changes nothing.
+  const historyJwtRef = useRef<string | null>(null)
+  historyJwtRef.current = session?.jwt ?? null
+  useEffect(() => {
+    if (!id) return
+    return holdHistoryScope(id, historyUser, () => httpHistoryRemote(() => historyJwtRef.current))
+  }, [id, historyUser])
+  useSettingsStepKinds(id ?? null, { project, onRenamed: refresh })
+  const reportHistory = useHistoryReporter()
+  useHistoryShortcuts(reportHistory)
+
   // Per-device user-scoped key — not part of the project record, not server-
-  // synced, no race with the project save flow. Kept on its own immediate-save
-  // path so the deferred-save bar isn't responsible for cross-project state.
+  // synced, no race with the project save flow.
   const completionUserKey = useUserApiKey("completion") ?? ""
   const geminiUserKey = useUserApiKey("gemini-tts") ?? ""
 
-  // Gemini TTS API key — stored in ttsSettings.apiKey (project-level).
-  const [geminiApiKey, setGeminiApiKey] = useState("")
+  // AQU-2263: which key drafts and voices use right now — from what is SAVED,
+  // the Preferences override and this browser's own keys.
+  const providerOverride = useUserProviderOverride()
+  const completionInUse = completionKeyInUse({
+    settings: { provider, endpoint, apiKey },
+    override: providerOverride,
+    personalKey: completionUserKey,
+  })
+  const geminiInUse = geminiKeyInUse({
+    projectKey: geminiApiKey,
+    personalKey: geminiUserKey,
+    orgHasKey: Boolean(orgSettingsForProject.orgProviderKeys?.["gemini-tts"]),
+  })
 
+  // The project's AI keys stay on this device and are never an Undo step:
+  // every step is saved to the server, and a key never leaves the browser.
+  const saveCompletionKey = (next: string) => {
+    if (next === apiKey) return
+    void commit.secret("apiKey", (p) => ({
+      ...p,
+      completionSettings: buildCompletionSettings(p.completionSettings, { apiKey: next || undefined }),
+      aiProviderChosen: true,
+    }))
+  }
+  const saveGeminiKey = (next: string) => {
+    if (next === geminiApiKey) return
+    void commit.secret("geminiApiKey", (p) => ({ ...p, ttsSettings: { ...p.ttsSettings, apiKey: next || undefined } }))
+  }
+
+  const [presetId, setPresetId] = useState<string>(() => presetIdForEndpoint(endpoint))
   const [models, setModels] = useState<string[]>([])
   const [connecting, setConnecting] = useState(false)
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
   const lastModelFetchKeyRef = useRef<string | null>(null)
-
-  const seededRef = useRef(false)
-
-  const applyBaseline = useCallback((b: Baseline) => {
-    setName(b.name)
-    setSourceLanguage(b.sourceLanguage)
-    setTargetLanguage(b.targetLanguage)
-    setUsername(b.username)
-    setProvider(b.provider)
-    setEndpoint(b.endpoint)
-    setApiKey(b.apiKey)
-    setPresetId(presetIdForEndpoint(b.endpoint))
-    setModel(b.model)
-    setMaxTokens(b.maxTokens)
-    setTemperature(b.temperature)
-    setLlmHealthPenalty(b.llmHealthPenalty)
-    setTopK(b.top_k)
-    setContextSize(b.contextSize)
-    setUseOnlyValidatedExamples(true)
-    setFewShotExampleFormat(b.fewShotExampleFormat)
-    setMainChatLanguage(b.main_chat_language)
-    setCompletionBatchSize(b.completionBatchSize)
-    setValidationBatchSize(b.validationBatchSize)
-    setAutoSyncEnabled(b.autoSyncEnabled)
-    setAutoSyncInterval(b.autoSyncInterval)
-    setValidationCount(b.validationCount)
-    setValidationCountAudio(b.validationCountAudio)
-    setValidationRoleFloor(b.validationRoleFloor)
-    setValidationNamedUsers(b.validationNamedUsers)
-    setAllowSelfValidation(b.allowSelfValidation)
-    setValidationRoleFloorAudio(b.validationRoleFloorAudio)
-    setValidationNamedUsersAudio(b.validationNamedUsersAudio)
-    setAllowSelfValidationAudio(b.allowSelfValidationAudio)
-    setCellEditingFloor(b.cellEditingFloor)
-    setAllowTrackEditing(b.allowTrackEditing)
-    setTimingLocked(b.timingLocked)
-    setHarmonizeMinRole(b.harmonize_min_role)
-    setBibleResourcesEnabled(b.bibleResourcesEnabled)
-    setDecaySettings(b.decaySettings)
-    setAudioMediaStrategy(b.audioMediaStrategy)
-    setGeminiApiKey(b.geminiApiKey)
-    setPrecedingTargetCells(b.precedingTargetCells)
-    setImportExcludeFrontMatter(b.importExcludeFrontMatter)
-    setTermMatching(b.termMatching)
-  }, [])
-
-  // Seed once when the project first loads. We intentionally don't reseed on
-  // every `project` identity change — background sync writes to IDB shouldn't
-  // wipe the user's in-progress edits. After save/discard we reseed manually.
+  // A new endpoint (typed here, or saved by someone else) is not connected yet,
+  // and the preset picker follows it.
+  const seenEndpointRef = useRef(endpoint)
   useEffect(() => {
-    if (!project || seededRef.current) return
-    const b = buildBaseline(project)
-    setBaseline(b)
-    applyBaseline(b)
-    seededRef.current = true
-  }, [project, applyBaseline])
-
-  // AQU-460 display-race fix: `project.bibleResourcesEnabled` hydrates in two
-  // async phases — `useProject`'s minimal record resolves first WITHOUT the
-  // field (undefined), then its own `useProjectSettings` GET fills it in. If
-  // the baseline seed above (which runs on first non-null `project`) lands
-  // during that undefined window, it locks in `undefined`, and the Switch
-  // paints `resolveBibleResourcesEnabled(undefined, hasScriptureFiles)` —
-  // wrongly `true` for a scripture project whose server value is really
-  // `false`. Once THIS component's own settings hook confirms a fetch has
-  // resolved (`sharedSettingsFetched`), re-sync the seeded value to whatever
-  // `project.bibleResourcesEnabled` now holds — but only if the user hasn't
-  // already touched the switch (don't clobber an in-progress edit), and only
-  // once (matches the "seed once" contract above).
-  const bibleResourcesResyncedRef = useRef(false)
-  useEffect(() => {
-    if (!project || !baseline || !sharedSettingsFetched) return
-    if (bibleResourcesResyncedRef.current) return
-    bibleResourcesResyncedRef.current = true
-    if (project.bibleResourcesEnabled === baseline.bibleResourcesEnabled) return
-    setBaseline((prev) => (prev ? { ...prev, bibleResourcesEnabled: project.bibleResourcesEnabled } : prev))
-    // Only overwrite the draft value if the user hasn't diverged from the
-    // (possibly-stale) baseline yet — otherwise we'd stomp an in-progress toggle.
-    setBibleResourcesEnabled((prev) => (prev === baseline.bibleResourcesEnabled ? project.bibleResourcesEnabled : prev))
-  }, [project, baseline, sharedSettingsFetched])
-
-  // AQU-1115: the Source/Target Language fields rendered permanently EMPTY on a
-  // project that has both set. Same two-phase shape as the AQU-460 race above,
-  // but worse: this page passes `includeSettings: false` to `useProject` (it
-  // owns the editable settings hook below, and a second overlay request would
-  // be a duplicate GET), so `project` here is `minimalProjectRecord`, which
-  // hardcodes `sourceLanguage: ""` / `targetLanguage: ""` — the languages live
-  // ONLY in the shared settings blob and never reach `project` at all. The
-  // baseline seed therefore didn't just *race* the real values, it could never
-  // see them, so the fields stayed blank forever. (The Languages card below
-  // looked right because it reads `sharedSettingsBlob` directly — that
-  // discrepancy is exactly what the bug report describes.)
-  //
-  // Once this page's own settings GET has resolved, re-sync both fields from
-  // the blob. `hasFetched` fails closed (stays false on a failed GET), so a
-  // settings outage leaves the previous behavior rather than blanking anything.
-  const languagesResyncedRef = useRef(false)
-  useEffect(() => {
-    if (!baseline || !sharedSettingsFetched) return
-    if (languagesResyncedRef.current) return
-    languagesResyncedRef.current = true
-    // Absent stays absent — a project with a genuinely empty language must show
-    // an empty field, never an invented default. A free-text label that isn't
-    // in the language catalog rides through verbatim.
-    const nextSource = sharedSettingsBlob?.sourceLanguage ?? baseline.sourceLanguage
-    const nextTarget = sharedSettingsBlob?.targetLanguage ?? baseline.targetLanguage
-    if (nextSource === baseline.sourceLanguage && nextTarget === baseline.targetLanguage) return
-    setBaseline((prev) => (prev ? { ...prev, sourceLanguage: nextSource, targetLanguage: nextTarget } : prev))
-    // Only adopt the hydrated value where the user hasn't already typed over the
-    // (blank) seed — otherwise this would stomp an in-progress edit. Settling to
-    // the true server value must also not read as a user edit, which is why the
-    // baseline moves with it.
-    setSourceLanguage((prev) => (prev === baseline.sourceLanguage ? nextSource : prev))
-    setTargetLanguage((prev) => (prev === baseline.targetLanguage ? nextTarget : prev))
-  }, [baseline, sharedSettingsFetched, sharedSettingsBlob])
+    if (seenEndpointRef.current === endpoint) return
+    seenEndpointRef.current = endpoint
+    setPresetId(presetIdForEndpoint(endpoint))
+    setConnected(false)
+    setConnectionError(null)
+    setModels([])
+    lastModelFetchKeyRef.current = null
+  }, [endpoint])
 
   const effectiveCompletionApiKey = apiKey.trim() || completionUserKey.trim()
 
@@ -741,37 +899,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (lastModelFetchKeyRef.current !== fetchKey) return
       setModels(list)
       setConnected(true)
-      const chosenModel = model || list[0] || ""
-      if (list.length > 0 && !model) setModel(list[0])
-      // Connect (and the auto-probe after a key/endpoint pause) is the moment
-      // the user believes BYOK is ready. Persist immediately so the workspace
-      // sparkle gate sees Custom OpenRouter without a second "Save changes".
-      if (id && provider === "custom") {
-        const latest = (await getProject(id)) ?? project ?? undefined
-        if (latest) {
-          const nextCompletion = buildCompletionSettings(latest.completionSettings, {
-            provider: "custom",
-            endpoint: trimmedEndpoint,
-            ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-            model: chosenModel,
-          })
-          await updateProject({
-            ...latest,
-            completionSettings: nextCompletion,
-            aiProviderChosen: true,
-          })
-          setBaseline((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  provider: "custom",
-                  endpoint: trimmedEndpoint,
-                  apiKey,
-                  model: chosenModel,
-                }
-              : prev,
-          )
-        }
+      // Connect is the moment the person believes BYOK is ready: the
+      // workspace's "pick a provider" prompt stops asking. AQU-2259: the
+      // provider, endpoint and model are the team's settings, so Connect never
+      // changes them — the model is picked from the list, which saves it.
+      if (id && provider === "custom" && apiKey.trim()) {
+        await patchProject(id, (p) => (p.aiProviderChosen ? p : { ...p, aiProviderChosen: true }))
       }
     } catch (err) {
       if (lastModelFetchKeyRef.current !== fetchKey) return
@@ -781,124 +914,16 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     } finally {
       if (lastModelFetchKeyRef.current === fetchKey) setConnecting(false)
     }
-  }, [apiKey, effectiveCompletionApiKey, endpoint, id, model, project, provider])
+  }, [apiKey, effectiveCompletionApiKey, endpoint, id, provider])
 
-  const isDirty = useMemo(() => {
-    if (!baseline) return false
-    return (
-      name !== baseline.name ||
-      sourceLanguage !== baseline.sourceLanguage ||
-      targetLanguage !== baseline.targetLanguage ||
-      username !== baseline.username ||
-      provider !== baseline.provider ||
-      endpoint !== baseline.endpoint ||
-      apiKey !== baseline.apiKey ||
-      model !== baseline.model ||
-      maxTokens !== baseline.maxTokens ||
-      temperature !== baseline.temperature ||
-      llmHealthPenalty !== baseline.llmHealthPenalty ||
-      topK !== baseline.top_k ||
-      contextSize !== baseline.contextSize ||
-      useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples ||
-      fewShotExampleFormat !== baseline.fewShotExampleFormat ||
-      mainChatLanguage !== baseline.main_chat_language ||
-      completionBatchSize !== baseline.completionBatchSize ||
-      validationBatchSize !== baseline.validationBatchSize ||
-      autoSyncEnabled !== baseline.autoSyncEnabled ||
-      autoSyncInterval !== baseline.autoSyncInterval ||
-      validationCount !== baseline.validationCount ||
-      validationCountAudio !== baseline.validationCountAudio ||
-      validationRoleFloor !== baseline.validationRoleFloor ||
-      JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers) ||
-      allowSelfValidation !== baseline.allowSelfValidation ||
-      validationRoleFloorAudio !== baseline.validationRoleFloorAudio ||
-      JSON.stringify(validationNamedUsersAudio) !== JSON.stringify(baseline.validationNamedUsersAudio) ||
-      allowSelfValidationAudio !== baseline.allowSelfValidationAudio ||
-      cellEditingFloor !== baseline.cellEditingFloor ||
-      allowTrackEditing !== baseline.allowTrackEditing ||
-      timingLocked !== baseline.timingLocked ||
-      harmonizeMinRole !== baseline.harmonize_min_role ||
-      bibleResourcesEnabled !== baseline.bibleResourcesEnabled ||
-      audioMediaStrategy !== baseline.audioMediaStrategy ||
-      !decayEqual(decaySettings, baseline.decaySettings) ||
-      geminiApiKey !== baseline.geminiApiKey ||
-      precedingTargetCells !== baseline.precedingTargetCells ||
-      importExcludeFrontMatter !== baseline.importExcludeFrontMatter ||
-      JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)
-    )
-  }, [
-    baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
-    model, maxTokens, temperature, llmHealthPenalty,
-    topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
-    completionBatchSize, validationBatchSize,
-    autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
-    validationRoleFloor, validationNamedUsers, allowSelfValidation, cellEditingFloor,
-    validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
-    allowTrackEditing,
-    timingLocked,
-    harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
-    precedingTargetCells, importExcludeFrontMatter, termMatching,
-  ])
-
-  // Warn before browser-level navigation (back button, tab close, reload).
-  useEffect(() => {
-    if (!isDirty) return
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault()
-      e.returnValue = ""
-    }
-    window.addEventListener("beforeunload", handler)
-    return () => window.removeEventListener("beforeunload", handler)
-  }, [isDirty])
-
-  const [discardOpen, setDiscardOpen] = useState(false)
-  const [closeAfterDiscard, setCloseAfterDiscard] = useState(false)
-  const [pendingHistoryDelta, setPendingHistoryDelta] = useState<number | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
-  // AQU-408: success message reflects the actual delta saved (a brief
-  // enumeration of which fields changed), not a generic "Saved". Auto-dismisses
-  // after a few seconds. The modal/page itself stays open on save — only an
-  // explicit "Save and close" leaves it.
-  const [savedMessage, setSavedMessage] = useState<string | null>(null)
-  const savedMessageTimerRef = useRef<number | null>(null)
-  useEffect(() => () => {
-    if (savedMessageTimerRef.current != null) window.clearTimeout(savedMessageTimerRef.current)
-  }, [])
-
-  // Pending in-app navigation target. Set when the user clicks something that
-  // would leave the page while dirty; cleared when they confirm discard (we
-  // navigate) or cancel (we drop the target). The app uses classic
-  // BrowserRouter, so useBlocker isn't available — instead every nav button
-  // on this page routes through requestNavigate.
-  const [pendingNav, setPendingNav] = useState<string | null>(null)
-  const requestNavigate = useCallback((target: string) => {
-    if (isDirty) {
-      setPendingNav(target)
-      setDiscardOpen(true)
-    } else {
-      navigate(target)
-    }
-  }, [isDirty, navigate])
-
+  // Nothing waits to be saved, so leaving needs no "discard changes?" prompt.
+  // A typing field being edited saves as it loses focus.
+  const requestNavigate = navigate
   const closeSettings = useCallback(() => {
-    if (isDirty) {
-      setCloseAfterDiscard(true)
-      setDiscardOpen(true)
-      return
-    }
     if (modal) navigate(-modalDepth)
     else navigate(editorPath)
-  }, [editorPath, isDirty, modal, modalDepth, navigate])
-
-  const requestHistoryNavigation = useCallback((delta: number) => {
-    if (isDirty) {
-      setPendingHistoryDelta(delta)
-      setDiscardOpen(true)
-      return
-    }
-    navigate(delta)
-  }, [isDirty, navigate])
+  }, [editorPath, modal, modalDepth, navigate])
+  const requestHistoryNavigation = useCallback((delta: number) => navigate(delta), [navigate])
 
   const preset = CUSTOM_PRESETS.find((p) => p.id === presetId) ?? CUSTOM_PRESETS[0]
 
@@ -914,8 +939,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setPresetId(nextPresetId)
     const preset = CUSTOM_PRESETS.find((p) => p.id === nextPresetId)
     if (!preset) return
-    const nextEndpoint = preset.id === "custom" ? endpoint : preset.endpoint
-    setEndpoint(nextEndpoint)
+    const nextEndpoint = endpointForPresetChange(nextPresetId, endpoint)
+    if (nextEndpoint !== endpoint) {
+      // The picker keeps what was picked ("Other…" with an empty endpoint).
+      seenEndpointRef.current = nextEndpoint
+      setDrafting("endpoint", nextEndpoint)
+    }
     setConnected(false)
     setConnectionError(null)
     setModels([])
@@ -929,309 +958,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     const timer = window.setTimeout(() => void loadModels(), 350)
     return () => window.clearTimeout(timer)
   }, [effectiveCompletionApiKey, endpoint, loadModels, preset.requiresKey, provider])
-
-  // ── Save orchestration ─────────────────────────────────────────────
-  // Order matters: local IDB writes first (cheap, can't fail meaningfully),
-  // then the shared/server PATCH (the only one that can 409). If the PATCH
-  // fails we leave local writes in place — they're idempotent and not the
-  // source of truth for shared fields anyway.
-  const handleSave = useCallback(async (): Promise<boolean> => {
-    if (!id || !baseline) return false
-    setSaving(true)
-    setSaveError(null)
-    setSavedMessage(null)
-    setNameError(null)
-    // AQU-408: track which fields actually changed so the success message can
-    // reflect the real delta saved, instead of a generic "Saved" that implies
-    // everything on the page was written.
-    const changedFieldLabels: string[] = []
-    try {
-      const completionUpdates: Partial<CompletionSettings> = {}
-      if (provider !== baseline.provider) { completionUpdates.provider = provider; changedFieldLabels.push("AI provider") }
-      if (endpoint.trim() !== baseline.endpoint) { completionUpdates.endpoint = endpoint.trim(); changedFieldLabels.push("endpoint") }
-      if (apiKey !== baseline.apiKey) { completionUpdates.apiKey = apiKey || undefined; changedFieldLabels.push("API key") }
-      if (model !== baseline.model) { completionUpdates.model = model; changedFieldLabels.push("model") }
-      if (maxTokens !== baseline.maxTokens) { completionUpdates.maxTokens = maxTokens; changedFieldLabels.push("max tokens") }
-      if (temperature !== baseline.temperature) { completionUpdates.temperature = temperature; changedFieldLabels.push("temperature") }
-      if (llmHealthPenalty !== baseline.llmHealthPenalty) { completionUpdates.llmHealthPenalty = llmHealthPenalty; changedFieldLabels.push("health penalty") }
-      if (topK !== baseline.top_k) { completionUpdates.top_k = topK; changedFieldLabels.push("examples retrieved") }
-      if (contextSize !== baseline.contextSize) { completionUpdates.contextSize = contextSize; changedFieldLabels.push("context window") }
-      if (useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples) { completionUpdates.useOnlyValidatedExamples = useOnlyValidatedExamples; changedFieldLabels.push("validated examples only") }
-      if (fewShotExampleFormat !== baseline.fewShotExampleFormat) { completionUpdates.fewShotExampleFormat = fewShotExampleFormat; changedFieldLabels.push("reference example format") }
-      if (mainChatLanguage !== baseline.main_chat_language) { completionUpdates.main_chat_language = mainChatLanguage || undefined; changedFieldLabels.push("assisted language") }
-      if (completionBatchSize !== baseline.completionBatchSize) { completionUpdates.completionBatchSize = completionBatchSize; changedFieldLabels.push("AI completions batch size") }
-      if (validationBatchSize !== baseline.validationBatchSize) { completionUpdates.validationBatchSize = validationBatchSize; changedFieldLabels.push("batch validation size") }
-
-      const localUpdates: Partial<ProjectRecord> = {}
-      // AQU-765: rename. Trim first so a whitespace-only entry is rejected
-      // (visible validation) rather than persisted. For a synced project the
-      // server's `projects.name` is the source of truth every surface reads
-      // (org list, breadcrumbs, portfolio, search), so push the rename there
-      // before mirroring it into the local IDB record below. Local projects
-      // skip the server call — their IDB record IS the source of truth.
-      const trimmedName = name.trim()
-      if (trimmedName !== baseline.name) {
-        if (!trimmedName) {
-          setNameError("Enter a project title.")
-          return false
-        }
-        if (isCloudProject) {
-          const jwt = getJwt()
-          if (!jwt) {
-            setSaveError("You're signed out. Sign in again to rename this project.")
-            return false
-          }
-          try {
-            await renameProject(jwt, id, trimmedName)
-          } catch (err) {
-            if (err instanceof UserError && err.status === 403) {
-              setSaveError(t("projectSettings.permission.onlyRoleCanModify", {
-                role: resolveRoleName(t, ROLE.MAINTAINER, { plural: true }),
-              }))
-            } else {
-              setSaveError(err instanceof Error ? err.message : "Renaming the project failed.")
-            }
-            return false
-          }
-        }
-        localUpdates.name = trimmedName
-        changedFieldLabels.push("project title")
-      }
-      if (username !== baseline.username) { localUpdates.username = username; changedFieldLabels.push("username") }
-      if (!decayEqual(decaySettings, baseline.decaySettings)) { localUpdates.decaySettings = decaySettings; changedFieldLabels.push("decay settings") }
-      if (audioMediaStrategy !== baseline.audioMediaStrategy) { localUpdates.audioMediaStrategy = audioMediaStrategy; changedFieldLabels.push("audio media strategy") }
-      // geminiApiKey handled below after `latest` is fetched, so voices/castAssignments are preserved.
-      if (
-        autoSyncEnabled !== baseline.autoSyncEnabled ||
-        autoSyncInterval !== baseline.autoSyncInterval
-      ) {
-        localUpdates.syncSettings = {
-          autoSync: { enabled: autoSyncEnabled, intervalMinutes: Math.max(1, autoSyncInterval) },
-        }
-        changedFieldLabels.push("auto-sync")
-      }
-
-      const geminiKeyChanged = geminiApiKey !== baseline.geminiApiKey
-      if (geminiKeyChanged) changedFieldLabels.push("voice API key")
-      const hasLocalWork =
-        Object.keys(localUpdates).length > 0 || Object.keys(completionUpdates).length > 0 || geminiKeyChanged
-      if (hasLocalWork) {
-        const latest = (await getProject(id)) ?? project ?? undefined
-        if (!latest) throw new Error("Project not found")
-        const nextCompletion = Object.keys(completionUpdates).length
-          ? buildCompletionSettings(latest.completionSettings, completionUpdates)
-          : latest.completionSettings
-        // Merge geminiApiKey into ttsSettings so voices/castAssignments are preserved.
-        const nextTtsSettings = geminiKeyChanged
-          ? { ...latest.ttsSettings, apiKey: geminiApiKey || undefined }
-          : latest.ttsSettings
-        await updateProject({
-          ...latest,
-          ...localUpdates,
-          completionSettings: nextCompletion,
-          ttsSettings: nextTtsSettings,
-          ...(Object.keys(completionUpdates).length > 0 ? { aiProviderChosen: true } : {}),
-        })
-      }
-
-      const sharedUpdates: ProjectWideSettings = {}
-      if (sourceLanguage !== baseline.sourceLanguage) { sharedUpdates.sourceLanguage = sourceLanguage; changedFieldLabels.push("source language") }
-      if (targetLanguage !== baseline.targetLanguage) { sharedUpdates.targetLanguage = targetLanguage; changedFieldLabels.push("target language") }
-      if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount; changedFieldLabels.push("validation count") }
-      if (validationCountAudio !== baseline.validationCountAudio) {
-        sharedUpdates.validationCountAudio = validationCountAudio
-        changedFieldLabels.push("audio validation count")
-      }
-      if (validationRoleFloor !== baseline.validationRoleFloor) { sharedUpdates.validationRoleFloor = validationRoleFloor; changedFieldLabels.push("validation role floor") }
-      if (JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers)) {
-        sharedUpdates.validationNamedUsers = validationNamedUsers
-        changedFieldLabels.push("named validators")
-      }
-      if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push("self-validation") }
-      if (validationRoleFloorAudio !== baseline.validationRoleFloorAudio) { sharedUpdates.validationRoleFloorAudio = validationRoleFloorAudio; changedFieldLabels.push("minimum role to validate recordings") }
-      if (JSON.stringify(validationNamedUsersAudio) !== JSON.stringify(baseline.validationNamedUsersAudio)) { sharedUpdates.validationNamedUsersAudio = validationNamedUsersAudio; changedFieldLabels.push("named recording validators") }
-      if (allowSelfValidationAudio !== baseline.allowSelfValidationAudio) { sharedUpdates.allowSelfValidationAudio = allowSelfValidationAudio; changedFieldLabels.push("validating your own recordings") }
-      if (cellEditingFloor !== baseline.cellEditingFloor) { sharedUpdates.cellEditingFloor = cellEditingFloor; changedFieldLabels.push("who can add and remove cells") }
-      if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing; changedFieldLabels.push("timeline track editing") }
-      if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked; changedFieldLabels.push("the timing lock") }
-      if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
-      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
-      if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
-      if (precedingTargetCells !== baseline.precedingTargetCells) {
-        sharedUpdates.draftContext = { precedingTargetCells }
-        changedFieldLabels.push("draft context")
-      }
-      if (JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)) {
-        sharedUpdates.termMatching = termMatching
-        changedFieldLabels.push("term matching affixes")
-      }
-
-      if (Object.keys(sharedUpdates).length > 0) {
-        const out = await patchShared(sharedUpdates)
-        if (out.kind === "conflict") {
-          toast.add({
-            type: "warning",
-            title: t("projectSettings.save.conflictToast", {
-              username: out.latest.updatedBy?.username ?? t("projectSettings.save.conflictFallbackUsername"),
-            }),
-          })
-          setSaveError("Someone else updated shared settings. Refresh to reapply your edits.")
-          return false
-        }
-        if (out.kind === "blocked") {
-          if (out.reason === "offline") {
-            setSaveError("You're offline. Reconnect to save shared fields.")
-          } else {
-            setSaveError(t("projectSettings.permission.onlyRoleCanModify", {
-              role: resolveRoleName(t, ROLE.MAINTAINER, { plural: true }),
-            }))
-          }
-          return false
-        }
-        if (out.kind === "error") {
-          setSaveError(out.message || "Saving shared settings failed.")
-          return false
-        }
-      }
-
-      // Re-baseline from current form state. Reading IDB here was racy —
-      // `patchShared` mirrors shared fields to IDB via a fire-and-forget write
-      // that hasn't necessarily flushed yet, so the read would return stale
-      // values and `applyBaseline` would wipe what the user just saved. We
-      // wrote the values; we know what they are.
-      // AQU-765: re-baseline (and reflect in the input) with the trimmed name
-      // we actually persisted, so the canonical value doesn't read back dirty.
-      if (trimmedName !== name) setName(trimmedName)
-      const newBaseline: Baseline = {
-        name: trimmedName,
-        sourceLanguage,
-        targetLanguage,
-        username,
-        provider,
-        endpoint: endpoint.trim(),
-        apiKey,
-        model,
-        maxTokens,
-        temperature,
-        llmHealthPenalty,
-        top_k: topK,
-        contextSize,
-        useOnlyValidatedExamples,
-        fewShotExampleFormat,
-        main_chat_language: mainChatLanguage,
-        completionBatchSize,
-        validationBatchSize,
-        autoSyncEnabled,
-        autoSyncInterval: Math.max(1, autoSyncInterval),
-        validationCount,
-        validationCountAudio,
-        validationRoleFloor,
-        validationNamedUsers,
-        allowSelfValidation,
-        validationRoleFloorAudio,
-        validationNamedUsersAudio,
-        allowSelfValidationAudio,
-        cellEditingFloor,
-        allowTrackEditing,
-        timingLocked,
-        harmonize_min_role: harmonizeMinRole,
-        bibleResourcesEnabled,
-        decaySettings,
-        audioMediaStrategy,
-        geminiApiKey,
-        precedingTargetCells,
-        importExcludeFrontMatter,
-        termMatching,
-      }
-      setBaseline(newBaseline)
-      // Refresh `useProject` in the background so other components see the
-      // updated IDB record. We don't await it — the form is already correct.
-      refresh()
-
-      // AQU-408 acceptance criterion: the success message reflects the actual
-      // delta saved (a brief enumeration of which fields changed), and the
-      // page/modal stays open afterward — callers decide separately whether
-      // to also navigate away (see handleSaveAndClose).
-      const message =
-        changedFieldLabels.length === 0
-          ? "No changes to save."
-          : changedFieldLabels.length <= 3
-            ? `Saved: ${changedFieldLabels.join(", ")}.`
-            : `Saved ${changedFieldLabels.length} changes: ${changedFieldLabels.slice(0, 3).join(", ")}, +${changedFieldLabels.length - 3} more.`
-      setSavedMessage(message)
-      if (savedMessageTimerRef.current != null) window.clearTimeout(savedMessageTimerRef.current)
-      savedMessageTimerRef.current = window.setTimeout(() => setSavedMessage(null), 4000)
-      return true
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err))
-      return false
-    } finally {
-      setSaving(false)
-    }
-  }, [
-    id, baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
-    model, maxTokens, temperature, llmHealthPenalty,
-    topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
-    completionBatchSize, validationBatchSize,
-    autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
-    validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
-    // AQU-490. The note directly below is about exactly this list: handleSave
-    // closes over these, so a field missing here is a field whose change the
-    // save silently never sees.
-    validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
-    // AQU-1068. Its predecessor `allowLineCreation` was missing from this list
-    // too, and the bug is invisible until you try it: handleSave closes over a
-    // stale value, the diff below sees no change, `sharedUpdates` comes out
-    // empty and NO REQUEST IS SENT AT ALL. The button reacts, the header keeps
-    // saying "Unsaved changes", and nothing in the console complains. The unit
-    // test does not catch it either — an unrelated re-render refreshes the
-    // closure in happy-dom — so exhaustive-deps is the only guard, and it is a
-    // warning among hundreds. `timingLocked` had the same hole: the timing
-    // LOCK, the one safeguard AQU-646 added, could silently fail to save.
-    // `allowTrackEditing` arrived with PR #474 carrying the same hole, and the
-    // merge that brought it here is where it became visible — dev's own
-    // handleSave list never named it either.
-    cellEditingFloor, timingLocked, allowTrackEditing,
-    bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
-    precedingTargetCells, importExcludeFrontMatter, termMatching, getJwt, isCloudProject, t,
-  ])
-
-  const handleSaveAndClose = useCallback(async () => {
-    const ok = await handleSave()
-    // `saveError` from the render closure is stale (set inside handleSave
-    // during this same tick); rely on the returned boolean instead.
-    if (!ok) return
-    if (modal) navigate(-modalDepth)
-    else navigate(editorPath)
-  }, [handleSave, navigate, editorPath, modal, modalDepth])
-
-  const handleDiscardConfirm = useCallback(() => {
-    if (baseline) applyBaseline(baseline)
-    setDiscardOpen(false)
-    if (closeAfterDiscard) {
-      setCloseAfterDiscard(false)
-      setPendingNav(null)
-      if (modal) navigate(-modalDepth)
-      else navigate(editorPath)
-      return
-    }
-    if (pendingHistoryDelta != null) {
-      setPendingHistoryDelta(null)
-      setPendingNav(null)
-      navigate(pendingHistoryDelta)
-      return
-    }
-    const target = pendingNav ?? editorPath
-    setPendingNav(null)
-    navigate(target)
-  }, [baseline, applyBaseline, closeAfterDiscard, pendingHistoryDelta, pendingNav, navigate, editorPath, modal, modalDepth])
-
-  const handleDiscardCancel = useCallback(() => {
-    setDiscardOpen(false)
-    setCloseAfterDiscard(false)
-    setPendingHistoryDelta(null)
-    setPendingNav(null)
-  }, [])
 
   // ── Settings sections definition ──────────────────────────────────────────
   const hasGitOrigin = project?.origin?.kind === "git"
@@ -1249,37 +975,85 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // this guard prevents a double mount.
   const hasDcsUpstream = !hasSourceLink && !!readCursor((sharedSettingsBlob ?? {}) as Record<string, unknown>)
 
+  // AQU-1685: the card is "Bible data", with its enrichment rows, only while
+  // this device has the Bible data experiment on; otherwise it is the old
+  // "Bible resources" card, findable by its old keywords.
+  const bibleDataExperiment = isBibleDataExperimentOn(project)
+
   const ALL_SECTIONS: SettingsSection[] = [
-    { id: "section-source-link", label: "Source link", keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
-    { id: "section-upstream-changes", label: "Upstream changes", keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
-    { id: "section-dcs-upstream", label: "Door43 upstream", keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
-    { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language"] },
-    { id: "section-languages", label: "Languages", keywords: ["languages", "target lanes", "lane", "target language", "dialect"] },
-    { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
-    { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
-    { id: "section-user", label: "User", keywords: ["username", "author"] },
-    { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
+    // AQU-1525: the counterpart of section-source-link — exactly one of the two
+    // is ever visible, keyed off whether this project already has an upstream.
+    { id: "section-link-source", label: t("projectSettings.section.sourceLink"), keywords: ["source", "link", "linked", "upstream", "attach", "share source", "mirror"], visible: !hasSourceLink },
+    { id: "section-source-link", label: t("projectSettings.section.sourceLink"), keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
+    { id: "section-inherited-settings", label: t("projectSettings.inherit.title", { upstream: inheritedUpstreamName ?? project?.sourceProjectId ?? "" }), keywords: ["settings from", "inherited settings", "inherit", "copy", "brief", "knowledge", "workflow", "detach", "upstream"], visible: hasSourceLink },
+    { id: "section-upstream-changes", label: t("projectSettings.section.upstreamChanges"), keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
+    { id: "section-dcs-upstream", label: t("projectSettings.section.dcsUpstream"), keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
+    { id: "section-project-info", label: t("projectSettings.section.projectInfo"), keywords: ["name", "source language", "target language", "smart quotes", "curly quotes", "quotation marks", "typography"] },
+    {
+      id: "section-languages",
+      label: t("projectSettings.section.languages"),
+      keywords: ["languages", "language lanes", "language lane", "target lanes", "lane", "target language", "dialect"],
+    },
+    // AQU-1686: "translation notes" stays. It used to mislead (this card did
+    // not control the Translation Notes sidebar, and still does not), but the
+    // card now holds the Translation helps enrichment, which shows
+    // unfoldingWord's Translation Notes. "bible resources" keeps the old name
+    // findable.
+    bibleDataExperiment
+      ? {
+          id: "section-bible-resources",
+          label: t("bibleData.card.title"),
+          keywords: [
+            "bible data", "bible resources", "aquifer", "bibletranslation", "reference", "scholarly",
+            "enrichments", "voices", "who's who", "passage structure", "original language", "greek",
+            "hebrew", "translation helps", "translation notes", "translation questions", "key terms",
+            "places", "maps", "checks", "macula", "opentext", "acai", "unfoldingword", "data sources", "license",
+          ],
+        }
+      : { id: "section-bible-resources", label: t("bibleData.card.title"), keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
+    { id: "section-import", label: t("projectSettings.section.import"), keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
+    // AQU-2259: only the "this setting moved" note is left here, until it expires.
+    { id: "section-user", label: t("projectSettings.section.user"), keywords: ["username", "author"], visible: settingMovedNotesShowing() },
+    // AQU-1993: self-service, so it is NOT in the Members pane — that pane can
+    // be hidden by the organization's member-list policy, which would hide the
+    // way out from the very people who need it.
+    { id: "section-leave-project", label: t("projectSettings.section.leaveProject"), keywords: ["leave", "leave project", "remove me", "remove myself", "quit", "unsubscribe", "stop working on"], visible: isCloudProject },
+    { id: "section-members", label: t("projectSettings.section.members"), keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator", "member list", "progress", "visibility", "who can see"], visible: canSeeMembers },
     // AQU-1068: a permission, so it lives with the roles rather than in the
     // Timeline card it grew out of — it governs ordinary text files now, not
     // just the timeline's silences.
-    { id: "section-cell-editing", label: "Content structure", keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role"] },
-    { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
-    { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
-    { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
-    { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
-    { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai"] },
-    { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
-    { id: "section-decay", label: "Retrieval support", keywords: ["decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
-    { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
-    { id: "section-timeline", label: "Timeline", keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines", "track", "tracks", "multi-track", "folder", "colour", "color"] },
-    { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
-    { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
-    { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
-    { id: "section-ai-metrics", label: "AI Metrics", keywords: ["post-edit", "edit distance", "ai metrics", "magnitude", "levenshtein", "ned", "biblica"] },
+    { id: "section-cell-editing", label: t("projectSettings.cellEditing.sectionTitle"), keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role", "label", "cell label", "who can label"] },
+    // AQU-2342: the ONE instructions text every AI draft reads (it replaced
+    // the brief, the system prompt and Living Memory's instruction entries).
+    // Its own section id gives it a row in the AI pane AND makes a search for
+    // any of the old names land on it (AQU-1672).
+    { id: "section-instructions", label: t("terminology.livingMemory.instructionsTitle"), keywords: ["instructions", "ai instructions", "brief", "translation brief", "system prompt", "prompt", "skopos", "purpose", "audience", "register", "literalness", "style guide", "living memory"] },
+    // AQU-2342: the ONE Checks list (project, lane, org and style rules, the
+    // built-in checks, and the Language profile they read). A row in the AI
+    // pane, findable by every old name.
+    { id: "section-checks", label: t("terminology.livingMemory.section.checks.title"), keywords: ["checks", "rules", "style rules", "quality", "translation quality", "built-in checks", "org rules", "decisions", "project decisions", "language profile", "quotation marks", "quote marks", "bible data checks"] },
+    { id: "section-ai-instructions", label: t("projectSettings.section.aiInstructions"), keywords: ["ai", "llm", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot", "ai drafting", "drafting"] },
+    { id: "section-draft-context", label: t("projectSettings.section.draftContext"), keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
+    { id: "section-advanced-llm", label: t("projectSettings.section.advancedLlm"), keywords: ["provider", "endpoint", "api key", "model", "ai model", "advanced", "llm", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
+    // AQU-1758: the Voice Studio is the Voices tab now; its old name still finds it.
+    { id: "section-voice", label: t("projectSettings.section.voice"), keywords: ["tts", "voices", "cast", "voice studio", "audio", "gemini", "elevenlabs", "api key", "tts key"] },
+    { id: "section-local-models", label: t("projectSettings.section.localModels"), keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai", "local models", "on-device"] },
+    { id: "section-validation", label: t("projectSettings.section.validation"), keywords: ["validation count", "approvals", "audio validation"] },
+    { id: "section-decay", label: t("projectSettings.decay.summary"), keywords: ["health", "decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
+    { id: "section-audio-media", label: t("projectSettings.section.audioMedia"), keywords: ["audio loading", "media", "audio media", "lazy", "eager", "stream"] },
+    { id: "section-timeline", label: t("editor.timeline.title"), keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines", "track", "tracks", "multi-track", "folder", "colour", "color", "film", "video", "sources"] },
+    { id: "section-git-sync", label: t("projectSettings.section.gitSync"), keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
+    // AQU-1272: the affix inventory and fold defaults live in this section, so
+    // the words a user searches for them by have to reach it.
+    { id: "section-terminology", label: t("projectSettings.section.terminology"), keywords: ["terminology", "termbase", "glossary", "concepts", "matching", "prefix", "prefixes", "suffix", "suffixes", "affix", "affixes", "marks", "vowel points", "forms"] },
+    { id: "section-termbase-sharing", label: t("projectSettings.section.termbaseSharing"), keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
+    { id: "section-ai-metrics", label: t("projectSettings.section.aiMetrics"), keywords: ["post-edit", "edit distance", "ai metrics", "magnitude", "levenshtein", "ned", "biblica"] },
     // Monday.com board sync — cloud (synced) projects only: the link lives on
     // the server against the project's org connection.
-    { id: "section-monday", label: "Monday.com", keywords: ["monday", "integration", "board", "push", "progress sync", "project management"], visible: isCloudProject },
-    { id: "section-experimental", label: "Experimental", keywords: ["experimental", "flags", "beta", "preview", "contextual", "contextual drafting"] },
+    { id: "section-monday", label: t("projectSettings.section.monday"), keywords: ["monday", "integration", "board", "push", "progress sync", "project management"], visible: isCloudProject },
+    // AQU-804: Airtable table sync, the same shape (and the same cloud-only rule).
+    { id: "section-airtable", label: t("projectSettings.section.airtable"), keywords: ["airtable", "integration", "table", "base", "push", "progress sync", "episodes", "project management"], visible: isCloudProject },
+    { id: "section-experimental", label: t("projectSettings.section.experimental"), keywords: ["experimental", "flags", "beta", "preview", "contextual", "contextual drafting"] },
   ]
 
   // ── Search filter ──────────────────────────────────────────────────────────
@@ -1291,6 +1065,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // mount; the box stays user-editable/clearable afterward.
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get("q") ?? "")
   const lowerQuery = searchQuery.trim().toLowerCase()
+
+  // AQU-2031: `?focus=<target>` is the pane-mode counterpart of `?q=`. A caller
+  // that wants one card reachable in one click deep-links to the card's GROUP
+  // page (`…/settings/general?focus=languages`) and the card is scrolled into
+  // view here. Unlike `?q=`, the page stays a pane — no search box, the group's
+  // own title, only the group's cards — so the person does not land on what
+  // looks like a search they never ran.
+  const focusTarget = searchParams.get("focus")
+  useEffect(() => {
+    if (!focusTarget || loading) return
+    const target = SETTINGS_FOCUS_TARGETS[focusTarget]
+    if (!target) return
+    document.getElementById(target.elementId)?.scrollIntoView?.({ block: target.block })
+  }, [focusTarget, loading])
   const visibleSections = lowerQuery
     ? ALL_SECTIONS.filter(
         (s) =>
@@ -1313,8 +1101,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     sectionIds: string[]
     /** Roster / DataTable panes use Page `wide` (max-w-6xl); form panes stay default. */
     wide?: boolean
-    /** Hub group label on the settings index (NavList). */
-    hub: string
+    /** Which heading the settings index lists it under (HUB_LABEL). */
+    hub: SettingsHub
     /** Omit from the settings index (still deep-linkable as a pane). */
     hideFromIndex?: boolean
     /** Parent group id when this is a nested detail pane (breadcrumb trail). */
@@ -1322,29 +1110,31 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   }[] = [
     {
       id: "general",
-      label: "General",
-      description: "Name, languages, content structure, username, Bible resources",
+      label: t("common.general"),
+      description: t("projectSettings.group.generalDescription"),
       icon: SlidersHorizontal,
-      hub: "Project",
-      sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-import", "section-user"],
+      hub: "project",
+      sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-import", "section-user", "section-leave-project"],
     },
     {
       id: "members",
-      label: "Members",
-      description: "Who can access this project, invites, and roles",
+      label: t("projectSettings.group.membersLabel"),
+      description: t("projectSettings.group.membersDescription"),
       icon: Users,
-      hub: "Project",
+      hub: "project",
       wide: true,
       sectionIds: ["section-members"],
     },
     {
       id: "source-sync",
-      label: "Source & sync",
-      description: "Linked source project, upstream changes, git sync",
+      label: t("projectSettings.group.sourceSyncLabel"),
+      description: t("projectSettings.group.sourceSyncDescription"),
       icon: Link2,
-      hub: "Project",
+      hub: "project",
       sectionIds: [
+        "section-link-source",
         "section-source-link",
+        "section-inherited-settings",
         "section-upstream-changes",
         "section-dcs-upstream",
         "section-git-sync",
@@ -1352,61 +1142,67 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     },
     {
       id: "ai",
-      label: "AI & completion",
-      description: "Instructions, draft context, provider, voice, terminology",
+      label: t("projectSettings.group.aiLabel"),
+      description: t("projectSettings.group.aiDescription"),
       icon: Sparkles,
-      hub: "AI & media",
-      // The system prompt (and the rest of Living Memory) lives on the
-      // standalone /project/:id/memory surface; this pane keeps a cross-link
-      // NavRow to memory/instructions instead of a nested settings page.
+      hub: "aiMedia",
+      // The instructions live on the standalone /project/:id/memory surface;
+      // this pane keeps one NavRow to memory/instructions instead of a nested
+      // settings page.
       sectionIds: [
+        "section-instructions", "section-checks",
         "section-ai-instructions", "section-draft-context", "section-advanced-llm",
         "section-voice", "section-local-models", "section-terminology", "section-termbase-sharing",
       ],
     },
     {
       id: "validation",
-      label: "Validation & health",
-      description: "Approvals, harmonization, staleness decay",
+      label: t("projectSettings.group.validationLabel"),
+      description: t("projectSettings.group.validationDescription"),
       icon: ShieldCheck,
-      hub: "Quality",
+      hub: "quality",
       sectionIds: ["section-validation", "section-decay"],
     },
     {
       id: "audio-media",
-      label: "Audio media",
-      description: "How audio is fetched from storage",
+      label: t("projectSettings.group.audioMediaLabel"),
+      description: t("projectSettings.group.audioMediaDescription"),
       icon: AudioLines,
-      hub: "AI & media",
+      hub: "aiMedia",
       sectionIds: ["section-audio-media", "section-timeline"],
     },
     {
       id: "metrics",
-      label: "AI metrics",
-      description: "Post-edit distance and AI usage",
+      label: t("projectSettings.group.metricsLabel"),
+      description: t("projectSettings.group.metricsDescription"),
       icon: BarChart3,
-      hub: "AI & media",
+      hub: "aiMedia",
       sectionIds: ["section-ai-metrics"],
     },
     {
       id: "integrations",
-      label: "Integrations",
-      description: "Monday.com board sync",
+      label: t("projectSettings.group.integrationsLabel"),
+      description: t("projectSettings.group.integrationsDescription"),
       icon: Plug,
-      hub: "Integrations",
-      sectionIds: ["section-monday"],
+      hub: "integrations",
+      sectionIds: ["section-monday", "section-airtable"],
     },
     {
       id: "experimental",
-      label: "Experimental",
-      description: "Early features, this device only",
+      label: t("projectSettings.section.experimental"),
+      description: t("projectSettings.group.experimentalDescription"),
       icon: FlaskConical,
-      hub: "Integrations",
+      hub: "integrations",
       sectionIds: ["section-experimental"],
     },
   ]
 
-  const HUB_ORDER = ["Project", "AI & media", "Quality", "Integrations"] as const
+  const HUB_LABEL: Record<SettingsHub, string> = {
+    project: t("projectSettings.hub.project"),
+    aiMedia: t("projectSettings.hub.aiMedia"),
+    quality: t("projectSettings.hub.quality"),
+    integrations: t("projectSettings.group.integrationsLabel"),
+  }
 
   const visibleSectionIdSet = new Set(visibleSections.map((s) => s.id))
   const visibleGroups = SETTINGS_GROUPS
@@ -1415,6 +1211,25 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // Index lists only hub-level entries; a `hideFromIndex` pane stays
   // deep-linkable but is opened from a parent pane NavRow.
   const indexGroups = visibleGroups.filter((g) => !g.hideFromIndex)
+
+  // AQU-2030: the back link, title, and save controls stay pinned at the top of
+  // the pane while the form scrolls under them. Measuring the pinned block lets
+  // the scroll port reserve that much `scroll-padding-top`, so tabbing to a
+  // field below the fold scrolls it clear of the header instead of under it.
+  const pinnedHeaderRef = useRef<HTMLDivElement | null>(null)
+  const [pinnedHeaderHeight, setPinnedHeaderHeight] = useState(0)
+  useEffect(() => {
+    const el = pinnedHeaderRef.current
+    if (!el) return
+    const measure = () => setPinnedHeaderHeight(el.getBoundingClientRect().height)
+    measure()
+    if (typeof ResizeObserver === "undefined") return
+    // The block grows and shrinks as the save controls appear with the dirty
+    // state, so re-measure rather than reading it once on mount.
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [loading])
 
   // Living Memory extraction: `memory`, `rules`, and `system-prompt` moved out
   // of settings onto the standalone /project/:id/memory surface. Old section
@@ -1426,7 +1241,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const movedSectionRedirects: Record<string, string> = id
     ? {
         memory: projectMemoryPath(id),
-        rules: projectMemoryPath(id, "quality"),
+        rules: projectMemoryPath(id, "checks"),
         "system-prompt": projectMemoryPath(id, "instructions"),
       }
     : {}
@@ -1459,6 +1274,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     const shown = new Set(sectionsToRender.map((s) => s.id))
     // DOM render order of section cards (must stay in sync with JSX below).
     const renderOrder = [
+      "section-link-source",
       "section-source-link",
       "section-upstream-changes",
       "section-dcs-upstream",
@@ -1467,7 +1283,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       "section-bible-resources",
       "section-import",
       "section-user",
+      "section-leave-project",
       "section-members",
+      "section-instructions",
+      "section-checks",
       "section-ai-instructions",
       "section-draft-context",
       "section-advanced-llm",
@@ -1481,6 +1300,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       "section-terminology",
       "section-termbase-sharing",
       "section-monday",
+      "section-airtable",
       "section-ai-metrics",
     ]
     const headers = new Map<string, string>()
@@ -1508,10 +1328,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   }
 
   const pageTitle = lowerQuery || !activeGroup
-    ? "Project settings"
+    ? t("projectSettings.pageTitle")
     : activeGroup.label
   const pageDescription = lowerQuery || !activeGroup
-    ? "Configure this project. Changes apply to everyone with access."
+    ? t("projectSettings.pageDescription")
     : activeGroup.description
   // Table panes (Members roster) need the wider content well; form panes stay
   // intentional/narrow. Search flattens across groups → keep default width.
@@ -1522,69 +1342,25 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
 
   // Hints for index NavRows — short current-value summaries (org / Preferences pattern).
   const groupHints: Record<string, string> = {
-    general: name.trim() || "Untitled",
-    members: "Roles & invites",
-    "source-sync": hasSourceLink ? "Linked" : hasGitOrigin ? "Git" : "None",
-    ai: provider === "frontier" ? "Frontier" : "Custom",
+    general: name.trim() || t("projectSettings.hint.untitled"),
+    members: t("projectSettings.hint.rolesInvites"),
+    "source-sync": hasSourceLink
+      ? t("projectSettings.hint.linked")
+      : hasGitOrigin ? t("projectSettings.hint.git") : t("common.none"),
+    ai: provider === "frontier"
+      ? t("projectSettings.advancedLlm.providerFrontierName")
+      : t("projectSettings.hint.custom"),
     validation: resolveRoleName(t, validationRoleFloor),
     "audio-media": t(AUDIO_MEDIA_STRATEGY_LABELS[audioMediaStrategy].nameKey),
-    metrics: "Post-edit",
-    integrations: "Monday.com",
-    experimental: "This device",
+    metrics: t("projectSettings.hint.postEdit"),
+    integrations: t("projectSettings.hint.integrations"),
   }
 
-  const headerActions = (
-    <div className="flex flex-wrap items-center justify-end gap-2">
-      {isDirty ? (
-        <ButtonGroup>
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? (
-              <Spinner data-icon="inline-start" aria-hidden="true" />
-            ) : (
-              <Save data-icon="inline-start" />
-            )}
-            {t("common.saveChanges")}
-          </Button>
-          <ButtonGroupSeparator />
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  disabled={saving}
-                  aria-label={t("projectSettings.moreSaveOptionsAriaLabel")}
-                >
-                  <ChevronDown />
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="end" className="min-w-56">
-              <DropdownMenuGroup>
-                <DropdownMenuItem onClick={handleSaveAndClose}>
-                  {t("projectSettings.saveAndClose")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setDiscardOpen(true)}>
-                  {t("projectSettings.closeWithoutSaving")}
-                </DropdownMenuItem>
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </ButtonGroup>
-      ) : null}
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        {isDirty && !saving && <span>{t("projectSettings.unsavedChanges")}</span>}
-        {!isDirty && savedMessage && (
-          <span
-            role="status"
-            className="flex items-center gap-1 text-green-600 dark:text-green-400"
-          >
-            <Check className="size-3.5" /> {savedMessage}
-          </span>
-        )}
-        {saveError && <span className="text-destructive">{saveError}</span>}
-      </div>
-    </div>
-  )
+  // AQU-2262: where the Save bar was. Settings save as you change them; this
+  // is the app's Undo, the same history the editor and Cmd/Ctrl+Z use. Its
+  // buttons and History panel act only on settings steps (Sam, Oct 30);
+  // Cmd/Ctrl+Z stays the project's newest step, whatever it changed.
+  const headerActions = <HistoryControls onResult={reportHistory} match={isSettingsStep} />
 
   const onSettingsPane = Boolean(activeGroup && !lowerQuery)
   const showSearch = !onSettingsPane
@@ -1599,11 +1375,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       orgId={project?.orgId}
       trail={[
         ...(fromEditor
-          ? [{ label: "Editor", onClick: () => requestNavigate(editorPath) }]
+          ? [{ label: t("projectSettings.breadcrumbEditor"), onClick: () => requestNavigate(editorPath) }]
           : []),
         onSettingsPane
-          ? { label: "Settings", to: settingsHref() }
-          : { label: "Settings" },
+          ? { label: t("projectSettings.backLinkLabel"), to: settingsHref() }
+          : { label: t("projectSettings.backLinkLabel") },
         ...(breadcrumbParent
           ? [{ label: breadcrumbParent.label, to: settingsHref(breadcrumbParent.id) }]
           : []),
@@ -1622,6 +1398,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       return (
         <Dialog open onOpenChange={(open) => { if (!open) closeSettings() }}>
           <DialogContent
+            ref={surfaceRef}
+            initialFocus={surfaceRef}
             className={`h-[min(90dvh,56rem)] gap-0 p-0 ${modalWidthClass}`}
             data-testid="project-settings-dialog"
           >
@@ -1644,21 +1422,41 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     )
   }
 
-  // Living Memory cross-link hint (Custom vs Default): the prompt itself is
-  // edited on memory/instructions now, so read the saved value straight off
-  // the project record — the same source the removed form baseline used.
-  const savedSystemPrompt = project?.completionSettings?.systemPrompt || DEFAULT_SYSTEM_PROMPT
+  // AQU-2342: a one-line preview of the resolved instructions (stored, else
+  // migrated from the old sources) on the Instructions row. Read through the
+  // editable settings hook first (it carries this page's optimistic overlay),
+  // falling back to the bare record before that GET resolves.
+  const resolvedInstructions = project
+    ? projectTranslationInstructions(overlaySettings(project, sharedSettingsBlob ?? {}))
+    : ""
 
   const settingsContent = (
-    <Page size={pageSize}>
-          {modal && onSettingsPane ? (
-            <BackLink
-              className="mb-6"
-              label={breadcrumbParent?.label ?? t("editor.navTitle.projectSettings")}
-              onClick={() => requestHistoryNavigation(-1)}
-            />
-          ) : null}
-          <div className="flex flex-col gap-12">
+    <Page
+      size={pageSize}
+      style={pinnedHeaderHeight ? { scrollPaddingTop: `${pinnedHeaderHeight}px` } : undefined}
+    >
+          {/*
+            AQU-2030: the pinned block. `-mt-6 pt-6` and `pb-4` are an opaque
+            bleed above and below the header — they keep an unscrolled pane
+            laid out exactly as before (the content stack's `mt-8` + this
+            `pb-4` restore the `gap-12` rhythm) while giving the pinned band
+            breathing room once form content slides underneath it. The
+            background is opaque, not translucent, so nothing shows through:
+            `bg-popover` matches DialogContent in the modal, `bg-background`
+            the AppShell card on the full-page route.
+          */}
+          <div
+            ref={pinnedHeaderRef}
+            data-slot="project-settings-pinned-header"
+            className={`sticky top-0 z-20 -mt-6 pt-6 pb-4 ${modal ? "bg-popover" : "bg-background"}`}
+          >
+            {modal && onSettingsPane ? (
+              <BackLink
+                className="mb-6"
+                label={breadcrumbParent?.label ?? t("editor.navTitle.projectSettings")}
+                onClick={() => requestHistoryNavigation(-1)}
+              />
+            ) : null}
             <PageHeader
               title={pageTitle}
               description={pageDescription}
@@ -1666,6 +1464,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               inset={pageSize !== "wide"}
               className="mb-0"
             />
+          </div>
+          <div className="mt-8 flex flex-col gap-12">
 
             {/* Search lives on the index only (detail panes match org settings). */}
             {showSearch && (
@@ -1678,7 +1478,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   const rows = indexGroups.filter((g) => g.hub === hub)
                   if (rows.length === 0) return null
                   return (
-                    <NavList key={hub} label={hub}>
+                    <NavList key={hub} label={HUB_LABEL[hub]}>
                       {rows.map((g) => (
                         <NavRow
                           key={g.id}
@@ -1699,21 +1499,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               <p className="px-2 py-1.5 text-sm text-muted-foreground">{t("projectSettings.noMatchingSettings")}</p>
             ) : null}
 
-        {sharedConflict && (
-          <div
-            role="alert"
-            className="flex items-start justify-between gap-3 rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
-          >
-            <span>{t("projectSettings.settingsChangedElsewhere")}</span>
-            <button
-              type="button"
-              aria-label={t("projectSettings.dismissConflictAriaLabel")}
-              onClick={dismissConflict}
-              className="shrink-0 text-amber-700 hover:text-amber-900 dark:text-amber-400 dark:hover:text-amber-200"
-            >
-              ✕
-            </button>
-          </div>
+        {searchGroupLabel("section-link-source")}
+        {!hasSourceLink && sectionsToRender.some((s) => s.id === "section-link-source") && (
+          <LinkSourceSection
+            projectId={id!}
+            onLinked={refresh}
+            roleLevel={project?.syncRole?.level ?? null}
+          />
         )}
         {searchGroupLabel("section-source-link")}
         {hasSourceLink && project?.sourceProjectId && sectionsToRender.some((s) => s.id === "section-source-link") && (
@@ -1724,9 +1516,25 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             sourceLinkConsumes={project.sourceLinkConsumes}
             sourceLinkGate={project.sourceLinkGate}
             sourceLinkCursor={project.sourceLinkCursor}
+            sourceLinkFileIds={project.sourceLinkFileIds}
+            sourceLinkUpstreamFileCount={project.sourceLinkUpstreamFileCount}
             onDetached={refresh}
+            onSynced={refresh}
+            onFilesAdded={refresh}
             roleLevel={project?.syncRole?.level ?? null}
           />
+        )}
+        {searchGroupLabel("section-inherited-settings")}
+        {hasSourceLink && project?.sourceProjectId && sectionsToRender.some((s) => s.id === "section-inherited-settings") && (
+          <div id="section-inherited-settings">
+            <InheritedSettingsSection
+              sourceProjectId={project.sourceProjectId}
+              settings={sharedSettingsBlob}
+              canEdit={canChangeShared}
+              locked={sharedDisabledTooltip}
+              onPatch={commit.recordedPatch()}
+            />
+          </div>
         )}
         {searchGroupLabel("section-upstream-changes")}
         {hasLiveSourceLink && sectionsToRender.some((s) => s.id === "section-upstream-changes") && (
@@ -1745,15 +1553,17 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-project-info")}
         {sectionsToRender.some((s) => s.id === "section-project-info") && (
           <div id="section-project-info">
-            <SettingsGroup label={t("projectSettings.section.projectInfo")}>
+            <SettingsGroup label={t("projectSettings.section.projectInfo")} locked={!canRenameProject ? sharedDisabledTooltip : null}>
               <SettingsRow
+                saveId="name"
                 label={<label htmlFor="pname">{t("projectSettings.info.titleLabel")}</label>}
                 description={
-                  sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0
-                    ? t("projectSettings.shared.lastEdited", {
-                        name: sharedUpdatedBy.username,
-                        date: new Date(sharedUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
-                      })
+                  sharedUpdatedAt && sharedVersion != null && sharedVersion > 0
+                    ? lastEditedLine(
+                        settingsEditorName(sharedUpdatedBy),
+                        new Date(sharedUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
+                        t,
+                      )
                     : t("projectSettings.shared.nameHint")
                 }
                 control={
@@ -1761,52 +1571,43 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                     disabled={!canRenameProject}
                     tooltip={renameDisabledTooltip}
                   >
-                    <Input
+                    {/* AQU-2262: saves when you leave it or pause; an empty
+                        name is never saved, the old one comes back. */}
+                    <CommitTextInput
                       id="pname"
+                      required
                       value={name}
-                      onChange={(e) => {
-                        setName(e.target.value)
-                        if (nameError) setNameError(null)
-                      }}
-                      disabled={!canRenameProject || saving}
-                      aria-invalid={nameError ? true : undefined}
+                      onCommit={(next, info) => void commit.name(next, info)}
+                      disabled={!canRenameProject}
                       aria-label={t("projectSettings.info.titleLabel")}
                       className="w-56 bg-background"
                     />
                   </DisabledFieldTooltip>
                 }
               />
-              {nameError ? (
-                <p role="alert" className="px-4 pb-2 text-xs text-destructive">
-                  {nameError}
-                </p>
-              ) : null}
               <SettingsRow
-                label={<label htmlFor="sl">{t("projectSettings.info.sourceLanguageLabel")}</label>}
-                control={
-                  <DisabledFieldTooltip disabled={!canEditLanguages} tooltip={languageDisabledTooltip}>
-                    <LanguageComboboxInput
-                      id="sl"
-                      value={sourceLanguage}
-                      onValueChange={setSourceLanguage}
-                      disabled={!canEditLanguages}
-                      aria-label={t("projectSettings.info.sourceLanguageLabel")}
-                      className="w-40 bg-background"
+                saveId="smartQuotes"
+                label={<label htmlFor="smart-quotes">{t("projectSettings.info.smartQuotesLabel")}</label>}
+                description={
+                  <>
+                    {t("projectSettings.info.smartQuotesDescription")}
+                    <InheritedFieldNote
+                      field="smartQuotes"
+                      upstreamName={inheritedUpstreamName}
+                      config={inheritedConfig}
+                      canEdit={canEditShared}
+                      onDetach={detachInherited}
                     />
-                  </DisabledFieldTooltip>
+                  </>
                 }
-              />
-              <SettingsRow
-                label={<label htmlFor="tl">{t("projectSettings.info.targetLanguageLabel")}</label>}
                 control={
-                  <DisabledFieldTooltip disabled={!canEditLanguages} tooltip={languageDisabledTooltip}>
-                    <LanguageComboboxInput
-                      id="tl"
-                      value={targetLanguage}
-                      onValueChange={setTargetLanguage}
-                      disabled={!canEditLanguages}
-                      aria-label={t("projectSettings.info.targetLanguageLabel")}
-                      className="w-40 bg-background"
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Switch
+                      id="smart-quotes"
+                      checked={smartQuotes}
+                      onCheckedChange={(checked) => setShared("smartQuotes", checked)}
+                      disabled={!canChangeShared}
+                      aria-label={t("projectSettings.info.smartQuotesLabel")}
                     />
                   </DisabledFieldTooltip>
                 }
@@ -1824,31 +1625,50 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             canEdit={canEditLanguages}
             disabledTooltip={languageDisabledTooltip}
             patch={patchShared}
+            laneRecords={isCloudProject ? sharedLanes ?? undefined : undefined}
+            onRenameLane={isCloudProject ? renameLane : undefined}
+            onCreateLane={isCloudProject ? createLane : undefined}
+            onSetLaneArchived={isCloudProject ? setLaneArchived : undefined}
+            onSetLaneDelivers={isCloudProject ? setLaneDelivers : undefined}
+            onLoadLaneLastChange={isCloudProject ? loadLaneLastChange : undefined}
+            startAdding={focusTarget === "add-lane"}
           />
         )}
-
         {searchGroupLabel("section-cell-editing")}
         {sectionsToRender.some((s) => s.id === "section-cell-editing") && (
           <div id="section-cell-editing">
             {/* AQU-1068. One setting answers WHO; the file's own nature answers
                 WHERE — a text file takes a cell anywhere, a subtitle file only
                 in a gap — so nothing here mentions timings or media. */}
-            <SettingsGroup label={t("projectSettings.cellEditing.sectionTitle")}>
+            <SettingsGroup label={t("projectSettings.cellEditing.sectionTitle")} locked={sharedDisabledTooltip}>
               <SettingsRow
+                saveId="cellEditingFloor"
                 label={<label htmlFor="cell-editing-floor">{t("projectSettings.cellEditing.label")}</label>}
                 description={t("projectSettings.cellEditing.description")}
                 control={
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                    {/* AQU-1768: follow the organization's tier, or set one here. */}
+                    <OrgDefaultSource
+                      id="cell-editing-floor-source"
+                      settingLabel={t("projectSettings.cellEditing.label")}
+                      inherited={cellEditingFloor == null}
+                      orgOptionLabel={t("projectSettings.mediaDefaults.orgValue", {
+                        value: cellEditingTierLabel(t, orgMediaDefaults.cellEditingFloor ?? "none"),
+                      })}
+                      disabled={!canChangeShared}
+                      onChange={(inherit) => setShared("cellEditingFloor", inherit ? undefined : effectiveCellEditingFloor)}
+                    />
                     <Select
                       items={CELL_EDITING_FLOOR_OPTIONS.map((o) => ({
                         value: o.value,
                         label: (o.level != null ? FLOOR_LABEL[o.level] : undefined) ?? t(o.labelKey),
                       }))}
-                      disabled={!canEditShared}
-                      value={cellEditingFloor}
-                      onValueChange={(value) =>
-                        setCellEditingFloor((value ?? cellEditingFloor) as typeof cellEditingFloor)
-                      }
+                      disabled={!canChangeShared}
+                      value={effectiveCellEditingFloor}
+                      onValueChange={(value) => {
+                        if (value && value !== effectiveCellEditingFloor) setShared("cellEditingFloor", value as CellEditingTier)
+                      }}
                     >
                       <SelectTrigger
                         id="cell-editing-floor"
@@ -1866,6 +1686,47 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         </SelectGroup>
                       </SelectContent>
                     </Select>
+                    </div>
+                  </DisabledFieldTooltip>
+                }
+              />
+              {/* AQU-2408: who may type a label on a cell. Two rungs, maintainer
+                  unless opened to project leads; no organization default. The
+                  tier is enforced where the Label field is drawn, like the one
+                  above — docs/decisions/0007-cell-labels-are-metadata-never-cast.md. */}
+              <SettingsRow
+                saveId="cellLabelFloor"
+                label={<label htmlFor="cell-label-floor">{t("projectSettings.cellLabel.label")}</label>}
+                description={t("projectSettings.cellLabel.description")}
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Select
+                      items={CELL_LABEL_FLOOR_OPTIONS.map((o) => ({
+                        value: o.value,
+                        label: FLOOR_LABEL[o.level] ?? t(o.labelKey),
+                      }))}
+                      disabled={!canChangeShared}
+                      value={effectiveCellLabelFloor}
+                      onValueChange={(value) => {
+                        if (value && value !== effectiveCellLabelFloor) setShared("cellLabelFloor", value as CellLabelTier)
+                      }}
+                    >
+                      <SelectTrigger
+                        id="cell-label-floor"
+                        data-testid="settings-cell-label-floor"
+                        aria-label={t("projectSettings.cellLabel.label")}
+                        className="w-64 bg-background"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {CELL_LABEL_FLOOR_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{t(o.labelKey)}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
                   </DisabledFieldTooltip>
                 }
               />
@@ -1876,44 +1737,50 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-bible-resources")}
         {sectionsToRender.some((s) => s.id === "section-bible-resources") && (
           <div id="section-bible-resources">
-            <SettingsGroup label={t("projectSettings.section.bibleResources")}>
-              <SettingsRow
-                label={<label htmlFor="bible-resources-enabled">{t("projectSettings.bible.enableLabel")}</label>}
-                description={
-                  <>
-                    {t("projectSettings.bible.description")}
-                    {bibleResourcesEnabled === undefined && projectHasScriptureFiles(project?.files) ? (
-                      <span className="mt-1 block">{t("projectSettings.bible.scriptureDefaultHint")}</span>
-                    ) : null}
-                    {bibleResourcesEnabled === undefined && !projectHasScriptureFiles(project?.files) ? (
-                      <span className="mt-1 block">{t("projectSettings.bible.nonScriptureDefaultHint")}</span>
-                    ) : null}
-                    {bibleResourcesEnabled === false ? (
-                      <span className="mt-1 block">{t("projectSettings.bible.disabledHint")}</span>
-                    ) : null}
-                  </>
-                }
-                control={
-                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
-                    <Switch
-                      id="bible-resources-enabled"
-                      checked={resolveBibleResourcesEnabled(bibleResourcesEnabled, projectHasScriptureFiles(project?.files))}
-                      onCheckedChange={(checked) => setBibleResourcesEnabled(checked)}
-                      disabled={!canEditShared}
-                      aria-label={t("projectSettings.bible.enableLabel")}
-                    />
-                  </DisabledFieldTooltip>
-                }
-              />
-            </SettingsGroup>
+            <BibleDataSection
+              switchValue={bibleResourcesEnabled}
+              onSwitchChange={(checked) => setShared("bibleResourcesEnabled", checked)}
+              enrichments={bibleEnrichments}
+              onEnrichmentChange={(enrichment, checked) =>
+                void commit.shared(`bibleEnrichments.${enrichment}`, sharedSettingLabel("bibleEnrichments"), [
+                  { key: "bibleEnrichments", field: enrichment, value: checked },
+                ])
+              }
+              hasScriptureFiles={projectHasScriptureFiles(project?.files)}
+              canEdit={canChangeShared}
+              lockedTooltip={sharedDisabledTooltip ?? null}
+              // The project-wide opt-in, or the legacy device-local flag that
+              // useProject overlays onto the record (AQU-1246).
+              autopilotOn={isAutopilotVisible({
+                autopilotEnabled: sharedSettingsBlob.autopilotEnabled,
+                experimentalFlags: project?.experimentalFlags,
+              })}
+              // Through requestNavigate, so unsaved edits get the discard prompt.
+              onOpenBuiltinChecks={id ? () => requestNavigate(projectMemoryPath(id, "checks")) : undefined}
+              experimentOn={bibleDataExperiment}
+            />
           </div>
         )}
 
         {searchGroupLabel("section-import")}
         {sectionsToRender.some((s) => s.id === "section-import") && (
           <div id="section-import">
-            <SettingsGroup label={t("projectSettings.section.import")}>
+            <SettingsGroup label={t("projectSettings.section.import")} locked={sharedDisabledTooltip}>
+              {/* AQU-2305: who may bring a new source file in — the
+                  organization's floor (AQU-2304), which this project may make
+                  stricter. First in the card: it decides whether the rest of
+                  the card's import behaviour is reachable at all. Cloud only;
+                  a local project has no org and no server floor. */}
+              {isCloudProject && projectPolicy.ready && (
+                <ProjectImportFloorSection
+                  floor={projectPolicy.importFloor}
+                  canEdit={canEditShared}
+                  disabledTooltip={sharedDisabledTooltip ?? undefined}
+                  onPatch={patchShared}
+                />
+              )}
               <SettingsRow
+                saveId="importExcludeFrontMatter"
                 label={<label htmlFor="import-exclude-front-matter">{t("projectSettings.import.excludeFrontMatterLabel")}</label>}
                 description={t("projectSettings.import.excludeFrontMatterDescription")}
                 control={
@@ -1921,10 +1788,45 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                     <Switch
                       id="import-exclude-front-matter"
                       checked={importExcludeFrontMatter}
-                      onCheckedChange={(checked) => setImportExcludeFrontMatter(checked)}
-                      disabled={!canEditShared}
+                      onCheckedChange={(checked) => setShared("importExcludeFrontMatter", checked)}
+                      disabled={!canChangeShared}
                       aria-label={t("projectSettings.import.excludeFrontMatterLabel")}
                     />
+                  </DisabledFieldTooltip>
+                }
+              />
+              {/* AQU-1720: a dubbing project generates one voice clip per cell,
+                  so the cell has to be able to BE the paragraph. */}
+              <SettingsRow
+                saveId="importCellUnit"
+                label={<label htmlFor="import-cell-unit">{t("projectSettings.import.cellUnitLabel")}</label>}
+                description={t("projectSettings.import.cellUnitDescription")}
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Select
+                      items={IMPORT_CELL_UNIT_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+                      disabled={!canChangeShared}
+                      value={importCellUnit}
+                      onValueChange={(value) => {
+                        if (value && value !== importCellUnit) setShared("importCellUnit", value as CellUnit)
+                      }}
+                    >
+                      <SelectTrigger
+                        id="import-cell-unit"
+                        data-testid="settings-import-cell-unit"
+                        aria-label={t("projectSettings.import.cellUnitLabel")}
+                        className="w-64 bg-background"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {IMPORT_CELL_UNIT_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{t(o.labelKey)}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
                   </DisabledFieldTooltip>
                 }
               />
@@ -1936,21 +1838,21 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {sectionsToRender.some((s) => s.id === "section-user") && (
           <div id="section-user">
             <SettingsGroup label={t("projectSettings.section.user")}>
-              <SettingsRow
-                label={<label htmlFor="un">{t("projectSettings.user.usernameLabel")}</label>}
-                description={t("projectSettings.user.usernameDescription")}
-                control={
-                  <Input
-                    id="un"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder={t("projectSettings.user.usernamePlaceholder")}
-                    aria-label={t("projectSettings.user.usernameLabel")}
-                    className="w-40 bg-background"
-                  />
-                }
+              {/* AQU-2259: a person's own setting, so it lives in Preferences now. */}
+              <SettingMovedNote
+                to="/preferences"
+                target={LOCAL_AUTHOR_NAME_SETTING_ID}
+                where={[t("nav.account.preferences"), t("common.general")]}
+                onNavigate={requestNavigate}
               />
             </SettingsGroup>
+          </div>
+        )}
+
+        {searchGroupLabel("section-leave-project")}
+        {id && sectionsToRender.some((s) => s.id === "section-leave-project") && (
+          <div id="section-leave-project">
+            <LeaveProjectSection projectId={id} projectName={project?.name ?? ""} />
           </div>
         )}
 
@@ -1958,66 +1860,73 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {id && sectionsToRender.some((s) => s.id === "section-members") && (
           <MembersSection projectId={id} />
         )}
+        {/* AQU-2263: who sees the member list and each member's progress. The
+            organization's policy, which a project may only make stricter; a
+            second home beside the dashboard's badges, which stay. */}
+        {id && isCloudProject && projectPolicy.ready && sectionsToRender.some((s) => s.id === "section-members") && (
+          <div id="section-member-visibility">
+            <ProjectVisibilitySection
+              roster={projectPolicy.rosterViewMinRole}
+              progress={projectPolicy.memberProgressViewMinRole}
+              roleLevel={project?.syncRole?.level ?? 0}
+              canEdit={canChangeShared}
+              disabledTooltip={sharedDisabledTooltip ?? undefined}
+              onPatch={commit.recordedPatch({ ownErrors: "all" })}
+            />
+          </div>
+        )}
+
+        {/* AQU-2342: the one entry to the project instructions. It renders
+            while searching too — a search for "brief" or "prompt" has to
+            produce the path to them (AQU-1672). Deliberately no modal `state`:
+            this is a real navigation out of settings. */}
+        {searchGroupLabel("section-instructions")}
+        {id && sectionsToRender.some((s) => s.id === "section-instructions") && (
+          <InstructionsRow projectId={id} resolvedInstructions={resolvedInstructions} />
+        )}
+        {searchGroupLabel("section-checks")}
+        {id && sectionsToRender.some((s) => s.id === "section-checks") && <ChecksRow projectId={id} />}
 
         {searchGroupLabel("section-ai-instructions")}
         {sectionsToRender.some((s) => s.id === "section-ai-instructions") && (
           <div id="section-ai-instructions" className="flex flex-col gap-12">
-            {/* Cross-link: the system prompt is edited on the Living Memory
-                surface (memory/instructions). A real navigation out of
-                settings — deliberately no modal `state` (unlike sibling
-                NavRows), so the route-modal doesn't try to stack it. */}
-            {!lowerQuery && id ? (
-              <NavList>
-                <NavRow
-                  to={projectMemoryPath(id, "instructions")}
-                  icon={LIVING_MEMORY_ICON}
-                  title={t("terminology.livingMemory.title")}
-                  description={t("projectSettings.systemPrompt.navDescription")}
-                  hint={
-                    savedSystemPrompt.trim() && savedSystemPrompt !== DEFAULT_SYSTEM_PROMPT
-                      ? "Custom"
-                      : "Default"
-                  }
-                />
-              </NavList>
-            ) : null}
-            <SettingsGroup label={t("projectSettings.section.aiInstructions")}>
+            <SettingsGroup label={t("projectSettings.section.aiInstructions")} description={sharedLockedLine}>
               <SettingsRow
+                saveId="draftingSettings.top_k"
                 label={<label htmlFor="top-k">{t("projectSettings.ai.topKLabel")}</label>}
                 description={t("projectSettings.ai.topKDescription", { defaultCount: DEFAULT_APPROVED_EXAMPLE_COUNT })}
                 control={
-                  <Input
+                  <CommitNumberInput
                     id="top-k"
-                    type="number"
+                    disabled={!canChangeShared}
                     min={1}
                     max={20}
                     value={topK}
-                    onChange={(e) => setTopK(Math.max(1, Math.min(20, Number(e.target.value))))}
+                    onCommit={(next, info) => setDrafting("top_k", next, info)}
                     aria-label={t("projectSettings.ai.topKLabel")}
                     className="w-24 bg-background"
                   />
                 }
               />
               <SettingsRow
+                saveId="draftingSettings.completionBatchSize"
                 label={<label htmlFor="completion-batch-size">{t("projectSettings.ai.completionBatchSizeLabel")}</label>}
                 description={t("projectSettings.ai.completionBatchSizeDescription", { defaultSize: MAX_BATCH_COMPLETIONS })}
                 control={
-
-                  <Input
+                  <CommitNumberInput
                     id="completion-batch-size"
-                    type="number"
+                    disabled={!canChangeShared}
                     min={1}
                     max={50}
                     value={completionBatchSize}
-                    onChange={(e) =>
-                      setCompletionBatchSize(Math.max(1, Math.min(50, Number(e.target.value) || 1)))
-                    }
+                    onCommit={(next, info) => setDrafting("completionBatchSize", next, info)}
                     aria-label={t("projectSettings.ai.completionBatchSizeLabel")}
                     className="w-24 bg-background"
                   />
                 }
               />
               <SettingsRow
+                saveId="draftingSettings.validationBatchSize"
                 label={<label htmlFor="validation-batch-size">{t("projectSettings.ai.validationBatchSizeLabel")}</label>}
                 description={withStyledTerms(
                   t("projectSettings.ai.validationBatchSizeHelp", {
@@ -2026,21 +1935,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   [{ text: t("projectSettings.ai.validationBatchSizeZeroNote"), as: "strong" }],
                 )}
                 control={
-                  <Input
+                  <CommitNumberInput
                     id="validation-batch-size"
-                    type="number"
+                    disabled={!canChangeShared}
                     min={0}
                     max={500}
                     value={validationBatchSize}
-                    onChange={(e) =>
-                      setValidationBatchSize(Math.max(0, Math.min(500, Number(e.target.value) || 0)))
-                    }
+                    onCommit={(next, info) => setDrafting("validationBatchSize", next, info)}
                     aria-label={t("projectSettings.ai.validationBatchSizeLabel")}
                     className="w-24 bg-background"
                   />
                 }
               />
               <SettingsRow
+                saveId="draftingSettings.contextSize"
                 label={<label htmlFor="context-size">{t("projectSettings.ai.contextWindowLabel")}</label>}
                 description={t("projectSettings.ai.contextWindowDescription")}
                 control={
@@ -2051,7 +1959,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       large: t("projectSettings.ai.contextWindowLarge"),
                     }}
                     value={contextSize}
-                    onValueChange={(value) => setContextSize(value as ContextSize)}
+                    onValueChange={(value) => {
+                      if (value && value !== contextSize) setDrafting("contextSize", value as ContextSize)
+                    }}
+                    disabled={!canChangeShared}
                   >
                     <SelectTrigger id="context-size" aria-label={t("projectSettings.ai.contextWindowLabel")} className="w-56 bg-background">
                       <SelectValue />
@@ -2067,13 +1978,15 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 }
               />
               <SettingsRow
+                saveId="draftingSettings.main_chat_language"
                 label={<label htmlFor="main-chat-language">{t("projectSettings.ai.assistantLanguageLabel")}</label>}
                 description={t("projectSettings.ai.assistantLanguageDescription")}
                 control={
-                  <Input
+                  <CommitTextInput
                     id="main-chat-language"
+                    disabled={!canChangeShared}
                     value={mainChatLanguage}
-                    onChange={(e) => setMainChatLanguage(e.target.value)}
+                    onCommit={(next, info) => setDrafting("main_chat_language", next, info)}
                     placeholder={t("projectSettings.ai.assistantLanguagePlaceholder")}
                     aria-label={t("projectSettings.ai.assistantLanguageLabel")}
                     className="w-56 bg-background"
@@ -2093,6 +2006,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 }
               />
               <SettingsRow
+                saveId="draftingSettings.fewShotExampleFormat"
                 label={<label htmlFor="few-shot-example-format">{t("projectSettings.ai.referenceExampleFormatLabel")}</label>}
                 description={t("projectSettings.ai.referenceExampleFormatDescription")}
                 control={
@@ -2102,7 +2016,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       "target-only": t("projectSettings.ai.referenceExampleFormatTargetOnly"),
                     }}
                     value={fewShotExampleFormat}
-                    onValueChange={(value) => setFewShotExampleFormat(value as "source-and-target" | "target-only")}
+                    onValueChange={(value) => {
+                      if (value && value !== fewShotExampleFormat) setDrafting("fewShotExampleFormat", value)
+                    }}
+                    disabled={!canChangeShared}
                   >
                     <SelectTrigger id="few-shot-example-format" aria-label={t("projectSettings.ai.referenceExampleFormatLabel")} className="w-56 bg-background">
                       <SelectValue />
@@ -2125,21 +2042,22 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           <div id="section-draft-context">
             <SettingsGroup label={t("projectSettings.section.draftContext")}>
               <SettingsRow
+                saveId="draftContext"
                 label={<label htmlFor="preceding-target-cells">{t("projectSettings.draftContext.precedingCellsLabel")}</label>}
                 description={t("projectSettings.draftContext.precedingCellsDescription", {
                   defaultCount: DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
                 })}
                 control={
-                  <Input
+                  <CommitNumberInput
                     id="preceding-target-cells"
-                    type="number"
+                    disabled={!canChangeShared}
                     min={0}
                     max={10}
                     value={precedingTargetCells}
-                    onChange={(e) =>
-                      setPrecedingTargetCells(
-                        Math.max(0, Math.min(10, Number(e.target.value))),
-                      )
+                    onCommit={(next, info) =>
+                      void commit.shared("draftContext", sharedSettingLabel("draftContext"), [
+                        { key: "draftContext", field: "precedingTargetCells", value: next },
+                      ], info)
                     }
                     aria-label={t("projectSettings.draftContext.precedingCellsLabel")}
                     className="w-24 bg-background"
@@ -2154,6 +2072,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {sectionsToRender.some((s) => s.id === "section-advanced-llm") && (
           <div id="section-advanced-llm">
             <SettingsGroup
+              description={sharedLockedLine}
               label={
                 <span className="inline-flex w-full items-center justify-between gap-4 pr-4">
                   <span>{t("projectSettings.advancedLlm.summary")}</span>
@@ -2167,11 +2086,19 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 </span>
               }
             >
-              <SettingsRow label={t("projectSettings.advancedLlm.providerLabel")} block>
+              <SettingsRow
+                saveId="draftingSettings.provider"
+                label={t("projectSettings.advancedLlm.providerLabel")}
+                description={<KeyInUseLine purpose="completion" kind={completionInUse} testId="completion-key-in-use" />}
+                block
+              >
                 <RadioGroup
                   name="provider"
                   value={provider}
-                  onValueChange={(value) => setProvider(value as CompletionProvider)}
+                  onValueChange={(value) => {
+                    if (value && value !== provider) setDrafting("provider", value as CompletionProvider)
+                  }}
+                  disabled={!canChangeShared}
                   className="flex flex-col gap-2"
                 >
                   <label className="flex items-start gap-2 text-sm">
@@ -2180,11 +2107,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       {withStyledTerms(
                         t("projectSettings.advancedLlm.providerFrontier", {
                           name: t("projectSettings.advancedLlm.providerFrontierName"),
-                          domain: "api.frontierrnd.com",
                         }),
                         [
                           { text: t("projectSettings.advancedLlm.providerFrontierName"), as: "strong" },
-                          { text: "api.frontierrnd.com", as: "code" },
                         ],
                       )}
                     </span>
@@ -2213,6 +2138,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         items={CUSTOM_PRESETS.map((p) => ({ value: p.id, label: presetLabel(t, p) }))}
                         value={presetId}
                         onValueChange={(value) => handlePresetChange(value ?? "")}
+                        disabled={!canChangeShared}
                       >
                         <SelectTrigger id="preset" aria-label={t("projectSettings.advancedLlm.presetLabel")} className="w-56 bg-background">
                           <SelectValue />
@@ -2228,6 +2154,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                     }
                   />
                   <SettingsRow
+                    saveId="draftingSettings.endpoint"
                     label={<label htmlFor="ep">{t("projectSettings.advancedLlm.endpointLabel")}</label>}
                     description={withStyledTerms(
                       t("projectSettings.advancedLlm.endpointHelp", {
@@ -2242,18 +2169,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                     block
                   >
                     <div className="flex gap-2">
-                      <Input
+                      <CommitTextInput
                         id="ep"
                         value={endpoint}
-                        onChange={(e) => {
-                          setEndpoint(e.target.value)
-                          setPresetId(presetIdForEndpoint(e.target.value))
-                          setConnected(false)
-                          setConnectionError(null)
-                          setModels([])
-                          lastModelFetchKeyRef.current = null
-                        }}
+                        onCommit={(next, info) => setDrafting("endpoint", next, info)}
                         placeholder="http://localhost:8000"
+                        disabled={!canChangeShared}
                         className="flex-1 bg-background"
                         aria-label={t("projectSettings.advancedLlm.endpointLabel")}
                       />
@@ -2274,8 +2195,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         </>
                       )
                     }
-                    description={t("projectSettings.advancedLlm.apiKeyDeviceOnlyNote")}
+                    description={t("projectSettings.deviceOnly")}
                     block
+                    saveId="apiKey"
                   >
                     <ApiKeyField
                       label={
@@ -2290,40 +2212,52 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       placeholder={preset.keyHint ?? (preset.requiresKey ? t("projectSettings.field.apiKeyPlaceholder") : t("projectSettings.field.apiKeyNoAuth"))}
                       projectKey={apiKey}
                       userKey={completionUserKey}
-                      onProjectKeyChange={setApiKey}
+                      onProjectKeyChange={saveCompletionKey}
                       onUserKeyChange={(v) => setUserApiKey("completion", v)}
-                      help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier."
+                      help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Aquilla."
                     />
                   </SettingsRow>
                   {models.length > 0 && (
                     <SettingsRow
+                      saveId="draftingSettings.model"
                       label={<label htmlFor="mdl">{t("projectSettings.advancedLlm.modelLabel")}</label>}
                       control={
-                        <Select value={model} onValueChange={(value) => setModel(value ?? "")}>
-                          <SelectTrigger id="mdl" aria-label={t("projectSettings.advancedLlm.modelLabel")} className="w-56 bg-background">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              {models.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
+                        // AQU-2290: a provider can list hundreds of models, so the
+                        // list searches as you type, like every list that grows
+                        // with your data (AQU-2260). A long model name is cut short
+                        // to fit; hovering over it shows the whole name (Sam, Oct
+                        // 30), and the whole name stays the row's text, so a
+                        // keyboard user's screen reader reads it in full.
+                        // AQU-2262: picking one saves it at once, one Undo step.
+                        <SearchSelect
+                          id="mdl"
+                          aria-label={t("projectSettings.advancedLlm.modelLabel")}
+                          options={models.map((m) => ({ value: m, label: m }))}
+                          value={model}
+                          onValueChange={(value) => setDrafting("model", value)}
+                          disabled={!canChangeShared}
+                          placeholder={t("projectSettings.advancedLlm.modelPlaceholder")}
+                          className="w-56 bg-background"
+                          renderOption={(o) => <span className="min-w-0 truncate" title={o.label}>{o.label}</span>}
+                          renderValue={(o) => <span title={o.label}>{o.label}</span>}
+                        />
                       }
                     />
                   )}
                   {models.length === 0 && (
                     <SettingsRow
+                      saveId="draftingSettings.model"
                       label={<label htmlFor="mdl-manual">{t("projectSettings.advancedLlm.modelManualLabel")}</label>}
                       description={withStyledTerms(
                         t("projectSettings.advancedLlm.modelManualHelp", { modelsPath: "/models" }),
                         [{ text: "/models", as: "code" }],
                       )}
                       control={
-                        <Input
+                        <CommitTextInput
                           id="mdl-manual"
+                          disabled={!canChangeShared}
                           value={model}
-                          onChange={(e) => setModel(e.target.value)}
+                          onCommit={(next, info) => setDrafting("model", next, info)}
                           placeholder={presetId === "openrouter" ? "anthropic/claude-3.5-sonnet" : t("projectSettings.advancedLlm.modelPlaceholder")}
                           aria-label={t("projectSettings.advancedLlm.modelManualLabel")}
                           className="w-56 bg-background"
@@ -2337,6 +2271,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               {/* i18n-exempt "frontier" is a completion-provider token, not copy */}
               {provider === "frontier" && (
                 <SettingsRow
+                  saveId="draftingSettings.model"
                   label={
                     <label htmlFor="mdl-frontier">
                       {t("projectSettings.advancedLlm.modelOverrideName")} <OptionalMark />
@@ -2347,10 +2282,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                     [{ text: "anthropic/claude-3.5-sonnet", as: "code" }],
                   )}
                   control={
-                    <Input
+                    <CommitTextInput
                       id="mdl-frontier"
+                      disabled={!canChangeShared}
                       value={model}
-                      onChange={(e) => setModel(e.target.value)}
+                      onCommit={(next, info) => setDrafting("model", next, info)}
                       placeholder={t("projectSettings.advancedLlm.modelOverridePlaceholder")}
                       aria-label={t("projectSettings.advancedLlm.modelOverrideName")}
                       className="w-56 bg-background"
@@ -2360,43 +2296,40 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               )}
 
               <SettingsRow
+                saveId="draftingSettings.maxTokens"
                 label={<label htmlFor="mt">{t("projectSettings.advancedLlm.maxTokensLabel")}</label>}
                 control={
-                  <Input
+                  <CommitNumberInput
                     id="mt"
-                    type="number"
+                    disabled={!canChangeShared}
+                    min={1}
+                    max={1_000_000}
                     value={maxTokens}
-                    onChange={(e) => setMaxTokens(Number(e.target.value))}
+                    onCommit={(next, info) => setDrafting("maxTokens", next, info)}
                     aria-label={t("projectSettings.advancedLlm.maxTokensLabel")}
                     className="w-24 bg-background"
                   />
                 }
               />
               <SettingsRow
-                label={t("projectSettings.advancedLlm.temperatureLabel", { value: temperature })}
+                saveId="draftingSettings.temperature"
+                label={t("projectSettings.advancedLlm.temperatureLabel", { value: draggedTemperature ?? temperature })}
                 control={
                   <div className="w-40">
+                    {/* AQU-2262: saves when let go, not at every step of a drag. */}
                     <Slider
                       min={0}
                       max={1}
                       step={0.05}
-                      value={[temperature]}
-                      onValueChange={(next) => setTemperature(Array.isArray(next) ? next[0] : next)}
-                    />
-                  </div>
-                }
-              />
-              <SettingsRow
-                label={t("projectSettings.advancedLlm.healthPenaltyLabel", { percent: Math.round(llmHealthPenalty * 100) })}
-                description={t("projectSettings.advancedLlm.healthPenaltyDescription")}
-                control={
-                  <div className="w-40">
-                    <Slider
-                      min={0}
-                      max={0.5}
-                      step={0.05}
-                      value={[llmHealthPenalty]}
-                      onValueChange={(next) => setLlmHealthPenalty(Array.isArray(next) ? next[0] : next)}
+                      value={[draggedTemperature ?? temperature]}
+                      onValueChange={(next) => setDraggedTemperature(Array.isArray(next) ? next[0] : next)}
+                      onValueCommitted={(next) => {
+                        const value = Array.isArray(next) ? next[0] : next
+                        setDraggedTemperature(null)
+                        if (value !== temperature) setDrafting("temperature", value)
+                      }}
+                      aria-label={t("projectSettings.advancedLlm.temperatureName")}
+                      disabled={!canChangeShared}
                     />
                   </div>
                 }
@@ -2410,29 +2343,59 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           <div id="section-voice">
             <SettingsGroup label={t("projectSettings.section.voice")}>
               <SettingsRow
-                label="Gemini TTS"
-                description={t("projectSettings.voice.geminiKeyHelp")}
+                saveId="projectLeadsManageVoices"
+                label={t("projectSettings.voice.leadsManageLabel")}
+                description={t("projectSettings.voice.leadsManageDescription")}
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Switch
+                      checked={sharedSettingsBlob.projectLeadsManageVoices === true}
+                      onCheckedChange={(checked) => setShared("projectLeadsManageVoices", checked)}
+                      disabled={!canChangeShared}
+                      aria-label={t("projectSettings.voice.leadsManageLabel")}
+                    />
+                  </DisabledFieldTooltip>
+                }
+              />
+              <SettingsRow
+                label={t("projectSettings.voice.geminiTtsLabel")}
+                description={
+                  <>
+                    {t("projectSettings.voice.geminiKeyHelp")}
+                    <span className="mt-1 block">{t("projectSettings.deviceOnly")}</span>
+                    <KeyInUseLine purpose="gemini" kind={geminiInUse} testId="gemini-key-in-use" />
+                  </>
+                }
                 block
+                saveId="geminiApiKey"
               >
                 <ApiKeyField
                   label={t("projectSettings.voice.geminiKeyLabel")}
                   placeholder={t("projectSettings.voice.geminiKeyPlaceholder")}
                   projectKey={geminiApiKey}
                   userKey={geminiUserKey}
-                  onProjectKeyChange={setGeminiApiKey}
+                  onProjectKeyChange={saveGeminiKey}
                   onUserKeyChange={(v) => setUserApiKey("gemini-tts", v)}
                   help={t("projectSettings.voice.geminiKeyHelp")}
                 />
               </SettingsRow>
+              {/* AQU-2299: the user's own ElevenLabs key, per user + device
+                  (never project settings) — the same key row / connected line
+                  New voice shows. */}
               <SettingsRow
-                label={t("projectSettings.voice.studioLabel")}
-                description={t("projectSettings.voice.libraryNote")}
+                label="ElevenLabs"
+                description={t("projectSettings.voice.elevenLabsHelp")}
+                block
+              >
+                <ElevenLabsConnectCard projectId={id} session={session} />
+              </SettingsRow>
+              <SettingsRow
+                label={t("common.voices")}
+                description={t("projectSettings.voice.voicesNote")}
                 control={
-                  <Button variant="outline" onClick={() => {
-                    try { window.localStorage.setItem(`aquilla:editorLens:${id}`, "audio") } catch { /* ignore */ }
-                    requestNavigate(`/project/${id}/editor`)
-                  }}>
-                    {t("projectSettings.voice.openStudioButton")}
+                  // AQU-1758: Media, with the Voices tab open (the /voice route).
+                  <Button variant="outline" onClick={() => requestNavigate(`/project/${id}/voice`)}>
+                    {t("projectSettings.voice.openVoicesButton")}
                   </Button>
                 }
               />
@@ -2450,7 +2413,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 control={
                   <Button
                     variant="outline"
-                    onClick={() => requestNavigate("/preferences")}
+                    // The hosted model picker says which models know this
+                    // project's language, so it needs to know the project.
+                    onClick={() => requestNavigate(project ? `/preferences/local-models?project=${encodeURIComponent(project.id)}` : "/preferences")}
                   >
                     {t("projectSettings.localModels.manageButton")}
                   </Button>
@@ -2465,43 +2430,65 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           <div id="section-validation" className="flex flex-col gap-12">
             <ValidationSettingsSection
               projectId={id}
+              notice={
+                <InheritedFieldNote
+                  field="workflowPolicy"
+                  upstreamName={inheritedUpstreamName}
+                  config={inheritedConfig}
+                  canEdit={canEditShared}
+                  onDetach={detachInherited}
+                />
+              }
               validationCount={validationCount}
               validationCountAudio={validationCountAudio}
+              orgValidationCount={orgValidationCount}
+              orgValidationCountAudio={orgValidationCountAudio}
               validationRoleFloor={validationRoleFloor}
               validationNamedUsers={validationNamedUsers}
               allowSelfValidation={allowSelfValidation}
               validationRoleFloorAudio={validationRoleFloorAudio}
               validationNamedUsersAudio={validationNamedUsersAudio}
               allowSelfValidationAudio={allowSelfValidationAudio}
-              disabled={!canEditShared}
+              orgValidationRoleFloorAudio={orgMediaDefaults.validationRoleFloorAudio ?? null}
+              orgAllowSelfValidationAudio={orgMediaDefaults.allowSelfValidationAudio ?? null}
+              disabled={!canChangeShared}
               disabledTooltip={sharedDisabledTooltip ?? undefined}
               // AQU-1083: the last row of the validation card. Passed as a
               // node rather than props because it patches the shared blob
-              // directly — see the component's own note for why it must not
-              // ride this page's draft/baseline state.
+              // directly, with its own role floor (Project lead).
               structuralCellsRow={
                 <StructuralCellsProjectSection
                   value={sharedSettingsBlob?.countStructuralCells}
                   orgDefault={orgCountStructuralCells ?? true}
-                  disabled={!canEditShared}
-                  disabledTooltip={sharedDisabledTooltip ?? undefined}
-                  onPatch={patchShared}
+                  disabled={!canEditCountStructural}
+                  disabledTooltip={structuralDisabledTooltip ?? undefined}
+                  onPatch={commit.recordedPatch({ ownErrors: "failures" })}
                 />
               }
-              onChange={(u) => {
-                if (u.validationCount !== undefined) setValidationCount(u.validationCount)
-                if (u.validationCountAudio !== undefined) setValidationCountAudio(u.validationCountAudio)
-                if (u.validationRoleFloor !== undefined) setValidationRoleFloor(u.validationRoleFloor)
-                if (u.validationNamedUsers !== undefined) setValidationNamedUsers(u.validationNamedUsers)
-                if (u.allowSelfValidation !== undefined) setAllowSelfValidation(u.allowSelfValidation)
-                if (u.validationRoleFloorAudio !== undefined) setValidationRoleFloorAudio(u.validationRoleFloorAudio)
-                if (u.validationNamedUsersAudio !== undefined) setValidationNamedUsersAudio(u.validationNamedUsersAudio)
-                if (u.allowSelfValidationAudio !== undefined) setAllowSelfValidationAudio(u.allowSelfValidationAudio)
+              // AQU-1391: same slot treatment, same card — validation is the
+              // gesture that triggers propagation.
+              repetitionPropagationRow={
+                <RepetitionPropagationProjectSection
+                  value={sharedSettingsBlob?.autoPropagateRepetitions}
+                  orgDefault={orgAutoPropagateRepetitions}
+                  disabled={!canChangeShared}
+                  disabledTooltip={sharedDisabledTooltip ?? undefined}
+                  onPatch={commit.recordedPatch({ ownErrors: "failures" })}
+                />
+              }
+              // AQU-2262: each change saves at once (a count when you leave
+              // it or pause). A null goes back to the organization's default.
+              onChange={(u, typed) => {
+                for (const [key, value] of Object.entries(u)) {
+                  if (value === undefined) continue
+                  void commit.shared(key, sharedSettingLabel(key), [{ key, value: value ?? undefined }], typed)
+                }
               }}
             />
             {/* AQU-186: Harmonization settings — harmonize_min_role floor. */}
-            <SettingsGroup label={t("projectSettings.harmonization.title")}>
+            <SettingsGroup label={t("projectSettings.harmonization.title")} locked={sharedDisabledTooltip}>
               <SettingsRow
+                saveId="harmonize_min_role"
                 label={<label htmlFor="harmonize-min-role">{t("projectSettings.harmonization.minRoleLabel")}</label>}
                 description={t("projectSettings.harmonization.description")}
                 control={
@@ -2513,9 +2500,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         }),
                         maintainer: resolveRoleName(t, "maintainer"),
                       }}
-                      disabled={!canEditShared}
+                      disabled={!canChangeShared}
                       value={harmonizeMinRole}
-                      onValueChange={(value) => setHarmonizeMinRole(value as "project_lead" | "maintainer")}
+                      onValueChange={(value) => {
+                        if (value && value !== harmonizeMinRole) setShared("harmonize_min_role", value)
+                      }}
                     >
                       <SelectTrigger id="harmonize-min-role" aria-label={t("projectSettings.harmonization.minRoleLabel")} className="w-56 bg-background">
                         <SelectValue />
@@ -2543,7 +2532,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           <div id="section-decay">
             <DecaySettingsSection
               settings={decaySettings}
-              onChange={setDecaySettings}
+              onChange={(next, typed) => setDevice("decaySettings", next, typed)}
             />
           </div>
         )}
@@ -2553,7 +2542,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           <div id="section-audio-media">
             <AudioMediaStrategySection
               value={audioMediaStrategy}
-              onChange={setAudioMediaStrategy}
+              onChange={(next) => setDevice("audioMediaStrategy", next)}
             />
           </div>
         )}
@@ -2565,41 +2554,114 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             <CardContent className="space-y-3">
               {/* AQU-646. FIRST in the card because it constrains everything
                   below it — the pencil under it is moot while nothing moves. */}
-              <div className="flex items-start gap-2">
+              <div className="flex flex-wrap items-start gap-2">
+                {/* AQU-1768: while the project follows the organization the
+                    box shows the organization's choice. Ticking it sets the
+                    choice for this project, and the menu beside it follows
+                    (Sam, Oct 28). The (i) opens the long explanation beneath
+                    the title, and closes it again. */}
                 <Checkbox
                   id="timing-locked"
                   data-testid="settings-timing-locked"
-                  checked={timingLocked}
-                  disabled={!canEditShared}
-                  onCheckedChange={(checked) => setTimingLocked(checked)}
+                  checked={effectiveTimingLocked}
+                  disabled={!canChangeShared}
+                  onCheckedChange={(checked) => setShared("timingLocked", checked)}
                 />
-                <label htmlFor="timing-locked" className="text-sm">
-                  {t("projectSettings.timeline.lockLabel")}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t("projectSettings.timeline.lockHint")}
-                  </p>
-                </label>
+                <span className="flex min-w-0 flex-1 flex-col text-sm">
+                  <span className="flex items-center gap-1">
+                    <label htmlFor="timing-locked">{t("projectSettings.timeline.lockLabel")}</label>
+                    <InfoToggle
+                      open={lockInfoOpen}
+                      onToggle={toggleLockInfo}
+                      label={t("projectSettings.timeline.lockInfoAria")}
+                      controls="settings-timing-locked-explanation"
+                      testId="settings-timing-locked-info"
+                    />
+                  </span>
+                  <InfoReveal open={lockInfoOpen} id="settings-timing-locked-explanation">
+                    <span className="block text-xs text-muted-foreground">{t("projectSettings.timeline.lockHint")}</span>
+                  </InfoReveal>
+                </span>
+                <SaveStatus id="timingLocked" className="max-w-56 text-right" />
+                <OrgDefaultSource
+                  id="timing-locked-source"
+                  settingLabel={t("projectSettings.timeline.lockLabel")}
+                  inherited={timingLocked == null}
+                  orgOptionLabel={orgBooleanOptionLabel(t, orgMediaDefaults.timingLocked ?? true)}
+                  disabled={!canChangeShared}
+                  onChange={(inherit) => setShared("timingLocked", inherit ? undefined : effectiveTimingLocked)}
+                />
               </div>
               {/* AQU-646 stage 2. LAST in the card, because it is the wider
                   claim of the two: the lock above constrains what may move on
                   a timeline, this one decides whether the timeline's own rows
-                  may be added to, grouped and recoloured at all. Off by
-                  default, and enforced on the server as well — the UI
+                  may be added to, grouped and recoloured at all. ON by default
+                  since AQU-2214, and enforced on the server as well — the UI
                   withholding a button is not a permission. */}
-              <div className="flex items-start gap-2">
+              <div className="flex flex-wrap items-start gap-2">
                 <Checkbox
                   id="allow-track-editing"
                   data-testid="settings-allow-track-editing"
-                  checked={allowTrackEditing}
-                  disabled={!canEditShared}
-                  onCheckedChange={(checked) => setAllowTrackEditing(checked)}
+                  checked={effectiveAllowTrackEditing}
+                  disabled={!canChangeShared}
+                  onCheckedChange={(checked) => setShared("allowTrackEditing", checked)}
                 />
-                <label htmlFor="allow-track-editing" className="text-sm">
-                  {t("projectSettings.timeline.trackEditingLabel")}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t("projectSettings.timeline.trackEditingHint")}
-                  </p>
-                </label>
+                <span className="flex min-w-0 flex-1 flex-col text-sm">
+                  <span className="flex items-center gap-1">
+                    <label htmlFor="allow-track-editing">{t("projectSettings.timeline.trackEditingLabel")}</label>
+                    <InfoToggle
+                      open={trackEditingInfoOpen}
+                      onToggle={toggleTrackEditingInfo}
+                      label={t("projectSettings.timeline.trackEditingInfoAria")}
+                      controls="settings-allow-track-editing-explanation"
+                      testId="settings-allow-track-editing-info"
+                    />
+                  </span>
+                  <InfoReveal open={trackEditingInfoOpen} id="settings-allow-track-editing-explanation">
+                    <span className="block text-xs text-muted-foreground">{t("projectSettings.timeline.trackEditingHint")}</span>
+                  </InfoReveal>
+                </span>
+                <SaveStatus id="allowTrackEditing" className="max-w-56 text-right" />
+                <OrgDefaultSource
+                  id="allow-track-editing-source"
+                  settingLabel={t("projectSettings.timeline.trackEditingLabel")}
+                  inherited={allowTrackEditing == null}
+                  orgOptionLabel={orgBooleanOptionLabel(t, orgMediaDefaults.allowTrackEditing ?? true)}
+                  disabled={!canChangeShared}
+                  onChange={(inherit) => setShared("allowTrackEditing", inherit ? undefined : effectiveAllowTrackEditing)}
+                />
+              </div>
+              {/* AQU-1758 (Sam's decision 7): the media view's dubbing tools —
+                  the Film button and the timeline's Sources menu — together.
+                  Unset, a project of books and documents hides them and any
+                  other shows them. Not a permission: nothing on the server
+                  reads it. The long explanation sits behind the (i).
+                  AQU-2262: it saves as it is ticked, one Undo step, and Undo
+                  puts "unset" back, so the project's kind decides again. */}
+              <div className="flex flex-wrap items-start gap-2">
+                <Checkbox
+                  id="film-and-sources"
+                  data-testid="settings-film-and-sources"
+                  checked={filmAndSourcesShown(filmAndSources, project?.files)}
+                  disabled={!canChangeShared}
+                  onCheckedChange={(checked) => setShared("filmAndSources", checked)}
+                />
+                <span className="flex min-w-0 flex-1 flex-col text-sm">
+                  <span className="flex items-center gap-1">
+                    <label htmlFor="film-and-sources">{t("projectSettings.timeline.filmAndSourcesLabel")}</label>
+                    <InfoToggle
+                      open={filmInfoOpen}
+                      onToggle={toggleFilmInfo}
+                      label={t("projectSettings.timeline.filmAndSourcesInfoAria")}
+                      controls="settings-film-and-sources-explanation"
+                      testId="settings-film-and-sources-info"
+                    />
+                  </span>
+                  <InfoReveal open={filmInfoOpen} id="settings-film-and-sources-explanation">
+                    <span className="block text-xs text-muted-foreground">{t("projectSettings.timeline.filmAndSourcesInfo")}</span>
+                  </InfoReveal>
+                </span>
+                <SaveStatus id="filmAndSources" className="max-w-56 text-right" />
               </div>
             </CardContent>
           </Card>
@@ -2609,7 +2671,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {/* i18n-exempt "git" is a project-origin kind, not copy */}
         {project?.origin?.kind === "git" && sectionsToRender.some((s) => s.id === "section-git-sync") && (
           <div id="section-git-sync">
-            <SettingsGroup label={t("projectSettings.section.gitSync")}>
+            <SettingsGroup label={t("projectSettings.section.gitSync")} description={t("projectSettings.deviceOnly")}>
               <SettingsRow
                 label={withStyledTerms(
                   t("projectSettings.gitSync.originLabel", {
@@ -2623,23 +2685,23 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 )}
               />
               <SettingsRow
-                label={<label htmlFor="auto-sync">Auto-sync</label>}
+                saveId="syncSettings"
+                label={<label htmlFor="auto-sync">{t("projectSettings.gitSync.autoSyncSwitch")}</label>}
                 description={t("projectSettings.gitSync.intervalNote")}
                 control={
                   <div className="flex items-center gap-2">
                     <Switch
                       id="auto-sync"
                       checked={autoSyncEnabled}
-                      onCheckedChange={(checked) => setAutoSyncEnabled(checked)}
-                      aria-label="Auto-sync"
+                      onCheckedChange={(checked) => setSyncSettings(checked, autoSyncInterval)}
+                      aria-label={t("projectSettings.gitSync.autoSyncSwitch")}
                     />
-                    <Input
-                      type="number"
+                    <CommitNumberInput
                       min={1}
                       max={60}
                       className="h-8 w-20 bg-background"
                       value={autoSyncInterval}
-                      onChange={(e) => setAutoSyncInterval(Math.max(1, Number(e.target.value) || 1))}
+                      onCommit={(next, info) => setSyncSettings(autoSyncEnabled, next, info)}
                       aria-label={t("projectSettings.gitSync.autoSyncIntervalAriaLabel")}
                     />
                     <span className="text-sm text-muted-foreground">{t("projectSettings.gitSync.minutesAbbrev")}</span>
@@ -2663,7 +2725,14 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 }
               />
             </SettingsGroup>
-            <TermMatchingSection value={termMatching} onChange={setTermMatching} disabled={!canEditShared} />
+            <TermMatchingSection
+              value={termMatching}
+              onChange={(next, typed) =>
+                void commit.shared("termMatching", sharedSettingLabel("termMatching"), [{ key: "termMatching", value: next }], typed)
+              }
+              disabled={!canChangeShared}
+              locked={sharedDisabledTooltip}
+            />
           </div>
         )}
         {searchGroupLabel("section-termbase-sharing")}
@@ -2679,7 +2748,16 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {id && sectionsToRender.some((s) => s.id === "section-monday") && (
           <MondayIntegrationSection
             projectId={id}
-            orgId={org?.id ?? null}
+            orgId={project?.orgId ?? null}
+            roleLevel={project?.syncRole?.level ?? null}
+          />
+        )}
+
+        {searchGroupLabel("section-airtable")}
+        {id && sectionsToRender.some((s) => s.id === "section-airtable") && (
+          <AirtableIntegrationSection
+            projectId={id}
+            orgId={project?.orgId ?? null}
             roleLevel={project?.syncRole?.level ?? null}
           />
         )}
@@ -2701,14 +2779,18 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             serverProject={project ?? undefined}
             // AQU-1246: the Autopilot opt-in is a project-wide synced setting,
             // not a device-local flag, so it reads from and writes through the
-            // shared settings blob. It saves immediately rather than joining
-            // the deferred Save bar — it is one switch with no dependent
-            // fields, and its role floor (project_lead) is lower than the bar's
-            // (maintainer), so folding it in would lock leads out of the one
-            // control they are allowed to touch.
+            // shared settings blob. Its role floor (project_lead) is lower
+            // than the rest of the page's (maintainer); the patch picks the
+            // floor from the keys it carries.
             autopilotEnabled={sharedSettingsBlob.autopilotEnabled}
             roleLevel={project?.syncRole?.level ?? null}
-            onSetAutopilotEnabled={(enabled) => { void patchShared({ autopilotEnabled: enabled }) }}
+            onSetAutopilotEnabled={(enabled) => { void commit.recordedPatch()({ autopilotEnabled: enabled }) }}
+            // AQU-1937: the per-project Smart Extensions switch (Maintainer+,
+            // the ordinary settings floor; the server refuses lower roles).
+            smartExtensionsEnabled={sharedSettingsBlob.smartExtensionsEnabled}
+            onSetSmartExtensionsEnabled={(enabled) => {
+              void commit.recordedPatch()({ smartExtensionsEnabled: enabled }).then(() => notifySmartExtensionsChanged(id))
+            }}
           />
         )}
           </div>
@@ -2718,6 +2800,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const shell = modal ? (
     <Dialog open onOpenChange={(open) => { if (!open) closeSettings() }}>
       <DialogContent
+        ref={surfaceRef}
+        initialFocus={surfaceRef}
         className={`h-[min(90dvh,56rem)] gap-0 p-0 ${modalWidthClass}`}
         data-testid="project-settings-dialog"
       >
@@ -2742,20 +2826,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   return (
     <>
       {shell}
-      <Dialog open={discardOpen} onOpenChange={(open) => (open ? setDiscardOpen(true) : handleDiscardCancel())}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("projectSettings.discardDialogTitle")}</DialogTitle>
-            <DialogDescription>
-              {t("projectSettings.discardDialogDescription")}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={handleDiscardCancel}>{t("projectSettings.keepEditing")}</Button>
-            <Button variant="destructive" onClick={handleDiscardConfirm}>{t("common.discard")}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
       <PrivilegedMembersDialog
         open={privilegedOpen}
         onOpenChange={setPrivilegedOpen}

@@ -21,9 +21,9 @@ describe("isSessionHydrationRequiredPath", () => {
   it("leaves public and offline-capable routes reachable", () => {
     for (const path of [
       "/login",
+      "/signup",
       "/reset-password",
       "/verify-email",
-      "/privacy-policy",
       "/onboarding",
       "/join/token",
       "/join-org/token",

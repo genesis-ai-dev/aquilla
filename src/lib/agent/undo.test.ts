@@ -63,6 +63,24 @@ describe("buildUndoEvents", () => {
     expect(payload.sourceEventId).toBe("src-c1")
   })
 
+  // AQU-1902: the undo restores the SAME lane the accepted commit wrote. With
+  // no lane it addressed the default lane, which a project created today does
+  // not have — the server refused it and the outbox dropped the undo.
+  it("restores the lane the accepted commit wrote", () => {
+    const staged = commit("c1")
+    staged.payload = { ...staged.payload, targetLang: "Spanish", laneId: "lane-es" }
+    const plan = buildUndoEvents(proposal([staged]), new Map([decision("c1", "accepted", "e1")]))
+
+    expect(plan.events[0].payload).toMatchObject({ targetLang: "Spanish", laneId: "lane-es" })
+  })
+
+  it("adds no lane to an undo whose commit carried none (legacy default lane)", () => {
+    const plan = buildUndoEvents(proposal([commit("c1")]), new Map([decision("c1", "accepted", "e1")]))
+
+    expect(plan.events[0].payload).not.toHaveProperty("targetLang")
+    expect(plan.events[0].payload).not.toHaveProperty("laneId")
+  })
+
   it("ignores pending, rejected, and already-undone rows", () => {
     const p = proposal([commit("c1"), commit("c2"), commit("c3"), commit("c4")])
     const decided = new Map([

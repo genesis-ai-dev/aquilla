@@ -1,12 +1,12 @@
 // Read-side helpers for the assignment.* projection (Phase C, slice 1).
 //
 // Progress is DERIVED ON READ: an assignment's `cells_done` is the count of its
-// assignment_cells whose paired TARGET cell is validated. assignment_cells hold
-// the resolved SOURCE cells (file_id, cell_id); validation lands on the target
-// row at the same (project_id, file_id, cell_id) — they share cell_id (AD-2).
-// So the join is assignment_cells -> cells ON (file_id, cell_id) WHERE
-// side='target' AND validated=1. This keeps slice 1 off the hot cell.commit
-// path (no stored progress counter).
+// member cells whose paired TARGET cell is validated. Membership holds the
+// SOURCE cells (file_id, cell_id); validation lands on the target row at the
+// same (project_id, file_id, cell_id) — they share cell_id (AD-2). So the join
+// is membership -> cells ON (file_id, cell_id) WHERE side='target' AND
+// validated=1. This keeps slice 1 off the hot cell.commit path (no stored
+// progress counter).
 //
 // AQU-1068: the DENOMINATOR is now derived the same way, for the same reason
 // one level up. `assignments.cells_total` is a stored column stamped once at
@@ -20,11 +20,40 @@
 // The stored column stays — assignment-events.ts still stamps it and the
 // agent's SQL surface documents it — it is simply no longer what anybody
 // reads.
+//
+// AQU-1629: MEMBERSHIP itself is derived now, not just the two counts over it.
+// Joining the resolved snapshot `assignment_cells` to live `cells` can only
+// ever drop rows, so AQU-1068 fixed removals and left additions broken the
+// other way: a line added to an assigned chapter or file never joined the
+// assignment, and the assignee's progress could read done over a chapter that
+// still had open work. Every query below therefore joins the view
+// `assignment_member_cells` (migration 0147), which re-resolves a book or
+// chapter scope from `assignment_scopes` against live `cells` on each read —
+// a chapter by the plan board's own chapter key (AQU-1493), the rule
+// assignment.create resolves the snapshot with — and keeps the frozen list
+// only for an explicit line selection ('cells' scope, AQU-1628): a selection
+// is exactly the lines the manager picked and must not silently acquire new
+// ones. Nothing here reads `assignment_cells` directly;
+// that table is now the audit record of what the scope resolved to at
+// creation.
 
 import type { Env } from "../types"
-import { bookKeyExpr, sectionKeyExpr } from "../../../db/shared/plan-keys"
+import {
+  planKeysJoinSql, unitBookKeyExpr, unitSectionKeyExpr,
+} from "../../../db/shared/plan-keys"
 import { planUnitsSql } from "../../../db/shared/plan-units"
-import { AUDIO_CTE_SQL } from "../../../db/shared/audio-progress"
+import { AUDIO_CTE_SQL, cellAudioVotesSql } from "../../../db/shared/audio-progress"
+import { laneDisplayNameSql } from "../../../db/shared/lanes"
+import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
+import { effectiveThresholdSql, loadEffectiveThreshold } from "../../../db/shared/validation-threshold"
+import { parseLaneDelivers, type LaneDelivers } from "../../../src/lib/lanes/lane-delivers"
+import {
+  assignmentKind,
+  compareValidationBehind,
+  loadValidationProgress,
+  type AssignmentKind,
+  type ValidationProgress,
+} from "./assignment-validation"
 
 /** Per-assignee rollup for the manager workload view. */
 export interface AssigneeWorkload {
@@ -38,42 +67,203 @@ export interface AssigneeWorkload {
   cellsDone: number
 }
 
-/** The denominator: assigned cells that still EXIST, counted live. Mirrors
- *  CELLS_DONE_SUBQUERY's join without the validated predicate; `side =
- *  'source'` is what makes each assigned cell count exactly once, since
- *  assignment_cells resolved source rows. */
-const CELLS_TOTAL_SUBQUERY = `(
-  SELECT COUNT(*) FROM assignment_cells ac
-    JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
-                 AND c.cell_id = ac.cell_id AND c.side = 'source'
-   WHERE ac.assignment_id = a.assignment_id
+/**
+ * AQU-1083 / AQU-1493: whether the assignment's project leaves headings and
+ * titles out of its counts — the project's answer, else its org's, else no.
+ * The same stored columns, and the same answer, as the `policy` CTE in
+ * `getUnitAssignments`, correlated on the outer `a` so every per-assignment
+ * figure below can ask it once.
+ */
+const EXCLUDES_STRUCTURAL_SQL = `COALESCE((
+  SELECT COALESCE(ps.count_structural, os.count_structural) = 'false'
+    FROM projects p
+    LEFT JOIN project_settings ps ON ps.project_id = p.id
+    LEFT JOIN org_settings os ON os.org_id = p.org_id
+   WHERE p.id = a.project_id
+), false)`
+
+/**
+ * The structural cell types, on the SOURCE row `alias` — target rows carry no
+ * type. COALESCE because a null type means content and `NULL IN (...)` would
+ * drop every untyped cell (see the note in `getUnitAssignments`).
+ */
+const isStructuralSql = (alias: string) => `COALESCE(${alias}.type, '') IN ('heading', 'paratext')`
+
+/**
+ * Picks between two forms of one count by the project's policy, so the policy
+ * is read once per assignment and a project that counts headings — nearly all
+ * of them — pays nothing for the filter.
+ */
+const byStructuralPolicy = (counting: string, excluding: string) =>
+  `(CASE WHEN ${EXCLUDES_STRUCTURAL_SQL} THEN ${excluding} ELSE ${counting} END)`
+
+/** The denominator: assigned cells that still EXIST, counted live. The view is
+ *  already the live SOURCE membership — it does the `side = 'source'` join to
+ *  `cells` itself, which is also what makes each assigned cell count exactly
+ *  once (source rows are lane-independent, one per cell) — so there is nothing
+ *  left to join here.
+ *
+ *  AQU-1493: and without the headings, when the project does not count them.
+ *  A chapter assignment takes the chapter's headings along (they count in the
+ *  chapter on the board), so with headings off "Assigned to me" read 23/24 for
+ *  a chapter whose every verse was done, while the plan inspector's row for the
+ *  same person — which applies the policy — said "Nothing left". Applied when
+ *  READING, not when the assignment is made, because the setting can change
+ *  afterwards; that also squares whole-file assignments, which always held the
+ *  headings. The view carries the source row's `type`, so the filter reads it
+ *  off `ac` directly. */
+const cellsTotalSql = (structural: string) => `(
+  SELECT COUNT(*) FROM assignment_member_cells ac
+   WHERE ac.assignment_id = a.assignment_id${structural}
 )`
+const CELLS_TOTAL_SUBQUERY = byStructuralPolicy(
+  cellsTotalSql(""),
+  cellsTotalSql(`\n     AND NOT ${isStructuralSql("ac")}`),
+)
 
 /**
  * The numerator: assigned cells whose TARGET row is validated — in the lane the
  * assignment is pinned to.
  *
  * AQU-1278 fixed the lane predicate. `cells` keys on (project, file, cell,
- * side, target_lang), so a multi-lane project holds one target row per lane;
- * without `c.target_lang = a.target_lang` a cell validated in Spanish AND
- * French counted twice, and cellsDone could exceed cellsTotal (the denominator
- * counts SOURCE rows, which are lane-independent — one per cell). That was on
- * screen in two places: the project Team card
- * (GET /:projectId/assignments/all) and the org-wide manager workload view
- * (GET /orgs/:orgId/assignments/workload). Both columns silently over-counted
- * exactly on the projects that need them most — the ones with several lanes.
+ * lane_id), so a multi-lane project holds one target row per lane; without a
+ * lane predicate a cell validated in Spanish AND French counted twice, and
+ * cellsDone could exceed cellsTotal (the denominator counts SOURCE rows, which
+ * are lane-independent — one per cell). That was on screen in two places: the
+ * project Team card (GET /:projectId/assignments/all) and the org-wide manager
+ * workload view (GET /orgs/:orgId/assignments/workload). Both columns silently
+ * over-counted exactly on the projects that need them most — the ones with
+ * several lanes.
  *
- * `a.target_lang` rather than a bound lane is deliberate: an assignment IS
- * pinned to one lane (AQU-538 §3.5, '' = the default lane), so its progress is
- * only ever measured in that lane.
+ * AQU-1609: the predicate is `c.lane_id = a.lane_id`, the identity both tables
+ * key on, rather than the legacy `target_lang` tag they both also carry. The
+ * two agree today only because `planNewTargetLane` hands a second lane of the
+ * same language its own lane id as its tag — identity routed through a string
+ * chosen for backwards compatibility. Comparing the ids directly needs no such
+ * guarantee, and is what survives AQU-1611 retiring the tag columns.
+ *
+ * `a.lane_id` rather than a bound lane is deliberate: an assignment IS pinned
+ * to one lane (AQU-538 §3.5), so its progress is only ever measured there.
+ *
+ * AQU-1493: with headings left out (see CELLS_TOTAL_SUBQUERY), the type is
+ * read from each cell's SOURCE row, the only side that carries one — which
+ * the view already carries as `ac.type`, so no second join to `cells`.
  */
-const CELLS_DONE_SUBQUERY = `(
-  SELECT COUNT(*) FROM assignment_cells ac
-    JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
+const TEXT_CELLS_DONE_SUBQUERY = byStructuralPolicy(
+  `(
+  SELECT COUNT(*) FROM assignment_member_cells ac
+    JOIN cells c ON c.project_id = ac.project_id AND c.file_id = ac.file_id
                  AND c.cell_id = ac.cell_id AND c.side = 'target'
-                 AND c.target_lang = a.target_lang AND c.validated = 1
+                 AND c.lane_id = a.lane_id AND c.validated = 1
    WHERE ac.assignment_id = a.assignment_id
-)`
+)`,
+  `(
+  SELECT COUNT(*) FROM assignment_member_cells ac
+    JOIN cells c ON c.project_id = ac.project_id AND c.file_id = ac.file_id
+                 AND c.cell_id = ac.cell_id AND c.side = 'target'
+                 AND c.lane_id = a.lane_id AND c.validated = 1
+   WHERE ac.assignment_id = a.assignment_id
+     AND NOT ${isStructuralSql("ac")}
+)`,
+)
+
+/** The assignment's language as the legacy tag a take's lane is read by (`audioLaneTagSql`). */
+const ASSIGNMENT_LANE_TAG_SQL = `(SELECT COALESCE(tl.legacy_tag, '') FROM lanes tl
+   WHERE tl.project_id = a.project_id AND tl.id = a.lane_id)`
+
+/** The project's "Required validators (audio)": project → org → 1, as every reader resolves it. */
+const AUDIO_THRESHOLD_SQL = `(SELECT ${effectiveThresholdSql("tps.validation_count_audio", "tos.validation_count_audio")}
+   FROM projects tp
+   LEFT JOIN project_settings tps ON tps.project_id = tp.id
+   LEFT JOIN org_settings tos ON tos.org_id = tp.org_id
+  WHERE tp.id = a.project_id)`
+
+/** One assigned line's recording is approved in the assignment's language. */
+const AUDIO_APPROVED_SQL = `${cellAudioVotesSql("ac", ASSIGNMENT_LANE_TAG_SQL)} >= ${AUDIO_THRESHOLD_SQL}`
+
+/** The same, with its text validated too — on the same line, in the same language. */
+const TEXT_VALIDATED_SQL = `EXISTS (
+     SELECT 1 FROM cells c
+      WHERE c.project_id = ac.project_id AND c.file_id = ac.file_id
+        AND c.cell_id = ac.cell_id AND c.side = 'target'
+        AND c.lane_id = a.lane_id AND c.validated = 1)`
+
+const assignedCellsWhereSql = (predicate: string) => byStructuralPolicy(
+  `(
+  SELECT COUNT(*) FROM assignment_member_cells ac
+   WHERE ac.assignment_id = a.assignment_id
+     AND ${predicate}
+)`,
+  `(
+  SELECT COUNT(*) FROM assignment_member_cells ac
+   WHERE ac.assignment_id = a.assignment_id
+     AND NOT ${isStructuralSql("ac")}
+     AND ${predicate}
+)`,
+)
+
+/**
+ * Media redesign slice 1: an assignment's done lines are counted by what its
+ * language DELIVERS (src/lib/lanes/lane-delivers.ts) — the rule the dashboard,
+ * the plan board and Monday follow, so "2 of 23" here is the figure they show.
+ * A Text language, and one nobody has chosen for, is the validated-text count
+ * above, byte for byte; an Audio language counts approved recordings at the
+ * project's audio threshold; Text and audio needs both on the same line.
+ */
+const CELLS_DONE_SUBQUERY = `(CASE (SELECT dl.delivers FROM lanes dl
+              WHERE dl.project_id = a.project_id AND dl.id = a.lane_id)
+  WHEN 'audio' THEN ${assignedCellsWhereSql(AUDIO_APPROVED_SQL)}
+  WHEN 'text_and_audio' THEN ${assignedCellsWhereSql(`${TEXT_VALIDATED_SQL} AND ${AUDIO_APPROVED_SQL}`)}
+  ELSE ${TEXT_CELLS_DONE_SUBQUERY}
+END)`
+
+/**
+ * AQU-1969: attach a Validate assignment's own-approval progress to the rows
+ * that are validate assignments, and make their `cellsTotal` / `cellsDone`
+ * say the same thing — the lines theirs to approve, and the ones they have —
+ * so every reader that only knows those two (the "Assigned to me" inboxes, the
+ * given-by list) reports the assignee's own work rather than anyone's. A
+ * translate row passes through untouched, and a list with no validate rows
+ * costs no query.
+ */
+async function withValidationProgress<
+  T extends { assignmentId: string; kind: AssignmentKind; cellsTotal: number; cellsDone: number },
+>(env: Env, rows: T[]): Promise<Array<T & { validation?: ValidationProgress }>> {
+  const ids = rows.filter((r) => r.kind === "validate").map((r) => r.assignmentId)
+  if (ids.length === 0) return rows
+  const progress = await loadValidationProgress(env, ids)
+  return rows.map((r) => {
+    const validation = r.kind === "validate" ? progress.get(r.assignmentId) : undefined
+    return validation
+      ? { ...r, validation, cellsTotal: validation.text.total, cellsDone: validation.text.validated }
+      : r
+  })
+}
+
+/**
+ * AQU-1609: the `lanes.id` a legacy target-language tag names, or `''` when the
+ * project has no such lane.
+ *
+ * Only for the seam where a caller still speaks tags — the `?lane=` query param
+ * on the per-unit read, kept for clients deployed before `?laneId=`. Everything
+ * inside this service compares `lane_id` to `lane_id`.
+ *
+ * `''` rather than null on a miss is deliberate: it is not a lane id any row
+ * carries, so an unresolvable tag reads as "no cells in that lane" instead of
+ * matching a NULL-tolerant join and borrowing another lane's totals.
+ */
+export async function resolveTargetLaneId(
+  env: Env,
+  projectId: string,
+  laneTag: string,
+): Promise<string> {
+  const row = await env.AQUILLA_PG.prepare(
+    "SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?",
+  )
+    .bind(projectId, laneTag)
+    .first<{ id: string }>()
+  return row?.id ?? ""
+}
 
 /**
  * One open assignment in the org-wide "Team workload" manager view, with its
@@ -92,11 +282,25 @@ export interface OrgAssignmentRow {
   assigneeUserId: number
   username: string | null
   scopeLabel: string
-  /** AQU-538 (§3.5): target-language lane. '' = default lane. */
+  /** AQU-538 (§3.5): target-language lane, as the legacy tag. '' = default lane. */
   targetLang: string
+  /** Display name from the lane row, when one exists. */
+  laneName?: string | null
+  /** AQU-1609: `lanes.id` — the lane's identity, straight off the assignment. */
+  laneId: string
   cellsTotal: number
   cellsDone: number
   deadline: string | null
+  /**
+   * AQU-2294: when the assignment was handed out — `assignments.created_at`,
+   * epoch ms. The list was already ORDERED by it; the manager card needs to
+   * show it, beside the deadline, so a row says how long it has been out.
+   */
+  createdAt: number
+  /** AQU-1969: what the assignment hands out. */
+  kind: AssignmentKind
+  /** AQU-1969: a validate assignment's own-approval progress; absent on a translate one. */
+  validation?: ValidationProgress
 }
 
 /**
@@ -115,15 +319,21 @@ export async function getOrgAssignmentWorkload(
             a.assignee_user_id AS assignee_user_id,
             u.username         AS assignee_username,
             a.scope_label      AS scope_label,
-            a.target_lang      AS target_lang,
+            COALESCE(ln.legacy_tag, '') AS target_lang,
+            a.lane_id          AS lane_id,
+            ${laneDisplayNameSql("ln")} AS lane_name,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             a.deadline         AS deadline,
-            (SELECT ac.file_id FROM assignment_cells ac
+            a.created_at       AS created_at,
+            a.kind             AS kind,
+            (SELECT ac.file_id FROM assignment_member_cells ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
        FROM assignments a
        JOIN projects p ON p.id = a.project_id
        LEFT JOIN users u ON u.id = a.assignee_user_id
+       LEFT JOIN lanes ln
+         ON ln.project_id = a.project_id AND ln.id = a.lane_id
       WHERE p.org_id = ? AND p.archived_at IS NULL
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
       ORDER BY a.created_at DESC`,
@@ -137,13 +347,17 @@ export async function getOrgAssignmentWorkload(
       assignee_username: string | null
       scope_label: string
       target_lang: string
+      lane_id: string
+      lane_name: string | null
       cells_total: number
       cells_done: number
       deadline: string | null
+      created_at: number
+      kind: string | null
       file_id: string | null
     }>()
 
-  return (rows.results ?? []).map((r) => ({
+  return withValidationProgress(env, (rows.results ?? []).map((r) => ({
     assignmentId: r.assignment_id,
     projectId: r.project_id,
     projectName: r.project_name,
@@ -152,10 +366,14 @@ export async function getOrgAssignmentWorkload(
     username: r.assignee_username,
     scopeLabel: r.scope_label,
     targetLang: r.target_lang ?? "",
+    laneId: r.lane_id,
+    laneName: r.lane_name,
     cellsTotal: r.cells_total,
     cellsDone: r.cells_done,
     deadline: r.deadline,
-  }))
+    createdAt: r.created_at,
+    kind: assignmentKind(r.kind),
+  })))
 }
 
 /**
@@ -163,6 +381,11 @@ export async function getOrgAssignmentWorkload(
  * Returns every assignee who has at least one open assignment in the project,
  * sorted by remaining work descending (same order as the org workload view).
  * Requires the caller to be maintainer+ on the project (enforced in the route).
+ *
+ * AQU-1969: TRANSLATE assignments only. A validate assignment's progress is a
+ * different number (the person's own approvals), so folding it into this
+ * per-person sum would blend two measures into one bar; the Team card lists
+ * those from `getProjectValidationAssignments` instead.
  */
 export async function getProjectAssignmentRoster(
   env: Env,
@@ -176,7 +399,8 @@ export async function getProjectAssignmentRoster(
        FROM assignments a
        LEFT JOIN users u ON u.id = a.assignee_user_id
       WHERE a.project_id = ?
-        AND a.unassigned_at IS NULL AND a.completed_at IS NULL`,
+        AND a.unassigned_at IS NULL AND a.completed_at IS NULL
+        AND a.kind <> 'validate'`,
   )
     .bind(projectId)
     .all<{
@@ -208,6 +432,74 @@ export async function getProjectAssignmentRoster(
   )
 }
 
+/** AQU-1969: one open validate assignment, with the assignee's own approvals. */
+export interface ValidationAssignment {
+  assignmentId: string
+  assigneeUserId: number
+  username: string | null
+  scopeLabel: string
+  /** The lane it is pinned to, as the legacy tag. */
+  targetLang: string
+  laneName?: string | null
+  laneId: string
+  deadline: string | null
+  validation: ValidationProgress
+}
+
+/**
+ * AQU-1969: every open validate assignment in ONE project, furthest behind
+ * first — the Team card's per-member validation lines. Same route, so the
+ * same floors, as the per-assignee roster above.
+ */
+export async function getProjectValidationAssignments(
+  env: Env,
+  projectId: string,
+): Promise<ValidationAssignment[]> {
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT a.assignment_id    AS assignment_id,
+            a.assignee_user_id AS assignee_user_id,
+            u.username         AS assignee_username,
+            a.scope_label      AS scope_label,
+            COALESCE(ln.legacy_tag, '') AS target_lang,
+            ${laneDisplayNameSql("ln")} AS lane_name,
+            a.lane_id          AS lane_id,
+            a.deadline         AS deadline
+       FROM assignments a
+       LEFT JOIN users u ON u.id = a.assignee_user_id
+       LEFT JOIN lanes ln
+         ON ln.project_id = a.project_id AND ln.id = a.lane_id
+      WHERE a.project_id = ? AND a.kind = 'validate'
+        AND a.unassigned_at IS NULL AND a.completed_at IS NULL
+      ORDER BY a.created_at DESC, a.assignment_id`,
+  )
+    .bind(projectId)
+    .all<{
+      assignment_id: string
+      assignee_user_id: number
+      assignee_username: string | null
+      scope_label: string
+      target_lang: string
+      lane_name: string | null
+      lane_id: string
+      deadline: string | null
+    }>()
+  const results = rows.results ?? []
+  const progress = await loadValidationProgress(env, results.map((r) => r.assignment_id))
+  return results
+    .map((r) => ({
+      assignmentId: r.assignment_id,
+      assigneeUserId: Number(r.assignee_user_id),
+      username: r.assignee_username,
+      scopeLabel: r.scope_label,
+      targetLang: r.target_lang ?? "",
+      laneName: r.lane_name,
+      laneId: r.lane_id,
+      deadline: r.deadline,
+      validation: progress.get(r.assignment_id)!,
+    }))
+    .sort(compareValidationBehind)
+}
+
 /**
  * One live assignment covering a planning unit, with that assignee's OWN
  * progress — every count below is over that assignment's cells inside this
@@ -218,8 +510,12 @@ export interface UnitAssignment {
   assigneeUserId: number
   username: string | null
   scopeLabel: string
-  /** AQU-538 (§3.5): the lane this assignment is pinned to. '' = default. */
+  /** AQU-538 (§3.5): the lane this assignment is pinned to, as the legacy tag. */
   targetLang: string
+  /** Display name from the lane row, when one exists. */
+  laneName?: string | null
+  /** AQU-1609: `lanes.id` — the lane's identity, straight off the assignment. */
+  laneId: string
   deadline: string | null
   /** The assignment's cells that are inside this unit and still exist. */
   cellsTotal: number
@@ -227,6 +523,14 @@ export interface UnitAssignment {
   validated: number
   recorded: number
   audioValidated: number
+  /** AQU-1969: what the assignment hands out. */
+  kind: AssignmentKind
+  /**
+   * AQU-1969: a validate assignment's own approvals inside this unit, measured
+   * in the assignment's own lane (see assignment-validation.ts). Absent on a
+   * translate assignment, whose four counts above stay its progress.
+   */
+  validation?: ValidationProgress
   /**
    * AQU-1278: the same five counts again, broken out per chapter, in canonical
    * order. Summing any column across this array gives the aggregate above it.
@@ -286,13 +590,9 @@ async function readThreshold(
   projectId: string,
   column: "validation_count" | "validation_count_audio",
 ): Promise<number> {
-  const row = await env.AQUILLA_PG.prepare(
-    `SELECT ${column} AS threshold FROM project_settings WHERE project_id = ?`,
-  )
-    .bind(projectId)
-    .first<{ threshold: string | number | null }>()
-  const value = Math.floor(Number(row?.threshold))
-  return Number.isFinite(value) ? Math.min(MAX_VALIDATION_LEVEL, Math.max(1, value)) : 1
+  // AQU-1771: project → org → 1, from the generated columns on both tables.
+  const key = column === "validation_count" ? "validationCount" : "validationCountAudio"
+  return Math.min(MAX_VALIDATION_LEVEL, await loadEffectiveThreshold(env.AQUILLA_PG, projectId, key))
 }
 
 /**
@@ -302,7 +602,7 @@ async function readThreshold(
  *
  * `sectionKey` is '' for a file-grain unit and a Bible book code ("GEN") for a
  * sub-file one. A file-grain unit IS the whole file, so it takes no section
- * predicate; a book unit filters on bookKeyExpr, the same expression
+ * predicate; a book unit filters on unitBookKeyExpr, the same expression
  * sync-worker builds file_section_progress's book rows from
  * (db/shared/plan-keys.ts). Deriving membership any other way would let this
  * panel count a different set of cells than the bar directly above it.
@@ -312,14 +612,19 @@ async function readThreshold(
  * bar. An assignment pinned to a DIFFERENT lane still appears — the cells are
  * spoken for either way, and hiding the row would make the unit look
  * unassigned — which is why every row carries its own `targetLang` for the
- * caller to label. Audio has no lane at all (below).
+ * caller to label. Audio is measured in that same lane (AQU-1591, below).
+ *
+ * AQU-1609: `laneId` is `lanes.id`. The route resolves it, accepting a legacy
+ * `?lane=` tag from an older client; nothing below takes a tag from the caller.
+ * The one tag comparison left is the audio join's, and it derives the tag from
+ * this id inside the statement (AQU-1591: the shared audio CTE groups by tag).
  */
 export async function getUnitAssignments(
   env: Env,
   projectId: string,
   fileId: string,
   sectionKey: string,
-  lane: string,
+  laneId: string,
 ): Promise<UnitAssignment[]> {
   const [validationCount, validationCountAudio] = await Promise.all([
     readValidationCount(env, projectId),
@@ -328,7 +633,11 @@ export async function getUnitAssignments(
 
   // A book unit filters by book key; a file-grain unit ('') does not filter at
   // all. Built as a fragment so the bind only exists when the predicate does.
-  const sectionPredicate = sectionKey === "" ? "" : `AND (${bookKeyExpr("c")}) = ?`
+  // AQU-1493: by the key the projection COUNTS a cell toward, so a line added
+  // with no reference is a person's share of the book (and chapter) it is
+  // counted in — the line above it, or for a heading the verse below it —
+  // here exactly as it is a cell of that book's bar above.
+  const sectionPredicate = sectionKey === "" ? "" : `AND (${unitBookKeyExpr("ac", "ik")}) = ?`
 
   const rows = await env.AQUILLA_PG.prepare(
     // The audio CTE is lifted from sync-worker's AUDIO_CTE_SQL, verbatim
@@ -340,9 +649,11 @@ export async function getUnitAssignments(
     // so joining takes straight onto the cell rows would multiply every other
     // count by the number of takes.
     //
-    // cell_audio has NO target_lang column, so audio is lane-independent BY
-    // CONSTRUCTION — one recording is the recording, whichever text lane you
-    // are looking at. That is a schema fact, not a simplification here.
+    // AQU-1591: audio IS per lane now. `cell_audio.lane_id` arrived with
+    // migration 0135, the shared CTE groups by it, and the join below pins the
+    // takes to the unit's own lane — the one `a.target_lang` names. Until then
+    // this panel counted every language's recordings as this assignee's, so a
+    // line voiced in Swahili read as recorded on the French unit too.
     `WITH policy AS (
        -- AQU-1083. Whether chapter headings and section titles count as
        -- translatable content is a team setting: the project's answer, else its
@@ -371,14 +682,16 @@ export async function getUnitAssignments(
             a.assignee_user_id AS assignee_user_id,
             u.username         AS assignee_username,
             a.scope_label      AS scope_label,
-            a.target_lang      AS target_lang,
+            COALESCE(ln.legacy_tag, '') AS target_lang,
+            a.lane_id          AS lane_id,
             a.deadline         AS deadline,
+            a.kind             AS kind,
             -- AQU-1278. One row per (assignment, chapter) rather than per
             -- assignment: the inspector needs to say WHICH chapters a person
             -- still owes work in, and which chapters of the unit nobody holds.
             -- The aggregate the panel already showed is the sum over these,
             -- folded below, so no existing number moves.
-            ${sectionKeyExpr("c")} AS chapter_key,
+            ${unitSectionKeyExpr("ac", "ik")} AS chapter_key,
             COUNT(*)::integer AS cells_total,
             COUNT(*) FILTER (WHERE TRIM(COALESCE(t.value, '')) <> '')::integer AS translated,
             COUNT(*) FILTER (WHERE COALESCE(t.endorsement_count, 0) >= ?)::integer AS validated,
@@ -387,25 +700,51 @@ export async function getUnitAssignments(
             -- reason the text count above it is: a stored verdict would disagree
             -- with the bar drawn above this panel the moment somebody changed
             -- the required number.
-            COUNT(*) FILTER (WHERE au.dub_votes >= ?)::integer AS audio_validated
+            COUNT(*) FILTER (WHERE au.dub_votes >= ?)::integer AS audio_validated,
+            MAX(${laneDisplayNameSql("ln")}) AS lane_name
        FROM assignments a
-       JOIN assignment_cells ac ON ac.assignment_id = a.assignment_id
        -- SOURCE rows are the denominator, exactly as in CELLS_TOTAL_SUBQUERY:
-       -- they are what assignment_cells resolved, they are lane-independent,
-       -- and a cell removed from the file drops out of the count instead of
-       -- stranding the assignment short of 100% forever (AQU-1068).
-       JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
-                   AND c.cell_id = ac.cell_id AND c.side = 'source'
-       LEFT JOIN cells t ON t.project_id = c.project_id AND t.file_id = c.file_id
-                        AND t.cell_id = c.cell_id AND t.side = 'target'
-                        AND t.target_lang = ?
-       LEFT JOIN audio au ON au.cell_id = c.cell_id
+       -- they are what membership resolves to, they are lane-independent, and
+       -- a cell removed from the file drops out of the count instead of
+       -- stranding the assignment short of 100% forever (AQU-1068). The view
+       -- already IS that join, and carries the source row's grouping columns
+       -- (canonical_ref / start_ms / type), so ac is the source cell here —
+       -- joining cells again for them cost this read 5x in measurement.
+       JOIN assignment_member_cells ac ON ac.assignment_id = a.assignment_id
+       -- AQU-1609: the lane's identity, not its legacy tag. The caller
+       -- resolved the lane id; a tag would re-introduce the string indirection
+       -- that AQU-1611 retires.
+       LEFT JOIN cells t ON t.project_id = ac.project_id AND t.file_id = ac.file_id
+                        AND t.cell_id = ac.cell_id AND t.side = 'target'
+                        AND t.lane_id = ?
+       -- AQU-1591: ...and in THIS unit's lane. The audio CTE returns one row
+       -- per (cell, lane); joining on the cell alone would hand a unit every
+       -- lane's takes, which is what it used to do.
+       --
+       -- The caller holds a lane ID (AQU-1609) and the shared CTE names a
+       -- take's lane by its TAG, so the id is turned into that tag here, by
+       -- the same lanes-row lookup audioLaneTagSql makes for the take — both
+       -- sides read the lane row as it is now, so a retagged lane still
+       -- matches itself. No row (an unknown id, or the '' an unresolvable tag
+       -- becomes) is NULL, which equals nothing: the unit reads no audio
+       -- rather than borrowing the default lane's, as its text join does.
+       LEFT JOIN audio au ON au.cell_id = ac.cell_id
+                         AND au.lane = (SELECT COALESCE(ul.legacy_tag, '') FROM lanes ul
+                                         WHERE ul.project_id = a.project_id
+                                           AND ul.id = ? AND ul.role = 'target')
+       -- AQU-1493: where a line with no reference is counted (the chapter of
+       -- the line above it, or a heading's verse below it), as the full
+       -- progress recompute stored it, so the chapter breakdown matches the grid.
+       ${planKeysJoinSql("ac", "ik")}
        LEFT JOIN users u ON u.id = a.assignee_user_id
+       LEFT JOIN lanes ln
+         ON ln.project_id = a.project_id AND ln.id = a.lane_id
        CROSS JOIN policy pol
       WHERE a.project_id = ? AND ac.file_id = ?
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
-        -- The SOURCE alias, always. Target rows carry no type at all, so the
-        -- same predicate written against t would be NULL on every row.
+        -- The SOURCE alias, always — ac, now that the view carries the
+        -- source row's type. Target rows carry no type at all, so the same
+        -- predicate written against t would be NULL on every row.
         --
         -- COALESCE, and it is not defensive noise: a null type MEANS content,
         -- but SQL does not agree. \`NULL IN ('heading','paratext')\` is NULL, so
@@ -413,17 +752,19 @@ export async function getUnitAssignments(
         -- it drops a false one — every untyped cell in the unit would vanish
         -- the moment a team turned headings off, and the panel would go blank
         -- rather than wrong, which is worse to diagnose. A test pins this.
-        AND NOT (pol.exclude_structural AND COALESCE(c.type, '') IN ('heading', 'paratext'))
+        AND NOT (pol.exclude_structural AND COALESCE(ac.type, '') IN ('heading', 'paratext'))
         ${sectionPredicate}
       GROUP BY a.assignment_id, a.assignee_user_id, u.username, a.scope_label,
-               a.target_lang, a.deadline, a.created_at, ${sectionKeyExpr("c")}
+               COALESCE(ln.legacy_tag, ''), a.lane_id, a.deadline, a.kind, a.created_at,
+               ${unitSectionKeyExpr("ac", "ik")}
       ORDER BY a.created_at DESC, a.assignment_id`,
   )
     // Binds are positional, so they follow the statement's own order: the
     // policy CTE's project, the audio CTE's (project, file), the text then
-    // audio thresholds in the SELECT list, the lane on the target join, then the
-    // WHERE — and the section key last, only when the fragment above put a
-    // placeholder there. Adding a CTE ahead of another means inserting its
+    // audio thresholds in the SELECT list, the lane id on the target join, the
+    // same lane id on the audio join (AQU-1591), then the WHERE — and the
+    // section key last, only when the fragment above put a placeholder there.
+    // Adding a CTE ahead of another means inserting its
     // binds ahead of theirs; there is no naming here to catch a mistake.
     .bind(
       projectId,
@@ -431,7 +772,10 @@ export async function getUnitAssignments(
       fileId,
       validationCount,
       validationCountAudio,
-      lane,
+      laneId,
+      // AQU-1591: the audio join's lane, immediately after the target join's —
+      // statement order, which is the only order these binds have.
+      laneId,
       projectId,
       fileId,
       ...(sectionKey === "" ? [] : [sectionKey]),
@@ -442,7 +786,10 @@ export async function getUnitAssignments(
       assignee_username: string | null
       scope_label: string
       target_lang: string
+      lane_id: string
+      lane_name: string | null
       deadline: string | null
+      kind: string | null
       chapter_key: string
       cells_total: number
       translated: number
@@ -465,7 +812,10 @@ export async function getUnitAssignments(
         username: r.assignee_username,
         scopeLabel: r.scope_label,
         targetLang: r.target_lang ?? "",
+        laneName: r.lane_name,
+        laneId: r.lane_id,
         deadline: r.deadline,
+        kind: assignmentKind(r.kind),
         cellsTotal: 0,
         translated: 0,
         validated: 0,
@@ -502,6 +852,14 @@ export async function getUnitAssignments(
       return ka.book === kb.book ? ka.num - kb.num : ka.book.localeCompare(kb.book)
     })
   }
+
+  // AQU-1969: a validate assignment's own approvals, over its lines in this
+  // unit — the same file and book the rows above were narrowed to.
+  const validateIds = [...byAssignment.values()].filter((e) => e.kind === "validate").map((e) => e.assignmentId)
+  if (validateIds.length > 0) {
+    const progress = await loadValidationProgress(env, validateIds, { fileId, sectionKey })
+    for (const id of validateIds) byAssignment.get(id)!.validation = progress.get(id)
+  }
   return [...byAssignment.values()]
 }
 
@@ -518,15 +876,111 @@ export interface MyAssignment {
   fileId: string | null
   /** Display name for `fileId` from `files.name`; null when `fileId` is null. */
   fileName: string | null
+  /**
+   * AQU-894: EVERY file the assignment's resolved cells touch, ascending.
+   *
+   * `fileId` above is one arbitrary member of this set (`LIMIT 1`), which is
+   * all the inbox's "open the right file" click needs. It cannot answer "is
+   * this file mine?", because a books-scope assignment over GEN + EXO reports
+   * one of the two and says nothing about the other — so a sidebar reading
+   * `fileId` alone would mark half a person's own work as somebody else's.
+   * Empty only when the scope resolved to zero cells.
+   */
+  fileIds: string[]
   scopeKind: string
   scopeLabel: string
+  /**
+   * AQU-1628: the resolved source cell ids, present ONLY for a 'cells' scope
+   * (the editor's current selection). A book or chapter scope leaves it absent
+   * — its extent is the whole file or the chapters `scopeLabel` names — so a
+   * reader branches on `scopeKind`, never on this being empty.
+   */
+  cellIds?: string[]
   /** AQU-538 (§3.5): target-language lane. '' = default lane. */
   targetLang: string
+  /** Display name of that lane, when the row exists. */
+  laneName?: string | null
+  /** Opaque lane id, for deep links. */
+  laneId?: string | null
   deadline: string | null
   note: string | null
+  /** AQU-1969: for a validate assignment, the lines theirs to approve and the ones they have. */
   cellsTotal: number
   cellsDone: number
   createdAt: number
+  /** AQU-1969: what the assignment hands out. */
+  kind: AssignmentKind
+  /** AQU-1969: a validate assignment's own-approval progress; absent on a translate one. */
+  validation?: ValidationProgress
+}
+
+/**
+ * assignment_id → the distinct files its resolved cells live in (AQU-894).
+ *
+ * A second read rather than an aggregate in the inbox query itself: the inbox
+ * is a once-per-project-open read, and one plain SELECT that any Postgres
+ * driver returns as plain rows is worth more here than saving a round trip on
+ * a `json_agg` whose shape depends on how the driver decodes a JSON column.
+ *
+ * Callers pass the assignment ids they already selected, so this inherits
+ * their authorization exactly — it never widens what the caller may see.
+ */
+async function fileIdsForAssignments(
+  env: Env,
+  assignmentIds: readonly string[],
+): Promise<Map<string, string[]>> {
+  const byAssignment = new Map<string, string[]>()
+  for (const id of assignmentIds) byAssignment.set(id, [])
+  if (assignmentIds.length === 0) return byAssignment
+
+  const placeholders = assignmentIds.map(() => "?").join(", ")
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT DISTINCT ac.assignment_id AS assignment_id, ac.file_id AS file_id
+       FROM assignment_member_cells ac
+      WHERE ac.assignment_id IN (${placeholders})
+      ORDER BY ac.assignment_id, ac.file_id`,
+  )
+    .bind(...assignmentIds)
+    .all<{ assignment_id: string; file_id: string }>()
+
+  for (const r of rows.results ?? []) byAssignment.get(r.assignment_id)?.push(r.file_id)
+  return byAssignment
+}
+
+/**
+ * assignment_id → its resolved source cell ids (AQU-1628).
+ *
+ * Only called with the ids of 'cells'-scope assignments: for a book or chapter
+ * scope the extent is re-derivable (the whole file, or the chapters named in
+ * `scope_label`), while an explicit line set is not — the editor gutter cannot
+ * tell which lines are the person's without being told. Keeping the call to
+ * that scope means an inbox with no selection assignments pays nothing. It
+ * reads membership rather than `assignment_cells` all the same, so a range
+ * scope reaching it would get today's lines and not a stale snapshot.
+ *
+ * Callers pass assignment ids they already selected, so this inherits their
+ * authorization exactly — it never widens what the caller may see.
+ */
+async function cellIdsForAssignments(
+  env: Env,
+  assignmentIds: readonly string[],
+): Promise<Map<string, string[]>> {
+  const byAssignment = new Map<string, string[]>()
+  if (assignmentIds.length === 0) return byAssignment
+  for (const id of assignmentIds) byAssignment.set(id, [])
+
+  const placeholders = assignmentIds.map(() => "?").join(", ")
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT ac.assignment_id AS assignment_id, ac.cell_id AS cell_id
+       FROM assignment_member_cells ac
+      WHERE ac.assignment_id IN (${placeholders})
+      ORDER BY ac.assignment_id, ac.cell_id`,
+  )
+    .bind(...assignmentIds)
+    .all<{ assignment_id: string; cell_id: string }>()
+
+  for (const r of rows.results ?? []) byAssignment.get(r.assignment_id)?.push(r.cell_id)
+  return byAssignment
 }
 
 /**
@@ -541,16 +995,21 @@ export async function getMyAssignments(
   const rows = await env.AQUILLA_PG.prepare(
     `SELECT a.assignment_id AS assignment_id, a.project_id AS project_id,
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
-            a.target_lang AS target_lang,
+            ${wireLegacyTagSql("a")} AS target_lang,
+            ${laneDisplayNameSql("ln")} AS lane_name,
+            a.lane_id AS lane_id,
             a.deadline AS deadline, a.note AS note,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
-            (SELECT ac.file_id FROM assignment_cells ac
+            a.kind AS kind,
+            (SELECT ac.file_id FROM assignment_member_cells ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id,
-            (SELECT f.name FROM assignment_cells ac
+            (SELECT f.name FROM assignment_member_cells ac
                JOIN files f ON f.id = ac.file_id AND f.project_id = a.project_id
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_name
        FROM assignments a
+       LEFT JOIN lanes ln
+         ON ln.project_id = a.project_id AND ln.id = a.lane_id
       WHERE a.project_id = ? AND a.assignee_user_id = ?
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
       ORDER BY a.created_at DESC`,
@@ -562,34 +1021,121 @@ export async function getMyAssignments(
       scope_kind: string
       scope_label: string
       target_lang: string
+      lane_name: string | null
+      lane_id: string | null
       deadline: string | null
       note: string | null
       cells_total: number
       created_at: number
       cells_done: number
+      kind: string | null
       file_id: string | null
       file_name: string | null
     }>()
 
-  return (rows.results ?? []).map((r) => ({
+  const results = rows.results ?? []
+  const fileIds = await fileIdsForAssignments(env, results.map((r) => r.assignment_id))
+  const cellIds = await cellIdsForAssignments(
+    env,
+    results.filter((r) => r.scope_kind === "cells").map((r) => r.assignment_id),
+  )
+
+  return withValidationProgress(env, results.map((r) => ({
     assignmentId: r.assignment_id,
     projectId: r.project_id,
     fileId: r.file_id,
     fileName: r.file_name,
+    fileIds: fileIds.get(r.assignment_id) ?? [],
     scopeKind: r.scope_kind,
     scopeLabel: r.scope_label,
+    ...(cellIds.has(r.assignment_id) ? { cellIds: cellIds.get(r.assignment_id) ?? [] } : {}),
     targetLang: r.target_lang ?? "",
+    laneName: r.lane_name,
+    laneId: r.lane_id,
     deadline: r.deadline,
     note: r.note,
     cellsTotal: r.cells_total,
     cellsDone: r.cells_done,
     createdAt: r.created_at,
-  }))
+    kind: assignmentKind(r.kind),
+  })))
+}
+
+/** An open assignment the caller handed out, with who it went to. */
+export interface GivenAssignment {
+  assignmentId: string
+  fileId: string | null
+  assigneeUserId: number
+  username: string | null
+  scopeLabel: string
+  /** '' = default lane. */
+  targetLang: string
+  cellsTotal: number
+  cellsDone: number
+  /** AQU-1969: what the assignment hands out. */
+  kind: AssignmentKind
+  validation?: ValidationProgress
+}
+
+/**
+ * AQU-581: the open assignments `userId` created in one project, newest
+ * first — the list a lane coordinator removes their own mistakes from.
+ */
+export async function getAssignmentsGivenBy(
+  env: Env,
+  projectId: string,
+  userId: number,
+): Promise<GivenAssignment[]> {
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT a.assignment_id AS assignment_id, a.assignee_user_id AS assignee_user_id,
+            u.username AS username, a.scope_label AS scope_label,
+            ${wireLegacyTagSql("a")} AS target_lang,
+            ${CELLS_TOTAL_SUBQUERY} AS cells_total,
+            ${CELLS_DONE_SUBQUERY} AS cells_done,
+            a.kind AS kind,
+            (SELECT ac.file_id FROM assignment_member_cells ac
+              WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
+       FROM assignments a
+       LEFT JOIN users u ON u.id = a.assignee_user_id
+      WHERE a.project_id = ? AND a.created_by = ?
+        AND a.unassigned_at IS NULL AND a.completed_at IS NULL
+      ORDER BY a.created_at DESC`,
+  )
+    .bind(projectId, userId)
+    .all<{
+      assignment_id: string
+      assignee_user_id: number | string
+      username: string | null
+      scope_label: string
+      target_lang: string | null
+      cells_total: number
+      cells_done: number
+      kind: string | null
+      file_id: string | null
+    }>()
+
+  return withValidationProgress(env, (rows.results ?? []).map((r) => ({
+    assignmentId: r.assignment_id,
+    fileId: r.file_id,
+    assigneeUserId: Number(r.assignee_user_id),
+    username: r.username,
+    scopeLabel: r.scope_label,
+    targetLang: r.target_lang ?? "",
+    cellsTotal: Number(r.cells_total),
+    cellsDone: Number(r.cells_done),
+    kind: assignmentKind(r.kind),
+  })))
 }
 
 /** One of the caller's open assignments, with its project name (org-wide inbox). */
 export interface MyOrgAssignment extends MyAssignment {
   projectName: string
+  /**
+   * Media redesign slice 2: what the assignment's language delivers, so the
+   * inbox's link lands on the first line still lacking what that language
+   * owes. Null when nobody has chosen (counts as Text).
+   */
+  laneDelivers: LaneDelivers | null
 }
 
 /**
@@ -608,17 +1154,23 @@ export async function getMyAssignmentsAcrossOrg(
     `SELECT a.assignment_id AS assignment_id, a.project_id AS project_id,
             p.name AS project_name,
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
-            a.target_lang AS target_lang,
+            ${wireLegacyTagSql("a")} AS target_lang,
+            ${laneDisplayNameSql("ln")} AS lane_name,
+            a.lane_id AS lane_id,
             a.deadline AS deadline, a.note AS note,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
-            (SELECT ac.file_id FROM assignment_cells ac
+            a.kind AS kind,
+            ln.delivers AS lane_delivers,
+            (SELECT ac.file_id FROM assignment_member_cells ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id,
-            (SELECT f.name FROM assignment_cells ac
+            (SELECT f.name FROM assignment_member_cells ac
                JOIN files f ON f.id = ac.file_id AND f.project_id = a.project_id
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_name
        FROM assignments a
        JOIN projects p ON p.id = a.project_id
+       LEFT JOIN lanes ln
+         ON ln.project_id = a.project_id AND ln.id = a.lane_id
       WHERE p.org_id = ? AND p.archived_at IS NULL
         AND a.assignee_user_id = ?
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
@@ -632,30 +1184,42 @@ export async function getMyAssignmentsAcrossOrg(
       scope_kind: string
       scope_label: string
       target_lang: string
+      lane_name: string | null
+      lane_id: string | null
       deadline: string | null
       note: string | null
       cells_total: number
       created_at: number
       cells_done: number
+      kind: string | null
+      lane_delivers: string | null
       file_id: string | null
       file_name: string | null
     }>()
 
-  return (rows.results ?? []).map((r) => ({
+  const results = rows.results ?? []
+  const fileIds = await fileIdsForAssignments(env, results.map((r) => r.assignment_id))
+
+  return withValidationProgress(env, results.map((r) => ({
     assignmentId: r.assignment_id,
     projectId: r.project_id,
     projectName: r.project_name,
+    laneDelivers: parseLaneDelivers(r.lane_delivers),
     fileId: r.file_id,
     fileName: r.file_name,
+    fileIds: fileIds.get(r.assignment_id) ?? [],
     scopeKind: r.scope_kind,
     scopeLabel: r.scope_label,
     targetLang: r.target_lang ?? "",
+    laneName: r.lane_name,
+    laneId: r.lane_id,
     deadline: r.deadline,
     note: r.note,
     cellsTotal: r.cells_total,
     cellsDone: r.cells_done,
     createdAt: r.created_at,
-  }))
+    kind: assignmentKind(r.kind),
+  })))
 }
 
 /** Split "GEN 10" → { book: "GEN", num: 10 } for natural ordering. */
@@ -665,13 +1229,40 @@ function chapterSortKey(chapter: string): { book: string; num: number } {
   return { book: m[1].trim(), num: parseInt(m[2], 10) }
 }
 
+/** "GEN 1" / "1CO 12" — a book code plus a chapter number. Not "GEN" or "1CO". */
+const NUMBERED_CHAPTER_KEY = /^([1-3]?[A-Z]{2,3}) (\d+)$/
+/** "GEN" / "1CO" / "TIT" — the book code alone. */
+const BARE_BOOK_CODE = /^[1-3]?[A-Z]{2,3}$/
+
+/**
+ * USFM book-header cells (`RUT:h:1`, `1CO:mt1:1`) cut to a bare book code.
+ * Beside numbered chapters of that book, the bare code is front matter, not a
+ * chapter — the same distinction the plan uses (`classifyPlanSection`). A lone
+ * bare code is a one-chapter book's only chapter (`TIT:4` → `TIT`, which is
+ * chapter 1) and stays. A real "RUT 1" is never this shape, so it stays too.
+ */
+function withoutBookFrontMatter(chapters: string[]): string[] {
+  const numberedBooks = new Set<string>()
+  for (const chapter of chapters) {
+    const match = NUMBERED_CHAPTER_KEY.exec(chapter)
+    if (match) numberedBooks.add(match[1])
+  }
+  return chapters.filter((chapter) => {
+    if (!BARE_BOOK_CODE.test(chapter)) return true
+    return !numberedBooks.has(chapter)
+  })
+}
+
 /**
  * Distinct chapters present in a file, derived from the source cells'
  * canonical_ref (e.g. "GEN 1:1" → "GEN 1"). Populates the assign picker's
  * chapter dropdown so a manager picks a real chapter instead of typing a
- * canonical-ref prefix — and the value feeds the resolver's LIKE 'GEN 1:%'
- * directly. Natural-sorted (book code, then chapter number) so "GEN 2"
- * precedes "GEN 10".
+ * canonical-ref prefix — and the value is the chapter key the resolver
+ * (sync-worker assignment-events.ts) matches against the plan board's own
+ * keys, so the person gets the chapter's headings and added lines too
+ * (AQU-1493). Natural-sorted (book code, then chapter number) so "GEN 2"
+ * precedes "GEN 10". Book-header refs (`GEN:h:1`) are not chapters when that
+ * book already has numbered ones; a one-chapter book's bare code is kept.
  */
 export async function getFileChapters(
   env: Env,
@@ -687,9 +1278,11 @@ export async function getFileChapters(
     .bind(projectId, fileId)
     .all<{ chapter: string }>()
 
-  const chapters = (rows.results ?? [])
-    .map((r) => r.chapter)
-    .filter((c): c is string => typeof c === "string" && c.length > 0)
+  const chapters = withoutBookFrontMatter(
+    (rows.results ?? [])
+      .map((r) => r.chapter)
+      .filter((c): c is string => typeof c === "string" && c.length > 0),
+  )
   chapters.sort((a, b) => {
     const ka = chapterSortKey(a)
     const kb = chapterSortKey(b)
@@ -743,17 +1336,25 @@ export async function getProjectUnitAssignees(env: Env, projectId: string): Prom
             usr.username        AS username,
             MAX(a.created_at)   AS latest
        FROM assignments a
-       JOIN assignment_cells ac ON ac.assignment_id = a.assignment_id
-       JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
-                   AND c.cell_id = ac.cell_id AND c.side = 'source'
+       -- ac IS the source cell: the view joins cells WHERE side = 'source'
+       -- itself and carries that row's grouping columns, so this read touches
+       -- cells once instead of twice (measured: twice cost it 5x and a
+       -- sequential scan).
+       JOIN assignment_member_cells ac ON ac.assignment_id = a.assignment_id
+       -- AQU-1493: a line with no reference counts toward the book it is
+       -- counted in (unitBookKeyExpr: the line above it's, or for a heading the
+       -- verse below it's), so its assignee belongs on that book's row. Read
+       -- from the placements the full progress recompute stored: walking every
+       -- assigned Bible on each board load cost tens of ms per file.
+       ${planKeysJoinSql("ac", "ik")}
        -- A file with book units has no '' unit and a file without has only
        -- the '' unit, so this OR is exact rather than lenient.
-       JOIN units u ON u.project_id = c.project_id AND u.file_id = c.file_id
-                   AND (u.section_key = '' OR u.section_key = ${bookKeyExpr("c")})
+       JOIN units u ON u.project_id = ac.project_id AND u.file_id = ac.file_id
+                   AND (u.section_key = '' OR u.section_key = ${unitBookKeyExpr("ac", "ik")})
        LEFT JOIN users usr ON usr.id = a.assignee_user_id
        CROSS JOIN policy pol
       WHERE a.project_id = ? AND a.unassigned_at IS NULL AND a.completed_at IS NULL
-        AND NOT (pol.exclude_structural AND COALESCE(c.type, '') IN ('heading', 'paratext'))
+        AND NOT (pol.exclude_structural AND COALESCE(ac.type, '') IN ('heading', 'paratext'))
       GROUP BY u.file_id, u.section_key, a.assignee_user_id, usr.username
       ORDER BY u.file_id, u.section_key, latest DESC, a.assignee_user_id`,
   )
@@ -766,4 +1367,64 @@ export async function getProjectUnitAssignees(env: Env, projectId: string): Prom
     userId: r.user_id,
     username: r.username,
   }))
+}
+
+/**
+ * One open assignment held by one member in one lane — what closing that
+ * person's work in the lane will touch (AQU-1999).
+ *
+ * `fileId` routes the `assignment.unassign` event's sync token, exactly as it
+ * does on the org workload row. Rows whose scope resolved to zero cells carry
+ * no file and are left out by `getMemberLaneAssignments`, so every row here is
+ * one the caller can actually close.
+ */
+export interface MemberLaneAssignment {
+  assignmentId: string
+  fileId: string
+  scopeLabel: string
+}
+
+/**
+ * The open assignments one member holds in ONE lane of one project — the
+ * answer the Staff popover needs before it takes someone off a lane
+ * (AQU-1999: removing the lane closes that work, and the confirmation says
+ * how much of it there is).
+ *
+ * `laneId` is a resolved `lanes.id`; the route converts a caller that still
+ * speaks tags (`resolveLaneScopeValue`) so this compares `lane_id` to
+ * `lane_id` like everything else in this service. Open means the same thing
+ * it means in the workload views: neither unassigned nor completed.
+ *
+ * Newest first, matching the org workload view's order.
+ */
+export async function getMemberLaneAssignments(
+  env: Env,
+  projectId: string,
+  userId: number,
+  laneId: string,
+): Promise<MemberLaneAssignment[]> {
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT a.assignment_id AS assignment_id,
+            a.scope_label   AS scope_label,
+            (SELECT ac.file_id FROM assignment_member_cells ac
+              WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
+       FROM assignments a
+      WHERE a.project_id = ? AND a.assignee_user_id = ? AND a.lane_id = ?
+        AND a.unassigned_at IS NULL AND a.completed_at IS NULL
+      ORDER BY a.created_at DESC`,
+  )
+    .bind(projectId, userId, laneId)
+    .all<{ assignment_id: string; scope_label: string; file_id: string | null }>()
+
+  // A scope that resolved to no cells holds no work to stall and offers no
+  // file to route an unassign through, so it is not reported as closable.
+  return (rows.results ?? [])
+    .filter((r): r is { assignment_id: string; scope_label: string; file_id: string } =>
+      r.file_id !== null,
+    )
+    .map((r) => ({
+      assignmentId: r.assignment_id,
+      fileId: r.file_id,
+      scopeLabel: r.scope_label,
+    }))
 }

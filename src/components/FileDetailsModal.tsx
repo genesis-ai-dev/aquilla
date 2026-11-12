@@ -11,8 +11,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import { progressPercent } from "@/lib/progress/progress-percent"
 
-interface FileStats { translated: number; validated: number; total: number }
+import type { FileStats } from "@/lib/progress/file-summary-progress"
 
 interface FileDetailsModalProps {
   file: FileReference | null
@@ -42,10 +43,11 @@ export function FileDetailsModal({
   const { t, locale } = useI18n()
   if (!file) return null
 
+  // AQU-1493: never 100 while a cell is outstanding.
   const translatedPct = progress && progress.total > 0
-    ? Math.round((progress.translated / progress.total) * 100) : null
+    ? progressPercent(progress.translated, progress.total) : null
   const validatedPct = progress && progress.total > 0
-    ? Math.round((progress.validated / progress.total) * 100) : null
+    ? progressPercent(progress.validated, progress.total) : null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -67,18 +69,34 @@ export function FileDetailsModal({
                 ? t("fileDetails.orderingTimeline")
                 : t("fileDetails.orderingSequence")}
             </DetailRow>
-            {file.sourceLanguage && (
-              <DetailRow label={t("fileDetails.sourceLanguage")}>{file.sourceLanguage}</DetailRow>
+            {file.declaredSourceLanguage && (
+              <DetailRow label={t("fileDetails.sourceLanguage")}>{file.declaredSourceLanguage}</DetailRow>
+            )}
+            {file.declaredTargetLanguage && (
+              <DetailRow label={t("fileDetails.targetLanguage")}>{file.declaredTargetLanguage}</DetailRow>
             )}
             <DetailRow label={t("fileDetails.imported")}>
               <DateTooltip value={file.createdAt} label={t("fileDetails.imported")} />
             </DetailRow>
-            {translatedPct !== null && validatedPct !== null && (
+            {translatedPct !== null && validatedPct !== null && progress && (
               <DetailRow label={t("fileDetails.progress")}>
-                {t("fileDetails.progressValue", {
-                  translated: bidiIsolate(formatNumber(translatedPct, locale)),
-                  validated: bidiIsolate(formatNumber(validatedPct, locale)),
-                })}
+                {/* Media redesign slice 2: a language that counts its
+                    recordings reads the same lines as the status bar. */}
+                {progress.delivers === "audio"
+                  ? t("fileDetails.audioProgressValue", {
+                      recorded: bidiIsolate(formatNumber(progress.translated, locale)),
+                      total: bidiIsolate(formatNumber(progress.total, locale)),
+                      approved: bidiIsolate(formatNumber(progress.validated, locale)),
+                    })
+                  : progress.delivers === "text_and_audio"
+                    ? t("fileDetails.bothProgressValue", {
+                        done: bidiIsolate(formatNumber(progress.validated, locale)),
+                        total: bidiIsolate(formatNumber(progress.total, locale)),
+                      })
+                    : t("fileDetails.progressValue", {
+                        translated: bidiIsolate(formatNumber(translatedPct, locale)),
+                        validated: bidiIsolate(formatNumber(validatedPct, locale)),
+                      })}
               </DetailRow>
             )}
           </dl>

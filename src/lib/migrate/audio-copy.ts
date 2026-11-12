@@ -1,5 +1,6 @@
-// Pure planning for the fast R2→R2 audio import (scripts/migrate-audio-copy.ts
-// is the I/O shell around this). Two responsibilities:
+// Pure planning for the fast R2→R2 audio import — the I/O shells around this
+// are scripts/migrate-daemon/stages/audio.ts and scripts/migrate-all.ts. Two
+// responsibilities:
 //   1. Resolve each cell attachment to its LFS oid via the pointers tree, so the
 //      copy endpoint can locate the bytes already in R2.
 //   2. Decide the events to emit per cell: one cell.audio.attach per *copied*
@@ -82,11 +83,14 @@ export function buildCellAudioEvents(
   cellId: string,
   copiedTakes: AudioImport[],
   selectedAquillaAudioId: string | null,
-  opts: AudioEventOptions,
+  opts: AudioEventOptions & { preserveUnselectedHistory?: boolean },
 ): IngestEvent[] {
   const events: IngestEvent[] = []
   for (const take of copiedTakes) {
-    events.push(audioAttachEvent(cellId, take, opts))
+    events.push(audioAttachEvent(cellId, take, {
+      ...opts,
+      historyOnly: opts.preserveUnselectedHistory === true && take.aquillaAudioId !== selectedAquillaAudioId,
+    }))
     // AQU-490: the take's Codex validations ride immediately behind its
     // attach, so a validate can never precede the row it votes on.
     events.push(...audioValidateEvents(cellId, take, opts))

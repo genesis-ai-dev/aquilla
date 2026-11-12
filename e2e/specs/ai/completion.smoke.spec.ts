@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url"
 import { test, expect } from "../../helpers/multi-user"
 import { applyUserProviderOverride } from "../../helpers/mock-llm-server"
 import { jwtFor, openSeededProject, readProjectedCells, seedProjectWithFile } from "../../helpers/seed-project"
@@ -42,7 +43,7 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
 
   // Mock LLM's default response is "Traducción de prueba".
   await expect(
-    alice.locator("[data-cell-id]").first().locator('[data-cell-type="target"]'),
+    ws.cellRow(0).locator('[data-cell-type="target"]'),
   ).toContainText("Traducción de prueba", { timeout: 15_000 })
   // AQU-1041 removed the visible AI-draft tag — the cell header renders the
   // same as a human-typed draft (RTL: EditorTable.aiDraftBadge.test.tsx).
@@ -61,7 +62,7 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
   // projection catches up, then remain pressed after the server round-trip.
   await ws.validateCell(0)
   await expect(
-    ws.cellRow(0).getByRole("button", { name: /Validated/i }).first(),
+    ws.validationToggle(0),
   ).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 })
 })
 
@@ -69,7 +70,7 @@ test("Draft all persists one ten-cell model package in one events request", asyn
   test.setTimeout(90_000)
   const seeded = await seedProjectWithFile(await jwtFor("alice"), {
     name: `AI batch ${Date.now()}`,
-    fixturePath: new URL("../../fixtures/ten-cells.md", import.meta.url).pathname,
+    fixturePath: fileURLToPath(new URL("../../fixtures/ten-cells.md", import.meta.url)),
   })
   const ws = await openSeededProject(alice, seeded)
 
@@ -93,12 +94,7 @@ test("Draft all persists one ten-cell model package in one events request", asyn
     }
   }, { timeout: 30_000 })
 
-  await ws.openFileOverflowMenu()
-  await alice.getByRole("menuitem", { name: /Draft all \(review required\)/i }).click()
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-  await dialog.getByRole("checkbox").click()
-  await dialog.getByRole("button", { name: /^Draft all$/i }).click()
+  await ws.draftAllEmptyCells()
 
   const request = await packagePost
   const body = request.postDataJSON() as {

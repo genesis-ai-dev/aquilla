@@ -70,3 +70,58 @@ describe("fetchCommentCounts", () => {
     expect(counts).toEqual({ unresolved: 3, byFile: { f1: 2, "": 1 } })
   })
 })
+
+// AQU-1275 — a VPN that hangs or drops one comment page used to wedge the whole
+// project refresh (no timeout) and leave the client holding a partial list that
+// the drawer rendered as "No comments yet". The read path now carries the same
+// timeout + bounded-retry contract as cells-read.ts.
+describe("AQU-1275 — transport resilience", () => {
+  it("arms a request timeout on every comments read", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ comments: [], nextCursor: null })))
+    await fetchCommentsPage("p1", "jwt")
+    const [, init] = (fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls[0]
+    // happy-dom provides AbortSignal.timeout; engines without it degrade to
+    // `undefined` (see fetch-timeout.ts) rather than losing the request.
+    expect(init.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it("retries a transport failure and succeeds on a later attempt", async () => {
+    let attempts = 0
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      attempts++
+      if (attempts === 1) throw new TypeError("Failed to fetch")
+      return json({ comments: [row(1)], nextCursor: null })
+    }))
+    const page = await fetchCommentsPage("p1", "jwt")
+    expect(attempts).toBe(2)
+    expect(page.comments.map((c) => c.commentId)).toEqual(["c1"])
+  })
+
+  it("retries a timeout abort — the hung-page case from the report", async () => {
+    let attempts = 0
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      attempts++
+      if (attempts < 3) {
+        const err = new Error("timed out")
+        err.name = "TimeoutError"
+        throw err
+      }
+      return json({ comments: [row(2)], nextCursor: null })
+    }))
+    const page = await fetchCommentsPage("p1", "jwt")
+    expect(attempts).toBe(3)
+    expect(page.comments.map((c) => c.commentId)).toEqual(["c2"])
+  })
+
+  it("does NOT retry a deterministic 4xx — an auth failure must surface at once", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("forbidden", { status: 403 })))
+    await expect(fetchCommentsPage("p1", "jwt")).rejects.toThrow(/HTTP 403/)
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("gives up after the bounded budget instead of retrying forever", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 503 })))
+    await expect(fetchCommentCounts("p1", "jwt")).rejects.toThrow(/HTTP 503/)
+    expect(fetch).toHaveBeenCalledTimes(3)
+  })
+})

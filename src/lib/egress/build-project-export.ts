@@ -29,6 +29,7 @@ import {
   type AudioAssemblyMode,
 } from "@/lib/export/audio-assembly"
 import { audioCacheGet, audioCachePut } from "@/lib/audio/bytes-cache"
+import { memMark } from "@/lib/perf-log"
 import { fetchCellAudio } from "@/lib/audio/upload"
 import type {
   EgressFileRef,
@@ -68,8 +69,8 @@ export interface BuildProjectExportDeps {
    *  naming). Undefined degrades to preset voices — never fatal. */
   ttsSettings?: ProjectTtsSettings
   /** Audio-attachments listings the orchestrator pre-fetched for its
-   *  freshness digest, keyed by fileId — files absent here are fetched via
-   *  fetchAudioAttachments so standalone callers still work. */
+   *  freshness digest, keyed by {@link audioListingKey} — entries absent here
+   *  are fetched via fetchAudioAttachments so standalone callers still work. */
   audioListings?: ReadonlyMap<string, FileAudioAttachmentsResponse>
   onProgress?: (phase: "text" | "audio", done: number, total: number) => void
   signal?: AbortSignal
@@ -95,6 +96,10 @@ type NativeTextPlan =
   | { kind: "structured"; format: TextExportFormat; ext: string }
   | { kind: "vtt"; ext: "vtt" }
 
+/** Office packages: the plain /source fetch already returns their stored
+ *  bytes (X-Export-Mode: raw-sidecar), and they ignore `?mode=raw`. */
+const SIDECAR_FILE_TYPES: ReadonlySet<string> = new Set(["docx", "pptx", "idml"])
+
 const NATIVE_TEXT_BY_FILE_TYPE: Partial<Record<string, NativeTextPlan>> = {
   usfm: { kind: "usfm", ext: "usfm" },
   docx: { kind: "sidecar", format: "docx", ext: "docx" },
@@ -113,6 +118,22 @@ const NATIVE_TEXT_BY_FILE_TYPE: Partial<Record<string, NativeTextPlan>> = {
 /** Shared slug convention: path-hostile runs → "-", trimmed. Dots survive the
  *  charset filter, so all-dot results ("."/"..") — which would escape their
  *  zip folder as path segments — take the fallback too. */
+/**
+ * AQU-1591: the key an audio-attachments listing is cached under — per FILE AND
+ * LANE, because a take belongs to one lane now.
+ *
+ * Exported so the orchestrator's pre-fetch (org-egress) and the memo here
+ * cannot drift: a pre-fetch keyed on the file alone would silently miss every
+ * lookup and re-fetch every listing, which is the quiet kind of regression that
+ * only shows up as a slow export.
+ *
+ * NUL as the separator, not `/` or `:` — a lane tag is free text off the
+ * project's settings and could contain either.
+ */
+export function audioListingKey(fileId: string, lane: string): string {
+  return `${fileId}\u0000${lane}`
+}
+
 export function egressSlug(raw: string, fallback: string): string {
   const slug = raw.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "")
   return !slug || /^\.+$/.test(slug) ? fallback : slug
@@ -193,7 +214,7 @@ async function mapWithConcurrency<T, R>(
       cursor += 1
       if (index >= items.length) return
       try {
-        results[index] = await fn(items[index]!, index)
+        results[index] = await fn(items[index], index)
       } catch (err) {
         failed = true
         failure ??= err
@@ -287,21 +308,32 @@ export async function buildProjectExport(
   // (buildCellData doesn't populate them — the workspace merges the per-file
   // audio read separately), so audio modes must fetch the listings and fold
   // them in with mergeCellsWithAudio or every cell reads as "no audio".
-  // Listings are lane-independent → memoized per file, pre-fetched ones from
-  // the orchestrator (its freshness digest) are reused, not fetched twice.
-  const listingByFile = new Map<string, Promise<FileAudioAttachmentsResponse>>()
-  const getAudioListing = (file: EgressFileRef): Promise<FileAudioAttachmentsResponse> => {
-    let promise = listingByFile.get(file.id)
+  //
+  // AQU-1591: memoized per (file, LANE), not per file. Listings used to be
+  // lane-independent because `cell_audio` had no lane at all — one listing
+  // served every unit, which meant a three-language export wrote the same takes
+  // into `audio/fra/`, `audio/swh/` and `audio/por/` whoever had voiced them.
+  // A take belongs to one lane now, so each unit reads its own, and the shared
+  // programme audio comes back in all of them (the read always returns
+  // `role = 'source'`). Pre-fetched ones from the orchestrator (its freshness
+  // digest) are reused under the same key, not fetched twice.
+  const listingByFileLane = new Map<string, Promise<FileAudioAttachmentsResponse>>()
+  const getAudioListing = (
+    file: EgressFileRef,
+    lane: string,
+  ): Promise<FileAudioAttachmentsResponse> => {
+    const key = audioListingKey(file.id, lane)
+    let promise = listingByFileLane.get(key)
     if (!promise) {
-      const prefetched = deps.audioListings?.get(file.id)
+      const prefetched = deps.audioListings?.get(key)
       promise = prefetched
         ? Promise.resolve(prefetched)
         : (async () => {
             const token = await deps.getToken(file.id)
             if (!token) throw new Error(`Couldn't get a read token for ${file.name}.`)
-            return fetchAudioAttachments(selection.projectId, file.id, token)
+            return fetchAudioAttachments(selection.projectId, file.id, token, lane)
           })()
-      listingByFile.set(file.id, promise)
+      listingByFileLane.set(key, promise)
     }
     return promise
   }
@@ -406,7 +438,7 @@ export async function buildProjectExport(
 
     if (audioMode !== null) {
       try {
-        const [bareCells, listing] = await Promise.all([getCells(), getAudioListing(file)])
+        const [bareCells, listing] = await Promise.all([getCells(), getAudioListing(file, lane)])
         const cells = mergeCellsWithAudio(bareCells, new Map(Object.entries(listing.cells)))
         const result = await assembleAudio({
           cells,
@@ -415,10 +447,17 @@ export async function buildProjectExport(
           fileSlug: fileBase,
           langCode: laneLang,
           mode: audioMode,
+          audioFormat: options.audioFormat,
           fetchBytes: fetchAudioBytes,
           decode: decodeAudio,
           signal: deps.signal,
         })
+        // AQU-1862: one heap sample per file×lane while the mem sampler runs
+        // (window.startMemSampler()), carrying what the assembler retained —
+        // the number the "peak memory stays bounded" check records.
+        memMark(
+          `egress audio ${fileBase}/${laneSlug} peak pcm ${(result.peakPcmBytes / 1048576).toFixed(1)}MB`,
+        )
         for (const e of result.entries) {
           outcome.audioEntries.push({ path: `audio/${laneSlug}/${fileBase}/${e.name}`, data: e.data })
         }
@@ -484,14 +523,17 @@ export async function buildProjectExport(
           fileId: file.id,
           getToken: deps.getToken,
         }
-        if (file.type === "usfm") {
+        if (!SIDECAR_FILE_TYPES.has(file.type)) {
           // AQU-907: ?mode=raw returns the byte-exact original upload. A
           // sync-worker that predates the mode ignores the param and injects
-          // current default-lane translations — the manifest must say so
-          // rather than present the entry as the original.
+          // current default-lane translations into USFM — the manifest must
+          // say so rather than present the entry as the original.
+          // AQU-1472: plain text now exports translated too, so every
+          // non-Office file asks for raw mode; the route decides by its stored
+          // format, which need not match `file.type`.
           const { bytes, rawOriginal } = await fetchRawSource(fetchArgs)
           pushEntry(report, `source-documents/${egressSlug(file.name, "file")}`, bytes)
-          if (!rawOriginal) {
+          if (!rawOriginal && file.type === "usfm") {
             ;(report.notes ??= []).push(
               "source document is the original USFM re-serialized with current default-lane translations injected — the server does not support raw mode yet",
             )

@@ -4,6 +4,8 @@ import {
   createLinkUpstreamChangedHandler,
   createReconnectResyncHandler,
   createScopedRefreshScheduler,
+  CONNECTION_LIMIT_CLOSE_CODE,
+  CONNECTION_SUPERSEDED_CLOSE_CODE,
   createWsReconciler,
   fileInventoryChanged,
   isOwnWriteEcho,
@@ -12,6 +14,7 @@ import {
   type ProjectWsServerMessage,
   type ScopedRefreshScope,
 } from "./ws-reconciler"
+import { buildFileScopedTokenFetcher } from "./cqrs-bridge"
 import {
   applyRemoteFrame,
   attachContextualRun,
@@ -303,6 +306,31 @@ describe("parseProjectWsMessage", () => {
     }))).toBeNull()
   })
 
+  it("parses presence.tier1, a batch of coarse rows (AQU-1825)", () => {
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.tier1",
+      users: [
+        { connId: "tab-a", userId: "alice", currentFileId: "file-1", focusedCell: "c1", ts: 10 },
+        { userId: "bob", ts: 11 },
+      ],
+    }))).toEqual({
+      t: "presence.tier1",
+      users: [
+        { connId: "tab-a", userId: "alice", currentFileId: "file-1", focusedCell: "c1", ts: 10 },
+        // No connId on the wire → keyed by userId, as the roster frame does.
+        { connId: "bob", userId: "bob", ts: 11 },
+      ],
+    })
+    // Strict field validation — one bad row marks the whole frame malformed.
+    expect(parseProjectWsMessage(JSON.stringify({ t: "presence.tier1", users: {} }))).toBeNull()
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.tier1", users: [{ userId: "alice" }],
+    }))).toBeNull()
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.tier1", users: [{ userId: "alice", ts: 1 }, { ts: 2 }],
+    }))).toBeNull()
+  })
+
   it("parses presence.diff / presence.left / presence.draft", () => {
     expect(parseProjectWsMessage(JSON.stringify({
       t: "presence.diff",
@@ -475,6 +503,7 @@ describe("parseProjectWsMessage", () => {
         untilSeq: 42,
         fileIds: ["f1", "f2"],
         cellIds: ["c1", "c2"],
+        filesChanged: true,
       }),
     )
     expect(msg).toEqual({
@@ -484,7 +513,22 @@ describe("parseProjectWsMessage", () => {
       untilSeq: 42,
       fileIds: ["f1", "f2"],
       cellIds: ["c1", "c2"],
+      filesChanged: true,
     })
+  })
+
+  it("reads a link.upstream-changed frame from an older worker as no file change (AQU-1545)", () => {
+    const msg = parseProjectWsMessage(
+      JSON.stringify({
+        t: "link.upstream-changed",
+        project: "proj-down",
+        upstream: "proj-up",
+        untilSeq: 42,
+        fileIds: ["f1"],
+        cellIds: ["c1"],
+      }),
+    )
+    expect(msg).toMatchObject({ t: "link.upstream-changed", filesChanged: false })
   })
 
   it("returns null for a malformed link.upstream-changed frame", () => {
@@ -573,6 +617,80 @@ describe("createWsReconciler", () => {
     expect(second).toMatch(/^[A-Za-z0-9_-]{8,64}$/)
     expect(second).not.toBe(first)
     r.close()
+  })
+
+  it("reuses one connId per tab when a storage key is given, so a reconnect replaces its row", async () => {
+    // AQU-1791: a fresh id per socket meant a reconnect — the normal outcome
+    // of a dropped link — asked the DO for a NEW presence row while the dead
+    // socket's row was still there, listing one person 2–3× as "viewing".
+    sessionStorage.clear()
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      minBackoffMs: 1,
+      maxBackoffMs: 1,
+      connIdStorageKey: "aquilla.presence.connId.p",
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    const first = new URL(FakeWebSocket.instances[0].url).searchParams.get("connId")
+    expect(first).toMatch(/^[A-Za-z0-9_-]{8,64}$/)
+    expect(sessionStorage.getItem("aquilla.presence.connId.p")).toBe(first)
+    FakeWebSocket.instances[0].open()
+
+    r.reconnect()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(new URL(FakeWebSocket.instances[1].url).searchParams.get("connId")).toBe(first)
+    r.close()
+
+    // A different project in the same tab is a different presence row.
+    const other = createWsReconciler({
+      projectId: "q",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      minBackoffMs: 1,
+      maxBackoffMs: 1,
+      connIdStorageKey: "aquilla.presence.connId.q",
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(new URL(FakeWebSocket.instances[2].url).searchParams.get("connId")).not.toBe(first)
+    other.close()
+    sessionStorage.clear()
+  })
+
+  it("rotates its tab connId when another connection supersedes it", async () => {
+    // A duplicated browser tab inherits the original's sessionStorage, so both
+    // would present one connId and take it from each other forever. The loser
+    // of a 4409 close gives the id up.
+    sessionStorage.clear()
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      minBackoffMs: 1,
+      maxBackoffMs: 1,
+      connIdStorageKey: "aquilla.presence.connId.p",
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    const ws = FakeWebSocket.instances[0]
+    const first = new URL(ws.url).searchParams.get("connId")
+    ws.open()
+    ws.close(CONNECTION_SUPERSEDED_CLOSE_CODE, "connection superseded")
+    expect(sessionStorage.getItem("aquilla.presence.connId.p")).toBeNull()
+
+    await vi.waitFor(() => expect(FakeWebSocket.instances.length).toBe(2))
+    const second = new URL(FakeWebSocket.instances[1].url).searchParams.get("connId")
+    expect(second).not.toBe(first)
+    expect(sessionStorage.getItem("aquilla.presence.connId.p")).toBe(second)
+    r.close()
+    sessionStorage.clear()
   })
 
   it("delivers parsed server frames to onMessage", async () => {
@@ -685,6 +803,193 @@ describe("createWsReconciler", () => {
     r.close()
   })
 
+  // ── AQU-1838 reconnect storm ──────────────────────────────────────────
+  //
+  // A sync-worker deploy drops every socket in the fleet in the same instant.
+  // The old schedule waited `window × (1 + rand×0.25)`, so 1,000 clients came
+  // back inside one 250ms band — 1,000 sockets, token mints and AQU-845
+  // resync fan-outs at once. Full jitter draws from the WHOLE window instead,
+  // so the same fleet arrives spread across it.
+
+  it("AQU-1838: draws the first reconnect from the whole window, not its end", async () => {
+    vi.useFakeTimers()
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      randomSource: () => 0.5,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    FakeWebSocket.instances[0].open()
+    FakeWebSocket.instances[0].close(1006, "deploy")
+    // Mid-window draw on the 5s default = 2.5s. The old schedule could only
+    // ever fire between 1000ms and 1250ms, whatever the client.
+    await vi.advanceTimersByTimeAsync(2_400)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(200)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    r.close()
+  })
+
+  it("AQU-1831: a 4429 \"room is full\" close waits out the longest window", async () => {
+    vi.useFakeTimers()
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      // Top-of-window draw, so the delay IS the window and the jump is visible.
+      randomSource: () => 1,
+      maxBackoffMs: 30_000,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    // The DO accepts the socket and closes it at once, so onopen has already
+    // reset the window to its first value — a 5s draw if nothing intervenes.
+    FakeWebSocket.instances[0].open()
+    FakeWebSocket.instances[0].close(CONNECTION_LIMIT_CLOSE_CODE, "project connection limit reached")
+    await vi.advanceTimersByTimeAsync(29_000)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1_000)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    r.close()
+  })
+
+  it("AQU-1838: a draw at the bottom of the window still waits out the floor", async () => {
+    vi.useFakeTimers()
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      randomSource: () => 0,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    FakeWebSocket.instances[0].open()
+    FakeWebSocket.instances[0].close(1006, "deploy")
+    // Full jitter can draw ~0; the floor keeps the unluckiest client from
+    // reconnecting hard against a server that is still coming up.
+    await vi.advanceTimersByTimeAsync(240)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(20)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    r.close()
+  })
+
+  it("AQU-1838: the window — not the delay — doubles while reconnects keep failing", async () => {
+    vi.useFakeTimers()
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      // Top-of-window draw every time, so the delay is the window itself and
+      // the growth is observable.
+      randomSource: () => 1,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    FakeWebSocket.instances[0].open()
+    FakeWebSocket.instances[0].close(1006, "deploy")
+    await vi.advanceTimersByTimeAsync(5_000)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    // Second failure: no open() this time, so the window stays grown.
+    FakeWebSocket.instances[1].close(1006, "still down")
+    await vi.advanceTimersByTimeAsync(5_000)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(5_000)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(3)
+    r.close()
+  })
+
+  it("AQU-1838: a successful open resets the window", async () => {
+    vi.useFakeTimers()
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      randomSource: () => 1,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    FakeWebSocket.instances[0].open()
+    FakeWebSocket.instances[0].close(1006, "blip")
+    await vi.advanceTimersByTimeAsync(5_000)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    FakeWebSocket.instances[1].open()
+    FakeWebSocket.instances[1].close(1006, "blip")
+    // Back to the first window, not the doubled one.
+    await vi.advanceTimersByTimeAsync(5_000)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(3)
+    r.close()
+  })
+
+  it("AQU-1838: reconnects inside the token lifetime do not mint a new sync token", async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          token: "sync-tok",
+          expiresIn: 900,
+          role: { level: 3, name: "translator", source: "group" },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    // The workspace mints through this file-scoped fetcher, which caches the
+    // token in a closure that outlives any socket. A deploy that drops the
+    // fleet must not become a burst of /sync-token mints on auth-worker.
+    const getToken = buildFileScopedTokenFetcher(() => "jwt", "p")
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: () => getToken("f-1"),
+      webSocketCtor: FakeWsCtor,
+      randomSource: () => 0,
+    })
+    await vi.advanceTimersByTimeAsync(1)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    for (let i = 0; i < 3; i += 1) {
+      FakeWebSocket.instances[i].open()
+      FakeWebSocket.instances[i].close(1006, "deploy")
+      await vi.advanceTimersByTimeAsync(300)
+      await Promise.resolve()
+      await Promise.resolve()
+    }
+    expect(FakeWebSocket.instances).toHaveLength(4)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    r.close()
+    vi.unstubAllGlobals()
+  })
+
   it("close() prevents further reconnects", async () => {
     vi.useFakeTimers()
     const r = createWsReconciler({
@@ -753,6 +1058,7 @@ describe("createLinkUpstreamChangedHandler (AQU-479 push accelerator)", () => {
       untilSeq: 1,
       fileIds: ["f1"],
       cellIds: ["c1"],
+      filesChanged: false,
       ...overrides,
     }
   }
@@ -804,12 +1110,33 @@ describe("createLinkUpstreamChangedHandler (AQU-479 push accelerator)", () => {
     expect(triggerLinkSync).not.toHaveBeenCalled()
   })
 
-  it("debounces link/sync triggers to one per window, but always revalidates staleness", () => {
+  /** A timer the test fires by hand: `pending()` lists what is waiting. */
+  function manualTimers() {
+    const timers: Array<{ fn: () => void; ms: number; cancelled: boolean }> = []
+    return {
+      setTimer: (fn: () => void, ms: number) => {
+        const timer = { fn, ms, cancelled: false }
+        timers.push(timer)
+        return () => { timer.cancelled = true }
+      },
+      pending: () => timers.filter((x) => !x.cancelled),
+      fireAll: () => {
+        const due = timers.filter((x) => !x.cancelled)
+        for (const x of due) x.cancelled = true
+        for (const x of due) x.fn()
+      },
+    }
+  }
+
+  const settle = () => new Promise<void>((r) => setTimeout(r, 0))
+
+  it("debounces link/sync triggers to one per window, but always revalidates staleness", async () => {
     // Spec §8 / dispatch note: "Debounce (e.g. one sync per 5s per project)
     // so bursts don't hammer the route." A large upstream re-import can
     // produce many frames in quick succession; only the sync POST should
     // collapse — staleness must still reflect every frame immediately.
     let t = 0
+    const timers = manualTimers()
     const revalidateStaleSource = vi.fn()
     const triggerLinkSync = vi.fn()
     const handle = createLinkUpstreamChangedHandler({
@@ -818,18 +1145,170 @@ describe("createLinkUpstreamChangedHandler (AQU-479 push accelerator)", () => {
       triggerLinkSync,
       debounceMs: 5000,
       now: () => t,
+      setTimer: timers.setTimer,
     })
 
     handle(frame()) // t=0 — fires
+    await settle()
     t = 1000
-    handle(frame()) // t=1000 — within window, suppressed
+    handle(frame()) // within window — owed, not fired
     t = 4999
-    handle(frame()) // still within window, suppressed
-    t = 5000
-    handle(frame()) // window elapsed — fires again
+    handle(frame()) // still within window — folds into the same owed sync
 
-    expect(revalidateStaleSource).toHaveBeenCalledTimes(4)
+    expect(revalidateStaleSource).toHaveBeenCalledTimes(3)
+    expect(triggerLinkSync).toHaveBeenCalledTimes(1)
+    // One trailing sync, due when the window that began at t=0 closes.
+    expect(timers.pending().map((x) => x.ms)).toEqual([4000])
+  })
+
+  it("never drops the last frame of a burst: the window closes with one more sync (AQU-1545)", async () => {
+    // Ten upstream hides in quick succession. The leading-edge-only debounce
+    // synced on the first and swallowed the other nine, so the open downstream
+    // showed one hidden cell until a reload.
+    let t = 0
+    const timers = manualTimers()
+    const triggerLinkSync = vi.fn()
+    const handle = createLinkUpstreamChangedHandler({
+      currentProjectId: () => "proj-down",
+      revalidateStaleSource: vi.fn(),
+      triggerLinkSync,
+      debounceMs: 5000,
+      now: () => t,
+      setTimer: timers.setTimer,
+    })
+
+    for (let i = 0; i < 10; i++) {
+      t = i * 100
+      handle(frame({ cellIds: [`c${i}`] }))
+      await settle()
+    }
+    expect(triggerLinkSync).toHaveBeenCalledTimes(1)
+
+    t = 5000
+    timers.fireAll()
+    await settle()
+
     expect(triggerLinkSync).toHaveBeenCalledTimes(2)
+    expect(timers.pending()).toEqual([])
+  })
+
+  it("a frame that lands while a sync is running is answered by another sync after it (AQU-1545)", async () => {
+    // The running sync may have read the upstream before this frame's change
+    // committed — joining it would leave the downstream one change short.
+    let t = 0
+    const timers = manualTimers()
+    let finishSync: (() => void) | null = null
+    const triggerLinkSync = vi.fn(
+      () => new Promise<void>((resolve) => { finishSync = resolve }),
+    )
+    const handle = createLinkUpstreamChangedHandler({
+      currentProjectId: () => "proj-down",
+      revalidateStaleSource: vi.fn(),
+      triggerLinkSync,
+      debounceMs: 5000,
+      now: () => t,
+      setTimer: timers.setTimer,
+    })
+
+    handle(frame()) // t=0 — sync 1 starts and stays running
+    t = 6000 // past the window, but sync 1 is still running
+    handle(frame())
+    expect(triggerLinkSync).toHaveBeenCalledTimes(1)
+
+    finishSync!()
+    await settle()
+
+    // Window long closed, so the owed sync runs as soon as sync 1 settles.
+    expect(triggerLinkSync).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps syncing after a sync fails", async () => {
+    let t = 0
+    const timers = manualTimers()
+    const triggerLinkSync = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(undefined)
+    const handle = createLinkUpstreamChangedHandler({
+      currentProjectId: () => "proj-down",
+      revalidateStaleSource: vi.fn(),
+      triggerLinkSync,
+      debounceMs: 5000,
+      now: () => t,
+      setTimer: timers.setTimer,
+    })
+
+    handle(frame())
+    await settle()
+    t = 5000
+    handle(frame())
+    await settle()
+
+    expect(triggerLinkSync).toHaveBeenCalledTimes(2)
+  })
+
+  it("tells the sync whether any frame it answers created or renamed a file (AQU-1545)", async () => {
+    // A rename only reaches the file list through a project re-read, and the
+    // frame is the only reliable source for that: the sync's own answer is
+    // empty whenever another trigger ran the fold first.
+    let t = 0
+    const timers = manualTimers()
+    const triggerLinkSync = vi.fn()
+    const handle = createLinkUpstreamChangedHandler({
+      currentProjectId: () => "proj-down",
+      revalidateStaleSource: vi.fn(),
+      triggerLinkSync,
+      debounceMs: 5000,
+      now: () => t,
+      setTimer: timers.setTimer,
+    })
+
+    handle(frame({ cellIds: ["c1"] })) // a hide — leading sync
+    await settle()
+    t = 1000
+    handle(frame({ cellIds: [], filesChanged: true })) // a rename, inside the window
+    t = 2000
+    handle(frame({ cellIds: ["c2"] })) // another hide; the rename is still owed
+    t = 5000
+    timers.fireAll()
+    await settle()
+    t = 10_000
+    handle(frame({ cellIds: ["c3"] })) // the owed flag was spent on the last sync
+    await settle()
+
+    expect(triggerLinkSync.mock.calls.map(([change]) => change)).toEqual([
+      { filesChanged: false },
+      { filesChanged: true },
+      { filesChanged: false },
+    ])
+  })
+
+  it("dispose() drops an owed sync so a torn-down socket triggers nothing", async () => {
+    let t = 0
+    const timers = manualTimers()
+    const triggerLinkSync = vi.fn()
+    const handle = createLinkUpstreamChangedHandler({
+      currentProjectId: () => "proj-down",
+      revalidateStaleSource: vi.fn(),
+      triggerLinkSync,
+      debounceMs: 5000,
+      now: () => t,
+      setTimer: timers.setTimer,
+    })
+
+    handle(frame())
+    await settle()
+    t = 1000
+    handle(frame())
+    expect(timers.pending()).toHaveLength(1)
+
+    handle.dispose()
+    expect(timers.pending()).toEqual([])
+    t = 10_000
+    handle(frame())
+    await settle()
+
+    expect(triggerLinkSync).toHaveBeenCalledTimes(1)
   })
 
   it("tracks debounce state per handler instance, not globally", () => {
@@ -1074,5 +1553,81 @@ describe("createReconnectResyncHandler (AQU-845 missed-broadcast recovery)", () 
     h.handleOpen()
 
     expect(onResync).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("file.progress.pushed (AQU-1832 live progress push)", () => {
+  const counts = {
+    totalCount: 4,
+    filledCount: 2,
+    validatedCount: 1,
+    validationLevels: [1],
+    audioCount: 0,
+    audioValidatedCount: 0,
+  }
+  const frame = (over: Record<string, unknown> = {}) => JSON.stringify({
+    t: "file.progress.pushed",
+    project: "p1",
+    file: "f1",
+    lane: "",
+    revision: 7,
+    validationCount: 1,
+    complete: false,
+    counts,
+    sections: [{ key: "GEN 1", ...counts }],
+    ...over,
+  })
+
+  it("parses a well-formed frame and keeps fields this client does not model", () => {
+    const parsed = parseProjectWsMessage(frame({
+      counts: { ...counts, audioValidationLevels: [0] },
+    }))
+    expect(parsed).toMatchObject({
+      t: "file.progress.pushed",
+      project: "p1",
+      file: "f1",
+      lane: "",
+      revision: 7,
+      complete: false,
+    })
+    // The server already sends more than the client type names; re-serialising
+    // a narrower shape here would silently drop it on the way to the resource.
+    expect(
+      (parsed as unknown as { counts: Record<string, unknown> }).counts.audioValidationLevels,
+    ).toEqual([0])
+  })
+
+  it("keeps a named lane distinct from the default one", () => {
+    expect(parseProjectWsMessage(frame({ lane: "fr" }))).toMatchObject({ lane: "fr" })
+  })
+
+  it("drops the whole frame when a counts block is incomplete", () => {
+    // A progress object with a plausible shape and one absent number renders
+    // as a percentage that is simply wrong; a dropped frame only costs the
+    // refetch the push was saving.
+    expect(parseProjectWsMessage(frame({ counts: { ...counts, filledCount: undefined } }))).toBeNull()
+    expect(parseProjectWsMessage(frame({ counts: { ...counts, validationLevels: ["1"] } }))).toBeNull()
+    expect(parseProjectWsMessage(frame({ sections: [{ ...counts }] }))).toBeNull()
+    expect(parseProjectWsMessage(frame({ sections: [{ key: "GEN 1", totalCount: 2 }] }))).toBeNull()
+  })
+
+  it("drops a frame missing the fields that scope it", () => {
+    expect(parseProjectWsMessage(frame({ lane: undefined }))).toBeNull()
+    expect(parseProjectWsMessage(frame({ revision: "7" }))).toBeNull()
+    expect(parseProjectWsMessage(frame({ complete: undefined }))).toBeNull()
+    expect(parseProjectWsMessage(frame({ sections: undefined }))).toBeNull()
+  })
+
+  it("carries progressPushed through an event.applied frame, and only when true", () => {
+    const applied = (over: Record<string, unknown>) => parseProjectWsMessage(JSON.stringify({
+      t: "event.applied", id: "e1", kind: "target.cell.commit", project: "p1", file: "f1", cell: "c1",
+      ...over,
+    }))
+    expect(applied({ progressPushed: true })).toMatchObject({ progressPushed: true })
+    // Anything but an explicit true means "refetch as before" — an older
+    // worker omits the field, and a truthy non-boolean is not a promise.
+    expect(applied({})).not.toHaveProperty("progressPushed")
+    expect(applied({ progressPushed: false })).not.toHaveProperty("progressPushed")
+    expect(applied({ progressPushed: "yes" })).not.toHaveProperty("progressPushed")
   })
 })

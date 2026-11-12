@@ -1,5 +1,5 @@
 // Monday API client — asserts URL/method/headers/body shapes against the
-// shared contract (monday-integration-contract.md), mirroring the fetch-mock
+// shared contract (docs/MONDAY-INTEGRATION.md), mirroring the fetch-mock
 // style of src/lib/terminology/subscriptions-api.test.ts.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
@@ -74,12 +74,12 @@ describe("fetchMondayConnection", () => {
 describe("startMondayConnect", () => {
   it("POSTs backTo and returns the OAuth url", async () => {
     fetchMock().mockResolvedValueOnce(ok({ url: "https://auth.monday.com/oauth2/authorize?x=1" }))
-    const res = await startMondayConnect("jwt", 7, "/settings/monday")
+    const res = await startMondayConnect("jwt", 7, "/orgs/7/settings/monday")
     expect(res.url).toContain("auth.monday.com")
     const [url, init] = fetchMock().mock.calls[0]
     expect(url).toMatch(/\/api\/v2\/monday\/orgs\/7\/connection\/start$/)
     expect(init.method).toBe("POST")
-    expect(JSON.parse(init.body as string)).toEqual({ backTo: "/settings/monday" })
+    expect(JSON.parse(init.body as string)).toEqual({ backTo: "/orgs/7/settings/monday" })
   })
 
   it("sends an empty body when backTo is omitted", async () => {
@@ -90,24 +90,24 @@ describe("startMondayConnect", () => {
 })
 
 describe("completeMondayOAuth", () => {
-  it("GETs the callback with code+state as query params and no auth header", async () => {
-    fetchMock().mockResolvedValueOnce(ok({ ok: true, backTo: "/settings/monday" }))
-    const res = await completeMondayOAuth("the-code", "the-state")
-    expect(res).toEqual({ ok: true, backTo: "/settings/monday" })
+  it("GETs the callback with code+state as query params and the caller session", async () => {
+    fetchMock().mockResolvedValueOnce(ok({ ok: true, backTo: "/orgs/7/settings/monday" }))
+    const res = await completeMondayOAuth("the-code", "the-state", "jwt")
+    expect(res).toEqual({ ok: true, backTo: "/orgs/7/settings/monday" })
     const call = fetchMock().mock.calls[0]
     expect(call[0]).toMatch(/\/api\/v2\/monday\/oauth\/callback\?code=the-code&state=the-state$/)
-    expect(call[1]).toBeUndefined() // plain GET, no headers
+    expect(call[1].headers.Authorization).toBe("Bearer jwt") // bound to the caller (login-CSRF guard)
   })
 
   it("returns ok:false with the server reason on failure", async () => {
     fetchMock().mockResolvedValueOnce(ok({ ok: false, reason: "state expired" }, 400))
-    const res = await completeMondayOAuth("c", "s")
+    const res = await completeMondayOAuth("c", "s", "jwt")
     expect(res).toEqual({ ok: false, reason: "state expired" })
   })
 
   it("returns ok:false (never throws) on network error — the code is single-use", async () => {
     fetchMock().mockRejectedValueOnce(new Error("offline"))
-    const res = await completeMondayOAuth("c", "s")
+    const res = await completeMondayOAuth("c", "s", "jwt")
     expect(res.ok).toBe(false)
   })
 })
@@ -181,7 +181,8 @@ describe("patchMondayLink", () => {
   it("PATCHes enabled and unwraps a { link } envelope", async () => {
     fetchMock().mockResolvedValueOnce(ok({ link: { id: "l1", enabled: false } }))
     const res = await patchMondayLink("jwt", "p1", { enabled: false })
-    expect(res.enabled).toBe(false)
+    expect(res.link.enabled).toBe(false)
+    expect(res.warnings).toEqual([])
     const [, init] = fetchMock().mock.calls[0]
     expect(init.method).toBe("PATCH")
     expect(JSON.parse(init.body as string)).toEqual({ enabled: false })
@@ -190,7 +191,13 @@ describe("patchMondayLink", () => {
   it("accepts a bare link object response", async () => {
     fetchMock().mockResolvedValueOnce(ok({ id: "l1", enabled: true, config: CONFIG }))
     const res = await patchMondayLink("jwt", "p1", { config: CONFIG })
-    expect(res.id).toBe("l1")
+    expect(res.link.id).toBe("l1")
+  })
+
+  it("passes on the warnings a mapping change came back with", async () => {
+    fetchMock().mockResolvedValueOnce(ok({ link: { id: "l1" }, warnings: ["column x not found on the board"] }))
+    const res = await patchMondayLink("jwt", "p1", { config: CONFIG })
+    expect(res.warnings).toEqual(["column x not found on the board"])
   })
 })
 

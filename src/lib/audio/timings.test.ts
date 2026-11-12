@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest"
 import {
   activeWordRange,
   alignChunks,
+  timingAddressesText,
   findActiveTimingIndex,
+  findTimingAtPlainOffset,
   tokenizeWords,
   uniformTimings,
 } from "./timings"
@@ -95,19 +97,38 @@ describe("findActiveTimingIndex", () => {
   })
 })
 
+describe("findTimingAtPlainOffset", () => {
+  const timings: WordTiming[] = [
+    { word: "hello", t0: 0, t1: 0.4, start: 0, end: 5 },
+    { word: "world", t0: 0.4, t1: 0.9, start: 6, end: 11 },
+  ]
+  it("returns the word covering the offset", () => {
+    expect(findTimingAtPlainOffset(timings, 0)?.word).toBe("hello")
+    expect(findTimingAtPlainOffset(timings, 4)?.word).toBe("hello")
+    expect(findTimingAtPlainOffset(timings, 6)?.word).toBe("world")
+  })
+  it("snaps a gap (the space) to the nearest word", () => {
+    expect(findTimingAtPlainOffset(timings, 5)?.word).toBe("world")
+  })
+  it("returns undefined when there are no timings", () => {
+    expect(findTimingAtPlainOffset(undefined, 0)).toBeUndefined()
+    expect(findTimingAtPlainOffset([], 0)).toBeUndefined()
+  })
+})
+
 describe("activeWordRange", () => {
   const timings: WordTiming[] = [
     { word: "hello", t0: 0, t1: 0.5, start: 0, end: 5 },
     { word: "world", t0: 0.5, t1: 1.0, start: 6, end: 11 },
   ]
   it("returns the plain-text span of the active word", () => {
-    expect(activeWordRange(timings, 0.2)).toEqual({ start: 0, end: 5 })
-    expect(activeWordRange(timings, 0.7)).toEqual({ start: 6, end: 11 })
+    expect(activeWordRange(timings, 0.2)).toEqual({ start: 0, end: 5, word: "hello" })
+    expect(activeWordRange(timings, 0.7)).toEqual({ start: 6, end: 11, word: "world" })
   })
   it("advances the span as playback crosses a word boundary", () => {
     // The read-view karaoke highlight must move word-to-word, not stick.
-    expect(activeWordRange(timings, 0.49)).toEqual({ start: 0, end: 5 })
-    expect(activeWordRange(timings, 0.5)).toEqual({ start: 6, end: 11 })
+    expect(activeWordRange(timings, 0.49)).toEqual({ start: 0, end: 5, word: "hello" })
+    expect(activeWordRange(timings, 0.5)).toEqual({ start: 6, end: 11, word: "world" })
   })
   it("returns null when no word is active (before/after/paused-past-end)", () => {
     expect(activeWordRange(timings, -1)).toBeNull()
@@ -116,5 +137,77 @@ describe("activeWordRange", () => {
   })
   it("returns null for a degenerate zero-width span", () => {
     expect(activeWordRange([{ word: "", t0: 0, t1: 1, start: 3, end: 3 }], 0.5)).toBeNull()
+  })
+})
+
+describe("timingAddressesText", () => {
+  // AQU-2254: the character offsets of a word timing are only usable while
+  // they still select the word they name. A transcript cleanup rewrites the
+  // text underneath them without moving them.
+  const cases: Array<{ name: string; timing: WordTiming; text: string; ok: boolean }> = [
+    {
+      name: "the word it names is at those offsets",
+      timing: { word: "house", t0: 0, t1: 1, start: 4, end: 9 },
+      text: "the house",
+      ok: true,
+    },
+    {
+      name: "punctuation and case differ but the word is the same",
+      timing: { word: "House,", t0: 0, t1: 1, start: 4, end: 9 },
+      text: "the house",
+      ok: true,
+    },
+    {
+      name: "a cleanup lengthened an earlier word, shifting this one right",
+      // "the house" → "that house": offsets 4..9 now select "house"[-1] = "hous"
+      timing: { word: "house", t0: 0, t1: 1, start: 4, end: 9 },
+      text: "that house",
+      ok: false,
+    },
+    {
+      name: "a cleanup shortened an earlier word, shifting this one left",
+      timing: { word: "house", t0: 0, t1: 1, start: 4, end: 9 },
+      text: "a house",
+      ok: false,
+    },
+    {
+      name: "a cleanup replaced the word itself",
+      timing: { word: "house", t0: 0, t1: 1, start: 4, end: 9 },
+      text: "the HORSE",
+      ok: false,
+    },
+    {
+      name: "the offsets run past the end of the text",
+      timing: { word: "household", t0: 0, t1: 1, start: 4, end: 13 },
+      text: "the house",
+      ok: false,
+    },
+    {
+      name: "a degenerate zero-width span",
+      timing: { word: "", t0: 0, t1: 1, start: 3, end: 3 },
+      text: "the house",
+      ok: false,
+    },
+  ]
+  it.each(cases)("$name → $ok", ({ timing, text, ok }) => {
+    expect(timingAddressesText(timing, text)).toBe(ok)
+  })
+})
+
+describe("activeWordRange carries the word its span claims", () => {
+  // AQU-2254: the span alone cannot be checked. Whoever paints it holds the
+  // text and needs the word to compare against.
+  const timings: WordTiming[] = [
+    { word: "the", t0: 0, t1: 0.5, start: 0, end: 3 },
+    { word: "house", t0: 0.5, t1: 1.0, start: 4, end: 9 },
+  ]
+  it("reports the active word alongside its offsets", () => {
+    expect(activeWordRange(timings, 0.7)).toEqual({ start: 4, end: 9, word: "house" })
+  })
+  it("composes with timingAddressesText over the text being painted", () => {
+    const active = activeWordRange(timings, 0.7)!
+    expect(timingAddressesText(active, "the house")).toBe(true)
+    // An AI cleanup lengthened the first word; the span slid onto "hous".
+    expect(timingAddressesText(active, "that house")).toBe(false)
   })
 })

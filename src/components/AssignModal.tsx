@@ -26,6 +26,7 @@
 // in sync-worker/src/events/authorize.ts; the client gate is a UX affordance,
 // not the security boundary.
 
+import { fileDisplayName } from "@/lib/file-display-name"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { UserCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -55,11 +56,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { SearchSelect } from "@/components/ui/search-select"
 import { DatePicker, dateToDeadlineString } from "@/components/ui/date-picker"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { AssignKindField } from "@/components/AssignKindField"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
-import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
+import { AddProjectMembersHint } from "@/components/AddProjectMembersHint"
+import { hasLanguageWorker, partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import { SCRIPTURE_FILE_TYPES } from "@/lib/parsers/types"
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import {
@@ -68,9 +72,26 @@ import {
   getFileChapters,
   AssignmentEmitError,
 } from "@/lib/sync/assignments"
+import type { AssignmentKind, AssignmentScopeEntry, AssignmentScopeKind } from "@/lib/sync/assignments"
+import type { OverlapScope } from "@/lib/sync/assignment-overlap"
+import { useAssignmentOverlap } from "@/hooks/useAssignmentOverlap"
+import { AssignmentOverlapNotice } from "@/components/org/AssignmentOverlapNotice"
 import { ROLE } from "@/lib/frontier/roles"
-import { canOpenAssignUi, canSubmitAssignment } from "@/lib/sync/role-policy"
+import {
+  canOpenAssignUi,
+  canSubmitAssignment,
+  laneDelegateLanes,
+  type LaneDelegateGrant,
+} from "@/lib/sync/role-policy"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
+import {
+  buildLaneItems,
+  lanesStaffedBy,
+  laneTagForAssignment,
+  selectValueForLane,
+  type AssignLaneOption,
+  type TeamLaneAttachment,
+} from "@/lib/sync/assignment-lane"
 
 type ScopeKind = "selection" | "verses" | "chapters" | "books"
 
@@ -90,6 +111,29 @@ interface AssignModalProps {
    * to the pre-lane flow).
    */
   targetLanes?: string[]
+  /**
+   * AQU-1977: the project's own target lanes, in order (`assignLaneOptions`).
+   * When given they are the lane select's options and nothing else, so no
+   * "Default language" is offered on a project that has no '' lane — and a
+   * `defaultLane` that names none of them opens on the first.
+   */
+  lanes?: readonly AssignLaneOption[]
+  /**
+   * AQU-1994: the project's lanes at least one of its people is on. `lanes` is
+   * narrowed to these, so this modal offers exactly what the Team card's
+   * Assign work panel offers. `null`/omitted means the server did not say and
+   * leaves the list as it was.
+   */
+  staffedLaneIds?: ReadonlySet<string> | readonly string[] | null
+  /**
+   * AQU-2047: each attached team's lane checks. The same input Assign work
+   * on the project overview passes, so this modal (lane row, plan, org,
+   * editor) offers the same lanes. `null`, omitted, or `[]` leaves the list
+   * as it was.
+   */
+  teamLanes?: readonly TeamLaneAttachment[] | null
+  /** Display names keyed by lane tag, including '' for the default lane. */
+  laneLabels?: Readonly<Record<string, string>>
   /**
    * AQU-538 (§3.5): lane to pre-select — the surface's active lane (workspace)
    * or the lane row the modal was launched from (PM surfaces). Defaults to ''
@@ -129,6 +173,13 @@ interface AssignModalProps {
   allowSelfAssignment?: boolean
   /** Org-configured floor for assigning work to anyone (default Project lead). */
   assignmentMinRole?: number
+  /**
+   * AQU-581: the caller's own lane-delegate grant — the org's
+   * `allowScopedLaneAssignment` setting plus this caller's lane/file scopes.
+   * When it covers at least one lane, a below-floor caller assigns to OTHER
+   * people (not just themselves), restricted to the lanes it names.
+   */
+  laneDelegate?: LaneDelegateGrant
   /**
    * AQU-496: the caller's own Frontier user id. Required to lock the assignee
    * picker to "self" when `roleLevel` is below PROJECT_LEAD — without it, a
@@ -176,6 +227,10 @@ export function AssignModal({
   activeFileId,
   projectFiles,
   targetLanes,
+  lanes,
+  staffedLaneIds,
+  teamLanes,
+  laneLabels,
   defaultLane = "",
   defaultLaneLabel,
   members,
@@ -183,6 +238,7 @@ export function AssignModal({
   roleLevel,
   allowSelfAssignment = false,
   assignmentMinRole = ROLE.PROJECT_LEAD,
+  laneDelegate,
   callerUserId = null,
   selectedCellIds,
   jwt,
@@ -190,18 +246,31 @@ export function AssignModal({
   onAssigned,
 }: AssignModalProps) {
   const t = useT()
-  // AQU-496: below PROJECT_LEAD, the only reason this modal can be open at
-  // all is the self-assign carve-out (see canOpenAssignUi gate below) — so
-  // "below lead" and "self-assign mode" are equivalent here.
-  const isSelfAssignMode = roleLevel < assignmentMinRole
+  // AQU-496: below the org's assignment floor, the self-assign carve-out is
+  // one reason this modal can be open (see the canOpenAssignUi gate below),
+  // and it locks the assignee picker to the caller.
+  //
+  // AQU-581: the lane-delegate carve-out is the other, and it does NOT — a
+  // mentor scoped to a lane is assigning OTHER people, which is the whole
+  // point. So "below floor" alone no longer implies self-assign mode; a
+  // delegate keeps the full picker and is restricted by lane instead.
+  //
+  // The grant is only ever consulted BELOW the floor, so a member carrying
+  // stale scopes who is later promoted never has their lane picker silently
+  // shrink to those scopes.
+  const effectiveDelegate = roleLevel < assignmentMinRole ? laneDelegate : undefined
+  const isLaneDelegate = laneDelegateLanes(effectiveDelegate).length > 0
+  const isSelfAssignMode = roleLevel < assignmentMinRole && !isLaneDelegate
   const effectiveCallerUserId =
     callerUserId ?? members.find((member) => member.username === author)?.userId ?? null
 
   const [scopeKind, setScopeKind] = useState<ScopeKind>("verses")
+  // AQU-1969: Translate (the assignment as it always was) unless chosen.
+  const [kind, setKind] = useState<AssignmentKind>("translate")
   const [selectedMemberId, setSelectedMemberId] = useState<string>("")
   // AQU-538 (§3.5): the target-language lane this assignment is pinned to. '' =
   // default lane. Only surfaced when the project has extra lanes.
-  const [selectedLane, setSelectedLane] = useState<string>(defaultLane)
+  const [selectedLane, setSelectedLane] = useState<string>(() => selectValueForLane(defaultLane))
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set())
   const [availableChapters, setAvailableChapters] = useState<string[]>([])
   const [selectedChapters, setSelectedChapters] = useState<Set<string>>(new Set())
@@ -228,15 +297,30 @@ export function AssignModal({
           ? String(effectiveCallerUserId)
           : "",
       )
-      setSelectedLane(defaultLane)
+      // AQU-581: a delegate launching from a lane outside their scopes must
+      // not open pre-set to it — land them on their first scoped lane instead,
+      // which is also the only sane default when their grant covers exactly
+      // one lane and the picker below stays hidden.
+      // AQU-729: the picker state is the select value (a sentinel stands in
+      // for the '' default lane), so the chosen raw lane is mapped through
+      // selectValueForLane before it lands in state.
+      const delegateLanes = laneDelegateLanes(effectiveDelegate)
+      setSelectedLane(
+        selectValueForLane(
+          delegateLanes.length > 0 && !delegateLanes.includes(defaultLane)
+            ? delegateLanes[0]
+            : defaultLane,
+        ),
+      )
       setSelectedFileIds(new Set())
       setSelectedChapters(new Set())
       setAvailableChapters([])
       setError(null)
       setNote("")
       setDeadlineDate(undefined)
+      setKind("translate")
     }
-  }, [open, selectedCellIds.size, activeFileId, isSelfAssignMode, effectiveCallerUserId, defaultLane])
+  }, [open, selectedCellIds.size, activeFileId, isSelfAssignMode, effectiveCallerUserId, defaultLane, effectiveDelegate])
 
   // AQU-658: derive the unit vocabulary from the active file's type so the
   // scope options and confirmation copy read correctly for non-scripture
@@ -276,12 +360,20 @@ export function AssignModal({
   // AQU-676: the assignee picker must list only the project's own members,
   // never everyone with org-baseline access. Org members inherit access to
   // every project via AD-12 max-wins, so without this filter a per-team mentor
-  // doing assignments sees (and could assign to) other language teams' people.
+  // doing assignments sees (and could assign to) people staffed on other lanes.
   // partitionMembers (AQU-454) keeps only members with a project-specific path
   // (override / group / creator); org-baseline-only members drop out.
+  //
+  // AQU-581: a lane coordinator may only hand work to someone who can do it —
+  // CONTRIBUTOR and up. The server also refuses anyone scoped away from the
+  // lane; other members' scopes aren't readable here, so that case surfaces
+  // as the server's refusal. A lead is trusted to pick.
   const eligibleMembers = useMemo(
-    () => partitionMembers(members).projectMembers,
-    [members],
+    () =>
+      partitionMembers(members).projectMembers.filter(
+        (m) => !isLaneDelegate || m.role.level >= ROLE.CONTRIBUTOR,
+      ),
+    [members, isLaneDelegate],
   )
 
   // AQU-497: group the books-scope file list by corpusMarker (real season/
@@ -289,23 +381,51 @@ export function AssignModal({
   // in one click via the per-group "Select all".
   const fileGroups = useMemo(() => groupByCorpus(projectFiles), [projectFiles])
 
-  // AQU-538 (§3.5): lane options — the default lane ('') first, then each extra
-  // lane. Only rendered (length > 1) when the project actually has extra lanes,
-  // keeping N=1 projects byte-identical to the pre-lane flow.
-  const laneItems = useMemo(() => {
-    const extra = targetLanes ?? []
-    if (extra.length === 0) return [] as { value: string; label: string }[]
-    // AQU-728: the '' lane IS a real language — the project's own default
-    // target language. Label it with that language's name (e.g. "Portuguese")
-    // so every lane, including the default, is listed by name and preselecting
-    // the launching default lane reads as the language, not "default". Only
-    // fall back to the generic label when the default language is unknown.
-    const defaultLabel = defaultLaneLabel?.trim() || t("dialog.assign.defaultLaneFallback")
-    return [
-      { value: "", label: defaultLabel },
-      ...extra.map((lane) => ({ value: lane, label: lane })),
-    ]
-  }, [targetLanes, defaultLaneLabel, t])
+  // AQU-538 (§3.5) / AQU-1601: the default lane first, then each extra lane.
+  // One lane still names itself — the field is how a person learns a lane
+  // exists. AQU-728 / AQU-729: the '' lane is a real language, and its option
+  // value is a sentinel because Base UI treats '' as "nothing selected".
+  // AQU-581: a lane delegate may only assign inside the lanes the org scoped
+  // them to. Leads pass no grant and keep the full list.
+  const laneItems = useMemo(
+    () =>
+      buildLaneItems({
+        lanes,
+        targetLanes,
+        laneLabels,
+        defaultLaneLabel,
+        defaultLaneFallback: t("dialog.assign.defaultLaneFallback"),
+        allowedTags: laneDelegateLanes(effectiveDelegate),
+        staffedLaneIds,
+        teamLanes,
+      }),
+    [lanes, targetLanes, laneLabels, defaultLaneLabel, effectiveDelegate, staffedLaneIds, teamLanes, t],
+  )
+  // AQU-1994: the project has lanes but nobody on it is on any of them. The
+  // modal names that instead of offering a language no one can work in, and
+  // refuses the submit — the same answer the Team card's panel gives. Asked of
+  // staffing alone: a lane delegate whose own lanes no longer exist also ends
+  // up with nothing to choose, and that is a different sentence.
+  const noStaffedLanes =
+    Boolean(lanes?.length) && lanesStaffedBy(lanes ?? [], staffedLaneIds).length === 0
+  // AQU-2194: with nobody on the project to give language work to, the picker
+  // holds only the caller (and perhaps the project's maintainers and owners)
+  // and nothing says why: people who only reach the project through the
+  // organisation are left out (AQU-676), and nobody has been staffed on the
+  // new language yet. Say so, and where people are added (the language's
+  // Staff… on the project Overview). Self-assign mode, a missing roster and
+  // the no-staffed-lanes line above already say their own piece.
+  const showStaffHint =
+    !isSelfAssignMode &&
+    !rosterUnavailable &&
+    !noStaffedLanes &&
+    !hasLanguageWorker(eligibleMembers, effectiveCallerUserId)
+  // AQU-1977: given the project's own lanes, a pick that names none of them —
+  // an empty default on a project that has no '' lane — reads as the first.
+  const laneValue =
+    lanes?.length && !laneItems.some((item) => item.value === selectedLane)
+      ? (laneItems[0]?.value ?? selectedLane)
+      : selectedLane
   // fileId -> named group label (excludes the synthetic "Ungrouped" bucket),
   // used to prefix each bulk-created assignment's scopeLabel so a PM can see
   // which season an individually-removable row came from.
@@ -361,8 +481,26 @@ export function AssignModal({
     })
   }, [])
 
+  // AQU-581 review: the server refuses a lane coordinator's pick when that
+  // person can't do the work. Say who and which language, in the reader's
+  // own language, rather than the server's English sentence.
+  const assigneeRefusal = useCallback(
+    (message: string, username: string): string | null => {
+      if (!message.includes("cannot take work in")) return null
+      const language =
+        laneItems.find((item) => item.value === laneValue)?.label ??
+        (defaultLaneLabel?.trim() || t("dialog.assign.defaultLaneFallback"))
+      return t("dialog.assign.error.assigneeNotEligible", { username, language })
+    },
+    [laneItems, laneValue, defaultLaneLabel, t],
+  )
+
   const handleSubmit = useCallback(async () => {
     setError(null)
+    if (noStaffedLanes) {
+      setError(t("org.assignWork.noStaffedLanes"))
+      return
+    }
     const member = members.find((m) => String(m.userId) === selectedMemberId)
     if (!member) { setError(t("dialog.assign.error.selectMember")); return }
 
@@ -388,8 +526,14 @@ export function AssignModal({
       effectiveCallerUserId,
       member.userId,
       assignmentMinRole,
+      effectiveDelegate,
+      // AQU-729: the policy takes the raw lane tag ('' = default), not the
+      // picker's select value.
+      laneTagForAssignment(laneValue) ?? "",
     )) {
-      setError(t("dialog.assign.error.selfOnly"))
+      // AQU-581: a delegate who picked a lane outside their scopes gets the
+      // lane message; everyone else below the floor is still self-only.
+      setError(t(isLaneDelegate ? "dialog.assign.error.laneOutOfScope" : "dialog.assign.error.selfOnly"))
       return
     }
 
@@ -401,7 +545,8 @@ export function AssignModal({
     if (scopeKind === "books") {
       if (selectedFileIds.size === 0) { setError(t("dialog.assign.error.selectFile")); return }
       const entries = Array.from(selectedFileIds).map((fid) => {
-        const name = projectFiles.find((f) => f.id === fid)?.name ?? fid
+        const file = projectFiles.find((f) => f.id === fid)
+        const name = file ? fileDisplayName(file) : fid
         const groupLabel = groupLabelByFileId.get(fid)
         return { fileId: fid, scopeLabel: groupLabel ? `${groupLabel} · ${name}` : name }
       })
@@ -413,14 +558,17 @@ export function AssignModal({
           author,
           assigneeUserId: member.userId,
           entries,
-          targetLang: selectedLane || undefined,
+          targetLang: laneTagForAssignment(laneValue),
           deadline,
           note: note.trim() || null,
+          kind,
         })
         const failed = results.filter((r) => r.error)
         const succeeded = results.length - failed.length
         if (succeeded > 0) onAssigned()
-        if (failed.length > 0) {
+        if (failed.length > 0 && assigneeRefusal(failed[0].error ?? "", member.username)) {
+          setError(assigneeRefusal(failed[0].error ?? "", member.username))
+        } else if (failed.length > 0) {
           setError(
             t("dialog.assign.error.bulkFailed", {
               failed: String(failed.length),
@@ -441,22 +589,28 @@ export function AssignModal({
     }
 
     // Build scope + scopeLabel for the single-event scopes.
-    let scope: { fileId: string; chapter?: string }[] = []
+    //
+    // File identity rides `fileId` (and the Assigned-to-me File column) — keep
+    // scopeLabel as the work description only, not "… in <fileName>".
+    // Persisted scope-label data (stored on the assignment record), not a
+    // rendered UI string — left in English; see AQU-511 dialog namespace notes.
+    let scope: AssignmentScopeEntry[] = []
     let scopeLabel = ""
-    let apiScopeKind: "books" | "chapters" = "books"
+    let apiScopeKind: AssignmentScopeKind = "books"
 
-    if (scopeKind === "selection" || scopeKind === "verses") {
+    if (scopeKind === "selection") {
+      if (!activeFileId) { setError(t("dialog.assign.error.noFileOpen")); return }
+      // AQU-1628: send the selected lines, not the file they live in. The file
+      // alone resolves to every source line in it server-side, so the assignee
+      // got the whole file while the label below still said "N segment(s)".
+      if (selectedCellIds.size === 0) { setError(t("dialog.assign.error.noSelection")); return }
+      scope = [{ fileId: activeFileId, cellIds: [...selectedCellIds] }]
+      scopeLabel = `${selectedCellIds.size} ${segmentNoun}(s)`
+      apiScopeKind = "cells"
+    } else if (scopeKind === "verses") {
       if (!activeFileId) { setError(t("dialog.assign.error.noFileOpen")); return }
       scope = [{ fileId: activeFileId }]
-      // File identity rides `fileId` (and the Assigned-to-me File column) —
-      // keep scopeLabel as the work description only, not "… in <fileName>".
-      // Persisted scope-label data (stored on the assignment record), not a
-      // rendered UI string — left in English; see AQU-511 dialog namespace notes.
-      scopeLabel = scopeKind === "selection"
-        ? `${selectedCellIds.size} ${segmentNoun}(s)`
-        : isScripture
-          ? "All verses"
-          : "Entire file"
+      scopeLabel = isScripture ? "All verses" : "Entire file"
       apiScopeKind = "books"
     } else if (scopeKind === "chapters") {
       if (!activeFileId) { setError(t("dialog.assign.error.noFileOpen")); return }
@@ -484,15 +638,16 @@ export function AssignModal({
         scope,
         scopeKind: apiScopeKind,
         scopeLabel,
-        targetLang: selectedLane || undefined,
+        targetLang: laneTagForAssignment(laneValue),
         deadline,
         note: note.trim() || null,
+        kind,
       })
       onAssigned()
       onOpenChange(false)
     } catch (e) {
       if (e instanceof AssignmentEmitError) {
-        setError(e.message)
+        setError(assigneeRefusal(e.message, member.username) ?? e.message)
       } else {
         // AQU-820: any error that isn't an AssignmentEmitError (the type
         // createAssignment uses for its own known failure modes, handled
@@ -506,15 +661,51 @@ export function AssignModal({
     }
   }, [
     members, eligibleMembers, isSelfAssignMode, selectedMemberId, scopeKind, activeFileId, projectFiles,
-    selectedCellIds.size, selectedChapters, selectedFileIds,
+    // AQU-1628: the whole set, not just its size — submit now sends the ids,
+    // and swapping which cells are selected without changing how many must
+    // not leave this callback holding the previous selection.
+    selectedCellIds, selectedChapters, selectedFileIds,
     jwt, projectId, author, note, onAssigned, onOpenChange,
-    roleLevel, allowSelfAssignment, assignmentMinRole, effectiveCallerUserId, deadlineDate, groupLabelByFileId,
-    selectedLane, isScripture, segmentNoun, selectUnitErrorKey, t,
+    roleLevel, allowSelfAssignment, assignmentMinRole, effectiveDelegate, isLaneDelegate,
+    effectiveCallerUserId, deadlineDate, groupLabelByFileId,
+    laneValue, noStaffedLanes, isScripture, segmentNoun, selectUnitErrorKey, assigneeRefusal, kind, t,
   ])
 
-  // Role gate (AQU-496): PROJECT_LEAD (500)+ always renders; below that, only
-  // when the org's allowSelfAssignment carve-out applies (canOpenAssignUi).
-  if (!canOpenAssignUi(roleLevel, allowSelfAssignment, assignmentMinRole)) return null
+  // AQU-1510: say so when this would assign someone lines they already hold.
+  // A selection has no chapters to compare, so it is not checked.
+  const overlapScope = useMemo<OverlapScope | null>(() => {
+    if (scopeKind === "verses" || scopeKind === "books") return { kind: "file" }
+    if (scopeKind === "chapters" && selectedChapters.size > 0) {
+      return { kind: "chapters", chapters: [...selectedChapters] }
+    }
+    return null
+  }, [scopeKind, selectedChapters])
+  const overlapFileIds = useMemo(
+    () => (scopeKind === "books" ? [...selectedFileIds] : activeFileId ? [activeFileId] : []),
+    [scopeKind, selectedFileIds, activeFileId],
+  )
+  const overlapMember = members.find((m) => String(m.userId) === selectedMemberId) ?? null
+  const overlaps = useAssignmentOverlap({
+    jwt,
+    projectId,
+    fileIds: overlapFileIds,
+    scope: overlapScope,
+    assigneeUserId: overlapMember?.userId ?? null,
+    lane: laneValue,
+    kind,
+  })
+  const overlapFileName = useCallback(
+    (fileId: string) => {
+      const file = projectFiles.find((f) => f.id === fileId)
+      return file ? fileDisplayName(file) : fileId
+    },
+    [projectFiles],
+  )
+
+  // Role gate (AQU-496 / AQU-581): a caller at the org's assignment floor
+  // always renders; below that, only when one of the org's two carve-outs
+  // applies — self-assign, or a lane-scoped delegate grant (canOpenAssignUi).
+  if (!canOpenAssignUi(roleLevel, allowSelfAssignment, assignmentMinRole, effectiveDelegate)) return null
 
   // AQU-496: in self-assign mode the picker is locked to the caller's own
   // membership row. If callerUserId couldn't be resolved (edge case — caller
@@ -548,6 +739,9 @@ export function AssignModal({
             max-h-[85dvh] DialogContent. */}
         <DialogBody>
         <FieldGroup className="py-1">
+          {/* AQU-1969: what the work is comes before which lines and who. */}
+          <AssignKindField id="assign-modal-kind" value={kind} onChange={setKind} disabled={submitting} />
+
           <Field>
             <FieldLabel htmlFor="assign-modal-scope">{t("dialog.assign.scopeLabel")}</FieldLabel>
             <Select
@@ -587,16 +781,16 @@ export function AssignModal({
             </Select>
           </Field>
 
-          {/* AQU-538 (§3.5): lane select — only when the project has extra
-              lanes. Assigning routes WORK to a lane; it is not a permission
-              wall (that's a scope — see §3.5). */}
+          {/* AQU-538 (§3.5) / AQU-1601: the lane this work is for. Several lanes
+              are a choice; one lane is named rather than hidden. Assigning
+              routes WORK to a lane; it is not a permission wall. */}
           {laneItems.length > 1 && (
             <Field>
               <FieldLabel htmlFor="assign-modal-lane">{t("dialog.assign.laneLabel")}</FieldLabel>
               <Select
                 items={laneItems}
-                value={selectedLane}
-                onValueChange={(v) => setSelectedLane(v ?? "")}
+                value={laneValue}
+                onValueChange={(v) => setSelectedLane(selectValueForLane(v))}
               >
                 <SelectTrigger id="assign-modal-lane">
                   <SelectValue />
@@ -622,6 +816,27 @@ export function AssignModal({
                   values={{ can: <em>{t("workspace.assignModal.canModalVerb")}</em> }}
                 />
               </FieldDescription>
+            </Field>
+          )}
+          {/* AQU-1994: no one on the project is on any of its lanes. Say so
+              where the picker would have been; Assign is refused. */}
+          {noStaffedLanes && (
+            <Field>
+              <FieldLabel>{t("dialog.assign.laneLabel")}</FieldLabel>
+              <FieldError data-testid="assign-modal-no-staffed-lanes">
+                {t("org.assignWork.noStaffedLanes")}
+              </FieldError>
+            </Field>
+          )}
+          {/* AQU-581: a lane delegate scoped to one language of a multi-language
+              project has nothing to choose, but still needs to see which
+              language the work lands in — hiding the picker hid that too. */}
+          {laneItems.length === 1 && (
+            <Field>
+              <FieldLabel>{t("dialog.assign.laneLabel")}</FieldLabel>
+              <p data-testid="assign-modal-lane-fixed" className="text-sm">
+                {laneItems[0].label}
+              </p>
             </Field>
           )}
 
@@ -658,7 +873,7 @@ export function AssignModal({
                             onCheckedChange={() => toggleFile(f.id)}
                             className="size-3"
                           />
-                          {f.name}
+                          {fileDisplayName(f)}
                         </label>
                       ))}
                     </div>
@@ -699,40 +914,34 @@ export function AssignModal({
 
           <Field>
             <FieldLabel htmlFor="assign-modal-assignee">{t("dialog.assign.assigneeLabel")}</FieldLabel>
-            <Select
-              items={assigneeItems}
+            {/* AQU-2260: a search box, since the people list grows with the team. */}
+            <SearchSelect
+              id="assign-modal-assignee"
+              options={assigneeItems}
               value={selectedMemberId}
-              onValueChange={(v) => setSelectedMemberId(v ?? "")}
+              onValueChange={setSelectedMemberId}
               disabled={isSelfAssignMode}
-            >
-              <SelectTrigger id="assign-modal-assignee">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {assigneeItems.map((item) => {
-                    const member = members.find((m) => String(m.userId) === item.value)
-                    return (
-                      <SelectItem key={item.value || "empty"} value={item.value}>
-                        {member ? (
-                          <UsernameWithAvatar
-                            username={member.username}
-                            label={item.label}
-                            size="xs"
-                            menuSafe
-                            nameClassName="text-sm font-normal"
-                          />
-                        ) : (
-                          item.label
-                        )}
-                      </SelectItem>
-                    )
-                  })}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+              renderOption={(item) => {
+                const member = members.find((m) => String(m.userId) === item.value)
+                return member ? (
+                  <UsernameWithAvatar
+                    userId={member.userId}
+                    username={member.username}
+                    label={item.label}
+                    size="xs"
+                    menuSafe
+                    nameClassName="text-sm font-normal"
+                  />
+                ) : (
+                  item.label
+                )
+              }}
+            />
             {isSelfAssignMode && (
               <FieldDescription>{t("dialog.assign.selfAssignDescription")}</FieldDescription>
+            )}
+            {showStaffHint && (
+              <AddProjectMembersHint projectId={projectId} testId="assign-modal-staff-hint" canAddPeople={roleLevel >= ROLE.MAINTAINER} />
             )}
             {/* AQU-1308: never leave an empty "Select member…" unexplained. */}
             {rosterUnavailable && (
@@ -769,6 +978,11 @@ export function AssignModal({
             />
           </Field>
 
+          <AssignmentOverlapNotice
+            overlaps={overlaps}
+            username={overlapMember?.username ?? ""}
+            fileName={overlapFileName}
+          />
           {error && <FieldError>{error}</FieldError>}
         </FieldGroup>
         </DialogBody>
@@ -777,7 +991,7 @@ export function AssignModal({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             {t("common.cancel")}
           </Button>
-          <Button onClick={handleSubmit} disabled={submitting}>
+          <Button onClick={handleSubmit} disabled={submitting || noStaffedLanes}>
             {submitting ? <Spinner className="me-1" /> : null}
             {t("dialog.assign.submit")}
           </Button>

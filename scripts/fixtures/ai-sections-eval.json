@@ -1,0 +1,434 @@
+{
+  "$comment": "Labelled fixture for scripts/ai-sections-eval.ts (AQU-1387). Scripture ground truth is the CC0 OpenBible section-counts dataset, read at run time from src/lib/import/data/section-boundaries.ts. Prose ground truth is the `heading` flag, which the eval STRIPS from the cell list before scoring so no scorer can see it.",
+  "documents": [
+    {
+      "id": "web-luke-5",
+      "kind": "scripture",
+      "provenance": "World English Bible (public domain), Luke 5, fetched from https://bible-api.com/luke+5?translation=web on 2026-09-27",
+      "cells": [
+        {
+          "key": "LUK 5:1",
+          "ref": "LUK 5:1",
+          "text": "Now while the multitude pressed on him and heard the word of God, he was standing by the lake of Gennesaret."
+        },
+        {
+          "key": "LUK 5:2",
+          "ref": "LUK 5:2",
+          "text": "He saw two boats standing by the lake, but the fishermen had gone out of them, and were washing their nets."
+        },
+        {
+          "key": "LUK 5:3",
+          "ref": "LUK 5:3",
+          "text": "He entered into one of the boats, which was Simon’s, and asked him to put out a little from the land. He sat down and taught the multitudes from the boat."
+        },
+        {
+          "key": "LUK 5:4",
+          "ref": "LUK 5:4",
+          "text": "When he had finished speaking, he said to Simon, “Put out into the deep, and let down your nets for a catch.”"
+        },
+        {
+          "key": "LUK 5:5",
+          "ref": "LUK 5:5",
+          "text": "Simon answered him, “Master, we worked all night, and took nothing; but at your word I will let down the net.”"
+        },
+        {
+          "key": "LUK 5:6",
+          "ref": "LUK 5:6",
+          "text": "When they had done this, they caught a great multitude of fish, and their net was breaking."
+        },
+        {
+          "key": "LUK 5:7",
+          "ref": "LUK 5:7",
+          "text": "They beckoned to their partners in the other boat, that they should come and help them. They came, and filled both boats, so that they began to sink."
+        },
+        {
+          "key": "LUK 5:8",
+          "ref": "LUK 5:8",
+          "text": "But Simon Peter, when he saw it, fell down at Jesus’ knees, saying, “Depart from me, for I am a sinful man, Lord.”"
+        },
+        {
+          "key": "LUK 5:9",
+          "ref": "LUK 5:9",
+          "text": "For he was amazed, and all who were with him, at the catch of fish which they had caught;"
+        },
+        {
+          "key": "LUK 5:10",
+          "ref": "LUK 5:10",
+          "text": "and so also were James and John, sons of Zebedee, who were partners with Simon. Jesus said to Simon, “Don’t be afraid. From now on you will be catching people alive.”"
+        },
+        {
+          "key": "LUK 5:11",
+          "ref": "LUK 5:11",
+          "text": "When they had brought their boats to land, they left everything, and followed him."
+        },
+        {
+          "key": "LUK 5:12",
+          "ref": "LUK 5:12",
+          "text": "While he was in one of the cities, behold, there was a man full of leprosy. When he saw Jesus, he fell on his face, and begged him, saying, “Lord, if you want to, you can make me clean.”"
+        },
+        {
+          "key": "LUK 5:13",
+          "ref": "LUK 5:13",
+          "text": "He stretched out his hand, and touched him, saying, “I want to. Be made clean.” Immediately the leprosy left him."
+        },
+        {
+          "key": "LUK 5:14",
+          "ref": "LUK 5:14",
+          "text": "He commanded him to tell no one, “But go your way, and show yourself to the priest, and offer for your cleansing according to what Moses commanded, for a testimony to them.”"
+        },
+        {
+          "key": "LUK 5:15",
+          "ref": "LUK 5:15",
+          "text": "But the report concerning him spread much more, and great multitudes came together to hear, and to be healed by him of their infirmities."
+        },
+        {
+          "key": "LUK 5:16",
+          "ref": "LUK 5:16",
+          "text": "But he withdrew himself into the desert, and prayed."
+        },
+        {
+          "key": "LUK 5:17",
+          "ref": "LUK 5:17",
+          "text": "On one of those days, he was teaching; and there were Pharisees and teachers of the law sitting by, who had come out of every village of Galilee, Judea, and Jerusalem. The power of the Lord was with him to heal them."
+        },
+        {
+          "key": "LUK 5:18",
+          "ref": "LUK 5:18",
+          "text": "Behold, men brought a paralyzed man on a cot, and they sought to bring him in to lay before Jesus."
+        },
+        {
+          "key": "LUK 5:19",
+          "ref": "LUK 5:19",
+          "text": "Not finding a way to bring him in because of the multitude, they went up to the housetop, and let him down through the tiles with his cot into the middle before Jesus."
+        },
+        {
+          "key": "LUK 5:20",
+          "ref": "LUK 5:20",
+          "text": "Seeing their faith, he said to him, “Man, your sins are forgiven you.”"
+        },
+        {
+          "key": "LUK 5:21",
+          "ref": "LUK 5:21",
+          "text": "The scribes and the Pharisees began to reason, saying, “Who is this that speaks blasphemies? Who can forgive sins, but God alone?”"
+        },
+        {
+          "key": "LUK 5:22",
+          "ref": "LUK 5:22",
+          "text": "But Jesus, perceiving their thoughts, answered them, “Why are you reasoning so in your hearts?"
+        },
+        {
+          "key": "LUK 5:23",
+          "ref": "LUK 5:23",
+          "text": "Which is easier to say, ‘Your sins are forgiven you;’ or to say, ‘Arise and walk?’"
+        },
+        {
+          "key": "LUK 5:24",
+          "ref": "LUK 5:24",
+          "text": "But that you may know that the Son of Man has authority on earth to forgive sins” (he said to the paralyzed man), “I tell you, arise, and take up your cot, and go to your house.”"
+        },
+        {
+          "key": "LUK 5:25",
+          "ref": "LUK 5:25",
+          "text": "Immediately he rose up before them, and took up that which he was laying on, and departed to his house, glorifying God."
+        },
+        {
+          "key": "LUK 5:26",
+          "ref": "LUK 5:26",
+          "text": "Amazement took hold on all, and they glorified God. They were filled with fear, saying, “We have seen strange things today.”"
+        },
+        {
+          "key": "LUK 5:27",
+          "ref": "LUK 5:27",
+          "text": "After these things he went out, and saw a tax collector named Levi sitting at the tax office, and said to him, “Follow me!”"
+        },
+        {
+          "key": "LUK 5:28",
+          "ref": "LUK 5:28",
+          "text": "He left everything, and rose up and followed him."
+        },
+        {
+          "key": "LUK 5:29",
+          "ref": "LUK 5:29",
+          "text": "Levi made a great feast for him in his house. There was a great crowd of tax collectors and others who were reclining with them."
+        },
+        {
+          "key": "LUK 5:30",
+          "ref": "LUK 5:30",
+          "text": "Their scribes and the Pharisees murmured against his disciples, saying, “Why do you eat and drink with the tax collectors and sinners?”"
+        },
+        {
+          "key": "LUK 5:31",
+          "ref": "LUK 5:31",
+          "text": "Jesus answered them, “Those who are healthy have no need for a physician, but those who are sick do."
+        },
+        {
+          "key": "LUK 5:32",
+          "ref": "LUK 5:32",
+          "text": "I have not come to call the righteous, but sinners to repentance.”"
+        },
+        {
+          "key": "LUK 5:33",
+          "ref": "LUK 5:33",
+          "text": "They said to him, “Why do John’s disciples often fast and pray, likewise also the disciples of the Pharisees, but yours eat and drink?”"
+        },
+        {
+          "key": "LUK 5:34",
+          "ref": "LUK 5:34",
+          "text": "He said to them, “Can you make the friends of the bridegroom fast, while the bridegroom is with them?"
+        },
+        {
+          "key": "LUK 5:35",
+          "ref": "LUK 5:35",
+          "text": "But the days will come when the bridegroom will be taken away from them. Then they will fast in those days.”"
+        },
+        {
+          "key": "LUK 5:36",
+          "ref": "LUK 5:36",
+          "text": "He also told a parable to them. “No one puts a piece from a new garment on an old garment, or else he will tear the new, and also the piece from the new will not match the old."
+        },
+        {
+          "key": "LUK 5:37",
+          "ref": "LUK 5:37",
+          "text": "No one puts new wine into old wine skins, or else the new wine will burst the skins, and it will be spilled, and the skins will be destroyed."
+        },
+        {
+          "key": "LUK 5:38",
+          "ref": "LUK 5:38",
+          "text": "But new wine must be put into fresh wine skins, and both are preserved."
+        },
+        {
+          "key": "LUK 5:39",
+          "ref": "LUK 5:39",
+          "text": "No man having drunk old wine immediately desires new, for he says, ‘The old is better.’”"
+        }
+      ]
+    },
+    {
+      "id": "workshop-report",
+      "kind": "prose",
+      "provenance": "Synthetic. Written for this fixture; a report shaped like the ones partners file.",
+      "cells": [
+        {
+          "key": "workshop-report-0",
+          "text": "Translation workshop report: Mae Sot, March",
+          "heading": true
+        },
+        {
+          "key": "workshop-report-1",
+          "text": "Fourteen translators attended across the four days, eleven of them from the two river valleys and three from the town."
+        },
+        {
+          "key": "workshop-report-2",
+          "text": "Attendance held through the final afternoon, which the previous two workshops did not manage."
+        },
+        {
+          "key": "workshop-report-3",
+          "text": "What the drafting sessions showed",
+          "heading": true
+        },
+        {
+          "key": "workshop-report-4",
+          "text": "Drafting in whole paragraphs was faster for everyone who tried it, and nobody went back to working line by line."
+        },
+        {
+          "key": "workshop-report-5",
+          "text": "Two translators said the difference was not the speed but that they could hear whether the paragraph sounded like speech."
+        },
+        {
+          "key": "workshop-report-6",
+          "text": "One of them read the same passage both ways to the room, which settled the argument faster than the numbers did."
+        },
+        {
+          "key": "workshop-report-7",
+          "text": "The exception was poetry, where the longer unit made it harder to keep the line breaks the community expects."
+        },
+        {
+          "key": "workshop-report-8",
+          "text": "We agreed to keep poetry on the shorter unit until there is a better answer."
+        },
+        {
+          "key": "workshop-report-9",
+          "text": "A translator from the upper valley pointed out that the same problem applies to genealogies."
+        },
+        {
+          "key": "workshop-report-10",
+          "text": "Nobody had a proposal for genealogies, so it was recorded and left open."
+        },
+        {
+          "key": "workshop-report-11",
+          "text": "Most people had drafted three or four passages by the end of the second day."
+        },
+        {
+          "key": "workshop-report-12",
+          "text": "Terminology decisions taken together",
+          "heading": true
+        },
+        {
+          "key": "workshop-report-13",
+          "text": "The group settled on a single rendering for the word that had been translated four different ways across the existing drafts."
+        },
+        {
+          "key": "workshop-report-14",
+          "text": "Nobody defended the older renderings once the four were laid side by side."
+        },
+        {
+          "key": "workshop-report-15",
+          "text": "A second term was left open, because the two valleys genuinely use different words and neither is wrong."
+        },
+        {
+          "key": "workshop-report-16",
+          "text": "Equipment and connectivity",
+          "heading": true
+        },
+        {
+          "key": "workshop-report-17",
+          "text": "The two shared laptops were the bottleneck on the first morning and stopped being one once people paired up."
+        },
+        {
+          "key": "workshop-report-18",
+          "text": "Connectivity dropped for most of the second day and the offline queue held everything, which several people noticed."
+        },
+        {
+          "key": "workshop-report-19",
+          "text": "One tablet would not sync until it was restarted; the work was still there afterwards."
+        },
+        {
+          "key": "workshop-report-20",
+          "text": "The projector failed on the third morning and we worked from printed sheets instead."
+        },
+        {
+          "key": "workshop-report-21",
+          "text": "Printed sheets turned out to be better for the terminology session and we should plan for them."
+        },
+        {
+          "key": "workshop-report-22",
+          "text": "Power was steady all week, which is not something the last two venues managed."
+        },
+        {
+          "key": "workshop-report-23",
+          "text": "Nobody needed the spare battery pack, though it was good to have brought it."
+        },
+        {
+          "key": "workshop-report-24",
+          "text": "The room was too small for fourteen once everyone had a laptop open."
+        },
+        {
+          "key": "workshop-report-25",
+          "text": "What to change before the next workshop",
+          "heading": true
+        },
+        {
+          "key": "workshop-report-26",
+          "text": "Start with the paragraph unit on the first morning rather than introducing it on day two."
+        },
+        {
+          "key": "workshop-report-27",
+          "text": "Bring a printed copy of the terminology decisions, because the screen is hard to share across a table of fourteen."
+        },
+        {
+          "key": "workshop-report-28",
+          "text": "Budget for a fourth day; the final afternoon was the most productive session of the week."
+        },
+        {
+          "key": "workshop-report-29",
+          "text": "Ask for a larger room, or split the group in two for the drafting sessions."
+        }
+      ]
+    },
+    {
+      "id": "ebl-workbook",
+      "kind": "prose",
+      "provenance": "Synthetic. Written for this fixture, modelled on the EBL exercise shape described in AQU-1386 (sentences continuing across cells).",
+      "cells": [
+        {
+          "key": "ebl-workbook-0",
+          "text": "Exercise 3: listening for the subject",
+          "heading": true
+        },
+        {
+          "key": "ebl-workbook-1",
+          "text": "Read the following sentence aloud twice, then write down who is doing the action."
+        },
+        {
+          "key": "ebl-workbook-2",
+          "text": "The man who had been sitting by the road stood up when the crowd"
+        },
+        {
+          "key": "ebl-workbook-3",
+          "text": "came near, and he called out to them."
+        },
+        {
+          "key": "ebl-workbook-4",
+          "text": "Now write the same sentence with the subject moved to the end."
+        },
+        {
+          "key": "ebl-workbook-5",
+          "text": "Read both versions aloud and mark which one you would say to a child."
+        },
+        {
+          "key": "ebl-workbook-6",
+          "text": "Explain your choice in one sentence."
+        },
+        {
+          "key": "ebl-workbook-7",
+          "text": "Exercise 4: reported speech",
+          "heading": true
+        },
+        {
+          "key": "ebl-workbook-8",
+          "text": "The teacher asked the students whether they had understood the passage, and they"
+        },
+        {
+          "key": "ebl-workbook-9",
+          "text": "answered that they had not."
+        },
+        {
+          "key": "ebl-workbook-10",
+          "text": "Exercise 5: joining two thoughts",
+          "heading": true
+        },
+        {
+          "key": "ebl-workbook-11",
+          "text": "When he had finished speaking he sat down, and everyone in the room"
+        },
+        {
+          "key": "ebl-workbook-12",
+          "text": "was silent for a long moment."
+        },
+        {
+          "key": "ebl-workbook-13",
+          "text": "Mark where you would break this into two sentences in your language."
+        },
+        {
+          "key": "ebl-workbook-14",
+          "text": "There is more than one defensible answer; write down why you chose yours."
+        },
+        {
+          "key": "ebl-workbook-15",
+          "text": "Compare your break with a partner's before turning the page."
+        },
+        {
+          "key": "ebl-workbook-16",
+          "text": "If you disagreed, read both versions aloud and decide which sounds spoken."
+        },
+        {
+          "key": "ebl-workbook-17",
+          "text": "Exercise 6: review",
+          "heading": true
+        },
+        {
+          "key": "ebl-workbook-18",
+          "text": "Return to exercises three, four and five and read your answers aloud in order."
+        },
+        {
+          "key": "ebl-workbook-19",
+          "text": "Note any place where two of your answers disagree about the same construction."
+        },
+        {
+          "key": "ebl-workbook-20",
+          "text": "Bring the disagreements to the next session rather than resolving them alone."
+        }
+      ]
+    }
+  ]
+}

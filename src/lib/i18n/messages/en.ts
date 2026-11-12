@@ -42,8 +42,24 @@ import { billing } from "../namespaces/billing"
 import { knowledgeBase } from "../namespaces/knowledgeBase"
 import { settings } from "../namespaces/settings"
 import { agent } from "../namespaces/agent"
+import { agentDraftReview } from "../namespaces/agentDraftReview"
 import { workspace } from "../namespaces/workspace"
 import { segmentation } from "../namespaces/segmentation"
+import { smartEdits } from "../namespaces/smartEdits"
+import { langquest } from "../namespaces/langquest"
+import { harmonizer } from "../namespaces/harmonizer"
+import { bibleData } from "../namespaces/bibleData"
+import { extensions } from "../namespaces/extensions"
+import { languageProfile } from "../namespaces/languageProfile"
+import { projectDecisions } from "../namespaces/projectDecisions"
+import { bibleAlignment } from "../namespaces/bibleAlignment"
+import { bibleChecks } from "../namespaces/bibleChecks"
+import { bibleHelps } from "../namespaces/bibleHelps"
+import { bibleParticipants } from "../namespaces/bibleParticipants"
+import { bibleVoices } from "../namespaces/bibleVoices"
+import { transcribe } from "../namespaces/transcribe"
+import { recordingsUpload } from "../namespaces/recordingsUpload"
+import { paratextBridge } from "../namespaces/paratextBridge"
 import type { MessageValue } from "../plurals"
 
 export const en = {
@@ -70,8 +86,24 @@ export const en = {
   ...knowledgeBase.keys,
   ...settings.keys,
   ...agent.keys,
+  ...agentDraftReview.keys,
   ...workspace.keys,
   ...segmentation.keys,
+  ...smartEdits.keys,
+  ...langquest.keys,
+  ...harmonizer.keys,
+  ...bibleData.keys,
+  ...extensions.keys,
+  ...languageProfile.keys,
+  ...projectDecisions.keys,
+  ...bibleAlignment.keys,
+  ...bibleChecks.keys,
+  ...bibleHelps.keys,
+  ...bibleParticipants.keys,
+  ...bibleVoices.keys,
+  ...transcribe.keys,
+  ...recordingsUpload.keys,
+  ...paratextBridge.keys,
 } as const
 
 export type MessageKey = keyof typeof en

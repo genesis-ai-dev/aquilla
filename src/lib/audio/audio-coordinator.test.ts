@@ -154,3 +154,34 @@ describe("audio shortcut owner tiers", () => {
     expect(isAudioShortcutOverridden()).toBe(false)
   })
 })
+
+describe("claimActiveAudio", () => {
+  const player = () => {
+    let playing = false
+    return {
+      isPlaying: () => playing,
+      play: async () => { playing = true },
+      pause: vi.fn(() => { playing = false }),
+      start() { playing = true },
+    }
+  }
+
+  it("silences whatever was playing and takes over", async () => {
+    const { claimActiveAudio, getActiveAudio, setActiveAudio } = await import("./audio-coordinator")
+    const row = player()
+    const strip = player()
+    setActiveAudio(row)
+    row.start()
+    claimActiveAudio(strip)
+    expect(row.pause).toHaveBeenCalledTimes(1)
+    expect(getActiveAudio()).toBe(strip)
+  })
+
+  it("leaves a quiet previous holder alone", async () => {
+    const { claimActiveAudio, setActiveAudio } = await import("./audio-coordinator")
+    const row = player()
+    setActiveAudio(row)
+    claimActiveAudio(player())
+    expect(row.pause).not.toHaveBeenCalled()
+  })
+})

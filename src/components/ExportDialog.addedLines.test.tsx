@@ -30,7 +30,7 @@ vi.mock("@/lib/sync/source-export", () => ({
   // empty list is also the right default here.
   fetchRemovedCells: vi.fn(async () => []),
 }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 
 import { useProjectCells } from "@/hooks/useProjectCells"
 const mockProjectCells = vi.mocked(useProjectCells)

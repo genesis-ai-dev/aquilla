@@ -1,6 +1,9 @@
 import { useState } from "react"
-import { describe, expect, it } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { describe, expect, it, vi } from "vitest"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
+
+import { loadFullLanguageCatalog, peekFullLanguageCatalog } from "@/lib/languages/full-catalog"
+import * as derivedLanguageCodeModule from "@/lib/languages/use-derived-language-code"
 
 import { LanguageComboboxInput } from "./LanguageComboboxInput"
 
@@ -9,6 +12,11 @@ import { LanguageComboboxInput } from "./LanguageComboboxInput"
  * field is not a Base-UI Combobox: the previous version cleared free-typed
  * text on Enter. The real-browser proof lives in
  * `e2e/specs/projects/language-combobox.spec.ts` — these cover the wiring.
+ *
+ * AQU-1456 widened the catalog from ISO 639-1 (~184) to the full ISO 639-3
+ * table (~7,900), loaded lazily. Cases below that turn on "this name is the
+ * only match" therefore use a name that is genuinely unique in that catalog;
+ * the French cases cover the opposite — an exact name that has siblings.
  *
  * AQU-1116 pre-highlights the top-ranked match so type-then-Enter selects it.
  * That narrows, but does not lift, the AQU-988 guarantee: Enter is claimed
@@ -41,24 +49,59 @@ function typeInto(input: HTMLElement, value: string) {
   fireEvent.change(input, { target: { value } })
 }
 
+/**
+ * AQU-1456 — wait out the lazy ISO 639-3 load, so the list on screen is the
+ * final one. The swap re-keys every row (French is `fr` in the bundled set and
+ * `fra` in the full one), which detaches any option located before it lands; a
+ * click on that stale node is a silent no-op. Call this after typing — the
+ * field's own load is in flight by then, and `act` flushes the re-render it
+ * triggers — and before locating an option to click.
+ */
+async function settleFullCatalog() {
+  await act(async () => {
+    await loadFullLanguageCatalog()
+  })
+}
+
 describe("LanguageComboboxInput", () => {
   it("suggests languages matching what was typed", async () => {
     render(<Harness />)
     const input = screen.getByLabelText("Language")
     typeInto(input, "fre")
 
-    const listbox = await screen.findByRole("listbox")
-    expect(
-      screen.getByRole("option", { name: /French/ }),
-    ).toBeTruthy()
-    expect(listbox.textContent).toContain("fr")
+    await screen.findByRole("listbox")
+    // AQU-1456 — a dozen names in the lazily loaded ISO 639-3 catalog contain
+    // "French" ("Cajun French", "Old French (842-ca. 1400)"), and whether that
+    // load has resolved by now is a race, so assert on the top-ranked option
+    // rather than on there being only one. French itself ranks first either way
+    // (AQU-1457). AQU-2049 shows the derived code ("fr"), not the 639-3 id.
+    const [best] = screen.getAllByRole("option", { name: /French/ })
+    expect(best.querySelector("span")?.textContent).toBe("French")
+    expect(best.querySelector("[data-language-code]")?.textContent).toBe("fr")
+  })
+
+  it("offers Traditional Han when zh-hant is typed, with its derived code (AQU-1792)", async () => {
+    render(<Harness />)
+    typeInto(screen.getByLabelText("Language"), "zh-hant")
+    await settleFullCatalog()
+
+    const option = await screen.findByRole("option", { name: /Traditional Han/ })
+    expect(option.querySelector("span")?.textContent).toBe("Traditional Han")
+    expect(option.querySelector("[data-language-code]")?.textContent).toBe("zh-Hant")
+    fireEvent.click(option)
+    expect(screen.getByTestId("committed")).toHaveTextContent("Traditional Han")
   })
 
   it("stores the display name — not the code — when a suggestion is picked", async () => {
     render(<Harness />)
     typeInto(screen.getByLabelText("Language"), "fre")
 
-    fireEvent.click(await screen.findByRole("option", { name: /French/ }))
+    // Locate and click in one synchronous step, on the settled list: an option
+    // found before the catalog swap is detached by it, and the click is lost.
+    await settleFullCatalog()
+    await screen.findByRole("listbox")
+    const [best] = screen.getAllByRole("option", { name: /French/ })
+    fireEvent.click(best)
 
     expect(screen.getByTestId("committed").textContent).toBe("French")
     expect((screen.getByLabelText("Language") as HTMLInputElement).value).toBe("French")
@@ -164,12 +207,31 @@ describe("LanguageComboboxInput", () => {
   it("leaves Enter alone once the text is exactly a catalog name", async () => {
     render(<Harness />)
     const input = screen.getByLabelText("Language")
-    typeInto(input, "Frenc")
+    typeInto(input, "Eastern Arrernt")
     await screen.findByRole("listbox")
     // The list hides itself here (isSettledLanguage), so Enter must not fire a
     // second, duplicate selection.
-    typeInto(input, "French")
+    typeInto(input, "Eastern Arrernte")
     await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(screen.getByTestId("committed").textContent).toBe("Eastern Arrernte")
+  })
+
+  it("commits the same name when an exact name still has catalog siblings", async () => {
+    // AQU-1456 — over the full ISO 639-3 catalog "French" is no longer the one
+    // match (Cajun French, French Sign Language, Old French, …), so the list
+    // stays up, exactly as it always has for "Norwegian". The exact match is
+    // still the top row, so Enter commits the typed name unchanged.
+    render(<Harness />)
+    const input = screen.getByLabelText("Language")
+    typeInto(input, "French")
+    await waitFor(() => {
+      expect(screen.getAllByRole("option")[0]!.textContent).toContain("French")
+    })
+    const options = screen.getAllByRole("option")
+    expect(options[0]!.getAttribute("aria-selected")).toBe("true")
+    expect(options.length).toBeGreaterThan(1)
 
     fireEvent.keyDown(input, { key: "Enter" })
     expect(screen.getByTestId("committed").textContent).toBe("French")
@@ -212,11 +274,11 @@ describe("LanguageComboboxInput", () => {
   it("hides the list once the text is already the only match", async () => {
     render(<Harness />)
     const input = screen.getByLabelText("Language")
-    typeInto(input, "Frenc")
+    typeInto(input, "Pattani Mala")
     await screen.findByRole("listbox")
 
     // Completing the word leaves nothing to suggest but the word itself.
-    typeInto(input, "French")
+    typeInto(input, "Pattani Malay")
     await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
   })
 
@@ -249,12 +311,26 @@ describe("LanguageComboboxInput", () => {
   })
 
   it("omits already-chosen languages from the list", async () => {
-    render(<Harness exclude={["French"]} />)
-    typeInto(screen.getByLabelText("Language"), "fren")
+    render(<Harness exclude={["Eastern Arrernte"]} />)
+    typeInto(screen.getByLabelText("Language"), "Eastern Arrernt")
 
     await waitFor(() => {
       expect(screen.queryByRole("listbox")).toBeNull()
     })
+  })
+
+  it("omits only the chosen language, not its catalog siblings", async () => {
+    // AQU-1456 — "French" being excluded must not take Cajun French or French
+    // Sign Language with it; they are different languages.
+    render(<Harness exclude={["French"]} />)
+    typeInto(screen.getByLabelText("Language"), "fren")
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option").length).toBeGreaterThan(0)
+    })
+    const labels = screen.getAllByRole("option").map((option) => option.textContent)
+    expect(labels.some((label) => label?.includes("French Sign Language"))).toBe(true)
+    expect(screen.queryByTestId("language-option-fra")).toBeNull()
   })
 
   /**
@@ -310,10 +386,123 @@ describe("LanguageComboboxInput", () => {
       render(<CommitHarness commits={commits} />)
       typeInto(screen.getByLabelText("Language"), "Spa")
 
-      fireEvent.click(await screen.findByRole("option", { name: /Spanish/ }))
+      // Exact name: the full catalog also has "Old Spanish" / "Spanish Sign
+      // Language", so a loose /Spanish/ matches several rows.
+      await screen.findByRole("listbox")
+      const spanish = screen.getAllByRole("option").find(
+        (option) => option.querySelector("span")?.textContent === "Spanish",
+      )
+      fireEvent.click(spanish!)
 
       expect(commits).toEqual([])
       expect((screen.getByLabelText("Language") as HTMLInputElement).value).toBe("Spanish")
+    })
+  })
+
+  /**
+   * AQU-2049 — the row shows the code a blank Advanced field would placeholder
+   * for that name. French's catalog id is "fra"; the derived code is "fr".
+   * Choosing the row still writes the name only.
+   */
+  describe("derived code on a suggestion (AQU-2049)", () => {
+    it("shows French's derived code, not the catalog id", async () => {
+      render(<Harness />)
+      typeInto(screen.getByLabelText("Language"), "Fr")
+      await settleFullCatalog()
+      await screen.findByRole("listbox")
+
+      const catalog = peekFullLanguageCatalog()
+      const derived = derivedLanguageCodeModule.derivedLanguageCode("French", catalog)
+      expect(derived).toBe("fr")
+      expect(catalog?.find((entry) => entry.name === "French")?.code).toBe("fra")
+
+      const option = screen.getByTestId("language-option-fra")
+      expect(option.querySelector("span")?.textContent).toBe("French")
+      expect(option.querySelector("[data-language-code]")?.textContent).toBe(derived)
+    })
+
+    it("calls onValueChange with the name when the row is clicked", async () => {
+      const onValueChange = vi.fn()
+      function Probe() {
+        const [value, setValue] = useState("")
+        return (
+          <LanguageComboboxInput
+            aria-label="Language"
+            value={value}
+            onValueChange={(next) => {
+              onValueChange(next)
+              setValue(next)
+            }}
+          />
+        )
+      }
+      render(<Probe />)
+      typeInto(screen.getByLabelText("Language"), "Fr")
+      await settleFullCatalog()
+      await screen.findByRole("listbox")
+      fireEvent.click(screen.getByTestId("language-option-fra"))
+
+      expect(onValueChange).toHaveBeenLastCalledWith("French")
+      expect(onValueChange.mock.calls.map(([value]) => value)).not.toContain("fr")
+      expect(onValueChange.mock.calls.map(([value]) => value)).not.toContain("fra")
+      expect((screen.getByLabelText("Language") as HTMLInputElement).value).toBe("French")
+    })
+
+    it("calls onEnterSelect with the name when Enter picks the row", async () => {
+      const onValueChange = vi.fn()
+      const onEnterSelect = vi.fn()
+      function Probe() {
+        const [value, setValue] = useState("")
+        return (
+          <LanguageComboboxInput
+            aria-label="Language"
+            value={value}
+            onValueChange={(next) => {
+              onValueChange(next)
+              setValue(next)
+            }}
+            onEnterSelect={(name) => {
+              onEnterSelect(name)
+              setValue(name)
+            }}
+          />
+        )
+      }
+      render(<Probe />)
+      const input = screen.getByLabelText("Language")
+      typeInto(input, "Fr")
+      await settleFullCatalog()
+      await screen.findByRole("listbox")
+      fireEvent.keyDown(input, { key: "Enter" })
+
+      expect(onEnterSelect).toHaveBeenCalledTimes(1)
+      expect(onEnterSelect).toHaveBeenCalledWith("French")
+      expect(onValueChange.mock.calls.map(([value]) => value)).toEqual(["Fr"])
+      expect((input as HTMLInputElement).value).toBe("French")
+    })
+
+    it("renders no code node when derivation returns nothing", async () => {
+      const spy = vi
+        .spyOn(derivedLanguageCodeModule, "derivedLanguageCode")
+        .mockReturnValue(null)
+      try {
+        render(<Harness />)
+        typeInto(screen.getByLabelText("Language"), "Fr")
+        await settleFullCatalog()
+        await screen.findByRole("listbox")
+        const option = screen.getAllByRole("option").find(
+          (row) => row.querySelector("span")?.textContent === "French",
+        )
+        expect(option).toBeTruthy()
+        expect(option!.textContent).toBe("French")
+        expect(option!.querySelector("[data-language-code]")).toBeNull()
+        expect(option!.querySelectorAll("span")).toHaveLength(1)
+
+        fireEvent.click(option!)
+        expect(screen.getByTestId("committed").textContent).toBe("French")
+      } finally {
+        spy.mockRestore()
+      }
     })
   })
 })

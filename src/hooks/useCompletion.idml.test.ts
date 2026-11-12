@@ -12,9 +12,14 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { useCompletion } from "./useCompletion"
+import {
+  markStyleAlignDirty,
+  resetStyleAlignDirtyForTests,
+  styleAlignDirtyMatches,
+} from "@/lib/store/style-align-dirty"
 
 vi.mock("@/lib/posthog", () => ({
-  default: { capture: vi.fn(), captureException: vi.fn() },
+  default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn(), captureException: vi.fn() },
 }))
 vi.mock("@/lib/completion/frontier-health", () => ({
   useFrontierHealth: () => ({ available: true }),
@@ -62,6 +67,8 @@ const searchPassages = vi.fn().mockResolvedValue([])
 describe("useCompletion IDML protected-output boundary", () => {
   beforeEach(() => {
     vi.unstubAllGlobals()
+    localStorage.clear()
+    resetStyleAlignDirtyForTests()
   })
 
   it("prompts with canonical anchors and commits only an exact protected response", async () => {
@@ -116,6 +123,21 @@ describe("useCompletion IDML protected-output boundary", () => {
     expect(saved).toBe(false)
     expect(commit).not.toHaveBeenCalled()
     expect(result.current.errors.get(cell.id)).toMatch(/repair pass also failed|protected IDML anchor/i)
+    // AQU-1964: the refusal is correct, but it used to be uncountable. One
+    // event per refused draft, carrying codes and counts only.
+    const { default: posthog } = await import("@/lib/posthog")
+    expect(posthog.capture).toHaveBeenCalledWith(
+      "idml draft rejected for protected anchor",
+      expect.objectContaining({
+        draft_mode: "single",
+        repair_attempted: true,
+        unit_count: 1,
+      }),
+    )
+    const [, properties] = vi.mocked(posthog.capture).mock.calls.find(
+      ([event]) => event === "idml draft rejected for protected anchor",
+    )!
+    expect(JSON.stringify(properties)).not.toMatch(/part-|Stories\//i)
   })
 
   it("repairs a broken IDML draft via slot-JSON stitch before committing", async () => {
@@ -247,9 +269,175 @@ describe("useCompletion IDML protected-output boundary", () => {
     expect(result.current.completing.get(cell.id)).toBeUndefined()
     expect(result.current.errors.get(cell.id)).toBeUndefined()
   })
+
+  it("aligns styles by committing slot text without drafting a new translation", async () => {
+    // Apostrophe glue is not a sentence the shape placer can keep, so this
+    // still asks the model. A plain "Hello" / "WORLD" cell is placed without one.
+    const unit = await parsedUnit({ slots: ["'", "'"] })
+    const cell = completionCell(unit)
+    cell.translated = "Bonjour MONDE"
+    cell.translatedHtml = renderIdmlUnitHtml({
+      ...unit,
+      slots: unit.slots.map((slot, index) => ({
+        ...slot,
+        text: index === 0 ? "Bonjour MONDE" : "",
+      })),
+    })
+    const bodies: string[] = []
+    mockCompletion(JSON.stringify({
+      slots: [{ i: 0, t: "Bonjour " }, { i: 1, t: "MONDE" }],
+    }), bodies)
+    const commit = vi.fn().mockResolvedValue(undefined)
+    const record = vi.fn()
+    const { result } = renderCompletion(cell, commit, record)
+    search.mockClear()
+
+    markStyleAlignDirty(cell.id, cell.translatedHtml)
+    let saved = false
+    await act(async () => {
+      saved = await result.current.alignCellStyles(cell as never)
+    })
+
+    expect(saved).toBe(true)
+    expect(styleAlignDirtyMatches(cell.id, cell.translatedHtml)).toBe(false)
+    expect(search).not.toHaveBeenCalled()
+    expect(commit).toHaveBeenCalledWith(
+      cell,
+      expect.stringContaining("MONDE"),
+      "test-model",
+      expect.objectContaining({ mode: "align-styles", promptVersion: "align-styles-v1" }),
+    )
+    const committedHtml = commit.mock.calls[0]![1] as string
+    const checked = validateIdmlTranslation(unit.sourceHtml, committedHtml, unit.metadata)
+    expect(checked.valid).toBe(true)
+    expect(checked.slots[1]).toBe("MONDE")
+    const request = JSON.parse(bodies[0]!) as {
+      temperature: number
+      messages: Array<{ content: string }>
+    }
+    expect(request.temperature).toBe(0)
+    expect(request.messages[0]?.content).toContain("Do not translate")
+    expect(request.messages.some((message) => message.content.includes("protected-anchor"))).toBe(false)
+    // AQU-1656: the align draft leaves its prompt and reply in the AI trail.
+    const provenance = commit.mock.calls[0]![3] as { interventionId?: string }
+    expect(provenance.interventionId).toBeTruthy()
+    expect(record).toHaveBeenCalledTimes(1)
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      callId: provenance.interventionId,
+      kind: "draft",
+      mode: "align-styles",
+      messages: request.messages,
+      rawOutput: JSON.stringify({ slots: [{ i: 0, t: "Bonjour " }, { i: 1, t: "MONDE" }] }),
+      cells: [expect.objectContaining({
+        interventionId: provenance.interventionId,
+        cellId: cell.id,
+        output: committedHtml,
+      })],
+    }))
+    expect(result.current.completing.get(cell.id)).toBeUndefined()
+  })
+
+  it("does not save an align-styles reply that changes the wording", async () => {
+    const unit = await parsedUnit({ slots: ["'", "'"] })
+    const cell = completionCell(unit)
+    cell.translated = "Bonjour MONDE"
+    cell.translatedHtml = renderIdmlUnitHtml({
+      ...unit,
+      slots: unit.slots.map((slot, index) => ({
+        ...slot,
+        text: index === 0 ? "Bonjour MONDE" : "",
+      })),
+    })
+    mockCompletion(JSON.stringify({
+      slots: [{ i: 0, t: "Bonjour " }, { i: 1, t: "LE MONDE" }],
+    }), [])
+    const commit = vi.fn().mockResolvedValue(undefined)
+    const record = vi.fn()
+    const { result } = renderCompletion(cell, commit, record)
+
+    markStyleAlignDirty(cell.id, cell.translatedHtml)
+    let saved = true
+    await act(async () => {
+      saved = await result.current.alignCellStyles(cell as never)
+    })
+
+    expect(saved).toBe(false)
+    expect(commit).not.toHaveBeenCalled()
+    expect(record).not.toHaveBeenCalled()
+    expect(styleAlignDirtyMatches(cell.id, cell.translatedHtml)).toBe(true)
+    expect(result.current.errors.get(cell.id)).toMatch(/changed the wording/)
+  })
+
+  it("clears the align warning when the model leaves the runs unchanged", async () => {
+    const unit = await parsedUnit({ slots: ["'", "'"] })
+    const cell = completionCell(unit)
+    cell.translated = "Bonjour MONDE"
+    cell.translatedHtml = renderIdmlUnitHtml({
+      ...unit,
+      slots: unit.slots.map((slot, index) => ({
+        ...slot,
+        text: index === 0 ? "Bonjour MONDE" : "",
+      })),
+    })
+    mockCompletion(JSON.stringify({
+      slots: [{ i: 0, t: "Bonjour MONDE" }, { i: 1, t: "" }],
+    }), [])
+    const commit = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderCompletion(cell, commit)
+    markStyleAlignDirty(cell.id, cell.translatedHtml)
+
+    let saved = true
+    await act(async () => {
+      saved = await result.current.alignCellStyles(cell as never)
+    })
+
+    expect(saved).toBe(false)
+    expect(commit).not.toHaveBeenCalled()
+    expect(styleAlignDirtyMatches(cell.id, cell.translatedHtml)).toBe(false)
+  })
+
+  it("places a collapsed translation into the source runs without calling the model", async () => {
+    const unit = await parsedUnit()
+    const cell = completionCell(unit)
+    cell.translated = "Bonjour MONDE"
+    cell.translatedHtml = renderIdmlUnitHtml({
+      ...unit,
+      slots: unit.slots.map((slot, index) => ({
+        ...slot,
+        text: index === 0 ? "Bonjour MONDE" : "",
+      })),
+    })
+    const bodies: string[] = []
+    mockCompletion("should-not-be-called", bodies)
+    const commit = vi.fn().mockResolvedValue(undefined)
+    const record = vi.fn()
+    const { result } = renderCompletion(cell, commit, record)
+
+    markStyleAlignDirty(cell.id, cell.translatedHtml)
+    let saved = false
+    await act(async () => {
+      saved = await result.current.alignCellStyles(cell as never)
+    })
+
+    expect(saved).toBe(true)
+    expect(bodies).toEqual([])
+    expect(record).not.toHaveBeenCalled()
+    expect(styleAlignDirtyMatches(cell.id, cell.translatedHtml)).toBe(false)
+    expect(commit).toHaveBeenCalledOnce()
+    const committedHtml = commit.mock.calls[0]![1] as string
+    const checked = validateIdmlTranslation(unit.sourceHtml, committedHtml, unit.metadata)
+    expect(checked.valid).toBe(true)
+    expect(checked.slots[0]).toBe("Bonjour ")
+    expect(checked.slots[1]).toBe("MONDE")
+    expect(result.current.completing.get(cell.id)).toBeUndefined()
+  })
 })
 
-function renderCompletion(cell: ReturnType<typeof completionCell>, commit: ReturnType<typeof vi.fn>) {
+function renderCompletion(
+  cell: ReturnType<typeof completionCell>,
+  commit: ReturnType<typeof vi.fn>,
+  record?: ReturnType<typeof vi.fn>,
+) {
   return renderHook(() => useCompletion(
     SETTINGS,
     "English",
@@ -262,6 +450,10 @@ function renderCompletion(cell: ReturnType<typeof completionCell>, commit: Retur
     [cell] as never,
     undefined,
     DEFAULT_DRAFT_CONTEXT,
+    "",
+    undefined,
+    undefined,
+    record as never,
   ))
 }
 
@@ -292,7 +484,7 @@ function completionCell(unit: IdmlTranslationUnit) {
   }
 }
 
-async function parsedUnit(options: { singleSlot?: boolean } = {}): Promise<IdmlTranslationUnit> {
+async function parsedUnit(options: { singleSlot?: boolean; slots?: readonly string[] } = {}): Promise<IdmlTranslationUnit> {
   const mime = "application/vnd.adobe.indesign-idml-package"
   const namespace = 'xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"'
   const storyPath = "Stories/Story_u100.xml"
@@ -308,9 +500,9 @@ async function parsedUnit(options: { singleSlot?: boolean } = {}): Promise<IdmlT
     [
       `<?xml version="1.0"?><idPkg:Story ${namespace}><Story Self="u100">`,
       '<ParagraphStyleRange Self="mixed" AppliedParagraphStyle="ParagraphStyle/Body">',
-      '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>Hello</Content></CharacterStyleRange>',
+      `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>${options.slots?.[0] ?? "Hello"}</Content></CharacterStyleRange>`,
       ...(!options.singleSlot
-        ? ['<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Bold"><Content>WORLD</Content></CharacterStyleRange>']
+        ? [`<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Bold"><Content>${options.slots?.[1] ?? "WORLD"}</Content></CharacterStyleRange>`]
         : ["<Br/>"]),
       "</ParagraphStyleRange></Story></idPkg:Story>",
     ].join(""),

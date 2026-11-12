@@ -18,6 +18,12 @@ export const AQUILLA_MIGRATION_NS = "7f3c8a91-2b4d-4e6f-9a8c-1d3e5f2b4a6c"
 
 const u5 = (seed: string): string => uuidv5(seed, AQUILLA_MIGRATION_NS)
 
+/** Audited repair of a missing audio projection whose original event is already
+ * logged. Keep that original event/ledger entry; this repair has its own stable
+ * identity, tied to the verified source bytes. Never use it for routine retries. */
+export const audioProjectionRepairEventId = (originalEventId: string, sourceOid: string): string =>
+  u5(`audio-projection-repair:v1:${originalEventId}:${sourceOid}`)
+
 /** Source of the legacy project key: a GitLab numeric project id, or the
  *  `metadata.json.projectId` of a local working copy. They get distinct
  *  prefixes so the two paths can never collide on the same aquilla project. */
@@ -138,6 +144,33 @@ export const sourceCellReanchorEventId = (
   anchorCellId: string | null,
 ): string => u5(`cell-reanchor:${projectId}:${fileId}:${cellId}:${anchorCellId ?? "∅"}`)
 
+/** event id for the `source.cell.visibility.set` that parks (or un-parks) a
+ *  cell Codex users hid with the eye icon (AQU-1425).
+ *
+ *  Keyed on the DECISION (`hidden`) and on the legacy timestamp of the edit
+ *  that made it — not on (project, file, cell) alone. A visibility flag is the
+ *  one migrated fact that legitimately flips back and forth: seeding only the
+ *  cell would make a later unhide in Codex derive the id the hide already used,
+ *  so the delta filter (and `INSERT OR IGNORE`) would swallow the show event and
+ *  strand the cell hidden forever. Including both makes a re-run of the SAME
+ *  working copy converge on the same id (a no-op) while every genuine flip
+ *  mints a fresh one — and because the projection replays in `server_seq`
+ *  order, the newest decision wins on rebuild too.
+ *
+ *  `ts` is absent only when Codex recorded no edit ledger for the flag (the
+ *  materialized-flag fallback); the decision itself still separates the two
+ *  ids. */
+export const sourceCellVisibilityEventId = (
+  projectId: string,
+  fileId: string,
+  cellId: string,
+  hidden: boolean,
+  ts: number | undefined,
+): string =>
+  u5(
+    `cell-visibility:${projectId}:${fileId}:${cellId}:${hidden ? "hide" : "show"}:${ts ?? "∅"}`,
+  )
+
 /** event id for the i-th `target.cell.commit` in a cell's edit history.
  *  `editIdx` is the 0-based index into the legacy `metadata.edits[]` (the
  *  source of full-history fidelity); commit_sha is deliberately excluded so a
@@ -198,3 +231,5 @@ export const audioSelectEventId = (
   cellId: string,
   audioId: string,
 ): string => u5(`audio-select:${projectId}:${fileId}:${cellId}:${audioId}`)
+
+export const personalOrgLegacyUuidFor = (namespaceId: number): string => u5(`gitlab-personal-namespace:${namespaceId}`)

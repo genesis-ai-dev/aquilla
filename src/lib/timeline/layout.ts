@@ -14,10 +14,16 @@
 import { subtitleSpanSec, targetChipGeom, type SpanSec, type TargetChipGeom } from "./lane-timing"
 import {
   buildProgramme,
+  canCarryTargetLead,
   fileSpanToProgrammeSpan,
+  leadSecForMove,
+  pieceLeadSecForMove,
+  type BuildProgrammeOptions,
   type Programme,
+  type ProgrammeLayer,
   type ProgrammeSlot,
 } from "./programme"
+import { isDefaultTrackSlot } from "./track-slots"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import type { AudioTimingMode } from "@/lib/parsers/types"
@@ -36,17 +42,59 @@ export interface TimelineLayout {
   totalSec: number
   /** Where a card sits in its lane. */
   spanFor(cell: CellData, lane: "subtitle" | "source"): SpanSec | null
-  /** Where a section's dub chip sits, and its trim state. */
-  targetGeom(cell: CellData, att: Att): TargetChipGeom | null
+  /**
+   * Where a section's dub chip sits, and its trim state.
+   *
+   * AQU-2252: `audioId` names the take. Following the recordings a take on an
+   * added track is a LAYER, placed and sized on its own, so asking about one
+   * without naming it would get the main take's answer. Every caller that has
+   * the take's id passes it; leaving it out asks about the main take.
+   */
+  targetGeom(cell: CellData, att: Att, audioId?: string): TargetChipGeom | null
   /**
    * The span a dub chip is measured and clamped against. In dubbing that's the
    * frozen source split. In audio-first it runs from the clip's own zero (so
-   * the head trim can be dragged back off) to the end of the verse's slot.
+   * the head trim can be dragged back off) to the end of the verse's slot —
+   * and for a take on a track made a layer (AQU-2252, Oct 29), it is the line's
+   * slot itself, the way a take is measured against its line following the
+   * source.
    */
-  chipSection(cell: CellData, att: Att): SpanSec | null
+  chipSection(cell: CellData, att: Att, audioId?: string): SpanSec | null
   /** Where clicking this cell should send playback, in the layout's seconds. */
   seekSecFor(cell: CellData): number | null
+  /**
+   * AQU-2215: whether a MOVE gesture on this take changes anything. Dubbing
+   * moves any chip; following the recordings only a take that can hold a
+   * pause before its line (`canCarryTargetLead`) — the others are computed
+   * end to end and have nowhere to go.
+   */
+  canRetimeTarget(cell: CellData, att: Att, audioId?: string): boolean
+  /**
+   * The inverse of `targetGeom`, for the one thing a drag may change: the
+   * FILE-clock anchor to STORE for a take whose audible start was dragged to
+   * `audibleStartSec` on THIS layout's clock. Null when the take cannot be
+   * moved here.
+   *
+   * Dubbing's clock IS the file clock, so the answer is the drag's own anchor.
+   * Following the recordings the chip is drawn on the programme clock, which
+   * nothing stores — what the drag actually changed is the take's pause before
+   * its line, and that is an offset from the line's own start.
+   */
+  retimeAnchorSec(cell: CellData, att: Att, audibleStartSec: number, audioId?: string): number | null
+  /**
+   * AQU-2252: what this take is to its line while the file follows its
+   * recordings — its take on the Language lane's main track ("main"), a take
+   * on an added track that sets line lengths ("sets-length"), or one on a
+   * track made a layer ("layer"), which is drawn, warned about and moved the
+   * way takes are following the source. Null following the original, where
+   * every take sits on the file clock alike, and for a take the programme
+   * does not lay in.
+   */
+  takeRole(cell: CellData, audioId: string): TakeRole | null
 }
+
+/** AQU-2252: see `TimelineLayout.takeRole`. */
+export type TakeRole = "main" | "sets-length" | "layer"
 
 /** Trailing room past the last card, so the final chip isn't flush to the edge.
  *  Exported so the insert arithmetic can agree with the track rather than
@@ -84,12 +132,48 @@ function dubbingLayout(cells: readonly CellData[], mediaDurationSec?: number | n
     chipSection: (cell) => sectionSpan(cell),
     seekSecFor: (cell) =>
       typeof cell.startTime === "number" && Number.isFinite(cell.startTime) ? cell.startTime : null,
+    canRetimeTarget: () => true,
+    // The clip's sample zero sits a head-trim before its audible start — the
+    // round-7 anchor, which is what the chip was already committing.
+    retimeAnchorSec: (cell, att, audibleStartSec) => {
+      const geom = targetChipGeom(cell, att)
+      return geom ? audibleStartSec - geom.trimStartSec : null
+    },
+    takeRole: () => null,
   }
 }
 
-function audioFirstLayout(_cells: readonly CellData[], dialogue: readonly CellData[]): TimelineLayout {
-  const programme = buildProgramme(dialogue)
+function audioFirstLayout(
+  _cells: readonly CellData[],
+  dialogue: readonly CellData[],
+  opts?: BuildProgrammeOptions,
+): TimelineLayout {
+  const programme = buildProgramme(dialogue, opts)
   const slotOf = (cell: CellData): ProgrammeSlot | null => programme.byCellId.get(cell.id) ?? null
+  /** AQU-2252: the take as a layer of its line, or null for the main take. */
+  const layerOf = (slot: ProgrammeSlot, audioId: string | undefined): ProgrammeLayer | null =>
+    audioId != null ? (slot.layers?.find((l) => l.audioId === audioId) ?? null) : null
+  const lineStartOf = (cell: CellData): number =>
+    typeof cell.startTime === "number" && Number.isFinite(cell.startTime) ? cell.startTime : 0
+  /** AQU-2252: the pieces of the line's split take on `layer`'s track, in
+   *  order, as the programme placed them; none for a take never split. A track
+   *  that sets line lengths holds one take per line, so its layers are all of
+   *  that take. */
+  const trackPiecesOf = (slot: ProgrammeSlot, layer: ProgrammeLayer): ProgrammeLayer[] => {
+    const takes = (slot.layers ?? []).filter((l) => l.slot === layer.slot && l.setsLength)
+    return takes.length > 1 ? takes : []
+  }
+
+  /** Which piece of the line's split take starts `trimStartSec` into the
+   *  recording, or -1 (a take never split). A piece is known by where it
+   *  starts in the recording; pieces never share audio, so no two start in
+   *  the same place. */
+  const pieceIndexOf = (slot: ProgrammeSlot, trimStartSec: number): number =>
+    slot.targetPieces ? slot.targetPieces.findIndex((p) => Math.abs(p.start - trimStartSec) < 1e-6) : -1
+  const trimStartOf = (att: Att): number =>
+    att?.trimStartMs != null && Number.isFinite(att.trimStartMs) && att.trimStartMs > 0
+      ? att.trimStartMs / 1000
+      : 0
 
   /**
    * The dub chip, re-expressed against the programme clock. The trim maths in
@@ -98,13 +182,10 @@ function audioFirstLayout(_cells: readonly CellData[], dialogue: readonly CellDa
    * audible start land exactly on the slot start — and leaves every existing
    * resize calculation correct without touching it.
    */
-  const geomFor = (cell: CellData, att: Att): TargetChipGeom | null => {
+  const geomFor = (cell: CellData, att: Att, audioId?: string): TargetChipGeom | null => {
     const slot = slotOf(cell)
     if (!slot) return null
-    const trimStartSec =
-      att?.trimStartMs != null && Number.isFinite(att.trimStartMs) && att.trimStartMs > 0
-        ? att.trimStartMs / 1000
-        : 0
+    const trimStartSec = trimStartOf(att)
     const durationSec =
       att?.durationMs != null && Number.isFinite(att.durationMs) && att.durationMs > 0
         ? att.durationMs / 1000
@@ -113,6 +194,33 @@ function audioFirstLayout(_cells: readonly CellData[], dialogue: readonly CellDa
       att?.trimEndMs != null && Number.isFinite(att.trimEndMs) && att.trimEndMs / 1000 > trimStartSec
         ? att.trimEndMs / 1000
         : null
+    // AQU-2252: a layer is drawn where it was put, at its own length — the
+    // programme placed it (`ProgrammeLayer`) and the transport plays it there.
+    // One of unknown length borrows its line's width from its own start, and
+    // says so, like the main take below.
+    const layer = layerOf(slot, audioId)
+    if (layer) {
+      const start = slot.startSec + layer.atSec
+      return layer.window
+        ? {
+            anchor: slot.startSec + layer.anchorSec,
+            start,
+            end: start + (layer.window.end - layer.window.start),
+            trimStartSec,
+            trimEndSec,
+            durationSec,
+            usingFallback: false,
+          }
+        : {
+            anchor: start - trimStartSec,
+            start,
+            end: start + slot.slotLenSec,
+            trimStartSec,
+            trimEndSec: null,
+            durationSec: null,
+            usingFallback: true,
+          }
+    }
     const anchor = slot.startSec - trimStartSec
     // No honest length → the chip borrows the verse's width and says so,
     // exactly as it does in dubbing mode.
@@ -127,10 +235,31 @@ function audioFirstLayout(_cells: readonly CellData[], dialogue: readonly CellDa
         usingFallback: true,
       }
     }
+    // AQU-1767 (Sam, 2026-10-15): a split take's pieces sit in the line's
+    // slot in the order they come in the recording — the way its joined copy
+    // plays them. AQU-1758: each where it was placed (`atSec`), the gaps
+    // between them silence.
+    const pieces = slot.targetPieces
+    const at = pieceIndexOf(slot, trimStartSec)
+    if (pieces && at >= 0) {
+      const start = slot.startSec + pieces[at].atSec
+      return {
+        anchor: start - trimStartSec,
+        start,
+        end: start + (pieces[at].end - pieces[at].start),
+        trimStartSec,
+        trimEndSec,
+        durationSec,
+        usingFallback: false,
+      }
+    }
+    // AQU-2204: a pause someone left before the take stays inside its line,
+    // so the take starts that far into the slot.
+    const start = slot.startSec + (slot.targetLeadSec ?? 0)
     return {
-      anchor,
-      start: slot.startSec,
-      end: slot.startSec + slot.targetLenSec,
+      anchor: start - trimStartSec,
+      start,
+      end: start + slot.targetLenSec,
       trimStartSec,
       trimEndSec,
       durationSec,
@@ -141,6 +270,7 @@ function audioFirstLayout(_cells: readonly CellData[], dialogue: readonly CellDa
   return {
     mode: "audioFirst",
     programme,
+    // AQU-2252: the programme reaches a layer that runs on past the last line.
     totalSec: programme.totalSec + TRACK_PAD_SEC,
     spanFor: (cell, lane) => {
       const slot = slotOf(cell)
@@ -159,16 +289,81 @@ function audioFirstLayout(_cells: readonly CellData[], dialogue: readonly CellDa
       return fileSpanToProgrammeSpan(programme, span.start, span.end)
     },
     targetGeom: geomFor,
-    chipSection: (cell, att) => {
+    chipSection: (cell, att, audioId) => {
       const slot = slotOf(cell)
       if (!slot) return null
-      const geom = geomFor(cell, att)
+      const geom = geomFor(cell, att, audioId)
+      // AQU-2252 (Sam, Oct 29): a take on a track made a layer is measured
+      // against its line, as a take is following the source — so it turns
+      // amber running past the line and red over the next take on its track.
+      // One on a track that sets line lengths is measured as the main take is.
+      if (layerOf(slot, audioId)?.setsLength === false) {
+        return { start: slot.startSec, end: slot.startSec + slot.slotLenSec }
+      }
       return {
         start: geom?.anchor ?? slot.startSec,
         end: slot.startSec + slot.slotLenSec,
       }
     },
     seekSecFor: (cell) => programme.byCellId.get(cell.id)?.startSec ?? null,
+    canRetimeTarget: (cell, _att, audioId) => {
+      const slot = slotOf(cell)
+      // AQU-2252: a layer's place is its own stored offset, which the next
+      // layout reads straight back — so it moves whatever its length. A take
+      // on a track that sets line lengths carries a pause, as the main take
+      // does, once its length is known.
+      const layer = slot ? layerOf(slot, audioId) : null
+      if (layer) return layer.setsLength ? layer.window != null : true
+      return slot != null && canCarryTargetLead(cell, slot)
+    },
+    // AQU-2215 (Sam, Oct 27): "it should still be possible for me to move a
+    // recorded take around in the timeline." It is the PAUSE before the take
+    // that moves — the one thing about a take's placement that following the
+    // recordings keeps (AQU-2204) — so the drag's programme-clock start comes
+    // back as a file-clock anchor whose offset IS that pause. The line grows
+    // to hold it on the next build, which is what carries the later lines
+    // along; nothing about the programme clock is ever stored.
+    retimeAnchorSec: (cell, att, audibleStartSec, audioId) => {
+      const slot = slotOf(cell)
+      if (!slot) return null
+      // AQU-2252: a take on a track made a layer stores where its clip's
+      // sample zero goes — a head trim before where its sound was dropped,
+      // before its line's start too (its lead-in): the chip's own move clamp
+      // keeps it touching its line and off its neighbour, as following the
+      // source. A take on a track that sets line lengths stores its pause, as
+      // the main take does.
+      const layer = layerOf(slot, audioId)
+      if (layer && !layer.setsLength) {
+        const trimStartSec = layer.window?.start ?? (att?.trimStartMs != null && att.trimStartMs > 0 ? att.trimStartMs / 1000 : 0)
+        return lineStartOf(cell) + (audibleStartSec - slot.startSec) - trimStartSec
+      }
+      if (layer) {
+        if (!layer.window) return null
+        // AQU-1758: a piece of a split take there has the one place both
+        // timings read, as a piece on the main track has.
+        const pieces = trackPiecesOf(slot, layer)
+        const at = pieces.indexOf(layer)
+        return lineStartOf(cell) + (at >= 0
+          ? pieceLeadSecForMove(slot, at, audibleStartSec, pieces.map((l) => ({ ...l.window!, atSec: l.atSec })))
+          : leadSecForMove(slot, audibleStartSec))
+      }
+      if (!canCarryTargetLead(cell, slot)) return null
+      // AQU-1758: a line with no times of its own stores the pause from its
+      // slot's start (a line start of 0), on the take — or on the piece, for
+      // a split take, each piece in the one place both timings read it from.
+      const at = pieceIndexOf(slot, trimStartOf(att))
+      return lineStartOf(cell) + (at >= 0 ? pieceLeadSecForMove(slot, at, audibleStartSec) : leadSecForMove(slot, audibleStartSec))
+    },
+    takeRole: (cell, audioId) => {
+      const slot = slotOf(cell)
+      if (!slot) return null
+      const layer = layerOf(slot, audioId)
+      if (layer) return layer.setsLength ? "sets-length" : "layer"
+      // A take the programme did not lay in as one of the line's other takes
+      // is the main track's only if it is stored on it.
+      const stored = cell.attachments?.[audioId]?.slot
+      return stored == null || isDefaultTrackSlot(stored) ? "main" : null
+    },
   }
 }
 
@@ -188,8 +383,10 @@ export function buildTimelineLayout(
   cells: readonly CellData[],
   dialogue: readonly CellData[],
   mediaDurationSec?: number | null,
+  /** AQU-2204: stand-in lengths for lines with no times (audio-first only). */
+  programmeOptions?: BuildProgrammeOptions,
 ): TimelineLayout {
   return mode === "audioFirst"
-    ? audioFirstLayout(cells, dialogue)
+    ? audioFirstLayout(cells, dialogue, programmeOptions)
     : dubbingLayout(cells, mediaDurationSec)
 }

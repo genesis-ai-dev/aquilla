@@ -4,7 +4,9 @@
 // in a booth session — a wrong audioId or slot here silently corrupts the mix.
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { fmtLabeledDateTime, fmtShortCalendarDate } from "@/lib/format-date"
+import { expectClickNote, expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 
 const emitSelect = vi.fn(async (..._args: unknown[]) => "evt-1")
@@ -12,17 +14,24 @@ const emitRemove = vi.fn(async (..._args: unknown[]) => "evt-2")
 const emitRename = vi.fn(async (..._args: unknown[]) => "evt-3")
 const notify = vi.fn((..._args: unknown[]) => {})
 const injectOptimistic = vi.fn((..._args: unknown[]) => {})
+const emitDeselect = vi.fn(async (..._args: unknown[]) => "evt-4")
+const injectDeselect = vi.fn((..._args: unknown[]) => {})
+const emitValidate = vi.fn(async (..._args: unknown[]) => "evt-5")
 
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioSelect: (...args: unknown[]) => emitSelect(...args),
+  emitCellAudioDeselect: (...args: unknown[]) => emitDeselect(...args),
   emitCellAudioRemove: (...args: unknown[]) => emitRemove(...args),
   emitCellAudioRename: (...args: unknown[]) => emitRename(...args),
+  emitCellAudioValidate: (...args: unknown[]) => emitValidate(...args),
+  emitCellAudioUnvalidate: (...args: unknown[]) => emitValidate(...args),
 }))
 const injectOptimisticRemove = vi.fn((..._args: unknown[]) => {})
 vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   notifyAudioAttachmentsChanged: (...args: unknown[]) => notify(...args),
   injectOptimisticAudioAttachment: (...args: unknown[]) => injectOptimistic(...args),
   injectOptimisticAudioRemove: (...args: unknown[]) => injectOptimisticRemove(...args),
+  injectOptimisticAudioDeselect: (...args: unknown[]) => injectDeselect(...args),
 }))
 
 // AQU-464: the strip resolves each take against the cell's text history. That
@@ -34,7 +43,14 @@ vi.mock("@/hooks/useRecordingTextDrift", () => ({
   useRecordingTextDrift: () => driftResult,
 }))
 
-import { TakesStrip } from "./TakesStrip"
+// AQU-2235: every list now draws each take's shape, which reads its peaks.
+const loadPeaks = vi.fn(async () => null)
+vi.mock("@/lib/audio/peaks-loader", async (orig) => ({
+  ...(await orig<typeof import("@/lib/audio/peaks-loader")>()),
+  loadPeaksFor: (...args: unknown[]) => loadPeaks(...(args as [])),
+}))
+
+import { TakesStrip, nextTakeLabel } from "./TakesStrip"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 const session = { jwt: "jwt", username: "dir" } as never
@@ -74,6 +90,26 @@ describe("TakesStrip", () => {
   it("renders nothing when there are no takes", () => {
     const { container } = render(<TakesStrip {...common} takes={[]} selectedAudioId={null} />)
     expect(container.firstChild).toBeNull()
+  })
+
+  // AQU-2235 (Sam's board 52): the recording window's list carries each
+  // take's shape at 56 × 20, as the Recording tab's always has.
+  it("draws each take's 56 × 20 shape in the recording window's list too", () => {
+    render(<TakesStrip {...common} chromeless takes={[take("a", 1500), take("b", 2300)]} selectedAudioId="b" />)
+    for (const id of ["a", "b"]) {
+      const shape = screen.getByTestId(`take-row-wave-${id}`)
+      expect(shape.style.height).toBe("20px")
+      expect(shape.className).toContain("w-14")
+    }
+  })
+
+  // Sam, Oct 25: "make the only distinction between AI and non-AI the little
+  // star in the corner" — ONE star, the one in the take's shape.
+  it("marks a generated take with one star, in its shape's corner", () => {
+    const voiced = { ...take("g", 1500), voiceId: "v-ana" }
+    render(<TakesStrip {...common} chromeless takes={[voiced, take("a", 1500)]} selectedAudioId="a" />)
+    expect(screen.getByTestId("take-row-g").querySelectorAll(".lucide-sparkles")).toHaveLength(1)
+    expect(screen.getByTestId("take-row-wave-g-generated")).toBeInTheDocument()
   })
 
   it("lists every take with its (backfilled) name and duration", async () => {
@@ -239,6 +275,25 @@ describe("TakesStrip", () => {
     expect(container).toBeTruthy()
   })
 
+  // AQU-2327 (Q2): a version saved from the Station keeps its take's name,
+  // and the list tells them apart by "· version N".
+  it("names a saved version after its take, with its version number", () => {
+    render(
+      <TakesStrip
+        {...common}
+        takes={[
+          { ...take("audio-a", 1000), label: "Take 2" },
+          { ...take("st-audio-b", 1000), label: "Take 2", referenceAudioId: "audio-a" },
+          { ...take("st-audio-c", 1000), label: "Take 2", referenceAudioId: "st-audio-b" },
+        ]}
+        selectedAudioId="st-audio-c"
+      />,
+    )
+    expect(screen.getByText("Take 2 · version 3")).toBeTruthy()
+    expect(screen.getByText("Take 2 · version 2")).toBeTruthy()
+    expect(screen.getByText("Take 2")).toBeTruthy()
+  })
+
   it("a cleaned take offers revert that selects the original take", async () => {
     emitSelect.mockResolvedValue("evt-ok")
     render(
@@ -307,6 +362,22 @@ describe("TakesStrip — stable names (round 8)", () => {
       expect.objectContaining({ audioId: "a", label: "Best whisper", cellId: "c1" }),
     )
     expect(screen.getByTestId("take-label-a")).toHaveTextContent("Best whisper")
+  })
+
+  // Escape closes the box. In Chromium the closing box then fires blur (WebKit
+  // does not — probed 2026-09-29), whose handler saved the very name Escape
+  // meant to throw away. happy-dom does not fire it on removal either, so this
+  // pins the outcome rather than reproducing the Chromium path.
+  it("Escape cancels a rename — nothing is saved", async () => {
+    render(<TakesStrip {...common} takes={[namedTake("a", "Take 1")]} selectedAudioId="a" />)
+    fireEvent.click(screen.getByRole("button", { name: "Rename take" }))
+    const input = screen.getByTestId("take-rename-a")
+    fireEvent.change(input, { target: { value: "Not this" } })
+    fireEvent.keyDown(input, { key: "Escape" })
+    fireEvent.blur(input)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(emitRename).not.toHaveBeenCalled()
+    expect(screen.getByTestId("take-label-a")).toHaveTextContent("Take 1")
   })
 
   it("legacy unlabeled takes are backfilled ONCE with sequential names", async () => {
@@ -387,6 +458,30 @@ describe("TakesStrip — generated (TTS) takes (round 8c)", () => {
     )
   })
 
+  // Sam, 2026-09-28 (Mark 1:3): a line with NO imported source clip — every
+  // text file — had nothing to hand the recording slot to, so picking the
+  // generated take changed nothing and the recording kept playing.
+  it("with no source clip, activating a TTS take empties the recording slot instead", async () => {
+    emitDeselect.mockClear()
+    injectDeselect.mockClear()
+    render(
+      <TakesStrip
+        {...common}
+        takes={[namedTake("audio-c1-1-t.webm", "Take 1"), genTake("audio-c1-2-g.wav")]}
+        selectedAudioId="audio-c1-1-t.webm" // a recorded take holds the slot
+        selectedGeneratedAudioId="audio-c1-2-g.wav"
+        sourceClip={null}
+      />,
+    )
+    const useButtons = screen.getAllByRole("button", { name: "Use this take" })
+    fireEvent.click(useButtons[useButtons.length - 1]) // the TTS row
+    await waitFor(() => expect(emitDeselect).toHaveBeenCalledTimes(1))
+    expect(emitSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ audioId: "audio-c1-2-g.wav", slot: "generatedVoice" }))
+    expect(emitDeselect).toHaveBeenCalledWith(expect.objectContaining({ cellId: "c1", slot: "recording" }))
+    expect(injectDeselect).toHaveBeenCalledWith("f1", "c1", "recording", expect.anything())
+  })
+
   it("activating a TTS take when the source already holds the slot emits ONE select", async () => {
     render(
       <TakesStrip
@@ -437,6 +532,35 @@ describe("TakesStrip — generated (TTS) takes (round 8c)", () => {
 // happened AND what is left, so it reports the last one; the workspace resets
 // the target row the recording justified, or a line whose work was deleted goes
 // on counting as finished on the server.
+// Sam, 2026-09-29 and -30: only the take that plays can be validated. In the
+// recorder that is the circled take; every other take shows its validation
+// read-only. In the Recording tab's lists nothing takes a vote — the take that
+// plays sits above them, with its own.
+describe("TakesStrip — a vote on the circled take only", () => {
+  beforeEach(() => emitValidate.mockClear())
+
+  it("draws every take's validation; only the circled one takes a press", () => {
+    render(<TakesStrip {...common} takes={[take("audio-c1-a.webm", 1000), take("audio-c1-b.webm", 1000)]} selectedAudioId="audio-c1-a.webm" />)
+    const marks = screen.getAllByTestId("audio-validation-button")
+    expect(marks).toHaveLength(2)
+    expect(marks[0]).toHaveAccessibleName("Audio not validated — c1. Click to validate.")
+    expect(marks[1]).toHaveAccessibleName("Audio not validated — c1.")
+    expect(marks[1]).not.toHaveAttribute("aria-pressed")
+    fireEvent.click(marks[1])
+    expect(emitValidate).not.toHaveBeenCalled()
+    fireEvent.click(marks[0])
+    expect(emitValidate).toHaveBeenCalledTimes(1)
+    expect(emitValidate.mock.calls[0][0]).toMatchObject({ audioId: "audio-c1-a.webm" })
+  })
+
+  it("takes no vote in the Recording tab's lists", () => {
+    // No session: the tab's rows would fetch each take's shape.
+    render(<TakesStrip {...common} session={null} variant="tab" takes={[take("audio-c1-a.webm", 1000), take("audio-c1-b.webm", 1000)]} selectedAudioId="audio-c1-a.webm" />)
+    for (const mark of screen.getAllByTestId("audio-validation-button")) fireEvent.click(mark)
+    expect(emitValidate).not.toHaveBeenCalled()
+  })
+})
+
 describe("TakesStrip — reporting the last take", () => {
   // Real ids: buildAudioId embeds its seed, and the imported SOURCE clip is
   // seeded with the FILE id while takes are seeded with the CELL id. That
@@ -510,9 +634,11 @@ describe("TakesStrip — reporting the last take", () => {
 
       const badge = await screen.findByTestId("take-text-drift-a")
       expect(badge.textContent).toContain("Text changed")
-      // The tooltip must quote the wording AS RECORDED — that is the whole
-      // point of the feature, not just "something changed".
-      expect(badge.getAttribute("title")).toContain("In the beginning")
+      // The note must quote the wording AS RECORDED — that is the whole point
+      // of the feature, not just "something changed". AQU-2260: it opens on a
+      // click, never a hover.
+      expect(badge).not.toHaveAttribute("title")
+      await expectClickNote(badge, "In the beginning")
     })
 
     it("leaves an undrifted take unmarked", () => {
@@ -554,30 +680,33 @@ describe("TakesStrip — reporting the last take", () => {
 
       const stamp = await screen.findByTestId("take-recorded-a")
       expect(stamp.textContent).toContain("mariette")
-      expect(stamp.textContent).toContain(
-        new Date(Date.parse("2026-06-30T10:00:00Z")).toLocaleDateString(),
-      )
+      expect(stamp.textContent).toContain(fmtShortCalendarDate(Date.parse("2026-06-30T10:00:00Z")))
+      expect(stamp.querySelector("[title]")).toBeNull()
     })
 
-    it("gives the exact time in the tooltip, since the stamp shows only the day", async () => {
+    it("gives the exact time in the date tooltip, since the stamp shows only the day", async () => {
+      const recordedAt = Date.parse("2026-06-30T10:00:00Z")
       driftResult = new Map([["a", drift("a")]])
-      render(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
+      renderWithTooltips(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
 
-      const title = (await screen.findByTestId("take-recorded-a")).getAttribute("title")
-      expect(title).toContain("Recorded")
-      expect(title).toContain("mariette")
-      expect(title).toContain(new Date(Date.parse("2026-06-30T10:00:00Z")).toLocaleString())
+      const stamp = await screen.findByTestId("take-recorded-a")
+      const trigger = stamp.querySelector("[data-slot=tooltip-trigger]")
+      expect(trigger).toBeTruthy()
+      await expectTooltip(trigger!, fmtLabeledDateTime(recordedAt, "Recorded"))
     })
 
     it("says a synthesised take was GENERATED, not recorded", async () => {
       // The named person chose to generate it; they did not perform it, and
       // calling a TTS render a recording misattributes human performance.
+      const recordedAt = Date.parse("2026-06-30T10:00:00Z")
       driftResult = new Map([["g", drift("g", { drifted: false })]])
-      render(<TakesStrip {...common} takes={[genTake("g")]} selectedGeneratedAudioId="g" selectedAudioId={null} />)
+      renderWithTooltips(<TakesStrip {...common} takes={[genTake("g")]} selectedGeneratedAudioId="g" selectedAudioId={null} />)
 
-      const title = (await screen.findByTestId("take-recorded-g")).getAttribute("title")
-      expect(title).toContain("Generated")
-      expect(title).not.toContain("Recorded")
+      const stamp = await screen.findByTestId("take-recorded-g")
+      const trigger = stamp.querySelector("[data-slot=tooltip-trigger]")
+      expect(trigger).toBeTruthy()
+      await expectTooltip(trigger!, fmtLabeledDateTime(recordedAt, "Generated"))
+      expect(screen.getByRole("tooltip").textContent).not.toContain("Recorded")
     })
 
     it("never badges a synthesised take as text-drifted", async () => {
@@ -600,5 +729,104 @@ describe("TakesStrip — reporting the last take", () => {
 
       expect(screen.queryByTestId("take-recorded-a")).toBeNull()
     })
+  })
+})
+
+// AQU-1217: a trimmed take shows its trimmed length — in the lists too.
+describe("TakesStrip — length", () => {
+  it("gives a trimmed take the length that plays", () => {
+    render(<TakesStrip {...common} takes={[{ ...take("audio-c1-a.webm", 2560), trimStartMs: 256, trimEndMs: 2320 }]} selectedAudioId={null} />)
+    // 2.064s kept, in tenths rounded down as the recorder says it (AQU-1767).
+    expect(screen.getByTestId("take-length-audio-c1-a.webm")).toHaveTextContent("2.0s")
+  })
+})
+
+// AQU-1767 (Sam's walk, 2026-10-15): splitting "Take 1" renames it "Take 1 · 1"
+// and "Take 1 · 2", and the next recording was named "Take 1" again.
+describe("nextTakeLabel", () => {
+  it("counts a split take's pieces as their take's number", () => {
+    expect(nextTakeLabel([{ label: "Take 1 · 1" }, { label: "Take 1 · 2" }])).toBe("Take 2")
+    expect(nextTakeLabel([{ label: "Take 1" }, { label: "Take 3 · 2" }])).toBe("Take 4")
+  })
+})
+
+// AQU-981 (Sam, Oct 29): a take split into pieces is still ONE take. After a
+// join the line read "Take 1", "Take 2 · split in 2", "Take 4" — no Take 3 —
+// because every unnamed piece was counted, and named, as a take of its own.
+describe("one number per take, however many pieces it has", () => {
+  const att = (audioId: string, label: string | null, pieceOf?: string, trimStartMs: number | null = null) =>
+    ({ audioId, label, trimStartMs, ...(pieceOf ? { pieceOf } : {}) })
+
+  it("an unnamed take in two pieces beside Take 1: it will be Take 2, so the next is Take 3", () => {
+    expect(nextTakeLabel([att("a", "Take 1"), att("b", null), att("c", null, "b", 400)])).toBe("Take 3")
+  })
+
+  it("a split take reads by its first piece's name, as the list shows it, whatever its other pieces were named", () => {
+    // Named one piece at a time by the old backfill: the list shows "Take 2 · split in 2".
+    expect(nextTakeLabel([att("a", "Take 1"), att("b", "Take 2"), att("c", "Take 3", "b", 400)])).toBe("Take 3")
+    // Named by a cut.
+    expect(nextTakeLabel([att("a", "Take 1"), att("b", "Take 2 · 1"), att("c", "Take 2 · 2", "b", 400)])).toBe("Take 3")
+  })
+
+  it("a named take and an unnamed whole take: the unnamed one is numbered after the named, so the next is Take 3", () => {
+    expect(nextTakeLabel([att("a", "Take 1"), att("b", null)])).toBe("Take 3")
+  })
+
+  it("named takes alone: one past the highest, a deleted number never reused", () => {
+    expect(nextTakeLabel([att("a", "Take 1"), att("c", "Take 3")])).toBe("Take 4")
+    expect(nextTakeLabel([att("a", "My best one")])).toBe("Take 1")
+  })
+
+  it("names an unnamed split take once, its pieces as the cut names them", async () => {
+    emitRename.mockClear()
+    const piece = { ...take("c", 1000), pieceOf: "b", trimStartMs: 400 } as AudioAttachmentOut
+    render(<TakesStrip {...common} takes={[namedTake("a", "Take 1"), take("b", 1000), piece]} selectedAudioId="a" />)
+    await waitFor(() => expect(emitRename).toHaveBeenCalledTimes(2))
+    expect(emitRename).toHaveBeenCalledWith(expect.objectContaining({ audioId: "b", label: "Take 2 · 1" }))
+    expect(emitRename).toHaveBeenCalledWith(expect.objectContaining({ audioId: "c", label: "Take 2 · 2" }))
+  })
+
+  it("the list of one take's pieces names nothing: it can't see the line's other takes", async () => {
+    emitRename.mockClear()
+    // The pieces' waveforms load their audio; nothing here is about that.
+    const offline = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"))
+    const piece = { ...take("c", 1000), pieceOf: "b", trimStartMs: 400 } as AudioAttachmentOut
+    render(<TakesStrip {...common} variant="pieces" takes={[take("b", 1000), piece]} selectedAudioId="b" />)
+    // The naming effect calls the rename before its first await, so once the
+    // effects and their microtasks have run, a rename would already be here.
+    await act(async () => {})
+    expect(emitRename).not.toHaveBeenCalled()
+    offline.mockRestore()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. A take's
+// status marks explain themselves on a click.
+describe("TakesStrip — status marks open their notes on click", () => {
+  it("says why a take's length is a question mark", async () => {
+    renderWithTooltips(
+      <TakesStrip {...common} takes={[{ ...take("a", 0), durationMs: null } as unknown as AudioAttachmentOut]} selectedAudioId="a" />,
+    )
+    const mark = await screen.findByTestId("take-unknown-length-a")
+    expect(mark).not.toHaveAttribute("title")
+    await expectClickNote(mark, "Length unknown")
+  })
+
+  it("says a take that is still saving is kept on this device", async () => {
+    renderWithTooltips(
+      <TakesStrip {...common} takes={[{ ...take("a", 1000), pendingSync: true }]} selectedAudioId="a" />,
+    )
+    const mark = await screen.findByTestId("take-saving-a")
+    expect(mark).not.toHaveAttribute("title")
+    await expectClickNote(mark, "kept safe on this device")
+  })
+
+  it("keeps the retry a plain button, and says the take is still on this device behind its (i)", async () => {
+    renderWithTooltips(
+      <TakesStrip {...common} takes={[{ ...take("a", 1000), syncFailed: true }]} selectedAudioId="a" />,
+    )
+    const retry = await screen.findByTestId("take-sync-failed-a")
+    expect(retry).not.toHaveAttribute("title")
+    await expectClickNote(screen.getByRole("button", { name: "About Not saved — retry" }), "still on this device")
   })
 })

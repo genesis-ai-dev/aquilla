@@ -1,0 +1,209 @@
+// Aquilla Tools builder — the self-review pass (AQU-1793). After a candidate
+// passes the gates, the same model reads it against the requirements checklist
+// and the UI bar (UI_CHECKS), re-marks every requirement, and — when a must is
+// missing/partial or a UI check fails — writes concrete fix instructions. The
+// builder then applies them once (a normal edit_tool call). Cheap: the review
+// replies with JSON only.
+
+import { normalizeRequirements, type ToolRequirement } from "../../../../shared/tools/requirements"
+import { UI_CHECKS } from "./build-prompt-guide"
+import { TOOLS_DOMAIN_PROMPT } from "./build-prompt-guide"
+
+export interface UiCheck {
+  check: string
+  ok: boolean
+  note?: string
+}
+
+export interface BuildReview {
+  requirements: ToolRequirement[]
+  ui: UiCheck[]
+  /** Concrete instructions for one fix pass, or null when nothing needs fixing. */
+  fix: string | null
+}
+
+export const TOOLS_REVIEW_SYSTEM_PROMPT = `You review an Aquilla extension (one HTML document running in a sandboxed
+iframe, talking to the app through \`aquilla\` / the \`aq\` SDK) before the user sees it. Be strict and concrete.
+
+1. For each numbered requirement, decide from the CODE (not the plan) whether it is "covered", "partial" or
+   "missing". Keep "not_possible" when the bridge truly cannot support it (and keep its reason); change a
+   "not_possible" to "missing" if the bridge could support it after all. Something that works only when the
+   project has imported that data as a file (originals, TN, TW, ULT/UST) that THIS extension does not import
+   itself (files.upsert) is "partial", and the note says so.
+   One short "note" per row.
+2. Check the code against each UI check below; ok=false with a short note when it fails.
+3. If any "must" is missing/partial (and possible) or any UI check fails, write "fix": numbered, concrete
+   instructions a developer can apply in one pass (what to remove, what to add, which aq component to use).
+   Otherwise "fix": null. Never ask for anything the bridge cannot do.
+Keep it short: each "note" at most 12 words, "fix" at most 10 numbered lines.
+
+UI checks:
+${UI_CHECKS.map((c, i) => `${i + 1}. ${c}`).join("\n")}
+
+${TOOLS_DOMAIN_PROMPT}
+
+Reply with ONE fenced block and nothing else:
+\`\`\`review
+{ "requirements": [{ "id": 1, "status": "covered", "note": "…" }], "ui": [{ "check": "no-duplicate-header", "ok": true }], "fix": null }
+\`\`\``
+
+/** Deterministic findings the review should not miss (cheap string checks, fed in as hints). */
+export function staticUiFindings(source: string, manifest: { name?: string; description?: string; mounts?: string[] }): string[] {
+  const out: string[] = []
+  const name = (manifest.name ?? "").trim()
+  const lower = source.toLowerCase()
+  if (name) {
+    const n = name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    if (new RegExp(`<h[1-3][^>]*>\\s*${n}\\s*</h[1-3]>`, "i").test(source) || new RegExp(`title:\\s*["'\`]${n}["'\`]`, "i").test(source)) {
+      out.push(`no-duplicate-header: the code draws the extension's own name ("${name}") as a heading`)
+    }
+  }
+  if (/save(s|d)? automatically|autosave|no save button/i.test(source) && /(>|label:\s*["'`])\s*(save|done)\s*(<|["'`])/i.test(source)) {
+    out.push("honest-copy: the copy says edits save automatically, but the UI also has a Save/Done button")
+  }
+  const body = /<body[^>]*>([\s\S]*?)<script/i.exec(source)?.[1] ?? ""
+  if (!/skel|loading|spinner/i.test(body) && !/aq\.ui\.spinner/i.test(lower)) {
+    out.push("loading-skeleton: no loading placeholder in the static HTML")
+  }
+  for (const finding of largeFetchFindings(source)) out.push(finding)
+  for (const finding of perItemLoopFindings(source)) out.push(finding)
+  if (/aquilla\.cells\.(list|page|commit)/.test(source) && !/aq\.(celllist|cellrow|targeteditor)/i.test(lower)) {
+    out.push("sdk-components: cells are read/edited with hand-rolled UI instead of aq.CellList / aq.CellRow / aq.TargetEditor")
+  }
+  return out
+}
+
+/** Endpoints known to answer big (whole catalogs with contents, archives,
+ *  recursive trees): fine for an import RUN, wrong for filling a dropdown. */
+const KNOWN_LARGE_FETCHES: { re: RegExp; unless?: RegExp; what: string; instead: string }[] = [
+  { re: /catalog\/search/i, unless: /showIngredients(=|\s*:\s*)false/i, what: "a Door43 catalog search with every entry's ingredients", instead: "add showIngredients=false and read one resource's manifest after the user picks it" },
+  { re: /\/archive\/[^"'`\s]*\.(zip|tar\.gz)|zipball/i, what: "a whole repository archive", instead: "list first; download the archive only in the import run" },
+  { re: /git\/trees\/[^"'`\s]*recursive/i, what: "a recursive repository tree", instead: "read the manifest (one small file) for the list" },
+]
+
+/** fetch-small-first: a choices/loading path that reads a known-large endpoint. */
+export function largeFetchFindings(source: string): string[] {
+  if (!/aquilla\.web\.fetch|web\.fetch\(/.test(source)) return []
+  const choicesPath = /import\.choices|phase\s*===?\s*["']choices["']/.test(source)
+  if (!choicesPath) return []
+  return KNOWN_LARGE_FETCHES.filter((k) => k.re.test(source) && !k.unless?.test(source)).map(
+    (k) => `fetch-small-first: the choices path may fetch ${k.what} to fill a dropdown; ${k.instead}`,
+  )
+}
+
+/** The calls that must not run once per item: each is a bridge round trip
+ *  (and a write or a network read) per verse/row. */
+const PER_ITEM_CALLS: { re: RegExp; call: string; instead: string; depth: number }[] = [
+  { re: /aquilla\.data\.put\s*\(/, call: "aquilla.data.put", instead: "collect the records and write them with ONE aquilla.data.putMany", depth: 1 },
+  { re: /aquilla\.cells\.byRef\s*\(/, call: "aquilla.cells.byRef", instead: "pass every ref to ONE aquilla.cells.byRef", depth: 1 },
+  // One upsert per book/file in a loop is the importer pattern; inside a loop
+  // within that loop it is per item.
+  { re: /aquilla\.files\.upsert\s*\(/, call: "aquilla.files.upsert", instead: "build the file's cells first and upsert each file ONCE", depth: 2 },
+]
+const LOOP_OPEN = /\bfor\s*\(|\bwhile\s*\(|\.forEach\s*\(|\.map\s*\(/g
+
+/** Is the end of `tail` (starting at a loop's opening "(") still inside that
+ *  loop? A forEach/map callback: inside while its parentheses are open. A
+ *  for/while: inside while its body braces are open (or, without braces, until
+ *  the statement's semicolon). */
+function stillInside(tail: string, call: boolean): boolean {
+  let parens = 0
+  let i = 0
+  for (; i < tail.length; i++) {
+    const ch = tail[i]
+    if (ch === "(") parens++
+    else if (ch === ")") {
+      parens--
+      if (parens === 0) break
+    }
+  }
+  if (call) return parens > 0
+  if (i >= tail.length) return false // still in the header
+  const body = tail.slice(i + 1)
+  if (!body.trimStart().startsWith("{")) return !body.includes(";")
+  let braces = 0
+  for (const ch of body) {
+    if (ch === "{") braces++
+    else if (ch === "}") {
+      braces--
+      if (braces === 0) return false
+    }
+  }
+  return braces > 0
+}
+
+/** batched-io: a per-item data.put / cells.byRef inside a for / while /
+ *  forEach / map body (a loop opener before it whose brace is still open),
+ *  or a files.upsert two loops deep. Cheap string checks, fed to the review
+ *  as hints. */
+export function perItemLoopFindings(source: string): string[] {
+  const out: string[] = []
+  for (const { re, call, instead, depth } of PER_ITEM_CALLS) {
+    const global = new RegExp(re.source, "g")
+    for (let m = global.exec(source); m; m = global.exec(source)) {
+      const before = source.slice(Math.max(0, m.index - (depth > 1 ? 1200 : 400)), m.index)
+      let open = 0
+      for (let l = LOOP_OPEN.exec(before); l; l = LOOP_OPEN.exec(before)) {
+        if (stillInside(before.slice(l.index + l[0].length - 1), l[0].startsWith("."))) open++
+      }
+      LOOP_OPEN.lastIndex = 0
+      if (open >= depth) {
+        out.push(`batched-io: ${call} is called once per item inside a loop; ${instead}`)
+        break
+      }
+    }
+  }
+  return out
+}
+
+export function buildReviewMessage(input: {
+  request: string
+  requirements: ToolRequirement[]
+  manifestJson: string
+  source: string
+  findings: string[]
+}): string {
+  return [
+    `The user's request:\n\n${input.request}`,
+    `Requirements (the coder's plan):\n\`\`\`json\n${JSON.stringify(input.requirements, null, 2)}\n\`\`\``,
+    input.findings.length ? `Automatic checks flagged (confirm or dismiss each):\n${input.findings.map((f) => `- ${f}`).join("\n")}` : "",
+    `Manifest:\n\`\`\`json\n${input.manifestJson}\n\`\`\``,
+    `Source:\n\`\`\`html\n${input.source}\n\`\`\``,
+  ].filter(Boolean).join("\n\n")
+}
+
+/** The review block → a normalized review (null when unreadable: the build proceeds unreviewed). */
+export function parseReview(text: string): BuildReview | null {
+  const m = /```(?:review|json)\s*\n([\s\S]*?)\n```/i.exec(text)
+  if (!m) return null
+  let raw: unknown
+  try {
+    raw = JSON.parse(m[1])
+  } catch {
+    return null
+  }
+  if (!raw || typeof raw !== "object") return null
+  const r = raw as Record<string, unknown>
+  const ui: UiCheck[] = Array.isArray(r.ui)
+    ? r.ui.flatMap((u) => {
+        if (!u || typeof u !== "object") return []
+        const x = u as Record<string, unknown>
+        if (typeof x.check !== "string") return []
+        return [{ check: x.check.slice(0, 60), ok: x.ok !== false, ...(typeof x.note === "string" && x.note ? { note: x.note.slice(0, 200) } : {}) }]
+      })
+    : []
+  // Review rows carry only id/status/note; give them a placeholder text so normalize keeps them.
+  const rows = Array.isArray(r.requirements)
+    ? r.requirements.map((x) => (x && typeof x === "object" ? { text: "·", ...(x as object) } : x))
+    : []
+  const fix = typeof r.fix === "string" && r.fix.trim() ? r.fix.trim().slice(0, 4000) : null
+  return { requirements: normalizeRequirements(rows), ui, fix }
+}
+
+export function buildFixMessage(request: string, fix: string): string {
+  return [
+    `Original request:\n\n${request}`,
+    `A review of your build found these problems. Fix all of them in one pass, keep everything that works:\n\n${fix}`,
+    `Return the complete tool in the same three-block format; the requirements block carries the final status of every row ("covered", "partial", "not_possible" + note).`,
+  ].join("\n\n")
+}

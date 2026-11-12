@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { createApp } from "../src/app"
+import { alwaysAdmit, noSleep } from "./fake-pool"
 import type { Env } from "../src/types"
 import type {
   SandboxLike,
@@ -54,6 +55,7 @@ function makeEnv(overrides?: Partial<Env>): Env {
   return {
     AGENT_SANDBOX_KEY: "test-key",
     Sandbox: {} as Env["Sandbox"],
+    SANDBOX_POOL: {} as Env["SANDBOX_POOL"],
     SNAPSHOTS: {
       get: async () => null,
     } as unknown as Env["SNAPSHOTS"],
@@ -62,7 +64,7 @@ function makeEnv(overrides?: Partial<Env>): Env {
 }
 
 function harness(sandbox: FakeSandbox, env: Env = makeEnv()) {
-  const app = createApp({ resolveSandbox: () => sandbox })
+  const app = createApp({ resolveSandbox: () => sandbox, pool: alwaysAdmit(), sleep: noSleep })
   return (req: Request) => app.fetch(req, env)
 }
 
@@ -429,7 +431,7 @@ describe("POST /sessions/:id/fetch-artifact", () => {
       new Request("http://x/sessions/s1/fetch-artifact", {
         method: "POST",
         headers: AUTH,
-        body: JSON.stringify({ key: "nope", path: "input.csv" }),
+        body: JSON.stringify({ key: "artifacts/p1/nope", path: "input.csv" }),
       }),
     )
     expect(res.status).toBe(404)

@@ -10,16 +10,14 @@
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { AudioValidationTake } from "@/components/cell/AudioValidationControl"
 import {
+  pieceGroupOf,
   selectedDubTakes,
   type AudioAttachmentOut,
   type CellAudioEntry,
 } from "@/lib/sync/cell-audio-read-types"
-
-const ROLE_FLOOR: Record<string, number> = {
-  reviewer: 300,
-  project_lead: 500,
-  maintainer: 600,
-}
+// AQU-1571: one floor table for text and audio, as the server keeps one.
+import { VALIDATION_ROLE_FLOOR } from "@/lib/review/text-validation-policy"
+import { pieceNames } from "@/lib/audio/take-groups"
 
 /**
  * The shape every surface actually holds: a row of the editor's `CellData`,
@@ -42,7 +40,13 @@ export interface CellLikeAudio {
     role?: "dub" | "source"
     validatorCount?: number
     validators?: string[]
+    /** AQU-2296: username → when they validated this take (ms). */
+    validatorDecidedTs?: Record<string, number>
     recordedBy?: string | null
+    /** AQU-1767: the take a piece was cut from, and where it starts in the clip. */
+    pieceOf?: string | null
+    trimStartMs?: number | null
+    isDeleted?: boolean
   }>
   selectedBySlot?: Record<string, string>
   selectedAudioId?: string | null
@@ -53,6 +57,8 @@ export function audioEntryFromCell(cell: CellLikeAudio | undefined): CellAudioEn
   if (!cell?.attachments) return undefined
   const attachments: Record<string, AudioAttachmentOut> = {}
   for (const [audioId, att] of Object.entries(cell.attachments)) {
+    // AQU-1767: a removed piece is not one of the line's takes any more.
+    if (att.isDeleted) continue
     attachments[audioId] = {
       audioId,
       url: "",
@@ -62,11 +68,17 @@ export function audioEntryFromCell(cell: CellLikeAudio | undefined): CellAudioEn
       referenceAudioId: null,
       durationMs: null,
       label: att.label ?? null,
-      trimStartMs: null,
+      // AQU-1767: carried so a cut take's pieces are found and ordered — every
+      // piece is a take this line's approval is measured over.
+      trimStartMs: att.trimStartMs ?? null,
       trimEndMs: null,
+      ...(att.pieceOf ? { pieceOf: att.pieceOf } : {}),
       ...(att.role ? { role: att.role } : {}),
       ...(att.validatorCount != null ? { validatorCount: att.validatorCount } : {}),
       ...(att.validators ? { validators: att.validators } : {}),
+      // AQU-2296: the stamps ride with the names, or the popover has names
+      // and no dates — which is how it shipped the first time.
+      ...(att.validatorDecidedTs ? { validatorDecidedTs: att.validatorDecidedTs } : {}),
       ...(att.recordedBy !== undefined ? { recordedBy: att.recordedBy } : {}),
     }
   }
@@ -105,7 +117,7 @@ export function audioValidationScope(
   // exactly as it is for text.
   if (policy.roleLevel !== null) {
     const floorName = project.validationRoleFloorAudio
-    const floor = floorName ? ROLE_FLOOR[floorName] : undefined
+    const floor = floorName ? VALIDATION_ROLE_FLOOR[floorName] : undefined
     if (floor !== undefined && policy.roleLevel < floor) {
       return { canValidate: false, reason: "role" }
     }
@@ -160,19 +172,151 @@ export function audioValidationTakes(
 ): AudioValidationTake[] {
   if (!entry) return []
   const scope = audioValidationScope(project, policy)
-  return selectedDubTakes(entry).map((take) => {
+  // AQU-1767: a piece goes by its take's name, numbered by where it sits.
+  const names = pieceNames(Object.values(entry.attachments))
+  const selected = selectedDubTakes(entry)
+  // Slice 3A: which of them are pieces of a cut take (a group with more than
+  // one member), so a surface can keep each piece's approval its own.
+  const groupSize = new Map<string, number>()
+  for (const take of selected) {
+    const group = pieceGroupOf(take, take.audioId)
+    groupSize.set(group, (groupSize.get(group) ?? 0) + 1)
+  }
+  return selected.map((take) => {
     const verdict = canValidateTake(take, project, scope, policy.username)
+    const group = pieceGroupOf(take, take.audioId)
     return {
       audioId: take.audioId,
-      label: take.label ?? null,
+      ...((groupSize.get(group) ?? 0) > 1 ? { pieceOf: group } : {}),
+      label: names.get(take.audioId) ?? take.label ?? null,
       slot: take.slot,
       validatorCount: take.validatorCount ?? 0,
       validators: take.validators ?? [],
+      validatorDecidedTs: take.validatorDecidedTs ?? {},
       isGenerated: Boolean(take.voiceId),
       canValidate: verdict.canValidate,
       ...(verdict.reason ? { blockedReason: reasonText(verdict.reason) } : {}),
     }
   })
+}
+
+/**
+ * Whether the viewer may vote on ONE take, and whether they have: what the
+ * timeline's right-click menu asks of the chip it opened on. A piece of a cut
+ * take answers for itself alone (decision 7, replacing Sam's 2026-10-15 ruling
+ * that a piece answered for its whole take). A take the line does not measure
+ * (not selected, or the source clip) takes no vote.
+ */
+export function takeVoteState(
+  entry: CellAudioEntry | undefined,
+  project: Parameters<typeof audioValidationTakes>[1],
+  policy: AudioValidationPolicy,
+  audioId: string,
+): { canVote: boolean; voted: boolean } {
+  const take = audioValidationTakes(entry, project, policy, () => "")
+    .find((x) => x.audioId === audioId && x.canValidate)
+  return { canVote: take != null, voted: take != null && take.validators.includes(policy.username) }
+}
+
+/** Where a take a line's audio check stands for LIVES: the row's own cell, or
+ *  the heard line (a cue in the audio-cue sibling) that performs the line. */
+export interface TakeOwner {
+  fileId: string
+  cellId: string
+}
+
+export interface LineValidation {
+  takes: AudioValidationTake[]
+  /** audioId → the cell a vote on that take is cast against. */
+  ownerOf: ReadonlyMap<string, TakeOwner>
+}
+
+type OwnedCell = CellLikeAudio & { id: string; fileId: string }
+
+/** The line's own dub track before added ones, as the timeline stacks them. */
+function mainTrackFirst(takes: AudioValidationTake[]): AudioValidationTake[] {
+  const main = (take: AudioValidationTake) => take.slot === "recording" || take.slot === "generatedVoice"
+  return [...takes.filter(main), ...takes.filter((take) => !main(take))]
+}
+
+/**
+ * The takes a LINE's audio check stands for, and where each one lives.
+ *
+ * In a dubbing file a subtitle line's recordings are not on it: they hang off
+ * the heard lines that perform it — cues in the hidden audio-cue sibling. A
+ * check that read the row alone therefore found nothing: every subtitle line
+ * said "No audio to validate", and a vote cast on the heard line's take in the
+ * Recording tab never showed on it (Sam, 2026-09-30). So a line's set is its
+ * own selected takes plus, for every heard line performing it, that heard
+ * line's selected take(s) — each named by what the heard line says (`nameOf`),
+ * so the hover list can tell two parts of one line apart — and `ownerOf` says
+ * which cell a vote on each goes to.
+ *
+ * Takes on more than one track are named by their track AND their own name —
+ * "Target audio · Take 1", "Track · Take 1" — since every track numbers its
+ * own takes and two "Take 1"s told the reader nothing (Sam, 2026-09-30).
+ * `trackNameOf` names the track a take sits on, as the timeline does.
+ *
+ * A heard line nobody has recorded yet (a line split across two, one of them
+ * done) joins the set as an UNRECORDED member. It can take no vote, and it
+ * keeps the line from reading fully validated — a row must never read
+ * validated while part of it is silent without saying so (the dubbing rule
+ * of 2026-09-20).
+ *
+ * With no heard lines this is `audioValidationTakes` on the row, every
+ * owner the row itself.
+ */
+export function lineValidationTakes<C extends OwnedCell>(
+  cell: OwnedCell,
+  heardLines: ReadonlyArray<{ cell: C; hasTake: boolean }> | null | undefined,
+  project: Pick<
+    ProjectRecord,
+    "validationRoleFloorAudio" | "validationNamedUsersAudio" | "allowSelfValidationAudio"
+  >,
+  policy: AudioValidationPolicy,
+  reasonText: (reason: "role" | "allowlist" | "self" | "unrecorded") => string,
+  nameOf: (cue: C) => string,
+  trackNameOf: (owner: OwnedCell, slot: string) => string,
+): LineValidation {
+  const takes: AudioValidationTake[] = []
+  const ownerOf = new Map<string, TakeOwner>()
+  const add = (owner: OwnedCell, take: AudioValidationTake) => {
+    if (ownerOf.has(take.audioId)) return
+    ownerOf.set(take.audioId, { fileId: owner.fileId, cellId: owner.id })
+    takes.push(take)
+  }
+  // "Track · Take 1", or just the track for a take with no name of its own.
+  const onTrack = (owner: OwnedCell, take: AudioValidationTake) =>
+    [trackNameOf(owner, take.slot), take.label].filter(Boolean).join(" · ")
+  const own = mainTrackFirst(audioValidationTakes(audioEntryFromCell(cell), project, policy, reasonText))
+  for (const take of own) {
+    add(cell, own.length > 1 ? { ...take, label: onTrack(cell, take) } : take)
+  }
+  for (const { cell: cue, hasTake } of heardLines ?? []) {
+    const name = nameOf(cue)
+    if (!hasTake) {
+      add(cue, {
+        audioId: `unrecorded:${cue.id}`,
+        label: name,
+        slot: "recording",
+        validatorCount: 0,
+        validators: [],
+        isGenerated: false,
+        canValidate: false,
+        blockedReason: reasonText("unrecorded"),
+        unrecorded: true,
+      })
+      continue
+    }
+    const heard = mainTrackFirst(audioValidationTakes(audioEntryFromCell(cue), project, policy, reasonText))
+    for (const take of heard) {
+      // A heard line with takes on more than one track: its words, then which
+      // track and which take, or the two would read the same.
+      const label = heard.length > 1 ? `${name} · ${onTrack(cue, take)}` : name
+      add(cue, { ...take, label })
+    }
+  }
+  return { takes, ownerOf }
 }
 
 /**
@@ -188,14 +332,17 @@ export function audioValidationTakes(
 type BlockedKey =
   | "editor.audioValidation.ownRecordingTooltip"
   | "editor.audioValidation.unavailableTooltip"
+  | "editor.audioValidation.partNotRecordedTooltip"
 
 export function audioBlockedReason(
   // Narrowed to the two keys this uses rather than `(key: string) => string`:
   // the app's `t` is typed against the whole catalogue, and a parameter typed
   // as plain `string` is not something it can be passed to.
   t: (key: BlockedKey) => string,
-): (reason: "role" | "allowlist" | "self") => string {
+): (reason: "role" | "allowlist" | "self" | "unrecorded") => string {
   return (reason) => reason === "self"
     ? t("editor.audioValidation.ownRecordingTooltip")
-    : t("editor.audioValidation.unavailableTooltip")
+    : reason === "unrecorded"
+      ? t("editor.audioValidation.partNotRecordedTooltip")
+      : t("editor.audioValidation.unavailableTooltip")
 }

@@ -37,8 +37,9 @@ describe("timecode projection", () => {
     expect(cellsInsert).toBeTruthy()
     expect(cellsInsert!.sql).toContain("start_ms")
     expect(cellsInsert!.sql).toContain("end_ms")
-    // AQU-538: target_lang sits at bind 4, shifting start_ms/end_ms to 15/16.
-    expect(cellsInsert!.args[15]).toBe(1500)
-    expect(cellsInsert!.args[16]).toBe(3250)
+    // start_ms / end_ms. The projection column is no longer a bind, so these
+    // sit one place earlier than they did when target_lang was written.
+    expect(cellsInsert!.args[14]).toBe(1500)
+    expect(cellsInsert!.args[15]).toBe(3250)
   })
 })

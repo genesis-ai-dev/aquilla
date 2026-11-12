@@ -5,7 +5,7 @@
 //     someone else's needs project_lead (500+).
 //   * PUT floors — replace-set requires project_lead (500+).
 //   * Replace-set semantics — PUT overwrites, empty clears.
-//   * The 500+-unscopable rule — scoping a lead/maintainer/owner is a 400.
+//   * Maintainer and above stay unscoped. A project lead can be lane-scoped.
 //   * The sync-token `scopes` claim — included when the user has scope rows,
 //     OMITTED entirely when they don't.
 
@@ -23,12 +23,13 @@ interface TokenClaims {
 }
 
 // user 1 = owner (700), user 2 = contributor (400), user 3 = lead (500),
-// user 4 = reviewer (300).
+// user 4 = reviewer (300), user 6 = maintainer (600).
 async function seedProject(): Promise<void> {
   await seedUser(1, "owner")
   await seedUser(2, "carol") // contributor
   await seedUser(3, "lead")
   await seedUser(4, "rev") // reviewer
+  await seedUser(6, "mina") // maintainer
   await env.AQUILLA_PG.prepare(
     "INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj-s', 'Scopes', NULL, 1)",
   ).run()
@@ -40,6 +41,9 @@ async function seedProject(): Promise<void> {
   ).run()
   await env.AQUILLA_PG.prepare(
     "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-s', 4, 300, 1)",
+  ).run()
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-s', 6, 600, 1)",
   ).run()
 }
 
@@ -83,6 +87,101 @@ describe("AQU-553 member-scopes — GET floors", () => {
       env,
     )
     expect(res.status).toBe(403)
+  })
+
+  // AQU-581: `me` resolves from the token. A contributor cannot learn their own
+  // numeric id client-side — the roster route is gated by rosterViewMinRole
+  // (MAINTAINER by default) — so without this the lane-delegate grant was
+  // always empty for the exact role the delegation exists to serve.
+  it("resolves `me` to the caller and returns their OWN scopes", async () => {
+    const owner = await jwtFor("owner")
+    await putScopes(owner, 2, [{ kind: "lane", value: "es" }])
+    const jwt = await jwtFor("carol") // contributor 400
+    const res = await app.request(
+      "/api/v2/projects/proj-s/members/me/scopes",
+      { method: "GET", headers: authHeader(jwt) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ scopes: [{ kind: "lane", value: "es" }], allowScopedLaneAssignment: false })
+  })
+
+  it("`me` returns [] for an unscoped caller, not a 403", async () => {
+    const jwt = await jwtFor("carol")
+    const res = await app.request(
+      "/api/v2/projects/proj-s/members/me/scopes",
+      { method: "GET", headers: authHeader(jwt) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ scopes: [], allowScopedLaneAssignment: false })
+  })
+
+  it("`me` never reads another user's scopes — a reviewer gets only their own", async () => {
+    const owner = await jwtFor("owner")
+    await putScopes(owner, 2, [{ kind: "lane", value: "es" }])
+    const jwt = await jwtFor("rev") // reviewer 300, unscoped
+    const res = await app.request(
+      "/api/v2/projects/proj-s/members/me/scopes",
+      { method: "GET", headers: authHeader(jwt) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ scopes: [], allowScopedLaneAssignment: false })
+  })
+
+    // AQU-581 review: a lane coordinator who is a GUEST (a project member outside
+  // the org) can't read the org's settings, so the client never learned the
+  // setting was on and hid "Assign work". `me` now carries it.
+  it("`me` tells a guest whether their project's org lets lane-limited members assign", async () => {
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("UPDATE projects SET org_id = 1 WHERE id = 'proj-s'").run()
+    const ask = async () => {
+      const res = await app.request(
+        "/api/v2/projects/proj-s/members/me/scopes",
+        { method: "GET", headers: authHeader(await jwtFor("carol")) }, // carol: project member, NOT in org 1
+        env,
+      )
+      return ((await res.json()) as { allowScopedLaneAssignment: boolean }).allowScopedLaneAssignment
+    }
+    expect(await ask()).toBe(false) // no settings row yet
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_settings (org_id, settings, version, updated_by) VALUES (1, ?, 0, 1)",
+    ).bind(JSON.stringify({ allowScopedLaneAssignment: true })).run()
+    expect(await ask()).toBe(true)
+    await env.AQUILLA_PG.prepare("UPDATE org_settings SET settings = ? WHERE org_id = 1")
+      .bind(JSON.stringify({ allowScopedLaneAssignment: false })).run()
+    expect(await ask()).toBe(false)
+  })
+
+  it("a numeric self-read keeps the plain { scopes } shape", async () => {
+    const res = await app.request(
+      "/api/v2/projects/proj-s/members/2/scopes",
+      { method: "GET", headers: authHeader(await jwtFor("carol")) },
+      env,
+    )
+    expect(await res.json()).toEqual({ scopes: [] })
+  })
+
+it("403s `me` from a non-member — membership is still required", async () => {
+    await seedUser(9, "outsider")
+    const jwt = await jwtFor("outsider")
+    const res = await app.request(
+      "/api/v2/projects/proj-s/members/me/scopes",
+      { method: "GET", headers: authHeader(jwt) },
+      env,
+    )
+    expect(res.status).toBe(403)
+  })
+
+  it("400s a non-numeric, non-`me` userId", async () => {
+    const jwt = await jwtFor("carol")
+    const res = await app.request(
+      "/api/v2/projects/proj-s/members/somebody/scopes",
+      { method: "GET", headers: authHeader(jwt) },
+      env,
+    )
+    expect(res.status).toBe(400)
   })
 
   it("lets a lead (500+) read another member's scopes", async () => {
@@ -143,13 +242,35 @@ describe("AQU-553 member-scopes — PUT floors + replace-set", () => {
   })
 })
 
-describe("AQU-553 member-scopes — leads must stay unscoped", () => {
-  it("400s scoping a member whose role is >= 500", async () => {
+describe("AQU-581 member-scopes — `me` is GET-only", () => {
+  it("400s a PUT to /members/me/scopes — writes always name an explicit member", async () => {
+    const owner = await jwtFor("owner")
+    const res = await app.request(
+      "/api/v2/projects/proj-s/members/me/scopes",
+      {
+        method: "PUT",
+        headers: { ...authHeader(owner), "content-type": "application/json" },
+        body: JSON.stringify({ scopes: [{ kind: "lane", value: "es" }] }),
+      },
+      env,
+    )
+    expect(res.status).toBe(400)
+  })
+})
+
+describe("member-scopes — maintainer and above stay unscoped", () => {
+  it("scopes a project lead onto a lane", async () => {
     const jwt = await jwtFor("owner")
-    const res = await putScopes(jwt, 3, [{ kind: "lane", value: "es" }]) // user 3 = lead 500
+    const res = await putScopes(jwt, 3, [{ kind: "lane", value: "es" }])
+    expect(res.status).toBe(200)
+  })
+
+  it("400s scoping a maintainer", async () => {
+    const jwt = await jwtFor("owner")
+    const res = await putScopes(jwt, 6, [{ kind: "lane", value: "es" }])
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({
-      error: "scopes are for contributor/reviewer roles",
+      error: "scopes are for roles below maintainer",
     })
   })
 
@@ -157,6 +278,42 @@ describe("AQU-553 member-scopes — leads must stay unscoped", () => {
     const jwt = await jwtFor("owner")
     const res = await putScopes(jwt, 3, [])
     expect(res.status).toBe(200)
+  })
+
+  it("403s a lane-limited lead clearing their OWN scopes (self-widening)", async () => {
+    await putScopes(await jwtFor("owner"), 3, [{ kind: "lane", value: "es" }])
+    const res = await putScopes(await jwtFor("lead"), 3, [])
+    expect(res.status).toBe(403)
+  })
+
+  it("a lane-limited lead grants only lanes they hold and keeps the rest", async () => {
+    const owner = await jwtFor("owner")
+    await putScopes(owner, 3, [{ kind: "lane", value: "es" }])
+    await putScopes(owner, 2, [{ kind: "lane", value: "fr" }])
+    const lead = await jwtFor("lead")
+
+    const added = await putScopes(lead, 2, [{ kind: "lane", value: "es" }])
+    expect(added.status).toBe(200)
+    const addedBody = (await added.json()) as { scopes: Array<{ kind: string; value: string }> }
+    expect(addedBody.scopes.filter((scope) => scope.kind === "lane").map((scope) => scope.value).sort()).toEqual([
+      "es",
+      "fr",
+    ])
+
+    const foreign = await putScopes(lead, 2, [{ kind: "lane", value: "de" }])
+    expect(foreign.status).toBe(403)
+    expect(await foreign.json()).toMatchObject({ error: "you can only grant lanes you hold" })
+
+    const narrow = await putScopes(lead, 4, [{ kind: "lane", value: "es" }])
+    expect(narrow.status).toBe(403)
+    expect(await narrow.json()).toMatchObject({
+      error: "you cannot change lanes for someone who already has every lane",
+    })
+
+    await putScopes(owner, 4, [{ kind: "lane", value: "es" }])
+    const wipe = await putScopes(lead, 4, [])
+    expect(wipe.status).toBe(403)
+    expect(await wipe.json()).toMatchObject({ error: "you cannot grant every lane" })
   })
 })
 

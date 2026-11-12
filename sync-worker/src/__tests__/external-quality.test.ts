@@ -13,6 +13,11 @@
 // the SHARED scan imported from src/lib/check/term-consistency-scan.ts — the
 // same function the in-app "Check file" pass calls (rule 12: a real producer's
 // output — the `cells` + `concepts` projections — through its real consumer).
+//
+// AQU-1175 adds the termbase LIST read (`/terms`) to the same router. Its cases
+// live here rather than in their own file because they share this seed and the
+// same auth gate, and because the two term reads must agree on what the
+// termbase is — they now go through one fetcher (`fetchConceptRows`).
 
 import { describe, it, expect, beforeEach } from "vitest"
 import { sign } from "hono/jwt"
@@ -94,6 +99,11 @@ async function seedProject(testDb: TestDb) {
      VALUES ('file-x', 'proj-a', 'Titus', 'evt-fx', 4, 3, 1), ('file-y', 'proj-a', 'Philemon', 'evt-fy', 1, 0, 0)`,
   )
 
+  await testDb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', 'proj-a', 'target', '', 1)`,
+  )
+
   // file-x source cells + their targets.
   const cells: [string, string, string, string, number][] = [
     // cellId, canonicalRef, source, target, validated
@@ -170,7 +180,7 @@ interface QualityBody {
 interface TermsBody {
   projectId: string
   fileId: string | null
-  lane?: string
+  laneId?: string
   scannedCells: number
   conceptCount: number
   flaggedCellCount: number
@@ -184,6 +194,27 @@ interface TermsBody {
     renderingUsage: { rendering: string; cellIds: string[] }[]
     flaggedCells: { cellId: string; cellLabel?: string }[]
   }[]
+}
+
+interface TermEntriesBody {
+  projectId: string
+  status: string | null
+  includeDeleted: boolean
+  termCount: number
+  data: {
+    conceptId: string
+    sourceTerm: string
+    renderings: { rendering: string; status: string }[]
+    notes: string | null
+    status: string
+    caseSensitive: boolean
+    matchOptions: { foldMarks?: boolean; affixes?: boolean; forms?: string[]; excludedForms?: string[] }
+    createdBy: string | null
+    createdAt: number
+    updatedAt: number
+    deletedAt: number | null
+  }[]
+  nextCursor: string | null
 }
 
 describe("external quality reads (AQU-1231)", () => {
@@ -227,7 +258,7 @@ describe("external quality reads (AQU-1231)", () => {
 
   it("404s an unknown fileId rather than silently reporting the whole project", async () => {
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/quality?fileId=nope", tokenA),
+      req("/api/v1/external/projects/proj-a/quality?lane=deflane1&fileId=nope", tokenA),
       env(testDb),
     )
     expect(res?.status).toBe(404)
@@ -242,7 +273,7 @@ describe("external quality reads (AQU-1231)", () => {
 
   it("per-file health equals the internal health-rollup route's value", async () => {
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/quality", tokenA),
+      req("/api/v1/external/projects/proj-a/quality?lane=deflane1", tokenA),
       env(testDb),
     )
     expect(res?.status).toBe(200)
@@ -268,7 +299,7 @@ describe("external quality reads (AQU-1231)", () => {
 
   it("scoping to one file matches that file's own rollup", async () => {
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/quality?fileId=file-x", tokenA),
+      req("/api/v1/external/projects/proj-a/quality?lane=deflane1&fileId=file-x", tokenA),
       env(testDb),
     )
     const body = (await res!.json()) as QualityBody
@@ -287,7 +318,7 @@ describe("external quality reads (AQU-1231)", () => {
 
   it("coverage counts and percentages equal the internal progress route's", async () => {
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/quality?fileId=file-x", tokenA),
+      req("/api/v1/external/projects/proj-a/quality?lane=deflane1&fileId=file-x", tokenA),
       env(testDb),
     )
     const body = (await res!.json()) as QualityBody
@@ -316,7 +347,7 @@ describe("external quality reads (AQU-1231)", () => {
 
   it("a file with no projection row still reports coverage from the files counters", async () => {
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/quality?fileId=file-y", tokenA),
+      req("/api/v1/external/projects/proj-a/quality?lane=deflane1&fileId=file-y", tokenA),
       env(testDb),
     )
     const body = (await res!.json()) as QualityBody
@@ -328,7 +359,7 @@ describe("external quality reads (AQU-1231)", () => {
 
   it("project coverage sums the files in scope", async () => {
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/quality", tokenA),
+      req("/api/v1/external/projects/proj-a/quality?lane=deflane1", tokenA),
       env(testDb),
     )
     const body = (await res!.json()) as QualityBody
@@ -345,7 +376,7 @@ describe("external quality reads (AQU-1231)", () => {
 
   it("lists the drifting term with the cells where each variant occurs", async () => {
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/terms/consistency?fileId=file-x", tokenA),
+      req("/api/v1/external/projects/proj-a/terms/consistency?lane=deflane1&fileId=file-x", tokenA),
       env(testDb),
     )
     expect(res?.status).toBe(200)
@@ -381,13 +412,13 @@ describe("external quality reads (AQU-1231)", () => {
       `UPDATE cells SET value = 'gracia y paz' WHERE project_id = 'proj-a' AND file_id = 'file-x' AND cell_id = 'c2' AND side = 'target'`,
     )
     const all = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/terms/consistency?fileId=file-x", tokenA),
+      req("/api/v1/external/projects/proj-a/terms/consistency?lane=deflane1&fileId=file-x", tokenA),
       env(testDb),
     )
     expect(((await all!.json()) as TermsBody).data).toHaveLength(1)
 
     const drift = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/terms/consistency?fileId=file-x&onlyDrift=1", tokenA),
+      req("/api/v1/external/projects/proj-a/terms/consistency?lane=deflane1&fileId=file-x&onlyDrift=1", tokenA),
       env(testDb),
     )
     const body = (await drift!.json()) as TermsBody
@@ -397,7 +428,7 @@ describe("external quality reads (AQU-1231)", () => {
 
   it("scans the whole project when no fileId is given", async () => {
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/terms/consistency", tokenA),
+      req("/api/v1/external/projects/proj-a/terms/consistency?lane=deflane1", tokenA),
       env(testDb),
     )
     const body = (await res!.json()) as TermsBody
@@ -420,19 +451,26 @@ describe("external quality reads (AQU-1231)", () => {
               ('proj-a', 'file-x', 'dual-fr', 'source', 'the grace french', 'evt-s-dual-fr', 1000, 3)`,
     )
     await testDb.pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, lane_id, value, event_id, last_edit_at, word_count)
-       VALUES ('proj-a', 'file-x', 'dual-id', 'target', 'xx', 'lane-tgt-es', 'merced dual-id', 'evt-t-dual-id', 2000, 2),
-              ('proj-a', 'file-x', 'dual-tag', 'target', 'es', NULL, 'la gracia dual-tag', 'evt-t-dual-tag', 2000, 3),
-              ('proj-a', 'file-x', 'dual-fr', 'target', 'fr', NULL, 'grâce', 'evt-t-dual-fr', 2000, 1)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, lane_id, value, event_id, last_edit_at, word_count) VALUES ('proj-a', 'file-x', 'dual-id', 'target', 'lane-tgt-es', 'merced dual-id', 'evt-t-dual-id', 2000, 2), ('proj-a', 'file-x', 'dual-tag', 'target', (SELECT aquilla_test_resolve_target_lane('proj-a', 'es')), 'la gracia dual-tag', 'evt-t-dual-tag', 2000, 3), ('proj-a', 'file-x', 'dual-fr', 'target', (SELECT aquilla_test_resolve_target_lane('proj-a', 'fr')), 'grâce', 'evt-t-dual-fr', 2000, 1)`,
+    )
+    // Renderings belong to one lane. This scan is the Spanish lane, so the
+    // concept's approved renderings have to name it; an unstamped rendering
+    // belongs to the legacy_tag '' lane and must not satisfy this check.
+    await testDb.pg.query(
+      `UPDATE concepts SET renderings = $1::jsonb WHERE concept_id = 'concept-grace'`,
+      [JSON.stringify([
+        { rendering: "gracia", status: "preferred", laneId: "lane-tgt-es" },
+        { rendering: "favor", status: "admitted", laneId: "lane-tgt-es" },
+      ])],
     )
 
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/terms/consistency?fileId=file-x&lane=es", tokenA),
+      req("/api/v1/external/projects/proj-a/terms/consistency?fileId=file-x&lane=lane-tgt-es", tokenA),
       env(testDb),
     )
     expect(res?.status).toBe(200)
     const body = (await res!.json()) as TermsBody
-    expect(body.lane).toBe("es")
+    expect(body.laneId).toBe("lane-tgt-es")
     const grace = body.data[0]
     expect(grace.conceptId).toBe("concept-grace")
     // Default-lane c1–c3 and the fr-only row have no es-lane target, so they
@@ -442,5 +480,139 @@ describe("external quality reads (AQU-1231)", () => {
     expect(grace.consistentCount).toBe(1)
     expect(grace.flaggedCells.map((c) => c.cellId)).toEqual(["dual-id"])
     expect(grace.renderingUsage).toEqual([{ rendering: "gracia", cellIds: ["dual-tag"] }])
+  })
+
+  // -- termbase list read (AQU-1175) ----------------------------------------
+
+  it("lists the termbase with the same rows the in-app Terminology page shows", async () => {
+    const res = await handleExternalQualityRequest(
+      req("/api/v1/external/projects/proj-a/terms", tokenA),
+      env(testDb),
+    )
+    expect(res?.status).toBe(200)
+    const body = (await res!.json()) as TermEntriesBody
+    expect(body.projectId).toBe("proj-a")
+    expect(body.status).toBeNull()
+    expect(body.termCount).toBe(2)
+    // created_at ASC, matching the internal concepts route the UI reads.
+    expect(body.data.map((t) => t.conceptId)).toEqual(["concept-grace", "concept-spirit"])
+    const grace = body.data[0]
+    expect(grace.sourceTerm).toBe("grace")
+    expect(grace.status).toBe("active")
+    expect(grace.renderings).toEqual([
+      { rendering: "gracia", status: "preferred" },
+      { rendering: "favor", status: "admitted" },
+    ])
+    expect(grace.caseSensitive).toBe(false)
+    expect(grace.deletedAt).toBeNull()
+    // A null match_options column reports as {} — "no variants configured",
+    // which is a fact an agent must be able to tell from "unknown".
+    expect(grace.matchOptions).toEqual({})
+  })
+
+  it("reports matchOptions.forms, the inflection variants that decide whether a term matches", async () => {
+    await testDb.pg.query(
+      `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status, case_sensitive, match_options, created_at, updated_at)
+       VALUES ('concept-word', 'proj-a', 'Боже Слово', $1::jsonb, 'active', 1, $2::jsonb, 2000, 2000)`,
+      [
+        JSON.stringify([{ rendering: "Word of God", status: "preferred" }]),
+        JSON.stringify({ forms: ["Божого Слова"], excludedForms: ["Слово Боже"], affixes: true }),
+      ],
+    )
+    const res = await handleExternalQualityRequest(
+      req("/api/v1/external/projects/proj-a/terms?status=active", tokenA),
+      env(testDb),
+    )
+    expect(res?.status).toBe(200)
+    const body = (await res!.json()) as TermEntriesBody
+    const word = body.data.find((t) => t.conceptId === "concept-word")!
+    expect(word.caseSensitive).toBe(true)
+    expect(word.matchOptions).toEqual({
+      affixes: true,
+      forms: ["Божого Слова"],
+      excludedForms: ["Слово Боже"],
+    })
+  })
+
+  it("status filters before paging, so a filtered page is not the first page filtered", async () => {
+    // Two more drafts AFTER the active concept, so an unfiltered first page of
+    // 1 would hold only `concept-grace` and a naive filter would return none.
+    await testDb.pg.query(
+      `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status, created_at, updated_at)
+       VALUES ('concept-d2', 'proj-a', 'mercy', '[]'::jsonb, 'draft', 3000, 3000),
+              ('concept-d3', 'proj-a', 'peace', '[]'::jsonb, 'draft', 4000, 4000)`,
+    )
+    const res = await handleExternalQualityRequest(
+      req("/api/v1/external/projects/proj-a/terms?status=draft&limit=1", tokenA),
+      env(testDb),
+    )
+    const body = (await res!.json()) as TermEntriesBody
+    expect(body.status).toBe("draft")
+    expect(body.termCount).toBe(3)
+    expect(body.data.map((t) => t.conceptId)).toEqual(["concept-spirit"])
+    expect(body.nextCursor).not.toBeNull()
+
+    const page2 = await handleExternalQualityRequest(
+      req(`/api/v1/external/projects/proj-a/terms?status=draft&limit=2&cursor=${body.nextCursor}`, tokenA),
+      env(testDb),
+    )
+    const body2 = (await page2!.json()) as TermEntriesBody
+    expect(body2.data.map((t) => t.conceptId)).toEqual(["concept-d2", "concept-d3"])
+    expect(body2.nextCursor).toBeNull()
+  })
+
+  it("hides tombstoned entries by default and surfaces them with includeDeleted=1", async () => {
+    await testDb.db
+      .prepare(`UPDATE concepts SET deleted_at = ? WHERE concept_id = ?`)
+      .bind(5000, "concept-spirit")
+      .run()
+
+    const live = await handleExternalQualityRequest(
+      req("/api/v1/external/projects/proj-a/terms", tokenA),
+      env(testDb),
+    )
+    const liveBody = (await live!.json()) as TermEntriesBody
+    expect(liveBody.data.map((t) => t.conceptId)).toEqual(["concept-grace"])
+
+    const all = await handleExternalQualityRequest(
+      req("/api/v1/external/projects/proj-a/terms?includeDeleted=1", tokenA),
+      env(testDb),
+    )
+    const allBody = (await all!.json()) as TermEntriesBody
+    expect(allBody.includeDeleted).toBe(true)
+    const spirit = allBody.data.find((t) => t.conceptId === "concept-spirit")!
+    expect(spirit.deletedAt).toBe(5000)
+  })
+
+  it("rejects an unknown status rather than silently returning everything", async () => {
+    const res = await handleExternalQualityRequest(
+      req("/api/v1/external/projects/proj-a/terms?status=retired", tokenA),
+      env(testDb),
+    )
+    expect(res?.status).toBe(400)
+    const body = (await res!.json()) as { error: { code: string } }
+    expect(body.error.code).toBe("validation_failed")
+  })
+
+  it("403 scope_denied on the termbase read for a wrong-project credential", async () => {
+    const res = await handleExternalQualityRequest(
+      req("/api/v1/external/projects/proj-a/terms", tokenB),
+      env(testDb),
+    )
+    expect(res?.status).toBe(403)
+    const body = (await res!.json()) as { error: { code: string } }
+    expect(body.error.code).toBe("scope_denied")
+  })
+
+  it("/terms does not shadow /terms/consistency", async () => {
+    const res = await handleExternalQualityRequest(
+      req("/api/v1/external/projects/proj-a/terms/consistency?lane=deflane1", tokenA),
+      env(testDb),
+    )
+    expect(res?.status).toBe(200)
+    // The drift shape, not the list shape.
+    const body = (await res!.json()) as TermsBody & { termCount?: number }
+    expect(body.termCount).toBeUndefined()
+    expect(body.data[0]).toHaveProperty("flaggedCells")
   })
 })

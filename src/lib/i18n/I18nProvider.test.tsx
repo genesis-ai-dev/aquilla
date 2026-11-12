@@ -3,7 +3,8 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { I18nProvider, useT } from "./I18nProvider"
 import { LanguageSwitcher } from "./LanguageSwitcher"
-import { CATALOGS } from "./messages"
+import { CATALOGS } from "./messages/all"
+import { registerCatalog } from "./messages"
 import type { Catalog } from "./messages/en"
 import { readStoredLocale } from "./store"
 
@@ -81,13 +82,17 @@ describe("I18nProvider + LanguageSwitcher", () => {
     // given locale happens to be.
     const partial = { ...CATALOGS.my }
     delete partial["nav.projects"]
-    CATALOGS.my = partial
+    registerCatalog("my", partial)
 
-    render(<Harness />)
-    await pickLanguage("မြန်မာ")
+    try {
+      render(<Harness />)
+      await pickLanguage("မြန်မာ")
 
-    expect(screen.getByTestId("label")).toHaveTextContent("Projects")
-    expect(document.documentElement.dir).toBe("ltr")
+      expect(screen.getByTestId("label")).toHaveTextContent("Projects")
+      expect(document.documentElement.dir).toBe("ltr")
+    } finally {
+      registerCatalog("my", CATALOGS.my)
+    }
   })
 
   it("renders the shipped translation for a locale that covers the key", async () => {

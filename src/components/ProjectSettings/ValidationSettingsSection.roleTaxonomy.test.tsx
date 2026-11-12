@@ -46,9 +46,10 @@ function renderFloor(validationRoleFloor: "reviewer" | "project_lead" | "maintai
 }
 
 function floorValueText(container: HTMLElement): string {
-  // The floor <Select> is the only one in this section; its displayed value
-  // lives on the [data-slot="select-value"] node.
-  const value = container.querySelector('[data-slot="select-value"]')
+  // The text floor <Select>'s displayed value lives on its
+  // [data-slot="select-value"] node. Found through its trigger's id, because
+  // the count rows carry their own "Organization default" selects (AQU-1771).
+  const value = container.querySelector('#validation-role-floor [data-slot="select-value"]')
   return value?.textContent ?? ""
 }
 
@@ -56,7 +57,7 @@ describe("ValidationSettingsSection — validator-role taxonomy (AQU-352)", () =
   it("shows the capitalized canonical role name for project_lead", () => {
     const { container } = renderFloor("project_lead")
     const text = floorValueText(container)
-    expect(text).toContain(resolveRoleName(t, 500)) // "Project lead"
+    expect(text).toContain(resolveRoleName(t, 500)) // "Project Lead"
   })
 
   it("shows 'Reviewer' without a '(default)' suffix baked into the label", () => {

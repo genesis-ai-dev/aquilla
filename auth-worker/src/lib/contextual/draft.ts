@@ -10,14 +10,24 @@
 import { parseDraftReply } from "../agent/tools/draft"
 import type { LintRule } from "../agent/lint"
 import type { CellPair } from "../agent/tools/select-cells"
+import { termHints, type TermGuidance } from "./project-context"
+import { instructionsPromptBlock } from "../../../../db/shared/translation-instructions"
 import {
-  PERFORMER_BRIEF_FIELDS,
-  type TermGuidance,
-  type TranslationBriefParameters,
-} from "./project-context"
+  assemblePromptSections,
+  checksHintBlock,
+  runDirectionsBlock,
+  terminologyBlock,
+} from "../../../../db/shared/prompt-blocks"
+import type { LanguageProfile } from "../../../../db/shared/language-profile"
 import { chargeBudget, type AmbiguityEntry, type LlmCall, type RunBudget, type SpanDraft } from "./types"
 
-export const CONTEXTUAL_PROMPT_VERSION = "contextual-draft-v2"
+// v3 (AQU-1691): the "Project decisions" block.
+// v4 (AQU-1690): per-cell Bible facts lines, and examples chosen by pack features.
+// v5 (AQU-2342 phase 2): the one section order shared by every drafting path
+// (db/shared/prompt-blocks.ts) — examples and preceding context move into the
+// system prompt; decisions fold into the instructions; the Language profile,
+// style rules and org rules ride in the shared checks hint.
+export const CONTEXTUAL_PROMPT_VERSION = "contextual-draft-v5"
 
 export interface ExamplePair {
   cellId?: string
@@ -39,15 +49,24 @@ export interface PerformSpanDeps {
   /** Validated pairs immediately preceding the span (discourse left-context). */
   precedingValidated: CellPair[]
   steeringDirections?: string[]
-  projectBriefL1?: string
-  /** The brief's structured answers, used when there is no L1 summary. */
-  briefParameters?: TranslationBriefParameters
+  /** AQU-2342: the project's resolved translation instructions. */
+  translationInstructions?: string
   /** Approved/forbidden renderings for the key terms that appear in THIS span. */
   terms?: TermGuidance[]
+  /** AQU-2342: the Language profile — data the Bible data checks verify; its
+   *  filled slots join the checks hint. (The decision log is folded into the
+   *  instructions.) */
+  languageProfile?: LanguageProfile
+  /** AQU-2342: style-rule instructions in force for THIS span. */
+  styleInstructions?: string[]
+  /** Project rules then org rules, already narrowed to the run's lane. */
   rules?: LintRule[]
   /** Per-cell constraints from a previous quorum rejection (redraft loop —
    *  losing verdicts, never "improve this"). */
   constraints?: { cellId: string; constraints: string[] }[]
+  /** AQU-1690: one Bible facts line per cell id (who speaks to whom, quote
+   *  levels, participants, "you"), shown under its segment. */
+  facts?: ReadonlyMap<string, string>
   sourceLanguage?: string
   targetLanguage?: string
   llm: LlmCall
@@ -68,110 +87,73 @@ export function promptFingerprint(prompt: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0")
 }
 
-// Keep supporting metadata bounded without truncating source or target text.
-// Translation examples and preceding segments are serialized in full below.
-function clip(value: string, maxLength: number): string {
-  return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value
-}
-
 function performerSystemPrompt(deps: PerformSpanDeps): string {
   const pair = deps.targetLanguage
     ? `You translate${deps.sourceLanguage ? ` from ${deps.sourceLanguage}` : ""} into ${deps.targetLanguage}.`
     : "You translate into the project's target language — infer it from the example pairs."
 
-  const registerBlock =
+  // AQU-1690: the facts lines are pack data, not guesses — say so once.
+  const factsNote = deps.pairs.some((p) => deps.facts?.has(p.cellId))
+    ? `Bible data — given facts. A segment may carry a "Facts:" line: who speaks to whom, where each quotation opens and closes (level 1 is the outer quotation, level 2 a quotation inside it), who is named, and whether "you" is singular or plural. Treat these as true. Mark each quotation with the project's quotation marks for its level.`
+    : ""
+
+  const register =
     deps.sceneBrief.ambiguityRegister.length > 0
-      ? `\nAmbiguity register — HARD constraints. Each item below is ambiguous ON PURPOSE in the source. Your draft must keep it just as open; do NOT resolve, clarify, or pick a reading:\n${deps.sceneBrief.ambiguityRegister.map((a) => `- [${a.id}] ${a.question}`).join("\n")}\n`
+      ? `Ambiguity register — HARD constraints. Each item below is ambiguous ON PURPOSE in the source. Your draft must keep it just as open; do NOT resolve, clarify, or pick a reading:\n${deps.sceneBrief.ambiguityRegister.map((a) => `- [${a.id}] ${a.question}`).join("\n")}`
       : ""
 
-  // Key terms first, and as HARD constraints: an inconsistently rendered key
-  // term is the defect a translation consultant rejects a whole book over.
-  // These were previously invisible to the model — terminology compiled to
-  // rules client-side only — so the performer could only be punished for
-  // missing a rendering it was never shown.
-  const termsBlock =
-    deps.terms && deps.terms.length > 0
-      ? `\nKey terms appearing in this passage — HARD constraints. Use an approved rendering for each; never use a forbidden one:\n${deps.terms
-          .map((t) => {
-            const use = [...t.preferred, ...t.admitted]
-            const parts = [
-              use.length > 0 ? `use ${use.map((r) => `"${r}"`).join(" or ")}` : null,
-              t.forbidden.length > 0
-                ? `never ${t.forbidden.map((r) => `"${r}"`).join(" or ")}`
-                : null,
-            ].filter(Boolean)
-            return `- "${t.sourceTerm}": ${parts.join("; ")}${t.notes ? ` (${clip(t.notes, 160)})` : ""}`
-          })
-          .join("\n")}\n`
+  const examples =
+    deps.examples.length > 0
+      ? `Translation pairs from this project (imitate them):\n${deps.examples
+          .map((e) => `${e.validated ? "✓" : "·"} ${JSON.stringify(e.source)} → ${JSON.stringify(e.target)}`)
+          .join("\n")}`
       : ""
-
-  // Rules carry a description that states what they REQUIRE. Sending only the
-  // name ("Term: grace") told the model a label and expected it to infer the
-  // requirement.
-  const rulesBlock =
-    deps.rules && deps.rules.length > 0
-      ? `\nProject rules (deterministic checks will run on your output):\n${deps.rules
-          .filter((r) => r.enabled)
-          .map((r) => `- ${r.description ? clip(r.description, 200) : r.name}`)
-          .join("\n")}\n`
-      : ""
-
-  // The brief's own answers, used when nobody has generated the L1 summary —
-  // an un-summarised brief is still a brief, and drafting without audience,
-  // register, or literalness means guessing the decisions that shape every
-  // sentence.
-  const briefFallbackBlock =
-    !deps.projectBriefL1 && deps.briefParameters
-      ? (() => {
-          const lines = PERFORMER_BRIEF_FIELDS.flatMap((f) => {
-            const v = deps.briefParameters?.[f.id]
-            return v ? [`- ${f.label}: ${clip(v, 300)}`] : []
-          })
-          return lines.length > 0 ? `\nProject brief (honour it):\n${lines.join("\n")}\n` : ""
-        })()
-      : ""
-
-  const steeringBlock =
-    deps.steeringDirections && deps.steeringDirections.length > 0
-      ? `\nActive directions from the human team (honour them):\n${deps.steeringDirections.map((d) => `- ${d}`).join("\n")}\n`
+  const preceding =
+    deps.precedingValidated.length > 0
+      ? `Immediately preceding, already-translated segments (continue their discourse flow):\n${deps.precedingValidated
+          .map((p) => `${p.canonicalRef ?? "·"}: ${JSON.stringify(p.source)} → ${JSON.stringify(p.target)}`)
+          .join("\n")}`
       : ""
 
   // [[ctx:draft]] routes the scripted e2e mock (scripts/mock-openrouter.ts).
-  return `[[ctx:draft]] ${pair} You are the PERFORMER in a two-role translation pipeline: an analyzer has already construed the scene below. Work from the scene brief — translate the scene's moves, not word by word. Target-language idioms are explicitly licensed where they carry the same move with the same social force.
-${deps.projectBriefL1 ? `\nProject brief (honour it): ${deps.projectBriefL1}\n` : briefFallbackBlock}
-Scene brief: ${deps.sceneBrief.l1Summary}
-${registerBlock}${termsBlock}${rulesBlock}${steeringBlock}
-Rules:
+  // AQU-2342: the ONE section order (db/shared/prompt-blocks.ts). Key terms
+  // and checks are HARD constraints: an inconsistently rendered key term is the
+  // defect a translation consultant rejects a whole book over. Steering lasts
+  // one wave; the instructions, checks and terms hold for every draft.
+  return assemblePromptSections({
+    role: `[[ctx:draft]] ${pair} You are the PERFORMER in a two-role translation pipeline: an analyzer has already construed the scene below. Work from the scene brief — translate the scene's moves, not word by word. Target-language idioms are explicitly licensed where they carry the same move with the same social force.`,
+    instructions: instructionsPromptBlock(deps.translationInstructions),
+    checks: checksHintBlock({
+      rules: (deps.rules ?? []).filter((r) => r.enabled),
+      styleInstructions: deps.styleInstructions ?? [],
+      languageProfile: deps.languageProfile ?? null,
+    }),
+    terminology: terminologyBlock(termHints(deps.terms ?? [])),
+    examples,
+    context: [`Scene brief: ${deps.sceneBrief.l1Summary}`, register, preceding, factsNote].filter(Boolean).join("\n\n"),
+    directions: runDirectionsBlock(deps.steeringDirections),
+    output: `Rules:
 1. Translate segment by segment; do not merge, split, or reorder segments.
 2. Keep names, numbers, and punctuation conventions consistent with the example pairs.
 3. Preserve every registered ambiguity exactly as open as the source leaves it.
 4. Render every key term listed above with one of its approved renderings.
-5. Output STRICT JSON only: an array like [{"i":1,"t":"<translation>"}] with one object per input segment, i matching the input number. No prose, no code fences.`
+5. Output STRICT JSON only: an array like [{"i":1,"t":"<translation>"}] with one object per input segment, i matching the input number. No prose, no code fences.`,
+  })
 }
 
 function userPrompt(deps: PerformSpanDeps): string {
-  const examplesBlock =
-    deps.examples.length > 0
-      ? `Translation pairs from this project (imitate them):\n${deps.examples
-          .map((e) => `${e.validated ? "✓" : "·"} ${JSON.stringify(e.source)} → ${JSON.stringify(e.target)}`)
-          .join("\n")}\n\n`
-      : ""
-  const precedingBlock =
-    deps.precedingValidated.length > 0
-      ? `Immediately preceding, already-translated segments (continue their discourse flow):\n${deps.precedingValidated
-          .map((p) => `${p.canonicalRef ?? "·"}: ${JSON.stringify(p.source)} → ${JSON.stringify(p.target)}`)
-          .join("\n")}\n\n`
-      : ""
   const constraintsById = new Map((deps.constraints ?? []).map((c) => [c.cellId, c.constraints]))
   const numbered = deps.pairs
     .map((p, i) => {
       const cs = constraintsById.get(p.cellId)
+      const facts = deps.facts?.get(p.cellId)
       const constraintNote =
-        cs && cs.length > 0 ? `\n   Constraints from review (satisfy each): ${cs.join("; ")}` : ""
+        (facts ? `\n   Facts: ${facts}` : "") +
+        (cs && cs.length > 0 ? `\n   Constraints from review (satisfy each): ${cs.join("; ")}` : "")
       return `${i + 1}. ${p.canonicalRef ? `[${p.canonicalRef}] ` : ""}${p.source}${constraintNote}`
     })
     .join("\n")
-  return `${examplesBlock}${precedingBlock}Translate these ${deps.pairs.length} segments:\n${numbered}`
+  return `Translate these ${deps.pairs.length} segments:\n${numbered}`
 }
 
 export async function performSpan(deps: PerformSpanDeps): Promise<PerformSpanResult> {

@@ -1,7 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { expectDisabledNote } from "@/test-utils/tooltip"
 import { describe, expect, it, vi } from "vitest"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
-import { CellTranscriptPreview } from "./CellTranscriptPreview"
+import { CellTranscriptPreview, classifyTranscriptPreview } from "./CellTranscriptPreview"
 import type { WordTiming } from "@/lib/codex-editor/types"
 
 const timings: WordTiming[] = [
@@ -45,5 +48,103 @@ describe("CellTranscriptPreview", () => {
       </I18nProvider>,
     )
     expect(screen.getByLabelText("Contributor+ required to edit transcripts")).toBeTruthy()
+  })
+
+  it("offers the corrected wording for the cell instead of a fresh transcription", () => {
+    const inserted = "des celles"
+    const timings: WordTiming[] = [
+      { word: "des", t0: 0, t1: 0.3, start: 0, end: 3 },
+      { word: "cellules", t0: 0.3, t1: 0.9, start: 4, end: 12 },
+    ]
+    render(
+      <I18nProvider>
+        <CellTranscriptPreview
+          timings={timings}
+          cellText={inserted}
+          cellId="c1"
+          alignedToCellText
+          editable
+          onRetranscribe={vi.fn()}
+          onUseAsCellText={vi.fn()}
+        />
+      </I18nProvider>,
+    )
+    expect(screen.queryByText("You changed the text after recording")).not.toBeInTheDocument()
+    expect(screen.getByText("Your recording sounds a little different")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Use what was heard" })).toBeInTheDocument()
+  })
+})
+
+describe("classifyTranscriptPreview", () => {
+  const inserted = "first paragraph de section one, il y a des contenus qui seraient des celles."
+
+  it("does not ask to retranscribe when a correction is longer than the text already in the cell", () => {
+    // The heard text was inserted earlier. A later correction grew a word
+    // and (older builds) reindexed offsets onto that longer string, so the
+    // last offset runs past the cell even though the cell was not shortened.
+    const corrected = inserted.replace(/celles\.$/, "cellules.")
+    const words = corrected.split(/\s+/)
+    let cursor = 0
+    const timings: WordTiming[] = words.map((word, i) => {
+      const start = cursor
+      const end = start + word.length
+      cursor = end + 1
+      return { word, start, end, t0: i, t1: i + 1 }
+    })
+    expect(timings[timings.length - 1].end).toBeGreaterThan(inserted.length)
+    expect(classifyTranscriptPreview(timings, inserted, true)).toBe("differs")
+  })
+
+  it("still asks to retranscribe when the cell itself lost the tail of the aligned text", () => {
+    const timings: WordTiming[] = [
+      { word: "hello", t0: 0, t1: 0.4, start: 0, end: 5 },
+      { word: "world", t0: 0.4, t1: 0.9, start: 6, end: 11 },
+    ]
+    expect(classifyTranscriptPreview(timings, "hello worl", true)).toBe("stale")
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button.
+describe("CellTranscriptPreview — no hover explanations", () => {
+  async function expectNoHover(el: Element) {
+    await userEvent.setup().hover(el)
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+  }
+
+  it("says why a reviewer cannot correct the transcript, on a click", async () => {
+    render(
+      <I18nProvider>
+        <TooltipProvider delay={0}>
+          <CellTranscriptPreview
+            timings={timings} cellText="the house" cellId="c1" alignedToCellText={false}
+            editable={false} onCorrectTranscript={vi.fn()}
+          />
+        </TooltipProvider>
+      </I18nProvider>,
+    )
+    await expectDisabledNote(
+      screen.getByLabelText("Contributor+ required to edit transcripts"),
+      "Contributor+ required to edit transcripts",
+    )
+  })
+
+  it("its text buttons have no hover", async () => {
+    const heard: WordTiming[] = [
+      { word: "des", t0: 0, t1: 0.3, start: 0, end: 3 },
+      { word: "cellules", t0: 0.3, t1: 0.9, start: 4, end: 12 },
+    ]
+    render(
+      <I18nProvider>
+        <TooltipProvider delay={0}>
+          <CellTranscriptPreview
+            timings={heard} cellText="des celles" cellId="c1" alignedToCellText editable
+            onRetranscribe={vi.fn()} onUseAsCellText={vi.fn()}
+          />
+        </TooltipProvider>
+      </I18nProvider>,
+    )
+    await expectNoHover(screen.getByRole("button", { name: "Use what was heard" }))
+    await expectNoHover(screen.getByRole("button", { name: /Transcribe again/ }))
   })
 })

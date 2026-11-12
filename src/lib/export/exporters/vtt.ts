@@ -160,7 +160,7 @@ function unitsFrom(
     // assignments when it does not — so passing one can only ever ADD tags,
     // never take away a tag the settings would have produced.
     const resolved = excludeLabels ? null : options.resolveName?.(cell)?.trim() || null
-    const voiceId = excludeLabels || resolved ? undefined : assignedCastVoiceId(settings, cell.id)
+    const voiceId = excludeLabels || resolved ? undefined : assignedCastVoiceId(settings, cell)
     const assigned = voiceId ? findVoice(settings, voiceId) : undefined
     const speaker = resolved ?? assigned?.name ?? null
     units.push({

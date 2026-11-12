@@ -53,8 +53,13 @@ export function usePlanUnitSections(opts: {
   /** Mints a project-scoped sync token; the progress route ignores its file claim. */
   getToken: (() => Promise<string | null>) | null
   lane: string
+  /**
+   * Bump to read again when the counts changed without the unit changing —
+   * a project setting such as "Count headings as translatable content".
+   */
+  version?: number
 }): UsePlanUnitSectionsResult {
-  const { projectId, unit, getToken, lane } = opts
+  const { projectId, unit, getToken, lane, version = 0 } = opts
   const [sections, setSections] = useState<PlanSection[]>(EMPTY)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(false)
@@ -112,7 +117,7 @@ export function usePlanUnitSections(opts: {
     return () => {
       cancelled = true
     }
-  }, [projectId, fileId, sectionKey, lane, getToken])
+  }, [projectId, fileId, sectionKey, lane, getToken, version])
 
   return { sections, loading, error }
 }

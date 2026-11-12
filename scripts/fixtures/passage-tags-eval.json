@@ -1,0 +1,193 @@
+{
+  "$comment": "Labelled fixture for scripts/passage-tags-eval.ts (AQU-657, slice 1). Each node carries the four tag labels a human would give it: who takes part, whether it opens a new scene relative to the previous node, whether it is mostly speech, and which other nodes it depends on. `sceneChange: null` on a document's first node means 'no predecessor to compare', and those nodes are excluded from that tag's score rather than counted as false.",
+  "documents": [
+    {
+      "id": "web-luke-5",
+      "kind": "scripture",
+      "provenance": "World English Bible (public domain), Luke 5, fetched from https://bible-api.com/luke+5?translation=web on 2026-10-01. Passage divisions are the standard pericopes of Luke 5.",
+      "cast": [
+        "Jesus",
+        "Simon",
+        "James",
+        "John",
+        "Levi",
+        "Pharisees",
+        "scribes",
+        "Moses",
+        "Zebedee"
+      ],
+      "nodes": [
+        {
+          "key": "passage:LUK 5:1",
+          "label": "LUK 5:1–11",
+          "startRef": "LUK 5:1",
+          "endRef": "LUK 5:11",
+          "text": "Now while the multitude pressed on him and heard the word of God, he was standing by the lake of Gennesaret. He saw two boats standing by the lake, but the fishermen had gone out of them, and were washing their nets. He entered into one of the boats, which was Simon’s, and asked him to put out a little from the land. He sat down and taught the multitudes from the boat. When he had finished speaking, he said to Simon, “Put out into the deep, and let down your nets for a catch.” Simon answered him, “Master, we worked all night, and took nothing; but at your word I will let down the net.” When they had done this, they caught a great multitude of fish, and their net was breaking. They beckoned to their partners in the other boat, that they should come and help them. They came, and filled both boats, so that they began to sink. But Simon Peter, when he saw it, fell down at Jesus’ knees, saying, “Depart from me, for I am a sinful man, Lord.” For he was amazed, and all who were with him, at the catch of fish which they had caught; and so also were James and John, sons of Zebedee, who were partners with Simon. Jesus said to Simon, “Don’t be afraid. From now on you will be catching people alive.” When they had brought their boats to land, they left everything, and followed him.",
+          "labels": {
+            "participants": [
+              "Jesus",
+              "Simon",
+              "James",
+              "John"
+            ],
+            "sceneChange": null,
+            "speech": false,
+            "refersTo": []
+          },
+          "labelNote": "Simon, James and John are named and act; Zebedee is only Simon's partners' father, a passing mention."
+        },
+        {
+          "key": "passage:LUK 5:12",
+          "label": "LUK 5:12–16",
+          "startRef": "LUK 5:12",
+          "endRef": "LUK 5:16",
+          "text": "While he was in one of the cities, behold, there was a man full of leprosy. When he saw Jesus, he fell on his face, and begged him, saying, “Lord, if you want to, you can make me clean.” He stretched out his hand, and touched him, saying, “I want to. Be made clean.” Immediately the leprosy left him. He commanded him to tell no one, “But go your way, and show yourself to the priest, and offer for your cleansing according to what Moses commanded, for a testimony to them.” But the report concerning him spread much more, and great multitudes came together to hear, and to be healed by him of their infirmities. But he withdrew himself into the desert, and prayed.",
+          "labels": {
+            "participants": [
+              "Jesus"
+            ],
+            "sceneChange": true,
+            "speech": false,
+            "refersTo": []
+          },
+          "labelNote": "New city and new day. Moses is named only in the instruction Jesus gives, so he is not a participant."
+        },
+        {
+          "key": "passage:LUK 5:17",
+          "label": "LUK 5:17–26",
+          "startRef": "LUK 5:17",
+          "endRef": "LUK 5:26",
+          "text": "On one of those days, he was teaching; and there were Pharisees and teachers of the law sitting by, who had come out of every village of Galilee, Judea, and Jerusalem. The power of the Lord was with him to heal them. Behold, men brought a paralyzed man on a cot, and they sought to bring him in to lay before Jesus. Not finding a way to bring him in because of the multitude, they went up to the housetop, and let him down through the tiles with his cot into the middle before Jesus. Seeing their faith, he said to him, “Man, your sins are forgiven you.” The scribes and the Pharisees began to reason, saying, “Who is this that speaks blasphemies? Who can forgive sins, but God alone?” But Jesus, perceiving their thoughts, answered them, “Why are you reasoning so in your hearts? Which is easier to say, ‘Your sins are forgiven you;’ or to say, ‘Arise and walk?’ But that you may know that the Son of Man has authority on earth to forgive sins” (he said to the paralyzed man), “I tell you, arise, and take up your cot, and go to your house.” Immediately he rose up before them, and took up that which he was laying on, and departed to his house, glorifying God. Amazement took hold on all, and they glorified God. They were filled with fear, saying, “We have seen strange things today.”",
+          "labels": {
+            "participants": [
+              "Jesus",
+              "Pharisees",
+              "scribes"
+            ],
+            "sceneChange": true,
+            "speech": false,
+            "refersTo": []
+          },
+          "labelNote": "The scribes and Pharisees reason aloud, so they take part; the paralyzed man is not in the book's cast list."
+        },
+        {
+          "key": "passage:LUK 5:27",
+          "label": "LUK 5:27–32",
+          "startRef": "LUK 5:27",
+          "endRef": "LUK 5:32",
+          "text": "After these things he went out, and saw a tax collector named Levi sitting at the tax office, and said to him, “Follow me!” He left everything, and rose up and followed him. Levi made a great feast for him in his house. There was a great crowd of tax collectors and others who were reclining with them. Their scribes and the Pharisees murmured against his disciples, saying, “Why do you eat and drink with the tax collectors and sinners?” Jesus answered them, “Those who are healthy have no need for a physician, but those who are sick do. I have not come to call the righteous, but sinners to repentance.”",
+          "labels": {
+            "participants": [
+              "Jesus",
+              "Levi",
+              "Pharisees",
+              "scribes"
+            ],
+            "sceneChange": true,
+            "speech": false,
+            "refersTo": []
+          },
+          "labelNote": "Levi is called and hosts; the scribes and Pharisees murmur and are answered."
+        },
+        {
+          "key": "passage:LUK 5:33",
+          "label": "LUK 5:33–39",
+          "startRef": "LUK 5:33",
+          "endRef": "LUK 5:39",
+          "text": "They said to him, “Why do John’s disciples often fast and pray, likewise also the disciples of the Pharisees, but yours eat and drink?” He said to them, “Can you make the friends of the bridegroom fast, while the bridegroom is with them? But the days will come when the bridegroom will be taken away from them. Then they will fast in those days.” He also told a parable to them. “No one puts a piece from a new garment on an old garment, or else he will tear the new, and also the piece from the new will not match the old. No one puts new wine into old wine skins, or else the new wine will burst the skins, and it will be spilled, and the skins will be destroyed. But new wine must be put into fresh wine skins, and both are preserved. No man having drunk old wine immediately desires new, for he says, ‘The old is better.’”",
+          "labels": {
+            "participants": [
+              "Jesus",
+              "Pharisees",
+              "scribes"
+            ],
+            "sceneChange": false,
+            "speech": true,
+            "refersTo": [
+              "passage:LUK 5:27"
+            ]
+          },
+          "labelNote": "The hard node: Jesus is present only as 'He', and John appears only as 'John's disciples'. It continues the feast scene of 5:27-32, which is also what it depends on for 'They'."
+        }
+      ]
+    },
+    {
+      "id": "partner-interview",
+      "kind": "prose",
+      "provenance": "Synthetic. Written for this fixture, shaped like the partner interview transcripts the app imports as media files (no scripture refs, speaker-led, speech-heavy).",
+      "cast": [
+        "Mariette",
+        "Joel",
+        "the translators",
+        "the reviewer"
+      ],
+      "nodes": [
+        {
+          "key": "passage:interview-0",
+          "label": "Opening — how the team is set up",
+          "text": "Mariette opened the call by describing how the team is organised. Four translators work in the river valleys, and a reviewer in the town reads everything they send before it goes to the publisher. Joel took notes while she spoke.",
+          "labels": {
+            "participants": [
+              "Mariette",
+              "Joel",
+              "the translators",
+              "the reviewer"
+            ],
+            "sceneChange": null,
+            "speech": false,
+            "refersTo": []
+          },
+          "labelNote": "Narration about the call. Everyone named is doing something."
+        },
+        {
+          "key": "passage:interview-1",
+          "label": "Mariette on the review bottleneck",
+          "text": "“The reviewer is the bottleneck,” she said. “She reads every verse twice, once for meaning and once for the way it sounds read aloud, and she will not sign anything she has not heard spoken. So the four of them can draft a chapter in a morning and then wait three days.”",
+          "labels": {
+            "participants": [
+              "Mariette",
+              "the translators",
+              "the reviewer"
+            ],
+            "sceneChange": false,
+            "speech": true,
+            "refersTo": []
+          },
+          "labelNote": "Almost entirely quoted speech, and Mariette is present only as 'she'. The reviewer and the four translators are what she is talking about and are the subject of the complaint, so they count as taking part in the passage."
+        },
+        {
+          "key": "passage:interview-2",
+          "label": "Joel on what would help",
+          "text": "Joel asked what would change that. “Let her hear the draft without opening a file,” Mariette answered. “If she can listen to a chapter on her phone on the bus, the three days become an afternoon.”",
+          "labels": {
+            "participants": [
+              "Joel",
+              "Mariette",
+              "the reviewer"
+            ],
+            "sceneChange": false,
+            "speech": true,
+            "refersTo": [
+              "passage:interview-1"
+            ]
+          },
+          "labelNote": "Depends on the previous passage: 'that' and 'the three days' only resolve there."
+        },
+        {
+          "key": "passage:interview-3",
+          "label": "Close — next workshop",
+          "text": "A week later, in the town hall, the translators met for the next workshop. The room was cold and the generator ran all morning. Nobody from the publisher came.",
+          "labels": {
+            "participants": [
+              "the translators"
+            ],
+            "sceneChange": true,
+            "speech": false,
+            "refersTo": []
+          },
+          "labelNote": "New time, new place, new cast — a scene change with no refs to compare, which the heuristic cannot see."
+        }
+      ]
+    }
+  ]
+}

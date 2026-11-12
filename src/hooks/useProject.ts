@@ -15,100 +15,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { minimalProjectRecord, resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
+import { minimalProjectRecord } from "@/lib/sync/cloud-projects"
+import { resolveProjectForRead, whenOfflineStoreOpen } from "@/lib/sync/project-resolve"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
-import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
-import type { ProjectWideSettings } from "@/lib/sync/project-settings"
+import { overlaySettings } from "@/hooks/project-settings-overlay"
 import { getProject, subscribeProjectRecords } from "@/lib/store/project-index"
 import { readResolvedProjectSeed, rememberResolvedProject } from "@/lib/sync/project-record-seed"
+import { subscribeProjectRecordChanged } from "@/lib/sync/project-record-changed"
+import { clearProjectTargetLanes, setProjectTargetLanes } from "@/lib/sync/project-target-lanes"
 
 /**
- * Overlay synced project-wide settings onto the server-returned ProjectRecord.
- * Mutates a shallow copy — never the input.
+ * The settings each browser keeps for itself, only in its own copy of the
+ * project and never on the server: Audio loading, Git auto-sync and Health.
+ * (AQU-2331) A cloud project's record comes from the server, which never has
+ * them, so this browser's copy is their only home: the record takes each one
+ * from it, and goes without one the copy no longer has (put back to its
+ * default), rather than keeping a value from an earlier read.
  */
-function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): ProjectRecord {
-  let next: ProjectRecord | null = null
-  const draft = () => {
-    next ??= { ...record }
-    return next
-  }
-  const assign = <K extends keyof ProjectRecord>(key: K, value: ProjectRecord[K] | null | undefined) => {
-    if (value == null) return
-    if (record[key] === value) return
-    draft()[key] = value
-  }
-  assign("sourceLanguage", settings.sourceLanguage)
-  assign("targetLanguage", settings.targetLanguage)
-  // AQU-538: the lane registry must reach the workspace or the LaneSwitcher
-  // never renders (found by the add-target-language e2e journey).
-  assign("targetLanes", settings.targetLanes)
-  // AQU-601: archived-lane markers overlay alongside the registry so the
-  // workspace switcher can hide archived lanes by default.
-  assign("archivedLanes", settings.archivedLanes)
-  if (settings.systemPrompt != null) {
-    if (record.completionSettings?.systemPrompt !== settings.systemPrompt) {
-      draft().completionSettings = buildCompletionSettings(
-        record.completionSettings,
-        { systemPrompt: settings.systemPrompt },
-      )
-    }
-  }
-  assign("rules", settings.rules)
-  assign("rulePenalties", settings.rulePenalties)
-  assign("algorithmicChecks", settings.algorithmicChecks)
-  assign("terminology", settings.terminology)
-  assign("termMatching", settings.termMatching)
-  assign("fileGenres", settings.fileGenres)
-  // AQU-207: confirmed/invalidated interlinear alignments. Must reach the
-  // workspace or the glosser and the alignment panel both read an empty list:
-  // a confirmation then persisted server-side but never fed the BT, never
-  // rendered as decided, and the next PATCH replaced the array instead of
-  // extending it (the panel's dedupe reads this same field).
-  assign("alignmentSeeds", settings.alignmentSeeds)
-  assign("livingMemoryEntries", settings.livingMemoryEntries)
-  assign("translationBrief", settings.translationBrief)
-  assign("validationCount", settings.validationCount)
-  assign("validationCountAudio", settings.validationCountAudio)
-  assign("validationRoleFloor", settings.validationRoleFloor)
-  assign("validationNamedUsers", settings.validationNamedUsers)
-  assign("allowSelfValidation", settings.allowSelfValidation)
-  // AQU-490: the audio policy. Must reach the workspace or the gutter control
-  // would apply the TEXT project's rules to recordings — the one thing Sam's
-  // "separate settings" ruling exists to prevent.
-  assign("validationRoleFloorAudio", settings.validationRoleFloorAudio)
-  assign("validationNamedUsersAudio", settings.validationNamedUsersAudio)
-  assign("allowSelfValidationAudio", settings.allowSelfValidationAudio)
-  assign("cellEditingFloor", settings.cellEditingFloor)
-  // AQU-646 stage 2: the second gate on track editing. Must reach the workspace
-  // or the add-track button and the colour menu would be invisible everywhere,
-  // since they render only when this is on.
-  assign("allowTrackEditing", settings.allowTrackEditing)
-  // AQU-1246: the Autopilot opt-in. Must reach the workspace and the project
-  // overview or the gate reads false everywhere and an opted-in project would
-  // see no Autopilot at all — the surfaces render only when this is on (or the
-  // legacy device-local flag was already stored true).
-  assign("autopilotEnabled", settings.autopilotEnabled)
-  assign("bibleResourcesEnabled", settings.bibleResourcesEnabled)
-  assign("draftContext", settings.draftContext)
-  // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the
-  // timeline against the imported file's clock or lay the verses out end to end.
-  assign("audioTimingMode", settings.audioTimingMode)
-  // AQU-646: the timeline lock. Must reach the workspace or the chips would be
-  // draggable for everyone until someone opened Project Settings.
-  assign("timingLocked", settings.timingLocked)
-  // AQU-634: USFM front-matter opt-out must reach the workspace so ImportDialog
-  // and the target-import panel drop front matter when it's on.
-  assign("importExcludeFrontMatter", settings.importExcludeFrontMatter)
-  if (settings.ttsSettings != null) {
-    // Server carries voice profiles (no apiKey); keep any device-local apiKey.
-    const merged = { ...record.ttsSettings, ...settings.ttsSettings }
-    if (JSON.stringify(record.ttsSettings ?? {}) !== JSON.stringify(merged)) {
-      draft().ttsSettings = merged
-    }
-  }
-  return next ?? record
-}
+const DEVICE_ONLY_KEYS = ["audioMediaStrategy", "syncSettings", "decaySettings"] as const
 
 /**
  * Overlay the DEVICE-LOCAL fields (the ones that live only on the IDB record,
@@ -122,24 +47,26 @@ function applyDeviceLocalSettings(
   record: ProjectRecord,
   local: ProjectRecord | undefined,
 ): ProjectRecord {
-  if (
-    !local ||
-    (!local.completionSettings &&
-      !local.experimentalFlags &&
-      local.aiProviderChosen === undefined)
-  ) {
-    return record
-  }
+  if (!local) return record
   const next: ProjectRecord = {
     ...record,
     ...(local.completionSettings ? { completionSettings: local.completionSettings } : {}),
     ...(local.experimentalFlags ? { experimentalFlags: local.experimentalFlags } : {}),
     ...(local.aiProviderChosen !== undefined ? { aiProviderChosen: local.aiProviderChosen } : {}),
   }
+  // AQU-2331: before, only the three above were laid over the server's copy,
+  // so on a cloud project these showed their default again after a reload (in
+  // Project settings, and to the editor: Audio loading never reached it).
+  for (const key of DEVICE_ONLY_KEYS) {
+    if (local[key] !== undefined) (next as unknown as Record<string, unknown>)[key] = local[key]
+    else delete next[key]
+  }
+  const same = (key: keyof ProjectRecord) => JSON.stringify(record[key] ?? null) === JSON.stringify(next[key] ?? null)
   const unchanged =
-    JSON.stringify(record.completionSettings ?? null) === JSON.stringify(next.completionSettings ?? null) &&
-    JSON.stringify(record.experimentalFlags ?? null) === JSON.stringify(next.experimentalFlags ?? null) &&
-    record.aiProviderChosen === next.aiProviderChosen
+    same("completionSettings") &&
+    same("experimentalFlags") &&
+    record.aiProviderChosen === next.aiProviderChosen &&
+    DEVICE_ONLY_KEYS.every(same)
   return unchanged ? record : next
 }
 
@@ -199,10 +126,19 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   // unassigned or not-yet-resolved; the overview's PM card reads it and
   // refresh()es after an assignment.
   const [pm, setPm] = useState<{ id: number; username: string } | null>(null)
+  // Desktop: the last resolve gave up waiting for the offline store, so the
+  // downloaded copy was never consulted. Retried once the store opens.
+  const [offlineCopyPending, setOfflineCopyPending] = useState(false)
   const hasLoaded = useRef(Boolean(initialProject))
   const { session, loading: sessionLoading } = useFrontierSession()
+  const cancelActiveResolve = useRef<(() => void) | null>(null)
+  const resolvePending = useRef(false)
+  const statusRef = useRef(status)
+  useEffect(() => { statusRef.current = status }, [status])
 
   const refresh = useCallback(() => {
+    // Every trigger shares one current read; an older result must never win.
+    cancelActiveResolve.current?.()
     if (!enabled) return () => {}
     if (!hasLoaded.current) setStatus("loading")
 
@@ -217,6 +153,13 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
     }
 
     let cancelled = false
+    resolvePending.current = true
+    const cancel = () => {
+      if (cancelled) return
+      cancelled = true
+      resolvePending.current = false
+    }
+    cancelActiveResolve.current = cancel
     ;(async () => {
       if (!session?.jwt) {
         if (cancelled) return
@@ -226,8 +169,10 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
         hasLoaded.current = true
         return
       }
-      const result = await resolveCloudProjectResult(projectId, session.jwt)
+      // Desktop: falls back to the downloaded copy when the server is unreachable.
+      const result = await resolveProjectForRead(projectId, session.jwt)
       if (cancelled) return
+      setOfflineCopyPending(result.offlineCopyPending === true)
       if (!result.ok) {
         if (result.reason === "unauthenticated") {
           void notifySessionExpiredIfCurrent(session.jwt)
@@ -258,18 +203,71 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
       setPm(result.project.pm ?? null)
       setStatus("ready")
       hasLoaded.current = true
-    })()
+    })().finally(() => {
+      if (!cancelled) resolvePending.current = false
+    })
 
-    return () => { cancelled = true }
+    return cancel
   }, [enabled, projectId, session?.jwt, sessionLoading])
 
   useEffect(() => {
-    const cleanup = refresh()
-    return cleanup
+    refresh()
+    // Account switching can mount this hook while offline. Revalidate using
+    // the current session on reconnect, including when the offline request
+    // has not settled yet. Cancel the older read so it cannot overwrite the
+    // recovered result. One read per online event; no error-driven retry loop.
+    const reconnect = () => {
+      // Healthy editors keep their mounted state; definitive permission or
+      // missing-project responses still require an explicit action.
+      if (!resolvePending.current && statusRef.current !== "loading" && statusRef.current !== "unreachable") return
+      refresh()
+    }
+    window.addEventListener("online", reconnect)
+    return () => {
+      window.removeEventListener("online", reconnect)
+      // Also cancel manual/event-triggered reads on session change or unmount.
+      cancelActiveResolve.current?.()
+    }
   }, [refresh])
 
+  // Desktop, offline: a cold open can outrun the offline store (a rebuild after
+  // an update can take longer than the resolve waits), leaving "unreachable"
+  // over a project that is on disk. Re-resolve once the store is open; the
+  // retry no longer waits, so it can't trigger itself again.
+  useEffect(() => {
+    if (!offlineCopyPending) return
+    let alive = true
+    let cancelRetry: (() => void) | null = null
+    void whenOfflineStoreOpen().then((open) => {
+      if (open && alive) cancelRetry = refresh()
+    })
+    return () => {
+      alive = false
+      cancelRetry?.()
+    }
+  }, [offlineCopyPending, refresh])
+
+  // AQU-1570: another surface in this tab changed the project on the server —
+  // typically Project Settings, a route modal over this page, linking a source
+  // project whose files have just arrived. Re-resolve, or the page behind the
+  // dialog keeps its old file list until a reload. A newer announcement
+  // supersedes an older one still in flight, as a newer effect run would.
+  useEffect(() => {
+    let cancelInFlight: (() => void) | null = null
+    const unsubscribe = subscribeProjectRecordChanged((changedId) => {
+      if (changedId !== projectId) return
+      cancelInFlight?.()
+      cancelInFlight = refresh()
+    })
+    return () => {
+      unsubscribe()
+      cancelInFlight?.()
+    }
+  }, [projectId, refresh])
+
   // AQU-1103 / AQU-1158: device-local fields (experimentalFlags,
-  // completionSettings, aiProviderChosen) are written by Project settings /
+  // completionSettings, aiProviderChosen, and since AQU-2331 Audio loading,
+  // Git auto-sync and Health) are written by Project settings /
   // Set up AI, which open as a route-modal OVER a still-mounted
   // overview/workspace (App.tsx `backgroundLocation`), so nothing re-runs
   // `refresh` for them. Re-overlay whenever this project's local record changes
@@ -321,9 +319,38 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
     },
   )
   const { settings: syncedSettings, patch: patchSettings, hasFetched: settingsFetched } = projectSettings
+  // AQU-1902: publish this project's target lane rows to the emit layer, which
+  // stamps every lane-addressed write with its lane row before queuing it.
+  // `null` while the settings GET is outstanding: a write naming no lane id is
+  // then refused at the source instead of being queued, refused by the server
+  // and dropped. A server response without lane rows (pre-AQU-1418) leaves the
+  // project unregistered, so writes pass through as before.
+  const settingsLanes = projectSettings.lanes
+  const settingsEnabled = enabled && options?.includeSettings !== false
+  useEffect(() => {
+    if (!settingsEnabled || !projectId) return
+    if (settingsLanes) {
+      setProjectTargetLanes(projectId, settingsLanes.filter((lane) => lane.role === "target"))
+    } else if (!settingsFetched) {
+      setProjectTargetLanes(projectId, null)
+    } else {
+      clearProjectTargetLanes(projectId)
+    }
+  }, [settingsEnabled, projectId, settingsLanes, settingsFetched])
+  const { orgValidationCount, orgValidationCountAudio, orgMediaDefaults, legacyProjectBriefText } = projectSettings
   const overlaid = useMemo(
-    () => project ? overlaySettings(project, syncedSettings) : null,
-    [project, syncedSettings],
+    () => {
+      if (!project) return null
+      const record = overlaySettings(project, syncedSettings, projectSettings.lanes, {
+        validationCount: orgValidationCount,
+        validationCountAudio: orgValidationCountAudio,
+        media: orgMediaDefaults,
+      })
+      // AQU-2342: the legacy agent brief rides on the record so every SPA
+      // reader resolves the instructions from the same sources the server does.
+      return legacyProjectBriefText ? { ...record, legacyProjectBriefText } : record
+    },
+    [project, syncedSettings, projectSettings.lanes, orgValidationCount, orgValidationCountAudio, orgMediaDefaults, legacyProjectBriefText],
   )
 
   return {

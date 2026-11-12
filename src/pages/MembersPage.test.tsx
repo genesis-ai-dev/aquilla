@@ -3,6 +3,8 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { OrgProvider } from "@/context/OrgContext"
+import { expectClickNote } from "@/test-utils/tooltip"
+import { useOrgInvites } from "@/hooks/useOrgInvites"
 import { MembersPage } from "./MembersPage"
 
 // AQU-1277: OrgProvider loads the project directory via
@@ -51,10 +53,10 @@ vi.mock("@/hooks/useOrgSettings", () => ({
 // MembersPageContent, useOrgMembers, useOrgInvites, and useAccessibleProjects.
 //
 // listMyOrgs returns "Come and See" (org 42) — the active-org data.
-// getOrCreateMyOrg returns a DIFFERENT org ("Legacy Org", id 99) — owned-org data.
+// getMyOrg returns a DIFFERENT org ("Legacy Org", id 99) — owned-org data.
 // The test asserts "Come and See" appears, which only happens if MembersPage
 // reads from the active org (useActiveOrg / listMyOrgs), not the owned org
-// (useOrg / getOrCreateMyOrg).
+// (useOrg / getMyOrg).
 const listMyOrgs = vi.fn(async (_jwt?: string) => [
   { id: 42, name: "Come and See", role: { level: 700, name: "owner" } },
 ])
@@ -68,8 +70,8 @@ vi.mock("@/lib/frontier/orgs", () => ({
   listPendingOrgInvites: vi.fn(async () => null),
   revokeProjectInvite: vi.fn(async () => true),
   // Deliberately different name so the test fails if MembersPage still reads
-  // the owned org via useOrg() / getOrCreateMyOrg.
-  getOrCreateMyOrg: vi.fn(async () => ({
+  // the owned org via useOrg() / getMyOrg.
+  getMyOrg: vi.fn(async () => ({
     id: 99,
     name: "Legacy Org",
     role: { level: 700, name: "owner" },
@@ -87,6 +89,7 @@ vi.mock("@/hooks/useOrg", async (importOriginal) => {
       isLoading: false,
       error: null,
       rosterHidden: false,
+      rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
       add: vi.fn(async () => null),
       addMany: vi.fn(async () => []),
@@ -160,7 +163,7 @@ describe("MembersPage active-org", () => {
     // switcher + the "People in <org>" heading) since MembersPage renders inside
     // the org shell — so assert ≥1 match rather than exactly one. The point of
     // this test is active-vs-owned: "Come and See" (42, from listMyOrgs) shows
-    // and "Legacy Org" (99, from getOrCreateMyOrg) does NOT.
+    // and "Legacy Org" (99, from getMyOrg) does NOT.
     await waitFor(() =>
       expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0),
     )
@@ -179,6 +182,7 @@ describe("MembersPage — AQU-485 roster visibility", () => {
       isLoading: false,
       error: null,
       rosterHidden: true,
+      rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
       add: vi.fn(async () => null),
       addMany: vi.fn(async () => []),
@@ -224,7 +228,7 @@ describe("MembersPage — AQU-538 §3.4 matrix tab", () => {
       </QueryClientProvider>,
     )
     await waitFor(() =>
-      expect(screen.getByRole("tab", { name: /^roster$/i })).toBeInTheDocument(),
+      expect(screen.getByRole("tab", { name: /^member list$/i })).toBeInTheDocument(),
     )
     expect(screen.queryByText(/no projects yet/i)).not.toBeInTheDocument()
   })
@@ -243,7 +247,7 @@ describe("MembersPage — AQU-538 §3.4 matrix tab", () => {
       </QueryClientProvider>,
     )
     await waitFor(() =>
-      expect(screen.getByRole("tab", { name: /^roster$/i })).toBeInTheDocument(),
+      expect(screen.getByRole("tab", { name: /^member list$/i })).toBeInTheDocument(),
     )
 
     fireEvent.click(screen.getByRole("tab", { name: /matrix/i }))
@@ -308,6 +312,7 @@ describe("MembersPage — Teams-style roster table", () => {
       isLoading: false,
       error: null,
       rosterHidden: false,
+      rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
       add: vi.fn(async () => null),
       addMany: vi.fn(async () => []),
@@ -346,6 +351,7 @@ describe("MembersPage — Teams-style roster table", () => {
       isLoading: false,
       error: null,
       rosterHidden: false,
+      rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
       add: vi.fn(async () => null),
       addMany: vi.fn(async () => []),
@@ -399,6 +405,7 @@ describe("MembersPage — Teams-style roster table", () => {
       isLoading: false,
       error: null,
       rosterHidden: false,
+      rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
       add: vi.fn(async () => null),
       addMany: vi.fn(async () => []),
@@ -410,6 +417,20 @@ describe("MembersPage — Teams-style roster table", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /add to projects/i })).toBeInTheDocument())
     expect(screen.getByRole("button", { name: /add to projects/i })).toBeEnabled()
     expect(screen.getByRole("button", { name: /add a member/i })).toBeInTheDocument()
+  })
+
+  // AQU-2256 item 1: the add-to-projects picker must be scoped to the org
+  // whose roster is open (42 here). Called without an org it listed every
+  // project the caller maintains in ANY org, so an org-A admin could grant an
+  // org-A member access to an org-C project from this page — and org-C's
+  // project names showed up on org-A's roster.
+  it("scopes the add-to-projects picker to the org whose roster is open", async () => {
+    const { useAccessibleProjects } = await import("@/hooks/useAccessibleProjects")
+    renderMembers()
+    await waitFor(() => expect(vi.mocked(useAccessibleProjects)).toHaveBeenCalled())
+    for (const call of vi.mocked(useAccessibleProjects).mock.calls) {
+      expect(call[0]).toBe(42)
+    }
   })
 
   it("hides Add a member but keeps Add to projects for a non-owner with project grants", async () => {
@@ -444,6 +465,7 @@ describe("MembersPage — Teams-style roster table", () => {
       isLoading: false,
       error: null,
       rosterHidden: false,
+      rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
       add: vi.fn(async () => null),
       addMany: vi.fn(async () => []),
@@ -472,6 +494,7 @@ describe("MembersPage — Teams-style roster table", () => {
       isLoading: false,
       error: null,
       rosterHidden: false,
+      rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
       add: vi.fn(async () => null),
       addMany: vi.fn(async () => []),
@@ -487,10 +510,44 @@ describe("MembersPage — Teams-style roster table", () => {
     expect(screen.getByRole("tab", { name: /invite by email/i })).toBeInTheDocument()
     // AQU-1107: default org-add is Contributor, and the dialog states that
     // that role does not open projects until a project/team grant exists.
+    // AQU-2289: that is the longer text, so it opens from the (i) in place.
     expect(screen.getByRole("combobox", { name: /^role$/i })).toHaveTextContent(/contributor/i)
-    expect(
-      screen.getByText(/cannot see or open projects until they are added to a specific project or team/i),
-    ).toBeInTheDocument()
-    expect(screen.getByText(/only maintainer and owner can see every project/i)).toBeInTheDocument()
+    const details = screen.getByTestId("role-dialog-details")
+    expect(details).toHaveAttribute("data-open", "false")
+    fireEvent.click(screen.getByTestId("role-dialog-info"))
+    expect(details).toHaveAttribute("data-open", "true")
+    expect(details).toHaveTextContent(/everyone else sees a project only once they're added to it, or to a team that has it/i)
+    expect(details).toHaveTextContent(/maintainers and owners see every project/i)
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a pending invite's kind (an email it was sent to, or
+// an open link) says what it means on a click, never on hover.
+describe("MembersPage pending invites", () => {
+  it("says what a targeted invite and an open link mean, on click", async () => {
+    const invite = (over: Record<string, unknown>) => ({
+      token: "t", projectId: "p1", projectName: "John", role: { level: 400, name: "contributor" },
+      createdBy: { userId: 1, username: "joel" }, createdAt: "2026-10-01T00:00:00Z", expiresAt: null, ...over,
+    })
+    vi.mocked(useOrgInvites).mockReturnValue({
+      invites: [invite({ token: "a", email: "anna@example.org" }), invite({ token: "b", email: null })],
+      isLoading: false,
+      error: null,
+      refresh: vi.fn(async () => {}),
+      revoke: vi.fn(async () => false),
+    } as unknown as ReturnType<typeof useOrgInvites>)
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/orgs/42/members"]}>
+          <OrgProvider>
+            <Routes>
+              <Route path="/orgs/:orgId/members" element={<MembersPage />} />
+            </Routes>
+          </OrgProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await expectClickNote(await screen.findByRole("button", { name: "anna@example.org" }), /sign-up form will be prefilled/)
+    await expectClickNote(screen.getByRole("button", { name: "open link" }), /anyone holding the URL can redeem/)
   })
 })

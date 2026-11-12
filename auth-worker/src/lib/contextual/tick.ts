@@ -16,6 +16,7 @@
 // the [[ctx:*]] prompt markers.
 
 import type { AquillaDb } from "../../../../db/shim/postgres"
+import { modelLanguageForLane } from "../../../../db/shared/lane-language"
 import {
   getRun,
   failRun,
@@ -32,6 +33,7 @@ import {
   findProposedCellsFromOtherRuns,
   appendContextualRunEvent,
   type ContextualRun,
+  type ContextualRunEvent,
   type ContextualParkReason,
   type ContextualRunStatus,
   type ContextualSpanReason,
@@ -50,19 +52,31 @@ import {
 } from "../../../../db/shared/scene-briefs"
 import { getFileSegmentation } from "../../../../db/shared/file-segmentation"
 import { selectCellPairs, type CellPair } from "../agent/tools/select-cells"
+import { triageVerdicts, type TriageCall } from "./triage"
 import { rulesForLane, type LintRule } from "../agent/lint"
 import { loadProjectContext, type ProjectContext } from "./project-context"
 import { openRouterExtras } from "../llm-vendor"
 import type { PaidCallAdmit } from "../billing/agent-usage"
 import { deriveSpanSeeds, seedsFromBoundaries } from "./segment"
 import { lintSpanDraft } from "./lint-node"
-import { runSpan, EXAMPLES_TARGET } from "./pipeline"
-import type { ExamplePair } from "./draft"
+import { runSpan, spanPairs, EXAMPLES_TARGET } from "./pipeline"
+import { styleInstructionsForCells } from "../../../../db/shared/style-instructions"
+import { examplesForSpan } from "./bible-examples"
 import type { NeighborBrief, LayerAboveBlock } from "./closure"
 import { reflectAtPark } from "./reflect"
+import { bibleReasonCode, prepareBibleWave, type BibleRun, type BibleTickDeps } from "./bible-run"
+import { bibleGateOf, spanBible } from "./bible-span"
+import { isBibleCode, recheckForStage, withBibleVerdicts } from "./bible-gates"
+import { bibleFactsTraceRow, spanMetrics, spanMetricsTraceRow } from "./span-metrics"
+import { raiseBibleFactQuestions } from "./bible-fact-questions"
 import type { LlmCall, SpanSeed, SpanPhase, SpanReport, Tier } from "./types"
 import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
+import { ingestRunActivity } from "../team-ingest"
 import { formatSpanRange } from "../../../../shared/span-label"
+import {
+  logVendorTimeout,
+  vendorDeadline,
+} from "../../../../shared/vendor-timeouts"
 
 // ── Model + endpoint resolution ─────────────────────────────────────────────
 
@@ -144,6 +158,23 @@ export interface LlmCallUsage {
   tokensPerSecond?: number
 }
 
+/** One model call's full content, for the step inspector's trace view. Fired
+ *  once per call (after retries settle), success or failure. Unlike
+ *  LlmCallUsage this carries the prompt and the reply, so it must only reach
+ *  stores the project already trusts with that text (lib/contextual/traces.ts). */
+export interface LlmCallTrace extends LlmCallUsage {
+  system: string
+  user: string
+  /** The model's reply; null when the call failed. */
+  output: string | null
+  /** Machine error code ("provider_http_error status=429"); null on success.
+   *  Never the provider's error body — see the note in makeLlmCall. */
+  error: string | null
+  /** OpenRouter generation id, for looking the call up on the provider side. */
+  generationId?: string
+  attempts: number
+}
+
 /** Bounded-concurrency gate. `limit <= 0` disables it entirely (no queueing,
  *  no bookkeeping) so the OpenRouter path behaves exactly as before. */
 function makeGate(limit: number): <T>(fn: () => Promise<T>) => Promise<T> {
@@ -176,6 +207,9 @@ export function makeLlmCall(cfg: {
   models: ContextualModels
   signal?: AbortSignal
   onUsage?: (u: LlmCallUsage) => void
+  /** Same contract as onUsage (never throws, fires once per call), but with
+   *  the prompt and reply attached. */
+  onTrace?: (t: LlmCallTrace) => void
   /** Cap on HTTP requests in flight through THIS LlmCall at any moment.
    *  0/undefined = uncapped (the OpenRouter default). */
   maxInFlight?: number
@@ -213,6 +247,29 @@ export function makeLlmCall(cfg: {
       }
     }
     const failed = { promptTokens: 0, completionTokens: 0, costCents: 0, ok: false }
+    let attempts = 0
+    const trace = (
+      u: Omit<LlmCallUsage, "label" | "spanId" | "tier" | "model" | "latencyMs">,
+      result: { output: string | null; error: string | null; generationId?: string },
+    ): void => {
+      if (!cfg.onTrace) return
+      try {
+        cfg.onTrace({
+          ...u,
+          ...result,
+          label: req.label ?? "",
+          spanId: req.spanId ?? "",
+          tier: req.tier as Tier,
+          model,
+          latencyMs: Date.now() - startedAt,
+          system: req.system,
+          user: req.user,
+          attempts,
+        })
+      } catch {
+        /* tracing must never break the run it is recording */
+      }
+    }
 
     // Capacity rejections are NOT model failures. A busy upstream (OpenRouter
     // rate limit, or a self-hosted server whose slots are all occupied) answers
@@ -252,20 +309,41 @@ export function makeLlmCall(cfg: {
     let body!: UpstreamBody
     for (let attempt = 1; ; attempt++) {
       startedAt = Date.now()
+      attempts = attempt
       let outcome: Attempt
       try {
         // The gate holds a slot only for the round-trip, never across the
         // backoff below — a sleeping retry must not occupy capacity.
         outcome = await gate<Attempt>(async () => {
-          const res = await fetch(cfg.url, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${cfg.apiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: requestBody,
-            ...(cfg.signal ? { signal: cfg.signal } : {}),
-          })
+          // AQU-1849: a deadline PER ATTEMPT (the retry backoff below is
+          // outside it), linked to the run's signal when it has one. Without
+          // it a hung provider held a gate slot indefinitely, starving the
+          // other lanes behind the same gate.
+          const deadline = vendorDeadline("openRouterNonStreaming", cfg.signal ?? null)
+          let res: Response
+          try {
+            res = await fetch(cfg.url, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${cfg.apiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: requestBody,
+              signal: deadline.signal,
+            })
+          } catch (err) {
+            if (deadline.timedOut()) {
+              // Reported as a retriable 504 so the backoff loop below gets its
+              // normal attempts and then fails as provider_http_error
+              // status=504 — a hang is now indistinguishable, to the caller,
+              // from the gateway timeout it really is.
+              logVendorTimeout("openRouterNonStreaming", err)
+              return { ok: false, status: 504, code: "http_error" }
+            }
+            throw err
+          } finally {
+            deadline.clear()
+          }
           if (!res.ok) {
             // Provider bodies are untrusted and may echo credentials, prompts,
             // or user text. Never materialize them in an Error that can reach
@@ -285,8 +363,10 @@ export function makeLlmCall(cfg: {
         })
       } catch {
         report(failed)
+        const code = cfg.signal?.aborted ? "provider_request_aborted" : "provider_transport_error"
+        trace(failed, { output: null, error: code })
         await hold()
-        throw new Error(cfg.signal?.aborted ? "provider_request_aborted" : "provider_transport_error")
+        throw new Error(code)
       }
       if (outcome.ok) {
         body = outcome.body
@@ -303,6 +383,7 @@ export function makeLlmCall(cfg: {
         const code = outcome.code === "invalid_response"
           ? "provider_invalid_response"
           : "provider_http_error"
+        trace(failed, { output: null, error: `${code} status=${outcome.status}` })
         await hold()
         throw new Error(`${code} status=${outcome.status}`)
       }
@@ -313,14 +394,17 @@ export function makeLlmCall(cfg: {
     }
     if (admission?.ok) await admission.settle({ id: body.id, usage: body.usage })
     const tps = body.timings?.predicted_per_second
-    report({
+    const usage = {
       promptTokens: body.usage?.prompt_tokens ?? 0,
       completionTokens: body.usage?.completion_tokens ?? 0,
       costCents: (body.usage?.cost ?? 0) * 100,
       ok: body.usage !== undefined,
       ...(typeof tps === "number" ? { tokensPerSecond: tps } : {}),
-    })
-    return body.choices?.[0]?.message?.content ?? ""
+    }
+    report(usage)
+    const output = body.choices?.[0]?.message?.content ?? ""
+    trace(usage, { output, error: null, ...(body.id ? { generationId: body.id } : {}) })
+    return output
   }
 }
 
@@ -449,15 +533,32 @@ export function runStateFrame(run: ContextualRun): ContextualRunStateFrame {
 
 /** Persist one live progress frame as a bounded product-activity fact. The
  * draft frame intentionally loses draft ids/text here: only count + cell ids
- * cross the durable telemetry boundary. */
+ * cross the durable telemetry boundary.
+ *
+ * This is the single server-side path that records narrative activity, so it
+ * is also where the shared team channel is fed (lib/team-ingest.ts). The
+ * write-through is best-effort by construction — `ingestRunActivity` never
+ * throws — so a channel outage cannot stop a run. */
 export async function persistContextualProgressFrame(
   db: AquillaDb,
   scope: { projectId: string; fileId: string },
   frame: ContextualProgressFrame,
 ): Promise<void> {
+  const event = await appendProgressFrameEvent(db, scope, frame)
+  if (event) await ingestRunActivity(db, event)
+}
+
+/** Every frame kind maps to exactly one durable event today. The `undefined`
+ *  tail is for a frame kind added later and not yet mapped: it records
+ *  nothing and feeds nothing, rather than half-writing. */
+async function appendProgressFrameEvent(
+  db: AquillaDb,
+  scope: { projectId: string; fileId: string },
+  frame: ContextualProgressFrame,
+): Promise<ContextualRunEvent | undefined> {
   switch (frame.type) {
     case "contextual.run.state":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -465,9 +566,8 @@ export async function persistContextualProgressFrame(
         status: frame.status,
         details: { done: frame.done, total: frame.total, failed: frame.failed ?? 0 },
       })
-      return
     case "contextual.span.start":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -476,9 +576,8 @@ export async function persistContextualProgressFrame(
         spanLabel: frame.spanLabel,
         status: "started",
       })
-      return
     case "contextual.phase":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -487,9 +586,8 @@ export async function persistContextualProgressFrame(
         spanLabel: frame.spanLabel,
         phase: frame.phase,
       })
-      return
     case "contextual.scene":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -502,9 +600,8 @@ export async function persistContextualProgressFrame(
           ambiguityCount: frame.ambiguityCount,
         },
       })
-      return
     case "contextual.drafts":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -518,9 +615,8 @@ export async function persistContextualProgressFrame(
           truncated: frame.truncated === true,
         },
       })
-      return
     case "contextual.memories":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -528,9 +624,8 @@ export async function persistContextualProgressFrame(
         status: frame.failed === true ? "failed" : "complete",
         details: { count: frame.count },
       })
-      return
     case "contextual.span":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -616,7 +711,7 @@ async function loadNeighborBriefs(
   db: AquillaDb,
   projectId: string,
   fileId: string,
-  targetLang: string,
+  laneId: string,
   seed: StoredSpanSeed,
   pairs: CellPair[],
 ): Promise<NeighborBrief[]> {
@@ -624,7 +719,7 @@ async function loadNeighborBriefs(
     const approved = await listSceneBriefs(db, projectId, {
       fileId,
       status: "approved",
-      targetLang,
+      laneId,
     })
     const order = new Map(pairs.map((p, i) => [p.cellId, i]))
     const seedStart = order.get(seed.startCellId) ?? 0
@@ -664,8 +759,9 @@ async function loadParagraphStarts(
   try {
     const { results } = await db
       .prepare(
+        // AQU-1610: a source row is `side = 'source'`, whatever lane it is in.
         `SELECT cell_id FROM cells
-          WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''
+          WHERE project_id = ? AND file_id = ? AND side = 'source'
             AND metadata ->> 'paragraphStart' = 'true'`,
       )
       .bind(projectId, fileId)
@@ -748,13 +844,6 @@ export async function resolveSpanSeeds(
   return deriveAutoSeeds(db, projectId, fileId, pairs)
 }
 
-function validatedExamples(pairs: CellPair[]): ExamplePair[] {
-  return pairs
-    .filter((p) => p.validated && p.target.trim())
-    .slice(0, EXAMPLES_TARGET)
-    .map((p) => ({ cellId: p.cellId, source: p.source, target: p.target, validated: true }))
-}
-
 // ── Steering ────────────────────────────────────────────────────────────────
 
 interface SteeringOutcome {
@@ -797,7 +886,7 @@ async function consumeSteering(
         brief &&
         brief.projectId === run.projectId &&
         brief.fileId === run.fileId &&
-        brief.targetLang === run.targetLang
+        brief.laneId === run.laneId
       ) {
         await markStale(db, briefId, "steering-refresh")
         const seed = cursor?.seeds.find(
@@ -827,6 +916,10 @@ export interface TickDeps {
   /** Spans to drive concurrently this wave. Defaults to `waveSize()` over the
    *  remaining spans; pass 1 to force the original strictly-serial behaviour. */
   concurrency?: number
+  /** Per-cell QA triage at staging (triage.ts). Omitted → fixed rules. */
+  triage?: TriageCall
+  /** AQU-1690: Bible data switches and the pack loader. Omitted → no Bible data. */
+  bible?: BibleTickDeps
 }
 
 export interface TickResult {
@@ -845,6 +938,8 @@ interface RunContext {
   pairs: CellPair[]
   layerAbove: LayerAboveBlock[]
   excludedCellIds: Set<string>
+  /** AQU-1690: the wave's Bible data, or why there is none. */
+  bible: BibleRun
   scope: {
     projectId: string
     fileId: string
@@ -868,10 +963,13 @@ function spanReasonCodes(
   report: SpanReport | undefined,
   outcome: "done" | "failed" | "blocked",
   occupiedAtStage: number,
+  bible: BibleRun,
 ): ContextualSpanReason[] {
   const reasons = new Set<ContextualSpanReason>()
   if (outcome === "failed") reasons.add("span_failed")
   if (occupiedAtStage > 0) reasons.add("target_already_filled")
+  const bibleReason = bibleReasonCode(bible)
+  if (bibleReason) reasons.add(bibleReason)
   for (const reason of report?.incompleteReasons ?? []) {
     if (reason.startsWith("scene construal did not close")) reasons.add("scene_construal_incomplete")
     else if (reason.startsWith("draft attempt")) reasons.add("draft_failed")
@@ -910,6 +1008,7 @@ async function processSpan(
     seedSource: storedSeed.seedSource as SpanSeed["seedSource"],
   }
   const label = spanLabel(storedSeed, shared.pairs)
+  const bibleGate = bibleGateOf(shared.bible)
 
   // The lane opens BEFORE the closure loop's first model call — otherwise the
   // UI shows nothing at all through the slowest phase of the span.
@@ -926,7 +1025,7 @@ async function processSpan(
     db,
     run.projectId,
     run.fileId,
-    run.targetLang,
+    run.laneId,
     storedSeed,
     shared.pairs,
   )
@@ -936,6 +1035,24 @@ async function processSpan(
   let report: SpanReport | undefined
   let occupiedAtStage = 0
   let phaseActivity = Promise.resolve()
+  const targetLanguage = await modelLanguageForLane(
+    db,
+    run.projectId,
+    { laneId: run.laneId, tag: run.targetLang },
+    shared.ctx.targetLanguage,
+  )
+  // AQU-2342: the style rules in force for this span, resolved as the editor
+  // resolves them (db/shared/style-instructions.ts).
+  const styleInstructions = await styleInstructionsForCells(db, {
+    projectId: run.projectId,
+    fileId: run.fileId,
+    cells: spanPairs(seed, shared.pairs),
+    settings: { fileGenres: shared.ctx.fileGenres },
+  })
+  // AQU-1690: the facts this span's prompts carry, and (below) its metrics.
+  const factsRow = bibleFactsTraceRow(seed.id, spanPairs(seed, shared.pairs), shared.bible)
+  if (factsRow) deps.bible?.trace?.(factsRow)
+  const residual: Record<string, number> = {}
   try {
     report = await runSpan({
       seed,
@@ -944,18 +1061,36 @@ async function processSpan(
       excludedCellIds: shared.excludedCellIds,
       neighborBriefs,
       layerAbove: shared.layerAbove,
-      examples: validatedExamples(shared.pairs),
-      ...(shared.ctx.projectBriefL1 ? { projectBriefL1: shared.ctx.projectBriefL1 } : {}),
-      // The brief's own answers carry when nobody generated an L1 summary, and
-      // the concepts get scoped to this span's source text inside runSpan.
-      briefParameters: shared.ctx.briefParameters,
+      // AQU-1690: validated pairs like this span first (speaker, quote shape,
+      // participants); without Bible data, the first ones in file order.
+      examples: examplesForSpan(
+        shared.pairs,
+        spanPairs(seed, shared.pairs),
+        EXAMPLES_TARGET,
+        shared.bible.state === "ready" ? shared.bible.data.facts : undefined,
+      ),
+      // AQU-2342: the one instructions text; the concepts get scoped to this
+      // span's source text inside runSpan.
+      ...(shared.ctx.translationInstructions ? { translationInstructions: shared.ctx.translationInstructions } : {}),
       ...(shared.ctx.concepts.length > 0 ? { concepts: shared.ctx.concepts } : {}),
+      // AQU-2342: the Language profile rides in the checks hint; the decision
+      // log reaches the performer through the instructions.
+      languageProfile: shared.ctx.languageProfile,
+      ...(styleInstructions.length > 0 ? { styleInstructions } : {}),
+      ...(shared.ctx.termMatching ? { termMatching: shared.ctx.termMatching } : {}),
+      ...(shared.bible.state === "ready"
+        ? {
+            bible: spanBible(shared.bible.data, {
+              pairs: shared.pairs,
+              spanId: seed.id,
+              ...(deps.bible?.judge ? { judge: deps.bible.judge } : {}),
+            }),
+          }
+        : {}),
       ...(steeringDirections.length > 0 ? { steeringDirections } : {}),
       rules: shared.rules,
       ...(shared.ctx.sourceLanguage ? { sourceLanguage: shared.ctx.sourceLanguage } : {}),
-      ...(run.targetLang || shared.ctx.targetLanguage
-        ? { targetLanguage: run.targetLang || shared.ctx.targetLanguage }
-        : {}),
+      ...(targetLanguage ? { targetLanguage } : {}),
       // Tag every call this span makes, for cost attribution. A wave runs
       // several spans concurrently, so the span id must ride the request
       // rather than live in shared mutable state.
@@ -983,7 +1118,7 @@ async function processSpan(
           fileId: run.fileId,
           startCellId: brief.startCellId,
           endCellId: brief.endCellId,
-          targetLang: run.targetLang,
+          laneId: run.laneId,
           construal: brief.l2Construal,
           ambiguityRegister: brief.ambiguityRegister,
           l1Summary: brief.l1Summary,
@@ -1008,7 +1143,8 @@ async function processSpan(
         })
         return proposed.brief.id
       },
-      lint: async (draft) => lintSpanDraft(shared.rules, shared.pairs, draft, shared.ctx.concepts),
+      lint: async (draft) =>
+        lintSpanDraft(shared.rules, shared.pairs, draft, shared.ctx.concepts, shared.ctx.termMatching, bibleGate ?? undefined),
       stage: async (draft) => {
         // Anti-clobber, checked as late as possible: a human may have typed
         // into one of these cells while the span was running. `pairs` is a
@@ -1019,13 +1155,35 @@ async function processSpan(
           projectId: run.projectId,
           fileId: run.fileId,
           cellIds: draft.cells.map((c) => c.cellId),
-          targetLang: run.targetLang,
+          laneId: run.laneId,
         })
         occupiedAtStage += occupied.size
         const fresh = draft.cells.filter((c) => !occupied.has(c.cellId))
         if (fresh.length === 0) {
           return { proposalId: "", spanId: draft.spanId, stagedCellIds: [], verdicts: {} }
         }
+        // AQU-1690: re-check the Bible data expectations on the FINAL text, so
+        // every bkp: code describes the staged words. A warning that survived
+        // its repair stages the cell for a person, never skips it.
+        const rechecks = new Map(
+          fresh.map((c) => [c.cellId, bibleGate ? recheckForStage(bibleGate, c.cellId, c.text, c.findings ?? []) : null]),
+        )
+        for (const recheck of rechecks.values()) {
+          for (const code of recheck?.findings ?? []) if (isBibleCode(code)) residual[code] = (residual[code] ?? 0) + 1
+        }
+        // Finding codes + a "needs a human?" call per flagged cell, stored on
+        // the draft for the PR view. Never blocks staging (triage.ts).
+        const pairById = new Map(shared.pairs.map((p) => [p.cellId, p]))
+        const verdictsByCell = await triageVerdicts(
+          fresh.map((c) => ({
+            cellId: c.cellId,
+            ref: pairById.get(c.cellId)?.canonicalRef ?? null,
+            source: pairById.get(c.cellId)?.source ?? "",
+            text: c.text,
+            findings: rechecks.get(c.cellId)?.findings ?? c.findings ?? [],
+          })),
+          deps.triage ?? (async (input) => ({ answers: input.fallback(), decidedBy: "heuristic", model: null, usage: null })),
+        )
         const staged = await insertDrafts(db, {
           runId: run.id,
           projectId: run.projectId,
@@ -1034,6 +1192,8 @@ async function processSpan(
           drafts: fresh.map((c) => ({
             cellId: c.cellId,
             text: c.text,
+            // AQU-1701: a finding's own evidence (bkp:C1) replaces its "flag".
+            verdicts: withBibleVerdicts({ ...verdictsByCell.get(c.cellId), ...c.values }, rechecks.get(c.cellId) ?? null),
             provenance: {
               spanId: draft.spanId,
               spanLabel: label,
@@ -1115,7 +1275,8 @@ async function processSpan(
       : report?.incomplete || occupiedAtStage > 0
         ? "partial"
         : "complete"
-  const reasons = spanReasonCodes(report, outcome, occupiedAtStage)
+  const reasons = spanReasonCodes(report, outcome, occupiedAtStage, shared.bible)
+  deps.bible?.trace?.(spanMetricsTraceRow(spanMetrics(seed.id, report, shared.bible, residual)))
   await notify({
     type: "contextual.span",
     runId: run.id,
@@ -1226,12 +1387,12 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   // Scope + cursor. Pairs are re-read every wave (cells move under the run);
   // seeds are pinned in the cursor so segmentation never shifts mid-run.
   const [pairs, excludedCellIds] = await Promise.all([
-    selectCellPairs(db, run.projectId, { fileId: run.fileId, targetLang: run.targetLang }),
+    selectCellPairs(db, run.projectId, { fileId: run.fileId, laneId: run.laneId }),
     findProposedCellsFromOtherRuns(db, {
       projectId: run.projectId,
       fileId: run.fileId,
       runId: run.id,
-      targetLang: run.targetLang,
+      laneId: run.laneId,
     }),
   ])
   let cursor = run.spanCursor
@@ -1310,18 +1471,45 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
 
   // Per-run context is loaded ONCE and shared by every span in the wave
   // (it was re-fetched per span before, which was pure overhead).
-  const ctx = await loadProjectContext(db, run.projectId)
-  const layerAbove: LayerAboveBlock[] = ctx.projectBriefL1
-    ? [{ ref: "project-brief", text: ctx.projectBriefL1 }]
+  const ctx = await loadProjectContext(db, run.projectId, {
+    laneId: run.laneId,
+    targetLang: run.targetLang,
+  })
+  // AQU-2342: the analyzer's layer above is the same instructions text the
+  // performer carries (it used to be the brief's L1 summary alone).
+  const layerAbove: LayerAboveBlock[] = ctx.translationInstructions
+    ? [{ ref: "project-instructions", text: ctx.translationInstructions }]
     : []
   // AQU-609: lane-scoped rules only constrain their own lane's drafts.
-  const rules: LintRule[] = rulesForLane(ctx.authoredRules, run.targetLang)
+  // AQU-2342: the org's rules are checked and hinted too, after the project's.
+  const rules: LintRule[] = rulesForLane([...ctx.authoredRules, ...(ctx.orgRules ?? [])], run.targetLang)
+  // AQU-1690: Bible data for the wave, loaded once beside the project context.
+  const bible = await prepareBibleWave(deps.bible, {
+    pairs,
+    profile: ctx.languageProfile,
+    concepts: ctx.concepts,
+    // AQU-1699: the decisions and source language that give each name its agreed rendering.
+    facts: ctx.projectFacts,
+    sourceLanguage: ctx.sourceLanguage,
+    multiLane: ctx.multiLane,
+  })
+  // A Language-profile slot the pack needs and the project lacks: ask once per
+  // run, without parking it (runId: null).
+  if (bible.state === "ready" && bible.data.checks && deps.bible?.raisedFactKeys) {
+    await raiseBibleFactQuestions(db, {
+      projectId: run.projectId,
+      fileId: run.fileId,
+      data: bible.data,
+      raised: deps.bible.raisedFactKeys,
+    })
+  }
   const shared: RunContext = {
     ctx,
     rules,
     pairs,
     layerAbove,
     excludedCellIds,
+    bible,
     scope: {
       projectId: run.projectId,
       fileId: run.fileId,

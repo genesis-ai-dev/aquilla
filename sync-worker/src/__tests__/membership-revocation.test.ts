@@ -26,7 +26,12 @@ vi.mock('partyserver', () => ({
 }))
 
 import { handleEventsWriteRequest } from '../events/route'
-import { checkProjectMembership } from '../events/membership'
+import { checkProjectMembership, checkProjectMembershipDetailed } from '../events/membership'
+import {
+  resolveProjectRoleIncludingArchivedShared,
+  setAccessGrantsMode,
+  type AccessGrantsMode,
+} from '../../../db/shared/project-roles'
 import { makeTestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
@@ -60,6 +65,26 @@ function commitEvent(id: string, userId: number): RawEvent<'target.cell.create'>
     parentId: null,
     author: `user-${userId}`,
     payload: { cellId: `cell-${id}`, value: 'hello', valueHtml: '<p>hello</p>' },
+    clientTs: 1000,
+  }
+}
+
+function commentEvent(id: string, userId: number): RawEvent<'comment.create'> {
+  return {
+    id,
+    schemaVersion: 1,
+    kind: 'comment.create',
+    projectId: PROJECT,
+    fileId: FILE,
+    cellId: `cell-${id}`,
+    parentId: null,
+    author: `user-${userId}`,
+    payload: {
+      commentId: `cmt-${id}`,
+      scope: { kind: 'cell', fileId: FILE, cellId: `cell-${id}` },
+      body: 'looks good',
+      parentCommentId: null,
+    },
     clientTs: 1000,
   }
 }
@@ -184,6 +209,135 @@ describe('AQU-346 — membership re-check on POST /events', () => {
     expect(result.accepted.map((a) => a.id)).toContain('evt-noproj')
     expect(result.rejected).toHaveLength(0)
   })
+})
+
+describe('AQU-1787 — the write perimeter resolves through the shared role resolver', () => {
+  // The Biblica ETT shape: org role Project Lead (500), the project reached
+  // ONLY through a team attached at Contributor (400), no direct
+  // project_members row. AQU-1274 taught the mint-side resolver that the org
+  // role contributes here, so the token claims 500; the write perimeter's own
+  // SQL still resolved 400 and the downgrade gate 403'd every write.
+  const teamOnlyOrgLeadFixture = () => ({
+    projects: [projectRow({ org_id: 5 })],
+    org_members: [{ org_id: 5, user_id: 1, role_level: 500 }],
+    group_members: [{ group_id: 7, user_id: 1 }],
+    group_project_grants: [{ group_id: 7, project_id: PROJECT, role_level: 400 }],
+  })
+
+  it('accepts a target-cell write from an org Project Lead reaching the project only through a Contributor team', async () => {
+    const { db } = await makeTestDb(teamOnlyOrgLeadFixture())
+    const result = await post(db, [commitEvent('evt-1787-cell', 1)], await tokenFor(1, { role: 500 }))
+    expect(result.rejected).toHaveLength(0)
+    expect(result.accepted.map((a) => a.id)).toContain('evt-1787-cell')
+  })
+
+  it('accepts a comment from the same member — every write kind was rejected, not just cell edits', async () => {
+    const { db } = await makeTestDb(teamOnlyOrgLeadFixture())
+    const result = await post(db, [commentEvent('evt-1787-cmt', 1)], await tokenFor(1, { role: 500 }))
+    expect(result.rejected).toHaveLength(0)
+    expect(result.accepted.map((a) => a.id)).toContain('evt-1787-cmt')
+  })
+
+  it('still rejects a genuine downgrade of a DIRECT project role (the AQU-1331 gate is intact)', async () => {
+    const { db } = await makeTestDb({
+      projects: [projectRow()],
+      project_members: [{ project_id: PROJECT, user_id: 1, role_level: 100 }],
+    })
+    const result = await post(db, [commitEvent('evt-1787-down', 1)], await tokenFor(1, { role: 700 }))
+    expect(result.accepted).toHaveLength(0)
+    expect(result.rejected).toEqual([
+      { id: 'evt-1787-down', status: 403, reason: 'role downgraded since token was issued' },
+    ])
+  })
+
+  it('an explicit lower DIRECT row still restricts someone below their org role (AQU-1274 rule 2)', async () => {
+    // Same org/team shape, but with a deliberate per-person grant at Viewer:
+    // the org path must NOT lift it, so a token claiming 500 is a downgrade.
+    const { db } = await makeTestDb({
+      ...teamOnlyOrgLeadFixture(),
+      project_members: [{ project_id: PROJECT, user_id: 1, role_level: 100 }],
+    })
+    const result = await post(db, [commitEvent('evt-1787-direct-floor', 1)], await tokenFor(1, { role: 500 }))
+    expect(result.rejected).toEqual([
+      { id: 'evt-1787-direct-floor', status: 403, reason: 'role downgraded since token was issued' },
+    ])
+  })
+
+  // The parity criterion: whatever the mint would claim is what the write
+  // perimeter must resolve, for every grant shape and under every resolver
+  // mode. This is the test that would have caught AQU-1787 at the time
+  // AQU-1274 landed on the auth-worker side only.
+  const PARITY_MATRIX: Array<{ name: string; seed: Record<string, unknown[]>; expected: number }> = [
+    {
+      name: 'direct only',
+      seed: {
+        projects: [projectRow()],
+        project_members: [{ project_id: PROJECT, user_id: 1, role_level: 400 }],
+      },
+      expected: 400,
+    },
+    {
+      name: 'team only',
+      seed: {
+        projects: [projectRow()],
+        group_members: [{ group_id: 7, user_id: 1 }],
+        group_project_grants: [{ group_id: 7, project_id: PROJECT, role_level: 400 }],
+      },
+      expected: 400,
+    },
+    {
+      name: 'org Maintainer+',
+      seed: {
+        projects: [projectRow({ org_id: 5 })],
+        org_members: [{ org_id: 5, user_id: 1, role_level: 600 }],
+      },
+      expected: 600,
+    },
+    {
+      name: 'org sub-Maintainer + team (AQU-1787)',
+      seed: {
+        projects: [projectRow({ org_id: 5 })],
+        org_members: [{ org_id: 5, user_id: 1, role_level: 500 }],
+        group_members: [{ group_id: 7, user_id: 1 }],
+        group_project_grants: [{ group_id: 7, project_id: PROJECT, role_level: 400 }],
+      },
+      expected: 500,
+    },
+    {
+      name: 'org sub-Maintainer + team + lower direct row',
+      seed: {
+        projects: [projectRow({ org_id: 5 })],
+        org_members: [{ org_id: 5, user_id: 1, role_level: 500 }],
+        group_members: [{ group_id: 7, user_id: 1 }],
+        group_project_grants: [{ group_id: 7, project_id: PROJECT, role_level: 400 }],
+        project_members: [{ project_id: PROJECT, user_id: 1, role_level: 100 }],
+      },
+      expected: 400,
+    },
+    {
+      name: 'creator',
+      seed: { projects: [projectRow({ created_by: 1 })] },
+      expected: 700,
+    },
+  ]
+
+  const MODES: AccessGrantsMode[] = ['off', 'shadow', 'on']
+
+  for (const mode of MODES) {
+    for (const shape of PARITY_MATRIX) {
+      it(`parity under ACCESS_GRANTS_RESOLVER=${mode}: ${shape.name}`, async () => {
+        const { db } = await makeTestDb(shape.seed as never)
+        setAccessGrantsMode(db, mode)
+        const live = await checkProjectMembershipDetailed(db, PROJECT, 1)
+        const minted = await resolveProjectRoleIncludingArchivedShared(db, { id: '1' }, PROJECT)
+        expect(live.status).toBe('ok')
+        expect(live.roleLevel).toBe(shape.expected)
+        // What the write perimeter resolves IS what the mint would claim, so
+        // the downgrade gate can never fire on an unchanged membership.
+        expect(live.roleLevel).toBe(minted?.level ?? null)
+      })
+    }
+  }
 })
 
 describe('checkProjectMembership (unit)', () => {

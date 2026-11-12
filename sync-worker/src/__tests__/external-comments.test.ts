@@ -413,7 +413,12 @@ describe('AQU-1233 — agent replies', () => {
       },
     })
     const agent = await memberToken(tdb, 400)
-    await tdb.pg.query(`INSERT INTO users (id, username, email, password_hash) VALUES (901, 'reviewer', 'rev@x.com', 'h')`)
+    // AQU-1193: the reviewer is a thread participant, not an @-mention, so
+    // they only hear about this reply if they opted into every reply.
+    await tdb.pg.query(
+      `INSERT INTO users (id, username, email, password_hash, preferences)
+       VALUES (901, 'reviewer', 'rev@x.com', 'h', '{"commentEmails":"all"}')`,
+    )
     await seedHumanComment(tdb, { commentId: 'c-root', author: 'reviewer', body: 'this rendering is wrong' })
 
     const { res: prepRes, body: prep } = await prepare(env, agent.token, [
@@ -448,13 +453,51 @@ describe('AQU-1233 — agent replies', () => {
     // …and visibly marked so a reviewer knows a tool wrote it.
     expect(reply.author_label).toBe(`${agent.username}${AGENT_COMMENT_LABEL_SUFFIX}`)
 
-    // The normal comment notification path fires for the thread's participant.
+    // The normal comment notification path fires for the thread's participant,
+    // who opted into every reply above.
     await Promise.all(pending)
     expect(emailed).toHaveLength(1)
 
     // And the agent reading back can tell its own reply from the human's root.
     const { body: read } = await readComments(env, agent.token, `?fileId=${FILE}&cellId=cell-1`)
     expect(read.data.map((c) => c.viaAgent)).toEqual([false, true])
+  })
+
+  it('does not email an unmentioned thread participant on the default (AQU-1193)', async () => {
+    // Same agent-reply path as above, but with the reviewer left on the
+    // mention-only default. An agent replying on a thread is exactly the kind
+    // of traffic that used to mail every prior participant.
+    const emailed: unknown[] = []
+    const env = makeEnv(tdb.db, {
+      EMAIL: {
+        send: async (m) => {
+          emailed.push(m)
+          return { messageId: 'test-message-id' }
+        },
+      },
+    })
+    const agent = await memberToken(tdb, 400)
+    await tdb.pg.query(
+      `INSERT INTO users (id, username, email, password_hash) VALUES (902, 'reviewer', 'rev@x.com', 'h')`,
+    )
+    await seedHumanComment(tdb, { commentId: 'c-root', author: 'reviewer', body: 'this rendering is wrong' })
+
+    const { body: prep } = await prepare(env, agent.token, [
+      {
+        kind: 'comment.create',
+        fileId: FILE,
+        cellId: 'cell-1',
+        payload: { body: 'fixed \u2014 switched to the 1984 wording', parentCommentId: 'c-root' },
+      },
+    ])
+    const pending: Promise<unknown>[] = []
+    const { res } = await commit(env, agent.token, prep.changeset.id, {
+      waitUntil: (p) => void pending.push(p),
+    })
+    expect(res.status).toBe(200)
+
+    await Promise.all(pending)
+    expect(emailed).toHaveLength(0)
   })
 
   it('a reply to a nonexistent thread fails cleanly at prepare', async () => {

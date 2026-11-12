@@ -11,6 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, waitFor, act } from "@testing-library/react"
 import type { CellRow } from "@/lib/sync/cells-read-types"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const fetchAllMock = vi.fn<(projectId: string, fileId: string, jwt: string, side?: "source" | "target") => Promise<CellRow[]>>()
 // Seam for the targeted single-cell refetch (revalidateCell → fetchCellsByIds).
@@ -379,7 +380,7 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     await waitFor(() => expect(calls).toBeGreaterThanOrEqual(1))
     expect(result.current.isError).toBe(false)
     // After the backoff retry resolves, cells appear.
-    await waitFor(() => expect(result.current.cells.length).toBe(1), { timeout: 2000 })
+    await waitFor(() => expect(result.current.cells.length).toBe(1))
     expect(result.current.isError).toBe(false)
   })
 
@@ -393,11 +394,12 @@ describe("useCells (Phase 2a, D1-backed)", () => {
         enabled: true,
       }),
     )
-    // 6 attempts with 250→4000ms backoff exhausts in ~7.75s; allow headroom.
-    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 10_000 })
+    // 6 attempts with 250→4000ms backoff exhausts in ~7.75s of real time, so
+    // the stall watchdog runs on top of that schedule.
+    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 8_000 + STALL_WATCHDOG_MS })
     expect(result.current.cells).toEqual([])
     expect(fetchAllMock).not.toHaveBeenCalled()
-  }, 12_000)
+  })
 
   it("overlays activeValidators from auditStats over the empty default", async () => {
     fetchAllMock.mockResolvedValueOnce([
@@ -1687,31 +1689,48 @@ describe("FRO-IMPORT-OPT: outbox subscription debounce", () => {
     // Reset the counter AFTER mount so we only count subscription-driven calls.
     peekOutboxBatchCallCount = 0
 
-    // Fire 20 outbox notifications in a tight burst by enqueuing distinct events.
-    // Each enqueueOutboxEvent calls notifyOutboxChanged() synchronously after the
-    // IDB write, which fires the subscription callback immediately.
-    await act(async () => {
-      for (let i = 0; i < 20; i++) {
-        await enqueue({
-          id: `burst-ev-${i}`,
-          schemaVersion: CQRS_SCHEMA_VERSION,
-          kind: "target.cell.commit",
-          projectId: "proj-a",
-          fileId: "file-x",
-          cellId: "c1",
-          author: "alice",
-          payload: { value: `burst-${i}` },
-          clientTs: Date.now(),
-        })
-      }
-    })
+    // AQU-1916: put the 50 ms debounce on a fake clock so the burst below
+    // cannot outrun it. Only setTimeout/clearTimeout are faked — IndexedDB
+    // (fake-indexeddb) drives itself off microtasks and setImmediate, so its
+    // enqueues still complete normally. Previously the burst raced a REAL
+    // 50 ms window: under CPU starvation the enqueues took longer than the
+    // window, the debounce fired mid-burst, and the count came back 3 or 8.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      // Fire 20 outbox notifications in a tight burst by enqueuing distinct events.
+      // Each enqueueOutboxEvent calls notifyOutboxChanged() synchronously after the
+      // IDB write, which fires the subscription callback immediately.
+      await act(async () => {
+        for (let i = 0; i < 20; i++) {
+          await enqueue({
+            id: `burst-ev-${i}`,
+            schemaVersion: CQRS_SCHEMA_VERSION,
+            kind: "target.cell.commit",
+            projectId: "proj-a",
+            fileId: "file-x",
+            cellId: "c1",
+            author: "alice",
+            payload: { value: `burst-${i}` },
+            clientTs: Date.now(),
+          })
+        }
+      })
 
-    // Wait past the 50ms debounce window for the coalesced refresh to fire.
-    await new Promise<void>((resolve) => setTimeout(resolve, 60))
+      // Trailing debounce: no read has fired yet, however long the burst took.
+      // A leading throttle — or no debounce at all — reads here instead.
+      expect(peekOutboxBatchCallCount).toBe(0)
 
-    // The entire burst of 20 notifications must have triggered exactly ONE
-    // peekOutboxBatch call (not 20).
-    expect(peekOutboxBatchCallCount).toBe(1)
+      // Close the window in logical time, not by sleeping past a real one.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50)
+      })
+
+      // The entire burst of 20 notifications must have triggered exactly ONE
+      // peekOutboxBatch call (not 20).
+      expect(peekOutboxBatchCallCount).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

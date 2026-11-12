@@ -73,9 +73,14 @@ export interface UseProjectsMembersMatrix {
 export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
   const { session } = useFrontierSession();
   const jwt = session?.jwt ?? null;
-  const { projects, error: projectsError } = useAccessibleProjects();
   const { state: orgState } = useOrg();
-  const orgId = orgState.kind === "success" ? orgState.org.id : null;
+  const orgId = orgState.kind === "success" ? orgState.org?.id ?? null : null;
+  // AQU-2256: columns are scoped to the same org as the rows below. An
+  // unscoped list put projects from the caller's OTHER orgs on this org's
+  // matrix, where every cell is necessarily empty (the row members are this
+  // org's). A legacy project with no org_id is likewise not in this org, so
+  // it no longer gets a column here.
+  const { projects, error: projectsError } = useAccessibleProjects(orgId);
   const { members: orgMembers } = useOrgMembers(orgId);
   const [matrix, setMatrix] = useState<MembersMatrix | null>(null);
   const [isLoading, setLoading] = useState(false);

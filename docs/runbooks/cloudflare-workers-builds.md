@@ -86,9 +86,10 @@ separately in Cloudflare. Any retained Neon branch or R2 data is not deployable
 application infrastructure and requires its own backup/retention decision before
 deletion.
 
-`.github/workflows/ci.yml` and `.github/workflows/deploy-workers.yml` are retained
-as explicit `workflow_dispatch` fallbacks. Neither has a `pull_request` or `push`
-trigger. Scheduled Neon/content workflows and tag-triggered Tauri releases are
+`.github/workflows/ci.yml` runs its test gate on pull requests into `dev` and
+keeps `workflow_dispatch` for typecheck, the production build, Tauri, and IDML.
+`.github/workflows/deploy-workers.yml` stays `workflow_dispatch` only. Neither
+workflow has a `push` trigger. Scheduled Neon/content workflows and tag-triggered Tauri releases are
 separate operational workloads and are not silently reassigned to Workers Builds.
 Playwright smoke on a dedicated Hetzner box is also separate — see
 [hetzner-ci.md](hetzner-ci.md). It is `workflow_dispatch`-only until a
@@ -103,8 +104,10 @@ Connect only `aquilla-web-preview` to `genesis-ai-dev/aquilla`. Configure:
 - root directory: `/`
 - non-production branch builds: enabled
 
-The build installs auth/sync dependencies and runs `tsc -b`. The deploy command
-runs `scripts/cloudflare-stack-preview.mjs` using the root Wrangler version:
+The build installs auth/sync dependencies, runs `tsc -b`, and runs each
+Worker's `type-check`, since wrangler's esbuild bundle does not type-check. The
+deploy command runs `scripts/cloudflare-stack-preview.mjs` using the root
+Wrangler version:
 
 1. Create/update auth and sync previews with the same branch-derived name.
 2. Read their actual URLs from Wrangler's structured output.
@@ -142,7 +145,10 @@ Generated `previews` configs bind both backends to development Hyperdrive
 and Durable Objects, **not database rows or blobs**. QA should use a separate
 project per preview; development and preview sessions of the same project do
 not share a Durable Object broadcast namespace. Schema-changing PRs need a
-separate database branch. Automatic migrations, legacy identity migration,
+separate database branch. Both backends set `LANE_READ_WALL=1`, as the
+development Workers do, so a member below Maintainer sees only the lanes they
+were granted; a member added without a lane grant sees no target lane.
+Automatic migrations, legacy identity migration,
 cron jobs, outbound email, and local authentication bypasses are not enabled.
 Password login uses existing development accounts. Email/invite delivery,
 external integrations, and optional agent infrastructure need separate preview
@@ -216,11 +222,13 @@ checks only the SPA graph. The post-promotion public check still proves that the
 separate marketing Worker owns `/case-studies/come-and-see` and
 `/case-studies/biblica` instead of falling through to the app shell.
 
-Identity and sync versions also carry a version-metadata binding. First-party
-requests require the version tag's actual Worker namespace to agree with the
-environment's `DEPLOYMENT_WORKER_NAME` before opening Hyperdrive. Identity's
+Identity and sync versions also carry a version-metadata binding. When a version
+tag is present, first-party requests require its Worker namespace to agree with
+the environment's `DEPLOYMENT_WORKER_NAME` before opening Hyperdrive. Identity's
 scheduled work enforces the same contract before its cron opens Neon. This
-prevents a version from another Worker namespace from reaching either database.
+prevents a tagged version from another Worker namespace from reaching either
+database. An untagged version (from `wrangler secret put` or a dashboard edit) is
+served with a warning; see "Rotating a secret" in `docs/DEPLOYMENT-ENVIRONMENTS.md`.
 
 ## Workers Builds without a Wrangler application
 

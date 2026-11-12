@@ -85,12 +85,16 @@ calibration record. `FINDINGS-*.md` hold the tables per pass.
 preview's URL is `https://<branch alias>-aquilla-web-preview.<account>.workers.dev`
 (the build log prints it as `app=`; the alias is the branch name lowered,
 non-alphanumerics to `-`, cut at 30). `AQUILLA_ORG_ID` is the org the
-stories work in (`9`, Dev Org, on the local seed).
+stories work in (`1`, Dev Org, the first organization a fresh local seed creates; `organizations.id` is a serial, so check it if the stack was seeded differently).
 
 On the local stack `login` opens `/__dev/login?as=<user>`. On a preview
 that route does not exist; set `AQUILLA_QA_USER` and `AQUILLA_QA_PASSWORD`
 and `login` signs in through the real form. Use a QA account on
 development storage, never a production account.
+
+The site-wide admin console is a second account, not a role: `login_admin`
+and `AQUILLA_QA_ADMIN_USER` / `AQUILLA_QA_ADMIN_PASSWORD` (see the admin
+fixture below).
 
 ## Fixtures on development storage
 
@@ -101,11 +105,52 @@ everyone. Name them in stories; never paste an id.
 - **Org:** QA Bot Workspace. **Accounts:** `qa-bot` (owner) and
   `qa-bot-2` (a plain member, for two-user and presence stories).
   Passwords live with the bot runner, not in this repo.
+- **Platform admin:** `qa-admin`, email **`qa-admin@local.test`** (AQU-1353).
+  The site-wide console (`/admin`) is gated on an allowlist of account
+  *emails* (`ADMIN_EMAILS`), which is a separate axis from the org role
+  ladder — no org permission reaches it, so `qa-bot` cannot, which is why
+  `/admin` claims used to come back `NOT CHECKED`. A branch preview's
+  allowlist holds that one address and nothing else
+  (`scripts/cloudflare-stack-preview.mjs`); `dev.aquilla.app` and production
+  keep the operator list in `auth-worker/wrangler.toml` and are not affected
+  by it. Set `AQUILLA_QA_ADMIN_USER` / `AQUILLA_QA_ADMIN_PASSWORD` for the
+  bot; on the local stack the seeded `dev` user is the admin instead and
+  `login_admin` uses it with no configuration. Previews keep step-up
+  elevation **on**, and because they have no mail binding the code comes back
+  in the request response and the gate prints it — so the bot walks the real
+  flow. The console's Platform tab writes **platform-wide** settings: walk it,
+  change nothing.
 - **Projects:** `english to burmese` (Bible in Basic English from eBible)
-  for Scripture stories; `QA Scripture Verse Resources` (Berean Standard
-  Bible) for Verse Resources and Parallel Bibles; `QA Smoke Project` and
-  `QA Org Search B`, both empty, for org, search, and import stories;
-  `subtitle-test` for media.
+  for Scripture stories; `QA Scripture Verse Resources` for Verse
+  Resources, Parallel Bibles, and every **cross-file** story — it carries
+  two multi-chapter files, the Berean Standard Bible and `sample.usfm`
+  (Genesis 1-2, four verse cells), so a chapter row under a file that is
+  not open can be clicked; `QA Smoke Project` and `QA Org Search B`, both
+  empty, for org, search, and import stories; `subtitle-test` for media.
+  `QA Long Project Name For Truncation And Ellipsis Acceptance Criteria`
+  (68 characters) is empty too, and exists only so a story about a
+  truncated project name has one long enough to truncate — the next
+  longest is 52 (AQU-1436, absorbing AQU-1437).
+  `qa-819 aqu-1272 pointed-hebrew 20260924230332` is for terminology
+  matching: pointed Hebrew, prefixes, and a substring negative case
+  (AQU-1412).
+- **AI drafting:** hosted drafting works on a preview with no key of
+  anyone's. `scripts/cloudflare-stack-preview.mjs` refuses to deploy an
+  auth preview without the platform `OPENROUTER_API_KEY` (AQU-1500), and
+  a project that has never customized its provider resolves to the hosted
+  one (`DEFAULT_COMPLETION_SETTINGS`). What is **not** fixture data is the
+  one-time **Set up AI** answer: `aiProviderChosen` is device-local — it
+  lives in this browser's IDB project row, overlaid onto the server's copy
+  by `overlayDeviceLocalSettings` (`src/hooks/useProject.ts`), and there is
+  no such column in Postgres — so nothing seeded on the project or in the
+  database can pre-answer it, and a fresh browser profile always starts
+  with the per-cell sparkle tooltip reading **"Set up AI to enable"**.
+  Answer it once per profile, on the project you are walking: click the
+  sparkle on a target cell (that is what opens the chooser), leave
+  **Aquilla AI** (Recommended) selected, and click **Continue**. The
+  tooltip then reads **"Translate with AI"** and drafts land. It survives
+  a preview rebuild and a dev-database reset, because it was never in
+  either; it is lost when the browser profile is (AQU-1436).
 - **Media:** in `subtitle-test`, files `001` to `012` are the repo's
   synthetic parity corpus (`parity/corpus/files/vtt/`). They have no
   film, no audio cues, and no takes; silence there is not a bug.
@@ -118,11 +163,97 @@ everyone. Name them in stories; never paste an id.
   timeline, either takes on Target audio or the source audio of a
   media-imported file. The timeline's Sources menu says which of the
   three a file has.
-- The seeded ids in the stories (`bestalu-bible`, org `9`) exist on the
+- The seeded ids in the stories (`bestalu-bible`, org `1`) exist on the
   local stack only.
 - Leave the workspace as you found it. Create throwaways under your own
   prefix and archive them when the walk ends. Never rename, archive, or
   delete the standing projects or the accounts.
+
+### Rebuilding the standing fixtures
+
+Nothing in this repo seeds the development database. These projects were
+made by hand and will not come back on their own if it is reset, so the
+recipe is here. Rebuild them as `qa-bot` in `QA Bot Workspace`, and keep
+every project and file name exactly as spelled above — the stories quote
+them.
+
+- `qa-admin` — register through the normal signup form with the email
+  **`qa-admin@local.test`** exactly as spelled (the preview allowlist matches
+  on the email, so a different address silently has no admin rights). It needs
+  no org and no project: a platform admin resolves owner-level on every org
+  server-side. Hand its password to the bot runner as
+  `AQUILLA_QA_ADMIN_PASSWORD`. To check it took, sign in on any branch preview
+  and open `/admin`: a non-admin is redirected to `/orgs/all`.
+- `QA Smoke Project`, `QA Org Search B`, and
+  `QA Long Project Name For Truncation And Ellipsis Acceptance Criteria`
+  — create empty. No import. Spell the long one exactly: a shorter name
+  does not truncate, which is the only thing it is for.
+- `english to burmese` — import the Bible in Basic English (`eng-engBBE`)
+  from the eBible catalogue in the import dialog.
+- `QA Scripture Verse Resources` — import the Berean Standard Bible
+  (`eng-engBSB`) from the same catalogue, then upload
+  `e2e/fixtures/sample.usfm` as a second source file. **Both are
+  required.** The second file is the whole point of the project: it is
+  what makes a cross-file story walkable at all, and because `sample.usfm`
+  is Genesis 1-2 its chapter rows are distinguishable from the BSB's, so a
+  jump that lands on the wrong file or the wrong chapter is visible rather
+  than ambiguous.
+- `subtitle-test` — upload `parity/corpus/files/vtt/vtt-001.vtt` through
+  `vtt-012.vtt` (they appear as files `001` to `012`) and
+  `e2e/fixtures/voices-roundtrip.vtt`. The film,
+  `voices-roundtrip-film.mp4`, is **not** in the repo: regenerate any
+  ten-second test pattern with a sound track — for example `ffmpeg -f
+  lavfi -i testsrc=d=10:s=320x240 -f lavfi -i sine=d=10 -shortest
+  voices-roundtrip-film.mp4` — and import it as its own `video` file.
+  Stories that must hear something only need it to have audio, not to be
+  that exact clip.
+- `qa-819 aqu-1272 pointed-hebrew 20260924230332` (AQU-1412). Upload
+  `e2e/fixtures/pointed-hebrew-terms.usfm` as the source file. It holds
+  the three cells a terminology claim needs: GEN 1:2 has the prefixed
+  form `וְהָאָ֗רֶץ` as plain text, GEN 1:3 has the same word inside
+  `\bd …\bd*`, so it renders bold and terms are looked up one marked
+  segment at a time (`UsfmSourceText`), and GEN 1:4 has `graceful`, the
+  negative control. Rich-HTML source such as IDML takes a third path,
+  `decorateTermsInHtml`, which this file does not reach. Then:
+  1. In Terminology, add two concepts, both `active`: source term
+     `הָאָ֗רֶץ` rendered `earth`, and source term `grace` rendered
+     `gracia`.
+  2. In Project settings > Terminology > **Prefixes**, add `ו`, `ה`, and
+     `ב`. Saved prefixes show as chips beside the input; the input itself
+     is the add field and stays empty.
+
+  A walk should find the Hebrew term in GEN 1:2 and GEN 1:3 through the
+  prefix, and should not find `grace` inside `graceful`. Nothing here
+  needs an AI key.
+- **Set up AI is not on this list, and cannot be.** It is answered per
+  browser profile, not per project, so rebuilding the database neither
+  loses it nor restores it. See the AI-drafting fixture note above for the
+  one-off click, and `PR-BOT.md` for how to report an AI-control claim
+  when it is unanswered.
+
+### The two gaps that are still open, and what to do about each
+
+AQU-1244 left two acceptance criteria unwalkable for want of a fixture.
+They are not the same kind of gap.
+
+- **IDML sub-sections — a file to add, when a story asks for one.** IDML
+  milestones are one per story (`idmlStoryMilestones` in
+  `src/lib/import/milestones.ts`), so the fixture has to be a multi-story
+  document. `packages/idml-roundtrip/fixtures/valid/feature-rich.idml` is
+  one: seven stories, and it already round-trips in CI. Upload it to
+  `QA Scripture Verse Resources` as a third file when an IDML story needs
+  walking. It is deliberately not there now — a third file changes what
+  every Files-panel and tab-strip story sees, and no story asks for it
+  yet, so it would cost more than it buys.
+- **Contextual-run range chips — no fixture to add.** A contextual run is
+  not an imported file, so nothing can be seeded for it. It needs the
+  project-wide **Try Autopilot** opt-in (Settings > Experimental, owner or
+  lead only) and then Play on the run pill, which is the sequence
+  `e2e/specs/contextual/run-pill.spec.ts` drives. So the recipe is the
+  deliverable: opt the project in, run the pill, walk the chips it
+  produces, then **turn the opt-in back off**. It is a server-stored
+  project-wide setting, not a device switch, so leaving it on would put
+  the Autopilot surface in front of every other story in that project.
 
 ## Running a story by hand
 
@@ -164,7 +295,9 @@ that is one more reason the bots should run against previews.
   elements (`wait "table"`) rather than placeholder text.
 - After clicking a cell's read view, wait for the editable element to
   mount and type into it by ref. Typing at "current focus" is lost.
-- Language pickers on the create dialog accept a typed code (`en`, `fr`).
+- The create dialog opens on "Where does this project come from?" (AQU-2105);
+  click **Start from scratch** (`find testid "project-source-scratch"`) before
+  filling its fields. Its language pickers accept a typed code (`en`, `fr`).
 - Give the upload command an absolute path; the daemon resolves relative
   paths from its own working directory.
 - Popovers and dialogs portal outside the row. Scope snapshots to `main` or

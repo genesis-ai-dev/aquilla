@@ -34,6 +34,8 @@ function parseCitations(raw: unknown): AquiferCitation[] | string {
     if (!c || typeof c !== "object") return "each citation must be an object with a url"
     const url = asString((c as Record<string, unknown>).url)
     if (!url) return "each citation requires a url"
+    // Rendered as an <a href> in the proposal card — only plain web links.
+    if (!/^https?:\/\//i.test(url)) return "each citation url must start with http:// or https://"
     const title = asString((c as Record<string, unknown>).title)
     const quote = asString((c as Record<string, unknown>).quote)
     out.push({ url, ...(title ? { title } : {}), ...(quote ? { quote } : {}) })

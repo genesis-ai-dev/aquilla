@@ -76,6 +76,20 @@ describe("computeOptionsHash", () => {
     expect(EGRESS_ENGINE_VERSION).toBeGreaterThanOrEqual(2)
   })
 
+  // AQU-1575: WAV changes the bytes only for separate clips — every other
+  // mode already writes WAV. Options saved before the field existed, an
+  // explicit "original", and WAV on those modes must all keep their keys.
+  it("folds the WAV choice in only where it changes the export", async () => {
+    const separate: EgressOptions = { ...baseOptions, audioMode: "separate-clips" }
+    const base = await computeOptionsHash(separate, fileIds)
+    expect(await computeOptionsHash({ ...separate, audioFormat: "original" }, fileIds)).toBe(base)
+    expect(await computeOptionsHash({ ...separate, audioFormat: "wav" }, fileIds)).not.toBe(base)
+    const stems: EgressOptions = { ...baseOptions, audioMode: "voice-timeline" }
+    expect(await computeOptionsHash({ ...stems, audioFormat: "wav" }, fileIds)).toBe(
+      await computeOptionsHash(stems, fileIds),
+    )
+  })
+
   it("changes when any content-affecting option or the selection changes", async () => {
     const base = await computeOptionsHash(baseOptions, fileIds)
     expect(await computeOptionsHash({ ...baseOptions, textMode: "convert" }, fileIds)).not.toBe(base)

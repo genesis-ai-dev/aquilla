@@ -18,6 +18,32 @@
 //
 // Adding a settings key? Add it here too, or agents cannot write it.
 
+import { TEXT_DIRECTION_SETTING_VALUES } from './text-direction'
+import { BIBLE_ENRICHMENT_IDS } from './bible-enrichments'
+import { BIBLE_VOICE_OVERRIDES_TYPE_NAME, bibleVoiceOverridesProblem } from './bible-voice-overrides'
+import { LANGUAGE_PROFILE_TYPE_NAME, languageProfileProblem } from './language-profile'
+import { PROJECT_FACTS_TYPE_NAME, projectFactsProblem } from './project-facts'
+import { DRAFTING_SETTINGS_TYPE_NAME, draftingSettingsProblem } from './drafting-settings'
+import {
+  ALGORITHMIC_CHECKS_BY_LANE_TYPE_NAME,
+  ALGORITHMIC_CHECKS_TYPE_NAME,
+  RULE_PENALTIES_TYPE_NAME,
+  RULES_TYPE_NAME,
+  algorithmicChecksByLaneProblem,
+  algorithmicChecksProblem,
+  rulePenaltiesProblem,
+  rulesProblem,
+} from './rules-settings'
+import { parseProjectVisibilityFloor, VISIBILITY_FLOOR_LEVELS } from './visibility-floors'
+import { PARALLEL_BIBLE_VERSIONS_TYPE_NAME, parallelBibleVersionsProblem } from './parallel-bible-versions'
+import { TRANSLATION_INSTRUCTIONS_MAX_CHARS, translationInstructionsProblem } from './translation-instructions'
+
+const VISIBILITY_FLOOR_TYPE_NAME = `${VISIBILITY_FLOOR_LEVELS.join(' | ')} (a role level: 100 viewer … 700 owner)`
+
+function visibilityFloorProblem(value: unknown): string | null {
+  return parseProjectVisibilityFloor(value) == null ? `not a role level (${VISIBILITY_FLOOR_LEVELS.join(', ')})` : null
+}
+
 /** How a key's value is described to callers (validation errors + docs). */
 export type SettingsValueKind =
   | 'string'
@@ -32,31 +58,57 @@ export interface SettingsKeySpec {
   kind: SettingsValueKind
   /** Allowed values when `kind` is 'enum'. */
   values?: readonly string[]
+  /**
+   * AQU-1686: when `kind` is 'object', the only keys the object may hold, and
+   * each must hold a boolean. Absent means any plain object.
+   */
+  booleanFlags?: readonly string[]
+  /**
+   * AQU-1688: when `kind` is 'object' (or, since AQU-1691, 'object[]'; since
+   * AQU-1771, 'number'; and 'string[]'), a check the value must also pass. Returns null when
+   * it is fine, else what is wrong.
+   */
+  problem?: (value: unknown) => string | null
+  /** AQU-1688: the type shown in errors and describe_command, when `kind` undersells it. */
+  typeName?: string
 }
 
-function isPlainObject(v: unknown): boolean {
+function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 /** Human-readable type name for a spec — used in errors and describe_command. */
 export function settingsTypeName(spec: SettingsKeySpec): string {
-  return spec.kind === 'enum' ? (spec.values ?? []).map((v) => `"${v}"`).join(' | ') : spec.kind
+  if (spec.typeName) return spec.typeName
+  if (spec.kind === 'enum') return (spec.values ?? []).map((v) => `"${v}"`).join(' | ')
+  if (spec.kind === 'object' && spec.booleanFlags) {
+    return `{ ${spec.booleanFlags.map((flag) => `"${flag}"?: boolean`).join(', ')} }`
+  }
+  return spec.kind
 }
 
 function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
   switch (spec.kind) {
     case 'string':
-      return typeof value === 'string'
+      return typeof value === 'string' && (!spec.problem || spec.problem(value) === null)
     case 'number':
-      return typeof value === 'number' && Number.isFinite(value)
+      return typeof value === 'number' && Number.isFinite(value) && (!spec.problem || spec.problem(value) === null)
     case 'boolean':
       return typeof value === 'boolean'
     case 'string[]':
       return Array.isArray(value) && value.every((v) => typeof v === 'string')
-    case 'object':
-      return isPlainObject(value)
+        && (!spec.problem || spec.problem(value) === null)
+    case 'object': {
+      if (!isPlainObject(value)) return false
+      if (spec.problem && spec.problem(value) !== null) return false
+      const flags = spec.booleanFlags
+      if (!flags) return true
+      return Object.entries(value).every(
+        ([key, flag]) => flags.includes(key) && typeof flag === 'boolean',
+      )
+    }
     case 'object[]':
-      return Array.isArray(value) && value.every(isPlainObject)
+      return Array.isArray(value) && value.every(isPlainObject) && (!spec.problem || spec.problem(value) === null)
     case 'enum':
       return typeof value === 'string' && (spec.values ?? []).includes(value)
   }
@@ -68,24 +120,89 @@ function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
  * switches → structured blobs).
  */
 export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec>> = {
-  // Identity / language
-  sourceLanguage: { kind: 'string' },
-  targetLanguage: { kind: 'string' },
-  targetLanes: { kind: 'string[]' },
-  archivedLanes: { kind: 'string[]' },
+  // Language. AQU-1615 / AQU-2223: the language pair and the lane registry are
+  // lane rows, not settings keys (db/shared/retired-lane-settings.ts).
+  // AQU-1471: the project's DEFAULT text direction per side. "auto" (and an
+  // absent key) means "take it from the language", which is what every project
+  // did before these keys existed. They are a default, never a stamp: nothing
+  // copies them onto the file rows, so a per-file override still wins and
+  // changing a lane's language still moves every file that has no override.
+  sourceTextDirection: { kind: 'enum', values: TEXT_DIRECTION_SETTING_VALUES },
+  targetTextDirection: { kind: 'enum', values: TEXT_DIRECTION_SETTING_VALUES },
 
   // Drafting
+  // AQU-2342: THE project instructions — the one text every drafting path
+  // (copilot, prompt preview, agent chat, agent draft, Autopilot) injects
+  // (db/shared/translation-instructions.ts). Unset, it is composed on read
+  // from the older sources below (brief summary, a customized systemPrompt,
+  // Living Memory instruction entries, the agent's legacy project brief).
+  translationInstructions: {
+    kind: 'string',
+    problem: (value) => translationInstructionsProblem(value),
+    typeName: `string (at most ${TRANSLATION_INSTRUCTIONS_MAX_CHARS} characters)`,
+  },
+  // AQU-2342: legacy. No prompt reads it any more except as a migrate-on-read
+  // source for translationInstructions; the copilot's role text is fixed.
   systemPrompt: { kind: 'string' },
+  // AQU-2259: the team's AI drafting settings — retrieval tuning, batch sizes,
+  // the model choice and the Health penalty (db/shared/drafting-settings.ts).
+  // Never an AI key: those stay on the device or with the organization.
+  draftingSettings: {
+    kind: 'object',
+    problem: (value) => draftingSettingsProblem(value),
+    typeName: DRAFTING_SETTINGS_TYPE_NAME,
+  },
   draftContext: { kind: 'object' },
+  // AQU-2342: the brief interview's answers. Prompts read translationInstructions;
+  // the brief only feeds it on read until instructions are written.
   translationBrief: { kind: 'object' },
   livingMemoryEntries: { kind: 'object[]' },
   alignmentSeeds: { kind: 'object[]' },
 
-  // Rules / checks
-  rules: { kind: 'object[]' },
-  rulePenalties: { kind: 'object' },
-  algorithmicChecks: { kind: 'object' },
-  terminology: { kind: 'object[]' },
+  // Rules / checks (AQU-2192: real validators; shapes in db/shared/rules-settings.ts)
+  rules: { kind: 'object[]', problem: (value) => rulesProblem(value), typeName: RULES_TYPE_NAME },
+  rulePenalties: {
+    kind: 'object',
+    problem: (value) => rulePenaltiesProblem(value),
+    typeName: RULE_PENALTIES_TYPE_NAME,
+  },
+  algorithmicChecks: {
+    kind: 'object',
+    problem: (value) => algorithmicChecksProblem(value),
+    typeName: ALGORITHMIC_CHECKS_TYPE_NAME,
+  },
+  // AQU-1906: the same overrides, PER TARGET LANE — `{ [laneTag]: { [checkId]:
+  // override } }`, where "" is the default lane. A lane entry lies over
+  // `algorithmicChecks` per check id (src/lib/lqa/lane-builtin-checks.ts), so a
+  // project with one lane keeps working untouched with this key absent.
+  algorithmicChecksByLane: {
+    kind: 'object',
+    problem: (value) => algorithmicChecksByLaneProblem(value),
+    typeName: ALGORITHMIC_CHECKS_BY_LANE_TYPE_NAME,
+  },
+  // `terminology` is NOT here: it is retired (AQU-1724) — see
+  // RETIRED_TERMINOLOGY_KEY below.
+  // AQU-1688: facts about the target language that Bible data checks need
+  // (db/shared/language-profile.ts). A check whose slot is empty is dormant.
+  // AQU-2342: data behind Checks — every drafting prompt's checks hint
+  // carries the filled slots (db/shared/prompt-blocks.ts).
+  languageProfile: {
+    kind: 'object',
+    problem: (value) => languageProfileProblem(value),
+    typeName: LANGUAGE_PROFILE_TYPE_NAME,
+  },
+  // AQU-1691: the decision log — answers to one-off questions
+  // (db/shared/project-facts.ts). One entry per key; a key that names a
+  // Language-profile slot belongs in languageProfile instead. AQU-2342: no
+  // prompt reads this key directly any more — answering a decision appends
+  // the answer to translationInstructions, and the log only feeds the
+  // instructions on read until they are written. It stays as the record of
+  // which questions are already answered.
+  projectFacts: {
+    kind: 'object[]',
+    problem: (value) => projectFactsProblem(value),
+    typeName: PROJECT_FACTS_TYPE_NAME,
+  },
 
   // Validation policy (all POLICY keys — writable in the restrictive direction
   // only, see db/shared/policy-direction.ts; a loosening write resolves to
@@ -124,15 +241,65 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
     kind: 'enum',
     values: ['none', 'commenter', 'reviewer', 'contributor', 'project_lead', 'maintainer'],
   },
+  // AQU-2408: who may type a label on a cell. Two rungs only; an absent key
+  // reads as maintainer (db/shared/cell-label-floor.ts).
+  cellLabelFloor: { kind: 'enum', values: ['maintainer', 'project_lead'] },
+  // AQU-1771: this project's own floors for who sees its member list and each
+  // member's progress. Stricter-only: the project enforces the higher of its
+  // own value and its org's (db/shared/visibility-floors.ts), and an agent
+  // may only raise them (policy-direction.ts).
+  rosterViewMinRole: {
+    kind: 'number',
+    problem: (value) => visibilityFloorProblem(value),
+    typeName: VISIBILITY_FLOOR_TYPE_NAME,
+  },
+  memberProgressViewMinRole: {
+    kind: 'number',
+    problem: (value) => visibilityFloorProblem(value),
+    typeName: VISIBILITY_FLOOR_TYPE_NAME,
+  },
+  // AQU-2305: this project's own floor for importing a NEW source file, the
+  // same key the org uses (AQU-2304). Stricter-only: the project enforces the
+  // higher of its own value and its org's (db/shared/import-floor.ts), and an
+  // agent may only raise it (policy-direction.ts).
+  importMinRole: {
+    kind: 'number',
+    problem: (value) => visibilityFloorProblem(value),
+    typeName: VISIBILITY_FLOOR_TYPE_NAME,
+  },
 
   // Capability switches
   allowLineCreation: { kind: 'boolean' },
   allowTrackEditing: { kind: 'boolean' },
   timingLocked: { kind: 'boolean' },
+  // AQU-1758 (Sam's decision 7): "Show the film and sources tools in the media
+  // view". Unset, the project's kind decides (src/lib/media/film-and-sources.ts).
+  filmAndSources: { kind: 'boolean' },
   audioTimingMode: { kind: 'enum', values: ['dubbing', 'audioFirst'] },
   bibleResourcesEnabled: { kind: 'boolean' },
+  // AQU-1686: one switch per Bible data enrichment (db/shared/bible-enrichments.ts).
+  // A missing id means that enrichment's default.
+  bibleEnrichments: { kind: 'object', booleanFlags: BIBLE_ENRICHMENT_IDS },
+  // AQU-1692: maintainers' corrections of who speaks a pack speech, and to whom
+  // (db/shared/bible-voice-overrides.ts). Maintainer-only like every key with
+  // no carve-out.
+  bibleVoiceOverrides: {
+    kind: 'object',
+    problem: (value) => bibleVoiceOverridesProblem(value),
+    typeName: BIBLE_VOICE_OVERRIDES_TYPE_NAME,
+  },
+  // The team's default Parallel Bibles versions (db/shared/parallel-bible-versions.ts).
+  // A project lead may set them from the panel; agents keep the maintainer floor.
+  parallelBibleVersions: {
+    kind: 'string[]',
+    problem: (value) => parallelBibleVersionsProblem(value),
+    typeName: PARALLEL_BIBLE_VERSIONS_TYPE_NAME,
+  },
   knowledgeBaseEnabled: { kind: 'boolean' },
   importExcludeFrontMatter: { kind: 'boolean' },
+  // AQU-1720: what one imported cell is for docx/txt/md uploads.
+  importCellUnit: { kind: 'enum', values: ['sentence', 'paragraph'] },
+  smartQuotes: { kind: 'boolean' },
 
   // Structured blobs
   ttsSettings: { kind: 'object' },
@@ -144,26 +311,120 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
 
 export const PROJECT_SETTINGS_KEYS: readonly string[] = Object.keys(PROJECT_SETTINGS_KEY_SPECS)
 
+/**
+ * AQU-1724: the settings key that used to hold a project's termbase. Key terms
+ * now live in the Postgres `concepts` table, projected from term.* events
+ * (db/postgres/migrations/0084_concepts.sql); scripts/migrate-concepts.ts
+ * deletes this key once a project migrates, and the editor reads it only while
+ * the table has no live rows. A settings write to it is therefore lost without
+ * a word, so every settings door refuses one with this message instead.
+ */
+export const RETIRED_TERMINOLOGY_KEY = 'terminology'
+
+export const RETIRED_TERMINOLOGY_MESSAGE =
+  'settings key "terminology" is retired — key terms live in the concepts table, and a settings write to ' +
+  'this key never reaches the editor. Write terms with term.create / term.update events in an EmitEvents ' +
+  'changeset (read the current termbase with list_terms first).'
+
 export function isKnownSettingsKey(key: string): boolean {
   return Object.prototype.hasOwnProperty.call(PROJECT_SETTINGS_KEY_SPECS, key)
+}
+
+/**
+ * AQU-2402: names a caller reaches for that are NOT the key, mapped to the one
+ * that is. Two kinds live here:
+ *
+ *  - a READ name that differs from the write key — `get_project_settings`
+ *    returns the built-in checks as `builtinChecks` (each with `overridden`),
+ *    but the writable key is `algorithmicChecks`, so a read-modify-write that
+ *    echoes the shape it just read names a key that does not exist;
+ *  - the obvious guess for a key whose real name is not guessable
+ *    (`checks`, `brief`, `instructions`, `tts`).
+ *
+ * Only aliases that are UNAMBIGUOUS belong here: the suggestion is quoted as
+ * "the key for that is …", so a wrong entry sends a caller somewhere worse
+ * than the key list would.
+ */
+export const SETTINGS_KEY_ALIASES: Readonly<Record<string, string>> = {
+  builtinChecks: 'algorithmicChecks',
+  builtinChecksByLane: 'algorithmicChecksByLane',
+  checks: 'algorithmicChecks',
+  checksByLane: 'algorithmicChecksByLane',
+  qualityChecks: 'algorithmicChecks',
+  brief: 'translationBrief',
+  instructions: 'translationInstructions',
+  projectInstructions: 'translationInstructions',
+  tts: 'ttsSettings',
+  voiceSettings: 'ttsSettings',
+}
+
+/** Lowercase, letters and digits only — so `builtin_checks`, `BuiltinChecks`
+ *  and `builtin-checks` all fold onto the same probe. */
+function foldKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+const FOLDED_KEYS = new Map<string, string>(PROJECT_SETTINGS_KEYS.map((key) => [foldKey(key), key]))
+const FOLDED_ALIASES = new Map<string, string>(
+  Object.entries(SETTINGS_KEY_ALIASES).map(([wrong, right]) => [foldKey(wrong), right]),
+)
+
+/**
+ * AQU-2402: the writable key a caller probably meant, or null. An alias wins
+ * over a spelling fold (`builtinChecks` is spelled correctly — it is simply
+ * the read name), and a fold only answers when exactly one key matches.
+ */
+export function suggestSettingsKey(key: string): string | null {
+  const folded = foldKey(key)
+  const alias = FOLDED_ALIASES.get(folded)
+  if (alias) return alias
+  const spelling = FOLDED_KEYS.get(folded)
+  if (spelling && spelling !== key) return spelling
+  const contained = PROJECT_SETTINGS_KEYS.filter(
+    (candidate) => folded.length >= 4 &&
+      (foldKey(candidate).includes(folded) || folded.includes(foldKey(candidate))),
+  )
+  return contained.length === 1 ? contained[0] : null
+}
+
+/**
+ * AQU-2402: the unknown-key refusal, SELF-CONTAINED. It used to say only
+ * "call describe_command('PatchSettings') for the valid keys" — but that tool
+ * is filtered out of the OAuth connector's tool list (external/mcp-chatgpt-tools.ts),
+ * so on the surface where an agent is most likely to guess a key, the one hint
+ * it was given could not be followed and each guess cost a round trip. The
+ * valid keys are named here instead, in the error itself, on every surface.
+ */
+export function unknownSettingsKeyMessage(key: string): string {
+  const suggestion = suggestSettingsKey(key)
+  const hint = suggestion ? ` — the key for that is "${suggestion}"` : ''
+  return (
+    `unknown settings key "${key}"${hint}. The writable keys are: ${PROJECT_SETTINGS_KEYS.join(', ')}. ` +
+    'Where describe_command is available, describe_command("PatchSettings") adds each key\'s type.'
+  )
 }
 
 /**
  * Validate one `{key, value}` settings op against the registry.
  *
  * Returns null when it is fine, else a message naming what is wrong — the
- * unknown key, or the type the key actually expects. `null` is accepted for
- * every key: JSON cannot carry `undefined`, so storing null is the only way a
- * caller can clear a key (see PatchSettingsOp).
+ * unknown key, the retired one, or the type the key actually expects. `null`
+ * is accepted for every live key: JSON cannot carry `undefined`, so storing
+ * null is the only way a caller can clear a key (see PatchSettingsOp).
  */
 export function validateSettingsKeyValue(key: string, value: unknown): string | null {
+  // Before the null pass-through: clearing the retired key is a write to it
+  // too, and on a project not yet migrated it would delete its only termbase.
+  if (key === RETIRED_TERMINOLOGY_KEY) return RETIRED_TERMINOLOGY_MESSAGE
   const spec = PROJECT_SETTINGS_KEY_SPECS[key]
-  if (!spec) {
-    return `unknown settings key "${key}" — call describe_command("PatchSettings") for the valid keys`
-  }
+  if (!spec) return unknownSettingsKeyMessage(key)
   if (value === null) return null
   if (!matchesSpec(spec, value)) {
-    return `settings key "${key}" expects ${settingsTypeName(spec)}`
+    // A structural problem names the field at fault, not only the expected type.
+    const detail = spec.problem && (isPlainObject(value) || Array.isArray(value) || typeof value === 'number' || typeof value === 'string')
+      ? spec.problem(value)
+      : null
+    return `settings key "${key}" expects ${settingsTypeName(spec)}${detail ? ` (${detail})` : ''}`
   }
   return null
 }

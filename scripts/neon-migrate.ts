@@ -15,7 +15,11 @@
 //   npx tsx scripts/neon-migrate.ts apply      apply pending migrations in
 //       filename order and record them. Refuses to run until the DB has been
 //       baselined — re-running ALL historical files on a live DB is unsafe
-//       (0031 drops + recreates `snapshots`).
+//       (0031 drops + recreates `snapshots`). Each file commits together with
+//       its `schema_migrations` row (AQU-1877) under a `lock_timeout` of 5s
+//       (AQUILLA_MIGRATION_LOCK_TIMEOUT to override); a file needing
+//       `CREATE INDEX CONCURRENTLY` takes the documented non-transactional
+//       path in scripts/neon-migration-file.ts.
 //   npx tsx scripts/neon-migrate.ts baseline   one-time bootstrap: create the
 //       ledger and mark every existing migration file as applied WITHOUT
 //       running it. Refuses if the schema diff shows drift — fix the drift by
@@ -26,6 +30,12 @@
 // the environment — CI passes them as secrets). Targets whatever branch
 // NEON_PG_HOST points at; override it to check the staging Neon branch.
 //
+// Because this script cannot tell WHICH branch that is, `apply` against a
+// remote branch needs the snapshot decision made for it (AQU-1877): run it
+// through `pnpm neon:apply:dev` / `neon:apply:prod`, which know the target and
+// can cut the snapshot branch, or pass `--no-snapshot` here to assert that the
+// branch is already snapshotted or disposable. A local apply is never gated.
+//
 // Convention (unchanged): every migration file must be idempotent
 // (IF NOT EXISTS guards) and schema.sql must be kept up to date as the
 // rollup, since the schema diff here treats it as the source of truth.
@@ -35,7 +45,8 @@ import { fileURLToPath } from "node:url"
 import type { Client } from "pg"
 import { neonClient } from "./pg"
 import { prepareCommentsKey } from "./neon-comments-key"
-import { applyMigrationFile } from "./neon-migration-file"
+import { applyMigrationFile, lockTimeoutSetting } from "./neon-migration-file"
+import { directApplyRefusal, NO_SNAPSHOT_FLAG } from "./neon-apply-guard"
 import {
   diffSchemaContract,
   expectedSchemaContract,
@@ -49,6 +60,7 @@ const LEDGER = "schema_migrations"
 
 /** Fill missing NEON_PG_* from .env so npm scripts work without `set -a`. */
 function loadDotEnv(): void {
+  if (process.env.AQUILLA_LOCAL_PG_URL) return
   if (process.env.NEON_PG_HOST && process.env.NEON_PG_PASSWORD) return
   const envFile = path.join(REPO_ROOT, ".env")
   if (!fs.existsSync(envFile)) return
@@ -133,7 +145,30 @@ async function status(client: Client): Promise<number> {
   return failures ? 1 : 0
 }
 
+/**
+ * Local dev containers predate the ledger, and replaying every historical file
+ * is unsafe (see apply). `LOCAL_BASELINE_BEFORE=0097` records the files sorting
+ * before 0097 as applied without running them, then apply runs the rest.
+ */
+async function baselineLocalBefore(client: Client, prefix: string): Promise<void> {
+  await client.query(
+    `CREATE TABLE IF NOT EXISTS ${LEDGER} (
+       name       TEXT PRIMARY KEY,
+       applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+     )`,
+  )
+  const skipped = migrationFiles().filter((f) => f < prefix)
+  for (const f of skipped) {
+    await client.query(`INSERT INTO ${LEDGER} (name) VALUES ($1) ON CONFLICT DO NOTHING`, [f])
+  }
+  console.log(`✓ local ledger created; ${skipped.length} files before ${prefix} recorded without running`)
+}
+
 async function apply(client: Client): Promise<number> {
+  const localBaseline = process.env.LOCAL_BASELINE_BEFORE?.trim()
+  if (process.env.AQUILLA_LOCAL_PG_URL && localBaseline && !(await ledgerExists(client))) {
+    await baselineLocalBefore(client, localBaseline)
+  }
   if (!(await ledgerExists(client))) {
     console.error(
       `✗ ${LEDGER} does not exist. Refusing to apply: a first run would re-execute ALL ` +
@@ -146,12 +181,17 @@ async function apply(client: Client): Promise<number> {
   if (!pending.length) {
     console.log("✓ nothing to apply")
   }
+  const lockTimeout = lockTimeoutSetting()
   for (const f of pending) {
-    console.log(`applying ${f}…`)
-    await applyMigrationFile(
-      client, f, fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8"),
+    console.log(`applying ${f}… (lock_timeout=${lockTimeout})`)
+    const plan = await applyMigrationFile(
+      client, f, fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8"), { lockTimeout },
     )
-    console.log(`✓ applied ${f}`)
+    console.log(
+      plan.mode === "transactional"
+        ? `✓ applied ${f} (file + ledger row in one transaction)`
+        : `✓ applied ${f} (non-transactional: ${plan.reason}; ${plan.statements.length} statement(s), ledger row written last)`,
+    )
   }
   return status(client)
 }
@@ -182,16 +222,28 @@ async function baseline(client: Client): Promise<number> {
 async function main() {
   const cmd = process.argv[2] ?? "status"
   if (!["status", "apply", "baseline", "prepare-comments-key"].includes(cmd)) {
-    console.error("usage: neon-migrate.ts [status|apply|baseline|prepare-comments-key]")
+    console.error(`usage: neon-migrate.ts [status|apply|baseline|prepare-comments-key] [${NO_SNAPSHOT_FLAG}]`)
     process.exit(1)
   }
   // pg.ts reads NEON_PG_* at neonClient() call time, so loading .env here
   // (after import) is safe.
   loadDotEnv()
+  // This entry point does not know which Neon branch NEON_PG_HOST names, so the
+  // snapshot decision has to come from a flag or from neon-target.ts
+  // (AQU-1877). Refuse before opening a connection, let alone applying.
+  if (cmd === "apply") {
+    const refusal = directApplyRefusal(process.argv, process.env)
+    if (refusal) {
+      console.error(refusal)
+      process.exit(1)
+    }
+  }
   const client = neonClient()
   await client.connect()
   try {
-    const host = process.env.NEON_PG_HOST
+    const host = process.env.AQUILLA_LOCAL_PG_URL
+      ? `local ${process.env.AQUILLA_LOCAL_PG_URL.replace(/:[^:@/]*@/, ":***@")}`
+      : process.env.NEON_PG_HOST
     console.log(`neon-migrate ${cmd} → ${host}\n`)
     const fns = { status, apply, baseline, "prepare-comments-key": prepareCommentsKey } as const
     process.exitCode = await fns[cmd as keyof typeof fns](client)

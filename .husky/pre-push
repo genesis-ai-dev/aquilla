@@ -12,6 +12,18 @@ done
 
 # Keep pushes proportional: scan credentials, then select browser tests from
 # the pushed commits. Full unit/worker and smoke suites are not push gates.
+
+# A node_modules symlink to another checkout still lets pnpm start, then tests
+# the wrong versions and Vite refuses files outside this worktree. Fail here,
+# before vitest, so the message is the fix rather than a wasm load error.
+echo "[pre-push] checking node_modules belongs to this worktree…"
+pnpm exec tsx scripts/assert-worktree-node-modules.ts
+status=$?
+if [ $status -ne 0 ]; then
+  echo "[pre-push] Push blocked."
+  exit $status
+fi
+
 echo "[pre-push] scanning tracked files for credentials…"
 pnpm run scan:secrets
 status=$?

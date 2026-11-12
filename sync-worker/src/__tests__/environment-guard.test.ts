@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   deploymentEnvironmentError,
   isDeployedEnvironment,
@@ -47,6 +47,23 @@ describe("deployment environment guard", () => {
         CF_VERSION_METADATA: { tag: "aquilla-sync-worker-dev-development-commit" },
       }),
     ).toContain("expected a version tag beginning aquilla-sync-worker-production-")
+  })
+
+  // `wrangler secret put` / a dashboard secret edit promotes an untagged copy of
+  // the live version. Refusing it took the API down; serve it and warn instead.
+  it("serves an untagged version derived by a secret edit, and warns once", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const untagged = {
+      ENVIRONMENT: "production",
+      AUTH_WORKER_URL: "https://api.aquilla.app/identity",
+      DEPLOYMENT_WORKER_NAME: "aquilla-sync-worker",
+      CF_VERSION_METADATA: {},
+    }
+    expect(deploymentEnvironmentError("https://api.aquilla.app/sync/events", untagged)).toBeNull()
+    expect(deploymentEnvironmentError("https://api.aquilla.app/sync/events", untagged)).toBeNull()
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0]?.[0]).toContain("untagged version")
+    warn.mockRestore()
   })
 
   it("rejects a missing Worker namespace before database access", () => {

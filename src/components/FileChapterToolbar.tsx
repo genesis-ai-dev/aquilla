@@ -1,17 +1,39 @@
 import { useMemo, type RefObject, type ReactNode } from "react"
-import { ListChecks, LoaderCircle, WandSparkles } from "lucide-react"
+import { Eye, EyeOff, ListChecks, LoaderCircle, WandSparkles } from "lucide-react"
 import { EditorModeToggle, type EditorLens } from "@/components/EditorModeToggle"
 import { EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS } from "@/components/editor-surface-toolbar"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
+import { InfoNote } from "@/components/ui/info-note"
+import { cn } from "@/lib/utils"
 import type { CheckRunResult } from "@/lib/check/deterministic-check"
 import { useT } from "@/lib/i18n/I18nProvider"
 
-interface FileChapterToolbarProps {
+/**
+ * AQU-1422: the "N hidden" indicator and its reveal toggle, in one control.
+ *
+ * Both jobs belong to one button because they answer one question. The count is
+ * the standing answer to "what have I parked in this file?", and the only useful
+ * next move is to look at them — so the thing that tells you is the thing that
+ * shows you, rather than a badge here and a switch three menus away.
+ *
+ * The workspace passes this ONLY to someone who may park cells, and only when
+ * the count is above zero, so there is no permission check and no zero state
+ * here: a reader is never handed the prop, and a source editor with nothing
+ * hidden sees no furniture.
+ */
+export interface HiddenCellsIndicatorProps {
+  /** How many cells in this file are parked. Always ≥ 1 when passed. */
+  count: number
+  /** Are they currently being drawn (dimmed) rather than dropped? */
+  revealed: boolean
+  onRevealedChange: (revealed: boolean) => void
+}
+
+export interface FileChapterToolbarProps {
   lens: EditorLens
   onLensChange: (lens: EditorLens) => void
   onAgentSelect?: () => void
   agentActive?: boolean
-  timeOrdered?: boolean
   checkOpen: boolean
   checkRunning: boolean
   checkResult: CheckRunResult | null
@@ -19,10 +41,20 @@ interface FileChapterToolbarProps {
   menuItems: OverflowMenuItem[]
   fileOptionsAnchorRef?: RefObject<HTMLButtonElement | null>
   viewSettingsMenu?: ReactNode
+  /** AQU-1422: absent ⇒ nothing is hidden, or this person may not park cells. */
+  hiddenCells?: HiddenCellsIndicatorProps
   translateAsReadEnabled?: boolean
   translateAsReadDisabled?: boolean
   translateAsReadActive?: boolean
   onTranslateAsReadChange?: (enabled: boolean) => void
+  /** Media redesign slice 2: an Audio language has no AI drafting, so the
+   *  menu does not offer Draft as you read there at all. */
+  audioLane?: boolean
+  /** AQU-1767 phase 2: the History panel's button, beside the lens switch. */
+  historyControl?: ReactNode
+  /** The media view's top bar (canvas board 55): the Panels button, before
+   *  the ⋯. */
+  beforeMenu?: ReactNode
 }
 
 /** Chapter-row right-side controls: mode switch and file-options menu. */
@@ -31,7 +63,6 @@ export function FileChapterToolbar({
   onLensChange,
   onAgentSelect,
   agentActive = false,
-  timeOrdered = false,
   checkOpen,
   checkRunning,
   checkResult,
@@ -39,10 +70,14 @@ export function FileChapterToolbar({
   menuItems,
   fileOptionsAnchorRef,
   viewSettingsMenu,
+  hiddenCells,
   translateAsReadEnabled = false,
   translateAsReadDisabled = false,
   translateAsReadActive = false,
   onTranslateAsReadChange,
+  audioLane = false,
+  historyControl,
+  beforeMenu,
 }: FileChapterToolbarProps) {
   const t = useT()
 
@@ -60,7 +95,17 @@ export function FileChapterToolbar({
       </span>
     ) : undefined
     return [
-      ...(onTranslateAsReadChange ? [{
+      // AQU-358: the chapter row used to carry a labelled split button with its
+      // own chevron menu BESIDE this ⋯, and a reader could not tell which of
+      // the two held what. There is one menu now, so each run of items says
+      // what it is for — starting with the two editor-wide passes this toolbar
+      // owns, which belong to the open view rather than to the file.
+      {
+        id: "editor-tools-section",
+        type: "label" as const,
+        label: t("nav.fileMenu.section.editorTools"),
+      },
+      ...(onTranslateAsReadChange && !audioLane ? [{
         id: "translate-as-read",
         type: "checkbox" as const,
         label: t("agentWorkspace.translateAsRead"),
@@ -87,6 +132,7 @@ export function FileChapterToolbar({
       ...menuItems,
     ]
   }, [
+    audioLane,
     menuItems,
     checkOpen,
     checkRunning,
@@ -104,13 +150,47 @@ export function FileChapterToolbar({
     // sibling still consumes gap and pads the ⋯ button away from the edge.
     <div className="relative flex shrink-0 items-center">
       <div className="flex items-center gap-2">
+        {/* Its words name it, so no hover; what hiding does is behind the (i)
+            beside it, on a click (AQU-2260). */}
+        {hiddenCells && (
+          <span className="flex shrink-0 items-center gap-0.5">
+            <button
+              type="button"
+              data-testid="hidden-cells-indicator"
+              // Exposed as state rather than left to a class check: the button's
+              // two appearances differ only by tint, and a test asserting on a
+              // colour class would pin the styling instead of the behaviour.
+              data-revealed={hiddenCells.revealed ? "true" : "false"}
+              aria-pressed={hiddenCells.revealed}
+              onClick={() => hiddenCells.onRevealedChange(!hiddenCells.revealed)}
+              className={cn(
+                "flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2 text-xs transition-colors",
+                hiddenCells.revealed
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
+            >
+              {hiddenCells.revealed
+                ? <Eye className="h-3.5 w-3.5 shrink-0" />
+                : <EyeOff className="h-3.5 w-3.5 shrink-0" />}
+              <span>{t("editor.hiddenCells.indicator", { count: hiddenCells.count })}</span>
+            </button>
+            <InfoNote
+              label={t("common.aboutAria", { name: t("editor.hiddenCells.indicator", { count: hiddenCells.count }) })}
+              align="end"
+            >
+              {t("editor.hiddenCells.indicatorTooltip", { count: hiddenCells.count })}
+            </InfoNote>
+          </span>
+        )}
+        {historyControl}
         <EditorModeToggle
           lens={lens}
           onChange={onLensChange}
           onAgentSelect={onAgentSelect}
           agentActive={agentActive}
-          timeOrdered={timeOrdered}
         />
+        {beforeMenu}
         <OverflowMenu
           items={overflowItems}
           triggerRef={fileOptionsAnchorRef}

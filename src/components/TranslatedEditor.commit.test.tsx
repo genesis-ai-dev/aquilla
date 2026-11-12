@@ -220,6 +220,64 @@ describe("TranslatedEditor — plain TipTap commit path", () => {
     expect(onEscapeToGrid).not.toHaveBeenCalled()
   })
 
+  // AQU-1063: the break Shift+Enter inserts is stored as a `\n` in the cell's
+  // plain value and a `<br>` in its html. The editor hydrates from HTML, so when
+  // only the plain value is available that `\n` used to reach the HTML parser
+  // raw — and HTML collapses a newline to a space, so the cell came back as one
+  // run of text with the break replaced by a space. The next commit serialised
+  // whatever the editor held, persisting the collapse: a deliberate line break
+  // was silently destroyed. The plain-only path is live — an AI completion that
+  // returns no html commits `value` alone, which clears `translatedHtml` on
+  // purpose (see `applyContentOverlays`) — as are plain-only imported targets.
+  it("keeps a plain-only value's line breaks instead of collapsing them to spaces", async () => {
+    const { container } = render(
+      <TranslatedEditor
+        cellId="cell-plain-breaks"
+        initialPlain={"line one\nline two"}
+        onCommit={() => { /* no-op */ }}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const pm = container.querySelector(".ProseMirror") as HTMLElement
+
+    // A real hard break in the document, not whitespace: before the fix this
+    // was `<p>line one line two</p>` with no <br> at all.
+    expect(pm.querySelectorAll("br").length).toBe(1)
+    expect(pm.textContent).toBe("line oneline two")
+    expect(pm.textContent).not.toContain("line one line two")
+    // One cell is one paragraph carrying hard breaks (AQU-584), never a
+    // paragraph per line.
+    expect(pm.querySelectorAll("p").length).toBe(1)
+  })
+
+  it("commits a plain-only multi-line value back with its break intact", async () => {
+    const commits: { value: string; valueHtml: string }[] = []
+    const { container } = render(
+      <TranslatedEditor
+        cellId="cell-plain-breaks-commit"
+        initialPlain={"line one\nline two"}
+        onCommit={(snap) => { commits.push(snap) }}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const pm = container.querySelector(".ProseMirror") as HTMLElement
+    act(() => { fireEvent.focus(pm) })
+
+    const tiptap = (pm as unknown as {
+      editor?: { commands: { insertContent: (c: string) => boolean } }
+    }).editor
+    expect(tiptap).toBeDefined()
+    act(() => { tiptap?.commands.insertContent("!") })
+    act(() => { window.dispatchEvent(new Event("pagehide")) })
+
+    expect(commits).toHaveLength(1)
+    // The round trip preserves the break. Pre-fix this committed
+    // "!line one line two" — the break laundered into a space for good.
+    expect(commits[0]?.value).toContain("\n")
+    expect(commits[0]?.value).toBe("!line one\nline two")
+    expect(commits[0]?.valueHtml).toContain("<br>")
+  })
+
   // AQU-667: an AI draft (sparkle / batch "Draft all") that lands while the
   // target editor is focused must become the editor's content, and a subsequent
   // blur must NOT commit the stale pre-draft text over it — otherwise the

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import {
   buildSourceChip,
+  chipLabel,
   serializeWithChips,
   serializeDocJSON,
   type ContextChip,
@@ -33,19 +34,51 @@ describe("buildSourceChip", () => {
   })
 })
 
+describe("chipLabel", () => {
+  it("shows the opening words of the selection, ellipsised when cut", () => {
+    expect(chipLabel({ selection: "In the beginning", canonicalRef: "GEN 1:1" })).toBe("In the beginning")
+    expect(chipLabel({
+      selection: "In  the beginning God created\nthe heavens and the earth", canonicalRef: "",
+    })).toBe("In the beginning God created the…")
+  })
+
+  it("caps a run of long words by characters", () => {
+    const label = chipLabel({ selection: "x".repeat(100), canonicalRef: "" })
+    expect(label.endsWith("…")).toBe(true)
+    expect(label.length).toBeLessThanOrEqual(49)
+  })
+
+  it("falls back to the ref, then 'source', only when there is no wording", () => {
+    expect(chipLabel({ selection: "  ", canonicalRef: "GEN 1:1" })).toBe("GEN 1:1")
+    expect(chipLabel({ selection: "", canonicalRef: "" })).toBe("source")
+  })
+})
+
 describe("serializeWithChips", () => {
+  // Regression: cells with an empty context produced canonicalRef "" and the
+  // sent bubble read "What does this mean about []" — the user could not tell
+  // what they had asked about.
+  it("never renders an empty-ref chip as [] in the bubble or legend", () => {
+    const c = chip({ chipId: "e", canonicalRef: "", selection: "the Word was with God" })
+    const { wire, display } = serializeWithChips("what does ⟦chip:e⟧ mean", [c])
+    expect(display).toBe("what does “the Word was with God” mean")
+    expect(display).not.toContain("[]")
+    expect(wire).toContain("⟦ctx:1⟧ source · file_id=")
+    expect(wire).toContain('"the Word was with God"')
+  })
+
   it("passes text through unchanged when there are no chips", () => {
     const { wire, display } = serializeWithChips("hello world", [])
     expect(wire).toBe("hello world")
     expect(display).toBe("hello world")
   })
 
-  it("replaces placeholders with ctx tokens (wire) and [ref] (display) and appends a legend", () => {
+  it("replaces placeholders with ctx tokens (wire) and the quoted wording (display) and appends a legend", () => {
     const a = chip({ chipId: "a", canonicalRef: "GEN 1:1", selection: "In the beginning" })
     const b = chip({ chipId: "b", canonicalRef: "JHN 1:1", selection: "the Word", fileId: "f2", cellId: "z2" })
     const text = "compare ⟦chip:a⟧ and ⟦chip:b⟧"
     const { wire, display } = serializeWithChips(text, [a, b])
-    expect(display).toBe("compare [GEN 1:1] and [JHN 1:1]")
+    expect(display).toBe("compare “In the beginning” and “the Word”")
     expect(wire).toContain("compare ⟦ctx:1⟧ and ⟦ctx:2⟧")
     expect(wire).toContain("## Context")
     expect(wire).toContain("⟦ctx:1⟧ GEN 1:1 · file_id=f-uuid cell_id=cell-uuid · source")

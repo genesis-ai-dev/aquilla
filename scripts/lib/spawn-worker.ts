@@ -1,4 +1,5 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process"
+import { spawnSync, type ChildProcess } from "node:child_process"
+import { spawn } from "./spawn-command"
 import { createWriteStream, mkdirSync, type WriteStream } from "node:fs"
 import os from "node:os"
 import path from "node:path"

@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 // Tests for DraftCells (AQU-1186) — the external Agent API command that asks
 // the project's OWN copilot to draft named cells and stages the result as one
 // changeset for human approval.
@@ -27,6 +28,7 @@ vi.mock('partyserver', () => ({
   }),
 }))
 
+import { handleExternalMcpRequest } from '../external/mcp-route'
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
 import { validateCommands } from '../external/commands'
 import { mintApiToken } from '../../../db/shared/api-credentials'
@@ -100,7 +102,7 @@ async function commit(env: ReturnType<typeof makeEnv>, token: string, id: string
 }
 
 function draftCmd(cellIds: string[], extra: Record<string, unknown> = {}) {
-  return [{ kind: 'DraftCells', fileId: FILE, cellIds, ...extra }]
+  return [{ kind: 'DraftCells', fileId: FILE, cellIds, laneId: 'deflane1', ...extra }]
 }
 
 function provenance(model = 'test/model') {
@@ -142,6 +144,7 @@ function draftEverything(model = 'test/model') {
   })
 }
 
+const databases = new Set<TestDb>()
 let tdb: TestDb
 
 async function seed(cellCount: number, settings: Record<string, unknown> | null) {
@@ -154,7 +157,7 @@ async function seed(cellCount: number, settings: Record<string, unknown> | null)
     event_id: `src-evt-${i + 1}`,
     last_edit_at: 1,
   }))
-  return makeTestDb({
+  const db = await makeTestDb({
     projects: [{ id: PROJECT, name: 'P', created_by: 99, org_id: null }],
     files: [{ project_id: PROJECT, id: FILE, name: 'f.usfm', created_at: 1, updated_at: 1 }],
     cells,
@@ -170,6 +173,13 @@ async function seed(cellCount: number, settings: Record<string, unknown> | null)
         }
       : {}),
   })
+  await db.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
+  databases.add(db)
+  return db
 }
 
 beforeEach(() => {
@@ -177,13 +187,50 @@ beforeEach(() => {
   nextCred = 0
 })
 
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllGlobals()
+  for (const database of databases) await database.close()
+  databases.clear()
 })
 
 // ── validation: explicit cell ids only ───────────────────────────────────────
 
 describe('DraftCells — validation', () => {
+  it('binds each deployed AI bridge to the matching identity environment', async () => {
+    const { unstable_readConfig } = await import('wrangler')
+    for (const environment of ['production', 'development']) {
+      const identity = unstable_readConfig({ config: fileURLToPath(new URL('../../../auth-worker/wrangler.toml', import.meta.url).href), env: environment })
+      const sync = unstable_readConfig({ config: fileURLToPath(new URL('../../wrangler.toml', import.meta.url).href), env: environment })
+      expect(sync.services.find((service: { binding: string; service: string }) => service.binding === 'AUTH_WORKER')?.service).toBe(identity.name)
+    }
+  })
+
+  it('prefers the identity service binding for the actual drafting request', async () => {
+    tdb = await seed(1, null)
+    const { token, userId } = await memberToken(tdb, 400)
+    const calls = draftEverything()
+    const serviceFetch = fetch
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('public route must not be used') }))
+    const env = { ...makeEnv(tdb.db), AUTH_WORKER: { fetch: serviceFetch } }
+    const resource = 'https://w/api/v1/external/mcp'
+    await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1 WHERE user_id = $2', [resource, String(userId)])
+    async function call(name: string, args: Record<string, unknown>) {
+      const response = await handleExternalMcpRequest(new Request(resource, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: { projectId: PROJECT, ...args } } }),
+      }), env)
+      const body = await response!.json() as { result: { content: { text: string }[]; isError?: boolean } }
+      expect(body.result.isError, body.result.content[0].text).not.toBe(true)
+      return JSON.parse(body.result.content[0].text)
+    }
+    const plan = await call('prepare_draft_cells', { updates: [{ fileId: FILE, cellIds: ['c1'], laneId: 'deflane1' }] })
+    await call('confirm_changeset', { changesetId: plan.changesetId, digest: plan.digest })
+    const content = await call('read_content', { fileId: FILE, lane: 'deflane1' })
+    expect(content.data).toEqual(expect.arrayContaining([expect.objectContaining({ side: 'target', value: 'draft:c1', aiDrafted: true, validated: false })]))
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ url: `${AUTH_URL}/api/v1/ai/agent/internal/draft-cells`, auth: `Bearer ${SECRET}`, body: { projectId: PROJECT, userId: String(userId), fileId: FILE, cellIds: ['c1'] } })
+  })
+
   it('rejects a wildcard cell id, naming the rule', () => {
     for (const wildcard of ['*', 'all', '**', '%']) {
       const result = validateCommands([{ kind: 'DraftCells', fileId: FILE, cellIds: [wildcard] }])
@@ -204,7 +251,7 @@ describe('DraftCells — validation', () => {
   })
 
   it('de-duplicates repeated cell ids rather than drafting one cell twice', () => {
-    const result = validateCommands([{ kind: 'DraftCells', fileId: FILE, cellIds: ['c1', 'c1', 'c2'] }])
+    const result = validateCommands([{ kind: 'DraftCells', fileId: FILE, cellIds: ['c1', 'c1', 'c2'], laneId: 'deflane1' }])
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error('unreachable')
     expect(result.commands[0]).toMatchObject({ kind: 'DraftCells', cellIds: ['c1', 'c2'] })
@@ -212,7 +259,7 @@ describe('DraftCells — validation', () => {
 
   it('never lets a caller self-assert AI provenance on a SetTranslation', () => {
     const result = validateCommands([
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'c1', value: 'mine', aiDraft: provenance() },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'c1', laneId: 'deflane1', value: 'mine', aiDraft: provenance() },
     ])
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error('unreachable')
@@ -242,6 +289,21 @@ describe('DraftCells — batch-size cap', () => {
     // The expensive call is never made, and nothing is staged.
     expect(calls).toHaveLength(0)
     expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
+  // AQU-2259: the batch size the SPA saves now, in the team's drafting settings.
+  it("honours the batch size in the team's drafting settings", async () => {
+    tdb = await seed(20, { draftingSettings: { completionBatchSize: 20 }, completionSettings: { completionBatchSize: 5 } })
+    const env = makeEnv(tdb.db)
+    const { token } = await memberToken(tdb, 400)
+    const calls = draftEverything()
+
+    const cellIds = Array.from({ length: 20 }, (_, i) => `c${i + 1}`)
+    const { res, body } = await prepare(env, token, draftCmd(cellIds))
+
+    expect(res.status).toBe(200)
+    expect(body.summary?.translationsAdded).toBe(20)
+    expect(calls).toHaveLength(1)
   })
 
   it("honours the project's configured batch size over the default", async () => {
@@ -357,8 +419,8 @@ describe('DraftCells — staged, never auto-committed', () => {
     const calls = draftEverything()
 
     const { res, body } = await prepare(env, token, [
-      { kind: 'DraftCells', fileId: FILE, cellIds: ['c1'] },
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'c2', value: 'mine' },
+      { kind: 'DraftCells', fileId: FILE, cellIds: ['c1'], laneId: 'deflane1' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'c2', laneId: 'deflane1', value: 'mine' },
     ])
 
     expect(res.status).toBe(400)

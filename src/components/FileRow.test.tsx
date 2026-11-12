@@ -4,7 +4,8 @@
 // affordances (progress meter, etc.) that row happens to render.
 
 import { describe, it, expect, vi } from "vitest"
-import { render, within, fireEvent } from "@testing-library/react"
+import { render, within, fireEvent, screen } from "@testing-library/react"
+import { expectTooltip } from "@/test-utils/tooltip"
 import { FileRow } from "./FileRow"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import type { FileReference } from "@/lib/parsers/types"
@@ -107,8 +108,74 @@ describe("FileRow — AQU-341 truncation consistency", () => {
 
   it("exposes both translated and validated percents on the reserved progress slot", () => {
     const { container } = renderRow({ progress: { translated: 8, validated: 5, total: 10 } })
-    const slot = container.querySelector('[data-testid="file-row-progress-slot"]')
+    const slot = container.querySelector('[data-testid="file-row-progress-slot"]')!
     expect(slot).toHaveAttribute("aria-label", "80% translated, 50% validated")
+    // AQU-1764: and draws them as ONE two-part bar across the slot (it was two
+    // bars side by side): validated, then translated but not validated.
+    const bars = slot.querySelectorAll('[data-slot="progress-split-bar"]')
+    expect(bars).toHaveLength(1)
+    expect([...bars[0].querySelectorAll<HTMLElement>("[data-progress-tone]")]
+      .map((part) => `${part.dataset.progressTone} ${part.style.width}`))
+      .toEqual(["textValidated 50%", "textTranslated 30%"])
+  })
+
+  it("never reads 100% while a cell is outstanding (AQU-1493)", () => {
+    // Genesis-sized: six short is 99.5%, which plain rounding called 100%.
+    const { container } = renderRow({ progress: { translated: 1194, validated: 1200, total: 1200 } })
+    const slot = container.querySelector('[data-testid="file-row-progress-slot"]')
+    expect(slot).toHaveAttribute("aria-label", "99% translated, 100% validated")
+  })
+
+  // AQU-2111: a project whose target language has no written form reads 0
+  // filled / 0 approved forever, so the row has to draw its AUDIO figures
+  // instead — this row used to read "0% translated, 0% validated" over a file
+  // where every line was recorded and signed off.
+  it("draws the audio bar alone on a file with takes and no target text", () => {
+    const { container } = renderRow({
+      progress: { translated: 0, validated: 0, total: 10, recorded: 5, audioValidated: 5 },
+    })
+    const slot = container.querySelector('[data-testid="file-row-progress-slot"]')!
+    expect(slot).toHaveAttribute("aria-label", "50% recorded, 50% audio validated")
+    const bars = slot.querySelectorAll('[data-slot="progress-split-bar"]')
+    expect(bars).toHaveLength(1)
+    expect([...bars[0].querySelectorAll<HTMLElement>("[data-progress-tone]")]
+      .map((part) => `${part.dataset.progressTone} ${part.style.width}`))
+      .toEqual(["audioValidated 50%"])
+    // The slot reservation is untouched, so names still truncate identically.
+    expect(slot.className).toContain("w-[50px]")
+  })
+
+  it("keeps the text bar and adds an audio one on a file with both", () => {
+    const { container } = renderRow({
+      progress: { translated: 8, validated: 5, total: 10, recorded: 4, audioValidated: 1 },
+    })
+    const slot = container.querySelector('[data-testid="file-row-progress-slot"]')!
+    expect(slot).toHaveAttribute(
+      "aria-label",
+      "80% translated, 50% validated, 40% recorded, 10% audio validated",
+    )
+    const bars = slot.querySelectorAll('[data-slot="progress-split-bar"]')
+    expect(bars).toHaveLength(2)
+    expect([...bars[0].querySelectorAll<HTMLElement>("[data-progress-tone]")]
+      .map((part) => part.dataset.progressTone)).toEqual(["textValidated", "textTranslated"])
+    expect([...bars[1].querySelectorAll<HTMLElement>("[data-progress-tone]")]
+      .map((part) => part.dataset.progressTone)).toEqual(["audioValidated", "audioRecorded"])
+  })
+
+  // WHY: a text-only project must look exactly as it did. An absent pair (an
+  // older sync-worker) and a real zero both mean "no audio bar", and neither
+  // may read as "0% recorded".
+  it("is unchanged on a text-only file, whether the audio pair is zero or absent", () => {
+    for (const progress of [
+      { translated: 8, validated: 5, total: 10 },
+      { translated: 8, validated: 5, total: 10, recorded: 0, audioValidated: 0 },
+    ]) {
+      const { container, unmount } = renderRow({ progress })
+      const slot = container.querySelector('[data-testid="file-row-progress-slot"]')!
+      expect(slot).toHaveAttribute("aria-label", "80% translated, 50% validated")
+      expect(slot.querySelectorAll('[data-slot="progress-split-bar"]')).toHaveLength(1)
+      unmount()
+    }
   })
 
   it("exposes the full (untruncated) name so the user can recover it", () => {
@@ -165,5 +232,127 @@ describe("FileRow — file actions menu", () => {
     fireEvent.click(getByRole("menuitem", { name: /assign work/i }))
     expect(onAssignWork).toHaveBeenCalledTimes(1)
     expect(onSelect).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-894 regression guard: a file the reader isn't assigned to recedes, but
+// stays fully usable. The point of the ticket is "make mine obvious" — not to
+// invent an access rule the server doesn't enforce.
+describe("FileRow — AQU-894 unassigned de-emphasis", () => {
+  function row(container: HTMLElement): HTMLElement {
+    return container.querySelector('[data-showcase="sidebar.file"]') as HTMLElement
+  }
+
+  it("leaves the row untouched by default", () => {
+    const { container } = renderRow()
+    expect(row(container).dataset.unassigned).toBeUndefined()
+    expect(row(container).className).not.toContain("opacity-55")
+  })
+
+  it("dims a row that is not the reader's", () => {
+    const { container } = renderRow({ unassigned: true })
+    expect(row(container).dataset.unassigned).toBe("true")
+    expect(row(container).className).toContain("opacity-55")
+    // Recovers on hover/focus, so a dimmed row never feels unreachable.
+    expect(row(container).className).toContain("hover:opacity-100")
+  })
+
+  it("does not dim the row the reader is currently in", () => {
+    const { container } = renderRow({ unassigned: true, active: true })
+    expect(row(container).className).not.toContain("opacity-55")
+  })
+
+  it("keeps the dimmed row selectable, so the dimming is never a lock", () => {
+    const onSelect = vi.fn()
+    const { container, getByRole } = renderRow({ unassigned: true, onSelect })
+    fireEvent.click(getByRole("button", { name: LONG_NAME }))
+    fireEvent.keyDown(row(container), { key: "Enter" })
+    expect(onSelect).toHaveBeenCalledTimes(2)
+  })
+
+  it("says WHY the row is dim, and that it can still be opened", () => {
+    // Dimming carries nothing to a screen reader, so the row states it in text
+    // — and states the second half too, or it is heard as a locked file.
+    const { container } = renderRow({ unassigned: true })
+    const note = container.querySelector(".sr-only")
+    expect(note?.textContent).toContain("Not assigned to you")
+    expect(note?.textContent).toContain("still open it")
+    expect(renderRow().container.querySelector(".sr-only")).toBeNull()
+  })
+})
+
+// Media redesign slice 2 (P2.1): a language that counts its recordings
+// describes the file by them.
+describe("FileRow progress in a language that counts its recordings", () => {
+  it("Audio: the bar says recorded and approved, never translated", () => {
+    const { getByTestId } = renderRow({ progress: { total: 45, translated: 10, validated: 6, delivers: "audio" } })
+    const label = getByTestId("file-row-progress-slot").getAttribute("aria-label") ?? ""
+    expect(label).toMatch(/^\d+% recorded, \d+% audio validated$/)
+    expect(label).not.toMatch(/translated/)
+  })
+
+  it("Text: a language that delivers text draws its text alone, however much is recorded", () => {
+    const { getByTestId } = renderRow({
+      progress: { total: 10, translated: 5, validated: 2, recorded: 8, audioValidated: 3, delivers: "text" },
+    })
+    expect(getByTestId("file-row-progress-slot").getAttribute("aria-label")).not.toMatch(/recorded/)
+  })
+
+  it("Text and audio: drawn exactly like a not-chosen file that holds both (Sam, Oct 24)", () => {
+    // The language's own row: started / done in translated / validated (what
+    // the footer reads), the two halves beside them.
+    const chosen = renderRow({
+      progress: {
+        total: 10, translated: 9, validated: 4, delivers: "text_and_audio",
+        textTranslated: 6, textValidated: 4, recorded: 5, audioValidated: 3,
+      },
+    })
+    const chosenSlot = chosen.getByTestId("file-row-progress-slot")
+    // The same file, nobody having chosen: text and audio figures as they are.
+    const unchosen = renderRow({ progress: { total: 10, translated: 6, validated: 4, recorded: 5, audioValidated: 3 } })
+    const unchosenSlot = unchosen.getAllByTestId("file-row-progress-slot")[1]
+    expect(chosenSlot.getAttribute("aria-label")).toBe("60% translated, 40% validated, 50% recorded, 30% audio validated")
+    expect(chosenSlot.getAttribute("aria-label")).toBe(unchosenSlot.getAttribute("aria-label"))
+    expect(chosenSlot.innerHTML).toBe(unchosenSlot.innerHTML)
+    expect(chosenSlot.getAttribute("title")).toBeNull()
+  })
+
+  it("Text and audio: the audio bar shows before the first recording, since the language owes it", () => {
+    const { getByTestId } = renderRow({
+      progress: {
+        total: 10, translated: 6, validated: 4, delivers: "text_and_audio",
+        textTranslated: 6, textValidated: 4, recorded: 0, audioValidated: 0,
+      },
+    })
+    expect(getByTestId("file-row-progress-slot").getAttribute("aria-label"))
+      .toBe("60% translated, 40% validated, 0% recorded, 0% audio validated")
+  })
+
+  it("Text: exactly as before", () => {
+    const { getByTestId } = renderRow({ progress: { total: 10, translated: 5, validated: 2 } })
+    const slot = getByTestId("file-row-progress-slot")
+    expect(slot.getAttribute("aria-label")).toBe("50% translated, 20% validated")
+    expect(slot.getAttribute("title")).toBeNull()
+  })
+})
+
+// AQU-1758 (Sam): a timed file carried a waveform "squiggle" in the file list.
+// Every file opens on the timeline in Media now — "they're all media files" —
+// so no row is marked.
+describe("FileRow — no marker for a timed file (AQU-1758)", () => {
+  it("draws a subtitle file's row like any other, with no waveform", () => {
+    const { container } = renderRow({ file: makeFile({ type: "vtt", orderedBy: "time", name: "Episode 1.vtt" }) })
+    expect(within(container).queryByLabelText("Timeline-ordered file")).toBeNull()
+    expect(container.querySelector("svg.lucide-audio-waveform")).toBeNull()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button.
+describe("FileRow — hover only names", () => {
+  it("the rename suggestion's hover only names it", async () => {
+    renderRow({ hasSuggestion: true, onApplySuggestion: vi.fn() })
+    const sparkle = screen.getByRole("button", { name: "Apply rename suggestion" })
+    await expectTooltip(sparkle, "Apply rename suggestion")
+    expect(screen.getByRole("tooltip").textContent).not.toContain("cleaner name")
   })
 })

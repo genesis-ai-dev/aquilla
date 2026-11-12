@@ -15,6 +15,7 @@
 
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
+import { assignedCastVoiceId } from "@/lib/audio/voices"
 import { neutralizeFormulaLeader } from "./csv-safety"
 
 function csvField(value: string): string {
@@ -46,7 +47,8 @@ function resolveVoiceName(
  *
  * The cast assignment for a cell is resolved in priority order:
  *   1. Per-cell ttsSettings.voiceId  (set via cell-level assignment in the editor)
- *   2. Project-level castAssignments[cellId]  (bulk assignment from Voice Studio)
+ *   2. Project-level castAssignments: the line's own entry, then its
+ *      character's `character:<name>` entry (AQU-2125)
  *
  * @param cells       Target-side CellData array from the active file or full project.
  * @param ttsSettings Project TTS/voice-library settings used to resolve voice names.
@@ -60,10 +62,11 @@ export function exportMetadataCsv(
   const rows = cells.map((c) => {
     const ref = c.group || c.id
 
-    // Resolve voice: cell-level setting takes precedence over project bulk assignment.
+    // Resolve voice: cell-level setting takes precedence over project bulk
+    // assignment — the line's own entry, then its character's (AQU-2125).
     const voiceId =
       c.ttsSettings?.voiceId ??
-      (ttsSettings?.castAssignments?.[c.id] ?? undefined)
+      assignedCastVoiceId(ttsSettings, c)
     const voice = resolveVoiceName(voiceId, ttsSettings)
 
     const cameraState = c.cameraState ?? ""

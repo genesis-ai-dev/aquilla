@@ -27,6 +27,13 @@ export interface CellAuditStats {
   /** Active validators tied to lastEditEventId. Empty when the current edit has
    *  no approvals or when lastEditEventId is null. */
   activeValidators: string[]
+  /** AQU-2296: username → when that validator cast the vote tied to
+   *  `lastEditEventId` (server clock, ms). Keyed by name rather than paired
+   *  positionally with `activeValidators`, so the two cannot drift. A name
+   *  with no entry has no known stamp. Optional for the same reason the wire
+   *  field is: a fixture or a worker that predates it reads as "no stamps
+   *  known", which the popover draws as a name with no date line. */
+  validatorDecidedTs?: Record<string, number>
   /** Active QA rule waivers on this cell (one per dismissed rule). Empty when
    *  no rule is currently waived. */
   waivers: RuleWaiver[]
@@ -39,6 +46,18 @@ interface UseCellsAuditStatsOptions {
   /** AQU-538 active target lane ('' = default). Picks which target row's
    *  head a derived stats entry follows when a cell has several lanes. */
   lane?: string
+}
+
+/** The projected row a committed cell's stats entry follows on `lane` (the
+ *  reading deriveCommittedCellStats documents); undefined when `rows` has no
+ *  row for the cell at all. */
+function committedStatsRow(cellId: string, rows: readonly CellRow[], lane: string): CellRow | undefined {
+  const targets = rows.filter((r) => r.cellId === cellId && r.side === "target")
+  return (
+    targets.find((r) => (r.targetLang ?? "") === lane) ??
+    targets[0] ??
+    rows.find((r) => r.cellId === cellId && r.side === "source")
+  )
 }
 
 /**
@@ -55,11 +74,7 @@ export function deriveCommittedCellStats(
   lane: string,
   prev: CellAuditStats | undefined,
 ): CellAuditStats | null {
-  const targets = rows.filter((r) => r.cellId === cellId && r.side === "target")
-  const row =
-    targets.find((r) => (r.targetLang ?? "") === lane) ??
-    targets[0] ??
-    rows.find((r) => r.cellId === cellId && r.side === "source")
+  const row = committedStatsRow(cellId, rows, lane)
   if (!row) return null
   const headChanged = prev?.lastEditEventId !== row.eventId
   return {
@@ -69,12 +84,16 @@ export function deriveCommittedCellStats(
     lastEditAt: row.lastEditAt ?? null,
     lastEditEventId: row.eventId,
     activeValidators: headChanged ? [] : (prev?.activeValidators ?? []),
+    validatorDecidedTs: headChanged ? {} : (prev?.validatorDecidedTs ?? {}),
     waivers: prev?.waivers ?? [],
   }
 }
 
 export interface UseCellsAuditStatsResult {
   byCellId: Map<string, CellAuditStats>
+  /** AQU-2094: `byCellId` came from a sparse read, so a cell missing from it
+   *  has no validators and no waivers (rather than "not loaded"). */
+  complete: boolean
   isLoading: boolean
   isError: boolean
   revalidate: () => void
@@ -90,7 +109,11 @@ export interface UseCellsAuditStatsResult {
 
 const EMPTY_AUDIT_STATS = new Map<string, CellAuditStats>()
 
-type CellAuditStatsWireRow = Partial<CellAuditStats> & { side?: string }
+type CellAuditStatsWireRow = Partial<CellAuditStats> & {
+  side?: string
+  /** AQU-1506: the row's lane ('' = default). Absent on a pre-lane worker. */
+  targetLang?: string
+}
 
 function toCellAuditStats(row: CellAuditStatsWireRow): CellAuditStats | null {
   if (!row.cellId) return null
@@ -101,30 +124,75 @@ function toCellAuditStats(row: CellAuditStatsWireRow): CellAuditStats | null {
     lastEditAt: row.lastEditAt ?? null,
     lastEditEventId: row.lastEditEventId ?? null,
     activeValidators: row.activeValidators ?? [],
+    validatorDecidedTs: row.validatorDecidedTs ?? {},
     waivers: row.waivers ?? [],
   }
 }
 
-function mergeStatsRows(rows: CellAuditStatsWireRow[]): Map<string, CellAuditStats> {
+/** Never picked. */
+const RANK_OTHER_LANE = 0
+/** Picked only when the active lane has no target row for this cell. */
+const RANK_SOURCE = 1
+/** The row that answers "who validated this cell, here". */
+const RANK_ACTIVE_LANE = 2
+
+/**
+ * How much a row deserves to be this cell's stats entry, on `lane`.
+ *
+ * AQU-1506: a cell on an N-lane file has one target row per lane, and the
+ * validators on each are that lane's own. Ranking makes the pick independent
+ * of row order — the response arrives in Postgres heap order, which a validate
+ * or commit rewrites, so "first target row wins" silently changed answer as
+ * people worked.
+ *
+ * A cell untranslated in this lane has no target row here and falls back to the
+ * source row, exactly as an untranslated cell on a single-lane file always has:
+ * no validators, and the source head for the staleness pin. Another lane's
+ * target row is never a substitute — inheriting its validators is the bug.
+ */
+function rankStatsRow(row: CellAuditStatsWireRow, lane: string, laneAware: boolean): number {
+  if (row.side !== "target") return RANK_SOURCE
+  // A pre-lane worker sends no `targetLang` on any row. It cannot tell one
+  // lane's row from another's, so keep the historical first-target-row reading
+  // rather than reporting every cell on a non-default lane as unvalidated.
+  if (!laneAware) return RANK_ACTIVE_LANE
+  return (row.targetLang ?? "") === lane ? RANK_ACTIVE_LANE : RANK_OTHER_LANE
+}
+
+function mergeStatsRows(
+  rows: CellAuditStatsWireRow[],
+  lane: string,
+): Map<string, CellAuditStats> {
+  const laneAware = rows.some((r) => r.targetLang !== undefined)
   const map = new Map<string, CellAuditStats>()
-  const sides = new Map<string, string | undefined>()
+  const ranks = new Map<string, number>()
   for (const row of rows) {
+    const rank = rankStatsRow(row, lane, laneAware)
+    if (rank === RANK_OTHER_LANE) continue
     const stats = toCellAuditStats(row)
     if (!stats) continue
-    const existingSide = sides.get(stats.cellId)
-    if (!map.has(stats.cellId) || (existingSide !== "target" && row.side === "target")) {
+    // Strictly greater, so the first row of a rank wins — byte-identical to the
+    // old first-target-row-wins reading on a single-lane file.
+    if (rank > (ranks.get(stats.cellId) ?? -1)) {
       map.set(stats.cellId, stats)
-      sides.set(stats.cellId, row.side)
+      ranks.set(stats.cellId, rank)
     }
   }
   return map
 }
 
+/**
+ * AQU-2094: asks for a sparse read — only cells someone has validated or
+ * waived. The rest of an entry is on the rows the editor already has, and on a
+ * whole Bible the full answer was ~9 MB. A worker that predates the flag
+ * answers in full, without `sparse: true`, and `complete` stays false.
+ */
 async function fetchCellsAuditStats(
   fileId: string,
   jwt: string,
-): Promise<Map<string, CellAuditStats>> {
-  const url = `${syncWorkerHttpOrigin()}/cells/audit-stats?fileId=${encodeURIComponent(fileId)}`
+  lane: string,
+): Promise<{ map: Map<string, CellAuditStats>; complete: boolean }> {
+  const url = `${syncWorkerHttpOrigin()}/cells/audit-stats?fileId=${encodeURIComponent(fileId)}&sparse=1`
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${jwt}` },
   })
@@ -132,8 +200,8 @@ async function fetchCellsAuditStats(
     const body = await res.text().catch(() => "")
     throw new Error(`cells/audit-stats failed: HTTP ${res.status} — ${body.slice(0, 200)}`)
   }
-  const body = (await res.json()) as { cells: CellAuditStatsWireRow[] }
-  return mergeStatsRows(body.cells)
+  const body = (await res.json()) as { cells: CellAuditStatsWireRow[]; sparse?: boolean }
+  return { map: mergeStatsRows(body.cells, lane), complete: body.sparse === true }
 }
 
 // Single-cell variant of fetchCellsAuditStats — same endpoint, scoped via
@@ -142,6 +210,7 @@ async function fetchCellAuditStats(
   fileId: string,
   cellId: string,
   jwt: string,
+  lane: string,
 ): Promise<CellAuditStats | null> {
   const url = `${syncWorkerHttpOrigin()}/cells/audit-stats?fileId=${encodeURIComponent(fileId)}&cellId=${encodeURIComponent(cellId)}`
   const res = await fetch(url, {
@@ -152,13 +221,14 @@ async function fetchCellAuditStats(
     throw new Error(`cells/audit-stats (cell) failed: HTTP ${res.status} — ${body.slice(0, 200)}`)
   }
   const body = (await res.json()) as { cells: CellAuditStatsWireRow[] }
-  return mergeStatsRows(body.cells).get(cellId) ?? null
+  return mergeStatsRows(body.cells, lane).get(cellId) ?? null
 }
 
 export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAuditStatsResult {
   const { enabled, fileId, getTokenForFile, lane = "" } = opts
 
   const [data, setData] = useState<Map<string, CellAuditStats>>(EMPTY_AUDIT_STATS)
+  const [complete, setComplete] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isError, setIsError] = useState(false)
 
@@ -166,8 +236,6 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
   const tokenRef = useRef(getTokenForFile)
   const enabledRef = useRef(enabled)
   const laneRef = useRef(lane)
-  const dataRef = useRef(data)
-  dataRef.current = data
   const generationRef = useRef(0)
 
   fileRef.current = fileId
@@ -179,11 +247,13 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
     const fid = fileRef.current
     if (!enabledRef.current || !fid) {
       setData(EMPTY_AUDIT_STATS)
+      setComplete(false)
       setIsLoading(false)
       setIsError(false)
       return
     }
     const gen = ++generationRef.current
+    const activeLane = laneRef.current
     setIsLoading(true)
     setIsError(false)
     try {
@@ -194,9 +264,10 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
         setIsLoading(false)
         return
       }
-      const map = await fetchCellsAuditStats(fid, token)
+      const { map, complete: sparse } = await fetchCellsAuditStats(fid, token, activeLane)
       if (generationRef.current !== gen) return
       setData(map)
+      setComplete(sparse)
       setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return
@@ -206,10 +277,14 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
     }
   }, [])
 
+  // AQU-1506: `lane` reloads too. Which row of a cell answers "who validated
+  // this" is a per-lane question resolved at merge time, so the map a previous
+  // lane produced does not describe this one. Mirrors useCells, which likewise
+  // re-fetches and re-derives its view on a lane switch.
   useEffect(() => {
     void doFetch()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileId, enabled])
+  }, [fileId, enabled, lane])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -223,14 +298,16 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
   const revalidateCellStats = useCallback((cellId: string) => {
     const fid = fileRef.current
     if (!enabledRef.current || !fid) return
+    const lane = laneRef.current
     void (async () => {
       try {
         const token = await tokenRef.current(fid)
         if (!token) return
-        const stats = await fetchCellAuditStats(fid, cellId, token)
-        // The active file may have changed while this was in flight — don't
-        // merge stale-file data into the current map.
-        if (!stats || fileRef.current !== fid) return
+        const stats = await fetchCellAuditStats(fid, cellId, token, lane)
+        // The active file — or, AQU-1506, the active lane — may have changed
+        // while this was in flight. Either makes the entry describe a view the
+        // user is no longer on, and the lane switch has its own reload running.
+        if (!stats || fileRef.current !== fid || laneRef.current !== lane) return
         setData((prev) => {
           const next = new Map(prev)
           next.set(stats.cellId, stats)
@@ -244,16 +321,25 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
 
   const applyCommittedCellStats = useCallback((cellId: string, rows: readonly CellRow[]): boolean => {
     if (!enabledRef.current || !fileRef.current) return false
-    // Read the latest map synchronously (a setData updater runs lazily, so
-    // the caller could not learn whether anything merged).
-    const stats = deriveCommittedCellStats(cellId, rows, laneRef.current, dataRef.current.get(cellId))
-    if (!stats) return false
-    const next = new Map(dataRef.current)
-    next.set(cellId, stats)
-    dataRef.current = next
-    setData(next)
+    const lane = laneRef.current
+    // Whether anything merges depends on the rows alone, so the caller has
+    // its answer synchronously while the merge itself runs as an updater.
+    if (!committedStatsRow(cellId, rows, lane)) return false
+    // AQU-2280: merge into React's latest map, never into a snapshot of it.
+    // A ref mirroring `data` only catches up on the next render, and the
+    // outbox drains the edits queued before a reload at the same moment the
+    // file's full read returns. Copying the pre-read map here and setting it
+    // threw the read's answer away for every other cell, so a whole file's
+    // validation pills went blank until something else refetched.
+    setData((prev) => {
+      const stats = deriveCommittedCellStats(cellId, rows, lane, prev.get(cellId))
+      if (!stats) return prev
+      const next = new Map(prev)
+      next.set(cellId, stats)
+      return next
+    })
     return true
   }, [])
 
-  return { byCellId: data, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats }
+  return { byCellId: data, complete, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats }
 }

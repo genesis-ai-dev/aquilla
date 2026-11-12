@@ -18,17 +18,15 @@ import { defineNamespace, plural } from "./types"
  * is one key holding a `plural({ … })` record of CLDR category → string, and the
  * component passes the count instead of choosing a branch — `translate()`
  * selects the category through `Intl.PluralRules` for the active locale. Strings
- * where the noun doesn't inflect ("Replace {count}", "{count} more — …") stay a
- * plain single key.
+ * where the noun doesn't inflect stay a plain single key.
  */
 export const search = defineNamespace({
   keys: {
     // Mode toggle (dock panel + full-panel mode tabs)
-    "search.mode.searchTooltip": "Search text",
     "search.mode.replace": "Replace",
-    "search.mode.replaceTooltip": "Find & Replace",
+    "search.mode.replaceTooltip": "Find & replace",
     "search.mode.bible": "Bible",
-    "search.mode.bibleTooltip": "Bible resources",
+    "search.mode.bibleTooltip": "Bible data",
     "search.mode.passages": "Passages",
 
     // Scope toggle (dock panel + full panel)
@@ -50,31 +48,39 @@ export const search = defineNamespace({
       one: "{count} result",
       other: "{count} results",
     }),
-    "search.dock.expandAllTooltip": "Expand all results in main area",
     "search.dock.expandAllAriaLabel": "Expand all results",
     "search.dock.expandAllLabel": "Expand all",
     "search.dock.moreResults": "{count} more — open full panel for all results",
-    "search.dock.replaceHint": "Find & Replace with diff preview lives in the full panel.",
-    "search.dock.openReplace": "Open Find & Replace",
+    "search.dock.replaceHint": "Find & replace with diff preview lives in the full panel.",
+    "search.dock.openReplace": "Open find & replace",
 
     // Dock panel — Bible resources (Aquifer) mode
     "search.bible.backToResults": "Back to results",
     "search.bible.openExternal": "Open on bibletranslation.org",
     "search.bible.truncated": "Truncated — open the full page on bibletranslation.org.",
     "search.bible.notesFor": "Notes for {ref}",
-    "search.bible.searchPlaceholder": "Search Bible resources…",
-    "search.bible.searchAriaLabel": "Search Bible resources",
+    "search.bible.searchPlaceholder": "Search Bible data…",
+    "search.bible.searchAriaLabel": "Search Bible data",
     "search.bible.noResults": "No resources found",
     "search.bible.idleHint":
       "Search bibletranslation.org for people, places, terms, and translation notes.",
 
     // Replace (shared by the dock's "open full panel" hint and the dialog's
     // Replace mode — the actual replace UI only exists in the dialog)
-    "search.replace.includeCellAriaLabel": "Include cell {cellId} in replace",
-    "search.replace.cellLocation": "{fileId} · cell {cellId}",
+    "search.replace.includeCellAriaLabel": "Include {location} in replace",
+    "search.replace.cellLocation": "{location}",
+    "search.replace.samePlace": "{location} ({index} of {total})",
+    "search.replace.filePosition": "{fileName} · {position}",
+    "search.replace.linePosition": "Line {position}",
+    "search.replace.unnamedPlace": "Cell",
     "search.replace.matchCount": "{count} replacements in this cell",
     "search.replace.placeholder": "Replacement text…",
     "search.replace.ariaLabel": "Replacement text",
+    "search.find.matchCase": "Match case",
+    "search.find.wholeWord": "Match whole word",
+    "search.find.useRegexp": "Use regular expression",
+    "search.find.invalidRegexp": "Invalid regular expression",
+    "search.replace.preserveCase": "Preserve case",
     "search.replace.clearsValidation":
       "Replacing text clears validation — it must be re-reviewed.",
     "search.replace.skippedNotice": plural({
@@ -98,14 +104,21 @@ export const search = defineNamespace({
     "search.replace.readOnlyTooltip": "Replace requires contributor access on these files",
     "search.replace.notWiredTooltip": "Replace is not yet wired",
     "search.replace.applying": "Applying…",
-    "search.replace.applyButtonCount": "Replace {count}",
-    "search.replace.applyButtonAll": "Replace All",
+    "search.replace.applyButtonCount": plural({
+      one: "Replace {count} cell",
+      other: "Replace {count} cells",
+    }),
+    "search.replace.applyButtonAll": "Replace all",
+    "search.replace.noSource": "No source text for this cell",
+    "search.replace.targetOnlyReason":
+      "Replace changes target text only. Each match shows its source so you can check the wording.",
+    "search.replace.sourceMatchNotReplaced": "Source match — not replaced",
 
     // Result row column badge (aria-hidden decorative label on a search hit)
 
     // Full-panel dialog chrome
     "search.dialog.titlePassages": "Parallel passages",
-    "search.dialog.titleReplace": "Search and Replace",
+    "search.dialog.titleReplace": "Search and replace",
     "search.dialog.scopeFile": "File: {fileName}",
     "search.dialog.scopeCurrentFile": "Current file",
     "search.dialog.scopeEntireProject": "Entire project",
@@ -131,7 +144,7 @@ export const search = defineNamespace({
     "search.dialog.noResultsFor": "No results for",
 
     // Expanded "results as editor" view
-    "search.expanded.header": "Search Results",
+    "search.expanded.header": "Search results",
     "search.expanded.forQuery": "for “{query}”",
     "search.expanded.fileCount": plural({
       one: "{count} file",
@@ -146,6 +159,17 @@ export const search = defineNamespace({
       other: "{count} examples",
     }),
     "search.examples.popoverAriaLabel": "Translation examples",
+
+    // TM-style fuzzy matches inside the examples popover (AQU-1393)
+    "search.examples.matchPercent": "{percent}% match",
+    "search.examples.exactMatch": "100% match",
+    "search.examples.looseLabel": "Example",
+    "search.examples.insert": "Insert",
+    "search.examples.insertAriaLabel": "Insert this translation into the target cell",
+    "search.examples.originTranslationMemory": "TM · {fileName}",
+    "search.examples.originFile": "{fileName}",
+    "search.examples.diffAddedAriaLabel": "only in this match",
+    "search.examples.diffRemovedAriaLabel": "only in this cell",
   },
   context: {
     _context: {
@@ -158,9 +182,6 @@ export const search = defineNamespace({
       screenshot: "search",
     },
     keys: {
-      "search.mode.searchTooltip": {
-        description: "Tooltip on the dock's Search mode toggle. A short noun phrase.",
-      },
       "search.mode.replace": {
         description:
           "Short visible label on the Replace mode toggle/tab, in both the dock panel " +
@@ -242,11 +263,6 @@ export const search = defineNamespace({
             "The number the sentence counts; it also selects which plural form is used.",
         },
       },
-      "search.dock.expandAllTooltip": {
-        description:
-          "Tooltip on the dock's 'expand all results' icon button, which opens every " +
-          "current hit in the main editor area as a browsable list.",
-      },
       "search.dock.expandAllAriaLabel": {
         description: "Accessible name (aria-label) of the same expand-all icon button.",
       },
@@ -319,18 +335,51 @@ export const search = defineNamespace({
       "search.replace.includeCellAriaLabel": {
         description:
           "Accessible name (aria-label) of the checkbox beside a replace-diff preview " +
-          "row, letting a screen-reader user identify which cell it toggles.",
-        placeholders: { cellId: "Internal id of the cell row. Not translated." },
+          "row, letting a screen-reader user identify which place it toggles. The " +
+          "place is a verse reference or other readable location, never an id.",
+        placeholders: {
+          location: "Readable place of the match, e.g. 'Genesis 1:1' or 'Notes · 4'. Not translated.",
+        },
       },
       "search.replace.cellLocation": {
         description:
-          "Small location label above a replace-diff preview row, identifying which " +
-          "file and cell the before/after text belongs to. 'cell' is the only " +
-          "translatable word — it names the row/unit being edited.",
+          "Location label above a Find & Replace match. The whole label is the " +
+          "readable place (a verse reference, a section, or a file and position). " +
+          "There is no other wording to translate.",
         placeholders: {
-          fileId: "Internal id of the file the cell belongs to. Not translated.",
-          cellId: "Internal id of the cell. Not translated.",
+          location: "Readable place of the match, e.g. 'Genesis 1:1'. Not translated.",
         },
+      },
+      "search.replace.samePlace": {
+        description:
+          "Location label above a Find & Replace match when another match has the " +
+          "same place, so a verse split across rows can be told apart. 'of' is the " +
+          "only word to translate. Example: 'Genesis 1:1 (2 of 2)'.",
+        placeholders: {
+          location: "Readable place shared by these matches, e.g. 'Genesis 1:1'. Not translated.",
+          index: "Which of the matches this is, in file order, starting at 1.",
+          total: "How many matches share this place.",
+        },
+      },
+      "search.replace.filePosition": {
+        description:
+          "Location of a match that is not a verse and has no section label: the " +
+          "file's name and the cell's position in that file. Example: 'Notes · 4'.",
+        placeholders: {
+          fileName: "The file's display name. Not translated.",
+          position: "1-based position of the cell in the file.",
+        },
+      },
+      "search.replace.linePosition": {
+        description:
+          "Location of a match that has no verse, section, or file name: its " +
+          "position in the file. Example: 'Line 4'.",
+        placeholders: { position: "1-based position of the cell in the file." },
+      },
+      "search.replace.unnamedPlace": {
+        description:
+          "Location of a match when nothing readable is known about where it sits. " +
+          "One short word. An id is never shown in its place.",
       },
       "search.replace.matchCount": {
         description:
@@ -352,6 +401,36 @@ export const search = defineNamespace({
           "not be read aloud as part of the field's name, and a translator must be able " +
           "to word the accessible name differently from the placeholder " +
           "(AQU-511 wave-3 finding 6).",
+      },
+      "search.find.matchCase": {
+        description:
+          "Tooltip and accessible name of the Aa toggle inside the find field. Pressed, " +
+          "the search distinguishes capitals from lowercase. Keep it to a few words.",
+        maxLength: 24,
+      },
+      "search.find.wholeWord": {
+        description:
+          "Tooltip and accessible name of the underlined ab toggle inside the find field. " +
+          "Pressed, a hit must be a whole word, not part of a longer one.",
+        maxLength: 24,
+      },
+      "search.find.useRegexp": {
+        description:
+          "Tooltip and accessible name of the * toggle inside the find field. Pressed, " +
+          "the find text is read as a regular expression.",
+        maxLength: 32,
+      },
+      "search.find.invalidRegexp": {
+        description:
+          "Error shown under the find field when Use regular expression is on and the " +
+          "pattern cannot be compiled. One short sentence.",
+      },
+      "search.replace.preserveCase": {
+        description:
+          "Tooltip and accessible name of the AB toggle inside the replacement field. " +
+          "Pressed, each replacement takes the capitalization of the text it replaces " +
+          "(hello → world, Hello → World, HELLO → WORLD).",
+        maxLength: 24,
       },
       "search.replace.clearsValidation": {
         description:
@@ -418,8 +497,8 @@ export const search = defineNamespace({
       },
       "search.replace.applyButtonCount": {
         description:
-          "Replace button label once at least one diff row is selected. 'Replace' does " +
-          "not change grammatical number with the count, so this is a single key.",
+          "Replace button label once at least one cell is selected. The noun agrees " +
+          "with the count: 'Replace 1 cell' or 'Replace N cells'.",
         placeholders: { count: "How many cells are selected to be replaced." },
       },
       "search.replace.applyButtonAll": {
@@ -427,10 +506,24 @@ export const search = defineNamespace({
           "Replace button label before any row is individually selected/deselected — " +
           "implies 'replace everything currently matched'.",
       },
-      "search.dialog.titlePassages": {
+      "search.replace.noSource": {
         description:
-          "Full dialog's title AND footer label when in parallel-passages mode " +
-          "(cross-project verse matching).",
+          "Shown in a replace-diff row when the matched target cell has no source text " +
+          "to compare against, so the absence is visible instead of a blank gap.",
+      },
+      "search.replace.targetOnlyReason": {
+        description:
+          "Note in Replace mode explaining why only target text is changed, and that " +
+          "each match shows its source for review. Both and Source are unavailable in " +
+          "this mode, so the search is target text only.",
+      },
+      "search.replace.sourceMatchNotReplaced": {
+        description:
+          "Label on a source-side hit inside Replace mode, explaining that the row stays " +
+          "visible for review and is not part of the replacement.",
+      },
+      "search.dialog.titlePassages": {
+        description: "Full dialog's title when in parallel-passages mode (cross-project verse matching).",
       },
       "search.dialog.titleReplace": {
         description: "Full dialog's title when in Replace mode.",
@@ -525,7 +618,8 @@ export const search = defineNamespace({
       "search.dialog.contentSideLabel": {
         description:
           "Accessible name (aria-label) of the Both/Source/Target toggle in the full " +
-          "dialog, hidden while in Replace mode (which is always target-only).",
+          "dialog. Stays visible in Replace mode so a reviewer can see why a source " +
+          "match is listed and switch sides without the control disappearing.",
       },
       "search.side.both": {
         description: "Tab option: search both source and target text.",
@@ -625,6 +719,73 @@ export const search = defineNamespace({
         description:
           "Accessible name (aria-label) of the examples popover content region, read " +
           "once by a screen reader before its example pairs.",
+      },
+      "search.examples.matchPercent": {
+        description:
+          "Badge on an example row giving how similar its source is to the cell being " +
+          "translated, the way a TMS tool labels a fuzzy match. Sits in a narrow badge " +
+          "beside the row, so keep it to the number plus one short word.",
+        maxLength: 16,
+        placeholders: {
+          percent:
+            "Whole-number similarity between 75 and 99, already computed; no percent sign.",
+        },
+      },
+      "search.examples.exactMatch": {
+        description:
+          "Badge on an example row whose source is identical to the cell being " +
+          "translated — the row that offers the one-click Insert. Written as its own " +
+          "key rather than 100 through {percent} so a locale can word an exact match " +
+          "differently from a partial one.",
+        maxLength: 16,
+      },
+      "search.examples.looseLabel": {
+        description:
+          "Badge on an example row too dissimilar to carry a percentage (below 75%). " +
+          "Names what the row still is — a translated pair worth reading — rather than " +
+          "advertising a number that would imply false precision.",
+        maxLength: 16,
+      },
+      "search.examples.insert": {
+        description:
+          "Visible label of the button that puts an exact match's existing translation " +
+          "into the target editor for the translator to keep or edit. One word.",
+        maxLength: 12,
+      },
+      "search.examples.insertAriaLabel": {
+        description:
+          "Accessible name (aria-label) of the Insert button, longer than its visible " +
+          "one-word label because it must say on its own what gets inserted where.",
+      },
+      "search.examples.originTranslationMemory": {
+        description:
+          "Origin line on an example row that came from an imported translation-memory " +
+          "(TMX) file rather than from the project's own translated cells. 'TM' is the " +
+          "translators' own abbreviation and is normally left as-is.",
+        placeholders: {
+          fileName: "Name of the imported TMX file, as shown in the file list.",
+        },
+      },
+      "search.examples.originFile": {
+        description:
+          "Origin line on an example row that came from a file in this project. Just " +
+          "the file name in the base locale; the key exists so a locale can wrap it " +
+          "(e.g. 'from {fileName}') if a bare name reads wrong.",
+        placeholders: {
+          fileName: "Name of the project file the example pair lives in.",
+        },
+      },
+      "search.examples.diffAddedAriaLabel": {
+        description:
+          "Accessible name (aria-label) on the highlighted words of a match's source " +
+          "that the cell being translated does not have. Read by a screen reader in " +
+          "place of the visual highlight, so it must say which side the words are on.",
+      },
+      "search.examples.diffRemovedAriaLabel": {
+        description:
+          "Accessible name (aria-label) on the struck-through words shown inside a " +
+          "match's source that belong to the cell being translated and are missing " +
+          "from the match.",
       },
     },
   },

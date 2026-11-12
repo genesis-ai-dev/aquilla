@@ -46,9 +46,16 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  closeDisabled = false,
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
+  /**
+   * Greys out the built-in X. Pair it with a Root that refuses to close while
+   * busy so the affordance matches the behaviour instead of looking live and
+   * doing nothing (AQU-1519).
+   */
+  closeDisabled?: boolean
 }) {
   const t = useT()
   return (
@@ -77,6 +84,7 @@ function DialogContent({
                 className="absolute top-2 end-2"
                 size="icon-sm"
                 aria-label={t("common.close")}
+                disabled={closeDisabled}
               />
             }
           >
@@ -103,12 +111,18 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
  * Place it between DialogHeader and DialogFooter so those stay fixed while the
  * body scrolls. Bleeds to the dialog's horizontal edges (so the scrollbar sits
  * at the edge) while keeping content padding.
+ *
+ * Vertical only. A child wider than the body is clipped, never scrolled
+ * sideways: because the body bleeds past the content padding, a horizontal
+ * scrollbar here would span the dialog's full width and sit visibly out of
+ * line with the content above it (AQU-2437, a long file name in the Export
+ * dialog). Content that must scroll sideways brings its own scroll container.
  */
 function DialogBody({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-body"
-      className={cn("-mx-5 min-h-0 flex-1 overflow-y-auto px-5", className)}
+      className={cn("-mx-5 min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-5", className)}
       {...props}
     />
   )

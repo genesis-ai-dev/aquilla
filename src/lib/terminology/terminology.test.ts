@@ -96,6 +96,86 @@ describe("compileConceptsToRules", () => {
     expect(targetPatterns.some((p) => p.includes("specter"))).toBe(true)
   })
 
+  // AQU-1712: the forbidden rule carries the concept's source condition, so it
+  // is judged only in cells whose source bears the concept — the same pattern
+  // the concept's approved rule matches its source side with.
+  it("gives each forbidden rule the concept's source pattern, keeping the rule id", () => {
+    const concept = makeConcept({
+      sourceTerm: "spirit",
+      renderings: [{ rendering: "ghost", status: "forbidden" }],
+    })
+    const [approved] = compileConceptsToRules([makeConcept({ sourceTerm: "spirit" })])
+    const [forbidden] = compileConceptsToRules([concept])
+    expect(forbidden.id).toBe("term:c1:forbidden:ghost")
+    expect(forbidden.check.type).toBe("target-forbids")
+    if (forbidden.check.type === "target-forbids" && approved.check.type === "source-requires-target") {
+      expect(forbidden.check.sourcePattern).toBe(approved.check.sourcePattern)
+    }
+  })
+
+  it.each([
+    { name: "flagged when the source bears the term", original: "the spirit came", flagged: true },
+    { name: "not flagged when the source lacks the term", original: "a friendly host", flagged: false },
+  ])("forbidden rendering through compile → rule-engine: $name", ({ original, flagged }) => {
+    const concept = makeConcept({
+      sourceTerm: "spirit",
+      renderings: [{ rendering: "ghost", status: "forbidden" }],
+    })
+    const rules = compileConceptsToRules([concept])
+    const cell: CellData = {
+      id: "c1",
+      original,
+      translated: "the holy ghost",
+      fileId: "f1",
+      context: "",
+      group: "",
+      type: "text",
+      originalHtml: undefined,
+      status: "validated",
+      validationStatus: "none",
+      activeValidators: [],
+      validationHistory: [],
+      history: [],
+      threads: [],
+    }
+    const infractions = checkRules(new Map([["f1", [cell]]]), rules).get("c1") ?? []
+    expect(infractions.map((i) => i.ruleId)).toEqual(
+      flagged ? ["term:c1:forbidden:ghost"] : [],
+    )
+  })
+
+  // AQU-764: the flag-vs-auto-replace question the team could not answer from
+  // anywhere. The answer is documented in docs/UI-GLOSSARY.md "Terminology
+  // enforcement — flag, never auto-replace"; these guard it.
+  it("flags rather than rewrites: no compiled terminology rule carries an autofix", () => {
+    const concept = makeConcept({
+      renderings: [
+        { rendering: "espíritu", status: "preferred" },
+        { rendering: "aliento", status: "admitted" },
+        { rendering: "ghost", status: "forbidden" },
+      ],
+    })
+    const rules = compileConceptsToRules([concept])
+    expect(rules.length).toBeGreaterThan(0)
+    for (const rule of rules) {
+      expect(rule.autofix).toBeUndefined()
+    }
+  })
+
+  it("grades a missing approved rendering minor and a forbidden rendering major", () => {
+    const concept = makeConcept({
+      renderings: [
+        { rendering: "espíritu", status: "preferred" },
+        { rendering: "ghost", status: "forbidden" },
+      ],
+    })
+    const rules = compileConceptsToRules([concept])
+    const approvedRule = rules.find((r) => r.check.type === "source-requires-target")
+    const forbiddenRule = rules.find((r) => r.check.type === "target-forbids")
+    expect(approvedRule?.severity).toBe("minor")
+    expect(forbiddenRule?.severity).toBe("major")
+  })
+
   it("violation detected: preferred rendering missing from target (source contains term)", () => {
     // Verify the compiled rules produce the expected check shape so the rule-engine
     // will flag the violation (rule-engine itself has its own tests).
@@ -243,6 +323,40 @@ describe("compileConceptsToRules", () => {
 // ---------------------------------------------------------------------------
 // store.ts tests
 // ---------------------------------------------------------------------------
+
+// AQU-2209: prompt injection reads the `term` payload, never the `check`
+// patterns, so every compiled rule must carry it — a rule without one is
+// invisible to the prompt and its concept silently stops being enforced there.
+describe("compileConceptsToRules term payload (AQU-2209)", () => {
+  it("attaches the concept's plain source term and approved renderings", () => {
+    const [approvedRule] = compileConceptsToRules([makeConcept()])
+    expect(approvedRule.term).toMatchObject({
+      conceptId: "c1",
+      sourceTerm: "spirit",
+      approved: ["espíritu", "aliento"],
+    })
+    // The pattern is carried for narrowing, not for rendering.
+    expect(approvedRule.term?.sourcePattern).toBe(approvedRule.check.type === "source-requires-target" ? approvedRule.check.sourcePattern : "")
+  })
+
+  it("names the one forbidden rendering on each forbidden rule", () => {
+    const forbidden = compileConceptsToRules([
+      makeConcept({
+        renderings: [
+          { rendering: "ghost", status: "forbidden" },
+          { rendering: "wind", status: "forbidden" },
+        ],
+      }),
+    ])
+    expect(forbidden.map((r) => r.term?.forbidden)).toEqual(["ghost", "wind"])
+    expect(forbidden.every((r) => r.term?.sourceTerm === "spirit")).toBe(true)
+  })
+
+  it("carries caseSensitive so narrowing matches the engine", () => {
+    const [rule] = compileConceptsToRules([makeConcept({ caseSensitive: true })])
+    expect(rule.term?.caseSensitive).toBe(true)
+  })
+})
 
 describe("addConcept", () => {
   it("adds a concept to an empty project", () => {

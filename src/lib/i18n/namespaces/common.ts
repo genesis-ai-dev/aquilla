@@ -29,6 +29,15 @@ export const common = defineNamespace({
     "common.loadingSpinner": "Loading",
     "common.showMore": "Show more",
     "common.showLess": "Show less",
+    // AQU-2293: the Show more / Show all / Show fewer trio under a capped
+    //   list. Shared by the project overview's imported-originals list and the
+    //   org Overview's Team workload card, so the wording cannot drift apart.
+    "common.listShowMore": plural({
+      one: "Show {count} more",
+      other: "Show {count} more",
+    }),
+    "common.listShowAll": "Show all ({count})",
+    "common.listShowFewer": "Show fewer",
 
     // — Shared vocabulary and status words (AQU-511 wave 4):
     //   promoted here because two or more namespaces render exactly these
@@ -53,6 +62,9 @@ export const common = defineNamespace({
     "common.seek": "Seek",
     "common.volume": "Volume",
     "common.noMatches": "No matches",
+    "common.searchPlaceholder": "Search…",
+    "common.searchListAria": "Search the list",
+    "common.aboutAria": "About {name}",
     "common.readOnlyGit": "Read-only (imported from git)",
     "common.refresh": "Refresh",
     "common.searching": "Searching…",
@@ -112,7 +124,7 @@ export const common = defineNamespace({
     "common.role.commenter": plural({ one: "Commenter", other: "Commenters" }),
     "common.role.reviewer": plural({ one: "Reviewer", other: "Reviewers" }),
     "common.role.contributor": plural({ one: "Contributor", other: "Contributors" }),
-    "common.role.projectLead": plural({ one: "Project lead", other: "Project leads" }),
+    "common.role.projectLead": plural({ one: "Project Lead", other: "Project Leads" }),
     "common.role.maintainer": plural({ one: "Maintainer", other: "Maintainers" }),
     "common.role.owner": plural({ one: "Owner", other: "Owners" }),
 
@@ -130,6 +142,11 @@ export const common = defineNamespace({
     "common.role.denialUnknown": "You need at least {minRole} access to do this.",
     "common.role.denialKnown":
       "{currentRole} cannot perform this action — you need at least {minRole} access.",
+
+    // AQU-1411: the anonymous half of the user chip. The username, when there
+    // is one, is data and is not catalogued. The id is never part of this label.
+    "common.userChip.anonymous": "User",
+    "common.userChip.idTooltip": "User ID {id}",
   },
   context: {
     _context: {
@@ -308,6 +325,29 @@ export const common = defineNamespace({
           "Inline link that collapses text expanded by common.showMore back to its " +
           "truncated form, next to an upward chevron.",
       },
+      "common.listShowMore": {
+        description:
+          "Text button under a list that starts capped at five rows (the project " +
+          "overview's imported originals, the org Overview's Team workload lists). " +
+          "Reveals the next batch of rows; count is the batch size, not how many are " +
+          "still hidden. Sits beside common.listShowAll and is hidden once fewer than a " +
+          "full batch remains.",
+        placeholders: { count: "Number of additional rows the next batch reveals (always five)." },
+      },
+      "common.listShowAll": {
+        description:
+          "Text button under a capped list that reveals every remaining row at once. " +
+          "Count is that list's total number of rows, not how many are still hidden. " +
+          "Replaced by common.listShowFewer once everything is visible.",
+        placeholders: { count: "Total number of rows in the list, hidden ones included." },
+      },
+      "common.listShowFewer": {
+        description:
+          "Text button that collapses a fully expanded list back to its first five " +
+          "rows. Takes the place of common.listShowAll once nothing is hidden. Distinct " +
+          "from common.showLess, which collapses a truncated block of prose rather than " +
+          "a list of rows.",
+      },
       "common.logIn": {
         description:
           "The sign-in affordance, in all three places it appears: the button shown in " +
@@ -319,8 +359,8 @@ export const common = defineNamespace({
       },
       "common.voices": {
         description:
-          "The set of speaking voices configured for a project — TTS configurations and " +
-          "cloned voices. Used both as the left-dock tab label that opens the voices panel " +
+          "The set of speaking voices configured for a project — TTS configurations, " +
+          "character voices and trained voices. Used both as the left-dock tab label that opens the voices panel " +
           "and as that panel's own heading. Plural noun; the tab is in a narrow rail.",
         screenshot: "audio-studio",
       },
@@ -461,6 +501,26 @@ export const common = defineNamespace({
           "voice picker, a voice library. No trailing period in the English source.",
         screenshot: "audio-studio",
       },
+      "common.searchPlaceholder": {
+        description:
+          "Placeholder in the search box at the top of a dropdown list that grows with the " +
+          "user's data — the UI language, a Bible's books, projects, people, AI models. Typing " +
+          "narrows the list below. A short imperative; the trailing character is a single " +
+          "ellipsis glyph (…).",
+        maxLength: 24,
+      },
+      "common.aboutAria": {
+        description:
+          "Accessible name (never visible) of a small (i) button beside a menu item or a " +
+          "setting. A click opens a line explaining that item under it. Names the thing it " +
+          "explains.",
+        placeholders: { name: "The menu item's or setting's own label, already translated." },
+      },
+      "common.searchListAria": {
+        description:
+          "Accessible name (never visible) of that same search box at the top of a dropdown " +
+          "list. Says what typing in it does: it narrows the list it sits in. No ellipsis.",
+      },
       "common.readOnlyGit": {
         description:
           "Explains that the open project came from a Git repository and cannot be written " +
@@ -588,8 +648,9 @@ export const common = defineNamespace({
       },
       "common.optionalFieldNote": {
         description:
-          "Small trailing qualifier appended after a field label to mark it as not " +
-          "required — the AI-provider endpoint form, and the invite-link email field.",
+          "Small trailing qualifier appended after a field label (or a section " +
+          "heading) to mark it as not required — the AI-provider endpoint form, the " +
+          "invite-link email field, and the translation-brief card's empty state.",
         screenshot: "project-settings",
       },
       "common.general": {
@@ -681,9 +742,10 @@ export const common = defineNamespace({
       "common.role.projectLead": {
         description:
           "Operational-PM role: contributor privileges plus managing project members, " +
-          "but not managing roles. Two words in English ('Project lead'); keep the " +
-          "second word lowercase unless the target language's title-casing rules call " +
-          "for otherwise. Same singular/plural label usage as common.role.viewer.",
+          "but not managing roles. A role title, so English capitalizes both words " +
+          "('Project Lead'); capitalize the main words the same way, leaving small " +
+          "joining words such as 'de' lowercase (French: 'Chef de Projet'). Same " +
+          "singular/plural label usage as common.role.viewer.",
         screenshot: "project-settings",
       },
       "common.role.maintainer": {
@@ -747,6 +809,24 @@ export const common = defineNamespace({
           currentRole: "The caller's current role name, already localized and pluralized (e.g. 'Viewers').",
           minRole: "The minimum role name required, already localized (e.g. 'Contributor').",
         },
+      },
+      "common.userChip.anonymous": {
+        description:
+          "Label on the person chip when that account has no username. It is the " +
+          "same word for every such person — they are told apart by the shape and " +
+          "color of the mark beside it, not by a made-up name. Do not insert a " +
+          "personal name, an email, or the user id.",
+        maxLength: 16,
+      },
+      "common.userChip.idTooltip": {
+        description:
+          "Tooltip on the person chip revealing the account's user id, for support. " +
+          "The id is not shown as the chip's label. '{id}' is the raw id and is not " +
+          "translated.",
+        placeholders: {
+          id: "The account's user id, exactly as stored. Not a name.",
+        },
+        maxLength: 40,
       },
     },
   },

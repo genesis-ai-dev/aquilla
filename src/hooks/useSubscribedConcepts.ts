@@ -1,4 +1,37 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+// Concepts from the org termbases a project subscribes to. (AQU-1721)
+//
+// A project can subscribe to the published termbase of another project in its
+// org (auth-worker routes/termbase-subscriptions.ts). The editor applies those
+// concepts ahead of the project's own: `useRules` compiles them through the
+// same path as local terminology, and the workspace also hands them to source
+// highlights, the term-lookup popover and Check file.
+//
+// They are READ-ONLY here. Each one carries `termbaseProjectId`, the project
+// that owns it, and the glossary never receives them: a glossary edit is a
+// `term.*` event keyed by concept id under THIS project's id, so the server
+// would drop an edit to an upstream concept while the glossary showed it saved.
+//
+// The read: list the subscriptions (route #4, already in priority-then-age
+// order), skip the unpublished ones, and read each remaining termbase's active
+// concepts through route #8 (GET /api/v2/projects/:termbaseProjectId/termbase/
+// concepts). Route #8's resolver, `canReadTermbase`, is the rule for which
+// subscriptions count: the termbase must be published, not archived, and in
+// this project's org. A 403 from it is that rule, not a failure, so it gives
+// no concepts and no error. Autopilot (`loadSubscribedConcepts`) and the Agent
+// API prompt preview apply the same rule.
+//
+// Lanes (AQU-1777): a termbase is a project with its own lanes, so its
+// renderings are stamped with ITS lane ids. Route #8 maps each one onto this
+// project's lane of the same language (mapSubscribedConceptLanes in
+// src/lib/terminology/rendering-lane.ts) before answering, so `laneId` here is
+// always one of THIS project's lanes and every lane filter downstream
+// (useRules, Check file, the lookup popover) treats a subscribed rendering
+// exactly like a local one. A rendering no lane here matches never arrives.
+//
+// Thin-client (AD-3): plain `useState` + a race-guarded `useEffect`, like
+// `useConcepts`. No React Query hooks.
+
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useFrontierSession } from "./useFrontierSession"
 import {
   listSubscriptions,
@@ -7,94 +40,65 @@ import {
 import { FRONTIER_BASE } from "@/lib/frontier/auth"
 import type { Concept } from "@/lib/terminology/types"
 
-/**
- * Fetch the active concepts of every termbase a project is subscribed to,
- * ordered by subscription priority (lower priority value = higher precedence,
- * emitted first).
- *
- * The merge into the rule engine lives in `useRules`; this hook is the
- * data-source. Subscribed managed concepts stay DETERMINISTIC managed terms —
- * this hook returns plain Concept[]; `useRules` compiles them through the same
- * `compileConceptsToRules` path as local terminology, so the
- * deterministic/probabilistic contract is preserved.
- *
- * ── SWARM-TODO (missing server read endpoint) ───────────────────────────────
- * There is currently NO `/api/v2` route that returns another project's
- * terminology concepts. `GET /api/v2/projects/:id` (ProjectDetailResponse,
- * src/lib/sync/projects-read-types.ts) does NOT include `terminology`, and the
- * publish/subscribe slice (docs/swarm/TERM3-ORG-API.md) only manages
- * subscription ROWS — it explicitly leaves the upstream termbase-DATA read
- * resolver `canReadTermbase(viewerProjectId, termbaseProjectId)` as a server
- * SWARM-TODO.
- *
- * Required server route (proposed):
- *   GET /api/v2/projects/:termbaseProjectId/termbase/concepts
- *     - auth: implicit viewer grant via canReadTermbase — true when a
- *       project_termbase_subscriptions(callerProject, :termbaseProjectId) row
- *       exists (mirror canReadSourceCells in services/project-permissions.ts).
- *       Caller passes its own project id (?subscriberProjectId=...) so the
- *       resolver can find the subscription row.
- *     - 200 { concepts: Concept[] }  // active concepts only
- *
- * Until that route exists, `fetchTermbaseConcepts` requests the proposed path
- * and treats any non-2xx (incl. the expected 404 while the route is absent) as
- * "no concepts yet" — so the ordering/merge wiring below is exercised and
- * tested now, and starts returning real concepts the moment the server route
- * lands, with NO client change required.
- */
-
 const ACTIVE = (c: Concept) => c.status === "active"
 
+/** Stable empties so consumers' memos keep identity across renders. */
+const NO_CONCEPTS: Concept[] = []
+const NO_SUBSCRIPTIONS: TermbaseSubscription[] = []
+
 /**
- * GET the active concepts for one upstream termbase project via the implicit
- * subscription grant. Returns [] on any error (route absent / no access).
- * Exported for unit testing the ordering merge.
+ * GET the active concepts of one subscribed termbase through route #8, each
+ * marked with the termbase it came from. A 403 means the termbase is gated off
+ * (archived, deleted or in another org), so it gives no concepts. Any other
+ * failure throws: an empty result would look like a termbase with no terms.
+ * Exported for unit testing.
  */
 export async function fetchTermbaseConcepts(
   jwt: string,
   subscriberProjectId: string,
   termbaseProjectId: string,
 ): Promise<Concept[]> {
-  try {
-    const res = await fetch(
-      `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(termbaseProjectId)}/termbase/concepts` +
-        `?subscriberProjectId=${encodeURIComponent(subscriberProjectId)}`,
-      { headers: { Authorization: `Bearer ${jwt}` } },
-    )
-    if (!res.ok) return [] // SWARM-TODO: route not yet implemented (see header).
-    const body = (await res.json()) as { concepts?: Concept[] }
-    return (body.concepts ?? []).filter(ACTIVE)
-  } catch {
-    return []
-  }
+  const res = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(termbaseProjectId)}/termbase/concepts` +
+      `?subscriberProjectId=${encodeURIComponent(subscriberProjectId)}`,
+    { headers: { Authorization: `Bearer ${jwt}` } },
+  )
+  if (res.status === 403) return NO_CONCEPTS
+  if (!res.ok) throw new Error(`subscribed termbase ${termbaseProjectId} could not be read (HTTP ${res.status})`)
+  const body = (await res.json()) as { concepts?: Concept[] }
+  return (body.concepts ?? []).filter(ACTIVE).map((c) => ({ ...c, termbaseProjectId }))
 }
 
 export interface SubscribedConcepts {
-  /** Active concepts from all subscribed termbases, ordered by priority. */
+  /** Active concepts from every subscribed termbase that counts, in priority order. */
   concepts: Concept[]
   subscriptions: TermbaseSubscription[]
   isLoading: boolean
+  /** Set when a read failed. The concepts then stay as they were last read. */
   error: string | null
   refresh: () => Promise<void>
 }
 
 /**
- * Returns the concepts contributed by a project's termbase subscriptions,
- * flattened in subscription-priority order (priority asc, then createdAt — the
- * order GET /subscriptions already returns), each termbase's active concepts
- * appended in turn. Higher-precedence (lower priority value) termbases come
- * first, so when `useRules` unions them ahead of nothing/local terminology the
- * precedence is preserved in evaluation order.
+ * The concepts a project's termbase subscriptions contribute, flattened in
+ * subscription-priority order (priority asc, then createdAt — the order route
+ * #4 returns), each termbase's active concepts appended in turn. Higher-
+ * precedence termbases come first, so `useRules`, which puts them ahead of
+ * local terminology, keeps that precedence in evaluation order.
  */
 export function useSubscribedConcepts(projectId: string | null): SubscribedConcepts {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
-  const [subscriptions, setSubscriptions] = useState<TermbaseSubscription[]>([])
-  const [concepts, setConcepts] = useState<Concept[]>([])
+  const [subscriptions, setSubscriptions] = useState<TermbaseSubscription[]>(NO_SUBSCRIPTIONS)
+  const [concepts, setConcepts] = useState<Concept[]>(NO_CONCEPTS)
   const [isLoading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const aliveRef = useRef(true)
 
+  // Race guard. A slower read for a PREVIOUS project (or token) must never
+  // overwrite a newer one's results, which a bare setState in an async body
+  // would do on a fast project switch.
+  const requestRef = useRef(0)
+  const aliveRef = useRef(true)
   useEffect(() => {
     aliveRef.current = true
     return () => {
@@ -103,29 +107,38 @@ export function useSubscribedConcepts(projectId: string | null): SubscribedConce
   }, [])
 
   const refresh = useCallback(async () => {
+    const seq = ++requestRef.current
+    const settle = (fn: () => void) => {
+      // Ignore a response that a newer request (or unmount) has superseded.
+      if (aliveRef.current && requestRef.current === seq) fn()
+    }
     if (!jwt || !projectId) {
-      setSubscriptions([])
-      setConcepts([])
+      settle(() => {
+        setSubscriptions(NO_SUBSCRIPTIONS)
+        setConcepts(NO_CONCEPTS)
+        setError(null)
+      })
       return
     }
     setLoading(true)
-    setError(null)
     try {
       const subs = await listSubscriptions(jwt, projectId)
-      // subs already arrive ordered by priority asc, then createdAt.
-      const onlyLive = subs.filter((s) => s.published)
+      // Route #8 refuses an unpublished termbase anyway; skip the request.
       const perTermbase = await Promise.all(
-        onlyLive.map((s) => fetchTermbaseConcepts(jwt, projectId, s.termbaseProjectId)),
+        subs
+          .filter((s) => s.published)
+          .map((s) => fetchTermbaseConcepts(jwt, projectId, s.termbaseProjectId)),
       )
       const flat = perTermbase.flat()
-      if (aliveRef.current) {
-        setSubscriptions(subs)
-        setConcepts(flat)
-      }
+      settle(() => {
+        setSubscriptions(subs.length === 0 ? NO_SUBSCRIPTIONS : subs)
+        setConcepts(flat.length === 0 ? NO_CONCEPTS : flat)
+        setError(null)
+      })
     } catch (e) {
-      if (aliveRef.current) setError(e instanceof Error ? e.message : String(e))
+      settle(() => setError(e instanceof Error ? e.message : String(e)))
     } finally {
-      if (aliveRef.current) setLoading(false)
+      settle(() => setLoading(false))
     }
   }, [jwt, projectId])
 
@@ -133,8 +146,5 @@ export function useSubscribedConcepts(projectId: string | null): SubscribedConce
     void refresh()
   }, [refresh])
 
-  return useMemo(
-    () => ({ concepts, subscriptions, isLoading, error, refresh }),
-    [concepts, subscriptions, isLoading, error, refresh],
-  )
+  return { concepts, subscriptions, isLoading, error, refresh }
 }

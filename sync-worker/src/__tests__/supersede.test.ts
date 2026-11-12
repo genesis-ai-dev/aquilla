@@ -28,7 +28,7 @@ function targets(entries: [string, { value: string; valueHtml: string | null }][
 }
 
 describe('isPlanSatisfied — SetTranslation', () => {
-  const plan: Command[] = [{ kind: 'SetTranslation', fileId: FILE, cellId: CELL, value: 'hola' }]
+  const plan: Command[] = [{ kind: 'SetTranslation', fileId: FILE, cellId: CELL, laneId: '', value: 'hola' }]
 
   it('is satisfied when the live target value already equals the planned value', () => {
     const state = live({
@@ -62,7 +62,7 @@ describe('isPlanSatisfied — SetTranslation', () => {
 
   it('requires the HTML to match too when the plan carries HTML', () => {
     const htmlPlan: Command[] = [
-      { kind: 'SetTranslation', fileId: FILE, cellId: CELL, value: 'hola', valueHtml: '<p>hola</p>' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: CELL, laneId: '', value: 'hola', valueHtml: '<p>hola</p>' },
     ]
     const wrongHtml = live({
       targetValues: targets([[laneCellKey(FILE, CELL), { value: 'hola', valueHtml: '<b>hola</b>' }]]),
@@ -225,14 +225,14 @@ describe('isPlanSatisfied — never-satisfiable kinds and whole-plan composition
       ]),
     })
     const bothMatch: Command[] = [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'uno' },
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-2', value: 'dos' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: '', value: 'uno' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-2', laneId: '', value: 'dos' },
     ]
     expect(isPlanSatisfied(bothMatch, state)).toBe(true)
 
     const oneDiffers: Command[] = [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'uno' },
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-2', value: 'TRES' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: '', value: 'uno' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-2', laneId: '', value: 'TRES' },
     ]
     expect(isPlanSatisfied(oneDiffers, state)).toBe(false)
     const verdicts = explainPlanSatisfaction(oneDiffers, state)

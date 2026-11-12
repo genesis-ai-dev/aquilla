@@ -37,24 +37,30 @@ ALLOW_UNAUTHENTICATED="true"
 # DIARIZATION_PUBLIC_BASE=""
 # DIARIZATION_SHARED_SECRET=""
 
-# Inworld TTS 2 Flash (AQU-1189) — the commercial hosted TTS / clone engine.
+# Inworld TTS 2 Flash (AQU-1189) — the commercial hosted TTS engine.
 # Paste the Portal API key as-is (the worker adds the Basic prefix).
 # Create a read-write key: https://platform.inworld.ai/  (or `inworld workspace add-key`)
-# Instant Voice Cloning needs write access on `voices`.
+# Voice Design (designing + publishing a voice) needs write access on `voices`.
 # Docs: docs/INWORLD-TTS.md
 INWORLD_API_KEY=""
 # INWORLD_API_BASE="https://api.inworld.ai"
 # INWORLD_TTS_MODEL="inworld-tts-2-flash"
 # INWORLD_DEFAULT_VOICE="Dennis"
 
-# Modal-hosted voice-conversion (Seed-VC; still used for Gemini/local clones).
-# SEED_VC_URL=""
-# SEED_VC_TOKEN=""
+# ElevenLabs (AQU-2299) is bring-your-own-key: each user's key travels from the
+# browser in X-ElevenLabs-Key and is never stored here. Only the upstream origin
+# is configurable. `pnpm dev` points it at scripts/mock-elevenlabs.ts (key
+# "test-elevenlabs-key") unless you set it here.
+# ELEVENLABS_BASE_URL="https://api.elevenlabs.io"
+
+# Voice conversion ("Change voice" into a library character voice or a trained
+# custom voice) — the only speech-to-speech path: the infra/modal/voice_forge.py
+# deploy's /convert URL and its shared secret.
+# VOICE_FORGE_URL="https://<workspace>--voice-forge-web.modal.run/convert"
+# VOICE_FORGE_TOKEN=""
 
 # TTS usage/cost guardrails. Leave unset to disable enforcement.
 # TTS_BUDGET_ENFORCE="false"
-# TTS_COST_CENTS_PER_CALL=""
-# TTS_COST_PER_AUDIO_SEC_CENTS=""
 # TTS_USER_DAILY_SECONDS_LIMIT=""
 
 # PostHog server-side analytics (optional — omit to disable).

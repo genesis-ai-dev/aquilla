@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  getOrCreateMyOrg, fetchOrgRoster, addOrgMember, addOrgMembers, removeOrgMember,
+  getMyOrg, fetchOrgRoster, addOrgMember, addOrgMembers, removeOrgMember,
   listOrgMemberProjects, type MyOrg, type OrgMember, type OrgMemberProject,
 } from "@/lib/frontier/orgs";
 import type { MemberGrantResult } from "@/lib/frontier/members";
@@ -13,7 +13,9 @@ import { useFrontierSession } from "./useFrontierSession";
  *   - session-loading: account hydration in flight (no JWT yet)
  *   - loading:        JWT present, /orgs/me fetch in flight
  *   - error:          fetch finished with an error
- *   - success:        fetch finished with data
+ *   - success:        fetch finished; `org` is null when the caller owns no
+ *                     personal workspace (AQU-2259: the read no longer
+ *                     creates one)
  *
  * Distinguishing session-loading from org-loading matters for the UX —
  * "Waiting for session…" is a different message than "Loading members…",
@@ -25,7 +27,7 @@ export type OrgState =
   | { kind: "session-loading" }
   | { kind: "loading" }
   | { kind: "error"; error: string }
-  | { kind: "success"; org: MyOrg };
+  | { kind: "success"; org: MyOrg | null };
 
 export interface UseOrg {
   state: OrgState;
@@ -64,7 +66,7 @@ export function useOrg(): UseOrg {
     }
     if (aliveRef.current) setState({ kind: "loading" });
     try {
-      const org = await getOrCreateMyOrg(jwt);
+      const org = await getMyOrg(jwt);
       if (aliveRef.current) setState({ kind: "success", org });
     } catch (e) {
       if (aliveRef.current) {
@@ -95,6 +97,16 @@ export interface UseOrgMembers {
    * is not what a hidden roster means.
    */
   rosterHidden: boolean;
+  /**
+   * AQU-731: true when the roster came back 403 *without* the AQU-485
+   * `rosterHidden` flag — i.e. the caller simply isn't a member of this org.
+   * Distinct from `rosterHidden` (policy) and from a genuinely empty org:
+   * all three used to arrive as `members: []` with no error, so a caller
+   * could only render "no one in your organization", which is a lie for the
+   * first two. Callers that let someone *act* on the roster must branch on
+   * this and say the roster is unavailable instead.
+   */
+  rosterAccessDenied: boolean;
   refresh: () => Promise<void>;
   add: (username: string, role: number) => Promise<OrgMember | null>;
   /**
@@ -117,6 +129,7 @@ export function useOrgMembers(orgId: number | null): UseOrgMembers {
   const [isLoading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rosterHidden, setRosterHidden] = useState(false);
+  const [rosterAccessDenied, setRosterAccessDenied] = useState(false);
   const aliveRef = useRef(true);
 
   // See useOrg above for the StrictMode rationale — same pattern.
@@ -135,21 +148,34 @@ export function useOrgMembers(orgId: number | null): UseOrgMembers {
       if (result.kind === "ok") {
         setMembers(result.members);
         setRosterHidden(false);
+        setRosterAccessDenied(false);
       } else if (result.kind === "roster-hidden") {
         // AQU-485: don't render an empty shell that leaks "zero members" —
         // clear the list AND flag the distinct hidden state so the page can
         // show "Roster hidden by org policy" instead.
         setMembers([]);
         setRosterHidden(true);
+        setRosterAccessDenied(false);
       } else {
-        // no-access: not an org member. Keep pre-AQU-485 behavior (empty,
-        // no error surfaced) — this route already requires org membership
-        // to reach this hook in practice.
+        // no-access: not an org member. AQU-731: this used to land as a bare
+        // empty list, on the assumption that every route reaching this hook
+        // already requires org membership. StaffLanePopover disproves that —
+        // a project admin who is not an org member opens it and is told
+        // "no one in your organization yet", which reads as a dead control.
+        // Flag it so the caller can say the roster is unavailable.
         setMembers([]);
         setRosterHidden(false);
+        setRosterAccessDenied(true);
       }
     } catch (e) {
-      if (aliveRef.current) setError(e instanceof Error ? e.message : String(e));
+      if (aliveRef.current) {
+        setError(e instanceof Error ? e.message : String(e));
+        // A thrown failure is its own state — don't leave a previous attempt's
+        // hidden/no-access flag standing, or a caller that ranks those above
+        // `error` would report the stale reason for a fresh failure.
+        setRosterHidden(false);
+        setRosterAccessDenied(false);
+      }
     } finally {
       if (aliveRef.current) setLoading(false);
     }
@@ -189,5 +215,8 @@ export function useOrgMembers(orgId: number | null): UseOrgMembers {
     return listOrgMemberProjects(jwt, orgId, userId);
   }, [jwt, orgId]);
 
-  return { members, isLoading, error, rosterHidden, refresh, add, addMany, remove, listMemberProjects };
+  return {
+    members, isLoading, error, rosterHidden, rosterAccessDenied,
+    refresh, add, addMany, remove, listMemberProjects,
+  };
 }

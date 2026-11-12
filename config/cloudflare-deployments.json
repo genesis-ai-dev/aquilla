@@ -36,6 +36,7 @@
     "identity": {
       "directory": "auth-worker",
       "requiredSecrets": [
+        "DISCORD_FEEDBACK_WEBHOOK_URL",
         "OPENROUTER_API_KEY",
         "RESEND_API_KEY",
         "SECRET_KEY",
@@ -51,14 +52,17 @@
           "apiHost": "api.aquilla.app",
           "routes": [
             "api.aquilla.app/identity/*",
-            "api.aquilla.app/chat/*"
+            "api.aquilla.app/chat/*",
+            "api.aquilla.app/.well-known/oauth-authorization-server/*",
+            "api.aquilla.app/.well-known/openai-apps-challenge"
           ],
           "requiredSecrets": [
             "FRONTIER_D1_API_TOKEN",
             "FRONTIER_D1_DATABASE_ID",
             "GITLAB_ADMIN_TOKEN",
             "MONDAY_CLIENT_SECRET",
-            "MONDAY_SIGNING_SECRET"
+            "MONDAY_SIGNING_SECRET",
+            "OMNI_SHARED_SECRET"
           ],
           "plainText": {
             "ENVIRONMENT": "production",
@@ -78,12 +82,18 @@
           "apiHost": "api.dev.aquilla.app",
           "routes": [
             "api.dev.aquilla.app/identity/*",
-            "api.dev.aquilla.app/chat/*"
+            "api.dev.aquilla.app/chat/*",
+            "api.dev.aquilla.app/.well-known/oauth-authorization-server/*",
+            "api.dev.aquilla.app/.well-known/openai-apps-challenge"
           ],
           "requiredSecrets": [
             "FRONTIER_D1_API_TOKEN",
             "FRONTIER_D1_DATABASE_ID",
-            "GITLAB_ADMIN_TOKEN"
+            "GITLAB_ADMIN_TOKEN",
+            "MONDAY_CLIENT_SECRET",
+            "MONDAY_SIGNING_SECRET",
+            "MONDAY_TOKEN_KEY",
+            "OMNI_SHARED_SECRET"
           ],
           "plainText": {
             "ENVIRONMENT": "development",
@@ -115,21 +125,22 @@
           "worker": "aquilla-sync-worker",
           "apiHost": "api.aquilla.app",
           "routes": [
-            "api.aquilla.app/sync/*"
+            "api.aquilla.app/sync/*",
+            "api.aquilla.app/robots.txt"
           ],
           "requiredSecrets": [
             "DIARIZATION_MODAL_URL",
             "DIARIZATION_PUBLIC_BASE",
             "DIARIZATION_SHARED_SECRET",
             "INWORLD_API_KEY",
-            "SEED_VC_TOKEN",
-            "SEED_VC_URL"
+            "VOICE_FORGE_TOKEN",
+            "VOICE_FORGE_URL"
           ],
           "plainText": {
             "ENVIRONMENT": "production",
             "AUTH_WORKER_URL": "https://api.aquilla.app/identity",
             "DEPLOYMENT_WORKER_NAME": "aquilla-sync-worker",
-            "POSTHOG_KEY": ""
+            "POSTHOG_KEY": "phc_qy5gb7wTaW5RbmMW8SEyQPSLKtYFtUobaqKZWiUs7cBt"
           },
           "hyperdrives": {
             "HYPERDRIVE": "69bcc10e67464f2eaf4fe91a9141e7cd"
@@ -143,9 +154,13 @@
           "worker": "aquilla-sync-worker-dev",
           "apiHost": "api.dev.aquilla.app",
           "routes": [
-            "api.dev.aquilla.app/sync/*"
+            "api.dev.aquilla.app/sync/*",
+            "api.dev.aquilla.app/robots.txt"
           ],
-          "requiredSecrets": [],
+          "requiredSecrets": [
+            "VOICE_FORGE_TOKEN",
+            "VOICE_FORGE_URL"
+          ],
           "plainText": {
             "ENVIRONMENT": "development",
             "AUTH_WORKER_URL": "https://api.dev.aquilla.app/identity",

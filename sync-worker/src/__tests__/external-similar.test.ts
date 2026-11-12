@@ -14,6 +14,7 @@ import { describe, it, expect, beforeEach } from "vitest"
 import { handleExternalReadRequest } from "../external/read-routes"
 import { mintApiToken } from "../../../db/shared/api-credentials"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
+import { bumpRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 
 const SECRET = "test-secret"
 const CRED_1 = "00000000-0000-0000-0000-000000000001"
@@ -23,7 +24,7 @@ interface SimilarRow {
   fileId: string
   sourceValue: string
   targetValue: string
-  targetLang: string
+  laneId: string
   score: number
 }
 
@@ -94,12 +95,15 @@ async function seedProject(testDb: TestDb) {
   await testDb.pg.query(
     `INSERT INTO files (id, project_id, name, event_id) VALUES ('file-x', 'proj-a', 'Genesis', 'evt-file-1')`,
   )
+  await testDb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', 'proj-a', 'target', '', 1)`,
+  )
   for (const c of CELLS) {
     for (const side of ["source", "target"] as const) {
       const value = side === "source" ? c.source : c.target
       await testDb.pg.query(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, value, target_lang, event_id, last_edit_at, word_count)
-         VALUES ('proj-a', $1, $2, $3, $4, $5, $6, 1000, $7)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, word_count, lane_id) VALUES ('proj-a', $1, $2, $3, $4, $6, 1000, $7, (SELECT CASE WHEN $3 = 'source' THEN aquilla_test_resolve_source_lane('proj-a') ELSE aquilla_test_resolve_target_lane('proj-a', $5) END))`,
         [
           c.fileId ?? "file-x",
           c.cellId,
@@ -166,7 +170,7 @@ describe("external similarity search (AQU-1232)", () => {
     expect(near.fileId).toBe("file-x")
     expect(near.sourceValue).toBe("In the beginning God created the earth")
     expect(near.targetValue).toBe("Au commencement Dieu créa la terre")
-    expect(near.targetLang).toBe("")
+    expect(near.laneId).toBe("deflane1")
     expect(near.score).toBeGreaterThan(0)
     expect(near.score).toBeLessThanOrEqual(1)
   })
@@ -192,9 +196,9 @@ describe("external similarity search (AQU-1232)", () => {
       expect(Object.keys(row).sort()).toEqual([
         "cellId",
         "fileId",
+        "laneId",
         "score",
         "sourceValue",
-        "targetLang",
         "targetValue",
       ])
     }
@@ -244,11 +248,8 @@ describe("external similarity search (AQU-1232)", () => {
   })
 
   it("throttles a credential that floods the read tier", async () => {
-    await testDb.pg.query(
-      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-       SELECT 'external_read', $1, 1 FROM generate_series(1, 300)`,
-      [`credential:${CRED_1}`],
-    )
+    // AQU-1843: the read budget belongs to the credential's OWNER now.
+    await bumpRateLimit(testDb.db, "external_read", userRateLimitIdentifier(2), 300)
     const res = await similar(testDb, "cellId=cell-q", token)
     expect(res.status).toBe(429)
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("rate_limited")

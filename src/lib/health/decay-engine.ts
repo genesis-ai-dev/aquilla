@@ -11,6 +11,7 @@
 // here (AD-14: "rules and built-in checks stay separate").
 
 import type { RuleInfraction, DecaySettings } from "@/lib/parsers/types"
+import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 /**
  * The shape returned by `useHealth`. Health numbers come from decay (AD-14);
@@ -167,15 +168,19 @@ export function computeDecayHealth(
       healthMap.set(cell.id, Math.round((1 - d) * 100))
       fileDecaySum += d
     }
+    // AQU-1493: never 100 while a cell is short of its endorsements. Every
+    // cell counts here, a blank one at full decay, so this climbs with the
+    // work done, and plain rounding drew the editor's ring as a full green
+    // "100" beside "(99%)" with two verses of a book still blank.
     fileHealth.set(
       fileId,
-      cells.length > 0 ? Math.round((1 - fileDecaySum / cells.length) * 100) : 0,
+      cells.length > 0 ? progressPercentOfFraction(1 - fileDecaySum / cells.length) : 0,
     )
     projectDecaySum += fileDecaySum
     projectCount += cells.length
   }
 
   const projectHealth =
-    projectCount > 0 ? Math.round((1 - projectDecaySum / projectCount) * 100) : 0
+    projectCount > 0 ? progressPercentOfFraction(1 - projectDecaySum / projectCount) : 0
   return { healthMap, fileHealth, projectHealth }
 }

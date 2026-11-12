@@ -2,9 +2,14 @@
 // Paratext detector. Kept separate from parsers/paratext-project.ts (which is
 // pure + node-testable) because this touches the File API + JSZip.
 
-import type { ProjectEntryCollection } from "../parsers/paratext-project"
+import { isRequiredProjectEntry, type ProjectEntryCollection } from "../parsers/paratext-project"
 import { MAX_SOURCE_ARTIFACT_BYTES } from "../../../shared/import-contract"
 import { assertSafeZipArchive } from "../parsers/zip-safety"
+
+/** AQU-1406: a Paratext export from a PTXprint machine can carry a helper file
+ *  whose ZIP size metadata is unreadable. Support material is not worth failing
+ *  an import over — only a book file or the project metadata is. */
+const NOT_SCRIPTURE_CONTENT = "skipped (not scripture content)"
 
 type FileWithPath = File & { webkitRelativePath?: string }
 const ZIP_EPOCH = new Date("1980-01-01T00:00:00.000Z")
@@ -28,16 +33,23 @@ export async function filesToProjectEntries(files: File[]): Promise<ProjectEntry
     const JSZip = (await import("jszip")).default
     const originalBytes = await files[0].arrayBuffer()
     const zip = await JSZip.loadAsync(originalBytes)
-    assertSafeZipArchive(zip, "Paratext ZIP")
+    const { skipped } = assertSafeZipArchive(zip, "Paratext ZIP", {
+      isOptionalEntry: (name) => !isRequiredProjectEntry(name),
+    })
+    const skippedNames = new Set(skipped)
     const entries: ProjectEntryCollection = []
     zip.forEach((path, entry) => {
       if (entry.dir) return
+      if (skippedNames.has(path) || skippedNames.has(entry.name)) return
       entries.push({
         name: path,
         text: () => entry.async("string"),
         bytes: () => entry.async("arraybuffer"),
       })
     })
+    if (skipped.length > 0) {
+      entries.skippedEntries = skipped.map((name) => ({ name, reason: NOT_SCRIPTURE_CONTENT }))
+    }
     entries.sourceArtifact = {
       name: files[0].name,
       format: "paratext-project",

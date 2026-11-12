@@ -34,5 +34,5 @@ export interface BillingWorkspace {
   usageResetsAt?: string
   /** Explicit server capability; absent means unavailable. */
   portalEnabled?: boolean
-  checkoutEnabled: false
+  checkoutEnabled: boolean
 }

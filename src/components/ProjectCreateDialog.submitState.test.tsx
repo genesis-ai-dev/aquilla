@@ -15,6 +15,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
 
+// AQU-1352: the destination picker fetches create-targets on open; submit waits
+// for it, so resolve to Personal (the server always lists it).
+vi.mock("@/lib/sync/create-targets", () => ({
+  fetchCreateTargets: vi.fn().mockResolvedValue([
+    { kind: "personal", orgId: null, name: "Personal", path: ["Personal"], role: 700, teams: [] },
+  ]),
+}))
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
     session: { jwt: "tok", username: "wendi" },
@@ -35,6 +42,9 @@ vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
   return { ...actual, createCloudProject: vi.fn() }
 })
 vi.mock("@/lib/sync/project-settings", () => ({
+  createProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "lane" } }),
+  renameProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "source-lane" } }),
+
   fetchProjectSettings: vi.fn().mockResolvedValue({ version: 0, settings: {} }),
   patchProjectSettings: vi.fn().mockResolvedValue({ kind: "ok" }),
   PROJECT_SETTINGS_VERSION_INITIAL: 0,
@@ -42,14 +52,14 @@ vi.mock("@/lib/sync/project-settings", () => ({
 vi.mock("@/lib/store/project-index", () => ({
   createProject: vi.fn().mockResolvedValue(undefined),
 }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 
 import { createCloudProject } from "@/lib/sync/cloud-projects"
 
 const mockCreateCloudProject = vi.mocked(createCloudProject)
 
 function fillValidSelfContained() {
-  fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "Russian BSB" } })
+  fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "Russian BSB" } })
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
   fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "Russian" } })
 }
@@ -61,9 +71,11 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
 
   it("opts create fields out of Chrome contact autocomplete", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
 
-    const name = screen.getByLabelText(/^Project title$/i)
+    const name = screen.getByLabelText(/^Project name$/i)
     expect(name).toHaveAttribute("autocomplete", "off")
     expect(name).toHaveAttribute("name", "aquilla-project-title")
     expect(name.getAttribute("name")).not.toBe("name")
@@ -72,7 +84,7 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     expect(source).toHaveAttribute("autocomplete", "off")
     expect(source).toHaveAttribute("name", "aquilla-project-source-language")
 
-    const target = screen.getByLabelText(/^Target language/i)
+    const target = screen.getByLabelText(/^Language lanes/i)
     expect(target).toHaveAttribute("autocomplete", "off")
     expect(target).toHaveAttribute("name", "aquilla-project-target-language")
 
@@ -89,10 +101,13 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     )
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillValidSelfContained()
 
-    const button = screen.getByRole("button", { name: /Create Project/i })
+    const button = screen.getByRole("button", { name: /Create project/i })
     fireEvent.click(button)
 
     await waitFor(() => {
@@ -112,10 +127,13 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     )
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillValidSelfContained()
 
-    const button = screen.getByRole("button", { name: /Create Project/i })
+    const button = screen.getByRole("button", { name: /Create project/i })
     fireEvent.click(button)
 
     await waitFor(() => {
@@ -138,16 +156,19 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     mockCreateCloudProject.mockRejectedValueOnce(new Error("network blip"))
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fillValidSelfContained()
 
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
 
     await waitFor(() => {
       expect(screen.getByRole("alert")).toHaveTextContent(/network blip/i)
     })
     // Back to the enabled idle state after failure.
-    const retryButton = screen.getByRole("button", { name: /Create Project/i })
+    const retryButton = screen.getByRole("button", { name: /Create project/i })
     expect(retryButton).toBeEnabled()
 
     // A deliberate retry still fires a create.

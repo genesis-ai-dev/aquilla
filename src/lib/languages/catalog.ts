@@ -2,19 +2,39 @@
  * AQU-988 — bundled ISO 639-1 language catalog backing the select-or-type
  * language fields (see `@/components/LanguageComboboxInput`).
  *
+ * AQU-1456 — this bundled set is now only the *head start*: the pickers load
+ * the full SIL ISO 639-3 catalog (~7,900 languages, `./full-catalog`) on first
+ * focus/keystroke and filter that instead, so low-resource languages are
+ * suggested too. The ranking and settled-state helpers below are shared by
+ * both catalogs, so pass the loaded one in via `filterLanguages`'s `catalog`
+ * option. Keep `LANGUAGES` as-is in shape: `src/lib/audio/inworld-languages.ts`
+ * reads its two-letter `code` synchronously to map lanes onto Inworld tags.
+ *
  * Suggestions only. Language fields stay freeform: the product contract is
- * "any label works — a BCP-47 tag, a language name, or a register description
- * (e.g. 'Grade 7 English')". Picking an entry stores its `name` (the display
- * name), i.e. exactly the string a user would have typed by hand, so nothing
- * downstream (agent prompts, export, lane counting, editor badges) changes
- * shape. Codes are shown as a hint and are searchable, never stored.
+ * a language name or a register description (e.g. 'Grade 7 English'). Picking
+ * an entry stores its `name`, i.e. exactly the string a user would have typed
+ * by hand, so nothing downstream (agent prompts, export, lane counting,
+ * editor badges) changes shape. Codes are searchable so a typed tag still
+ * finds the name. Picking stores the name, never a code (AQU-1792). The list
+ * shows the derived code beside that name (AQU-2049); a later edit of the
+ * lane code is an override.
  */
 
 export type LanguageEntry = {
-  /** ISO 639-1 two-letter code. Searchable; never the stored value. */
+  /**
+   * Primary code — ISO 639-1 in `LANGUAGES`, ISO 639-3 in the full catalog.
+   * Searchable, never stored. Not the suggestion hint: French's id here is
+   * "fra", and the hint is the derived code "fr".
+   */
   code: string
   /** English display name — this is what gets stored when picked. */
   name: string
+  /**
+   * AQU-1456 — a second searchable code for the same language, so a 639-3
+   * entry still answers to its two-letter form ("fr" and "fra" both find
+   * French). `codeFromLanguageCatalog` prefers this over `code` for that name.
+   */
+  altCode?: string
 }
 
 /** ISO 639-1, English display names, sorted by name. */
@@ -205,8 +225,30 @@ export const LANGUAGES: readonly LanguageEntry[] = [
   { code: "zu", name: "Zulu" },
 ]
 
+/**
+ * AQU-1792 — script and region varieties ISO 639 does not name on its own.
+ * The picker suggests the name ("Traditional Han"), never the tag ("zh-Hant").
+ * `codeForLanguageLabel` derives the tag from that name; the advanced code
+ * field is where a wrong derivation gets corrected.
+ */
+export const NAMED_VARIETY_LANGUAGES: readonly LanguageEntry[] = [
+  { code: "zh-Hans", name: "Simplified Han" },
+  { code: "zh-Hant", name: "Traditional Han" },
+  { code: "es-419", name: "Latin American Spanish" },
+  { code: "fr-CA", name: "Canadian French" },
+]
+
 /** Default cap on rendered suggestions — enough to scroll, cheap to render. */
 export const LANGUAGE_SUGGESTION_LIMIT = 50
+
+/** Append named varieties the bundled or full catalog does not already carry. */
+function catalogWithNamedVarieties(
+  catalog: readonly LanguageEntry[],
+): readonly LanguageEntry[] {
+  const codes = new Set(catalog.map((entry) => fold(entry.code)))
+  const extra = NAMED_VARIETY_LANGUAGES.filter((entry) => !codes.has(fold(entry.code)))
+  return extra.length === 0 ? catalog : [...catalog, ...extra]
+}
 
 /**
  * Fold case and diacritics so "espanol" matches "Español" and "FRE" matches
@@ -221,19 +263,127 @@ function fold(value: string): string {
 }
 
 /**
- * Rank a catalog entry against a folded query. Lower is better; `null` means
- * "no match". Exact code beats name prefix beats code prefix beats substring,
- * so typing "fr" puts French on top and "fre" still surfaces it.
+ * Code for an exact catalog name or code. A 639-1 `altCode` wins over the
+ * 639-3 id ("Spanish" → "es", not "spa"). A language with no two-letter code
+ * keeps its 639-3 id ("Turkana" → "tuv"). Not a fuzzy search: "Grade 7
+ * English" matches nothing.
  */
-function rank(entry: LanguageEntry, query: string): number | null {
+export function codeFromLanguageCatalog(
+  label: string | null | undefined,
+  catalog: readonly LanguageEntry[],
+): string | null {
+  const folded = fold((label ?? "").trim())
+  if (!folded) return null
+  const byName = catalog.find((entry) => fold(entry.name) === folded)
+  if (byName) return byName.altCode ?? byName.code
+  const byCode = catalog.find(
+    (entry) =>
+      fold(entry.code) === folded || (entry.altCode !== undefined && fold(entry.altCode) === folded),
+  )
+  if (!byCode) return null
+  if (byCode.altCode !== undefined && fold(byCode.altCode) === folded) return byCode.altCode
+  return byCode.code
+}
+
+/** Display name for a known code, so a seeded tag can be shown as a name. */
+export function nameForLanguageCode(code: string): string | null {
+  const folded = fold(code.trim())
+  if (!folded) return null
+  return (
+    NAMED_VARIETY_LANGUAGES.find((entry) => fold(entry.code) === folded)?.name ??
+    LANGUAGES.find((entry) => fold(entry.code) === folded)?.name ??
+    null
+  )
+}
+
+/**
+ * Word boundaries, for the ranking below: anything that is not a letter or a
+ * digit separates words in a folded display name — spaces, but also the
+ * punctuation SIL's reference names carry ("Luba-Katanga", "Hawai'i Creole
+ * English", "Old English (ca. 450-1100)", "Biblical Hebrew/Aramaic/Greek").
+ * `undefined` (past the end of the name) counts as a boundary.
+ */
+function isBoundary(char: string | undefined): boolean {
+  return char === undefined || !/[a-z0-9]/.test(char)
+}
+
+/** Rank tiers, lower is better. See `rank`. */
+const RANK_EXACT_CODE = 0
+const RANK_EXACT_NAME = 1
+const RANK_WHOLE_WORD = 2
+const RANK_WORD_START = 3
+const RANK_CODE_PREFIX = 4
+const RANK_SUBSTRING = 5
+
+/**
+ * AQU-1457 — where in a folded name the query lands. A query that fills a
+ * whole word ("malay" in "Standard Malay") outranks one that only starts a
+ * word ("mala" in "Malayalam"), which in turn outranks a mid-word hit ("ala"
+ * in "Malayalam"); `wordIndex` says which word matched, so a name that *leads*
+ * with the query beats one that mentions it later.
+ *
+ * Multi-word queries fall out of the same rule, since the scan only tries
+ * word starts: "eastern arr" starts word 0 of "Eastern Arrernte".
+ */
+function matchName(name: string, query: string): { tier: number; wordIndex: number } | null {
+  let best: { tier: number; wordIndex: number } | null = null
+  let wordIndex = 0
+  for (let i = 0; i < name.length; i++) {
+    if (isBoundary(name[i]) || !isBoundary(name[i - 1])) continue
+    if (name.startsWith(query, i)) {
+      const tier = isBoundary(name[i + query.length]) ? RANK_WHOLE_WORD : RANK_WORD_START
+      if (!best || tier < best.tier) best = { tier, wordIndex }
+      // Word 0 with a whole-word hit is the best this name can do.
+      if (best.tier === RANK_WHOLE_WORD) break
+    }
+    wordIndex++
+  }
+  return best
+}
+
+/**
+ * Rank a catalog entry against a folded query. Lower is better; `null` means
+ * "no match". Exact code beats exact name beats a whole-word hit beats a
+ * word-start hit beats a code prefix beats a mid-word substring, so typing
+ * "fr" puts French on top, "fre" still surfaces it, and "arrernte" puts
+ * "Eastern Arrernte" above a name that merely contains those letters.
+ *
+ * `wordIndex` orders entries inside a tier (see `filterLanguages`).
+ */
+function rank(
+  entry: LanguageEntry,
+  query: string,
+): { tier: number; wordIndex: number } | null {
   const name = fold(entry.name)
   const code = fold(entry.code)
-  if (code === query) return 0
-  if (name === query) return 1
-  if (name.startsWith(query)) return 2
-  if (code.startsWith(query)) return 3
-  if (name.includes(query)) return 4
+  const altCode = entry.altCode ? fold(entry.altCode) : null
+  if (code === query || altCode === query) return { tier: RANK_EXACT_CODE, wordIndex: 0 }
+  if (name === query) return { tier: RANK_EXACT_NAME, wordIndex: 0 }
+  const inName = matchName(name, query)
+  if (inName) return inName
+  if (code.startsWith(query) || altCode?.startsWith(query)) {
+    return { tier: RANK_CODE_PREFIX, wordIndex: 0 }
+  }
+  if (name.includes(query)) return { tier: RANK_SUBSTRING, wordIndex: 0 }
   return null
+}
+
+/**
+ * AQU-1457 — 0 for SIL's standardized form of the matched language, 1
+ * otherwise. SIL names the standard variety of a macrolanguage "Standard
+ * <language>" ("Standard Malay" under `msa`, "Standard Arabic" under `ara`),
+ * and that variety is what a translator typing the bare language name almost
+ * always wants — so it sorts ahead of the geographic and ethnic varieties that
+ * qualify the same word ("Pattani Malay", "Kedah Malay"), which no
+ * name-derived measure such as length would do.
+ */
+function standardFormFirst(entry: LanguageEntry, wordIndex: number): number {
+  return wordIndex === 1 && fold(entry.name).startsWith("standard ") ? 0 : 1
+}
+
+/** 0 for a language with an ISO 639-1 code, 1 otherwise. See `filterLanguages`. */
+function majorFirst(entry: LanguageEntry): number {
+  return entry.altCode ? 0 : 1
 }
 
 /**
@@ -252,32 +402,66 @@ export function isSettledLanguage(
 
 /**
  * Filter the catalog by display name or code. An empty query returns the head
- * of the full list (the plain "dropdown" case).
+ * of the catalog (the plain "dropdown" case).
  *
  * `exclude` drops entries already chosen (case-insensitively) so a chips field
  * never suggests a language that is already a chip.
  */
 export function filterLanguages(
   query: string,
-  options: { limit?: number; exclude?: readonly string[] } = {},
+  options: {
+    limit?: number
+    exclude?: readonly string[]
+    /**
+     * AQU-1456 — catalog to search. Defaults to the bundled ISO 639-1 set;
+     * the pickers pass the lazily loaded ISO 639-3 catalog once it resolves.
+     */
+    catalog?: readonly LanguageEntry[]
+  } = {},
 ): LanguageEntry[] {
-  const { limit = LANGUAGE_SUGGESTION_LIMIT, exclude } = options
+  const { limit = LANGUAGE_SUGGESTION_LIMIT, exclude, catalog = LANGUAGES } = options
+  const source = catalogWithNamedVarieties(catalog)
   const excluded = exclude?.length
     ? new Set(exclude.map((value) => fold(value.trim())))
     : null
   const allowed = excluded
-    ? LANGUAGES.filter((entry) => !excluded.has(fold(entry.name)))
-    : LANGUAGES
+    ? source.filter((entry) => !excluded.has(fold(entry.name)))
+    : source
 
   const folded = fold(query.trim())
   if (!folded) return allowed.slice(0, limit)
 
-  const scored: Array<{ entry: LanguageEntry; score: number }> = []
+  const scored: Array<{
+    entry: LanguageEntry
+    tier: number
+    wordIndex: number
+    standard: number
+  }> = []
   for (const entry of allowed) {
     const score = rank(entry, folded)
-    if (score !== null) scored.push({ entry, score })
+    if (score === null) continue
+    // Folded once here rather than inside the comparator below, which runs
+    // O(n log n) times over a 7,900-entry catalog.
+    scored.push({ entry, ...score, standard: standardFormFirst(entry, score.wordIndex) })
   }
-  // Stable within a rank: the catalog is already name-sorted.
-  scored.sort((a, b) => a.score - b.score)
+  // Tiebreaks inside a tier, in order:
+  //  * the earlier word of the name matched — a name that leads with the query
+  //    is more likely to be the language meant than one that qualifies it;
+  //  * AQU-1457 — SIL's "Standard <language>" variety (see `standardFormFirst`);
+  //  * AQU-1456 — a language that also carries an ISO 639-1 code comes first.
+  //    Without this, widening the catalog from ~184 to ~7,900 buries the majors
+  //    behind alphabetically-earlier obscure codes ("ger" surfacing "Geragew"
+  //    ahead of "German");
+  //  * AQU-1457 — the shorter name, so the plain language beats its dialects
+  //    and historic stages ("Malay (macrolanguage)" ahead of "Malayic Dayak").
+  // Stable beyond that: the catalog is already name-sorted.
+  scored.sort(
+    (a, b) =>
+      a.tier - b.tier ||
+      a.wordIndex - b.wordIndex ||
+      a.standard - b.standard ||
+      majorFirst(a.entry) - majorFirst(b.entry) ||
+      a.entry.name.length - b.entry.name.length,
+  )
   return scored.slice(0, limit).map((item) => item.entry)
 }

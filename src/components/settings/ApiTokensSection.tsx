@@ -10,7 +10,7 @@ import { buildConnectionInstructions } from "@/lib/sync/agent-connect"
 // as a UX courtesy only — the server (auth-worker/src/routes/credentials.ts)
 // remains the authority and re-checks everything.
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react"
 import { Copy, ShieldAlert } from "lucide-react"
 import { buildAgentInstructions } from "@/lib/sync/agent-instructions"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -39,6 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { SearchSelect } from "@/components/ui/search-select"
 import { Spinner } from "@/components/ui/spinner"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -56,6 +57,7 @@ import {
   mintCredential,
   revokeCredential,
   type ApiCredential,
+  type CredentialAccess,
   type CredentialMode,
   type MintCredentialResult,
 } from "@/lib/sync/credentials"
@@ -74,6 +76,29 @@ const EXPIRY_PRESETS = [
   { id: "none", labelKey: "common.noExpiry", days: null },
 ] as const satisfies readonly { id: string; labelKey: TokenMessageKey; days: number | null }[]
 type ExpiryPresetId = (typeof EXPIRY_PRESETS)[number]["id"]
+
+/**
+ * A flag that turns itself off after `ms`. The timer is cleared on unmount
+ * and on a repeat trigger, so a dialog closed mid-countdown never sets state
+ * on an unmounted component (in vitest that surfaced as an unhandled
+ * "window is not defined" after the test file had torn down its DOM).
+ */
+function useTransientFlag(ms: number): [boolean, () => void] {
+  const [on, setOn] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current)
+  }, [])
+  const trigger = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current)
+    setOn(true)
+    timer.current = setTimeout(() => {
+      timer.current = null
+      setOn(false)
+    }, ms)
+  }, [ms])
+  return [on, trigger]
+}
 
 function expiryToIso(preset: ExpiryPresetId): string | undefined {
   const days = EXPIRY_PRESETS.find((p) => p.id === preset)?.days
@@ -126,7 +151,7 @@ function useOrgsAndProjects(jwt: string | null): {
         }
         setOrgs([])
         setProjects([])
-        setError(toUserFacingError(error, "token scopes").message)
+        setError(toUserFacingError(error).message)
       })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => {
@@ -296,6 +321,7 @@ export function ApiTokensSection() {
       {instructionsFor && (
         <AgentInstructionsDialog
           mode={instructionsFor.mode}
+          access={instructionsFor.access}
           scopeLabel={scopeLabel(t, instructionsFor, orgs, projects)}
           onClose={() => setInstructionsFor(null)}
         />
@@ -384,13 +410,12 @@ function ShowOnceTokenDialog({
   onClose: () => void
 }) {
   const t = useT()
-  const [copied, setCopied] = useState(false)
-  const [copiedPrompt, setCopiedPrompt] = useState(false)
+  const [copied, markCopied] = useTransientFlag(1500)
+  const [copiedPrompt, markCopiedPrompt] = useTransientFlag(1500)
 
   function copy() {
     void navigator.clipboard.writeText(result.token)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    markCopied()
   }
 
   // Copies the token *inside* a ready-to-paste prompt. This is the only moment
@@ -401,11 +426,11 @@ function ShowOnceTokenDialog({
         syncOrigin: syncWorkerHttpOrigin(),
         token: result.token,
         mode: result.credential.mode,
+        access: result.credential.access,
         scopeLabel,
       }),
     )
-    setCopiedPrompt(true)
-    setTimeout(() => setCopiedPrompt(false), 1500)
+    markCopiedPrompt()
   }
 
   return (
@@ -463,25 +488,26 @@ function ShowOnceTokenDialog({
 function AgentInstructionsDialog({
   token,
   mode,
+  access,
   scopeLabel,
   onClose,
 }: {
   token?: string
   mode: CredentialMode
+  access: CredentialAccess
   scopeLabel: string
   onClose: () => void
 }) {
   const t = useT()
-  const [copied, setCopied] = useState(false)
+  const [copied, markCopied] = useTransientFlag(1500)
   const text = useMemo(
-    () => buildAgentInstructions({ syncOrigin: syncWorkerHttpOrigin(), token, mode, scopeLabel }),
-    [token, mode, scopeLabel],
+    () => buildAgentInstructions({ syncOrigin: syncWorkerHttpOrigin(), token, mode, access, scopeLabel }),
+    [token, mode, access, scopeLabel],
   )
 
   function copy() {
     void navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    markCopied()
   }
 
   return (
@@ -535,6 +561,15 @@ function MintTokenDialog({
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
   const [mode, setMode] = useState<CredentialMode>("ask")
+  // AQU-1242: defaults to read-write, matching the server default and what every
+  // token minted before this field existed does. Tempting as a safe-by-default
+  // read-only is, flipping it would silently change what a returning user gets
+  // from this dialog: someone who mints "Import agent" the way they always have
+  // and skips past a new radio would walk away with a token their agent 403s on,
+  // and discover it as a broken import rather than as a choice they made.
+  // Narrowing a token is therefore explicit, and the option is placed first and
+  // spelled out so it is not easy to miss.
+  const [access, setAccess] = useState<CredentialAccess>("write")
   const [orgId, setOrgId] = useState("")
   const [projectId, setProjectId] = useState("")
   const [expiry, setExpiry] = useState<ExpiryPresetId>("90d")
@@ -559,10 +594,35 @@ function MintTokenDialog({
       ),
     [projects, orgId],
   )
+  // AQU-2102: Base UI only renders a chosen option's label on the closed trigger
+  // when the Select is handed the value → label mapping; without it the trigger
+  // prints the raw stored value — an org id, a project uuid, `90d`. The labels
+  // here are the same ones the options render, so the two can't drift.
+  const orgItems = useMemo(
+    () =>
+      orgOptions.map((o) => ({
+        value: String(o.id),
+        label: o.name ?? t("onboarding.apiTokens.scope.orgFallback", { id: o.id }),
+      })),
+    [orgOptions, t],
+  )
+  const projectItems = useMemo(
+    () => [
+      { value: "", label: t("onboarding.apiTokens.projectPlaceholder") },
+      ...projectOptions.map((p) => ({ value: p.id, label: p.name })),
+    ],
+    [projectOptions, t],
+  )
+  const expiryItems = useMemo(
+    () => EXPIRY_PRESETS.map((p) => ({ value: p.id, label: t(p.labelKey) })),
+    [t],
+  )
   const selectedProject = projectOptions.find((p) => p.id === projectId) ?? null
   // Act mode requires a project scope where the caller is >= MAINTAINER —
   // disabled (not just server-rejected) until that's true, per spec §1.
-  const canAct = selectedProject != null && selectedProject.role.level >= ROLE.MAINTAINER
+  const readOnly = access === "read"
+  const canAct =
+    !readOnly && selectedProject != null && selectedProject.role.level >= ROLE.MAINTAINER
   // AQU-1180: exposing translator names to an agent is a decision about other
   // people's safety, so it takes an OWNER of the scope — mirrors the server's
   // permission_denied rule rather than letting the user discover it on submit.
@@ -575,6 +635,7 @@ function MintTokenDialog({
     if (open) return
     setName("")
     setMode("ask")
+    setAccess("write")
     setOrgId("")
     setProjectId("")
     setExpiry("90d")
@@ -615,6 +676,7 @@ function MintTokenDialog({
       const result = await mintCredential(jwt, {
         name: name.trim(),
         mode,
+        access,
         orgId: orgId || undefined,
         projectId: projectId || undefined,
         expiresAt: expiryToIso(expiry),
@@ -651,15 +713,39 @@ function MintTokenDialog({
               />
             </Field>
 
+            {/* AQU-1242: asked BEFORE mode, because it decides whether mode is a
+                question at all — a read-only token never reaches an approval. */}
+            <Field>
+              <FieldLabel>{t("onboarding.apiTokens.accessLabel")}</FieldLabel>
+              <RadioGroup
+                value={access}
+                onValueChange={(value) => setAccess(value as CredentialAccess)}
+                className="gap-2"
+              >
+                <label className="flex items-start gap-2.5 text-sm">
+                  <RadioGroupItem value="read" className="mt-0.5" data-testid="token-access-read" />
+                  <span>
+                    <strong>{t("onboarding.apiTokens.accessReadLabel")}</strong> — {t("onboarding.apiTokens.accessReadDescription")}
+                  </span>
+                </label>
+                <label className="flex items-start gap-2.5 text-sm">
+                  <RadioGroupItem value="write" className="mt-0.5" data-testid="token-access-write" />
+                  <span>
+                    <strong>{t("onboarding.apiTokens.accessWriteLabel")}</strong> — {t("onboarding.apiTokens.accessWriteDescription")}
+                  </span>
+                </label>
+              </RadioGroup>
+            </Field>
+
             <Field>
               <FieldLabel>{t("common.modeLabel")}</FieldLabel>
               <RadioGroup
                 value={mode}
                 onValueChange={(value) => setMode(value as CredentialMode)}
-                className="gap-2"
+                className={`gap-2 ${readOnly ? "opacity-50" : ""}`}
               >
                 <label className="flex items-start gap-2.5 text-sm">
-                  <RadioGroupItem value="ask" className="mt-0.5" />
+                  <RadioGroupItem value="ask" className="mt-0.5" disabled={readOnly} />
                   <span>
                     <strong>{t("onboarding.apiTokens.modeAskLabel")}</strong> — {t("onboarding.apiTokens.modeAskDescription")}
                   </span>
@@ -673,11 +759,18 @@ function MintTokenDialog({
                   </span>
                 </label>
               </RadioGroup>
+              {readOnly && (
+                <FieldDescription>{t("onboarding.apiTokens.modeNotApplicable")}</FieldDescription>
+              )}
             </Field>
 
             <Field>
               <FieldLabel htmlFor="token-org">{t("onboarding.apiTokens.orgLabel")}</FieldLabel>
-              <Select value={orgId} onValueChange={(value) => setOrgId(value ?? "")}>
+              <Select
+                items={orgItems}
+                value={orgId}
+                onValueChange={(value) => setOrgId(value ?? "")}
+              >
                 <SelectTrigger id="token-org" className="w-full">
                   <SelectValue placeholder={t("onboarding.apiTokens.orgPlaceholder")} />
                 </SelectTrigger>
@@ -698,25 +791,21 @@ function MintTokenDialog({
 
             <Field>
               <FieldLabel htmlFor="token-project">{t("common.project")}</FieldLabel>
-              <Select value={projectId} onValueChange={(value) => setProjectId(value ?? "")}>
-                <SelectTrigger id="token-project" className="w-full">
-                  <SelectValue placeholder={t("onboarding.apiTokens.projectPlaceholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {projectOptions.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+              {/* AQU-2232: a search box, for someone in many projects. The
+                  first row puts the token back to org-wide. */}
+              <SearchSelect
+                id="token-project"
+                options={projectItems}
+                value={projectId}
+                onValueChange={setProjectId}
+                placeholder={t("onboarding.apiTokens.projectPlaceholder")}
+              />
             </Field>
 
             <Field>
               <FieldLabel htmlFor="token-expiry">{t("onboarding.apiTokens.expiryLabel")}</FieldLabel>
               <Select
+                items={expiryItems}
                 value={expiry}
                 onValueChange={(value) => setExpiry((value ?? "90d") as ExpiryPresetId)}
               >

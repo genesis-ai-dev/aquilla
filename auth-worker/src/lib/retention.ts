@@ -1,8 +1,16 @@
-// Retention / active-user metrics — pure, deterministic derivations over the
-// `user_activity_days` rollup (one row per user per UTC day they used the app)
-// and the users table (signup date). No DB access here: the admin route and
-// the emailed recap both feed rows in and format the result, so the numbers on
-// the dashboard and in the inbox can never disagree.
+// Retention / active-user metrics — the DEFINITIONS, as pure deterministic
+// derivations over the `user_activity_days` rollup (one row per user per UTC
+// day they used the app) and the users table (signup date). The shapes below
+// (`RetentionMetrics` and friends) are what the admin dashboard and the emailed
+// recap both render, so the numbers in the console and in the inbox can never
+// disagree.
+//
+// `computeRetention` is the executable form of these definitions. Production no
+// longer calls it: since AQU-1867 the numbers are aggregated in Postgres by
+// lib/retention-load.ts, because reducing every user x 400 days of activity in
+// the isolate ran it out of memory. It is kept, and kept honest, as the
+// reference the SQL is parity-tested against (retention-load.test.ts) — a
+// window boundary or cohort rule only has to be right in one readable place.
 //
 // Definitions (all days are UTC calendar days, inclusive windows ending `asOf`):
 //   DAU        — distinct users active on `asOf`.

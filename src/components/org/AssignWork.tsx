@@ -1,7 +1,18 @@
 import { useState, useEffect, useMemo } from "react"
-import { fetchProjectRoster, partitionMembers, type ProjectMember } from "@/lib/frontier/members"
+import { AddProjectMembersHint } from "@/components/AddProjectMembersHint"
+import { ROLE } from "@/lib/frontier/roles"
+import { fetchProjectRoster, hasLanguageWorker, partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import { compareByCanonicalBookOrder, getBookName } from "@/lib/file-labeling/bible-book-names"
 import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
+import {
+  buildLaneItems,
+  initialAssignmentLane,
+  laneIdForTag,
+  lanesStaffedBy,
+  laneTagForAssignment,
+  type AssignLaneOption,
+  type TeamLaneAttachment,
+} from "@/lib/sync/assignment-lane"
 import { canSubmitAssignment } from "@/lib/sync/role-policy"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -15,7 +26,6 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
-  OptionalMark,
 } from "@/components/ui/field"
 import {
   Select,
@@ -25,8 +35,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { SearchSelect, type SearchSelectOption } from "@/components/ui/search-select"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { AssignKindField } from "@/components/AssignKindField"
+import type { AssignmentKind } from "@/lib/sync/assignments"
+import type { OverlapScope } from "@/lib/sync/assignment-overlap"
+import { useAssignmentOverlap } from "@/hooks/useAssignmentOverlap"
+import { AssignmentOverlapNotice } from "./AssignmentOverlapNotice"
 
 /**
  * Manager affordance (project_lead+) on the project overview: assign a book or
@@ -70,14 +86,52 @@ export interface AssignWorkProps {
   /** Called after a successful assign so the parent can refresh rollups. */
   onAssigned?: () => void
   /**
-   * Target-language lane for the assignment. '' = the project's default lane
-   * (omitted on the wire, same contract as AssignModal).
+   * Lane tag the manager arrived from. `null` or omitted is the All tab:
+   * several lanes pre-fill nothing. `''` is the default lane. One lane names
+   * itself either way.
    */
-  targetLang?: string
+  arrivedLane?: string | null
+  /** Tags the field offers. `''` is the default lane. Omitted → that lane only. */
+  laneTags?: readonly string[]
+  /**
+   * AQU-1977: the project's own target lanes, in order (`assignLaneOptions`).
+   * When given they replace `laneTags` and no "Default language" is invented.
+   */
+  lanes?: readonly AssignLaneOption[]
+  laneLabels?: Readonly<Record<string, string>>
+  defaultLaneLabel?: string
+  /**
+   * Target lane rows. The chosen row's id is what `assignment.create` sends.
+   * Absent before the lane rows exist; the tag still goes out.
+   */
+  laneRows?: readonly { id: string; legacyTag: string | null }[]
+  /**
+   * AQU-1994: the project's lanes at least one of its people is on. The field
+   * offers only these, so a manager cannot route work to a language nobody on
+   * the project can work in. `null`/omitted is "the server did not say" — not
+   * "nobody" — and leaves the list as it was.
+   */
+  staffedLaneIds?: ReadonlySet<string> | readonly string[] | null
+  /**
+   * AQU-2047: each attached team's lane checks. A lane stays when any attached
+   * team is tied to it. `lanesExplicit: false` is tied to every current target
+   * lane. `null`, omitted, or `[]` (no attached team) leaves the list as it
+   * was — absence is not "no lanes". Applied with staffing: a lane must pass
+   * both when both are present.
+   */
+  teamLanes?: readonly TeamLaneAttachment[] | null
+  /** Called when the panel is opened, so staffing and team lanes can be re-read. */
+  onOpen?: () => void
 }
 
 const DEFAULT_ROLE_LEVEL = 500
 const DEFAULT_ASSIGNMENT_MIN_ROLE = 500
+
+/** A person in the Assignee list; the empty first row has no user. */
+interface AssigneeOption extends SearchSelectOption {
+  userId?: number
+  username?: string
+}
 
 export function AssignWork({
   projectId,
@@ -89,7 +143,15 @@ export function AssignWork({
   assignmentMinRole = DEFAULT_ASSIGNMENT_MIN_ROLE,
   callerUserId = null,
   onAssigned,
-  targetLang = "",
+  arrivedLane = null,
+  laneTags,
+  lanes,
+  laneLabels,
+  defaultLaneLabel,
+  laneRows,
+  staffedLaneIds,
+  teamLanes,
+  onOpen,
 }: AssignWorkProps) {
   const t = useT()
   const isSelfAssignMode = roleLevel < assignmentMinRole
@@ -102,10 +164,46 @@ export function AssignWork({
   const [selectedChapters, setSelectedChapters] = useState<string[]>([])
   const [chapters, setChapters] = useState<string[]>([])
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
+  // AQU-1969: Translate (the assignment as it always was) unless chosen.
+  const [kind, setKind] = useState<AssignmentKind>("translate")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const laneItems = useMemo(
+    () =>
+      buildLaneItems({
+        lanes,
+        targetLanes: laneTags,
+        laneLabels,
+        defaultLaneLabel,
+        defaultLaneFallback: t("dialog.assign.defaultLaneFallback"),
+        staffedLaneIds,
+        teamLanes,
+      }),
+    [lanes, laneTags, laneLabels, defaultLaneLabel, staffedLaneIds, teamLanes, t],
+  )
+  // AQU-1994: nobody on the project is on any of its lanes. There is nothing
+  // truthful to offer, so the field says so and Assign is refused rather than
+  // listing languages no one can work in. Asked of staffing alone, so the
+  // legacy `laneTags` shape (a project with no lane rows) is untouched.
+  const noStaffedLanes =
+    Boolean(lanes?.length) && lanesStaffedBy(lanes ?? [], staffedLaneIds).length === 0
+  // undefined = the arrival rule; a string or null is the manager's own pick.
+  // Reset when the panel opens or the lane they arrived from changes, so a
+  // previous choice doesn't survive into the All tab.
+  const arrivalKey = `${open ? "open" : "closed"}:${arrivedLane ?? "all"}:${laneItems.map((item) => item.value).join("\0")}`
+  const [lanePick, setLanePick] = useState<{ key: string; value: string | null } | null>(null)
+  if (lanePick?.key !== arrivalKey) {
+    setLanePick({ key: arrivalKey, value: initialAssignmentLane(laneItems, arrivedLane) })
+  }
+  const selectedLane = lanePick?.key === arrivalKey ? lanePick.value : initialAssignmentLane(laneItems, arrivedLane)
+  function chooseLane(value: string | null) {
+    setLanePick({ key: arrivalKey, value })
+  }
   // AQU-1308: why the roster is empty, when it is empty for a reason.
   const [rosterError, setRosterError] = useState<"hidden" | "load-failed" | null>(null)
+  // AQU-2194: whether the roster fetch for this opening has answered, so the
+  // "nobody else is on this project" line never flashes before it does.
+  const [rosterLoaded, setRosterLoaded] = useState(false)
 
   // AQU-582 / AQU-678: list books in canonical Bible reading order (Genesis →
   // Revelation) rather than the incoming prop order, matching the sidebar and
@@ -133,10 +231,12 @@ export function AssignWork({
     if (!open) return
     let cancelled = false
     setRosterError(null)
+    setRosterLoaded(false)
     fetchProjectRoster(jwt, projectId)
       .then((r) => {
         if (cancelled) return
         setMembers(r.kind === "ok" ? r.members : [])
+        setRosterLoaded(true)
         if (r.kind === "roster-hidden") setRosterError("hidden")
         else if (r.kind === "no-access") setRosterError("load-failed")
       })
@@ -144,6 +244,7 @@ export function AssignWork({
         if (cancelled) return
         setMembers([])
         setRosterError("load-failed")
+        setRosterLoaded(true)
         setError(e instanceof Error ? e.message : String(e))
       })
     return () => { cancelled = true }
@@ -160,12 +261,50 @@ export function AssignWork({
   )
   const effectiveCallerUserId =
     callerUserId ?? members.find((member) => member.username === author)?.userId ?? null
+  // AQU-2194: nobody on the project to give language work to leaves the picker
+  // without a linguist and no word why (AssignModal's showStaffHint, same rule).
+  const showStaffHint =
+    rosterLoaded &&
+    !isSelfAssignMode &&
+    !rosterError &&
+    !hasLanguageWorker(eligibleMembers, effectiveCallerUserId)
 
   useEffect(() => {
     if (isSelfAssignMode && effectiveCallerUserId != null) {
       setAssigneeId(effectiveCallerUserId)
     }
   }, [isSelfAssignMode, effectiveCallerUserId])
+
+  // The two searchable lists (AQU-2260). The first assignee row is the empty
+  // "Select member…" choice, as it was in the plain dropdown.
+  const assigneeOptions = useMemo<AssigneeOption[]>(
+    () =>
+      isSelfAssignMode
+        ? members
+            .filter((m) => m.userId === effectiveCallerUserId)
+            .map((m) => ({
+              value: String(m.userId),
+              label: t("dialog.assign.assigneeSelfSuffix", { username: m.username }),
+              userId: m.userId,
+              username: m.username,
+            }))
+        : [
+            { value: "", label: t("dialog.assign.selectMemberPlaceholder") },
+            // AQU-676: project members only — org-baseline-only people are excluded.
+            ...eligibleMembers.map((m) => ({
+              value: String(m.userId),
+              label: m.username,
+              userId: m.userId,
+              username: m.username,
+            })),
+          ],
+    [isSelfAssignMode, members, eligibleMembers, effectiveCallerUserId, t],
+  )
+  const bookOptions = useMemo(
+    () => sortedFiles.map((f) => ({ value: f.id, label: f.label })),
+    [sortedFiles],
+  )
+
 
   // Load the selected file's chapters for the picker; clear the checked
   // chapters when the file changes so stale chapters can't leak across books.
@@ -220,6 +359,19 @@ export function AssignWork({
       setError(t("dialog.assign.error.selfOnly"))
       return
     }
+    if (noStaffedLanes) {
+      setError(t("org.assignWork.noStaffedLanes"))
+      return
+    }
+    // One lane names itself. Several lanes pre-fill only from the tab the
+    // manager arrived from; the All tab pre-fills nothing and cannot submit.
+    const chosenLane = laneItems.length === 1 ? laneItems[0]!.value : selectedLane
+    if (!chosenLane) {
+      setError(t("org.assignWork.chooseLane"))
+      return
+    }
+    const targetLang = laneTagForAssignment(chosenLane)
+    const laneId = laneIdForTag(targetLang, laneRows)
     // AQU-678: label the assignment with the spelled-out canonical book name.
     const fileName = sortedFiles.find((f) => f.id === fileId)?.label ?? "file"
     // AQU-677: zero checked chapters = whole book (unchanged single-book path);
@@ -243,11 +395,14 @@ export function AssignWork({
         scope,
         scopeKind,
         scopeLabel,
-        targetLang: targetLang || undefined,
+        ...(targetLang ? { targetLang } : {}),
+        ...(laneId ? { laneId } : {}),
         deadline: deadline || null,
+        kind,
       })
       setSelectedChapters([])
       setDeadlineDate(undefined)
+      setKind("translate")
       setOpen(false)
       onAssigned?.()
     } catch (e) {
@@ -257,9 +412,32 @@ export function AssignWork({
     }
   }
 
+  // AQU-1510: say so when this would assign someone lines they already hold.
+  // No chapters ticked is the whole book, the same reading the submit takes.
+  const overlapScope = useMemo<OverlapScope | null>(
+    () => (orderedChosen.length > 0 ? { kind: "chapters", chapters: orderedChosen } : { kind: "file" }),
+    [orderedChosen],
+  )
+  const overlapFileIds = useMemo(() => (open && fileId ? [fileId] : []), [open, fileId])
+  const overlapMember = assigneeId === "" ? null : members.find((m) => m.userId === Number(assigneeId)) ?? null
+  const overlaps = useAssignmentOverlap({
+    jwt,
+    projectId,
+    fileIds: overlapFileIds,
+    scope: overlapScope,
+    assigneeUserId: overlapMember?.userId ?? null,
+    lane: laneItems.length === 1 ? laneItems[0]!.value : selectedLane,
+    kind,
+  })
+
   if (!open) {
     return (
-      <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => { setOpen(true); onOpen?.() }}
+      >
         {t("org.assignWork.assignButtonLabel")}
       </Button>
     )
@@ -268,66 +446,77 @@ export function AssignWork({
   return (
     <div role="group" aria-label={t("dialog.assign.title")} className="mt-3 w-full rounded-md border p-3">
       <FieldGroup className="gap-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field>
-            <FieldLabel htmlFor="assign-work-assignee">{t("org.assignWork.assigneeLabel")}</FieldLabel>
+        <AssignKindField id="assign-work-kind" value={kind} onChange={setKind} disabled={busy} />
+        <Field>
+          <FieldLabel htmlFor={laneItems.length > 1 ? "assign-work-lane" : undefined}>
+            {t("dialog.assign.laneLabel")}
+          </FieldLabel>
+          {noStaffedLanes ? (
+            <FieldError data-testid="assign-work-no-staffed-lanes">
+              {t("org.assignWork.noStaffedLanes")}
+            </FieldError>
+          ) : laneItems.length === 1 ? (
+            <p data-testid="assign-work-lane-fixed" className="text-sm">
+              {laneItems[0]!.label}
+            </p>
+          ) : (
             <Select
-              items={
-                isSelfAssignMode
-                  ? members
-                      .filter((m) => m.userId === effectiveCallerUserId)
-                      .map((m) => ({ value: String(m.userId), label: t("dialog.assign.assigneeSelfSuffix", { username: m.username }) }))
-                  : [
-                      { value: "", label: t("dialog.assign.selectMemberPlaceholder") },
-                      // AQU-676: project members only — org-baseline-only people are excluded.
-                      ...eligibleMembers.map((m) => ({ value: String(m.userId), label: m.username })),
-                    ]
-              }
-              value={assigneeId === "" ? "" : String(assigneeId)}
-              onValueChange={(v) => setAssigneeId(v == null || v === "" ? "" : Number(v))}
-              disabled={busy || isSelfAssignMode}
+              items={[
+                { value: "", label: t("org.assignWork.chooseLane") },
+                ...laneItems,
+              ]}
+              value={selectedLane ?? ""}
+              onValueChange={(v) => chooseLane(v ? v : null)}
+              disabled={busy}
             >
-              <SelectTrigger id="assign-work-assignee">
+              <SelectTrigger id="assign-work-lane" data-testid="assign-work-lane">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  {isSelfAssignMode ? (
-                    members
-                      .filter((m) => m.userId === effectiveCallerUserId)
-                      .map((m) => (
-                        <SelectItem key={m.userId} value={String(m.userId)}>
-                          <UsernameWithAvatar
-                            username={m.username}
-                            label={t("dialog.assign.assigneeSelfSuffix", { username: m.username })}
-                            size="xs"
-                            menuSafe
-                            nameClassName="text-sm font-normal"
-                          />
-                        </SelectItem>
-                      ))
-                  ) : (
-                    <>
-                      <SelectItem value="">{t("dialog.assign.selectMemberPlaceholder")}</SelectItem>
-                      {eligibleMembers.map((m) => (
-                        <SelectItem key={m.userId} value={String(m.userId)}>
-                          <UsernameWithAvatar
-                            username={m.username}
-                            size="xs"
-                            menuSafe
-                            nameClassName="text-sm font-normal"
-                          />
-                        </SelectItem>
-                      ))}
-                    </>
-                  )}
+                  <SelectItem value="">{t("org.assignWork.chooseLane")}</SelectItem>
+                  {laneItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
                 </SelectGroup>
               </SelectContent>
             </Select>
+          )}
+        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field>
+            <FieldLabel htmlFor="assign-work-assignee">{t("org.assignWork.assigneeLabel")}</FieldLabel>
+            {/* AQU-2260: a search box, since the people list grows with the team. */}
+            <SearchSelect
+              id="assign-work-assignee"
+              options={assigneeOptions}
+              value={assigneeId === "" ? "" : String(assigneeId)}
+              onValueChange={(v) => setAssigneeId(v === "" ? "" : Number(v))}
+              disabled={busy || isSelfAssignMode}
+              renderOption={(o) =>
+                o.userId == null ? (
+                  o.label
+                ) : (
+                  <UsernameWithAvatar
+                    userId={o.userId}
+                    username={o.username ?? o.label}
+                    label={isSelfAssignMode ? o.label : undefined}
+                    size="xs"
+                    menuSafe
+                    nameClassName="text-sm font-normal"
+                  />
+                )
+              }
+            />
             {isSelfAssignMode && (
               <FieldDescription>
                 {t("org.assignWork.selfAssignNote")}
               </FieldDescription>
+            )}
+            {showStaffHint && (
+              <AddProjectMembersHint projectId={projectId} testId="assign-work-staff-hint" canAddPeople={roleLevel >= ROLE.MAINTAINER} />
             )}
             {/* AQU-1308: name the failure right under the picker it emptied. */}
             {rosterError && (
@@ -340,23 +529,14 @@ export function AssignWork({
           </Field>
           <Field>
             <FieldLabel htmlFor="assign-work-book">{t("org.assignWork.bookLabel")}</FieldLabel>
-            <Select
-              items={sortedFiles.map((f) => ({ value: f.id, label: f.label }))}
+            {/* AQU-2260: up to 66 books, so a search box. */}
+            <SearchSelect
+              id="assign-work-book"
+              options={bookOptions}
               value={fileId}
-              onValueChange={(v) => setFileId(v ?? "")}
+              onValueChange={setFileId}
               disabled={busy}
-            >
-              <SelectTrigger id="assign-work-book">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {sortedFiles.map((f) => (
-                    <SelectItem key={f.id} value={f.id}>{f.label}</SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+            />
           </Field>
           <Field>
             <FieldLabel htmlFor="assign-work-chapters">{t("editor.milestone.vocab.chapterPlural")}</FieldLabel>
@@ -411,7 +591,7 @@ export function AssignWork({
           </Field>
           <Field>
             <FieldLabel htmlFor="assign-work-deadline">
-              {t("dialog.assign.deadlineLabel")} <OptionalMark />
+              {t("dialog.assign.deadlineLabel")}
             </FieldLabel>
             <DatePicker
               id="assign-work-deadline"
@@ -425,7 +605,7 @@ export function AssignWork({
           <Button
             type="button"
             onClick={() => void submit()}
-            disabled={busy}
+            disabled={busy || noStaffedLanes}
           >
             {t("dialog.assign.submit")}
           </Button>
@@ -438,6 +618,11 @@ export function AssignWork({
             {t("common.cancel")}
           </Button>
         </div>
+        <AssignmentOverlapNotice
+          overlaps={overlaps}
+          username={overlapMember?.username ?? ""}
+          fileName={(id) => sortedFiles.find((f) => f.id === id)?.label ?? id}
+        />
         {error && <FieldError>{error}</FieldError>}
       </FieldGroup>
     </div>

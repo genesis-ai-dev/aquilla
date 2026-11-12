@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  adjacentPassagePaths,
   buildMapMosaic,
   coordsToTilePoint,
   DEFAULT_MAP_ZOOM,
   formatCoordinates,
+  loadPassageEntities,
   osmPermalink,
   OSM_TILE_SIZE,
   parseEntityCoordinates,
@@ -11,6 +13,8 @@ import {
   parseEntitySummary,
   parsePassageEntities,
   passagePathFromRef,
+  prefetchPassageEntities,
+  __resetPassageResourceCaches,
 } from "./passage-resources"
 
 // Abridged from the live response for /en/passages/MAT/2/1/ — the shape the
@@ -229,5 +233,86 @@ describe("osmPermalink / formatCoordinates", () => {
   it("labels hemispheres rather than printing a minus sign", () => {
     expect(formatCoordinates({ lat: 31.7054, lon: 35.2103 })).toBe("31.705°N, 35.210°E")
     expect(formatCoordinates({ lat: -1.5, lon: -78.25 })).toBe("1.500°S, 78.250°W")
+  })
+})
+
+describe("adjacentPassagePaths (AQU-843)", () => {
+  it("warms the next verse first, then the previous one", () => {
+    expect(adjacentPassagePaths("/en/passages/RUT/1/8/")).toEqual([
+      "/en/passages/RUT/1/9/",
+      "/en/passages/RUT/1/7/",
+    ])
+  })
+
+  it("has no predecessor to warm at verse 1", () => {
+    expect(adjacentPassagePaths("/en/passages/RUT/1/1/")).toEqual(["/en/passages/RUT/1/2/"])
+  })
+
+  it("handles numbered books", () => {
+    expect(adjacentPassagePaths("/en/passages/1SA/16/1/")).toEqual(["/en/passages/1SA/16/2/"])
+  })
+
+  it("returns nothing for paths that are not verse pages", () => {
+    expect(adjacentPassagePaths("/en/places/bethlehem/")).toEqual([])
+    expect(adjacentPassagePaths("/en/passages/RUT/1/")).toEqual([])
+    expect(adjacentPassagePaths("")).toEqual([])
+  })
+})
+
+describe("prefetchPassageEntities (AQU-843)", () => {
+  function pageResponse(body: string): Response {
+    return new Response(JSON.stringify({ url: "https://example.test/p", markdown: body }), {
+      status: 200,
+    })
+  }
+
+  function pathOf(call: unknown[]): string {
+    return new URL(String(call[0]), "https://example.test").searchParams.get("path") ?? ""
+  }
+
+  beforeEach(() => __resetPassageResourceCaches())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("warms a verse so the later in-view load costs no request", async () => {
+    const fetchMock = vi.fn(async () => pageResponse(PASSAGE_MARKDOWN))
+    vi.stubGlobal("fetch", fetchMock)
+
+    prefetchPassageEntities("jwt", "p1", "/en/passages/MAT/2/2/")
+    const entities = await loadPassageEntities("jwt", "p1", "/en/passages/MAT/2/2/")
+
+    expect(entities.length).toBeGreaterThan(0)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(pathOf(fetchMock.mock.calls[0])).toBe("/en/passages/MAT/2/2/")
+  })
+
+  it("does not re-request a path already cached", async () => {
+    const fetchMock = vi.fn(async () => pageResponse(PASSAGE_MARKDOWN))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await loadPassageEntities("jwt", "p1", "/en/passages/MAT/2/1/")
+    prefetchPassageEntities("jwt", "p1", "/en/passages/MAT/2/1/")
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("remembers a warm miss so parking on a chapter's last verse costs one request, not one per scroll", async () => {
+    const fetchMock = vi.fn(async () => new Response("not found", { status: 404 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    // The verse after the last one in the chapter — unknowable in advance.
+    prefetchPassageEntities("jwt", "p1", "/en/passages/MAT/2/24/")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    prefetchPassageEntities("jwt", "p1", "/en/passages/MAT/2/24/")
+    prefetchPassageEntities("jwt", "p1", "/en/passages/MAT/2/24/")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("swallows a failed warm rather than surfacing it as an error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 503 })))
+
+    expect(() => prefetchPassageEntities("jwt", "p1", "/en/passages/MAT/2/9/")).not.toThrow()
+    await new Promise((resolve) => setTimeout(resolve, 0))
   })
 })

@@ -1,5 +1,5 @@
 import { openDB, type DBSchema } from "idb"
-import type { ProjectRecord, ProjectSnapshot } from "../parsers/types"
+import type { ProjectRecord, ProjectSnapshot, ProjectTtsSettings } from "../parsers/types"
 import {
   archiveProjectRemote,
   unarchiveProjectRemote,
@@ -181,6 +181,29 @@ export async function patchProject(
   return next
 }
 
+/** Voice fields a walled server response replaces as a whole set. */
+const TTS_SERVER_SET_KEYS = [
+  "voices",
+  "castAssignments",
+  "defaultVoiceId",
+  "laneCastAssignments",
+  "laneDefaultVoiceId",
+] as const
+
+/**
+ * Device-local voice keys (provider, api key) stay. The server's voices,
+ * cast, and defaults replace the cached ones, including when the server
+ * omits a hidden lane.
+ */
+export function mergeTtsSettings(
+  local: ProjectTtsSettings,
+  server: ProjectTtsSettings,
+): ProjectTtsSettings {
+  const device: ProjectTtsSettings = { ...local }
+  for (const key of TTS_SERVER_SET_KEYS) delete device[key]
+  return { ...device, ...server }
+}
+
 /** Overlay client-local file metadata from IDB onto a server-fetched project. */
 export function mergeServerProjectWithLocalCache(
   server: ProjectRecord,
@@ -222,8 +245,15 @@ export function mergeServerProjectWithLocalCache(
     // AQU-701: voice settings chosen in the setup checklist (provider, BYOK
     // gemini key) are written to the device-local record; carry them across
     // server refetches, letting server-synced keys win where present.
+    // AQU-2043: voices, cast, and defaults are the server's complete set.
+    // A walled response omits hidden lanes, and a shallow spread would keep
+    // the cached Arabic copy the member is no longer allowed to see.
     ...(local.ttsSettings
-      ? { ttsSettings: { ...local.ttsSettings, ...server.ttsSettings } }
+      ? {
+          ttsSettings: server.ttsSettings
+            ? mergeTtsSettings(local.ttsSettings, server.ttsSettings)
+            : local.ttsSettings,
+        }
       : {}),
     // Experimental flags are device-local by design (src/lib/features/flags.ts)
     // — the server record never carries them, so the local overlay wins.

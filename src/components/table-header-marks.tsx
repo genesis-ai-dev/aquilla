@@ -1,0 +1,93 @@
+// Small marks in the editing table's header over its narrow, unlabeled
+// columns, each naming its column on hover. (Sam, 2026-09-28; the Text and
+// Audio views — the Media view's table keeps its own header.)
+//
+// They line up with the columns they label by reproducing the row's widths:
+// the gutter's select box (20px), 8px, the notices column (20px), 2px, and the
+// number filling the rest; then, before the Target heading, the two 24px
+// validation checks — text, then audio, which a validated line shows as the
+// same green check — and the 24px Play that follows the audio check in every
+// row (AQU-2401), unmarked but reproduced for the width. The audio check and
+// that Play are there only when the rows' are.
+//
+// The two check marks are the chapter picker's text and audio glyphs
+// (`PROGRESS_ICON`, AQU-2139), so one screen carries one icon vocabulary for
+// the two columns.
+
+import type { ReactNode } from "react"
+import { Flag, Hash, SquareCheck } from "lucide-react"
+import { AppTooltip } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { PROGRESS_ICON } from "@/lib/progress/progress-icons"
+import type { AudioColumn } from "@/lib/audio/file-has-audio"
+
+function Mark({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
+  return (
+    <AppTooltip content={label}>
+      <span role="img" aria-label={label} className={cn("flex justify-center", className)}>
+        {children}
+      </span>
+    </AppTooltip>
+  )
+}
+
+/** Over the row gutter: select, notices, and the number when lines are
+ *  numbered — "Verse number" in a file of chapters (a book of the Bible),
+ *  "Cell number" anywhere else (Sam, 2026-09-28). */
+export function GutterMarks({ numbers }: { numbers: "verse" | "cell" | null }) {
+  const t = useT()
+  return (
+    <div data-testid="table-gutter-marks" className="hidden items-center md:flex">
+      <Mark label={t("editor.gutter.select")} className="w-5 shrink-0">
+        <SquareCheck className="h-3 w-3" />
+      </Mark>
+      <div className="ms-2 flex min-w-0 flex-1 items-center gap-0.5">
+        <Mark label={t("editor.gutter.notices")} className="w-5 shrink-0">
+          <Flag className="h-3 w-3" />
+        </Mark>
+        {numbers && (
+          <Mark
+            label={t(numbers === "verse" ? "editor.gutter.verseNumber" : "editor.gutter.cellNumber")}
+            className="min-w-0 flex-1"
+          >
+            <Hash className="h-3 w-3" />
+          </Mark>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Over the two validation checks, just before the Target heading. The audio
+ *  mark follows the rows' audio column (AQU-1495): a file with no audio has no
+ *  column, and a mark over nothing would push the heading off the rows'
+ *  target boxes. */
+export function CheckMarks({ audioColumn, textColumn = true }: {
+  audioColumn: AudioColumn
+  /** Media redesign slice 2: false in an Audio language, which has no text check. */
+  textColumn?: boolean
+}) {
+  const t = useT()
+  return (
+    // -ms-3: the rows' two checks start 12px before the heading's text.
+    <span data-testid="table-check-marks" className="hidden items-center gap-1.5 md:-ms-3 md:flex">
+      {textColumn && (
+        <Mark label={t("editor.gutter.textChecks")} className="w-6">
+          <PROGRESS_ICON.text className="h-3 w-3" />
+        </Mark>
+      )}
+      {audioColumn !== "off" && (
+        <Mark label={t("editor.gutter.audioChecks")} className="w-6">
+          <PROGRESS_ICON.audio className="h-3 w-3" />
+        </Mark>
+      )}
+      {/* AQU-2401: the row's gutter now ends with a 24px Play beside the audio
+          check. Nothing is marked over it — the glyph in every row says what
+          it is, and the two marks are here to tell the two CHECKS apart — but
+          the width has to be reproduced, or the Target heading would sit 30px
+          to the left of the target boxes it labels. */}
+      {audioColumn !== "off" && <span aria-hidden className="w-6 shrink-0" />}
+    </span>
+  )
+}

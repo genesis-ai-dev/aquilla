@@ -101,11 +101,43 @@ export function projectSettingsPath(projectId: string, section?: string): string
     : `/project/${projectId}/settings`
 }
 
+/**
+ * AQU-2031: the editor TARGET header's way into the project's language
+ * settings. It lands on the General PANE with one card scrolled into view
+ * (`?focus=`), NOT on a `?q=` search pre-fill: search mode always shows the
+ * search box and matches cards in other groups, so the person arrived at what
+ * looked like a search they never ran. `"languages"` is the Languages card
+ * (Change target language…, the single-lane TARGET pill, "Set target
+ * language"); `"add-lane"` is its "Add language" form, opened (Add lane…).
+ * The `focus` values are read by `SETTINGS_FOCUS_TARGETS` in ProjectSettings.
+ */
+export function projectLanguageSettingsPath(
+  projectId: string,
+  focus: "languages" | "add-lane",
+): string {
+  return `${projectSettingsPath(projectId, "general")}?focus=${focus}`
+}
+
+/**
+ * AQU-2306: where a project's own import floor is set — the Import card, which
+ * lives in the General pane. Deep-linked with `?focus=` rather than `?q=` for
+ * the reason projectLanguageSettingsPath gives: a search the person never ran
+ * is a confusing place to land.
+ */
+export function projectImportSettingsPath(projectId: string): string {
+  return `${projectSettingsPath(projectId, "general")}?focus=import`
+}
+
 /** Living Memory surface — the section index, or one of its detail panes. */
 export function projectMemoryPath(projectId: string, section?: string): string {
   return section
     ? `/project/${projectId}/memory/${section}`
     : `/project/${projectId}/memory`
+}
+
+/** Project overview — the project's home page (`/projects/$id`). */
+export function projectOverviewPath(projectId: string): string {
+  return `/projects/${projectId}`
 }
 
 /** Default work surface — paired cell editor (`/project/$id/editor`). */
@@ -114,9 +146,9 @@ export function projectEditorPath(projectId: string, fileId?: string | null): st
   return fileId ? `${base}/file/${fileId}` : base
 }
 
-/** Same-origin relative path from `?return=` — rejects protocol-relative URLs. */
+/** Same-origin relative path from `?return=` — rejects protocol-relative URLs and backslashes (`/\\evil.com`). */
 export function safeReturnPath(raw: string | null | undefined): string | null {
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return null
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return null
   return raw
 }
 
@@ -151,4 +183,25 @@ export function editorReturnFromLocation(
   const raw = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get("return")
   const returnTo = safeReturnPath(raw)
   return returnTo && isProjectEditorPath(returnTo, projectId) ? returnTo : null
+}
+
+/**
+ * The fileId in a project-editor path (`/project/:id/editor/file/:fileId`).
+ * Null for the bare editor path, another project's editor, or any other path.
+ */
+export function fileIdFromEditorPath(
+  path: string | null | undefined,
+  projectId: string,
+): string | null {
+  if (!path) return null
+  const pathname = path.split(/[?#]/)[0] ?? ""
+  const prefix = `${projectEditorPath(projectId)}/file/`
+  if (!pathname.startsWith(prefix)) return null
+  const raw = pathname.slice(prefix.length).split("/")[0]
+  if (!raw) return null
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
 }

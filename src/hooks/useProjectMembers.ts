@@ -6,6 +6,7 @@ import {
 } from "@/lib/frontier/members";
 import { useFrontierSession } from "./useFrontierSession";
 import { toUserFacingError } from "@/lib/errors/user-error";
+import type { MemberLaneAccess } from "@/lib/lanes/lane-access-choice";
 
 export interface UseProjectMembers {
   members: ProjectMember[];
@@ -20,14 +21,14 @@ export interface UseProjectMembers {
   rosterHidden: boolean;
   refresh: () => Promise<void>;
   /** Returns null if username not found, otherwise the new/upserted member. */
-  add: (username: string, role: number) => Promise<ProjectMember | null>;
+  add: (username: string, role: number, laneAccess?: MemberLaneAccess) => Promise<ProjectMember | null>;
   /**
    * AQU-734: grant `role` to several people in ONE batch request (non-atomic).
    * Returns the per-person `results` so the caller can name who failed. The
    * roster is refreshed once after the call so everyone who landed shows up.
    */
   addMany: (
-    members: Array<{ username: string; role: number }>,
+    members: Array<{ username: string; role: number; laneAccess?: MemberLaneAccess }>,
   ) => Promise<MemberGrantResult[]>;
   remove: (userId: number) => Promise<void>;
   /** Same as add — server upserts. Convenience for renaming the call site. */
@@ -85,17 +86,17 @@ export function useProjectMembers(projectId: string | null): UseProjectMembers {
 
   useEffect(() => { void load(false); }, [load]);
 
-  const add = useCallback(async (username: string, role: number) => {
+  const add = useCallback(async (username: string, role: number, laneAccess?: MemberLaneAccess) => {
     if (!jwt || !projectId) return null;
     const found = await lookupUser(jwt, username);
     if (!found) return null;
-    const next = await addProjectMember(jwt, projectId, username, role);
+    const next = await addProjectMember(jwt, projectId, username, role, laneAccess);
     await refresh();
     return next;
   }, [jwt, projectId, refresh]);
 
   const addMany = useCallback(async (
-    toAdd: Array<{ username: string; role: number }>,
+    toAdd: Array<{ username: string; role: number; laneAccess?: MemberLaneAccess }>,
   ) => {
     if (!jwt || !projectId || toAdd.length === 0) return [];
     const results = await addProjectMembers(jwt, projectId, toAdd);

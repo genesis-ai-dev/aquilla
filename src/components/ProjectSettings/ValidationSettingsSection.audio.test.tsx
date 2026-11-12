@@ -38,7 +38,7 @@ function draw(over: Record<string, unknown> = {}) {
 describe("ValidationSettingsSection — the audio policy", () => {
   it("offers its own role floor, self-validation switch and allowlist", () => {
     draw()
-    expect(screen.getByRole("combobox", { name: /Minimum role to validate recordings/i })).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "Minimum role to validate recordings" })).toBeInTheDocument()
     expect(screen.getByRole("switch", { name: /Allow validating your own recordings/i })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: /Named recording validators/i })).toBeInTheDocument()
   })

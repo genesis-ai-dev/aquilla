@@ -5,48 +5,109 @@
 // cell.audio.rename). Self-contained: resolves frontier audio URLs to
 // playable blobs and emits cell.audio.select / .remove / .rename.
 
+import { STATION_PICKS } from "@/lib/station/picks"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Bird, Check, CloudAlert, CloudUpload, FileClock, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { recordStep } from "@/lib/history/history"
+import { Bird, Check, CloudAlert, CloudUpload, FileClock, Pause, Pencil, Play, RotateCcw, Trash2 } from "lucide-react"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { fmtShortCalendarDate } from "@/lib/format-date"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote, NoteOnClick } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { audioIdSeededWith, fetchCellAudio, isDenoisedAudioId, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import { fetchCellAudio, isDenoisedAudioId, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { audioMimeForExt } from "@/lib/audio/mime"
-import { emitCellAudioSelect, emitCellAudioRemove, emitCellAudioRename } from "@/lib/sync/events-emit"
+import { isGeneratedTake } from "@/lib/audio/track-audio"
+import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
+import { emitCellAudioDeselect, emitCellAudioSelect, emitCellAudioRename } from "@/lib/sync/events-emit"
 import {
   injectOptimisticAudioAttachment,
-  injectOptimisticAudioRemove,
+  injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged,
   retryFailedAudioSync,
 } from "@/lib/audio/audio-attachments-bus"
+import { hasOwnRecordingLeft, removeTake, removeWholeTake, renameTake } from "@/lib/audio/take-actions"
+import { originalRecordingId, pieceNames, splitTakeName, takeBaseLabel, takeRows } from "@/lib/audio/take-groups"
+import { pieceGroupOf } from "@/lib/sync/cell-audio-read-types"
 import { useRecordingTextDrift } from "@/hooks/useRecordingTextDrift"
+import type { RecordingTextDrift } from "@/lib/audio/text-drift"
+import { transcriptVerdict } from "@/lib/audio/transcript-verdict"
+import { takeTrackVars } from "@/lib/timeline/take-colors"
+import { formatTakeSeconds, takePlayedMs } from "@/lib/audio/take-length"
+import { TakeRowWave } from "@/components/audio/TakeRowWave"
+import { TakeTextVerdict } from "@/components/audio/TakeTextVerdict"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { AudioValidationControl } from "@/components/cell/AudioValidationControl"
+import { PiecesApproved } from "@/components/audio/PiecesApproved"
 import { useAudioValidation } from "@/hooks/useAudioValidation"
 
-/** "Take 7" → 7; anything else → null. */
+/**
+ * "Take 7" → 7; anything else → null. A split take's pieces ("Take 7 · 2",
+ * AQU-1767) hold their take's number too, or the next recording would reuse it.
+ */
 function parseTakeNumber(label: string | null | undefined): number | null {
-  const m = label?.match(/^Take (\d+)$/)
+  const m = label?.match(/^Take (\d+)(?: · \d+)?$/)
   return m ? Number(m[1]) : null
 }
 
-/** The next fresh take name for a cell, given its current takes' labels. */
-export function nextTakeLabel(takes: Array<Pick<AudioAttachmentOut, "label">>): string {
+/** What numbering reads of a take: its name, and, for a piece, which take it is. */
+type NumberedTake = Pick<AudioAttachmentOut, "label"> & Partial<Pick<AudioAttachmentOut, "audioId" | "pieceOf" | "trimStartMs">>
+
+/**
+ * A line's takes as the take list counts them. AQU-981 (Sam, 2026-10-29): a
+ * take split into pieces is ONE take. It goes by the name of its first named
+ * piece in clip order, which is the name the list shows ("Take 2 · split in
+ * 2"), whatever its other pieces happen to be named. Returns the highest take
+ * number, and the takes with no name yet (each a list of its pieces, in clip
+ * order), which the backfill numbers after it. A cleaned copy is never named
+ * "Take N", so it is not counted.
+ */
+function takeNumbering<T extends NumberedTake>(takes: readonly T[]): { max: number; unnamed: Array<{ key: string; pieces: T[] }> } {
+  const groups = new Map<string, T[]>()
+  takes.forEach((t, i) => {
+    const key = t.pieceOf ?? t.audioId ?? `#${i}`
+    const list = groups.get(key)
+    if (list) list.push(t)
+    else groups.set(key, [t])
+  })
   let max = 0
-  for (const t of takes) {
-    const n = parseTakeNumber(t.label)
-    if (n != null && n > max) max = n
+  const unnamed: Array<{ key: string; pieces: T[] }> = []
+  for (const [key, list] of groups) {
+    const pieces = [...list].sort((a, b) => (a.trimStartMs ?? 0) - (b.trimStartMs ?? 0) || (a.audioId ?? "").localeCompare(b.audioId ?? ""))
+    const named = pieces.find((p) => p.label)
+    if (named) {
+      const n = parseTakeNumber(takeBaseLabel(named.label))
+      if (n != null && n > max) max = n
+    } else if (!pieces.every((p) => p.audioId && isDenoisedAudioId(p.audioId))) {
+      unnamed.push({ key, pieces })
+    }
   }
-  // Unlabeled legacy takes still occupy numbers once backfilled; count them
-  // in so a fresh recording never collides with a pending backfill.
-  const unlabeled = takes.filter((t) => !t.label).length
-  return `Take ${Math.max(max, unlabeled) + 1}`
+  unnamed.sort((a, b) => a.key.localeCompare(b.key))
+  return { max, unnamed }
+}
+
+/** The next fresh take name for a cell, given its current takes. */
+export function nextTakeLabel(takes: readonly NumberedTake[]): string {
+  // A take with no name yet takes a number once the list names it (after the
+  // highest), so a fresh recording counts it in and never collides with it.
+  const { max, unnamed } = takeNumbering(takes)
+  return `Take ${max + unnamed.length + 1}`
+}
+
+/** One row of the list: a take, or (AQU-1767) one piece of a split take. */
+interface ListRow {
+  att: AudioAttachmentOut
+  /** What the row plays: a split take's pieces, or the row's own clip. */
+  pieces: AudioAttachmentOut[]
+  isCleaned: boolean
+  /** A piece's row: the whole take it was cut from, its pieces in clip order. */
+  take?: AudioAttachmentOut[]
 }
 
 interface Props {
@@ -81,6 +142,54 @@ interface Props {
    *  recorder's utility strip owns that chrome and the count, so the two
    *  cannot say the same thing twice. */
   chromeless?: boolean
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /**
+   * "tab": the expanded cell's Recording tab lists a line's OTHER takes with
+   * this (Sam, 2026-09-29) — the take that plays is drawn above the list, so
+   * `hide` leaves it out. Each row gains the take's shape and how it compares
+   * with the text. Rename, remove noise, revert and delete stay on every row,
+   * as in the recorder (Sam, 2026-09-29: not hover-only).
+   * Selecting, renaming, deleting and cleaning are this component's, exactly
+   * as in the recorder.
+   */
+  variant?: "recorder" | "tab" | "pieces"
+  /*
+   * "pieces" (AQU-1767, Sam 2026-10-14): a split take's own pieces, listed
+   * under it in the Recording tab — play, approve, rename, delete each. Each
+   * piece has its own votes and its own name (decision 7). No choosing (they
+   * play together, as one take), no cleaning (the take is cleaned whole,
+   * above) and no text check (the take is checked whole).
+   *
+   * Elsewhere a split take is ONE row: its name, "split in N", its whole
+   * length; play plays its pieces, choose and delete act on all of them, and
+   * Remove noise keeps its cuts. It takes no vote: it says how many of its
+   * pieces are approved. In the recorder each piece is listed under it on a
+   * row of its own, as in the pieces list, with its own vote and its own name
+   * (decision 7, Sam 2026-10-22).
+   */
+  /** Takes to leave out of the list (the tab's playing take). */
+  hide?: readonly string[]
+  /** Tab: each take's word timings, for how it compares with the text. */
+  timingsFor?: (audioId: string) => ReadonlyArray<{ word: string; end: number }> | null | undefined
+  /** The file whose timeline these takes are on, for their tracks' colours:
+   *  `fileId` itself, except for a heard line's takes, whose tracks are the
+   *  subtitle file's while they live in its hidden cue sibling. */
+  trackFileId?: string
+  /** Tab: the text those timings are compared with, or null when nothing
+   *  can say what the takes should say (a part of a split line). */
+  cellText?: string | null
+  /** The cell's take history, when the caller already read it — the tab reads
+   *  it once for the playing take and this list together. */
+  history?: ReadonlyMap<string, RecordingTextDrift>
+  /**
+   * Nothing here may change a take: no choosing, renaming, cleaning,
+   * reverting or deleting — play only. The recorder only ever opens for
+   * someone who can edit; the Recording tab shows this list to everyone, and
+   * a viewer's press would paint a change the server then refuses (found
+   * 2026-09-29, walking the tab as a viewer).
+   */
+  readOnly?: boolean
 }
 
 export function TakesStrip({
@@ -96,9 +205,24 @@ export function TakesStrip({
   author,
   session,
   chromeless = false,
+  targetLang,
+  variant = "recorder",
+  hide,
+  timingsFor,
+  cellText = "",
+  trackFileId,
+  history,
+  readOnly = false,
 }: Props) {
-  const t = useT()
-  const audioValidation = useAudioValidation({ project, fileId, cellId, username: author, jwt: session?.jwt ?? null })
+  const tab = variant === "tab"
+  const piecesList = variant === "pieces"
+  const { t, locale } = useI18n()
+  const audioValidation = useAudioValidation({
+    project, fileId, cellId, username: author, jwt: session?.jwt ?? null,
+    ...(targetLang ? { targetLang } : {}),
+    // AQU-1572: a piece's vote is cast in the Recording tab.
+    surface: piecesList ? "recording-tab" : "recorder",
+  })
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -111,6 +235,8 @@ export function TakesStrip({
   const latestCircleRef = useRef<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const urlRef = useRef<string | null>(null)
+  // AQU-1767: the frame loop that holds a piece's playback to its window.
+  const windowLoopRef = useRef<number | null>(null)
 
   // One history read per cell answers two questions about every take on it:
   //
@@ -127,14 +253,15 @@ export function TakesStrip({
   // doubled the history read on the hottest strip in the editor.
   const allTakeIds = useMemo(() => takes.map((t) => t.audioId), [takes])
   const driftTokenFetcher = useMemo(() => audioSyncTokenFetcherForSession(session), [session])
-  const takeHistory = useRecordingTextDrift({
-    enabled: Boolean(session?.jwt) && allTakeIds.length > 0,
+  const ownHistory = useRecordingTextDrift({
+    enabled: !history && Boolean(session?.jwt) && allTakeIds.length > 0,
     projectId,
     fileId,
     cellId,
     audioIds: allTakeIds,
     getTokenForFile: driftTokenFetcher,
   })
+  const takeHistory = history ?? ownHistory
 
   // The take that actually SOUNDS, mirroring playback's preference order: a
   // recorded take holding the recording slot wins; otherwise the selected
@@ -158,18 +285,67 @@ export function TakesStrip({
     }
   }, [activeTakeId, optimisticSelectedId])
 
+  // AQU-1217: one sound at a time. An audition registers with the audio
+  // coordinator, so starting the recorder's selected-take waveform silences it
+  // and starting an audition silences the waveform. Built on first use, inside
+  // a callback — never read during render.
+  const auditionRef = useRef<ActiveAudioController | null>(null)
+
   const stopPlayback = useCallback(() => {
+    if (windowLoopRef.current != null) { cancelAnimationFrame(windowLoopRef.current); windowLoopRef.current = null }
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
     if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null }
+    if (auditionRef.current) clearActiveAudioIf(auditionRef.current)
     setPlayingId(null)
   }, [])
 
+  const audition = useCallback((): ActiveAudioController => {
+    if (!auditionRef.current) {
+      auditionRef.current = {
+        isPlaying: () => Boolean(audioRef.current && !audioRef.current.paused),
+        play: async () => {},
+        pause: () => stopPlayback(),
+      }
+    }
+    return auditionRef.current
+  }, [stopPlayback])
+
   useEffect(() => () => stopPlayback(), [stopPlayback])
 
-  const play = useCallback(async (att: AudioAttachmentOut) => {
-    if (playingId === att.audioId) { stopPlayback(); return }
+  // AQU-1767: start at the first window once the clip can seek, then on every
+  // frame move on to the next window at each one's end, and stop after the last.
+  const holdToWindows = useCallback(async (audio: HTMLAudioElement, windows: readonly { startSec: number; endSec: number | null }[]) => {
+    if (audio.readyState < 1) {
+      await new Promise<void>((resolve) => {
+        audio.addEventListener("loadedmetadata", () => resolve(), { once: true })
+        audio.addEventListener("error", () => resolve(), { once: true })
+      })
+    }
+    let w = 0
+    audio.currentTime = windows[0].startSec
+    const tick = () => {
+      if (audioRef.current !== audio) return
+      const end = windows[w].endSec
+      if (end != null && audio.currentTime >= end) {
+        w += 1
+        if (w >= windows.length) { stopPlayback(); return }
+        audio.currentTime = windows[w].startSec
+      }
+      windowLoopRef.current = requestAnimationFrame(tick)
+    }
+    windowLoopRef.current = requestAnimationFrame(tick)
+  }, [stopPlayback])
+
+  /**
+   * Audition a take. `windows` (AQU-1767): play only these parts of the
+   * recording, in order — a piece's window, or a split take's pieces. Absent,
+   * the whole clip as always. `key`: the row playing it, when a split take's
+   * row and its first piece's row share a clip.
+   */
+  const play = useCallback(async (att: AudioAttachmentOut, windows?: readonly { startSec: number; endSec: number | null }[], key: string = att.audioId) => {
+    if (playingId === key) { stopPlayback(); return }
     stopPlayback()
-    setLoadingId(att.audioId)
+    setLoadingId(key)
     try {
       let src = att.url
       const frontier = parseFrontierAudioUrl(att.url)
@@ -188,14 +364,16 @@ export function TakesStrip({
       const audio = new Audio(src)
       audioRef.current = audio
       audio.onended = () => stopPlayback()
+      claimActiveAudio(audition())
+      if (windows && windows.length > 0) await holdToWindows(audio, windows)
       await audio.play()
-      setPlayingId(att.audioId)
+      setPlayingId(key)
     } catch {
       stopPlayback()
     } finally {
-      setLoadingId((cur) => (cur === att.audioId ? null : cur))
+      setLoadingId((cur) => (cur === key ? null : cur))
     }
-  }, [playingId, stopPlayback, session, projectId, fileId])
+  }, [playingId, stopPlayback, audition, session, projectId, fileId, holdToWindows])
 
   const circle = useCallback(async (audioId: string) => {
     // Effective selected = optimistic override if in-flight, else server value.
@@ -221,24 +399,41 @@ export function TakesStrip({
     // per-(cell, slot) deselect would drop whatever was really there.
     const slot = take?.slot ?? RECORDING_SLOT
     // Round 8c: a generated take only sounds when no recorded take holds the
-    // recording slot — hand that slot back to the source clip alongside.
+    // recording slot — hand that slot back to the source clip alongside, or,
+    // with no source clip to park it on (every text file), empty it: that case
+    // used to do nothing, and the recording kept playing (Sam, 2026-09-28).
     //
     // THE DEFAULT TRACK ONLY. An added track has one slot holding both kinds,
-    // so picking either already deselects the other and there is no shared
-    // source clip to park anything on.
-    const displaceToSource =
+    // so picking either already deselects the other.
+    const displaceRecording =
       slot === GENERATED_VOICE_SLOT &&
-      sourceClip != null &&
       takes.some((t) => t.audioId === selectedAudioId && t.slot === RECORDING_SLOT)
     try {
-      const selectP = emitCellAudioSelect({ projectId, fileId, cellId, audioId, slot, author })
+      const selectP = emitCellAudioSelect({
+        projectId, fileId, cellId, audioId, slot, author,
+        ...(targetLang ? { targetLang } : {}),
+      })
       if (take) injectOptimisticAudioAttachment(fileId, cellId, take, selectP)
       await selectP
-      if (displaceToSource) {
-        const displaceP = emitCellAudioSelect({
-          projectId, fileId, cellId, audioId: sourceClip.audioId, slot: "recording", author,
+      // AQU-1767 phase 2: choosing a take is a step — unless it also handed the
+      // recording slot back (the default track's generated-voice juggle),
+      // which a one-slot undo could not put back honestly.
+      if (!displaceRecording) {
+        const groupOf = (id: string | null | undefined) => (id ? takes.find((t) => t.audioId === id)?.pieceOf ?? id : null)
+        recordStep({
+          kind: "take.select",
+          data: { cellId, slot, before: groupOf(effectiveSelected), after: groupOf(audioId)! },
+          labelKey: "editor.history.stepChooseTake",
+          fileId,
         })
-        injectOptimisticAudioAttachment(fileId, cellId, sourceClip, displaceP)
+      }
+      if (displaceRecording) {
+        const where = { projectId, fileId, cellId, slot: RECORDING_SLOT, author, ...(targetLang ? { targetLang } : {}) }
+        const displaceP = sourceClip
+          ? emitCellAudioSelect({ ...where, audioId: sourceClip.audioId })
+          : emitCellAudioDeselect(where)
+        if (sourceClip) injectOptimisticAudioAttachment(fileId, cellId, sourceClip, displaceP)
+        else injectOptimisticAudioDeselect(fileId, cellId, RECORDING_SLOT, displaceP)
         await displaceP
       }
       notifyAudioAttachmentsChanged(fileId)
@@ -250,58 +445,91 @@ export function TakesStrip({
     } finally {
       setBusyId((cur) => (cur === audioId ? null : cur))
     }
-  }, [optimisticSelectedId, activeTakeId, selectedAudioId, sourceClip, takes, projectId, fileId, cellId, author])
+  }, [optimisticSelectedId, activeTakeId, selectedAudioId, sourceClip, takes, projectId, fileId, cellId, author, targetLang])
 
   const remove = useCallback(async (audioId: string) => {
     setBusyId(audioId)
     try {
       if (playingId === audioId) stopPlayback()
-      // SUB-48: deletes get their own overlay. Without it the take stayed on
-      // screen while its remove sat in the outbox — reading as "it won't
-      // delete" — and any still-queued attach for the same clip painted it
-      // back (injectOptimisticAudioRemove cancels that attach outright).
       // The take's own slot, verbatim — see the note in `circle` above for why
       // the old binary coercion became a data-mover once a take could belong
       // to an added track.
       const slot = takes.find((t) => t.audioId === audioId)?.slot ?? RECORDING_SLOT
-      const removeP = emitCellAudioRemove({ projectId, fileId, cellId, audioId, author })
-      injectOptimisticAudioRemove(fileId, cellId, audioId, slot, removeP)
-      await removeP
-      notifyAudioAttachmentsChanged(fileId)
+      const playingNow = optimisticSelectedId ?? activeTakeId
+      const groupOf = (id: string | null | undefined) => (id ? takes.find((t) => t.audioId === id)?.pieceOf ?? id : null)
+      await removeTake({
+        projectId, fileId, cellId, audioId, slot, author, ...(targetLang ? { targetLang } : {}),
+        history: { wasSelected: groupOf(playingNow) === groupOf(audioId) },
+      })
       // Was that the cell's last recording? `takes` still holds the pre-removal
-      // list, so the survivors are everything else that is a take OF THIS CELL
-      // — `audioIdSeededWith` keeps the shared imported source clip, which is
-      // seeded with the file's id, from counting as one.
-      // …and "a recording" means a non-synthetic one on ANY track, which the
-      // attachment says (`voiceId`) rather than the slot: an added track's one
-      // slot holds recorded and generated takes alike.
-      const ownTakesLeft = takes.filter(
-        (t) => t.audioId !== audioId && !t.voiceId && audioIdSeededWith(t.audioId, cellId),
-      )
-      if (ownTakesLeft.length === 0) onLastTakeRemoved?.(cellId)
+      // list, so the survivors are everything else that is a take OF THIS CELL.
+      if (!hasOwnRecordingLeft(takes, audioId, cellId)) onLastTakeRemoved?.(cellId)
     } catch {
       // The overlay drops itself on rejection and pokes a refetch, so the row
       // reappears from server truth rather than the UI wedging.
     } finally {
       setBusyId((cur) => (cur === audioId ? null : cur))
     }
-  }, [playingId, stopPlayback, takes, projectId, fileId, cellId, author, onLastTakeRemoved])
+  }, [playingId, stopPlayback, takes, projectId, fileId, cellId, author, onLastTakeRemoved, targetLang])
+
+  // AQU-1767 (Sam, 2026-10-14): a split take's row deletes the whole take, every
+  // piece, in one step.
+  const removeWhole = useCallback(async (pieces: readonly AudioAttachmentOut[]) => {
+    const [first] = pieces
+    if (!first) return
+    setBusyId(first.audioId)
+    try {
+      if (playingId === first.audioId) stopPlayback()
+      const playingNow = optimisticSelectedId ?? activeTakeId
+      const group = pieceGroupOf(first, first.audioId)
+      const wasSelected = pieces.some((p) => p.audioId === playingNow) ||
+        takes.some((t) => t.audioId === playingNow && pieceGroupOf(t, t.audioId) === group)
+      await removeWholeTake({
+        projectId, fileId, cellId, author, ...(targetLang ? { targetLang } : {}),
+        pieces: pieces.map((p) => ({ audioId: p.audioId, slot: p.slot ?? RECORDING_SLOT })),
+        history: { wasSelected },
+      })
+      const gone = new Set(pieces.map((p) => p.audioId))
+      const left = takes.map((t) => (gone.has(t.audioId) && t.audioId !== first.audioId ? { ...t, isDeleted: true } : t))
+      if (!hasOwnRecordingLeft(left, first.audioId, cellId)) onLastTakeRemoved?.(cellId)
+    } catch {
+      // The overlays drop themselves on rejection and poke a refetch.
+    } finally {
+      setBusyId((cur) => (cur === first.audioId ? null : cur))
+    }
+  }, [playingId, stopPlayback, optimisticSelectedId, activeTakeId, takes, projectId, fileId, cellId, author, onLastTakeRemoved, targetLang])
 
   // On-device noise removal: clean THIS take into a new (denoised) take. The
   // heavy RNNoise/wasm path is dynamically imported so it's only loaded when a
   // user actually denoises. denoiseTake handles upload + attach + bus poke.
   const [denoisingId, setDenoisingId] = useState<string | null>(null)
-  const denoise = useCallback(async (att: AudioAttachmentOut) => {
+  const denoise = useCallback(async (att: AudioAttachmentOut, pieces?: readonly AudioAttachmentOut[]) => {
     if (!session?.jwt || denoisingId) return
     setDenoisingId(att.audioId)
     try {
-      const { denoiseTake } = await import("@/lib/audio/denoise-take")
+      const { denoiseSplitTake, denoiseTake } = await import("@/lib/audio/denoise-take")
+      // Decision 11: an Undo step, naming the take that played in the slot the
+      // cleaned one lands in (none when another slot's take was playing).
+      const playing = takes.find((t) => t.audioId === (optimisticSelectedId ?? activeTakeId))
+      const playingIn = (slot: string) => (playing && playing.slot === slot ? (playing.pieceOf ?? playing.audioId) : null)
+      // AQU-1767: a split take is cleaned whole and keeps its cuts.
+      if (pieces && pieces.length > 1) {
+        await denoiseSplitTake({
+          projectId, fileId, cellId, pieces, author, session, ...(targetLang ? { targetLang } : {}),
+          history: { selectedBefore: playingIn(pieces[0].slot) },
+        })
+        return
+      }
       await denoiseTake({
         projectId, fileId, cellId,
         sourceAudioId: att.audioId,
         sourceUrl: att.url,
         author,
         session,
+        ...(targetLang ? { targetLang } : {}),
+        // AQU-2327: the cleaned take keeps this one's track, kept part and places.
+        source: att,
+        history: { selectedBefore: playingIn(att.slot ?? RECORDING_SLOT) },
       })
     } catch {
       // Failure leaves the original untouched; the strip simply doesn't gain a
@@ -309,7 +537,7 @@ export function TakesStrip({
     } finally {
       setDenoisingId((cur) => (cur === att.audioId ? null : cur))
     }
-  }, [session, denoisingId, projectId, fileId, cellId, author])
+  }, [session, denoisingId, projectId, fileId, cellId, author, targetLang, takes, optimisticSelectedId, activeTakeId])
 
   // Round 8: names are PERSISTED (att.label) — never derived from position.
   // Strip-local overrides show a rename/backfill instantly (a bus inject
@@ -331,30 +559,83 @@ export function TakesStrip({
       return changed ? next : prev
     })
   }, [takes])
-  const displayLabel = useCallback(
-    (att: AudioAttachmentOut): string =>
-      labelOverrides.get(att.audioId) ??
-      // A stored name is user data — never translated. Only the placeholder
-      // shown until a name exists (or is backfilled) is a UI string.
-      att.label ??
-      (isDenoisedAudioId(att.audioId)
-        ? t("audio.takesStrip.cleanedLabel")
-        : t("audio.takesStrip.takeFallback")),
-    [labelOverrides, t],
+  // AQU-2327 (Q2): a version saved from the Station keeps its take's name;
+  // the list tells them apart by "· version N", counted up the chain of takes
+  // each was made from (`referenceAudioId`).
+  const versionOf = useCallback(
+    (att: AudioAttachmentOut): number => {
+      if (STATION_PICKS.versions !== "under") return 1
+      const byId = new Map(takes.map((x) => [x.audioId, x]))
+      let n = 1
+      let ref = att.referenceAudioId
+      const seen = new Set<string>()
+      // Only a NAMED take can be a version: two unnamed takes (an old
+      // "Cleaned" take and its original) are different takes.
+      if (!att.label) return 1
+      while (ref && !seen.has(ref) && byId.has(ref)) {
+        seen.add(ref)
+        if (byId.get(ref)!.label !== att.label) break
+        n += 1
+        ref = byId.get(ref)!.referenceAudioId
+      }
+      return n
+    },
+    [takes],
   )
+  const displayLabel = useCallback(
+    (att: AudioAttachmentOut): string => {
+      const base =
+        labelOverrides.get(att.audioId) ??
+        // A stored name is user data — never translated. Only the placeholder
+        // shown until a name exists (or is backfilled) is a UI string.
+        att.label ??
+        (isDenoisedAudioId(att.audioId)
+          ? t("audio.takesStrip.cleanedLabel")
+          : t("audio.takesStrip.takeFallback"))
+      const v = versionOf(att)
+      return v > 1 ? t("editor.station.takeVersion", { take: base, n: v }) : base
+    },
+    [labelOverrides, t, versionOf],
+  )
+
+  // AQU-1767 (Sam, 2026-10-15): pieces numbered by where they sit, worked out
+  // here. A piece renamed on its own goes by that name (decision 7). Only the
+  // pieces of a split take: one never split goes by `displayLabel`, which
+  // keeps a saved version's "· version N" (AQU-2327).
+  const names = useMemo(() => {
+    const split = new Set(
+      takeRows(takes).flatMap((row) => (row.pieces.length > 1 ? row.pieces.map((p) => p.audioId) : [])),
+    )
+    return new Map([...pieceNames(takes)].filter(([id]) => split.has(id)))
+  }, [takes])
+  /** The name a row shows and a rename starts from: a piece's own or numbered
+   *  name, a take never split its stored one. (A split take's row is named by
+   *  `splitLabel`.) */
+  const shownLabel = useCallback(
+    (att: AudioAttachmentOut): string =>
+      labelOverrides.get(att.audioId) ?? names.get(att.audioId) ?? displayLabel(att),
+    [labelOverrides, names, displayLabel],
+  )
+  /** A split take's row: the name its pieces share, not any one piece's. */
+  const splitLabel = (pieces: readonly AudioAttachmentOut[]): string =>
+    splitTakeName(pieces.map((p) => ({ label: labelOverrides.get(p.audioId) ?? p.label }))) ??
+    (isDenoisedAudioId(pieces[0].audioId) ? t("audio.takesStrip.cleanedLabel") : t("audio.takesStrip.takeFallback"))
 
   // Inline rename (pencil → input; Enter/blur commits, Esc cancels).
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState("")
+  // Escape closes the box, and a closing box loses focus — whose handler
+  // would then save what Escape meant to throw away.
+  const renameCancelledRef = useRef(false)
   const commitRename = useCallback(
     async (att: AudioAttachmentOut) => {
       const label = renameDraft.trim()
       setRenamingId(null)
-      if (!label || label === displayLabel(att)) return
+      if (renameCancelledRef.current) { renameCancelledRef.current = false; return }
+      if (!label || label === shownLabel(att)) return
       setLabelOverrides((prev) => new Map(prev).set(att.audioId, label))
       try {
-        await emitCellAudioRename({ projectId, fileId, cellId, audioId: att.audioId, label, author })
-        notifyAudioAttachmentsChanged(fileId)
+        await renameTake({ projectId, fileId, cellId, audioId: att.audioId, label, author, ...(targetLang ? { targetLang } : {}), labelBefore: att.label ?? null })
       } catch {
         setLabelOverrides((prev) => {
           const next = new Map(prev)
@@ -363,61 +644,100 @@ export function TakesStrip({
         })
       }
     },
-    [renameDraft, displayLabel, projectId, fileId, cellId, author],
+    [renameDraft, shownLabel, projectId, fileId, cellId, author, targetLang],
   )
 
   // Legacy takes recorded before labels existed: backfill "Take N" ONCE (by
   // the takes' stable id/order), after which every name is permanent.
   const backfilledRef = useRef(false)
   useEffect(() => {
-    if (backfilledRef.current || !session?.jwt) return
-    const unlabeled = takes.filter((t) => !t.label && !isDenoisedAudioId(t.audioId) && !labelOverrides.has(t.audioId))
-    if (unlabeled.length === 0) return
+    // Not for someone who may not rename: every backfilled name would be
+    // refused by the server.
+    // The pieces list sees one take's pieces and none of the line's other
+    // takes, so it can't number anything: the line's own list does.
+    if (backfilledRef.current || !session?.jwt || readOnly || piecesList) return
+    // AQU-981 (Sam, 2026-10-29): one number per TAKE. A take in pieces gets one
+    // number, and its pieces are named as a cut names them: "Take 2 · 1",
+    // "Take 2 · 2". Naming each piece as its own take made the line read
+    // "Take 1", "Take 2 · split in 2", then "Take 4".
+    const { max, unnamed } = takeNumbering(takes.map((t) => ({ ...t, label: labelOverrides.get(t.audioId) ?? t.label })))
+    if (unnamed.length === 0) return
     backfilledRef.current = true
-    let n = 0
-    for (const t of takes) {
-      const parsed = parseTakeNumber(t.label)
-      if (parsed != null && parsed > n) n = parsed
-    }
-    const sorted = [...unlabeled].sort((a, b) => a.audioId.localeCompare(b.audioId))
     void (async () => {
-      for (const t of sorted) {
+      let n = max
+      for (const take of unnamed) {
         n += 1
-        const label = `Take ${n}`
-        setLabelOverrides((prev) => new Map(prev).set(t.audioId, label))
-        try {
-          await emitCellAudioRename({ projectId, fileId, cellId, audioId: t.audioId, label, author })
-        } catch {
-          /* backfill is best-effort; next mount retries */
+        const names = take.pieces.map((p, i) => [p.audioId, take.pieces.length > 1 ? `Take ${n} · ${i + 1}` : `Take ${n}`] as const)
+        setLabelOverrides((prev) => {
+          const next = new Map(prev)
+          for (const [audioId, label] of names) next.set(audioId, label)
+          return next
+        })
+        for (const [audioId, label] of names) {
+          try {
+            await emitCellAudioRename({
+              projectId, fileId, cellId, audioId, label, author,
+              ...(targetLang ? { targetLang } : {}),
+            })
+          } catch {
+            /* backfill is best-effort; next mount retries */
+          }
         }
       }
       notifyAudioAttachmentsChanged(fileId)
     })()
-  }, [takes, session?.jwt, labelOverrides, projectId, fileId, cellId, author])
+  }, [takes, session?.jwt, labelOverrides, projectId, fileId, cellId, author, targetLang, readOnly, piecesList])
 
   // Cleaned (dn-) takes pinned above originals; stable id order within groups.
-  const ordered = useMemo(() => {
-    const byId = (a: AudioAttachmentOut, b: AudioAttachmentOut) => a.audioId.localeCompare(b.audioId)
-    const cleaned = takes.filter((t) => isDenoisedAudioId(t.audioId)).sort(byId)
-    const originals = takes.filter((t) => !isDenoisedAudioId(t.audioId)).sort(byId)
-    return [...cleaned, ...originals].map((att) => ({
-      att,
-      isCleaned: isDenoisedAudioId(att.audioId),
-    }))
-  }, [takes])
+  // AQU-1767: a split take is one row (its first piece stands for it), named
+  // as cleaned by its group; the pieces list keeps a row per piece, in order.
+  // Decision 7 (Sam, 2026-10-22): the recorder lists each piece of a split
+  // take under it, on a row of its own. `take` marks a piece's row: the whole
+  // take it was cut from, its pieces in clip order.
+  const ordered = useMemo((): ListRow[] => {
+    const listed = hide?.length ? takes.filter((t) => !hide.includes(t.audioId)) : takes
+    const pieceRows = (take: AudioAttachmentOut[]): ListRow[] =>
+      take.map((att) => ({ att, pieces: [att], isCleaned: false, take }))
+    if (piecesList) return takeRows(listed).flatMap((row) => pieceRows(row.pieces))
+    const rows = takeRows(listed).map((row) => ({ att: row.pieces[0], pieces: row.pieces, isCleaned: isDenoisedAudioId(row.group) }))
+    const byId = (a: { att: AudioAttachmentOut }, b: { att: AudioAttachmentOut }) => a.att.audioId.localeCompare(b.att.audioId)
+    const sorted = [...rows.filter((r) => r.isCleaned).sort(byId), ...rows.filter((r) => !r.isCleaned).sort(byId)]
+    // The Recording tab lists a piece only under the take that plays.
+    if (tab) return sorted
+    return sorted.flatMap((row) => (row.pieces.length > 1 ? [row, ...pieceRows(row.pieces)] : [row]))
+  }, [takes, hide, piecesList, tab])
+  // What a heading counts: takes, never the pieces listed under them.
+  const takeCount = piecesList ? ordered.length : ordered.filter((r) => !r.take).length
 
-  if (takes.length === 0) return null
+  // AQU-1767 (Sam, 2026-10-15): every take dated by the recording its words
+  // came from.
+  const takesById = useMemo(() => Object.fromEntries(takes.map((t) => [t.audioId, t])), [takes])
+
+  if (ordered.length === 0) return null
 
   const haveTake = new Set(takes.map((t) => t.audioId))
 
   return (
-    <div className={chromeless ? "px-4 py-2" : "border-t px-5 py-3"}>
+    <div
+      className={tab || piecesList ? "flex flex-col gap-1" : chromeless ? "px-4 py-2" : "border-t px-5 py-3"}
+      data-testid={tab ? "tab-other-takes" : piecesList ? "tab-take-pieces" : undefined}
+    >
+      {tab && (
+        <div className="text-[11px] font-medium text-muted-foreground">
+          {t("editor.recordingTab.otherTakes", { count: takeCount })}
+        </div>
+      )}
+      {piecesList && (
+        <div className="text-[11px] font-medium text-muted-foreground" data-testid="take-pieces-heading">
+          {t("editor.recordingTab.pieces", { count: takeCount })}
+        </div>
+      )}
       {/* The recorder's utility strip carries the count and the border itself,
           so inside it this component renders rows and nothing else — two
           "Takes (3)" headings three inches apart is the failure this avoids. */}
-      {!chromeless && (
+      {!chromeless && !tab && !piecesList && (
         <div className="mb-2 text-xs text-muted-foreground/60">
-          {t("audio.takesStrip.heading", { count: takes.length })}
+          {t("audio.takesStrip.heading", { count: takeCount })}
         </div>
       )}
       {/* Round 8: rows, not chips — one take per line, name first.
@@ -427,20 +747,50 @@ export function TakesStrip({
           this component cannot know, and a second cap in here would fight
           whichever one it is inside. */}
       <div className="flex flex-col gap-1">
-        {ordered.map(({ att, isCleaned }) => {
+        {ordered.map(({ att, pieces, isCleaned, take }) => {
           // Use optimistic override while in-flight; fall back to server value.
           const effectiveSelectedId = optimisticSelectedId ?? activeTakeId
-          const isCircled = att.audioId === effectiveSelectedId
+          // AQU-1767: a split take, as one row.
+          const isSplit = pieces.length > 1
+          // AQU-1767: one piece of a split take, on its own row.
+          const isPiece = take != null
+          // The recorder lists a split take's row and its first piece's row
+          // together, and both are that piece's clip: a piece's row there goes
+          // by its own key (and test ids).
+          const rowKey = isPiece && !piecesList ? `piece-${att.audioId}` : att.audioId
+          // A piece of the playing take is not "chosen" on its own: the take is.
+          const isCircled = !isPiece && pieces.some((p) => p.audioId === effectiveSelectedId)
+          // What plays: a piece's own window, or a split take's pieces.
+          const windows = isPiece || isSplit
+            ? pieces.map((p) => ({ startSec: (p.trimStartMs ?? 0) / 1000, endSec: p.trimEndMs == null ? null : p.trimEndMs / 1000 }))
+            : undefined
             // AQU-646 stage 3: synthetic-ness comes off the TAKE, not off its slot —
-    // an added track's single slot holds both kinds. `voiceId` is set by all
-    // three paths that mint a generated voice.
-    const isGenerated = Boolean(att.voiceId) || att.slot === GENERATED_VOICE_SLOT
+    // an added track's single slot holds both kinds. AQU-2235: the one rule
+    // every surface that draws the sparkle asks.
+    const isGenerated = isGeneratedTake({ selectedGeneratedVoiceAudioId: selectedGeneratedAudioId }, att.audioId, att)
           // AQU-1372: when this take was made and who made it. Absent — never
           // guessed — while the history read is still in flight, or when the
           // 200-event window does not reach back to this take's attach.
-          const provenance = takeHistory.get(att.audioId) ?? null
-          const isPlaying = att.audioId === playingId
-          const isLoading = att.audioId === loadingId
+          // AQU-1767 (Sam, 2026-10-15): dated by the recording its words came
+          // from — not by when a piece was cut or a copy cleaned — so a take
+          // and all its pieces agree. A piece's own row says neither: the
+          // take above it does, once.
+          const provenance = isPiece
+            ? null
+            : takeHistory.get(originalRecordingId(takesById, att.audioId)) ??
+              takeHistory.get(pieceGroupOf(att, att.audioId)) ??
+              takeHistory.get(att.audioId) ??
+              null
+          // A recording's words checked against the line's text, in the tab.
+          // A split take is checked whole: whichever piece holds its transcript.
+          const verdict = tab && !isGenerated
+            ? transcriptVerdict({
+                timings: pieces.map((p) => timingsFor?.(p.audioId)).find((tm) => tm && tm.length > 0) ?? timingsFor?.(att.audioId),
+                cellText,
+              })
+            : null
+          const isPlaying = rowKey === playingId
+          const isLoading = rowKey === loadingId
           const isBusy = att.audioId === busyId
           // Disable all circle buttons while any selection switch is in flight.
           const isSelectInFlight = busyId !== null
@@ -449,19 +799,40 @@ export function TakesStrip({
           // as that take is still present.
           const revertTo = att.referenceAudioId
           const canRevert = isCleaned && !!revertTo && haveTake.has(revertTo)
+          // Decision 7 (Sam, 2026-10-22): a piece takes its own vote. In the
+          // pieces list it sits under the take that plays, from whoever may
+          // validate; in the recorder only while its take is the circled one,
+          // as every take there. A split take's row takes none: it says how
+          // many of its pieces are approved.
+          const takeCircled = isPiece && take.some((p) => p.audioId === effectiveSelectedId)
+          const voteReadOnly = isPiece
+            ? !piecesList && (readOnly || !takeCircled)
+            : readOnly || tab || !isCircled
+          const validationTakes = audioValidation.takesFor({
+            attachments: Object.fromEntries(pieces.map((p) => [p.audioId, p])),
+            selectedBySlot: { [att.slot]: att.audioId },
+          })
+          // Slice 3A (Sam, Oct 29): a cut take's row that says how many of its
+          // pieces are approved says how many pieces it is in, so it carries
+          // no "· split in 3".
+          const showsPiecesCount = isSplit && validationTakes.length > 0
           return (
             <div
-              key={att.audioId}
-              data-testid={`take-row-${att.audioId}`}
+              key={rowKey}
+              data-testid={`take-row-${rowKey}`}
+              // The pieces count measures the text in this row (PiecesApproved).
+              data-fit-row={isSplit ? "" : undefined}
               className={cn(
-                "flex w-full items-center gap-1.5 rounded-md border px-1.5 py-1 text-xs transition-colors",
+                "group/take flex items-center gap-1.5 rounded-md border px-1.5 py-1 text-xs transition-colors",
+                // The recorder's piece rows sit indented under their take.
+                isPiece && !piecesList ? "ms-5" : "w-full",
                 isCircled
                   ? isGenerated
                     ? "border-violet-500/60 bg-violet-500/10"
                     : "border-emerald-500/60 bg-emerald-500/10"
                   : isCleaned
                     ? "border-emerald-500/30 bg-emerald-500/5"
-                    : "border-border bg-muted/30",
+                    : tab ? "border-border bg-background hover:bg-muted/40" : "border-border bg-muted/30",
               )}
             >
               <AppTooltip content={isPlaying ? t("common.stop") : t("audio.takesStrip.playTakeTooltip")}>
@@ -469,7 +840,7 @@ export function TakesStrip({
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  onClick={() => void play(att)}
+                  onClick={() => void play(att, windows, rowKey)}
                   aria-label={isPlaying ? t("common.stop") : t("audio.takesStrip.playTakeTooltip")}
                   className="rounded-md hover:bg-background"
                 >
@@ -478,13 +849,39 @@ export function TakesStrip({
                     : <Play className="h-3.5 w-3.5" />}
                 </Button>
               </AppTooltip>
-              <span className="flex min-w-0 flex-1 items-center gap-1 tabular-nums">
+              {/* AQU-2235 (Sam's board 52): every takes list carries the take's
+                  56 × 20 shape — the recording window's too, not only the
+                  Recording tab's. */}
+              <TakeRowWave
+                projectId={projectId}
+                fileId={fileId}
+                // A split take's shape runs from its first piece to its last.
+                att={isSplit
+                  ? { ...att, trimStartMs: Math.min(...pieces.map((p) => p.trimStartMs ?? 0)), trimEndMs: pieces[pieces.length - 1].trimEndMs }
+                  : att}
+                session={session}
+                strategy={project.audioMediaStrategy}
+                generated={isGenerated}
+                trackVars={takeTrackVars({ files: project.files, fileId: trackFileId ?? fileId, slot: att.slot })}
+              />
+              {/* Slice 3A (Oct 29): a cut take's text clips at its own edge, so
+                  nothing in it is ever drawn over the buttons or the pieces
+                  count after it, and keeps room for a name like "Take 12" and
+                  its length, so the count is what gives way. */}
+              <span
+                data-fit-text={isSplit ? "" : undefined}
+                className={cn(
+                  "flex min-w-0 flex-1 items-center gap-1 tabular-nums",
+                  isSplit && "min-w-[calc(11ch+0.25rem)] overflow-hidden",
+                )}
+              >
                 {isCleaned && <Bird className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400" />}
-                {isGenerated && <Sparkles className="h-3 w-3 shrink-0 text-violet-600 dark:text-violet-400" />}
-                {renamingId === att.audioId ? (
+                {/* AQU-2235: no second star beside the name — the one in the
+                    take's shape is the only mark (Sam, Oct 25). */}
+                {renamingId === rowKey ? (
                   <input
                     autoFocus
-                    data-testid={`take-rename-${att.audioId}`}
+                    data-testid={`take-rename-${rowKey}`}
                     value={renameDraft}
                     onChange={(e) => setRenameDraft(e.target.value)}
                     onBlur={() => void commitRename(att)}
@@ -493,6 +890,7 @@ export function TakesStrip({
                         e.preventDefault()
                         void commitRename(att)
                       } else if (e.key === "Escape") {
+                        renameCancelledRef.current = true
                         setRenamingId(null)
                       }
                     }}
@@ -500,70 +898,125 @@ export function TakesStrip({
                   />
                 ) : (
                   <>
-                    <span data-testid={`take-label-${att.audioId}`} className="truncate font-medium">
-                      {displayLabel(att)}
+                    {/* Slice 3A evidence (Oct 25): the name keeps room for
+                        "Take 12" — on a cut take's row too (Sam, Oct 29): there
+                        the pieces count shortens before the name gives up any. */}
+                    <span data-testid={`take-label-${rowKey}`} className="min-w-[7ch] truncate font-medium">
+                      {isSplit ? splitLabel(pieces) : shownLabel(att)}
                     </span>
-                    {att.durationMs != null ? (
-                      <span className="shrink-0 text-muted-foreground/70">{(att.durationMs / 1000).toFixed(1)}s</span>
+                    {isSplit && !showsPiecesCount && (
+                      <span data-testid={`take-split-${att.audioId}`} className="min-w-0 truncate text-muted-foreground/70">
+                        · {t("editor.recordingTab.splitInto", { count: pieces.length })}
+                      </span>
+                    )}
+                    {isSplit ? (
+                      <span data-testid={`take-length-${rowKey}`} className="shrink-0 text-muted-foreground/70">
+                        {formatTakeSeconds(takePlayedMs(pieces) ?? 0)}s
+                      </span>
+                    ) : att.durationMs != null ? (
+                      // The length that plays: a trimmed take's kept part
+                      // (AQU-1217), as the chip and the take on top say it.
+                      <span data-testid={`take-length-${rowKey}`} className="shrink-0 text-muted-foreground/70">
+                        {formatTakeSeconds(takePlayedMs([att]) ?? att.durationMs)}s
+                      </span>
                     ) : (
                       // SUB-48: no measured length. Say so — a blank space read
                       // as "fine" while the chip was quietly section-width.
-                      <span
-                        title={t("audio.takesStrip.unknownLengthTooltip")}
-                        data-testid={`take-unknown-length-${att.audioId}`}
-                        className="shrink-0 text-muted-foreground/50"
-                      >
-                        ?
-                      </span>
+                      // Why, on a click of the mark (AQU-2260).
+                      <NoteOnClick note={t("audio.takesStrip.unknownLengthTooltip")} className="shrink-0">
+                        <span
+                          data-testid={`take-unknown-length-${rowKey}`}
+                          className="shrink-0 text-muted-foreground/50"
+                        >
+                          ?
+                        </span>
+                      </NoteOnClick>
                     )}
                     {att.pendingSync && (
-                      <span
-                        title={t("audio.takesStrip.pendingSyncTooltip")}
-                        data-testid={`take-saving-${att.audioId}`}
-                        className="flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground/70"
-                      >
-                        <CloudUpload className="h-3 w-3 animate-pulse" /> {t("common.saving")}
-                      </span>
+                      <NoteOnClick note={t("audio.takesStrip.pendingSyncTooltip")} className="shrink-0">
+                        <span
+                          data-testid={`take-saving-${rowKey}`}
+                          className="flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground/70"
+                        >
+                          <CloudUpload className="h-3 w-3 animate-pulse" /> {t("common.saving")}
+                        </span>
+                      </NoteOnClick>
                     )}
                     {/* AQU-924: this take never reached the server. Say so ON the
                         take and offer the retry here — it used to just vanish. */}
+                    {/* The button says what happened and what it does; that
+                        the take is still safe on this device is behind its (i)
+                        (AQU-2260 — never a hover). */}
                     {att.syncFailed && (
-                      <button
-                        type="button"
-                        title={t("audio.takesStrip.syncFailedTooltip")}
-                        data-testid={`take-sync-failed-${att.audioId}`}
-                        onClick={() => {
-                          void retryFailedAudioSync(projectId, fileId, cellId, att.audioId)
-                        }}
-                        className="flex shrink-0 items-center gap-0.5 rounded px-1 text-[10px] text-destructive hover:bg-destructive/10"
-                      >
-                        <CloudAlert className="h-3 w-3" /> {t("audio.takesStrip.syncFailedRetry")}
-                      </button>
+                      <span className="flex shrink-0 items-center">
+                        <button
+                          type="button"
+                          data-testid={`take-sync-failed-${rowKey}`}
+                          onClick={() => {
+                            void retryFailedAudioSync(projectId, fileId, cellId, att.audioId)
+                          }}
+                          className="flex shrink-0 items-center gap-0.5 rounded px-1 text-[10px] text-destructive hover:bg-destructive/10"
+                        >
+                          <CloudAlert className="h-3 w-3" /> {t("audio.takesStrip.syncFailedRetry")}
+                        </button>
+                        <InfoNote
+                          label={t("common.aboutAria", { name: t("audio.takesStrip.syncFailedRetry") })}
+                          className="text-destructive/70 hover:text-destructive"
+                          iconClassName="h-3 w-3"
+                        >
+                          {t("audio.takesStrip.syncFailedTooltip")}
+                        </InfoNote>
+                      </span>
                     )}
                     {/* AQU-1372: "recorded when, by whom" — the answer the
                         event log already holds, on the row that asks it.
-                        Compact by necessity (this row is dense): the date and
-                        the person inline, the exact time in the tooltip. */}
-                    {provenance && (
-                      <span
-                        data-testid={`take-recorded-${att.audioId}`}
-                        title={t(
-                          isGenerated
-                            ? "audio.takesStrip.generatedByTooltip"
-                            : "audio.takesStrip.recordedByTooltip",
-                          {
-                            datetime: new Date(provenance.recordedAt).toLocaleString(),
-                            author: provenance.recordedBy,
-                          },
-                        )}
-                        className="min-w-0 shrink truncate text-[10px] text-muted-foreground/60"
-                      >
-                        {t("audio.takesStrip.recordedByBadge", {
-                          date: new Date(provenance.recordedAt).toLocaleDateString(),
-                          author: provenance.recordedBy,
-                        })}
-                      </span>
-                    )}
+                        Compact by necessity (this row is dense): the short
+                        calendar date and the person inline; the exact time
+                        opens in DateTooltip, the same hover every other date
+                        uses. */}
+                    {provenance && (() => {
+                      const recorded = (
+                        <span
+                          data-testid={`take-recorded-${att.audioId}`}
+                          className={cn(
+                            "inline-flex items-center text-[10px] text-muted-foreground/60",
+                            isSplit ? "shrink-0" : "min-w-0 max-w-full shrink",
+                          )}
+                        >
+                          <DateTooltip
+                            value={provenance.recordedAt}
+                            label={t(isGenerated ? "audio.takesStrip.generatedLabel" : "audio.takesStrip.recordedLabel")}
+                            className="min-w-0 truncate"
+                          >
+                            {t("audio.takesStrip.recordedByBadge", {
+                              date: fmtShortCalendarDate(provenance.recordedAt, undefined, locale),
+                              author: provenance.recordedBy,
+                            })}
+                          </DateTooltip>
+                        </span>
+                      )
+                      if (!isSplit) return recorded
+                      // Slice 3A (Sam, Oct 29): on a cut take's row the date
+                      // gives way first, before the pieces count shortens — and
+                      // whole or not at all, never a stray "O…". A one-line box
+                      // that wraps: a date that does not fit beside the zero-
+                      // width first item drops to the hidden second line. That
+                      // item is a line tall, or the first line would have no
+                      // height and the second would show. The box only grows
+                      // into room nothing else wants (from nothing, up to the
+                      // date's own width): shrinking, it would take a sliver
+                      // from the name too, and a sliver is enough for "…".
+                      return (
+                        <span
+                          data-fit="give"
+                          data-testid={`take-recorded-fit-${att.audioId}`}
+                          className="flex h-4 min-w-0 max-w-max flex-1 basis-0 flex-wrap items-center overflow-hidden"
+                        >
+                          <span aria-hidden className="h-4 w-0" />
+                          {recorded}
+                        </span>
+                      )
+                    })()}
                     {/* AQU-464: this take speaks wording the line no longer
                         carries. Advisory, not an error — reviewing audio
                         against its own older text is the point.
@@ -573,46 +1026,67 @@ export function TakesStrip({
                         current text, so it can never lag it — without this
                         guard, widening that list to every take would have
                         started badging TTS takes as stale. */}
-                    {!isGenerated && provenance?.drifted && (
-                      <span
-                        title={t("audio.takesStrip.textDriftTooltip", {
+                    {/* Not when its transcript matches the line as it reads now:
+                        that recording says the current text, however the text
+                        got there (Sam, 2026-10-15 — using a transcript AS the
+                        text was flagging its own take). */}
+                    {!isGenerated && provenance?.drifted && verdict?.kind !== "match" && (
+                      <NoteOnClick
+                        note={t("audio.takesStrip.textDriftTooltip", {
                           date: new Date(provenance.recordedAt).toLocaleDateString(),
                           text: provenance.textAtRecording ?? "",
                         })}
-                        data-testid={`take-text-drift-${att.audioId}`}
-                        className="flex shrink-0 items-center gap-0.5 rounded px-1 text-[10px] text-amber-700 dark:text-amber-400"
+                        className="shrink-0"
                       >
-                        <FileClock className="h-3 w-3" /> {t("audio.takesStrip.textDriftBadge")}
-                      </span>
+                        <span
+                          data-testid={`take-text-drift-${att.audioId}`}
+                          className="flex shrink-0 items-center gap-0.5 rounded px-1 text-[10px] text-amber-700 dark:text-amber-400"
+                        >
+                          <FileClock className="h-3 w-3" /> {t("audio.takesStrip.textDriftBadge")}
+                        </span>
+                      </NoteOnClick>
                     )}
-                    <AppTooltip content={t("audio.takesStrip.renameTooltip")}>
+                    {/* The tab's question about every take: does it say the
+                        text? A generated take is read FROM the text, so only
+                        a recording is asked. */}
+                    {verdict && (
+                      <TakeTextVerdict
+                        verdict={verdict}
+                        testId={`take-verdict-${att.audioId}`}
+                      />
+                    )}
+                    {/* A split take's row is not renamed: its pieces are, each
+                        on its own row (decision 7). */}
+                    {!isSplit && <AppTooltip content={t("audio.takesStrip.renameTooltip")}>
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon-xs"
                         onClick={() => {
-                          setRenameDraft(displayLabel(att))
-                          setRenamingId(att.audioId)
+                          renameCancelledRef.current = false
+                          setRenameDraft(shownLabel(att))
+                          setRenamingId(rowKey)
                         }}
                         aria-label={t("audio.takesStrip.renameTooltip")}
-                        className="rounded-md text-muted-foreground/40 hover:bg-background hover:text-foreground"
+                        disabled={readOnly}
+                        className={"rounded-md text-muted-foreground/40 hover:bg-background hover:text-foreground"}
                       >
                         <Pencil className="h-3 w-3" />
                       </Button>
-                    </AppTooltip>
+                    </AppTooltip>}
                   </>
                 )}
               </span>
-              {!isCleaned && !isGenerated && (
+              {!isPiece && !isCleaned && !isGenerated && (
                 <AppTooltip content={t("audio.takesStrip.removeNoiseTooltip")}>
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon-xs"
-                    onClick={() => void denoise(att)}
-                    disabled={!session?.jwt || denoisingId !== null}
+                    onClick={() => void denoise(att, pieces)}
+                    disabled={readOnly || !session?.jwt || denoisingId !== null}
                     aria-label={t("audio.takesStrip.removeNoiseTooltip")}
-                    className="rounded-md text-muted-foreground/60 hover:bg-background"
+                    className={"rounded-md text-muted-foreground/60 hover:bg-background"}
                   >
                     {isDenoising ? <Spinner className="size-3.5" /> : <Bird className="h-3.5 w-3.5" />}
                   </Button>
@@ -625,9 +1099,9 @@ export function TakesStrip({
                     variant="ghost"
                     size="icon-xs"
                     onClick={() => void circle(revertTo)}
-                    disabled={isSelectInFlight}
+                    disabled={readOnly || isSelectInFlight}
                     aria-label={t("audio.takesStrip.revertTooltip")}
-                    className="rounded-md text-muted-foreground/60 hover:bg-background"
+                    className={"rounded-md text-muted-foreground/60 hover:bg-background"}
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
                   </Button>
@@ -640,28 +1114,43 @@ export function TakesStrip({
                   is exactly where you compare takes to choose the keeper, so
                   "that older one was signed off by two people" is part of
                   the choice. Showing it on the circled take alone made it
-                  look as though validation belonged to the selection. A vote
-                  on an unselected take is a real vote with no effect on the
-                  line until that take is chosen. */}
-              <AudioValidationControl
+                  look as though validation belonged to the selection.
+                  A VOTE ONLY ON THE CIRCLED TAKE (Sam, 2026-09-29 and -30):
+                  a vote is cast only on the take that plays for the line,
+                  where it can be heard, so every other take shows its
+                  validation read-only. In the Recording tab's other takes
+                  nothing is circled — the take that plays sits above them,
+                  with its own vote. */}
+              {/* AQU-1767, decision 7 (replacing Sam's 2026-10-15 ruling that
+                  a split take was approved whole): each piece takes its own
+                  vote on its own row (see `voteReadOnly`); the split take's
+                  row says how many of them are approved, read-only. */}
+              {isSplit ? (
+                <PiecesApproved
+                  pieces={validationTakes}
+                  requirement={audioValidation.validationRequirement}
+                  testId={`take-pieces-approved-${rowKey}`}
+                  fit
+                />
+              ) : (
+                <AudioValidationControl
+                  readOnly={voteReadOnly}
                   cellRef={cellId}
-                  takes={audioValidation.takeFor(
-                    { attachments: { [att.audioId]: att }, selectedBySlot: { [att.slot]: att.audioId } },
-                    att.audioId,
-                  )}
+                  takes={validationTakes}
                   currentUsername={author}
                   validationRequirement={audioValidation.validationRequirement}
                   canValidate={audioValidation.canValidate}
                   onValidationChange={audioValidation.onValidationChange}
                   variant="inline"
                 />
-              <AppTooltip content={isCircled ? t("audio.takesStrip.activeTakeTooltip") : t("audio.takesStrip.useTakeTooltip")}>
+              )}
+              {!isPiece && <AppTooltip content={isCircled ? t("audio.takesStrip.activeTakeTooltip") : t("audio.takesStrip.useTakeTooltip")}>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-xs"
                   onClick={() => void circle(att.audioId)}
-                  disabled={isSelectInFlight || isCircled}
+                  disabled={readOnly || isSelectInFlight || isCircled}
                   aria-label={isCircled ? t("audio.takesStrip.activeTakeTooltip") : t("audio.takesStrip.useTakeTooltip")}
                   className={cn(
                     "rounded-md hover:bg-background",
@@ -674,16 +1163,16 @@ export function TakesStrip({
                 >
                   {isBusy ? <Spinner className="size-3.5" /> : <Check className="h-3.5 w-3.5" />}
                 </Button>
-              </AppTooltip>
+              </AppTooltip>}
               <AppTooltip content={t("audio.takesStrip.deleteTakeTooltip")}>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  onClick={() => void remove(att.audioId)}
-                  disabled={isBusy}
+                  onClick={() => void (isSplit ? removeWhole(pieces) : remove(att.audioId))}
+                  disabled={readOnly || isBusy}
                   aria-label={t("audio.takesStrip.deleteTakeTooltip")}
-                  className="rounded-md text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"
+                  className={"rounded-md text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>

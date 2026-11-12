@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from "vitest"
-import { render, screen, cleanup } from "@testing-library/react"
+import { render, screen, cleanup, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
@@ -63,7 +63,27 @@ vi.mock("@legendapp/list/react", async () => {
   }
 })
 
-afterEach(cleanup)
+vi.mock("@/lib/parsers/helloao", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/parsers/helloao")>("@/lib/parsers/helloao")
+  return {
+    ...actual,
+    fetchHelloaoTranslations: vi.fn(async () => [
+      { id: "BSB", name: "BSB", englishName: "Berean Standard Bible", shortName: "BSB", language: "eng", textDirection: "ltr", licenseUrl: "https://berean.bible/", website: "https://berean.bible/" },
+    ]),
+    fetchHelloaoChapter: vi.fn(async () => ({
+      translation: { id: "BSB" },
+      book: { id: "GEN", numberOfChapters: 50 },
+      chapter: { number: 1, content: [{ type: "verse", number: 1, content: ["In the beginning God created"] }] },
+    })),
+    prefetchHelloaoChapter: vi.fn(),
+  }
+})
+
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+  localStorage.clear()
+})
 
 const project: ProjectRecord = {
   id: "proj-1",
@@ -82,7 +102,7 @@ const project: ProjectRecord = {
  */
 function makeRows(
   id: string,
-  { timecode = false, castName }: { timecode?: boolean; castName?: string } = {},
+  { timecode = false, castName, ref = "GEN 1:1" }: { timecode?: boolean; castName?: string; ref?: string | null } = {},
 ): CellRow[] {
   const timing = timecode ? { startMs: 0, endMs: 3970 } : {}
   // The character sheet writes `cast_name` onto the SOURCE row (see the
@@ -92,14 +112,14 @@ function makeRows(
   return [
     {
       cellId: id, side: "source", value: "hello", valueHtml: null, type: "text",
-      canonicalRef: "GEN 1:1", anchorCellId: null, eventId: `${id}-source`,
+      canonicalRef: ref, anchorCellId: null, eventId: `${id}-source`,
       sourceEventId: null, lastEditor: null, lastEditAt: 1, validated: false, wordCount: 1,
       ...timing,
       ...meta,
     },
     {
       cellId: id, side: "target", value: "bonjour", valueHtml: null, type: "text",
-      canonicalRef: "GEN 1:1", anchorCellId: null, eventId: `${id}-target`,
+      canonicalRef: ref, anchorCellId: null, eventId: `${id}-target`,
       sourceEventId: `${id}-source`, lastEditor: "tester", lastEditAt: 2, validated: false, wordCount: 1,
       ...timing,
     },
@@ -138,20 +158,26 @@ function renderTable({
   cellLabels = false,
   castName,
   projectOverride,
+  followsRecordings,
+  bibles,
+  ref,
 }: {
+  bibles?: readonly string[]
+  ref?: string | null
   lineNumbers?: boolean
   timecode?: boolean
+  followsRecordings?: boolean
   cellLabels?: boolean
   castName?: string
   projectOverride?: ProjectRecord
 } = {}) {
   const store = new CellStore()
   store.setRuntime({ projectId: project.id, fileId: "file-1", username: "tester", requiredValidations: 1, auditStats: new Map() })
-  store.replaceRows(makeRows("cell-1", { timecode, castName }), { full: true, maxServerSeq: 1 })
+  store.replaceRows(makeRows("cell-1", { timecode, castName, ref }), { full: true, maxServerSeq: 1 })
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
-      <EditorActionsProvider value={{}}>
+      <EditorActionsProvider value={followsRecordings ? { followsRecordings } : {}}>
         <EditorTable
           // ALWAYS the cast-bearing project, so `cellLabelsEnabled` below is
           // the ONLY variable (2026-08-28). This used to swing with the gate
@@ -175,6 +201,12 @@ function renderTable({
           cellLabelsEnabled={cellLabels}
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
+          parallelBibles={bibles ? {
+            projectId: project.id,
+            projectDefaults: bibles,
+            canSetProjectDefaults: false,
+            onSetProjectDefaults: async () => true,
+          } : undefined}
         />
       </EditorActionsProvider>
     </QueryClientProvider>,
@@ -256,6 +288,15 @@ describe("EditorTable — source/target first-line alignment", () => {
   // The foot line is NOT reserved when empty, and that asymmetry is deliberate:
   // nothing below the source text mirrors anything in the target column, so an
   // always-on strip would be wasted height on every scripture row in the app.
+  // AQU-2204 (Sam, Oct 26): a file that follows its recordings shows no source
+  // time anywhere — the English cue times are not the Arabic's.
+  it("draws no timecode while the file follows its recordings", async () => {
+    renderTable({ timecode: true, followsRecordings: true })
+    await screen.findByText("hello")
+    expect(screen.queryByTestId("source-timing-line")).toBeNull()
+    expect(screen.queryByText("00:00:00.000 --> 00:00:03.970")).toBeNull()
+  })
+
   it("draws no foot line at all when the context is not a timecode", async () => {
     renderTable()
     await screen.findByText("hello")
@@ -443,5 +484,77 @@ describe("EditorTable — the character on a row whose voice has not resolved", 
     await screen.findByText("hello")
     expect(screen.queryByTestId("source-cell-label")).toBeNull()
     expect(screen.getByTestId("target-header-lane")).not.toHaveTextContent("little Mary Magdalene")
+  })
+})
+
+describe("EditorTable — Bible columns", () => {
+  function tableWidth(width: number) {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      { width, height: 600, top: 0, left: 0, right: width, bottom: 600, x: 0, y: 0, toJSON: () => ({}) } as DOMRect,
+    )
+  }
+
+  it("adds one track per Bible between source and target, in the rows and the headers alike", async () => {
+    tableWidth(1400)
+    renderTable({ bibles: ["BSB"] })
+    const cell = await screen.findByTestId("bible-cell-BSB")
+    expect(await within(cell).findByText("In the beginning God created")).toBeInTheDocument()
+    // First line on the source's baseline: the same 20px strip as the source context line.
+    expect(cell.firstElementChild?.className).toContain("h-4")
+    expect(cell.firstElementChild?.className).toContain("mb-1")
+
+    const row = cell.closest("[data-grid-row]") as HTMLElement
+    const headers = screen.getByTestId("table-column-headers")
+    expect(row.className).toContain("md:grid-cols-[var(--editor-grid-cols)]")
+    expect(headers.className).toContain("md:grid-cols-[var(--editor-grid-cols)]")
+    expect((headers.parentElement?.closest("[style]") as HTMLElement).style.getPropertyValue("--editor-grid-cols"))
+      .toBe("84px minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)")
+    expect(screen.getByTestId("bible-column-header-BSB").textContent).toContain("Berean Standard Bible · License")
+    // Source, Bible, Target in that order.
+    const tracks = Array.from(row.children).map((el) => el.getAttribute("data-showcase") ?? el.getAttribute("data-testid"))
+    expect(tracks.indexOf("editor.source")).toBeLessThan(tracks.indexOf("bible-cell-BSB"))
+    expect(tracks.indexOf("bible-cell-BSB")).toBeLessThan(tracks.indexOf("editor.target"))
+  })
+
+  it("stacks the Bible under the source text, with the grid left at three tracks, when the columns don't fit", async () => {
+    tableWidth(700)
+    renderTable({ bibles: ["BSB"] })
+    const stack = await screen.findByTestId("bible-stack-BSB")
+    expect(await within(stack).findByText("In the beginning God created")).toBeInTheDocument()
+    expect(stack.closest("[data-showcase='editor.source']")).not.toBeNull()
+    expect(screen.queryByTestId("bible-cell-BSB")).toBeNull()
+    expect(screen.getByTestId("table-column-headers").className).toContain("md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]")
+  })
+
+  it("offers no Bible columns without versions chosen, beyond the Add Bible control", async () => {
+    tableWidth(1400)
+    renderTable({ bibles: [] })
+    await screen.findByText("hello")
+    expect(screen.getByRole("button", { name: "Add Bible" })).toBeInTheDocument()
+    expect(screen.queryByTestId("bible-stack")).toBeNull()
+    expect(screen.getByTestId("table-column-headers").className).toContain("md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]")
+  })
+
+  it.each([
+    [1400, "columns"],
+    [700, "stacked"],
+  ])("keeps the drafted target beside the Bible text at %spx (%s)", async (width) => {
+    tableWidth(width)
+    renderTable({ bibles: ["BSB"] })
+    // In columns the stacked copy is also in the DOM, hidden from md up (phones read it).
+    const [bible] = await screen.findAllByText("In the beginning God created")
+    const row = bible.closest("[data-grid-row]") as HTMLElement
+    const target = row.querySelector<HTMLElement>("[data-showcase='editor.target']")
+    expect(target).not.toBeNull()
+    expect(within(target!).getByText("bonjour")).toBeInTheDocument()
+  })
+
+  it("shows no Bible columns and no Add Bible on a file with no chapter and verse", async () => {
+    tableWidth(1400)
+    renderTable({ bibles: ["BSB"], ref: null })
+    await screen.findByText("hello")
+    expect(screen.queryByRole("button", { name: "Add Bible" })).toBeNull()
+    expect(screen.queryByTestId("bible-cell-BSB")).toBeNull()
+    expect(screen.queryByTestId("bible-stack")).toBeNull()
   })
 })

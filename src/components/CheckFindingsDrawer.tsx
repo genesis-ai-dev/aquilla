@@ -7,20 +7,33 @@
  * findings cite their evidence (cell references, rule/concept names) and a
  * cell reference click scrolls/focuses that cell in the editor. The comment
  * affordance reuses the existing CommentsDrawer via onOpenComments.
+ *
+ * AQU-1737 adds the one judgement call in the panel: approving a suspected
+ * spelling. It is session-local for the same reason as the findings, and it is
+ * per FORM, never per cell — a spelling card carries every cell its form
+ * occurs in, so one click clears all of them. Asking the same question once
+ * per cell is how a spell check stops being used.
  */
 
-import { X, AlertTriangle, AlertCircle, BookA, MessageSquare, RefreshCw } from "lucide-react"
+import { useState } from "react"
+import { X, AlertTriangle, AlertCircle, BookA, CaseSensitive, MessageSquare, RefreshCw, SpellCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { cellTextForDisplay, truncateCellText } from "@/lib/cell-text"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
 import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
-import { formatTime, formatCount } from "@/lib/i18n/format"
+import { formatTime, formatCount, useFormat } from "@/lib/i18n/format"
+import { translateRuleName } from "@/lib/lqa/builtin-resolver"
+import { isBibleCheckInfraction } from "@/lib/bible-data/check-messages"
+import { formatInfractionEvidence, formatInfractionReason } from "@/lib/rules/format-infraction"
 import type { CellData } from "@/hooks/useCells"
+import { approveSpelling, withoutApprovedSpellings } from "@/lib/qa/spelling"
 import type {
+  CapitalizationFinding,
   CheckRunResult,
   RuleFindingGroup,
+  SpellingFinding,
   TermConsistencyFinding,
 } from "@/lib/check/deterministic-check"
 import { RightSidebarPanel } from "./RightSidebarPanel"
@@ -101,9 +114,11 @@ interface CellRefButtonProps {
   onNavigateToCell: (cellId: string) => void
   onOpenComments?: (cellId: string) => void
   detail?: string
+  /** AQU-1688: where a Bible data finding's fact comes from. */
+  evidence?: string[]
 }
 
-function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, detail }: CellRefButtonProps) {
+function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, detail, evidence }: CellRefButtonProps) {
   const t = useT()
   return (
     // min-w-0 on the flex item + button (SUB-5): without it, long unbroken
@@ -111,7 +126,7 @@ function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, 
     // punches through the fixed-width drawer; the inner `truncate`s only work
     // once their flex ancestors are allowed to shrink.
     <li className="flex min-w-0 items-start gap-1">
-      <AppTooltip content={t("rules.checkDrawer.goToCell")}>
+      {/* The card shows what it is and is the way to it: no hover (AQU-2260). */}
         <button
           type="button"
           className="min-w-0 flex-1 rounded border-s-2 border-amber-400 bg-amber-50 p-1.5 text-start text-xs hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-950/40"
@@ -119,13 +134,15 @@ function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, 
         >
         <div className="truncate font-medium">{label}</div>
         {detail && <div className="truncate text-muted-foreground">{detail}</div>}
+        {evidence?.map((line) => (
+          <div key={line} className="truncate text-muted-foreground/80">{line}</div>
+        ))}
         {cell && (
           <div className="truncate text-muted-foreground">
             {truncateCellText(cellTextForDisplay(cell.translated), 60)}
           </div>
         )}
       </button>
-      </AppTooltip>
       {onOpenComments && (
         <AppTooltip content={t("rules.checkDrawer.commentOnCell")}>
           <Button
@@ -155,16 +172,16 @@ function RuleFindingCard({
   onOpenComments?: (cellId: string) => void
 }) {
   const t = useT()
+  const format = useFormat()
   const SeverityIcon = group.rule.severity === "major" ? AlertTriangle : AlertCircle
   const severityColor = group.rule.severity === "major" ? "text-red-500" : "text-amber-500"
   return (
     <div className="min-w-0 rounded-md border p-2">
       <div className="mb-1 flex min-w-0 items-center gap-1.5">
         <SeverityIcon className={`h-3.5 w-3.5 shrink-0 ${severityColor}`} />
-        {/* group.rule.name is the user's OWN rule name (or, for a built-in
-            check, app-authored chrome resolved by translateRuleName) —
-            content, never keyed here. */}
-        <span className="min-w-0 truncate text-xs font-semibold">{group.rule.name}</span>
+        {/* The user's OWN rule name is content and stays as written; a
+            built-in check's name is app chrome, resolved by translateRuleName. */}
+        <span className="min-w-0 truncate text-xs font-semibold">{translateRuleName(group.rule, t)}</span>
         <span className="ms-auto shrink-0 text-[10px] text-muted-foreground">
           {t("common.cellCount", { count: group.infractions.length })}
         </span>
@@ -179,10 +196,14 @@ function RuleFindingCard({
               label={findingCellLabel(cell, inf.cellId)}
               cell={cell}
               detail={
-                inf.spans[0]?.matchedText
-                  ? t("rules.checkDrawer.matchedDetail", { text: inf.spans[0].matchedText })
-                  : undefined
+                // AQU-1688: a Bible data finding explains itself; its marks alone say little.
+                isBibleCheckInfraction(inf)
+                  ? formatInfractionReason(inf, t)
+                  : inf.spans[0]?.matchedText
+                    ? t("rules.checkDrawer.matchedDetail", { text: inf.spans[0].matchedText })
+                    : undefined
               }
+              evidence={formatInfractionEvidence(inf, t, format)}
               onNavigateToCell={onNavigateToCell}
               onOpenComments={onOpenComments}
             />
@@ -235,6 +256,118 @@ function TermFindingCard({
   )
 }
 
+/**
+ * AQU-1734: one capitalization finding. A mixed-case card is titled by the
+ * offending word form (raw cell content, never translated); the heading card
+ * carries a localized title because it has no single form to name.
+ */
+function CapitalizationFindingCard({
+  finding,
+  cellMap,
+  onNavigateToCell,
+  onOpenComments,
+}: {
+  finding: CapitalizationFinding
+  cellMap: Map<string, CellData>
+  onNavigateToCell: (cellId: string) => void
+  onOpenComments?: (cellId: string) => void
+}) {
+  const t = useT()
+  return (
+    <div className="min-w-0 rounded-md border p-2">
+      <div className="mb-1 flex min-w-0 items-center gap-1.5">
+        <CaseSensitive className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+        <span className="min-w-0 truncate text-xs font-semibold">
+          {finding.code === "mixed-case" ? finding.form : t("rules.checkDrawer.headingStartsLowercase")}
+        </span>
+        <span className="ms-auto shrink-0 text-[10px] text-muted-foreground">
+          {t("common.cellCount", { count: finding.cells.length })}
+        </span>
+      </div>
+      {finding.code === "mixed-case" && (
+        <p className="mb-1.5 break-words text-xs text-muted-foreground">
+          {t("rules.checkDrawer.mixedCaseHeadline", { count: finding.cells.length })}
+        </p>
+      )}
+      <ul className="min-w-0 space-y-1">
+        {finding.cells.map((fc) => (
+          <CellRefButton
+            key={fc.cellId}
+            cellId={fc.cellId}
+            label={fc.cellLabel ?? findingCellLabel(cellMap.get(fc.cellId), fc.cellId)}
+            cell={cellMap.get(fc.cellId)}
+            onNavigateToCell={onNavigateToCell}
+            onOpenComments={onOpenComments}
+          />
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/**
+ * AQU-1737: one suspected misspelling. Titled by the suspected form (raw cell
+ * content, never translated), with the spelling the project usually writes as
+ * the suggestion, and one Approve button that clears every occurrence.
+ */
+function SpellingFindingCard({
+  finding,
+  cellMap,
+  onNavigateToCell,
+  onOpenComments,
+  onApprove,
+}: {
+  finding: SpellingFinding
+  cellMap: Map<string, CellData>
+  onNavigateToCell: (cellId: string) => void
+  onOpenComments?: (cellId: string) => void
+  onApprove: (form: string) => void
+}) {
+  const t = useT()
+  return (
+    <div className="min-w-0 rounded-md border p-2">
+      <div className="mb-1 flex min-w-0 items-center gap-1.5">
+        <SpellCheck className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+        <span className="min-w-0 truncate text-xs font-semibold">{finding.form}</span>
+        <AppTooltip
+          content={t("rules.checkDrawer.approveSpellingAriaLabel", { form: finding.form })}
+        >
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="ms-auto h-6 shrink-0 px-1.5 text-[10px]"
+            onClick={() => onApprove(finding.form)}
+            aria-label={t("rules.checkDrawer.approveSpellingAriaLabel", { form: finding.form })}
+          >
+            {t("rules.checkDrawer.approveSpelling")}
+          </Button>
+        </AppTooltip>
+      </div>
+      <p className="mb-1.5 break-words text-xs text-muted-foreground">
+        {t(
+          finding.reason === "sound-alike"
+            ? "rules.checkDrawer.spellingSoundsLike"
+            : "rules.checkDrawer.spellingCloseTo",
+          { suggestion: finding.suggestion, suggestionCount: finding.suggestionOccurrences },
+        )}
+      </p>
+      <ul className="min-w-0 space-y-1">
+        {finding.cells.map((fc) => (
+          <CellRefButton
+            key={fc.cellId}
+            cellId={fc.cellId}
+            label={fc.cellLabel ?? findingCellLabel(cellMap.get(fc.cellId), fc.cellId)}
+            cell={cellMap.get(fc.cellId)}
+            onNavigateToCell={onNavigateToCell}
+            onOpenComments={onOpenComments}
+          />
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 export function CheckFindingsDrawer({
   result,
   running,
@@ -252,9 +385,22 @@ export function CheckFindingsDrawer({
   const cleanTermCount = (result?.termFindings.length ?? 0) - flaggedTermFindings.length
   const ruleIssueCount = result?.ruleFindings.reduce((n, g) => n + g.infractions.length, 0) ?? 0
   const termIssueCount = flaggedTermFindings.reduce((n, f) => n + f.flaggedCells.length, 0)
+  const capitalizationFindings = result?.capitalizationFindings ?? []
+  const capitalizationIssueCount = capitalizationFindings.reduce((n, f) => n + f.cells.length, 0)
+  const caseExceptions = result?.caseExceptions ?? []
+
+  // AQU-1737. Held here, not in ProjectWorkspace, and deliberately NOT reset
+  // when a new result arrives: a spelling the reviewer has already accepted
+  // must not come back on the next run of the same check.
+  const [approvedSpellings, setApprovedSpellings] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  )
+  const spellingFindings = withoutApprovedSpellings(result?.spellingFindings ?? [], approvedSpellings)
+  const autoApprovedSpellings = result?.approvedSpellings ?? []
+  const wordlistSize = result?.wordlistSize ?? 0
 
   return (
-    <RightSidebarPanel storageKey="check" defaultWidth={320} resizeLabel="Resize file check panel">
+    <RightSidebarPanel storageKey="check" defaultWidth={320} resizeLabel={t("editor.panel.resizeCheck")}>
     <div className="flex h-full min-w-0 w-full flex-col overflow-hidden border-s bg-card">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b p-2">
         {/* Wording tracks the "Check file" button and its "Close file check"
@@ -304,8 +450,17 @@ export function CheckFindingsDrawer({
           </div>
 
           {result.totalFindingCount === 0 ? (
-            <div className="flex flex-1 items-center justify-center p-4 text-center text-sm text-muted-foreground">
-              {t("rules.checkDrawer.checkedNoIssues", { summary: checkScopeSummary(result, t, locale) })}
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center text-sm text-muted-foreground">
+              <p>{t("rules.checkDrawer.checkedNoIssues", { summary: checkScopeSummary(result, t, locale) })}</p>
+              {/* AQU-1734: a clean result still accounts for what the
+                  capitalization scan excepted — silence is never unexplained. */}
+              {caseExceptions.length > 0 && (
+                <p className="break-words text-[10px]">
+                  {t("rules.checkDrawer.caseExceptionsLearned", {
+                    forms: caseExceptions.map((e) => e.form).join(", "),
+                  })}
+                </p>
+              )}
             </div>
           ) : (
             <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-auto p-3">
@@ -352,6 +507,80 @@ export function CheckFindingsDrawer({
                 {cleanTermCount > 0 && (
                   <p className="mt-1.5 text-[10px] text-muted-foreground">
                     {t("rules.checkDrawer.otherTermsClean", { count: cleanTermCount })}
+                  </p>
+                )}
+              </div>
+
+              <div className="min-w-0">
+                <p className="mb-1 text-xs text-muted-foreground">
+                  {t("rules.checkDrawer.capitalization", { count: capitalizationIssueCount })}
+                </p>
+                {capitalizationFindings.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">{t("common.none")}</p>
+                ) : (
+                  <div className="min-w-0 space-y-2">
+                    {capitalizationFindings.map((finding) => (
+                      <CapitalizationFindingCard
+                        key={`${finding.code}:${finding.form}`}
+                        finding={finding}
+                        cellMap={cellMap}
+                        onNavigateToCell={onNavigateToCell}
+                        onOpenComments={onOpenComments}
+                      />
+                    ))}
+                  </div>
+                )}
+                {/* AQU-1734: what the scan learned to allow, so a reviewer can
+                    see the exceptions instead of trusting a silent pass. */}
+                {caseExceptions.length > 0 && (
+                  <p className="mt-1.5 break-words text-[10px] text-muted-foreground">
+                    {t("rules.checkDrawer.caseExceptionsLearned", {
+                      forms: caseExceptions.map((e) => e.form).join(", "),
+                    })}
+                  </p>
+                )}
+              </div>
+
+              {/* AQU-1737: suspected misspellings, from the project's own wordlist. */}
+              <div className="min-w-0">
+                <p className="mb-1 text-xs text-muted-foreground">
+                  {t("rules.checkDrawer.spelling", { count: spellingFindings.length })}
+                </p>
+                {spellingFindings.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">{t("common.none")}</p>
+                ) : (
+                  <div className="min-w-0 space-y-2">
+                    {spellingFindings.map((finding) => (
+                      <SpellingFindingCard
+                        key={finding.form}
+                        finding={finding}
+                        cellMap={cellMap}
+                        onNavigateToCell={onNavigateToCell}
+                        onOpenComments={onOpenComments}
+                        onApprove={(form) =>
+                          setApprovedSpellings((prev) => approveSpelling(prev, form))
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+                {approvedSpellings.size > 0 && (
+                  <p className="mt-1.5 text-[10px] text-muted-foreground">
+                    {t("rules.checkDrawer.spellingApproved", { count: approvedSpellings.size })}
+                  </p>
+                )}
+                {/* Same contract as the case exceptions above: a form let
+                    through on frequency alone is named, not silently passed. */}
+                {autoApprovedSpellings.length > 0 && (
+                  <p className="mt-1.5 break-words text-[10px] text-muted-foreground">
+                    {t("rules.checkDrawer.spellingAutoApproved", {
+                      forms: autoApprovedSpellings.map((e) => e.form).join(", "),
+                    })}
+                  </p>
+                )}
+                {wordlistSize > 0 && (
+                  <p className="mt-1.5 text-[10px] text-muted-foreground">
+                    {t("rules.checkDrawer.wordlistSize", { count: wordlistSize })}
                   </p>
                 )}
               </div>

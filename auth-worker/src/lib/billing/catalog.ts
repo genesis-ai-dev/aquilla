@@ -19,7 +19,7 @@ export async function readValidatedBillingCatalog(env: Env) {
   const live = /^(sk|rk)_live_/.test(secret)
   if (!/^(sk|rk)_(test|live)_/.test(secret)
     || catalog.bindings.some(binding => binding.live !== live)
-    || new Set(catalog.bindings.map(binding => binding.priceId)).size !== 10) {
+    || new Set(catalog.bindings.map(binding => binding.priceId)).size !== catalog.bindings.length) {
     throw new Error('Invalid catalog environment')
   }
   const account = await stripeForm(env, 'GET', '/account')

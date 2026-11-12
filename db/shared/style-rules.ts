@@ -604,3 +604,155 @@ export async function deleteApplicability(
     .first<{ id: string }>()
   return row != null
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Batch decisions (external Agent API, AQU-2195)
+// ──────────────────────────────────────────────────────────────────────────
+
+/** One reviewer decision in a batch. `ifMatchVersion` is the rule's `version`
+ *  as the caller last read it. Approve and reject do not bump `version` (the
+ *  in-app review does not either), so the guard on those is "nobody edited it
+ *  since you looked"; an update bumps it, like the in-app PATCH. */
+export interface StyleRuleDecision {
+  ruleId: string
+  action: "approve" | "reject" | "update"
+  ifMatchVersion: number
+  patch?: UpdateStyleRulePatch
+}
+
+export type StyleRuleDecisionIssueCode =
+  | "not_found"
+  | "org_inherited"
+  | "invalid_state"
+  | "stale_version"
+
+export interface StyleRuleDecisionIssue {
+  /** Position of the decision in the submitted list. */
+  index: number
+  ruleId: string
+  code: StyleRuleDecisionIssueCode
+  message: string
+  currentVersion?: number
+  currentStatus?: StyleRuleStatus
+}
+
+export type ApplyStyleRuleDecisionsResult =
+  | { status: "ok"; rules: StyleRule[] }
+  | { status: "refused"; issues: StyleRuleDecisionIssue[] }
+
+/** Thrown inside the transaction to roll it back when a write that validation
+ *  said would succeed does not. Never escapes this module. */
+class DecisionRollback extends Error {}
+
+async function findDecisionIssues(
+  h: AquillaDb,
+  projectId: string,
+  decisions: StyleRuleDecision[],
+  lock: boolean,
+): Promise<StyleRuleDecisionIssue[]> {
+  const marks = decisions.map(() => "?").join(", ")
+  const found = await h
+    .prepare(
+      `SELECT ${RULE_COLS} FROM style_rules
+        WHERE id IN (${marks})
+          AND (project_id = ? OR org_id = (SELECT org_id FROM projects WHERE id = ?))
+        ${lock ? "FOR UPDATE" : ""}`,
+    )
+    .bind(...decisions.map((d) => d.ruleId), projectId, projectId)
+    .all<RuleRow>()
+  const byId = new Map(found.results.map((r) => [r.id, rowToRule(r)]))
+
+  const issues: StyleRuleDecisionIssue[] = []
+  decisions.forEach((d, index) => {
+    const rule = byId.get(d.ruleId)
+    if (!rule) {
+      issues.push({ index, ruleId: d.ruleId, code: "not_found", message: "no such rule in this project" })
+      return
+    }
+    if (rule.projectId !== projectId) {
+      issues.push({
+        index,
+        ruleId: d.ruleId,
+        code: "org_inherited",
+        message: "org rules are managed at the org level and cannot be changed through a project",
+      })
+      return
+    }
+    if (rule.version !== d.ifMatchVersion) {
+      issues.push({
+        index,
+        ruleId: d.ruleId,
+        code: "stale_version",
+        message: `rule is at version ${rule.version}, not ${d.ifMatchVersion}; re-read it`,
+        currentVersion: rule.version,
+      })
+      return
+    }
+    if (d.action !== "update" && rule.status !== "proposed") {
+      issues.push({
+        index,
+        ruleId: d.ruleId,
+        code: "invalid_state",
+        message: `rule is ${rule.status}, only proposed rules can be reviewed`,
+        currentStatus: rule.status,
+      })
+    }
+  })
+  return issues
+}
+
+/** Check a batch against the live rows without writing or locking anything.
+ *  Prepare uses it to refuse a plan that could not commit; commit re-checks
+ *  under a lock, so this is early feedback, not the guarantee. */
+export async function checkRuleDecisions(
+  db: AquillaDb,
+  input: { projectId: string; decisions: StyleRuleDecision[] },
+): Promise<StyleRuleDecisionIssue[]> {
+  if (input.decisions.length === 0) return []
+  return findDecisionIssues(db, input.projectId, input.decisions, false)
+}
+
+/**
+ * Apply a batch of reviewer decisions to one project's own rules, all or
+ * nothing. Every rule row is locked (`FOR UPDATE`), every decision is checked
+ * against the locked row, and only if all of them pass is anything written.
+ * Org-inherited rules are refused: like the in-app routes, a project cannot
+ * review or edit its org's rules. Runs in one transaction when the handle has
+ * `transaction()`; on a handle without it (test doubles) the same checks run
+ * first and the writes are not rolled back if the database fails mid-way.
+ */
+export async function applyRuleDecisions(
+  db: AquillaDb,
+  input: { projectId: string; decisions: StyleRuleDecision[]; reviewedBy: string | null },
+): Promise<ApplyStyleRuleDecisionsResult> {
+  const { projectId, decisions, reviewedBy } = input
+  if (decisions.length === 0) return { status: "ok", rules: [] }
+
+  const run = async (h: AquillaDb): Promise<ApplyStyleRuleDecisionsResult> => {
+    const issues = await findDecisionIssues(h, projectId, decisions, true)
+    if (issues.length > 0) return { status: "refused", issues }
+
+    const applied: StyleRule[] = []
+    for (const d of decisions) {
+      const result =
+        d.action === "update"
+          ? await updateRule(h, d.ruleId, d.patch ?? {})
+          : await reviewRule(h, { id: d.ruleId, action: d.action, reviewedBy })
+      if (result.status !== "ok") throw new DecisionRollback(`${d.ruleId}: ${result.status}`)
+      applied.push(result.rule)
+    }
+    return { status: "ok", rules: applied }
+  }
+
+  try {
+    return db.transaction ? await db.transaction(run) : await run(db)
+  } catch (err) {
+    if (err instanceof DecisionRollback) {
+      return {
+        status: "refused",
+        issues: [{ index: 0, ruleId: decisions[0].ruleId, code: "invalid_state", message: err.message }],
+      }
+    }
+    throw err
+  }
+}

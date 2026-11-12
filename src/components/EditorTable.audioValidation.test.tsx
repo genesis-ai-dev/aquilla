@@ -11,7 +11,7 @@
  * Real EditorTable, real rows, mocked list virtualiser (happy-dom has no
  * layout) and a mocked per-file audio read so the takes can be shaped exactly.
  */
-import { describe, it, expect, vi } from "vitest"
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
@@ -22,6 +22,10 @@ import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import type { CellData } from "@/hooks/useCells"
+import type { LinkedTake } from "@/lib/audio/linked-takes"
+import { __resetFileAudioMemoryForTests } from "@/lib/audio/file-has-audio"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 vi.mock("@/hooks/useMicPermission", () => ({ useMicPermission: () => ({ micDenied: true }) }))
 vi.mock("@legendapp/list/react", async () => {
@@ -41,10 +45,28 @@ vi.mock("@legendapp/list/react", async () => {
   }
 })
 // The takes, shaped per test. Everything else in that module stays real.
-const audioState = vi.hoisted(() => ({ byCellId: new Map<string, CellAudioEntry>() }))
+const audioState = vi.hoisted(() => ({ byCellId: new Map<string, CellAudioEntry>(), hasLoaded: true }))
 vi.mock("@/hooks/useFileAudioAttachments", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  useFileAudioAttachments: () => ({ byCellId: audioState.byCellId, isLoading: false, revalidate: vi.fn() }),
+  useFileAudioAttachments: () => ({
+    byCellId: audioState.byCellId, isLoading: false, hasLoaded: audioState.hasLoaded, revalidate: vi.fn(),
+  }),
+}))
+// The votes, caught rather than sent; the flush-then-refresh after one is a
+// no-op here.
+const emits = vi.hoisted(() => ({ validate: vi.fn(async (_: unknown) => undefined) }))
+vi.mock("@/lib/sync/events-emit", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  emitCellAudioValidate: emits.validate,
+}))
+// AQU-1572: the emit reports each validation itself (cell-telemetry.ts, at the
+// emit seam). With the emits mocked, any capture here would be the row
+// reporting a second time on its own.
+const { captureCellValidation } = vi.hoisted(() => ({ captureCellValidation: vi.fn() }))
+vi.mock("@/lib/cell-telemetry", () => ({ captureCellValidation, captureAudioAction: vi.fn() }))
+vi.mock("@/lib/audio/audio-validation-commit", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useAudioValidationCommit: () => async () => undefined,
 }))
 // The take block's audio controller reaches for AudioContext and fetch; a
 // stub keeps the block mounted without a media pipeline behind it.
@@ -122,8 +144,12 @@ function renderTable() {
 
 const rowOf = async (target: string) => (await screen.findByText(target)).closest("[data-grid-row]") as HTMLElement
 
+// Which files were last seen with audio is session memory; each test starts
+// with none.
+beforeEach(() => __resetFileAudioMemoryForTests())
+
 describe("EditorTable — audio validation across the whole gutter", () => {
-  it("draws a control on the line with a recording and a faded mic on the line without", async () => {
+  it("draws a control on the line with a recording and a faded circle on the line without", async () => {
     audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
     renderTable()
     const withTake = await rowOf("bonjour cell-1")
@@ -134,21 +160,89 @@ describe("EditorTable — audio validation across the whole gutter", () => {
     expect(within(without).getByTestId("audio-validation-unavailable")).toBeInTheDocument()
   })
 
-  // No switch, no setting, no project-level gate (Sam, 2026-09-21). A file
-  // with no audio at all has no live mic anywhere — every line draws the
-  // faded one instead (Sam, 2026-09-23), so the column is still full.
-  it("draws only faded mics when the file has no audio at all", async () => {
+  // AQU-1495 (Sam, 2026-10-01): the column belongs to files with audio. Until
+  // then a file with none drew a faded mark on every line (09-23), so removing
+  // a project's last recording left the column standing, and a text-only
+  // project wore it on every line it had.
+  it("draws no audio column when the file has no audio at all", async () => {
     audioState.byCellId = new Map()
     renderTable()
     await screen.findByText("bonjour cell-1")
-    expect(screen.queryByTestId("audio-validation-button")).toBeNull()
-    expect(screen.getAllByTestId("audio-validation-unavailable")).toHaveLength(2)
+    expect(screen.queryByTestId("audio-validation-gutter")).toBeNull()
+    expect(screen.queryByTestId("audio-validation-unavailable")).toBeNull()
+    // The text column is untouched.
+    expect(screen.getAllByTestId("validation-gutter")).toHaveLength(2)
+  })
+
+  // …and neither does the header, whose marks stand over the rows' columns.
+  it("marks only the text checks in the header of a file with no audio", async () => {
+    audioState.byCellId = new Map()
+    renderTable()
+    await screen.findByText("bonjour cell-1")
+    const marks = screen.getByTestId("table-check-marks")
+    expect(within(marks).getByRole("img", { name: "Text validation" })).toBeInTheDocument()
+    expect(within(marks).queryByRole("img", { name: "Audio validation" })).toBeNull()
+  })
+
+  it("marks both checks in the header of a file with audio", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    renderTable()
+    await rowOf("bonjour cell-1")
+    const marks = screen.getByTestId("table-check-marks")
+    expect(within(marks).getByRole("img", { name: "Text validation" })).toBeInTheDocument()
+    expect(within(marks).getByRole("img", { name: "Audio validation" })).toBeInTheDocument()
+    // AQU-2401: the header's marks reproduce the row's widths, and the row's
+    // gutter now ends with a 24px Play. The mic names the audio CHECK; the
+    // Play slot is held open, unmarked, so the Target heading stays over the
+    // target boxes. Three slots in the header, two of them marks.
+    expect(marks.children).toHaveLength(3)
+    expect(marks.children[2].getAttribute("aria-hidden")).toBe("true")
+  })
+})
+
+// AQU-1495, from Joel's report of the 2026-09-29 call: the board's audio bar
+// went when the last recording was removed, and the editor's mic stayed.
+describe("EditorTable — removing recordings", () => {
+  function ui() {
+    return (
+      <MemoryRouter><QueryClientProvider client={new QueryClient()}><EditorActionsProvider value={{}}>
+        <EditorTable {...tableProps(project)} />
+      </EditorActionsProvider></QueryClientProvider></MemoryRouter>
+    )
+  }
+
+  it("takes the column away with the file's last recording", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    const { rerender } = render(ui())
+    expect(within(await rowOf("bonjour cell-1")).getByTestId("audio-validation-button")).toBeInTheDocument()
+
+    audioState.byCellId = new Map()
+    rerender(ui())
+    await screen.findByText("bonjour cell-1")
+    expect(screen.queryByTestId("audio-validation-gutter")).toBeNull()
+  })
+
+  it("keeps the column when other lines still have audio, and fades only the emptied line", async () => {
+    audioState.byCellId = new Map([
+      ["cell-1", entry([take("t1", "recording")])],
+      ["cell-2", entry([take("t2", "recording")])],
+    ])
+    const { rerender } = render(ui())
+    expect(within(await rowOf("bonjour cell-2")).getByTestId("audio-validation-button")).toBeInTheDocument()
+
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    rerender(ui())
+    const kept = await rowOf("bonjour cell-1")
+    const emptied = await rowOf("bonjour cell-2")
+    expect(within(kept).getByTestId("audio-validation-button")).toBeInTheDocument()
+    expect(within(emptied).queryByTestId("audio-validation-button")).toBeNull()
+    expect(within(emptied).getByTestId("audio-validation-unavailable")).toBeInTheDocument()
   })
 })
 
 describe("EditorTable — a line with only audio", () => {
   // Sam, 2026-09-22: an audio-only line offered BOTH controls, so you could
-  // "validate" a translation that did not exist. Only the mic now.
+  // "validate" a translation that did not exist. Only the audio check now.
   it("gets the audio control and not the text one", async () => {
     audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
     const s = store()
@@ -169,10 +263,12 @@ describe("EditorTable — a line with only audio", () => {
     const audioOnly = Array.from(document.querySelectorAll<HTMLElement>("[data-grid-row]"))
       .find((r) => !r.textContent?.includes("bonjour cell-2"))!
     expect(audioOnly).toBeDefined()
-    // Its text gutter holds only the faded circle — no button to press; its
-    // audio slot is live.
+    // Its text gutter holds only the faded circle — no validate button; its
+    // audio slot is live. (AQU-2260: the circle says why on click, from a
+    // stand-in that is not a Tab stop.)
     const textGutter = audioOnly.querySelector('[data-testid="validation-gutter"]')
-    expect(textGutter?.querySelector("button")).toBeNull()
+    expect(textGutter?.querySelector("button:not([data-slot='note-on-click'])")).toBeNull()
+    expect(textGutter?.querySelector("[data-slot='note-on-click']")?.getAttribute("tabindex")).toBe("-1")
     expect(textGutter?.querySelector('[data-testid="validation-unavailable"]')).not.toBeNull()
     expect(within(audioOnly).getByTestId("audio-validation-button")).toBeInTheDocument()
   })
@@ -192,13 +288,293 @@ describe("EditorTable — the Recording tab lists added-track takes", () => {
     expect(screen.queryByText(/no audio yet/i)).toBeNull()
   })
 
-  it("heads an unnamed added-track take by its track", async () => {
+  // Sam, 2026-09-30: named by its track before its own name. A track this
+  // build cannot name is still named as a track.
+  it("names the track of a take that lives on an added track", async () => {
     audioState.byCellId = new Map([["cell-1", entry([take("t2", "track-2")])]])
     renderTable()
     const row = await rowOf("bonjour cell-1")
     fireEvent.click(within(row).getByRole("button", { name: "Open cell details" }))
     const tab = await screen.findByText("Recording")
     fireEvent.click(tab.closest("button") ?? tab)
-    expect(await screen.findByText("Take on an added track")).toBeInTheDocument()
+    expect(await screen.findByTestId("cell-take-track")).toHaveTextContent("Added track")
+  })
+})
+
+// Sam, 2026-09-30: in a dubbing file a subtitle line's takes live on the heard
+// lines (cues) performing it. The line's audio check read only the row, so it
+// said "No audio to validate", and a vote on the heard line never showed.
+describe("EditorTable — a subtitle line's audio check reaches its heard lines", () => {
+  const cue = (id: string, audioId: string | null, words: string, validators: string[] = []): CellData => ({
+    id, fileId: "cue-file", original: words, translated: "", startTime: 1, endTime: 2,
+    attachments: audioId
+      ? { [audioId]: { ...take(audioId, "recording"), validators, validatorCount: validators.length } }
+      : {},
+    selectedAudioId: audioId,
+    selectedGeneratedVoiceAudioId: null,
+  } as unknown as CellData)
+
+  function renderWith(linked: Map<string, LinkedTake[]>) {
+    audioState.byCellId = new Map()
+    return render(
+      <MemoryRouter><QueryClientProvider client={new QueryClient()}><EditorActionsProvider value={{}}>
+        <EditorTable {...tableProps(project)} linkedTakesByCell={linked} />
+      </EditorActionsProvider></QueryClientProvider></MemoryRouter>,
+    )
+  }
+
+  it("draws the heard line's take, and votes on it where it lives", async () => {
+    emits.validate.mockClear()
+    renderWith(new Map([["cell-1", [{ cell: cue("cue-a", "ta", "Bring back some bread,"), sharedWith: 1, hasTake: true, performs: ["cell-1"], partOfSplit: false }]]]))
+    const row = await rowOf("bonjour cell-1")
+    expect(within(row).queryByTestId("audio-validation-unavailable")).toBeNull()
+    fireEvent.click(within(row).getByTestId("audio-validation-button"))
+    await vi.waitFor(() => expect(emits.validate).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
+    expect(emits.validate.mock.calls[0][0]).toMatchObject({ fileId: "cue-file", cellId: "cue-a", audioId: "ta" })
+  })
+
+  // AQU-1572: "same for audio with medium=audio", counted on the line the take
+  // lives on.
+  it("reports the vote once, through its one emit, against the heard line", async () => {
+    emits.validate.mockClear()
+    captureCellValidation.mockClear()
+    renderWith(new Map([["cell-1", [{ cell: cue("cue-a", "ta", "Bring back some bread,"), sharedWith: 1, hasTake: true, performs: ["cell-1"], partOfSplit: false }]]]))
+    fireEvent.click(within(await rowOf("bonjour cell-1")).getByTestId("audio-validation-button"))
+    await vi.waitFor(() => expect(emits.validate).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
+    expect(emits.validate.mock.calls[0][0]).toMatchObject({ fileId: "cue-file", cellId: "cue-a", surface: "cell" })
+    expect(captureCellValidation).not.toHaveBeenCalled()
+  })
+
+  it("shows a vote cast on the heard line elsewhere", async () => {
+    renderWith(new Map([["cell-1", [{ cell: cue("cue-a", "ta", "Bring back some bread,", ["someone"]), sharedWith: 1, hasTake: true, performs: ["cell-1"], partOfSplit: false }]]]))
+    const row = await rowOf("bonjour cell-1")
+    // Validated by another at a threshold of one: the double check, which
+    // offers nothing to press.
+    expect(within(row).getByTestId("audio-validation-button")).toHaveAttribute(
+      "aria-label", expect.stringContaining("validated"),
+    )
+    expect(within(row).getByTestId("audio-validation-button").className).toContain("text-green-500")
+  })
+})
+
+// The 3G pass (Sam, 2026-10-01): until the file's recordings had been read,
+// every line said "No audio to validate", then changed its mind seconds later.
+// An empty answer before the read means "not known yet" — the slot holds a
+// placeholder, and in a dubbing file it waits for the heard lines' takes too,
+// so a line never shows a count that is about to change. AQU-1495: only where
+// audio is expected, so a text-only file never pulses on every line.
+describe("EditorTable — the audio check waits for the file's recordings", () => {
+  afterEach(() => { audioState.hasLoaded = true })
+
+  it("holds a placeholder on every line of a file last seen with audio", async () => {
+    // Read once with a recording on it…
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    const first = renderTable()
+    await rowOf("bonjour cell-1")
+    first.unmount()
+    // …then opened again, its recordings not yet read.
+    audioState.byCellId = new Map()
+    audioState.hasLoaded = false
+    renderTable()
+    await screen.findByText("bonjour cell-1")
+    expect(screen.getAllByTestId("audio-validation-checking")).toHaveLength(2)
+    expect(screen.queryByTestId("audio-validation-unavailable")).toBeNull()
+    expect(screen.queryByTestId("audio-validation-button")).toBeNull()
+  })
+
+  it("draws nothing while reading a file not known to have audio", async () => {
+    audioState.byCellId = new Map()
+    audioState.hasLoaded = false
+    renderTable()
+    await screen.findByText("bonjour cell-1")
+    expect(screen.queryByTestId("audio-validation-gutter")).toBeNull()
+  })
+
+  // Switching files, the read can still hold the previous file's answer until
+  // the new one is back. It says nothing about this file.
+  it("does not judge an unread file by what the read still holds", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    audioState.hasLoaded = false
+    renderTable()
+    await screen.findByText("bonjour cell-1")
+    expect(screen.queryByTestId("audio-validation-gutter")).toBeNull()
+  })
+
+  it("takes the placeholder away when a file expected to have audio turns out to have none", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    renderTable().unmount()
+    audioState.byCellId = new Map()
+    audioState.hasLoaded = false
+    const { rerender } = renderTable()
+    await screen.findByText("bonjour cell-1")
+    expect(screen.getAllByTestId("audio-validation-checking")).toHaveLength(2)
+
+    audioState.hasLoaded = true
+    rerender(
+      <MemoryRouter><QueryClientProvider client={new QueryClient()}><EditorActionsProvider value={{ onOpenRecording: vi.fn() }}>
+        <EditorTable {...tableProps(project)} />
+      </EditorActionsProvider></QueryClientProvider></MemoryRouter>,
+    )
+    await screen.findByText("bonjour cell-1")
+    expect(screen.queryByTestId("audio-validation-gutter")).toBeNull()
+  })
+
+  it("in a dubbing file, waits for the heard lines' takes before saying anything", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    const ui = (heardLinesLoading: boolean) => (
+      <MemoryRouter><QueryClientProvider client={new QueryClient()}><EditorActionsProvider value={{}}>
+        <EditorTable {...tableProps(project)} heardLinesLoading={heardLinesLoading} />
+      </EditorActionsProvider></QueryClientProvider></MemoryRouter>
+    )
+    const { rerender } = render(ui(true))
+    await screen.findByText("bonjour cell-1")
+    // The line's own take is known, but a heard line may add another: no
+    // control yet, on either line.
+    expect(screen.getAllByTestId("audio-validation-checking")).toHaveLength(2)
+    expect(screen.queryByTestId("audio-validation-button")).toBeNull()
+
+    rerender(ui(false))
+    const withTake = await rowOf("bonjour cell-1")
+    const without = await rowOf("bonjour cell-2")
+    expect(screen.queryByTestId("audio-validation-checking")).toBeNull()
+    expect(within(withTake).getByTestId("audio-validation-button")).toBeInTheDocument()
+    expect(within(without).getByTestId("audio-validation-unavailable")).toBeInTheDocument()
+  })
+})
+
+// AQU-2401: ▶ Play for the line's own recording, promoted out of the `⋯` into
+// the left validation gutter beside the audio check it answers.
+//
+// The workflow this is for (AQU-490) is listen → validate, line after line.
+// With Play behind the `⋯` the listen half cost two clicks on EVERY line,
+// while the check that answers it already sat in the gutter (AQU-592). AQU-200
+// wrote the rule for moving one back out — an action frequent enough to earn a
+// direct slot is promoted, with nothing else changing — and AQU-2287 applied
+// it to Record.
+describe("EditorTable — Play sits in the gutter, not behind the ⋯", () => {
+  const playButton = (row: HTMLElement) => within(row).queryByTestId("cell-audio-play-button")
+  const fadedPlay = (row: HTMLElement) => within(row).queryByTestId("cell-audio-play-unavailable")
+  const overflowTrigger = (row: HTMLElement) =>
+    row.querySelector<HTMLElement>("[data-slot=cell-action-rail-overflow]")!
+
+  it("draws Play in the gutter, after the audio check, on a line with a recording", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    renderTable()
+    const row = await rowOf("bonjour cell-1")
+    const play = playButton(row)!
+    expect(play).toBeInTheDocument()
+    expect(play).toHaveAccessibleName("Play audio")
+    expect(fadedPlay(row)).toBeNull()
+
+    // ORDER IS THE POINT: text check, audio check, Play, then the target. A
+    // reviewer presses Play, listens, and presses the check without leaving
+    // the strip, so the three must be siblings in that order.
+    const gutter = row.querySelector<HTMLElement>("[data-testid=validation-gutter]")!
+    const slots = Array.from(gutter.parentElement!.children).map((el) => el.getAttribute("data-testid"))
+    expect(slots.slice(0, 3)).toEqual([
+      "validation-gutter", "audio-validation-gutter", "cell-audio-play-gutter",
+    ])
+  })
+
+  // The two clicks this change removes. The `⋯` still holds everything else it
+  // held; only the recording's Play left. ("Play from this cue" is a different
+  // button on a different sound — the file's master audio, AQU-1118 — and this
+  // fixture is not a timed file, so it is absent here for its own reason.)
+  it("leaves no Play for the recording inside the ⋯", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    renderTable()
+    const row = await rowOf("bonjour cell-1")
+    fireEvent.click(overflowTrigger(row))
+    const menu = await screen.findByRole("dialog")
+    expect(within(menu).queryByRole("button", { name: "Play audio" })).toBeNull()
+    // …and the gutter's one is still the only one on the row.
+    expect(within(row).getAllByTestId("cell-audio-play-button")).toHaveLength(1)
+  })
+
+  // Sam's rule for an empty line (2026-09-23), now applied to Play as well as
+  // the check: the gutter reads full on every row, so the target text's left
+  // edge never shifts between rows.
+  it("draws a faded Play, no tab stop, on a line with no recording in a file that has some", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    renderTable()
+    const without = await rowOf("bonjour cell-2")
+    expect(playButton(without)).toBeNull()
+    const faded = fadedPlay(without)!
+    expect(faded.tagName).toBe("SPAN")
+    expect(faded).toHaveAccessibleName(/nothing recorded to play/i)
+    expect(faded.className).toContain("opacity-40")
+    // The mark is the button, and it is NOT a Tab stop — one per row would
+    // otherwise put a dead stop between every check and the next row.
+    expect(faded.closest("[data-slot=note-on-click]")?.getAttribute("tabindex")).toBe("-1")
+    // Both slots are still drawn, so the target text starts in the same place.
+    expect(within(without).getByTestId("audio-validation-gutter")).toBeInTheDocument()
+    expect(within(without).getByTestId("cell-audio-play-gutter")).toBeInTheDocument()
+  })
+
+  it("says what there is nothing of, on a click", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    renderTable()
+    const without = await rowOf("bonjour cell-2")
+    fireEvent.click(fadedPlay(without)!)
+    expect(await screen.findByText(/nothing recorded on this line to play/i)).toBeInTheDocument()
+  })
+
+  // AQU-1495's rule, which Play inherits by being gated on the same column: a
+  // text-only file has no audio column, so it gets no Play either, and its
+  // rail is exactly as it was.
+  it("draws no Play at all in a file with no audio", async () => {
+    audioState.byCellId = new Map()
+    renderTable()
+    await screen.findByText("bonjour cell-1")
+    expect(screen.queryByTestId("cell-audio-play-gutter")).toBeNull()
+    expect(screen.queryByTestId("cell-audio-play-button")).toBeNull()
+    expect(screen.queryByTestId("cell-audio-play-unavailable")).toBeNull()
+  })
+
+  // The 3G pass's rule (Sam, 2026-10-01), which Play inherits too: before the
+  // recordings are read, an absent take is not "no recording". The slot holds
+  // its width and offers nothing to press, so the row cannot shuffle under the
+  // pointer a moment later.
+  it("reserves the slot, pressable by nothing, while the recordings are being read", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    renderTable().unmount()
+    audioState.byCellId = new Map()
+    audioState.hasLoaded = false
+    try {
+      renderTable()
+      await screen.findByText("bonjour cell-1")
+      expect(screen.getAllByTestId("cell-audio-play-gutter")).toHaveLength(2)
+      expect(screen.queryByTestId("cell-audio-play-button")).toBeNull()
+      expect(screen.queryByTestId("cell-audio-play-unavailable")).toBeNull()
+    } finally {
+      audioState.hasLoaded = true
+    }
+  })
+
+  // AQU-200 put an emerald dot on the `⋯` to stand for the Play it had hidden.
+  // Play is visible again, so the dot has nothing left to stand for — "this
+  // line has audio" is now said by the button being live rather than faded, a
+  // few pixels from the check that counts it.
+  it("shows no dot on the ⋯ for a line with a recording and no open comments", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    renderTable()
+    const row = await rowOf("bonjour cell-1")
+    expect(overflowTrigger(row).querySelector("span[aria-hidden]")).toBeNull()
+  })
+
+  // …and the one signal it still carries is unaffected. Comments win the dot
+  // because an unread comment is addressed to a person, where "this line has
+  // audio" is only a state.
+  it("still shows the primary dot for an open comment", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    render(
+      <MemoryRouter><QueryClientProvider client={new QueryClient()}><EditorActionsProvider value={{}}>
+        <EditorTable {...tableProps(project)} cellOpenCommentCount={new Map([["cell-1", 1]])} />
+      </EditorActionsProvider></QueryClientProvider></MemoryRouter>,
+    )
+    const row = await rowOf("bonjour cell-1")
+    const dot = overflowTrigger(row).querySelector("span[aria-hidden]")
+    expect(dot).not.toBeNull()
+    expect(dot!.className).toContain("bg-primary")
   })
 })

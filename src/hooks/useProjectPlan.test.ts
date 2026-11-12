@@ -58,6 +58,17 @@ describe("useProjectPlan", () => {
     expect(result.current.error).toMatch(/500/)
   })
 
+  it("reports an unmintable token as a failed read, never a pending one", async () => {
+    // AQU-2088: on an archived project the sync-token mint is refused, so
+    // `getToken` answers null. That has to land in the board's error state —
+    // leaving it at "loading" showed "Loading the plan..." for ever.
+    const { result } = renderHook(() =>
+      useProjectPlan({ projectId: "p1", lane: "", getToken: async () => null }))
+    await waitFor(() => expect(result.current.status).toBe("error"))
+    expect(result.current.error).toMatch(/token/)
+    expect(fetchProjectPlan).not.toHaveBeenCalled()
+  })
+
   it("shows a date change before the server answers", async () => {
     // The row must move the moment you pick a date; waiting on a round trip
     // makes the board feel broken.

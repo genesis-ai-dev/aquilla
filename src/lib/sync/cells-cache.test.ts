@@ -11,6 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { CellRow } from "./cells-read-types"
 import {
+  grantsVersionFromSyncToken,
   mergeCellsDelta,
   readCellsCache,
   writeCellsCache,
@@ -21,6 +22,7 @@ import {
   flushCellsCacheWrites,
   scheduleCellsCacheWrite,
 } from "./cells-cache"
+import { CELLS_CACHE_STORE } from "./cells-cache-writer"
 
 function row(
   cellId: string,
@@ -305,7 +307,65 @@ describe("cells cache maxServerSeq cursor", () => {
   })
 })
 
+function tokenWithGrants(grants: { lane: string; level: number }[] | null): string {
+  const payload = grants === null ? {} : { laneGrants: grants }
+  const b64 = btoa(JSON.stringify(payload)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+  return `hdr.${b64}.sig`
+}
+
+describe("cells cache grant version", () => {
+  beforeEach(async () => {
+    await resetCellsCacheConnectionForTests()
+  })
+
+  it("keeps today's key when the token has no lane grants", () => {
+    expect(grantsVersionFromSyncToken(null)).toBe("")
+    expect(grantsVersionFromSyncToken(tokenWithGrants(null))).toBe("")
+    expect(grantsVersionFromSyncToken(tokenWithGrants([]))).toBe("")
+  })
+
+  it("does not paint a snapshot written under a different grant set", async () => {
+    const spanish = grantsVersionFromSyncToken(tokenWithGrants([{ lane: "es", level: 400 }]))
+    const french = grantsVersionFromSyncToken(tokenWithGrants([{ lane: "fr", level: 400 }]))
+    expect(spanish).not.toBe("")
+    expect(spanish).not.toBe(french)
+
+    await writeCellsCache("p1", "f1", [row("es-row", "target")], 1, undefined, spanish)
+    expect((await readCellsCache("p1", "f1", spanish))?.rows[0].cellId).toBe("es-row")
+    expect(await readCellsCache("p1", "f1", french)).toBeNull()
+    expect(await readCellsCache("p1", "f1")).toBeNull()
+  })
+
+  it("drops the unversioned snapshot once a grant-scoped one is stored", async () => {
+    await writeCellsCache("p1", "f1", [row("old", "target")], 1)
+    const version = grantsVersionFromSyncToken(tokenWithGrants([{ lane: "es", level: 400 }]))
+    await writeCellsCache("p1", "f1", [row("granted", "target")], 2, undefined, version)
+    expect(await readCellsCache("p1", "f1")).toBeNull()
+    expect((await readCellsCache("p1", "f1", version))?.rows[0].cellId).toBe("granted")
+  })
+
+  it("drops the unversioned snapshot when a grant-scoped read misses", async () => {
+    await writeCellsCache("p1", "f1", [row("old", "target")], 1)
+    const version = grantsVersionFromSyncToken(tokenWithGrants([{ lane: "es", level: 300 }]))
+    expect(await readCellsCache("p1", "f1", version)).toBeNull()
+    expect(await readCellsCache("p1", "f1")).toBeNull()
+  })
+})
+
 describe("queued cells cache writes", () => {
+  /**
+   * AQU-1865: a snapshot write commits two rows in one transaction — the
+   * snapshot and the `cells-meta` row carrying its size and last access. These
+   * tests are about how many *snapshot writes* the debounce let through, so they
+   * count puts against the snapshot store rather than every put in the
+   * transaction.
+   */
+  function snapshotPuts(put: { mock: { contexts: unknown[] } }): number {
+    return put.mock.contexts.filter(
+      (context) => (context as IDBObjectStore | undefined)?.name === CELLS_CACHE_STORE,
+    ).length
+  }
+
   beforeEach(async () => {
     vi.useRealTimers()
     await resetCellsCacheConnectionForTests()
@@ -336,12 +396,12 @@ describe("queued cells cache writes", () => {
     expect(put).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     await vi.runAllTimersAsync()
-    expect(put).toHaveBeenCalledTimes(1)
+    expect(snapshotPuts(put)).toBe(1)
     // fake-indexeddb completes transactions through timers of its own.
     vi.useRealTimers()
     await flushCellsCacheWrites("queued-project", "queued-file")
 
-    expect(put).toHaveBeenCalledTimes(1)
+    expect(snapshotPuts(put)).toBe(1)
     const entry = await readCellsCache("queued-project", "queued-file")
     expect(entry?.rows[0].cellId).toBe("row-10")
     expect(entry?.maxServerSeq).toBeUndefined()
@@ -368,11 +428,11 @@ describe("queued cells cache writes", () => {
     expect(put).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     await vi.runAllTimersAsync()
-    expect(put).toHaveBeenCalledTimes(1)
+    expect(snapshotPuts(put)).toBe(1)
     vi.useRealTimers()
     await flushCellsCacheWrites("trailing-project", "trailing-file")
 
-    expect(put).toHaveBeenCalledTimes(1)
+    expect(snapshotPuts(put)).toBe(1)
     const entry = await readCellsCache("trailing-project", "trailing-file")
     expect(entry?.rows[0].cellId).toBe("second")
     expect(entry?.maxServerSeq).toBe(2)

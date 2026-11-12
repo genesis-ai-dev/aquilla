@@ -8,7 +8,9 @@ import babel from "@rolldown/plugin-babel"
 import tailwindcss from "@tailwindcss/vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import { brandingHtmlPlugin } from "./scripts/vite-html-branding.ts"
+import { stripI18nContextPlugin } from "./scripts/vite-strip-i18n-context.ts"
 import { resolveBuildBranch, resolveBuildDate, resolveBuildSha } from "./scripts/build-info.ts"
+import { TRANSFORMERS_ORT_SPECIFIER, resolveTransformersOrtExternWasm } from "./scripts/transformers-ort-extern-wasm.ts"
 import { BRAND_DATA, BRAND_DATA_IDS } from "./src/branding/brands/data.ts"
 import type { BrandId } from "./src/branding/types.ts"
 
@@ -100,6 +102,8 @@ export default defineConfig(({ mode }) => ({
       globals: { Buffer: true, global: true, process: true },
     }),
     brandingHtmlPlugin(brand),
+    // AQU-2090: translator notes are for the catalog tooling, never the browser.
+    stripI18nContextPlugin(),
     {
       name: "version-json",
       writeBundle() {
@@ -132,6 +136,16 @@ export default defineConfig(({ mode }) => ({
         replacement: path.resolve(import.meta.dirname, "./packages/idml-roundtrip/src/index.ts"),
       },
       { find: "@", replacement: path.resolve(import.meta.dirname, "./src") },
+      // transformers.js fetches its ONNX Runtime WASM from jsDelivr at runtime,
+      // so the copy its default onnxruntime-web build makes Vite emit is dead
+      // weight — and at 25.6 MiB under transformers 4.3.0 it is over the
+      // Cloudflare Workers per-asset limit. Exact match on purpose: mms-worker's
+      // own `onnxruntime-web/wasm` import still needs its bundled WASM. See
+      // scripts/transformers-ort-extern-wasm.ts.
+      {
+        find: new RegExp(`^${TRANSFORMERS_ORT_SPECIFIER}$`),
+        replacement: resolveTransformersOrtExternWasm(import.meta.dirname),
+      },
     ],
   },
   optimizeDeps: {
@@ -166,6 +180,16 @@ export default defineConfig(({ mode }) => ({
     ],
   },
   build: {
+    // AQU-2377: WebKit can retain failed modulepreload responses across a
+    // document reload after an offline navigation. Let dynamic imports load
+    // their JS graph normally; retain initial HTML preloads and Vite's CSS
+    // loading/error helper (including vite:preloadError).
+    // https://bugs.webkit.org/show_bug.cgi?id=270357
+    // Tradeoff: cold lazy routes discover JS dependencies through imports,
+    // rather than fetching the whole dependency graph in parallel up front.
+    modulePreload: {
+      resolveDependencies: (_filename, deps, { hostType }) => hostType === "html" ? deps : [],
+    },
     // hls.js (~508kB), dash.js (~961kB), and web-worker AI bundles (whisper,
     // mms) are intentionally large and non-initial (lazy route or
     // worker). Raise the threshold so vite doesn't warn about things we
@@ -204,31 +228,74 @@ export default defineConfig(({ mode }) => ({
     },
   },
   test: {
-    environment: "happy-dom",
-    setupFiles: ["./src/test-setup.ts"],
-    passWithNoTests: false,
-    exclude: [
-      "**/node_modules/**",
-      "dist/**",
-      ".worktrees/**",
-      ".claude/worktrees/**",
-      ".claire/**",
-      "e2e/**",
-      "smart-tests/journeys/**",
-      "smart-tests/.venv/**",
-      // Each worker has its own vitest config + local node_modules. Running
-      // their tests from root pulls in worker-local deps the root install
-      // doesn't have. deploy-workers.yml runs each worker's tests in its
-      // own directory.
-      "auth-worker/**",
-      "sync-worker/**",
-      "agent-worker/**",
-      "worker/**",
-      // Parity-run acceptance/roundtrip suites run via `pnpm parity:score` /
-      // `pnpm roundtrip:score` with parity/vitest.config.ts — rows there are
-      // red by design until implemented, so they must not fail the default
-      // suite.
-      "parity/**",
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "app",
+          environment: "happy-dom",
+          setupFiles: ["./src/test-setup.ts"],
+          // Stall watchdogs, not speed limits (AGENTS.md rule 15, AQU-1749). A
+          // passing test is unaffected; a stalled one fails after a minute.
+          // Each wait inside a test has 10 s (STALL_WATCHDOG_MS,
+          // src/test-utils/timeouts.ts), so these ceilings stay above the sum
+          // of a test's waits.
+          testTimeout: 60_000,
+          hookTimeout: 60_000,
+          passWithNoTests: false,
+          exclude: [
+            "**/node_modules/**",
+            "dist/**",
+            ".worktrees/**",
+            ".claude/worktrees/**",
+            ".claire/**",
+            "e2e/**",
+            "smart-tests/journeys/**",
+            "smart-tests/adversarial/journeys/**",
+            "smart-tests/.venv/**",
+            // Each worker has its own vitest config + local node_modules. Running
+            // their tests from root pulls in worker-local deps the root install
+            // doesn't have. deploy-workers.yml runs each worker's tests in its
+            // own directory.
+            "auth-worker/**",
+            "sync-worker/**",
+            "agent-worker/**",
+            "monitor-worker/**",
+            "worker/**",
+            // The Zapier app has its own package.json + jest suite (cd zapier && npm test).
+            "zapier/**",
+            // Parity-run acceptance/roundtrip suites run via `pnpm parity:score` /
+            // `pnpm roundtrip:score` with parity/vitest.config.ts — rows there are
+            // red by design until implemented, so they must not fail the default
+            // suite.
+            "parity/**",
+            // Owned by the "scripts-node" project below. The .ts files here
+            // import node:url / node:path; the app project's browser polyfill
+            // makes fileURLToPath's dirname "." on Windows, so repo-root
+            // lookups walk up out of the checkout.
+            "scripts/**/*.test.mjs",
+            "scripts/lib/e2e-lock.test.ts",
+            "scripts/lib/worktree-install-guard.test.ts",
+            "scripts/lib/spawn-command.test.ts",
+            "scripts/lib/playwright-loader-env.test.ts",
+            "scripts/lib/listening-pids.test.ts",
+            "scripts/lib/desktop-bundle.test.ts",
+            // Owned by the "qa-biblica-python" project below: a Node-env test
+            // that shells out to the QA runner's Python suite (AQU-2365).
+            "agents/**",
+          ],
+        },
+      },
+      // `scripts/*.mjs` are plain Node modules run with `node`, never through a
+      // bundler, so they are tested against the real Node built-ins — see
+      // `scripts/vitest.config.mts`. It is a SEPARATE CONFIG FILE on purpose:
+      // an inline project here shares this file's resolved `resolve.alias`, so
+      // vite-plugin-node-polyfills' browser shims reached it regardless of what
+      // the inline entry declared (AQU-1431; AQU-1273 had it inline).
+      "./scripts/vitest.config.mts",
+      // Runs agents/qa-biblica's stdlib `unittest` suite, so the Biblica QA
+      // runner is covered by `pnpm test` like everything else (AQU-2365).
+      "./agents/qa-biblica/vitest.config.mts",
     ],
   },
 }))

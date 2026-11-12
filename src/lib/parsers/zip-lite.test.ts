@@ -29,6 +29,19 @@ describe("readZipLite", () => {
     expect(await readZipLiteEntryText(archive, "b/two.txt")).toBe("second")
   })
 
+  it("refuses a member that inflates past its declared central-directory size", async () => {
+    const zip = new JSZip()
+    zip.file("bomb.txt", "A".repeat(100_000), { compression: "DEFLATE" })
+    const bytes = new Uint8Array(await zip.generateAsync({ type: "arraybuffer" }))
+    // Lie in the central directory: declare 10 bytes for a 100 KB member.
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    for (let i = 0; i + 28 < bytes.length; i++) {
+      if (view.getUint32(i, true) === 0x02014b50) view.setUint32(i + 24, 10, true)
+    }
+    const archive = readZipLite(bytes)
+    await expect(readZipLiteEntryBytes(archive, "bomb.txt")).rejects.toThrow(/declared size/)
+  })
+
   it("reads STORED members", async () => {
     // The parity fixture is a hand-written stored-only archive.
     const archive = readZipLite(buildDocxParityFixture())

@@ -13,8 +13,7 @@ import { v7 as uuidv7 } from "uuid"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 import { emitSourceCellCreate, emitSourceCellDelete, emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
-import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
-import { extractVoiceReference, type ReferenceRange } from "@/lib/audio/reference-extract"
+import { buildSpeakerCastWrite } from "@/lib/import/cast-from-speakers"
 import { turnsToSegments, speakerLabel, type DiarizationTurn } from "@/lib/timeline/diarization"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
@@ -91,7 +90,19 @@ async function startJob(args: RunDiarizationArgs, audioObject: string): Promise<
     signal: args.signal,
   })
   if (!res.ok) {
-    throw new Error(`diarization start failed (${res.status}): ${(await res.text().catch(() => "")).slice(0, 200)}`)
+    const raw = await res.text().catch(() => "")
+    // AQU-1855: /start refuses with 429 + `{error}` when the user or the project
+    // is already holding the cap of live diarization jobs. Surface that sentence
+    // — it tells the user what to do ("wait for one to finish") — rather than the
+    // raw JSON blob the message used to carry.
+    let detail = raw.slice(0, 200)
+    try {
+      const parsed = JSON.parse(raw) as { error?: unknown }
+      if (typeof parsed.error === "string" && parsed.error.length > 0) detail = parsed.error
+    } catch {
+      // Not JSON (a plain-text 401/403 from the token check) — keep the body.
+    }
+    throw new Error(`diarization start failed (${res.status}): ${detail}`)
   }
   const body = (await res.json()) as { jobId?: string }
   if (!body.jobId) throw new Error("diarization start returned no jobId")
@@ -132,7 +143,7 @@ async function applyTurns(
     }
   }
 
-  const pairs: { cellId: string; speaker: string }[] = []
+  const pairs: { cellId: string; speaker: string; castNamed: true }[] = []
   let prevCellId: string | null = null
   let seq = 0
   for (const s of segments) {
@@ -147,6 +158,10 @@ async function applyTurns(
       sequenceIndex: seq,
       startMs: s.startMs,
       endMs: s.endMs,
+      // AQU-2125: "Speaker 2" is the line's character, so the speaker is cast
+      // once rather than every turn. A person renaming the voice later renames
+      // the voice, not the lines.
+      metadata: { cast_name: speakerLabel(s.speaker) },
       author: args.author,
     })
     await emitCellAudioAttach({
@@ -158,62 +173,23 @@ async function applyTurns(
       slot: "recording",
       trimStartMs: s.trimStartMs,
       trimEndMs: s.trimEndMs,
+      // AQU-1565 follow-up: the re-cut rows still share the file's own
+      // recording. Without the role each new row's clip was stored as a dub.
+      role: "source",
       author: args.author,
     })
-    pairs.push({ cellId, speaker: speakerLabel(s.speaker) })
+    pairs.push({ cellId, speaker: speakerLabel(s.speaker), castNamed: true })
     prevCellId = cellId
     seq += 1
   }
 
-  // Cast: one "Speaker N" voice per cluster, assigned to its cells. Merge the
-  // new assignments into any existing ones (don't clobber other files).
-  const additions = buildCastAdditions(pairs, args.ttsSettings, () => uuidv7())
+  // Cast: one "Speaker N" voice per cluster, cast once by character (AQU-2125).
+  // The map comes back whole, other files' casting included.
+  const cast = buildSpeakerCastWrite(pairs, args.ttsSettings, () => uuidv7())
 
-  // AQU-646: give each Speaker voice a clone reference extracted from that
-  // speaker's own turns in the imported clip, so generating target audio on
-  // their cells speaks in the imported speaker's voice (TTS→Seed-VC runs
-  // automatically once `referenceAudioId` is set). Failure-tolerant per
-  // speaker: an extraction error leaves that voice reference-less (today's
-  // behavior) rather than failing the diarization.
-  const speakerRanges = new Map<string, ReferenceRange[]>()
-  for (const s of segments) {
-    const label = speakerLabel(s.speaker)
-    const list = speakerRanges.get(label) ?? []
-    // trim* are in-clip coordinates — exactly what extraction slices.
-    list.push({ startMs: s.trimStartMs, endMs: s.trimEndMs })
-    speakerRanges.set(label, list)
-  }
-  const voiceIdBySpeaker = new Map<string, string>()
-  for (const p of pairs) {
-    const vid = additions.castAssignments[p.cellId]
-    if (vid && !voiceIdBySpeaker.has(p.speaker)) voiceIdBySpeaker.set(p.speaker, vid)
-  }
-  const getSyncToken = (_pid: string, fid: string) => args.getToken(fid)
-  const voices = [...additions.voices]
-  for (const [speaker, ranges] of speakerRanges) {
-    const voiceId = voiceIdBySpeaker.get(speaker)
-    if (!voiceId) continue
-    const idx = voices.findIndex((v) => v.id === voiceId)
-    // Reused voices that already carry a reference keep it.
-    if (idx < 0 || voices[idx].referenceAudioId) continue
-    try {
-      const referenceAudioId = await extractVoiceReference({
-        projectId: args.projectId,
-        fileId: args.fileId,
-        clipUrl: clip.url,
-        ranges,
-        getSyncToken,
-      })
-      if (referenceAudioId) voices[idx] = { ...voices[idx], referenceAudioId }
-    } catch (err) {
-      console.warn(`[diarize] voice reference extraction failed for ${speaker}:`, err)
-    }
-  }
-
-  await args.saveTts({
-    voices,
-    castAssignments: { ...(args.ttsSettings?.castAssignments ?? {}), ...additions.castAssignments },
-  })
+  // Plain TTS voices, one per speaker (AQU-2291: no clone clip is lifted from
+  // the speaker's turns any more — a real person's voice is trained).
+  await args.saveTts({ voices: cast.voices, castAssignments: cast.castAssignments })
 
   return { speakers: speakers.length, segments: segments.length }
 }

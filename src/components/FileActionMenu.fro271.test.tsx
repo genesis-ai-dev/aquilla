@@ -5,7 +5,7 @@
  * When it is provided, the item appears.
  */
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import { describe, it, expect, vi } from "vitest"
 import {
   ContextMenu,
@@ -91,5 +91,19 @@ describe("FileActionMenu — segmentation", () => {
     expect(
       segmentation.compareDocumentPosition(exportItem) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
+  })
+})
+
+describe("FileActionMenu — re-import", () => {
+  it("hides Re-import when the caller cannot import", () => {
+    renderMenu()
+    expect(screen.queryByRole("menuitem", { name: /^Re-import$/ })).toBeNull()
+  })
+
+  it("shows Re-import and runs it when the caller can import", () => {
+    const onReimport = vi.fn()
+    renderMenu({ onReimport })
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Re-import$/ }))
+    expect(onReimport).toHaveBeenCalledOnce()
   })
 })

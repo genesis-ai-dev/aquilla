@@ -22,6 +22,8 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, optionalCaller, type AuthHonoEnv } from "../middleware/auth"
+import { projectElevationDenial } from "../services/elevation-gate"
+import { auditMembershipChange } from "../services/admin-audit"
 import {
   INVITE_MIN_ROLE,
   LINK_ROLE_CAP,
@@ -41,6 +43,8 @@ import {
   parseScopeLanes,
   serializeScopeLanes,
 } from "../services/invite-scopes"
+import { resolveExplicitLaneChoice } from "../services/lane-choice"
+import { emailBoundInviteUnverified } from "../services/verified-email-invite"
 
 const invites = new Hono<AuthHonoEnv>()
 
@@ -75,14 +79,17 @@ const createMultiInviteSchema = z.object({
   roleLevel: z.number().int().min(100).max(700).optional(),
   expiresAt: z.string().datetime().optional(),
   /**
-   * AQU-528: optional lane (target-language) scopes auto-granted on join. The
-   * same lane set applies to every project sharing the token. Omitted/empty =
-   * unscoped invite (today's behavior).
+   * AQU-528: lane scopes auto-granted on join. The same set applies to every
+   * project on the token. AQU-1808: omitting this is not every current lane —
+   * send allCurrentLanes, or name the lanes, when any project has current
+   * target lanes.
    */
   scopeLanes: z
     .array(z.string().max(MAX_LANE_VALUE_LENGTH))
     .max(MAX_INVITE_SCOPE_LANES)
     .optional(),
+  /** AQU-1808: explicit every-current-lane choice for every project on the token. */
+  allCurrentLanes: z.literal(true).optional(),
 })
 
 invites.post(
@@ -114,14 +121,36 @@ invites.post(
           403,
         )
       }
+      const unelevated = await projectElevationDenial(c, resolved)
+      if (unelevated) return unelevated
     }
 
     const token = crypto.randomUUID().replace(/-/g, "")
     const expiresAt =
       body.expiresAt ?? new Date(Date.now() + DEFAULT_INVITE_TTL_MS).toISOString()
 
-    // AQU-528: same lane scopes on every row sharing the token; null = unscoped.
-    const scopeLanesJson = serializeScopeLanes(body.scopeLanes)
+    // AQU-1607: stored as lane ids, resolved against every project the token
+    // covers — accept picks out the ones belonging to the project joined.
+    // AQU-1808: a missing choice is refused when any of those projects has a
+    // current target lane. allCurrentLanes stores no scopes.
+    const laneChoice = await resolveExplicitLaneChoice(c.env, projectIds, {
+      role: grantedRole,
+      allCurrentLanes: body.allCurrentLanes,
+      scopeLanes: body.scopeLanes,
+      requireChoice: true,
+    })
+    if (!laneChoice.ok) {
+      return c.json(
+        {
+          error: laneChoice.error,
+          code: laneChoice.code,
+          ...(laneChoice.ambiguous ? { ambiguous: laneChoice.ambiguous } : {}),
+          ...(laneChoice.unmatched ? { unmatched: laneChoice.unmatched } : {}),
+        },
+        400,
+      )
+    }
+    const scopeLanesJson = serializeScopeLanes(laneChoice.kind === "lanes" ? laneChoice.laneIds : [])
 
     for (const pid of projectIds) {
       try {
@@ -136,6 +165,12 @@ invites.post(
         console.error(`[invites/multi] insert failed for ${pid}:`, err)
         return c.json({ error: "Failed to create multi-project invite" }, 500)
       }
+      await auditMembershipChange(c.env, user, {
+        action: "project.invite.create",
+        where: { scope: "project", projectId: pid },
+        roleBefore: null,
+        roleAfter: grantedRole,
+      })
     }
 
     return c.json({
@@ -160,6 +195,20 @@ invites.post(
 
 invites.get("/mine", authMiddleware, async (c) => {
   const user = c.get("user")
+
+  // [Pen test] Auth & session mgmt (2026-10-26): registration never verifies
+  // the email, so anyone could register an invitee's address first and list
+  // (then accept) the invites sent to it. Email-matched discovery only trusts
+  // an address the account has proven it controls. Invite-link accept (the
+  // token holder path) is unchanged, so legit invitees see no new friction.
+  const verified = await c.env.AQUILLA_PG.prepare(
+    "SELECT email_verified_at FROM users WHERE id = ?",
+  )
+    .bind(user.id)
+    .first<{ email_verified_at: string | null }>()
+  if (!verified?.email_verified_at) {
+    return c.json({ invites: [] })
+  }
 
   const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT pi.token AS token,
@@ -397,6 +446,14 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
       403,
     )
   }
+  // AQU-1579: the match above is only a string compare. Refuse before any
+  // row is claimed so an unverified account cannot spend the token.
+  const unverified = await emailBoundInviteUnverified(
+    c.env.AQUILLA_PG,
+    user.id,
+    first.email,
+  )
+  if (unverified) return c.json(unverified, 403)
 
   // Archived projects can't be joined via invite (mirrors legacy accept).
   const archivedRows = await c.env.AQUILLA_PG.prepare(
@@ -464,8 +521,11 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
         continue
       }
 
+      // [Pen test 2026-10-06] Re-accept never raises a (possibly demoted) role.
       const finalRole = existing
-        ? Math.max(existing.role_level, invite.role_level)
+        ? invite.used_at
+          ? existing.role_level
+          : Math.max(existing.role_level, invite.role_level)
         : invite.role_level
 
       if (existing) {

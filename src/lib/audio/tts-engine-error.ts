@@ -1,32 +1,80 @@
-// Map hosted TTS / clone-conversion HTTP failures onto Error messages that
+// Map hosted TTS / voice-conversion HTTP failures onto Error messages that
 // name the engine that actually failed. The gutter tooltip shows
 // `err.message` raw; categorizeAiError then turns the same strings into a
 // titled popover so Inworld 503s never read as a missing Gemini key.
 
+import { aiRefusalError } from "@/lib/billing/ai-refusal"
+
 export const HOSTED_TTS_NOT_CONFIGURED_BODY =
-  "This line uses Inworld TTS, not Gemini. Hosted TTS isn't wired on this server — a Gemini API key will not fix it."
+  "This line uses Inworld TTS, not Gemini. Hosted TTS isn't wired on this server, so a Gemini API key will not fix it."
 
 export const HOSTED_TTS_FAILED_BODY =
   "Inworld TTS couldn't generate this line. This is not a Gemini key problem."
 
-export const SEED_VC_NOT_CONFIGURED_BODY =
-  "This clone voice needs Seed-VC after Gemini or a local engine. Voice conversion isn't wired on this server. An Inworld clone wouldn't need this step."
+export const VOICE_CONVERT_NOT_CONFIGURED_BODY =
+  "Voice conversion isn't set up on this server, so character and trained voices can't re-voice this line. This is not a Gemini key problem."
 
-export const SEED_VC_FAILED_BODY =
-  "Voice cloning (Seed-VC) couldn't convert this line. This is not a Gemini key problem."
+// Engine-neutral: Change voice runs on the voice forge (RVC) for character and
+// trained voices (AQU-2212, AQU-2291).
+export const VOICE_CONVERT_FAILED_BODY =
+  "Voice conversion couldn't re-voice this line. This is not a Gemini key problem."
+
+/** The worker gave up waiting: almost always a GPU container starting cold. */
+export const VOICE_CONVERT_SLOW_MESSAGE =
+  "The voice service took too long to answer — it was probably starting up. Try again; the next one is usually quick."
+
+/**
+ * AQU-1156: a single TTS request must finish, or fail, inside a bounded window.
+ * Without a deadline a hung upstream left the per-cell generate control
+ * spinning until the browser's own multi-minute socket timeout — no audio, no
+ * error, nothing to retry.
+ *
+ * The client bound sits ABOVE the sync-worker's own upstream bound
+ * (`INWORLD_TTS_REQUEST_TIMEOUT_MS`, 60s) so the server's specific 502 normally
+ * wins the race and the user reads *why* it failed; this is the backstop for
+ * when the worker itself never answers.
+ */
+export const TTS_REQUEST_TIMEOUT_MS = 90_000
+
+/** True for the DOMException an `AbortSignal.timeout`/abort rejects fetch with. */
+export function isAbortTimeout(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false
+  const name = (err as { name?: unknown }).name
+  return name === "TimeoutError" || name === "AbortError"
+}
+
+/**
+ * The message a blown deadline shows in the cell's tts badge. It names the
+ * engine (so an Inworld stall never reads as a missing Gemini key) and says
+ * the request is over, because the control is idle again and clickable.
+ */
+export function errorFromTtsTimeout(engine: string, ms: number): Error {
+  return new Error(
+    `${engine} did not respond within ${Math.round(ms / 1000)}s. The request was cancelled — click generate again to retry.`,
+  )
+}
 
 export function errorFromHostedTts(status: number, body: string): Error {
   const detail = body.trim() || `HTTP ${status}`
   if (status === 503 && /tts not configured/i.test(detail)) {
     return new Error(HOSTED_TTS_NOT_CONFIGURED_BODY)
   }
+  // AQU-1872/AQU-2068: an org out of allowance is refused before the vendor
+  // is called, so it must not be reported as a vendor failure. The gutter
+  // tooltip shows `err.message` raw; the refusal's message stands on its own.
+  const refused = aiRefusalError(status, detail)
+  if (refused) return refused
   return new Error(`Inworld TTS failed (${status}): ${detail}`)
 }
 
 export function errorFromVoiceConvert(status: number, body: string): Error {
   const detail = body.trim() || `HTTP ${status}`
   if (status === 503 && /voice conversion not configured/i.test(detail)) {
-    return new Error(SEED_VC_NOT_CONFIGURED_BODY)
+    return new Error(VOICE_CONVERT_NOT_CONFIGURED_BODY)
   }
-  return new Error(`Voice cloning (Seed-VC) failed (${status}): ${detail}`)
+  if (status === 409 && /still training/i.test(detail)) {
+    return new Error("This voice is still training. Training takes about 45 minutes; try again once it shows as ready.")
+  }
+  if (status === 504) return new Error(VOICE_CONVERT_SLOW_MESSAGE)
+  return new Error(`Voice conversion failed (${status}): ${detail}`)
 }

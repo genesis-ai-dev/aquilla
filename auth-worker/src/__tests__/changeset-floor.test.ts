@@ -121,23 +121,18 @@ describe("requiredRoleForChangeset", () => {
     ).toBe(600)
   })
 
-  it("uses the PROJECT_LEAD default for a terminology-only patch", async () => {
-    const p = await seedProject(null) // no org ⇒ default termbase floor 500
-    expect(
-      await floor(p, [
-        { kind: "PatchSettings", projectId: "proj-1", ifMatchVersion: 1, ops: [{ key: "terminology", value: {} }] },
-      ]),
-    ).toBe(500)
-  })
-
-  it("raises the terminology floor to the org's termbaseEditMinRole", async () => {
+  it("gives a terminology patch the plain MAINTAINER settings floor — the termbase floor no longer applies (AQU-1724)", async () => {
+    // Prepare refuses the retired key, so only a plan staged before AQU-1724
+    // can still carry it, and its commit is refused too. Such a plan is no
+    // cheaper to approve than any other settings plan: the org's termbase
+    // floor, lowered or raised, is not consulted.
+    const terminologyPlan = [
+      { kind: "PatchSettings", projectId: "proj-1", ifMatchVersion: 1, ops: [{ key: "terminology", value: {} }] },
+    ]
     const p = await seedProject(7)
+    expect(await floor(p, terminologyPlan)).toBe(600) // org never set a floor (default was 500)
     await setOrgSettings(7, { termbaseEditMinRole: 700 })
-    expect(
-      await floor(p, [
-        { kind: "PatchSettings", projectId: "proj-1", ifMatchVersion: 1, ops: [{ key: "terminology", value: {} }] },
-      ]),
-    ).toBe(700)
+    expect(await floor(p, terminologyPlan)).toBe(600)
   })
 
   it("flags a tenant-creation plan, which keeps the creator rule", () => {

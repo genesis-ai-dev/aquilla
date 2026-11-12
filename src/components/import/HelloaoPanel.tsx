@@ -21,7 +21,8 @@ interface HelloaoPanelProps {
   sourceLanguage: string
   targetLanguage: string
   getToken: (fileId: string) => Promise<string | null>
-  onImported: (ref: FileReference, inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
+  /** AQU-1187: scripture catalog imports land as one file per book. */
+  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
 }
 
 export function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported }: HelloaoPanelProps) {
@@ -72,8 +73,8 @@ export function HelloaoPanel({ projectId, username, sourceLanguage, targetLangua
           tr.id.toLowerCase().includes(q) ||
           tr.name.toLowerCase().includes(q) ||
           tr.englishName.toLowerCase().includes(q) ||
-          tr.languageEnglishName.toLowerCase().includes(q) ||
-          tr.languageName.toLowerCase().includes(q)
+          (tr.languageEnglishName ?? "").toLowerCase().includes(q) ||
+          (tr.languageName ?? "").toLowerCase().includes(q)
       )
       .slice(0, 200)
   }, [translations, query])
@@ -125,7 +126,7 @@ export function HelloaoPanel({ projectId, username, sourceLanguage, targetLangua
     try {
       // Whole-bible selection passes null so the parser skips no books.
       const selection = checkedBooks.size === books.length ? null : checkedBooks
-      const ref = await importHelloao(
+      const refs = await importHelloao(
         selected,
         selection,
         {
@@ -138,7 +139,7 @@ export function HelloaoPanel({ projectId, username, sourceLanguage, targetLangua
         setProgress,
         abortRef.current.signal
       )
-      await onImported(ref, { sourceLanguage: selected.language || undefined })
+      await onImported(refs, { sourceLanguage: selected.language || undefined })
     } catch (err) {
       setImportErr(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {
@@ -316,7 +317,7 @@ export function HelloaoPanel({ projectId, username, sourceLanguage, targetLangua
                   </div>
                   <span className="text-xs text-muted-foreground">
                     {t("importExport.helloao.languageAndBookCount", {
-                      language: tr.languageEnglishName || tr.languageName,
+                      language: tr.languageEnglishName || tr.languageName || tr.language,
                       count: tr.numberOfBooks,
                     })}
                   </span>

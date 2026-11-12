@@ -248,7 +248,7 @@ export class Scheduler {
       project,
       dir: path.join(this.clonesDir, String(project.gitlab_id)),
     })
-    active && (active.progress = result)
+    if (active) active.progress = result
     if (this.ctx.config.dryRun) {
       this.settled.add(job.id)
       return

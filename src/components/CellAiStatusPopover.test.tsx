@@ -6,7 +6,7 @@ import type { ActionableError } from "@/lib/audio/ai-error"
 const error: ActionableError = {
   category: "provider-unavailable",
   title: "Inworld TTS isn't configured",
-  body: "This line uses Inworld TTS, not Gemini. Hosted TTS isn't wired on this server — a Gemini API key will not fix it.",
+  body: "This line uses Inworld TTS, not Gemini. Hosted TTS isn't wired on this server, so a Gemini API key will not fix it.",
   raw: "TTS not configured",
 }
 

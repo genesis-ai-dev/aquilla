@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import {
   IDML_STYLE_BOLD_CLASS,
   IDML_STYLE_ITALIC_CLASS,
+  IDML_PLAIN_GROUP_ATTR,
+  IDML_STYLE_SEGMENT_EMPTY_ATTR,
   decorateIdmlStyleElement,
   idmlCharacterStyleEmphasis,
   looksLikeIdmlHtml,
@@ -78,6 +80,7 @@ describe("prepareIdmlDisplayHtml", () => {
     expect(bold?.classList.contains(IDML_STYLE_BOLD_CLASS)).toBe(true)
     expect(bold?.style.fontWeight).toBe("700")
     expect(italic?.classList.contains(IDML_STYLE_ITALIC_CLASS)).toBe(true)
+    expect(plain?.hasAttribute(IDML_STYLE_SEGMENT_EMPTY_ATTR)).toBe(false)
     expect(italic?.style.fontStyle).toBe("italic")
     expect(bold?.getAttribute("data-idml-character-style")).toBe("CharacterStyle/Bold")
   })
@@ -126,5 +129,43 @@ describe("prepareIdmlDisplayHtml", () => {
     })
     expect(slot.style.fontWeight).toBe("700")
     expect(slot.style.fontStyle).toBe("italic")
+  })
+
+  it("marks an empty run so the segment view can label it, and leaves a written run unmarked", () => {
+    const decorated = prepareIdmlDisplayHtml(
+      html.replace(">Bold</span>", "></span>"),
+    )
+    const root = document.createElement("div")
+    root.innerHTML = decorated
+    const [plain, bold] = [...root.querySelectorAll<HTMLElement>("span[data-idml-protected=\"slot\"]")]
+    expect(plain?.hasAttribute(IDML_STYLE_SEGMENT_EMPTY_ATTR)).toBe(false)
+    expect(bold?.hasAttribute(IDML_STYLE_SEGMENT_EMPTY_ATTR)).toBe(true)
+    expect(bold?.textContent).toBe("")
+  })
+
+  it("draws consecutive plain runs as one Regular and joins a run that already has text", () => {
+    const decorated = prepareIdmlDisplayHtml(
+      `<p data-idml-version="2">`
+      + `<span data-idml-slot="0" data-idml-character-style="CharacterStyle/Body" data-idml-protected="slot"></span>`
+      + `<span data-idml-slot="1" data-idml-character-style="CharacterStyle/Body" data-idml-protected="slot"></span>`
+      + `<span data-idml-slot="2" data-idml-character-style="CharacterStyle/Body" data-idml-protected="slot"></span>`
+      + `<span data-idml-slot="3" data-idml-character-style="CharacterStyle/Bold" data-idml-protected="slot"></span>`
+      + `<span data-idml-slot="4" data-idml-character-style="CharacterStyle/Body" data-idml-protected="slot"></span>`
+      + `<span data-idml-slot="5" data-idml-character-style="CharacterStyle/Body" data-idml-protected="slot">Hi</span>`
+      + `<span data-idml-token="0" data-idml-token-kind="tab" data-idml-protected="token" contenteditable="false"></span>`
+      + `<span data-idml-slot="6" data-idml-character-style="CharacterStyle/Body" data-idml-protected="slot"></span>`
+      + `</p>`,
+    )
+    const root = document.createElement("div")
+    root.innerHTML = decorated
+    const group = (slot: number) => root.querySelector(`[data-idml-slot="${slot}"]`)
+      ?.getAttribute(IDML_PLAIN_GROUP_ATTR) ?? null
+    expect(group(0)).toBe("label")
+    expect(group(1)).toBe("join")
+    expect(group(2)).toBe("join")
+    expect(group(3)).toBeNull()
+    expect(group(4)).toBe("join")
+    expect(group(5)).toBeNull()
+    expect(group(6)).toBe("label")
   })
 })

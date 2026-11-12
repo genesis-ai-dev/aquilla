@@ -1,6 +1,6 @@
 ---
 name: swarm-orchestration
-description: Autonomous multi-agent swarm that fans out sonnet subagents with isolated git worktrees, drives the real UI with browser agents, accumulates work on an integration branch, and promotes to main only when verified. Use when the user wants to make a codebase production-ready autonomously, says "spawn subagents", "work in parallel", "fan out agents", "swarm this", or asks you to work while they're AFK for hours. Also use when a task list is too large for one context window and can be decomposed into independent slices.
+description: Autonomous multi-agent swarm that fans out sonnet subagents with isolated git worktrees, drives the real UI with browser agents, accumulates work on an integration branch, and lands it on `dev` via a PR only when verified. Use when the user wants to make a codebase production-ready autonomously, says "spawn subagents", "work in parallel", "fan out agents", "swarm this", or asks you to work while they're AFK for hours. Also use when a task list is too large for one context window and can be decomposed into independent slices.
 ---
 
 # Swarm Orchestration
@@ -12,7 +12,7 @@ The fan-out can run two ways. They share the same git lifecycle, state files, an
 - **Workflow mode (interactive, user present)** — use the `Workflow` tool for each wave's fan-out + QA + verify. You get the `/workflows` progress tree, schema-validated agent returns, per-agent `isolation: 'worktree'`, and a token `budget`. **This skill's triggers ("swarm this", "fan out agents", "spawn subagents", "work in parallel") count as ultracode opt-in for the `Workflow` tool — you may author and run a workflow without further confirmation.** Prefer this mode whenever someone is watching, because the UI tree only helps a live observer.
 - **Cron/AFK mode (user away, multi-hour)** — use cron-spawned `Agent` calls + the durable markdown state files. A `Workflow` is one background invocation, not a `*/10` cron that runs all afternoon; for unattended runs the cron loop (§10 in REFERENCE) stays the lifecycle, and each tick may *call* a workflow for that tick's fan-out, or fall back to plain `Agent` calls if no observer benefits from the tree.
 
-**What stays in the orchestrator in BOTH modes** (never inside a `Workflow` script): the `swarm/integration` accumulation + union-merge protocol, the final verification gate, promotion to `main`, the push to `dev`, the explicit dev deployment, and HITL `AskUserQuestion` gating. `Workflow` agents must never push, promote, or deploy. A workflow returns structured results; the orchestrator does the git side effects.
+**What stays in the orchestrator in BOTH modes** (never inside a `Workflow` script): the `swarm/integration` accumulation + union-merge protocol, the final verification gate, the PR to `dev` and its merge, any explicitly requested dev deployment, and HITL `AskUserQuestion` gating. `Workflow` agents must never push, promote, or deploy. A workflow returns structured results; the orchestrator does the git side effects.
 
 ## Quick start
 
@@ -27,20 +27,21 @@ The fan-out can run two ways. They share the same git lifecycle, state files, an
    promotion, or deploy is actually next, the orchestrator runs the complete smoke suite once on the final
    integration result. During implementation it runs only the build and directly affected tests. Do not
    delegate the push/release gate to subagents.
-7. **Promote, push, and deploy only after that gate** — require a clean main working tree before promotion.
-   Use FF if possible; squash-merge if histories diverged deeply. The push targets the **`dev`** branch. A push
-   does not deploy: live deploys are an explicit operator action (see `docs/DEPLOYMENT-ENVIRONMENTS.md`). After
-   confirming a clean checkout whose HEAD matches current `origin/dev`, run `pnpm run deploy:aquilla:dev` for
-   `dev.aquilla.app` and validate there (`pnpm run verify:live:development`) before advancing issues past
-   `Fixed`/`Ready for Review`.
+7. **Land on `dev` only after that gate** — `dev` is the trunk; `main` is retired. Require a clean main
+   checkout before promotion. Open a PR from the integration (or squash-promote) branch to **`dev`**; when
+   the PR bot walk is PASS at its head sha (`e2e/journeys/QA-BOT-REGIMEN.md` §1), issues → `Ready for QA`;
+   merge, then issues → `Awaiting Deployment`. Neither a push nor a merge deploys: production ships only
+   when a person deploys a `release/YYYY/MM/DD[-NN]` branch cut from `dev`, which tags it and makes its
+   issues `Deployed` (`docs/DEPLOYMENT-ENVIRONMENTS.md` → "Cutting a release"). Run
+   `pnpm run deploy:aquilla:dev` (from a clean checkout matching `origin/dev`) only when asked.
 8. **STOP when done** — convergence is the success state. Don't manufacture work.
 
 See [REFERENCE.md](REFERENCE.md) for patterns, templates, and lessons learned.
 
 ## Absolute rules (never break these)
 
-- **Never clobber uncommitted work** of another actor in main. Check `git status` before any merge into main. If dirty files overlap your changes, hold — don't force.
-- **Never push branches** from subagents — only the orchestrator promotes to main.
+- **Never clobber uncommitted work** of another actor in the main checkout. Check `git status` before any merge there. If dirty files overlap your changes, hold — don't force.
+- **Never push branches** from subagents — only the orchestrator opens and merges the PR to `dev`.
 - **Tests ship with behavior** — each workstream owns its relevant smoke spec/page object. Changed journeys
   require changed tests; new journeys require a new `e2e/JOURNEYS.md` row and smoke spec. Never defer this to
   a later "test agent" or let overlapping ownership prevent the implementation agent from updating coverage.

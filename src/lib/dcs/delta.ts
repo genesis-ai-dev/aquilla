@@ -13,12 +13,14 @@
 //        - present in a changed file, gone from parse → delete (tombstone)
 //        - present, hash equal                      → nothing
 
+import { mapWithConcurrency } from "@/lib/concurrency"
 import type { DcsCatalogEntry, DcsCell, DcsCursor, DcsFile } from "./types"
-import type { DcsClient, RefKind } from "./catalog"
+import { isDcsRawNotFound, type DcsClient, type RefKind } from "./catalog"
 import { parseManifest } from "./manifest"
 import { routeFor } from "./resource-map"
-import { dcsEventId, dcsFileId } from "./cell-id"
+import { dcsEventId, dcsFileId, dcsLegacyFileId } from "./cell-id"
 import { contentHash } from "./content-hash"
+import { detectChanges } from "@/lib/import/change-detection"
 
 /** The adapter project's current view of one source cell (from the projection). */
 export interface CurrentCell {
@@ -32,6 +34,8 @@ export interface CurrentCell {
 
 export interface ComputeDeltaArgs {
   client: DcsClient
+  /** The adapter project the delta lands in — scopes derived file ids (AQU-1891). */
+  projectId: string
   /** The pinned cursor (owner/repo/ref of the LAST import). */
   cursor: DcsCursor
   /** The entry the cursor points at (old ref). Its refType picks the raw kind. */
@@ -56,6 +60,61 @@ export interface DeltaResult {
 }
 
 const MANIFEST_PATH = "manifest.yaml"
+
+/** Raw member fetches in flight at once (AQU-1860). A release that touches
+ *  several thousand verses spans dozens of books, and these used to be fetched
+ *  one after another — latency, not work, dominated. Checks are user-triggered
+ *  and a handful of concurrent reads is well within what Gitea serves, so the
+ *  cap is the same small pool the rest of the app uses for fan-out reads. */
+const RAW_FETCH_CONCURRENCY = 4
+
+/**
+ * Fetch every `path` at one ref into a path→text map. Results are folded in
+ * INPUT order, so the map (and therefore the parse, and therefore the
+ * classification) does not depend on which fetch finished first.
+ *
+ * A member that is ABSENT at this ref is skipped, not fatal. `compareRefs`
+ * returns the union of the filenames touched by every commit in the range, so a
+ * file renamed or deleted part-way through legitimately appears in the changed
+ * list while not existing at the new ref: on WycliffeAssociates/en_udb
+ * v19-01...v19-10, 11 of 84 changed paths are absent. Letting one of those
+ * abort the batch meant a single stale front-matter path lost the whole
+ * release — every USFM book included — which is what it did before this guard
+ * (the pre-existing serial loop propagated the 404 the same way).
+ *
+ * Skipping is the conservative half of the repair: the member is simply not in
+ * `parsedFiles`, and `classifyAgainstCurrent` scopes deletes to the files the
+ * parse produced, so no cell is tombstoned on account of a path we could not
+ * read. A file genuinely deleted upstream therefore keeps its cells rather than
+ * losing them to a guess — the same position the "a brand-new upstream file is
+ * NOT auto-added here" note above takes on the other side.
+ *
+ * Every other failure (403, 5xx, a size or encoding refusal) still aborts, so a
+ * throttled or broken upstream never looks like an empty delta.
+ */
+async function fetchRawFiles(
+  client: DcsClient,
+  at: { owner: string; repoName: string; ref: string; refKind: RefKind },
+  paths: readonly string[],
+  cancelMessage: string,
+  signal?: AbortSignal,
+): Promise<Map<string, string>> {
+  const texts = await mapWithConcurrency(paths, RAW_FETCH_CONCURRENCY, async (path) => {
+    if (signal?.aborted) throw new Error(cancelMessage)
+    try {
+      return await client.fetchRaw(at.owner, at.repoName, at.ref, path, at.refKind, signal)
+    } catch (error) {
+      if (isDcsRawNotFound(error)) return null
+      throw error
+    }
+  })
+  const fileTexts = new Map<string, string>()
+  paths.forEach((path, index) => {
+    const text = texts[index]
+    if (text !== null) fileTexts.set(path, text)
+  })
+  return fileTexts
+}
 
 /**
  * Compute the source-cell delta between the pinned cursor and a newer release.
@@ -88,19 +147,22 @@ export async function computeDelta(args: ComputeDeltaArgs): Promise<DeltaResult>
 
   // 2. Re-fetch + re-parse only the changed files the route can parse.
   const changed = compare.changedFiles.filter((p) => p !== MANIFEST_PATH)
-  const fileTexts = new Map<string, string>()
-  for (const path of changed) {
-    if (args.signal?.aborted) throw new Error("Delta cancelled")
-    fileTexts.set(path, await client.fetchRaw(owner, repoName, newEntry.ref, path, refKind))
-  }
+  const fileTexts = await fetchRawFiles(
+    client,
+    { owner, repoName, ref: newEntry.ref, refKind },
+    changed,
+    "Delta cancelled",
+    args.signal,
+  )
   const parsedFiles = route.parse({
     entry: newEntry,
     manifest,
+    projectId: args.projectId,
     files: fileTexts,
     options: { excludeFrontMatter: args.excludeFrontMatter },
   })
 
-  return classifyAgainstCurrent(parsedFiles, currentCells)
+  return classifyAgainstCurrent(parsedFiles, currentCells, newEntry.fullName)
 }
 
 /**
@@ -129,43 +191,31 @@ export async function computeDelta(args: ComputeDeltaArgs): Promise<DeltaResult>
 function classifyAgainstCurrent(
   parsedFiles: DcsFile[],
   currentCells: Map<string, CurrentCell>,
+  repo: string,
 ): DeltaResult {
   const adapterFileIds = new Set<string>()
   for (const c of currentCells.values()) adapterFileIds.add(c.fileId)
-  const relevantFiles = parsedFiles.filter((f) => adapterFileIds.has(f.fileId))
-
-  // The set of (relevant) files the parse (re)produced — deletes are scoped to
-  // these so a cell that vanished from a re-parsed file is a real removal, not
-  // just an untouched file elsewhere.
-  const parsedFileIds = new Set(relevantFiles.map((f) => f.fileId))
-  const parsedCellIds = new Set<string>()
-
-  const creates: Array<{ cell: DcsCell; fileId: string }> = []
-  const commits: Array<{ cell: DcsCell; parentEventId: string }> = []
-
-  for (const file of relevantFiles) {
-    for (const cell of file.cells) {
-      parsedCellIds.add(cell.cellId)
-      const current = currentCells.get(cell.cellId)
-      if (!current) {
-        creates.push({ cell, fileId: file.fileId })
-      } else if (current.contentHash !== cell.contentHash) {
-        commits.push({ cell, parentEventId: current.eventId })
-      }
-      // hash-equal → nothing.
+  // AQU-1891: a parsed file is "held" under the project-scoped id for anything
+  // imported after the scope landed, and under the legacy project-agnostic id
+  // for anything imported before it. Match either, and carry the id the
+  // PROJECTION actually uses so creates land in the existing file row and
+  // deletes stay scoped to the right file.
+  const relevantFiles: DcsFile[] = []
+  for (const f of parsedFiles) {
+    if (adapterFileIds.has(f.fileId)) {
+      relevantFiles.push(f)
+      continue
+    }
+    const legacy = f.sourcePath === undefined ? undefined : dcsLegacyFileId(repo, f.sourcePath)
+    if (legacy !== undefined && adapterFileIds.has(legacy)) {
+      relevantFiles.push({ ...f, fileId: legacy })
     }
   }
 
-  // Deletes: cells the adapter currently holds for a re-parsed file that the
-  // new parse no longer produced (tombstone). Scoped by fileId so untouched
-  // files' cells are never deleted.
-  const deletes: string[] = []
-  for (const [cellId, current] of currentCells) {
-    if (parsedFileIds.has(current.fileId) && !parsedCellIds.has(cellId)) {
-      deletes.push(cellId)
-    }
-  }
-
+  // The generic classifier (src/lib/import/change-detection.ts) scopes deletes
+  // to the (relevant) files this parse re-produced, so an untouched file's
+  // cells are never deleted.
+  const { creates, commits, deletes } = detectChanges(relevantFiles, currentCells)
   return { creates, commits, deletes }
 }
 
@@ -179,8 +229,29 @@ function classifyAgainstCurrent(
 // projection with the identical create/commit/delete logic. Correctly-imported
 // cells hash-match and produce no ops.
 
+/**
+ * AQU-1891: which id the PROJECTION holds a DCS file under, or undefined when
+ * this project does not hold it. New imports derive `dcsFileId(project, repo,
+ * path)`; imports from before the project scope was added hold the legacy
+ * `dcsLegacyFileId(repo, path)`. Both must resolve, or "check for updates" and
+ * repair would silently stop matching any file of a pre-fix project.
+ */
+function resolveHeldFileId(
+  heldFileIds: Set<string>,
+  projectId: string,
+  repo: string,
+  path: string,
+): string | undefined {
+  const scoped = dcsFileId(projectId, repo, path)
+  if (heldFileIds.has(scoped)) return scoped
+  const legacy = dcsLegacyFileId(repo, path)
+  return heldFileIds.has(legacy) ? legacy : undefined
+}
+
 export interface ComputeRepairDeltaArgs {
   client: DcsClient
+  /** The adapter project being repaired — scopes derived file ids (AQU-1891). */
+  projectId: string
   /** The catalog entry the cursor is PINNED at — repair re-reads this exact ref. */
   entry: DcsCatalogEntry
   /** The adapter project's current source cells, keyed by cellId. */
@@ -192,15 +263,53 @@ export interface ComputeRepairDeltaArgs {
 }
 
 /**
+ * AQU-1896: how much of the project's held source the scan actually looked at.
+ *
+ * The op counts alone cannot tell two opposite outcomes apart — "I re-read
+ * every file you hold and they all hash-match" and "I resolved none of your
+ * files in the pinned source, so I read nothing" are both
+ * `{creates: [], commits: [], deletes: []}`. Reporting what the scan reached
+ * lets the caller say which one happened instead of calling both a match.
+ */
+export interface RepairScan {
+  /** Distinct source files this project holds, per the projection. */
+  heldFiles: number
+  /** Held files that resolved to a path in the pinned ref's tree. Zero here
+   *  with `heldFiles > 0` means nothing was checked: the ids could not be
+   *  derived from any upstream path (a renamed/removed path upstream, or an
+   *  id-scheme skew — AQU-1891). */
+  resolvedFiles: number
+  /** Resolved files whose bytes were actually read at the pinned ref. A tree
+   *  path that 404s at the ref is skipped rather than fatal (see
+   *  `fetchRawFiles`), so this can be lower than `resolvedFiles` — and zero
+   *  here also means nothing was checked. */
+  fetchedFiles: number
+}
+
+export interface RepairDeltaResult extends DeltaResult {
+  /** What the scan reached. See `RepairScan` — a zero-op result is only a
+   *  clean bill of health when `fetchedFiles > 0`. */
+  scan: RepairScan
+}
+
+const EMPTY_REPAIR_SCAN: RepairScan = { heldFiles: 0, resolvedFiles: 0, fetchedFiles: 0 }
+
+/**
  * Re-parse ALL adapter-held files at the pinned ref and diff against the
  * projection. Fetches only files the adapter holds: every route derives its
- * fileId as `dcsFileId(repo, path)`, so tree paths are pre-filtered against the
- * adapter's fileIds BEFORE any raw fetch (a one-book adapter of a 66-book repo
- * fetches exactly one book).
+ * fileId as `dcsFileId(projectId, repo, path)`, so tree paths are pre-filtered
+ * against the adapter's fileIds BEFORE any raw fetch (a one-book adapter of a
+ * 66-book repo fetches exactly one book). The pre-filter also accepts the
+ * pre-AQU-1891 project-agnostic id so repair still reaches a pre-fix project's
+ * files.
  */
-export async function computeRepairDelta(args: ComputeRepairDeltaArgs): Promise<DeltaResult> {
+export async function computeRepairDelta(
+  args: ComputeRepairDeltaArgs,
+): Promise<RepairDeltaResult> {
   const { client, entry, currentCells } = args
-  if (currentCells.size === 0) return { creates: [], commits: [], deletes: [] }
+  if (currentCells.size === 0) {
+    return { creates: [], commits: [], deletes: [], scan: EMPTY_REPAIR_SCAN }
+  }
 
   const owner = entry.owner
   const repoName = entry.name
@@ -220,21 +329,39 @@ export async function computeRepairDelta(args: ComputeRepairDeltaArgs): Promise<
   for (const c of currentCells.values()) adapterFileIds.add(c.fileId)
 
   const tree = await client.getTree(owner, repoName, entry.ref)
-  const fileTexts = new Map<string, string>()
+  // AQU-1896: count the HELD FILE IDS the tree resolved, not the tree paths, so
+  // the figure is comparable with `heldFiles` (two upstream paths resolving to
+  // one held file would otherwise over-count).
+  const resolvedFileIds = new Set<string>()
+  const held: string[] = []
   for (const path of tree) {
     if (path === MANIFEST_PATH) continue
-    if (!adapterFileIds.has(dcsFileId(repo, path))) continue
-    if (args.signal?.aborted) throw new Error("Repair cancelled")
-    fileTexts.set(path, await client.fetchRaw(owner, repoName, entry.ref, path, refKind))
+    const heldId = resolveHeldFileId(adapterFileIds, args.projectId, repo, path)
+    if (heldId === undefined) continue
+    resolvedFileIds.add(heldId)
+    held.push(path)
+  }
+  const fileTexts = await fetchRawFiles(
+    client,
+    { owner, repoName, ref: entry.ref, refKind },
+    held,
+    "Repair cancelled",
+    args.signal,
+  )
+  const scan: RepairScan = {
+    heldFiles: adapterFileIds.size,
+    resolvedFiles: resolvedFileIds.size,
+    fetchedFiles: fileTexts.size,
   }
 
   const parsedFiles = route.parse({
     entry,
     manifest,
+    projectId: args.projectId,
     files: fileTexts,
     options: { excludeFrontMatter: args.excludeFrontMatter },
   })
-  return classifyAgainstCurrent(parsedFiles, currentCells)
+  return { ...classifyAgainstCurrent(parsedFiles, currentCells, repo), scan }
 }
 
 /**

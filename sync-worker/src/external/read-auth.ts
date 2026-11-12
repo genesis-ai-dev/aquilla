@@ -16,18 +16,25 @@
 //
 // Nothing here is new behavior beyond that — it is read-routes.ts's gate, moved.
 
+import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { sign } from "hono/jwt"
 import type { SyncTokenClaims } from "../auth"
 import { ROLE } from "../events/role-policy"
+import { loadLaneGrants } from "../../../db/shared/lane-visibility"
+import { READ_WALL_MAINTAINER, laneReadWallEnabled } from "../../../src/lib/lanes/read-wall"
 import { externalError } from "./errors"
 import { AUTH_HINT } from "./discovery-route"
-import { validateApiCredential, type ApiCredentialContext } from "../../../db/shared/api-credentials"
+import { validateApiCredentialRequest, type ApiCredentialContext } from "../../../db/shared/api-credentials"
 import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
-import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
+import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 
 export interface ExternalReadsEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-730. Unset locally and in e2e. Deployed dev and prod set "1". */
+  LANE_READ_WALL?: string
+  /** Base URL for the ask-mode approval deep link (changesets/pending). */
+  BASE_URL?: string
 }
 
 /** Credential-only gate (no project in play yet) — used by /me, /projects and
@@ -47,11 +54,7 @@ export async function authenticateCredential(
     }
   }
 
-  const credential = await validateApiCredential(
-    env.AQUILLA_PG as AquillaDb,
-    token,
-    request.headers.get("CF-Connecting-IP"),
-  )
+  const credential = await validateApiCredentialRequest(env.AQUILLA_PG as AquillaDb, request)
   if (!credential) {
     // Collapses invalid/revoked/expired into one generic message — the code
     // (permission_denied) is what callers branch on, not the message text.
@@ -122,7 +125,7 @@ export async function scopeCredentialToProject(
       response: externalError("scope_denied", "credential is not scoped to this project", 403),
     }
   }
-  if (credential.orgId !== null && credential.orgId !== projectOrgId) {
+  if (!credentialAllowsOrganization(credential, projectOrgId)) {
     return {
       ok: false,
       response: externalError("scope_denied", "credential is not scoped to this org", 403),
@@ -149,14 +152,24 @@ export async function mintInternalToken(
   fileId: string,
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000)
+  const userId = Number(ctx.credential.userId)
+  // The cells and files routes trust laneGrants on this token. The identity
+  // worker puts them on the SPA's sync token. This internal stand-in has to
+  // do the same, or a below-Maintainer agent sees no target lane once the
+  // wall is on. Wall off: leave the claim absent, matching today's token.
+  const laneGrants =
+    env.AQUILLA_PG && laneReadWallEnabled(env.LANE_READ_WALL) && ctx.role < READ_WALL_MAINTAINER
+      ? await loadLaneGrants(env.AQUILLA_PG, projectId, userId)
+      : undefined
   const claims: SyncTokenClaims = {
-    userId: Number(ctx.credential.userId),
+    userId,
     projectId,
     fileId,
     role: ctx.role,
     aud: "sync",
     iat: now,
     exp: now + 30,
+    ...(laneGrants ? { laneGrants } : {}),
   }
   return sign(claims as unknown as Record<string, unknown>, env.SYNC_SECRET_KEY as string, "HS256")
 }
@@ -167,11 +180,12 @@ export async function mintInternalToken(
 
 // Search is the cheapest external call to spam (no write, no changeset) and
 // the most abuse-prone (FTS over the whole project on every request), so it's
-// the first external route throttled. Scoped per credential, not per IP — PAT
-// callers are already authenticated and IP-scoping a bot-run agent buys
-// nothing. Wide enough that a legitimate agent looping searches every few
-// seconds never trips it; tight enough to blunt a leaked-PAT query flood.
-export const SEARCH_MAX_PER_CREDENTIAL = 300
+// the first external route throttled. Scoped per USER, not per IP — PAT callers
+// are already authenticated and IP-scoping a bot-run agent buys nothing — and
+// not per credential either (AQU-1843: that let one person mint N tokens for N
+// times the budget). Wide enough that a legitimate agent looping searches every
+// few seconds never trips it; tight enough to blunt a leaked-PAT query flood.
+export const SEARCH_MAX_PER_USER = 300
 
 // [Pen test] API security & data exposure (2026-08-27): /me, /projects,
 // /files, /files/:fileId/cells, and /cells/:cellId/history had NO throttle —
@@ -179,20 +193,36 @@ export const SEARCH_MAX_PER_CREDENTIAL = 300
 // "enforced on /search, changeset prepare, changeset commit, and artifact
 // upload" only, i.e. every other external route was explicitly excluded. A
 // leaked or malicious PAT could scrape a project's entire file/cell/history
-// graph without limit. Same cap and per-credential scoping as search — these
-// are comparably cheap, paginated reads.
-export const READ_MAX_PER_CREDENTIAL = 300
+// graph without limit. Same cap and per-user scoping as search — these are
+// comparably cheap, paginated reads.
+export const READ_MAX_PER_USER = 300
 
-/** Shared throttle for the plain read routes. Returns a 429 Response if the
- *  credential is over budget (and records nothing further), else records this
- *  call and returns null. */
-export async function checkReadRateLimit(db: AquillaDb, credentialId: string): Promise<Response | null> {
-  const identifier = `credential:${credentialId}`
-  const recent = await countRecentRateLimitEvents(db, "external_read", identifier)
-  if (recent >= READ_MAX_PER_CREDENTIAL) {
+/**
+ * Shared throttle for the plain read routes. Returns a 429 Response if the
+ * caller is over budget, else consumes one unit and returns null.
+ *
+ * AQU-1843: keyed on the credential's OWNER, not the credential. These caps
+ * were per-credential, so minting a second PAT bought a second budget — the
+ * limit was effectively "300 per 15 minutes times however many tokens you care
+ * to create". The cap now follows the human, and extra tokens share it.
+ *
+ * Fails OPEN: these are free paginated reads, so blocking them when the
+ * limiter itself is unavailable would turn a cost control into an outage. The
+ * routes that spend money fail closed instead (see db/shared/rate-limit.ts).
+ */
+export async function checkReadRateLimit(
+  db: AquillaDb,
+  credential: Pick<ApiCredentialContext, "userId">,
+): Promise<Response | null> {
+  const decision = await enforceRateLimit(db, {
+    kind: "external_read",
+    identifier: userRateLimitIdentifier(credential.userId),
+    limit: READ_MAX_PER_USER,
+    failMode: "open",
+  })
+  if (!decision.allowed) {
     return externalError("rate_limited", "read rate limit exceeded, slow down", 429)
   }
-  await recordRateLimitEvent(db, "external_read", identifier)
   return null
 }
 
@@ -204,16 +234,21 @@ export async function checkReadRateLimit(db: AquillaDb, credentialId: string): P
  */
 export async function checkSearchRateLimit(
   db: AquillaDb,
-  credentialId: string,
+  credential: Pick<ApiCredentialContext, "userId">,
   cost = 1,
 ): Promise<Response | null> {
-  const identifier = `credential:${credentialId}`
-  const recent = await countRecentRateLimitEvents(db, "external_search", identifier)
-  if (recent >= SEARCH_MAX_PER_CREDENTIAL) {
+  // AQU-1843: one statement charges all `cost` units at once (it was a loop of
+  // one INSERT per unit), keyed on the owner rather than the credential, and
+  // fails open for the same reason the read cap does.
+  const decision = await enforceRateLimit(db, {
+    kind: "external_search",
+    identifier: userRateLimitIdentifier(credential.userId),
+    limit: SEARCH_MAX_PER_USER,
+    failMode: "open",
+    cost,
+  })
+  if (!decision.allowed) {
     return externalError("rate_limited", "search rate limit exceeded, slow down", 429)
-  }
-  for (let i = 0; i < cost; i++) {
-    await recordRateLimitEvent(db, "external_search", identifier)
   }
   return null
 }

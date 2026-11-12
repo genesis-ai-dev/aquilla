@@ -6,7 +6,7 @@
  * stats, and the term page never disagree about what a term matches.
  */
 
-import type { Concept, TermMatchingSettings, TermMatchOptions } from "./types"
+import type { ConceptMatchInput, TermMatchingSettings, TermMatchOptions } from "./model"
 
 export const DEFAULT_MAX_AFFIXES = 2
 
@@ -29,8 +29,44 @@ export function hasCombiningMarks(s: string): boolean {
   return /\p{M}/u.test(s.normalize("NFC"))
 }
 
+/**
+ * True when the string carries a Greek accent that NFC has composed into the
+ * letter — καί is κ, α, U+03AF and καὶ is κ, α, U+1F76, neither with a
+ * combining mark left for `hasCombiningMarks` to see (AQU-1936).
+ */
+export function hasPrecomposedGreekAccent(s: string): boolean {
+  for (const ch of s) {
+    if (!/\p{Script=Greek}/u.test(ch)) continue
+    if (/\p{M}/u.test(ch.normalize("NFD"))) return true
+  }
+  return false
+}
+
+/**
+ * True when a term's diacritics are ones mark folding should ignore by default.
+ *
+ * Two arms, because the scripts differ in kind as well as in encoding
+ * (AQU-1936). The combining-mark arm is the pointed scripts: Hebrew, Arabic,
+ * Syriac, where the points are a reading aid over a consonantal skeleton, so
+ * the same word turns up pointed, differently pointed and unpointed.
+ *
+ * The Greek arm is accent, which is PROSODIC: the identical word is written
+ * καί in isolation and καὶ before an enclitic, so an acute/grave/circumflex
+ * difference is never a different word, and asking the user to add each accent
+ * as an extra form is asking them to enumerate grammar.
+ *
+ * Latin is deliberately NOT here, even though NFC composes its diacritics the
+ * same way. Latin accents distinguish words a reader would not accept merging
+ * — Spanish `año`/`ano`, French `ou`/`où` — so folding stays opt-in there.
+ * Adding another script to this default is that same judgment call, not a
+ * Unicode detail.
+ */
+export function hasFoldableDiacritics(s: string): boolean {
+  return hasCombiningMarks(s) || hasPrecomposedGreekAccent(s)
+}
+
 export function resolveMatchOptions(
-  concept: Pick<Concept, "sourceTerm" | "match">,
+  concept: Pick<ConceptMatchInput, "sourceTerm" | "match">,
   project?: TermMatchingSettings,
 ): ResolvedMatchOptions {
   const prefixes = (project?.prefixes ?? []).filter((p) => p.length > 0)
@@ -40,7 +76,7 @@ export function resolveMatchOptions(
   const foldMarks =
     concept.match?.foldMarks ??
     project?.foldMarksDefault ??
-    hasCombiningMarks(concept.sourceTerm)
+    hasFoldableDiacritics(concept.sourceTerm)
 
   const affixes = hasInventory && (concept.match?.affixes ?? true)
 

@@ -3,18 +3,19 @@
  *
  * Confirms the panel is a pure selector: search + voice rows + narrator star,
  * plus a single "New voice" entry point that opens the unified modal (which
- * carries both TTS + Clone tabs, exercised in its own test) seeded with the
+ * carries the TTS / Characters / Train tabs, exercised in its own test) seeded with the
  * project's configured engine — not hardcoded Gemini.
  */
 
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { VoiceLibraryPanel } from "./VoiceLibraryPanel"
-import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
+import { renderWithTooltips, expectTooltip, expectDisabledNote } from "@/test-utils/tooltip"
 import type { NewVoiceModalProps } from "@/components/voice/NewVoiceModal"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
+import { ROLE } from "@/lib/frontier/roles"
 
-// The unified create/clone modal is heavy (audio/network) — stub to a marker
+// The unified New voice modal is heavy (audio/network) — stub to a marker
 // that records the props the panel wires in.
 const modalProps: { last: NewVoiceModalProps | null } = { last: null }
 vi.mock("@/components/voice/NewVoiceModal", () => ({
@@ -63,6 +64,53 @@ describe("VoiceLibraryPanel (selector)", () => {
     expect(screen.getByRole("button", { name: /New voice/ })).toBeTruthy()
   })
 
+  // AQU-959: a partner opened Voices as a contributor, found "New voice" greyed
+  // out, and got no tooltip, no message and no path forward — the demo stalled
+  // until the host changed her role by hand. The role gate and its denial
+  // sentence were already here (AQU-365); what was missing is that a disabled
+  // button swallows hover, so the sentence could never surface. Asserting the
+  // hover would prove nothing (happy-dom dispatches on disabled elements and a
+  // browser does not) — assert that the tooltip's trigger is a real, focusable
+  // element that is not the disabled button.
+  it("explains why New voice is dead for a contributor instead of going silent", async () => {
+    const narrator = makeVoice()
+    renderWithTooltips(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        settings={{ provider: "gemini", voices: [narrator], defaultVoiceId: narrator.id }}
+        onSettingsChange={vi.fn()}
+        roleLevel={ROLE.CONTRIBUTOR}
+      />,
+    )
+
+    const button = screen.getByRole("button", { name: /New voice/ })
+    expect(button).toBeDisabled()
+
+    const standIn = document.querySelector('[data-slot="tooltip-disabled-trigger"]')
+    expect(standIn).not.toBeNull()
+    expect(standIn).not.toHaveAttribute("disabled")
+    expect(standIn).toContainElement(button)
+    // Full-width button: the stand-in must carry the width or the row collapses.
+    expect(standIn).toHaveClass("w-full")
+    // AQU-2260 (Sam, Oct 29): the reason opens on a click, never a hover.
+    await expectDisabledNote(button, /Maintainer/i)
+  })
+
+  // The other half of the AC: a user who CAN create voices gains no new chrome.
+  it("adds no stand-in trigger for a maintainer who can create voices", () => {
+    const narrator = makeVoice()
+    renderWithTooltips(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        settings={{ provider: "gemini", voices: [narrator], defaultVoiceId: narrator.id }}
+        onSettingsChange={vi.fn()}
+        roleLevel={ROLE.MAINTAINER}
+      />,
+    )
+    expect(screen.getByRole("button", { name: /New voice/ })).not.toBeDisabled()
+    expect(document.querySelector('[data-slot="tooltip-disabled-trigger"]')).toBeNull()
+  })
+
   it("filters rows by the search query", () => {
     setup()
     fireEvent.change(screen.getByPlaceholderText("Search voices…"), { target: { value: "mary" } })
@@ -95,14 +143,14 @@ describe("VoiceLibraryPanel (selector)", () => {
       provider: "mms",
       voices: [
         makeVoice({ id: "v-k", name: "Kiki", provider: "inworld", voiceName: "Dennis" }),
-        makeVoice({ id: "v-c", name: "Cloney", provider: undefined, voiceName: undefined, referenceAudioId: "ref-1.webm" }),
+        makeVoice({ id: "v-c", name: "Hearth", provider: undefined, voiceName: undefined, libraryVoiceId: "narrator-hearth" }),
         // No per-voice engine → falls back to the project engine (mms).
         makeVoice({ id: "v-legacy", name: "Legacy", provider: undefined, voiceName: undefined }),
       ],
       defaultVoiceId: "v-k",
     })
     expect(screen.getByText("Inworld")).toBeTruthy()
-    expect(screen.getByText("Clone")).toBeTruthy()
+    expect(screen.getByText("Character")).toBeTruthy()
     expect(screen.getByText("MMS")).toBeTruthy()
   })
 
@@ -239,7 +287,7 @@ describe("VoiceLibraryPanel (selector)", () => {
     expect(row).toHaveTextContent(/0\/2 voiced/)
   })
 
-  it("uses the project language on a voice that has none of its own", () => {
+  it("does not label a voice with the open project lane when the voice has no language", () => {
     const onSettingsChange = vi.fn()
     render(
       <VoiceLibraryPanel
@@ -255,7 +303,8 @@ describe("VoiceLibraryPanel (selector)", () => {
       />,
     )
     const row = screen.getByText("Narrator").closest("[role='button']")
-    expect(row).toHaveTextContent(/Spanish/i)
+    expect(row).not.toHaveTextContent(/Spanish/i)
+    expect(row).not.toHaveTextContent(/French/i)
   })
 })
 
@@ -307,6 +356,40 @@ describe("VoiceLibraryPanel — AQU-365 role gating", () => {
     expect(screen.getAllByRole("button", { name: /More voice actions/ }).length).toBeGreaterThan(0)
   })
 
+  it("keeps New voice disabled for a project lead until the project allows it", () => {
+    setupWithRole(ROLE.PROJECT_LEAD)
+    expect((screen.getByRole("button", { name: /New voice/ }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("enables New voice for a project lead when the project allows it", () => {
+    const onSettingsChange = vi.fn()
+    const narrator = makeVoice()
+    render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        settings={{ provider: "gemini", voices: [narrator], defaultVoiceId: narrator.id }}
+        onSettingsChange={onSettingsChange}
+        roleLevel={ROLE.PROJECT_LEAD}
+        leadsManageVoices
+      />,
+    )
+    expect((screen.getByRole("button", { name: /New voice/ }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it("keeps New voice disabled for a contributor even when the project allows leads", () => {
+    const narrator = makeVoice()
+    render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        settings={{ provider: "gemini", voices: [narrator], defaultVoiceId: narrator.id }}
+        onSettingsChange={vi.fn()}
+        roleLevel={ROLE.CONTRIBUTOR}
+        leadsManageVoices
+      />,
+    )
+    expect((screen.getByRole("button", { name: /New voice/ }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it("fails open (New voice enabled) when roleLevel is not provided (local/legacy project)", () => {
     setupWithRole(null)
     const button = screen.getByRole("button", { name: /New voice/ }) as HTMLButtonElement
@@ -328,7 +411,7 @@ describe("VoiceLibraryPanel — settings sync (AQU-1001)", () => {
     )
     expect(screen.queryByText("Keean")).toBeNull()
 
-    const cloned: Voice = { id: "v-clone", name: "Keean", color: "#0d9488", referenceAudioId: "ref.webm" }
+    const cloned: Voice = { id: "v-anna", name: "Keean", color: "#0d9488", libraryVoiceId: "c-0a1b2c3d" }
     rerender(
       <VoiceLibraryPanel
         projectId="dev-project"
@@ -337,5 +420,59 @@ describe("VoiceLibraryPanel — settings sync (AQU-1001)", () => {
       />,
     )
     expect(screen.getByText("Keean")).toBeTruthy()
+  })
+})
+
+// AQU-1940: `iloko_ilo_the_chosen` came out of the Codex migration with 31,287
+// voices (one minted per verse label). The panel mapped every one of them to a
+// full row in a single synchronous render: the main thread blocked ~3s on
+// "Open project", the heap passed 2.4GB and Chrome killed the tab, so anyone
+// whose dock remembered the Voices tab could not open the project at all. The
+// list is windowed now — the library's size must not decide how many rows the
+// panel mounts.
+describe("VoiceLibraryPanel — large library (AQU-1940)", () => {
+  function library(size: number): Voice[] {
+    return Array.from({ length: size }, (_, i) =>
+      makeVoice({ id: `v-${i}`, name: `Voice ${i}` }),
+    )
+  }
+
+  function renderLibrary(voices: Voice[]) {
+    render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        settings={{ provider: "gemini", voices, defaultVoiceId: voices[0]?.id }}
+        onSettingsChange={vi.fn()}
+      />,
+    )
+  }
+
+  it("mounts a window of rows, not one per voice, and still counts the whole library", () => {
+    renderLibrary(library(30_000))
+
+    // The header reports the whole library…
+    expect(screen.getByText("30000")).toBeTruthy()
+    // …while only the rows in or near the scrollport are in the DOM.
+    const mounted = document.querySelectorAll("[data-voice-id]")
+    expect(mounted.length).toBeGreaterThan(0)
+    expect(mounted.length).toBeLessThan(100)
+  })
+
+  it("search still reaches a voice at the far end of a huge library", () => {
+    renderLibrary(library(30_000))
+    expect(screen.queryByText("Voice 29999")).toBeNull()
+
+    fireEvent.change(screen.getByPlaceholderText("Search voices…"), {
+      target: { value: "voice 29999" },
+    })
+
+    expect(screen.getByText("Voice 29999")).toBeTruthy()
+    expect(document.querySelectorAll("[data-voice-id]").length).toBe(1)
+  })
+
+  it("renders a small library in full, exactly as before", () => {
+    renderLibrary(library(12))
+    expect(document.querySelectorAll("[data-voice-id]").length).toBe(12)
+    expect(screen.getByText("Voice 11")).toBeTruthy()
   })
 })

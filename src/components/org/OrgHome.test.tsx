@@ -2,11 +2,12 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
-import { ProjectTable, activityStatus, OrgHome } from "./OrgHome"
+import { activityStatus, OrgHome } from "./OrgHome"
 import { OrgOverview } from "./OrgOverview"
 import { OrgProjectsPage } from "./OrgProjectsPage"
-import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
+import { renderWithTooltips } from "@/test-utils/tooltip"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
+import { summarizePortfoliosByOrg } from "@/lib/frontier/portfolio-metrics"
 
 function projectsRollupStat() {
   // Overview (and all-orgs) rollup tiles sit outside the nav. The label lives
@@ -47,6 +48,11 @@ vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 vi.mock("@/components/HelpMenu", () => ({ HelpMenu: () => null }))
 vi.mock("./OrgSwitcher", () => ({ OrgSwitcher: () => null }))
 vi.mock("@/hooks/usePlatformAdmin", () => ({ usePlatformAdmin: () => ({ isAdmin: false, loading: false }) }))
+
+// AQU-1071: the org's active-language count, as the mocked portfolio summary
+// reports it. The mock factory below repeats the literal rather than reading this
+// const: the factory runs at import time, before module-level initialization.
+const ORG_ACTIVE_LANGUAGES = 7
 
 // Mock portfolio fetch; keep real metrics helpers. Project list data is built
 // inside the factory so vi.hoist does not race with outer constants.
@@ -91,6 +97,22 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
     ...actual,
     getPortfolio,
     getPortfolios,
+    // AQU-1071: the org rollup and the org's active-language count arrive in one
+    // response, and useOrgPortfolio reads both through this call.
+    getOrgPortfolioSummary: vi.fn(async () => ({
+      projects: await getPortfolio(),
+      activeLanguageCount: 7, // keep in step with ORG_ACTIVE_LANGUAGES
+    })),
+    getPortfolioAggregates: vi.fn(async () => ({
+      projectCount: 0,
+      avgTranslatedPct: 0,
+      avgValidatedPct: 0,
+      avgAudioPct: 0,
+      stalledCount: 0,
+      overdueCount: 0,
+      attentionCount: 0,
+      orgs: [],
+    })),
     getPortfolioPage: vi.fn(async (_jwt: string, _orgId: number, opts?: { q?: string }) => {
       const list = await getPortfolio()
       const q = opts?.q?.trim().toLowerCase() ?? ""
@@ -164,14 +186,29 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   memberProgressViewMinRole: 600,
   // AQU-496: default leads-only (matches the server's safe default).
   allowSelfAssignment: false,
+  allowScopedLaneAssignment: false,
   countStructuralCells: true,
+  autoPropagateRepetitions: true,
+  autoPropagateRepetitionsOverrides: 0,
+  resetAutoPropagateRepetitionsOverrides: vi.fn(),
   countStructuralOverrides: 0,
   resetCountStructuralOverrides: vi.fn(),
+  validationCountDefault: null,
+  validationCountAudioDefault: null,
+  validationCountOverrides: 0,
+  validationCountAudioOverrides: 0,
+  overrideProjects: { countStructuralCells: null, validationCount: null, validationCountAudio: null },
+  resetValidationCountOverrides: vi.fn(),
+  mediaDefaults: {},
+  mediaDefaultOverrides: {},
+  mediaOverrideProjects: {},
+  resetMediaDefaultOverrides: vi.fn(),
   // AQU-1037: assignment authority defaults to project_lead.
   assignmentMinRole: 500,
   // AQU-822: default termbase-edit floor (project_lead), as the server resolves it.
   termbaseEditMinRole: 500,
   languageEditMinRole: 600,
+  importMinRole: 500,
   commentCreateMinRole: 200,
   commentResolveMinRole: 400,
   refresh: vi.fn(async () => null),
@@ -195,7 +232,8 @@ beforeEach(async () => {
   vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
   const { getWorkload } = await import("@/lib/sync/assignments")
   vi.mocked(getWorkload).mockResolvedValue([])
-  const { getPortfolio, getPortfolioPage, getPortfolios, getPortfoliosPage } = await import("@/lib/frontier/portfolio")
+  const { getPortfolio, getOrgPortfolioSummary, getPortfolioPage, getPortfolios, getPortfoliosPage, getPortfolioAggregates } =
+    await import("@/lib/frontier/portfolio")
   vi.mocked(getPortfolio).mockImplementation(async () => {
     const now = Date.now()
     return [
@@ -232,6 +270,19 @@ beforeEach(async () => {
     ]
   })
   vi.mocked(getPortfolios).mockImplementation(async () => [{ orgId: 1, projects: await getPortfolio("jwt", 1) }])
+  vi.mocked(getPortfolioAggregates).mockImplementation(async () => {
+    const projects = await getPortfolio("jwt", 1)
+    const summary = summarizePortfoliosByOrg(
+      projects.map((project) => ({ ...project, orgId: 1 })),
+      [1],
+      Date.now(),
+    )
+    return { ...summary.totals, orgs: summary.orgs }
+  })
+  vi.mocked(getOrgPortfolioSummary).mockImplementation(async () => ({
+    projects: await getPortfolio("jwt", 1),
+    activeLanguageCount: ORG_ACTIVE_LANGUAGES,
+  }))
   vi.mocked(getPortfolioPage).mockImplementation(async (_jwt, _orgId, opts) => {
     const list = await getPortfolio("jwt", 1)
     const q = opts?.q?.trim().toLowerCase() ?? ""
@@ -269,17 +320,6 @@ afterEach(() => {
   Reflect.deleteProperty(HTMLElement.prototype, "clientWidth")
 })
 
-function mockProjectNameOverflow(overflowing: boolean) {
-  Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
-    configurable: true,
-    get: () => (overflowing ? 400 : 80),
-  })
-  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
-    configurable: true,
-    get: () => 128,
-  })
-}
-
 describe("OrgHome loading template", () => {
   it("keeps the header breadcrumb-only (no trailing profile chip)", () => {
     mockUseFrontierSession.mockReturnValue({
@@ -296,160 +336,11 @@ describe("OrgHome loading template", () => {
     expect(screen.getByTestId("org-home-loading-template")).toBeInTheDocument()
     const header = document.querySelector("[data-slot='app-shell-header']")
     expect(header).not.toBeNull()
-    expect(header!.querySelectorAll("[data-slot='skeleton']")).toHaveLength(1)
-  })
-})
-
-describe("ProjectTable", () => {
-  const project: PortfolioProject & { orgName: string } = {
-    id: "long-project",
-    name: "A project name that must remain readable beside its organization",
-    orgName: "Come and See Foundation International",
-    totalCells: 100,
-    filledCells: 40,
-    validatedCells: 20,
-    aiDraftedCells: 0,
-    lastEditAt: Date.now(),
-    audioCells: 10,
-    validatedAudioCells: 0,
-    recordedMs: 0,
-    deadlineAt: "2020-01-01",
-    sourceLanguage: "English",
-    targetLanguage: "French",
-  }
-
-  it("keeps the organization secondary while preserving a compact project identity", async () => {
-    mockProjectNameOverflow(true)
-    renderWithTooltips(
-      <MemoryRouter>
-        <ProjectTable
-          projects={[project]}
-          now={Date.now()}
-          showOrg
-          // AQU-606: this map is only the per-file *hint*; the project's own
-          // targetLanguage ("French") takes precedence for the '' lane chip.
-          defaultLaneLabelByProjectId={new Map([[project.id, "conversational Spanish"]])}
-        />
-      </MemoryRouter>,
-    )
-
-    expect(screen.getByText("Project")).toBeInTheDocument()
-    expect(screen.getByText("Org")).toBeInTheDocument()
-    const identity = screen.getByTestId("project-table-identity")
-    const projectName = screen.getByTestId("project-table-name")
-    const expandedProjectName = screen.getByTestId("project-table-name-expanded")
-    const organization = screen.getByTestId("project-table-organization")
-    const metadata = screen.getByTestId("project-table-metadata")
-    const deadlineTrigger = screen.getByTestId("project-table-deadline-trigger")
-    const deadlineStatus = screen.getByTestId("project-table-deadline-status")
-    expect(projectName).toHaveTextContent(project.name)
-    expect(projectName).toHaveClass("overflow-hidden", "whitespace-nowrap", "text-clip")
-    expect(projectName).not.toHaveClass("truncate", "text-ellipsis")
-    expect(organization).toHaveTextContent(project.orgName)
-    expect(identity).toContainElement(projectName)
-    expect(identity).toContainElement(organization)
-    expect(projectName).not.toHaveAttribute("title")
-    expect(
-      [...(projectName.closest("a")?.querySelectorAll("[title]") ?? [])].filter(
-        (element) => element.getAttribute("title") === project.name,
-      ),
-    ).toHaveLength(0)
-    expect(projectName).not.toHaveAttribute("data-slot", "tooltip-trigger")
-    expect(projectName.parentElement).toHaveAttribute("data-project-name-truncated", "true")
-    expect(expandedProjectName).toHaveTextContent(project.name)
-    expect(expandedProjectName).toHaveAttribute("aria-hidden", "true")
-    expect(expandedProjectName).toHaveClass("z-50", "-start-2", "px-2", "py-1", "bg-popover", "shadow-md")
-    expect(organization).not.toHaveAttribute("data-slot", "tooltip-trigger")
-    expect(identity).toHaveClass("@md/project-table:grid-cols-[minmax(6.5rem,1fr)_minmax(4rem,6rem)]")
-    expect(organization).toHaveClass("relative", "h-5", "w-full")
-    expect(organization).toHaveAttribute("data-org-name", project.orgName)
-    expect(organization.querySelectorAll('[data-slot="badge"]')).toHaveLength(1)
-    expect(metadata).toHaveTextContent("English → French")
-    expect(identity).toContainElement(deadlineTrigger)
-    expect(deadlineTrigger).toContainElement(deadlineStatus)
-    expect(deadlineStatus).toHaveTextContent("Overdue")
-    expect(deadlineStatus).toHaveClass("[&>span:last-child]:sr-only")
-    expect(metadata).not.toContainElement(deadlineStatus)
-    expect(organization).not.toContainElement(deadlineStatus)
-    expect(screen.getByTestId("project-table")).toHaveClass("overflow-hidden")
-    expect(screen.getByTestId("project-table")).not.toHaveClass("overflow-x-auto")
-    const languages = screen.getByTestId("project-table-languages")
-    const languageChip = screen.getByTestId(`lane-chip-${project.id}-`)
-    expect(languages).toHaveClass("min-w-0", "overflow-hidden")
-    expect(languageChip.parentElement).toHaveClass("w-full", "min-w-0", "max-w-full")
-    expect(languageChip).toHaveClass("min-w-0", "max-w-full", "overflow-hidden")
-    expect(within(languageChip).getByText("French")).toHaveClass("min-w-0", "flex-1", "truncate")
-    expect(languageChip).toHaveAccessibleName("French: 40% translated")
-    // The (potentially truncated) label's full text stays recoverable on hover.
-    await expectTooltip(languageChip, "French — 40% translated")
-    expect(screen.getByText("Language")).toBeInTheDocument()
-    expect(screen.getByTestId("project-table-translated-header")).toHaveAttribute("aria-label", "Translated")
-    expect(screen.getByTestId("project-table-validated-header")).toHaveAttribute("aria-label", "Validated")
-    expect(screen.getByTestId("project-table-audio-header")).toHaveAttribute("aria-label", "Has audio")
-    expect(screen.getByTestId("project-table-translated-value")).toHaveClass("justify-self-start", "text-start")
-    expect(screen.getByTestId("project-table-validated-value")).toHaveClass("justify-self-start", "text-start")
-    expect(screen.getByTestId("project-table-audio-value")).toHaveClass("justify-self-start", "text-start")
-    expect(screen.queryByText("Role")).not.toBeInTheDocument()
-    expect(screen.queryByText("Updated", { exact: true })).not.toBeInTheDocument()
-    expect(screen.queryByText(/Updated /)).not.toBeInTheDocument()
-  })
-
-  it("labels the default lane from the project's target language with no per-file hint (AQU-606)", async () => {
-    // The all-orgs table passes an empty hint map, and a lanes-migrated project
-    // carries no per-file targetLanguage — the chip used to read "Default".
-    renderWithTooltips(
-      <MemoryRouter>
-        <ProjectTable projects={[project]} now={Date.now()} showOrg />
-      </MemoryRouter>,
-    )
-
-    const chip = screen.getByTestId(`lane-chip-${project.id}-`)
-    expect(chip).toHaveTextContent("French")
-    expect(chip).not.toHaveTextContent("Default")
-    // A long target language still truncates but stays recoverable on hover.
-    expect(within(chip).getByText("French")).toHaveClass("min-w-0", "flex-1", "truncate")
-    await expectTooltip(chip, "French — 40% translated")
-  })
-
-  it("falls back to the neutral placeholder when no target language is set (AQU-606)", () => {
-    render(
-      <MemoryRouter>
-        <ProjectTable
-          projects={[{ ...project, id: "untargeted", targetLanguage: null }]}
-          now={Date.now()}
-          showOrg
-        />
-      </MemoryRouter>,
-    )
-
-    expect(screen.getByTestId("lane-chip-untargeted-")).toHaveTextContent("Default")
-  })
-
-  it("omits the redundant organization column in a single-organization view", () => {
-    render(
-      <MemoryRouter>
-        <ProjectTable projects={[project]} now={Date.now()} showOrg={false} />
-      </MemoryRouter>,
-    )
-
-    expect(screen.queryByTestId("project-table-organization")).not.toBeInTheDocument()
-    expect(screen.getByTestId("project-table-name")).toHaveTextContent(project.name)
-  })
-
-  it("does not reveal or tooltip a project name that fits", () => {
-    mockProjectNameOverflow(false)
-    render(
-      <MemoryRouter>
-        <ProjectTable projects={[{ ...project, id: "exodus", name: "Exodus" }]} now={Date.now()} showOrg />
-      </MemoryRouter>,
-    )
-
-    const projectName = screen.getByTestId("project-table-name")
-    expect(projectName).toHaveTextContent("Exodus")
-    expect(projectName).not.toHaveAttribute("title")
-    expect(projectName).not.toHaveAttribute("data-slot", "tooltip-trigger")
-    expect(projectName.parentElement).toHaveAttribute("data-project-name-truncated", "false")
-    expect(screen.queryByTestId("project-table-name-expanded")).not.toBeInTheDocument()
+    // The real breadcrumb, nothing else: no profile chip, no loading chrome.
+    expect(header!.textContent).toContain("All organizations")
+    expect(header!.querySelectorAll("nav")).toHaveLength(1)
+    expect(header!.children).toHaveLength(1)
+    expect(document.querySelectorAll("[data-slot='loading-cursor']").length).toBeGreaterThan(0)
   })
 })
 
@@ -559,18 +450,18 @@ describe("OrgOverview / OrgProjects", () => {
         { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
       ])
 
-      const { getPortfolios } = await import("@/lib/frontier/portfolio")
-      const portfolioCallsBeforeRetry = vi.mocked(getPortfolios).mock.calls.length
+      const { getPortfolioAggregates } = await import("@/lib/frontier/portfolio")
+      const summaryCallsBeforeRetry = vi.mocked(getPortfolioAggregates).mock.calls.length
 
       fireEvent.click(within(card).getByRole("button", { name: /retry/i }))
 
       // Same mount: the dashboard replaces the error card.
       await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
       expect(screen.queryByTestId("org-load-error")).not.toBeInTheDocument()
-      // Retry re-issues the dependent portfolio fetch too, not just the orgs —
-      // the failure state resolves to real data rather than an empty dashboard.
+      // Retry re-issues the overview summary too, not just the orgs — the
+      // failure state resolves to real totals rather than an empty dashboard.
       await waitFor(() =>
-        expect(vi.mocked(getPortfolios).mock.calls.length).toBeGreaterThan(portfolioCallsBeforeRetry),
+        expect(vi.mocked(getPortfolioAggregates).mock.calls.length).toBeGreaterThan(summaryCallsBeforeRetry),
       )
     })
 
@@ -593,7 +484,13 @@ describe("OrgOverview / OrgProjects", () => {
 
   it("renders the org name, nav, and admin links for an owner", async () => {
     renderMemberOverview()
-    await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
+    // The loading template shows the real breadcrumb (so the org name is
+    // visible early): wait for the template itself to leave.
+    await waitFor(() => {
+      expect(screen.queryByTestId("org-home-loading-template")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("org-overview-loading-template")).not.toBeInTheDocument()
+    })
+    expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0)
     expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Projects" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Teams" })).toBeInTheDocument()
@@ -657,11 +554,25 @@ describe("OrgOverview / OrgProjects", () => {
 
   it("shows the project count in the rollup strip", async () => {
     renderMemberOverview()
-    await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
+    // The loading template already shows the tile labels, so wait for the
+    // template itself to leave rather than for a label to appear.
+    await waitFor(() => expect(screen.queryByTestId("org-overview-loading-template")).not.toBeInTheDocument())
     const projectsStat = projectsRollupStat()
     expect(within(projectsStat).getByText("2")).toBeInTheDocument()
     expect(projectsStat).toHaveClass("flex-row-reverse")
     expect(projectsStat.parentElement).toHaveClass("grid-cols-1")
+  })
+
+  // AQU-1071: the enterprise billing band is how many active target lanes this
+  // org has. The tile shows the server-side count.
+  it("shows the org's active-lane count in the rollup strip", async () => {
+    renderMemberOverview()
+    await waitFor(() => expect(screen.queryByTestId("org-overview-loading-template")).not.toBeInTheDocument())
+    const label = screen.getAllByText("Active language lanes").find((el) => !el.closest("nav"))!
+    const tile = label.parentElement?.parentElement
+    if (!tile) throw new Error("lanes tile root not found")
+    expect(within(tile).getByText(String(ORG_ACTIVE_LANGUAGES))).toBeInTheDocument()
+    expect(within(tile).getByText("Language lanes")).toBeInTheDocument()
   })
 
   it("shows the overdue rollup card and at-risk rows on overview", async () => {
@@ -877,7 +788,7 @@ describe("OrgOverview per-section visibility (AQU-486)", () => {
     vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 400, name: "contributor" } }])
 
     renderMemberOverview()
-    await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByTestId("org-overview-loading-template")).not.toBeInTheDocument())
 
     expect(screen.queryByTestId("section-team-workload")).not.toBeInTheDocument()
     expect(screen.queryByTestId("section-team-usage")).not.toBeInTheDocument()
@@ -894,10 +805,12 @@ describe("OrgOverview per-section visibility (AQU-486)", () => {
     ])
     // Default org role in this suite is 700 (owner) — meets the floor.
     renderMemberOverview()
-    await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByTestId("org-overview-loading-template")).not.toBeInTheDocument())
 
     const section = await screen.findByTestId("section-team-workload")
-    expect(within(section).getByTestId("section-visibility-badge")).toHaveTextContent(/maintainers & owners/i)
+    // The card renders nothing until its workload rows land, so the badge
+    // arrives a render after the gated container does: wait for it.
+    expect(await within(section).findByTestId("section-visibility-badge")).toHaveTextContent(/maintainers & owners/i)
   })
 
   it("a maintainer can change the Team workload floor via the inline advanced toggle", async () => {
@@ -905,6 +818,9 @@ describe("OrgOverview per-section visibility (AQU-486)", () => {
     useOrgSettingsMock.mockReturnValue({
       ...defaultOrgSettingsMock(),
       memberProgressViewMinRole: 600,
+      // The member list is open too, so the progress setting can go all the
+      // way down (AQU-1771: the card names people, so it follows both).
+      rosterViewMinRole: 100,
       patch,
     })
     canEditRosterProgressFloorMock.mockReturnValue(true)
@@ -914,7 +830,7 @@ describe("OrgOverview per-section visibility (AQU-486)", () => {
     ])
 
     renderMemberOverview()
-    await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByTestId("org-overview-loading-template")).not.toBeInTheDocument())
 
     const section = await screen.findByTestId("section-team-workload")
     const visibilityButton = await within(section).findByRole("button", {
@@ -933,6 +849,81 @@ describe("OrgOverview per-section visibility (AQU-486)", () => {
   })
 })
 
+// AQU-1771: the Team cards name people, so they follow the higher of the
+// member-progress and member-list settings, as the server does.
+describe("OrgOverview Team cards follow both visibility settings (AQU-1771)", () => {
+  const workloadRow = { assignmentId: "a1", projectId: "p1", projectName: "Legacy Translation", fileId: "f1", assigneeUserId: 2, username: "anna", scopeLabel: "Genesis", cellsTotal: 10, cellsDone: 4, deadline: null }
+
+  async function asContributor() {
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 400, name: "contributor" } }])
+  }
+
+  it("stays hidden from a contributor when only member progress is opened to contributors", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 400,
+      rosterViewMinRole: 600,
+    })
+    await asContributor()
+    const { getWorkload } = await import("@/lib/sync/assignments")
+    vi.mocked(getWorkload).mockResolvedValue([workloadRow])
+
+    renderMemberOverview()
+    await waitFor(() => expect(screen.queryByTestId("org-overview-loading-template")).not.toBeInTheDocument())
+
+    expect(screen.queryByTestId("section-team-workload")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("section-team-usage")).not.toBeInTheDocument()
+  })
+
+  it("shows to a contributor once both settings are opened, badged with the higher one", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 400,
+      rosterViewMinRole: 500,
+    })
+    // A project lead meets both.
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 500, name: "project_lead" } }])
+    const { getWorkload } = await import("@/lib/sync/assignments")
+    vi.mocked(getWorkload).mockResolvedValue([workloadRow])
+
+    renderMemberOverview()
+    const section = await screen.findByTestId("section-team-workload")
+    // Same as above: the badge lands with the rows, after the container.
+    expect(await within(section).findByTestId("section-visibility-badge")).toHaveTextContent(/project leads & up/i)
+  })
+
+  it("offers nothing below the member-list setting in the Team workload picker", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 600,
+      rosterViewMinRole: 600,
+    })
+    canEditRosterProgressFloorMock.mockReturnValue(true)
+    const { getWorkload } = await import("@/lib/sync/assignments")
+    vi.mocked(getWorkload).mockResolvedValue([workloadRow])
+
+    renderMemberOverview()
+    const section = await screen.findByTestId("section-team-workload")
+    fireEvent.click(await within(section).findByRole("button", { name: /change section visibility/i }))
+    fireEvent.click(await screen.findByRole("combobox", { name: /who can see this section/i }))
+    const everyone = await screen.findByRole("option", { name: /everyone with access/i })
+    expect(everyone).toHaveAttribute("aria-disabled", "true")
+  })
+
+  it("drops the Team workload card when the server refuses the read, instead of an empty card", async () => {
+    useOrgSettingsMock.mockReturnValue(defaultOrgSettingsMock())
+    const { getWorkload } = await import("@/lib/sync/assignments")
+    const { UserError } = await import("@/lib/errors/user-error")
+    vi.mocked(getWorkload).mockRejectedValue(new UserError(403, "", "org"))
+
+    renderMemberOverview()
+    await waitFor(() => expect(vi.mocked(getWorkload)).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByTestId("section-team-workload")).not.toBeInTheDocument())
+  })
+})
+
 // AQU-293: signed-out state — no fake-empty dashboard
 describe("OrgOverview signed-out state", () => {
   it("shows a sign-in prompt instead of zero-stat cards when there is no session", async () => {
@@ -943,7 +934,7 @@ describe("OrgOverview signed-out state", () => {
     renderMemberOverview()
 
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: /sign in/i })).toBeInTheDocument()
+      expect(screen.getByRole("link", { name: /log in/i })).toBeInTheDocument()
     })
 
     // The stat rollup cards must not be present — they'd show meaningless zeros.
@@ -957,7 +948,7 @@ describe("OrgOverview signed-out state", () => {
 
     renderMemberOverview()
 
-    const link = await screen.findByRole("link", { name: /sign in/i })
+    const link = await screen.findByRole("link", { name: /log in/i })
     expect(link.getAttribute("href")).toMatch(/\/login\?next=/)
   })
 })
@@ -1007,8 +998,19 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
   ) {
     const { listMyOrgs } = await import("@/lib/frontier/orgs")
     vi.mocked(listMyOrgs).mockResolvedValue(twoOrgs)
-    const { getPortfolios, getPortfoliosPage } = await import("@/lib/frontier/portfolio")
+    const { getPortfolioAggregates, getPortfolios, getPortfoliosPage } = await import("@/lib/frontier/portfolio")
     vi.mocked(getPortfolios).mockResolvedValue(portfolios as never)
+    vi.mocked(getPortfolioAggregates).mockImplementation(async () => {
+      const rows = (portfolios as Array<{ orgId: number; projects: PortfolioProject[] }>).flatMap(
+        ({ orgId, projects: list }) => list.map((project) => ({ ...project, orgId })),
+      )
+      const summary = summarizePortfoliosByOrg(
+        rows,
+        portfolios.map((portfolio) => portfolio.orgId),
+        Date.now(),
+      )
+      return { ...summary.totals, orgs: summary.orgs }
+    })
     vi.mocked(getPortfoliosPage).mockImplementation(async () => {
       const list = (portfolios as Array<{ orgId: number; projects: Array<{ name: string }> }>).flatMap(
         ({ orgId, projects: rows }) => rows.map((project) => ({ ...project, orgId })),
@@ -1021,6 +1023,23 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
       </MemoryRouter>,
     )
   }
+
+  // AQU-1488. WHY: a member invited to one project but never to its org read
+  // "Projects 0" in these totals beside a table listing that project: the totals
+  // asked only for member orgs. The org they hold a project in is asked for too
+  // (the server counts only projects they can open).
+  it("asks for the totals of orgs where the caller only holds a project", async () => {
+    fetchAccessibleProjectsMock.mockResolvedValue([
+      { id: "pm", name: "Marathi EBL", orgId: 503, orgName: "Biblica", role: { level: 400, name: "contributor", source: "override" }, files: [] },
+    ])
+    await renderAllOrgs()
+    const { getPortfolioAggregates } = await import("@/lib/frontier/portfolio")
+    await waitFor(() => expect(vi.mocked(getPortfolioAggregates)).toHaveBeenCalled())
+    const calls = vi.mocked(getPortfolioAggregates).mock.calls
+    expect(calls.at(-1)![1]).toEqual([1, 2, 503])
+    // Only once the shared projects are known, so the tile never counts twice.
+    expect(calls.every(([, ids]) => (ids as number[]).includes(503))).toBe(true)
+  })
 
   it("surfaces the failure in the projects panel instead of a plain empty state", async () => {
     fetchAccessibleProjectsMock.mockRejectedValue(new Error("Failed to fetch"))
@@ -1109,6 +1128,10 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
     const avgTile = screen.getByText("Avg translated").parentElement?.parentElement
     expect(avgTile).toBeTruthy()
     expect(within(avgTile!).getByText("10%")).toBeInTheDocument()
+    const { getPortfolioAggregates, getPortfolios } = await import("@/lib/frontier/portfolio")
+    expect(vi.mocked(getPortfolioAggregates)).toHaveBeenCalled()
+    // The project table is paged. Overview totals must not download every row.
+    expect(vi.mocked(getPortfolios)).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByTestId("shared-filter-chip"))
     await waitFor(() => {

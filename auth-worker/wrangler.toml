@@ -72,6 +72,36 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots"
 
+# AQU-1845 — the per-run Autopilot driver (src/contextual-run-do.ts). One
+# object per run; its alarm drives the run's waves and re-arms itself, so a run
+# finishes whether or not the request (or tab) that started it is still around,
+# instead of dying with that request's `waitUntil` budget and waiting for the
+# 5-minute cron to re-adopt it. Holds no authoritative state — every cursor,
+# status and staged draft is in Postgres — so an evicted object or a redeploy
+# costs at most the wave in flight.
+#
+# Wrangler environments do NOT inherit top-level bindings or migrations, so
+# every live named environment re-declares both below. Deleting the binding is
+# safe at the code level (routes/contextual.ts falls back to the in-request
+# loop) but gives up the long-run driver, so don't.
+[[durable_objects.bindings]]
+name = "CONTEXTUAL_RUN_DRIVER"
+class_name = "ContextualRunDriver"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ContextualRunDriver"]
+
+# AQU-2051 — the per-document knowledge-base indexing driver. A new DO class
+# needs its own migration tag; v1 above must stay as it is.
+[[durable_objects.bindings]]
+name = "KNOWLEDGE_INDEX_DRIVER"
+class_name = "KnowledgeIndexDriver"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["KnowledgeIndexDriver"]
+
 # Keep the top-level email binding for default-profile compatibility. Every live
 # named environment also declares its own binding because Wrangler environments
 # do not inherit top-level bindings.
@@ -85,6 +115,10 @@ name = "EMAIL"
 # docs/DEPLOYMENT-ENVIRONMENTS.md § "Worker secrets (per environment)" (AQU-762):
 #   SECRET_KEY      — identity access-token signing key.
 #   SYNC_SECRET_KEY — signs /sync-token JWTs. MUST match aquilla-sync-worker.
+#   MONDAY_TOKEN_KEY — development only (AQU-1775): the Monday token encryption
+#                      key is derived from it instead of SECRET_KEY, so a
+#                      production token copied onto the dev Neon branch is
+#                      unreadable on dev. Unset keeps the SECRET_KEY derivation.
 #   OPENROUTER_API_KEY — Bearer key forwarded by /api/v1/chat/completions
 #                        to OpenRouter (folded in from aquilla-chat-worker).
 #   AGENT_SANDBOX_KEY  — shared bearer secret for the sandbox worker
@@ -96,6 +130,9 @@ name = "EMAIL"
 #   GITLAB_ADMIN_TOKEN      — trusted service token for access reconstruction.
 #   STRIPE_SECRET_KEY       — Stripe secret (sk_test_… / sk_live_…). Never commit.
 #   STRIPE_WEBHOOK_SECRET   — Stripe webhook signing secret (whsec_…).
+#   OMNI_SHARED_SECRET      — sent as X-Omni-Secret to the Omnilingual ASR Modal
+#                             app; MUST match its `aquilla-omni-asr` Modal secret.
+#                             Unset → non-Whisper hosted transcription answers 503.
 # Plain vars: see types.ts for the full list.
 #
 # Outbound email (password reset + project invites) goes through Cloudflare
@@ -122,18 +159,36 @@ binding = "CF_VERSION_METADATA"
 [placement]
 mode = "smart"
 
-# Monday.com integration: cron flush of debounced board-link pushes
-# (src/index.ts scheduled() → lib/monday/push.ts flushDirtyLinks, cap 20).
+# Monday.com and Airtable integrations: cron flush of debounced link pushes
+# (src/index.ts scheduled() → lib/integrations/push.ts flushDirtyLinks, cap 20).
 # NOTE: like placement/observability, [triggers] is NOT inherited by env
 # blocks — keep the env-block copies below in sync.
 [triggers]
-# Second/third entries: retention recap emails to ADMIN_EMAILS — weekly Monday
+# Second/third entries: retention recap emails to the platform admins — weekly Monday
 # 14:00 UTC and monthly on the 1st (src/lib/retention-report.ts). Production only.
 crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
 
 [vars]
+# Omnilingual ASR on Modal (infra/modal/omni_asr.py). Hosted transcription for
+# languages Whisper lacks, plus the zero-shot opt-in. Empty = Automatic keeps
+# Whisper auto-detect for those languages and an explicit Omnilingual choice
+# answers 503. Needs `wrangler secret put OMNI_SHARED_SECRET --env=<env>` with
+# the value of the Modal secret `aquilla-omni-asr`. OMNI_ASR_AMORTIZATION
+# (default 1.5) multiplies metered GPU cost to cover idle and cold-start time.
+OMNI_ASR_MODAL_URL = ""
+OMNI_ASR_AMORTIZATION = "1.5"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
+# [Pen test] Auth & session mgmt (2026-09-28): was 43200 (30 days). Lowered per
+# docs/OPSEC.md V8 — with server-side jti revocation now in place
+# (utils/token-revocation.ts), the 30-day fixed lifetime was a leftover from
+# before revocation existed, not a deliberate current tradeoff. 20160 (14
+# days) still comfortably covers the offline/diode-zone gap this domain
+# actually sees (see access-links.ts's 90-day link TTL for that flow, which
+# is unaffected) while roughly halving the worst-case exposure of a token
+# that leaks somewhere refresh can't reach it (server logs, browser history,
+# a shared machine) — an active client is unaffected, since useSessionRefresh
+# rolls the credential forward well before this lapses.
+ACCESS_TOKEN_EXPIRE_MINUTES = "20160"
 EMAIL_FROM = "noreply@support.aquilla.app"
 # Team inbox for the public "book a call" form (routes/contact.ts). Must be a
 # routed destination address in Cloudflare Email Routing.
@@ -166,11 +221,13 @@ GITLAB_URL = "https://git.genesisrnd.com"
 # AGENT_SANDBOX_URL = "https://<aquilla-agent-sandbox-url>"
 # Site-wide admin surface (/api/v2/admin/*) identity, by ACCOUNT EMAIL — usernames
 # don't matter. Separate axis from the org role ladder; see platform-admin.ts.
+# Who is an admin lives in the `platform_admins` table, NOT here (AQU-1239: the
+# repo is public). ADMIN_EMAILS is an optional bootstrap var, set only by the
+# local dev-stack, e2e and self-hosters; deployed envs leave it unset.
 # ADMIN_REQUIRE_ELEVATION="true" adds the emailed 6-digit step-up code (→ 6h
 # session); bypassed under WRANGLER_LOCAL=1 (local dev-stack / e2e) so the local
-# console stays open. The named production profile re-declares both values below;
+# console stays open. The named production profile re-declares it below;
 # the unnamed profile is local-only and is never a production deploy source.
-ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com,sampetetc@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # Monday.com integration (non-secret ids; empty defaults — set real values per
 # deploy). Secrets MONDAY_CLIENT_SECRET + MONDAY_SIGNING_SECRET go through
@@ -185,6 +242,8 @@ MONDAY_REDIRECT_URI = "https://aquilla.app/oauth/callback"
 STRIPE_PUBLISHABLE_KEY = "pk_test_51U47kG7SR91OrWMSCDdwkoCVTexlfzvqLy7ftUUbeM0CDTlH61PsnxEkocohJZNt1cRFGrzOKtP3CUfesJSabn5H00D9YwLoPi"
 STRIPE_PRICE_FIELD = "price_1U487L7SR91OrWMSAwgtPRxU"
 STRIPE_PRICE_ADDON = "price_1U487M7SR91OrWMStnLewx15"
+# AQU-1352 P1: shadow-compare the access_grants resolver (logs parity mismatches; answers unchanged).
+ACCESS_GRANTS_RESOLVER = "shadow"
 
 # ---------------------------------------------------------------------------
 # Production environment — owns routes on api.aquilla.app for the identity
@@ -198,6 +257,11 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = [
   "api.aquilla.app/identity/*",
   "api.aquilla.app/chat/*",
+  # RFC 8414 discovery for the MCP OAuth issuer (api.aquilla.app/identity): the
+  # spec's path-issuer location sits at the host root. Only this one prefix.
+  "api.aquilla.app/.well-known/oauth-authorization-server/*",
+  # OpenAI plugin portal domain verification (secret OPENAI_APPS_CHALLENGE).
+  "api.aquilla.app/.well-known/openai-apps-challenge",
 ]
 
 [env.production.build]
@@ -209,12 +273,13 @@ mode = "smart"
 
 # See top-level [triggers] — env blocks don't inherit crons either.
 [env.production.triggers]
-# Second/third entries: retention recap emails to ADMIN_EMAILS — weekly Monday
+# Second/third entries: retention recap emails to the platform admins — weekly Monday
 # 14:00 UTC and monthly on the 1st (src/lib/retention-report.ts). Production only.
 crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
 
-# Like placement, observability is NOT inherited by env blocks — without this,
-# production has Workers Logs disabled and 4xx/5xx are invisible.
+# Wrangler (3.x and 4.x) does inherit the top-level [observability] block into
+# env blocks, and `versions deploy` syncs the resolved value. It is declared per
+# env anyway so a top-level edit can't change what production logs.
 [env.production.observability]
 enabled = true
 
@@ -229,12 +294,47 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots"
 
+# In-app agent changeset staging (propose_command) reaches sync-worker through
+# this binding, not the zone URL: same-zone global fetch never reaches the Worker.
+[[env.production.services]]
+binding = "SYNC_WORKER"
+service = "aquilla-sync-worker"
+
 [[env.production.send_email]]
 name = "EMAIL"
 
+# See the top-level [[durable_objects.bindings]] — env blocks don't inherit it.
+[[env.production.durable_objects.bindings]]
+name = "CONTEXTUAL_RUN_DRIVER"
+class_name = "ContextualRunDriver"
+
+[[env.production.migrations]]
+tag = "v1"
+new_sqlite_classes = ["ContextualRunDriver"]
+
+# AQU-2051 — the per-document knowledge-base indexing driver. A new DO class
+# needs its own migration tag; v1 above must stay as it is.
+[[env.production.durable_objects.bindings]]
+name = "KNOWLEDGE_INDEX_DRIVER"
+class_name = "KnowledgeIndexDriver"
+
+[[env.production.migrations]]
+tag = "v2"
+new_sqlite_classes = ["KnowledgeIndexDriver"]
+
 [env.production.vars]
+# Omnilingual ASR on Modal (infra/modal/omni_asr.py). Hosted transcription for
+# languages Whisper lacks, plus the zero-shot opt-in. Empty = Automatic keeps
+# Whisper auto-detect for those languages and an explicit Omnilingual choice
+# answers 503. Needs `wrangler secret put OMNI_SHARED_SECRET --env=<env>` with
+# the value of the Modal secret `aquilla-omni-asr`. OMNI_ASR_AMORTIZATION
+# (default 1.5) multiplies metered GPU cost to cover idle and cold-start time.
+OMNI_ASR_MODAL_URL = "https://genesis-ai-dev--aquilla-omnilingual-asr-api.us-east.modal.run"
+OMNI_ASR_AMORTIZATION = "1.5"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
+# [Pen test] Auth & session mgmt (2026-09-28): see [vars] above for why this
+# dropped from 43200 (30 days) — same reasoning applies to production.
+ACCESS_TOKEN_EXPIRE_MINUTES = "20160"
 EMAIL_FROM = "noreply@support.aquilla.app"
 # Team inbox for the public "book a call" form (routes/contact.ts). Must be a
 # routed destination address in Cloudflare Email Routing.
@@ -249,30 +349,41 @@ EMAIL_REPLY_TO = "support@aquilla.app"
 DISCORD_INVITE_URL = "https://discord.gg/T2EndwXe4W"
 BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
+# MCP OAuth issuer (routes/mcp-oauth.ts). Must equal the sync worker's
+# AUTH_WORKER_URL, which its protected-resource metadata names.
+MCP_OAUTH_ISSUER = "https://api.aquilla.app/identity"
+# This worker's own public base (routes/monday.ts builds the Monday webhook
+# address from it). The identity API host, NOT BASE_URL: the website answers
+# a webhook POST with 405 and Monday then refuses to create the webhook.
+BASE_URL_API = "https://api.aquilla.app/identity"
 DEFAULT_LLM_MODEL = "openai/gpt-5.6-luna"
 ENVIRONMENT = "production"
+# AQU-730 read wall. Deploy this only after neon-backfill-lanes --apply has
+# written project_member_lane_roles in production. Local and e2e leave it unset.
+LANE_READ_WALL = "1"
 DEPLOYMENT_WORKER_NAME = "aquilla-identity"
 LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
 GITLAB_URL = "https://git.genesisrnd.com"
-ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com,sampetetc@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # PostHog ingest region + *project* token (public — same one shipped in the SPA
 # bundle). Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
 # AQU-854: telemetry moved to PostHog EU Cloud. The host is stated explicitly
-# so a deploy never relies on the code default. POSTHOG_KEY is intentionally
-# EMPTY until the EU project exists — the retired US project token must not be
-# posted to an EU endpoint, and `shipLog` no-ops on a blank key, so worker log
-# shipping stays off (local logging is unaffected) until the EU token is filled
-# in here. See the Linear issue's "Account-side dependency".
+# so a deploy never relies on the code default. AQU-1814 connects the verified
+# Frontier R&D EU project (282623); keep this public token aligned with
+# config/posthog.json. Local and e2e profiles leave log shipping off.
 POSTHOG_HOST = "https://eu.i.posthog.com"
-POSTHOG_KEY = ""
+POSTHOG_KEY = "phc_qy5gb7wTaW5RbmMW8SEyQPSLKtYFtUobaqKZWiUs7cBt"
 # Monday.com integration (see top-level [vars] note).
 MONDAY_CLIENT_ID = "552d390bfdeba3893d071979380eff09"
 MONDAY_APP_ID = "11760401"
 MONDAY_APP_SLUG = "frontierrnd-company_aquilla-v1"
 MONDAY_REDIRECT_URI = "https://aquilla.app/oauth/callback"
-# Stripe launch: use STRIPE_PRICE_FIELD_MONTHLY / STRIPE_PRICE_FIELD_ANNUAL.
+# New workspace plans: live mode requires a live native STRIPE_PRICE_CATALOG,
+# STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET and both portal configurations.
+BILLING_LIVE_HOSTS = "api.aquilla.app,aquilla.app"
+BILLING_WORKSPACE_CHECKOUT_ENABLED = "false"
+# Legacy Stripe launch: use STRIPE_PRICE_FIELD_MONTHLY / STRIPE_PRICE_FIELD_ANNUAL.
 # Keep BILLING_CHECKOUT_ENABLED unset/false until an explicit launch.
 # Legacy Field Plan: STRIPE_PRICE_FIELD / STRIPE_PRICE_ADDON retained after
 # live (or test) prices are provisioned. Checkout 503s until they exist.
@@ -284,12 +395,25 @@ MONDAY_REDIRECT_URI = "https://aquilla.app/oauth/callback"
 # Same SECRET_KEY + SYNC_SECRET_KEY as prod so tokens minted against dev still
 # verify against prod workers during cross-env testing.
 # ---------------------------------------------------------------------------
+# Secrets Store (docs/DEPLOYMENT-ENVIRONMENTS.md, "Changing a secret without a
+# redeploy"): SS_<NAME> supplies env.<NAME> at runtime, so the value can change
+# in the store without a new Worker version.
+[[env.production.secrets_store_secrets]]
+binding = "SS_OMNI_SHARED_SECRET"
+store_id = "74633238cfb84b6a8197a6bd21b2fa21"
+secret_name = "aquilla-production-OMNI_SHARED_SECRET"
+
 [env.development]
 name = "aquilla-dev-identity"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = [
   "api.dev.aquilla.app/identity/*",
   "api.dev.aquilla.app/chat/*",
+  # RFC 8414 discovery for the MCP OAuth issuer (api.dev.aquilla.app/identity): the
+  # spec's path-issuer location sits at the host root. Only this one prefix.
+  "api.dev.aquilla.app/.well-known/oauth-authorization-server/*",
+  # OpenAI plugin portal domain verification (secret OPENAI_APPS_CHALLENGE).
+  "api.dev.aquilla.app/.well-known/openai-apps-challenge",
 ]
 
 # See top-level [placement] — keep env blocks in sync (they don't inherit it).
@@ -298,9 +422,14 @@ mode = "smart"
 
 # See top-level [triggers] — env blocks don't inherit crons either.
 [env.development.triggers]
-# Second/third entries: retention recap emails to ADMIN_EMAILS — weekly Monday
+# Second/third entries: retention recap emails to the platform admins — weekly Monday
 # 14:00 UTC and monthly on the 1st (src/lib/retention-report.ts). Production only.
 crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
+
+# See [env.production.observability] — declared per env so a top-level edit
+# can't change what dev logs.
+[env.development.observability]
+enabled = true
 
 # Dev runs on Neon (Postgres) to mirror prod. index.ts builds AQUILLA_PG
 # from the Postgres shim over Hyperdrive → the Neon `dev` branch.
@@ -318,15 +447,50 @@ id = "53581197ff7a4202a5ed0ef08537d4a6"
 binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots-dev"
 
+[[env.development.services]]
+binding = "SYNC_WORKER"
+service = "aquilla-sync-worker-dev"
+
 [[env.development.send_email]]
 name = "EMAIL"
+
+# See the top-level [[durable_objects.bindings]] — env blocks don't inherit it.
+[[env.development.durable_objects.bindings]]
+name = "CONTEXTUAL_RUN_DRIVER"
+class_name = "ContextualRunDriver"
+
+[[env.development.migrations]]
+tag = "v1"
+new_sqlite_classes = ["ContextualRunDriver"]
+
+# AQU-2051 — the per-document knowledge-base indexing driver. A new DO class
+# needs its own migration tag; v1 above must stay as it is.
+[[env.development.durable_objects.bindings]]
+name = "KNOWLEDGE_INDEX_DRIVER"
+class_name = "KnowledgeIndexDriver"
+
+[[env.development.migrations]]
+tag = "v2"
+new_sqlite_classes = ["KnowledgeIndexDriver"]
 
 [env.development.version_metadata]
 binding = "CF_VERSION_METADATA"
 
 [env.development.vars]
+# Omnilingual ASR on Modal (infra/modal/omni_asr.py). Hosted transcription for
+# languages Whisper lacks, plus the zero-shot opt-in. Empty = Automatic keeps
+# Whisper auto-detect for those languages and an explicit Omnilingual choice
+# answers 503. Needs `wrangler secret put OMNI_SHARED_SECRET --env=<env>` with
+# the value of the Modal secret `aquilla-omni-asr`. OMNI_ASR_AMORTIZATION
+# (default 1.5) multiplies metered GPU cost to cover idle and cold-start time.
+OMNI_ASR_MODAL_URL = "https://genesis-ai-dev--aquilla-omnilingual-asr-api.us-east.modal.run"
+OMNI_ASR_AMORTIZATION = "1.5"
+POSTHOG_HOST = "https://eu.i.posthog.com"
+POSTHOG_KEY = "phc_qy5gb7wTaW5RbmMW8SEyQPSLKtYFtUobaqKZWiUs7cBt"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
+# [Pen test] Auth & session mgmt (2026-09-28): see top-level [vars] for why
+# this dropped from 43200 (30 days).
+ACCESS_TOKEN_EXPIRE_MINUTES = "20160"
 EMAIL_FROM = "noreply@support.aquilla.app"
 # Team inbox for the public "book a call" form (routes/contact.ts). Must be a
 # routed destination address in Cloudflare Email Routing.
@@ -340,6 +504,11 @@ EMAIL_REPLY_TO = "support@aquilla.app"
 # deploys to omit it.
 DISCORD_INVITE_URL = "https://discord.gg/T2EndwXe4W"
 BASE_URL = "https://dev.aquilla.app"
+# MCP OAuth issuer (routes/mcp-oauth.ts). Must equal the sync worker's
+# AUTH_WORKER_URL, which its protected-resource metadata names.
+MCP_OAUTH_ISSUER = "https://api.dev.aquilla.app/identity"
+# This worker's own public base (Monday webhook address); see production.
+BASE_URL_API = "https://api.dev.aquilla.app/identity"
 # Stripe SANDBOX billing on the dev deployment (AQU-837). The gate also
 # requires ENVIRONMENT=development and an sk_test_/rk_test_ secret, so these
 # two vars cannot enable anything on production even if copied there.
@@ -353,6 +522,9 @@ BILLING_SANDBOX_HOSTS = "api.dev.aquilla.app,dev.aquilla.app"
 SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "openai/gpt-5.6-luna"
 ENVIRONMENT = "development"
+# AQU-730 read wall. Deploy this only after neon-backfill-lanes --apply has
+# written project_member_lane_roles on dev. Local and e2e leave it unset.
+LANE_READ_WALL = "1"
 DEPLOYMENT_WORKER_NAME = "aquilla-dev-identity"
 LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
@@ -362,7 +534,6 @@ GITLAB_URL = "https://git.genesisrnd.com"
 # own runtime, not a developer laptop. Local dev-stack injects either its
 # optional :8790 container or an explicitly configured remote endpoint.
 # AGENT_SANDBOX_URL = "https://<aquilla-agent-sandbox-dev-url>"
-ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com,sampetetc@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # Monday.com integration (see top-level [vars] note).
 MONDAY_CLIENT_ID = "552d390bfdeba3893d071979380eff09"
@@ -371,6 +542,16 @@ MONDAY_APP_SLUG = "frontierrnd-company_aquilla-v1"
 MONDAY_REDIRECT_URI = "https://dev.aquilla.app/oauth/callback"
 # Stripe Field Plan: same as production — leave unset until prices + secrets
 # are provisioned on this Worker. Local/e2e use the top-level test catalog.
+# AQU-1352 P1: shadow-compare the access_grants resolver (logs parity mismatches; answers unchanged).
+ACCESS_GRANTS_RESOLVER = "shadow"
+
+# Secrets Store (docs/DEPLOYMENT-ENVIRONMENTS.md, "Changing a secret without a
+# redeploy"): SS_<NAME> supplies env.<NAME> at runtime, so the value can change
+# in the store without a new Worker version.
+[[env.development.secrets_store_secrets]]
+binding = "SS_OMNI_SHARED_SECRET"
+store_id = "74633238cfb84b6a8197a6bd21b2fa21"
+secret_name = "aquilla-development-OMNI_SHARED_SECRET"
 
 [env.e2e]
 name = "aquilla-identity-e2e"
@@ -383,8 +564,30 @@ id = "REPLACE_WITH_E2E_HYPERDRIVE_ID"
 binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots-dev"
 
+# See the top-level [[durable_objects.bindings]] — env blocks don't inherit it.
+[[env.e2e.durable_objects.bindings]]
+name = "CONTEXTUAL_RUN_DRIVER"
+class_name = "ContextualRunDriver"
+
+[[env.e2e.migrations]]
+tag = "v1"
+new_sqlite_classes = ["ContextualRunDriver"]
+
+# AQU-2051 — the per-document knowledge-base indexing driver. A new DO class
+# needs its own migration tag; v1 above must stay as it is.
+[[env.e2e.durable_objects.bindings]]
+name = "KNOWLEDGE_INDEX_DRIVER"
+class_name = "KnowledgeIndexDriver"
+
+[[env.e2e.migrations]]
+tag = "v2"
+new_sqlite_classes = ["KnowledgeIndexDriver"]
+
 [env.e2e.vars]
 ALGORITHM = "HS256"
+# Left at 30 days deliberately — not internet-reachable, so the shorter
+# prod/dev TTL's exposure argument doesn't apply here, and a longer lifetime
+# avoids mid-run token expiry flakiness.
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@local.test"
 BASE_URL = "http://127.0.0.1:5173"

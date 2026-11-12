@@ -24,6 +24,7 @@
 // The orchestrator takes an injected decode/fetch so tests can supply fakes;
 // production wires real Web Audio + sync-worker fetch.
 
+import { applyClipLevelPcm, guardPeak, levelFields } from "@/lib/export/clip-level"
 import JSZip from "jszip"
 import { resolvePcmWindow } from "@/lib/audio/pcm-window"
 import type { CellData } from "@/hooks/useCells"
@@ -33,6 +34,8 @@ import { targetChipGeom } from "@/lib/timeline/lane-timing"
 import { encodeWavPcm16Chunks, quantisePcm16, type Pcm16Chunk } from "@/lib/audio/wav-encode"
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { TARGET_RATE } from "@/lib/audio/decode-mono"
+import { isInternalIdName, stripInternalIds } from "./internal-id-names"
+import { defaultTrackTakeId, isSilencedForExport } from "./audio-validation-scope"
 
 export interface CharacterClip {
   cellId: string
@@ -61,6 +64,10 @@ export interface CharacterClip {
    */
   trimStartMs?: number | null
   trimEndMs?: number | null
+  /** AQU-2327: the take's volume and fades, applied as the timeline plays them. */
+  gainDb?: number | null
+  fadeInMs?: number | null
+  fadeOutMs?: number | null
 }
 
 export interface CharacterGroup {
@@ -90,9 +97,12 @@ export interface CharacterPreview {
 }
 
 /** Pick the best-available audio for a cell: recording slot first, else
- *  generated-voice slot. Returns null when the cell has no usable audio. */
+ *  generated-voice slot. Returns null when the cell has no usable audio.
+ *  AQU-2148: "usable" is the point — a slot whose selected take was removed
+ *  falls through to the other rather than resolving to a dead id and dropping
+ *  the line out of the deliverable. See `defaultTrackTakeId`. */
 function bestAudioId(cell: CellData): string | null {
-  return cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId ?? null
+  return defaultTrackTakeId(cell)
 }
 
 /**
@@ -130,12 +140,23 @@ export function characterIdentity(
 ): { key: string; name: string; color?: string } {
   const named = resolveName?.(cell)?.trim() || null
   if (named) {
-    const voice = resolveCastVoice(settings, cell.id, cell.ttsSettings?.voiceId)
+    const voice = resolveCastVoice(settings, cell, cell.ttsSettings?.voiceId)
     return { key: named, name: named, ...(voice.color ? { color: voice.color } : {}) }
   }
-  const explicit = assignedCastVoiceId(settings, cell.id) ?? cell.ttsSettings?.voiceId
+  const explicit = assignedCastVoiceId(settings, cell) ?? cell.ttsSettings?.voiceId
   if (!explicit) return { key: UNNAMED_CHARACTER_KEY, name: UNNAMED_CHARACTER_LABEL }
-  const voice = resolveCastVoice(settings, cell.id, cell.ttsSettings?.voiceId)
+  const voice = resolveCastVoice(settings, cell, cell.ttsSettings?.voiceId)
+  // AQU-1461: A VOICE NAMED BY ITS ID IS NOT A CAST CHARACTER. The New voice
+  // modal requires a name, but `voices` is persisted project JSON that imports,
+  // other clients and the Agent API all write — so an id can arrive here, and it
+  // used to travel straight into `..._a89dec11-d60e-48c1-….wav`. Reusing the
+  // uncast label rather than inventing a third one keeps the GROUPING keyed on
+  // `voice.id`, so two id-named voices stay two tracks, and lands the delivered
+  // file on `NO_CHARACTER` — the name this export already uses for a line with
+  // no character to put there.
+  if (isInternalIdName(voice.name) || voice.name.trim() === "") {
+    return { key: voice.id, name: UNNAMED_CHARACTER_LABEL, ...(voice.color ? { color: voice.color } : {}) }
+  }
   return { key: voice.id, name: voice.name, ...(voice.color ? { color: voice.color } : {}) }
 }
 
@@ -166,6 +187,15 @@ export function groupAudioByCharacter(
     if (!audioId) continue
     const attachment = cell.attachments?.[audioId]
     if (!attachment?.url) continue
+    // AQU-965: validated-only withdrew this take. Leaving it out IS silence in
+    // place here — every clip is laid on a silent track at its own timeline
+    // second (`placeClips`), so the line falls quiet and every other take in
+    // the character's track keeps the position it had — which is what makes
+    // the stems drop into a DAW still aligned. A withdrawn take at the very
+    // END of a character's part shortens the trailing silence (its cue window
+    // leaves `trackDurationSec` with it); every stem still starts at 0:00, so
+    // nothing earlier moves.
+    if (isSilencedForExport(attachment)) continue
     // The NAME is the identity when we have one: two cells sharing a character
     // belong together even if they resolved to different voices. A line nobody
     // cast is its own group — see `characterIdentity`.
@@ -189,9 +219,12 @@ export function groupAudioByCharacter(
     // all of them (2026-08-27).
     const trimStartMs = attachment.trimStartMs ?? null
     const trimEndMs = attachment.trimEndMs ?? null
+    // AQU-981: a range uploaded as one file gives each line it covers a take
+    // of its own over the SAME url, so the clip is known by the bytes it plays
+    // as well as by its id.
     const existing = group.clips.find(
       (c) =>
-        c.audioId === audioId &&
+        (c.audioId === audioId || c.url === attachment.url) &&
         (c.trimStartMs ?? null) === trimStartMs &&
         (c.trimEndMs ?? null) === trimEndMs,
     )
@@ -231,7 +264,7 @@ export function groupAudioByCharacter(
       }
       continue
     }
-    group.clips.push({ cellId: cell.id, audioId, url: attachment.url, startSec, endSec, trimStartMs, trimEndMs })
+    group.clips.push({ cellId: cell.id, audioId, url: attachment.url, startSec, endSec, trimStartMs, trimEndMs, ...levelFields(attachment) })
   }
   return order.map((k) => byKey.get(k)!)
 }
@@ -285,8 +318,10 @@ export function previewAudioByCharacter(
       continue
     }
     const seen = countedClips.get(key)!
-    if (seen.has(audioId)) continue
+    // AQU-981: a range's lines each hold their own id over one url — one clip.
+    if (seen.has(audioId) || seen.has(attachment.url)) continue
     seen.add(audioId)
+    seen.add(attachment.url)
 
     if (cell.startTime == null) {
       row.untimedCount += 1
@@ -315,6 +350,9 @@ export function previewAudioByCharacter(
 export interface PlacedClip {
   pcm: Float32Array
   startSec: number
+  /** AQU-2327: the take was raised above its recorded level, so its own
+   *  peaks go through the peak guard even where nothing overlaps it. */
+  raised?: boolean
 }
 
 /** Silence after the last take, so a lossy encoder or a player's fade cannot
@@ -373,9 +411,16 @@ export function placeClips(
     const n = Math.min(clip.pcm.length, total - offset)
     for (let i = 0; i < n; i += 1) {
       const at = offset + i
-      const sample = track[at] + quantisePcm16(clip.pcm[i])
-      // Saturating add: two loud takes over one another must not wrap round to
-      // the opposite sign, which is heard as a click rather than as loudness.
+      // AQU-2327: where takes SUM, or a take was raised, the peak guard
+      // (as the playback mixer has) rather than a hard clip. A take on its
+      // own at its recorded level lands on exactly the samples a live take
+      // does — the guard never touches it. (Two loud takes must still never
+      // wrap round to the opposite sign.)
+      const under = track[at]
+      const sample =
+        under === 0 && !clip.raised
+          ? quantisePcm16(clip.pcm[i])
+          : quantisePcm16(guardPeak(under / 32768 + clip.pcm[i]))
       track[at] = sample > 32767 ? 32767 : sample < -32768 ? -32768 : sample
     }
   }
@@ -397,7 +442,13 @@ export function characterKey(name: string): string {
  * mouthful in a folder of forty tracks. `NO_CHARACTER` reads beside `JESUS`.
  */
 export function characterFileKey(name: string): string {
-  return name === UNNAMED_CHARACTER_LABEL ? UNNAMED_CHARACTER_KEY : characterKey(name)
+  if (name === UNNAMED_CHARACTER_LABEL) return UNNAMED_CHARACTER_KEY
+  // AQU-1461: an id that rode in on part of a name loses the id and keeps the
+  // rest; a name that is nothing BUT an id has no readable part, so it lands on
+  // the same key as an uncast line rather than on `characterKey`'s "unnamed",
+  // which would read as a deliberate cast member called "unnamed".
+  const readable = stripInternalIds(name)
+  return readable.trim() === "" ? UNNAMED_CHARACTER_KEY : characterKey(readable)
 }
 
 export interface ExportAudioArgs {
@@ -437,7 +488,7 @@ export async function exportAudioByCharacter(
   const pcmByClip = new Map<string, Promise<Float32Array | null>>()
 
   for (const group of groups) {
-    const placed: { pcm: Float32Array; startSec: number; endSec: number | null }[] = []
+    const placed: { pcm: Float32Array; startSec: number; endSec: number | null; raised?: boolean }[] = []
     for (const clip of group.clips) {
       const cell = args.cells.find((c) => c.id === clip.cellId)!
       const parsed = parseFrontierAudioUrl(clip.url)
@@ -486,8 +537,10 @@ export async function exportAudioByCharacter(
             trimStartMs: clip.trimStartMs,
             trimEndMs: clip.trimEndMs,
           })
-          const audible = win.isFull ? pcm : pcm.subarray(win.start, win.end)
-          placed.push({ pcm: audible, startSec: clip.startSec!, endSec: clip.endSec })
+          const kept = win.isFull ? pcm : pcm.subarray(win.start, win.end)
+          // AQU-2327: its volume and fades, as the timeline plays them.
+          const audible = applyClipLevelPcm(kept, TARGET_RATE, clip)
+          placed.push({ pcm: audible, startSec: clip.startSec!, endSec: clip.endSec, ...((clip.gainDb ?? 0) > 0 ? { raised: true } : {}) })
         }
       } catch (err) {
         console.warn(`[audio-by-character] skipping clip ${clip.audioId} (${clip.cellId}):`, err)
@@ -508,7 +561,12 @@ export async function exportAudioByCharacter(
     if (track.length === 0) continue
     const wav = encodeWavPcm16Chunks([track], TARGET_RATE)
     // codex-editor's naming, plus its disambiguator for same-named cast.
-    const stem = args.fileBase ? `${characterKey(args.fileBase)}_` : ""
+    // AQU-1461: the stem is the FILE's display name, so an id in it ships in
+    // every entry of the zip. Dropped rather than replaced when that is all it
+    // was: the per-character name is still unambiguous without it, and the zip's
+    // own name is separately editable in the dialog.
+    const fileStem = args.fileBase ? stripInternalIds(args.fileBase) : ""
+    const stem = fileStem.trim() ? `${characterKey(fileStem)}_` : ""
     const base = `${stem}${args.langCode}_${characterFileKey(group.name)}`
     // Keyed case-blind (2026-08-27): "JESUS" and "Jesus" are two characters to
     // this sanitiser and one filename to macOS and Windows, so without the fold

@@ -26,6 +26,13 @@ interface AudioRowRaw {
   trim_start_ms: number | null
   trim_end_ms: number | null
   target_offset_ms: number | null
+  /** AQU-2267 (0189). Optional, like the AQU-490 fields below, so a row built
+   *  by hand need not know it; absent reads as NULL. */
+  recordings_offset_ms?: number | null
+  /** AQU-2327 (0193): the clip's volume and fades. Optional, absent = none. */
+  gain_db?: number | null
+  fade_in_ms?: number | null
+  fade_out_ms?: number | null
   timings_json: string | null
   selected: number
   created_ts: number
@@ -37,6 +44,15 @@ interface AudioRowRaw {
   created_by?: string | null
   /** Who has validated THIS take, newest vote first. Joined in by the route. */
   validators?: string[]
+  /** AQU-2296: username → the server clock of that person's vote, as the
+   *  route's `jsonb_object_agg(...)::text`. Absent on a hand-built row. */
+  validator_decided_ts?: string | Record<string, unknown> | null
+  /** AQU-1767: the take this row was cut from (its group's root), or null. */
+  piece_of?: string | null
+  /** 0186: what ASR heard, and the AI-cleanup provenance (JSON text). */
+  asr_text?: string | null
+  asr_model?: string | null
+  transcript_ai?: string | null
 }
 
 export interface AttachmentOut {
@@ -62,6 +78,17 @@ export interface AttachmentOut {
    */
   targetOffsetMs: number | null
   /**
+   * AQU-2267: where this take sits FOLLOWING THE RECORDINGS, measured the same
+   * way as `targetOffsetMs` (its place following the source) from its line's
+   * start in that layout. NULL = no place of its own there: that timing reads
+   * `targetOffsetMs`, as every take placed before the column existed does.
+   */
+  recordingsOffsetMs: number | null
+  /** AQU-2327: present only when set — volume in dB, fades in ms. */
+  gainDb?: number
+  fadeInMs?: number
+  fadeOutMs?: number
+  /**
    * AQU-490: how many people have validated this take, and who.
    *
    * The count is denormalized onto cell_audio and `validators` is joined from
@@ -73,6 +100,12 @@ export interface AttachmentOut {
    */
   validatorCount: number
   validators: string[]
+  /**
+   * AQU-2296: username → when that person validated this take (server clock,
+   * ms). A name missing from it has no known stamp — the popover then shows
+   * the name with no date line rather than an "Invalid Date".
+   */
+  validatorDecidedTs: Record<string, number>
   /**
    * 'dub' — somebody's translation of this line. 'source' — the shared
    * programme audio an import attached, which sits SELECTED on every cell of a
@@ -86,6 +119,34 @@ export interface AttachmentOut {
    * must never be treated as a match for the current viewer.
    */
   recordedBy: string | null
+  /**
+   * AQU-1767: the take this one was CUT from — its piece group's root — or
+   * null for a whole take and for a cut's first piece (which IS the root).
+   * Group key = `pieceOf ?? audioId`. Selection is per group: when one piece
+   * of a group is selected, every live piece of it is.
+   */
+  pieceOf: string | null
+  /**
+   * 0186 (two-step transcription): what ASR heard for this clip, kept through
+   * corrections, and the model that heard it. Null for clips transcribed
+   * before the column existed.
+   */
+  asrText: string | null
+  asrModel: string | null
+  /** Provenance of an AI cleanup while the transcript is still the AI's. */
+  transcriptAi: { model: string; at: number; changes: number } | null
+}
+
+function parseTranscriptAi(raw: string | null | undefined): AttachmentOut["transcriptAi"] {
+  if (!raw) return null
+  try {
+    const v = JSON.parse(raw) as Partial<NonNullable<AttachmentOut["transcriptAi"]>>
+    return typeof v.model === "string" && typeof v.at === "number" && typeof v.changes === "number"
+      ? { model: v.model, at: v.at, changes: v.changes }
+      : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -105,6 +166,37 @@ function normalizeValidators(raw: unknown): string[] {
   // Usernames cannot contain a comma or a quote, so a plain split is enough;
   // the quotes Postgres adds around awkward values are stripped anyway.
   return inner.split(",").map((v) => v.trim().replace(/^"|"$/g, "")).filter(Boolean)
+}
+
+/**
+ * AQU-2296: `jsonb_object_agg(...)::text` → `{ username: ms }`.
+ *
+ * Tolerant on purpose: null/absent (no votes, or a worker that predates the
+ * column) reads as an empty record, and a value that is not a finite number is
+ * dropped rather than carried to the UI, where it would render as
+ * "Invalid Date". A driver that hands back an already-parsed object still works.
+ */
+function normalizeValidatorStamps(raw: unknown): Record<string, number> {
+  let parsed: unknown = raw
+  if (typeof raw === "string") {
+    if (raw.trim() === "") return {}
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      return {}
+    }
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {}
+  const out: Record<string, number> = {}
+  for (const [username, value] of Object.entries(parsed as Record<string, unknown>)) {
+    // `Number(null)` and `Number("")` are both 0, a finite number that would
+    // date the vote to 1970 — so absent and blank are rejected by value, not
+    // left to the finite check.
+    if (value == null || value === "") continue
+    const ts = Number(value)
+    if (Number.isFinite(ts) && ts > 0) out[username] = ts
+  }
+  return out
 }
 
 export interface CellAudioOut {
@@ -135,6 +227,7 @@ export type { AudioRowRaw }
 /** Fold the file's rows into the per-cell response body. */
 export function collapseCellAudioRows(rows: readonly AudioRowRaw[]): Record<string, CellAudioOut> {
   const cells: Record<string, CellAudioOut> = {}
+  const rowsById = new Map<string, AudioRowRaw>()
   for (const r of rows) {
     let entry = cells[r.cell_id]
     if (!entry) {
@@ -159,14 +252,23 @@ export function collapseCellAudioRows(rows: readonly AudioRowRaw[]): Record<stri
       trimStartMs: r.trim_start_ms,
       trimEndMs: r.trim_end_ms,
       targetOffsetMs: r.target_offset_ms,
+      recordingsOffsetMs: r.recordings_offset_ms ?? null,
+      ...(r.gain_db != null ? { gainDb: Number(r.gain_db) } : {}),
+      ...(r.fade_in_ms != null ? { fadeInMs: Number(r.fade_in_ms) } : {}),
+      ...(r.fade_out_ms != null ? { fadeOutMs: Number(r.fade_out_ms) } : {}),
       // AQU-490. The defaults are the pre-0096 reading of a row: no votes, a
       // dub, no known recorder. `role` is narrowed rather than cast, so a
       // value the schema's CHECK could not produce still lands on 'dub' — the
       // safe side, since 'source' is what excludes a take from being counted.
       validatorCount: Number(r.validator_count ?? 0) || 0,
       validators: normalizeValidators(r.validators),
+      validatorDecidedTs: normalizeValidatorStamps(r.validator_decided_ts),
       role: r.role === "source" ? "source" : "dub",
       recordedBy: r.created_by ?? null,
+      pieceOf: r.piece_of ?? null,
+      asrText: r.asr_text ?? null,
+      asrModel: r.asr_model ?? null,
+      transcriptAi: parseTranscriptAi(r.transcript_ai),
     }
     if (r.timings_json) {
       try {
@@ -175,7 +277,23 @@ export function collapseCellAudioRows(rows: readonly AudioRowRaw[]): Record<stri
         // ignore malformed timings — playback degrades to no karaoke
       }
     }
-    if (r.selected === 1) entry.selectedBySlot[r.slot] = r.audio_id
+    if (r.selected === 1) {
+      // AQU-1767: a cut take keeps EVERY live piece selected, so a slot can
+      // hold several selected rows. The pointer names the group by its EARLIEST
+      // piece in the clip — "the take that plays" first — and `selectedPieces`
+      // on the client expands it back to all of them. Without this the newest
+      // piece (the last row in created order) would win by accident.
+      const prior = entry.selectedBySlot[r.slot]
+      const priorRow = prior ? rowsById.get(`${r.cell_id}\u0000${prior}`) : undefined
+      // Two selected rows from DIFFERENT groups is not a state the projection
+      // produces; if old data holds one, the last row still wins as before.
+      const sameGroup =
+        priorRow != null && (priorRow.piece_of ?? priorRow.audio_id) === (r.piece_of ?? r.audio_id)
+      if (!sameGroup || Number(r.trim_start_ms ?? 0) < Number(priorRow.trim_start_ms ?? 0)) {
+        entry.selectedBySlot[r.slot] = r.audio_id
+      }
+    }
+    rowsById.set(`${r.cell_id}\u0000${r.audio_id}`, r)
   }
 
   // The two named pointers, derived from the map rather than written beside it.

@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input"
 import { DiscoveredFormsChips } from "@/components/terminology/DiscoveredFormsChips"
 import { MatchOptionsFields } from "@/components/terminology/MatchOptionsFields"
 import { discoverForms } from "@/lib/terminology/discover-forms"
-import { hasCombiningMarks, pruneMatch, resolveMatchOptions } from "@/lib/terminology/match-options"
+import { hasFoldableDiacritics, pruneMatch, resolveMatchOptions } from "@/lib/terminology/match-options"
 import type { Concept, TermMatchingSettings, TermMatchOptions } from "@/lib/terminology/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -24,6 +24,11 @@ interface Props {
   concept: Concept
   /** Cells to derive the surface forms from — the same list the page filters. */
   cells: ReadonlyArray<{ id: string; original: string }>
+  /**
+   * Surfaces already counted by the server scan. When present they replace
+   * the client tally, which would only see the loaded page.
+   */
+  forms?: ReadonlyArray<{ surface: string; count: number; excluded: boolean }>
   termMatching?: TermMatchingSettings
   /** False renders the section read-only (chips still show what matched). */
   canEdit: boolean
@@ -35,6 +40,7 @@ interface Props {
 export function TermFormsSection({
   concept,
   cells,
+  forms,
   termMatching,
   canEdit,
   onMatchChange,
@@ -43,8 +49,11 @@ export function TermFormsSection({
 }: Props) {
   const t = useT()
   const discovered = useMemo(
-    () => discoverForms(cells, concept, termMatching),
-    [cells, concept, termMatching],
+    () =>
+      forms
+        ? forms.map((form) => ({ ...form, sampleCellIds: [] as string[] }))
+        : discoverForms(cells, concept, termMatching),
+    [forms, cells, concept, termMatching],
   )
   const resolved = useMemo(
     () => resolveMatchOptions(concept, termMatching),
@@ -76,6 +85,10 @@ export function TermFormsSection({
           className="h-7 text-xs"
           onKeyDown={(e) => {
             if (e.key !== "Enter") return
+            // AQU-1272: an IME composes with Enter. Committing the form on that
+            // keystroke would add the half-composed reading and swallow the
+            // confirmation — exactly the languages this field exists for.
+            if (e.nativeEvent.isComposing) return
             e.preventDefault()
             const value = e.currentTarget.value.trim()
             if (!value) return
@@ -92,7 +105,8 @@ export function TermFormsSection({
         value={concept.match ?? {}}
         resolved={resolved}
         showFoldMarks={
-          hasCombiningMarks(concept.sourceTerm) || discovered.some((f) => hasCombiningMarks(f.surface))
+          hasFoldableDiacritics(concept.sourceTerm) ||
+          discovered.some((f) => hasFoldableDiacritics(f.surface))
         }
         hasAffixInventory={resolved.prefixes.length + resolved.suffixes.length > 0}
         caseSensitive={concept.caseSensitive === true}

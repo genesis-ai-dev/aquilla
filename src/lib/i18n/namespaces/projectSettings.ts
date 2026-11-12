@@ -15,6 +15,74 @@ import { defineNamespace, plural } from "./types"
  */
 export const projectSettings = defineNamespace({
   keys: {
+    "projectSettings.checking.position": "{current} of {total}",
+    "projectSettings.checking.creatorTitle": "Community checking links",
+    "projectSettings.checking.wipNotice": "Feature-flagged WIP. Guests hear selected recordings and leave feedback in project comments. Reviewer links currently collect feedback; formal validation is not included.",
+    "projectSettings.checking.loadingProject": "Loading project passages…",
+    "projectSettings.checking.linkTitle": "Link title",
+    "projectSettings.checking.guestAccess": "Guest access",
+    "projectSettings.checking.viewerOption": "Viewer — listen",
+    "projectSettings.checking.commenterOption": "Commenter — listen and comment",
+    "projectSettings.checking.reviewerOption": "Reviewer — listen and give review feedback",
+    "projectSettings.checking.pinOptional": "PIN (optional)",
+    "projectSettings.checking.pinHelp": "Use 4–12 digits. Share the PIN separately.",
+    "projectSettings.checking.createLink": "Create checking link",
+    "projectSettings.checking.revoked": "Revoked",
+    "projectSettings.checking.copied": "Copied",
+    "projectSettings.checking.copyLink": "Copy link",
+    "projectSettings.checking.openGuest": "Open guest view",
+    "projectSettings.checking.revoke": "Revoke",
+    "projectSettings.checking.brand": "Aquilla · Community checking",
+    "projectSettings.checking.welcome": "Listen together",
+    "projectSettings.checking.joinHelp": "Listen to the passages shared with you. Enter your name so the team knows who is giving feedback.",
+    "projectSettings.checking.name": "Your name",
+    "projectSettings.checking.guestPin": "PIN, if you received one",
+    "projectSettings.checking.opening": "Opening…",
+    "projectSettings.checking.start": "Start listening",
+    "projectSettings.checking.listenOnly": "Listen only",
+    "projectSettings.checking.reviewFeedback": "Review feedback",
+    "projectSettings.checking.listenComment": "Listen and comment",
+    "projectSettings.checking.loadingPassages": "Loading passages…",
+    "projectSettings.checking.unavailablePassages": "These passages are no longer available.",
+    "projectSettings.checking.player": "Passage player",
+    "projectSettings.checking.recording": "Passage recording",
+    "projectSettings.checking.pause": "Pause",
+    "projectSettings.checking.play": "Play continuously",
+    "projectSettings.checking.noRecording": "No selected recording for this passage.",
+    "projectSettings.checking.playbackHelp": "Playback continues through available recordings in passage order.",
+    "projectSettings.checking.previous": "Previous passage",
+    "projectSettings.checking.next": "Next passage",
+    "projectSettings.checking.playPassage": "Play {label}",
+    "projectSettings.checking.yourFeedback": "Your feedback on this passage",
+    "projectSettings.checking.feedbackPlaceholder": "What is clear? What could be improved?",
+    "projectSettings.checking.sendFeedback": "Send feedback",
+    "projectSettings.checking.retry": "Retry pending feedback",
+    "projectSettings.checking.passages": "Shared passages",
+    "projectSettings.checking.scopeTitle": "Passages to share",
+    "projectSettings.checking.emptyProject": "This project has no passages to share.",
+    "projectSettings.checking.wholeProject": "Whole project",
+    "projectSettings.checking.defaultTitle": "Community listening",
+    "projectSettings.checking.signIn": "Sign in to create checking links.",
+    "projectSettings.checking.createFailed": "Could not create link.",
+    "projectSettings.checking.revokeFailed": "Could not revoke link.",
+    "projectSettings.checking.copyFailed": "Copy failed. Select and copy the URL above.",
+    "projectSettings.checking.saved": "Feedback saved to the project. Thank you.",
+    "projectSettings.checking.recordingUnavailable": "This recording is unavailable. Try another passage or retry the link.",
+    "projectSettings.checking.pressPlay": "Press Play to continue listening.",
+    "projectSettings.checking.end": "You have reached the end of the recordings.",
+    "projectSettings.checking.openFailed": "Could not open this link.",
+    "projectSettings.checking.syncing": "Feedback saved on this device. Syncing…",
+    "projectSettings.checking.saveFailed": "Could not save feedback.",
+    "projectSettings.checking.pendingFeedback": "Feedback stays on this device until it can sync. {reason}",
+    "projectSettings.checking.playFailed": "This recording could not play. Please try another passage.",
+    "projectSettings.checking.playRetry": "The recording could not play. Please try again.",
+    "projectSettings.checking.selectionSummary": "{count} units selected. New units are not added to existing links. This sample supports up to 2,000 units per link.",
+    "projectSettings.checking.urlLabel": "Checking URL for {title}",
+    "projectSettings.checking.feedbackOn": "Feedback on {label}",
+    "projectSettings.checking.allSection": "All {section}",
+
+    "projectSettings.checking.flagLabel": "Community checking (WIP)",
+    "projectSettings.checking.flagDescription": "Try scoped listening links with guest feedback. Experimental; links expire after 30 days. Only on this device.",
     // ── Permission-denied (shared component, project-settings call sites) ──
     "projectSettings.permission.changeSharedSettingsAction": "change shared settings",
     "projectSettings.permission.roleOrHigher": "{role} or higher",
@@ -30,38 +98,56 @@ export const projectSettings = defineNamespace({
     "projectSettings.permission.privilegedDialogError": "Couldn't load {role}.",
 
     // ── Project creation dialog ──
-    "projectSettings.create.trigger": "New Project",
-    "projectSettings.create.dialogTitle": "Create New Project",
+    "projectSettings.create.trigger": "New project",
+    "projectSettings.create.dialogTitle": "Create new project",
+    // AQU-1352: destination picker at the top of the create dialog.
+    "projectSettings.create.destinationLabel": "Create in",
+    "projectSettings.create.destinationPersonal": "Personal",
+    "projectSettings.create.destinationThisOrg": "this organization",
+    "projectSettings.create.destinationRoleHint":
+      "You're a {role} in {org}, so you can't create projects there. You can create one in Personal.",
+    "projectSettings.create.destinationNotAllowedHint":
+      "You can't create projects in {org}. You can create one in Personal.",
+    "projectSettings.create.destinationLoadError":
+      "Couldn't load where you can create projects. Close this dialog and try again.",
+    "projectSettings.create.createdToast": "Created {name} in {destination}",
+    // AQU-1352 P2: teams multi-select under the destination picker.
+    "projectSettings.create.teamsLabel": "Teams",
+    "projectSettings.create.teamsPlaceholder": "Choose teams",
+    "projectSettings.create.teamsSearch": "Search teams",
+    "projectSettings.create.teamsEmpty": "No teams found.",
+    "projectSettings.create.teamsRequiredHint": "Pick a team you lead. The project will belong to that team.",
+    "projectSettings.create.teamsRequiredError": "Choose at least one team to create this project in.",
     // AQU-832: create.nameLabel/sourceLanguageLabel still reuse
     // projectSettings.info.{nameLabel,sourceLanguageLabel}. Target label is
     // create-dialog-only and stays "Target Language(s)" for any lane count.
-    "projectSettings.create.namePlaceholder": "My Translation Project",
-    "projectSettings.create.sourceLanguagePlaceholder": "English, Grade 7 English, es-419…",
-    "projectSettings.create.targetLanguagesLabel": "Target Language(s)",
-    "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, zh-Hant…",
+    "projectSettings.create.namePlaceholder": "My translation project",
+    "projectSettings.create.sourceLanguagePlaceholder": "English, Grade 7 English…",
+    "projectSettings.create.targetLanguagesLabel": "Language lanes",
+    "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, Traditional Han…",
     "projectSettings.create.additionalTargetPlaceholder": "Add another…",
-    "projectSettings.create.addTargetLanguageAction": "Add another language",
     "projectSettings.create.bulkTargetLanguagesHint":
       "That's all {max} boxes. Add any remaining languages here, separated by commas.",
     "projectSettings.create.bulkTargetLanguagesPlaceholder":
-      "Swahili, Yoruba, Hausa, zh-Hant…",
+      "Swahili, Yoruba, Hausa, Traditional Han…",
     "projectSettings.create.bulkTargetLanguagesCount": plural({
-      one: "Adds {count} more lane.",
-      other: "Adds {count} more lanes.",
+      one: "Adds {count} more language lane.",
+      other: "Adds {count} more language lanes.",
     }),
     "projectSettings.create.languageHintAriaLabel": "What can I enter here?",
     "projectSettings.create.languageHintTooltip":
-      "Any label works — a BCP-47 tag, a language name, or a register description " +
-      "(e.g. \"Grade 7 English\", \"conversational Swahili\").",
+      "Type a language name or a description (e.g. \"Grade 7 English\", " +
+      "\"conversational Swahili\"). The language code is filled in from the name, " +
+      "and you can edit that code if it is wrong.",
     "projectSettings.create.advancedShapeSummary": "Advanced: project shape",
-    "projectSettings.create.shapeSelfContainedName": "Self Contained (Default)",
+    "projectSettings.create.shapeSelfContainedName": "Self-contained (default)",
     "projectSettings.create.shapeSelfContained": plural({
       one: "{name} — this project owns both its source and its target.",
       other: "{name} — this project owns both its source and its targets.",
     }),
     "projectSettings.create.shapeLinkedTargetName": plural({
-      one: "Linked Target",
-      other: "Linked Targets",
+      one: "Linked target",
+      other: "Linked targets",
     }),
     "projectSettings.create.shapeLinkedTarget": plural({
       one:
@@ -82,39 +168,96 @@ export const projectSettings = defineNamespace({
       "propagate here.",
     "projectSettings.create.upstreamProjectLabel": "Upstream project",
     "projectSettings.create.upstreamProjectPlaceholder": "Choose a project to link from…",
+    // AQU-1518: the upstream picker is a searchable combobox, not a
+    // scroll-only dropdown.
+    "projectSettings.create.upstreamProjectSearchPlaceholder": "Search projects…",
+    "projectSettings.create.upstreamProjectSearchAriaLabel": "Search projects",
+    "projectSettings.create.upstreamProjectNoMatches": "No projects match.",
+    "projectSettings.create.upstreamProjectNone": "No upstream project",
     "projectSettings.create.linkConsumesLabel":
       "Which corpus should become this project's source?",
-    "projectSettings.create.linkConsumesSourceName": "Its Source",
+    "projectSettings.create.linkConsumesSourceName": "Its source",
     "projectSettings.create.linkConsumesSource": plural({
       one:
-        "{name} — sibling-translation case (this project translates the same original " +
-        "text). For same-org sibling languages, a target lane on the upstream project " +
-        "is the recommended shape instead.",
+        "{name} — sibling-translation case (this project translates the same original text). For " +
+        "same-org sibling languages, a language lane on the upstream project is the recommended " +
+        "shape instead.",
       other:
-        "{name} — sibling-translation case (this project translates the same original " +
-        "text). For same-org sibling languages, target lanes on the upstream project " +
-        "are the recommended shape instead.",
+        "{name} — sibling-translation case (this project translates the same original text). For " +
+        "same-org sibling languages, language lanes on the upstream project are the recommended " +
+        "shape instead.",
     }),
-    "projectSettings.create.linkConsumesTargetName": "One of its Targets",
+    "projectSettings.create.linkConsumesTargetName": "One of its targets",
     "projectSettings.create.linkConsumesTarget":
       "{name} — chain case (this project translates one of the upstream project's " +
       "targets, e.g. French → Chaluba).",
     "projectSettings.create.validationLinkConsumesRequired":
       "Choose which corpus should become this project's source",
+    // ── AQU-1605: which of the upstream's lanes a chain link consumes. Only
+    // asked for "One of its Targets" — the sibling case consumes the upstream's
+    // one source lane, so there is nothing to choose. Offered only for the lanes
+    // the user may see, and pre-filled when that is a single lane.
+    "projectSettings.create.upstreamLaneLabel": "Which of its translations?",
+    "projectSettings.create.upstreamLanePlaceholder": "Choose a translation…",
+    "projectSettings.create.upstreamLaneUnnamed": "Untitled language lane",
+    "projectSettings.create.upstreamLaneLoading": "Loading translations…",
+    "projectSettings.create.upstreamLaneNone":
+      "This project has no translation you can use as a source. Choose its source " +
+      "instead, or ask for access to one of its translations.",
+    "projectSettings.create.upstreamLaneLoadError":
+      "Couldn't load this project's translations.",
+    "projectSettings.create.upstreamLaneRetry": "Try again",
+    "projectSettings.create.validationUpstreamLaneRequired":
+      "Choose which of the upstream project's translations to use",
+    // ── AQU-1561: which of the upstream's files the new project brings in.
+    // Same question the Source & sync link flow asks, so the list itself reuses
+    // `projectSettings.linkSource.selectAllFiles` / `fileClashBadge` — only the
+    // sentences around it differ, because a clone's one-time copy and a live
+    // link's ongoing follow are different promises.
+    "projectSettings.create.upstreamFilesLabel": "Files to bring in",
+    "projectSettings.create.upstreamFilesLoading": "Loading that project's files…",
+    "projectSettings.create.upstreamFilesLoadError":
+      "Couldn't load that project's file list, so we can't say which files would " +
+      "be brought in. Nothing has been created.",
+    "projectSettings.create.upstreamFilesRetryButton": "Try again",
+    "projectSettings.create.upstreamFilesNoneSelected":
+      "Pick at least one file to bring in.",
+    "projectSettings.create.upstreamFilesEmptyUpstream":
+      "That project has no files yet, so none will be brought in now.",
+    "projectSettings.create.upstreamFilesCount": plural({
+      one: "{count} file will be brought into the new project.",
+      other: "{count} files will be brought into the new project.",
+    }),
+    // The live case follows the upstream from here on, so whether the link is
+    // whole-project or a fixed list decides what arrives LATER too.
+    "projectSettings.create.upstreamFilesLiveAllNote":
+      "The new project will follow the whole source project, so files it adds " +
+      "later will arrive too.",
+    "projectSettings.create.upstreamFilesLiveSubsetNote":
+      "The new project will follow only the files you picked. Files the source " +
+      "project adds later will not arrive on their own.",
+    // A clone never syncs again, so there is no "later" to describe — only what
+    // the one snapshot copies.
+    "projectSettings.create.upstreamFilesCloneNote":
+      "A copy is taken once, of the files you picked. The new project does not " +
+      "follow the source project afterwards.",
     // "Creating…" busy label → common.creating (identical text)
     "projectSettings.create.submitCreatingAndLinking": "Creating & linking…",
-    "projectSettings.create.submitCreate": "Create Project",
-    "projectSettings.create.submitCreateAndLink": "Create & Link",
+    "projectSettings.create.submitCreate": "Create project",
+    "projectSettings.create.longRunningNote":
+      "This is taking longer than expected. You can close this dialog — the project " +
+      "may still finish and show up in your projects list.",
+    "projectSettings.create.submitCreateAndLink": "Create & link",
     "projectSettings.create.errorSignInRequired": "You need to be signed in to create a project.",
     "projectSettings.create.errorGeneric": "Failed to create project. Please try again.",
     "projectSettings.create.extraLanguagesWarning":
-      "Project created; adding extra languages failed — add them in Settings → Languages.",
+      "Project created; adding extra languages failed — add them in Project settings → Languages.",
     "projectSettings.create.extraLanguagesDescription":
       "Optional — add more target languages for this project (e.g. dialect variants " +
       "or parallel drafts of the same source).",
-    "projectSettings.create.extraLanguagesPlaceholder": "e.g. fr-CA",
+    "projectSettings.create.extraLanguagesPlaceholder": "e.g. Traditional Han",
     "projectSettings.create.extraLanguagesRemoveAriaLabel": "Remove {lang}",
-    "projectSettings.create.extraLanguagesEmptyError": "Enter a language tag.",
+    "projectSettings.create.extraLanguagesEmptyError": "Enter a language name.",
     "projectSettings.create.extraLanguagesTooLongError": "Must be {max} characters or fewer.",
     "projectSettings.create.extraLanguagesDuplicatePrimaryError":
       "This is already the primary target language.",
@@ -122,75 +265,63 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.validationTargetLanguageRequired": "Target language is required",
     "projectSettings.create.validationUpstreamProjectRequired": "Choose an upstream project",
     "projectSettings.create.laneRecommendationHeading": "Same source, new language?",
+    // Sam, Oct 29: a lane is always a "Language lane" in the interface.
     "projectSettings.create.laneRecommendation":
-      "{heading} Add it as a target lane on {projectName} instead — no separate " +
-      "project to keep in sync.",
-    "projectSettings.create.laneRecommendationAdding": "Adding lane…",
-    "projectSettings.create.laneRecommendationAddButton": "Add as lane on {projectName}",
+      "{heading} Add it as a language lane on {projectName} instead — no separate project to keep in " +
+      "sync.",
+    // AQU-2259: the dialog showed these as hard-coded English. A lane is a
+    // "Language lane" in the interface (Sam, Oct 29).
+    "projectSettings.create.laneRecommendationAdding": "Adding language lane…",
+    "projectSettings.create.laneRecommendationAddButton": "Add as a language lane on {projectName}",
     "projectSettings.create.laneRecommendationSignInError":
-      "You need to be signed in to add a lane.",
+      "You need to be signed in to add a language lane.",
     "projectSettings.create.laneRecommendationEmptyTargetError":
       "Enter a target language above first.",
     "projectSettings.create.laneRecommendationAlreadyDefaultError":
       "\"{lane}\" is already {projectName}'s default target language.",
     "projectSettings.create.laneRecommendationAlreadyLaneError":
-      "\"{lane}\" is already a lane on {projectName}.",
+      "\"{lane}\" is already a language lane on {projectName}.",
     "projectSettings.create.laneRecommendationSuccess":
-      "Added \"{lane}\" as a lane on {projectName}. Open that project to start translating.",
+      "Added \"{lane}\" as a language lane on {projectName}. Open that project to start translating.",
     "projectSettings.create.laneRecommendationConflictError":
       "Someone else updated that project's settings just now. Try again.",
     "projectSettings.create.laneRecommendationForbiddenError":
-      "You need maintainer access on {projectName} to add a lane there.",
+      "You need maintainer access on {projectName} to add a language lane there.",
     "projectSettings.create.laneRecommendationGenericError":
-      "Couldn't add the lane. Please try again.",
+      "Couldn't add the language lane. Please try again.",
 
     // ── Share panel ──
-    "projectSettings.share.dialogTitle": "Share Project",
-    "projectSettings.share.tabMembers": "Members",
     "projectSettings.share.tabInviteLink": "Invite link",
-    "projectSettings.share.lockedHintOrg": "Remove from org to revoke",
     "projectSettings.share.lockedHintCreator": "Project creator",
-    "projectSettings.share.emptySuggestionsHint":
-      "All org members already have access to this project.",
     "projectSettings.share.inviteEmailInvalid":
       "Enter a valid email address, or leave blank for an open link.",
     "projectSettings.share.signInToInvite": "Sign in to create an invite link.",
     "projectSettings.share.createInviteFailed":
       "Couldn't create invite. You may not have permission, or the server is unreachable.",
-    "projectSettings.share.inviteLinkReady": "Invite link ready. Send it to the recipient.",
+    "projectSettings.share.laneChoiceLegend": "Language lanes",
+    "projectSettings.share.laneChoiceAll": "Every current language lane",
+    "projectSettings.share.laneChoiceSome": "Only selected language lanes",
+    "projectSettings.share.laneChoiceRequired": "Choose the language lanes before adding this person.",
+    "projectSettings.share.laneChoiceLeadNote": "A maintainer sees every language lane.",
+    "projectSettings.share.laneChoiceAdminHint":
+      "To limit someone to some language lanes, use Project settings → Members on that project.",
     "projectSettings.share.copyUrlLabel": "Copy URL",
-    "projectSettings.share.copied": "Copied!",
-    "projectSettings.share.recipientJoinsAs":
-      "The recipient signs in (or signs up) and is added as {role}.",
     "projectSettings.share.recipientJoinsAsFallbackRole": "a member",
-    "projectSettings.share.singleUseNote":
-      "This link is single-use — once redeemed, click {createAnotherLink} to generate " +
-      "a fresh one for the next person.",
-    "projectSettings.share.revokeBeforeRedeemedNote":
-      "To revoke before it is redeemed, use the Active links list below.",
     "projectSettings.share.createAnotherLinkButton": "Create another link",
     // "Role" field label → common.roleLabel (identical text)
     "projectSettings.share.signInToCreateLink": "Sign in to create an invite link",
-    "projectSettings.share.recipientEmailLabel": "Recipient email",
     // "(optional)" → common.optionalFieldNote (identical text)
     "projectSettings.share.emailPlaceholder": "name@example.com",
-    "projectSettings.share.emailRestrictedNote":
-      "Only an account with this email can redeem this link.",
     "projectSettings.share.openLinkNote":
       "Leave blank for an open link anyone signed in can redeem.",
     "projectSettings.share.linkExpiresLabel": "Link expires",
     "projectSettings.share.expiryOneDay": "1 day",
-    "projectSettings.share.expirySevenDays": "7 days",
-    "projectSettings.share.expiryThirtyDaysDefault": "30 days (default)",
     // "No expiry" → common.noExpiry (identical text)
     // "Creating…" button-busy label → common.creating (identical text)
     "projectSettings.share.createInviteLinkButton": "Create invite link",
-    "projectSettings.share.loadingActiveLinks": "Loading active links…",
-    "projectSettings.share.activeLinksHeading": "Active links",
     "projectSettings.share.openLinkConnector": "open link",
     // "Expires {date}" → common.expiresOn (identical text)
     // "Revoke" button → common.revoke (identical text)
-    "projectSettings.share.revokeLinkAriaLabel": "Revoke this invite link",
 
     // ── Page chrome (nav, groups, save bar, discard dialog) ──
     "projectSettings.pageTitle": "Project settings",
@@ -200,31 +331,14 @@ export const projectSettings = defineNamespace({
     "projectSettings.backLinkLabel": "Settings",
     "projectSettings.breadcrumbEditor": "Editor",
     // "Save changes" → common.saveChanges (identical text)
-    "projectSettings.moreSaveOptionsAriaLabel": "More save options",
-    "projectSettings.saveAndClose": "Save and close",
-    "projectSettings.closeWithoutSaving": "Close without saving",
-    "projectSettings.unsavedChanges": "Unsaved changes",
-    "projectSettings.settingsChangedElsewhere": "Settings changed elsewhere — refresh to reapply.",
-    "projectSettings.dismissConflictAriaLabel": "Dismiss conflict notice",
     "projectSettings.noMatchingSettings": "No matching settings.",
-    "projectSettings.discardDialogTitle": "Discard changes?",
-    "projectSettings.discardDialogDescription":
-      "You have unsaved changes to project settings. They will be lost if you leave now.",
-    "projectSettings.keepEditing": "Keep editing",
 
-    "projectSettings.save.noChanges": "No changes to save.",
-    "projectSettings.save.savedShort": "Saved: {list}.",
-    "projectSettings.save.savedMany": plural({
-      other: "Saved {count} changes: {list}, +{more} more.",
-    }),
 
     // ── Changed-field nouns (AQU-408 "Saved: X, Y, Z." delta message) ──
     // AQU-832: several concepts here reuse an existing FieldLabel/section key
     // instead of a duplicate lowercase noun (no-duplicates.test.ts hard-fails
     // on an unexcused 2+-key collision, and a case-only difference is never a
     // valid exception reason) — see the reused key named in each comment.
-    "projectSettings.field.aiProvider": "AI provider",
-    "projectSettings.field.endpoint": "endpoint",
     "projectSettings.field.apiKey": "API key",
     // AQU-646, keyed 2026-08-20.
     "projectSettings.field.apiKeyRequired": "API key *",
@@ -232,13 +346,21 @@ export const projectSettings = defineNamespace({
     "projectSettings.field.apiKeyNoAuth": "Leave blank for no auth",
     "projectSettings.advancedLlm.modelPlaceholder": "Type a model id",
     "projectSettings.shared.lastEdited": "Last edited by {name} · {date}",
+    "projectSettings.shared.lastEditedOn": "Last edited {date}",
     "projectSettings.shared.nameHint": "Shown across the workspace and project list.",
     "projectSettings.timeline.lockLabel": "Lock the timings against dragging",
+    "projectSettings.timeline.lockInfoAria": "About locking the timings",
     "projectSettings.timeline.lockHint":
       "On by default, and on for everyone \u2014 project leads included. The timings came from the client's own file, and a dragged chip moves a line for the whole team with nothing to compare it against afterwards. While this is on, the handles are gone from every imported line and cue; a line somebody added here still moves, and recordings can still be placed against their lines as usual. Only a maintainer can turn it off, and the timeline says so for as long as it is off.",
     "projectSettings.timeline.trackEditingLabel": "Let maintainers add and edit timeline tracks",
+    "projectSettings.timeline.trackEditingInfoAria": "About adding and editing timeline tracks",
     "projectSettings.timeline.trackEditingHint":
-      "Off by default. With this on, a maintainer can add extra tracks to a file's timeline, group them into folders, give them colours and delete them. Deleting a track deletes every recording on it, and asks first. Renaming a track and dragging one up or down the list are not affected by this \u2014 a maintainer can always do both. Turning this back off leaves every track exactly as it is and everything still plays; it only stops the tracks being changed.",
+      "On by default. With this on, a maintainer can add extra tracks to a file's timeline, group them into folders, give them colours and delete them. Deleting a track deletes every recording on it, and asks first. Renaming a track and dragging one up or down the list are not affected by this \u2014 a maintainer can always do both. An organization can change that default for all of its projects, and a maintainer can turn it off for this one. Turning it off leaves every track exactly as it is and everything still plays; it only stops the tracks being changed.",
+    // AQU-1758 (Sam's decision 7): the dubbing tools, behind one switch.
+    "projectSettings.timeline.filmAndSourcesLabel": "Show the film and sources tools in the media view",
+    "projectSettings.timeline.filmAndSourcesInfoAria": "About the film and sources tools",
+    "projectSettings.timeline.filmAndSourcesInfo":
+      "Shows the Sources menu in the media view's top bar. Its first item is the film, for linking a video, and the rest import audio cues, character sheets and subtitles. These are dubbing tools, so a project made of books and documents starts with them hidden and any other project with them shown. Hiding them removes nothing that is already attached.",
     "projectSettings.cellEditing.sectionTitle": "Content structure",
     "projectSettings.cellEditing.label": "Who can add and remove cells",
     "projectSettings.cellEditing.description":
@@ -253,101 +375,114 @@ export const projectSettings = defineNamespace({
     // can edit") and are now the product's standard ladder, so a project admin
     // reads the same names here as on the Members panel.
     "projectSettings.cellEditing.optionNone": "No one — default",
-    "projectSettings.cellEditing.optionCommenter": "Commenter (200)",
-    "projectSettings.cellEditing.optionReviewer": "Reviewer (300)",
-    "projectSettings.cellEditing.optionContributor": "Contributor (400)",
-    "projectSettings.cellEditing.optionProjectLead": "Project lead (500)",
-    "projectSettings.cellEditing.optionMaintainer": "Maintainer (600)",
+    "projectSettings.cellEditing.optionCommenter": "Commenter",
+    "projectSettings.cellEditing.optionReviewer": "Reviewer",
+    "projectSettings.cellEditing.optionContributor": "Contributor",
+    "projectSettings.cellEditing.optionProjectLead": "Project Lead",
+    "projectSettings.cellEditing.optionMaintainer": "Maintainer",
+    // AQU-2408: who may type a label on a cell. Sits under the same "Content
+    // structure" heading as the cell-editing tier, and reuses its role options.
+    "projectSettings.cellLabel.label": "Who can label cells",
+    "projectSettings.cellLabel.description":
+      "A label is a short note typed on a line — a section name, a reviewer's mark. It is never a voice or a character. Maintainers can label cells unless you open this to project leads.",
     // model → projectSettings.advancedLlm.modelLabel
-    "projectSettings.field.temperature": "temperature",
-    "projectSettings.field.healthPenalty": "health penalty",
-    "projectSettings.field.examplesRetrieved": "examples retrieved",
     // context window → projectSettings.ai.contextWindowLabel
-    "projectSettings.field.validatedExamplesOnly": "validated examples only",
     // reference example format → projectSettings.ai.referenceExampleFormatLabel
-    "projectSettings.field.assistedLanguage": "assisted language",
     // AI completions batch size → projectSettings.ai.completionBatchSizeLabel
     // batch validation size → projectSettings.ai.validationBatchSizeLabel
     // project name → projectSettings.info.nameLabel
-    // username → projectSettings.user.usernameLabel
-    "projectSettings.field.decaySettings": "decay settings",
-    "projectSettings.field.audioMediaStrategy": "audio media strategy",
-    "projectSettings.field.autoSync": "auto-sync",
-    "projectSettings.field.voiceApiKey": "voice API key",
     // source language → projectSettings.info.sourceLanguageLabel
     // target language → projectSettings.info.targetLanguageLabel
-    // AI instructions → projectSettings.section.aiInstructions
-    "projectSettings.field.validationCount": "validation count",
-    "projectSettings.field.audioValidationCount": "audio validation count",
-    "projectSettings.field.validationRoleFloor": "validation role floor",
-    "projectSettings.field.namedValidators": "named validators",
-    "projectSettings.field.selfValidation": "self-validation",
-    "projectSettings.field.harmonizeMinRole": "harmonize min role",
-    // Bible resources → projectSettings.section.bibleResources
-    "projectSettings.field.usfmFrontMatter": "USFM front matter",
     // draft context → projectSettings.section.draftContext
+    // AQU-2261: the rest of the "Saved: …" nouns, so the whole message is translated.
 
     // ── Save-flow errors ──
-    "projectSettings.save.nameRequired": "Enter a project name.",
     "projectSettings.save.signedOutRenameError": "You're signed out. Sign in again to rename this project.",
     "projectSettings.save.renameFailedGeneric": "Renaming the project failed.",
-    "projectSettings.save.conflictToast": "Synced settings update from {username}.",
-    "projectSettings.save.conflictFallbackUsername": "another collaborator",
-    "projectSettings.save.conflictError": "Someone else updated shared settings. Refresh to reapply your edits.",
-    "projectSettings.save.offlineError": "You're offline. Reconnect to save shared fields.",
-    "projectSettings.save.sharedSettingsFailedGeneric": "Saving shared settings failed.",
     "projectSettings.save.projectNotFoundError": "Project not found",
 
     // ── Settings-group index (SETTINGS_GROUPS) ──
     // "General" group label → common.general (identical text)
-    "projectSettings.group.generalDescription": "Name, languages, username, Bible resources",
+    "projectSettings.group.generalDescription": "Name, languages, content structure, Bible data",
+    "projectSettings.group.membersLabel": "Members",
+    "projectSettings.group.membersDescription": "Who can access this project, invites, and roles",
     "projectSettings.group.sourceSyncLabel": "Source & sync",
-    "projectSettings.group.sourceSyncDescription": "Linked source project, upstream changes, git sync",
-    "projectSettings.group.aiLabel": "AI & completion",
-    "projectSettings.group.aiDescription": "Instructions, draft context, provider, voice, terminology",
+    "projectSettings.group.sourceSyncDescription": "Source link, upstream changes, git sync",
+    "projectSettings.group.aiLabel": "AI",
+    "projectSettings.group.aiDescription": "Instructions, drafting, model, voice, terminology",
     "projectSettings.group.validationLabel": "Validation & health",
     "projectSettings.group.validationDescription": "Approvals, harmonization, staleness decay",
-    // audio-media group label → projectSettings.section.audioMedia (identical text)
-    "projectSettings.group.audioMediaDescription": "How audio is fetched from storage",
-    // metrics group label → projectSettings.section.aiMetrics (identical text)
+    "projectSettings.group.audioMediaLabel": "Media",
+    "projectSettings.group.audioMediaDescription": "How audio loads, and the timeline",
+    "projectSettings.group.metricsLabel": "AI metrics",
     "projectSettings.group.metricsDescription": "Post-edit distance and AI usage",
     "projectSettings.group.integrationsLabel": "Integrations",
-    "projectSettings.group.integrationsDescription": "Monday.com board sync",
+    "projectSettings.group.integrationsDescription": "Monday.com and Airtable sync",
     // experimental group label → projectSettings.section.experimental (identical text)
-    "projectSettings.group.experimentalDescription": "Early features, this device only",
+    "projectSettings.group.experimentalDescription": "Autopilot, extensions, and other early features",
+    // The headings the index groups its rows under. "Integrations" →
+    // projectSettings.group.integrationsLabel (identical text).
+    "projectSettings.hub.project": "Project",
+    "projectSettings.hub.aiMedia": "AI & media",
+    "projectSettings.hub.quality": "Quality",
+    // The short current value at the end of an index row, or a nav row.
+    "projectSettings.hint.untitled": "Untitled",
+    "projectSettings.hint.rolesInvites": "Roles & invites",
+    "projectSettings.hint.linked": "Linked",
+    "projectSettings.hint.git": "Git",
+    "projectSettings.hint.custom": "Custom",
+    "projectSettings.hint.postEdit": "Post-edit",
+    "projectSettings.hint.integrations": "Monday.com, Airtable",
 
     // ── Section labels (ALL_SECTIONS + reused as the matching card titles) ──
     "projectSettings.section.sourceLink": "Source link",
     "projectSettings.section.upstreamChanges": "Upstream changes",
     "projectSettings.section.dcsUpstream": "Door43 upstream",
-    "projectSettings.section.projectInfo": "Project Info",
+    "projectSettings.section.projectInfo": "Project info",
     "projectSettings.section.languages": "Languages",
-    "projectSettings.section.bibleResources": "Bible resources",
     "projectSettings.section.import": "Import",
     "projectSettings.section.user": "User",
-    "projectSettings.section.aiInstructions": "AI Instructions",
-    "projectSettings.section.draftContext": "Draft Context",
-    "projectSettings.section.advancedLlm": "Advanced LLM",
+    // ── AQU-1993: leaving a project (the one self-service control here) ──
+    "projectSettings.section.leaveProject": "Leave project",
+    "projectSettings.leave.rowLabel": "Leave project",
+    "projectSettings.leave.rowDescription":
+      "Give up your own access to this project. An owner or maintainer has to add you back.",
+    "projectSettings.leave.confirmTitle": "Leave {name}?",
+    "projectSettings.leave.confirmBody":
+      "You will lose your access to this project and anything in it. This does not delete the project for anyone else.",
+    "projectSettings.leave.leavingButton": "Leaving…",
+    "projectSettings.leave.leftToast": "You left {name}.",
+    "projectSettings.leave.stillHasAccess":
+      "Your individual access is gone, but your organization or a team still gives you access to this project.",
+    "projectSettings.leave.inheritedOnly":
+      "Your access to this project comes from your organization or a team, so there is nothing here for you to give up. Leave the organization instead, or ask an owner to remove you.",
+    "projectSettings.leave.failed": "Couldn't leave this project.",
+    "projectSettings.section.members": "Team members",
+    "projectSettings.section.aiInstructions": "AI drafting",
+    "projectSettings.section.draftContext": "Draft context",
+    "projectSettings.section.advancedLlm": "AI model (advanced)",
     "projectSettings.section.voice": "Voice",
-    "projectSettings.section.localModels": "Local AI models",
+    "projectSettings.section.localModels": "On-device AI models",
     "projectSettings.section.decay": "Decay",
     "projectSettings.section.validation": "Validation",
-    "projectSettings.section.audioMedia": "Audio Media",
-    "projectSettings.section.gitSync": "Git Sync",
+    "projectSettings.section.audioMedia": "Audio loading",
+    "projectSettings.section.gitSync": "Git sync",
     "projectSettings.section.terminology": "Terminology",
-    "projectSettings.section.termbaseSharing": "Term Base Sharing",
-    "projectSettings.section.aiMetrics": "AI Metrics",
+    "projectSettings.section.termbaseSharing": "Term base sharing",
+    "projectSettings.section.aiMetrics": "AI metrics",
     "projectSettings.section.monday": "Monday.com",
+    "projectSettings.section.airtable": "Airtable",
     "projectSettings.section.experimental": "Experimental",
 
     // ── Project Info card ──
-    "projectSettings.info.nameLabel": "Project Name",
+    "projectSettings.info.nameLabel": "Project name",
     "projectSettings.info.lastEditedBy": "Last edited by {username} · {date}",
-    "projectSettings.info.sourceLanguageLabel": "Source Language",
-    "projectSettings.info.targetLanguageLabel": "Target Language",
+    "projectSettings.info.sourceLanguageLabel": "Source language",
+    "projectSettings.info.targetLanguageLabel": "Target language",
+    "projectSettings.info.smartQuotesLabel": "Smart quotes",
+    "projectSettings.info.smartQuotesDescription": "Turn straight quotes into curly quotes as you type, in the target language's style. Press Backspace right after to keep a straight quote.",
 
     // ── Bible resources card ──
-    "projectSettings.bible.enableLabel": "Enable Bible resources",
     "projectSettings.bible.description": "Scholarly reference data from bibletranslation.org in Search and the agent.",
     "projectSettings.bible.scriptureDefaultHint": "Available by default for scripture projects — turn off to disable.",
     "projectSettings.bible.nonScriptureDefaultHint": "Off by default for non-scripture projects — turn on to enable.",
@@ -359,11 +494,18 @@ export const projectSettings = defineNamespace({
       "When on, USFM imports drop the book name, running header, TOC, main title, and " +
       "introduction paragraphs. Section headings and Psalm titles still import. Off " +
       "(the default) imports front matter as translatable cells.",
+    "projectSettings.import.cellUnitLabel": "Import cell unit",
+    "projectSettings.import.cellUnitDescription":
+      "What one cell is when a Word, text, or Markdown file is imported. " +
+      "\u201cSentence\u201d splits long paragraphs into shorter cells \u2014 right for subtitles and " +
+      "documents. \u201cParagraph\u201d keeps each paragraph whole, with no sentence splitting and " +
+      "no length limit \u2014 right for dubbing, where one cell becomes one voice clip. " +
+      "Formats that define their own cells (USFM verses, subtitle cues) are unaffected.",
+    "projectSettings.import.cellUnitOptionSentence": "Sentence (split long paragraphs)",
+    "projectSettings.import.cellUnitOptionParagraph": "Paragraph (one cell per paragraph)",
 
     // ── User card ──
-    "projectSettings.user.usernameLabel": "Username",
     "projectSettings.user.usernamePlaceholder": "local",
-    "projectSettings.user.usernameDescription": "Used as author name in translation history.",
 
     // ── AI Instructions card ──
     "projectSettings.ai.instructionsHelp":
@@ -386,9 +528,13 @@ export const projectSettings = defineNamespace({
     "projectSettings.ai.contextWindowMedium": "Medium — paragraph (default)",
     "projectSettings.ai.contextWindowLarge": "Large — chapter",
     "projectSettings.ai.contextWindowDescription": "Controls how much surrounding passage context is included.",
-    "projectSettings.ai.assistantLanguageLabel": "Assistant language",
+    // AQU-2263: the team's fallback for the assistant's answers (it was saved
+    // but never read). Each person's own choice in Preferences wins over it.
+    "projectSettings.ai.assistantLanguageLabel": "The assistant answers the team in",
+    "projectSettings.ai.assistantLanguageName": "Assistant language",
     "projectSettings.ai.assistantLanguagePlaceholder": "e.g. English, Français, Español…",
-    "projectSettings.ai.assistantLanguageDescription": "Language the AI assistant uses in chat responses. Independent of the UI locale.",
+    "projectSettings.ai.assistantLanguageDescription":
+      "For everyone on this project who hasn't chosen their own in Preferences. Left empty, the assistant answers in the language each person writes in.",
     "projectSettings.ai.approvedExamplesOnlyLabel": "Approved examples only",
     "projectSettings.ai.approvedExamplesOnlyDescription":
       "Drafting always retrieves human-validated project translations. Raw machine " +
@@ -408,14 +554,14 @@ export const projectSettings = defineNamespace({
       "left-context when drafting. 0 disables preceding-context. Default: {defaultCount}.",
 
     // ── Advanced LLM details ──
-    "projectSettings.advancedLlm.summary": "Advanced LLM settings",
-    "projectSettings.advancedLlm.frontierDefaultStatus": "Frontier (default)",
+    "projectSettings.advancedLlm.summary": "AI model (advanced)",
+    "projectSettings.advancedLlm.frontierDefaultStatus": "Aquilla (default)",
     "projectSettings.advancedLlm.customEndpointStatus": "Custom: {endpoint}",
     "projectSettings.advancedLlm.notSet": "not set",
     "projectSettings.advancedLlm.providerLabel": "Provider",
-    "projectSettings.advancedLlm.providerFrontierName": "Frontier",
+    "projectSettings.advancedLlm.providerFrontierName": "Aquilla",
     "projectSettings.advancedLlm.providerFrontier":
-      "{name} (recommended) — calls {domain} using your Frontier login. Works out of the box.",
+      "{name} (recommended) — uses your Aquilla login. Works out of the box.",
     "projectSettings.advancedLlm.providerCustomName": "Custom endpoint",
     "projectSettings.advancedLlm.providerCustom":
       "{name} — localhost, self-hosted, or a third-party OpenAI-compatible API " +
@@ -440,8 +586,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.advancedLlm.apiKeyLabelOptional": "API key (optional)",
     "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "Paste your API key",
     "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "Leave blank for no auth",
-    "projectSettings.advancedLlm.apiKeyHelp": "Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier.",
-    "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "Stays on this device — not shared with collaborators.",
+    "projectSettings.advancedLlm.apiKeyHelp": "Sent as Authorization: Bearer <key>. Stored in your browser; never uploaded to Aquilla.",
+    // AQU-2259: the one label for a setting that stays in this browser — the
+    // project AI keys, Audio loading, Git auto-sync. The same words AQU-2053
+    // gave the experimental switches.
+    "projectSettings.deviceOnly": "Only on this device.",
     "projectSettings.advancedLlm.modelLabel": "Model",
     "projectSettings.advancedLlm.modelManualLabel": "Model (if not listed)",
     "projectSettings.advancedLlm.modelManualPlaceholderOpenRouter": "anthropic/claude-3.5-sonnet",
@@ -450,28 +599,35 @@ export const projectSettings = defineNamespace({
       "Click Connect to discover models, or type one manually (required for providers " +
       "that don't expose {modelsPath}).",
     "projectSettings.advancedLlm.modelOverrideLabel": "Model override (optional)",
-    "projectSettings.advancedLlm.modelOverridePlaceholder": "Leave blank for Frontier's default",
-    "projectSettings.advancedLlm.modelOverrideHelp": "Optionally specify an OpenRouter model (e.g. {example}).",
-    "projectSettings.advancedLlm.maxTokensLabel": "Max Tokens",
+    "projectSettings.advancedLlm.modelOverridePlaceholder": "Leave blank for Aquilla's default",
+    "projectSettings.advancedLlm.modelOverrideHelp": "Enter an OpenRouter model (optional), for example {example}.",
+    "projectSettings.advancedLlm.maxTokensLabel": "Max tokens",
     "projectSettings.advancedLlm.temperatureLabel": "Temperature ({value})",
-    "projectSettings.advancedLlm.healthPenaltyLabel": "LLM Health Penalty ({percent}%)",
-    "projectSettings.advancedLlm.healthPenaltyDescription":
-      "LLM translations are penalized by this amount in health calculations. 0% = full " +
-      "trust, 50% = heavy penalty. Default: 10%.",
+    "projectSettings.advancedLlm.temperatureName": "Temperature",
 
     // ── Voice card ──
+    // Oct 29 second pass: the voice card's provider row, hard-coded English before.
+    "projectSettings.voice.geminiTtsLabel": "Gemini TTS",
     "projectSettings.voice.geminiKeyLabel": "Gemini API key",
     "projectSettings.voice.geminiKeyPlaceholder": "AIza...",
     "projectSettings.voice.geminiKeyHelp":
       "Used for Gemini-powered text-to-speech. Get a key at aistudio.google.com/apikey. " +
-      "Sent directly to Google; never uploaded to Frontier.",
-    "projectSettings.voice.libraryNote": "Voice library and cast assignments live in the Voice Studio.",
-    "projectSettings.voice.openStudioButton": "Open Voice Studio",
+      "Sent directly to Google; never uploaded to Aquilla.",
+    "projectSettings.voice.elevenLabsHelp":
+      "Your own ElevenLabs key, for ElevenLabs voices. It stays on this device for you only and is never shared with the project.",
+    // AQU-1758: the Voice Studio (the Audio view) is gone; the library and the
+    // cast are in Media's Voices tab.
+    "projectSettings.voice.voicesNote": "The voice library and cast assignments are in the Voices tab of the Media view.",
+    "projectSettings.voice.openVoicesButton": "Open Voices",
+    "projectSettings.voice.leadsManageLabel": "Project Leads can manage voices",
+    "projectSettings.voice.leadsManageDescription":
+      "When this is on, a project lead can create, edit, and assign voices on the language lanes " +
+      "they can write. When it is off, only a maintainer can. Voices already created stay either way.",
 
     // ── Local AI models card (device-shared; downloads managed in Preferences) ──
     "projectSettings.localModels.description":
-      "Whisper transcription and the local voices run in your browser and are shared " +
-      "across every project on this device. Manage downloads in your personal preferences.",
+      "Whisper transcription and the on-device voices run in your browser and are shared across " +
+      "every project on this device. Manage downloads in your personal preferences.",
     "projectSettings.localModels.manageButton": "Manage models",
 
     // ── Harmonization card ──
@@ -482,25 +638,40 @@ export const projectSettings = defineNamespace({
     // of minting duplicates. "(default)" is the only project-settings-owned text.
     "projectSettings.harmonization.defaultRoleSuffix": "{role} (default)",
     "projectSettings.harmonization.description":
-      "Only users with at least this role can open a harmonization sweep on this " +
-      "project. The floor cannot be lowered below Project Lead (hard floor per spec).",
+      "Only users with at least this role can open a harmonization sweep on this project. The floor " +
+      "cannot be lowered below Project Lead (hard floor per spec).",
 
     // ── Git Sync card ──
     "projectSettings.gitSync.originLabel": "Origin: {url} (branch: {branch})",
-    "projectSettings.gitSync.autoSyncLabel": "Auto-sync every",
     "projectSettings.gitSync.minutesSuffix": "minutes (only when there are changes)",
+    // Oct 29 second pass: the switch's label, hard-coded English before.
+    "projectSettings.gitSync.autoSyncSwitch": "Auto-sync",
     "projectSettings.gitSync.intervalNote": "Interval is floored at 1 minute. Sync will only push when there are local changes.",
 
     // ── Terminology card ──
-    "projectSettings.terminology.title": "Terminology Library",
+    "projectSettings.terminology.title": "Terminology library",
     "projectSettings.terminology.description": "Manage approved terms, renderings, and the project terminology (term base).",
-    "projectSettings.terminology.openButton": "Open Terminology Library",
+    "projectSettings.terminology.openButton": "Open terminology library",
 
     // ── ValidationSettingsSection.tsx ──
+    // Card headings: the text and audio rules each get their own card.
+    "projectSettings.validation.textGroup": "Text validation",
+    "projectSettings.validation.audioGroup": "Audio validation",
     "projectSettings.validation.requiredTextLabel": "Required validators (text)",
-    "projectSettings.validation.requiredTextDescription": "Cells need this many distinct validators to count as fully validated.",
+    "projectSettings.validation.requiredTextDescription": "Cells need this many distinct validators to count as validated.",
     "projectSettings.validation.requiredAudioLabel": "Required validators (audio)",
     "projectSettings.validation.requiredAudioAppliesNote": "Applies to audio translations, once recordings exist.",
+    // AQU-1771: the count can follow the organization's default or be set here.
+    "projectSettings.validation.orgDefaultOption": "Organization default ({number})",
+    "projectSettings.validation.customOption": "Set for this project",
+    "projectSettings.validation.requiredTextSourceAria": "Text validators: use the organization default or set a number for this project",
+    "projectSettings.validation.requiredAudioSourceAria": "Audio validators: use the organization default or set a number for this project",
+    // AQU-1768: the media settings can follow the organization's default too.
+    "projectSettings.mediaDefaults.orgOn": "Organization default (on)",
+    "projectSettings.mediaDefaults.orgOff": "Organization default (off)",
+    "projectSettings.mediaDefaults.orgValue": "Organization default ({value})",
+    "projectSettings.mediaDefaults.cellEditingNobody": "No one",
+    "projectSettings.mediaDefaults.sourceAria": "{setting}: use the organization default or set it for this project",
     "projectSettings.validation.minRoleLabel": "Minimum validator role",
     "projectSettings.validation.minRoleDescription": "Only users with at least this role can cast a validation vote. Defaults to reviewer.",
     // ── StructuralCellsProjectSection ── AQU-1083
@@ -509,23 +680,60 @@ export const projectSettings = defineNamespace({
       "Whether chapter headings, section titles and book names count toward " +
       "this project's translation and validation percentages. Leaving them " +
       "out means a book reads 100% once every verse is done.",
-    "projectSettings.structuralCells.inherit": "Organization default",
-    "projectSettings.structuralCells.currentlyCounting":
-      "The organization currently counts them",
-    "projectSettings.structuralCells.currentlyExcluding":
-      "The organization currently leaves them out",
-    "projectSettings.structuralCells.count": "Count them",
-    "projectSettings.structuralCells.exclude": "Leave them out",
     "projectSettings.structuralCells.saveFailed": "Could not save that change",
 
-    "projectSettings.validation.allowSelfLabel": "Allow self-validation",
-    "projectSettings.validation.allowSelfDescription": "When off, a contributor's vote on their own commit is ignored.",
-    "projectSettings.validation.namedValidatorsLabel": "Named validators (optional)",
+    // ── ProjectVisibilitySection ── AQU-2263: who sees this project's member
+    // list and each member's progress; a second home for the dashboard badges.
+    "projectSettings.visibility.groupLabel": "Member list and progress",
+    "projectSettings.visibility.groupDescription":
+      "Your organization decides who can see these. A project can make them stricter, never looser.",
+    "projectSettings.visibility.rosterLabel": "Who can see the member list",
+    "projectSettings.visibility.rosterDescription":
+      "The member list and member count, here and on the project's dashboard.",
+    "projectSettings.visibility.progressLabel": "Who can see each member's progress",
+    "projectSettings.visibility.progressDescription":
+      "Each member's progress on the project's dashboard. They also need to see the member list.",
+    // {role} is a plural role name: "Owners".
+    "projectSettings.visibility.onlyRoleLoosens": "Only {role} can make this less strict.",
+
+    // ── ProjectImportFloorSection ── AQU-2305: who may bring a NEW source file
+    // into THIS project. The organization's floor (AQU-2304), which a project
+    // may only make stricter.
+    "projectSettings.importFloor.label": "Who can import files",
+    "projectSettings.importFloor.description":
+      "Minimum role required to bring a new source file into this project, " +
+      "including re-importing one. Your organization sets this; a project can " +
+      "make it stricter, never looser. Importing a translation into a file " +
+      "that is already here is not affected.",
+    // Shown on a role the organization's own floor rules out, so the option
+    // says why it cannot be chosen.
+    "projectSettings.importFloor.stricterOnly":
+      "your organization requires more; a project can only be stricter",
+
+    // AQU-1391 — repetition auto-propagation, same shape as above.
+    "projectSettings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
+    "projectSettings.autoPropagateRepetitions.description":
+      "Whether validating a cell copies its translation into the other cells in " +
+      "the same file whose source text is identical. Filled-in cells are left " +
+      "unvalidated, and cells someone has already validated are never changed.",
+    "projectSettings.autoPropagateRepetitions.saveFailed": "Could not save that change",
+
+    // AQU-1768: "(text)", like "Required validators (text)" above it — the
+    // recordings' own switch sits further down under Audio validation.
+    "projectSettings.validation.allowSelfLabel": "Allow self-validation (text)",
+    // AQU-1571: the server refuses the vote up front, for every role, and the
+    // editor greys the check out; "ignored" and "a contributor's" were both wrong.
+    "projectSettings.validation.allowSelfDescription":
+      "When off, nobody can validate a line whose latest change is their own, whatever " +
+      "their role. Someone else has to.",
+    "projectSettings.validation.namedValidatorsLabel": "Named validators",
     "projectSettings.validation.namedValidatorsPlaceholder": "alice, bob, carol",
+    // AQU-1571: people off the list cannot vote at all (the server refuses it),
+    // and the field is a member picker, not a comma-separated box.
     "projectSettings.validation.namedValidatorsDescription":
-      "Comma-separated usernames. When set, only these users' votes count toward the " +
-      "threshold (AND'd with the role floor). Leave empty to allow any " +
-      "sufficiently-privileged user.",
+      "When anyone is listed, only these people can validate text, and they still " +
+      "need the minimum role above. Leave empty to allow anyone who meets the " +
+      "minimum role.",
 
     // ── AQU-490: the audio policy, beside the text policy rather than folded
     // into it. Sam's ruling is that these are SEPARATE settings, so every
@@ -547,33 +755,45 @@ export const projectSettings = defineNamespace({
       "empty to allow anyone who meets the minimum role above.",
 
     // ── DecaySettingsSection.tsx ──
-    "projectSettings.decay.summary": "Retrieval support",
+    "projectSettings.decay.summary": "Health",
     "projectSettings.decay.description":
-      "This support signal measures proximity to approved neighboring cells in the " +
+      "This health signal measures proximity to approved neighboring cells in the " +
       "retrieval graph. It can prioritize review, but it is not a translation-quality " +
       "score and never removes the human-review requirement.",
     "projectSettings.decay.maxHopsLabel": "Max hops",
     "projectSettings.decay.maxHopsDescription":
-      "Propagation radius from approved cells. Larger values let support ripple " +
+      "Propagation radius from approved cells. Larger values let health ripple " +
       "further through the retrieval graph. Default {defaultValue}.",
     "projectSettings.decay.attentionThresholdLabel": "Attention threshold",
     "projectSettings.decay.attentionThresholdDescription":
-      "Low support beyond this threshold shows the cell's review-priority marker " +
+      "Low health beyond this threshold shows the cell's review-priority marker " +
       "(0–1). Default {defaultValue}.",
 
     // ── AudioMediaStrategySection.tsx ──
     "projectSettings.audioMedia.title": "Audio loading",
-    "projectSettings.audioMedia.description":
-      "Decide when audio recordings are downloaded from storage to this device. You " +
-      "can switch any time without re-recording — only future loads are affected.",
+    // Sam, Oct 29: each choice says one short phrase; its (i) says the rest.
+    // What the code does (peaks-loader autoLoadsPeaks, eager-peaks): the choice
+    // only decides when the waveforms on a cell's takes load. Playback and the
+    // timeline's own waveforms are the same in all four.
+    "projectSettings.audioMedia.info":
+      "When the waveforms on a cell's takes load. Whatever you pick, playing a take downloads " +
+      "its audio and keeps a copy on this device, and the timeline draws its own waveforms.",
+    "projectSettings.audioMedia.infoAria": "What the audio loading choices do",
     "projectSettings.audioMedia.strategyStreamName": "Stream",
-    "projectSettings.audioMedia.strategyStreamDescription": "Play directly from the network. No local cache, no waveforms unless you opt in.",
+    // Stream and Manual do the same today (both wait for a click), so they
+    // share these two strings.
+    "projectSettings.audioMedia.strategyOnClickSummary": "Waveforms wait for a click",
+    "projectSettings.audioMedia.strategyOnClickInfo": "Each take shows Load waveform in its place until you click it.",
     "projectSettings.audioMedia.strategyLazyName": "Lazy (default)",
-    "projectSettings.audioMedia.strategyLazyDescription": "Download a cell's audio when you scroll to it or press play. Caches locally.",
+    "projectSettings.audioMedia.strategyLazySummary": "Waveforms load as they come into view",
+    "projectSettings.audioMedia.strategyLazyInfo":
+      "Each take's waveform loads when the take is shown, from a small saved outline when there is one.",
     "projectSettings.audioMedia.strategyEagerName": "Eager",
-    "projectSettings.audioMedia.strategyEagerDescription": "Prefetch every cell's waveform when the file opens. Best for offline review.",
+    "projectSettings.audioMedia.strategyEagerSummary": "Every waveform loads when a file opens",
+    "projectSettings.audioMedia.strategyEagerInfo":
+      "Like Lazy, and every take's waveform in the file also loads in the background, ready before " +
+      "you scroll to it.",
     "projectSettings.audioMedia.strategyManualName": "Manual",
-    "projectSettings.audioMedia.strategyManualDescription": "Don't auto-download anything. You click a button per cell to load it.",
 
     // ── SourceLinkSection.tsx ──
     "projectSettings.sourceLink.description":
@@ -585,15 +805,142 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.consumesTranslations": "consumes translations",
     "projectSettings.sourceLink.consumesSource": "consumes source",
     "projectSettings.sourceLink.gateLabel": "gate: {value}",
+    // AQU-1605: which of the upstream's translations the link consumes.
+    "projectSettings.sourceLink.laneLabel": "translation: {value}",
     "projectSettings.sourceLink.gateValidatedOnly": "validated only",
     "projectSettings.sourceLink.gateEveryCommit": "every commit",
     "projectSettings.sourceLink.cursorLabel": "cursor: {value}",
+    // AQU-1559: how much of the upstream this link follows. A subset link is
+    // pinned to the files it was made with; a whole-project one keeps picking up
+    // the files the upstream gains.
+    "projectSettings.sourceLink.scopeAllFiles": "All files",
+    "projectSettings.sourceLink.scopeSomeFiles": plural(
+      {
+        one: "{count} of {total} file",
+        other: "{count} of {total} files",
+      },
+      "total",
+    ),
+    // AQU-1560: "Choose files" — add more of the upstream's files to a live
+    // link that follows a fixed list, without detaching and re-linking.
+    // Already-linked files are shown checked and locked (unlinking one is a
+    // later slice). The dialog reuses the link flow's count sentence, scope
+    // notes and same-name warning, so the two read the same.
+    "projectSettings.sourceLink.chooseFilesButton": "Choose files",
+    "projectSettings.sourceLink.chooseFilesTitle": "Choose which files this link follows",
+    "projectSettings.sourceLink.chooseFilesDescription":
+      "Files this link follows are checked. Check more of the source project's " +
+      "files to add them here: each arrives with its complete source, and " +
+      "receives the source project's changes from then on. Uncheck one to stop " +
+      "following it and keep it as this project's own copy.",
+    "projectSettings.sourceLink.chooseFilesLoading": "Loading the source project's files…",
+    "projectSettings.sourceLink.chooseFilesLoadError":
+      "Couldn't load the source project's file list. Nothing has been changed.",
+    "projectSettings.sourceLink.chooseFilesLinkedBadge": "already linked",
+    "projectSettings.sourceLink.chooseFilesAllLinked":
+      "This link follows every file in the source project, and files it adds " +
+      "later arrive here on their own. There is nothing to add — uncheck a file " +
+      "to stop following it.",
+    "projectSettings.sourceLink.chooseFilesNoneChecked":
+      "Check a file above to add it to this link, or uncheck one to stop " +
+      "following it.",
+    "projectSettings.sourceLink.chooseFilesAddButton": "Add files",
+    "projectSettings.sourceLink.chooseFilesAddingButton": "Adding files…",
+    "projectSettings.sourceLink.chooseFilesIncomplete":
+      "The files didn't finish arriving, so they haven't been added to the link " +
+      "yet. Try again to finish bringing them in.",
+    // AQU-1562: unchecking a file the link follows stops this project following
+    // that one file — a per-file detach. The file stays, with everything on it;
+    // only the flow of upstream changes ends. Checking a stopped file again
+    // resumes it in the same file, which is a different promise from adding a
+    // file this project never had, so the two are worded apart. Every one of
+    // these sentences is in the confirm step, before anything changes.
+    "projectSettings.sourceLink.chooseFilesStoppedBadge": "stopped following",
+    "projectSettings.sourceLink.chooseFilesReviewButton": "Review changes",
+    "projectSettings.sourceLink.chooseFilesConfirmTitle": "Confirm these changes to the link",
+    "projectSettings.sourceLink.chooseFilesApplyingButton": "Saving the link…",
+    "projectSettings.sourceLink.chooseFilesStopHeading": plural({
+      one: "Stop following this file:",
+      other: "Stop following these files:",
+    }),
+    "projectSettings.sourceLink.chooseFilesStopBody": plural({
+      one:
+        "It stays in this project with the source text it has now, and its " +
+        "translations, validations and comments are untouched. It will no longer " +
+        "receive the source project's changes.",
+      other:
+        "They stay in this project with the source text they have now, and their " +
+        "translations, validations and comments are untouched. They will no longer " +
+        "receive the source project's changes.",
+    }),
+    "projectSettings.sourceLink.chooseFilesStopOthersNote":
+      "Every other file this link follows keeps syncing as before.",
+    "projectSettings.sourceLink.chooseFilesStopWholeProjectWarning":
+      "This link follows the whole source project. Stopping a file pins it to the " +
+      "remaining files, so files the source project adds later will no longer " +
+      "arrive here on their own.",
+    "projectSettings.sourceLink.chooseFilesKeepOneError":
+      "At least one file must stay linked. To stop following the source project " +
+      "altogether, use \u201cDetach from source\u201d.",
+    "projectSettings.sourceLink.chooseFilesResumeHeading": plural({
+      one: "Follow this file again:",
+      other: "Follow these files again:",
+    }),
+    "projectSettings.sourceLink.chooseFilesResumeBody": plural({
+      one:
+        "Its source text will be replaced with the source project's current text. " +
+        "Its translations, validations and comments stay.",
+      other:
+        "Their source text will be replaced with the source project's current " +
+        "text. Their translations, validations and comments stay.",
+    }),
+    // AQU-1679: an added upstream file can instead follow INTO a file this
+    // project already has — the link flow's replace option, here too.
+    "projectSettings.sourceLink.chooseFilesReplaceHeading": plural({
+      one: "Replace the source in this file you already have:",
+      other: "Replace the source in these files you already have:",
+    }),
+    "projectSettings.sourceLink.chooseFilesReplaceBody": plural({
+      one:
+        "It stays the same file, with its translations, validations and comments " +
+        "on the same lines. Its source text becomes the source project's, and it " +
+        "receives the source project's changes from then on. No second copy is added.",
+      other:
+        "They stay the same files, with their translations, validations and comments " +
+        "on the same lines. Their source text becomes the source project's, and they " +
+        "receive the source project's changes from then on. No second copies are added.",
+    }),
+    "projectSettings.sourceLink.chooseFilesAddHeading": plural({
+      one: "Add this file:",
+      other: "Add these files:",
+    }),
+    "projectSettings.sourceLink.chooseFilesAddBody": plural({
+      one:
+        "It arrives with its complete source text, and receives the source " +
+        "project's changes from then on.",
+      other:
+        "They arrive with their complete source text, and receive the source " +
+        "project's changes from then on.",
+    }),
+    // AQU-1544: a live link that has never brought anything through.
+    "projectSettings.sourceLink.notSyncedBadge": "Not synced yet",
+    "projectSettings.sourceLink.notSyncedNote":
+      "Nothing has come through this link yet, so the source project's files are " +
+      "not in this project. Sync now to bring them in.",
+    "projectSettings.sourceLink.syncNowButton": "Sync now",
+    "projectSettings.sourceLink.syncingButton": "Syncing…",
+    "projectSettings.sourceLink.syncFailedNote":
+      "Couldn't bring in the source project's files. The link is still saved, so " +
+      "you can try again in a moment.",
+    "projectSettings.sourceLink.syncNothingYetNote":
+      "The source project has nothing to bring in yet. Its files will arrive here " +
+      "as it gains them.",
     "projectSettings.sourceLink.cloneNote": "This is a one-time snapshot — upstream changes do not propagate here.",
     "projectSettings.sourceLink.irreversibleTitle": "Detaching is irreversible",
     "projectSettings.sourceLink.irreversibleDescription":
       "Detaching snapshots the current upstream source cells into this project and " +
       "severs the live link. Stale-source markers will clear. This action cannot be undone.",
-    "projectSettings.sourceLink.roleGateNote": "Project lead or above required to detach from source.",
+    "projectSettings.sourceLink.roleGateNote": "Project Lead or above required to detach from source.",
     "projectSettings.sourceLink.detachButton": "Detach from source",
     "projectSettings.sourceLink.detachDialogTitle": "Detach from source project?",
     "projectSettings.sourceLink.detachDialogDescription":
@@ -604,47 +951,251 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.detachingButton": "Detaching…",
     "projectSettings.sourceLink.detachConfirmButton": "Detach",
 
+    // ── LinkSourceSection.tsx (AQU-1525) ──
+    "projectSettings.linkSource.title": "Link to a source project",
+    "projectSettings.linkSource.description":
+      "This project owns its own source. Link it to another project to read that " +
+      "project's source files here, without recreating this project.",
+    "projectSettings.linkSource.pickerLabel": "Source project",
+    "projectSettings.linkSource.pickerPlaceholder": "Choose a project to link from…",
+    "projectSettings.linkSource.pickerSearchPlaceholder": "Search projects…",
+    "projectSettings.linkSource.pickerSearchAriaLabel": "Search projects",
+    "projectSettings.linkSource.pickerNoMatches": "No projects match.",
+    "projectSettings.linkSource.noProjectsNote": "No other project is available to link to.",
+    "projectSettings.linkSource.additiveNote":
+      "The link is live: the upstream's source files are mirrored in alongside " +
+      "everything this project already holds, and later upstream edits keep " +
+      "flowing through. Existing files, translations and validations are left as " +
+      "they are. Detach later to stop following the upstream.",
+    // AQU-1679: the same promise when the lead has chosen to replace the source
+    // of a file they already have — "existing files are left as they are" is
+    // no longer true of those.
+    "projectSettings.linkSource.additiveNoteReplacing":
+      "The link is live: later upstream edits keep flowing through, including " +
+      "into the files whose source you are replacing. Your other files, and every " +
+      "translation and validation, are left as they are. Detach later to stop " +
+      "following the upstream.",
+    "projectSettings.linkSource.linkButton": "Link source project",
+    "projectSettings.linkSource.linkingButton": "Linking…",
+    "projectSettings.linkSource.roleGateNote":
+      "Project Lead or above required to link a source project.",
+    "projectSettings.linkSource.cycleError":
+      "That project already reads its source from this one, so linking would " +
+      "create a loop. This project is still unlinked — choose a different project.",
+
+    // ── AQU-1526: the confirm step shown after an upstream is picked and
+    // before anything is linked. It warns about same-named files; it never
+    // blocks the link.
+    "projectSettings.linkSource.reviewButton": "Review what will be added",
+    "projectSettings.linkSource.cancelButton": "Cancel",
+    "projectSettings.linkSource.previewTitle": "Link to {upstream}?",
+    "projectSettings.linkSource.previewLoading": "Checking what this link will add…",
+    "projectSettings.linkSource.previewCount": plural({
+      one: "{count} source file will be added to this project.",
+      other: "{count} source files will be added to this project.",
+    }),
+    // ── AQU-1559: the confirm step's file list. Every file arrives checked,
+    // so the stock outcome is the whole-project link; unchecking any of them
+    // pins the link to the rest.
+    "projectSettings.linkSource.selectAllFiles": "All files",
+    "projectSettings.linkSource.fileClashBadge": "same name here",
+    "projectSettings.linkSource.previewNoneSelected":
+      "Pick at least one file to link.",
+    // ── AQU-1679: a file this project already has can follow the link itself,
+    // instead of gaining a second copy. Offered per same-named file, off by
+    // default, and shown with what it will do before anything is linked.
+    "projectSettings.linkSource.replaceOption":
+      "Replace the source in my existing {name} and keep its translations",
+    "projectSettings.linkSource.replaceComparing": "Comparing the two files…",
+    "projectSettings.linkSource.replaceCompareFailed":
+      "Couldn't compare the two files. Turn this off and on to try again, or " +
+      "leave it off to add the file as a separate copy.",
+    "projectSettings.linkSource.replaceMatchSame": plural({
+      one: "{same} of {count} line is the same in both files.",
+      other: "{same} of {count} lines are the same in both files.",
+    }),
+    "projectSettings.linkSource.replaceMatchChanged": plural({
+      one:
+        "{count} line differs and will take the source project's text. Its " +
+        "translation will be flagged as source changed.",
+      other:
+        "{count} lines differ and will take the source project's text. Their " +
+        "translations will be flagged as source changed.",
+    }),
+    "projectSettings.linkSource.replaceMatchAdded": plural({
+      one: "{count} line only the source project has will be added to your file.",
+      other: "{count} lines only the source project has will be added to your file.",
+    }),
+    "projectSettings.linkSource.replaceMatchKept": plural({
+      one: "{count} line only your file has will stay as it is.",
+      other: "{count} lines only your file has will stay as they are.",
+    }),
+    "projectSettings.linkSource.replaceNoMatch": plural({
+      one:
+        "These two files are not the same material: {same} of {count} line matches. " +
+        "Turn this off to add the file as a separate copy.",
+      other:
+        "These two files are not the same material: only {same} of {count} lines " +
+        "match. Turn this off to add the file as a separate copy.",
+    }),
+    "projectSettings.linkSource.replaceCount": plural({
+      one:
+        "{count} file you already have will take its source from this link and " +
+        "keep its translations.",
+      other:
+        "{count} files you already have will take their source from this link and " +
+        "keep their translations.",
+    }),
+    "projectSettings.linkSource.scopeAllNote":
+      "This link follows the whole project, so files the source project adds " +
+      "later will arrive here too.",
+    "projectSettings.linkSource.scopeSubsetNote":
+      "This link follows only the files you picked. Files the source project " +
+      "adds later will not arrive here on their own.",
+    "projectSettings.linkSource.previewEmptyUpstream":
+      "That project has no source files yet, so nothing will be added now. Files " +
+      "will arrive here as the upstream gains them.",
+    "projectSettings.linkSource.previewLoadError":
+      "Couldn't load that project's file list, so we can't say what the link will " +
+      "add. Nothing has been linked.",
+    "projectSettings.linkSource.previewRetryButton": "Try again",
+    // ── AQU-1544: the link was saved but its first sync failed. One sentence
+    // and one action, shown wherever the user started the link.
+    "projectSettings.linkSource.seedFailedMessage":
+      "The link to the source project was saved, but its files have not arrived " +
+      "here yet. Try again to bring them in.",
+    "projectSettings.linkSource.seedRetryFailedNote":
+      "That attempt did not bring them in either. The link is still saved, so you " +
+      "can try again in a moment.",
+    "projectSettings.linkSource.seedRetryingButton": "Trying again…",
+    "projectSettings.linkSource.clashWarningHeading": plural({
+      one: "This project already has a file with the same name:",
+      other: "This project already has files with these names:",
+    }),
+    "projectSettings.linkSource.clashWarningBody": plural({
+      one:
+        "Your existing file is kept exactly as it is, with its translations. The " +
+        "mirrored copy arrives alongside it with empty translations, so this name " +
+        "will appear twice in the file list.",
+      other:
+        "Your existing files are kept exactly as they are, with their translations. " +
+        "The mirrored copies arrive alongside them with empty translations, so each " +
+        "of these names will appear twice in the file list.",
+    }),
+
     // ── LanguagesSection.tsx ──
     "projectSettings.languages.defaultTargetLabel": "Default target language",
-    "projectSettings.languages.defaultTargetNote": "The default (unnamed) lane. Change it on Project Info, above.",
-    "projectSettings.languages.additionalLanesLabel": "Additional target lanes",
-    "projectSettings.languages.additionalLanesDescription":
-      "Extra target-language lanes for this project — e.g. dialect variants or " +
-      "parallel drafts of the same source.",
-    "projectSettings.languages.noAdditionalLanes": "No additional lanes yet.",
-    "projectSettings.languages.archiveConfirm":
-      "Archive \"{lane}\"? It's hidden from the lane switcher by default but kept — " +
-      "its cell data is preserved and you can restore it anytime.",
+    "projectSettings.languages.laneNamePlaceholder": "Name this language lane",
+    // AQU-1592: a lane stores the language the user typed, an OPTIONAL display
+    // name, and an OPTIONAL code override. The name's placeholder is the
+    // language itself, because that is what the lane shows when no name is set.
+    "projectSettings.languages.laneLanguagePlaceholder": "The language it translates into",
+    "projectSettings.languages.laneLanguageRequiredError":
+      "A language lane needs a language. Type the language it translates into.",
+    "projectSettings.languages.laneCodeNote":
+      "Leave blank to derive the code from the language. Set it only when the " +
+      "derived code is wrong.",
+    "projectSettings.languages.laneCodeDerivedPlaceholder": "Derived from the language",
+    "projectSettings.languages.laneCodeMalformedError":
+      "That is not a valid language code. Use a BCP 47 tag such as \"es\" or \"es-MX\".",
+    "projectSettings.languages.duplicateNameError":
+      "Another language lane already has this name. Change one of them.",
+    // AQU-1784: the label a lane that shares its name is shown under elsewhere.
+    "projectSettings.languages.laneShownAs": "Shown as \"{label}\"",
+    "projectSettings.languages.nameTooLongError": "That name is too long.",
+    "projectSettings.languages.noAdditionalLanes": "No language lanes yet.",
+    // AQU-1464: "is anyone still working in here?" — shown inside the archive
+    // confirmation, above the Confirm button.
+    "projectSettings.languages.lastChangeLoading": "Checking recent activity…",
+    "projectSettings.languages.lastChange": "Last change in this language lane: {date} by {editor}",
+    "projectSettings.languages.lastChangeUnknownEditor": "Last change in this language lane: {date}",
+    "projectSettings.languages.lastChangeNone": "No changes in this language lane yet.",
+    "projectSettings.languages.lastChangeUnavailable": "Last change unavailable.",
+    // AQU-1600: every target lane is archivable, including the former default
+    // one — but a project must keep one active, so the last one's archive
+    // control is disabled with this reason.
+    "projectSettings.languages.lastActiveLaneTooltip":
+      "This is the project's only active language lane. Add another language lane before archiving " +
+      "this one.",
     "projectSettings.languages.archivingButton": "Archiving…",
     "projectSettings.languages.confirmArchiveButton": "Confirm archive",
-    "projectSettings.languages.archiveLaneAriaLabel": "Archive lane {lane}",
-    "projectSettings.languages.archivedLanesLabel": "Archived lanes",
-    "projectSettings.languages.archivedLanesDescription":
-      "Hidden from the lane switcher by default. Their translations are kept; " +
-      "restore a lane to make it active again.",
+    "projectSettings.languages.archiveLaneAriaLabel": "Archive language lane {lane}",
+    // Media redesign slice 1 — each language row's "Delivers" choice, which
+    // replaced AQU-1954's "Records audio" switch. Also used by the create dialog.
+    "projectSettings.languages.deliversLabel": "Delivers",
+    "projectSettings.languages.deliversAriaLabel": "What {lane} delivers",
+    "projectSettings.languages.deliversText": "Text",
+    "projectSettings.languages.deliversAudio": "Audio",
+    "projectSettings.languages.deliversTextAndAudio": "Text and audio",
+    "projectSettings.languages.deliversChoose": "Choose",
+    "projectSettings.languages.deliversHint":
+      "Delivers decides how a language lane's progress is counted. Text: a line is done when its " +
+      "text is validated. Audio: a line is done when its recording is approved, and no text is " +
+      "needed. Text and audio: a line is done only when both its text and its recording are approved.",
+    "projectSettings.languages.deliversNeedsChoice":
+      "This language lane had \"Records audio\" turned on. Choose whether it delivers Text, or Text " +
+      "and audio. Until you choose, its progress is counted as before.",
     "projectSettings.languages.restoringButton": "Restoring…",
     // "Restore" button → common.restore (identical text)
-    "projectSettings.languages.restoreLaneAriaLabel": "Restore lane {lane}",
-    "projectSettings.languages.addLaneLabel": "Add a target lane",
+    "projectSettings.languages.restoreLaneAriaLabel": "Restore language lane {lane}",
     "projectSettings.languages.suggestionsAriaLabel": "Language suggestions",
-    // "e.g. fr-CA" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
+    // "e.g. Traditional Han" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
     // "Adding…" busy label → common.adding (identical text)
-    "projectSettings.languages.addLaneButton": "Add lane",
-    "projectSettings.languages.alreadyDefaultError": "This is already the default target language.",
-    "projectSettings.languages.alreadyExistsError": "This lane already exists.",
+    "projectSettings.languages.alreadyExistsError": "This language lane already exists.",
     "projectSettings.languages.conflictError": "Someone else updated shared settings. Refresh to reapply your change.",
     "projectSettings.languages.offlineError": "You're offline. Reconnect to save language lanes.",
     "projectSettings.languages.permissionError": "You don't have permission to change shared settings.",
     "projectSettings.languages.savingFailedGeneric": "Saving failed.",
+    // Media redesign (Sam, Oct 25): design B, the compact table — Name |
+    // Language | Code | Delivers | ⋯. Explanations and long sub-text sit behind
+    // small (i) icons, so each "…AriaLabel" here names one of those icons.
+    "projectSettings.languages.targetLanguagesHeading": "Language lanes",
+    "projectSettings.languages.targetLanguagesHint":
+      "The language lanes this project translates into. Add one per dialect, or one per team when " +
+      "two teams draft the same language.",
+    "projectSettings.languages.targetLanguagesHintAriaLabel": "About language lanes",
+    "projectSettings.languages.noTargetLanguages": "No language lanes yet.",
+    "projectSettings.languages.codeColumn": "Code",
+    "projectSettings.languages.noLanguageSet": "No language set",
+    "projectSettings.languages.codeOptionalLabel": "Code (optional)",
+    "projectSettings.languages.codeHintAriaLabel": "About the code",
+    "projectSettings.languages.deliversHintAriaLabel": "About Delivers",
+    "projectSettings.languages.deliversNeedsChoiceAriaLabel": "Why {lane} needs a choice",
+    "projectSettings.languages.renameLaneAriaLabel": "Rename {lane}",
+    "projectSettings.languages.rowMenuAriaLabel": "More for {lane}",
+    "projectSettings.languages.sameNameMarker": "Same name as another language lane",
+    "projectSettings.languages.duplicateBannerTwo":
+      "Two language lanes are both named \"{lane}\", so they are hard to tell apart in the language " +
+      "switcher and on the Overview.",
+    "projectSettings.languages.duplicateBannerMany":
+      "Several language lanes are named \"{lane}\", so they are hard to tell apart in the language " +
+      "switcher and on the Overview.",
+    "projectSettings.languages.duplicateRenameAction": "Rename the second one",
+    "projectSettings.languages.duplicateArchiveAction": "Archive it",
+    "projectSettings.languages.addLanguageHeading": "Add a language lane",
+    "projectSettings.languages.addNameHint":
+      "Starts as the language's name. Give it a name of its own to tell two language lanes in one " +
+      "language apart.",
+    "projectSettings.languages.addNameHintAriaLabel": "About the name",
+    "projectSettings.languages.newLanguageLabel": "the new language lane",
+    "projectSettings.languages.addDuplicateNotice":
+      "Another language lane is already named \"{lane}\". You can still add this one; the language " +
+      "switcher numbers them.",
+    "projectSettings.languages.archiveConfirmShort": "Archive \"{lane}\"?",
+    "projectSettings.languages.archiveHint":
+      "It leaves the language switcher, but nothing is deleted: its work is kept and " +
+      "you can restore it at any time.",
+    "projectSettings.languages.archiveHintAriaLabel": "About archiving",
+    "projectSettings.languages.archivedHint":
+      "Hidden from the language switcher. Their work is kept; restore one to make it " +
+      "active again.",
+    "projectSettings.languages.archivedHintAriaLabel": "About archived language lanes",
+    "projectSettings.languages.changeSourceAriaLabel": "Change the source language",
 
     // ── ProjectSettings.tsx — misc call sites without a pre-existing key ──
-    "projectSettings.info.titleLabel": "Project title",
-    "projectSettings.systemPrompt.label": "System prompt",
-    "projectSettings.systemPrompt.navDescription":
-      "What this project is producing and how translations should read",
+    "projectSettings.info.titleLabel": "Project name",
     "projectSettings.advancedLlm.modelOverrideName": "Model override",
-    "projectSettings.voice.studioLabel": "Voice Studio",
-    "projectSettings.localModels.onDeviceLabel": "On-device models",
+    "projectSettings.localModels.onDeviceLabel": "Transcription and voices",
     "projectSettings.gitSync.autoSyncIntervalAriaLabel": "Auto-sync interval minutes",
     "projectSettings.gitSync.minutesAbbrev": "min",
 
@@ -659,8 +1210,14 @@ export const projectSettings = defineNamespace({
     "projectSettings.members.filterProjectGrants": "Project grants",
     "projectSettings.members.filterViaOrg": "Via organization",
     "projectSettings.members.removeDirectAccess": "Remove direct access",
+    "projectSettings.members.removeDirectAccessDescription":
+      "This removes {username}'s direct {role} membership on this project. Access through the organization, a team, or as the project creator stays.",
     "projectSettings.members.revokeAllAccess": "Revoke all access…",
     "projectSettings.members.noActionsAvailable": "No actions available",
+    "projectSettings.members.roleChangeNeedsRole":
+      "{role} or higher can change member roles",
+    "projectSettings.members.roleChangeOutranked":
+      "You can't change a member whose role is at or above your own",
     "projectSettings.members.addDialogDescription":
       "Grant access from your organization, or create a shareable invite link.",
     "projectSettings.members.actionsForRow": "Actions for {username}",
@@ -670,6 +1227,38 @@ export const projectSettings = defineNamespace({
     //    in MondayIntegrationSection.tsx scoped this trio to a dedicated later
     //    wave; this is that wave. "Monday"/"Monday.com" is the product's own
     //    name and stays as-is in every locale.
+    "projectSettings.monday.overviewConnectDescription": "Your organization is connected. Link a board to share this project's progress.",
+    "projectSettings.monday.overviewOpenBoard": "Open board in Monday",
+    "projectSettings.monday.overviewConfigureLink": "Configure link",
+    "projectSettings.monday.overviewLinkBoard": "Link a board",
+    "projectSettings.monday.overviewUrlUnavailable": "The board link is unavailable. Find the board by name in Monday.",
+    "projectSettings.monday.wizardDoneNeedsAttentionTitle": "Board linked — sync needs attention",
+    "projectSettings.monday.wizardLinkWarningsTitle": "The board is linked, but Monday reported a problem:",
+    "projectSettings.monday.wizardRecommendation": plural({
+      one: "Recommended: one item per {granularity}, with {mappedCount} progress column.",
+      other: "Recommended: one item per {granularity}, with {mappedCount} progress columns.",
+    }, "mappedCount"),
+    "projectSettings.monday.wizardPreviewBoardLink": "Preview board in Monday",
+    "projectSettings.monday.wizardHideCustomization": "Hide customization",
+    "projectSettings.monday.wizardShowCustomization": "Customize data and columns",
+    "projectSettings.monday.wizardFindBoardManually": "Find {name} in Monday. The direct board link is unavailable.",
+    "projectSettings.monday.connectionCheckFailed": "Could not check the Monday connection. Try again.",
+    "projectSettings.monday.retryAction": "Retry",
+    "projectSettings.monday.orgNextLinkProjectsTitle": "Next: link your projects",
+    "projectSettings.monday.orgNextLinkProjectsDescription": "Your organization is connected. Choose a project to review its recommended board and progress columns. You only authorize Monday once for this organization.",
+    "projectSettings.monday.orgProjectsLoading": "Loading projects…",
+    "projectSettings.monday.orgProjectsRetry": "Retry projects",
+    "projectSettings.monday.orgNoAccessibleProjects": "No accessible projects in this organization.",
+    "projectSettings.monday.orgProjectLinkedTo": "Linked to {board}",
+    "projectSettings.monday.orgProjectNotLinked": "Not linked yet",
+    "projectSettings.monday.orgProjectLinksLoading": "Checking which projects are linked…",
+    "projectSettings.monday.orgProjectLinksFailed": "Couldn't check which projects are linked to Monday.",
+    "projectSettings.monday.orgProjectSetUp": "Set up",
+    "projectSettings.monday.orgProjectManageInSettings": "Manage in project settings",
+    "projectSettings.monday.orgProjectViewInSettings": "View in project settings",
+    "projectSettings.monday.orgProjectSyncPaused": "Sync paused",
+    "projectSettings.monday.orgProjectBoardChanged": "Board changed",
+    "projectSettings.monday.orgProjectPushFailed": "Last push failed",
     "projectSettings.monday.boardSyncLabel": "Board sync",
     "projectSettings.monday.loadingIntegration": "Loading Monday integration…",
     "projectSettings.monday.orgNotConnected": "Your organization hasn't connected Monday.com yet.",
@@ -696,13 +1285,24 @@ export const projectSettings = defineNamespace({
       "untouched on Monday.",
     "projectSettings.monday.removeLinkButton": "Remove link",
     "projectSettings.monday.structureStaleWarning": "Board structure changed — review the mapping below.",
+    "projectSettings.monday.boardChangesIntro":
+      "New on your Monday board since it was linked. Map a column to fill it from Aquilla (then pick what it shows and save the mapping), or mark it not needed.",
+    "projectSettings.monday.boardChangesMap": "Map it",
+    "projectSettings.monday.loadingBoardColumns": "Loading the board's columns…",
+    "projectSettings.monday.boardChangesDismiss": "Not needed",
+    "projectSettings.monday.boardChangesReadOnly": "Aquilla can't fill this kind of column.",
     "projectSettings.monday.linkedBoardPrefix": "Linked board:",
     "projectSettings.monday.oneItemPerLabel": "One item per {granularity}.",
+    "projectSettings.monday.oneItemWithSubitemsLabel": "One item for the project, with a subitem per file.",
+    "projectSettings.monday.fileSubitemsLabel": "Files as subitems",
+    "projectSettings.monday.fileSubitemsDescription":
+      "Each file gets a subitem under the project's row on Monday, with its own progress.",
     "projectSettings.monday.lastPushOk": "Last push {date} — ok.",
     "projectSettings.monday.lastPushFailed": "Last push {date} — failed.",
     "projectSettings.monday.notPushedYet": "Not pushed yet.",
     "projectSettings.monday.syncToggleLabel": "Sync",
     "projectSettings.monday.syncNowButton": "Sync now",
+    "projectSettings.monday.syncNowPausedTooltip": "Sync is off. Turn it on to push progress to Monday.",
     "projectSettings.monday.removeBoardLinkAriaLabel": "Remove board link",
     "projectSettings.monday.columnMappingLabel": "Column mapping",
     "projectSettings.monday.reconfigureWithAiLabel": "Reconfigure with AI",
@@ -735,15 +1335,218 @@ export const projectSettings = defineNamespace({
       "Couldn't list boards — an org maintainer can change the board later.",
     "projectSettings.monday.pickBoardPlaceholder": "Pick a board",
     "projectSettings.monday.boardItemsLabel": "Board items",
-    "projectSettings.monday.granularityProjectLabel": "One item for the whole project",
+    "projectSettings.monday.granularityProjectLabel": "One item for the project, with a subitem per file",
     "projectSettings.monday.granularityFileLabel": "One item per file",
     "projectSettings.monday.someColumnsSkipped": "Some columns were skipped",
+    "projectSettings.monday.columnPickerOnBoard": "On your board",
+    "projectSettings.monday.columnInfo.completion_pct": "How much of the project or file is translated, as a percentage.",
+    "projectSettings.monday.columnInfo.validated_pct": "How much is translated and approved by enough reviewers, as a percentage.",
+    "projectSettings.monday.columnInfo.has_audio_pct": "How many lines have a recording, as a percentage.",
+    "projectSettings.monday.columnInfo.audio_validated_pct": "How many lines have an approved recording, as a percentage.",
+    "projectSettings.monday.columnInfo.status_auto": "Not started, In progress or Complete, worked out from the translation progress.",
+    "projectSettings.monday.columnInfo.deadline":
+      "The project deadline. Empty when the project has none.",
+    "projectSettings.monday.columnInfo.last_activity": "The date someone last worked on the project.",
+    "projectSettings.monday.columnInfo.translators": "The names of the people who can translate in the project.",
+    "projectSettings.monday.columnInfo.filled_count": "How many lines are translated.",
+    "projectSettings.monday.columnInfo.validated_count": "How many lines are translated and approved.",
+    "projectSettings.monday.columnInfo.total_count": "How many lines there are to translate.",
+    "projectSettings.monday.columnInfo.project_link": "A link that opens the project in Aquilla. On a row per file, it opens that file.",
+    "projectSettings.monday.columnInfo.schedule_status":
+      "On track, Due soon, Overdue or Behind plan, from the project deadline and the plan's target " +
+      "dates.",
+    "projectSettings.monday.columnInfo.books_done": "How many books (or files) are marked Done on the plan, like \"12 of 27\".",
+    "projectSettings.monday.columnInfo.next_target_date": "The nearest target date on the plan that isn't done or past yet.",
+    "projectSettings.monday.columnInfo.days_since_activity": "How many days since anyone last worked on the project.",
+    "projectSettings.monday.columnInfo.project_manager": "The project manager's name.",
+    "projectSettings.monday.columnInfo.languages": "The languages the project translates into.",
+    "projectSettings.monday.columnInfo.active_contributors_30d": "How many different people worked on the project in the last 30 days.",
+    "projectSettings.monday.columnInfo.books_in_progress": "The books (or files) that have been started and aren't marked Done.",
+    "projectSettings.monday.columnInfo.recorded_minutes": "Minutes of recorded audio in the project.",
+    "projectSettings.monday.columnInfo.external_id": "Aquilla's own ID for each item. Needed so a later setup finds and reuses the items Aquilla made.",
     "projectSettings.monday.reviewRowsCaption": "What gets pushed — change any row before applying",
     "projectSettings.monday.applyingStatus": "Linking the board and pushing your progress…",
     "projectSettings.monday.progressPushesAutomatically": "Progress pushes automatically as translators work.",
     "projectSettings.monday.viewBoardLink": "View board on Monday",
     "projectSettings.monday.connectButton": "Connect Monday.com",
     "projectSettings.monday.applyAndPushButton": "Apply and push",
+    "projectSettings.monday.wizardIntroLine":
+      "Aquilla picks a board and suggests what to show. Nothing changes in Monday until you confirm.",
+    "projectSettings.monday.wizardStepOf": "Step {step} of {total}",
+    "projectSettings.monday.wizardBoardTitle": "Which board?",
+    "projectSettings.monday.wizardColumnsTitle": "What should your board show?",
+    "projectSettings.monday.wizardConfirmTitle": "Ready to connect",
+    "projectSettings.monday.wizardAdvancedShow": "Advanced: match columns myself",
+    "projectSettings.monday.wizardAdvancedHide": "Hide advanced",
+    "projectSettings.monday.wizardConfirmAdds": plural({
+      one: "Aquilla will add {count} column to your Monday board and keep one row for this project, with a subitem for each file, up to date in an “Aquilla projects” group.",
+      other: "Aquilla will add {count} columns to your Monday board and keep one row for this project, with a subitem for each file, up to date in an “Aquilla projects” group.",
+    }, "count"),
+    "projectSettings.monday.wizardConfirmAddsPerFile": plural({
+      one: "Aquilla will add {count} column to your Monday board and keep one row per file up to date in an “Aquilla projects” group.",
+      other: "Aquilla will add {count} columns to your Monday board and keep one row per file up to date in an “Aquilla projects” group.",
+    }, "count"),
+    "projectSettings.monday.wizardConfirmNoAdds": "Aquilla will keep one row for this project, with a subitem for each file, up to date on {board}, in an “Aquilla projects” group.",
+    "projectSettings.monday.wizardConfirmNoAddsPerFile": "Aquilla will keep one row per file up to date on {board}, in an “Aquilla projects” group.",
+    "projectSettings.monday.wizardAddAndConnectButton": "Add columns and connect",
+    // AQU-2087: step 1's other choice, a clean board made by Aquilla.
+    "projectSettings.monday.newBoardOption": "Make a new board for me",
+    "projectSettings.monday.newBoardHelp":
+      "A clean board with only the columns you pick next, in one “Aquilla projects” group, and no sample rows.",
+    "projectSettings.monday.newBoardNameLabel": "Board name",
+    "projectSettings.monday.newBoardDefaultName": "Aquilla progress",
+    "projectSettings.monday.existingBoardOption": "A board you already have",
+    "projectSettings.monday.noBoardsYet": "This Monday account has no boards yet, so Aquilla will make one.",
+    "projectSettings.monday.wizardConfirmNewBoard": plural({
+      one: "Aquilla will make a board called “{board}” with {count} column, and keep one row for this project up to date in an “Aquilla projects” group.",
+      other: "Aquilla will make a board called “{board}” with {count} columns, and keep one row for this project up to date in an “Aquilla projects” group.",
+    }, "count"),
+    "projectSettings.monday.wizardConfirmNewBoardPerFile": plural({
+      one: "Aquilla will make a board called “{board}” with {count} column, and keep one row per file up to date in an “Aquilla projects” group.",
+      other: "Aquilla will make a board called “{board}” with {count} columns, and keep one row per file up to date in an “Aquilla projects” group.",
+    }, "count"),
+    "projectSettings.monday.wizardMakeBoardButton": "Make board and connect",
+    "projectSettings.monday.wizardMakingBoard": "Making your board in Monday…",
+    "projectSettings.monday.wizardNewBoardFailed": "Couldn't make the board: {reason}. Nothing was connected yet.",
+    "projectSettings.monday.wizardAddingColumns": "Adding columns to your board…",
+    "projectSettings.monday.wizardAddColumnsFailed": "Couldn't add the columns: {reason}. Nothing was connected yet.",
+    "projectSettings.monday.wizardSomeColumnsNotAdded":
+      "Monday didn't add: {columns} ({reason}). Everything else is connected; you can add them later from this page.",
+    "projectSettings.monday.chooser.intro":
+      "Tick what you want on your Monday board. We'll use columns you already have and add any that are missing.",
+    "projectSettings.monday.chooser.groupSchedule": "Schedule",
+    "projectSettings.monday.chooser.groupTeam": "Team and activity",
+    "projectSettings.monday.chooser.newColumn": "New column",
+    "projectSettings.monday.chooser.alwaysIncluded": "Always included, so Aquilla can find this project's row again.",
+    "projectSettings.monday.chooser.namesVisible": "Everyone who can see {board} on Monday will see these names.",
+    "projectSettings.monday.chooser.summaryAdds": plural({
+      one: "Adds {count} new column to {board} and uses {uses} already there.",
+      other: "Adds {count} new columns to {board} and uses {uses} already there.",
+    }, "count"),
+    "projectSettings.monday.chooser.summaryNoAdds": plural({
+      one: "Uses {count} column already on {board}; nothing new is added.",
+      other: "Uses {count} columns already on {board}; nothing new is added.",
+    }, "count"),
+    "projectSettings.monday.addColumnsButton": "Add columns",
+    "projectSettings.monday.addColumnsDialogTitle": "Add columns to your board",
+    "projectSettings.monday.addColumnsConfirm": plural({
+      one: "Add {count} column",
+      other: "Add {count} columns",
+    }, "count"),
+
+    // ── Airtable integration (AQU-804) — Monday's screens for a table ──
+    "projectSettings.airtable.tableSyncLabel": "Table sync",
+    "projectSettings.airtable.loadingIntegration": "Loading Airtable integration…",
+    "projectSettings.airtable.connectionCheckFailed": "Could not check the Airtable connection. Try again.",
+    "projectSettings.airtable.orgNotConnected": "Your organization hasn't connected Airtable yet.",
+    "projectSettings.airtable.noTableLinkedReadOnly":
+      "No Airtable table is linked to this project. Maintainers can set one up here.",
+    "projectSettings.airtable.linkTablePrompt":
+      "Link an Airtable table to push this project's translation progress automatically, for the whole project and for each file.",
+    "projectSettings.airtable.setupWithAiBlurb":
+      "Picks the table, maps your progress figures to its fields, and shows you the plan before anything is written.",
+    "projectSettings.airtable.syncOnBadge": "Sync on",
+    "projectSettings.airtable.pushedNotice": plural({
+      one: "Pushed to Airtable ({count} record).",
+      other: "Pushed to Airtable ({count} records).",
+    }, "count"),
+    "projectSettings.airtable.syncFailedNotice": "Sync failed: {reason}",
+    "projectSettings.airtable.addFieldsButton": "Add fields",
+    "projectSettings.airtable.addFieldsDialogTitle": "Add fields to your table",
+    "projectSettings.airtable.addFieldsConfirm": plural({
+      one: "Add {count} field",
+      other: "Add {count} fields",
+    }, "count"),
+    "projectSettings.airtable.removeTableLinkTitle": "Remove table link?",
+    "projectSettings.airtable.removeTableLinkDescription":
+      "Progress will stop pushing to {table}. The table and its records are left untouched in Airtable.",
+    "projectSettings.airtable.removeTableLinkAriaLabel": "Remove table link",
+    "projectSettings.airtable.tableChangesIntro":
+      "New in your Airtable table since it was linked. Map a field to fill it from Aquilla (then pick what it shows and save the mapping), or mark it not needed.",
+    "projectSettings.airtable.tableChangesReadOnly": "Aquilla can't fill this kind of field.",
+    "projectSettings.airtable.structureStaleWarning": "The table's fields changed — review the mapping below.",
+    "projectSettings.airtable.linkedTablePrefix": "Linked table:",
+    "projectSettings.airtable.openTable": "Open table in Airtable",
+    "projectSettings.airtable.syncNowPausedTooltip": "Sync is off. Turn it on to push progress to Airtable.",
+    "projectSettings.airtable.fieldMappingLabel": "Field mapping",
+    "projectSettings.airtable.loadingTableFields": "Loading the table's fields…",
+    "projectSettings.airtable.reconfigurePlaceholder":
+      "Describe what to change — e.g. “track validated % instead of completion, one record per episode”",
+    "projectSettings.airtable.fieldHeader": "Airtable field",
+    "projectSettings.airtable.pickFieldPlaceholder": "Pick a field",
+    "projectSettings.airtable.noFieldsMapped": "No fields mapped.",
+    "projectSettings.airtable.recordsLine.project": "One record for the whole project.",
+    "projectSettings.airtable.recordsLine.file": "One record per file.",
+    "projectSettings.airtable.recordsLine.projectAndFiles": "One record for the project and one per file.",
+    "projectSettings.airtable.granularity.project": "One record for the whole project",
+    "projectSettings.airtable.granularity.file": "One record per file (episode)",
+    "projectSettings.airtable.granularity.projectAndFiles": "One record for the project and one per file",
+    "projectSettings.airtable.recordsLabel": "Table records",
+    "projectSettings.airtable.wizardTitle": "Set up Airtable with AI",
+    "projectSettings.airtable.wizardIntroLine":
+      "Aquilla picks a table and suggests what to show. Nothing changes in Airtable until you confirm.",
+    "projectSettings.airtable.connectGateDescription":
+      "Your organization isn't connected to Airtable yet. Paste a personal access token to connect it; setup continues right after.",
+    "projectSettings.airtable.scanButton": "Scan and propose",
+    "projectSettings.airtable.connectAndScanButton": "Connect and scan",
+    "projectSettings.airtable.scanStep1Label": "Reading this project and your Airtable tables",
+    "projectSettings.airtable.scanStep2Label": "Matching progress figures to the table's fields",
+    "projectSettings.airtable.wizardTableTitle": "Which table?",
+    "projectSettings.airtable.wizardColumnsTitle": "What should your table show?",
+    "projectSettings.airtable.tableInBase": "In the {base} base",
+    "projectSettings.airtable.loadingBases": "Loading bases…",
+    "projectSettings.airtable.loadingTables": "Loading tables…",
+    "projectSettings.airtable.tableListFailed":
+      "Couldn't list the tables — an org maintainer can change the table later.",
+    "projectSettings.airtable.baseSelectAriaLabel": "Airtable base",
+    "projectSettings.airtable.tableSelectAriaLabel": "Airtable table",
+    "projectSettings.airtable.pickBasePlaceholder": "Pick a base",
+    "projectSettings.airtable.pickTablePlaceholder": "Pick a table",
+    "projectSettings.airtable.someFieldsSkipped": "Some fields were skipped",
+    "projectSettings.airtable.wizardAdvancedShow": "Advanced: match fields myself",
+    "projectSettings.airtable.wizardConfirmAdds": plural({
+      one: "Aquilla will add {count} field to {table}.",
+      other: "Aquilla will add {count} fields to {table}.",
+    }, "count"),
+    "projectSettings.airtable.wizardConfirmNoAdds": "Aquilla will use the fields already in {table}.",
+    "projectSettings.airtable.wizardConfirmRecords.project": "It keeps one record for this project up to date there.",
+    "projectSettings.airtable.wizardConfirmRecords.file": "It keeps one record per file up to date there.",
+    "projectSettings.airtable.wizardConfirmRecords.projectAndFiles":
+      "It keeps one record for this project and one per file up to date there.",
+    "projectSettings.airtable.wizardAddAndConnectButton": "Add fields and connect",
+    "projectSettings.airtable.wizardAddingFields": "Adding fields to your table…",
+    "projectSettings.airtable.wizardAddFieldsFailed": "Couldn't add the fields: {reason}. Nothing was connected yet.",
+    "projectSettings.airtable.wizardSomeFieldsNotAdded":
+      "Airtable didn't add: {columns} ({reason}). Everything else is connected; you can add them later from this page.",
+    "projectSettings.airtable.applyingStatus": "Linking the table and pushing your progress…",
+    "projectSettings.airtable.wizardDoneTitle": "Airtable is set up",
+    "projectSettings.airtable.wizardDoneNeedsAttentionTitle": "Table linked — sync needs attention",
+    "projectSettings.airtable.wizardDoneLine": "This project now syncs to {table}.",
+    "projectSettings.airtable.pushedRecords": plural({
+      one: "Pushed {count} record.",
+      other: "Pushed {count} records.",
+    }, "count"),
+    "projectSettings.airtable.firstPushFailed": "Linked, but the first push failed: {reason} You can retry with Sync now.",
+    "projectSettings.airtable.wizardLinkWarningsTitle": "The table is linked, but some fields were left out:",
+    "projectSettings.airtable.chooser.intro":
+      "Tick what you want in your Airtable table. We'll use fields you already have and add any that are missing.",
+    "projectSettings.airtable.chooser.inTable": "In your table",
+    "projectSettings.airtable.chooser.newField": "New field",
+    "projectSettings.airtable.chooser.alwaysIncluded": "Always included, so Aquilla can find its records again.",
+    "projectSettings.airtable.chooser.summaryAdds": plural({
+      one: "Adds {count} new field to {board} and uses {uses} already there.",
+      other: "Adds {count} new fields to {board} and uses {uses} already there.",
+    }, "count"),
+    "projectSettings.airtable.chooser.summaryNoAdds": plural({
+      one: "Uses {count} field already in {board}; nothing new is added.",
+      other: "Uses {count} fields already in {board}; nothing new is added.",
+    }, "count"),
+    "projectSettings.airtable.chooser.namesVisible": "Everyone who can see {board} in Airtable will see these names.",
+    "projectSettings.airtable.orgNextLinkProjectsDescription":
+      "Your organization is connected. Choose a project to review its recommended table and progress fields.",
+    "projectSettings.airtable.orgProjectLinkedTo": "Linked to {table}",
+    "projectSettings.airtable.orgProjectLinksFailed": "Couldn't check which projects are linked to Airtable.",
+    "projectSettings.airtable.orgProjectTableChanged": "Table changed",
 
     // ── Terminology source-term matching (AQU-1271) ──
     "projectSettings.termMatching.title": "Prefixes and suffixes",
@@ -760,6 +1563,23 @@ export const projectSettings = defineNamespace({
     "projectSettings.termMatching.preset.arabic": "Arabic",
     "projectSettings.termMatching.preset.swahili": "Swahili",
     "projectSettings.termMatching.preset.turkish": "Turkish",
+
+    // ── AQU-1075: settings copied from the upstream project ──
+    "projectSettings.inherit.title": "Settings from {upstream}",
+    "projectSettings.inherit.description":
+      "This project keeps a copy of what you turn on. When {upstream} saves one of them, the copy updates, and so does the next project in the chain. Detach a field to keep your own.",
+    "projectSettings.inherit.linkDescription":
+      "Turn on what this project should receive. You can detach any of them later in its settings.",
+    "projectSettings.inherit.field.translationBrief": "Translation brief",
+    "projectSettings.inherit.field.knowledgeDocs": "Knowledge-base documents",
+    "projectSettings.inherit.field.workflowPolicy": "Workflow policy",
+    "projectSettings.inherit.field.workflowPolicyDetail":
+      "Who may validate, self-validation, autopilot and agent mode, and check penalties.",
+    "projectSettings.inherit.field.livingMemory": "Living-memory notes",
+    "projectSettings.inherit.field.smartQuotes": "Smart quotes",
+    "projectSettings.inherit.field.systemPrompt": "Instructions",
+    "projectSettings.inherit.fromUpstream": "from {upstream}",
+    "projectSettings.inherit.detach": "Detach",
   },
   context: {
     _context: {
@@ -770,6 +1590,50 @@ export const projectSettings = defineNamespace({
         "button text.",
     },
     keys: {
+      "projectSettings.leave.confirmTitle": {
+        description:
+          "Title of the confirm dialog a person opens to leave a project themselves "
+          + "(AQU-1993), not to remove someone else.",
+        placeholders: {
+          name: "The project's name — not translated.",
+        },
+      },
+      "projectSettings.leave.leftToast": {
+        description: "Success toast after the person left a project.",
+        placeholders: {
+          name: "The project's name — not translated.",
+        },
+      },
+      "projectSettings.timeline.lockInfoAria": {
+        description:
+          "Accessible name of the (i) beside 'Lock the timings against dragging' in Project settings; " +
+          "the (i) holds that setting's longer explanation.",
+      },
+      "projectSettings.timeline.trackEditingInfoAria": {
+        description:
+          "Accessible name of the (i) beside 'Let maintainers add and edit timeline tracks' in Project " +
+          "settings; the (i) holds that setting's longer explanation.",
+      },
+      "projectSettings.audioMedia.infoAria": {
+        description:
+          "Accessible name of the (i) beside the 'Audio loading' card's title in Project settings; the (i) " +
+          "explains what the card is for and what each of its four choices does.",
+      },
+      "projectSettings.timeline.filmAndSourcesLabel": {
+        description:
+          "Label of a checkbox in the project's Timeline settings: whether the media view shows its " +
+          "dubbing tools — the Sources menu in its top bar, whose first item is the film (link a video).",
+      },
+      "projectSettings.timeline.filmAndSourcesInfoAria": {
+        description:
+          "Screen-reader name of the small (i) button beside that checkbox, which opens the longer " +
+          "explanation (projectSettings.timeline.filmAndSourcesInfo).",
+      },
+      "projectSettings.timeline.filmAndSourcesInfo": {
+        description:
+          "The explanation behind the (i) beside the film and sources checkbox. 'Sources' is the name " +
+          "of a menu in the media view's top bar, and the film is the first item in that menu.",
+      },
       "projectSettings.shared.lastEdited": {
         description:
           "Sub-line under the project-name field recording who last changed the " +
@@ -777,6 +1641,14 @@ export const projectSettings = defineNamespace({
           "period. Separated by a middle dot.",
         placeholders: {
           name: "Username of the person who last saved the shared settings.",
+          date: "Date of that save, already formatted for the viewer's locale.",
+        },
+      },
+      "projectSettings.shared.lastEditedOn": {
+        description:
+          "The same provenance line as lastEdited, when the app does not know " +
+          "who saved the shared settings, only when. Not a sentence, no period.",
+        placeholders: {
           date: "Date of that save, already formatted for the viewer's locale.",
         },
       },
@@ -856,30 +1728,72 @@ export const projectSettings = defineNamespace({
           role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
         },
       },
+      "projectSettings.create.destinationRoleHint": {
+        description:
+          "Help text under the create-dialog destination picker when the caller " +
+          "may not create projects in the org the page is showing.",
+        placeholders: {
+          role: "Singular localized role name, e.g. 'Contributor' or 'Guest'.",
+          org: "Organization name, e.g. 'Biblica ETT'.",
+        },
+      },
+      "projectSettings.create.destinationNotAllowedHint": {
+        description:
+          "Help text under the create-dialog destination picker when the caller may " +
+          "not create projects in the page's org and their role there is unknown.",
+        placeholders: { org: "Organization name, e.g. 'Biblica ETT'." },
+      },
+      "projectSettings.create.destinationLoadError": {
+        description:
+          "Error in the create-project dialog when the list of places the user may " +
+          "create a project could not be loaded. Creating is blocked until it loads.",
+      },
+      "projectSettings.create.createdToast": {
+        description: "Success toast after creating a project, naming where it was created.",
+        placeholders: {
+          name: "The new project's name.",
+          destination: "Where it was created: an organization name or the user's personal workspace name.",
+        },
+      },
+      "projectSettings.create.teamsLabel": {
+        description: "Field label above the teams multi-select in the create-project dialog.",
+      },
+      "projectSettings.create.teamsPlaceholder": {
+        description: "Placeholder in the teams multi-select trigger when no team is chosen.",
+      },
+      "projectSettings.create.teamsSearch": {
+        description: "Placeholder and accessible name for the search box inside the teams multi-select.",
+      },
+      "projectSettings.create.teamsEmpty": {
+        description: "Shown in the teams multi-select when the search matches no team.",
+      },
+      "projectSettings.create.teamsRequiredHint": {
+        description:
+          "Help text under the teams multi-select when the caller may only create projects " +
+          "in this organization inside a team they lead.",
+      },
+      "projectSettings.create.teamsRequiredError": {
+        description: "Form error when the caller submits without choosing a required team.",
+      },
       "projectSettings.create.trigger": {
         description: "Button that opens the create-project dialog. Short, with a leading + icon.",
       },
       "projectSettings.create.targetLanguagesLabel": {
         description:
           "Field label above the target-language boxes in the create dialog. " +
-          "Always 'Target Language(s)' — the parenthetical covers one or many " +
-          "lanes without swapping the label as boxes fill.",
+          "Always 'Language lanes' (AQU-2261), however many boxes are filled — " +
+          "each box becomes one language lane.",
       },
       "projectSettings.create.shapeLinkedTargetName": {
         description:
           "Bold name of the linked-target project-shape radio. Inflects with how " +
           "many target-language lanes the user has filled in on this create pass " +
-          "('Linked Target' vs 'Linked Targets'). Count is not shown as a numeral.",
+          "('Linked target' vs 'Linked targets'). Count is not shown as a numeral.",
       },
       "projectSettings.create.additionalTargetPlaceholder": {
         description:
           "Placeholder in the second and subsequent target-language boxes of the " +
           "create dialog, where the first box carries the full example placeholder.",
-      },
-      "projectSettings.create.addTargetLanguageAction": {
-        description:
-          "Label of the button under the target-language boxes in the create dialog " +
-          "that appends one more empty box (one per additional target lane).",
       },
       "projectSettings.create.bulkTargetLanguagesHint": {
         description:
@@ -905,7 +1819,7 @@ export const projectSettings = defineNamespace({
         },
       },
       "projectSettings.create.languageHintAriaLabel": {
-        description: "Accessible name of the small info-icon button beside a source/target language field that opens an explanatory tooltip.",
+        description: "Accessible name of the small (i) button beside a source/target language field. A click opens an explanation in place under the label.",
       },
       "projectSettings.create.shapeSelfContained": {
         description:
@@ -929,6 +1843,13 @@ export const projectSettings = defineNamespace({
         description:
           "The emphasized mode word in projectSettings.create.cloneIntro — a one-time " +
           "snapshot copy, not a live link.",
+      },
+      "projectSettings.create.upstreamFilesCount": {
+        description:
+          "Sentence under the file list in the Create New Project dialog, saying how many of the upstream project's files the new project will bring in.",
+        placeholders: {
+          count: "How many files are checked (data, a plain integer), e.g. '3'.",
+        },
       },
       "projectSettings.create.cloneIntro": {
         description:
@@ -1033,71 +1954,14 @@ export const projectSettings = defineNamespace({
           projectName: "The upstream project's name (data, not translated).",
         },
       },
-      "projectSettings.share.lockedHintOrg": {
-        description: "Tooltip on a locked (non-editable) role row in the Share dialog's Members tab, for a member whose access comes from org membership.",
-      },
       "projectSettings.share.lockedHintCreator": {
         description: "Tooltip on a locked role row for the project's creator, whose role can't be changed here.",
-      },
-      "projectSettings.share.recipientJoinsAs": {
-        description:
-          "Sentence shown after an invite link is minted, naming the role the " +
-          "recipient will hold once they redeem it.",
-        placeholders: {
-          role: "The already-localized role display name (via resolveRoleName), or the projectSettings.share.recipientJoinsAsFallbackRole fallback text if the role option can't be resolved.",
-        },
-      },
-      "projectSettings.share.singleUseNote": {
-        description:
-          "Note explaining an invite link is single-use, naming the button that " +
-          "mints a fresh one for the next recipient.",
-        placeholders: {
-          createAnotherLink: "The rendered projectSettings.share.createAnotherLinkButton label, wrapped in <strong> by the caller — insert exactly as given.",
-        },
-      },
-      "projectSettings.share.recipientEmailLabel": {
-        description: "Field label for the optional recipient-email input on the invite-link form. The '(optional)' qualifier is a separate, smaller-styled span using common.optionalFieldNote.",
       },
       "projectSettings.share.openLinkConnector": {
         description: "Short connector text on an active-invite-link row shown instead of the recipient's email, when the link has no email restriction (anyone can redeem it).",
       },
-      "projectSettings.share.revokeLinkAriaLabel": {
-        description: "Accessible name of the trash-icon button that starts the revoke-confirmation flow for one active invite link.",
-      },
       "projectSettings.searchAriaLabel": {
         description: "Accessible name of the settings search input, which filters section cards by label/keyword as the user types.",
-      },
-      "projectSettings.moreSaveOptionsAriaLabel": {
-        description: "Accessible name of the small chevron button beside 'Save changes' that opens the 'Save and close' / 'Close without saving' menu.",
-      },
-      "projectSettings.dismissConflictAriaLabel": {
-        description: "Accessible name of the small × button that dismisses the 'Settings changed elsewhere' banner.",
-      },
-      "projectSettings.save.savedShort": {
-        description:
-          "Success message shown briefly after Save when 3 or fewer fields changed — " +
-          "a plain list of the changed field names.",
-        placeholders: {
-          list: "The changed field names (projectSettings.field.*), already joined into a localized list via formatList() — insert exactly as given.",
-        },
-      },
-      "projectSettings.save.savedMany": {
-        description:
-          "Success message shown briefly after Save when more than 3 fields changed — " +
-          "names the first 3 and counts the rest. count is always > 3 in the English " +
-          "flow (the <=3 case uses savedShort instead), but other locales' plural " +
-          "rules may still select a category other than 'other' for the same number.",
-        placeholders: {
-          count: "Total number of changed fields (always > 3 in the English flow — governs plural selection).",
-          list: "The first 3 changed field names (projectSettings.field.*), already joined into a localized list via formatList() — insert exactly as given.",
-          more: "How many additional changed fields beyond the first 3, as a plain cardinal number. Not separately pluralized.",
-        },
-      },
-      "projectSettings.save.conflictToast": {
-        description: "Toast shown when a background shared-settings update from another collaborator lands while this page is open.",
-        placeholders: {
-          username: "The other collaborator's username (data), or the projectSettings.save.conflictFallbackUsername fallback text if unknown.",
-        },
       },
       "projectSettings.info.lastEditedBy": {
         description: "Small note under the Project Name field showing who last saved shared settings and when.",
@@ -1146,10 +2010,9 @@ export const projectSettings = defineNamespace({
         },
       },
       "projectSettings.advancedLlm.providerFrontier": {
-        description: "Radio-option description for the Frontier (recommended, default) completion provider.",
+        description: "Radio-option description for the Aquilla (recommended, default) completion provider.",
         placeholders: {
           name: "The bold provider name, already translated via projectSettings.advancedLlm.providerFrontierName and wrapped in <strong> by the caller.",
-          domain: "The literal, untranslated hostname 'api.frontierrnd.com', styled as inline code by the caller — insert exactly as given.",
         },
       },
       "projectSettings.advancedLlm.providerCustom": {
@@ -1181,10 +2044,18 @@ export const projectSettings = defineNamespace({
         },
       },
       "projectSettings.advancedLlm.modelOverrideHelp": {
-        description: "Help text under the optional model-override input for the Frontier provider.",
+        description: "Help text under the optional model-override input for the Aquilla provider.",
         placeholders: {
           example: "An example OpenRouter model id, e.g. 'anthropic/claude-3.5-sonnet', styled as inline code by the caller — data, not translated.",
         },
+      },
+      "projectSettings.advancedLlm.temperatureName": {
+        description: "The name of the AI temperature setting, without its value: names the slider for screen readers and names an Undo step ('Change: Temperature').",
+        maxLength: 30,
+      },
+      "projectSettings.ai.assistantLanguageName": {
+        description: "Short name of the setting for the language the AI assistant answers the team in, as an Undo step names it ('Change: Assistant language').",
+        maxLength: 40,
       },
       "projectSettings.advancedLlm.temperatureLabel": {
         description: "Field label for the temperature slider, showing its current value live.",
@@ -1192,11 +2063,18 @@ export const projectSettings = defineNamespace({
           value: "The current temperature value, e.g. '0.3'.",
         },
       },
-      "projectSettings.advancedLlm.healthPenaltyLabel": {
-        description: "Field label for the LLM health-penalty slider, showing its current value live.",
-        placeholders: {
-          percent: "The current penalty as a whole-number percentage, e.g. '10'.",
-        },
+      "projectSettings.cellLabel.label": {
+        description:
+          "Row label for the dropdown in Project settings → Content structure that " +
+          "says which role may type a label on a cell (Maintainer or Project Lead). " +
+          "A question-like noun phrase, matching 'Who can add and remove cells'.",
+      },
+      "projectSettings.cellLabel.description": {
+        description:
+          "Help text under the 'Who can label cells' row. Explains what a cell label " +
+          "is (a short note typed on a line), that it is never a voice or a character, " +
+          "and that maintainers may label cells unless the setting opens it to project " +
+          "leads. Role names as in common.role.*.",
       },
       "projectSettings.cellEditing.optionNone": {
         description:
@@ -1244,7 +2122,7 @@ export const projectSettings = defineNamespace({
           "Marks a role option in the harmonization minimum-role select as the " +
           "current default.",
         placeholders: {
-          role: "The already-localized role display name (via resolveRoleName/common.role.*), e.g. 'Project lead'.",
+          role: "The already-localized role display name (via resolveRoleName/common.role.*), e.g. 'Project Lead'.",
         },
       },
       "projectSettings.gitSync.originLabel": {
@@ -1255,13 +2133,13 @@ export const projectSettings = defineNamespace({
         },
       },
       "projectSettings.decay.maxHopsDescription": {
-        description: "Help text under the 'Max hops' input on the Retrieval support (decay) panel.",
+        description: "Help text under the 'Max hops' input on the Health (decay) panel.",
         placeholders: {
           defaultValue: "The default max-hops value as a plain number (data), e.g. '4'.",
         },
       },
       "projectSettings.decay.attentionThresholdDescription": {
-        description: "Help text under the 'Attention threshold' input on the Retrieval support (decay) panel.",
+        description: "Help text under the 'Attention threshold' input on the Health (decay) panel.",
         placeholders: {
           defaultValue: "The default threshold value as a plain number (data), e.g. '0.4'.",
         },
@@ -1270,6 +2148,25 @@ export const projectSettings = defineNamespace({
         description: "Small badge on the Source link card naming the sync gate for a chain (consumes-target) link.",
         placeholders: {
           value: "The rendered projectSettings.sourceLink.gateValidatedOnly or gateEveryCommit string — insert exactly as given.",
+        },
+      },
+      "projectSettings.sourceLink.laneLabel": {
+        description:
+          "Small badge naming WHICH of the upstream project's translations a chain " +
+          "(consumes-target) link reads — shown beside the corpus and gate badges on " +
+          "the confirm step of the linking flow. 'translation' here means one of the " +
+          "upstream's target languages, not the act of translating.",
+        placeholders: {
+          value: "The lane's own name as the upstream project set it (a language name such as 'Quebec French'), inserted as given and never translated.",
+        },
+      },
+      "projectSettings.sourceLink.scopeSomeFiles": {
+        description:
+          "Small badge on the Source link card saying how many of the upstream project's files this link follows, for a link made with only some of them picked.",
+        placeholders: {
+          count: "How many of the upstream's files this link follows (data, a plain integer), e.g. '2'.",
+          total:
+            "How many files the upstream project has in total (data, a plain integer), e.g. '3'. The plural form is chosen from THIS number.",
         },
       },
       "projectSettings.sourceLink.cursorLabel": {
@@ -1284,10 +2181,121 @@ export const projectSettings = defineNamespace({
           word: "The literal, untranslated confirmation word 'DETACH' the user must type verbatim — styled bold-monospace by the caller. Never translate this word: the input is validated against the exact English literal.",
         },
       },
-      "projectSettings.languages.archiveConfirm": {
-        description: "Inline confirmation prompt shown before archiving one target lane.",
+      "projectSettings.languages.targetLanguagesHintAriaLabel": {
+        description:
+          "Accessible name of a small (i) icon on Project settings → Languages beside the Target languages heading. " +
+          "A click opens the explanation in place under it; a second click closes it.",
+      },
+      "projectSettings.languages.codeHintAriaLabel": {
+        description:
+          "Accessible name of a small (i) icon on Project settings → Languages beside a language's Code field, explaining that the code comes from the language. " +
+          "A click opens the explanation in place under it; a second click closes it.",
+      },
+      "projectSettings.languages.deliversHintAriaLabel": {
+        description:
+          "Accessible name of a small (i) icon on Project settings → Languages beside the Delivers column heading and the add form's Delivers field. " +
+          "A click opens the explanation in place under it; a second click closes it.",
+      },
+      "projectSettings.languages.addNameHintAriaLabel": {
+        description:
+          "Accessible name of a small (i) icon on Project settings → Languages beside the Name field of the Add a language form. " +
+          "A click opens the explanation in place under it; a second click closes it.",
+      },
+      "projectSettings.languages.archiveHintAriaLabel": {
+        description:
+          "Accessible name of a small (i) icon on Project settings → Languages inside the confirmation shown before archiving a language. " +
+          "A click opens the explanation in place under it; a second click closes it.",
+      },
+      "projectSettings.languages.archivedHintAriaLabel": {
+        description:
+          "Accessible name of a small (i) icon on Project settings → Languages beside the collapsed Archived (n) group of archived languages. " +
+          "A click opens the explanation in place under it; a second click closes it.",
+      },
+      "projectSettings.languages.changeSourceAriaLabel": {
+        description:
+          "Accessible name of the Change button on the source-language line of Project " +
+          "settings → Languages. It opens the source's Name, Language and Code fields.",
+      },
+      "projectSettings.languages.deliversNeedsChoiceAriaLabel": {
+        description:
+          "Accessible name of the small (i) icon beside a target language's Delivers " +
+          "dropdown when nothing is chosen yet. Its tooltip explains why a choice is needed.",
+        placeholders: { lane: "The language's display name (data, not translated)." },
+      },
+      "projectSettings.languages.renameLaneAriaLabel": {
+        description:
+          "Accessible name of a target language's name in the languages table, which " +
+          "opens its Name, Language and Code fields when clicked.",
+        placeholders: { lane: "The language's display name (data, not translated)." },
+      },
+      "projectSettings.languages.rowMenuAriaLabel": {
+        description:
+          "Accessible name of the ⋯ button at the end of one target language row, which " +
+          "opens Rename, Language and code…, and Archive.",
+        placeholders: { lane: "The language's display name (data, not translated)." },
+      },
+      "projectSettings.languages.duplicateBannerTwo": {
+        description:
+          "Warning above the languages table when two active target languages have the " +
+          "same name. Followed by two actions: rename the second one, or archive it.",
+        placeholders: { lane: "The shared name (data, not translated)." },
+      },
+      "projectSettings.languages.duplicateBannerMany": {
+        description:
+          "Same as projectSettings.languages.duplicateBannerTwo, for three or more active " +
+          "target languages with the same name.",
+        placeholders: { lane: "The shared name (data, not translated)." },
+      },
+      "projectSettings.languages.addDuplicateNotice": {
+        description:
+          "Notice in the Add a language form while the language being added would have " +
+          "the same name as an active one. Not an error: adding it is allowed.",
         placeholders: {
-          lane: "The lane's language tag (data, not translated).",
+          lane: "The existing language's display name, as the switcher shows it (data, not translated).",
+        },
+      },
+      "projectSettings.languages.archiveConfirmShort": {
+        description:
+          "Question under one target language row before it is archived, followed by " +
+          "Confirm archive and Cancel. The longer explanation is in a tooltip beside it.",
+        placeholders: { lane: "The language's display name (data, not translated)." },
+      },
+      "projectSettings.languages.laneShownAs": {
+        description:
+          "Tooltip, and accessible name, of the small (i) icon beside the name of a " +
+          "language whose name another language also uses, giving the label it is shown " +
+          "under elsewhere in the app — the name plus the suffix that tells the two " +
+          "apart. Not a sentence; no period.",
+        placeholders: {
+          label: "The lane's disambiguated display label, e.g. 'Tshangla · 2' (data, not translated).",
+        },
+      },
+      "projectSettings.languages.lastChange": {
+        description:
+          "Inside the archive-lane confirmation: when this lane was last translated in, and " +
+          "by whom. Tells the project manager whether the lane is dormant or someone is " +
+          "working in it right now, because archiving locks the lane's translators out of " +
+          "editing. Shown only to people who may archive the lane.",
+        placeholders: {
+          date: "The already-formatted, locale-aware date of the edit (data) — insert exactly as given, do not reformat or reorder its parts.",
+          editor: "The editing member's username (data, never translated).",
+        },
+      },
+      "projectSettings.languages.lastChangeUnknownEditor": {
+        description:
+          "Same as projectSettings.languages.lastChange, for a lane whose newest edit " +
+          "records no editor name (an imported or pre-attribution row). Keep the two " +
+          "wordings consistent — only the trailing \"by <name>\" is dropped.",
+        placeholders: {
+          date: "The already-formatted, locale-aware date of the edit (data) — insert exactly as given, do not reformat or reorder its parts.",
+        },
+      },
+      "projectSettings.languages.deliversAriaLabel": {
+        description:
+          "Accessible name of the dropdown on one target language row that says what the " +
+          "language delivers: Text, Audio, or Text and audio.",
+        placeholders: {
+          lane: "The language's display name (data, not translated).",
         },
       },
       "projectSettings.languages.archiveLaneAriaLabel": {
@@ -1344,6 +2352,303 @@ export const projectSettings = defineNamespace({
           boardName: "The linked board's name (data, not translated), or a generic fallback noun if unknown.",
         },
       },
+      "projectSettings.monday.columnPickerOnBoard": {
+        description:
+          "Small badge beside a column in the picker when that column already exists on the " +
+          "user's Monday board (so it can't be ticked to add again).",
+      },
+      "projectSettings.monday.columnInfo.completion_pct": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.validated_pct": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.has_audio_pct": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.audio_validated_pct": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.status_auto": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.deadline": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.last_activity": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.translators": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.filled_count": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.validated_count": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.total_count": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.project_link": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.schedule_status": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.books_done": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.next_target_date": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.days_since_activity": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.project_manager": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.languages": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.active_contributors_30d": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.books_in_progress": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.recorded_minutes": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.external_id": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.wizardIntroLine": {
+        description: "One-sentence description at the start of the Monday.com setup dialog in project settings.",
+      },
+      "projectSettings.monday.wizardStepOf": {
+        description: "Small step counter above the title of each step of the three-step Monday.com setup dialog.",
+        placeholders: { step: "The current step number, e.g. 2.", total: "How many steps there are (3)." },
+      },
+      "projectSettings.monday.wizardBoardTitle": {
+        description: "Title of step 1 of the Monday.com setup: choosing which Monday board the project's progress goes to.",
+      },
+      "projectSettings.monday.wizardColumnsTitle": {
+        description:
+          "Title of step 2 of the Monday.com setup: a checklist of the columns (progress figures, dates, names) " +
+          "Aquilla can show on the user's Monday board.",
+      },
+      "projectSettings.monday.wizardConfirmTitle": {
+        description: "Title of step 3 of the Monday.com setup, a summary before anything is written to Monday.",
+      },
+      "projectSettings.monday.wizardAdvancedShow": {
+        description:
+          "Link under the column checklist that reveals per-row controls for sending each figure to a column " +
+          "of the user's choosing. For admins who want to pick columns themselves.",
+      },
+      "projectSettings.monday.wizardAdvancedHide": {
+        description: "The same link once the advanced controls are open; hides them again.",
+      },
+      "projectSettings.monday.wizardConfirmAdds": {
+        description: "Summary on the last setup step when new columns will be created on the Monday board.",
+        placeholders: { count: "How many columns Aquilla will create." },
+      },
+      "projectSettings.monday.wizardConfirmAddsPerFile": {
+        description: "Same summary when the board gets one row per file of the project instead of one for the whole project.",
+        placeholders: { count: "How many columns Aquilla will create." },
+      },
+      "projectSettings.monday.wizardConfirmNoAdds": {
+        description: "Summary on the last setup step when the board already has every chosen column.",
+        placeholders: { board: "The Monday board's name (Monday data, not translated)." },
+      },
+      "projectSettings.monday.wizardConfirmNoAddsPerFile": {
+        description: "Same summary when the board gets one row per file of the project.",
+        placeholders: { board: "The Monday board's name (Monday data, not translated)." },
+      },
+      "projectSettings.monday.wizardAddAndConnectButton": {
+        description: "Final button of the Monday.com setup when new columns must be created first; then the board is connected.",
+      },
+      "projectSettings.monday.newBoardOption": {
+        description:
+          "Choice in step 1 of the Monday.com setup (\"Which board?\"): instead of linking one of the user's Monday " +
+          "boards, Aquilla creates a new board for this project's progress.",
+      },
+      "projectSettings.monday.newBoardHelp": {
+        description:
+          "Explanation under \"Make a new board for me\": the new board holds only the columns the user ticks in the " +
+          "next step, inside one group named \"Aquilla projects\" (keep that name as written), with none of " +
+          "Monday's example rows.",
+      },
+      "projectSettings.monday.newBoardNameLabel": {
+        description: "Label of the text field for the new Monday board's name.",
+      },
+      "projectSettings.monday.newBoardDefaultName": {
+        description:
+          "The name the new Monday board gets unless the user types another. It becomes the board's real name in " +
+          "Monday, so keep it short.",
+      },
+      "projectSettings.monday.existingBoardOption": {
+        description: "Choice in step 1 of the Monday.com setup: link one of the user's existing Monday boards (picked below).",
+      },
+      "projectSettings.monday.noBoardsYet": {
+        description:
+          "Note in step 1 of the Monday.com setup when the user's Monday account has no boards at all; the only " +
+          "choice left is a new board made by Aquilla.",
+      },
+      "projectSettings.monday.wizardConfirmNewBoard": {
+        description: "Summary on the last setup step when Aquilla will create a new Monday board with the chosen columns.",
+        placeholders: {
+          board: "The new board's name, as the user typed it (not translated).",
+          count: "How many columns the new board gets.",
+        },
+      },
+      "projectSettings.monday.wizardConfirmNewBoardPerFile": {
+        description: "Same summary when the new board gets one row per file of the project instead of one for the whole project.",
+        placeholders: {
+          board: "The new board's name, as the user typed it (not translated).",
+          count: "How many columns the new board gets.",
+        },
+      },
+      "projectSettings.monday.wizardMakeBoardButton": {
+        description: "Final button of the Monday.com setup when Aquilla first creates a new board; then the board is connected.",
+      },
+      "projectSettings.monday.wizardMakingBoard": {
+        description: "Progress line while Aquilla creates the new board and its columns in the user's Monday account.",
+      },
+      "projectSettings.monday.wizardNewBoardFailed": {
+        description: "Error when Monday did not create the new board; nothing was connected.",
+        placeholders: { reason: "The error message, usually Monday's own, shown as received." },
+      },
+      "projectSettings.monday.wizardAddingColumns": {
+        description: "Progress line while Aquilla creates the chosen columns on the user's Monday board.",
+      },
+      "projectSettings.monday.wizardAddColumnsFailed": {
+        description: "Error when creating the columns on Monday failed entirely; the board was not connected.",
+        placeholders: { reason: "The error message, usually Monday's own, shown as received." },
+      },
+      "projectSettings.monday.wizardSomeColumnsNotAdded": {
+        description:
+          "Warning after setup when Monday refused to create some of the chosen columns; the board is " +
+          "connected with the rest, and the missing ones can be added later.",
+        placeholders: {
+          columns: "Comma-separated titles of the refused columns (Monday data, untranslated).",
+          reason: "Monday's own error message, in English, shown as received.",
+        },
+      },
+      "projectSettings.monday.chooser.intro": {
+        description:
+          "Instruction at the top of the Monday.com column checklist. 'We' is Aquilla. Columns the board lacks " +
+          "are created on the user's Monday board.",
+      },
+      "projectSettings.monday.chooser.groupSchedule": {
+        description: "Group heading in the Monday.com column checklist for deadline, status and plan dates.",
+      },
+      "projectSettings.monday.chooser.groupTeam": {
+        description: "Group heading in the Monday.com column checklist for people and recent activity.",
+      },
+      "projectSettings.monday.orgProjectLinkedTo": {
+        description: "Under a project's name in Org settings → Monday.com: the Monday board the project pushes to.",
+        placeholders: { board: "The Monday board's name (Monday data, not translated)." },
+      },
+      "projectSettings.monday.orgProjectLinksLoading": {
+        description: "Shown above the project list in Org settings → Monday.com while Aquilla reads which projects have a board.",
+      },
+      "projectSettings.monday.orgProjectLinksFailed": {
+        description: "Shown above the project list in Org settings → Monday.com when reading which projects have a board failed; a Retry button sits beside it.",
+      },
+      "projectSettings.monday.orgProjectNotLinked": {
+        description: "Under a project's name in Org settings → Monday.com when the project has no board yet.",
+      },
+      "projectSettings.monday.orgProjectSetUp": {
+        description: "Button beside an unlinked project in Org settings → Monday.com. Opens the board setup right there, without leaving org settings.",
+      },
+      "projectSettings.monday.orgProjectManageInSettings": {
+        description: "Link beside a linked project in Org settings → Monday.com. Leaves org settings for that project's own settings page, where the mapping and Sync live.",
+      },
+      "projectSettings.monday.orgProjectViewInSettings": {
+        description: "Link beside a project the viewer can't manage, in Org settings → Monday.com. Leaves org settings for that project's settings page.",
+      },
+      "projectSettings.monday.orgProjectSyncPaused": {
+        description: "Small tag beside a linked project in Org settings → Monday.com when its Sync switch is off.",
+      },
+      "projectSettings.monday.orgProjectBoardChanged": {
+        description: "Small tag beside a linked project in Org settings → Monday.com when its board has new columns to review.",
+      },
+      "projectSettings.monday.orgProjectPushFailed": {
+        description: "Small tag beside a linked project in Org settings → Monday.com when its last push to Monday failed.",
+      },
+      "projectSettings.monday.boardChangesIntro": {
+        description: "Amber banner on a linked Monday board listing columns someone added on Monday since the link was saved; each listed column has 'Map it' and 'Not needed' buttons.",
+      },
+      "projectSettings.monday.loadingBoardColumns": {
+        description: "Shown in place of the column mapping on a linked Monday board while Aquilla reads the board's column names.",
+      },
+      "projectSettings.monday.boardChangesMap": {
+        description: "Button beside a new Monday column: adds a row for it to the mapping table below, to fill it from Aquilla.",
+      },
+      "projectSettings.monday.boardChangesDismiss": {
+        description: "Button beside a new Monday column: the column stays on the board, Aquilla stops asking about it.",
+      },
+      "projectSettings.monday.boardChangesReadOnly": {
+        description: "Shown instead of 'Map it' for a new Monday column Aquilla can't write to (a formula, mirror or similar column).",
+      },
+      "projectSettings.monday.chooser.newColumn": {
+        description: "Small tag beside a column in the checklist that isn't on the Monday board yet and would be created.",
+      },
+      "projectSettings.monday.chooser.alwaysIncluded": {
+        description: "Note under the locked 'Aquilla ID' column in the checklist, saying why it can't be unticked.",
+      },
+      "projectSettings.monday.chooser.namesVisible": {
+        description:
+          "Security note under the 'Project manager' and 'Translators' columns in the checklist, shown in amber while " +
+          "either is ticked: those columns put people's names on the Monday board, and anyone with access to the " +
+          "board can read them. Plain and factual, so it reads as a clear caution without alarm.",
+        placeholders: { board: "The Monday board's name (Monday data, not translated)." },
+      },
+      "projectSettings.monday.chooser.summaryAdds": {
+        description: "Live summary under the column checklist when some ticked columns will be created.",
+        placeholders: {
+          count: "How many new columns will be created.",
+          board: "The Monday board's name (Monday data, not translated).",
+          uses: "How many ticked columns are already on the board (a number).",
+        },
+      },
+      "projectSettings.monday.chooser.summaryNoAdds": {
+        description: "Live summary under the column checklist when every ticked column is already on the board.",
+        placeholders: {
+          count: "How many ticked columns are already on the board.",
+          board: "The Monday board's name (Monday data, not translated).",
+        },
+      },
+      "projectSettings.monday.addColumnsButton": {
+        description: "Button on a project's linked Monday board settings that opens the column checklist to add more columns.",
+      },
+      "projectSettings.monday.addColumnsDialogTitle": {
+        description: "Title of the dialog for adding more columns to an already linked Monday board.",
+      },
+      "projectSettings.monday.addColumnsConfirm": {
+        description: "Confirm button of that dialog: create the ticked new columns on the Monday board.",
+        placeholders: { count: "How many columns will be created." },
+      },
+      "projectSettings.monday.wizardRecommendation": {
+        description: "Summary line in the Monday setup wizard review step: the recommended item granularity and how many progress columns are mapped.",
+        placeholders: {
+          granularity: "The literal, untranslated word 'file' or 'project' (data) — matches the value stored on the link's itemGranularity setting, not a separately translated enum.",
+          mappedCount: "How many progress columns are mapped to project metrics.",
+        },
+      },
+      "projectSettings.monday.wizardLinkWarningsTitle": {
+        description:
+          "Heading of a warning box on the last step of the Monday setup wizard, above " +
+          "a list of server messages (shown in English) about the link that was just " +
+          "saved, for example that Monday's change notifications could not be set up.",
+      },
+      "projectSettings.monday.wizardFindBoardManually": {
+        description: "Fallback note in the Monday setup wizard when Monday returned no direct board URL, telling the user to find the board by name.",
+        placeholders: {
+          name: "The linked board's name (data, not translated), or the board id if no name is known.",
+        },
+      },
       "projectSettings.monday.oneItemPerLabel": {
         description:
           "Small note under the linked-board status row, naming what one Monday board " +
@@ -1351,6 +2656,19 @@ export const projectSettings = defineNamespace({
         placeholders: {
           granularity: "The literal, untranslated word 'file' or 'project' (data) — matches the value stored on the link's itemGranularity setting, not a separately translated enum.",
         },
+      },
+      "projectSettings.monday.oneItemWithSubitemsLabel": {
+        description:
+          "Small note under the linked-board status row when the project is one Monday " +
+          "item and each of its files is a subitem under that item.",
+      },
+      "projectSettings.monday.fileSubitemsLabel": {
+        description:
+          "Label of a switch in the Monday.com project settings: when on, each file of the " +
+          "project is pushed as a Monday subitem under the project's row.",
+      },
+      "projectSettings.monday.fileSubitemsDescription": {
+        description: "Help text under the “Files as subitems” switch in the Monday.com project settings.",
       },
       "projectSettings.monday.lastPushOk": {
         description:
@@ -1379,8 +2697,119 @@ export const projectSettings = defineNamespace({
           "flow and the AI setup wizard's board-change control. No separate visible " +
           "label — only a placeholder inside the closed select.",
       },
+      "projectSettings.monday.syncNowPausedTooltip": {
+        description:
+          "Tooltip on the disabled \"Sync now\" button in a project's Monday.com settings " +
+          "while the Sync switch beside it is off. \"Sync\" is that switch's label " +
+          "(projectSettings.monday.syncToggleLabel).",
+      },
       "projectSettings.monday.removeBoardLinkAriaLabel": {
         description: "Accessible name of the icon-only trash button that opens the remove-board-link confirmation.",
+      },
+      "projectSettings.airtable.pushedNotice": {
+        description: "Line under the Sync now button after a push to the project's Airtable table succeeded (AQU-804).",
+        placeholders: { count: "How many Airtable records were written, a whole number." },
+      },
+      "projectSettings.airtable.syncFailedNotice": {
+        description: "Line under the Sync now button when a push to Airtable failed.",
+        placeholders: { reason: "Airtable's or the server's own reason, in English, shown as given." },
+      },
+      "projectSettings.airtable.addFieldsConfirm": {
+        description: "Confirm button of the 'Add fields to your table' dialog; creates that many new fields in the Airtable table.",
+        placeholders: { count: "How many fields will be created, a whole number." },
+      },
+      "projectSettings.airtable.removeTableLinkDescription": {
+        description: "Body of the confirmation before unlinking the project's Airtable table.",
+        placeholders: { table: "The linked Airtable table's name (data, not translated)." },
+      },
+      "projectSettings.airtable.removeTableLinkAriaLabel": {
+        description: "Accessible name of the icon-only trash button that opens the remove-table-link confirmation.",
+      },
+      "projectSettings.airtable.baseSelectAriaLabel": {
+        description: "Accessible name of the dropdown that picks an Airtable base (a base holds tables).",
+      },
+      "projectSettings.airtable.tableSelectAriaLabel": {
+        description: "Accessible name of the dropdown that picks a table inside the chosen Airtable base.",
+      },
+      "projectSettings.airtable.tableInBase": {
+        description: "Small line under the chosen Airtable table's name in setup, naming the base it is in.",
+        placeholders: { base: "The Airtable base's name (data, not translated)." },
+      },
+      "projectSettings.airtable.wizardConfirmAdds": {
+        description:
+          "First sentence of the last setup step: how many new fields Aquilla will create in the Airtable table. " +
+          "Followed by one of the projectSettings.airtable.wizardConfirmRecords.* sentences.",
+        placeholders: {
+          count: "How many fields will be created, a whole number.",
+          table: "The Airtable table's name (data, not translated).",
+        },
+      },
+      "projectSettings.airtable.wizardConfirmNoAdds": {
+        description:
+          "First sentence of the last setup step when no new field is needed. Followed by one of the " +
+          "projectSettings.airtable.wizardConfirmRecords.* sentences, which say 'there' meaning this table.",
+        placeholders: { table: "The Airtable table's name (data, not translated)." },
+      },
+      "projectSettings.airtable.wizardAddFieldsFailed": {
+        description: "Error in setup when creating the new Airtable fields failed; nothing was linked.",
+        placeholders: { reason: "Airtable's or the server's own reason, in English, shown as given." },
+      },
+      "projectSettings.airtable.wizardSomeFieldsNotAdded": {
+        description: "Warning after setup when Airtable refused to create some of the fields; the link itself works.",
+        placeholders: {
+          columns: "The names of the fields that were not created, comma-separated (data, not translated).",
+          reason: "Airtable's reason for the first refusal, in English, shown as given.",
+        },
+      },
+      "projectSettings.airtable.wizardDoneLine": {
+        description: "First sentence of the last setup screen once the table is linked.",
+        placeholders: { table: "The Airtable table's name (data, not translated)." },
+      },
+      "projectSettings.airtable.pushedRecords": {
+        description: "Line on the last setup screen after the first push into Airtable landed.",
+        placeholders: { count: "How many Airtable records were written, a whole number." },
+      },
+      "projectSettings.airtable.firstPushFailed": {
+        description:
+          "Warning on the last setup screen when the table was linked but the first push failed. " +
+          "'Sync now' is the name of the button that retries (projectSettings.monday.syncNowButton).",
+        placeholders: { reason: "Airtable's or the server's own reason, in English, shown as given; it ends with its own full stop." },
+      },
+      "projectSettings.airtable.chooser.summaryAdds": {
+        description:
+          "Live line under the field list in Airtable setup: how many new fields will be created in the table " +
+          "and how many existing ones are used.",
+        placeholders: {
+          count: "How many new fields will be created, a whole number.",
+          board: "The Airtable TABLE's name (data, not translated). Named 'board' because the list is shared with Monday.com setup.",
+          uses: "How many fields already in the table are used, a whole number.",
+        },
+      },
+      "projectSettings.airtable.chooser.summaryNoAdds": {
+        description: "Live line under the field list in Airtable setup when nothing new will be created.",
+        placeholders: {
+          count: "How many fields already in the table are used, a whole number.",
+          board: "The Airtable TABLE's name (data, not translated). Named 'board' because the list is shared with Monday.com setup.",
+        },
+      },
+      "projectSettings.airtable.chooser.namesVisible": {
+        description:
+          "Security note under the 'Project manager' and 'Translators' fields in the Airtable setup's field list, shown " +
+          "in amber while either is ticked: those fields put people's names in the Airtable table, and anyone with " +
+          "access to the table can read them. Plain and factual, so it reads as a clear caution without alarm. " +
+          "Sibling of projectSettings.monday.chooser.namesVisible.",
+        placeholders: {
+          board: "The Airtable TABLE's name (data, not translated). Named 'board' because the list is shared with Monday.com setup.",
+        },
+      },
+      "projectSettings.airtable.chooser.inTable": {
+        description:
+          "Small badge beside a field in the Airtable setup list when that field already exists in the " +
+          "user's table (it is used as it is, not created again).",
+      },
+      "projectSettings.airtable.orgProjectLinkedTo": {
+        description: "Status line under a project's name in Org settings → Airtable.",
+        placeholders: { table: "The linked Airtable table's name (data, not translated)." },
       },
       "projectSettings.monday.removeMappingRowAriaLabel": {
         description: "Accessible name of the icon-only trash button that deletes one column-mapping row.",
@@ -1390,6 +2819,17 @@ export const projectSettings = defineNamespace({
           "Accessible name of the numeric minutes input beside the auto-sync toggle — " +
           "no separate visible label, just the enable switch, this input, and a trailing 'min' unit.",
       },
+      "projectSettings.members.removeDirectAccessDescription": {
+        description:
+          "Body of the confirm dialog opened by Remove direct access on a project " +
+          "Members row. Confirming deletes only that person's direct project " +
+          "membership. Access they still have through the organization, a team, or " +
+          "as the project creator stays. This dialog does not revoke those paths.",
+        placeholders: {
+          username: "The member's username — not translated.",
+          role: "The direct membership's role name, already localized (for example 'Project Lead').",
+        },
+      },
       "projectSettings.members.actionsForRow": {
         description:
           "Accessible name of the icon-only row-actions button in the last column " +
@@ -1397,6 +2837,371 @@ export const projectSettings = defineNamespace({
         placeholders: {
           username: "The row's member username (data, not translated).",
         },
+      },
+      "projectSettings.members.roleChangeNeedsRole": {
+        description:
+          "Shown on the project Members table when the VIEWER's own role is below the " +
+          "floor for managing membership: as a disabled row-menu note in place of " +
+          "'Change role', and as the tooltip on the disabled 'Add a member' button. " +
+          "States the required role rather than leaving the control silently missing.",
+        placeholders: {
+          role: "The localized name of the required role (today 'Project Lead'), resolved from the role ladder — insert exactly as given.",
+        },
+      },
+      "projectSettings.members.roleChangeOutranked": {
+        description:
+          "Disabled note in a project Members row menu, shown in place of 'Change role' " +
+          "when the viewer may manage membership in general but not THIS member, whose " +
+          "current role is at or above the viewer's own.",
+      },
+      "projectSettings.create.upstreamProjectSearchAriaLabel": {
+        description:
+          "Accessible name of the search box inside the Create New Project dialog's " +
+          "\"Upstream project\" picker (AQU-1518). Screen-reader-only — never rendered " +
+          "as visible text; the visible hint is upstreamProjectSearchPlaceholder. " +
+          "\"Projects\" here means Aquilla translation projects, the same sense as " +
+          "projectSettings.create.upstreamProjectLabel.",
+      },
+      "projectSettings.linkSource.pickerSearchAriaLabel": {
+        description:
+          "Accessible name of the search box inside the \"Link to a source project\" " +
+          "picker in Project Settings → Source & sync (AQU-1525). Screen-reader-only — " +
+          "never rendered as visible text; the visible hint is " +
+          "projectSettings.linkSource.pickerSearchPlaceholder. \"Projects\" here means " +
+          "Aquilla translation projects, the same sense as " +
+          "projectSettings.linkSource.pickerLabel.",
+      },
+      // AQU-1526 — the confirm step between picking an upstream and linking it.
+      "projectSettings.linkSource.previewTitle": {
+        description:
+          "Heading of the confirm step in Project Settings \u2192 Source & sync, shown after " +
+          "an upstream project has been picked and before anything is linked. A " +
+          "question, because the step can still be cancelled.",
+        placeholders: {
+          upstream: "The display name of the upstream project about to be linked, as the user named it \u2014 never translated.",
+        },
+      },
+      "projectSettings.linkSource.previewCount": {
+        description:
+          "The confirm step's headline fact: how many source files the link will " +
+          "mirror into this project. Shown only when the upstream has at least one " +
+          "file (an upstream with none gets previewEmptyUpstream instead, never " +
+          "\"0 source files\"). \"Source files\" are the upstream's own source-side " +
+          "files, not file uploads.",
+        placeholders: {
+          count: "How many upstream source files will be added; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.previewEmptyUpstream": {
+        description:
+          "Replaces the file count in the confirm step when the chosen upstream has " +
+          "no source files yet. Reassuring, not a refusal: the link is still " +
+          "allowed, and files appear here as the upstream gains them.",
+      },
+      "projectSettings.linkSource.previewLoading": {
+        description:
+          "Transient line in the confirm step while the upstream's file list is being " +
+          "read, before the count and any same-name warning can be shown.",
+      },
+      "projectSettings.linkSource.previewLoadError": {
+        description:
+          "Shown in the confirm step when the upstream's file list could not be read, " +
+          "so the step cannot say what the link would add. Deliberately distinct from " +
+          "previewEmptyUpstream \u2014 \"we don't know\" is not \"nothing is coming\" \u2014 and it " +
+          "states that nothing has been linked, because the user is mid-action.",
+      },
+      "projectSettings.linkSource.previewRetryButton": {
+        description:
+          "Retry button with two homes in the link flow. Beside previewLoadError it " +
+          "re-reads the upstream's file list; beside seedFailedMessage it re-runs the " +
+          "sync that brings the linked project's files in. In both it repeats the " +
+          "step that just failed — never a page reload, and never the link itself.",
+      },
+      "projectSettings.linkSource.seedFailedMessage": {
+        description:
+          "Shown after a link was saved but the first sync that copies the source " +
+          "project's files in failed. Appears in the Import dialog, on the settings " +
+          "card and as a banner on the project page, next to a \"Try again\" button. " +
+          "Three facts in order: the link exists, the files are missing, retrying is " +
+          "the fix. Plain language — no error code and no technical cause.",
+      },
+      "projectSettings.linkSource.seedRetryFailedNote": {
+        description:
+          "Added under seedFailedMessage when the user pressed \"Try again\" and that " +
+          "failed as well. \"Them\" is the source project's files from the sentence " +
+          "above. Reassures that the link itself was not lost and the retry is still " +
+          "there.",
+      },
+      "projectSettings.linkSource.seedRetryingButton": {
+        description:
+          "Label of the \"Try again\" button beside seedFailedMessage while its retry " +
+          "is running; the button is disabled meanwhile.",
+      },
+      "projectSettings.sourceLink.chooseFilesButton": {
+        description:
+          "Button on the Source link card (Project Settings) that opens a list of the " +
+          "upstream project's files, to add more of them to this project's link. A " +
+          "verb phrase: 'choose' as in pick.",
+      },
+      "projectSettings.sourceLink.chooseFilesTitle": {
+        description:
+          "Title of the dialog listing the upstream project's files with checkboxes. " +
+          "Files already linked are checked and cannot be unchecked; the rest can be " +
+          "checked to add them.",
+      },
+      "projectSettings.sourceLink.chooseFilesLinkedBadge": {
+        description:
+          "Small label beside a file in that list that this project already receives " +
+          "from the upstream, explaining why its checkbox is checked and locked.",
+      },
+      "projectSettings.sourceLink.chooseFilesAddButton": {
+        description:
+          "The dialog's confirm button: brings the checked files into this project. " +
+          "The sentence above it states how many.",
+      },
+      // AQU-1562: the confirm step shown before a link's file choice changes.
+      // Each heading introduces a bulleted list of file names; the body beneath
+      // it is the promise made about exactly those files. Headings and bodies
+      // are paired, so a translator should read each pair together.
+      "projectSettings.sourceLink.chooseFilesStopHeading": {
+        description:
+          "Heading over the list of files that will STOP being followed, in the confirm " +
+          "step of \"Choose files\" (Project Settings → Source link). Ends in a colon: the " +
+          "file names follow immediately beneath it. The number is never printed — it only " +
+          "chooses the form, so a language with more plural categories needs each of them.",
+      },
+      "projectSettings.sourceLink.chooseFilesStopBody": {
+        description:
+          "Under the stop list: what stopping does to those files. The reassurance is the " +
+          "point — before this existed, the only ways to stop following a file were to " +
+          "delete it (losing its translations) or to detach the whole project. Say plainly " +
+          "that the file stays with everything on it and only stops receiving changes.",
+      },
+      "projectSettings.sourceLink.chooseFilesStopOthersNote": {
+        description:
+          "One more sentence under the stop list: the link's OTHER files are unaffected. " +
+          "Stopping is per file, and a lead stopping one book needs to know the rest keeps " +
+          "arriving.",
+      },
+      "projectSettings.sourceLink.chooseFilesStopWholeProjectWarning": {
+        description:
+          "Warning in the same confirm, shown only when the link currently follows the whole " +
+          "source project. Stopping one file turns it into a fixed list of the rest, so files " +
+          "the source project adds later stop arriving on their own — a consequence nobody " +
+          "asked for, hence stating it before it happens. \"Pins\" as in fixes/locks to.",
+      },
+      "projectSettings.sourceLink.chooseFilesKeepOneError": {
+        description:
+          "Shown in place of the confirm when every followed file has been unchecked. A link " +
+          "following no files could never bring anything in; stopping everything is the " +
+          "separate \"Detach from source\" action on the same card, which the sentence names " +
+          "in quotes — translate that name the same way it is translated on the button.",
+      },
+      "projectSettings.sourceLink.chooseFilesResumeHeading": {
+        description:
+          "Heading over the list of previously-stopped files that will be followed AGAIN. " +
+          "Distinct from the add heading below because the file is already in the project: " +
+          "this resumes it rather than bringing a new one in. Ends in a colon; names follow.",
+      },
+      "projectSettings.sourceLink.chooseFilesResumeBody": {
+        description:
+          "Under the resume list: the one thing resuming costs. The file's source text is " +
+          "replaced with the source project's current text — the lead may have been editing " +
+          "it in the meantime — while the translations on it are kept. Both halves matter.",
+      },
+      "projectSettings.sourceLink.chooseFilesReplaceHeading": {
+        description:
+          "Heading in the Choose files confirm step over the list of files the project " +
+          "already has whose source the added upstream files will replace (AQU-1679). Ends " +
+          "in a colon; names follow. Kept apart from the add heading: these files are not " +
+          "arriving, they are being joined to the link.",
+      },
+      "projectSettings.sourceLink.chooseFilesReplaceBody": {
+        description:
+          "Under the replace list: the file keeps its identity and everything on it " +
+          "(translations, validations, comments) line by line; only its source text " +
+          "becomes the source project's, and it follows the source project afterwards. " +
+          "Says explicitly that no second copy is added \u2014 the thing a lead fears here.",
+      },
+      "projectSettings.sourceLink.chooseFilesAddHeading": {
+        description:
+          "Heading over the list of files being added that this project never held. Ends in " +
+          "a colon; names follow. Kept apart from the resume heading above, which promises " +
+          "something different.",
+      },
+      "projectSettings.sourceLink.chooseFilesAddBody": {
+        description:
+          "Under the add list: an added file arrives with its WHOLE current source, not only " +
+          "the changes made from now on, and follows the source project afterwards like any " +
+          "other linked file.",
+      },
+      "projectSettings.sourceLink.chooseFilesStoppedBadge": {
+        description:
+          "Small label beside a file in the \"Choose files\" list that this project stopped " +
+          "following: it is here with its translations but no longer receives the source " +
+          "project's changes. Explains why its checkbox is clear when the file is plainly in " +
+          "the project, and warns that checking it replaces its source text.",
+      },
+      "projectSettings.sourceLink.chooseFilesReviewButton": {
+        description:
+          "The \"Choose files\" dialog's primary button when the lead has stopped or resumed a " +
+          "file: it opens the confirm step rather than acting, since those carry promises the " +
+          "checkboxes do not. A verb phrase.",
+      },
+      "projectSettings.sourceLink.chooseFilesConfirmTitle": {
+        description: "Title of that confirm step, replacing the file-list dialog's own title.",
+      },
+      "projectSettings.sourceLink.chooseFilesApplyingButton": {
+        description:
+          "Label of the confirm step's button while the changes are being saved; the button is " +
+          "disabled meanwhile.",
+      },
+      "projectSettings.sourceLink.chooseFilesIncomplete": {
+        description:
+          "Error under the list when the files could not all be brought in. Nothing " +
+          "is half-added: the files are not in the project yet, and pressing the " +
+          "button again resumes.",
+      },
+      "projectSettings.sourceLink.notSyncedBadge": {
+        description:
+          "Badge on the Source link settings card, in the row with \"Live\", for a " +
+          "link that has never brought any content through. Replaces the cursor " +
+          "badge. A state, not an error — keep it as short as the other badges.",
+      },
+      "projectSettings.sourceLink.notSyncedNote": {
+        description:
+          "Explains the \"Not synced yet\" badge on the Source link settings card and " +
+          "points at the \"Sync now\" button beside it. The link exists; what is " +
+          "missing is the source project's files.",
+      },
+      "projectSettings.sourceLink.syncNowButton": {
+        description:
+          "Button on the Source link settings card that runs the sync bringing the " +
+          "linked source project's files into this project. Shown only while the link " +
+          "has never synced.",
+      },
+      "projectSettings.sourceLink.syncingButton": {
+        description: "Label of the \"Sync now\" button while that sync is running; the button is disabled meanwhile.",
+      },
+      "projectSettings.sourceLink.syncFailedNote": {
+        description:
+          "Replaces notSyncedNote after \"Sync now\" failed. Says the files did not " +
+          "come in, that the link was not lost, and that the button can be pressed " +
+          "again. No error code and no technical cause.",
+      },
+      "projectSettings.sourceLink.syncNothingYetNote": {
+        description:
+          "Replaces notSyncedNote after \"Sync now\" worked but the source project is " +
+          "empty, so there was nothing to copy. Reassuring, not an error: files will " +
+          "appear once the source project has some.",
+      },
+      "projectSettings.linkSource.additiveNoteReplacing": {
+        description:
+          "Replaces additiveNote under the link confirm step once at least one " +
+          "existing file is set to have its source replaced. Same reassurance, minus " +
+          "the claim that existing files are untouched: the replaced files' source " +
+          "text changes and keeps following the upstream; translations and " +
+          "validations are still never touched.",
+      },
+      "projectSettings.linkSource.replaceOption": {
+        description:
+          "Checkbox under an upstream file in the link confirm step, shown when this " +
+          "project already has exactly one file of the same name. On: the link " +
+          "follows into that existing file \u2014 its source text is replaced by the " +
+          "source project's and its translations stay \u2014 instead of adding a second " +
+          "file of that name. Off by default.",
+        placeholders: {
+          name: "The file's name as the user named it \u2014 never translated.",
+        },
+      },
+      "projectSettings.linkSource.replaceComparing": {
+        description:
+          "Shown under replaceOption right after it is turned on, while the server " +
+          "compares the project's file with the source project's file.",
+      },
+      "projectSettings.linkSource.replaceCompareFailed": {
+        description:
+          "Shown under replaceOption when the comparison could not be made. The link " +
+          "cannot be confirmed with the option on until a comparison succeeds; the " +
+          "sentence gives both ways out. No error code.",
+      },
+      "projectSettings.linkSource.replaceMatchSame": {
+        description:
+          "First line of the comparison under replaceOption: how many lines of text " +
+          "are word-for-word identical in the project's file and the source project's " +
+          "file. \"Lines\" are the file's translation units (verses, paragraphs).",
+        placeholders: {
+          same: "How many lines are identical in both files.",
+          count: "How many lines the longer of the two files has; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceMatchChanged": {
+        description:
+          "Comparison line, shown only when above zero: lines that correspond but " +
+          "whose source text differs. They take the source project's text, and their " +
+          "existing translations get the app's \"source changed\" flag for review.",
+        placeholders: {
+          count: "How many lines will take the source project's text; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceMatchAdded": {
+        description:
+          "Comparison line, shown only when above zero: lines the source project's " +
+          "file has and the project's file does not. They are added to the project's file.",
+        placeholders: {
+          count: "How many lines will be added; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceMatchKept": {
+        description:
+          "Comparison line, shown only when above zero: lines the project's file has " +
+          "and the source project's file does not. Nothing happens to them.",
+        placeholders: {
+          count: "How many lines only this project's file has; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceNoMatch": {
+        description:
+          "Replaces the comparison when fewer than half of the lines are identical: " +
+          "the two files share a name but are not the same text, so the source cannot " +
+          "be replaced. The link stays unconfirmable until the option is turned off.",
+        placeholders: {
+          same: "How many lines are identical in both files.",
+          count: "How many lines the longer of the two files has; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceCount": {
+        description:
+          "Summary sentence in the link confirm step, beside the count of files that " +
+          "will be added: how many existing files will follow the link in place " +
+          "(source replaced, translations kept) rather than gaining a second copy.",
+        placeholders: {
+          count: "How many existing files will follow the link; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.clashWarningHeading": {
+        description:
+          "Opens the confirm step's warning that some upstream files share a name with " +
+          "files this project already has; the names follow as a list. Ends in a colon " +
+          "for that reason. A caution, not an error \u2014 the link is still allowed.",
+      },
+      "projectSettings.linkSource.clashWarningBody": {
+        description:
+          "Follows the clashing file names and says what will happen: the project's " +
+          "own files are kept untouched with their translations, and the mirrored " +
+          "copies arrive beside them with empty translations, so each name appears " +
+          "twice in the file list. Nothing is overwritten or merged.",
+      },
+      "projectSettings.linkSource.reviewButton": {
+        description:
+          "Button that leaves the picker and opens the confirm step. It links nothing " +
+          "by itself \u2014 the wording has to make that clear, because the press that " +
+          "actually links is linkButton on the next step.",
+      },
+      "projectSettings.linkSource.cancelButton": {
+        description:
+          "Backs out of the confirm step to the picker without linking. The picked " +
+          "project is kept, so this is \"not yet\", not \"discard\".",
       },
       "projectSettings.termMatching.title": {
         description: "Heading of the project-settings card for the project's shared prefix/suffix affix inventory.",
@@ -1419,6 +3224,34 @@ export const projectSettings = defineNamespace({
         description:
           "Label of the switch that sets the project-wide default for ignoring vowel marks/accents " +
           "when matching terms, absent a per-concept override.",
+      },
+      "projectSettings.checking.position": {
+        description: "Progress line on the community checking guest page, showing which passage is open out of all passages in the link.",
+        placeholders: { current: "1-based number of the open passage.", total: "Number of passages in the link." },
+      },
+      "projectSettings.checking.pendingFeedback": {
+        description: "Notice on the guest page when feedback could not reach the project yet; it is kept on the guest's device and retried.",
+        placeholders: { reason: "The server's own error sentence, already localized or in English; may be empty." },
+      },
+      "projectSettings.checking.selectionSummary": {
+        description: "Summary under the passage picker when a project lead builds a community checking link.",
+        placeholders: { count: "Number of selected units (verses or lines)." },
+      },
+      "projectSettings.checking.urlLabel": {
+        description: "Accessible name of the read-only field holding a checking link's URL.",
+        placeholders: { title: "The link title the project lead typed (data, not translated)." },
+      },
+      "projectSettings.checking.playPassage": {
+        description: "Accessible name of the small play button beside one passage in the guest page's running text.",
+        placeholders: { label: "The passage reference, e.g. 'MRK 1:2', or 'Unit 3' when it has none." },
+      },
+      "projectSettings.checking.feedbackOn": {
+        description: "Label of the feedback box on the guest page, naming the passage the feedback is about.",
+        placeholders: { label: "The passage reference, e.g. 'MRK 1:2', or 'Unit 3' when it has none." },
+      },
+      "projectSettings.checking.allSection": {
+        description: "Checkbox in the passage picker that selects every unit in one chapter or section.",
+        placeholders: { section: "The chapter or section name, e.g. 'MRK 1' (data, not translated)." },
       },
       "projectSettings.termMatching.loadPreset": {
         description: "Button that opens a menu of built-in affix presets (Hebrew, Arabic, Swahili, Turkish, …) to load.",
@@ -1443,6 +3276,139 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.termMatching.preset.turkish": {
         description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.inherit.title": {
+        description:
+          "Heading of the inherited-settings card in Project Settings, shown only when this project is linked to an upstream. Names the upstream.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.inherit.description": {
+        description:
+          "Explanation under that heading: turned-on fields are copies that update when the upstream saves, including further down a chain, and Detach keeps a local copy.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.inherit.linkDescription": {
+        description:
+          "One sentence under that heading: the choice can be changed later, per field, from the downstream project's settings.",
+      },
+      "projectSettings.inherit.field.translationBrief": {
+        description: "Checkbox label. The translation brief is copied from the upstream when this is on.",
+      },
+      "projectSettings.inherit.field.knowledgeDocs": {
+        description: "Checkbox label. The upstream project's knowledge-base documents are copied when this is on.",
+      },
+      "projectSettings.inherit.field.workflowPolicy": {
+        description:
+          "Checkbox label. Validation role floors, self-validation, autopilot, agent mode, and check penalties are copied when this is on.",
+      },
+      "projectSettings.inherit.field.workflowPolicyDetail": {
+        description: "Secondary line under the workflow-policy checkbox, listing what that one choice covers.",
+      },
+      "projectSettings.inherit.field.livingMemory": {
+        description: "Checkbox label. Living-memory notes are copied when this is on. Off by default.",
+      },
+      "projectSettings.inherit.field.smartQuotes": {
+        description: "Checkbox label. The smart-quotes switch is copied when this is on. Off by default.",
+      },
+      "projectSettings.inherit.field.systemPrompt": {
+        description:
+          "Checkbox label. AI instructions (the system prompt) are copied when this is on. Off by default, because those instructions usually name the language pair.",
+      },
+      "projectSettings.inherit.fromUpstream": {
+        description:
+          "Shown beside a field that is still being copied, both in the inherited-settings card and next to the field itself.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.validation.orgDefaultOption": {
+        description:
+          "Option in a dropdown beside 'Required validators'. Choosing it means this project uses the number its organization set, shown in brackets.",
+        placeholders: {
+          number: "How many validators the organization's default requires, a number from 1 to 15.",
+        },
+      },
+      "projectSettings.validation.customOption": {
+        description:
+          "Option in the same dropdown. Choosing it lets this project set its own value instead of the organization's. " +
+          "Also used beside the timeline, line-editing and recording-validation settings (AQU-1768).",
+      },
+      "projectSettings.mediaDefaults.orgOn": {
+        description:
+          "Option in a dropdown beside an on/off project setting (timing lock, timeline track editing, validating your own " +
+          "recordings). Choosing it means this project follows its organization's default, which is currently ON.",
+      },
+      "projectSettings.mediaDefaults.orgOff": {
+        description:
+          "Same dropdown, when the organization's default is currently OFF.",
+      },
+      "projectSettings.mediaDefaults.orgValue": {
+        description:
+          "Same dropdown beside a role setting ('Who can add and remove cells', 'Minimum role to validate recordings'). " +
+          "Choosing it means this project follows its organization's choice, shown in brackets.",
+        placeholders: {
+          value: "The organization's current choice, e.g. 'Project Lead' or 'No one', already translated.",
+        },
+      },
+      "projectSettings.importFloor.label": {
+        description:
+          "Row label in Project settings \u2192 Import: the minimum role needed to bring a NEW source file into this "
+          + "project. Same wording as the organization-wide row on Settings \u2192 Security.",
+      },
+      "projectSettings.importFloor.description": {
+        description:
+          "Help text under that row. Says the organization sets the floor and a project can only be stricter, and that "
+          + "importing a translation into a file already in the project is not affected.",
+      },
+      "projectSettings.importFloor.stricterOnly": {
+        description:
+          "Appended to a role option this project cannot choose because the organization already requires a higher "
+          + "role. Shown after the role name and a dash, on a disabled option, e.g. \"Project lead \u2014 \u2026\".",
+      },
+      "projectSettings.visibility.onlyRoleLoosens": {
+        description:
+          "Under 'Who can see the member list' or 'Who can see each member's progress' in Project settings → Members, " +
+          "when this project set a stricter value than the reader's own role: only people with that role or higher may " +
+          "make it less strict again.",
+        placeholders: {
+          role: "A plural role name, already translated, e.g. 'Owners'.",
+        },
+      },
+      "projectSettings.mediaDefaults.cellEditingNobody": {
+        description:
+          "Short name for the 'nobody may add or remove cells' choice, shown inside 'Organization default (…)' and in the " +
+          "closed role picker on the organization's Project defaults page. Not a role.",
+      },
+      "projectSettings.mediaDefaults.sourceAria": {
+        description:
+          "Screen-reader label for that dropdown. Not shown on screen.",
+        placeholders: {
+          setting: "The setting's own label, e.g. 'Lock the timings against dragging', already translated.",
+        },
+      },
+      "projectSettings.validation.requiredTextSourceAria": {
+        description:
+          "Screen-reader label for that dropdown on the text-validation row. Not shown on screen.",
+      },
+      "projectSettings.validation.requiredAudioSourceAria": {
+        description:
+          "Screen-reader label for that dropdown on the audio-validation row. Not shown on screen.",
+      },
+      "projectSettings.inherit.detach": {
+        description:
+          "Button beside a field that is still being copied. Stops future updates of that field and keeps the current copy.",
+      },
+      "projectSettings.voice.leadsManageLabel": {
+        description:
+          "Label for a switch on the project Voice card. It lets a project lead manage voices on lanes they can write. Off unless a maintainer turns it on.",
+      },
+      "projectSettings.voice.leadsManageDescription": {
+        description:
+          "Help text under that switch. Explains that project leads gain voice controls only while it is on, and that turning it off does not delete voices.",
       },
     },
   },

@@ -109,9 +109,59 @@ export function deploymentEnvironmentError(
 
   const versionTag = bindings.CF_VERSION_METADATA?.tag
   const expectedTagPrefix = `${expected.worker}-${expected.environment}-`
-  if (!versionTag?.startsWith(expectedTagPrefix)) {
-    return `${requestHostname} expected a version tag beginning ${expectedTagPrefix}, received ${versionTag ?? "unset"}`
+  if (!versionTag) {
+    warnUntaggedVersion(expected)
+  } else if (!versionTag.startsWith(expectedTagPrefix)) {
+    return `${requestHostname} expected a version tag beginning ${expectedTagPrefix}, received ${versionTag}`
   }
 
+  return null
+}
+
+let warnedUntagged = false
+
+/**
+ * A missing tag is served, not refused. `wrangler secret put` and dashboard
+ * secret edits derive an untagged version from the live one (same script, same
+ * bindings) and give it 100% of traffic in one step; Cloudflare has no way to
+ * refuse that promotion. Failing closed on it turned secret edits into full
+ * outages (dev sync, AQU-1361; prod identity, 2026-10-20). The binding checks
+ * above still catch cross-environment config, and a tag naming another Worker
+ * still fails closed. Warn once per isolate so the drift shows in Workers Logs.
+ */
+function warnUntaggedVersion(expected: ExpectedDeployment): void {
+  if (warnedUntagged) return
+  warnedUntagged = true
+  console.warn(
+    `[environment-guard] ${expected.worker} ${expected.environment} is serving an untagged version; redeploy through the repo deployer or rotate secrets with pnpm run secrets:rotate`,
+  )
+}
+
+/**
+ * The `scheduled` entrypoint's version of the guard above.
+ *
+ * `deploymentEnvironmentError` keys off the request hostname, which a cron has
+ * none of — so a worker whose profile and bindings disagree would sail straight
+ * past it. That matters for the AQU-1856 R2 sweep in particular: it DELETES
+ * user media unattended, so a development-profile deploy pointed at the
+ * production bucket must not run it.
+ *
+ * Returns an operator-facing message when the combination is unsafe, else null.
+ * A non-deployed worker (`pnpm dev`, `[env.e2e]`) returns null — local stacks
+ * own their own bucket and are allowed to sweep it.
+ */
+export function scheduledDeploymentEnvironmentError(
+  bindings: AuthBypassBindings & { DEPLOYMENT_WORKER_NAME?: string },
+): string | null {
+  if (!isDeployedEnvironment(bindings)) return null
+  const expected = Object.values(EXPECTED_DEPLOYMENTS).find(
+    (d) => d.environment === bindings.ENVIRONMENT,
+  )
+  if (!expected) {
+    return `ENVIRONMENT=${bindings.ENVIRONMENT} has no expected deployment profile`
+  }
+  if (bindings.DEPLOYMENT_WORKER_NAME !== expected.worker) {
+    return `ENVIRONMENT=${expected.environment} expected DEPLOYMENT_WORKER_NAME=${expected.worker}, received ${bindings.DEPLOYMENT_WORKER_NAME ?? "unset"}`
+  }
   return null
 }

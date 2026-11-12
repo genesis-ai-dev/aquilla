@@ -14,7 +14,7 @@ export const FLOOR_LABEL: Record<number, string> = {
   [ROLE.COMMENTER]: "Commenter",
   [ROLE.REVIEWER]: "Reviewer",
   [ROLE.CONTRIBUTOR]: "Contributor",
-  [ROLE.PROJECT_LEAD]: "Project lead",
+  [ROLE.PROJECT_LEAD]: "Project Lead",
   [ROLE.MAINTAINER]: "Maintainer",
   [ROLE.OWNER]: "Owner",
 }
@@ -26,6 +26,7 @@ export const ORG_SETTINGS_SECTIONS = [
   "billing",
   "providers",
   "monday",
+  "airtable",
 ] as const
 export type OrgSettingsSection = (typeof ORG_SETTINGS_SECTIONS)[number]
 
@@ -41,15 +42,16 @@ export const ORG_SETTINGS_SECTION_TITLES: Record<OrgSettingsSection, string> = {
   identity: "Identity",
   security: "Security",
   "project-defaults": "Project defaults",
-  billing: "Billing & usage",
+  billing: "Billing",
   providers: "AI provider keys",
   monday: "Monday.com",
+  airtable: "Airtable",
 }
 
 export const ORG_SETTINGS_SECTION_DESCRIPTIONS: Record<OrgSettingsSection, string> = {
   identity: "The organization's display name, shown across the workspace.",
   security:
-    "Who can see members and who can export, assign, manage terms, and change project languages.",
+    "Who can see members and who can export, assign, manage terms, import files, and change project languages.",
   "project-defaults":
     "Settings every project in this organization follows unless it chooses its own.",
   billing:
@@ -58,4 +60,6 @@ export const ORG_SETTINGS_SECTION_DESCRIPTIONS: Record<OrgSettingsSection, strin
     "Org-level keys act as a baseline for everyone in this organization. Projects or individuals can override with their own.",
   monday:
     "Connect this organization's Monday.com account. Projects can then link a board and push progress automatically.",
+  airtable:
+    "Connect this organization's Airtable with a personal access token. Projects can then link a table and push progress automatically.",
 }

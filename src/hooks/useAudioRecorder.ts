@@ -68,9 +68,10 @@ const STOP_TAIL_GRACE_MS = 250
 // ruling). NOT trimmed and NOT silenced: the caller anchors the take this
 // much earlier on the timeline (see the modal's save), so the kept audio
 // plays exactly where it was performed. 200ms covers human anticipation with
-// room to spare while staying far clear of the countdown's last beep, which
-// ends over a second before zero.
-const PRE_ROLL_MS = 200
+// room to spare while staying clear of the countdown's last beep — at the
+// Fast count (AQU-1210) that beep is shortened so it still ends well before
+// this window opens; useCountdown.test pins it.
+export const PRE_ROLL_MS = 200
 
 export type RecorderState =
   | { kind: "idle" }
@@ -102,7 +103,7 @@ export interface UseAudioRecorderOptions {
    *  Undefined (the normal case) means "whatever the pref says at start()". */
   format?: RecordingFormat
   /** A tighter byte budget than the upload cap, turned into a shorter hard
-   *  stop. The voice-clone reference has one; checking it once the take is
+   *  stop, for a caller with its own budget; checking it once the take is
    *  already over is a late failure the operator pays for. */
   maxBytes?: number
   /**
@@ -113,7 +114,7 @@ export interface UseAudioRecorderOptions {
    * takes makes the OS reconfigure the input device, and the recovery ramp
    * lands inside the next take — measured at a fifteenth of the real level
    * through Sam's first words. The recording modal passes true and releases
-   * on close; the voice-clone recorder keeps the default, where the mic
+   * on close; any other caller keeps the default, where the mic
    * indicator turning off at stop is the expected behaviour.
    */
   holdMic?: boolean

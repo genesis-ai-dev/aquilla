@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { MoreHorizontal, type LucideIcon } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
@@ -19,6 +19,9 @@ export interface ProjectNavItem {
 
 interface Props {
   items: ProjectNavItem[]
+  /** Extra rows that own their own behaviour (e.g. a popover trigger),
+   *  rendered after the pinned rows and before "More". */
+  children?: ReactNode
 }
 
 function NavRow({
@@ -46,7 +49,7 @@ function NavRow({
   )
 }
 
-export function SidebarProjectSection({ items }: Props) {
+export function SidebarProjectSection({ items, children }: Props) {
   const t = useT()
   const [moreOpen, setMoreOpen] = useState(false)
   const pinned = items.filter((i) => i.pinned)
@@ -69,6 +72,7 @@ export function SidebarProjectSection({ items }: Props) {
         {pinned.map((item) => (
           <NavRow key={item.id} item={item} t={t} />
         ))}
+        {children}
         {overflow.length > 0 && (
           <div>
             <Popover open={moreOpen} onOpenChange={setMoreOpen}>

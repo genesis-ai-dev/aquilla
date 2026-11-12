@@ -4,6 +4,8 @@ import {
   exportJson,
   listJsonStringPaths,
   matchesJsonSelection,
+  splitJsonPath,
+  groupJsonLeaves,
 } from "./json-i18n"
 import type { CellData } from "@/hooks/useCells"
 
@@ -317,5 +319,69 @@ describe("exportJson keyed (partial-selection round-trip)", () => {
     const cells = [makeCellAt("a.b", "x", "y")]
     const text = await blobText(exportJson(original, cells, { keyed: true }))
     expect(text).toBe('{\n    "a": {\n        "b": "y"\n    }\n}\n')
+  })
+})
+
+// ─── splitJsonPath / groupJsonLeaves (key-picker primitives, AQU-525) ────────
+
+describe("splitJsonPath", () => {
+  it("splits a dotted object path into container and own key", () => {
+    expect(splitJsonPath("app.title")).toEqual({ parent: "app", label: "title" })
+    expect(splitJsonPath("a.b.c")).toEqual({ parent: "a.b", label: "c" })
+  })
+
+  it("treats a root-level key as having no container", () => {
+    expect(splitJsonPath("title")).toEqual({ parent: "", label: "title" })
+  })
+
+  it("keeps an array index as its own segment under the array's path", () => {
+    expect(splitJsonPath("messages[2]")).toEqual({ parent: "messages", label: "[2]" })
+    expect(splitJsonPath("a.b[0]")).toEqual({ parent: "a.b", label: "[0]" })
+    expect(splitJsonPath("rows[1][0]")).toEqual({ parent: "rows[1]", label: "[0]" })
+  })
+
+  it("does not split on punctuation inside a bracketed key", () => {
+    expect(splitJsonPath('cfg["a.b"]')).toEqual({ parent: "cfg", label: '["a.b"]' })
+    expect(splitJsonPath('cfg["a]b"]')).toEqual({ parent: "cfg", label: '["a]b"]' })
+    expect(splitJsonPath('cfg["a\\"b"].x')).toEqual({ parent: 'cfg["a\\"b"]', label: "x" })
+  })
+
+  it("round-trips the paths listJsonStringPaths actually emits", () => {
+    const paths = listJsonStringPaths(
+      '{"app":{"title":"T"},"messages":["M"],"weird key":"W","top":"X"}',
+    ).map((leaf) => leaf.path)
+    expect(paths).toEqual(["app.title", "messages[0]", '["weird key"]', "top"])
+    expect(paths.map(splitJsonPath)).toEqual([
+      { parent: "app", label: "title" },
+      { parent: "messages", label: "[0]" },
+      { parent: "", label: '["weird key"]' },
+      { parent: "", label: "top" },
+    ])
+  })
+})
+
+describe("groupJsonLeaves", () => {
+  it("groups leaves by container in first-appearance order", () => {
+    const groups = groupJsonLeaves(
+      listJsonStringPaths('{"app":{"title":"T","sub":"S"},"msgs":["A","B"],"top":"X"}'),
+    )
+    expect(groups.map((g) => g.parent)).toEqual(["app", "msgs", ""])
+    expect(groups[0].leaves.map((l) => l.path)).toEqual(["app.title", "app.sub"])
+    expect(groups[1].leaves.map((l) => l.path)).toEqual(["msgs[0]", "msgs[1]"])
+    expect(groups[2].leaves.map((l) => l.value)).toEqual(["X"])
+  })
+
+  it("reunites leaves of one container that the walk visited apart", () => {
+    const groups = groupJsonLeaves([
+      { path: "a.one", value: "1" },
+      { path: "b.two", value: "2" },
+      { path: "a.three", value: "3" },
+    ])
+    expect(groups).toHaveLength(2)
+    expect(groups[0].leaves.map((l) => l.path)).toEqual(["a.one", "a.three"])
+  })
+
+  it("returns no groups for a document with no string leaves", () => {
+    expect(groupJsonLeaves(listJsonStringPaths('{"n":1,"empty":""}'))).toEqual([])
   })
 })

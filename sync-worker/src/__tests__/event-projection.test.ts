@@ -104,19 +104,18 @@ describe('buildEventProjectionStmts — source.cell.create', () => {
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     const { sql, args } = cellsStmts[0]
     expect(sql).toContain('INSERT INTO cells')
-    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, side, target_lang)')
-    // 0=project_id, 1=file_id, 2=cell_id, 3=side, 4=target_lang, 5=value,
-    // 6=value_html, 7=type, 8=canonical_ref, 9=anchor_cell_id, 10=event_id,
-    // 11=last_editor, 12=last_edit_at, 13=word_count, 14=content_hash
+    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, lane_id)')
+    expect(sql).not.toContain('target_lang')
+    // 0=project_id, 1=file_id, 2=cell_id, 3=side, 4=value,
+    // 5=value_html, 6=type, 7=canonical_ref, 8=anchor_cell_id, 9=event_id
     expect(args[0]).toBe('proj-1')
     expect(args[1]).toBe('file-a')
     expect(args[2]).toBe('cell-1')
     expect(args[3]).toBe('source')
-    expect(args[4]).toBe('') // AQU-538: source rows always on the default lane
-    expect(args[5]).toBe('In the beginning')
-    expect(args[7]).toBe('verse')
-    expect(args[8]).toBe('GEN 1:1')
-    expect(args[10]).toBe('evt-test-id')
+    expect(args[4]).toBe('In the beginning')
+    expect(args[6]).toBe('verse')
+    expect(args[7]).toBe('GEN 1:1')
+    expect(args[9]).toBe('evt-test-id')
   })
 })
 
@@ -134,11 +133,12 @@ describe('buildEventProjectionStmts — target.cell.create', () => {
       stmts,
     )
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
-    const { args } = cellsStmts[0]
+    const { args, sql } = cellsStmts[0]
+    expect(sql).not.toContain('target_lang')
     expect(args[3]).toBe('target')
-    expect(args[4]).toBe('')            // target_lang: default lane
-    expect(args[9]).toBe('cell-0')      // anchor_cell_id
-    expect(args[10]).toBe('evt-test-id') // event_id
+    expect(args[4]).toBe('hello')
+    expect(args[8]).toBe('cell-0')      // anchor_cell_id
+    expect(args[9]).toBe('evt-test-id') // event_id
   })
 })
 
@@ -163,19 +163,17 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
     // The client never emits target.cell.create, so the commit is an UPSERT:
     // INSERT the target row on first translation, ON CONFLICT UPDATE after.
     expect(sql).toContain('INSERT INTO cells')
-    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET')
+    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET')
     expect(sql).toContain('event_id = excluded.event_id')
     expect(sql).toContain('source_event_id = excluded.source_event_id')
-    // bind order (mirrors the INSERT column list):
-    // 0=project_id, 1=file_id, 2=cell_id, 3=target_lang, 4=value,
-    // 5=value_html, 6=event_id, 7=source_event_id, 8=last_editor,
-    // 9=last_edit_at, 10=word_count, 11=content_hash
+    expect(sql).not.toContain('target_lang')
+    // 0=project_id, 1=file_id, 2=cell_id, 3=value, 4=value_html,
+    // 5=event_id, 6=source_event_id
     expect(args[0]).toBe('proj-1')
     expect(args[2]).toBe('cell-1')
-    expect(args[3]).toBe('') // AQU-538: default lane when targetLang absent
-    expect(args[4]).toBe('new text')
-    expect(args[6]).toBe('evt-test-id')
-    expect(args[7]).toBe('src-event-99')
+    expect(args[3]).toBe('new text')
+    expect(args[5]).toBe('evt-test-id')
+    expect(args[6]).toBe('src-event-99')
     const reconciliation = recorded.find(r => r.sql.includes('UPDATE contextual_drafts AS draft'))
     expect(reconciliation?.sql).toContain("draft.status = 'proposed'")
     expect(reconciliation?.sql).toContain('projected.event_id = ?')
@@ -191,7 +189,7 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
       stmts,
     )
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
-    expect(cellsStmts[0].args[7]).toBe(null)
+    expect(cellsStmts[0].args[6]).toBe(null)
   })
 
   it('projects AI provenance and clears it on a human commit', () => {
@@ -217,8 +215,8 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
     )
     const aiStmt = recorded.find((row) => row.sql.includes('INSERT INTO cells'))!
     expect(aiStmt.sql).toContain('ai_draft')
-    expect(aiStmt.args[12]).toBe(1)
-    expect(JSON.parse(String(aiStmt.args[13]))).toEqual(provenance)
+    expect(aiStmt.args[11]).toBe(1)
+    expect(JSON.parse(String(aiStmt.args[12]))).toEqual(provenance)
 
     const human = makeD1Stub()
     buildEventProjectionStmts(
@@ -227,8 +225,8 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
       [],
     )
     const humanStmt = human.recorded.find((row) => row.sql.includes('INSERT INTO cells'))!
-    expect(humanStmt.args[12]).toBe(0)
-    expect(humanStmt.args[13]).toBeNull()
+    expect(humanStmt.args[11]).toBe(0)
+    expect(humanStmt.args[12]).toBeNull()
   })
 })
 
@@ -345,8 +343,8 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
     const cellsStmts = recorded.filter(r => r.sql.startsWith('DELETE FROM cells'))
     expect(cellsStmts[0].sql).toContain('DELETE FROM cells')
     expect(cellsStmts[0].sql).toContain('side = ?')
-    // AQU-538: trailing bind is the target lane ('' = default).
-    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', ''])
+    // AQU-1611: side, then the lane lookup (project, legacy tag). '' is the default lane.
+    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'proj-1', ''])
   })
 
   it('source.cell.delete binds side=source', () => {
@@ -356,8 +354,9 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
     // Two now: the cascade's lane rows (literal side = 'target') and the
     // source row itself (parameterised side = ?).
     const cellsStmts = recorded.filter(r => r.sql.startsWith('DELETE FROM cells') && !r.sql.includes("side = 'target'"))
-    // AQU-538: source rows always live on the default lane ('').
-    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'source', ''])
+    // AQU-1611: source matches on side. The lane lookup binds are still supplied
+    // (project, tag '') because the predicate is `side = 'source' OR lane_id = …`.
+    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'source', 'proj-1', ''])
   })
 
   it('target.cell.delete with targetLang deletes only that lane', () => {
@@ -365,8 +364,9 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
     const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeEvent('target.cell.delete', { targetLang: 'fr' }), stmts)
     const cellsStmts = recorded.filter(r => r.sql.startsWith('DELETE FROM cells'))
-    expect(cellsStmts[0].sql).toContain('target_lang = ?')
-    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'fr'])
+    expect(cellsStmts[0].sql).toContain('legacy_tag = ?')
+    expect(cellsStmts[0].sql).toContain('lane_id =')
+    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'proj-1', 'fr'])
   })
 })
 
@@ -383,8 +383,9 @@ describe('buildEventProjectionStmts — *.cell.reorder', () => {
     expect(recorded[0].sql).toContain('side = ?')
     expect(recorded[0].args[0]).toBe('cell-7')
     expect(recorded[0].args[1]).toBe('evt-test-id') // event_id
-    // AQU-538: last two positional args are the bound `side` and lane.
-    expect(recorded[0].args[recorded[0].args.length - 2]).toBe('target')
+    // AQU-1611: the tail is side, then the lane lookup (project, legacy tag).
+    expect(recorded[0].args[recorded[0].args.length - 3]).toBe('target')
+    expect(recorded[0].args[recorded[0].args.length - 2]).toBe('proj-1')
     expect(recorded[0].args[recorded[0].args.length - 1]).toBe('')
   })
 
@@ -396,7 +397,8 @@ describe('buildEventProjectionStmts — *.cell.reorder', () => {
       makeEvent('source.cell.reorder', { anchorCellId: 'cell-9' }),
       stmts,
     )
-    expect(recorded[0].args[recorded[0].args.length - 2]).toBe('source')
+    expect(recorded[0].args[recorded[0].args.length - 3]).toBe('source')
+    expect(recorded[0].args[recorded[0].args.length - 2]).toBe('proj-1')
     expect(recorded[0].args[recorded[0].args.length - 1]).toBe('')
   })
 })
@@ -439,7 +441,11 @@ describe('buildEventProjectionStmts — side scoping (regression: target edits m
       //     `SELECT ...` form used for chain-claim gating (target.cell.commit),
       //  3. a parametrised `side = ?` with the matching value in args
       //     (deletes, reorders).
-      const litMatch = sql.match(/side\s*=\s*'(source|target)'/)
+      // A literal `side = 'source' OR …` is the source-row short-circuit
+      // (AQU-1611), not the mutation's side. The mutation's own side is the
+      // bound `side = ?` (deletes, reorders) or a side literal that is not
+      // that OR.
+      const litMatch = sql.match(/side\s*=\s*'(source|target)'(?!\s*OR)/)
       const valuesMatch = sql.match(/(?:VALUES\s*\(|\)\s*SELECT\s)[^)]*'(source|target)'/)
       if (litMatch) {
         expect(litMatch[1]).toBe(expectedSide)
@@ -468,8 +474,9 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
       stmts,
     )
     // AQU-292: validator UPSERT + ai_drafted clear + cells.validated recompute
-    // + endorsement_count recompute + files counters recompute.
-    expect(stmts).toHaveLength(5)
+    // + reviewLanes clear (sidebar re-import) + endorsement_count recompute
+    // + files counters recompute.
+    expect(stmts).toHaveLength(6)
     expect(recorded[0].sql).toContain('INSERT INTO cell_validators')
     // 0012: columns are (project_id, file_id, cell_id, event_id, username, decided_ts) — no is_active
     expect(recorded[0].sql).toContain('event_id')
@@ -482,12 +489,25 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
     expect(recorded[2].sql).toContain('SET validated')
     // Recompute references event_id (not edit_event_id) per 0012 schema
     expect(recorded[2].sql).toContain('event_id = cells.event_id')
+    // Sidebar re-import: once this lane's target carries a validated row, the
+    // lane drops out of the source cell's `aquillaImport.reviewLanes` outline.
+    // Scoped to the source side and keyed on the vote's lane (no targetLang in
+    // the payload → the '' legacy tag), so lane B's flag survives lane A's vote.
+    expect(recorded[3].sql).toContain("'{aquillaImport,reviewLanes}'")
+    expect(recorded[3].sql).toContain("source.side = 'source'")
+    expect(recorded[3].sql).toContain('t.validated = 1')
+    expect(recorded[3].args).toEqual([
+      'proj-1', '',
+      'proj-1', 'file-a', 'cell-1',
+      'proj-1', 'file-a', 'cell-1',
+      'proj-1', '',
+    ])
     // AD-14 pass 1: endorsement_count recompute against current chain head
-    expect(recorded[3].sql).toContain('SET endorsement_count')
-    expect(recorded[3].sql).toContain('cells.event_id')
+    expect(recorded[4].sql).toContain('SET endorsement_count')
+    expect(recorded[4].sql).toContain('cells.event_id')
     // approved_count moves on validate, so files counters are recomputed.
-    expect(recorded[4].sql).toContain('UPDATE files SET cell_count')
-    expect(recorded[4].sql).toContain('approved_count')
+    expect(recorded[5].sql).toContain('UPDATE files SET cell_count')
+    expect(recorded[5].sql).toContain('approved_count')
   })
 
   it('cell.unvalidate emits DELETE (not UPSERT) + cells.validated recompute + endorsement_count recompute', () => {
@@ -532,7 +552,15 @@ describe('buildEventProjectionStmts — cell.audio.validate / cell.audio.unvalid
     expect(stmts).toHaveLength(2)
     expect(recorded[0].sql).toContain('INSERT INTO cell_audio_validators')
     expect(recorded[0].sql).toContain('ON CONFLICT')
-    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'a1', 'alice', 2000])
+    // AQU-1591: the four trailing binds belong to the lane_id subquery, which
+    // reads the lane off the TAKE — a vote is a fact about one take, so it
+    // cannot take the lane of whoever happened to cast it. See
+    // audio-lane-projection.test.ts for the row that proves it.
+    expect(recorded[0].sql).toContain('SELECT lane_id FROM cell_audio')
+    expect(recorded[0].args).toEqual([
+      'proj-1', 'file-a', 'cell-1', 'a1', 'alice', 2000,
+      'proj-1', 'file-a', 'cell-1', 'a1',
+    ])
     expect(recorded[1].sql).toContain('SET validator_count')
   })
 
@@ -602,9 +630,11 @@ describe('buildEventProjectionStmts — cell.waive / cell.unwaive', () => {
     expect(recorded[0].sql).toContain('INSERT INTO cell_waivers')
     expect(recorded[0].sql).toContain('rule_id')
     expect(recorded[0].sql).toContain('ON CONFLICT')
-    // Bind order: project, file, cell, ruleId, reason, author, serverTs.
+    // Bind order: project, file, cell, ruleId, matchHash, reason, author, serverTs.
+    // AQU-1740: an omitted matchHash stores as '' — "the rule is waived across
+    // the whole cell", which is what every pre-0163 row means.
     expect(recorded[0].args).toEqual([
-      'proj-1', 'file-a', 'cell-1', 'no-double-space', 'intentional', 'alice', 2000,
+      'proj-1', 'file-a', 'cell-1', 'no-double-space', '', 'intentional', 'alice', 2000,
     ])
     expect(touches).toEqual(['cell_waivers'])
   })
@@ -613,10 +643,27 @@ describe('buildEventProjectionStmts — cell.waive / cell.unwaive', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeEvent('cell.waive', { ruleId: 'rule-x' }), stmts)
-    expect(recorded[0].args[4]).toBeNull()
+    expect(recorded[0].args[5]).toBeNull()
   })
 
-  it('cell.unwaive emits a DELETE keyed by rule_id', () => {
+  // AQU-1740: the primary key now carries the finding, so two findings of one
+  // rule are two rows instead of one overwriting the other.
+  it('cell.waive keys the UPSERT on match_hash when the payload names a finding', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('cell.waive', { ruleId: 'builtin:repeated-word', matchHash: 'abc123' }),
+      stmts,
+    )
+    expect(recorded[0].sql).toContain('match_hash')
+    expect(recorded[0].sql).toContain(
+      'ON CONFLICT(project_id, file_id, cell_id, rule_id, match_hash)',
+    )
+    expect(recorded[0].args[4]).toBe('abc123')
+  })
+
+  it('cell.unwaive emits a DELETE keyed by rule_id and match_hash', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: AquillaStatement[] = []
     const touches = buildEventProjectionStmts(
@@ -627,8 +674,21 @@ describe('buildEventProjectionStmts — cell.waive / cell.unwaive', () => {
     expect(stmts).toHaveLength(1)
     expect(recorded[0].sql).toContain('DELETE FROM cell_waivers')
     expect(recorded[0].sql).toContain('rule_id = ?')
-    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'no-double-space'])
+    expect(recorded[0].sql).toContain('match_hash = ?')
+    // '' — a cell-wide unwaive must not delete the per-finding rows.
+    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'no-double-space', ''])
     expect(touches).toEqual(['cell_waivers'])
+  })
+
+  it('cell.unwaive deletes exactly the named finding', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('cell.unwaive', { ruleId: 'builtin:repeated-word', matchHash: 'abc123' }),
+      stmts,
+    )
+    expect(recorded[0].args[4]).toBe('abc123')
   })
 
   it('throws when fileId or cellId is missing', () => {
@@ -660,10 +720,50 @@ describe('buildEventProjectionStmts — file.create', () => {
     expect(recorded[0].sql).toContain('INSERT INTO files')
     expect(recorded[0].args[0]).toBe('file-a')
     expect(recorded[0].args[2]).toBe('Genesis')
+    // AQU-1596: the payload field name is wire history, but what lands in
+    // `meta` says what it actually is — the language this file *declared*,
+    // which is import information and never the language of a lane.
     expect(JSON.parse(recorded[0].args.at(-1) as string)).toEqual({
-      sourceLanguage: 'en',
+      declaredSourceLanguage: 'en',
       aquillaImport: { version: 1, profileId: 'builtin:usfm-lossless' },
     })
+  })
+
+  it('records both declared languages and writes neither legacy key (AQU-1596)', () => {
+    const { db, recorded } = makeD1Stub()
+    buildEventProjectionStmts(
+      db,
+      makeEvent('file.create', {
+        name: 'Genesis',
+        fileType: 'codex',
+        sourceLanguage: 'hbo',
+        targetLanguage: 'fra',
+      }, { cellId: null }),
+      [],
+    )
+    const meta = JSON.parse(recorded[0].args.at(-1) as string)
+    expect(meta).toEqual({ declaredSourceLanguage: 'hbo', declaredTargetLanguage: 'fra' })
+    expect(meta).not.toHaveProperty('sourceLanguage')
+    expect(meta).not.toHaveProperty('targetLanguage')
+  })
+
+  it('leaves a legacy key already in projectionMeta untouched beside the declared one (AQU-1596)', () => {
+    const { db, recorded } = makeD1Stub()
+    buildEventProjectionStmts(
+      db,
+      makeEvent('file.create', {
+        name: 'Genesis',
+        fileType: 'codex',
+        sourceLanguage: 'hbo',
+        projectionMeta: { sourceLanguage: 'eng', orderedBy: 'time' },
+      }, { cellId: null }),
+      [],
+    )
+    const meta = JSON.parse(recorded[0].args.at(-1) as string)
+    // History is never rewritten: the old key stays, the declared key wins on read.
+    expect(meta.sourceLanguage).toBe('eng')
+    expect(meta.declaredSourceLanguage).toBe('hbo')
+    expect(meta.orderedBy).toBe('time')
   })
 })
 
@@ -906,6 +1006,11 @@ describe('isChainMutatingKind', () => {
     // AQU-931: anchor-only repair — must NOT arbitrate (a parent-null event
     // would lose the genesis slot to the cell's own create on rebuild).
     'source.cell.reanchor': false,
+    // AQU-1422: hide/show moves only cells.hidden_at on the shared source
+    // row and never advances the source head (a hide must not make every
+    // lane's translation go stale under AD-9) — non-chain-mutating by design.
+    'source.cell.visibility.set': false,
+    'source.cell.restore': false,
     'target.cell.create': true,
     'target.cell.commit': true,
     'target.cell.delete': true,
@@ -924,6 +1029,7 @@ describe('isChainMutatingKind', () => {
     'file.rename': false,
     'file.delete': false,
     'file.restore': false,
+    'file.revision': false,
     'comment.create': false,
     'comment.edit': false,
     'comment.delete': false,
@@ -935,24 +1041,42 @@ describe('isChainMutatingKind', () => {
     'term.approve': false,
     'term.reject': false,
     'cell.backtranslation.set': false,
+    // AQU-1408: a gloss correction is a side row (cell_glosses) pinned to a
+    // target event; it never advances the target head.
+    'cell.gloss.set': false,
     'assignment.create': false,
     'assignment.reassign': false,
     'assignment.unassign': false,
     'project.link-source': false,
     'cast.assign': false,
+    // AQU-2408: a typed label is one metadata key on the source row; never the chain.
+    'cell.label.set': false,
     'cell.retime': false,
     'cell.audio.rename': false,
     'cell.audio.trim': false,
+    // AQU-2327: a take's volume and fades; never the text chain.
+    'cell.audio.gain': false,
     'cell.audio.place': false,
+    // AQU-1767: a cut makes a second take row; it never moves the text chain.
+    'cell.audio.cut': false,
     // A link says which subtitle a heard line performs; it never moves the
     // cell's own text chain.
     'cell.link.set': false,
+    // AQU-777: an attachment hangs off the cell as reference context; it
+    // never touches the cell's own text chain.
+    'cell.attachment.add': false,
+    'cell.attachment.remove': false,
     'cell.audio.measure': false,
     'cell.lane.retime': false,
     'file.video.set': false,
     'file.timing.set': false,
     'file.corpus.set': false,
+    'file.extension.set': false,
+    // AQU-1569: a reorder writes one files.meta key; no cell chain is involved.
+    'file.reorder': false,
     'file.track.set': false,
+    'file.milestone.set': false,
+    'file.milestone.remove': false,
     // AQU-476: mirror events replicate an ordering the upstream already
     // arbitrated — see CHAIN_MUTATING_KINDS's doc comment.
     'source.cell.mirror': false,
@@ -993,8 +1117,11 @@ describe('source.cell.delete — dependent cleanup', () => {
     return recorded
   }
 
+  // The AQU-1767 archive statement READS every dependent table (it copies what
+  // the cascade is about to take), so it is left out of the per-table shape
+  // checks and asserted on its own below.
   const sqlFor = (recorded: RecordedStmt[], table: string) =>
-    recorded.filter((r) => r.sql.includes(table))
+    recorded.filter((r) => r.sql.includes(table) && !r.sql.includes('removed_cell_archive'))
 
   /**
    * The same cleanup for a delete that carries a PARENT — i.e. every removal
@@ -1065,11 +1192,17 @@ describe('source.cell.delete — dependent cleanup', () => {
   it("a target delete's cleanup tests the TARGET row's head, not the source's", () => {
     // The gate must follow the row the accompanying write targets, or a lane
     // delete would be gated on a row it is not touching.
-    const validators = gatedDeleteStmts('target.cell.delete', { targetLang: 'fr' })
-      .filter((r) => r.sql.includes('cell_validators'))
+    const recorded = gatedDeleteStmts('target.cell.delete', { targetLang: 'fr' })
+    const validators = recorded.filter((r) => r.sql.includes('cell_validators'))
     expect(validators).toHaveLength(1)
     expect(validators[0].args).toContain('target')
     expect(validators[0].args).toContain('fr')
+    const backtranslations = recorded.filter((r) => r.sql.includes('cell_backtranslations'))
+    expect(backtranslations).toHaveLength(1)
+    expect(backtranslations[0].sql).toContain('FROM chain_claims')
+    expect(backtranslations[0].sql).toContain('FROM cells WHERE')
+    expect(backtranslations[0].args).toContain('target')
+    expect(backtranslations[0].args).toContain('fr')
   })
 
   // AQU-1068 review round: the translations are the SOURCE delete's business.
@@ -1101,8 +1234,9 @@ describe('source.cell.delete — dependent cleanup', () => {
     // act as removing the cell.
     const rows = sqlFor(deleteStmts('target.cell.delete', { targetLang: 'fr' }), 'DELETE FROM cells')
     expect(rows).toHaveLength(1)
-    expect(rows[0].sql).toContain('target_lang = ?')
-    expect(rows[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'fr'])
+    expect(rows[0].sql).toContain('legacy_tag = ?')
+    expect(rows[0].sql).toContain('lane_id =')
+    expect(rows[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'proj-1', 'fr'])
   })
 
   it('clears every lane of validators for the cell', () => {
@@ -1169,13 +1303,38 @@ describe('source.cell.delete — dependent cleanup', () => {
     const recorded = deleteStmts('target.cell.delete', { targetLang: 'fr' })
     const validators = sqlFor(recorded, 'cell_validators')
     expect(validators).toHaveLength(1)
-    expect(validators[0].sql).toContain('target_lang = ?')
-    expect(validators[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'fr'])
+    expect(validators[0].sql).toContain('legacy_tag = ?')
+    expect(validators[0].sql).toContain('lane_id =')
+    expect(validators[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'proj-1', 'fr'])
+    const backtranslations = sqlFor(recorded, 'cell_backtranslations')
+    expect(backtranslations).toHaveLength(1)
+    expect(backtranslations[0].sql).toContain('legacy_tag = ?')
+    expect(backtranslations[0].sql).toContain("lane_id IS NULL AND ? = ''")
+    // Named lane: the NULL-lane (default) rows are not selected.
+    expect(backtranslations[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'proj-1', 'fr', 'fr'])
     // The cell itself survives a lane delete, so its takes, pairings and
     // comments must all survive with it.
     for (const table of ['cell_audio', 'cell_links', 'UPDATE comments', 'cell_waivers', 'cell_word_morph']) {
       expect(sqlFor(recorded, table), table).toHaveLength(0)
     }
+  })
+
+  it('a default-lane target delete also removes NULL-lane back-translations', () => {
+    const recorded = deleteStmts('target.cell.delete', {})
+    const backtranslations = sqlFor(recorded, 'cell_backtranslations')
+    expect(backtranslations).toHaveLength(1)
+    expect(backtranslations[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'proj-1', '', ''])
+  })
+
+  it('archives what it is about to take FIRST, so a removal can be undone (AQU-1767)', () => {
+    const recorded = deleteStmts('source.cell.delete')
+    const firstCascade = recorded.findIndex((r) => r.sql.includes('DELETE FROM cells'))
+    const archive = recorded.findIndex((r) => r.sql.includes('INSERT INTO removed_cell_archive'))
+    expect(archive).toBeGreaterThanOrEqual(0)
+    expect(archive).toBeLessThan(firstCascade)
+    expect(recorded[archive].sql).toContain('ON CONFLICT (delete_event_id) DO NOTHING')
+    // A target (single-lane) delete keeps the cell, so nothing is archived.
+    expect(deleteStmts('target.cell.delete', {}).some((r) => r.sql.includes('removed_cell_archive'))).toBe(false)
   })
 
   it('gates every dependent write on the chain claim, like the cells write', () => {

@@ -38,6 +38,24 @@ export async function revokeToken(
   evictSessionByJti(jti)
 }
 
+const SESSION_FAMILY_PREFIX = "sid:"
+
+/** Denylists a whole session family (every token minted by login + its sliding
+ *  refreshes). Stored in revoked_tokens under a namespaced key, so it needs no
+ *  schema change and is pruned by the same cron. */
+export async function revokeSessionFamily(
+  db: AquillaDb,
+  sid: string,
+  userId: number,
+  expSeconds: number,
+): Promise<void> {
+  await revokeToken(db, `${SESSION_FAMILY_PREFIX}${sid}`, userId, expSeconds)
+}
+
+export function isSessionFamilyRevoked(db: AquillaDb, sid: string): Promise<boolean> {
+  return isTokenRevoked(db, `${SESSION_FAMILY_PREFIX}${sid}`)
+}
+
 /**
  * Fail open on a DB error, matching this codebase's established posture for
  * auth-adjacent infra checks (see utils/rate-limit.ts `countRecentEvents`):

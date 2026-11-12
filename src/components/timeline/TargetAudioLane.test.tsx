@@ -3,8 +3,9 @@
 // resize-as-trim commits.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, act } from "@testing-library/react"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { renderWithTooltips } from "@/test-utils/tooltip"
 const pauseAllTransports = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/audio/transport-pause", () => ({ pauseAllTransports }))
 const toastAdd = vi.hoisted(() => vi.fn())
@@ -15,6 +16,8 @@ vi.mock("@/components/ui/toast", async (importActual) => {
 
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
 import { chipRadiusPx } from "@/lib/timeline/scale"
+import { RowMetricsContext } from "./useRowMetrics"
+import { chipHeightPx, chipPadPx } from "@/lib/timeline/row-metrics"
 import type { CellData } from "@/hooks/useCells"
 
 const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
@@ -47,6 +50,19 @@ function item(
 const pressPlay = async () => {
   fireEvent.click(screen.getByTestId("tl-target-c1-play"))
   await act(async () => { await Promise.resolve() })
+}
+
+
+/** AQU-2260 (Sam, Oct 29, third pass): a take's details are at the top of its
+ *  right-click menu, as plain lines. Hovering the chip shows nothing. */
+async function expectTakeDetails(key: string, text: RegExp) {
+  const chip = screen.getByTestId(`tl-target-${key}`)
+  await userEvent.setup().hover(chip)
+  expect(screen.queryByRole("tooltip")).toBeNull()
+  fireEvent.contextMenu(chip, { button: 2 })
+  const details = await screen.findByTestId(`tl-take-details-${key}`)
+  expect(details.textContent).toMatch(text)
+  return details
 }
 
 const base = {
@@ -112,7 +128,8 @@ describe("TargetAudioLane — overflow warnings", () => {
     render(<TargetAudioLane {...base} items={[item({}, 4000)]} color="0d9488" />)
     const chip = screen.getByTestId("tl-target-c1")
     expect(chip).toHaveAttribute("data-overflow", "none")
-    expect(chip.className).toContain("bg-[color:var(--tl-track-take)]")
+    // AQU-2235: the take look's 12% ground.
+    expect(chip.className).toContain("bg-[color:var(--tl-track-ground)]")
     expect(screen.getByTestId("tl-target-lane").style.getPropertyValue("--tl-track-hue")).toBe("#0d9488")
   })
 
@@ -130,10 +147,12 @@ describe("TargetAudioLane — overflow warnings", () => {
     // …and no inline fill anywhere to have overridden it.
     expect(offender.style.backgroundColor).toBe("")
     // A chip on the same track that is behaving keeps its identity class.
-    expect(screen.getByTestId("tl-target-c2").className).toContain("bg-[color:var(--tl-track-take)]")
+    expect(screen.getByTestId("tl-target-c2").className).toContain("bg-[color:var(--tl-track-ground)]")
   })
 
-  it("uses the lighter alpha for a generated voice", () => {
+  // AQU-2235 (Sam, Oct 25): "make the only distinction between AI and non-AI
+  // the little star in the corner" — a generated voice wears the same ground.
+  it("draws a generated voice on the same ground as a recorded take", () => {
     render(
       <TargetAudioLane
         {...base}
@@ -141,7 +160,7 @@ describe("TargetAudioLane — overflow warnings", () => {
         color="0d9488"
       />,
     )
-    expect(screen.getByTestId("tl-target-c1").className).toContain("bg-[color:var(--tl-track-gen)]")
+    expect(screen.getByTestId("tl-target-c1").className).toContain("bg-[color:var(--tl-track-ground)]")
   })
 
   it("draws a preset id and a picked hex through the same one mechanism", () => {
@@ -188,7 +207,7 @@ describe("TargetAudioLane — overflow warnings", () => {
       "c2",
     ) // head at 16 → 2.0s under c1's tail
     renderWithTooltips(<TargetAudioLane {...base} items={[first, second]} />)
-    await expectTooltip(screen.getByTestId("tl-target-c2"), /−2\.0s.*previous dub/)
+    await expectTakeDetails("c2", /−2\.0s.*previous dub/)
     // The red paints the whole warning line (the number span inherits it).
     expect(
       screen.getByTestId("tl-target-c2-tip-overlap-head").parentElement?.className,
@@ -204,7 +223,7 @@ describe("TargetAudioLane — overflow warnings", () => {
     ) // head at 16, under c1's GUESSED tail
     renderWithTooltips(<TargetAudioLane {...base} items={[first, second]} />)
     // The warning prose still fires — but no number derived from a guess.
-    await expectTooltip(screen.getByTestId("tl-target-c2"), /Overlaps the previous dub/)
+    await expectTakeDetails("c2", /Overlaps the previous dub/)
     expect(screen.queryByTestId("tl-target-c2-tip-overlap-head")).toBeNull()
   })
 
@@ -212,7 +231,7 @@ describe("TargetAudioLane — overflow warnings", () => {
     const first = item({}, 12500) // [10, 22.5] over c2's chip at 20 → −2.5s
     const second = item({ startTime: 20, endTime: 30 } as Partial<CellData>, 4000, "c2")
     renderWithTooltips(<TargetAudioLane {...base} items={[first, second]} />)
-    await expectTooltip(screen.getByTestId("tl-target-c1"), /−2\.5s.*next dub/)
+    await expectTakeDetails("c1", /−2\.5s.*next dub/)
     expect(
       screen.getByTestId("tl-target-c1-tip-overlap").parentElement?.className,
     ).toContain("text-red")
@@ -588,13 +607,39 @@ describe("TargetAudioLane — resize-as-trim (round 7)", () => {
 })
 
 describe("TargetAudioLane — interaction", () => {
-  it("clean click selects and seeks", () => {
+  // AQU-1767 (Sam, 2026-10-14): a click selects the take and leaves the
+  // playhead alone, so S can split it there; a double-click jumps to the line.
+  it("clean click selects the line and the take, and does not seek", () => {
     const onSelect = vi.fn()
+    const onSelectTake = vi.fn()
     const onSeek = vi.fn()
-    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onSelect={onSelect} onSeek={onSeek} />)
+    render(
+      <TargetAudioLane {...base} items={[item({}, 4000)]} onSelect={onSelect} onSelectTake={onSelectTake} onSeek={onSeek} />,
+    )
     fireEvent.click(screen.getByTestId("tl-target-c1"))
     expect(onSelect).toHaveBeenCalledWith("c1")
+    // AQU-2327: with the take's own id, so the Station can follow the click.
+    expect(onSelectTake).toHaveBeenCalledWith("c1", "audio-c1-1700000000-take.webm")
+    expect(onSeek).not.toHaveBeenCalled()
+  })
+
+  it("double-click jumps to the line", () => {
+    const onSeek = vi.fn()
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onSeek={onSeek} />)
+    fireEvent.doubleClick(screen.getByTestId("tl-target-c1"))
     expect(onSeek).toHaveBeenCalledWith("c1")
+  })
+
+  it("rings the selected take strongly, and a merely selected line's take quietly", () => {
+    const { unmount } = render(
+      <TargetAudioLane {...base} selectedId="c1" selectedTakeCellId="c1" items={[item({}, 4000)]} />,
+    )
+    expect(screen.getByTestId("tl-target-c1").className).toContain("ring-2 ring-sky-500")
+    unmount()
+    render(<TargetAudioLane {...base} selectedId="c1" items={[item({}, 4000)]} />)
+    const cls = screen.getByTestId("tl-target-c1").className
+    expect(cls).toContain("ring-1 ring-sky-500/50")
+    expect(cls).not.toContain("ring-2")
   })
 
   it("dragging commits the new start (clamped into the section) and suppresses the seek", () => {
@@ -953,11 +998,11 @@ describe("TargetAudioLane — buried chips stay reachable (SUB-48)", () => {
 
   it("the drawn-short tooltip names the neighbour it is protecting", async () => {
     const { unmount } = renderWithTooltips(<TargetAudioLane {...base} items={backdragged()} />)
-    await expectTooltip(screen.getByTestId("tl-target-c2"), /previous dub stays reachable/)
+    await expectTakeDetails("c2", /previous dub stays reachable/)
     unmount()
 
     renderWithTooltips(<TargetAudioLane {...base} items={longLongShort()} />)
-    await expectTooltip(screen.getByTestId("tl-target-c1"), /next dub stays reachable/)
+    await expectTakeDetails("c1", /next dub stays reachable/)
   })
 
   it("a chip with no chip after it is never truncated", () => {
@@ -1020,7 +1065,7 @@ describe("TargetAudioLane — missing badge + loading spinner (2026-08-05)", () 
     const chip = screen.getByTestId("tl-target-c1")
     expect(chip).toHaveAttribute("data-missing", "true")
     expect(screen.getByTestId("tl-target-c1-missing")).toBeInTheDocument()
-    await expectTooltip(chip, /This clip's audio is missing\./)
+    await expectTakeDetails("c1", /This clip's audio is missing\./)
   })
 
   it("the verse being waited on shows the loading spinner", () => {
@@ -1114,9 +1159,13 @@ describe("TargetAudioLane — corner affordances never collide (SUB-48)", () => 
     expect(screen.getByTestId("tl-target-c1-record")).toBeInTheDocument()
   })
 
+  // AQU-2235: the mic lives in the name bar now, from 60px wide (board 54).
   it("a not-yet-queued narrow chip keeps the mic button at its normal threshold", () => {
-    render(<TargetAudioLane {...base} items={[item({ startTime: 10, endTime: 20 }, 1000)]} onOpenRecording={vi.fn()} />)
+    const { unmount } = render(<TargetAudioLane {...base} items={[item({ startTime: 10, endTime: 20 }, 1500)]} onOpenRecording={vi.fn()} />)
     expect(screen.getByTestId("tl-target-c1-record")).toBeInTheDocument()
+    unmount()
+    render(<TargetAudioLane {...base} items={[item({ startTime: 10, endTime: 20 }, 1000)]} onOpenRecording={vi.fn()} />)
+    expect(screen.queryByTestId("tl-target-c1-record")).toBeNull()
   })
 })
 
@@ -1306,14 +1355,19 @@ describe("TargetAudioLane — the track's colour", () => {
     expect(laneOf().className).not.toContain("bg-[color:var(--tl-track")
   })
 
-  it("draws a take at 67% and a generated voice at 33%", () => {
+  // AQU-2235 (Sam, Oct 25, board 51): a 12% ground in a 26% frame, for a
+  // recorded take and a generated voice alike.
+  it("draws a take and a generated voice alike: a 12% ground in a 26% frame", () => {
     const { unmount } = render(<TargetAudioLane {...base} color="cyan" items={[item({}, 4000)]} />)
-    expect(classesOf()).toContain("bg-[color:var(--tl-track-take)]")
+    expect(classesOf()).toContain("bg-[color:var(--tl-track-ground)]")
+    expect(classesOf()).toContain("border-[color:var(--tl-track-frame)]")
+    expect(laneOf().style.getPropertyValue("--tl-track-ground")).toBe("rgba(0, 195, 205, 0.12)")
+    expect(laneOf().style.getPropertyValue("--tl-track-frame")).toBe("rgba(0, 195, 205, 0.26)")
     unmount()
 
     const generated = { ...item({}, 4000), kind: "generated" as const }
     render(<TargetAudioLane {...base} color="cyan" items={[generated]} />)
-    expect(classesOf()).toContain("bg-[color:var(--tl-track-gen)]")
+    expect(classesOf()).toContain("bg-[color:var(--tl-track-ground)]")
     // BOTH chips are washes now, so both read against the page rather than
     // against the hue — ink chosen for the hue would be wrong at these alphas.
     expect(classesOf()).toContain("text-foreground")
@@ -1322,7 +1376,8 @@ describe("TargetAudioLane — the track's colour", () => {
 
   it("defaults to green for a track nobody has coloured", () => {
     render(<TargetAudioLane {...base} items={[item({}, 4000)]} />)
-    expect(hueOf()).toBe("#40c06e")
+    // AQU-2235: the new green, the recording bar's hue (was #40c06e).
+    expect(hueOf()).toBe("#23c179")
   })
 
   it("takes a picked hex as readily as a preset id", () => {
@@ -1342,7 +1397,7 @@ describe("TargetAudioLane — the track's colour", () => {
   // half of that bargain: the old client draws the default rather than nothing.
   it("falls back to the default for an id this build cannot name", () => {
     render(<TargetAudioLane {...base} color="ultramarine-2" items={[item({}, 4000)]} />)
-    expect(hueOf()).toBe("#40c06e")
+    expect(hueOf()).toBe("#23c179")
   })
 
   // THE ONE THAT MATTERS MOST. `cn` resolves last-wins per utility group, and
@@ -1390,26 +1445,48 @@ describe("TargetAudioLane — the sparkle on generated chips", () => {
     expect(screen.queryByTestId("tl-target-c1-generated")).toBeNull()
   })
 
-  // Sam, 2026-08-22: "we'd just move the sparkles over to the right so that it
-  // doesn't collide with the left trim handle." The handle is the leftmost 7px
-  // and is the control you reach for.
-  it("sits clear of the left trim handle, vertically centred", () => {
+  // AQU-2235 (board 54): with a name bar the sparkle LEADS the bar, clear of
+  // the waveform and of the trim handles, which start under the bar.
+  it("leads the name bar, clear of the trim handles below it", () => {
     render(<TargetAudioLane {...base} items={[generated()]} />)
+    const glyph = screen.getByTestId("tl-target-c1-generated")
+    const bar = screen.getByTestId("tl-target-c1-bar")
+    expect(bar.contains(glyph)).toBe(true)
+    expect(bar.firstElementChild?.firstElementChild).toBe(glyph)
+  })
+
+  // Sam, 2026-08-22: "we'd just move the sparkles over to the right so that it
+  // doesn't collide with the left trim handle." Under 30px there is no bar,
+  // and the sparkle keeps the place it had.
+  it("on a clip too short for a bar, sits clear of the left trim handle, vertically centred", () => {
+    const rowH = 40
+    const chipH = chipHeightPx(rowH)
+    render(
+      <RowMetricsContext.Provider value={{ rowH, chipH, chipPad: chipPadPx(rowH) }}>
+        <TargetAudioLane {...base} items={[generated()]} />
+      </RowMetricsContext.Provider>,
+    )
+    expect(chipH).toBeLessThan(30)
+    expect(screen.queryByTestId("tl-target-c1-bar")).toBeNull()
     const glyph = screen.getByTestId("tl-target-c1-generated")
     expect(glyph.className).toContain("left-2")
     expect(glyph.className).toContain("top-1/2")
     expect(glyph.className).toContain("-translate-y-1/2")
   })
 
-  // They occupy the same pixels: the corner badge is 14px tall at top-1, so at
-  // any height where it renders it covers the vertical centre. A missing take
-  // is a STATE; "this one is synthetic" is an identity the colour still says.
-  it("gives way to the corner state badge", () => {
+  // In the bar a state and the sparkle no longer fight for one corner: the
+  // sparkle keeps leading the bar and the state glyph sits at its right end,
+  // where appearing never moves the name.
+  it("keeps leading the bar beside a corner state glyph, which sits at the right end", () => {
     render(
       <TargetAudioLane {...base} items={[generated()]} missingCellIds={new Set(["c1"])} />,
     )
-    expect(screen.getByTestId("tl-target-c1-missing")).toBeTruthy()
-    expect(screen.queryByTestId("tl-target-c1-generated")).toBeNull()
+    const bar = screen.getByTestId("tl-target-c1-bar")
+    const missing = screen.getByTestId("tl-target-c1-missing")
+    const glyph = screen.getByTestId("tl-target-c1-generated")
+    expect(bar.firstElementChild?.firstElementChild).toBe(glyph)
+    expect(missing.parentElement).toBe(bar)
+    expect(bar.firstElementChild?.contains(missing)).toBe(false)
   })
 
   it("is withheld from a chip too narrow to hold it", () => {
@@ -1534,6 +1611,37 @@ describe("TargetAudioLane — the play button (stage 5)", () => {
     expect(play).toHaveBeenCalledTimes(2)
   })
 
+  // 2026-09-30: fetching the clip took 14.6s on a slow connection with the
+  // button still saying "Play this clip". It says it is loading now, and a
+  // second press gives up the wait.
+  it("says it is loading while the clip arrives, and a second press gives up", async () => {
+    let arrive: (v: "ready") => void = () => {}
+    const play = vi.fn(() => ({ stop: () => {}, isPlaying: () => true, positionSec: () => null, audible: true }))
+    const factory = () => ({ prime: () => new Promise<"ready">((r) => { arrive = r }), play })
+    render(<TargetAudioLane {...base} previewFactory={factory as never} items={[item({}, 4000)]} />)
+    const button = screen.getByTestId("tl-target-c1-play")
+    fireEvent.click(button)
+    await waitFor(() => expect(button).toHaveAttribute("aria-label", "Loading…"))
+    expect(button).toHaveAttribute("aria-busy", "true")
+    fireEvent.click(button)
+    await waitFor(() => expect(button).toHaveAttribute("aria-label", "Play this clip"))
+    await act(async () => { arrive("ready") })
+    expect(play).not.toHaveBeenCalled()
+  })
+
+  it("plays once the clip has arrived", async () => {
+    let arrive: (v: "ready") => void = () => {}
+    const play = vi.fn(() => ({ stop: () => {}, isPlaying: () => true, positionSec: () => null, audible: true }))
+    const factory = () => ({ prime: () => new Promise<"ready">((r) => { arrive = r }), play })
+    render(<TargetAudioLane {...base} previewFactory={factory as never} items={[item({}, 4000)]} />)
+    const button = screen.getByTestId("tl-target-c1-play")
+    fireEvent.click(button)
+    await waitFor(() => expect(button).toHaveAttribute("aria-label", "Loading…"))
+    await act(async () => { arrive("ready") })
+    expect(play).toHaveBeenCalledTimes(1)
+    expect(button).toHaveAttribute("aria-label", "Stop")
+  })
+
   it("leaves room for the record button on a chip wide enough for both", () => {
     render(
       <TargetAudioLane {...wired} items={[item({}, 4000)]} onOpenRecording={() => {}} />,
@@ -1634,9 +1742,9 @@ describe("TargetAudioLane — the preview mini-playhead (2026-08-27)", () => {
     expect(screen.getByTestId("tl-target-c1-playline").style.left).toBe("20px")
   })
 
-  // ── The progress fill (Sam, same round): the unplayed side drops to the
-  // hover rung and the chip re-fills behind the line — the SoundCloud pattern
-  // in the palette's own ladder.
+  // ── The progress fill (Sam, same round): the unplayed side stays on the
+  // resting ground and the chip fills one rung up behind the line — AQU-2235
+  // (Sam, Oct 25): played 27%, not yet 12%, and the waveform split 90 / 30.
   it("dims the unplayed side on press and re-fills behind the playhead", async () => {
     const stub = stubPreview()
     render(<TargetAudioLane {...base} previewFactory={stub.factory} items={[item({}, 4000)]} />)
@@ -1646,8 +1754,8 @@ describe("TargetAudioLane — the preview mini-playhead (2026-08-27)", () => {
     await pressPlay()
     // The identity fill is muted and the split gradient takes the slot…
     expect(chip.className).toContain("bg-transparent")
-    expect(chip.className).toContain("var(--tl-track-take)_var(--tl-play-x")
-    expect(chip.className).toContain("var(--tl-track-hover)_var(--tl-play-x")
+    expect(chip.className).toContain("var(--tl-track-played)_var(--tl-play-x")
+    expect(chip.className).toContain("var(--tl-track-ground)_var(--tl-play-x")
     // …split at 0 while the decode is still in flight (whole chip = "not yet"),
     frame()
     expect(chip.style.getPropertyValue("--tl-play-x")).toBe("0px")
@@ -1661,7 +1769,7 @@ describe("TargetAudioLane — the preview mini-playhead (2026-08-27)", () => {
     expect(chip.style.getPropertyValue("--tl-play-x")).toBe("")
   })
 
-  it("a generated voice re-fills to its own lighter rung", async () => {
+  it("a generated voice re-fills exactly as a recorded take does", async () => {
     const stub = stubPreview()
     render(
       <TargetAudioLane
@@ -1671,7 +1779,7 @@ describe("TargetAudioLane — the preview mini-playhead (2026-08-27)", () => {
       />,
     )
     await pressPlay()
-    expect(screen.getByTestId("tl-target-c1").className).toContain("var(--tl-track-gen)_var(--tl-play-x")
+    expect(screen.getByTestId("tl-target-c1").className).toContain("var(--tl-track-played)_var(--tl-play-x")
   })
 
   it("never repaints a red at-fault chip — the warning still beats playback", async () => {
@@ -1951,5 +2059,51 @@ describe("TargetAudioLane — the validation tick", () => {
       />,
     )
     expect(tick()).toBeNull()
+  })
+})
+
+// Sam's decision (hidden lines on the timeline): a hidden line's takes are
+// drawn where they sit, faded, with nothing on them to play or record with.
+describe("TargetAudioLane — a hidden line", () => {
+  const wired = { ...base, projectId: "p1", fileId: "f1", session: { jwt: "tok", username: "sam" } as never }
+
+  it("is faded and offers neither play nor record", () => {
+    render(<TargetAudioLane {...wired} items={[item({ hidden: true } as Partial<CellData>, 4000)]} onOpenRecording={vi.fn()} />)
+    const chip = screen.getByTestId("tl-target-c1")
+    expect(chip).toHaveAttribute("data-hidden-line")
+    expect(chip.className).toContain("opacity-60")
+    expect(screen.queryByTestId("tl-target-c1-play")).toBeNull()
+    expect(screen.queryByTestId("tl-target-c1-record")).toBeNull()
+  })
+
+  it("draws every piece of a split take faded", () => {
+    const A = "audio-c1-1700000000-take.webm", B = "audio-c1-1700000500-piece.webm"
+    const cut = item({ hidden: true } as Partial<CellData>, 4000, "c1", { trimEndMs: 1500 })
+    ;(cut.cell.attachments as Record<string, object>)[B] = { type: "audio", url: "frontier-audio://take", durationMs: 4000, trimStartMs: 2000, pieceOf: A }
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[
+          { ...cut, pieceIndex: 0, pieceCount: 2 },
+          { cell: cut.cell, kind: "take", audioId: B, pieceIndex: 1, pieceCount: 2 },
+        ]}
+      />,
+    )
+    const chips = document.querySelectorAll('[data-testid^="tl-target-c1"][data-audio-id]')
+    expect(chips).toHaveLength(2)
+    for (const chip of chips) expect(chip).toHaveAttribute("data-hidden-line")
+  })
+
+  it("leaves its empty slot without a record button", () => {
+    const empty = { id: "c9", fileId: "f1", medium: "media", startTime: 30, endTime: 36, attachments: {}, hidden: true } as unknown as CellData
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} emptyCells={[empty]} onOpenRecording={vi.fn()} />)
+    expect(screen.queryByTestId("tl-target-empty-c9-record")).toBeNull()
+  })
+
+  it("plays and records as before once shown again", () => {
+    render(<TargetAudioLane {...wired} items={[item({}, 4000)]} onOpenRecording={vi.fn()} />)
+    expect(screen.getByTestId("tl-target-c1")).not.toHaveAttribute("data-hidden-line")
+    expect(screen.getByTestId("tl-target-c1-play")).toBeInTheDocument()
+    expect(screen.getByTestId("tl-target-c1-record")).toBeInTheDocument()
   })
 })

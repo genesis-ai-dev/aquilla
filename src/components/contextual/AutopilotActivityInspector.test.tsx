@@ -1,9 +1,11 @@
+// Every catalog, synchronously: this file asserts translated text (AQU-1991).
+import "@/test-utils/all-catalogs"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { AutopilotActivityInspector } from "./AutopilotActivityInspector"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
-import { CATALOGS } from "@/lib/i18n/messages"
+import { CATALOGS } from "@/lib/i18n/messages/all"
 import type { Catalog } from "@/lib/i18n/messages/en"
 import { LOCALE_STORAGE_KEY } from "@/lib/i18n/store"
 import type {
@@ -15,6 +17,7 @@ import type {
   ContextualRunPage,
   ContextualRunRecord,
 } from "@/lib/contextual/transport"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const RUN_ID = "01920000-0000-7000-8000-000000000001"
 let originalMyanmarCatalog: Catalog
@@ -237,6 +240,30 @@ describe("AutopilotActivityInspector", () => {
     expect(announcement).toHaveTextContent("Finished checking the next passage.")
   })
 
+  // AQU-1847. A run can be held behind another file, another project in the
+  // same workspace, or another tenant, under the org and platform-wide
+  // capacity ceilings. The queued status used to fall through to the generic
+  // "Autopilot status changed", which reads as a stall — the opposite of the
+  // honest answer, which is that the run is in line and will start.
+  it("names a run queued for model capacity instead of calling it a bare status change", async () => {
+    const queuedEvent = {
+      ...activity.events[0],
+      id: "event-queued",
+      kind: "run_state",
+      status: "queued",
+      spanId: undefined,
+      spanLabel: undefined,
+      summary: "Autopilot is waiting for model capacity",
+      details: { done: 3, total: 10, failed: 0 },
+      createdAt: "2026-08-11T10:03:00.000Z",
+    }
+    activityMock.mockResolvedValue({ ...activity, events: [queuedEvent] })
+    renderInspector()
+
+    expect(await screen.findByText("Autopilot is waiting for model capacity")).toBeInTheDocument()
+    expect(screen.queryByText("Autopilot status changed")).not.toBeInTheDocument()
+  })
+
   it("opens failed details and offers a truthful new-run retry", async () => {
     const failed = { ...run, status: "failed", lastError: "Agent credit cap reached." }
     runsMock.mockResolvedValueOnce(runPage([failed]))
@@ -325,7 +352,7 @@ describe("AutopilotActivityInspector", () => {
     expect(screen.queryByText("Opaque upstream diagnostic.")).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /Technical & evidence/ }))
     fireEvent.click(screen.getByRole("button", { name: "Copy activity log" }))
-    await vi.waitFor(() => expect(writeText).toHaveBeenCalled())
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalled(), { timeout: STALL_WATCHDOG_MS })
     const copied = writeText.mock.calls[0][0]
     expect(copied).toContain("drafts_staged")
     expect(copied).toContain("Opaque upstream diagnostic.")
@@ -605,7 +632,7 @@ describe("AutopilotActivityInspector", () => {
       "p1",
       restarted.runId,
       expect.objectContaining({ draftLimit: 50 }),
-    ))
+    ), { timeout: STALL_WATCHDOG_MS })
     // Mirrors the editor parent refreshing its fallback snapshot after the
     // mutation while focusRunId still points at the failed run.
     rerender(
@@ -674,7 +701,7 @@ describe("AutopilotActivityInspector", () => {
       "p1",
       firstRun.runId,
       expect.objectContaining({ draftCursor }),
-    ))
+    ), { timeout: STALL_WATCHDOG_MS })
     fireEvent.click(screen.getByRole("button", { name: /B\.usfm.*1 ready to review/i }))
     expect(await screen.findByText("Second run activity.")).toBeInTheDocument()
 
@@ -760,8 +787,8 @@ describe("AutopilotActivityInspector", () => {
     renderInspector({ fallbackRun: parked, onRunChanged })
 
     fireEvent.click(await screen.findByRole("button", { name: "Stop" }))
-    await vi.waitFor(() => expect(commandMock).toHaveBeenCalledWith("p1", RUN_ID, "terminate"))
-    await vi.waitFor(() => expect(onRunChanged).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(commandMock).toHaveBeenCalledWith("p1", RUN_ID, "terminate"), { timeout: STALL_WATCHDOG_MS })
+    await vi.waitFor(() => expect(onRunChanged).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
   })
 
   it("places per-collection truncation notices beside their evidence", async () => {
@@ -810,13 +837,13 @@ describe("AutopilotActivityInspector", () => {
 
     expect(await screen.findByText(/Could not refresh detailed activity/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
-    await vi.waitFor(() => expect(runsMock).toHaveBeenCalledTimes(2))
-    await vi.waitFor(() => expect(activityMock).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(runsMock).toHaveBeenCalledTimes(2), { timeout: STALL_WATCHDOG_MS })
+    await vi.waitFor(() => expect(activityMock).toHaveBeenCalledTimes(2), { timeout: STALL_WATCHDOG_MS })
     expect(await screen.findByText("3 reviewable drafts staged")).toBeInTheDocument()
     expect(screen.queryByText(/Could not refresh detailed activity/)).not.toBeInTheDocument()
   })
 
-  it("links missing terminology and brief context to their real project surfaces", async () => {
+  it("links missing terminology and instructions context to their real project surfaces", async () => {
     renderInspector({
       initialSection: "context",
       readiness: {
@@ -824,7 +851,7 @@ describe("AutopilotActivityInspector", () => {
         blockingGaps: 2,
         items: [
           { id: "terminology", label: "Key terms", level: "missing", detail: "Missing", href: "terminology" },
-          { id: "brief", label: "Translation brief", level: "missing", detail: "Missing", href: "memory/brief" },
+          { id: "instructions", label: "Translation instructions", level: "missing", detail: "Missing", href: "memory/instructions" },
         ],
       },
     })
@@ -833,10 +860,79 @@ describe("AutopilotActivityInspector", () => {
       "href",
       "/project/p1/terminology",
     )
+    expect(screen.getByRole("link", { name: "Set up Translation instructions" })).toHaveAttribute(
+      "href",
+      "/project/p1/memory/instructions",
+    )
+  })
+
+  // AQU-1672: the "Set up" link renders only while an item is unfinished, so a
+  // project past first setup had no route left to the surface behind it. That
+  // mattered most for the translation brief (now the project instructions) —
+  // this list was its only path from the dashboard, and a reviewer wanting to
+  // re-read or revise it found none.
+  it("keeps a route to a finished context item from its own title", async () => {
+    renderInspector({
+      initialSection: "context",
+      readiness: {
+        ready: true,
+        blockingGaps: 0,
+        items: [
+          { id: "instructions", label: "Translation instructions", level: "ready", detail: "Written", href: "memory/instructions" },
+        ],
+      },
+    })
+
+    expect(await screen.findByRole("link", { name: "Translation instructions" })).toHaveAttribute(
+      "href",
+      "/project/p1/memory/instructions",
+    )
+  })
+
+  // AQU-1678: the Context disclosure used to be nested inside the
+  // `selectedRun` branch, so a project with no Autopilot runs opened a sheet
+  // with no Context section at all — while the card's "N context suggestions"
+  // widget opened that very sheet with `initialSection: "context"`. Readiness is
+  // project state, so the list has to render with zero runs.
+  it("shows project context readiness on a project with no Autopilot runs", async () => {
+    runsMock.mockResolvedValue(runPage([]))
+
+    renderInspector({
+      initialSection: "context",
+      readiness: {
+        ready: false,
+        blockingGaps: 1,
+        items: [
+          { id: "brief", label: "Translation brief", level: "missing", detail: "Missing", href: "memory/brief" },
+          { id: "terminology", label: "Key terms", level: "ready", detail: "Answered", href: "terminology" },
+        ],
+      },
+    })
+
+    expect(await screen.findByText("No Autopilot runs have been recorded yet.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Context/ })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Set up Translation brief" })).toHaveAttribute(
       "href",
       "/project/p1/memory/brief",
     )
+    expect(screen.getByRole("link", { name: "Key terms" })).toHaveAttribute(
+      "href",
+      "/project/p1/terminology",
+    )
+    // Run-specific cards stay gated on a selected run.
+    expect(screen.queryByRole("img", { name: "Autopilot process graph" })).not.toBeInTheDocument()
+    expect(activityMock).not.toHaveBeenCalled()
+  })
+
+  // AQU-1678: the empty state used to say "for this run" unconditionally, which
+  // cannot be true in the no-run, no-readiness case this section now renders in.
+  it("names the project, not a run, when no context exists and no run is selected", async () => {
+    runsMock.mockResolvedValue(runPage([]))
+
+    renderInspector({ initialSection: "context" })
+
+    expect(await screen.findByText("No context has been recorded for this project yet.")).toBeInTheDocument()
+    expect(screen.queryByText(/recorded for this run/)).not.toBeInTheDocument()
   })
 
   it("retries a named-language lane and reviews its drafts in that lane", async () => {
@@ -855,7 +951,7 @@ describe("AutopilotActivityInspector", () => {
     expect(await screen.findByText(/couldn’t draft at the time/)).toBeInTheDocument()
     expect(screen.queryByText("unsupported_target_language_lane")).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Run Autopilot" }))
-    await vi.waitFor(() => expect(retryMock).toHaveBeenCalledWith("p1", "file-1", "fr"))
+    await vi.waitFor(() => expect(retryMock).toHaveBeenCalledWith("p1", "file-1", "fr"), { timeout: STALL_WATCHDOG_MS })
     await screen.findByText("3 reviewable drafts staged")
     fireEvent.click(screen.getByRole("button", { name: /Ready for review/ }))
     const reviewLink = await screen.findByRole("link", { name: /Review in editor/ })
@@ -874,7 +970,7 @@ describe("AutopilotActivityInspector", () => {
 
     renderInspector()
 
-    expect(await screen.findByText("Language: fr")).toBeInTheDocument()
+    expect(await screen.findByText("Language lane: fr")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument()
     expect(await screen.findByText("3 reviewable drafts staged")).toBeInTheDocument()
@@ -923,7 +1019,7 @@ describe("AutopilotActivityInspector", () => {
       "p1",
       frenchReview.runId,
       expect.objectContaining({ draftStatus: "proposed" }),
-    ))
+    ), { timeout: STALL_WATCHDOG_MS })
     expect(screen.getByText("2 ready to review")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /French\.usfm/ })).toHaveAttribute("aria-pressed", "true")
   })
@@ -985,7 +1081,7 @@ describe("AutopilotActivityInspector", () => {
       "p1",
       evidenceRun.runId,
       expect.objectContaining({ draftStatus: "proposed" }),
-    ))
+    ), { timeout: STALL_WATCHDOG_MS })
     expect(screen.getByText("2 ready to review")).toBeInTheDocument()
   })
 

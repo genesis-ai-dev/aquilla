@@ -21,11 +21,16 @@ import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { probeDurationMsSafe } from "@/lib/import"
+import { AUDIO_FILE_ACCEPT, AUDIO_FILE_EXT_SET, AUDIO_FORMATS_LABEL, UNPLAYABLE_AUDIO_EXTS } from "@/lib/audio/mime"
+import type { TelemetrySurface } from "@/lib/cell-telemetry"
+import { recordTakeAdded } from "@/lib/history/take-steps"
 
-/** `accept` for the hidden `<input type="file">`. `audio/*` alone is not
- *  enough: some mobile browsers report an empty or wrong MIME type for files
- *  off the camera roll / Files app, so the extensions are listed too. */
-export const ACCEPT = "audio/*,.wav,.mp3,.m4a,.ogg"
+/** `accept` for the hidden `<input type="file">` — the shared list, not a
+ *  hand-written copy of it. AQU-1922: this named 4 of the 10 supported
+ *  extensions, so a FLAC/Opus/AAC/WebM file off a phone's Files app (empty or
+ *  wrong MIME, the case the extension list exists for) could not be picked at
+ *  all, though `validateAudioFile` and playback both handle it. */
+export const ACCEPT = AUDIO_FILE_ACCEPT
 
 /** Decision 2026-08-05: audio work is blocked UP FRONT while offline instead
  *  of failing mid-flow with a raw fetch error. One copy of the message, used
@@ -33,14 +38,6 @@ export const ACCEPT = "audio/*,.wav,.mp3,.m4a,.ogg"
  *  local duplicate it used to have. */
 export const OFFLINE_MESSAGE =
   "You're offline — recordings can't be saved without a connection. Reconnect and try again."
-
-// Extensions `audioMimeForExt` (./mime.ts) can map to a real audio MIME type.
-// Kept as an explicit list rather than probing that function, because its
-// default arm returns "audio/mpeg" for anything unknown — asking it "do you
-// know this?" is not a question it can answer. Keep the two in sync.
-const KNOWN_AUDIO_EXTS = new Set([
-  "wav", "mp3", "m4a", "mp4", "aac", "ogg", "oga", "opus", "webm", "flac",
-])
 
 // 100 MB. Nothing in this path has a progress UI — no bar, no byte counter —
 // so an oversized pick is an unexplained multi-minute freeze covering both the
@@ -84,9 +81,19 @@ export function extFromFile(file: File): string {
  * MediaRecorder webm).
  */
 export function validateAudioFile(file: File): string | null {
+  const ext = extFromFile(file)
+  // BEFORE the declared-type check, not after: a .wma/.aiff/.amr declares a
+  // real `audio/*` type, so trusting the type alone waves through exactly the
+  // files no browser can decode — they upload fine and then sit on the line as
+  // a take that never plays. Bulk upload has always refused them
+  // (bulk-upload/match.ts `UNPLAYABLE_AUDIO_EXTS`, reason `unplayableFormat`),
+  // and its comment claimed this path did too; AQU-1922 makes that true.
+  if (UNPLAYABLE_AUDIO_EXTS.has(ext)) {
+    return `A .${ext} file can't be played in a browser — convert it to ${AUDIO_FORMATS_LABEL} first.`
+  }
   const declaredAudio = file.type.toLowerCase().startsWith("audio/")
-  if (!declaredAudio && !KNOWN_AUDIO_EXTS.has(extFromFile(file))) {
-    return "That doesn't look like an audio file — pick a .wav, .mp3, .m4a or .ogg."
+  if (!declaredAudio && !AUDIO_FILE_EXT_SET.has(ext)) {
+    return `That doesn't look like an audio file — pick a ${AUDIO_FORMATS_LABEL}.`
   }
   if (file.size > MAX_ATTACH_BYTES) {
     return `That file is ${mb(file.size)} MB — the limit is ${mb(MAX_ATTACH_BYTES)} MB. ` +
@@ -115,6 +122,13 @@ export interface AttachAudioFileArgs {
    *  The rail button passes nothing, deliberately: it has no takes list, and
    *  fetching one to label a single icon click isn't worth the request. */
   label?: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** AQU-1572: where the upload came from, for telemetry ("recorder", "cell"). */
+  surface: TelemetrySurface
+  /** Decision 11: record an Undo step for the new take, naming the take that
+   *  played in its slot before. Omitted by bulk runs, which record none. */
+  history?: { selectedBefore: string | null }
 }
 
 export interface AttachAudioFileResult {
@@ -173,34 +187,92 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
   // timed the clip, so a probe is the only source there is.
   const durationMs = await probeDurationMsSafe(file)
 
+  await attachUploadedTake({
+    projectId,
+    fileId,
+    cellId,
+    audioId: fullAudioId,
+    url: result.url,
+    slot,
+    mimeType: file.type || undefined,
+    durationMs,
+    label,
+    ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+    surface: args.surface,
+    username,
+    // F8: the R2 object uploaded fine but the attach event failed — delete it
+    // rather than leaking storage. The cleanup itself is non-fatal.
+    onEmitFailed: () => {
+      void deleteCellAudio({ projectId, fileId, audioId: result.audioId, ext: result.ext, getSyncToken })
+    },
+  })
+  notifyAudioAttachmentsChanged(fileId)
+  if (args.history) {
+    recordTakeAdded("upload", { cellId, audioId: fullAudioId, slot, selectedBefore: args.history.selectedBefore }, { fileId })
+  }
+
+  return { audioId: fullAudioId, url: result.url, durationMs }
+}
+
+export interface AttachUploadedTakeArgs {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The stored id INCLUDING its extension ("audio-cell12-….wav"). */
+  audioId: string
+  /** The frontier-audio:// url of the bytes it plays. AQU-981: a recording
+   *  shared over a range of lines is one object, so every line's take names
+   *  the same url under its own cell-seeded id. */
+  url: string
+  slot: string
+  mimeType: string | undefined
+  durationMs: number | undefined
+  label?: string
+  targetLang?: string
+  surface: TelemetrySurface
+  username: string
+  /** Runs when the attach event could not be queued, before the error is
+   *  re-thrown — the caller decides whether the uploaded bytes may go. */
+  onEmitFailed?: () => void
+}
+
+/**
+ * The attach half of an upload, shared by the picker (`attachAudioFileToCell`)
+ * and bulk upload (AQU-981) so the two write the same take: the
+ * cell.audio.attach event, then the optimistic paint that flips `hasAudio`
+ * before the outbox flushes. The caller pokes the attachments read.
+ */
+export async function attachUploadedTake(args: AttachUploadedTakeArgs): Promise<string> {
+  const { projectId, fileId, cellId, audioId, url, slot, mimeType, durationMs, label, username } = args
   let attachEventId: string
   try {
     attachEventId = await emitCellAudioAttach({
       projectId,
       fileId,
       cellId,
-      audioId: fullAudioId,
-      url: result.url,
+      audioId,
+      url,
       slot,
-      mimeType: file.type || undefined,
+      mimeType,
       durationMs,
       label,
+      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+      // AQU-1572: the originating attach gesture — this is the one that counts.
+      audioOrigin: "attach",
+      surface: args.surface,
       author: username,
     })
   } catch (emitErr) {
-    // F8: the R2 object uploaded fine but the attach event failed — delete it
-    // rather than leaking storage, then re-throw so the user sees the real
-    // error. The cleanup itself is non-fatal.
-    void deleteCellAudio({ projectId, fileId, audioId: result.audioId, ext: result.ext, getSyncToken })
+    args.onEmitFailed?.()
     throw emitErr
   }
 
-  // Flip `hasAudio` immediately — the bus poke below refetches the server
-  // projection, but that races the outbox flush and would otherwise leave the
-  // gutter icon stale until a manual reload.
+  // Flip `hasAudio` immediately — the bus poke the caller sends refetches the
+  // server projection, but that races the outbox flush and would otherwise
+  // leave the gutter icon stale until a manual reload.
   injectOptimisticAudioAttachment(fileId, cellId, {
-    audioId: fullAudioId,
-    url: result.url,
+    audioId,
+    url,
     // THE CALLER'S SLOT, not a literal. The emit above already used it; this
     // line did not, so an upload aimed at an added track optimistically
     // claimed the DEFAULT dub row's selection — and could never be confirmed,
@@ -209,7 +281,7 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
     // audio-attachments-bus.ts: a plain-string slot means the compiler cannot
     // catch a hard-coded one written where a variable belongs.
     slot,
-    mimeType: file.type || null,
+    mimeType: mimeType ?? null,
     voiceId: null,
     referenceAudioId: null,
     durationMs: durationMs ?? null,
@@ -217,7 +289,5 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
     trimStartMs: null,
     trimEndMs: null,
   }, attachEventId)
-  notifyAudioAttachmentsChanged(fileId)
-
-  return { audioId: fullAudioId, url: result.url, durationMs }
+  return attachEventId
 }

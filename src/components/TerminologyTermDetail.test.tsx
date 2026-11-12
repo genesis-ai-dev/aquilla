@@ -63,6 +63,32 @@ describe("TerminologyTermDetail", () => {
     fireEvent.click(screen.getByRole("button", { name: /go to rom 3:24/i }))
     expect(onJumpToCell).toHaveBeenCalledWith({ cellId: "cell-1", fileId: "file-1" })
   })
+
+  // AQU-2076: a cell with no ref used to show the last 8 hex digits of its id.
+  it("labels a cell with no ref 'Untitled cell', never an id fragment", () => {
+    const onJumpToCell = vi.fn()
+    renderDetail({
+      cells: [cell({ id: "0b6c1e2a-4f3d-4c8e-9a1b-55e0d158f8d3", context: "", group: "" })],
+      files: [{ id: "file-1", name: "Ruth" }],
+      onJumpToCell,
+    })
+    const row = screen.getByText("by grace alone").closest("li")
+    if (!row) throw new Error("occurrence row not found")
+    expect(within(row).getByText("Untitled cell")).toBeInTheDocument()
+    expect(within(row).getByText("Ruth")).toBeInTheDocument()
+    expect(row.textContent).not.toMatch(/d158f8d3/)
+    fireEvent.click(screen.getByRole("button", { name: /go to untitled cell/i }))
+    expect(onJumpToCell).toHaveBeenCalledWith({
+      cellId: "0b6c1e2a-4f3d-4c8e-9a1b-55e0d158f8d3",
+      fileId: "file-1",
+    })
+  })
+
+  it("keeps the ref for a cell that has one", () => {
+    renderDetail({ cells: [cell()], files: [{ id: "file-1", name: "Romans" }] })
+    expect(screen.getByText("ROM 3:24")).toBeInTheDocument()
+    expect(screen.queryByText("Untitled cell")).not.toBeInTheDocument()
+  })
 })
 
 // AQU-206 AC3: the verdict is derived on read from the row's current target,

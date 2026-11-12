@@ -15,6 +15,7 @@ import {
   removeOutboxEvents,
   outboxPendingCount,
   outboxFailedCount,
+  readOutboxCounts,
   peekPendingOutboxBatch,
   getOutboxRecordsForCell,
   quarantineOutboxEvents,
@@ -304,6 +305,7 @@ describe("cqrs outbox", () => {
     expect(await outboxFailedCount()).toBe(1)
     // The total count still includes the failed record.
     expect(await outboxPendingCount()).toBe(1)
+    expect(await readOutboxCounts()).toEqual({ count: 1, failed: 1 })
   })
 
   it("peekPendingOutboxBatch excludes failed records", async () => {
@@ -565,6 +567,51 @@ describe("Tauri offline routing", () => {
 
     expect(await outboxPendingCount()).toBe(1)
     expect(currentOfflineStore!.query(offlineTables.eventQueue.select())).toHaveLength(0)
+  })
+
+  it("falls through to IndexedDB when the offline store won't open (e.g. a newer build owns it)", async () => {
+    setTauriRuntime(true)
+    getOfflineStoreMock.mockRejectedValueOnce(new Error("newer offline data"))
+
+    await enqueueOutboxEvent(commitEvent)
+
+    expect(getOfflineStoreMock).toHaveBeenCalled()
+    expect(await outboxPendingCount()).toBe(1)
+  })
+
+  // A leader rebuilding after a schema change can take minutes to boot, and a
+  // dead one never does; the edit must not wait on it unwritten.
+  it("falls through to IndexedDB when the offline store is still booting", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      setTauriRuntime(true)
+      markProjectOfflineReady("proj1")
+      getOfflineStoreMock.mockReturnValueOnce(new Promise<never>(() => {}))
+
+      const pending = enqueueOutboxEvent(commitEvent)
+      await vi.advanceTimersByTimeAsync(3_000)
+      await pending
+
+      expect(await outboxPendingCount()).toBe(1)
+      expect(currentOfflineStore!.query(offlineTables.eventQueue.select())).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("journals a target commit before waiting on the offline store, and clears it once routed", async () => {
+    setActiveOutboxOwner("alice")
+    setTauriRuntime(true)
+    markProjectOfflineReady("proj1")
+    const key = "aquilla:outbox-recovery:v1:tc1"
+
+    const pending = enqueueOutboxEvent(commitEvent)
+    expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({ ownerKey: "alice", event: { id: "tc1" } })
+    await pending
+
+    expect(localStorage.getItem(key)).toBeNull()
+    expect(currentOfflineStore!.query(offlineTables.eventQueue.select()).map((r) => r.id)).toEqual(["tc1"])
+    expect(await outboxPendingCount()).toBe(0)
   })
 
   it("a non-routable kind always goes to IndexedDB regardless of Tauri/offline-ready state", async () => {

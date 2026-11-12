@@ -11,6 +11,8 @@
 import { describe, it, expect } from "vitest"
 import { useState } from "react"
 import { render, screen, fireEvent, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { renderWithTooltips } from "@/test-utils/tooltip"
 import { ModelListEditor, type ModelListValue } from "./ModelListEditor"
 
 function Harness({ initial }: { initial: ModelListValue }) {
@@ -122,5 +124,19 @@ describe("ModelListEditor", () => {
     )
     fireEvent.click(screen.getByRole("button", { name: /remove a\/model/i }))
     expect(state()).toMatchObject({ fastModel: "", deepModel: "" })
+  })
+
+  // AQU-2260 (Sam, Oct 29): a labelled toggle does not explain itself on
+  // hover. What each one marks is already printed under the list.
+  it("says what each role toggle marks on the page, with no hover", async () => {
+    renderWithTooltips(<Harness initial={value({ models: ["a/model"] })} />)
+    const user = userEvent.setup()
+    for (const name of [/^Chat/, /^Agent/, /^Fast/, /^Deep/]) {
+      await user.hover(screen.getByRole("button", { name }))
+      await new Promise((r) => setTimeout(r, 20))
+      expect(screen.queryByRole("tooltip")).toBeNull()
+    }
+    expect(document.body.textContent).toMatch(/marks the default chat model/)
+    expect(document.body.textContent).toMatch(/set the autopilot.s fast and deep tiers/)
   })
 })

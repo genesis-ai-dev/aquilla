@@ -7,13 +7,11 @@ invitee's dashboard")
 ## Preconditions
 
 - Logged in as `alice` in one session, `bob` in a second session.
-- Alice is a maintainer of Dev Org (org id 9).
+- Alice is a maintainer of Dev Org (org id 1).
 
 ## Steps
 
-1. **Alice**: from `/orgs/9/projects` click **New Project**. Fill **Project
-   title** with a unique name, **Source Language** with `en`, **Target
-   language(s)** with `fr`. Click **Create Project**.
+1. **Alice**: from `/orgs/1/projects` click **New project**, then **Start from scratch**. Fill **Project name** with a unique name, **Source language** with `en`, **Language lanes** with `fr`. Click **Create project**.
 2. **Alice**: on the project overview, click **Project settings**.
 3. **Alice**: click **Members Roles & invites**.
 4. **Alice**: click **Add a member**, then click the **Invite link** tab.
@@ -45,7 +43,7 @@ invitee's dashboard")
 
 ## Notes for the agent
 
-Right after **Create Project**, the project overview keeps loading extra
+Right after **Create project**, the project overview keeps loading extra
 content (Autopilot, Team) for a beat. A click on **Project settings** during
 that reflow can land on nothing and the settings panel never opens. Wait for
 the page to settle (for example wait for the text **Team** to appear, then

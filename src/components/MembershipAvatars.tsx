@@ -1,7 +1,6 @@
 import type { ProjectMember } from "@/lib/frontier/members"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { UserChip } from "@/components/UserChip"
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { resolveRoleName } from "@/lib/frontier/roles"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -22,9 +21,14 @@ export function MembershipAvatars({ members, maxVisible = 4 }: MembershipAvatars
       aria-label={t("org.teamsList.memberCount", { count: members.length })}
     >
       {visible.map((m) => (
-        <AppTooltip key={m.userId} content={`${m.username} (${resolveRoleName(t, m.role.name)})`}>
-          <InitialsAvatar name={m.username} size="sm" />
-        </AppTooltip>
+        <UserChip
+          key={m.userId}
+          userId={m.userId}
+          username={m.username}
+          size="sm"
+          avatarOnly
+          hint={resolveRoleName(t, m.role.name)}
+        />
       ))}
       {overflow > 0 && (
         <AvatarGroupCount className="size-6 text-[10px] font-semibold">

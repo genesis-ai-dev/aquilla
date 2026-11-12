@@ -151,7 +151,9 @@ const STATE_FILE = ".migrate-state.json"
 // sweep re-derives every project once.
 // v3: milestone cells are retracted instead of migrated as pairs (AQU-930).
 // v4: merged-away cells (`data.merged`) are retracted like deleted ones (AQU-944).
-const CONTENT_LOGIC_VERSION = 4
+// v5: cells Codex parked with the eye icon (`data.hidden`) migrate hidden —
+//     source.cell.visibility.set, NOT a retraction (AQU-1425).
+const CONTENT_LOGIC_VERSION = 5
 type MigState = Record<
   string,
   { contentSha?: string; contentLogic?: number; audioSha?: string; audioFastSha?: string }
@@ -977,6 +979,11 @@ async function run(args: Args) {
         gs.skipped ? `unchanged since ${prev?.syncedAt} (plan hash match — upsert skipped)` : args.apply ? "upserted" : "planned (dry-run)"
       } to Neon`,
     )
+    // AQU-1800: team membership with no lane grant reaches the team's projects
+    // and shows source text only, so the grant count rides the same report.
+    if (gs.laneGrants !== null) {
+      console.log(`  lane-access rows ${args.apply ? "written" : "an apply would add"}: ${gs.laneGrants}`)
+    }
     // Re-read full maps from Neon (now incl. any orgs just created) — fetchOrgTeamMaps
     // also carries owner_user_id, which the project upsert needs.
     const maps = await fetchOrgTeamMaps()

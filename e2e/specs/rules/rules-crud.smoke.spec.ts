@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { startAddCheck } from "../../helpers/page-objects/ChecksList"
 import {
   jwtFor,
   seedProjectWithFile,
@@ -18,10 +19,8 @@ test("rules page create, edit, delete, and dialogs surface session", async ({ al
   })
   await alice.goto(`/project/${seeded.projectId}/rules`)
 
-  await test.step("Add Rule create dialog appears and Cancel dismisses", async () => {
-    const addRuleBtn = alice.getByRole("button", { name: /Add Rule/i })
-    await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
-    await addRuleBtn.click()
+  await test.step("Add check → Write a check opens the editor and Cancel dismisses", async () => {
+    await startAddCheck(alice, "Write a check")
 
     const dialog = alice.getByRole("dialog")
     await expect(dialog).toBeVisible({ timeout: 3_000 })
@@ -34,13 +33,12 @@ test("rules page create, edit, delete, and dialogs surface session", async ({ al
 
     await dialog.getByRole("button", { name: /Cancel/i }).first().click()
     await expect(dialog).not.toBeVisible({ timeout: 3_000 })
-    await expect(addRuleBtn).toBeEnabled({ timeout: 3_000 })
+    await expect(alice.getByRole("button", { name: "Add check" })).toBeEnabled({ timeout: 3_000 })
   })
 
   const editRuleName = `TestRule ${Date.now()}`
   await test.step("create rule then Edit opens inline RuleEditor pre-filled", async () => {
-    const addRuleBtn = alice.getByRole("button", { name: /Add Rule/i })
-    await addRuleBtn.click()
+    await startAddCheck(alice, "Write a check")
 
     const dialog = alice.getByRole("dialog")
     await expect(dialog).toBeVisible({ timeout: 3_000 })
@@ -67,8 +65,7 @@ test("rules page create, edit, delete, and dialogs surface session", async ({ al
   })
 
   await test.step("delete a custom rule removes it from the list", async () => {
-    const addRuleBtn = alice.getByRole("button", { name: /Add Rule/i })
-    await addRuleBtn.click()
+    await startAddCheck(alice, "Write a check")
 
     const ruleName = `Delete Me ${Date.now()}`
     const nameInput = alice.locator('input[placeholder="e.g. Preserve numbers"]')
@@ -90,10 +87,8 @@ test("rules page create, edit, delete, and dialogs surface session", async ({ al
   })
 
   const orgRuleName = `OrgRule ${Date.now()}`
-  await test.step("Add Org Rule creates an org-scoped rule", async () => {
-    const addOrgRuleBtn = alice.getByRole("button", { name: /Add Org Rule/i })
-    await expect(addOrgRuleBtn).toBeVisible({ timeout: 10_000 })
-    await addOrgRuleBtn.click()
+  await test.step("Add check → organization check creates an org-scoped rule", async () => {
+    await startAddCheck(alice, "Write an organization check")
 
     const dialog = alice.getByRole("dialog")
     await expect(dialog).toBeVisible({ timeout: 3_000 })
@@ -109,9 +104,7 @@ test("rules page create, edit, delete, and dialogs surface session", async ({ al
 
   await test.step("org rule edit pencil opens and closes inline RuleEditor", async () => {
     const editRuleNameOrg = `EditRule ${Date.now()}`
-    const addOrgRuleBtn = alice.getByRole("button", { name: /Add Org Rule/i }).first()
-    await expect(addOrgRuleBtn).toBeVisible({ timeout: 10_000 })
-    await addOrgRuleBtn.click()
+    await startAddCheck(alice, "Write an organization check")
 
     const dialog = alice.getByRole("dialog")
     await expect(dialog).toBeVisible({ timeout: 5_000 })
@@ -137,12 +130,12 @@ test("rules page create, edit, delete, and dialogs surface session", async ({ al
     await expect(inlineEditor).not.toBeVisible({ timeout: 3_000 })
   })
 
-  await test.step("Import from doc and Suggest from edits dialogs open", async () => {
-    const importDocBtn = alice.getByRole("button", { name: /Import from doc/i })
-    await expect(importDocBtn).toBeVisible({ timeout: 10_000 })
-    await importDocBtn.click()
+  await test.step("Import from a style guide opens; rule suggestions live in the list", async () => {
+    await startAddCheck(alice, "Import from a style guide")
 
-    const importDialog = alice.getByRole("dialog")
+    // Scoped by name: the "Add check" chooser is a dialog too, and can still be
+    // finishing its close animation when this one closes.
+    const importDialog = alice.getByRole("dialog", { name: /Import rules from/i })
     await expect(importDialog).toBeVisible({ timeout: 5_000 })
     await expect(
       importDialog.getByRole("heading", { name: /Import rules from/i }),
@@ -150,16 +143,11 @@ test("rules page create, edit, delete, and dialogs surface session", async ({ al
     await alice.keyboard.press("Escape")
     await expect(importDialog).not.toBeVisible({ timeout: 3_000 })
 
-    const suggestBtn = alice.getByRole("button", { name: /Suggest from edits/i })
-    await expect(suggestBtn).toBeVisible({ timeout: 5_000 })
-    await suggestBtn.click()
-
-    const suggestDialog = alice.getByRole("dialog")
-    await expect(suggestDialog).toBeVisible({ timeout: 5_000 })
+    // Suggestions are reviewed in place at the foot of the project rules
+    // list — no modal to open and lose them in.
     await expect(
-      suggestDialog.getByRole("heading", { name: /Suggest rules from/i }),
-    ).toBeVisible()
-    await alice.keyboard.press("Escape")
-    await expect(suggestDialog).not.toBeVisible({ timeout: 3_000 })
+      alice.getByRole("button", { name: /Suggest rules from my edits/i }),
+    ).toBeVisible({ timeout: 5_000 })
+    await expect(alice.getByRole("textbox", { name: /What the suggested rules should be about/i })).toBeVisible()
   })
 })

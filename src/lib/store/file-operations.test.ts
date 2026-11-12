@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest"
 import {
-  renameFile, moveFileToCorpus, renameCorpus, deleteFile,
+  renameFile, moveFileToCorpus, renameCorpus, deleteFile, applyFileSortIndexes,
+  overlayPendingSortIndexes, settlePendingSortIndexes,
 } from "./file-operations"
+import { planFileMove, planFileOrderReset, SORT_INDEX_STEP } from "@/lib/sidebar/file-sort-index"
+import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import type { ProjectRecord, FileReference } from "@/lib/parsers/types"
 
 function mkFile(overrides: Partial<FileReference>): FileReference {
@@ -113,5 +116,117 @@ describe("deleteFile", () => {
     const project = mkProject([mkFile({ id: "f1" })])
     const next = deleteFile(project, "missing")
     expect(next.files).toHaveLength(1)
+  })
+})
+
+// AQU-1569: the optimistic half of a reorder — the sidebar has to show the new
+// order on drop, not on the next server read.
+describe("applyFileSortIndexes", () => {
+  it("writes each file's new position", () => {
+    const project = mkProject([
+      mkFile({ id: "f1", name: "A" }),
+      mkFile({ id: "f2", name: "B" }),
+    ])
+    const next = applyFileSortIndexes(project, [
+      { fileId: "f2", sortIndex: 0 },
+      { fileId: "f1", sortIndex: 1024 },
+    ])
+    expect(next.files.map((f) => [f.id, f.sortIndex])).toEqual([["f1", 1024], ["f2", 0]])
+  })
+
+  it("stores 0 rather than dropping it", () => {
+    // 0 is what a renumber stamps on the first file; a truthiness check here
+    // would silently unplace it and the row would jump back on the next render.
+    const project = mkProject([mkFile({ id: "f1", sortIndex: 512 })])
+    expect(applyFileSortIndexes(project, [{ fileId: "f1", sortIndex: 0 }]).files[0].sortIndex).toBe(0)
+  })
+
+  it("removes the field for null, rather than setting it to null", () => {
+    // `groupByCorpus` asks whether the field is a finite number; a literal null
+    // would read as unplaced either way, but the cached record is also written
+    // back to IDB, and "absent" is the shape the server sends.
+    const project = mkProject([mkFile({ id: "f1", sortIndex: 512 })])
+    const next = applyFileSortIndexes(project, [{ fileId: "f1", sortIndex: null }])
+    expect("sortIndex" in next.files[0]).toBe(false)
+  })
+
+  it("leaves files the batch does not name alone", () => {
+    const project = mkProject([
+      mkFile({ id: "f1", sortIndex: 0 }),
+      mkFile({ id: "f2", name: "B" }),
+    ])
+    const next = applyFileSortIndexes(project, [{ fileId: "f1", sortIndex: 99 }])
+    expect(next.files[1]).toBe(project.files[1])
+  })
+
+  it("returns the same project for an empty batch", () => {
+    const project = mkProject([mkFile({ id: "f1" })])
+    expect(applyFileSortIndexes(project, [])).toBe(project)
+  })
+
+  // Unlike its single-file neighbours this does NOT throw: the writes come
+  // from a group the sidebar rendered, and a file deleted in another tab
+  // between the render and the drop must not cost the rest of the batch.
+  it("ignores an id it cannot find instead of throwing", () => {
+    const project = mkProject([mkFile({ id: "f1" })])
+    const next = applyFileSortIndexes(project, [
+      { fileId: "gone", sortIndex: 0 },
+      { fileId: "f1", sortIndex: 1024 },
+    ])
+    expect(next.files).toHaveLength(1)
+    expect(next.files[0].sortIndex).toBe(1024)
+  })
+})
+
+// The list on screen is the server read. A drop has to move that list itself;
+// waiting for the file.reorder round-trip is the snap-back on let-go.
+describe("overlayPendingSortIndexes", () => {
+  function season(ids: string[]): FileReference[] {
+    return ids.map((id, index) => mkFile({
+      id,
+      name: id,
+      corpusMarker: "Season 1",
+      sortIndex: index * SORT_INDEX_STEP,
+    }))
+  }
+
+  function pendingOf(writes: { fileId: string; sortIndex: number | null }[]) {
+    return new Map(writes.map((write) => [write.fileId, write.sortIndex]))
+  }
+
+  it("puts a file dragged downward into the slot it was dropped on", () => {
+    const files = season(["a", "b", "c", "d"])
+    const writes = planFileMove(files, "a", 3)
+    const shown = overlayPendingSortIndexes(files, pendingOf(writes))
+    expect(groupByCorpus(shown)[0].files.map((file) => file.id)).toEqual(["b", "c", "d", "a"])
+  })
+
+  it("puts a file dragged upward into the slot it was dropped on", () => {
+    const files = season(["a", "b", "c", "d"])
+    const writes = planFileMove(files, "d", 1)
+    const shown = overlayPendingSortIndexes(files, pendingOf(writes))
+    expect(groupByCorpus(shown)[0].files.map((file) => file.id)).toEqual(["a", "d", "b", "c"])
+  })
+
+  it("returns the same array when nothing is pending", () => {
+    const files = season(["a", "b"])
+    expect(overlayPendingSortIndexes(files, new Map())).toBe(files)
+  })
+
+  it("clears a reset so the automatic order shows before the server agrees", () => {
+    const files = season(["b", "a"])
+    const writes = planFileOrderReset(files)
+    const shown = overlayPendingSortIndexes(files, pendingOf(writes))
+    expect(shown.every((file) => file.sortIndex === undefined)).toBe(true)
+    expect(groupByCorpus(shown)[0].files.map((file) => file.id)).toEqual(["a", "b"])
+  })
+
+  it("keeps the pending position until the server file carries it, then lets go", () => {
+    const files = season(["a", "b", "c", "d"])
+    const writes = planFileMove(files, "d", 1)
+    const pending = pendingOf(writes)
+    expect(settlePendingSortIndexes(files, pending)).toBe(pending)
+    const landed = applyFileSortIndexes(mkProject(files), writes).files
+    expect(settlePendingSortIndexes(landed, pending).size).toBe(0)
   })
 })

@@ -1,3 +1,4 @@
+import { workspaceBillingMode, workspaceCheckoutEnabled } from '../lib/billing/environment'
 import { startWorkspacePortalRehearsal, workspacePortalAvailable } from '../lib/billing/workspace-portal'
 import { changeSelectionSchema, reviewWorkspaceChange } from '../lib/billing/workspace-change-review'
 import { Hono } from 'hono'
@@ -13,6 +14,7 @@ import { getEffectiveOrgRole } from '../services/org-permissions'
 import { ROLE } from '../types'
 import { readBillingWorkspace } from '../lib/billing/workspace'
 import { readWorkspaceUsageSummary } from '../lib/billing/workspace-usage'
+import { resolveOrgPlan } from '../../../db/shared/org-plan'
 
 const billingWorkspace = new Hono<AuthHonoEnv>()
 billingWorkspace.get('/orgs/:orgId/billing/workspace', authMiddleware, async c => {
@@ -31,9 +33,47 @@ billingWorkspace.get('/orgs/:orgId/billing/workspace', authMiddleware, async c =
   // Measured usage is additive: a ledger outage leaves it null, never zero.
   const usage = await readWorkspaceUsageSummary(c.env.AQUILLA_PG, orgId).catch(() => null)
   return c.json({ ...workspace,
+    checkoutEnabled: workspace.eligibility.reason === 'ready' && workspaceCheckoutEnabled(c.env, c.req.url),
     ...(usage ? { usagePercent: usage.percent, usageResetsAt: usage.resetsAt } : {}),
     ...(workspacePortalAvailable(c.env, c.req.url, workspace) ? { portalEnabled: true } : {}),
   })
+})
+/** AQU-2059: the org's one plan, so the client never copies the rules (spec
+ * §4.2). Any member may read it; it carries no prices or ledger values. */
+billingWorkspace.get('/orgs/:orgId/plan', authMiddleware, async c => {
+  const raw = c.req.param('orgId') ?? ''
+  const orgId = Number(raw)
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(orgId) || orgId < 1) {
+    return c.json({ error: 'invalid_org' }, 400)
+  }
+  const role = await getEffectiveOrgRole(c.env, orgId, c.get('user'))
+  if (role == null) return c.json({ error: 'forbidden' }, 403)
+  c.header('Cache-Control', 'private, no-store')
+  const plan = await resolveOrgPlan(c.env.AQUILLA_PG, orgId)
+  if (!plan) return c.json({ error: 'not_found' }, 404)
+  return c.json({ orgId, tier: plan.tier, source: plan.source, metered: plan.weeklyAllowanceUnits !== null,
+    periodStart: plan.period.start, periodEnd: plan.period.end, contractEndsAt: plan.contractEndsAt,
+    ...(plan.graceEndsAt ? { graceEndsAt: plan.graceEndsAt } : {}) })
+})
+/** AQU-2068: the % meter every member sees (spec §6). It carries a percentage
+ * and a reset time only, never units, cents or credits (R7). `percentUsed` is
+ * null when the ledger read fails, so an outage never reads as 0%. */
+billingWorkspace.get('/orgs/:orgId/ai-meter', authMiddleware, async c => {
+  const raw = c.req.param('orgId') ?? ''
+  const orgId = Number(raw)
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(orgId) || orgId < 1) {
+    return c.json({ error: 'invalid_org' }, 400)
+  }
+  const role = await getEffectiveOrgRole(c.env, orgId, c.get('user'))
+  if (role == null) return c.json({ error: 'forbidden' }, 403)
+  c.header('Cache-Control', 'private, no-store')
+  const plan = await resolveOrgPlan(c.env.AQUILLA_PG, orgId)
+  if (!plan) return c.json({ error: 'not_found' }, 404)
+  if (plan.weeklyAllowanceUnits === null) {
+    return c.json({ orgId, plan: plan.tier, mode: 'unmetered', percentUsed: null, resetsAt: null })
+  }
+  const usage = await readWorkspaceUsageSummary(c.env.AQUILLA_PG, orgId).catch(() => null)
+  return c.json({ orgId, plan: plan.tier, mode: 'metered', percentUsed: usage?.percent ?? null, resetsAt: plan.period.end })
 })
 const selectionSchema = z.object({
   offer: z.enum(paidOffers), interval: z.enum(['month', 'year']), quantity: z.literal(1),
@@ -58,14 +98,16 @@ billingWorkspace.post('/orgs/:orgId/billing/review', authMiddleware, async c => 
     return c.json(reviewBillingPlan(workspace, selection.data, unavailableOffers()))
   }
   try {
-    return c.json(reviewBillingPlan(workspace, selection.data, await readBillingOffers(c.env)))
+    return c.json(reviewBillingPlan(workspace, selection.data, await readBillingOffers(c.env), workspaceCheckoutEnabled(c.env, c.req.url)))
   } catch {
     return c.json({ error: 'pricing_unavailable' }, 503)
   }
 })
-billingWorkspace.post('/orgs/:orgId/billing/checkout-rehearsal', authMiddleware, async c => {
+for (const path of ['checkout-rehearsal', 'workspace/checkout']) {
+billingWorkspace.post(`/orgs/:orgId/billing/${path}`, authMiddleware, async c => {
   // A live key, deployed hostname, missing local flag, or absent opt-in stays off.
-  if (!workspaceCheckoutRehearsalEnabled(c.env, c.req.url)) return c.json({ error: 'checkout_disabled' }, 503)
+  if (!(path === 'checkout-rehearsal' ? workspaceCheckoutRehearsalEnabled(c.env, c.req.url)
+    : workspaceCheckoutEnabled(c.env, c.req.url))) return c.json({ error: 'checkout_disabled' }, 503)
   const raw = c.req.param('orgId') ?? ''
   const orgId = Number(raw)
   if (!/^\d+$/.test(raw) || !Number.isSafeInteger(orgId) || orgId < 1) return c.json({ error: 'invalid_org' }, 400)
@@ -82,9 +124,12 @@ billingWorkspace.post('/orgs/:orgId/billing/checkout-rehearsal', authMiddleware,
     return c.json({ error: 'checkout_unavailable' }, 503)
   }
 })
+}
+for (const path of ['checkout-rehearsal', 'workspace/checkout']) {
 for (const action of ['reconcile', 'expire'] as const) {
-  billingWorkspace.post(`/orgs/:orgId/billing/checkout-rehearsal/${action}`, authMiddleware, async c => {
-    if (!workspaceCheckoutRehearsalEnabled(c.env, c.req.url)) return c.json({ error: 'checkout_disabled' }, 503)
+  billingWorkspace.post(`/orgs/:orgId/billing/${path}/${action}`, authMiddleware, async c => {
+    if (!(path === 'checkout-rehearsal' ? workspaceCheckoutRehearsalEnabled(c.env, c.req.url)
+      : workspaceBillingMode(c.env, c.req.url))) return c.json({ error: 'checkout_disabled' }, 503)
     const raw = c.req.param('orgId') ?? ''
     const orgId = Number(raw)
     if (!/^\d+$/.test(raw) || !Number.isSafeInteger(orgId) || orgId < 1) return c.json({ error: 'invalid_org' }, 400)
@@ -98,6 +143,7 @@ for (const action of ['reconcile', 'expire'] as const) {
       return c.json({ error: 'checkout_unavailable' }, 503)
     }
   })
+}
 }
 /** Local scripted-provider rehearsal only: inspect held reservations and settle
  * one from the provider's generation record. Never releases usage.
@@ -150,9 +196,11 @@ billingWorkspace.post('/orgs/:orgId/billing/change-rehearsal/review', authMiddle
     return c.json({ error: 'change_review_unavailable' }, 503)
   }
 })
-billingWorkspace.post('/orgs/:orgId/billing/portal-rehearsal', authMiddleware, async c => {
+for (const path of ['portal-rehearsal', 'workspace/portal']) {
+billingWorkspace.post(`/orgs/:orgId/billing/${path}`, authMiddleware, async c => {
   c.header('Cache-Control', 'private, no-store')
-  if (!workspaceCheckoutRehearsalEnabled(c.env, c.req.url)) return c.json({ error: 'portal_disabled' }, 503)
+  if (!(path === 'portal-rehearsal' ? workspaceCheckoutRehearsalEnabled(c.env, c.req.url)
+    : workspaceBillingMode(c.env, c.req.url))) return c.json({ error: 'portal_disabled' }, 503)
   const raw = c.req.param('orgId') ?? ''
   const orgId = Number(raw)
   if (!/^\d+$/.test(raw) || !Number.isSafeInteger(orgId) || orgId < 1) return c.json({ error: 'invalid_org' }, 400)
@@ -166,4 +214,5 @@ billingWorkspace.post('/orgs/:orgId/billing/portal-rehearsal', authMiddleware, a
     return c.json({ error: 'portal_unavailable' }, 503)
   }
 })
+}
 export default billingWorkspace

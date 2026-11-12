@@ -1,15 +1,42 @@
 /**
  * Online/offline status (Phase 5 task 5) — reads the Rust-side connectivity
- * loop (`src-tauri/src/connectivity.rs`, started at app boot, polling
- * `https://api.aquilla.app` every 10s) instead of re-implementing polling on
- * the JS side. `get_connectivity` gives the current value on mount;
- * `connectivity://changed` pushes updates in between polls.
+ * loop (`src-tauri/src/connectivity.rs`, started at app boot, polling every
+ * 10s) instead of re-implementing polling on the JS side. `get_connectivity`
+ * gives the current value on mount; `connectivity://changed` pushes updates in
+ * between polls.
+ *
+ * The Rust side does not know which backend this build talks to, so it probes
+ * nothing until we hand it `AUTH_BASE` (see `ensureProbeUrl`). Hardcoding the
+ * host there meant a dev build reported PRODUCTION's reachability — it would
+ * say "online" while its own API was unreachable and nothing was syncing.
  */
 import { useEffect, useState } from "react"
 import { isTauriRuntime } from "./is-tauri"
+import { AUTH_BASE } from "@/lib/frontier/auth"
 
 interface ConnectivityChangedPayload {
   online: boolean
+}
+
+/**
+ * Tell Rust what to probe. Memoized — every call site can await it cheaply.
+ *
+ * Exported as `startConnectivityProbe` and called from OfflineStoreProvider at
+ * app boot, not just from `useConnectivity`: the only consumer of that hook is
+ * ConnectivityStatusChip, which mounts in the editor, so relying on it alone
+ * left connectivity Unknown everywhere else in the app.
+ */
+let probeUrlSent: Promise<void> | null = null
+function ensureProbeUrl(): Promise<void> {
+  probeUrlSent ??= (async () => {
+    const { invoke } = await import("@tauri-apps/api/core")
+    await invoke("set_connectivity_probe_url", { url: AUTH_BASE })
+  })().catch(() => {
+    // Let a later call retry rather than wedging connectivity as Unknown for
+    // the life of the process (e.g. IPC bridge not ready yet).
+    probeUrlSent = null
+  })
+  return probeUrlSent
 }
 
 /**
@@ -23,7 +50,10 @@ export async function isOnline(): Promise<boolean | null> {
   if (!isTauriRuntime()) return null
   try {
     const { invoke } = await import("@tauri-apps/api/core")
-    return await invoke<boolean>("get_connectivity")
+    await ensureProbeUrl()
+    // `null` here is Rust's "no probe has completed yet", which means the same
+    // thing to callers as the not-Tauri case: unknown.
+    return (await invoke<boolean | null>("get_connectivity")) ?? null
   } catch {
     return null
   }
@@ -47,9 +77,12 @@ export function useConnectivity(): boolean | null {
         import("@tauri-apps/api/core"),
         import("@tauri-apps/api/event"),
       ])
-      const initial = await invoke<boolean>("get_connectivity")
+      await ensureProbeUrl()
+      const initial = await invoke<boolean | null>("get_connectivity")
       if (cancelled) return
-      setOnline(initial)
+      // Stays null (chip hidden) until the first probe lands, rather than
+      // asserting a state nothing has measured yet.
+      setOnline(initial ?? null)
       unlisten = await listen<ConnectivityChangedPayload>("connectivity://changed", (event) => {
         setOnline(event.payload.online)
       })
@@ -68,4 +101,59 @@ export function useConnectivity(): boolean | null {
   }, [])
 
   return online
+}
+
+/** Connectivity for non-React code. `null` = unknown (web, or no probe yet). */
+export interface ConnectivitySource {
+  current(): boolean | null
+  /** Called on every change reported by the Rust loop; returns an unsubscribe. */
+  subscribe(listener: (online: boolean | null) => void): () => void
+}
+
+let latestOnline: boolean | null = null
+let watching = false
+const connectivityListeners = new Set<(online: boolean | null) => void>()
+
+function publishConnectivity(online: boolean | null): void {
+  if (online === latestOnline) return
+  latestOnline = online
+  for (const listener of connectivityListeners) listener(online)
+}
+
+/** Starts (once) mirroring the Rust loop into `latestOnline`. */
+function watchConnectivity(): void {
+  if (watching || !isTauriRuntime()) return
+  watching = true
+  void (async () => {
+    const [{ invoke }, { listen }] = await Promise.all([
+      import("@tauri-apps/api/core"),
+      import("@tauri-apps/api/event"),
+    ])
+    await ensureProbeUrl()
+    await listen<ConnectivityChangedPayload>("connectivity://changed", (event) => publishConnectivity(event.payload.online))
+    publishConnectivity((await invoke<boolean | null>("get_connectivity")) ?? null)
+  })().catch(() => {
+    // Same degradation as useConnectivity: unknown, and a later call retries.
+    watching = false
+  })
+}
+
+export const desktopConnectivity: ConnectivitySource = {
+  current() {
+    watchConnectivity()
+    return latestOnline
+  },
+  subscribe(listener) {
+    watchConnectivity()
+    connectivityListeners.add(listener)
+    return () => {
+      connectivityListeners.delete(listener)
+    }
+  },
+}
+
+/** Desktop-only: begin probing the backend this build talks to. No-op on web. */
+export function startConnectivityProbe(): void {
+  if (!isTauriRuntime()) return
+  void ensureProbeUrl()
 }

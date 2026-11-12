@@ -1,63 +1,117 @@
-import posthog from "posthog-js"
-import { isAnalyticsEnabled, onAnalyticsConsentChange } from "@/lib/analytics-consent"
-import { redactCaptureEvent } from "@/lib/analytics-redaction"
-import { resolvePosthogHost } from "@/lib/posthog-host"
+import type { PostHog } from "posthog-js"
+import { analyticsAccount } from "./analytics-account"
+import { AUTH_BASE } from "./frontier/auth"
+import { resolveAppEnv } from "./analytics-env"
+import { installResizeObserverNoiseGuard } from "./analytics-noise"
+import { redactCaptureEvent } from "./analytics-redaction"
+import { resolvePosthogHost } from "./posthog-host"
 
 const KEY = import.meta.env.VITE_POSTHOG_KEY as string | undefined
-// AQU-854: EU Cloud by default — see `posthog-host.ts` for why US is not a
-// legal fallback. Override with `VITE_POSTHOG_HOST=https://eu.i.posthog.com`.
 const HOST = resolvePosthogHost(import.meta.env.VITE_POSTHOG_HOST as string | undefined)
+let loaded: PostHog | null = null
+let generation = -1
+let starting = -1
 
-if (typeof window !== "undefined" && KEY) {
-  posthog.init(KEY, {
-    api_host: HOST,
-    persistence: "localStorage+cookie",
-    capture_pageview: true,
-    autocapture: false,
-    // Surface unhandled errors / rejections as $exception events so failures
-    // that never reach an explicit captureException call are still queryable.
-    capture_exceptions: true,
-    // OPS-29 (docs/OPSEC-REVIEW-2026-09-14.md): the last hook before an event
-    // leaves the browser. `/join/:token`, `/join-org/:token`, `/link/:token`,
-    // `/reset-password?token=` and `/verify-email?token=` all carry a live
-    // credential in the URL, and PostHog attaches `$current_url`/`$pathname` to
-    // every event (plus the replay's own rrweb `href` and the `$initial_*`
-    // person properties). Redact by route position and query-parameter name so
-    // no capture site has to remember to do it.
-    before_send: redactCaptureEvent,
-    disable_session_recording: !isAnalyticsEnabled(),
-    session_recording: {
-      // Keep the page visible so replays are actually diagnosable. Inputs are
-      // masked — passwords, emails and invite tokens all enter through inputs.
-      maskAllInputs: true,
-      // OPS-3 (docs/OPSEC-REVIEW-2026-08-13.md): `maskAllInputs` never covered
-      // the thing most worth covering. The cell editor is a contenteditable,
-      // not an <input>, so unpublished draft translations — and the source
-      // text beside them, which names the passage and therefore the project —
-      // were replayed verbatim into a third-party US processor. For a team
-      // translating in a jurisdiction where the work is dangerous, a replay
-      // that shows *which* text is being worked on is a bigger disclosure than
-      // anything in the analytics events.
-      //
-      // `[data-cell-type]` is the source and target column wrappers in
-      // EditorTable, so this masks every render variant of cell text — rich
-      // HTML, plain, USFM, IDML, and the live editor — in one selector rather
-      // than one component at a time. `[data-ph-mask]` stays for everything
-      // else that opts in (comment bodies, the source rich-text surface).
-      maskTextSelector: "[data-ph-mask], [data-cell-type]",
-    },
-    opt_out_capturing_by_default: !isAnalyticsEnabled(),
-  })
-
-  onAnalyticsConsentChange((enabled) => {
-    if (enabled) {
-      posthog.opt_in_capturing()
-      posthog.startSessionRecording()
-    } else {
-      posthog.opt_out_capturing()
-      posthog.stopSessionRecording()
-    }
-  })
+function current(expected = generation): boolean {
+  return expected === analyticsAccount.getSnapshot().generation && analyticsAccount.eligible()
 }
 
+// Deliberately no queue: unapproved events/errors cannot be replayed after approval.
+const posthog = {
+  capture: (...args: Parameters<PostHog["capture"]>): void => { if (current()) loaded?.capture(...args) },
+  captureException: (...args: Parameters<PostHog["captureException"]>): void => { if (current()) loaded?.captureException(...args) },
+  // Identity belongs to the account controller, never a late login callback.
+  identify: (..._args: Parameters<PostHog["identify"]>): void => {},
+  register: (...args: Parameters<PostHog["register"]>): void => { if (current()) loaded?.register(...args) },
+  reset: (): void => analyticsAccount.invalidate(),
+  get_session_replay_url: (): string | undefined => current() ? loaded?.get_session_replay_url() : undefined,
+  /** Capture this before asynchronous work; completion cannot cross accounts. */
+  scope: (expected = analyticsAccount.getSnapshot().generation, owner?: string) => {
+    const approved = analyticsAccount.eligible() && (owner === undefined || owner === analyticsAccount.getSnapshot().username)
+    return {
+      owner: analyticsAccount.getSnapshot().username,
+      enabled: () => approved && current(expected),
+      capture: (...args: Parameters<PostHog["capture"]>) => { if (approved && current(expected)) posthog.capture(...args) },
+      captureException: (...args: Parameters<PostHog["captureException"]>) => { if (approved && current(expected)) posthog.captureException(...args) },
+    }
+  },
+}
+
+function stop(): void {
+  const old = loaded
+  loaded = null
+  if (!old) return
+  // The SDK's shutdown flushes. Every dispatch (including retry/beacon) has the
+  // generation guard below, so teardown discards rather than sending that data.
+  try { old.sessionRecording?.dispose({ discardBufferedEvents: true }) } catch { /* dispatch remains blocked */ }
+  try { old.stopSessionRecording() } catch { /* dispatch remains blocked */ }
+  try { void Promise.resolve(old.shutdown()).catch(() => {}) } catch { /* optional teardown must not break account switching */ }
+  old.__loaded = false
+}
+
+async function reconcile(): Promise<void> {
+  const state = analyticsAccount.getSnapshot()
+  if (generation !== state.generation || !analyticsAccount.eligible()) stop()
+  if (!KEY || !analyticsAccount.eligible() || loaded || starting === state.generation) return
+  const expected = state.generation
+  starting = expected
+  try {
+    // Bundle the recorder locally: no late external script can restart it after
+    // withdrawal, and no SDK asset is requested before approval.
+    const [{ PostHog }, identity] = await Promise.all([
+      import("posthog-js/full/no-external"),
+      crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${AUTH_BASE}:${state.accountId}`)),
+    ])
+    if (!current(expected)) return
+    const ph = new PostHog()
+    const allowed = () => current(expected)
+    generation = expected
+    const distinctId = Array.from(new Uint8Array(identity), b => b.toString(16).padStart(2, "0")).join("")
+    ph.init(KEY, {
+      bootstrap: { distinctID: distinctId, isIdentifiedID: true },
+      api_host: HOST,
+      api_transport: "fetch",
+      persistence: "memory",
+      disable_persistence: true,
+      consent_persistence_name: `aquilla:runtime-consent:${crypto.randomUUID()}`,
+      capture_pageview: false,
+      capture_pageleave: false,
+      autocapture: false,
+      // Global errors can originate in another account's background uploads.
+      // Explicit, operation-scoped captureException remains available.
+      capture_exceptions: false,
+      capture_performance: false,
+      enable_recording_console_log: false,
+      disable_external_dependency_loading: true,
+      disable_surveys: true,
+      disable_conversations: true,
+      disable_product_tours: true,
+      advanced_disable_feature_flags: true,
+      disable_compression: true,
+      before_send: (event) => allowed() ? redactCaptureEvent(event) : null,
+      disable_session_recording: true,
+      session_recording: { recordHeaders: false, recordBody: false, maskAllInputs: true, maskTextSelector: "[data-ph-mask], [data-cell-type]" },
+    })
+    // Pinned SDK integration seam: the common dispatch path checks this for
+    // initial sends, queued sends, retries and unload. Compression is disabled
+    // so no async encoder can outlive that check. Covered with the real SDK.
+    const limited = ph.rateLimiter.isServerRateLimited.bind(ph.rateLimiter)
+    ph.rateLimiter.isServerRateLimited = (...args) => !allowed() || limited(...args)
+    loaded = ph
+    ph.register({ app_env: resolveAppEnv(window.location) })
+    ph.identify(distinctId)
+    ph.capture("$pageview")
+    ph.startSessionRecording()
+  } catch {
+    // Optional analytics failure must not interfere with login or editing.
+    stop()
+  } finally {
+    if (starting === expected) starting = -1
+  }
+}
+if (typeof window !== "undefined" && KEY) {
+  installResizeObserverNoiseGuard(window)
+  analyticsAccount.subscribe(() => { void reconcile() })
+  void reconcile()
+}
 export default posthog

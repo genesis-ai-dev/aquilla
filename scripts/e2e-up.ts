@@ -1,4 +1,5 @@
-import { spawn, spawnSync } from "node:child_process"
+import { spawnSync } from "node:child_process"
+import { spawn } from "./lib/spawn-command"
 import { existsSync, writeFileSync, rmSync, copyFileSync, mkdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -13,6 +14,10 @@ import {
 } from "./lib/spawn-worker"
 import { MockLLMServer } from "../e2e/helpers/mock-llm-server"
 import { shouldWriteTestEnvFile } from "./lib/e2e-run-mode"
+import { acquireE2eSlotLock, type E2eSlotLock } from "./lib/e2e-lock"
+import { pidsFromNetstat } from "./lib/listening-pids"
+import { playwrightLoaderEnv } from "./lib/playwright-loader-env"
+import { refuseBorrowedNodeModules, refuseMissingPlaywrightChromium } from "./lib/worktree-install-guard"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, "..")
@@ -22,6 +27,9 @@ const REPO_ROOT = path.resolve(__dirname, "..")
 // wrangler state, build dir, and Playwright --shard slice. Unset (or N=1) keeps
 // the original single-stack behavior byte-for-byte. K is the 0-based offset used
 // to fan out ports/names. See scripts/e2e-shard.ts for the parallel runner.
+// E2E_LOCK=off skips the per-slot lock (emergency only — concurrent runs will
+// kill each other's workers and drop that slot's database again).
+// E2E_LOCK_WAIT_SECONDS bounds the wait for the holder (default 1800).
 const SHARD_MATCH = /^(\d+)\/(\d+)$/.exec(process.env.E2E_SHARD ?? "")
 const SHARD_INDEX = SHARD_MATCH ? parseInt(SHARD_MATCH[1], 10) : 1
 const SHARD_TOTAL = SHARD_MATCH ? parseInt(SHARD_MATCH[2], 10) : 1
@@ -52,9 +60,24 @@ const PERSIST_DIR = path.join(REPO_ROOT, `.wrangler-e2e-state${SUFFIX}`)
 //
 // The reset prefers the Docker container `aquilla-dev-pg` (the canonical
 // CI/dev setup); when Docker isn't available it falls back to a local `psql`
-// against the same localhost:5432 endpoint (e.g. a Homebrew Postgres dev box).
+// against the same 127.0.0.1:5432 endpoint (e.g. a Homebrew Postgres dev box).
+//
+// AQU-2107: the host is the IPv4 literal, never the `localhost` hostname. The
+// reset reaches Postgres over a unix socket (`docker exec`, or
+// E2E_PG_ADMIN_URL), so it cannot see a TCP resolution problem; the workers
+// dial this string over TCP from inside workerd, making it the only
+// resolver-dependent hop in the gating suite. A `localhost` that resolves to
+// `::1` ahead of 127.0.0.1 (the macOS /etc/hosts default) against a runtime
+// that publishes 5432 on IPv4 only is therefore the one hop that can add
+// connect latency the database never sees — the leading explanation for
+// AQU-2107's worker statement timeouts and 16-60s requests on endpoints whose
+// queries measure under a millisecond, with no matching sessions in
+// pg_stat_activity. That chain is not yet confirmed on a box that reproduces
+// the stall, but pinning the literal removes the variable and matches every
+// other local Postgres URL in this repo (dev-stack.ts, neon-target.ts, the
+// scripts/neon-* maintenance tools), which this one alone did not.
 const E2E_PG_DB = `aquilla_e2e${SHARDED ? `_s${K}` : ""}`
-const E2E_PG_URL = `postgresql://aquilla:aquilla@localhost:5432/${E2E_PG_DB}`
+const E2E_PG_URL = `postgresql://aquilla:aquilla@127.0.0.1:5432/${E2E_PG_DB}`
 const PG_CONTAINER = "aquilla-dev-pg"
 // Admin connection used only by the Docker-less reset fallback. Drop/recreate
 // needs CREATE DATABASE, which the `aquilla` login role lacks, so we default to
@@ -94,6 +117,10 @@ const COMMAND_TIMEOUT_MS = 10 * 60_000
 const cleanup: Array<() => Promise<void>> = []
 const logFiles: Record<string, string> = {}
 
+let slotLock: E2eSlotLock | undefined
+// Set only after the slot lock is held (or E2E_LOCK=off). freePort before
+// that kills the run this process is waiting on.
+let portsOwned = false
 let shuttingDown = false
 async function shutdown(code = 0): Promise<never> {
   if (shuttingDown) {
@@ -102,20 +129,28 @@ async function shutdown(code = 0): Promise<never> {
   }
   shuttingDown = true
   console.log(`\n${TAG}[e2e-up] shutting down…`)
-  // Iterate a copy so the array isn't mutated.
-  for (const fn of [...cleanup].reverse()) {
-    try { await fn() } catch (e) { console.error(e) }
-  }
-  // Reap workerd/vite orphans that survived SIGTERM so the next run (and a
-  // still-running `pnpm dev`) does not inherit our listeners.
-  for (const port of MANAGED_PORTS) {
-    await freePort(port)
+  if (portsOwned) {
+    // Iterate a copy so the array isn't mutated.
+    for (const fn of [...cleanup].reverse()) {
+      try { await fn() } catch (e) { console.error(e) }
+    }
+    // Reap workerd/vite orphans that survived SIGTERM so the next run (and a
+    // still-running `pnpm dev`) does not inherit our listeners.
+    for (const port of MANAGED_PORTS) {
+      await freePort(port)
+    }
   }
   process.exit(code)
 }
 
 process.on("SIGINT", () => { void shutdown(130) })
 process.on("SIGTERM", () => { void shutdown(143) })
+// process.exit (schema reset, sentinel mismatch, a second signal) still emits
+// exit. Releasing here, after shutdown's freePort, keeps the slot until our
+// listeners are gone and covers exits that never reach shutdown.
+process.on("exit", () => {
+  try { slotLock?.release() } catch (error) { console.error(error) }
+})
 
 async function waitForUrl(url: string, timeoutMs: number): Promise<void> {
   const start = Date.now()
@@ -218,18 +253,27 @@ function dumpLogs(tailLines = 80): void {
 /** Free a port held by a stale process from a prior run. Non-interactive
  * SIGTERM-then-SIGKILL — anything bound to one of our managed ports is by
  * definition leftover orchestrator state. */
-async function freePort(port: number): Promise<void> {
+function pidsListeningOn(port: number): string[] {
+  // lsof is not on Windows. A missing lookup used to look like "port is free",
+  // so the next stack's mock died with EADDRINUSE and the stale listener
+  // answered health checks.
+  if (process.platform === "win32") {
+    const raw = spawnSync("netstat", ["-ano", "-p", "tcp"], { encoding: "utf8" }).stdout || ""
+    return pidsFromNetstat(raw, port)
+  }
   const pidsRaw = spawnSync("lsof", ["-ti", `:${port}`], { encoding: "utf8" }).stdout || ""
-  const pids = pidsRaw.split("\n").filter(Boolean)
+  return pidsRaw.split("\n").filter(Boolean)
+}
+
+async function freePort(port: number): Promise<void> {
+  const pids = pidsListeningOn(port)
   if (pids.length === 0) return
   console.log(`${TAG}[e2e-up] freeing port ${port} (held by ${pids.join(", ")})…`)
   for (const pid of pids) {
     try { process.kill(Number(pid), "SIGTERM") } catch {}
   }
   await new Promise((r) => setTimeout(r, 500))
-  const remaining = (spawnSync("lsof", ["-ti", `:${port}`], { encoding: "utf8" }).stdout || "")
-    .split("\n").filter(Boolean)
-  for (const pid of remaining) {
+  for (const pid of pidsListeningOn(port)) {
     try { process.kill(Number(pid), "SIGKILL") } catch {}
   }
 }
@@ -335,7 +379,7 @@ function hasLocalPsql(): boolean {
 /**
  * Drop + recreate the e2e database from a clean schema. Prefers the Docker
  * container (`aquilla-dev-pg`, the canonical CI/dev setup); falls back to a
- * local `psql` against localhost:5432 when Docker is unavailable. Exits the
+ * local `psql` against 127.0.0.1:5432 when Docker is unavailable. Exits the
  * process on failure — we refuse to run the suite against a stale/partial
  * schema (it manifests as confusing 500s like "column p.is_active does not
  * exist").
@@ -346,7 +390,7 @@ function hasLocalPsql(): boolean {
  */
 /**
  * The reset applies the schema through `docker exec` (a unix socket inside the
- * container) while the workers reach Postgres over TCP at localhost:5432. Those
+ * container) while the workers reach Postgres over TCP at 127.0.0.1:5432. Those
  * are only the same database if exactly one Postgres owns that port. Two Docker
  * runtimes side by side (Colima + Docker Desktop) each publish their own
  * `aquilla-dev-pg` on 5432, so the reset lands in one and every worker query
@@ -420,12 +464,13 @@ function resetE2ePostgres(): string {
   if (!hasLocalPsql()) {
     console.error(
       `${TAG}[e2e-up] no Docker container 'aquilla-dev-pg' and no local 'psql' on PATH.\n` +
-        "  Start Docker (with the aquilla-dev-pg container) or install a local\n" +
-        "  Postgres reachable at localhost:5432 with role 'aquilla'. See e2e/README.md.",
+        "  Start Docker (with the aquilla-dev-pg container), or bring up a native\n" +
+        "  Postgres with:  eval \"$(bash scripts/e2e-pg-native.sh)\"\n" +
+        "  (AQU-1820: Docker is not required — see e2e/README.md → Prerequisites).",
     )
     process.exit(1)
   }
-  console.log(`${TAG}[e2e-up] Docker unavailable — resetting via local psql (localhost:5432).`)
+  console.log(`${TAG}[e2e-up] Docker unavailable — resetting via local psql (127.0.0.1:5432).`)
   // Drop/recreate needs CREATE DATABASE (the `aquilla` login role lacks it), so
   // run it through the admin connection and hand ownership to `aquilla` so the
   // schema apply (as aquilla) can create objects in the public schema.
@@ -453,6 +498,9 @@ function resetE2ePostgres(): string {
 }
 
 async function main(): Promise<void> {
+  refuseBorrowedNodeModules(REPO_ROOT)
+  refuseMissingPlaywrightChromium()
+
   if (!existsSync(AUTH_WORKER_DIR)) {
     console.error(`${TAG}[e2e-up] auth-worker not found at ${AUTH_WORKER_DIR}`)
     process.exit(1)
@@ -464,6 +512,16 @@ async function main(): Promise<void> {
   if (SHARDED) {
     console.log(`${TAG}[e2e-up] isolated stack: identity :${IDENTITY_PORT} · sync :${SYNC_WORKER_PORT} · vite :${VITE_PORT} · db ${E2E_PG_DB}`)
   }
+
+  // Held across freePort, the database reset, and shutdown's reap. Slot K is
+  // the same number the ports and database use, so e2e-shard's children do
+  // not contend with each other. The parent does not take a lock.
+  slotLock = await acquireE2eSlotLock({
+    slot: K,
+    cwd: REPO_ROOT,
+    command: process.argv.join(" "),
+  })
+  portsOwned = true
 
   // The per-shard backend URLs the browser app must be built against, and the
   // node-side helpers (seed.ts, auth.ts) read. Mock LLM URL is filled in once
@@ -477,6 +535,13 @@ async function main(): Promise<void> {
     // strips the `/chat` prefix the same way production `api.*.aquilla.app/chat` does.
     VITE_CHAT_BASE: `http://127.0.0.1:${IDENTITY_PORT}/chat`,
     VITE_SYNC_WORKER_HOST: `127.0.0.1:${SYNC_WORKER_PORT}`,
+    // Smart Extensions: the product default is "Aquilla editor (Smart
+    // Extension)", but the editor smoke journeys were written for (and keep
+    // guarding) the built-in "Aquilla editor", so the e2e build pins the
+    // default off. Specs that exercise the extension editor restore the
+    // product default per page (localStorage aquilla.extensions.defaultEditor
+    // = "on", or E2E_EDITOR=extension).
+    VITE_EXTENSION_DEFAULT_EDITOR: "off",
     // Pin Google Drive import to unconfigured regardless of the developer's
     // .env.local — import-dialog.smoke.spec asserts the not-configured notice,
     // and real creds leaking into the e2e build would flip that panel state.
@@ -565,6 +630,8 @@ async function main(): Promise<void> {
     // ADMIN_REQUIRE_ELEVATION here keep the step-up off so the console opens.
     // OPENROUTER_* point the agent/chat loops at the scripted mock above.
     // SYNC_WORKER_URL/ENVIRONMENT let identity reach the isolated sync worker.
+    // MCP_OAUTH_PINNED_CLIENTS: chatgpt.com 403s workerd's fetch of its client
+    // metadata document (AQU-1641), so the OAuth consent spec uses this copy.
     extraArgs: [
       "--persist-to", PERSIST_DIR,
       "--var", "WRANGLER_LOCAL:1",
@@ -582,6 +649,11 @@ async function main(): Promise<void> {
       "--var", "GITLAB_ADMIN_TOKEN:e2e-gitlab-admin",
       "--var", `SYNC_WORKER_URL:http://127.0.0.1:${SYNC_WORKER_PORT}`,
       "--var", "ENVIRONMENT:development",
+      "--var", `MCP_OAUTH_PINNED_CLIENTS:${JSON.stringify([{
+        client_id: "https://chatgpt.com/oauth/client.json",
+        client_name: "ChatGPT",
+        redirect_uris: ["https://chatgpt.com/connector_platform_oauth_redirect"],
+      }])}`,
     ],
     logFile: openLogFile(logFiles.identity),
     streamToParent: VERBOSE,
@@ -646,7 +718,17 @@ async function main(): Promise<void> {
   // The build cost (~15-30s) pays for itself after the second spec. The backend
   // URLs are passed via env so each shard bakes its own (VITE_* process env is
   // inlined by Vite at build time and takes priority over .env files).
-  if (VITE_MODE === "preview") {
+  //
+  // E2E_PREBUILT_DIST=1 means the caller already ran this exact build before
+  // starting the workers (the Hetzner QA bootstrap does, so the build never
+  // shares its memory cap with two wrangler dev servers). An absent dist is
+  // still a hard error, never a silent dev-mode fallback.
+  if (VITE_MODE === "preview" && process.env.E2E_PREBUILT_DIST === "1") {
+    if (!existsSync(path.join(REPO_ROOT, DIST_DIR, "index.html"))) {
+      throw new Error(`E2E_PREBUILT_DIST=1 but ${DIST_DIR}/index.html is missing`)
+    }
+    console.log(`${TAG}[boot 7/8] serving prebuilt ${DIST_DIR} (E2E_PREBUILT_DIST=1)`)
+  } else if (VITE_MODE === "preview") {
     console.log(`${TAG}[boot 7/8] building app for test mode (one-time, ~30s)…`)
     await runOnce("npx", ["vite", "build", "--mode", "test", "--outDir", DIST_DIR], REPO_ROOT, "build", browserEnv)
   } else {
@@ -721,6 +803,7 @@ async function main(): Promise<void> {
     env: {
       ...process.env,
       ...browserEnv,
+      ...playwrightLoaderEnv(),
       E2E_BASE_URL: `http://127.0.0.1:${VITE_PORT}`,
       E2E_DATABASE_URL: E2E_PG_URL,
     },
@@ -744,5 +827,6 @@ async function main(): Promise<void> {
 
 main().catch((e) => {
   console.error(`${TAG}[e2e-up] fatal:`, e)
-  void shutdown(1)
+  if (portsOwned) void shutdown(1)
+  else process.exit(1)
 })

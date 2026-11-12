@@ -2,11 +2,13 @@
 //
 // `compile.ts` is the app-facing entry point and stays the only place that
 // knows about i18n; it passes a `CompileLabels` bundle backed by `t()`. This
-// module holds the compilation itself so the Agent API's effective-prompt
-// preview (sync-worker/src/external/prompt-preview.ts) can compile a project's
-// terminology into the SAME rules the editor compiles, and therefore into the
-// same prompt block — without dragging the 2.9 MB i18n catalogs into the
-// worker bundle.
+// module holds the compilation itself so workers compile a project's
+// terminology into the SAME rules the editor compiles: the Agent API's
+// effective-prompt preview (sync-worker/src/external/prompt-preview.ts) and
+// autopilot's terminology lint (lintTerminology in
+// auth-worker/src/lib/contextual/project-context.ts, AQU-1711) — without
+// dragging the 2.9 MB i18n catalogs into the worker bundle. Keep it the only
+// compiler: a second copy is how the editor and the workers drifted apart.
 //
 // Same constraints as src/lib/completion/prompt-build.ts: no `@/` aliases
 // (transitively), no DOM, no storage, no i18n. Parameter/return types are
@@ -18,11 +20,24 @@
 //     (instance counts add up 1:1: each sourceTerm hit needs a counterpart
 //      approved rendering, and extra renderings in the target are also a miss)
 //   each forbidden rendering → one `target-forbids` rule per rendering
-//     (source contains sourceTerm AND target contains forbidden text ⇒ violation)
+//     (the source bears the concept AND the target contains the forbidden
+//      text ⇒ violation. The source condition rides on the check as
+//      `sourcePattern` — AQU-1712; before it the editor flagged the rendering
+//      in every cell, while lintTerminology and the worker's project scan
+//      already required the source to bear the concept)
 //
 // draft / deprecated concepts are skipped entirely.
+//
+// Every rule also carries a `term` payload (AQU-2209): the concept id, the
+// plain source term and renderings, and the source pattern. Prompt injection
+// reads ONLY that — `buildRulesBlock` narrows terminology to the concepts
+// present in the cell being drafted and renders them as `Moses → Moisés`,
+// instead of spelling every concept's match regex into every draft call. The
+// `check` patterns remain the rule engine's and nobody else's.
 
-import { termToRegexSource } from "./match"
+import { conceptToRegexSource, termToRegexSource } from "./match"
+import type { TermMatchOptions, TermMatchingSettings } from "./model"
+import type { PromptTermInfo } from "../completion/prompt-build"
 
 /** Structural echo of `TermRendering` (./types). */
 export interface CompiledRendering {
@@ -37,6 +52,10 @@ export interface CompiledConcept {
   renderings: CompiledRendering[]
   status: string
   caseSensitive?: boolean
+  match?: TermMatchOptions
+  /** The termbase entry's note. Carried into prompts (clipped) with the
+   *  renderings — AQU-2342: every drafting path shows term notes. */
+  notes?: string
 }
 
 /** Structural echo of `TranslationRule` (../parsers/types) for the two check
@@ -52,7 +71,11 @@ export interface CompiledTermRule {
   createdAt: string
   check:
     | { type: "source-requires-target"; sourcePattern: string; targetPattern: string; caseSensitive?: boolean }
-    | { type: "target-forbids"; targetPattern: string; caseSensitive?: boolean }
+    | { type: "target-forbids"; targetPattern: string; sourcePattern: string; caseSensitive?: boolean }
+  /** Regex-free data for prompt injection (AQU-2209) — the plain source term
+   *  and renderings, plus the source pattern injection narrows on. Derived on
+   *  read with the rest of the rule; nothing persists it. */
+  term: PromptTermInfo
 }
 
 /**
@@ -84,10 +107,15 @@ function escapeRegex(s: string): string {
  *
  * Only `active` concepts produce rules. The returned rules use existing
  * TranslationRule check types — no new check kinds are introduced.
+ *
+ * `termMatching` is the consuming project's affix inventory
+ * (ProjectWideSettings.termMatching); without it the source pattern still
+ * applies the concept's own match options and script-derived mark folding.
  */
 export function compileConceptsToRulesCore(
   concepts: CompiledConcept[],
   labels: CompileLabels,
+  termMatching?: TermMatchingSettings,
 ): CompiledTermRule[] {
   const rules: CompiledTermRule[] = []
   const now = new Date().toISOString()
@@ -100,10 +128,25 @@ export function compileConceptsToRulesCore(
     )
     const forbidden = concept.renderings.filter((r) => r.status === "forbidden")
 
-    // Wildcard-aware source pattern (grac* matches grace/graced/gracia, etc.).
-    // termToRegexSource returns null for empty/whitespace terms → skip concept.
-    const sourcePattern = termToRegexSource(concept.sourceTerm)
+    // AQU-1271: the SOURCE side goes through the concept matcher, so the rule
+    // engine sees the same surface forms as chips, stats and the term page —
+    // wildcards plus mark-folding, project affixes, extra forms and exclusions.
+    // Returns null for empty/whitespace terms → skip concept.
+    const sourcePattern = conceptToRegexSource(
+      { sourceTerm: concept.sourceTerm, match: concept.match },
+      termMatching,
+    )
     if (sourcePattern === null) continue
+
+    // Shared by this concept's rules, so injection tests one pattern per
+    // concept rather than one per rule (AQU-2209).
+    const term: PromptTermInfo = {
+      conceptId: concept.id,
+      sourceTerm: concept.sourceTerm,
+      sourcePattern,
+      ...(concept.caseSensitive ? { caseSensitive: true } : {}),
+      ...(concept.notes?.trim() ? { notes: concept.notes.trim() } : {}),
+    }
 
     // source-requires-target: each source instance needs a counterpart rendering.
     if (approved.length > 0) {
@@ -136,18 +179,21 @@ export function compileConceptsToRulesCore(
           targetPattern,
           ...(concept.caseSensitive ? { caseSensitive: true } : {}),
         },
+        term: { ...term, approved: approved.map((r) => r.rendering) },
       })
     }
 
     // target-forbids: source has the term AND target contains a forbidden rendering.
     // One rule per forbidden rendering so the violation message names the exact form.
     for (const f of forbidden) {
-      // The target-forbids check fires regardless of source, but per the spec:
-      // "forbidden rendering in the target when the source bears the concept".
-      // The existing `target-forbids` check type does NOT have a source guard.
-      // We model it as target-forbids unconditionally (matching spec intent for
-      // string-match path). When a source guard is needed it can be upgraded to
-      // source-requires-target with an inverted target pattern; deferred.
+      // AQU-1712: "forbidden rendering in the target when the source bears the
+      // concept". The source condition rides on the check as `sourcePattern` —
+      // the SAME pattern the concept's approved rule matches its source side
+      // with, so both rules of a concept apply to exactly the same cells.
+      // Without it the editor flagged every cell whose translation contained
+      // the rendering, including cells whose source never mentions the
+      // concept: a forbidden rendering is usually an ordinary word that is
+      // wrong only as a rendering of this one concept.
       const forbiddenPattern = termToRegexSource(f.rendering)
       if (forbiddenPattern === null) continue
       rules.push({
@@ -163,8 +209,10 @@ export function compileConceptsToRulesCore(
         check: {
           type: "target-forbids",
           targetPattern: forbiddenPattern,
+          sourcePattern,
           ...(concept.caseSensitive ? { caseSensitive: true } : {}),
         },
+        term: { ...term, forbidden: f.rendering },
       })
     }
   }

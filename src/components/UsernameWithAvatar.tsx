@@ -1,11 +1,16 @@
 import type { ReactNode } from "react"
-import { InitialsAvatar, type InitialsAvatarShape, type InitialsAvatarSize } from "@/components/InitialsAvatar"
-import { cn } from "@/lib/utils"
+import { UserChip } from "@/components/UserChip"
+import type { InitialsAvatarShape, InitialsAvatarSize } from "@/components/InitialsAvatar"
 
 type UsernameWithAvatarProps = {
   /** Stable identity used for avatar color/initials. */
   username: string
-  /** Visible label; defaults to `username`. */
+  /** Account id, when the caller has one. Shown in the tooltip, not the label. */
+  userId?: string | number | null
+  /**
+   * Visible label. Defaults to the username. Use this only for the username
+   * plus a short qualifier ("anna (you)"), never a real name or a raw id.
+   */
   label?: string
   size?: InitialsAvatarSize
   shape?: InitialsAvatarShape
@@ -22,11 +27,12 @@ type UsernameWithAvatarProps = {
 }
 
 /**
- * Standard people identity chip: colored InitialsAvatar + username.
- * Prefer this anywhere a username is the primary label in a list/table row.
+ * The user chip, under the name older call sites already import.
+ * New call sites should use `UserChip` directly.
  */
 export function UsernameWithAvatar({
   username,
+  userId,
   label,
   size = "sm",
   shape,
@@ -37,25 +43,20 @@ export function UsernameWithAvatar({
   nameTestId,
   children,
 }: UsernameWithAvatarProps) {
-  const text = label ?? username
   return (
-    <span className={cn("inline-flex min-w-0 items-center gap-2", className)}>
-      {/* Decorative when the username text is visible beside it. */}
-      <span aria-hidden className="shrink-0">
-        <InitialsAvatar name={username} size={size} shape={shape} menuSafe={menuSafe} />
-      </span>
-      <span
-        data-slot="username"
-        data-testid={nameTestId}
-        className={cn(
-          "font-medium text-foreground",
-          truncate && "truncate",
-          nameClassName,
-        )}
-      >
-        {text}
-      </span>
+    <UserChip
+      userId={userId}
+      username={username}
+      visibleLabel={label}
+      size={size}
+      shape={shape}
+      className={className}
+      nameClassName={nameClassName}
+      truncate={truncate}
+      menuSafe={menuSafe}
+      nameTestId={nameTestId}
+    >
       {children}
-    </span>
+    </UserChip>
   )
 }

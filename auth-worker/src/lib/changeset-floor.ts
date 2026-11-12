@@ -16,14 +16,14 @@
 //
 // Org-configurable floors are resolved here before the command walk:
 // assignment EmitEvents use assignmentMinRole exactly (so lowering and raising
-// both work), while terminology PatchSettings retains its existing
-// raise-only mirror of sync-worker's private requiredRoleForOps arithmetic.
+// both work). PatchSettings no longer has a termbase carve-out: `terminology`
+// is retired (AQU-1724), refused at prepare and at commit, so a plan that
+// still carries it takes the plain MAINTAINER settings floor.
 //
 // SWARM-TODO(AQU-CMDREG-P1): once sync-worker's external/authority.ts
 // (§2.3, built in parallel) has landed, collapse the max-over-commands walk and
 // the tenant-creation carve-out below onto its requiredFloorForChangeset /
-// isTenantCreation, and export requiredRoleForOps so the termbase raise above
-// can become an exact match instead of a ceiling.
+// isTenantCreation.
 
 import {
   commandsContainAssignmentEvents,
@@ -32,10 +32,7 @@ import {
 } from "../../../sync-worker/src/external/commands"
 import { ORG_MEMBER_COMMAND_KINDS } from "../../../sync-worker/src/external/commands-org-members"
 import { describeCommand } from "../../../db/shared/command-catalog"
-import {
-  getAssignmentMinRoleForProject,
-  getTermbaseEditMinRoleForProject,
-} from "../services/org-permissions"
+import { getAssignmentMinRoleForProject } from "../services/org-permissions"
 import { ROLE, type Env } from "../types"
 
 /** Floor for a plan whose stored commands cannot be read as the known command
@@ -122,14 +119,6 @@ export function planIsCreatorScoped(commandsRaw: unknown): boolean {
   )
 }
 
-/** True when the plan patches the `terminology` settings key — the one op
- *  whose floor is an ORG setting rather than a constant. */
-function touchesTerminology(commands: readonly Command[]): boolean {
-  return commands.some(
-    (c) => c.kind === "PatchSettings" && c.ops.some((op) => op.key === "terminology"),
-  )
-}
-
 /**
  * The project role a caller must hold to view / approve / reject this
  * changeset: `max` over its stored commands' floors.
@@ -163,10 +152,5 @@ export async function requiredRoleForChangeset(
     return UNREADABLE_PLAN_FLOOR
   }
   if (!Number.isFinite(floor)) return UNREADABLE_PLAN_FLOOR
-
-  // Costs an extra read only when the plan actually touches terminology.
-  if (touchesTerminology(commands)) {
-    floor = Math.max(floor, await getTermbaseEditMinRoleForProject(env, projectId))
-  }
   return floor
 }

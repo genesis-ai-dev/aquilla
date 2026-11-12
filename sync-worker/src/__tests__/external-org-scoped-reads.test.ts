@@ -27,6 +27,7 @@ import { MCP_TOOLS } from "../external/mcp-tools"
 import { mintApiToken, validateApiCredential } from "../../../db/shared/api-credentials"
 import type { ExternalEnv } from "../external/types"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
+import { peekRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 
 const SECRET = "test-secret"
 
@@ -392,8 +393,11 @@ describe("org-scoped external reads (AQU-1236)", () => {
     it("charges the search budget once per project searched", async () => {
       const token = await seedCredential(testDb, { userId: ALICE })
       await get(testDb, "/api/v1/external/search?q=beginning&projectIds=proj-a,proj-b", token)
-      const events = await testDb.rows<{ kind: string }>("auth_rate_limit_events")
-      expect(events.filter((e) => e.kind === "external_search").length).toBe(2)
+      // AQU-1843: one counter row per (kind, identifier, window) charged all
+      // `cost` units at once, instead of one event row per unit.
+      expect(
+        await peekRateLimit(testDb.db, "external_search", userRateLimitIdentifier(ALICE)),
+      ).toBe(2)
     })
   })
 

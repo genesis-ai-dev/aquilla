@@ -1,4 +1,6 @@
 import type { BookHealthCell, BookHealthChapter } from "@/components/sidebar/BookHealthSpine"
+import { progressViewFor, type MilestoneProgressView } from "@/lib/progress/milestone-progress-view"
+import { deliversView, type LaneDelivers } from "@/lib/lanes/lane-delivers"
 
 /** A navigation-index chapter: the fields the sidebar's chapter map reads. */
 export interface ChapterHealthSource {
@@ -11,7 +13,14 @@ export interface ChapterHealthSource {
 }
 
 export interface ChapterHealthReaders {
-  getSummary(cellId: string): { status: string; translated: string } | null | undefined
+  getSummary(cellId: string): {
+    status: string
+    translated: string
+    laneStatus?: string
+    aiDrafted?: boolean
+    hasOwnTake?: boolean
+    audioApproved?: boolean
+  } | null | undefined
   health(cellId: string): number | undefined
   hasIssue(cellId: string): boolean
   /**
@@ -21,7 +30,29 @@ export interface ChapterHealthReaders {
    * square is drawn. Absent ⇒ nothing is excluded.
    */
   isExcluded?(cellId: string): boolean
+  /**
+   * AQU-2112: the line's AUDIO state — `"audioValidated"` when every chosen
+   * take meets the project's audio validation requirement, `"recorded"` when
+   * it carries a take of its own that does not, and undefined when it carries
+   * none. `"audioValidated"` implies recorded, so the caller reports the
+   * stronger of the two and this builder counts it toward both figures.
+   *
+   * ABSENT means "audio is not counted here" — a text-only project passes no
+   * reader and every number and colour below is byte-identical to what it
+   * was before audio progress existed, including the second walk this
+   * otherwise costs.
+   */
+  audioStage?(cellId: string): AudioCellStage | undefined
+  /**
+   * Media redesign: what the open language delivers, when someone has chosen.
+   * It overrides the file's evidence about which unit the chapters are drawn
+   * in (`deliversView`).
+   */
+  delivers?: LaneDelivers | null
 }
+
+/** AQU-2112: a line's audio state, strongest first. */
+export type AudioCellStage = "recorded" | "audioValidated"
 
 export interface ChapterHealthBuilder {
   /**
@@ -42,12 +73,37 @@ interface ChapterEntry {
   cells: CellEntry[]
 }
 
-function cellStage(summary: { status: string; translated: string }): BookHealthCell["stage"] {
+function cellStage(summary: { status: string; translated: string; laneStatus?: string }): BookHealthCell["stage"] {
+  // Media redesign slice 2: a language that counts its recordings draws each
+  // square by the line's status in that language (recorded, approved).
+  if (summary.laneStatus) {
+    return summary.laneStatus === "validated"
+      ? "validated"
+      : summary.laneStatus === "empty" ? "untranslated" : "automatic"
+  }
   return summary.status === "validated"
     ? "validated"
     : summary.status === "empty" || !summary.translated.trim()
       ? "untranslated"
       : "automatic"
+}
+
+/**
+ * What a line holds, for a square drawn from its status in a language that
+ * counts its recordings. That square is light blue for any line that is
+ * started, so on its own it cannot say whether the text, the recording or
+ * both are there; its label reads this instead.
+ */
+function linePartsOf(summary: {
+  status: string
+  translated: string
+  hasOwnTake?: boolean
+  audioApproved?: boolean
+}): NonNullable<BookHealthCell["lineParts"]> {
+  return {
+    text: !summary.translated.trim() ? "none" : summary.status === "validated" ? "validated" : "typed",
+    audio: summary.audioApproved ? "approved" : summary.hasOwnTake ? "recorded" : "none",
+  }
 }
 
 /**
@@ -68,7 +124,52 @@ export function createChapterHealthBuilder(): ChapterHealthBuilder {
       let anyChapterChanged = chapters.length !== last.length
       let membershipChanged = anyChapterChanged
 
+      // AQU-2112: which figures this file shows is decided over the WHOLE
+      // file before a single chapter is drawn — a file with recordings and no
+      // target text shows audio alone, one with both shows text as before
+      // plus audio — so the audio counts come first, in their own walk.
+      //
+      // That walk happens only when a reader was supplied, which is how a
+      // text-only project pays nothing for audio progress and comes out of
+      // here with exactly the chapters it did before: no second pass, no
+      // audio figures on the chapter, no change of colour.
+      const audioStage = readers.audioStage
+      const audioCounts = audioStage
+        ? chapters.map((source) => {
+            let audioRecorded = 0
+            let audioValidated = 0
+            let textTranslated = 0
+            for (const cellId of source.cellIds) {
+              // The same exclusion the store's own fraction applies, so these
+              // numerators sit over `source.total` honestly (AQU-1083/1424).
+              if (readers.isExcluded?.(cellId) ?? false) continue
+              const stage = audioStage(cellId)
+              if (stage) audioRecorded++
+              if (stage === "audioValidated") audioValidated++
+              // TEXT ALONE — never the take that `source.translated` also
+              // counts as translated (AQU-646). That distinction is the whole
+              // per-file decision: without it an audio-only file reads as one
+              // that has both and keeps the text figures that can never move.
+              if (readers.getSummary(cellId)?.translated.trim()) textTranslated++
+            }
+            return { audioRecorded, audioValidated, textTranslated }
+          })
+        : null
+      // The rule itself is AQU-2110's, shared so the sidebar and the chapter
+      // picker can never disagree about which unit a file is measured in.
+      // What the language delivers wins where someone has chosen (media
+      // redesign).
+      const progressView: MilestoneProgressView | undefined = audioCounts
+        ? deliversView(readers.delivers, progressViewFor(chapters.map((source, index) => ({
+            translated: source.translated,
+            validated: source.validated,
+            total: source.total,
+            ...audioCounts[index],
+          }))))
+        : undefined
+
       const result = chapters.map((source, chapterIndex) => {
+        const audio = audioCounts?.[chapterIndex]
         const prevChapter = chaptersByKey.get(source.key)
         if (!prevChapter) membershipChanged = true
         const cells: CellEntry[] = []
@@ -78,15 +179,46 @@ export function createChapterHealthBuilder(): ChapterHealthBuilder {
           const summary = readers.getSummary(cellId)
           if (!summary) continue
           const excluded = readers.isExcluded?.(cellId) ?? false
-          const stage = excluded ? "excluded" as const : cellStage(summary)
+          // AQU-2112: in the audio view the square says whether the LINE IS
+          // RECORDED and signed off. Its text stage can never move on a
+          // language with no written form, so drawing it there reports every
+          // finished line as untranslated. Any other view draws text, which
+          // is why a file with both keeps the squares it always had, and a
+          // line with no take still draws untranslated in the audio view.
+          const audioCellStage = progressView === "audio" ? audioStage?.(cellId) : undefined
+          const stage = excluded ? "excluded" as const : audioCellStage ?? cellStage(summary)
           // An excluded cell carries no health score: health measures how good
-          // a translation is, and this one is not being scored at all.
-          const health = excluded ? undefined : stage === "validated" ? 100 : readers.health(cellId)
-          const hasIssue = readers.hasIssue(cellId)
+          // a translation is, and this one is not being scored at all. Neither
+          // does an audio square — there is no text under it to score.
+          const health = excluded || audioCellStage
+            ? undefined
+            : stage === "validated" ? 100 : readers.health(cellId)
+          // AQU-2159: a check's flag is drawn only on a line with text — an
+          // empty line is flagged for being empty, which its square already
+          // says. Read from the text itself, not the stage, because an audio
+          // square's stage says nothing about whether text sits under it.
+          const hasIssue = !excluded && Boolean(summary.translated.trim()) && readers.hasIssue(cellId)
+          // AQU-2159: an AI draft nobody has validated is drawn in the AI
+          // stripes. Carried only when true, so every other square is the
+          // object it always was.
+          const aiDrafted = stage === "automatic" && summary.aiDrafted === true
+          // A square drawn from the line's status in a language that counts its
+          // recordings carries what the line holds, so a line with only a
+          // recording is not announced as translated text.
+          const lineParts = !excluded && !audioCellStage && summary.laneStatus ? linePartsOf(summary) : undefined
           const prev = cellsById.get(cellId)
           const entry = prev && prev.stage === stage && prev.health === health && prev.hasIssue === hasIssue
+            && (prev.aiDrafted ?? false) === aiDrafted
+            && prev.lineParts?.text === lineParts?.text && prev.lineParts?.audio === lineParts?.audio
             ? prev
-            : { id: cellId, stage, health, hasIssue }
+            : {
+              id: cellId,
+              stage,
+              health,
+              hasIssue,
+              ...(aiDrafted ? { aiDrafted } : {}),
+              ...(lineParts ? { lineParts } : {}),
+            }
           if (entry !== prevChapter?.cells[cells.length]) cellsChanged = true
           if (cellId !== prevChapter?.cells[cells.length]?.id) membershipChanged = true
           if (entry !== prev) cellsById.set(cellId, entry)
@@ -103,6 +235,12 @@ export function createChapterHealthBuilder(): ChapterHealthBuilder {
           && prevChapter.chapter.translated === source.translated
           && prevChapter.chapter.validated === source.validated
           && prevChapter.chapter.total === source.total
+          // AQU-2112: a take validated in this chapter, or the file crossing
+          // from text into audio, has to invalidate the cached chapter too —
+          // the figure beside the name is read from these.
+          && prevChapter.chapter.progressView === progressView
+          && prevChapter.chapter.audioRecorded === audio?.audioRecorded
+          && prevChapter.chapter.audioValidated === audio?.audioValidated
         const chapter: BookHealthChapter = reusable
           ? prevChapter.chapter
           : {
@@ -111,6 +249,15 @@ export function createChapterHealthBuilder(): ChapterHealthBuilder {
               translated: source.translated,
               validated: source.validated,
               total: source.total,
+              // Spread, not written as undefined: a text-only file's chapter
+              // carries no audio keys at all, exactly as before.
+              ...(audio
+                ? {
+                    audioRecorded: audio.audioRecorded,
+                    audioValidated: audio.audioValidated,
+                    progressView,
+                  }
+                : {}),
               cells,
             }
         const entry: ChapterEntry = reusable ? prevChapter : { chapter, cells }

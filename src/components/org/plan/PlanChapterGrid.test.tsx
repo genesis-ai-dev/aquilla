@@ -3,16 +3,24 @@ import { render, screen, fireEvent, within } from "@testing-library/react"
 import { PlanChapterGrid, PlanGridLegend, planTileChapter } from "./PlanChapterGrid"
 import { classifyPlanSection, numberedBookCodes } from "@/lib/plan/plan-section"
 import type { PlanSection } from "@/hooks/usePlanUnitSections"
-import { hexToRgba, parseTrackHue } from "@/lib/timeline/track-colors"
+import { PROGRESS_COLOR } from "@/lib/progress/progress-palette"
 
 /**
- * The hues are asserted through the same lookup the component uses, on purpose.
- * What these tests pin is not the value of azure — `track-colors.ts` owns that
- * and Sam retunes it — but WHICH HALF OF THE UNDERLINE EACH MEDIUM GETS and the
- * alpha it is drawn at, which is this file's decision and nobody else's.
+ * The colours are asserted through the same palette the component uses, on
+ * purpose. What these tests pin is not the value of the blue — `index.css`
+ * owns that, and Sam retunes it — but WHICH HALF OF THE UNDERLINE EACH MEDIUM
+ * GETS and the strength it is drawn at, which is this file's decision and
+ * nobody else's. (AQU-1764 moved both from the timeline's hues to the shared
+ * progress palette.)
  */
-const TEXT_HUE = parseTrackHue("azure")
-const AUDIO_HUE = parseTrackHue("cyan")
+const TEXT_HUE = PROGRESS_COLOR.textValidated
+const AUDIO_HUE = PROGRESS_COLOR.audioValidated
+
+/** A half's colour and strength, read off its inline style. */
+const paint = (el: Element | null) => {
+  const style = (el as HTMLElement).style
+  return { color: style.backgroundColor, strength: style.opacity }
+}
 
 const section = (key: string, over: Partial<PlanSection> = {}): PlanSection => ({
   key,
@@ -27,6 +35,7 @@ const section = (key: string, over: Partial<PlanSection> = {}): PlanSection => (
 
 function renderGrid(sections: PlanSection[], over: {
   showAudio?: boolean
+  showText?: boolean
   nearlyComplete?: boolean
   selectedKey?: string | null
 } = {}) {
@@ -35,6 +44,7 @@ function renderGrid(sections: PlanSection[], over: {
     <PlanChapterGrid
       sections={sections}
       showAudio={over.showAudio ?? false}
+      showText={over.showText ?? true}
       nearlyComplete={over.nearlyComplete ?? false}
       selectedKey={over.selectedKey ?? null}
       onSelect={onSelect}
@@ -125,7 +135,8 @@ describe("laying the tiles out", () => {
     // the name it was given.
     renderGrid([section("GEN 1"), section("GEN"), section("Scene 4")])
     const extras = screen.getByTestId("plan-chapter-extras")
-    expect(within(extras).getByTestId("plan-tile-GEN")).toHaveTextContent("front matter")
+    // Sentence case: a label standing alone, like the card it opens (AQU-1493).
+    expect(within(extras).getByTestId("plan-tile-GEN")).toHaveTextContent(/^Front matter/)
     expect(within(extras).getByTestId("plan-tile-Scene 4")).toHaveTextContent("Scene 4")
     expect(testids(screen.getByTestId("plan-chapter-grid"))).toEqual(["plan-tile-GEN 1"])
   })
@@ -162,18 +173,14 @@ describe("what a tile says it is short of", () => {
   it("draws the text hue on the left half only, where audio is done", () => {
     renderGrid([section("GEN 1", { validatedCount: 20 })], { showAudio: true })
     // Twenty of forty cells unvalidated: 0.5 + 0.5 = a full-strength line.
-    expect(underline("GEN 1", "text")).toHaveStyle({
-      backgroundColor: hexToRgba(TEXT_HUE, 1),
-    })
+    expect(paint(underline("GEN 1", "text"))).toEqual({ color: TEXT_HUE, strength: "1" })
     expect(underline("GEN 1", "audio")).toHaveStyle({ backgroundColor: "transparent" })
   })
 
   it("draws the audio hue on the right half only, where the text is done", () => {
     renderGrid([section("GEN 1", { audioCount: 36, audioValidatedCount: 36 })], { showAudio: true })
     // Four takes of forty missing: 0.5 + 0.1.
-    expect(underline("GEN 1", "audio")).toHaveStyle({
-      backgroundColor: hexToRgba(AUDIO_HUE, 0.6),
-    })
+    expect(paint(underline("GEN 1", "audio"))).toEqual({ color: AUDIO_HUE, strength: "0.6" })
     expect(underline("GEN 1", "text")).toHaveStyle({ backgroundColor: "transparent" })
   })
 
@@ -222,6 +229,9 @@ describe("the legend", () => {
     expect(legend).toHaveTextContent("all complete")
     expect(legend).toHaveTextContent("text short")
     expect(legend).toHaveTextContent("audio short")
+    // Each swatch is its underline's colour, at a middle strength.
+    expect(paint(legend.querySelector('[data-plan-legend="text"]'))).toEqual({ color: TEXT_HUE, strength: "0.75" })
+    expect(paint(legend.querySelector('[data-plan-legend="audio"]'))).toEqual({ color: AUDIO_HUE, strength: "0.75" })
   })
 
   it("drops the audio swatch on a text-only project", () => {
@@ -267,5 +277,66 @@ describe("the badge above its neighbours", () => {
     // overhang. Sam: "badges are still clipping."
     renderGrid([section("GEN 1", { validatedCount: 35 }), section("GEN 2")], { nearlyComplete: true })
     expect(screen.getByTestId("plan-tile-badge-GEN 1").className).toContain("z-10")
+  })
+
+  it("is a neutral bubble — the text colour, not a status's or a bar's blue (AQU-1764)", () => {
+    // It used to borrow Nearly complete's filled dot. That status is now a
+    // half-filled ring, and the blues belong to the progress bars, so the
+    // count is the text colour filled behind digits in the page colour.
+    renderGrid([section("GEN 1", { validatedCount: 35 })], { nearlyComplete: true })
+    const badge = screen.getByTestId("plan-tile-badge-GEN 1")
+    expect(badge.className).toContain("bg-foreground")
+    expect(badge.className).toContain("text-background")
+    expect(badge.className).not.toMatch(/oklch|text-white|border-/)
+  })
+})
+
+
+/**
+ * AQU-955: the grid on an AUDIO-ONLY file.
+ *
+ * Its chapters have takes and no target text, so with text still measured every
+ * tile was short by its whole cell count and the grid was a solid block of
+ * "outstanding" whatever had been recorded — the one view that was supposed to
+ * answer "which chapters still need recording" answered nothing.
+ */
+describe("an audio-only file (AQU-955)", () => {
+  const recorded = (key: string, over: Partial<PlanSection> = {}) =>
+    section(key, { filledCount: 0, validatedCount: 0, ...over })
+
+  it("draws a fully recorded chapter as complete instead of short", () => {
+    renderGrid([recorded("GEN 1")], { showAudio: true, showText: false })
+    expect(screen.getByTestId("plan-tile-GEN 1")).not.toHaveAttribute("data-short")
+  })
+
+  it("still marks a chapter whose takes are missing", () => {
+    renderGrid([recorded("GEN 1", { audioCount: 10, audioValidatedCount: 10 })], {
+      showAudio: true,
+      showText: false,
+    })
+    expect(screen.getByTestId("plan-tile-GEN 1")).toHaveAttribute("data-short", "true")
+  })
+
+  it("leaves the text half of the underline transparent and draws only the audio half", () => {
+    renderGrid([recorded("GEN 1", { audioCount: 10, audioValidatedCount: 10 })], {
+      showAudio: true,
+      showText: false,
+    })
+    expect(underline("GEN 1", "text")).toHaveStyle({ backgroundColor: "transparent" })
+    expect(underline("GEN 1", "audio")).not.toHaveStyle({ backgroundColor: "transparent" })
+  })
+
+  it("names only the swatches it can draw", () => {
+    render(<PlanGridLegend showAudio showText={false} />)
+    const legend = screen.getByTestId("plan-grid-legend")
+    expect(within(legend).queryByText(/text/i)).toBeNull()
+  })
+
+  it("is the same grid as before on a file that does carry text", () => {
+    // The guard on the other side: showText defaults to true, so every caller
+    // written before this renders byte-for-byte as it did.
+    renderGrid([section("GEN 1", { validatedCount: 10 })], { showAudio: false })
+    expect(screen.getByTestId("plan-tile-GEN 1")).toHaveAttribute("data-short", "true")
+    expect(paint(underline("GEN 1", "text"))).toEqual({ color: TEXT_HUE, strength: "1" })
   })
 })

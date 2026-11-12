@@ -94,10 +94,17 @@ export function folderIdsOf(tracks: readonly TimelineTrack[]): ReadonlySet<strin
  *
  * `collapsed` is the set of folder ids the viewer has closed — personal state,
  * so it never reaches the merge or an event.
+ *
+ * AQU-1684: `hidden` is the set of track ids the viewer has hidden — the same
+ * kind of state. A hidden track is not drawn and is no member of its folder's
+ * rows or band; it keeps its content, its sound and its place in the order.
+ * A folder is never hidden: it is a heading, and closing it is how its tracks
+ * are put away.
  */
 export function buildTrackRows(
   tracks: readonly TimelineTrack[],
   collapsed?: ReadonlySet<string> | null,
+  hidden?: ReadonlySet<string> | null,
 ): TrackRow[] {
   const folderIds = folderIdsOf(tracks)
 
@@ -105,6 +112,7 @@ export function buildTrackRows(
   const members = new Map<string, TimelineTrack[]>()
   const topLevel: TimelineTrack[] = []
   for (const track of tracks) {
+    if (track.kind !== "folder" && hidden?.has(track.id)) continue
     const scope = trackScope(track, folderIds)
     if (scope === null) {
       topLevel.push(track)
@@ -131,6 +139,19 @@ export function buildTrackRows(
     }
   }
   return rows
+}
+
+/**
+ * AQU-1684: the tracks this person has hidden that still exist on the file, in
+ * the order they are drawn — what "Hidden tracks" lists to show again. An id
+ * left behind by a track deleted since is not one; folders are never hidden.
+ */
+export function hiddenTracksOf(
+  tracks: readonly TimelineTrack[],
+  hidden: ReadonlySet<string> | null | undefined,
+): TimelineTrack[] {
+  if (!hidden || hidden.size === 0) return []
+  return tracks.filter((track) => track.kind !== "folder" && hidden.has(track.id))
 }
 
 /**

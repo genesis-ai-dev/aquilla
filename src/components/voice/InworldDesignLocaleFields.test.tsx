@@ -7,7 +7,7 @@ import { listInworldSupportedLanguages } from "@/lib/sync/tts"
 import { __resetInworldSupportedLanguagesCacheForTests } from "@/lib/audio/inworld-voices"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { InworldSupportedLanguage } from "@/lib/audio/inworld-supported-languages"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { expectClickNote, renderWithTooltips } from "@/test-utils/tooltip"
 
 vi.mock("@/lib/sync/tts", () => ({
   listInworldVoices: vi.fn(),
@@ -60,6 +60,21 @@ const portalLanguages: InworldSupportedLanguage[] = [
   lang({ code: "fil", familyCode: "fil", familyDisplayName: "Filipino", hasVoices: false }),
   lang({ code: "ta", familyCode: "ta", familyDisplayName: "Tamil", hasVoices: false }),
   lang({ code: "acw", familyCode: "acw", familyDisplayName: "Hijazi Arabic", hasVoices: false }),
+  lang({ code: "en-ZA", familyCode: "en", familyDisplayName: "English" }),
+  lang({ code: "ar", familyCode: "ar", familyDisplayName: "Arabic" }),
+  lang({
+    code: "ar-SA",
+    familyCode: "ar",
+    familyDisplayName: "Arabic",
+    accentDisplayName: "Saudi",
+  }),
+  lang({
+    code: "ar-EG",
+    familyCode: "ar",
+    familyDisplayName: "Arabic",
+    accentDisplayName: "Egyptian",
+    hasVoices: false,
+  }),
 ]
 
 function renderLocales(
@@ -161,14 +176,15 @@ describe("InworldDesignLocaleFields", () => {
     expect(onLanguageChange).toHaveBeenCalledWith("en")
   })
 
+  // AQU-2260: the (i)s open on click (VoiceInfoTip is an InfoNote now).
   it("explains language and accent behind info icons", async () => {
     vi.mocked(listInworldSupportedLanguages).mockResolvedValue(portalLanguages)
     renderLocales("en-US")
-    await expectTooltip(
+    await expectClickNote(
       screen.getByRole("button", { name: "About the language" }),
       /language this designed voice will speak/i,
     )
-    await expectTooltip(
+    await expectClickNote(
       screen.getByRole("button", { name: "About the accent" }),
       /Default is just en/i,
     )
@@ -177,11 +193,11 @@ describe("InworldDesignLocaleFields", () => {
   it("explains catalog language copy on prebuilt", async () => {
     vi.mocked(listInworldSupportedLanguages).mockResolvedValue(portalLanguages)
     renderLocales("en-US", "catalog", true)
-    await expectTooltip(
+    await expectClickNote(
       screen.getByRole("button", { name: "About the language" }),
       /already has speakers/i,
     )
-    await expectTooltip(
+    await expectClickNote(
       screen.getByRole("button", { name: "About the accent" }),
       /matching stock voices/i,
     )
@@ -198,6 +214,43 @@ describe("InworldDesignLocaleFields", () => {
     expect(screen.getByRole("option", { name: /^Swahili$/i })).toBeTruthy()
     expect(screen.queryByRole("option", { name: /^Abadi$/i })).toBeNull()
     expect(screen.queryByRole("option", { name: /^Tamil$/i })).toBeNull()
+  })
+
+  it("keeps a saved accent the prebuilt list no longer offers (AQU-2032)", async () => {
+    vi.mocked(listInworldSupportedLanguages).mockResolvedValue(portalLanguages)
+    const user = userEvent.setup()
+    const { onLanguageChange } = renderLocales("ar-EG", "catalog", true)
+    expect(await screen.findByRole("combobox", { name: "Accent" })).toHaveTextContent("Egyptian")
+    expect(onLanguageChange).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("combobox", { name: "Accent" }))
+    expect(await screen.findByRole("option", { name: /Egyptian/ })).toBeTruthy()
+    expect(screen.getByRole("option", { name: /Saudi/ })).toBeTruthy()
+  })
+
+  it("keeps a saved accent the catalog has not loaded yet (AQU-2032)", async () => {
+    vi.mocked(listInworldSupportedLanguages).mockResolvedValue([])
+    const { onLanguageChange } = renderLocales("ar-EG", "catalog", true)
+    expect(await screen.findByRole("combobox", { name: "Language" })).toHaveTextContent("Arabic")
+    expect(onLanguageChange).not.toHaveBeenCalled()
+  })
+
+  it("keeps a saved accent the catalog lists without an accent name (AQU-2032)", async () => {
+    vi.mocked(listInworldSupportedLanguages).mockResolvedValue(portalLanguages)
+    const user = userEvent.setup()
+    const { onLanguageChange } = renderLocales("en-ZA", "catalog", true)
+    expect(await screen.findByRole("combobox", { name: "Accent" })).toHaveTextContent("South Africa")
+    expect(onLanguageChange).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("combobox", { name: "Accent" }))
+    expect(await screen.findByRole("option", { name: /South Africa/ })).toBeTruthy()
+  })
+
+  it("still writes Default when the user picks it over an unlisted accent (AQU-2032)", async () => {
+    vi.mocked(listInworldSupportedLanguages).mockResolvedValue(portalLanguages)
+    const user = userEvent.setup()
+    const { onLanguageChange } = renderLocales("ar-EG", "catalog", true)
+    await user.click(await screen.findByRole("combobox", { name: "Accent" }))
+    await user.click(await screen.findByRole("option", { name: /^Default$/ }))
+    expect(onLanguageChange).toHaveBeenCalledWith("ar")
   })
 
   it("shows a short empty state when search misses on prebuilt", async () => {

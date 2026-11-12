@@ -75,11 +75,22 @@ async function memberToken(
 }
 
 async function prepare(env: ReturnType<typeof makeEnv>, token: string, events: unknown[]) {
+  const stamped = events.map((event) => {
+    if (!event || typeof event !== 'object') return event
+    const row = event as { kind?: string; laneId?: string }
+    if (
+      (row.kind === 'cell.validate' || row.kind === 'cell.unvalidate' || row.kind === 'cell.backtranslation.set' || row.kind === 'target.cell.repin')
+      && row.laneId === undefined
+    ) {
+      return { ...row, laneId: 'deflane1' }
+    }
+    return event
+  })
   const res = (await handleExternalChangesetsRequest(
     new Request(`https://w/api/v1/external/projects/${PROJECT}/changesets`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ commands: [{ kind: 'EmitEvents', events }] }),
+      body: JSON.stringify({ commands: [{ kind: 'EmitEvents', events: stamped }] }),
     }),
     env,
   ))!
@@ -226,6 +237,11 @@ beforeEach(async () => {
       },
     ],
   })
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
 })
 
 // ── Guardrail 1: no validation-laundering of AI drafts ────────────────────
@@ -383,8 +399,8 @@ describe('AQU-1184 — explicit cell lists only', () => {
     })
     // …but a count alone is not an approvable plan: each cell is named with its text.
     expect(body.summary.testimony).toEqual([
-      { kind: 'cell.validate', fileId: FILE, cellId: 'cell-1', text: 'En el principio', truncated: false },
-      { kind: 'cell.validate', fileId: FILE, cellId: 'cell-2', text: 'creó Dios', truncated: false },
+      { kind: 'cell.validate', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', text: 'En el principio', truncated: false },
+      { kind: 'cell.validate', fileId: FILE, cellId: 'cell-2', laneId: 'deflane1', text: 'creó Dios', truncated: false },
     ])
     // Comments are not testimony — they do not appear in that section.
     expect(body.summary.testimony).toHaveLength(2)
@@ -437,7 +453,47 @@ describe('AQU-1184 — project validation policy applies to the credential', () 
     expect(res.status).toBe(403)
     expect(body.error.code).toBe('permission_denied')
     expect(JSON.stringify(body.error.details)).toMatch(/self-validation is not allowed/)
+    // AQU-1571: the refusal names the line it was about, not just an event id.
+    expect(body.error.details.rejected).toHaveLength(1)
+    expect(body.error.details.rejected[0]).toMatchObject({
+      status: 403,
+      fileId: FILE,
+      cellId: 'cell-1',
+      reason: expect.stringMatching(/self-validation is not allowed/),
+    })
     expect(await tdb.rows('cell_validators')).toHaveLength(0)
+  })
+
+  it('a partly refused commit applies the rest and its receipt names the refused line (AQU-1571)', async () => {
+    const env = makeEnv(tdb.db)
+    await setProjectSettings(tdb, { allowSelfValidation: false })
+    const reviewer = await memberToken(tdb, 300, 'half-self-validator')
+    // cell-1 is the credential owner's own text; cell-2 is someone else's.
+    await seedTargetCommit(tdb, 'cell-1', 'tgt-mixed-1', {
+      value: 'my own translation',
+      author: reviewer.username,
+      role: 700,
+    })
+    await seedTargetCommit(tdb, 'cell-2', 'tgt-mixed-2', { value: 'their translation' })
+
+    const { body: prep } = await prepare(env, reviewer.token, [
+      { kind: 'cell.validate', fileId: FILE, cellId: 'cell-1' },
+      { kind: 'cell.validate', fileId: FILE, cellId: 'cell-2' },
+    ])
+    const { res, body } = await commit(env, reviewer.token, prep.changeset.id)
+
+    expect(res.status).toBe(200)
+    expect(body.receipt.appliedCount).toBe(1)
+    expect(body.receipt.warnings).toEqual([
+      {
+        code: 'rejected',
+        fileId: FILE,
+        cellId: 'cell-1',
+        message: expect.stringMatching(/self-validation is not allowed/),
+      },
+    ])
+    const votes = await tdb.rows<{ cell_id: string }>('cell_validators')
+    expect(votes.map((v) => v.cell_id)).toEqual(['cell-2'])
   })
 
   it('a different reviewer validating the same cell is allowed under the same setting', async () => {
@@ -511,5 +567,7 @@ describe('AQU-1184 — the guardrails are documented where an agent will read th
     expect(doc).toMatch(/no wildcard|There is no wildcard/i)
     expect(doc).toContain('allowSelfValidation')
     expect(doc).toContain('itemized')
+    // AQU-1571: a partial refusal is reported per line in the receipt.
+    expect(doc).toContain('receipt.warnings')
   })
 })

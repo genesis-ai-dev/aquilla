@@ -285,6 +285,76 @@ describe("serializeUsfmLossless", () => {
   })
 })
 
+// AQU-865: Gretchen (Biblica Global Publishing) reported a native export writing
+// only the LAST number of a verse range — "\v 1-3" coming back as "\v 3". Codex
+// rebuilds the marker line and had that bug; Aquilla's export never does, because
+// the `\v` token is copied out of the client's own bytes and only the TEXT span
+// between markers is substituted. These tests pin that property, so a future
+// "improvement" that starts composing marker lines from a parsed verse number
+// cannot reintroduce the collapse unnoticed. Mirrored in
+// sync-worker/src/__tests__/usfm-lossless.test.ts — the export runs there.
+describe("serializeUsfmLossless — verse-range labels (AQU-865)", () => {
+  const RANGE_BOOK = `\\id GEN
+\\c 1
+\\p
+\\v 1-3 En el principio creó Dios los cielos y la tierra.
+\\v 4a Y vio Dios que la luz era buena,
+\\v 4b y separó la luz de las tinieblas.
+\\v 5 Y llamó Dios a la luz Día.`
+
+  /** Every verse token the file actually carries, in document order. */
+  const verseTokens = (usfm: string): string[] =>
+    [...usfm.matchAll(/\\v (\S+)/g)].map((m) => m[1])
+
+  it("keeps the full range on the marker when the range verse is translated", () => {
+    const doc = parseUsfmLossless(RANGE_BOOK)
+    const out = serializeUsfmLossless(doc, { "GEN 1:1-3": "In the beginning God created." })
+    expect(out).toContain("\\v 1-3 In the beginning God created.")
+    // The reported defect: the range collapsed to its last (or first) member.
+    expect(verseTokens(out)).toEqual(["1-3", "4a", "4b", "5"])
+  })
+
+  it("keeps a suffixed verse token intact too", () => {
+    const doc = parseUsfmLossless(RANGE_BOOK)
+    const out = serializeUsfmLossless(doc, { "GEN 1:4a": "And God saw the light was good," })
+    expect(out).toContain("\\v 4a And God saw the light was good,")
+    expect(out).toContain("\\v 4b y separó la luz de las tinieblas.")
+    expect(verseTokens(out)).toEqual(["1-3", "4a", "4b", "5"])
+  })
+
+  it("re-parses to the SAME refs — no range is renumbered or expanded", () => {
+    const doc = parseUsfmLossless(RANGE_BOOK)
+    const out = serializeUsfmLossless(doc, {
+      "GEN 1:1-3": "In the beginning God created.",
+      "GEN 1:5": "And God called the light Day.",
+    })
+    expect(parseUsfmLossless(out).verses.map((v) => v.ref)).toEqual([
+      "GEN 1:1-3",
+      "GEN 1:4a",
+      "GEN 1:4b",
+      "GEN 1:5",
+    ])
+  })
+
+  it("leaves an untranslated range verse byte-identical", () => {
+    const doc = parseUsfmLossless(RANGE_BOOK)
+    expect(serializeUsfmLossless(doc, { "GEN 1:5": "Day." })).toContain(
+      "\\v 1-3 En el principio creó Dios los cielos y la tierra.",
+    )
+    expect(serializeUsfmLossless(doc)).toBe(RANGE_BOOK)
+  })
+
+  it("removes a range verse whole — marker and range together", () => {
+    const doc = parseUsfmLossless(RANGE_BOOK)
+    const out = serializeUsfmLossless(doc, undefined, { remove: new Set(["GEN 1:1-3"]) })
+    // Neither the words nor a bare/partial marker may survive. A leftover
+    // "\v 1" or "\v 3" here would BE the reported bug, arrived at by deletion.
+    expect(out).not.toContain("En el principio")
+    expect(verseTokens(out)).toEqual(["4a", "4b", "5"])
+    expect(out).toContain("\\v 4a Y vio Dios que la luz era buena,")
+  })
+})
+
 describe("hasIntraVerseMarkers (AQU-276)", () => {
   it("returns false for plain prose verse text", () => {
     expect(hasIntraVerseMarkers("In the beginning God created the heavens and the earth.")).toBe(false)
@@ -483,5 +553,76 @@ describe("parseUsfmLossless — paragraphStart (D2)", () => {
     const doc = parseUsfmLossless(raw)
     expect(doc.verses[0].paragraphStart).toBe(true)
     expect(doc.verses[1].paragraphStart).toBe(true)
+  })
+})
+
+// ── AQU-2184: paragraphMarker ────────────────────────────────────────────────
+//
+// Intent: `paragraphStart` says a block opened; it cannot say WHICH block, and
+// `\p` vs `\q2` is the difference between prose and a poetry line indented two
+// levels on the HTML export's page. The bare marker sits BETWEEN verse spans,
+// so if it is not captured here nothing downstream can recover it.
+
+describe("parseUsfmLossless — paragraphMarker (AQU-2184)", () => {
+  it("records the marker that opened each verse's paragraph", () => {
+    const raw = `\\id PSA
+\\c 1
+\\q1
+\\v 1 Blessed is the man
+\\q2 who walks not in the counsel
+\\q1
+\\v 2 but his delight is in the law
+\\p
+\\v 3 He is like a tree
+\\m
+\\v 4 planted by the water`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses.map((v) => v.paragraphMarker)).toEqual(["q1", "q1", "p", "m"])
+  })
+
+  it("is absent on a continuation verse, which has no paragraph of its own", () => {
+    const raw = `\\id RUT
+\\c 1
+\\p
+\\v 1 Now it came to pass
+\\v 2 And the name of the man was Elimelech`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses[0].paragraphMarker).toBe("p")
+    expect(doc.verses[1].paragraphStart).toBeUndefined()
+    expect(doc.verses[1].paragraphMarker).toBeUndefined()
+  })
+
+  it("is absent when only \\c opened the group — a chapter break has no paragraph style", () => {
+    const raw = `\\id JHN
+\\c 1
+\\v 1 In the beginning was the Word`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses[0].paragraphStart).toBe(true)
+    expect(doc.verses[0].paragraphMarker).toBeUndefined()
+  })
+
+  it("looks past a lone \\b for the marker that carries the style", () => {
+    // \\b is vertical space, not a paragraph style: `\\q1` then `\\b` then
+    // `\\v` is still a poetry line at level 1.
+    const raw = `\\id PSA
+\\c 119
+\\q1
+\\b
+\\v 9 How can a young man keep his way pure?`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses[0].paragraphStart).toBe(true)
+    expect(doc.verses[0].paragraphMarker).toBe("q1")
+  })
+
+  it("an intra-verse content-bearing \\q2 does not become the NEXT verse's marker", () => {
+    const raw = `\\id PSA
+\\c 1
+\\q1
+\\v 1 Blessed is the man
+\\q2 nor stands in the way of sinners
+\\v 2 but his delight is in the law`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses[1].paragraphStart).toBeUndefined()
+    expect(doc.verses[1].paragraphMarker).toBeUndefined()
   })
 })

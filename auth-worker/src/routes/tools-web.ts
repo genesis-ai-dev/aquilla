@@ -1,0 +1,113 @@
+// POST /api/v2/projects/:projectId/tools/:toolId/web-fetch — aquilla.web.fetch.
+//
+// Body: { url: string, as?: "text" | "json" | "bytes" }   (bytes → base64 body, apiRev 7)
+// → 200 { status, contentType, body, url }   (status = the SITE's status; 4xx/5xx bodies included)
+//
+// Who may: a project member whose standing grant for THIS tool includes
+// read:web, for a URL on the tool's current manifest.web (and the optional
+// TOOLS_WEB_ALLOWED_DOMAINS). Every other check lives in lib/tools/web-fetch.ts.
+// Each call is rate-limited per user and written to the audit log line below.
+// AQU-1937: answers are cached per tool + URL (web-fetch-cache.ts); a fresh
+// cached copy answers without touching the site or the rate limit. Importers
+// (write:files) get the longer upstream budget (shared/tools/timeouts.ts).
+
+import type { Context } from "hono"
+import type { AuthHonoEnv } from "../middleware/auth"
+import { resolveProjectRole } from "../services/project-permissions"
+import { getTool } from "../lib/tools/store"
+import {
+  WebFetchError,
+  WEB_FETCH_IMPORTER_MAX_PER_WINDOW,
+  WEB_FETCH_IMPORTER_TIMEOUT_MS,
+  WEB_FETCH_MAX_PER_WINDOW,
+  WEB_FETCH_TIMEOUT_MS,
+  checkWebUrl,
+  deploymentAllowlist,
+  dohResolver,
+} from "../lib/tools/web-fetch"
+import { type WebCacheStore, cachedWebFetch, freshCached, webCacheKey, workersCacheStore } from "../lib/tools/web-fetch-cache"
+import { countRecentEvents, recordAuthEvent, userIdentifier } from "../utils/rate-limit"
+
+type Ctx = Context<AuthHonoEnv>
+
+function fail(c: Ctx, status: number, code: string, message: string) {
+  return c.json({ error: { code, message } }, status as 400)
+}
+
+export async function webFetchRoute(c: Ctx) {
+  const projectId = c.req.param("projectId") ?? ""
+  const toolId = c.req.param("toolId") ?? ""
+  const user = c.get("user")
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) return fail(c, 404, "not_found", "project not found")
+  const tool = await getTool(c.env.AQUILLA_PG, projectId, toolId, user.id)
+  if (!tool) return fail(c, 404, "not_found", "tool not found")
+  const domains = tool.manifest.web ?? []
+  if (!tool.manifest.scopes.includes("read:web") || domains.length === 0) return fail(c, 403, "permission_denied", "this extension does not declare read:web")
+  if (!tool.grantedScopes.includes("read:web")) return fail(c, 403, "permission_denied", "you have not allowed this extension to read websites")
+
+  const body = (await c.req.json().catch(() => null)) as { url?: unknown; as?: unknown } | null
+  if (!body || typeof body.url !== "string" || !body.url.trim() || body.url.length > 2048) return fail(c, 400, "validation_failed", "url is required (at most 2048 characters)")
+  const as = body.as === "json" ? "json" : body.as === "bytes" ? "bytes" : "text"
+
+  const ident = userIdentifier(user.id)
+  // apiRev 7: importers (write:files) get the larger window — see web-fetch.ts.
+  const importer = tool.manifest.scopes.includes("write:files")
+  const windowMax = importer ? WEB_FETCH_IMPORTER_MAX_PER_WINDOW : WEB_FETCH_MAX_PER_WINDOW
+  const store = webCacheStore()
+  const url = body.url.trim()
+  // The domain checks still apply to a cached answer: the tool's sites may have changed since.
+  const hit = as === "bytes" ? null : await freshCached(store, webCacheKey(toolId, as, url))
+  if (hit) {
+    try {
+      checkWebUrl(url, domains, deploymentAllowlist(c.env.TOOLS_WEB_ALLOWED_DOMAINS))
+    } catch (err) {
+      if (err instanceof WebFetchError) return fail(c, err.status, err.code, err.message)
+      throw err
+    }
+    console.log(JSON.stringify({ audit: "tools.web_fetch", projectId, toolId, userId: user.id, host: new URL(hit.url).hostname, status: hit.status, bytes: hit.bytes, cache: "hit" }))
+    return c.json({ status: hit.status, contentType: hit.contentType, body: hit.body, url: hit.url, cache: "hit" })
+  }
+  if ((await countRecentEvents(c.env.AQUILLA_PG, "tool_web_fetch", ident, { onlyFailures: false })) >= windowMax) {
+    return fail(c, 429, "rate_limited", "too many website reads; try again in a few minutes")
+  }
+  await recordAuthEvent(c.env.AQUILLA_PG, "tool_web_fetch", ident, true)
+
+  let host = ""
+  try {
+    host = new URL(body.url).hostname
+  } catch {
+    /* reported by proxyWebFetch */
+  }
+  try {
+    const started = Date.now()
+    const out = await cachedWebFetch(
+      {
+        toolId,
+        url,
+        as,
+        domains,
+        deploymentAllow: deploymentAllowlist(c.env.TOOLS_WEB_ALLOWED_DOMAINS),
+        timeoutMs: importer ? WEB_FETCH_IMPORTER_TIMEOUT_MS : WEB_FETCH_TIMEOUT_MS,
+      },
+      // Bound wrappers: workerd's global fetch throws "Illegal invocation" when called as a method of another object.
+      { fetch: (input, init) => fetch(input, init), resolve: dohResolver((input, init) => fetch(input, init)), store },
+    )
+    const ms = Date.now() - started
+    console.log(JSON.stringify({ audit: "tools.web_fetch", projectId, toolId, userId: user.id, host: new URL(out.url).hostname, status: out.status, bytes: out.bytes, cache: out.cache, ms }))
+    return c.json({ status: out.status, contentType: out.contentType, body: out.body, url: out.url, cache: out.cache, ms })
+  } catch (err) {
+    if (err instanceof WebFetchError) {
+      console.log(JSON.stringify({ audit: "tools.web_fetch", projectId, toolId, userId: user.id, host, refused: err.code }))
+      return fail(c, err.status, err.code, err.message)
+    }
+    console.error("[tools/web-fetch] failed:", err)
+    return fail(c, 502, "fetch_failed", "the site could not be reached")
+  }
+}
+
+/** The Workers Cache API when the runtime has one (not in every test pool). */
+function webCacheStore(): WebCacheStore | null {
+  const g = globalThis as { caches?: { default?: Cache } }
+  return g.caches?.default ? workersCacheStore(g.caches.default) : null
+}

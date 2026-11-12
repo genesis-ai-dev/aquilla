@@ -1,9 +1,14 @@
-import { afterEach, describe, it, expect, vi } from "vitest"
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
 import {
+  adjacentChapters,
+  fetchHelloaoChapter,
   fetchHelloaoComplete,
   flattenHelloaoContent,
+  HelloaoChapterNotFoundError,
   parseHelloaoChapterStrings,
   parseHelloaoComplete,
+  prefetchHelloaoChapter,
+  __resetHelloaoChapterCache,
   type HelloaoChapter,
   type HelloaoComplete,
 } from "./helloao"
@@ -25,6 +30,27 @@ describe("fetchHelloaoComplete", () => {
 
     expect(result.translation.id).toBe("TST")
     expect(onRawSource).toHaveBeenCalledWith(raw)
+  })
+})
+
+describe("fetchHelloaoChapter", () => {
+  // AQU-849: a version that simply doesn't carry the chapter is an absence the
+  // sidebar renders as "no text", so it must be distinguishable from a failure.
+  it("reports a missing chapter as HelloaoChapterNotFoundError", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 404 })))
+
+    await expect(fetchHelloaoChapter("TST", "GEN", 99)).rejects.toBeInstanceOf(
+      HelloaoChapterNotFoundError,
+    )
+  })
+
+  it("reports any other bad status as a plain error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })))
+
+    const err = await fetchHelloaoChapter("TST", "EXO", 1).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err).not.toBeInstanceOf(HelloaoChapterNotFoundError)
+    expect((err as Error).message).toContain("503")
   })
 })
 
@@ -138,5 +164,69 @@ describe("parseCanonicalRef", () => {
   it("returns null for non-scripture groups (uuid groups from prose files)", () => {
     expect(parseCanonicalRef("3f9c2a10-aaaa-bbbb-cccc-000000000000")).toBeNull()
     expect(parseCanonicalRef("")).toBeNull()
+  })
+})
+
+describe("adjacentChapters (AQU-843)", () => {
+  it("warms forward first, then back", () => {
+    expect(adjacentChapters(5, 50)).toEqual([6, 4])
+  })
+
+  it("never walks off the end of the book", () => {
+    expect(adjacentChapters(50, 50)).toEqual([49])
+  })
+
+  it("never asks for chapter 0", () => {
+    expect(adjacentChapters(1, 50)).toEqual([2])
+  })
+
+  it("has nothing to warm in a single-chapter book", () => {
+    expect(adjacentChapters(1, 1)).toEqual([])
+  })
+})
+
+describe("prefetchHelloaoChapter (AQU-843)", () => {
+  const chapterJson = JSON.stringify({
+    translation: { id: "BSB" },
+    book: { id: "GEN", numberOfChapters: 50 },
+    chapter: { number: 2, content: [] },
+  })
+
+  beforeEach(() => __resetHelloaoChapterCache())
+
+  it("populates the cache so the later in-view fetch costs no request", async () => {
+    const fetchMock = vi.fn(async () => new Response(chapterJson, { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    prefetchHelloaoChapter("BSB", "GEN", 2)
+    const res = await fetchHelloaoChapter("BSB", "GEN", 2)
+
+    expect(res.chapter.number).toBe(2)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("swallows a failed warm — a preload miss is not a user-visible error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("nope", { status: 404 })))
+
+    // Would be an unhandled rejection if the prefetch didn't catch.
+    expect(() => prefetchHelloaoChapter("BSB", "GEN", 51)).not.toThrow()
+    await Promise.resolve()
+  })
+
+  it("leaves a failed warm retryable rather than caching the failure", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("boom", { status: 503 }))
+      .mockResolvedValueOnce(new Response(chapterJson, { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    prefetchHelloaoChapter("BSB", "GEN", 2)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // The chapter the translator then scrolls to must still be fetchable.
+    await expect(fetchHelloaoChapter("BSB", "GEN", 2)).resolves.toMatchObject({
+      chapter: { number: 2 },
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })

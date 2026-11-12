@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { CATALOGS } from "./index"
+import { CATALOGS } from "./all"
 import { en, type Catalog, type MessageKey } from "./en"
 import { DEFAULT_LOCALE, LOCALES } from "../locales"
 import { isPluralMessage, PLURAL_CATEGORIES, type MessageValue } from "../plurals"

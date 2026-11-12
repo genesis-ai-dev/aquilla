@@ -6,13 +6,38 @@ const CORE_SENTINELS = [
 ]
 
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
+  { source: /^src\/(?:pages\/Signup|lib\/navigation\/login-path)/, sentinels: ["e2e/specs/projects/onboarding.smoke.spec.ts"] },
   {
-    source: /^(?:src\/pages\/Login\.tsx|src\/components\/onboarding\/OnboardingWizard\.tsx|src\/.*billing|auth-worker\/.*billing|auth-worker\/src\/routes\/(?:chat|import-classify|agent|contextual)\.ts|auth-worker\/src\/lib\/agent\/(?:upstream|tools\/draft)\.ts|auth-worker\/src\/lib\/contextual\/tick\.ts|db\/shared\/(?:billing|workspace-access)|config\/pricing\/|auth-worker\/src\/services\/org-permissions\.ts|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/i,
+    source: /^(?:src\/(?:components|lib)\/checking\/|sync-worker\/src\/checking\/|db\/postgres\/migrations\/0162_community_checking)/,
+    sentinels: ["e2e/specs/collab/cross-user-comment.smoke.spec.ts"],
+  },
+  {
+    // AQU-1479: captions, media bytes, and staged attachments publish together.
+    source: /^(?:src\/lib\/import(?:\.ts|\/)|src\/lib\/parsers\/embedded-subtitles|src\/lib\/audio\/(?:align-source-script|script-alignment|source-alignment)|src\/components\/(?:ImportDialog|import\/|timeline\/TimelineEditor)|src\/hooks\/useTimelineTextCells|src\/lib\/sync\/bulk-import|sync-worker\/src\/audio\.ts|sync-worker\/src\/events\/import-(?:route|track-publication|caption-promotion)|shared\/timeline-import)/i,
+    sentinels: ["e2e/specs/editor/import-media-captions.smoke.spec.ts"],
+  },
+  {
+    source: /^(?:src\/components\/(?:FileActionMenu|FileRow|ExpandableFileList|ImportDialog|import\/PreviewPanel|EditorTable)|src\/lib\/(?:cells\/source-review|import\/reimport-copy-name|import\.ts|sync\/bulk-import)|sync-worker\/src\/events\/import-reconcile)/,
+    sentinels: ["e2e/specs/editor/sidebar-reimport.smoke.spec.ts"],
+  },
+  {
+    source: /^auth-worker\/src\/routes\/transcription\.ts$/i,
+    sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
+  },
+  {
+    source: /^(?:src\/pages\/(?:Login|Signup)\.tsx|src\/components\/onboarding\/OnboardingWizard\.tsx|src\/.*billing|auth-worker\/.*billing|auth-worker\/src\/routes\/(?:chat|import-classify|agent|contextual|transcription)\.ts|auth-worker\/src\/lib\/agent\/(?:upstream|tools\/draft)\.ts|auth-worker\/src\/lib\/contextual\/tick\.ts|db\/shared\/(?:billing|workspace-access)|config\/pricing\/|auth-worker\/src\/services\/org-permissions\.ts|db\/postgres\/migrations\/.*(?:workspace_(?:billing|checkout|subscription|plan_change|usage)|weekly_allowance|live_workspace_checkout))/i,
     sentinels: ["e2e/specs/orgs/org-settings-billing.smoke.spec.ts"],
   },
   {
-    source: /^(?:auth-worker\/.*agent-connect|src\/.*(?:ConnectAgent|agent-connect|ApiTokensSection)|db\/.*agent_authorizations)/i,
+    // MCP OAuth (ChatGPT plugin) shares credential validation and browser consent.
+    // Package changes also select this connection sentinel.
+    source: /^(?:plugins\/aquilla\/|auth-worker\/.*(?:agent-connect|mcp-oauth)|db\/shared\/api-credentials|sync-worker\/src\/external\/(?:mcp|read-auth|token-bridge|orgs-list|projects-list|changesets-route|commit)|src\/.*(?:ConnectAgent|OAuthConsent|agent-access|agent-connect|ApiTokensSection)|db\/.*(?:agent_authorizations|mcp_oauth))/i,
     sentinels: ["e2e/specs/agent/agent-connection.smoke.spec.ts"],
+  },
+  {
+    // Aquilla Tools (prototype): sandboxed tool host, bridge, store, provenance.
+    source: /^(?:src\/(?:lib|components|pages)\/[Tt]ools\/|shared\/tools\/|auth-worker\/src\/(?:routes\/tools|lib\/tools\/)|sync-worker\/src\/events\/(?:tool-provenance|cells-by-ref-route|handlers\/file-extension-set)|src\/lib\/import\/change-detection|src\/lib\/dcs\/(?:extension\/|import-plan)|db\/postgres\/migrations\/.*project_tools)/,
+    sentinels: ["e2e/specs/tools/tools-heatmap.spec.ts", "e2e/specs/tools/default-editor-extension.spec.ts", "e2e/specs/tools/default-editor-parity.spec.ts", "e2e/specs/tools/built-extension-renders.spec.ts", "e2e/specs/tools/sdk-extension.spec.ts", "e2e/specs/tools/default-editor-rev4.spec.ts", "e2e/specs/tools/default-editor-rev5.spec.ts", "e2e/specs/tools/extension-builder.spec.ts", "e2e/specs/tools/web-read.spec.ts", "e2e/specs/tools/extension-primitives.spec.ts", "e2e/specs/tools/smart-extensions-flag-importer.spec.ts"],
   },
   {
     source: /^(?:auth-worker\/|src\/(?:pages|components|lib|hooks|context)\/.*(?:auth|account|login|signup|password|session|credential|outbox))/i,
@@ -28,6 +53,15 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
       "e2e/specs/orgs/account-switcher.smoke.spec.ts",
       "e2e/specs/orgs/members.smoke.spec.ts",
     ],
+  },
+  {
+    // AQU-1153: the share / invite journey — Add a member (+ Invite link tab),
+    // the org members page's "Add to projects" dialog, the recipient typeahead
+    // they share, and /join/:token — has its own smoke spec, but none of these
+    // files carry a domain keyword above, so they fell through to the core
+    // sentinels and PR #882 shipped a stale locator in that spec ungated.
+    source: /^(?:src\/components\/(?:UsernameTypeahead|MemberMultiAddRow|MultiProjectInviteDialog|ProjectSettings\/(?:AddProjectMemberDialog|InviteLinkTab|RevokeAllDialog)|JoinPage)\.tsx|src\/hooks\/useUserSearch\.ts|src\/lib\/sync\/invites\.ts|auth-worker\/src\/(?:routes\/invites|services\/invite-scopes)\.ts)$/,
+    sentinels: ["e2e/specs/projects/share-invite.smoke.spec.ts"],
   },
   {
     // AQU-1169: app-wide font size is device-scoped like theme; the persist-reload
@@ -54,11 +88,32 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/rules/violation.smoke.spec.ts"],
   },
   {
+    // BIA forecasting: ghost-text next words + "words that fit here". The
+    // journey crosses the projection → SPA read → forecast worker → commit.
+    source: /^src\/(?:lib\/forecast\/|lib\/richtext\/ghost-text|hooks\/useForecastCorpus|components\/WordsThatFitMenu|context\/ForecastContext|lib\/store\/ghost-text-pref)/,
+    sentinels: ["e2e/specs/editor/ghost-text.spec.ts"],
+  },
+  {
+    // AQU-1248: Edit History's read retries transient failures with backoff
+    // and names a network vs server failure; the throttled-network spec
+    // drives it through the real history route.
+    source: /^src\/(?:lib\/sync\/(?:history-read|read-retry)|hooks\/useCellEditHistory|components\/HistoryDrawer)/,
+    sentinels: ["e2e/specs/editor/history-load-retry.spec.ts"],
+  },
+  {
     source: /^src\/(?:components|lib)\/(?:terminology|termbase)/i,
     sentinels: ["e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts"],
   },
   {
     source: /^src\/(?:components|lib)\/(?:agent|chat|completion|brief)/i,
+    sentinels: ["e2e/specs/ai/completion.smoke.spec.ts"],
+  },
+  {
+    // AQU-657: document-understanding tags (and the route that asks for them)
+    // reach a user through retrieval and few-shot selection, so they select the
+    // AI predict journey rather than falling through to the generic
+    // shared-runtime sentinel.
+    source: /^(?:src\/lib\/understanding|auth-worker\/src\/routes\/ai-passage-tags)/i,
     sentinels: ["e2e/specs/ai/completion.smoke.spec.ts"],
   },
   {
@@ -85,10 +140,17 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/validation/validate.smoke.spec.ts"],
   },
   {
-    // `parsers`/`biblica` are the importer's own reading layer — a change there
-    // only reaches a user through an import, so it selects the import sentinel
-    // rather than falling through to the generic shared-runtime one.
-    source: /^(?:src\/(?:components|lib)\/(?:editor|cell|workspace-actions|import|export|parsers|biblica|audio|voice|video|search|sidebar|timeline|storage)|packages\/idml)/i,
+    // AQU-1566: captions becoming a linked video's rows is walked by the
+    // import-and-edit smoke (link video only, then Attach captions).
+    source: /^(?:src\/hooks\/useMediaPictureUrl\.|src\/lib\/sync\/bulk-import\.|sync-worker\/src\/events\/(?:import-route|import-caption-promotion)\.)/,
+    sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
+  },
+  {
+    // `parsers` and the partner integrations are the importer's own reading layer
+    // — a change there only reaches a user through an import, so it selects the
+    // import sentinel rather than falling through to the generic shared-runtime
+    // one. Partner readers moved under `src/partner-integrations/` in AQU-1286.
+    source: /^(?:src\/(?:components|lib)\/(?:editor|cell|workspace-actions|import|export|parsers|audio|voice|video|search|sidebar|timeline|storage)|src\/partner-integrations\/|packages\/idml)/i,
     sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
   },
   {
@@ -100,7 +162,7 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
 const NON_RUNTIME = /^(?:docs\/|\.github\/|\.claude\/|\.agents\/|test-results|playwright-report|.*\.(?:md|mdx|txt|png|jpe?g|gif|svg|mp4|mov|csv))$/i
 const UNIT_TEST = /(?:^|\/)(?:__tests__\/.*|[^/]+\.(?:test|spec)\.[cm]?[jt]sx?)$/i
 const E2E_INFRA = /^(?:e2e\/(?:config|helpers|reporters)\/|scripts\/(?:e2e-|lib\/spawn-worker)|package\.json$|pnpm-lock\.yaml$|vite\.config|tsconfig)/i
-const PRODUCT_RUNTIME = /^(?:src\/|auth-worker\/|sync-worker\/|packages\/|index\.html$|config\/pricing\/|db\/shared\/(?:billing|workspace-access)|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/
+const PRODUCT_RUNTIME = /^(?:plugins\/aquilla\/|db\/shared\/api-credentials|db\/postgres\/migrations\/.*mcp_oauth|src\/|auth-worker\/|sync-worker\/|packages\/|shared\/timeline-import|index\.html$|config\/pricing\/|db\/shared\/(?:billing|workspace-access)|db\/postgres\/migrations\/.*(?:workspace_(?:billing|checkout|subscription|plan_change|usage)|weekly_allowance|live_workspace_checkout))/
 
 function normalize(file: string): string {
   return file.trim().replaceAll("\\", "/").replace(/^\.\//, "")
@@ -112,7 +174,9 @@ function tokensFor(file: string): string[] {
     .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
     .toLowerCase()
     .split(/[^a-z0-9]+/)
-    .filter((token) => token.length >= 5 && !["component", "dialog", "section", "index", "route", "button"].includes(token))
+    // "popover" is chrome, like "dialog". Matching it sent the member-presence
+    // spec out for every language-popover edit.
+    .filter((token) => token.length >= 5 && !["component", "dialog", "section", "index", "route", "button", "popover"].includes(token))
 }
 
 function closestSpecs(file: string, smokeSpecs: string[]): string[] {
@@ -135,6 +199,18 @@ function closestSpecs(file: string, smokeSpecs: string[]): string[] {
 export interface E2EImpact {
   specs: string[]
   reasons: string[]
+}
+
+/**
+ * The specs the affected gate may run: every smoke spec, plus every domain
+ * sentinel that exists even when it is not a smoke spec (e.g. the BIA
+ * ghost-text journey, `e2e/specs/editor/ghost-text.spec.ts`). Without the
+ * second half a non-smoke sentinel was silently filtered out of every real
+ * pre-push run, so forecast changes selected no browser journey.
+ */
+export function affectedSpecPool(smokeSpecs: string[], exists: (spec: string) => boolean): string[] {
+  const sentinels = [...CORE_SENTINELS, ...DOMAIN_RULES.flatMap(({ sentinels }) => sentinels)]
+  return [...new Set([...smokeSpecs, ...sentinels.filter((spec) => exists(spec))].map(normalize))].sort()
 }
 
 export function selectAffectedE2E(changedFiles: string[], availableSmokeSpecs: string[]): E2EImpact {

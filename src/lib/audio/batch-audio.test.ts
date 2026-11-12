@@ -121,6 +121,23 @@ describe("runTranscribeAll", () => {
     // Progress clears to null after completion.
     expect(getBatchProgress()).toBeNull()
   })
+
+  it("hands every cell the lane being worked in (AQU-1978)", async () => {
+    // Each take's timings ride a re-attach that deselects within the lane it
+    // names; with no lane that was the `''` lane, on every line of the batch.
+    const { transcribeCell } = await import("./transcribe")
+    const cells = [
+      makeCell({
+        id: "c1",
+        selectedAudioId: "a1",
+        attachments: { a1: { url: "frontier-audio://p/f/a1.wav" } as unknown as import("@/lib/codex-editor/types").CodexCellAttachment },
+      }),
+    ]
+    await runTranscribeAll({ cells, projectId: "proj1", session: mockSession, targetLanguage: "Spanish", targetLang: "es-lane" })
+    expect(transcribeCell).toHaveBeenCalledWith(
+      expect.objectContaining({ language: "Spanish", targetLang: "es-lane" }),
+    )
+  })
 })
 
 // AQU-928: the timeline's "transcribe these sections" row passes an explicit
@@ -214,6 +231,16 @@ describe("runSynthAll", () => {
     ]
     await runSynthAll({ cells, project: mockProject, session: mockSession, username: "user1" })
     expect(generateCellVoice).toHaveBeenCalledTimes(2)
+  })
+
+  // AQU-1572: each line it voices reports its own `audio generated` from the
+  // attach; the run only says where they came from.
+  it("tells every generation it is part of Generate all", async () => {
+    const { generateCellVoice } = await import("./voice-generate-helpers")
+    vi.mocked(generateCellVoice).mockClear()
+    const cells = [makeCell({ id: "c1", translated: "Hola" }), makeCell({ id: "c2", translated: "Adios" })]
+    await runSynthAll({ cells, project: mockProject, session: mockSession, username: "user1" })
+    expect(vi.mocked(generateCellVoice).mock.calls.map(([a]) => a.surface)).toEqual(["generate-all", "generate-all"])
   })
 })
 
@@ -348,5 +375,107 @@ describe("runTranscribeAll progress", () => {
     const onProgress = vi.fn()
     await runTranscribeAll({ cells: [], projectId: "p1", session: null, onProgress })
     expect(onProgress).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-1681: a recording split into many rows is transcribed a minute at a time
+// on the hosted service (60 requests per 15 minutes per person), and a batch
+// that reaches the limit waits rather than failing rows.
+describe("runTranscribeAll — a minute at a time (AQU-1681)", () => {
+  const CLIP = "audio-f1-1792105301290-7brtt9hly"
+  const shared = (id: string, startMs: number, endMs: number, over: Partial<CellData> = {}) => makeCell({
+    id, medium: "media", selectedAudioId: CLIP,
+    attachments: { [CLIP]: { url: `frontier-audio://${CLIP}.m4a`, trimStartMs: startMs, trimEndMs: endMs } } as unknown as CellData["attachments"],
+    ...over,
+  })
+  const rows = () => [shared("r1", 0, 3000), shared("r2", 4000, 7000), shared("r3", 8000, 11000)]
+
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    const chunked = await import("./transcribe-chunked")
+    vi.spyOn(chunked, "transcribeChunk").mockResolvedValue(undefined)
+  })
+
+  it("sends a hosted batch's rows as one minute, counting every row toward progress", async () => {
+    const { transcribeCell } = await import("./transcribe")
+    const { transcribeChunk } = await import("./transcribe-chunked")
+    const seen: [number, number][] = []
+    await runTranscribeAll({ cells: rows(), projectId: "p1", session: mockSession, onProgress: (d, t) => seen.push([d, t]) })
+    expect(vi.mocked(transcribeChunk)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(transcribeChunk).mock.calls[0]![0].rows.map((r) => r.cell.id)).toEqual(["r1", "r2", "r3"])
+    expect(transcribeCell).not.toHaveBeenCalled()
+    expect(seen).toEqual([[0, 3], [3, 3]])
+  })
+
+  it("leaves rows that already have their text alone, and out of the audio sent", async () => {
+    const { transcribeChunk } = await import("./transcribe-chunked")
+    const cells = [shared("r1", 0, 3000), shared("r2", 4000, 7000, { transcription: "done" }), shared("r3", 8000, 11000), shared("r4", 12000, 15000)]
+    await runTranscribeAll({ cells, projectId: "p1", session: mockSession })
+    expect(vi.mocked(transcribeChunk).mock.calls.flatMap(([c]) => c.rows.map((r) => r.cell.id))).toEqual(["r1", "r3", "r4"])
+  })
+
+  it("packs only as much as the account's model takes in one request", async () => {
+    const { transcribeCell } = await import("./transcribe")
+    const { transcribeChunk } = await import("./transcribe-chunked")
+    const { setTranscriptionModel } = await import("./transcription-model")
+    const twelve = () => [shared("r1", 0, 12_000), shared("r2", 13_000, 25_000), shared("r3", 26_000, 38_000)]
+    setTranscriptionModel(mockSession.username, "omni-ctc")
+    try {
+      await runTranscribeAll({ cells: twelve(), projectId: "p1", session: mockSession })
+    } finally {
+      setTranscriptionModel(mockSession.username, "auto")
+    }
+    // 12 + 0.5 + 12 s fits Omnilingual's 30 s; the third row would not.
+    expect(vi.mocked(transcribeChunk).mock.calls.map(([c]) => c.rows.map((r) => r.cell.id))).toEqual([["r1", "r2"]])
+    expect(vi.mocked(transcribeCell).mock.calls.map(([a]) => a.cell.id)).toEqual(["r3"])
+  })
+
+  it("stays row by row for a chosen selection and for on-device Whisper", async () => {
+    const { transcribeCell } = await import("./transcribe")
+    const { transcribeChunk } = await import("./transcribe-chunked")
+    await runTranscribeAll({ cells: rows(), projectId: "p1", session: mockSession, force: true })
+    await runTranscribeAll({ cells: rows(), projectId: "p1", session: null })
+    expect(transcribeChunk).not.toHaveBeenCalled()
+    expect(transcribeCell).toHaveBeenCalledTimes(6)
+  })
+
+  it("waits out the hosted limit, showing when it carries on, and stops waiting on Cancel", async () => {
+    vi.useFakeTimers()
+    const { transcribeChunk } = await import("./transcribe-chunked")
+    let waited: Promise<void> | null = null
+    vi.mocked(transcribeChunk).mockImplementation(async (_chunk, ctx) => {
+      waited = ctx.onRateLimited!(420)
+      await waited.catch(() => {})
+    })
+    const onWaiting = vi.fn()
+    const run = runTranscribeAll({ cells: rows(), projectId: "p1", session: mockSession, onWaiting })
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(getBatchProgress()?.waitingUntil).toBeGreaterThan(Date.now() + 400_000)
+    expect(onWaiting).toHaveBeenCalledWith(getBatchProgress()?.waitingUntil)
+    cancelBatchTranscribe()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await expect(waited!).rejects.toThrow(/cancelled/)
+    expect(onWaiting).toHaveBeenLastCalledWith(null)
+    await run
+    expect(getBatchProgress()).toBeNull()
+    vi.useRealTimers()
+  })
+
+  it("keeps the decoded recording for the whole run, a long wait included", async () => {
+    vi.useFakeTimers()
+    const { primeSharedClipPcm, hasSharedClipPcm, SHARED_CLIP_IDLE_MS } = await import("./shared-clip-pcm")
+    const { transcribeChunk } = await import("./transcribe-chunked")
+    primeSharedClipPcm(`${CLIP}.m4a`, new Float32Array(16))
+    vi.mocked(transcribeChunk).mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20 * 60_000))
+    })
+    const run = runTranscribeAll({ cells: rows(), projectId: "p1", session: mockSession })
+    await vi.advanceTimersByTimeAsync(19 * 60_000)
+    expect(hasSharedClipPcm(`${CLIP}.m4a`)).toBe(true)
+    await vi.advanceTimersByTimeAsync(60_000)
+    await run
+    await vi.advanceTimersByTimeAsync(SHARED_CLIP_IDLE_MS)
+    expect(hasSharedClipPcm(`${CLIP}.m4a`)).toBe(false)
+    vi.useRealTimers()
   })
 })

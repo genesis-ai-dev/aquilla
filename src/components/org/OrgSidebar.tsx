@@ -1,6 +1,6 @@
 import { startTransition, type ComponentProps, type MouseEvent } from "react"
 import { NavLink, useNavigate } from "react-router-dom"
-import type { LucideIcon } from "lucide-react"
+import { KeyRound, MessageSquare, ScrollText, type LucideIcon } from "lucide-react"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
@@ -15,6 +15,7 @@ import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { OrgSwitcher } from "./OrgSwitcher"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 
 const link = ({ isActive }: { isActive: boolean }) =>
   `flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-normal ${isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`
@@ -46,7 +47,7 @@ function OrgNavLink(props: ComponentProps<typeof NavLink>) {
 
 export function OrgSidebar() {
   const t = useT()
-  const { activeOrg, activeOrgId, activeGuestOrg, isAllOrgs } = useActiveOrg()
+  const { activeOrg, activeOrgId, activeGuestOrg, isAllOrgs, isLoading: orgsLoading } = useActiveOrg()
   // AQU-790: in a guest org the caller has project-level access only — no org
   // membership. Member-scoped nav (Teams, Assigned, Members, Archived,
   // Settings) is hidden so nothing links into an org they can't operate on
@@ -58,7 +59,7 @@ export function OrgSidebar() {
   // AQU-485: Members is a roster-visibility surface, not a generic admin
   // tool. Follow rosterViewMinRole so a below-floor maintainer does not see
   // the nav item, and a lowered floor can surface it for contributors.
-  const { canViewRoster, canEgress } = useOrgSettings(
+  const { canViewRoster, canEgress, hasFetched: settingsFetched } = useOrgSettings(
     isMemberOrg ? activeOrgId : null,
     activeOrg?.role?.level,
   )
@@ -68,7 +69,10 @@ export function OrgSidebar() {
   // a below-admin role the org opened the surface to still gets the entry.
   const showEgressNav = isMemberOrg && canEgress
   // Platform-operator (site-wide admin) — separate axis from the org role.
-  const { isAdmin: isPlatformAdmin } = usePlatformAdmin()
+  const { isAdmin: isPlatformAdmin, loading: platformAdminLoading } = usePlatformAdmin()
+  // The entries above appear as each permission check lands. While any is
+  // still pending, one cursor at the end of the list says more may follow.
+  const navPending = orgsLoading || platformAdminLoading || (isMemberOrg && !settingsFetched)
 
   const portfolioHomeTo = isAllOrgs
     ? orgHomePath(ALL_ORGS_PARAM)
@@ -81,7 +85,7 @@ export function OrgSidebar() {
       <div data-tour="org-switcher">
         <OrgSwitcher />
       </div>
-      <nav className="mt-2 flex flex-1 flex-col gap-0.5">
+      <nav className="mt-2 flex flex-1 flex-col gap-0.5" data-reveal="">
         {/* Guest org: Projects table only. Member: Overview + Projects. */}
         {isGuestOrg && activeOrgId != null ? (
           <OrgNavLink
@@ -135,6 +139,15 @@ export function OrgSidebar() {
             <NavIcon icon={NAV_PAGE_ICONS.assigned} />
             {t("editor.navTitle.assignedToMe")}
           </OrgNavLink>
+          {/* AQU-1958: comments across the org's projects. Maintainer+, the
+              same floor the page itself applies — editorial leads review
+              feedback across projects, contributors work inside one. */}
+          {isAdmin && (
+            <OrgNavLink to={orgPath(activeOrgId, "/comments")} className={link}>
+              <NavIcon icon={MessageSquare} />
+              {t("comments.org.title")}
+            </OrgNavLink>
+          )}
         </>}
         {isMemberOrg && activeOrgId != null && (showMembersNav || isAdmin) && (
           <div className="my-1 border-t" />
@@ -145,10 +158,24 @@ export function OrgSidebar() {
             {t("editor.navTitle.members")}
           </OrgNavLink>
         )}
+        {/* AQU-1352 §3.6: same roster gate as Members (and GET /users/:id/access). */}
+        {showMembersNav && activeOrgId != null && (
+          <OrgNavLink to={orgPath(activeOrgId, "/access")} className={link}>
+            <NavIcon icon={KeyRound} />
+            {t("org.access.page.title")}
+          </OrgNavLink>
+        )}
+        {/* AQU-1072: owners and maintainers. Platform operators resolve as owner. */}
+        {activeOrgId != null && (isAdmin || (isMemberOrg && isPlatformAdmin)) && (
+          <OrgNavLink to={orgPath(activeOrgId, "/access-audit")} className={link}>
+            <NavIcon icon={ScrollText} />
+            {t("org.accessAudit.title")}
+          </OrgNavLink>
+        )}
         {isAdmin && activeOrgId != null && (
           <OrgNavLink to={orgPath(activeOrgId, "/archived")} className={link}>
             <NavIcon icon={NAV_PAGE_ICONS.archived} />
-            {t("org.orgSidebar.archived")}
+            {t("editor.navTitle.archivedProjects")}
           </OrgNavLink>
         )}
         {showEgressNav && activeOrgId != null && (
@@ -163,12 +190,11 @@ export function OrgSidebar() {
             className={link}
             data-tour="nav-settings"
             // AQU-1338: a project view also carries a link labelled
-            // "Settings". Two links with one name and different destinations
-            // is ambiguous link purpose; name this one for where it goes.
-            aria-label={t("editor.navTitle.organizationSettings")}
+            // "Settings", so this one is named for where it goes. AQU-2261:
+            // it says so on screen too, in the word list's one form.
           >
             <NavIcon icon={NAV_PAGE_ICONS.settings} />
-            {t("nav.settings")}
+            {t("editor.navTitle.organizationSettings")}
           </OrgNavLink>
         )}
         {isPlatformAdmin && <>
@@ -178,6 +204,11 @@ export function OrgSidebar() {
             {t("org.orgSidebar.admin")}
           </OrgNavLink>
         </>}
+        {navPending && (
+          <div className="flex h-8 items-center px-2" data-testid="org-sidebar-pending" aria-hidden="true">
+            <LoadingCursor plain />
+          </div>
+        )}
       </nav>
       <div className="mt-auto pt-2" data-tour="account-switcher">
         <div className="min-w-0">

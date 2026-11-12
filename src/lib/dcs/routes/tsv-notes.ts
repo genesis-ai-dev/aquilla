@@ -40,7 +40,7 @@ function isNotes(entry: DcsCatalogEntry, manifest: DcsManifest): boolean {
 export const tsvNotesRoute: ResourceRoute = {
   id: "tsv-notes",
   matches: (entry, manifest) => isNotes(entry, manifest),
-  parse: ({ entry, files }) => {
+  parse: ({ entry, projectId, files }) => {
     const repo = entry.fullName
     const out: DcsFile[] = []
 
@@ -74,7 +74,7 @@ export const tsvNotesRoute: ResourceRoute = {
       }
 
       out.push({
-        fileId: dcsFileId(repo, path),
+        fileId: dcsFileId(projectId, repo, path),
         name: path.split("/").pop() ?? path,
         sourcePath: path,
         bookCode: book,

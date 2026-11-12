@@ -1,6 +1,9 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useState } from "react"
 import { Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { GrantScopeNotice } from "@/components/GrantScopeNotice"
+import { toast } from "@/components/ui/toast"
 import {
   Field,
   FieldError,
@@ -10,10 +13,11 @@ import {
 import { Input } from "@/components/ui/input"
 import { RoleSelect } from "@/components/RoleSelect"
 import { createOrgInvite } from "@/lib/frontier/orgs"
-import { ROLE, ORG_ROLE_OPTIONS } from "@/lib/frontier/roles"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { ROLE } from "@/lib/frontier/roles"
+import { roleChoices } from "@/lib/frontier/role-choices"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { describeGrant, grantButtonLabel } from "@/lib/access/grant-scope-sentence"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import posthog from "@/lib/posthog"
 import { INVITE_SENT } from "@/lib/event-names"
 
 /**
@@ -23,7 +27,8 @@ import { INVITE_SENT } from "@/lib/event-names"
  * Server enforces owner-only — this UI is gated by the caller as a courtesy.
  */
 export function OrgInviteByEmail({ orgId }: { orgId: number }) {
-  const t = useT()
+  const analytics = useAccountAnalytics()
+  const { t, locale } = useI18n()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const [email, setEmail] = useState("")
@@ -53,13 +58,23 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
         email: trimmed || undefined,
         role,
       })
-      posthog.capture(INVITE_SENT, {
+      analytics.capture(INVITE_SENT, {
         scope: "org",
         org_id: orgId,
         role,
         has_email: Boolean(trimmed),
       })
       setLink(`${window.location.origin}/join-org/${result.token}`)
+      toast.add({
+        type: "success",
+        title: describeGrant(t, {
+          link: !trimmed,
+          names: trimmed ? [trimmed] : [],
+          roleLevel: role,
+          scope: { kind: "organization" },
+          locale,
+        }).sentence,
+      })
       setStatus(
         trimmed
           ? t("org.inviteByEmail.sentToEmail", { email: trimmed })
@@ -79,6 +94,15 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
+
+  const trimmedEmail = email.trim()
+  const grantCopy = describeGrant(t, {
+    link: trimmedEmail.length === 0,
+    names: trimmedEmail ? [trimmedEmail] : [],
+    roleLevel: role,
+    scope: { kind: "organization" },
+    locale,
+  })
 
   return (
     <div className="space-y-3">
@@ -100,15 +124,21 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
           <FieldLabel htmlFor="org-invite-role">{t("org.inviteByEmail.roleLabel")}</FieldLabel>
           <RoleSelect
             id="org-invite-role"
-            options={ORG_ROLE_OPTIONS}
+            // AQU-2289: the organization add list; the invite route caps at Maintainer.
+            options={roleChoices("org", { callerLevel: null, purpose: "add" })}
             value={role}
             onValueChange={setRole}
             aria-label={t("org.inviteByEmail.roleLabel")}
           />
         </Field>
-        <Button size="sm" onClick={submit} disabled={busy}>
-          {busy ? t("auth.resetPassword.sending") : t("org.inviteByEmail.submit")}
-        </Button>
+        <div className="flex basis-full flex-col items-start gap-2">
+          <GrantScopeNotice sentence={grantCopy.sentence} />
+          <Button size="sm" onClick={submit} disabled={busy}>
+            {busy
+              ? t("auth.resetPassword.sending")
+              : grantButtonLabel(t, t("org.inviteByEmail.submit"), grantCopy.scopeEcho)}
+          </Button>
+        </div>
       </FieldGroup>
       {error && <FieldError className="text-xs">{error}</FieldError>}
       {status && <p className="text-xs text-muted-foreground">{status}</p>}

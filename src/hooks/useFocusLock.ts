@@ -56,6 +56,23 @@ export function focusLockKey(cellId: string, lane: string | undefined): string {
   return lane ? `${cellId}@lane:${lane}` : cellId
 }
 
+/**
+ * The username holding `cellId` on `lane`, or null.
+ *
+ * Claim and presence frames store the composed {@link focusLockKey}. A row
+ * that looks up the bare cell id misses every lease once the project has a
+ * real target lane (the key is `cellId@lane:Swahili`, not `cellId`). The bare
+ * id is the default lane's key, so a named lane must not fall back to it.
+ */
+export function lockHolderForCell(
+  holders: ReadonlyMap<string, string> | null | undefined,
+  cellId: string,
+  lane: string | undefined,
+): string | null {
+  if (!holders) return null
+  return holders.get(focusLockKey(cellId, lane)) ?? null
+}
+
 export interface LockHolder {
   userId: string
   ts: number
@@ -169,7 +186,6 @@ export function useFocusLock(
   // synchronizes the *external* WS lease lifetime to the cellId prop;
   // setIsHeld inside release() is the only React state and it's reflecting
   // the WS state, not deriving new state from props.
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     // Compare against the composed key: switching cell OR lane must release
     // the prior lease (otherwise the renewal timer keeps firing the old key).
@@ -177,7 +193,6 @@ export function useFocusLock(
       release()
     }
   }, [lockKey, release])
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Drop the lock on unmount so a refresh or navigate-away doesn't strand a
   // lease (would otherwise wait for leaseMs to auto-expire).

@@ -15,8 +15,15 @@
  *   - Body parse failure: treated as network error
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
-import { flushOutboxBatch, flushOutboxUntilSettled, subscribeStaleSiblings, subscribeAppliedEvents } from "./outbox-flush"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import {
+  ELEVATION_HOLD_REASON,
+  flushOutboxBatch,
+  flushOutboxUntilSettled,
+  releaseElevationHolds,
+  subscribeStaleSiblings,
+  subscribeAppliedEvents,
+} from "./outbox-flush"
 import { createFlushAppliedTracker } from "./flush-applied"
 import { createLiveApplier } from "./live-apply"
 import { CellStore } from "@/hooks/useActiveCellStore"
@@ -28,6 +35,7 @@ import {
   peekPendingOutboxBatch,
   resetOutboxConnectionForTests,
   setActiveOutboxOwner,
+  OUTBOX_MAX_ATTEMPTS,
 } from "./outbox"
 import type { CqrsRawEvent } from "./outbox-types"
 import { CQRS_SCHEMA_VERSION } from "./outbox-types"
@@ -65,6 +73,7 @@ function jsonResponse(body: object, status = 200): Response {
 }
 
 import type { TokenMintResult } from "./outbox-flush"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const TOKEN_FN = async (): Promise<TokenMintResult> => ({ token: "tok", status: 200 })
 const NULL_TOKEN_FN = async (): Promise<TokenMintResult> => ({ token: null, status: null })
@@ -127,7 +136,7 @@ describe("flushOutboxBatch", () => {
       getTokenForFile: mint,
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
-    await vi.waitFor(() => expect(mint).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(mint).toHaveBeenCalledOnce(), { timeout: STALL_WATCHDOG_MS })
     setActiveOutboxOwner("bob")
     resolveMint({ token: "alice-token", status: 200 })
 
@@ -180,7 +189,7 @@ describe("flushOutboxBatch", () => {
       },
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
-    await vi.waitFor(() => expect(mint).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(mint).toHaveBeenCalledOnce(), { timeout: STALL_WATCHDOG_MS })
     currentJwt = "alice-jwt-2"
     resolveMint({ token: "token-from-jwt-1", status: 200 })
 
@@ -791,19 +800,49 @@ describe("flushOutboxBatch", () => {
     await enqueueOutboxEvent(makeEvent("e2", "f1"))
     let release!: () => void
     const gate = new Promise<void>((r) => { release = r })
+    let announceFetchEntered!: () => void
+    const fetchEntered = new Promise<void>((r) => { announceFetchEntered = r })
     const fetchMock = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+      announceFetchEntered()
       await gate
       const ids = (JSON.parse(init.body as string).events as Array<{ id: string }>).map((e) => e.id)
       return jsonResponse({ accepted: ids.map((id) => ({ id })), rejected: [] })
     })
-    const deps = { getTokenForFile: TOKEN_FN, fetchImpl: fetchMock as unknown as typeof fetch }
+    // Counting the mint is what tells us the second caller did NO work: the
+    // per-tab chain is taken before the first IDB peek, so a queued caller
+    // cannot reach the mint until the running flush settles.
+    const tokenFn = vi.fn(TOKEN_FN)
+    const deps = { getTokenForFile: tokenFn, fetchImpl: fetchMock as unknown as typeof fetch }
     // Two callers race (the useOutboxFlusher loop and an inline "flush now").
     const a = flushOutboxBatch(deps)
     const b = flushOutboxBatch(deps)
-    await new Promise((r) => setTimeout(r, 10))
-    // The second caller waited: only one POST is in flight.
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    release()
+    let watchdog: ReturnType<typeof setTimeout> | undefined
+    try {
+      // Wait for the state — the first POST is in flight — not for a 10 ms
+      // window. Under CPU starvation that window expired before the first
+      // caller had even reached fetch, so the count below read 0 (AQU-1916).
+      // The watchdog only keeps a genuine stall from sitting here silently;
+      // it is generous, so it never decides a correct build (rule 15).
+      await Promise.race([
+        fetchEntered,
+        new Promise<never>((_resolve, reject) => {
+          watchdog = setTimeout(
+            () => reject(new Error("the first flush never reached its POST")),
+            STALL_WATCHDOG_MS,
+          )
+        }),
+      ])
+      // The second caller waited: while the first sits inside its POST, the
+      // second has minted nothing, peeked nothing and POSTed nothing.
+      expect(tokenFn).toHaveBeenCalledTimes(1)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      clearTimeout(watchdog)
+      // Release in a finally: a failed assertion above must not leave the
+      // per-tab chain wedged, hanging every later test in this file to the
+      // 60 s ceiling (AQU-1916).
+      release()
+    }
     const [ra, rb] = await Promise.all([a, b])
     expect(ra.accepted).toBe(2)
     // The queued caller ran AFTER the first drained the queue and found nothing.
@@ -1205,6 +1244,129 @@ describe("flushOutboxBatch", () => {
     expect(rows[0].lastError).toMatchObject({ status: 0, reason: "request timed out" })
     expect(rows[0].status).toBe("pending")
   })
+
+  // ── AQU-1368: pre-AQU-927 events poisoned with fractional ms ─────────────
+
+  it("AQU-1368: a STORED event with durationMs 2403.5 is rounded on the way out and flushes clean", async () => {
+    // The partner's exact row (lin184, minted 2026-08-15, three days before
+    // AQU-927's emit guard shipped). It cannot be fixed at emit time — it is
+    // already in IndexedDB — so the flush boundary has to repair it.
+    await enqueueOutboxEvent(
+      makeEvent("poison", "f1", {
+        kind: "cell.audio.attach",
+        payload: { audioId: "a1", durationMs: 2403.5 },
+      } as unknown as Partial<CqrsRawEvent<"target.cell.commit">>),
+    )
+
+    let posted: CqrsRawEvent[] = []
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      posted = JSON.parse(init.body as string).events
+      // The server only accepts it BECAUSE the value arrived integral — this
+      // is the whole point of the fix, so the mock refuses a fractional one
+      // exactly as Postgres does.
+      const bad = posted.find((e) => !Number.isInteger(
+        (e.payload as { durationMs?: number }).durationMs,
+      ))
+      if (bad) {
+        return jsonResponse({
+          accepted: [],
+          rejected: [{
+            id: bad.id,
+            status: 500,
+            reason: 'DB batch failed: PostgresError: invalid input syntax for type bigint: "2403.5"',
+          }],
+        })
+      }
+      return jsonResponse({ accepted: posted.map((e) => ({ id: e.id })), rejected: [] })
+    })
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect((posted[0].payload as { durationMs: number }).durationMs).toBe(2404)
+    expect(result.accepted).toBe(1)
+    expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("AQU-1368: an unfixable head is posted ALONE on its next attempt, so valid events behind it are not dragged down", async () => {
+    // A poison event the sanitizer cannot rescue (not a millisecond field at
+    // all), plus a fresh valid audio event queued behind it. The /events
+    // INSERT is atomic, so batching them together means the valid one dies
+    // with the poison on every flush — the five-week outage in AQU-1368.
+    await enqueueOutboxEvent(makeEvent("poison", "f1"))
+    await enqueueOutboxEvent(makeEvent("valid", "f1"))
+
+    const bodies: CqrsRawEvent[][] = []
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const events: CqrsRawEvent[] = JSON.parse(init.body as string).events
+      bodies.push(events)
+      // Postgres refuses the whole batch when any member is bad.
+      if (events.some((e) => e.id === "poison")) {
+        return jsonResponse({
+          accepted: [],
+          rejected: events.map((e) => ({
+            id: e.id,
+            status: 500,
+            reason: "DB batch failed: PostgresError: invalid input syntax for type bigint",
+          })),
+        })
+      }
+      return jsonResponse({ accepted: events.map((e) => ({ id: e.id })), rejected: [] })
+    })
+
+    const deps = {
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    }
+
+    // Round 1 batches both, and both are refused together.
+    await flushOutboxBatch(deps)
+    expect(bodies[0].map((e) => e.id)).toEqual(["poison", "valid"])
+
+    // Round 2: the head has a burnt attempt, so it goes out on its own.
+    await flushOutboxBatch(deps)
+    expect(bodies[1].map((e) => e.id)).toEqual(["poison"])
+
+    // Keep flushing: the poison burns its own budget to the cap, flips to
+    // `failed`, stops being peeked — and the valid event finally lands.
+    for (let i = 0; i < OUTBOX_MAX_ATTEMPTS + 1; i++) await flushOutboxBatch(deps)
+
+    expect(bodies.some((b) => b.length === 1 && b[0].id === "valid")).toBe(true)
+    const rows = await peekOutboxBatch(10)
+    expect(rows.find((r) => r.id === "valid")).toBeUndefined()
+    expect(rows.find((r) => r.id === "poison")?.status).toBe("failed")
+  })
+
+  it("AQU-1368: a transient failure does NOT trigger single-event isolation (no throughput regression)", async () => {
+    // Offline/5xx/timeouts go through stampOutboxError and never burn the
+    // attempt budget, so a normal blip must leave full batching intact.
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2", "f1"))
+
+    const bodies: CqrsRawEvent[][] = []
+    let firstCall = true
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(init.body as string).events)
+      if (firstCall) {
+        firstCall = false
+        return new Response("Internal Server Error", { status: 500 })
+      }
+      const events: CqrsRawEvent[] = JSON.parse(init.body as string).events
+      return jsonResponse({ accepted: events.map((e) => ({ id: e.id })), rejected: [] })
+    })
+
+    const deps = {
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    }
+    await flushOutboxBatch(deps)
+    await flushOutboxBatch(deps)
+
+    expect(bodies[1].map((e) => e.id)).toEqual(["e1", "e2"])
+    expect(await outboxPendingCount()).toBe(0)
+  })
 })
 
 describe("flushOutboxUntilSettled (AQU-579)", () => {
@@ -1323,5 +1485,487 @@ describe("flushOutboxUntilSettled (AQU-579)", () => {
 
     expect(fetchMock).not.toHaveBeenCalled()
     expect(result).toMatchObject({ posted: 0, settled: true })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-1788: "role downgraded since token was issued" earns ONE re-mint + retry
+// ---------------------------------------------------------------------------
+
+describe("AQU-1788 role-downgrade re-mint and single retry", () => {
+  beforeEach(async () => {
+    _eventSeq = 0
+    await resetIdb()
+  })
+
+  /** A minter that hands out a new token every time it is forced to re-mint,
+   *  so a test can assert WHICH token each POST carried. Mirrors
+   *  makeSyncTokenMinter: a non-forced call is served from the cache. */
+  function mintSpy(): {
+    fn: (projectId: string, fileId: string, opts?: { forceRefresh?: boolean }) => Promise<TokenMintResult>
+    calls: Array<{ forceRefresh: boolean }>
+  } {
+    const calls: Array<{ forceRefresh: boolean }> = []
+    let generation = 0
+    return {
+      calls,
+      fn: async (_projectId, _fileId, opts) => {
+        const forceRefresh = opts?.forceRefresh === true
+        calls.push({ forceRefresh })
+        if (forceRefresh) generation += 1
+        return { token: `tok-${generation}`, status: 200 }
+      },
+    }
+  }
+
+  function tokensPosted(fetchMock: ReturnType<typeof vi.fn>): string[] {
+    return fetchMock.mock.calls.map(([, init]) => {
+      const headers = (init as RequestInit).headers as Record<string, string>
+      return headers.Authorization
+    })
+  }
+
+  it("re-mints and re-posts the batch once, accepting the events the retry saves", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2", "f1"))
+    const minter = mintSpy()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        accepted: [],
+        rejected: [
+          { id: "e1", status: 403, reason: "role downgraded since token was issued" },
+          { id: "e2", status: 403, reason: "role downgraded since token was issued" },
+        ],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        accepted: [{ id: "e1" }, { id: "e2" }],
+        rejected: [],
+      }))
+    const onForbidden = vi.fn()
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: minter.fn,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+    })
+
+    // Exactly one extra mint, and it asked for a fresh token.
+    expect(minter.calls).toEqual([{ forceRefresh: false }, { forceRefresh: true }])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(tokensPosted(fetchMock)).toEqual(["Bearer tok-0", "Bearer tok-1"])
+    // The Maintainer→Project Lead case: the edits save and nothing is refused.
+    expect(result).toMatchObject({ accepted: 2, quarantined: 0 })
+    expect(onForbidden).not.toHaveBeenCalled()
+    expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("quarantines with the retry's accurate reason, not the downgrade reason", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const minter = mintSpy()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        accepted: [],
+        rejected: [{ id: "e1", status: 403, reason: "role downgraded since token was issued" }],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        accepted: [],
+        rejected: [{ id: "e1", status: 403, reason: "role too low for target.cell.commit" }],
+      }))
+    const onForbidden = vi.fn()
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: minter.fn,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result).toMatchObject({ quarantined: 1, accepted: 0 })
+    // The Contributor→Viewer case: the banner explains what the role may not
+    // do, which is the whole point of retrying with a token that tells the
+    // truth about the role.
+    expect(onForbidden).toHaveBeenCalledWith([expect.objectContaining({
+      id: "e1",
+      status: 403,
+      reason: "role too low for target.cell.commit",
+    })])
+    const rec = (await peekOutboxBatch(10)).find((r) => r.id === "e1")
+    expect(rec?.status).toBe("failed")
+    expect(rec?.lastError).toMatchObject({ reason: "role too low for target.cell.commit" })
+  })
+
+  it("retries exactly once — a second downgrade rejection quarantines instead of looping", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const minter = mintSpy()
+    // A fresh Response per call: one instance cannot have its body read twice.
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      jsonResponse({
+        accepted: [],
+        rejected: [{ id: "e1", status: 403, reason: "role downgraded since token was issued" }],
+      }),
+    )
+    const onForbidden = vi.fn()
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: minter.fn,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(minter.calls.filter((c) => c.forceRefresh)).toHaveLength(1)
+    expect(result).toMatchObject({ quarantined: 1 })
+    expect(await peekPendingOutboxBatch(10)).toHaveLength(0)
+  })
+
+  it("does not re-mint for a membership revocation (the retry cannot clear it)", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const minter = mintSpy()
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        accepted: [],
+        rejected: [{ id: "e1", status: 403, reason: "membership revoked" }],
+      }),
+    )
+    const onForbidden = vi.fn()
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: minter.fn,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(minter.calls).toEqual([{ forceRefresh: false }])
+    expect(result).toMatchObject({ quarantined: 1 })
+    expect(onForbidden).toHaveBeenCalledWith([expect.objectContaining({
+      reason: "membership revoked",
+    })])
+  })
+
+  it("leaves a batch with no downgrade rejection on the unchanged path (no extra mint)", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2", "f1"))
+    const minter = mintSpy()
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ accepted: [{ id: "e1" }, { id: "e2" }], rejected: [] }),
+    )
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: minter.fn,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(minter.calls).toEqual([{ forceRefresh: false }])
+    expect(result).toMatchObject({ accepted: 2 })
+  })
+
+  it("gives a whole-batch 403 carrying the downgrade reason the same single retry", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const minter = mintSpy()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response("role downgraded since token was issued", { status: 403 }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ accepted: [{ id: "e1" }], rejected: [] }))
+    const onForbidden = vi.fn()
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: minter.fn,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(minter.calls).toEqual([{ forceRefresh: false }, { forceRefresh: true }])
+    expect(result).toMatchObject({ accepted: 1, quarantined: 0 })
+    expect(onForbidden).not.toHaveBeenCalled()
+  })
+
+  it("quarantines a whole-batch 403 that is not the downgrade reason without re-minting", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const minter = mintSpy()
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("token scoped to different project", { status: 403 }),
+    )
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: minter.fn,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(minter.calls).toEqual([{ forceRefresh: false }])
+    expect(result).toMatchObject({ quarantined: 1 })
+  })
+
+  it("keeps the events retryable, unburned, when the forced re-mint fails transiently", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const calls: Array<{ forceRefresh: boolean }> = []
+    const getTokenForFile = async (
+      _projectId: string,
+      _fileId: string,
+      opts?: { forceRefresh?: boolean },
+    ): Promise<TokenMintResult> => {
+      const forceRefresh = opts?.forceRefresh === true
+      calls.push({ forceRefresh })
+      // The identity worker is briefly unavailable, so the live role can't be
+      // learned. Losing the edits to a 403 we now know may be clearable would
+      // be the very data loss this issue is about.
+      return forceRefresh ? { token: null, status: 503 } : { token: "tok", status: 200 }
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        accepted: [],
+        rejected: [{ id: "e1", status: 403, reason: "role downgraded since token was issued" }],
+      }),
+    )
+    const onForbidden = vi.fn()
+
+    const result = await flushOutboxBatch({
+      getTokenForFile,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(calls).toEqual([{ forceRefresh: false }, { forceRefresh: true }])
+    expect(result).toMatchObject({ authError: true, quarantined: 0 })
+    expect(onForbidden).not.toHaveBeenCalled()
+    const pending = await peekPendingOutboxBatch(10)
+    expect(pending.map((r) => r.id)).toEqual(["e1"])
+    expect(pending[0].attempts).toBe(0)
+  })
+
+  it("does not retry a response that also accepted events (their outcomes would be lost)", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2", "f1"))
+    const minter = mintSpy()
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        accepted: [{ id: "e1" }],
+        rejected: [{ id: "e2", status: 403, reason: "role downgraded since token was issued" }],
+      }),
+    )
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: minter.fn,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(minter.calls).toEqual([{ forceRefresh: false }])
+    expect(result).toMatchObject({ accepted: 1, quarantined: 1 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// OPS-44: a platform admin's un-elevated mint is held, not quarantined
+// ---------------------------------------------------------------------------
+
+describe("OPS-44 elevation-required mint", () => {
+  const ELEVATION_403: TokenMintResult = { token: null, status: 403, elevationRequired: true }
+
+  beforeEach(async () => {
+    _eventSeq = 0
+    await resetIdb()
+    releaseElevationHolds()
+  })
+  afterEach(() => releaseElevationHolds())
+
+  it("holds the events pending and unburned: no quarantine, no onForbidden, no POST", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1", { projectId: "burmese-ot" }))
+    await enqueueOutboxEvent(makeEvent("e2", "f1", { projectId: "burmese-ot" }))
+    const fetchMock = vi.fn()
+    const onForbidden = vi.fn()
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: async () => ELEVATION_403,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+    })
+
+    expect(result).toMatchObject({ posted: 0, quarantined: 0, authError: false })
+    expect(fetchMock).not.toHaveBeenCalled()
+    // onForbidden is what rolls back optimistic state; the edit must stay put.
+    expect(onForbidden).not.toHaveBeenCalled()
+    const all = await peekOutboxBatch(10)
+    expect(all.map((r) => r.id)).toEqual(["e1", "e2"])
+    for (const record of all) {
+      expect(record.status).toBe("pending")
+      expect(record.attempts).toBe(0)
+      expect(record.lastError).toEqual({ status: 403, reason: ELEVATION_HOLD_REASON })
+    }
+  })
+
+  it("AQU-2003: a read-only platform view token is held like the 403 was, never posted", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1", { projectId: "burmese-ot" }))
+    const fetchMock = vi.fn()
+    const onForbidden = vi.fn()
+    const view: TokenMintResult = {
+      token: "tok-view",
+      status: 200,
+      role: { level: 100, source: "platform" },
+    }
+    const mint = vi.fn(async () => view)
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: mint,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+    })
+
+    expect(result).toMatchObject({ posted: 0, quarantined: 0, authError: false })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(onForbidden).not.toHaveBeenCalled()
+    // The second mint bypasses the minter's cache, which may predate the grant.
+    expect(mint).toHaveBeenLastCalledWith("burmese-ot", "f1", { forceRefresh: true })
+    const [record] = await peekOutboxBatch(10)
+    expect(record.status).toBe("pending")
+    expect(record.lastError).toEqual({ status: 403, reason: ELEVATION_HOLD_REASON })
+  })
+
+  it("AQU-2003: a cached view token is replaced by the elevated one on the forced re-mint", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1", { projectId: "burmese-ot" }))
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ accepted: [{ id: "e1" }], rejected: [] }))
+    const mint = vi.fn(async (_p: string, _f: string, opts?: { forceRefresh?: boolean }): Promise<TokenMintResult> =>
+      opts?.forceRefresh
+        ? { token: "tok-owner", status: 200 }
+        : { token: "tok-view", status: 200, role: { level: 100, source: "platform" } })
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: mint,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(result).toMatchObject({ accepted: 1, quarantined: 0 })
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer tok-owner" })
+  })
+
+  it("contrast: a generic mint 403 (no access, archived) still quarantines", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1", { projectId: "gone" }))
+    const onForbidden = vi.fn()
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: MINT_403_FN,
+      fetchImpl: vi.fn() as unknown as typeof fetch,
+      onForbidden,
+    })
+
+    expect(result).toMatchObject({ quarantined: 1 })
+    expect(onForbidden).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "e1", reason: "no access to this change's project" }),
+    ])
+    expect(await peekPendingOutboxBatch(10)).toHaveLength(0)
+  })
+
+  it("does not head-of-line block: the SAME flush moves on and posts another project's events", async () => {
+    await enqueueOutboxEvent(makeEvent("held", "fA", { projectId: "burmese-ot" }))
+    await enqueueOutboxEvent(makeEvent("other", "fB", { projectId: "member-project" }))
+    const mint = vi.fn(async (projectId: string): Promise<TokenMintResult> =>
+      projectId === "burmese-ot" ? ELEVATION_403 : { token: "tok", status: 200 })
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ accepted: [{ id: "other" }], rejected: [] }),
+    )
+
+    const result = await flushOutboxUntilSettled(["other"], {
+      getTokenForFile: mint,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    // One round: the held project did not cost the caller its own write.
+    expect(result).toMatchObject({ settled: true, accepted: 1, quarantined: 0 })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string).events.map((e: CqrsRawEvent) => e.id))
+      .toEqual(["other"])
+    expect((await peekOutboxBatch(10)).map((r) => r.id)).toEqual(["held"])
+  })
+
+  it("skips a held project on later flushes without minting again, then drains it once released", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1", { projectId: "burmese-ot" }))
+    let elevated = false
+    const mint = vi.fn(async (): Promise<TokenMintResult> =>
+      elevated ? { token: "tok", status: 200 } : ELEVATION_403)
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ accepted: [{ id: "e1" }], rejected: [] }),
+    )
+    const deps = { getTokenForFile: mint, fetchImpl: fetchMock as unknown as typeof fetch }
+
+    await flushOutboxBatch(deps)
+    expect(mint).toHaveBeenCalledTimes(1)
+    // Background ticks before the admin verifies: no mint storm, no POST.
+    await flushOutboxBatch(deps)
+    await flushOutboxBatch(deps)
+    expect(mint).toHaveBeenCalledTimes(1)
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    // The admin enters the emailed code; useOutboxFlusher releases and flushes.
+    elevated = true
+    releaseElevationHolds()
+    const result = await flushOutboxBatch(deps)
+
+    expect(result).toMatchObject({ accepted: 1 })
+    expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("re-holds after a release when the session is still not elevated (one mint, no loop)", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1", { projectId: "burmese-ot" }))
+    const mint = vi.fn(async (): Promise<TokenMintResult> => ELEVATION_403)
+    const deps = { getTokenForFile: mint, fetchImpl: vi.fn() as unknown as typeof fetch }
+
+    await flushOutboxBatch(deps)
+    releaseElevationHolds() // e.g. Retry now, without verifying
+    await flushOutboxBatch(deps)
+    await flushOutboxBatch(deps)
+
+    expect(mint).toHaveBeenCalledTimes(2)
+    expect((await peekPendingOutboxBatch(10)).map((r) => r.id)).toEqual(["e1"])
+  })
+
+  it("holds per account: another stored account's events for the same project still mint", async () => {
+    await enqueueOutboxEvent(makeEvent("admin-edit", "f1", { projectId: "burmese-ot" }), { ownerKey: "admin" })
+    await enqueueOutboxEvent(makeEvent("member-edit", "f1", { projectId: "burmese-ot" }), { ownerKey: "member" })
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ accepted: [{ id: "member-edit" }], rejected: [] }),
+    )
+
+    await flushOutboxBatch({
+      getTokenForFile: async () => ELEVATION_403,
+      ownerScope: { ownerKey: "admin", isSessionCurrent: async () => true },
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    const memberMint = vi.fn(async (): Promise<TokenMintResult> => ({ token: "member-tok", status: 200 }))
+    const result = await flushOutboxBatch({
+      getTokenForFile: memberMint,
+      ownerScope: { ownerKey: "member", isSessionCurrent: async () => true },
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(memberMint).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({ accepted: 1 })
+    expect(await outboxPendingCount({ ownerKey: "admin" })).toBe(1)
+  })
+
+  it("a held backlog larger than the peek window does not hide the events behind it", async () => {
+    // 201 held rows overflow MAX_BATCH * 2; without skipping them inside the
+    // peek, the next project would never come into view.
+    for (let i = 0; i < 201; i++) {
+      await enqueueOutboxEvent(makeEvent(`held-${i}`, "fA", { projectId: "burmese-ot" }))
+    }
+    await enqueueOutboxEvent(makeEvent("behind", "fB", { projectId: "member-project" }))
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ accepted: [{ id: "behind" }], rejected: [] }),
+    )
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: async (projectId) =>
+        projectId === "burmese-ot" ? ELEVATION_403 : { token: "tok", status: 200 },
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(result).toMatchObject({ accepted: 1 })
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string).events.map((e: CqrsRawEvent) => e.id))
+      .toEqual(["behind"])
   })
 })

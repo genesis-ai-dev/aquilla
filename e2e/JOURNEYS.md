@@ -17,42 +17,55 @@ not a micro-spec farm.
 | Projects | Create project, appears on dashboard | `e2e/specs/projects/create.smoke.spec.ts` |
 | Projects | Open / delete / restore from trash | `e2e/specs/projects/project-trash.smoke.spec.ts` |
 | Projects | App shell still routes | `e2e/specs/projects/route-health.smoke.spec.ts` |
+| Projects | Monday organization handoff, project overview shortcuts, project organization scope, recommended setup, and board destinations (AQU-1208; covered in RTL; worker integration covers metadata persistence) | `src/components/ProjectSettings/MondayIntegrationSection.test.tsx`, `src/components/ProjectSettings/MondaySetupWizard.test.tsx`, `src/components/ProjectSettings.subMenuIA.test.tsx`, `src/pages/settings/OrgSettingsMonday.test.tsx`, `src/components/org/ProjectMondayCard.test.tsx`, `src/components/org/ProjectOverview.test.tsx` |
 | Projects | Project settings rename/save persists | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Knowledge Base upload, extracted-text read, and delete persist through Postgres + R2 (via Living Memory → Knowledge, `/project/:id/memory/knowledge`) | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Setup checklist survives refresh | `e2e/specs/editor/setup-checklist-survives-refresh.smoke.spec.ts` |
-| Agent connection | Browser consent issues a scoped credential; revocation blocks Agent API access | `e2e/specs/agent/agent-connection.smoke.spec.ts` |
+| Agent connection | Browser consent issues a scoped credential; OAuth selects current organizations in Act mode; later organizations stay excluded; OAuth is MCP-bound while device tokens retain REST access; MCP artifact upload → preview → import → commit persists source content; revocation blocks access | `e2e/specs/agent/agent-connection.smoke.spec.ts` |
+| Agent workbench | The workbench shows the file open in the editor — the Document view lists its cells, a reload keeps them, and Text returns to the same file (AQU-1496) | `e2e/specs/agent/workbench-open-file.smoke.spec.ts` |
 | Orgs | Add member to org, member sees it | `e2e/specs/orgs/members.smoke.spec.ts` |
+| Orgs | A member leaves an organization, and a member leaves a project they were individually added to; the last owner and a personal workspace are refused, and inherited project access survives the dropped direct grant and is reported rather than implied gone (AQU-1993). No new smoke: a regression here leaves someone a member they wanted to stop being — it loses no data, access or committed artifact — and the guards it has to keep (last owner, personal workspace, inherited-only, the cascade) are server rules, covered where they live. | Covered in worker integration (`auth-worker/src/__tests__/leave-org-and-project.test.ts` — both routes against real Postgres: the cascade to team rows, the last-owner and personal-workspace refusals, the inherited-only refusal, and the surviving-path report) and RTL/unit (`src/pages/Settings.test.tsx` — the Danger-zone control for a non-owner, the confirm → leave → org switch, the last-owner message, and its absence on a personal workspace; `src/components/ProjectSettings/LeaveProjectSection.test.tsx` — confirm-first, navigate away only when access is really gone, and both refusals; `src/lib/frontier/orgs.test.ts` / `members.test.ts` — the clients) |
 | Orgs | Account switcher sessions | `e2e/specs/orgs/account-switcher.smoke.spec.ts` |
 | Orgs | Preferences persist across reload | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts` |
-| Orgs | Billing & usage preserves existing access and distinguishes persisted personal/team scope across creation, navigation, and reload; selected-plan links require an explicit workspace and reject incompatible scope; offer tabs, cadence, Stripe-derived display, and workspace plan review are covered in RTL; authenticated review restrictions and current-price validation are covered in worker integration tests; sandbox checkout → signed initial payment → workspace plan, retries, confirmed checkout expiry/replacement, rollback, isolation, and JSON persistence are covered against real Postgres; signed renewal/failure/recovery/cancellation, delayed events, concurrent revisions, and atomic lifecycle rollback are covered against real Postgres; effective Free allowance after payment failure crosses Postgres → API → browser; existing-plan upgrade/downgrade review preserves Stripe proration parameters and renewal timing through real signed activation → review → Postgres; its API client and review UI are covered in RTL; native single-item catalog → checkout → signed activation → scope-specific hosted portal is covered in worker/real-Postgres tests; captured Stripe upgrade/credit-downgrade/cancel_at shapes, early invoice replay, and concurrent native update retries preserve usage anchors in real-Postgres tests; durable provider-cost reservations and settlements compose signed activation with exact-period admission, equal per-tool multipliers, concurrent request limits, retries, and Free fallback in real-Postgres tests (local authenticated chat JSON/SSE, import-classification, agent per-step (orchestrator turn and nested drafting), and autopilot graph-call admission/settlement (owner-funded background runs pause at the span edge on exhaustion), including charged malformed output, weekly exhaustion mid-run, and held-request reconciliation from provider generation records, are covered through the real handlers and Postgres; live-provider and other endpoint wiring remains pending); Manage billing and safe portal failures are covered in RTL; hosted portal sessions are covered through signed activation → Postgres → authenticated route → Stripe request in worker and real-Postgres tests; paid plan/cadence/period display is covered in RTL and persisted plan reload/workspace isolation crosses Postgres → API → browser | `e2e/specs/orgs/org-settings-billing.smoke.spec.ts` |
+| Orgs | Billing & usage preserves existing access and distinguishes persisted personal/team scope across creation, navigation, and reload; selected-plan links require an explicit workspace and reject incompatible scope; offer tabs, cadence, Stripe-derived display, and workspace plan review are covered in RTL; authenticated review restrictions and current-price validation are covered in worker integration tests; sandbox checkout → signed initial payment → workspace plan, retries, confirmed checkout expiry/replacement, rollback, isolation, and JSON persistence are covered against real Postgres; signed renewal/failure/recovery/cancellation, delayed events, concurrent revisions, and atomic lifecycle rollback are covered against real Postgres; effective Free allowance after payment failure crosses Postgres → API → browser; existing-plan upgrade/downgrade review preserves Stripe proration parameters and renewal timing through real signed activation → review → Postgres; its API client and review UI are covered in RTL; native single-item catalog → checkout → signed activation → scope-specific hosted portal is covered in worker/real-Postgres tests; captured Stripe upgrade/credit-downgrade/cancel_at shapes, early invoice replay, and concurrent native update retries preserve usage anchors in real-Postgres tests; durable provider-cost reservations and settlements compose signed activation with exact-period admission, equal per-tool multipliers, concurrent request limits, retries, and Free fallback in real-Postgres tests (local authenticated chat JSON/SSE, import-classification, agent per-step (orchestrator turn and nested drafting), and autopilot graph-call admission/settlement (owner-funded background runs pause at the span edge on exhaustion), including hosted Whisper admission and settlement from real client WAVs, charged malformed output, weekly exhaustion mid-run, and held-request reconciliation from provider generation records, are covered through the real handlers and Postgres; live-provider and other endpoint wiring remains pending); Manage billing and safe portal failures are covered in RTL; hosted portal sessions are covered through signed activation → Postgres → authenticated route → Stripe request in worker and real-Postgres tests; paid plan/cadence/period display is covered in RTL and persisted plan reload/workspace isolation crosses Postgres → API → browser | `e2e/specs/orgs/org-settings-billing.smoke.spec.ts` |
 | Orgs | Owner exports selected projects as one org ZIP | `e2e/specs/orgs/org-egress.smoke.spec.ts` |
+| Orgs | An org export's peak tab memory is bounded by the unit of work, not the archive — no audio mode holds more than about one clip of decoded PCM, a per-voice timeline stem is assembled from its clips plus bounded silence rather than one full-length buffer, a clip shared by several cells is released after the last of them, and entry bytes (zip output included) go to blob storage as they are produced (AQU-1862) | Covered in unit (`src/lib/export/audio-assembly.test.ts` — the retained-PCM ceiling in every mode, shared-clip release, bounded stem parts; `src/lib/audio/wav-encode.test.ts` — the blob-part WAV is byte-identical to the Float32 one; `src/lib/egress/zip-core.test.ts` — identical archive content from string, typed-array and blob entry data, and output past one flush window). No new smoke: the archive's contents are already this row's journey above, and the bound itself needs hours of seeded audio to move — not reproducible from Playwright, like the half-open socket in the Collab row. Recording it on a real org is the ticket's QA step, with `window.startMemSampler()` reading the per-file `peak pcm` marks. |
 | Auth | First-login / account-setup status (sentinel) | `e2e/specs/auth/login-account-setup-status.smoke.spec.ts` |
-| Editor | Import markdown, edit cell, persists across reload and immediate hard navigation; cold opens reveal complete source/target rows while the remaining rows load | `e2e/specs/editor/import-and-edit.smoke.spec.ts` |
+| Editor | Import markdown, edit cell, persists across reload and immediate hard navigation; cold opens reveal complete source/target rows while the remaining rows load; imported video automatically links its picture and preserves signed range playback and seeking after reload; YouTube imports support a picture only whose first captions, attached from the Text view without the track-editing switch, become its own rows (subtitle file type, original caption download) while a later caption file stays a timeline-only track (AQU-1566), original media with configured ASR or embedded-caption review, and user caption exports with unchanged original download | `e2e/specs/editor/import-and-edit.smoke.spec.ts` |
+| Importing | Media with companion or embedded MP4/M4A captions preserves reviewed wording, cue boundaries, playable source clips, and byte-exact original media across publication and reload. Attaching captions creates an independent track; counted overwrite preserves other wording and source audio. Pasted and uploaded scripts reuse persisted word timings, preserve paragraph boundaries, save reviewed independent tracks, and retain byte-exact original script downloads (SPA → sync-worker → Postgres + R2). Preview, confidence, boundary correction, and consent changes also have RTL coverage | `e2e/specs/editor/import-media-captions.smoke.spec.ts` |
+| Audio & Voice | Transcription is a background job, never a gate on the document (AQU-1917): with the hosted ASR endpoint hung or returning 500, automatic transcription after a media import still leaves the contributor able to edit a cell, save it, switch files and reload with the edit intact (SPA → sync-worker → Postgres), reports in a toast rather than a modal, and writes nothing into the document on a failed run. The per-cell badge's own error/retry rendering is covered in RTL (`src/components/CellTranscribeBadge.test.tsx`) | `e2e/specs/editor/transcription-never-blocks.smoke.spec.ts` |
+| Editor | BIA ghost-text next words learned from validated target cells (projection → SPA read → forecast worker); the suggestion is a decoration only until Tab/→ accepts it; "words that fit here" replaces a selected word; both commit like typing (full suite, not smoke — an aid that never writes on its own; off by default since AQU-2117, so the spec and the showcases turn the "Suggest next words" switch on through View settings first; never-mutates-the-document, Esc, setting toggle and Tab-over-cell-navigation covered in RTL: `TranslatedEditor.ghostText.test.tsx`, `ghost-text-plugin.test.ts`) | `e2e/specs/editor/ghost-text.spec.ts` |
 | Editor | Adaptive cell pages preserve ordering and show download progress | Covered in worker integration (`cells-read.test.ts`) and RTL (`CellLoadingProgress.test.tsx`, `useActiveCellStore.stale-rejection.test.tsx`) |
+| Editor | Hidden cells are not work — excluded from progress (numerator and denominator, live in both directions), health, automatic drafting and search (AQU-1424) | Covered in worker integration (`sync-worker/src/__tests__/hidden-cells-progress.test.ts` — progress projection, `files` counters, FTS; `auth-worker/src/__tests__/hidden-cells-agent.test.ts` — the shared cell selector behind autopilot and the agent's read/draft, plus agent search) and RTL/unit (`useActiveCellStore.hiddenProgress.test.ts`, `src/lib/completion/draft-targets.test.ts`, `src/lib/health/excluded-cell.test.ts`). No new smoke: the hide/show journey itself is AQU-1422's row, and nothing here can lose data, access or a committed artifact — a regression misreports a number or wastes a credit. |
+| Project management | A project's lane-independent numbers live on its SOURCE lane's progress row, not on the former default target lane's — so the plan board's totals, the files list's counts and the org overview's per-lane denominators are the same whichever target lanes a project has, and a lane with no translations yet still shows the full denominator (AQU-1599) | Covered in worker integration (`sync-worker/src/__tests__/progress-projection.test.ts` — a row per real lane, the source lane's row carrying the denominator and no translations; `lane-validators-progress.test.ts` — the per-lane row sets and the source lane's own; `progress-book-audio.test.ts` — the prune reaches the source lane's rows too; `progress-lane-join.test.ts` — the lane join stays the bare, indexable `target_lang` equality; `plan-read.test.ts` and `files-read.test.ts` — the readers; `auth-worker/src/__tests__/org-portfolio.test.ts` — the org overview's denominator and lane order). No new smoke, on the same reading as the AQU-1424 row above: nothing here can lose data, access or a committed artifact — a regression misreports a number — and the surfaces it shows up on already have smoke journeys. |
+| Editor | Audio is work — the files sidebar's per-file meters and the editor footer report the medium the work is actually in, so an audio-only file (a target language with no written form) shows its recorded / audio-validated figures instead of reading 0% translated, a file with both media shows both, and a text-only file is unchanged (AQU-2111) | Covered in worker integration (`sync-worker/src/__tests__/files-read.test.ts` — the listing's per-file audio pair, measured against the project's AUDIO threshold, the structural share subtracted, zero for a file with no projection row, and lane-scoped behind the read wall) and RTL/unit (`src/lib/progress/live-audio-progress.test.ts` — the open file's live count, the weakest-take and imported-source-clip rules, the structural policy, and null while the attachment map is still loading; `src/lib/progress/file-summary-progress.test.ts` — the mapping and the absent-is-not-zero rule; `FileRow.test.tsx` and `StatusBar.test.tsx` — the display rule on both surfaces). No new smoke, on the same reading as the AQU-1424 and AQU-1599 rows above: nothing here can lose data, access or a committed artifact — a regression misreports a number — and the recording journey it rides on is journey 8's. |
 | Editor | Import EPUB package, preserve spine order, commit source bytes | `e2e/specs/editor/import-epub.smoke.spec.ts` |
 | Editor | EPUB chapter picker excludes navigation, cover, and notes by default | `e2e/specs/editor/import-epub-picker.smoke.spec.ts` |
 | Editor | Commit survives stale in-flight refetch | `e2e/specs/editor/commit-survives-stale-refetch.smoke.spec.ts` |
+| Editor | Edit History on a slow, lossy (3G-like) connection: a history read whose first attempts fail retries with backoff and fills the panel without Retry; when every attempt fails without reaching the sync worker, the message names a network failure and Retry recovers (AQU-1248; full suite, not smoke — a failed read loses no data. Bounded retry, fail-fast 401/403 and network-vs-server classification are covered in unit `src/lib/sync/history-read.test.ts`, the drawer's messages in RTL `HistoryDrawer.error-state.test.tsx`) | `e2e/specs/editor/history-load-retry.spec.ts` |
 | Editor | Re-import updates source while preserving target | `e2e/specs/editor/reimport-preserves-target.smoke.spec.ts` |
+| Editor | Sidebar re-import updates one file, flags a changed source, and hides a removed unit | `e2e/specs/editor/sidebar-reimport.smoke.spec.ts` |
 | Editor | eBible import persists across reload | `e2e/specs/editor/import-ebible-persists-reload.smoke.spec.ts` |
 | Editor | Comment writes through events | `e2e/specs/editor/comments.smoke.spec.ts` |
-| Editor | Export downloads (own-format, original blob vs injected USFM) | `e2e/specs/editor/export.smoke.spec.ts` |
+| Editor | Export downloads (own-format, original blob vs injected USFM, a USFM book as one readable HTML page with numbered verses, escaped text and the verses of one USFM paragraph flowing together — AQU-2182 / AQU-2184) | `e2e/specs/editor/export.smoke.spec.ts` |
 | Editor | Workspace actions dropdown (E2E harness sentinel) | `e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts` |
 | Rules | Enable built-in rule, see violation in editor | `e2e/specs/rules/violation.smoke.spec.ts` |
 | Rules | Custom rule create / edit / toggle (surface session) | `e2e/specs/rules/rules-crud.smoke.spec.ts` |
-| Validation | Editing a cell auto-validates | `e2e/specs/validation/validate.smoke.spec.ts` |
+| Validation | Editing a cell auto-validates; an edit made as soon as the project opens waits for the languages (read-only "Loading languages…"), then lands on its lane with its validation and survives reload (AQU-1901/1902) | `e2e/specs/validation/validate.smoke.spec.ts` |
 | Validation | Validation history persists across navigation | `e2e/specs/validation/validation-persists-navigation.smoke.spec.ts` |
 | AI | Sparkle fills a cell | `e2e/specs/ai/completion.smoke.spec.ts` |
 | Collab | File propagates alice → bob | `e2e/specs/collab/file-propagation.smoke.spec.ts` |
 | Collab | Concurrent cell edit propagates alice → bob after cold import setup on a throttled renderer | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` |
 | Collab | Same-parent commits held behind a request barrier on a throttled (3G-like) network converge, keep both edits in history, stay stable, and the bumped edit is promotable | `e2e/specs/collab/concurrent-edit-throttled.smoke.spec.ts` |
-| Collab | One editor's successive commits chain linearly (same focus session, reload, second tab, three pending corrections on an existing target head, and edits after an unacknowledged human/AI draft including timeout/retry and a correction still only in the editor buffer); corrections and their validation survive navigation and reload | `e2e/specs/collab/commit-chain-linear.smoke.spec.ts` |
-| Collab | Member presence indicators | `e2e/specs/collab/member-presence-popover.smoke.spec.ts` |
+| Collab | One editor's successive commits chain linearly (same focus session, reload, second tab, three pending corrections on an existing target head, a quick Tab / Shift+Tab re-edit of an empty or translated verse while its first save is still being written to the outbox (AQU-1578), and edits after an unacknowledged human/AI draft including timeout/retry and a correction still only in the editor buffer); corrections and their validation survive navigation and reload | `e2e/specs/collab/commit-chain-linear.smoke.spec.ts` |
+| Collab | Member presence indicators (one roster row per user however many connections, and a presence entry retired on heartbeat TTL rather than only on a clean socket close — AQU-1791 — are covered in RTL `src/components/PeerPresence.test.tsx` / `src/lib/sync/presence-store.test.ts` and worker unit `sync-worker/src/__tests__/project-do-handlers.test.ts`, with the AQU-1836 hibernation guards (attachment round-trip, auto-response liveness, alarm deadlines, revocation denylist) in `sync-worker/src/__tests__/project-do-hibernation.test.ts`; no new smoke — a regression miscounts who is online, it loses no data, access or artifact, and a half-open socket is not reproducible from Playwright) | `e2e/specs/collab/member-presence-popover.smoke.spec.ts` |
 | Collab | BT edit locked for reviewer | `e2e/specs/collab/bt-edit-locked-for-reviewer.smoke.spec.ts` |
+| Collab | A corrected statistical gloss persists and reaches other members; below contributor the correction affordance is disabled with its reason (AQU-1408 §1) | `e2e/specs/collab/gloss-correction-syncs.smoke.spec.ts` |
 | Collab | Cross-user comment | `e2e/specs/collab/cross-user-comment.smoke.spec.ts` |
 | Collab | Cross-user validate | `e2e/specs/collab/cross-user-validate.smoke.spec.ts` |
-| Sharing | Invite link → join → dashboard visibility (surface) | `e2e/specs/projects/share-invite.smoke.spec.ts` |
+| Sharing | Invite link → join → dashboard visibility; org invitation → password recovery in a fresh browser session → explicit acceptance and server-verified membership. The browser consumes the actual reset email captured by Miniflare; worker integration tests also cover ordinary resets and rejected redirect targets (no real mail is sent). | `e2e/specs/projects/share-invite.smoke.spec.ts` |
 | Terminology | Wildcard term chip (domain sentinel) | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts` |
-| Admin | Billing credit catalog and organization usage grants | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
+| Admin | Billing credit catalog and organization usage grants; weekly allowance grants persist through admin → Postgres → workspace usage, while global Free limits and personal-workspace exceptions are covered in worker integration and RTL tests | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
 
 ## Smart journeys (adaptive navigation, independent outcomes)
 
@@ -93,6 +106,14 @@ the covered outcome actually is rather than what it was meant to be.
 Rows 1 and 3 are the cheapest to add next: both reuse the existing seeded
 file and need no second identity or media fixture.
 
+## Adversarial journeys (deployed dev, advisory)
+
+Jev attacks the deployed dev build under hostile conditions, red-team goals,
+and reworded goals; a snapshot oracle over every touched project decides.
+Findings file as Linear Triage tickets under AQU-1330. A model-free canary
+gates each run. See [the adversarial suite](../smart-tests/adversarial/README.md).
+The catalogue lives in `smart-tests/adversarial/attacks.ts`.
+
 ## Journeys moved to another repository
 
 | Area | Journey | Current owner |
@@ -111,7 +132,7 @@ accept, import-and-edit, …) stay hermetic per-test.
 | Surface | Spec |
 | --- | --- |
 | Comments page empty / filters / sort / search / back-nav / resolved | `e2e/specs/editor/comments-page.smoke.spec.ts` |
-| Onboarding wizard steps | `e2e/specs/projects/onboarding.smoke.spec.ts` |
+| Short signup: welcome, privacy choice, account (AQU-2300) | `e2e/specs/projects/onboarding.smoke.spec.ts` |
 | Formatting bubble + shortcuts + loss warning | `e2e/specs/editor/formatting.smoke.spec.ts` |
 | Search toolbar + replace + scope | `e2e/specs/editor/search.smoke.spec.ts` |
 | Rules create / edit / delete / org / dialogs | `e2e/specs/rules/rules-crud.smoke.spec.ts` |
@@ -130,10 +151,10 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 | Journey | Spec |
 | --- | --- |
 | IDML roundtrip / IME / protected slots | `e2e/specs/editor/idml-roundtrip.spec.ts` |
-| Biblica study notes import (incl. division bookmarks + front/back matter volumes) | `e2e/specs/editor/import-biblica-study-notes.spec.ts` |
-| Treasure Hunt Bible import | `e2e/specs/editor/import-treasure-hunt-bible.spec.ts` |
-| Reach 4 Life import | `e2e/specs/editor/import-reach4life.spec.ts` |
-| EBL guide import (whole guide + topic/lesson sections) | `e2e/specs/editor/import-ebl.spec.ts` |
+| Biblica study notes import (incl. division bookmarks + front/back matter volumes) | `e2e/specs/partner-integrations/biblica/import-biblica-study-notes.spec.ts` |
+| Treasure Hunt Bible import | `e2e/specs/partner-integrations/biblica/import-treasure-hunt-bible.spec.ts` |
+| Reach 4 Life import | `e2e/specs/partner-integrations/biblica/import-reach4life.spec.ts` |
+| EBL guide import (whole guide + topic/lesson sections) | `e2e/specs/partner-integrations/biblica/import-ebl.spec.ts` |
 | Contextual run pill | `e2e/specs/contextual/run-pill.spec.ts` |
 | Project overview autopilot | `e2e/specs/projects/project-overview-autopilot.spec.ts` |
 | Org access lifecycle (multi-path revoke; AQU-435/1107 org Contributor sees no projects) | `e2e/specs/orgs/org-access-lifecycle.spec.ts` |
@@ -141,18 +162,71 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 | Agent changeset approval | `e2e/specs/agent/changeset-approval.spec.ts` |
 | Pointed term forms: mark folding, the saved project affix inventory, and a per-form exclusion that survives reload | `e2e/specs/terminology/pointed-term-forms.spec.ts` |
 | Merge duplicate concepts: survivor keeps the union of renderings, the merged-away concept is gone for a second member and after reload (AQU-1337; dialog rules + role gate covered in RTL) | `e2e/specs/terminology/merge-duplicates.spec.ts` |
+| Repetition auto-propagation: typing a translation into a repeated segment (validated by the edit itself) fills the file's other identical-source rows once the cell is left; filled rows stay unvalidated; the projection and a cold reload agree (AQU-1484 — not smoke: a regression leaves rows unfilled, it loses nothing. The settle-on-leave timing, the mid-typing hold and the self-validation-off gate are covered in RTL, `EditorTable.repetitionTrigger.test.tsx`; the per-cell chain/pin planning in `repetition-propagation.test.ts`). AQU-1486: the fill toast's "Validate all" signs the filled rows off on the server, and "Validate text" on a selection asks once and validates its repeats too (the click dialog, the remembered answer, bulk conflicts and Undo are covered in RTL, `useRepetitionValidation.test.tsx`; the planning in `repetition-validation.test.ts`). AQU-2176: that "Validate all" reports in a dialog NAMING the rows it signed off, dismissed by Done — the list's contents, the row jump and the dialog's Undo are RTL, `useRepetitionValidation.test.tsx`. AQU-2177: a bulk validation reports in the same dialog, its repeats grouped into validated / filled-still-needs-validating / left-as-they-were under the run's own summary — the grouping, the counts, the row jump, the dialog's Undo and the no-repeats toast are RTL, same file | `e2e/specs/validation/repetition-propagation.spec.ts` |
+| Sibling merge: a linked sibling's translations fold into the host as a real lane (a lane record, the switcher shows it, rename works) through the identity → sync call on the real schema (AQU-1550 — not smoke: no UI yet, and a failed merge leaves the donor live. The lane record, its position, re-runs and the no-orphan-on-failure rule are covered in the worker suite, `merge-sibling-lane-record.test.ts`; the fold token's claims and the duplicate-name refusal in auth-worker's `merge-sibling.test.ts`) | `e2e/specs/projects/merge-sibling.spec.ts` |
+| Link replacing an existing file: linking an established project from Settings → Source & sync with "Replace the source in my existing file" keeps ONE file with the same cells and its translation on its line, and a later upstream source edit reaches that same cell; the same option from "Choose files" on an existing link adds the file into the project's own copy (AQU-1679 — full-suite, not smoke: the option is off by default, so a regression strands nobody who did not choose it. The line pairing is pinned in `db/shared/link-file-match.test.ts`; the join, later edits/deletes, added and kept lines, the windowed first sync and the fall-back to a separate copy in `sync-worker/src/__tests__/link-sync-adopt-existing-file.test.ts`; the match route, the link and add-files requests' refusals and detach in auth-worker's `source-linking-replace-files.test.ts`; the confirm step's states in `LinkSourceSection.test.tsx` and the dialog's in `ChooseLinkedFilesDialog.test.tsx`) | `e2e/specs/projects/link-replace-existing-file.spec.ts` |
 | Translate-as-read drafting workflow | `e2e/specs/ai/translate-as-read.spec.ts` |
 | Agent draft / sidebar | `e2e/specs/ai/agent-draft.spec.ts` |
 | Completion races / lanes / footnotes | `e2e/specs/ai/completion-*.spec.ts` |
 | Agent-import sandbox | `e2e/specs/agent-import.spec.ts` |
 | Account switch cross-tab | `e2e/specs/orgs/account-switch-cross-tab.spec.ts` |
+| Six simultaneous editors (write + live-update latency under whole-BSB helloao import) | `e2e/specs/collab/six-editor-concurrency.spec.ts` |
 | Session-expired banner | `e2e/specs/auth/session-expired-banner.smoke.spec.ts` |
+| Aquilla Tools (prototype): install the vetted Key-Term Heat Map starter, its first write pauses on the host permission prompt ("Always" extends the standing grant), a bulk harmonize lands through the outbox with server-verified tool provenance, and "revert everything since then" restores every cell except one a person edited afterwards (full-suite, not smoke: prototype surface behind a nav entry. Bridge trust checks, embedJson, permission decisions and the build gates are in `src/lib/tools/__tests__/`; the revert skip rules in `shared/tools/revert.test.ts`; the store/grant/activity routes in auth-worker's `tools-routes.test.ts`; the provenance stamp in sync-worker's `tool-provenance.test.ts`) | `e2e/specs/tools/tools-heatmap.spec.ts` |
+| Smart Extensions: the DEFAULT editor is the first-party "Aquilla editor (Smart Extension)" (server-installed; the built-in "Aquilla editor" is one click away; scopes auto-granted and stated on the bar). Rich-text edits and a validation land as ordinary events with verified tool provenance; a second user's focus lock and edit arrive live in the frame; the built-in editor is one switch away and back; "revert everything since then" undoes the extension's writes (full-suite, not smoke: prototype surface; e2e builds with the default off so the editor smokes keep guarding the built-in editor. Bridge rev-2 surfaces in `src/lib/tools/__tests__/api-rev2.test.ts`, `live-data-rev2.test.ts`, the editor itself in `default-editor.test.ts`, the install route in auth-worker `tools-routes.test.ts`) | `e2e/specs/tools/default-editor-extension.spec.ts` |
+| Smart Extensions editor parity (AQU-1793): in the extension editor, an AI draft through the host's own pipeline (mock LLM; aiDrafted projected), the host's history and comments drawers opened from the frame, a footnote committed as raw USFM, Ctrl/Cmd+. next-unfinished, the host's selection bar driven by the frame's selection, and "Remove your validation" from the validators popover. The core editor journeys (validate, validation persists, comments, concurrent edit, AI completion) also run against the extension with `E2E_EDITOR=extension` (`pnpm test:e2e:extension-editor`). Bridge rev-3 units in `src/lib/tools/__tests__/api-rev3.test.ts`, the editor in `default-editor.test.ts` | `e2e/specs/tools/default-editor-parity.spec.ts` |
+| Smart Extensions: a freshly BUILT extension (real builder output, word count) renders in its full page and, from the editor's palette, in the side panel (also at a narrow width, where the dock is a sheet), and its numbers follow an edit live. The builder's smoke gate renders every declared mount with sample data and rejects a blank one (`builder-gates.test.ts` "render gate") | `e2e/specs/tools/built-extension-renders.spec.ts` |
+| Smart Extensions builder (AQU-1793), a first-time user's path: Describe (plain words + the "Side panel" placement) → Building (their words, the live phase, "Bigger extensions can take a few minutes", Cancel) → Try it (their words quoted, the extension running in the sandbox on sample verses, where it appears, what it may do) → Add to project → it opens from the editor's palette in the side panel. And "Build a new editor…" in the "Edit with" menu presets "As an editor"; the built editor appears in "Edit with". The model call is answered with a real builder output; lint, smoke, preview and install are real. Starters opening Review (not installing), the failure card and `?where=` are in `src/pages/Tools/ToolsPage.test.tsx`; the flow's rules (placement sentence, progress steps, provenance) in `src/lib/tools/__tests__/builder-model.test.ts` | `e2e/specs/tools/extension-builder.spec.ts` |
+| Smart Extensions `read:web` (apiRev 6): an extension declaring a site (`manifest.web`) is prompted the first time it reads it, naming the site and saying the site sees the request, with no "Allow once"; "Not now" denies the call; "Always allow" stores a per-user grant and `aquilla.web.fetch` goes through the auth-worker proxy (the site's answer is mocked at the browser). The real proxy refuses a user without the grant, undeclared hosts, internal addresses and plain http. Allowlist/SSRF/redirect/size/type rules in auth-worker `tools-web-fetch.test.ts`; manifest, lint and prompt in `src/lib/tools/__tests__/web-read.test.tsx` | `e2e/specs/tools/web-read.spec.ts` |
+| Smart Extensions primitives (apiRev 7, AQU-1937): an IMPORTER extension's settings action runs headless, reads a site (mocked at the browser) and `files.upsert` creates a tagged, grouped project file attributed to the extension through a verified tool session; an EDITOR extension finds it by tag (`files.list`), opens its group (`files.group`) and reads the verse across files (`cells.byRef`, the new sync-worker `/cells/by-ref`); a data record anchored to the noted cell round-trips as "current" in a hidden data file (absent from the file list) and reads "changed" after the importer's bar action refreshes the file as a delta; the importer's export format appears in the export dialog for the tagged file and downloads what it delivers. Server rules (identity gate, data-file floor, /import, provenance, `files.meta.extension`, by-ref) in sync-worker `extension-files.test.ts`; upsert delta, data drift, handlers in `src/lib/tools/__tests__/rev7-files.test.ts`; manifest actions/exports, on-open rule and SDK readers in `rev7-manifest-sdk.test.ts`; tool sessions and bytes in auth-worker `tools-routes.test.ts` / `tools-web-fetch.test.ts` | `e2e/specs/tools/extension-primitives.spec.ts` |
+| Smart Extensions switch and import contributions (AQU-1937): OFF by default, a project is today's Aquilla — the extensions page shows an "off" notice, Import offers no extension importers and the auth-worker refuses the tools API; a Maintainer turns it ON and Import offers the first-party "Door43 resources" importer and an extension's import contribution, whose options form the platform renders from its schema; the import runs headless with the chosen option and records { importer, options, upstream } on the file; "Refresh from source" in the file menu re-runs it with the stored options and only the changed cell changes. The Door43 importer's byte-identical parity with the built-in import (ULT / TN / TQ / OBS fixtures) is in `src/lib/dcs/extension/door43-parity.test.ts`, the shipped bundle's run/choices/refresh in `door43-bundle.test.ts`, TW / TWL / alignment-as-data in `door43-plan.test.ts`, the tools-route gate in auth-worker `tools-routes.test.ts` | `e2e/specs/tools/smart-extensions-flag-importer.spec.ts` |
+| Smart Extensions SDK (`window.aq`, manifest `sdk: 1`): a few-line "verse cards" page built from the SDK's UI kit and the editor's own components (source, translation editor, validate button) edits and validates through the bridge; a word-count side panel on `aq.useCells()` follows the file open in the editor and updates live | `e2e/specs/tools/sdk-extension.spec.ts` |
+| Smart Extensions (apiRev 4) in the first-party extension editor: the source selection toolbar (Ask AI opens the host chat with the selection; Add to terminology the host popover), the source cell menu (edit source text in place → `source.cell.commit`; hide a cell), the footnote tray fed from the frame's visible rows, the audio column voting on a recorded take, and the Audio lens waveform | `e2e/specs/tools/default-editor-rev4.spec.ts` |
+| Smart Extensions (apiRev 5, Daniel 2026-10-12): "Aquilla editor (Smart Extension)" is the default — a browser that never chose opens it, marked "Your default" in the one "Edit with" menu; picking "Aquilla editor" there opens the built-in editor. A commenter (no write role, no extension grant) picks it, makes it the project default from the menu, and it survives a reload; when the extension cannot load (its code fetch fails) the built-in editor opens with a notice. On a real AI draft (mock LLM → aiDrafted projected) the extension paints the same validated-vs-guessed provenance runs (#946) as the built-in editor. The e2e build pins the default off for the native journeys; these specs restore it per browser. The UI-only rev-5 parity items — integrity-check hover explanations (AQU-757), the archived-lane / role banner wording (AQU-1463), the Align styles cell action (IDML), locks on the active lane only (AQU-1808), per-connection presence (AQU-1791) — are covered through the shipped runtime in `src/lib/tools/__tests__/rev5.test.ts`; the default and switch-back rules in `default-editor-flag.test.ts` and `src/components/tools/ExtensionEditor.switchback.test.tsx` | `e2e/specs/tools/default-editor-rev5.spec.ts` |
 
 ## Covered in RTL
 
 UI chrome that used to be one smoke file per click is covered under
 `src/**/*.test.tsx`. Do **not** re-add Playwright for these:
 
+- Costly model waits show a shared fills-twice bar (editor AI draft, and
+  suggest-rules-from-edits). The draft or the suggestions appear as soon as
+  the call returns; the bar then finishes in about 200ms, and reduced motion
+  stays a static mark. Covered in RTL (`fills-twice-indicator.test.tsx`,
+  and the editor row assertion in `EditorTable.editorActions.test.tsx`).
+  The sparkle still filling a cell stays `e2e/specs/ai/completion.smoke.spec.ts`.
+
+- Unified Agent conversation/document/knowledge navigation and same-task
+  re-selection: covered in RTL (`AgentWorkbench.test.tsx`, `workspace-location.test.ts`).
+  The former competing Team/Chat tabs and mandatory three-pane layout are retired.
+- Unsent Agent messages, context chips, and attachment ownership across views,
+  conversations, and accounts: covered in composer draft-store and composer RTL.
+- Focused task-draft review stays on the Agent route, preserves the task language
+  lane and editor Audio/Text preference, and uses the existing contextual approval
+  transport. Navigation and approval wiring are covered in `AgentDraftReview.test.tsx`.
+- Optional paired document context uses the existing cell renderer/commit callbacks
+  in one aligned scrolling surface: covered in `AgentDocumentContext.test.tsx`.
+- Agent Team header, roster/card access, and toolbar identity across tabs:
+  covered in RTL (`TeamThreadsView.test.tsx`, `AgentWorkbench.test.tsx`)
+- Agent task message grouping, routine-activity disclosure, explicit step
+  inspection, Escape priority, and focus return: covered in RTL
+  (`TeamThreadDetail.test.tsx`, `TeamThreadsView.test.tsx`)
+- Agent pending-review/question header and links to focused task review:
+  covered in RTL (`TeamConversationHeader.test.tsx`, `TeamThreadsView.test.tsx`)
+- Agent chat options, confirmed reset, preserved applied events, and pinned
+  Team chat navigation: covered in RTL (`AgentChatOptions.test.tsx`,
+  `AgentWorkbench.test.tsx`, `AgentDockPanel.test.tsx`)
+- Workspace sidebar hide/show restoration and Agent Back navigation:
+  covered in RTL (`LeftDock.test.tsx`, `useDockTabs.test.ts`,
+  `useWorkspaceDockTabs.test.ts`, `AgentWorkbench.test.tsx`,
+  `workbench-layout.test.ts`)
+- Collapsed-rail history and footer controls: covered in RTL
+  (`NavHistoryControls.test.tsx`, `AppShell.test.tsx`)
+- The Assigned-to-me inbox never reports an answer it does not have: no
+  "You have no open assignments." while the scoped read is outstanding (the org
+  directory resolves asynchronously, so this is the normal cold-load path), and
+  an org switch returns to the skeleton rather than showing the previous org's
+  rows (AQU-1251 — `AssignedToMe.test.tsx`, `AssignedToMe.orgSwitch.test.tsx`).
 - DOM navigation and editing: plan inspector editor link, filename keyboard
   access, corpus rename input, read-surface button activation, and cell labels
   (`PlanInspector.test.tsx`, `ProjectOverview.test.tsx`, `FileRow.test.tsx`,
@@ -160,28 +234,366 @@ UI chrome that used to be one smoke file per click is covered under
   `EditorTable.editorActions.test.tsx`). Pending-edit page-hide flush is covered
   in `TranslatedEditor.commit.test.tsx` and import-and-edit smoke.
 
+- A cell's own label (AQU-2408): typed in the expansion panel's Label row at or
+  above the project's `cellLabelFloor` tier (maintainer unless opened to project
+  leads), stored as `metadata.cellLabel` on the source row by the non-chain
+  `cell.label.set` event, shown in the corner label slot beneath an assigned
+  voice or cast name, and never a voice itself. Covered in RTL
+  (`CellLabelRow.test.tsx`, `EditorTable.cellLabelRow.test.tsx`,
+  `ProjectSettings.cellLabel.test.tsx`), with the projection, floors, read model
+  and undo step pinned in `sync-worker/src/__tests__/cell-label-set.test.ts`,
+  `cell-label-gate.test.ts`, `cell-label-floor.test.ts`, `label-steps.test.ts`
+  and `useCells.cellLabel.test.ts`. UI-only, no new smoke: the write rides the
+  same outbox → sync-worker → Postgres path every metadata event already uses.
 - View settings, tab strip, selection bar, outbox inspector, term-lookup popover,
   video attachment dialog, cell-expansion Escape close, setup-checklist expand/skip
   (except survives-refresh, which stays smoke)
+- A cell's detail view as a pop-up modal (AQU-2021): double-clicking a row opens
+  the same tab shell as a modal with previous/next through the displayed cells,
+  and a double-click inside the open editor still selects a word rather than
+  opening it. Covered in RTL (`EditorTable.cellDetailModal.test.tsx`). UI-only,
+  no new smoke: one more way into a view the chevron already reaches, writing
+  nothing of its own.
+- AI availability after an offline → online cycle (AQU-1377): a health probe forced
+  while the browser is offline records no snapshot, the browser `online` event forces
+  a fresh probe that re-enables the AI controls, and a batch refused because the
+  service is unreachable surfaces an explicit banner instead of a silent no-op
+  (`frontier-health.test.tsx`, `useCompletion.unavailable.test.ts`). UI gating only —
+  no data, access or committed artifact is at risk, so per the rules above this stays
+  RTL rather than becoming a smoke journey.
 - Live connection popover: keyboard open/close, observed upload/download activity, and offline readings (`SyncStatusIndicator.test.tsx`); passive sampling, five-minute totals/average/slowest reply, failure counts, sample freshness, expiry, and five-second chart buckets (`connection-activity.test.ts`); separate traffic/reply scales and honest gaps for missing samples (`ConnectionHistoryChart.test.tsx`).
-- Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome
+- Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome.
+  Recovery's single validation message and return-to-sign-in are covered in RTL
+  (`FrontierForgotPasswordForm.test.tsx`, AQU-2300). The old eight-step wizard was shortened to welcome, privacy choice and signup;
+  anonymous Skip for now was retired; `Signup.test.tsx` covers direct signup,
+  hydration, safe destinations and billing continuation. Preferences and in-app
+  workspace/project creation replace the removed setup steps.
+  Organization invitation preview gating (unavailable links, retryable failures,
+  pending/stale requests, signed-in/out states) is covered in RTL by
+  `JoinOrgPage.test.tsx` (AQU-2297). Membership acceptance and reopening a used
+  link as its still-member redeemer stay in `share-invite.smoke.spec.ts`.
+  Also the refused-sign-up redirection (AQU-1345): a 409 shows the "sign in instead"
+  copy with word-for-word identical wording whichever datastore reserved the identity,
+  and the Sign in action carries the typed identifier into the login field
+  (`FrontierSignupForm.identityTaken.test.tsx`, `FrontierLoginForm.prefill.test.tsx`).
+  The migration itself on that subsequent login is unchanged by that work and stays
+  covered where it already was.
 - Project settings pane links / toggles (except rename/save persistence smoke)
+- Linking an **established** project to another project's source from Project Settings
+  → Source & sync (AQU-1525): the entry point's role gate, picker contents (every
+  accessible project, never this one, never an archived one), the live/consumes-source
+  shape it posts, the seed self-heal fallback, and the cycle refusal are in
+  `LinkSourceSection.test.tsx`; the pane mounting it in
+  `ProjectSettings.subMenuIA.test.tsx`. That linking is **additive** — the first mirror
+  sync after linking leaves every pre-existing file, translation and validation row
+  byte-identical, and a same-named upstream file lands beside the project's own — is
+  pinned against real Postgres in `sync-worker/src/__tests__/link-sync-additive-established.test.ts`.
+  The cross-layer walk (link from settings in the browser, then assert the mirrored files
+  appear while the pre-existing file's translations survive) is NOT yet a smoke journey —
+  AQU-1525 left it open because it could not be executed where the fix was made; it is
+  the remaining item on that issue's automated-coverage checklist.
+  The pre-link confirm step (AQU-1526) is RTL/unit too: the clash arithmetic — matched
+  ignoring letter case, reported in the upstream's spelling, listed once per name — in
+  `link-source-preview.test.ts`, and the step's states (count, same-name warning that
+  does not block, empty upstream, an unreadable upstream file list that is never shown
+  as a count of zero, and cancel) in `LinkSourceSection.test.tsx`. No data or artifact
+  is at risk before confirming and the step crosses no second service, so per the rules
+  above it stays RTL rather than becoming a smoke journey.
+  Which corpus of the upstream a link consumes, and — for the chain case — WHICH of
+  its translations (AQU-1528 / AQU-1605), is RTL plus worker tests, not smoke: the
+  question's states (asked for the chain case only, pre-filled at a single lane,
+  refused with several and no pick, offering exactly the lanes the server returned,
+  and an unreadable lane list said out loud with a retry) are in
+  `ProjectCreateDialog.upstreamLane.test.tsx` and `LinkSourceSection.test.tsx`; which
+  lanes a caller may be offered at all, and the server refusing a lane of another
+  project, an archived lane or one the read wall hides, in auth-worker's
+  `source-linking-lane-choice.test.ts`; and the fold actually reading the named lane
+  (and nothing of the upstream's other lanes) against real Postgres in
+  `sync-worker/src/__tests__/link-sync-lane-choice.test.ts`, whose sibling
+  `link-sync-fold.default-lane-baseline.test.ts` pins that a link naming no lane still
+  reads the former default one.
+  The Import dialog's second entry point to the same action (AQU-1527, "From another
+  project" on the landing screen) is RTL in `ImportDialog.linkProject.test.tsx`: the tile
+  routes to the flow, back links nothing, the shared pre-link preview appears on this
+  path too (the flow is one component — `ProjectSettings/LinkSourceFlow.tsx` — so the two
+  entry points cannot diverge), confirming posts the live/consumes-source shape and closes
+  the dialog, and the two unusable cases (already linked, below project lead) are shown
+  disabled with their reason. The cross-layer walk is the SAME still-open item AQU-1525
+  left: one smoke journey covering link-then-assert-mirrored-files serves both entry
+  points, and it is tracked there rather than duplicated here.
+  A link whose FIRST MIRROR SYNC FAILED (AQU-1544) is RTL/unit as well. The link is saved
+  and then filled by that sync; when it failed, every entry point used to carry on as if
+  it had worked. What the user is shown instead — the link was saved, the source files
+  have not arrived, "Try again" — is pinned per entry point: the shared flow in
+  `LinkSourceSection.test.tsx` (the success callback does not fire; a retry that fails
+  keeps the message and the action; one that works finishes as a normal link), the Import
+  dialog staying open in `ImportDialog.linkProject.test.tsx`, and Create New Project →
+  Linked target in `ProjectCreateDialog.linked.test.tsx`, where the dialog's real output
+  is passed through the real landing banner (`LinkSeedFailedNotice.test.tsx` covers the
+  banner alone). The workspace's zero-file self-heal no longer failing quietly is in
+  `ProjectWorkspace.selfheal.test.ts`, and Project Settings telling a never-synced link
+  ("Not synced yet" / "Sync now") from a healthy one in `SourceLinkSection.test.tsx`.
+  It stays out of smoke for the reason the rules give: it is a message and a retry on a
+  failure path, nothing is lost that was not already missing, and reproducing it needs
+  the sync service to be made to fail, which the local e2e stack has no switch for.
+  The page BEHIND Project Settings listing a new link's files without a reload (AQU-1570)
+  is RTL too. Settings is a route modal over the still-mounted workspace or overview,
+  each with its own `useProject`; the link flow, "Try again" and a "Sync now" that brought
+  content in announce the change (`lib/sync/project-record-changed.ts`) and every
+  `useProject` for the project re-resolves. Pinned where it escaped, in the composition:
+  `LinkSourceSection.pageBehind.test.tsx` renders the real flow beside a real `useProject`
+  consumer (files listed after a link and after a retry that works; nothing re-read when
+  the first sync failed), with the hook's own contract in `useProject.test.tsx` and Sync
+  now's in `SourceLinkSection.test.tsx`. It is a stale read with nothing lost, so it stays
+  out of smoke; the AQU-1525 smoke walk above would cover it once it exists.
+  A link to a LARGE upstream seeding at all (AQU-1543: statement size; AQU-1563: the
+  first sync folding the whole history at once ran the ProjectSync Durable Object out
+  of its 128 MB) is worker-tested against real Postgres. `link-sync-large-upstream.test.ts`
+  pins that no statement grows with the upstream; `link-sync-windowed.test.ts` pins that
+  the delta is read and committed in bounded windows (events and payload bytes), that an
+  interrupted sync resumes at its last finished window, that one event per window ends in
+  exactly the state one window gives (both link shapes), and that `POST /link/sync` keeps
+  calling budgeted invocations until the link is caught up. No smoke: local workerd does
+  not enforce the memory limit the bug hit, so a browser walk would pass on the broken
+  code too; what bounds memory is that no read or write grows with the upstream.
+  An OPEN live-linked project following its upstream without a reload (the AQU-479
+  push accelerator; AQU-1545 hide/show and rename) is worker/unit-tested. Which upstream
+  changes notify, per link shape, is one definition shared with the mirror sync and is
+  pinned through the real `POST /events` route in `sync-worker/src/__tests__/link-notify.test.ts`
+  (hide, show, rename, clone gets nothing, consumes-target links hear translations).
+  A sync asked for mid-sync gets a fresh fold (`rerun-single-flight.test.ts`). On the
+  client, a burst keeps its trailing sync and a frame landing mid-sync is owed another
+  (`ws-reconciler.test.ts`); the frame-time staleness read fires no sync of its own
+  (`useStaleSourceCells.test.tsx`); after the sync, progress is re-read and the file list
+  re-read when a frame said files moved (`ProjectWorkspace.pushedLinkSync.test.ts`).
+  Not smoke: a missed push loses nothing — the lazy pull on the next file open is the
+  floor — and the walk needs two projects, a link and a second socket.
+- A ONE-TIME COPY of another project's source — the Cloned shape at Create New Project,
+  and the snapshot a detach freezes — bringing in exactly the files it shows (AQU-1608) is
+  auth-worker-tested against real Postgres in
+  `auth-worker/src/__tests__/source-linking-deleted-file-cells.test.ts`. Both flows are one
+  function, `snapshotSourceCells`, which copied file rows through `snapshotSourceFiles`
+  (live files only) and then every source cell in the upstream, so a file the upstream had
+  moved to Recently deleted contributed lines keyed to a file row the new project does not
+  have. Pinned there for all four shapes: the whole-project copy, a subset copy, a followed
+  file deleted upstream after the link was made (the detach half), and an upstream with
+  nothing deleted. No smoke, and this is the reason rather than the usual one — the walk is
+  cheap, but what went wrong is INVISIBLE on the surface a walk would check: the file list
+  was always right, and the stray rows showed only through project-wide search
+  (`scoped-search.ts` matches `cells` on `project_id` alone) and the health rollup's
+  `DISTINCT file_id`. A browser walk that asserted the file list would have passed on the
+  broken code; what the copy must hold is that its files and its lines are one set, which is
+  a server-state assertion. The manual walk is still worth running once per release and is
+  on this issue's QA checklist; it needs a three-file upstream with a phrase unique to the
+  deleted file, which no standing fixture provides.
 - Import dialog chrome / specialized options landing (except persist-reload journeys), including the mutually exclusive Biblica title choice and its independent sentence-split option (`ImportDialog.biblicaEdition.test.tsx`)
 - Preferences toggles / theme / app font size (except persist-reload)
+- Account-specific hosted/local Whisper selection, explicit model download consent, and manual/automatic transcription routing (`LocalModelsSection.test.tsx`, `transcription-routing.test.ts`, `auto-transcribe.test.ts`) — covered in RTL/unit tests
+- Local Whisper execution device (AQU-1533): the worker runs on WebGPU only when the browser hands out a GPU adapter, and otherwise loads on WASM without attempting WebGPU first — a WebGPU session that fails cannot be retried on WASM in the same worker (`whisper-worker.device.test.ts`). Unit-level only: a browser check needs a launch without a GPU adapter and model weights from external CDNs, so it is a manual verification, not a smoke.
+- Lane-switcher and TARGET-pill labelling when two lanes read the same (AQU-1784): the suffix rule (code override, else position among the colliding lanes), the pill matching the switcher, Project Settings → Languages saying how a colliding lane is shown, and the inline notice that lets a duplicate name be added anyway — `lane-label-suffix.test.ts`, `lane-options.test.ts`, `lane-language.test.ts`, `lane-create.test.ts`, `EditorTable.laneSwitcher.test.tsx`, `LanguagesSection.test.tsx`. UI-only: switching lanes itself is already exercised by the editor's smoke journeys, and nothing here can lose data, access or a committed artifact — a regression mislabels a lane.
+- Live lock when your lane is archived (AQU-1463): the member working in a lane that a PM archives gets a must-dismiss modal naming it, then a persistent read-only banner, and the lane stops offering target edits, validation, AI draft/Autopilot, lane audio, target import and replace while reading, search, export and comments stay. The lock decision, the kind table it shares with the sync-worker's own refusal (AQU-1462), and the rule for who gets the modal (the member who was *in* the lane — not a cold open on an archived one, not a reader who already acknowledged it, not a member sitting in another lane) are in `src/lib/lanes/lane-lock.test.ts`; the read-only override outranking every role in `useProjectPermissions.test.ts`; the banner and the withdrawn write affordances in `EditorTable.archivedLane.test.tsx`; the modal's must-dismiss behaviour (Esc and a click outside do nothing, one button) in `LaneArchivedDialog.test.tsx`. UI-only: the lock is derived from the lane rows the existing `project.settings.updated` frame already re-reads, so the live propagation it rides on is the collab path those frames' own journeys cover, and a regression here cannot lose data or access — the server refuses the same writes regardless (AQU-1462).
 - Rules page toggles / severity / regex mode (RTL on RulesPage + rule editor)
 - Comments page empty / filter / sort chrome (RTL + comments-page surface session)
+- Comment visibility polish (AQU-1259): clicking anywhere on a comments page card, including a resolved summary, carries `&comments=1` so arriving in the editor opens that cell's thread instead of only scrolling to the row — the link/reader contract in `project-workspace-lane-deeplink.test.ts`, the page half (unresolved and resolved) in `CommentsPage.test.tsx`. The opt-in **Highlight open comments** editor setting and the leading-edge accent it draws on rows with an unresolved thread are in `ViewSettingsMenu.test.tsx` and `EditorTable.unresolvedCommentHighlight.test.tsx`; AQU-599's always-on badge is unchanged.
+- Comment @mentions and the in-app inbox (AQU-761): typing @ in a comment composer suggests project members and inserts a plain `@username` token; the header bell lists mentions of the signed-in user, marks them read, and opens the cell thread. Covered in RTL/unit tests (`mention-suggest.test.ts`, `mention-inbox.test.ts`, `mention-read-state.test.ts`, `MentionTextarea.test.tsx`, `NotificationsInbox.test.tsx`, `CommentsDrawer.test.tsx`). The AQU-284 email loop still reads the same token from the comment body.
+- Comments export and the org-wide comments view (AQU-1958): the project Comments page's **Export as CSV** writes exactly the threads on screen — filters and sort included — with project/file names rather than uuids, formula-injection neutralized per AQU-1281 (`comments-csv.test.ts`, `comments-export-threads.test.ts`, `CommentsPage.test.tsx`). `/orgs/:orgId/comments` is the same list across the org's projects: maintainer-gated surface, project badge per thread, jump-to-cell into that thread's own project, and a named banner when one project's read fails (`OrgCommentsPage.test.tsx`, `useOrgComments.test.tsx`, `org-comments.test.ts`). UI-only: the view is a client fan-out over the existing per-project project-list and comments reads, so access stays where the server already enforces it — a project the viewer lacks is absent from the list and its token cannot be minted (`useOrgComments.test.tsx` pins one read per listed project), and a regression here cannot lose data, access or a committed artifact.
 - Living-memory empty states and section IA (index → brief/instructions/quality/knowledge/examples panes, collapsed prediction prompt, role gates — RTL in `LivingMemoryPage.component.test.tsx`; entry points and legacy settings redirects in `ProjectSettings.subMenuIA.test.tsx` + `shell-routing.test.ts`)
-- Back-translation generation, editing, stale/provenance, and statistical-pairs comparison (`BacktranslationPanel.test.tsx`); the cross-user edit lock remains in the smoke keep-list
+- Back-translation generation, editing, stale/provenance, statistical-pairs comparison, and — AQU-1408 — the two-reading order (statistical gloss above the AI reading) plus each section's visible descriptor (`BacktranslationPanel.test.tsx`); the cross-user edit lock remains in the smoke keep-list. The gloss *correction* affordance and its rules — the editable gloss with no corpus, the withdrawal, the corrected marker, the role floor — are RTL in the same file, and the resolver's precedence and fall-back-on-retranslation in `gloss-record.test.ts` (which also runs the read route's own row shape through hydration into the resolver); what is in the smoke keep-list is the one thing RTL cannot answer — whether a correction actually reached the server and another member's browser (AQU-1408 §1)
 - Admin console tab clicks, formatting Ctrl+B alone, breadcrumb-only nav
 - Milestone split-view (one whole division at a time vs continuous file): the switch lives in ⋯ → Editor settings; the pager stays on the editor (`ViewSettingsMenu.test.tsx`, `EditorTable.splitMilestones.test.tsx`, `ChapterNavigator.test.tsx`). Jumps into the paged view — an Assigned-to-me entry and a recording-modal cell change turning to the milestone that holds the target cell (`EditorTable.milestoneJumpTargets.test.tsx`, `milestone-jump-targets.test.ts`); a Files-panel chapter row or a contextual-run range chip turning to the milestone that contains the target cell (`ScrollToGroupHandler.test.tsx`)
-- Clone-voice button on a source cell opens the New voice modal in place without switching to the Voices dock tab (`CloneVoiceModalHost.test.tsx`, `CellVoicePanel.chip.test.tsx`)
+- Milestone picker legibility (AQU-1485): a division title wins the dropdown's width over the per-row progress readout, which is a marker plus a percentage rather than spelled-out words; a title still clipped, and the trigger's collapsed label, reveal themselves on hover (`ChapterNavigator.compactProgress.test.tsx`)
+- Correcting milestones from the picker (AQU-2310): at or above the milestone floor a hand-set row's edit control offers Rename… / Edit range… / Remove, an app-made "Part N" row offers Rename… only (a hand-set milestone over exactly its cells), a chapter the file supplied offers nothing, and "New milestone…" opens the form empty; below the floor or on a live-linked project there is neither (`ChapterNavigator.editing.test.tsx`, `EditorTable.setMilestone.test.tsx`). Renaming a part leaves every other part's number alone (`milestone-navigation.userMilestones.test.ts`); rename locks the range, a cleared name is refused out loud, and widening a milestone into the part beside it is not refused as crossing itself (`SetMilestoneDialog.edit.test.tsx`, `user-milestone-spans.test.ts`); a milestone nested under a Scripture chapter is listed and reachable there (`EditorTable.namedMilestones.test.tsx`). No new smoke: the write path is AQU-2308's two events, unchanged.
+- Milestone picker audio figures (AQU-2110): the picker counts audio validation — a file with recordings and no target text in the viewed language shows recorded / audio-validated figures alone, in the audio tones, so an audio-only chapter reads 100% once every take is signed off; a file with both media keeps its text figures and gains the audio column; a text-only file is unchanged; a take validated or un-validated moves the figure with no reload — covered in RTL/unit (`ChapterNavigator.audioProgress.test.tsx` — the three views and the tones; `useActiveCellStore.audioProgress.test.ts` — the rollup, the weakest-take rule at the requirement, two tracks, the structural policy, and the move without a file rebuild; `lib/progress/audio-progress-cells.test.ts` — the id sets off the attachment read). No new smoke, on the same reading as the AQU-2111 row above: a regression misreports a number.
+- Sidebar chapter list audio figures (AQU-2112): the editor sidebar's per-file chapter list counts audio validation, by the same per-file rule as the chapter picker (AQU-2110) — a file with recordings and no target text in the viewed language reads its audio figures alone in the audio tones, so an audio-only chapter reads complete once every take is signed off instead of drawing every square untranslated; a file with both keeps its text squares and figures and gains the audio pair; a text-only file is unchanged; a heading or parked line still draws "not counted". Both of the list's sources are covered: the OPEN file's own projection (`lib/health/chapter-health.audioProgress.test.ts` — the three views, the per-line recorded/validated squares, the exclusions, and the re-count when a take is un-validated) and the SERVER's per-chapter progress for a file merely expanded, producer through consumer (`sidebar/FileSectionGrid.audioProgress.test.tsx` — the counts the `/progress` response has always carried and this surface discarded, including a worker that sends none). No new smoke, on the same reading as the AQU-1485 row above: a regression misreports a number in sidebar chrome.
+- Seed-VC was removed (AQU-2291). A real person's voice is either an Inworld quick clone from one short clip (New voice → Clone voice; `/api/v1/voice/tts` clones the `referenceAudioId` once via Inworld `voices:clone` and caches the id, `tts.test.ts`) — it reads text but cannot re-voice takes — or a custom voice trained from at least 5 minutes of recordings (New voice → Train voice), which Change voice can use. `POST /api/v1/voice/convert` refuses a `referenceAudioId` with a 400 that says so (`sync-worker/src/__tests__/voice-convert.test.ts`).
+- Train a voice from this recording (a person's take: its ⋯ menu on the timeline, or the Recording tab's take) opens the New voice modal in place on the Train voice tab, seeded with that take, without switching to the Voices dock tab — a generated or re-voiced take offers none (AQU-1758, AQU-2291; `CloneVoiceModalHost.test.tsx`, `TargetAudioLane.menu.test.tsx`, `CellTakeBlock.test.tsx`, `RecordingTakes.lineVoice.test.tsx`)
+- Media is the view on every file (AQU-1758). A Bible book or document opens on the timeline one chapter at a time — the chapter the table and its chapter picker are on, or the one playback is on — and a file with no chapters shows whole on the timeline, however long (a 100-minute document draws every line) (`sequence-timeline.test.ts`). Recordings sit on their takes with dashed stand-ins for the rest; headings follow "Count headings as translatable content" (on the timeline when they count, off unless recorded when they do not) and hidden lines stay off unless recorded; text chips on a book never drag into times; a book with no source audio has no Source audio row (`tracks.test.ts`, `TimelineEditor.test.tsx`). Play all carries on into the next chapter, on the queue's ran-out signal and never on a stop or a pause (`play-queue.ran-out.test.ts`). Following the recordings, a book verse's take and each piece of a split take can be dragged; the pause or the gap between pieces is deliberate silence, stored on the take or piece through `cell.audio.place`, drawn as nothing (plain timeline, no band, no words) and joined in as silence (`programme.test.ts`, `layout.test.ts`, `tail-cut.test.ts`, `play-queue.free-split.test.ts`). The table under the timeline shows source text (`EditorTable.castGutter.test.tsx`); the mode switch says Media (`FileChapterToolbar.test.tsx`, `AgentWorkbench.test.tsx`); in Media a row always opens on Recording unless it has issues (`expansion-tab.test.ts`); no timed file carries a waveform marker in the file list (`FileRow.test.tsx`); the microphone is only ever asked for by the recording window (`useMicPermission.test.ts`, `EditorTable.micPrompt.test.tsx`); a take has a ⋯ on hover and, on a person's take, its menu and the Recording tab's take offer "Train a voice from this recording" (AQU-2291: New voice on the Train voice tab, seeded with the take), and a generated take's clip names its voice when it is not the line's (`TargetAudioLane.menu.test.tsx`, `TargetAudioLane.lineVoice.test.tsx`, `RecordingTakes.lineVoice.test.tsx`, `take-voice.test.ts`); what the Audio view's voice card did (AQU-2212) lives on: a voice picked in a line's circle acts on the line — a character, trained or ElevenLabs voice re-voices its take, an empty line reads its text, a stock voice regenerates a generated take, never over a person's recording — the circle names a person's recording ("Recorded by …") and ends its list with "Add a voice…", and when the line's voice and its take disagree "Change to …" / "Generate · …" leads its take's menu and its Recording tab, with "Voicing as …" there and on the clip while it runs (`line-voice.test.ts`, `voicing-as.test.ts`, `EditorTable.castGutter.test.tsx`, `CastGutterVoice.test.tsx`); the Film button and the Sources menu follow the project's "film and sources" setting, off by default for a book project (`film-and-sources.test.ts`, `ProjectSettings.timeline.test.tsx`). `/project/:id/voice` still resolves (route-health smoke). Extension editors keep their own Audio lens (`default-editor-rev4.spec.ts` clicks the host's Media tab).
+- Change voice per line on the Media timeline (AQU-2026): a take's right-click menu on the target audio lane offers **Change voice** beside Regenerate — the per-line control the Audio view kept on its voice card until AQU-1758 retired that view, so this menu is now the one place on every file. It answers for the LINE: nothing is offered where the only sound is a linked video's programme audio, a voice that is not a trained library or custom voice greys the item with that reason (AQU-2291 removed the Seed-VC quality submenu along with clone voices), and an uneditable lane carries no take menu at all (`TargetAudioLane.menu.test.tsx`). No new smoke: the conversion itself is the unchanged `changeCellVoice` path the Audio lens's voice card already runs — this is which surface reaches it.
+- Moving a recorded take on the Media timeline (AQU-2215): following the recordings, a take is no longer locked to the front of its line — dragging its chip right leaves a pause before it (the line grows to hold it, so the lines after it move along) and dragging it left shortens that pause back to none, never below. What a drag stores is only that pause, as the take's offset from its line's own start; the derived programme clock the chip is drawn on is never persisted, so the take lands where the next layout draws it and keeps its place across a timing-choice switch. A take the programme would not keep a pause for stays locked rather than springing back — a split take, a take of unknown length, a line with no times of its own. The pause arithmetic and the movability rule are in `src/lib/timeline/programme.test.ts`, the per-mode inverse of the chip's geometry in `src/lib/timeline/layout.test.ts`, and the gesture end to end in `src/components/timeline/TimelineEditor.test.tsx`. No new smoke, on the same reading as the AQU-2026 row above: nothing crosses a layer — the placement rides the unchanged `cell.audio.place` write that journey 8's recording path already covers, and this is which timing choice reaches it.
+- Voice library size does not decide the panel's render cost (AQU-1940): the Voices dock panel windows its rows, so a project carrying tens of thousands of voices — one was minted per verse label by the Codex migration — opens instead of freezing and losing the tab to an OOM kill, while the header count and the search still cover every row the lane offers — the whole library until AQU-2037 scoped both to the active lane (`VoiceLibraryPanel.test.tsx`). UI-only: nothing crosses a layer here — the library arrives in the project-settings read that every other Voices journey already rides, and a regression costs the reader the tab, not data, access or a committed artifact. The 30k library it takes to move the bound is seeded in RTL; recording a heap snapshot on the real project is the ticket's QA step.
+- Chapter audio stitch (AQU-1201): concatenate a chapter's verse recordings into one continuous WAV. A checkbox includes chapter-heading takes in that file; the choice is remembered in export-dialog localStorage — RTL in `audio-chapter.group.test.ts`, `audio-chapter.export.test.ts`, `ExportDialog.audio-chapter.test.tsx`, `export-dialog-memory.test.ts`. Existing by-character / by-line exports stay on their own tests.
+- Batch voice generation from a cell selection (AQU-1722): Media's **Generate voice** picks one voice and gives every selected line its own take, beside **Voice together**'s one shared clip. The plan's scope, word/credit estimate, skip clauses and explicit skip/overwrite choice over lines that already have audio are in `BatchVoiceDialog.test.tsx`; the planning and run rules — one shared queue and Cancel, a per-line failure named with an actionable reason rather than aborting, a clean stop at the provider's daily budget naming what it never attempted, and the word-allowance prefix cut — are in `batch-voice.test.ts`; the toolbar gating in `SelectionBar.test.tsx`. No new smoke: the takes attach through the unchanged per-cell path that journey 8 already covers end to end.
+- A voice belongs to the target lane it was made in (AQU-2037): one project no longer means one shared voice library. `Voice.laneId` records the lane, `laneScopedTtsSettings` is the one read view every voice surface goes through (the Voices panel's rows and count, the per-cell picker, the batch voice dialog, the Media-timeline cast gutter, Generate per cell and whole-file, change-voice), and `saveTts` is the one write seam that stamps a newly stored voice — so New voice / Train voice / voice design, an import with speaker labels, diarization and "Adopt voices as cast" all land in the active lane without knowing lanes exist. A cell cast to another lane's voice reads as unassigned and generates with this lane's voice; a lane whose project default belongs elsewhere falls back to the built-in Narrator; voices stored before the field keep showing on every lane until AQU-2039 migrates them; a project with no target lane rows is unchanged. Rules in `voice-lanes.test.ts`, the hook's scoping, stamping and localStorage round trip in `useProjectTts.lanes.test.ts`, the roster in `VoiceLibraryPanel.lanes.test.tsx`. UI-only, no new smoke: nothing crosses a layer — the lane is already the client's, and the library rides the same project-settings read/write every other Voices journey uses, with `laneId` passing through a server that only caps the blob's size. Confirming the reported two-lane project (an Arabic voice no longer offered on, or speaking for, the Samoan lane) is the ticket's QA step.
 - New-voice leftover Kokoro project defaults remap to Inworld; picker offers Inworld / Gemini / MMS (`NewVoiceModal.test.tsx`)
+- A language with no Inworld stock voices disables the Voice picker (AQU-2035): on the **Prebuilt voice** tab of New voice / Edit voice, a stock-voice lookup that runs and comes back empty — or fails — leaves the picker greyed out on the voice that will be saved (the saved one when editing, otherwise the built-in default), never blank and never reselected behind the user. The built-in English list and its "Couldn't load Inworld voices… Showing the built-in list." note are gone from the base catalog, all eleven locale catalogs and the source-hash sidecar: English voices are the wrong choices for Danish, and the note read as an error where the Language hint already points to **Voice design**. A language that does have voices lists them as before, and the "no lookup attempted" case (no project/file context or no session) still falls back to the built-in list (`InworldVoiceField.test.tsx`). UI-only, no new smoke: nothing crosses a layer — this is which voices the unchanged `listInworldVoices` read is allowed to stand in for, and the save path is untouched. Walking Danish/Default on the real modal is the ticket's QA step.
 - Inworld Voice Design starting-point chips (Agent, Narrator, Instructor, Pirate — Companion removed AQU-1378) (`InworldVoiceDesignField.test.tsx`, `inworld-voice-design.test.ts`)
 - AI model consent dialog: Just Whisper starts that model's download (Enable all is not required) (`AiModelConsentDialog.test.tsx`)
 - Org add-member dialog defaults to Contributor and states that org membership below Maintainer does not open projects (`MembersPage.test.tsx`; access-panel copy in `MemberAccessPanel.test.tsx`)
+- Member inspector lane access (AQU-1783): the popover reports a member's LANE GRANTS
+  (`project_member_lane_roles`), not their scopes, because the read wall reads the grants —
+  reading the scopes is what made it print "Unscoped — full access" about a contributor the
+  wall had walled off. The verdict rule is `src/lib/lanes/grant-gap.test.ts` (all granted /
+  gap / deliberate scoping / a grant below Viewer / Maintainer-by-role / wall off); the three
+  rendered states, the "no access" marker and the one-click regrant are in
+  `MemberLaneScopeEditor.test.tsx`; the endpoint payload, the lead-only gate, the regrant
+  granting every target lane (archived included) and a lane created after the regrant still
+  reaching the member (AQU-1781) are in
+  `auth-worker/src/__tests__/member-scopes-lane-grants.test.ts`. No smoke: the gap is a
+  two-table DISAGREEMENT, so a walk only shows it with the read wall on (`LANE_READ_WALL`,
+  unset locally and in e2e) AND grants that have drifted. Since AQU-1781 (a new lane is
+  granted to members who read every lane), AQU-1782 (direct add writes grants) and AQU-1801
+  (the three team writes do too — team add, team→project attach, team→project role change,
+  pinned in `auth-worker/src/__tests__/team-lane-grants.test.ts`) the app's own flows no
+  longer produce that drift — it lives in data written before them — so a walk has to delete
+  a grant row by hand first. The inspector-shows-the-gap → regrant →
+  contributor-reloads walk is on this issue's QA checklist rather than written blind.
+- Org import floor (AQU-2304): an org owner sets **Settings → Security → "Who can import files"**
+  to Maintainer, and in every project of that org only maintainers and owners may bring a NEW
+  source file in — the Import dialog's "New source text", the sidebar re-import and the IDML copy
+  repair all withdraw from a project lead, while importing a TRANSLATION into a file already in the
+  project stays open to contributors and the Door43 upstream panel stays Maintainer-only either way.
+  The server is the boundary: `file.create` is refused with a 403 naming the required role, so a
+  stale or hand-crafted client cannot get around the setting. The perimeter refusal and every
+  fail-safe (unset, garbage, unreadable or org-less → Project lead; owner never reads settings at
+  all; one org-settings read per batch through the request cache) are in
+  `sync-worker/src/__tests__/authorize-import-floor.test.ts`; the owner-only write gate, the
+  role-ladder validation, the carry-over of an omitted key and the resolved floor on the project's
+  settings response (for a project lead by direct grant who is NOT an org member, and whose org read
+  is a 403) in `auth-worker/src/__tests__/org-settings-import-floor.test.ts`; the Security row — two
+  options, disabled below owner, the patched key, the owner-only error, the page's intro sentence —
+  in `Settings.test.tsx`; and the client gate, with the floor's trip from the settings response into
+  the one decision all five source-import affordances read, in `role-policy.test.ts` /
+  `project-org-policy.test.ts`. **No smoke yet, and the gap is deliberate:** the cross-layer walk
+  this contract deserves (owner flips the org → the lead's own browser loses Import on its next
+  settings re-read → a hand-posted `file.create` from that lead 403s → flip back and the same post
+  succeeds) needs two role-seeded sessions and a direct sync-API post, and the box this landed on
+  had no Docker, hence no local Postgres and no runnable stack. It is on the ticket's QA checklist
+  rather than written blind — same call as the AQU-1187 row below. There is no existing org-floor
+  smoke to extend (no spec drives `/settings/security` today), so this would be a new journey file.
+  AQU-2306 adds the row's disclosure of which projects require MORE than the org: the count, the
+  zero state, the loading state that says nothing, the capped and visibility-filtered list with its
+  "and N more" remainder, the absence of a reset, and the re-read when the org's floor moves are in
+  `ImportPermissionsSection.test.tsx`; the server side of the count — name-visibility filtering, the
+  50 cap beside the exact total, the number-only read of AQU-2305's `wp_import_min_role` column, and the count falling to zero when the ORG
+  rises past a project with nothing written to that project — in auth-worker
+  `org-stricter-import-projects.test.ts`. It shares the walk above's gap for the same reason, and
+  the cross-project version of it (project A goes stricter → the org's Security row names A → the
+  link lands on A's Import card) is on AQU-2306's QA checklist.
+- Project import floor (AQU-2305): a project may make that same floor **stricter and never looser**.
+  A maintainer sets **Project settings → Import → "Who can import files"** from "Organization default
+  (Project lead)" to "Set for this project" → Maintainer, and in that project alone a project lead
+  loses Import "New source text", the sidebar re-import and the IDML repair, while the same lead still
+  imports in a sibling project of the same org. With the org itself at Maintainer the project's role
+  select offers nothing lower — the lower rung is disabled with the stricter-only reason on the option
+  — and a value below the org's floor written through the settings API is refused with a 400 naming
+  that floor, so the picker's restraint is a convenience and not the protection. A stored value the
+  org has since overtaken is inert: it displays as following the organization and enforces the org's
+  floor. The floor the perimeter applies is the HIGHER of the two
+  (`sync-worker/src/__tests__/authorize-project-import-floor.test.ts` — stricter enforced, looser and
+  off-ladder inert, no project row / a throwing read → Project lead, an owner reads neither settings
+  row, each row read once per batch); the write refusal, the three-way `importFloor` on the settings
+  response, the clear-on-omit and the project lead's 403 in
+  `auth-worker/src/__tests__/project-import-floor.test.ts`; the row itself — the source selector, the
+  disabled lower option with its hint, the cleared key on "Organization default", an inert stored
+  value reading as the org's, and the whole row disabled for a lead — in
+  `ProjectSettings.importFloor.test.tsx`. The key is never copied down a source link
+  (`inherited-settings.test.ts`). **No smoke, for AQU-2304's reason and inheriting its gap:** the walk
+  that matters spans two projects, two roles and a direct sync-API post, which needs a running stack
+  this box has no Docker for. It is on the ticket's QA checklist rather than written blind, and it
+  would extend the AQU-2304 journey file that does not exist yet rather than adding a second one.
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
-- Agent workbench is desktop-only: compact viewports omit Agent entry points and direct Agent URLs return to the editor — covered in RTL (`FileChapterToolbar.test.tsx`, `LeftDock.test.tsx`, `agent/AgentModeRoute.test.tsx`).
+- Agent works on compact viewports (2026-09-30, restored after #802 hid it): the single-column Team workspace keeps its entry points below `lg`, and picking a conversation from the mobile sidebar sheet closes the sheet even when only `?conversation=` changes — covered in RTL (`AppShell.test.tsx` sheet close; `FileChapterToolbar.test.tsx` / `LeftDock.test.tsx` for entry-point wiring; `ProjectWorkspaceRoute.test.tsx` for a direct Agent URL staying on Agent). Verified at 375px on the dev stack. AQU-1496: every `/project/:id/...` surface shares one route wrapper — `ProjectWorkspaceRoute.test.tsx` pins it, so a surface hop keeps the workspace (and its open file) mounted; a guard on one surface alone is what broke that.
+- AQU-1187 scripture-catalog per-book import: an eBible / Hello AO selection spanning several books emits one source file per book, each carrying `bookCode`, so the files group into OT/NT and order canonically; a single-book selection stays one file and only gains its code. Covered at the import-contract level in `src/lib/import.scripture-books.test.ts` (asserts the real `file.create` bodies, per-book originals, and the re-import collision key) plus `group-by-corpus.test.ts`. The existing `import-ebible-persists-reload.smoke.spec.ts` fixture is a three-verse Genesis corpus, i.e. the single-book path, and stays valid unchanged. The multi-book variant needs a corpus long enough to cross a book boundary (~1.5k lines, generated from the bundled vref list) — worth adding to that spec when a runnable stack is at hand; it was not added blind.
+- Linked-video empty table (AQU-1565): a time-ordered file whose media is a LINKED
+  video — a YouTube "Link the film only" import (AQU-1556) — has no rows of its own, and
+  the editor's empty table used to fall through to the prompt for a file with no media
+  at all ("No media on this file yet", plus a direct-media-URL field that rejects a
+  watch page). What it says instead, what it offers, and what it withholds are covered
+  in RTL through the real EditorTable branch (`EditorTable.mediaEmptyState.test.tsx`):
+  the linked-video copy with no attach-media prompt and no URL field, the Open Media
+  view action and its absence when the table already renders under the timeline, the
+  attached caption tracks being NAMED rather than reported absent (their cues live in
+  their own content files, so the host file's row count stays at zero), a viewer
+  getting the sentence and nothing to click, and the regression guard that a file with
+  no linked video keeps the ordinary prompt, direct-URL field included. The decision
+  itself is `lib/editor/linked-video-empty-state.test.ts`. No smoke, per the rules: it
+  is an empty state in a single component, nothing is lost if it breaks, and the
+  picture-only import journey it follows is already walked by
+  `e2e/specs/editor/import-and-edit.smoke.spec.ts` (row 31).
+- Caption tracks becoming a linked video's rows (AQU-1566, Sam's option b). The
+  attach-as-rows journey itself is smoke row 31 above. What is RTL/unit only: the
+  rows-mode decision (`lib/editor/linked-video-empty-state.test.ts`: only once the
+  rows have loaded cleanly), the dialog's rows mode and the destinations it stops
+  offering once the file has rows (`import/ImportTimelineTextDialog.test.tsx`, `lib/import/caption-destinations.test.ts`), the
+  empty state's Attach captions and one "Use (track) as this file's rows" button per
+  source caption track for maintainers, and a Viewer keeping only Open Media view
+  (`EditorTable.mediaEmptyState.test.tsx`), the track menu's "Use as this file's rows"
+  and Attach captions without the switch and a viewer getting no Sources menu, Add
+  track or track menu (`timeline/TimelineEditor.test.tsx`, `TrackMenuItems.test.ts`),
+  and the confirmation (`timeline/UseTrackAsRowsDialog.test.tsx`). Turning an
+  existing track into rows is covered end to end against the real sync-worker
+  routes and Postgres in `src/lib/import/caption-rows.contract.test.js` and
+  `sync-worker/src/__tests__/import-caption-promotion.test.ts`. No smoke for it: the
+  new UI can no longer create the "empty file with a timeline track" it starts from,
+  so only legacy files reach it, and the server step is already pinned.
+- AQU-1702 file sidebar cross-group drag: dropping a file on another corpus group
+  moves it there (group marker + slot in the new group, as one call), the group under
+  the pointer shows the ring and the insertion line, and the one drop the sidebar
+  cannot express — a Bible book sent to Ungrouped, which the book-code fallback would
+  pull straight back — says why and writes nothing. "Move to corpus…" is the same
+  move without a drag. Covered in RTL (`ExpandableFileList.reorder.test.tsx`), with
+  the rule in `lib/sidebar/file-regroup.test.ts` and the numbers in
+  `lib/sidebar/file-sort-index.test.ts`. No smoke, same reasoning as AQU-1569: it is
+  sidebar chrome in one component, and the events it writes (`file.corpus.set`,
+  `file.reorder`) are already exercised by the worker projection tests.
+- AQU-1187 sidebar/picker book tree: a file spanning several books shows a collapsible header per book in the expanded sidebar row and files the toolbar chapter picker's options under book headings; per-book and non-scripture files render flat exactly as before — covered in RTL (`sidebar/BookHealthSpine.bookTree.test.tsx`, `ChapterNavigator.bookGroups.test.tsx`, `lib/sidebar/book-sections.test.ts`).
+- Hide cell / Show cell (AQU-1422): the menu entry's role gate (absent below
+  Project Lead, including on a DCS-pinned project where a refusal reason exists),
+  the DCS-pinned disabled reason, the IDML row that is parkable although its text
+  is not editable, the Show-cell wording flip, and the dimmed eye-off row —
+  covered in RTL (`EditorTable.hiddenCells.test.tsx`). The display-list rule that
+  drops a parked cell from the text table, the media lens and the chapter counts
+  together, and the list-version bumps a live hide/show depends on, are in
+  `useActiveCellStore.hiddenCells.test.ts`. The durable contract is a worker unit
+  test, not a smoke: `sync-worker/src/__tests__/hidden-cells-projection.test.ts`
+  drives the real projection against real Postgres and reads it back out through
+  the real cells read route, which is the producer/consumer seam that would
+  otherwise fail silently. The emit contract (non-chain-mutating, PROJECT_LEAD
+  floor) is in `src/lib/sync/events-emit.hiddenCells.test.ts`.
+- Hidden cells leave every export (AQU-1423). The existing export smoke
+  (`e2e/specs/editor/export.smoke.spec.ts`, row 38 above) already crosses the
+  layers this touches, and hiding adds no new cross-layer contract — it adds a
+  predicate to a scoping step that journey already exercises. So the coverage is
+  narrower and closer to the failure: `src/lib/export/validation-scope.test.ts`
+  for the predicate, `src/lib/export/hidden-cells-export.test.ts` for the
+  producer/consumer seam (real cells through the real scoping step into the REAL
+  text exporters, asserting the parked line is absent in BOTH languages — the
+  failure here is not a missing line but a present one in the source language),
+  `src/components/ExportDialog.hiddenCells.test.tsx` for the round-trip formats
+  and the dialog's per-format note, and
+  `sync-worker/src/__tests__/usfm-export-plan.test.ts` for the server-side USFM
+  plan against real Postgres.
+- Upstream curation reaches a linked project (AQU-1453, AQU-1546). A hide or a
+  show on an upstream source cell travels down every live link, and it is a
+  server contract end to end — the fold, the mirror payload and the projection —
+  with no UI of its own in the consuming project (a linked project does not offer
+  hide/show on mirrored source cells). So the coverage stays where the failure is:
+  `sync-worker/src/__tests__/link-sync-visibility.test.ts` against real Postgres.
+  AQU-1546 adds the two orders of events that lost the state while the
+  hide-last order worked — hide then edit, on a first sync and on an established
+  link — and a three-project `A → B → C` chain, where the middle project's hidden
+  cells were never hidden by anyone in it and the state exists only on the
+  `source.cell.mirror` events it received. No smoke: the downstream rows are
+  already there, nothing is lost, and a regression offers work the upstream
+  parked rather than destroying it.
+- An upstream delete reaches a linked project as a tombstone, and only as one
+  (AQU-1567). Like curation above it is a server contract with no UI of its own
+  in the consuming project, so it is pinned in
+  `sync-worker/src/__tests__/link-sync-tombstone-chain.test.ts` against real
+  Postgres: in `A → B → C` the cell A deleted is tombstoned in C with its text
+  kept, for a consumes-source and a consumes-target C, and a hide or a new
+  translation of it in B does not make it live in C again; an upstream restoring
+  the cell with its ORIGINAL text clears the tombstone, on one link and down a
+  chain; and a cell the downstream never held gets no row at all — create and
+  delete in one window, in different windows of one run, or as an empty
+  tombstone already sitting in B — while a later re-create still arrives and a
+  replayed window mirrors nothing. `link-sync-windowed.test.ts` pins that
+  one-event windows end in the same state. No smoke: the walk needs three
+  projects and two links, and crosses no layer the worker test does not already
+  run for real.
+- In-app feedback (AQU-1028, moved to the Help menu by AQU-1548): the Help ("?") menu's **Feedback** item opens the report dialog, the report is submitted to the team whether or not analytics consent is on, and the optional screen capture attaches / is dismissed / fails — covered in RTL (`ReportProblemButton/ReportProblemDialog.test.tsx`, `HelpMenu.test.tsx` for the entry point, `lib/feedback.test.ts`). The worker side (multipart route, R2 key, mail body, throttle, and the degradations when storage or mail is unbound) is covered against real Postgres in `auth-worker/src/__tests__/feedback.test.ts`.
+- A translation note shows the original-language phrase it is about, in its own script and direction, with the occurrence marker and support article — covered in RTL (`TranslationNotesSidebar.originalPhrase.test.tsx`); the producer→panel metadata contract is pinned in `src/lib/notes/note-metadata.test.ts`, `src/lib/parsers/translation-notes.test.ts` and `src/lib/dcs/routes/tsv-notes.test.ts`.
 
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL
 is missing, add it — then delete any leftover smoke, do not park it as non-smoke.
@@ -189,3 +601,14 @@ is missing, add it — then delete any leftover smoke, do not park it as non-smo
 Parallel Bibles missing-reference empty state is covered in RTL:
 `src/components/ParallelBiblesSidebar.test.tsx` (absent/book-only references,
 version picker access, and recovery when a valid reference appears).
+AQU-1249: `e2e/specs/collab/cross-user-comment.smoke.spec.ts` also covers a named anonymous guest joining a PIN checking link and saving feedback visible to the project owner. Default-off experimental discovery and hierarchical selection are covered in RTL (`ExperimentalFlagsSection.test.tsx`, `CheckingScopePicker.test.tsx`).
+
+### Optional analytics consent (AQU-2242 / AQU-2381)
+
+`e2e/privacy/analytics-consent.spec.ts` runs separately with
+`e2e/config/playwright.config.privacy.ts` and an analytics-enabled hermetic stack
+(see `e2e/privacy/README.md`). It verifies zero pre-approval contact, approved
+positive controls, account-specific identities and recordings, masking, stale
+callbacks, withdrawal, offline recovery and cross-tab refusal in Chromium,
+Firefox and WebKit. `projects/onboarding.smoke.spec.ts` checks the initially
+checked draft, explicit confirmation, Back/login navigation and denied storage.

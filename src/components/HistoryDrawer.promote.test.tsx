@@ -61,7 +61,7 @@ const CELL = {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockHook.mockReturnValue({ history: [A2, B2], isLoading: false, isError: false, revalidate: vi.fn() })
+  mockHook.mockReturnValue({ history: [A2, B2], isLoading: false, isError: false, failure: null, revalidate: vi.fn() })
 })
 
 describe("HistoryDrawer bumped (stale-branch) entry", () => {
@@ -117,7 +117,7 @@ describe("HistoryDrawer bumped (stale-branch) entry", () => {
 // must not require retyping it.
 describe("HistoryDrawer older on-chain entry", () => {
   it("offers Restore on an older version, not on the current one, and hands back that entry", () => {
-    mockHook.mockReturnValue({ history: [A1, A2], isLoading: false, isError: false, revalidate: vi.fn() })
+    mockHook.mockReturnValue({ history: [A1, A2], isLoading: false, isError: false, failure: null, revalidate: vi.fn() })
     const onPromote = vi.fn()
     render(
       <HistoryDrawer
@@ -154,6 +154,7 @@ describe("HistoryDrawer older on-chain entry", () => {
       history: [{ ...A1, syncState: "pending" }, A2],
       isLoading: false,
       isError: false,
+      failure: null,
       revalidate: vi.fn(),
     })
     render(

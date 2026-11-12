@@ -1,10 +1,13 @@
 import type { CSSProperties } from "react"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { CellIssueLines } from "@/components/cell/CellIssueLines"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { NOTE_CONTENT_CLASS } from "@/components/ui/info-note"
 import {
   healthRibbonColor,
   healthRibbonOpacity,
   type HealthRibbonPoint,
 } from "@/lib/health/health-ribbon"
+import { formatCellIssueLine, type CellIssueLine } from "@/lib/rules/cell-issue-summary"
 import { cn } from "@/lib/utils"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 
@@ -12,11 +15,15 @@ interface HealthRibbonProps {
   point: HealthRibbonPoint
   hasMajorIssue?: boolean
   hasIssue?: boolean
+  /** Active checks on this cell. When present, hover names each one. */
+  issues?: readonly CellIssueLine[]
+  /** Plain hint when the ribbon is flagged with no check to name. */
+  issueHint?: string
   className?: string
   testId?: string
 }
 
-function description(point: HealthRibbonPoint): string {
+function description(point: HealthRibbonPoint, t: TFunction): string {
   const raw = point.rawScore === undefined ? undefined : Math.round(point.rawScore)
   const trend = point.smoothedScore === undefined ? undefined : Math.round(point.smoothedScore)
 
@@ -27,13 +34,18 @@ function description(point: HealthRibbonPoint): string {
       ? `Automatic health ${raw}%`
       : `Automatic health ${raw}% · local trend ${trend}%`
   }
-  if (raw === undefined) return "Pre-translation source evidence unavailable"
+  if (raw === undefined) return t("editor.health.evidenceUnavailable")
   return trend === undefined || trend === raw
-    ? `Pre-translation source evidence ${raw}%`
-    : `Pre-translation source evidence ${raw}% · local trend ${trend}%`
+    ? t("editor.health.evidence", { raw })
+    : t("editor.health.evidenceTrend", { raw, trend })
 }
 
-function tooltipContent(point: HealthRibbonPoint, issueLabel: string, t: TFunction) {
+function tooltipContent(
+  point: HealthRibbonPoint,
+  issueLabel: string,
+  issues: readonly CellIssueLine[],
+  t: TFunction,
+) {
   const raw = point.rawScore === undefined ? undefined : Math.round(point.rawScore)
   const trend = point.smoothedScore === undefined ? undefined : Math.round(point.smoothedScore)
 
@@ -42,7 +54,7 @@ function tooltipContent(point: HealthRibbonPoint, issueLabel: string, t: TFuncti
       <div className="space-y-1">
         <p className="font-medium">{t("agentWorkspace.humanValidated")}</p>
         <p>{t("agentWorkspace.validationAuthoritative")}</p>
-        {issueLabel && <p className="font-medium text-amber-600 dark:text-amber-400">{issueLabel}</p>}
+        {issueDetail(issueLabel, issues)}
       </div>
     )
   }
@@ -52,11 +64,13 @@ function tooltipContent(point: HealthRibbonPoint, issueLabel: string, t: TFuncti
       <div className="space-y-1">
         <p className="font-medium">
           {raw === undefined
-            ? "Automatic estimate pending"
-            : `Automatic estimate ${raw}%${trend === undefined || trend === raw ? "" : ` · local trend ${trend}%`}`}
+            ? t("editor.health.estimatePending")
+            : trend === undefined || trend === raw
+              ? t("editor.health.estimate", { raw })
+              : t("editor.health.estimateTrend", { raw, trend })}
         </p>
         <p>{t("agentWorkspace.automaticHealthHelp")}</p>
-        {issueLabel && <p className="font-medium text-amber-600 dark:text-amber-400">{issueLabel}</p>}
+        {issueDetail(issueLabel, issues)}
       </div>
     )
   }
@@ -65,27 +79,43 @@ function tooltipContent(point: HealthRibbonPoint, issueLabel: string, t: TFuncti
     <div className="space-y-1">
       <p className="font-medium">
         {raw === undefined
-          ? "Pre-translation source evidence unavailable"
-          : `Source evidence ${raw}%${trend === undefined || trend === raw ? "" : ` · local trend ${trend}%`}`}
+          ? t("editor.health.evidenceUnavailable")
+          : trend === undefined || trend === raw
+            ? t("editor.health.evidence", { raw })
+            : t("editor.health.evidenceTrend", { raw, trend })}
       </p>
       <p>{t("agentWorkspace.sourceCoverageHelp")}</p>
-      {issueLabel && <p className="font-medium text-amber-600 dark:text-amber-400">{issueLabel}</p>}
+      {issueDetail(issueLabel, issues)}
     </div>
   )
+}
+
+function issueDetail(issueLabel: string, issues: readonly CellIssueLine[]) {
+  if (issues.length > 0) return <CellIssueLines lines={issues} />
+  if (!issueLabel) return null
+  return <p className="font-medium text-amber-600 dark:text-amber-400">{issueLabel}</p>
 }
 
 export function HealthRibbon({
   point,
   hasMajorIssue = false,
   hasIssue = false,
+  issues = [],
+  issueHint,
   className,
   testId = "health-ribbon",
 }: HealthRibbonProps) {
   const t = useT()
-  const issueLabel = hasMajorIssue
-    ? "Major automatic issue"
-    : hasIssue ? "Automatic issue" : ""
-  const label = `${description(point)}${issueLabel ? ` · ${issueLabel.toLowerCase()}` : ""}`
+  const namedIssues = issues.length > 0
+    ? issues.map(formatCellIssueLine).join(". ")
+    : ""
+  const genericLabel = namedIssues || issueHint
+    ? ""
+    : hasMajorIssue
+      ? "Major automatic issue"
+      : hasIssue ? "Automatic issue" : ""
+  const issueLabel = namedIssues || issueHint || genericLabel
+  const label = `${description(point, t)}${issueLabel ? ` · ${genericLabel ? genericLabel.toLowerCase() : issueLabel}` : ""}`
   const score = point.smoothedScore
   const opacity = healthRibbonOpacity(point)
 
@@ -97,29 +127,39 @@ export function HealthRibbon({
         backgroundImage: `linear-gradient(to bottom, ${healthRibbonColor(point.topScore ?? score, point.topOpacity ?? opacity)} 0%, ${healthRibbonColor(score, opacity)} 42%, ${healthRibbonColor(score, opacity)} 58%, ${healthRibbonColor(point.bottomScore ?? score, point.bottomOpacity ?? opacity)} 100%)`,
       }
 
+  // AQU-2260 (Sam, Oct 29): nothing explains itself on hover. The ribbon is
+  // its own trigger: a click (or Enter / Space) opens what its colour means in
+  // a note anchored to it, and a second click shuts it. The click stops here,
+  // so it never selects the cell under it.
   return (
-    <AppTooltip content={tooltipContent(point, issueLabel, t)} side="right" delay={200} className="max-w-xs">
-      <span
-        data-showcase="cell.health"
-        data-testid={testId}
-        data-health-stage={point.stage}
-        data-health-score={score === undefined ? undefined : Math.round(score)}
-        data-health-opacity={opacity.toFixed(2)}
-        aria-label={label}
-        role="img"
-        tabIndex={0}
-        className={cn(
-          "pointer-events-auto absolute -bottom-2 -top-2 left-0 z-10 w-3 cursor-help focus-visible:outline-none",
-          className,
-        )}
-        onClick={(event) => event.stopPropagation()}
+    <Popover>
+      <PopoverTrigger
+        nativeButton={false}
+        render={
+          <span
+            data-showcase="cell.health"
+            data-testid={testId}
+            data-health-stage={point.stage}
+            data-health-score={score === undefined ? undefined : Math.round(score)}
+            data-health-opacity={opacity.toFixed(2)}
+            aria-label={label}
+            className={cn(
+              "pointer-events-auto absolute -bottom-2 -top-2 left-0 z-10 w-3 cursor-pointer focus-visible:outline-none",
+              className,
+            )}
+            onClick={(event) => event.stopPropagation()}
+          />
+        }
       >
         <span
           aria-hidden="true"
           className="absolute bottom-0 left-0 top-0 w-[2px] transition-opacity duration-500"
           style={lineStyle}
         />
-      </span>
-    </AppTooltip>
+      </PopoverTrigger>
+      <PopoverContent side="right" sideOffset={6} className={cn(NOTE_CONTENT_CLASS, "max-w-xs")}>
+        {tooltipContent(point, genericLabel || issueHint || "", issues, t)}
+      </PopoverContent>
+    </Popover>
   )
 }

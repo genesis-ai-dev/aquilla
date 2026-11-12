@@ -21,15 +21,16 @@
 //   6. Living Memory extraction: the `memory`, `rules`, and `system-prompt`
 //      sections are gone from settings, and their legacy URLs redirect
 //      (page AND route-modal) to the standalone /project/:id/memory surface —
-//      memory → /memory, rules → /memory/quality, system-prompt →
+//      memory → /memory, rules → /memory/checks, system-prompt →
 //      /memory/instructions — preserving the query string.
-//   7. The AI pane keeps a cross-link NavRow to Living Memory (instructions)
-//      with the old Custom/Default system-prompt hint semantics.
+//   7. The AI pane keeps one NavRow to the project instructions
+//      (memory/instructions) with a preview of the text (AQU-2342).
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, cleanup } from "@testing-library/react"
 import { MemoryRouter, Route, Routes, Link, useLocation } from "react-router-dom"
 import { ProjectSettings, ProjectSettingsDialog } from "./ProjectSettings"
+import { projectLanguageSettingsPath } from "@/lib/navigation/org-paths"
 
 
 vi.mock("@/components/org/OrgSidebar", () => ({
@@ -59,11 +60,12 @@ const PROJECT_ID = "proj-submenu-ia"
 function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   return {
     id: PROJECT_ID,
+    orgId: 7,
     name: "Sub-menu IA Test Project",
     files: [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "", cellCount: 1 }],
     sourceLanguage: "English",
     targetLanguage: "French",
-    syncRole: { level: 700, source: "creator" },
+    syncRole: { level: rosterSettings.roleLevel, source: "creator" },
     // Give every group something to render: git-sync origin, no source link
     // (kept simple — source-link/upstream tested for visibility separately
     // isn't needed here since "General" and "AI" alone already prove the
@@ -95,15 +97,40 @@ vi.mock("@/hooks/useProjectSettings", () => ({
     hasFetched: true,
     isOnline: true,
     refresh: vi.fn(),
+    orgPolicy: rosterSettings.visibilityFloors ? carriedOrgPolicy : null,
+    visibilityFloors: rosterSettings.visibilityFloors,
   }),
 }))
 
+// AQU-1771: the org policy the project's settings response carries.
+const carriedOrgPolicy = {
+  rosterViewMinRole: 600,
+  memberProgressViewMinRole: 600,
+  allowSelfAssignment: false,
+  allowScopedLaneAssignment: false,
+  assignmentMinRole: 500,
+  autoPropagateRepetitions: true,
+  exportMinRole: null,
+}
+
 vi.mock("@/hooks/useOrg", () => ({
-  useOrg: () => ({ org: null }),
+  useOrg: () => ({ org: { id: 99 } }),
 }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "tok", username: "tester" }, loading: false }),
+}))
+
+// AQU-1525: the Source & sync pane now mounts LinkSourceSection for a project
+// with no upstream, and that card lists the projects the user can link to.
+// Stubbed so the pane stays offline-deterministic (the real hook fetches).
+vi.mock("@/hooks/useAccessibleProjects", () => ({
+  useProjectsForNavigation: () => ({
+    projects: [{ id: "proj-upstream", name: "English Source", role: { level: 100 } }],
+    isLoading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
 }))
 
 vi.mock("@/hooks/useAccounts", () => ({
@@ -128,10 +155,18 @@ vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
   }
 })
 
-vi.mock("@/lib/store/project-index", () => ({
-  getProject: vi.fn().mockResolvedValue(null),
-  updateProject: vi.fn().mockResolvedValue(undefined),
+const projectIndex = vi.hoisted(() => ({
+  getProject: vi.fn(async () => null),
+  updateProject: vi.fn(async () => undefined),
+  patchProject: vi.fn(async () => null),
 }))
+// AQU-2262: a name typed and left (or closed) saves, through the rename.
+vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/sync/cloud-projects")>()
+  return { ...actual, renameProject: vi.fn(async (_jwt: string, id: string, name: string) => ({ id, name })) }
+})
+
+vi.mock("@/lib/store/project-index", () => projectIndex)
 
 vi.mock("@/lib/progress/read-validation-count", () => ({
   readValidationCount: vi.fn(() => 1),
@@ -170,7 +205,17 @@ vi.mock("@/hooks/useProjectOrgId", () => ({
   useProjectOrgId: () => ({ orgId: null, isLoading: false, error: null }),
 }))
 
-const rosterSettings = vi.hoisted(() => ({ canViewRoster: true }))
+// AQU-1771: the Members pane follows the roster floor THIS project enforces —
+// the org's (here 600, from the org read below) or the project's own stricter
+// one carried on its settings response — against the caller's project role.
+const rosterSettings = vi.hoisted(() => ({
+  canViewRoster: true,
+  roleLevel: 700,
+  visibilityFloors: null as null | {
+    rosterViewMinRole: { org: number; project: number | null; effective: number }
+    memberProgressViewMinRole: { org: number; project: number | null; effective: number }
+  },
+}))
 vi.mock("@/hooks/useOrgSettings", () => ({
   useOrgSettings: () => ({
     settings: {},
@@ -269,6 +314,8 @@ function renderModalAt(path: string) {
 beforeEach(() => {
   vi.clearAllMocks()
   rosterSettings.canViewRoster = true
+  rosterSettings.roleLevel = 700
+  rosterSettings.visibilityFloors = null
 })
 
 describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
@@ -278,14 +325,16 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     const dialog = screen.getByTestId("project-settings-dialog")
     expect(dialog).toHaveClass("max-w-[min(42rem,calc(100%-2rem))]")
     fireEvent.click(screen.getByText("General"))
-    fireEvent.change(screen.getByLabelText(/project title/i), {
-      target: { value: "Unsaved modal title" },
+    fireEvent.change(screen.getByLabelText(/project name/i), {
+      target: { value: "Typed modal title" },
     })
 
+    // AQU-2262: nothing is left unsaved, so closing asks nothing: what was
+    // being typed saves as the page closes.
     fireEvent.click(screen.getByRole("button", { name: /close/i }))
-    expect(screen.getByRole("heading", { name: "Discard changes?" })).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "Discard" }))
+    expect(screen.queryByRole("heading", { name: "Discard changes?" })).toBeNull()
     expect(screen.getByTestId("project-overview-background")).toBeTruthy()
+    expect(projectIndex.getProject).toHaveBeenCalled()
   })
 
   it("only expands the modal beyond the content width for wide settings panes", () => {
@@ -304,8 +353,11 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     // The index is a NavList of groups...
     expect(screen.getByText("General")).toBeTruthy()
     expect(screen.getByText("Members")).toBeTruthy()
-    expect(screen.getByText("AI & completion")).toBeTruthy()
+    expect(screen.getByText("AI", { exact: true })).toBeTruthy()
     expect(screen.getByText("Validation & health")).toBeTruthy()
+    // AQU-2261: the pane holding Audio loading and Timeline is "Media".
+    expect(screen.getByText("Media")).toBeTruthy()
+    expect(screen.queryByText(/audio media/i)).toBeNull()
     // ...minus the sections that moved to the standalone Living Memory
     // surface (/project/:id/memory) — they must NOT be index rows anymore.
     // The Quality hub still renders with Validation & health alone.
@@ -318,9 +370,9 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.getByText("Lazy (default)")).toBeTruthy()
 
     // ...not the controls themselves. Project Title (General) and AI
-    // Instructions (AI & completion) must NOT both be in the document at once
+    // Instructions (AI) must NOT both be in the document at once
     // on the index — proving this isn't still one long scroll.
-    expect(screen.queryByLabelText(/project title/i)).toBeNull()
+    expect(screen.queryByLabelText(/project name/i)).toBeNull()
     expect(screen.queryByLabelText(/username/i)).toBeNull()
   })
 
@@ -330,10 +382,11 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     fireEvent.click(screen.getByText("General"))
 
     // General's own controls are present...
-    expect(screen.getByLabelText(/project title/i)).toBeTruthy()
-    expect(screen.getByLabelText(/username/i)).toBeTruthy()
+    expect(screen.getByLabelText(/project name/i)).toBeTruthy()
+    // AQU-2259: the username moved to Preferences; a note is left here.
+    expect(screen.getByText(/this setting moved to preferences/i)).toBeTruthy()
 
-    // ...but a control that lives in a different group (AI & completion) is
+    // ...but a control that lives in a different group (AI) is
     // NOT rendered at the same time. This is the core "no more one long
     // scroll" assertion — every field used to be simultaneously in the DOM.
     expect(screen.queryByLabelText(/examples retrieved/i)).toBeNull()
@@ -344,17 +397,74 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
 
     expect(screen.getByLabelText(/examples retrieved/i)).toBeTruthy()
-    expect(screen.queryByLabelText(/project title/i)).toBeNull()
+    expect(screen.queryByLabelText(/project name/i)).toBeNull()
+  })
+
+  // AQU-2031: the editor's TARGET header used to reach these cards through a
+  // `?q=` search pre-fill, which always showed the search box and mixed in
+  // cards from other groups. Those entry points now deep-link to the GROUP
+  // pane with `?focus=`, which scrolls one card (or one field) into view while
+  // the page stays a pane: no search box, the group's own title.
+  it("a `?focus=` deep link lands on the pane with its target scrolled into view", () => {
+    const scrolled: { id: string; block?: ScrollLogicalPosition }[] = []
+    vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (
+      this: Element,
+      arg?: boolean | ScrollIntoViewOptions,
+    ) {
+      scrolled.push({ id: this.id, block: typeof arg === "object" ? arg.block : undefined })
+    })
+
+    const cases = [
+      // "Change target language…", the single-lane TARGET pill, and the "Set
+      // target language" prompt all share this one.
+      { focus: "languages", elementId: "section-languages", block: "start" },
+      // "Add lane…" — the field sits below the lane list, so a project with
+      // enough lanes would otherwise open with it below the fold.
+      { focus: "add-lane", elementId: "add-lane-field", block: "nearest" },
+    ] as const
+
+    for (const { focus, elementId, block } of cases) {
+      scrolled.length = 0
+      // Render the URL the EDITOR actually navigates to, from the same helper
+      // ProjectWorkspace calls — so a producer that went back to `?q=` (or to
+      // the settings index) fails here rather than only in the browser.
+      renderAt(projectLanguageSettingsPath(PROJECT_ID, focus))
+
+      // Pane mode, not a search: the box the pre-fill always showed is absent,
+      // and the title is the group's own rather than "Project settings".
+      expect(screen.queryByLabelText(/search settings/i)).toBeNull()
+      expect(screen.getByRole("heading", { name: "General" })).toBeTruthy()
+      // The Languages card is on the pane either way...
+      expect(document.getElementById("section-languages")).toBeTruthy()
+      // ...and only General's cards are — no card from another group tags along
+      // the way the keyword search used to pull in unrelated matches.
+      expect(screen.queryByLabelText(/examples retrieved/i)).toBeNull()
+      // ...and the deep link scrolled to the requested target, not the top.
+      expect(scrolled).toEqual([{ id: elementId, block }])
+
+      cleanup()
+    }
+  })
+
+  it("an unknown `?focus=` value leaves the pane untouched rather than throwing", () => {
+    const scrollIntoView = vi
+      .spyOn(Element.prototype, "scrollIntoView")
+      .mockImplementation(() => {})
+
+    renderAt(`/project/${PROJECT_ID}/settings/general?focus=not-a-target`)
+
+    expect(screen.getByRole("heading", { name: "General" })).toBeTruthy()
+    expect(scrollIntoView).not.toHaveBeenCalled()
   })
 
   it("the Settings breadcrumb returns to the settings index", () => {
     renderAt(`/project/${PROJECT_ID}/settings/general`)
-    expect(screen.getByLabelText(/project title/i)).toBeTruthy()
+    expect(screen.getByLabelText(/project name/i)).toBeTruthy()
 
     fireEvent.click(screen.getByRole("link", { name: /^Settings$/i }))
 
-    expect(screen.getByText("AI & completion")).toBeTruthy()
-    expect(screen.queryByLabelText(/project title/i)).toBeNull()
+    expect(screen.getByText("AI", { exact: true })).toBeTruthy()
+    expect(screen.queryByLabelText(/project name/i)).toBeNull()
   })
 
   it("omits Editor from the breadcrumb unless settings was opened from the editor", () => {
@@ -384,7 +494,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
 
     // Matching cards appear under their index section label — not a flat dump.
     expect(screen.getByText("General")).toBeTruthy()
-    expect(screen.getByLabelText(/project title/i)).toBeTruthy()
+    expect(screen.getByLabelText(/project name/i)).toBeTruthy()
     // Unrelated groups that have no keyword match stay out of the document.
     expect(screen.queryByText("AI metrics")).toBeNull()
     expect(screen.queryByText(/approved ai review effort/i)).toBeNull()
@@ -394,12 +504,12 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
   // still reachable through exactly one sub-menu pane.
   it("every settings group renders its expected controls (no section dropped)", () => {
     renderAt(`/project/${PROJECT_ID}/settings/general`)
-    expect(screen.getByLabelText(/project title/i)).toBeTruthy()
-    expect(screen.getByRole("switch", { name: /enable bible resources/i })).toBeTruthy()
-    expect(screen.getByLabelText(/username/i)).toBeTruthy()
+    expect(screen.getByLabelText(/project name/i)).toBeTruthy()
+    expect(screen.getByRole("switch", { name: /enable bible data/i })).toBeTruthy()
+    expect(screen.getByText(/this setting moved to preferences/i)).toBeTruthy()
     // Form panes stay on Page size="default" (max-w-2xl, left-aligned).
-    expect(screen.getByLabelText(/project title/i).closest(".max-w-2xl")).toBeTruthy()
-    expect(screen.getByLabelText(/project title/i).closest(".max-w-6xl")).toBeNull()
+    expect(screen.getByLabelText(/project name/i).closest(".max-w-2xl")).toBeTruthy()
+    expect(screen.getByLabelText(/project name/i).closest(".max-w-6xl")).toBeNull()
 
     renderAt(`/project/${PROJECT_ID}/settings/members`)
     expect(screen.getByTestId("settings-members-section")).toBeTruthy()
@@ -413,17 +523,21 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.getByLabelText(/search by name or email/i)).toBeTruthy()
 
     renderAt(`/project/${PROJECT_ID}/settings/source-sync`)
-    // This project has a git origin but no source link, so only Git Sync
-    // renders in this pane — confirms the group still mounts correctly when
-    // some of its member sections are conditionally hidden.
-    // PageHeader description also mentions "git sync", so match the card title exactly.
-    expect(screen.getByText("Git Sync")).toBeTruthy()
+    // This project has a git origin but no source link, so Git Sync and
+    // (AQU-1525) the "Link to a source project" card render in this pane while
+    // Source link / Upstream changes stay hidden — confirms the group still
+    // mounts correctly when some of its member sections are conditionally
+    // hidden. PageHeader description also mentions "git sync", so match the
+    // card title exactly.
+    expect(screen.getByText("Git sync")).toBeTruthy()
+    expect(screen.getByText("Link to a source project")).toBeTruthy()
+    expect(screen.queryByText("Source link")).toBeNull()
 
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
-    // The system prompt moved to Living Memory (memory/instructions) — the AI
-    // pane cross-links there instead of nesting a settings pane, and no
+    // The project instructions live in Living Memory (memory/instructions) —
+    // the AI pane links there instead of nesting a settings pane, and no
     // system-prompt textarea exists anywhere in settings anymore.
-    expect(screen.getByRole("link", { name: /living memory/i })).toBeTruthy()
+    expect(screen.getByRole("link", { name: /^instructions/i })).toBeTruthy()
     expect(screen.queryByLabelText(/^system prompt$/i)).toBeNull()
     expect(screen.getByLabelText(/examples retrieved/i)).toBeTruthy()
     expect(screen.getByLabelText(/preceding committed-target cells/i)).toBeTruthy()
@@ -433,10 +547,13 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     renderAt(`/project/${PROJECT_ID}/settings/validation`)
     expect(screen.getByLabelText(/required validators \(text\)/i)).toBeTruthy()
     expect(screen.getByText(/^harmonization$/i)).toBeTruthy()
-    expect(screen.getByText(/retrieval support/i)).toBeTruthy()
-    // Retrieval support sits under Validation + Harmonization on this pane.
-    const validationHeading = screen.getByText(/^validation$/i)
-    const retrievalHeading = screen.getByText(/retrieval support/i)
+    expect(screen.getByText(/^health$/i)).toBeTruthy()
+    // AQU-764: the decay panel is named "Health", not "Retrieval support".
+    // It sits under the validation cards + Harmonization on this pane. The
+    // text and audio rules are two cards since 2026-10-03.
+    expect(screen.getByText(/^audio validation$/i)).toBeTruthy()
+    const validationHeading = screen.getByText(/^text validation$/i)
+    const retrievalHeading = screen.getByText(/^health$/i)
     expect(
       validationHeading.compareDocumentPosition(retrievalHeading) &
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -467,10 +584,10 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     )
   })
 
-  it("redirects the legacy settings/rules URL to memory/quality, preserving search", () => {
+  it("redirects the legacy settings/rules URL to memory/checks, preserving search", () => {
     renderAt(`/project/${PROJECT_ID}/settings/rules?q=x`)
     expect(screen.getByTestId("landing-path").textContent).toBe(
-      `/project/${PROJECT_ID}/memory/quality?q=x`,
+      `/project/${PROJECT_ID}/memory/checks?q=x`,
     )
   })
 
@@ -488,15 +605,14 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.queryByTestId("project-settings-dialog")).toBeNull()
   })
 
-  // Entry point kept alive: the AI pane cross-links to Living Memory where
-  // the system prompt now lives, reusing the old Custom/Default hint. It is a
+  // AQU-2342: the AI pane's one entry to the project instructions. It is a
   // plain navigation (no modal state) since it leaves settings entirely.
-  it("the AI pane shows a Living Memory cross-link with a Default hint by default", () => {
+  it("the AI pane links to the instructions, saying when none are written", () => {
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
 
-    const link = screen.getByRole("link", { name: /living memory/i })
+    const link = screen.getByRole("link", { name: /^instructions/i })
     expect(link).toHaveAttribute("href", `/project/${PROJECT_ID}/memory/instructions`)
-    expect(link).toHaveTextContent("Default")
+    expect(link).toHaveTextContent("Not written yet")
   })
 
   // The hidden termbase-sharing section (SHOW_TERMBASE_SHARING_IN_SETTINGS
@@ -512,6 +628,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
 
   it("hides the Members settings pane when the caller is below the roster floor", () => {
     rosterSettings.canViewRoster = false
+    rosterSettings.roleLevel = 400
     renderAt(`/project/${PROJECT_ID}/settings`)
 
     expect(screen.queryByRole("link", { name: "Members" })).toBeNull()
@@ -523,4 +640,45 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.queryByText(/roster hidden/i)).toBeNull()
     expect(screen.getByText("General")).toBeTruthy()
   })
+
+  it("hides the Members pane from a maintainer when this project raised its member list to owners (AQU-1771)", () => {
+    rosterSettings.roleLevel = 600
+    rosterSettings.visibilityFloors = {
+      rosterViewMinRole: { org: 600, project: 700, effective: 700 },
+      memberProgressViewMinRole: { org: 600, project: null, effective: 600 },
+    }
+    renderAt(`/project/${PROJECT_ID}/settings`)
+    expect(screen.queryByText("Members")).toBeNull()
+    expect(screen.getByText("General")).toBeTruthy()
+  })
+
+  it("shows the Members pane to a maintainer when the project follows the org (AQU-1771)", () => {
+    rosterSettings.roleLevel = 600
+    rosterSettings.visibilityFloors = {
+      rosterViewMinRole: { org: 600, project: null, effective: 600 },
+      memberProgressViewMinRole: { org: 600, project: null, effective: 600 },
+    }
+    renderAt(`/project/${PROJECT_ID}/settings`)
+    expect(screen.getByText("Members")).toBeTruthy()
+  })
+})
+
+vi.mock("./ProjectSettings/MondayIntegrationSection", () => ({
+  MondayIntegrationSection: ({ orgId }: { orgId: number | null }) => (
+    <div data-testid="monday-project-org">{orgId}</div>
+  ),
+}))
+it("AQU-1208: Monday setup uses the project's organization, not the personal organization", () => {
+  renderAt(`/project/${PROJECT_ID}/settings/integrations`)
+  expect(screen.getByTestId("monday-project-org")).toHaveTextContent("7")
+})
+
+vi.mock("./ProjectSettings/AirtableIntegrationSection", () => ({
+  AirtableIntegrationSection: ({ orgId }: { orgId: number | null }) => (
+    <div data-testid="airtable-project-org">{orgId}</div>
+  ),
+}))
+it("AQU-804: Integrations shows Airtable beside Monday, with the project's organization", () => {
+  renderAt(`/project/${PROJECT_ID}/settings/integrations`)
+  expect(screen.getByTestId("airtable-project-org")).toHaveTextContent("7")
 })

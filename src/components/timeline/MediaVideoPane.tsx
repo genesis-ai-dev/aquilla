@@ -25,7 +25,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
 import { seedAudibility, useQueueAudibility } from "@/lib/audio/audibility"
-import { queueClockIsFileTime, useQueueForFile } from "@/lib/audio/play-queue"
+import { queueClockIsFileTime, stopQueue, useQueueForFile } from "@/lib/audio/play-queue"
 import { effectiveSourceText } from "@/lib/cell-text"
 import type { DirectionMode, TextDirection } from "@/lib/text-direction"
 import { cellIdAtSec } from "@/lib/timeline/source-regions"
@@ -40,9 +40,24 @@ import {
   useVideoSoundingCellId,
 } from "@/lib/timeline/video-clock"
 import { clearVideoControllerIf, setVideoController, type VideoController } from "@/lib/timeline/video-controller"
+import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
+import { youTubeVideoId } from "@/lib/video/youtube"
+import { YouTubePicture } from "./YouTubePicture"
+import { DOCK_HOST_MOVING } from "./media-dock-layout"
 import { useHlsVideo } from "@/hooks/useHlsVideo"
+import { useMediaPictureUrl } from "@/hooks/useMediaPictureUrl"
+import type { FrontierSession } from "@/lib/frontier/types"
 import { readFilmAudioLanguage, writeFilmAudioLanguage } from "@/lib/video/film-audio-tracks"
 import { VideoAudioPicker } from "./VideoAudioPicker"
+import { VideoSoundSourcePicker } from "./VideoSoundSourcePicker"
+import {
+  onBeforePlaybackSourceSwitch,
+  recordingDrivesPlayback,
+  switchPlaybackSource,
+  usePlaybackSource,
+  type PlaybackSource,
+} from "@/lib/audio/playback-source"
+import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { videoSyncAction } from "./video-sync"
 import { nextScrubSeek } from "./video-seek-coalesce"
 import {
@@ -53,7 +68,6 @@ import {
   type StallState,
 } from "./video-stall"
 import { DEFAULT_VIDEO_ASPECT, fitPictureRect, intrinsicAspect } from "./video-frame"
-import { VideoPaneHeader } from "./VideoPaneHeader"
 import { VideoPaneErrorCard } from "./VideoPaneErrorCard"
 import { VideoPaneCaption } from "./VideoPaneCaption"
 import { VideoPaneControls } from "./VideoPaneControls"
@@ -89,6 +103,8 @@ const VIDEO_READY_TIMEOUT_MS = 4000
 
 export interface MediaVideoPaneProps {
   src: string
+  projectId?: string
+  session?: FrontierSession | null
   /** The file the picture belongs to — the key the mute preference is stored
    *  under. Required rather than optional on purpose: an absent id would seed
    *  nothing and mute nothing, silently, and the compiler catching a caller
@@ -133,11 +149,10 @@ export interface MediaVideoPaneProps {
   onVideoDuration?: (src: string, sec: number | null) => void
   /** Opens the link-video dialog — offered when the source will not load. */
   onChangeVideo?: () => void
-  /** AQU-1119: collapse the video section to a rail. Absent means no button. */
-  onCollapse?: () => void
-  /** AQU-1119: fold the OTHER sections so the picture has the lens to itself. */
-  onToggleFullscreen?: () => void
-  isFullscreen?: boolean
+  /** A click on a YouTube picture: play or pause through Aquilla's transport,
+   *  exactly as Space and the playback bar's button do (the workspace hands
+   *  its timeline toggle). Absent means the picture takes no clicks of ours. */
+  onPictureClick?: () => void
   sourceDirectionMode?: DirectionMode
   targetDirectionMode?: DirectionMode
   sourceTextDirection?: TextDirection
@@ -145,7 +160,9 @@ export interface MediaVideoPaneProps {
 }
 
 export function MediaVideoPane({
-  src,
+  src: storedSrc,
+  projectId,
+  session,
   fileId,
   cells,
   seekSec,
@@ -155,9 +172,7 @@ export function MediaVideoPane({
   onVideoPlaying,
   onVideoDuration,
   onChangeVideo,
-  onCollapse,
-  onToggleFullscreen,
-  isFullscreen,
+  onPictureClick,
   sourceDirectionMode = "auto",
   targetDirectionMode = "auto",
   sourceTextDirection = "ltr",
@@ -177,6 +192,9 @@ export function MediaVideoPane({
   /** Bumped by "Try again", and by the stall ladder's last rung, so the element
    *  is rebuilt against the same URL. */
   const [loadAttempt, setLoadAttempt] = useState(0)
+  const src = useMediaPictureUrl({
+    src: storedSrc, projectId, fileId, session, retryKey: loadAttempt,
+  }) ?? ""
   /**
    * The player. These films are HLS playlists rather than files, which only
    * Safari can open on its own — so without this the picture, and the
@@ -198,7 +216,8 @@ export function MediaVideoPane({
   useEffect(() => {
     setAudioLanguage(readFilmAudioLanguage(src))
   }, [src])
-  const stream = useHlsVideo(videoRef, src, { attachKey: loadAttempt, audioLanguage })
+  const youTube = useMemo(() => youTubeVideoId(src) != null, [src])
+  const stream = useHlsVideo(videoRef, src, { attachKey: loadAttempt, audioLanguage, enabled: !youTube })
   const pipeline = stream.pipeline
   const chooseAudioLanguage = useCallback(
     (lang: string) => {
@@ -231,7 +250,20 @@ export function MediaVideoPane({
    * — and then every tick fails the file-time test and pauses the picture, so
    * the user gets a frozen first frame, no controls, and no way to start it.
    */
-  const slaved = useMemo(() => cells.some((c) => queueClockIsFileTime(c)), [cells])
+  const recordingCell = useMemo(() => cells.find((c) => queueClockIsFileTime(c)), [cells])
+  /**
+   * AQU-1565 follow-up: having a recording is necessary for slaving, no longer
+   * sufficient. A YouTube picture keeps its own sound and drives itself until
+   * the person picks the uploaded recording (`playback-source.ts`); a streamed
+   * film defaults to the recording, which is the arrangement it always had.
+   */
+  const playbackSource = usePlaybackSource(fileId, src)
+  const slaved = recordingDrivesPlayback(recordingCell != null, playbackSource)
+  /** The sound menu exists only where there is a choice to make: a YouTube
+   *  picture over a file that also carries an uploaded recording. */
+  const offerSoundSource = youTube && recordingCell != null
+  const recordingName = recordingCell?.original.trim() || null
+  const [soundMenuOpen, setSoundMenuOpen] = useState(false)
   /** Whether the film's soundtrack is on. Only bites in the standalone
    *  arrangement — a slaved picture is already silent. */
   const sourceAudible = useQueueAudibility().source
@@ -574,6 +606,77 @@ export function MediaVideoPane({
     return () => window.clearInterval(id)
   }, [slaved])
 
+  /**
+   * A YOUTUBE PICTURE DOES NOT SURVIVE A MOVE. The dock moves the film between
+   * areas by moving the element it is drawn into (useMediaDock), and a browser
+   * reloads an iframe that is moved in the page. A <video> moves untouched and
+   * plays on; a YouTube picture is an iframe, so it came back at 0:00, stopped,
+   * with its player cut off from the transport's play, pause and seek (review,
+   * Oct 29). The dock says when it is about to move the film, and a YouTube
+   * picture is then rebuilt where it lands, as the stall ladder's last rung
+   * does: a fresh element and player, put back where it was, and started again
+   * if the transport still wants it. The time is read now, while the player is
+   * still the live one.
+   */
+  useEffect(() => {
+    const host = fieldRef.current?.closest("[data-media-panel]")
+    if (!youTube || !host) return
+    const onMoving = () => {
+      const video = videoRef.current
+      if (!video) return
+      // A rebuild already on its way keeps the place it is going back to.
+      if (resumeAtRef.current == null) resumeAtRef.current = video.currentTime
+      stallRef.current = forgetStallSample(stallRef.current)
+      // A wait for the old element to be ready would never end.
+      cancelPendingPlay()
+      // Not playing until the new player is, or the playhead runs on over a
+      // picture that is still loading.
+      if (!slaved) onVideoPlayingRef.current?.(false)
+      setLoadAttempt((n) => n + 1)
+    }
+    host.addEventListener(DOCK_HOST_MOVING, onMoving)
+    return () => host.removeEventListener(DOCK_HOST_MOVING, onMoving)
+    // `failed`: the field is only there while the error card is not.
+  }, [youTube, failed, slaved, cancelPendingPlay])
+
+  /**
+   * Switching sound mid-play hands the transport from one player to the other
+   * (queue <-> picture). Neither stops the other on its own: picking the
+   * video's sound unmutes a picture that is still running while the queue
+   * plays on underneath it, and the playback bar then drives only the picture.
+   * So everything stops first, and the person presses play on the new source.
+   * Nothing resumes by itself, the house rule for every pause here.
+   *
+   * pauseAllTransports alone is not enough for that (walk 2026-10-02):
+   * - A SLAVED picture has no registered controller; it is normally stopped by
+   *   the sync effect following the queue. But the flip below makes the pane
+   *   standalone on the next render, so that effect never runs, and the
+   *   picture played on, now unmuted. So the element is paused here directly,
+   *   and the play intent dropped so the stall watchdog does not restart it.
+   * - A PAUSED queue is still "active" for this file, and an active queue owns
+   *   the playback bar (`selectTransportForFile`). Play then resumed the
+   *   recording under the video's own sound. Stopping it hands the bar to the
+   *   source the person just picked.
+   */
+  //
+  // The timeline's Source audio lane offers the same choice (Sam, Oct 5), so
+  // the stopping is registered for the file and runs whichever surface the
+  // person used (`switchPlaybackSource`).
+  const queueActive = queue.active
+  useEffect(
+    () =>
+      onBeforePlaybackSourceSwitch(fileId, () => {
+        pauseAllTransports()
+        wantPlayRef.current = false
+        stallRef.current = IDLE_STALL_STATE
+        cancelPendingPlay()
+        videoRef.current?.pause()
+        if (queueActive) stopQueue()
+      }),
+    [fileId, queueActive, cancelPendingPlay],
+  )
+  const chooseSoundSource = (next: PlaybackSource) => switchPlaybackSource(fileId, playbackSource, next)
+
   // Handing the transport to the queue abandons any start we were waiting for.
   //
   // Deliberately its own effect keyed on `slaved` alone, rather than folded
@@ -737,6 +840,30 @@ export function MediaVideoPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seekNonce, seekTarget])
 
+  // THE FILM TAKES THE FLOOR WHEN IT STARTS (2026-09-30), in the standalone
+  // arrangement, where it is the transport: a take playing on a waveform or a
+  // chip's preview stops, and the next thing to start stops the film. The play
+  // queue has done this since 09-29; the film did not, so a take went on
+  // sounding under it (found in the throttled browser pass). A SLAVED picture
+  // never claims — the queue it follows already holds the floor, and a claim
+  // here would pause that queue and, through it, the picture itself.
+  // `pause` goes through the registered controller, so a claim stops the film
+  // exactly as the bar's pause does (intent, stall ladder, readiness wait).
+  const registeredControllerRef = useRef<VideoController | null>(null)
+  const [filmAudio] = useState<ActiveAudioController>(() => ({
+    isPlaying: () => {
+      const video = videoRef.current
+      return Boolean(video && !video.paused)
+    },
+    play: async () => { registeredControllerRef.current?.play() },
+    pause: () => { registeredControllerRef.current?.pause() },
+  }))
+  useEffect(() => {
+    // Slaved, or gone: never the floor-holder.
+    if (slaved) clearActiveAudioIf(filmAudio)
+    return () => clearActiveAudioIf(filmAudio)
+  }, [slaved, filmAudio])
+
   // Round 5: the playback bar has to DRIVE the picture it reports, so the pane
   // registers a controller reading the element live. Registered only in the
   // STANDALONE arrangement — a slaved picture is the queue's to command, and a
@@ -786,7 +913,11 @@ export function MediaVideoPane({
       },
     }
     setVideoController(controller)
-    return () => clearVideoControllerIf(controller)
+    registeredControllerRef.current = controller
+    return () => {
+      clearVideoControllerIf(controller)
+      if (registeredControllerRef.current === controller) registeredControllerRef.current = null
+    }
   }, [slaved, requestPlayWhenReady, cancelPendingPlay])
 
   // Space from the timeline. Only in the STANDALONE arrangement: when the queue
@@ -985,26 +1116,22 @@ export function MediaVideoPane({
         src={src}
         onRetry={() => { setFailed(false); setLoadAttempt((n) => n + 1) }}
         onChangeVideo={onChangeVideo}
-        onCollapse={onCollapse}
       />
     )
   }
 
+  const Picture = youTube ? YouTubePicture : "video"
   return (
     <div
       data-testid="tl-video-pane"
       data-video-state={slaved ? "slaved" : "standalone"}
-      className="flex h-full min-h-0 flex-col overflow-hidden border-r border-border"
+      className="flex h-full min-h-0 flex-col overflow-hidden"
     >
-      <VideoPaneHeader
-        src={src}
-        onCollapse={onCollapse}
-        onToggleFullscreen={onToggleFullscreen}
-        isFullscreen={isFullscreen}
-      />
-      {/* The black field fills everything under the header, and the picture is
-          centred in it at the video's own proportions — leftover space becomes
-          cinema bars instead of blank page. */}
+      {/* Media redesign, layout: no header row. The panel's strip names it
+          and carries its controls, and the film's name is on the top bar's
+          Film button. The black field fills everything under the strip, and
+          the picture is centred in it at the video's own proportions —
+          leftover space becomes cinema bars instead of blank page. */}
       <div
         ref={fieldRef}
         data-testid="video-pane-field"
@@ -1018,7 +1145,7 @@ export function MediaVideoPane({
         className={cn("relative", picture ? "" : "aspect-video w-full")}
         style={picture ? { width: `${picture.width}px`, height: `${picture.height}px` } : undefined}
       >
-        <video
+        <Picture
           ref={videoRef}
           // The pipeline is part of the identity: switching players has to
           // start from a clean element, never one holding the other's buffer.
@@ -1026,7 +1153,7 @@ export function MediaVideoPane({
           // NO `src` WHERE THE STREAMING PLAYER IS DRIVING. It attaches its own
           // buffered source to the element, and an address sitting in `src`
           // beside it is a second source for the same picture.
-          src={pipeline === "hls" ? undefined : src}
+          src={pipeline === "hls" ? undefined : src || undefined}
           data-testid="video-pane-media"
           data-video-pipeline={pipeline}
           aria-label={t("editor.timeline.videoPaneLinked")}
@@ -1075,7 +1202,7 @@ export function MediaVideoPane({
             setFailed(true)
             // Whatever length we had is no longer trustworthy — a track sized
             // to a video that will not load is worse than one sized to the cues.
-            onVideoDuration?.(src, null)
+            onVideoDuration?.(storedSrc, null)
           }}
           onLoadedMetadata={(e) => {
             setMediaEpoch((n) => n + 1)
@@ -1083,7 +1210,7 @@ export function MediaVideoPane({
             // rather than the assumed 16:9.
             const real = intrinsicAspect(e.currentTarget.videoWidth, e.currentTarget.videoHeight)
             if (real != null) setAspect(real)
-            onVideoDuration?.(src, e.currentTarget.duration)
+            onVideoDuration?.(storedSrc, e.currentTarget.duration)
             // A reload or a rebuild left the picture at the start of the film.
             // Put it back where the stall caught it, and start it again if that
             // is still what the transport wants — otherwise recovering from a
@@ -1102,7 +1229,7 @@ export function MediaVideoPane({
           }}
           onDurationChange={(e) => {
             setMediaEpoch((n) => n + 1)
-            onVideoDuration?.(src, e.currentTarget.duration)
+            onVideoDuration?.(storedSrc, e.currentTarget.duration)
           }}
           onTimeUpdate={
             slaved
@@ -1135,12 +1262,35 @@ export function MediaVideoPane({
                   // click-to-start overlay permanently, however well the
                   // picture played afterwards.
                   playFailuresRef.current = 0
+                  claimActiveAudio(filmAudio)
                   onVideoPlaying?.(true)
                 }
           }
-          onPause={slaved ? undefined : () => onVideoPlaying?.(false)}
-          onEnded={slaved ? undefined : () => onVideoPlaying?.(false)}
+          onPause={slaved ? undefined : () => { clearActiveAudioIf(filmAudio); onVideoPlaying?.(false) }}
+          onEnded={slaved ? undefined : () => { clearActiveAudioIf(filmAudio); onVideoPlaying?.(false) }}
         />
+        {/* Sam, Oct 5: clicking YouTube's own play button (or anywhere on its
+             picture) started only the picture. With the uploaded recording
+             chosen, that picture is silent and follows the queue, so nothing
+             was heard and the playback bar did not know it was playing. A
+             clear layer now takes every click on a YouTube picture and hands
+             it to Aquilla's transport, the same toggle as Space and the bar's
+             button, so the chosen sound always plays. Sam accepted the cost:
+             YouTube's in-picture links (title, "Watch on YouTube") can no
+             longer be clicked. It is a pointer convenience only, so it is
+             hidden from assistive tech: the playback bar is the control.
+             Below the caption (which takes no pointer anyway), the
+             click-to-start overlay and the corner menus. A side effect worth
+             having: the picture now reports hover, so the corner controls
+             appear over it, not only over the black bars. */}
+        {youTube && onPictureClick && (
+          <div
+            aria-hidden
+            data-testid="video-pane-youtube-click-layer"
+            className="absolute inset-0 z-[5] cursor-pointer"
+            onClick={onPictureClick}
+          />
+        )}
         {/* Anchored to the PICTURE, not the black field: the exported video
              has no bars, so this is where the line really lives — and it can
              never drift into a bar as the pane is resized. */}
@@ -1180,22 +1330,41 @@ export function MediaVideoPane({
       {hasCaption && placement === "bar" && <VideoPaneCaption {...captionProps} />}
       {/* Bottom right (Sam, 2026-08-18). On the FIELD rather than the picture,
           like the two caption controls above and for the same reason: it keeps
-          its corner when the picture is letterboxed down to a small box. */}
+          its corner when the picture is letterboxed down to a small box.
+          AQU-1565 follow-up: keyboard focus reveals it too. The sound menu is
+          the only way to hear an uploaded recording on a YouTube file, and a
+          hover-only corner left a keyboard user tabbing onto an invisible
+          control.
+          And on a YouTube file with an uploaded recording it stays on screen.
+          The YouTube player is a cross-origin frame that swallows the pointer,
+          so hovering the picture itself never revealed the corner: only the
+          black bars around it did, and the sound menu is the one way to hear
+          the recording (browser pass, 2026-10-02). */}
       <div
         data-testid="video-audio-overlay"
         className={cn(
           "absolute bottom-2 right-2 z-30 transition-opacity duration-300",
-          modeRevealed || audioMenuOpen
+          modeRevealed || audioMenuOpen || soundMenuOpen || offerSoundSource
             ? "opacity-100"
-            : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
+            : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100",
         )}
       >
-        <VideoAudioPicker
-          tracks={stream.audioTracks}
-          activeLang={stream.activeAudioLang}
-          onChange={chooseAudioLanguage}
-          onOpenChange={setAudioMenuOpen}
-        />
+        <div className="flex items-center gap-1.5">
+          {offerSoundSource && (
+            <VideoSoundSourcePicker
+              value={playbackSource}
+              recordingName={recordingName}
+              onChange={chooseSoundSource}
+              onOpenChange={setSoundMenuOpen}
+            />
+          )}
+          <VideoAudioPicker
+            tracks={stream.audioTracks}
+            activeLang={stream.activeAudioLang}
+            onChange={chooseAudioLanguage}
+            onOpenChange={setAudioMenuOpen}
+          />
+        </div>
       </div>
       {/* NO MUTE BUTTON ON THE PICTURE. It was here for a few hours on
           2026-08-14 and came straight back off (Sam): the playback bar already

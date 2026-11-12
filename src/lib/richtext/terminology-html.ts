@@ -24,8 +24,8 @@
  * be stripped straight back off.
  */
 
-import type { Concept } from "@/lib/terminology/types"
-import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
+import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
+import { findConceptMatches } from "@/lib/terminology/match"
 
 /** Class pair the delegated click handler and the shared highlight style key off. */
 export const TERM_HIGHLIGHT_CLASS = "term-chip-host terminology-highlight"
@@ -33,7 +33,7 @@ export const TERM_HIGHLIGHT_CLASS = "term-chip-host terminology-highlight"
 /** Tags that end a line of text, so a term may not match across one. */
 const BLOCK_TAGS = new Set(["P", "BR", "DIV", "LI", "TR", "TD", "BLOCKQUOTE"])
 
-interface TextEntry {
+export interface TextEntry {
   node: Text
   /** Offset of this node's text within the flattened document text. */
   start: number
@@ -53,7 +53,7 @@ interface TermMatch {
  * the matcher's word-boundary lookarounds stop a term from spanning two
  * paragraphs, while an inline boundary (`<b>Holy</b> Spirit`) stays matchable.
  */
-function collectText(root: HTMLElement): { text: string; entries: TextEntry[] } {
+export function collectText(root: HTMLElement): { text: string; entries: TextEntry[] } {
   const entries: TextEntry[] = []
   let text = ""
 
@@ -81,11 +81,17 @@ function collectText(root: HTMLElement): { text: string; entries: TextEntry[] } 
  * taken — the same precedence `SourceWithTermLookup` applies, so "Spirit"
  * inside "Holy Spirit" never splits the phrase.
  */
-function findNonOverlappingMatches(text: string, concepts: Concept[]): TermMatch[] {
+function findNonOverlappingMatches(
+  text: string,
+  concepts: Concept[],
+  termMatching?: TermMatchingSettings,
+): TermMatch[] {
   const found: TermMatch[] = []
   for (const concept of concepts) {
-    for (const m of findTermMatches(text, concept.sourceTerm)) {
-      found.push({ ...m, term: concept.sourceTerm })
+    // AQU-1272: the whole concept, not just its headword string — the formatted
+    // source path recognises the same occurrences as the plain one.
+    for (const m of findConceptMatches(text, concept, termMatching)) {
+      found.push({ start: m.start, end: m.end, term: concept.sourceTerm })
     }
   }
   found.sort((a, b) => a.start - b.start || b.end - a.end)
@@ -108,6 +114,12 @@ export interface DecorateTermsOptions {
    * to a screen reader is worse than announcing nothing.
    */
   label?: (term: string) => string
+  /**
+   * Project affix inventory + fold defaults (AQU-1272). Passed straight to the
+   * shared matcher, so this surface agrees with the plain-text one on which
+   * occurrences of a concept exist.
+   */
+  termMatching?: TermMatchingSettings
 }
 
 /**
@@ -133,7 +145,7 @@ export function decorateTermsInHtml(
   const { text, entries } = collectText(root)
   if (!text) return html
 
-  const matches = findNonOverlappingMatches(text, active)
+  const matches = findNonOverlappingMatches(text, active, options.termMatching)
   if (matches.length === 0) return html
 
   // Each text node is replaced wholesale, so nodes can be handled in any order.

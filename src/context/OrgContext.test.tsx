@@ -317,8 +317,9 @@ describe("OrgProvider", () => {
       // Not a membership: activeOrg stays null and isAllOrgs is false.
       expect(screen.getByTestId("active").textContent).toBe("none")
       expect(screen.getByTestId("all").textContent).toBe("no")
-      // Persisted, so a reload keeps the caller in the guest org.
-      expect(localStorage.getItem("org:active")).toBe("2")
+      // Persisted, so a reload keeps the caller in the guest org. The write is
+      // a passive effect that can land a tick after the commit painting "2".
+      await waitFor(() => expect(localStorage.getItem("org:active")).toBe("2"))
     })
 
     it("stays null when the active path org is a real membership", async () => {
@@ -370,7 +371,8 @@ describe("OrgProvider", () => {
     render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByTestId("all").textContent).toBe("yes"))
     expect(screen.getByTestId("active").textContent).toBe("none")
-    expect(localStorage.getItem("org:active")).toBe("all")
+    // Passive-effect write; it can trail the commit that painted "yes".
+    await waitFor(() => expect(localStorage.getItem("org:active")).toBe("all"))
   })
 
   // AQU-882: a failed org load must stay distinguishable from "zero orgs", and

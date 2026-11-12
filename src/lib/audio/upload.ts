@@ -8,12 +8,30 @@
 // for backwards compatibility with existing recordings.
 
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
+// AQU-2086: the id convention lives in db/shared so the Agent API's LinkMedia
+// compile step (sync-worker) mints the same cell-seeded ids the recorder does.
+import { audioIdSeededWith, buildAudioId } from "../../../db/shared/audio-id"
+// Type-only: the implementation is reached by dynamic import below, so
+// there is no cycle between the two modules.
+import type { MultipartUploadProgress } from "@/lib/audio/multipart-upload"
 
 const AUDIO_URL_SCHEME = "frontier-audio"
 
-/** Server-side upload cap. Mirrors MAX_AUDIO_BYTES in sync-worker/src/audio.ts
- *  (the client can't import worker code) — keep the two in sync. */
+/** Cap on a SINGLE-SHOT upload (one PUT body). Mirrors MAX_AUDIO_BYTES in
+ *  sync-worker/src/audio.ts (the client can't import worker code) — keep the
+ *  two in sync. Anything larger goes through the multipart path instead, so
+ *  this is no longer the largest audio object the app accepts — see
+ *  MAX_AUDIO_OBJECT_BYTES. It is still the budget `recording-limits.ts`
+ *  derives the live-recorder hard stop from, which is a memory limit on
+ *  capture rather than an upload one. */
 export const MAX_AUDIO_UPLOAD_BYTES = 95 * 1024 * 1024
+
+/** Cap on a complete audio/video object however it is uploaded (AQU-1853).
+ *  Objects above MAX_AUDIO_UPLOAD_BYTES are sent as an R2 multipart upload, so
+ *  the old 95 MB ceiling no longer applies to a file the user picks. Mirrors
+ *  MAX_AUDIO_MULTIPART_BYTES in sync-worker/src/audio-multipart.ts — keep the
+ *  two in sync. */
+export const MAX_AUDIO_OBJECT_BYTES = 2 * 1024 * 1024 * 1024
 
 export interface AudioUploadResult {
   audioId: string
@@ -34,13 +52,10 @@ export type SyncTokenForFile = (
  * Build a stable audio id in the desktop format:
  *   audio-{cellId}-{timestamp}-{random}
  * Characters in cellId that R2 object names dislike (":" etc.) are normalised.
+ * Defined in db/shared/audio-id.ts (see the import above); re-exported here so
+ * the SPA's many call sites keep their import path.
  */
-export function buildAudioId(cellId: string): string {
-  const normalised = cellId.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64)
-  const ts = Date.now()
-  const rnd = Math.random().toString(36).slice(2, 11)
-  return `audio-${normalised}-${ts}-${rnd}`
-}
+export { buildAudioId }
 
 /** Prefix that marks a take produced by on-device noise removal (RNNoise). */
 const DENOISED_AUDIO_PREFIX = "dn-"
@@ -64,12 +79,9 @@ export function buildDenoisedAudioId(cellId: string): string {
  * distinguishes them — attachment trims fail in both directions (single-segment
  * imports carry none; cropped takes gain some). Relies on the seed convention
  * above staying stable — change buildAudioId's seeding and this breaks.
+ * Defined in db/shared/audio-id.ts; re-exported here.
  */
-export function audioIdSeededWith(audioId: string | undefined, id: string): boolean {
-  if (!audioId || !id) return false
-  const normalised = id.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64)
-  return audioId.includes(`-${normalised}-`)
-}
+export { audioIdSeededWith }
 
 /**
  * True when an audioId names a denoised take. Tolerates the stored
@@ -93,14 +105,25 @@ export function buildFrontierAudioUrl(audioId: string, ext: string): string {
   return `${AUDIO_URL_SCHEME}://${audioId}.${ext}`
 }
 
-function audioEndpoint(projectId: string, fileId: string, audioId: string, ext: string): string {
-  const objectName = `${audioId}.${ext}`
+/**
+ * The HTTP endpoint of ONE object under a file's audio prefix.
+ *
+ * `objectName` is the R2 object's own filename: `<audioId>.<ext>` for a clip,
+ * and that plus a suffix for a sidecar that rides alongside it (AQU-2095's
+ * peaks sidecar — see peaks-sidecar.ts). The worker route accepts any
+ * `[A-Za-z0-9._-]+` name, so a sidecar needs no endpoint of its own.
+ */
+export function audioObjectEndpoint(projectId: string, fileId: string, objectName: string): string {
   return (
     `${syncWorkerHttpOrigin()}/audio/` +
     `${encodeURIComponent(projectId)}/` +
     `${encodeURIComponent(fileId)}/` +
     `${encodeURIComponent(objectName)}`
   )
+}
+
+function audioEndpoint(projectId: string, fileId: string, audioId: string, ext: string): string {
+  return audioObjectEndpoint(projectId, fileId, `${audioId}.${ext}`)
 }
 
 export interface UploadCellAudioArgs {
@@ -117,6 +140,12 @@ export interface UploadCellAudioArgs {
   signal?: AbortSignal
   fetchFn?: typeof fetch
   retryDelaysMs?: readonly number[]
+  /** Multipart path only (blobs over MAX_AUDIO_UPLOAD_BYTES): override the
+   *  part size the server advertises. Ignored by the single-PUT path. */
+  partSizeBytes?: number
+  /** Multipart path only: per-part progress, for the upload UI on a large
+   *  file. The single-PUT path reports nothing (it is one request). */
+  onProgress?: (progress: MultipartUploadProgress) => void
 }
 
 const AUDIO_UPLOAD_ATTEMPTS = 3
@@ -128,13 +157,13 @@ function isRetryableAudioUploadStatus(status: number): boolean {
 
 export async function uploadCellAudio(args: UploadCellAudioArgs): Promise<AudioUploadResult> {
   const { projectId, fileId, audioId, ext, blob, artifactId, artifactName, getSyncToken } = args
+  // AQU-1853: anything that won't fit in one request body goes to R2 as a
+  // multipart upload instead of being rejected. Imported dynamically so the
+  // common small-clip path doesn't pull the parting/hashing code into its
+  // chunk — and so there is no import cycle between the two modules.
   if (blob.size > MAX_AUDIO_UPLOAD_BYTES) {
-    const mb = (n: number) => Math.round(n / (1024 * 1024))
-    throw new Error(
-      `This audio file is ${mb(blob.size)} MB — the limit is ` +
-        `${mb(MAX_AUDIO_UPLOAD_BYTES)} MB. Try a compressed format like mp3, ` +
-        `or split the file.`,
-    )
+    const { uploadCellAudioMultipart } = await import("@/lib/audio/multipart-upload")
+    return uploadCellAudioMultipart(args)
   }
   let token = await getSyncToken(projectId, fileId)
   if (!token) throw new Error("audio upload: no sync token (not signed in or no project access)")

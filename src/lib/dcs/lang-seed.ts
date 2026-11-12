@@ -13,6 +13,7 @@
 // rather than leaking a name that would return no results.
 
 import { normalizeLanguageTag } from "@/lib/language-normalize"
+import { codeForLanguageLabel } from "@/lib/lanes/backfill-plan"
 
 /** ISO 639-2/T (3-letter) → the 2-letter Gateway-Language code DCS keys on. */
 const THREE_TO_TWO: Record<string, string> = {
@@ -29,6 +30,10 @@ const THREE_TO_TWO: Record<string, string> = {
 export function toDcsLangSeed(raw: string | undefined | null): string {
   const s = (raw ?? "").trim()
   if (!s) return ""
+  // A known name ("Traditional Han", "English") or a known tag becomes the
+  // code DCS actually matches. Anything else keeps the older fallback below.
+  const derived = codeForLanguageLabel(s)
+  if (derived) return derived
   // Already a code (short, or has a region subtag DCS keys on) — DCS uses it
   // verbatim; passing a display name is the ONLY thing we must never do.
   const looksLikeName = /^[a-z]{4,}$/i.test(s) // one all-letter word, 4+ chars

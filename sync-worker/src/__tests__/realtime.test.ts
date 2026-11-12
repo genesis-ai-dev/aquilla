@@ -266,15 +266,20 @@ describe('PROJECTION_TABLES', () => {
       cell_validators: true,
       cell_waivers: true,
       cell_audio: true,
+      // AQU-777: per-cell file attachments.
+      cell_attachments: true,
       cell_audio_validators: true,
       comments: true,
       cell_backtranslations: true,
+      // AQU-1408: hand-corrected statistical glosses.
+      cell_glosses: true,
       assignments: true,
       assignment_cells: true,
       cell_links: true,
       // AQU-1068: a source.cell.delete now clears the cell's morph rows.
       cell_word_morph: true,
       concepts: true,
+      file_milestones: true,
     }
     expect([...PROJECTION_TABLES].sort()).toEqual(Object.keys(ALL).sort())
   })

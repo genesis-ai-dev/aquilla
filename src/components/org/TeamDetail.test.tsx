@@ -1,11 +1,12 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor, act, fireEvent } from "@testing-library/react"
+import { render, screen, waitFor, act, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { OrgProvider } from "@/context/OrgContext"
 import { TeamDetail } from "./TeamDetail"
 import { UserError } from "@/lib/errors/user-error"
 import { fmtShortCalendarDate } from "@/lib/format-date"
+import { expectClickNote } from "@/test-utils/tooltip"
 
 // AQU-1277: OrgSidebar's useOrgSettings fetches /api/v2/orgs/:id/settings.
 // fetchOrgSettings swallows its own failures and returns null, so unmocked it
@@ -16,7 +17,13 @@ vi.mock("@/lib/sync/org-settings", async (importActual) => ({
   fetchOrgSettings: vi.fn(async () => null),
 }))
 
+const { targetLanes } = vi.hoisted(() => ({
+  targetLanes: vi.fn(() => ({ lanes: [] as { id: string; label: string }[], ready: true })),
+}))
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }) }))
+vi.mock("@/hooks/useCurrentTargetLanes", () => ({
+  useCurrentTargetLanes: () => targetLanes(),
+}))
 const listMyOrgs = vi.fn()
 const listOrgMembers = vi.fn()
 const addOrgMember = vi.fn()
@@ -38,6 +45,7 @@ vi.mock("@/lib/frontier/teams", () => ({
   attachProject: (...a: unknown[]) => attachProject(...a),
   changeProjectRole: (...a: unknown[]) => changeProjectRole(...a),
   detachProject: (...a: unknown[]) => detachProject(...a),
+  setTeamProjectLanes: vi.fn(),
 }))
 // AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
 vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
@@ -84,6 +92,7 @@ async function openTeamTab(name: RegExp) {
 }
 
 beforeEach(() => {
+  targetLanes.mockReturnValue({ lanes: [], ready: true })
   localStorage.clear()
   listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
   listOrgMembers.mockResolvedValue([
@@ -118,7 +127,68 @@ describe("TeamDetail project management", () => {
     await pickSelectOption(/project to attach/i, /bambara/i)
     await pickSelectOption(/granted role/i, /contributor/i)
     await act(async () => { screen.getByRole("button", { name: /^attach$/i }).click() })
-    await waitFor(() => expect(attachProject).toHaveBeenCalledWith("jwt", 1, 10, "pa", 400))
+    await waitFor(() => expect(attachProject).toHaveBeenCalledWith("jwt", 1, 10, "pa", 400, undefined))
+  })
+
+  // AQU-2260 (Sam, Oct 29, option 2B): every project in the org is a choice
+  // here, so the list gets a search box.
+  it("the project to attach list has a search box that narrows it", async () => {
+    const cp = await import("@/lib/sync/cloud-projects")
+    ;(cp.fetchAccessibleProjectsResult as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      projects: [
+        { id: "pa", name: "Bambara", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] },
+        { id: "pb", name: "Wolof", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] },
+      ],
+    })
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [], projects: [] })
+    renderDetail()
+    await openTeamTab(/^projects$/i)
+    await act(async () => { (await screen.findByRole("button", { name: /attach project/i })).click() })
+    fireEvent.click(screen.getByRole("combobox", { name: /project to attach/i }))
+    const search = await screen.findByRole("combobox", { name: "Search the list" })
+    fireEvent.change(search, { target: { value: "wol" } })
+    expect(await screen.findByRole("option", { name: "Wolof" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "Bambara" })).toBeNull()
+  })
+
+  it("checks every lane from All, and sends only the lanes left checked", async () => {
+    targetLanes.mockReturnValue({
+      lanes: [
+        { id: "lane-es", label: "Spanish" },
+        { id: "lane-fr", label: "French" },
+      ],
+      ready: true,
+    })
+    const cp = await import("@/lib/sync/cloud-projects")
+    ;(cp.fetchAccessibleProjectsResult as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      projects: [{ id: "pa", name: "Bambara", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] }],
+    })
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [], projects: [] })
+    renderDetail()
+    await openTeamTab(/^projects$/i)
+    await act(async () => { (await screen.findByRole("button", { name: /attach project/i })).click() })
+    const dialog = screen.getByRole("dialog", { name: /attach project to 'wa'/i })
+    const all = dialog.querySelector('input[type="checkbox"]') as HTMLInputElement
+    const spanish = screen.getByRole("checkbox", { name: "Spanish" })
+    const french = screen.getByRole("checkbox", { name: "French" })
+    expect(all.checked).toBe(true)
+    expect(spanish).toBeChecked()
+    expect(french).toBeChecked()
+
+    fireEvent.click(french)
+    expect(french).not.toBeChecked()
+    expect(all.checked).toBe(false)
+    expect(all.indeterminate).toBe(true)
+
+    fireEvent.click(all)
+    expect(spanish).toBeChecked()
+    expect(french).toBeChecked()
+
+    fireEvent.click(french)
+    await act(async () => { screen.getByRole("button", { name: /^attach$/i }).click() })
+    await waitFor(() => expect(attachProject).toHaveBeenCalledWith("jwt", 1, 10, "pa", 100, ["lane-es"]))
   })
 
   it("detaches a project", async () => {
@@ -230,6 +300,102 @@ describe("TeamDetail admin management", () => {
     expect(picker).not.toHaveTextContent("Ben")
   })
 
+  // AQU-2238: direct invite-to-team. The picker can only offer org members, so
+  // staffing a team with an outsider used to mean org add → team add → org
+  // remove; this field replaces that dance with one scoped grant.
+  it("invites someone outside the org by email in ONE external request, org roster untouched", async () => {
+    getTeam.mockResolvedValue({
+      id: 10,
+      name: "WA",
+      members: [{ userId: 2, username: "anna", roleLevel: 100 }],
+      projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }],
+    })
+    addTeamMembers.mockResolvedValue([{ username: "joel@example.com", ok: true, external: true }])
+    renderDetail()
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
+    await act(async () => { (await screen.findByRole("button", { name: /add (a )?member/i })).click() })
+    // The scope sentence names the projects they reach and what they won't get.
+    const scope = screen.getByTestId("grant-scope-sentence")
+    expect(scope).toHaveTextContent("Bambara")
+    expect(scope).toHaveTextContent(/not added to the organization's member list/i)
+    fireEvent.change(screen.getByLabelText(/invite someone outside the organization/i), {
+      target: { value: "joel@example.com" },
+    })
+    await act(async () => { screen.getByRole("button", { name: /^add$/i }).click() })
+    await waitFor(() => expect(addTeamMembers).toHaveBeenCalledTimes(1))
+    expect(addTeamMembers).toHaveBeenCalledWith("jwt", 1, 10, ["joel@example.com"], { external: true })
+    // Never routed through the org roster — that is the bug being fixed.
+    expect(addOrgMember).not.toHaveBeenCalled()
+  })
+
+  it("warns that an unattached team grants the outside person nothing yet", async () => {
+    renderDetail()
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
+    await act(async () => { (await screen.findByRole("button", { name: /add (a )?member/i })).click() })
+    expect(screen.getByTestId("grant-scope-sentence")).toHaveTextContent(
+      /no project is attached to this team yet/i,
+    )
+  })
+
+  it("sends org members and the outside invite as separate requests, so the picker path stays fail-closed", async () => {
+    addTeamMembers.mockResolvedValue([{ username: "x", ok: true }])
+    renderDetail()
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
+    await act(async () => { (await screen.findByRole("button", { name: /add (a )?member/i })).click() })
+    fireEvent.click(screen.getByRole("combobox", { name: /members to add/i }))
+    fireEvent.click(await screen.findByRole("option", { name: /^Ben$/ }))
+    fireEvent.change(screen.getByLabelText(/invite someone outside the organization/i), {
+      target: { value: "joel@example.com" },
+    })
+    await act(async () => { screen.getByRole("button", { name: /^add$/i }).click() })
+    await waitFor(() => expect(addTeamMembers).toHaveBeenCalledTimes(2))
+    expect(addTeamMembers).toHaveBeenNthCalledWith(1, "jwt", 1, 10, ["Ben"])
+    expect(addTeamMembers).toHaveBeenNthCalledWith(2, "jwt", 1, 10, ["joel@example.com"], { external: true })
+  })
+
+  it("Add is enabled by the outside-invite field alone, and a failed invite stays in that field", async () => {
+    addTeamMembers.mockResolvedValue([
+      { username: "joel@example.com", ok: false, error: { code: "user_not_found", message: "no Aquilla account" } },
+    ])
+    renderDetail()
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
+    await act(async () => { (await screen.findByRole("button", { name: /add (a )?member/i })).click() })
+    expect(screen.getByRole("button", { name: /^add$/i })).toBeDisabled()
+    const field = screen.getByLabelText(/invite someone outside the organization/i)
+    fireEvent.change(field, { target: { value: "joel@example.com" } })
+    expect(screen.getByRole("button", { name: /^add$/i })).toBeEnabled()
+    await act(async () => { screen.getByRole("button", { name: /^add$/i }).click() })
+    await waitFor(() =>
+      expect(screen.getByText(/joel@example.com \(no Aquilla account\)/)).toBeInTheDocument(),
+    )
+    // Kept where it was typed — never folded into the org-member picker.
+    expect(field).toHaveValue("joel@example.com")
+    expect(screen.getByRole("combobox", { name: /members to add/i })).toHaveTextContent("Select members…")
+  })
+
+  it("labels a team member with no org role as outside the org, not Unknown", async () => {
+    getTeam.mockResolvedValue({
+      id: 10,
+      name: "WA",
+      members: [{ userId: 9, username: "joel", roleLevel: null }],
+      projects: [],
+    })
+    renderDetail()
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText("joel")).toBeInTheDocument())
+    expect(screen.getByText(/outside org/i)).toBeInTheDocument()
+    // AQU-2260: what "Outside org" means opens on a click of the label, never
+    // on hover.
+    await expectClickNote(
+      screen.getByRole("button", { name: /outside org/i }),
+      /not on this organization's member list/i,
+    )
+  })
+
   it("removes a member", async () => {
     renderDetail()
     await openTeamTab(/^members$/i)
@@ -256,7 +422,7 @@ describe("TeamDetail admin management", () => {
 
   it("links admins to team settings", async () => {
     renderDetail()
-    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole("heading", { name: /WA$/ })).toBeInTheDocument())
     const settings = screen.getByRole("link", { name: /team settings/i })
     expect(settings).toHaveAttribute("href", "/orgs/1/teams/10/settings")
   })
@@ -270,8 +436,8 @@ describe("TeamDetail admin management", () => {
       projects: [],
     })
     renderDetail()
-    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
-    const title = screen.getByRole("heading", { name: "WA" })
+    await waitFor(() => expect(screen.getByRole("heading", { name: /WA$/ })).toBeInTheDocument())
+    const title = screen.getByRole("heading", { name: /WA$/ })
     expect(title.nextElementSibling).toBeNull()
   })
 
@@ -284,14 +450,14 @@ describe("TeamDetail admin management", () => {
       projects: [],
     })
     renderDetail()
-    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole("heading", { name: /WA$/ })).toBeInTheDocument())
     expect(screen.getByText("West Africa translation")).toBeInTheDocument()
   })
 
   it("keeps the avatar in flow and pads body content to the title on wide screens", async () => {
     renderDetail()
-    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
-    const title = screen.getByRole("heading", { name: "WA" })
+    await waitFor(() => expect(screen.getByRole("heading", { name: /WA$/ })).toBeInTheDocument())
+    const title = screen.getByRole("heading", { name: /WA$/ })
     const well = screen.getByTestId("team-detail-well")
     expect(well).toHaveClass("max-w-6xl")
     expect(well.className).toContain("@6xl/team-detail:max-w-[calc(72rem+2.75rem)]")
@@ -303,6 +469,45 @@ describe("TeamDetail admin management", () => {
     expect(tabs.parentElement).toHaveClass("@6xl/team-detail:pl-11")
     expect(tabs.parentElement).not.toHaveClass("pl-11")
     expect(well).toContainElement(tabs)
+  })
+})
+
+describe("TeamDetail overview (AQU-2140)", () => {
+  it("opens this team's members and projects from Overview", async () => {
+    getTeam.mockResolvedValue({
+      id: 10,
+      name: "WA",
+      members: [{ userId: 2, username: "anna", roleLevel: 100 }],
+      projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }],
+    })
+    renderDetail()
+    const sections = await screen.findByRole("tablist", { name: /team sections/i })
+    const overview = within(sections).getByRole("link", { name: "Overview" })
+    expect(overview).toHaveAttribute("href", "/orgs/1/teams/10")
+    // Projects is the landing tab; members stay put until Overview is opened.
+    expect(screen.queryByRole("heading", { name: "Members" })).toBeNull()
+    fireEvent.click(overview)
+    expect(await screen.findByRole("heading", { name: "Members" })).toBeInTheDocument()
+    expect(screen.getByText("anna")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Projects" })).toBeInTheDocument()
+    expect(screen.getByText("Bambara")).toBeInTheDocument()
+  })
+
+  it("shows a member only the team's own roster and projects", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 100, name: "viewer" } }])
+    getTeam.mockResolvedValue({
+      id: 10,
+      name: "WA",
+      members: [{ userId: 2, username: "anna", roleLevel: 100 }],
+      projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }],
+    })
+    renderDetail()
+    const sections = await screen.findByRole("tablist", { name: /team sections/i })
+    fireEvent.click(within(sections).getByRole("link", { name: "Overview" }))
+    expect(await screen.findByText("anna")).toBeInTheDocument()
+    expect(screen.getByText("Bambara")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /attach project/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /add (a )?member/i })).toBeNull()
   })
 })
 
@@ -335,6 +540,45 @@ describe("TeamDetail non-admin gating", () => {
     await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
     const remove = await screen.findByRole("menuitem", { name: /remove anna — maintainers only/i })
     expect(remove).toHaveAttribute("aria-disabled", "true")
+  })
+})
+
+// AQU-1352 §3.7 rules 1–2: a team row says where its role comes from. A NULL
+// team role inherits the org role, so a viewer who cannot edit is told where
+// to change it instead of seeing a bare "Inherit".
+describe("TeamDetail team-role origin (AQU-1352)", () => {
+  it("badges inheriting rows as inherited and team-role rows as direct", async () => {
+    getTeam.mockResolvedValue({
+      id: 10, name: "WA", projects: [],
+      members: [
+        { userId: 2, username: "anna", roleLevel: 100, teamRoleLevel: null },
+        { userId: 3, username: "Ben", roleLevel: 100, teamRoleLevel: 600 },
+      ],
+    })
+    const { container } = renderDetail()
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText("Ben")).toBeInTheDocument())
+    const origins = Array.from(container.querySelectorAll("[data-origin]")).map((el) => el.getAttribute("data-origin"))
+    expect(origins).toEqual(expect.arrayContaining(["inherited", "direct"]))
+  })
+
+  it("tells a non-editor an inherited team role is set at the org", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 100, name: "viewer" } }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", projects: [], members: [{ userId: 2, username: "anna", roleLevel: 100, teamRoleLevel: null }] })
+    renderDetail()
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
+    expect(screen.getByTestId("inherited-role-control")).toBeInTheDocument()
+    expect(screen.getAllByText(/CAS/).some((el) => /set at/i.test(el.textContent ?? ""))).toBe(true)
+  })
+
+  it("keeps the team-role select usable for an editor on an inheriting row", async () => {
+    getTeam.mockResolvedValue({ id: 10, name: "WA", projects: [], members: [{ userId: 2, username: "anna", roleLevel: 100, teamRoleLevel: null }] })
+    renderDetail()
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
+    expect(screen.queryByTestId("inherited-role-control")).toBeNull()
+    expect(screen.getByTestId("team-role-anna")).toBeInTheDocument()
   })
 })
 
@@ -382,10 +626,99 @@ describe("TeamDetail member role editing (AQU-139)", () => {
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     // No role-change combobox for maintainer
     expect(screen.queryByRole("combobox", { name: /role for anna/i })).toBeNull()
-    // Read-only org-level role label with shadcn tooltip is present
-    expect(screen.getByLabelText(/org-level role: viewer/i)).toBeInTheDocument()
+    // Read-only org-level role label. AQU-2260: why it is read-only opens on
+    // click, in a note anchored to it, never on hover.
+    await expectClickNote(
+      screen.getByRole("button", { name: /org-level role: viewer/i }),
+      /can only be changed by an org owner/,
+    )
     await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
     expect(screen.queryByRole("menuitem", { name: /change role/i })).toBeNull()
+  })
+})
+
+// AQU-2289 (Sam, Oct 29, settings cleanup 4c option A): every Change role and
+// Add member opens the same dialog, with the same roles for the same level.
+describe("TeamDetail one role dialog (AQU-2289)", () => {
+  const ALL = ["Viewer", "Commenter", "Reviewer", "Contributor", "Project Lead", "Maintainer", "Owner"]
+
+  async function offered(comboName: RegExp): Promise<string[]> {
+    fireEvent.click(screen.getByRole("combobox", { name: comboName }))
+    const listbox = await screen.findByRole("listbox")
+    return ALL.filter((name) =>
+      within(listbox).queryAllByRole("option").some((o) => o.textContent?.toLowerCase().startsWith(name.toLowerCase())),
+    )
+  }
+
+  async function openMemberMenu(name: string) {
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText(name)).toBeInTheDocument())
+    await act(async () => { (await screen.findByRole("button", { name: new RegExp(`actions for ${name}`, "i") })).click() })
+  }
+
+  it("a member's Change role sets their organization role from the five, never Commenter or Reviewer", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
+    renderDetail()
+    await openMemberMenu("anna")
+    await act(async () => { (await screen.findByRole("menuitem", { name: /change role/i })).click() })
+    expect(screen.getByTestId("role-dialog")).toHaveAttribute("data-role-level", "org")
+    expect(await offered(/role for anna/i)).toEqual(["Viewer", "Contributor", "Project Lead", "Maintainer", "Owner"])
+  })
+
+  it("offers no organization Change role for someone outside the org: saving it would add them to the org", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 9, username: "gus", roleLevel: null }], projects: [] })
+    renderDetail()
+    await openMemberMenu("gus")
+    expect(screen.queryByRole("menuitem", { name: /change role/i })).toBeNull()
+    expect(screen.getByRole("menuitem", { name: /remove from team/i })).toBeInTheDocument()
+  })
+
+  it("keeps an organization Owner's role locked, as the member list does", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 5, username: "olga", roleLevel: 700 }], projects: [] })
+    renderDetail()
+    await openMemberMenu("olga")
+    expect(screen.queryByRole("menuitem", { name: /change role/i })).toBeNull()
+  })
+
+  it("a team's project grant offers the project list, never Owner", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [], projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }] })
+    renderDetail()
+    await openTeamTab(/^projects$/i)
+    await waitFor(() => expect(screen.getByText("Bambara")).toBeInTheDocument())
+    await act(async () => { screen.getByRole("button", { name: /actions for bambara/i }).click() })
+    await act(async () => { screen.getByRole("menuitem", { name: /^change role$/i }).click() })
+    expect(screen.getByTestId("role-dialog")).toHaveAttribute("data-role-level", "project")
+    expect(await offered(/role for bambara/i)).toEqual([
+      "Viewer", "Commenter", "Reviewer", "Contributor", "Project Lead", "Maintainer",
+    ])
+  })
+
+  it("attaching a project offers the project list too", async () => {
+    const cp = await import("@/lib/sync/cloud-projects")
+    ;(cp.fetchAccessibleProjectsResult as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      projects: [{ id: "pa", name: "Bambara", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] }],
+    })
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [], projects: [] })
+    renderDetail()
+    await openTeamTab(/^projects$/i)
+    await act(async () => { (await screen.findByRole("button", { name: /attach project/i })).click() })
+    expect(await offered(/granted role/i)).not.toContain("Owner")
+  })
+
+  it("Add member opens the same dialog, keeping the outside-the-org invite", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
+    renderDetail()
+    await openTeamTab(/^members$/i)
+    await act(async () => { (await screen.findByRole("button", { name: /add a member/i })).click() })
+    const dialog = screen.getByTestId("role-dialog")
+    expect(dialog).toHaveAttribute("data-role-dialog-mode", "add")
+    expect(within(dialog).getByLabelText(/invite someone outside the organization/i)).toBeInTheDocument()
   })
 })
 

@@ -25,9 +25,31 @@ import { Switch } from "@/components/ui/switch"
 import { SegmentTabs } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
+import { BibleDataViewSettings } from "@/components/bible-data/BibleDataViewSettings"
+import type { BiblePackStatus } from "@/components/bible-data/bible-data-bus"
+import type { BibleVoiceOverrides } from "../../db/shared/bible-voice-overrides"
 import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
+import { scaledDefaultCellFontSizePx, useOptionalFontSizeScale } from "@/branding/FontSize"
 import { setMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
+import {
+  setUnresolvedCommentHighlight,
+  useUnresolvedCommentHighlight,
+} from "@/lib/store/unresolved-comment-highlight-pref"
+import { setGhostTextEnabled, useGhostTextEnabled } from "@/lib/store/ghost-text-pref"
+import {
+  setHealthScoreColorCoding,
+  useHealthScoreColorCoding,
+} from "@/lib/store/health-score-color-coding-pref"
+import {
+  setVisibleStyleSegments,
+  useVisibleStyleSegments,
+} from "@/lib/store/visible-style-segments-pref"
+import {
+  setLowMemoryMode,
+  useLowMemoryMode,
+  type LowMemoryMode,
+} from "@/lib/perf/low-memory"
 import type { FootnoteViewMode } from "@/lib/footnotes/types"
 import type { TargetKeyTermHighlightMode } from "@/hooks/useTargetKeyTermHighlightPreference"
 import type { DirectionMode, TextDirection, TextDirectionSummary } from "@/lib/text-direction"
@@ -62,6 +84,16 @@ interface ViewSettingsMenuProps {
   footnoteViewMode?: FootnoteViewMode
   /** When approved target renderings receive the quiet key-term highlight. */
   targetKeyTermHighlightMode?: TargetKeyTermHighlightMode
+  /** AQU-1687: the project has the Voices enrichment on, so the Bible data options apply. */
+  bibleDataVoicesEnabled?: boolean
+  /** AQU-1689: the project has the Who's Who enrichment on, so its options apply. */
+  bibleDataWhosWhoEnabled?: boolean
+  /** AQU-1692: how the open book's Bible data loaded, as the editor published it. */
+  bibleDataStatus?: BiblePackStatus | null
+  /** AQU-1692: the project's voice corrections, to describe orphaned ones. */
+  bibleVoiceCorrections?: BibleVoiceOverrides
+  /** AQU-1692: a maintainer removes an orphaned voice correction. */
+  onRemoveVoiceCorrection?: (speechId: string) => void
   /** Per-file source-column font size in px. */
   sourceFontSize: number
   /** Per-file target-column font size in px. */
@@ -104,6 +136,11 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   healthCalculationsEnabled = true,
   footnoteViewMode = "off",
   targetKeyTermHighlightMode = "never",
+  bibleDataVoicesEnabled = false,
+  bibleDataWhosWhoEnabled = false,
+  bibleDataStatus,
+  bibleVoiceCorrections,
+  onRemoveVoiceCorrection,
   sourceFontSize,
   targetFontSize,
   sourceFontSizeExplicit = false,
@@ -122,8 +159,19 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   onTargetKeyTermHighlightModeChange,
 }, ref) {
   const t = useT()
+  // AQU-2263: what an untouched file shows — the app font size from Preferences.
+  const defaultFontSize = scaledDefaultCellFontSizePx(useOptionalFontSizeScale())
   const [menuOpen, setMenuOpen] = useState(false)
   const splitByMilestone = useMilestoneSplit()
+  // AQU-1259: like the milestone split, a device preference read straight from
+  // its store rather than plumbed through props — the menu is the only writer
+  // and EditorTable is the only reader, so a prop pair through
+  // ProjectWorkspace would be two more parameters carrying no extra meaning.
+  const highlightUnresolvedComments = useUnresolvedCommentHighlight()
+  const ghostTextEnabled = useGhostTextEnabled()
+  const healthScoreColorCoding = useHealthScoreColorCoding()
+  const visibleStyleSegments = useVisibleStyleSegments()
+  const lowMemoryMode = useLowMemoryMode()
   const mismatch = useMemo(
     () =>
       getManualDirectionMismatch({
@@ -288,10 +336,15 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
           side="bottom"
           sideOffset={4}
           data-testid="view-settings-popover"
-          className="w-72"
+          className="w-72 overflow-hidden"
         >
           <PopoverTitle className="sr-only">{t("editor.view.settings")}</PopoverTitle>
-
+          {/* The panel is taller than a laptop screen. This is a block scroller,
+              not a flex column, so the rows overflow instead of shrinking away. */}
+          <div
+            data-testid="view-settings-scroller"
+            className="max-h-[min(32rem,calc(100dvh-5rem))] w-full min-h-0 min-w-0 space-y-2.5 overflow-x-hidden overflow-y-auto overscroll-y-contain"
+          >
           <FieldGroup className="gap-3">
             <SwitchRow
               id="view-split-milestones"
@@ -327,6 +380,32 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
                 onCheckedChange={onHealthCalculationsChange}
               />
             )}
+            <SwitchRow
+              id="view-highlight-unresolved-comments"
+              label={t("editor.view.highlightUnresolvedComments")}
+              checked={highlightUnresolvedComments}
+              disabled={!fileOpen}
+              onCheckedChange={setUnresolvedCommentHighlight}
+            />
+            <SwitchRow
+              id="view-ghost-text"
+              label={t("editor.view.ghostText")}
+              checked={ghostTextEnabled}
+              onCheckedChange={setGhostTextEnabled}
+            />
+            <SwitchRow
+              id="view-health-score-color-coding"
+              label={t("editor.view.healthScoreColorCoding")}
+              checked={healthScoreColorCoding}
+              disabled={!fileOpen}
+              onCheckedChange={setHealthScoreColorCoding}
+            />
+            <SwitchRow
+              id="view-visible-style-segments"
+              label={t("editor.view.visibleStyleSegments")}
+              checked={visibleStyleSegments}
+              onCheckedChange={setVisibleStyleSegments}
+            />
           </FieldGroup>
 
           {onTargetKeyTermHighlightModeChange && (
@@ -390,6 +469,22 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
             </>
           )}
 
+          {/* AQU-1687, AQU-1689: personal options for the Voices and Who's Who
+              enrichments, each shown only where the project has it on.
+              Device settings, like low memory. */}
+          {(bibleDataVoicesEnabled || bibleDataWhosWhoEnabled) && (
+            <>
+              <Separator />
+              <BibleDataViewSettings
+                voices={bibleDataVoicesEnabled}
+                whosWho={bibleDataWhosWhoEnabled}
+                status={bibleDataStatus}
+                corrections={bibleVoiceCorrections}
+                onRemoveCorrection={onRemoveVoiceCorrection}
+              />
+            </>
+          )}
+
           <Separator />
           <div className="flex flex-col gap-2">
             <SectionLabel>{t("editor.view.textDirection")}</SectionLabel>
@@ -414,18 +509,58 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               label={t("editor.column.source")}
               value={sourceFontSize}
               disabled={!fileOpen}
-              explicit={sourceFontSizeExplicit}
               onChange={onSourceFontSizeChange}
-              onReset={onSourceFontSizeReset}
             />
             <FontSizeRow
               label={t("editor.column.target")}
               value={targetFontSize}
               disabled={!fileOpen}
-              explicit={targetFontSizeExplicit}
               onChange={onTargetFontSizeChange}
-              onReset={onTargetFontSizeReset}
             />
+            {/* AQU-2263: a file's size overrides the app font size from
+                Preferences, so say what that default is, and put both columns
+                back on it in one step. */}
+            <div className={cn("flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs text-muted-foreground", !fileOpen && "opacity-50")}>
+              <span data-testid="font-size-default" className="whitespace-nowrap">
+                {t("editor.view.fontSizeDefault", { size: defaultFontSize })}
+              </span>
+              {(sourceFontSizeExplicit || targetFontSizeExplicit) && (onSourceFontSizeReset || onTargetFontSizeReset) ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="-ms-1.5 h-auto px-1.5 py-0.5 text-xs"
+                  disabled={!fileOpen}
+                  onClick={() => {
+                    if (sourceFontSizeExplicit) onSourceFontSizeReset?.()
+                    if (targetFontSizeExplicit) onTargetFontSizeReset?.()
+                  }}
+                >
+                  <RotateCcw className="size-3" aria-hidden />
+                  {t("editor.view.fontSizeReset")}
+                </Button>
+              ) : null}
+            </div>
+          </div>
+
+          {/* AQU-1191: a device setting, not a file one — it stays usable with
+              no file open, and it is stored per browser like the rest of this
+              popover. */}
+          <Separator />
+          <div className="flex flex-col gap-2">
+            <SectionLabel>{t("editor.view.lowMemory")}</SectionLabel>
+            <SegmentTabs<LowMemoryMode>
+              value={lowMemoryMode}
+              onValueChange={setLowMemoryMode}
+              aria-label={t("editor.view.lowMemory")}
+              listClassName="w-full"
+              options={[
+                { label: t("editor.view.lowMemoryAuto"), value: "auto" },
+                { label: t("editor.view.lowMemoryOn"), value: "on" },
+                { label: t("editor.view.lowMemoryOff"), value: "off" },
+              ]}
+            />
+          </div>
           </div>
         </PopoverContent>
       </Popover>
@@ -474,16 +609,12 @@ function FontSizeRow({
   label,
   value,
   disabled,
-  explicit,
   onChange,
-  onReset,
 }: {
   label: string
   value: number
   disabled: boolean
-  explicit: boolean
   onChange: (v: number) => void
-  onReset?: () => void
 }) {
   const t = useT()
   const side = label.toLowerCase()
@@ -523,23 +654,6 @@ function FontSizeRow({
             <span className="text-[11px] leading-none select-none">A+</span>
           </Button>
         </AppTooltip>
-        <span className="flex size-5 items-center justify-center">
-          {explicit && onReset ? (
-            <AppTooltip content={t("editor.view.useAppFontSize", { side })}>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-label={t("editor.view.useAppFontSize", { side })}
-                disabled={disabled}
-                onClick={onReset}
-                className="size-5 text-muted-foreground"
-              >
-                <RotateCcw className="h-3 w-3" />
-              </Button>
-            </AppTooltip>
-          ) : null}
-        </span>
       </span>
     </div>
   )

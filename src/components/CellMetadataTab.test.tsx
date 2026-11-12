@@ -89,8 +89,8 @@ describe("CellMetadataTab", () => {
     })
 
     it("toggles a key on for the whole project, and off again from any cell", () => {
-      // The SDBH importer writes `Field: glosses`; checking it here is what
-      // turns the label on for every cell in the project that has `Field`.
+      // Checking a key here is what turns the label on for every cell in
+      // the project that has it.
       const { unmount } = render(
         <CellMetadataTab metadata={{ Field: "glosses" }} projectId="p1" />,
       )
@@ -110,18 +110,47 @@ describe("CellMetadataTab", () => {
     })
 
     it("offers no toggle for values with no one-line label", () => {
-      // Attachments and nested objects would label nothing — a checkbox there
-      // would be a dead control.
+      // Attachments and deeper structures would label nothing — a checkbox
+      // there would be a dead control. A nested object gets none itself; its
+      // one-line fields get their own (next test).
       render(
         <CellMetadataTab
           metadata={{
             attachments: [{ type: "image", url: "https://cdn.example.org/a.jpg" }],
-            source: { book: "GEN" },
+            source: { ref: { book: "GEN" } },
           }}
           projectId="p1"
         />,
       )
       expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+    })
+
+    it("offers the one-line fields inside a nested object, keyed parent.child", () => {
+      // WHY: the SDBH importer keeps every field under `metadata.sdbh`
+      // (src/lib/parsers/sdbh.ts). Offering only top-level keys left SDBH
+      // projects with no checkbox at all — the AQU-1369 feature was unusable
+      // on the project it was built for.
+      render(
+        <CellMetadataTab
+          metadata={{
+            tags: ["אָב", "Definition"],
+            sdbh: {
+              layer: "sense",
+              lemma: "אָב",
+              partsOfSpeech: "noun",
+              domains: [{ code: "001", label: "Family" }],
+            },
+          }}
+          projectId="p1"
+        />,
+      )
+      expect(screen.queryByRole("checkbox", { name: "Show sdbh on cells" })).not.toBeInTheDocument()
+      // A list of objects has no one-line label either.
+      expect(screen.queryByRole("checkbox", { name: "Show sdbh.domains on cells" })).not.toBeInTheDocument()
+      const lemma = screen.getByRole("checkbox", { name: "Show sdbh.lemma on cells" })
+      expect(screen.getByRole("checkbox", { name: "Show sdbh.partsOfSpeech on cells" })).toBeInTheDocument()
+      fireEvent.click(lemma)
+      expect(getCellDisplayFields("p1")).toEqual(["sdbh.lemma"])
     })
 
     it("reads a key already on from storage as checked", () => {

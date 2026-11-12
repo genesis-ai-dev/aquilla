@@ -5,6 +5,7 @@ import {
   readImportMilestone,
   type MilestoneNavigationCell,
 } from "./milestone-navigation"
+import { FALLBACK_MILESTONE_SIZE } from "@/lib/import/milestones"
 import type { ImportMilestone } from "../../shared/import-contract"
 
 function persisted(
@@ -101,6 +102,81 @@ describe("deriveMilestoneNavigation", () => {
       { key: "part:cell-1", label: "Part 1", count: 50 },
       { key: "part:cell-51", label: "Part 2", count: 1 },
     ])
+  })
+
+  it("keeps the section identity instead of swapping to Part N partway down (AQU-1164)", () => {
+    const chapterOne = { key: "biblica:GEN:1", kind: "chapter", label: "Genesis 1", shortLabel: "1" } as const
+    const generic = { key: "part:later", kind: "part", label: "Part 2", shortLabel: "2" } as const
+    const result = deriveMilestoneNavigation([
+      persisted("verse-one", chapterOne),
+      persisted("verse-two", generic),
+      persisted("verse-three", generic),
+    ])
+
+    expect([...result.milestoneByCellId.values()]).toEqual([chapterOne, chapterOne, chapterOne])
+    expect(result.orderedMilestones.map(({ milestone }) => milestone.key)).toEqual(["biblica:GEN:1"])
+  })
+
+  it("lets a generic part milestone ahead of the first identity inherit it (AQU-1164)", () => {
+    const generic = { key: "part:lead", kind: "part", label: "Part 1", shortLabel: "1" } as const
+    const story = { key: "story:body.xml:s1", kind: "story", label: "Story 1", shortLabel: "1" } as const
+    const result = deriveMilestoneNavigation([
+      persisted("lead", generic),
+      persisted("body", story),
+    ])
+
+    expect([...result.milestoneByCellId.values()]).toEqual([story, story])
+  })
+
+  it("keeps an arbitrarily long section as one page, however many chunks it spans (AQU-1444)", () => {
+    // The cheap half of the EditorTable split-milestones guard: a section read
+    // out of the file is one navigation entry no matter how far past the
+    // fallback chunker's `FALLBACK_MILESTONE_SIZE` cut it runs. Four chunks'
+    // worth here, which the render-level test in
+    // `src/components/EditorTable.splitMilestones.test.tsx` cannot afford —
+    // it pays ~55 ms per cell, so it covers only the first boundary crossing.
+    const section = {
+      key: "ebl:boxes:1",
+      kind: "section",
+      label: "Boxes and tables",
+      shortLabel: "B",
+    } as const
+    const length = FALLBACK_MILESTONE_SIZE * 4
+    const cellIds = Array.from({ length }, (_, index) => `cell-box-${index + 1}`)
+    const result = deriveMilestoneNavigation([
+      ...cellIds.map((id) => persisted(id, section)),
+      persisted("cell-intro-1", {
+        key: "ebl:section:1:intro",
+        kind: "section",
+        label: "INTRODUCTION",
+        shortLabel: "1",
+      }),
+    ])
+
+    expect(result.orderedMilestones.map(({ milestone }) => milestone.key)).toEqual([
+      "ebl:boxes:1",
+      "ebl:section:1:intro",
+    ])
+    expect(result.orderedMilestones[0]?.cellIds).toEqual(cellIds)
+    expect(cellIdsForMilestonePage(
+      result.orderedMilestones.map(({ milestone, cellIds: ids }) => ({
+        key: milestone.key,
+        cellIds: ids,
+      })),
+      "ebl:boxes:1",
+    )).toEqual(cellIds)
+  })
+
+  it("keeps Part N for a file that is generic all the way through (AQU-1164)", () => {
+    const partOne = { key: "part:unit-1", kind: "part", label: "Part 1", shortLabel: "1" } as const
+    const partTwo = { key: "part:unit-51", kind: "part", label: "Part 2", shortLabel: "2" } as const
+    const result = deriveMilestoneNavigation([
+      persisted("cell-1", partOne),
+      persisted("cell-2", partOne),
+      persisted("cell-3", partTwo),
+    ])
+
+    expect([...result.milestoneByCellId.values()]).toEqual([partOne, partOne, partTwo])
   })
 })
 

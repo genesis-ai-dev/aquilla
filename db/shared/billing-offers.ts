@@ -1,6 +1,7 @@
 /** Customer-facing catalog: monetary amounts come from Stripe, ledger units stay private. */
 export interface BillingOffer {
-  offer: 'pro' | 'max_5x' | 'max_20x' | 'team' | 'team_20x'
+  // AQU-2058: Team is the only self-serve paid offer.
+  offer: 'team'
   label: string
   scope: 'personal' | 'team'
   capacityLabel: string
@@ -21,6 +22,5 @@ export interface BillingOffers {
 }
 
 export const billingOfferLabels: Record<BillingOffer['offer'], string> = {
-  pro: 'Pro', max_5x: 'Max 5×', max_20x: 'Max 20×',
-  team: 'Team', team_20x: 'Team 20×',
+  team: 'Team',
 }

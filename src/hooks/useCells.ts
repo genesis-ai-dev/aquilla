@@ -17,7 +17,7 @@ import type { CodexCellAttachment, EditTypeValue, ValidationEntry, WordTiming } 
 import type { CellAuditStats } from "./useCellsAuditStats"
 import { streamFileCells, fetchCellsByIds, fetchCellsDelta } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
-import { readCellsCache, writeCellsCache, mergeCellsDelta } from "@/lib/sync/cells-cache"
+import { grantsVersionFromSyncToken, readCellsCache, writeCellsCache, mergeCellsDelta } from "@/lib/sync/cells-cache"
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { formatVttTime } from "@/lib/video/vtt-generator"
 import { decodeHtmlEntities } from "@/lib/html-entities"
@@ -96,6 +96,10 @@ export interface CellData {
   validationStatus: ValidationStatus
   endorsementCount?: number
   activeValidators: string[]
+  /** AQU-2296: username → when that validator signed off the current head
+   *  (server clock, ms). Feeds the date under each name in the
+   *  "Text validated by" popover; a name with no entry gets no date line. */
+  validatorDecidedTs?: Record<string, number>
   /** Empty in Phase 2a — useCellEditHistory will own this in Phase 2b. */
   validationHistory: EditValidationSummary[]
   /** Empty in Phase 2a — useCellHistory will own this in Phase 2b. */
@@ -119,6 +123,21 @@ export interface CellData {
    * it — notably the empty-target check.
    */
   hasOwnTake?: boolean
+  /**
+   * Media redesign slice 2: in a language that counts its recordings (Audio,
+   * or Text and audio), this line's recording has the project's required
+   * audio validators. Absent in a Text language and wherever audio is not
+   * loaded.
+   */
+  audioApproved?: boolean
+  /**
+   * Media redesign slice 2: the line's PROGRESS status by what its language
+   * delivers (src/lib/lanes/lane-delivers.ts `laneLineStatus`) — recorded and
+   * approved in an Audio language, both halves in Text and audio. Set only in
+   * a language that counts its recordings; in a Text language progress reads
+   * `status`, exactly as before. `status` itself always stays the text's.
+   */
+  laneStatus?: "empty" | "unvalidated" | "validated"
   selectedGeneratedVoiceAudioId?: string
   /**
    * AQU-646 stage 3: the active clip in EVERY slot, keyed by slot.
@@ -154,12 +173,37 @@ export interface CellData {
    *  continuation cells — drives paragraph grouping (`deriveParagraphs`) and
    *  the paragraph-draft UI affordance. Never derived from the target row. */
   paragraphStart?: boolean
+  /** AQU-2184: the USFM marker that opened this cell's paragraph — "p", "m",
+   *  "q1", "pi2", … — from the SOURCE row's `metadata.paragraphMarker`.
+   *  Present only where `paragraphStart` is, and only on USFM/Paratext
+   *  imports made since AQU-2184; absent everywhere else, where a consumer
+   *  must fall back to plain prose. Source-only for the same reason
+   *  `paragraphStart` is: the book's structure is the source's, and a
+   *  translation that carries no markers still reads in the source's
+   *  paragraphs and poetry lines. */
+  paragraphMarker?: string
+  /** AQU-1422: true while this cell is parked with "Hide cell". Read from the
+   *  SOURCE row's `hidden` flag and NEVER from the target row — hiding is per
+   *  cell, not per lane, and a target row created after the hide carries no flag
+   *  of its own. Absent on a visible cell. */
+  hidden?: boolean
   waivers?: import("@/lib/parsers/types").RuleWaiver[]
   /** Most-recent edit timestamp on the target row (ms epoch). Forwarded from
    *  the CellRow projection so consumers like useLivingMemory can sort by
    *  recency without re-fetching. Undefined for source-only cells or cells
    *  that have never been edited. */
   lastEditAt?: number
+  /** Who wrote the current target text in THIS lane: the active lane's target
+   *  row's `cells.last_editor`, never the source row's.
+   *  - AQU-1630: the server's self-validation refusal compares this against
+   *    the caller, so a client that wants to answer "may I validate this
+   *    line?" before enqueuing a `cell.validate` needs the same value.
+   *  - AQU-1571: the live store stamps the viewer while an unsynced edit of
+   *    theirs is shown. Display and validation policy only (`isOwnTextEdit`);
+   *    never sent anywhere.
+   *  Null when unknown (no target row projected yet; imported rows carry
+   *  none); undefined on a cell read without one. */
+  lastEditor?: string | null
 }
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
@@ -187,6 +231,10 @@ function waiversEqual(
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) {
     if (a[i].ruleId !== b[i].ruleId) return false
+    // AQU-1740: two waivers can now share a ruleId and differ only in the
+    // finding they name, so the hash has to be part of the comparison or a
+    // re-fetch that swapped one for the other would read as "unchanged".
+    if (a[i].matchHash !== b[i].matchHash) return false
     if (a[i].reason !== b[i].reason) return false
     if (a[i].waivedAt !== b[i].waivedAt) return false
     if (a[i].waivedBy !== b[i].waivedBy) return false
@@ -217,6 +265,7 @@ function cellsEqual(a: CellData, b: CellData): boolean {
     a.validationStatus === b.validationStatus &&
     a.endorsementCount === b.endorsementCount &&
     a.lastEditAt === b.lastEditAt &&
+    a.lastEditor === b.lastEditor &&
     a.startTime === b.startTime &&
     a.endTime === b.endTime &&
     a.sequenceIndex === b.sequenceIndex &&
@@ -225,9 +274,23 @@ function cellsEqual(a: CellData, b: CellData): boolean {
     a.cameraState === b.cameraState &&
     a.metadata === b.metadata &&
     stringArraysEqual(a.activeValidators, b.activeValidators) &&
+    sameStampRecord(a.validatorDecidedTs, b.validatorDecidedTs) &&
     stringArraysEqual(a.globalReferences, b.globalReferences) &&
     waiversEqual(a.waivers, b.waivers)
   )
+}
+
+/** AQU-2296: two `username -> timestamp` records, compared by value. */
+function sameStampRecord(
+  a: Record<string, number> | undefined,
+  b: Record<string, number> | undefined,
+): boolean {
+  if (a === b) return true
+  const left = a ?? {}
+  const right = b ?? {}
+  const keys = Object.keys(left)
+  if (keys.length !== Object.keys(right).length) return false
+  return keys.every((key) => left[key] === right[key])
 }
 
 function cellArraysEqual(a: readonly CellData[], b: readonly CellData[]): boolean {
@@ -299,24 +362,44 @@ export function buildCellData(
   const original = decodeHtmlEntities(source?.value ?? "")
 
   const activeValidators = stats?.activeValidators ?? []
+
+  // AQU-1364: when audit stats are loaded for a cell they are the
+  // authoritative validator list for its CURRENT head. They carry the
+  // optimistic outbox overlay (`lib/sync/audit-stats-overlay.ts`), and
+  // `cell.validate`/`cell.unvalidate` always refetch them
+  // (`isStatsDerivableKind` excludes the validation pair), so an unvalidate
+  // shows up there at once. The denormalized `cells.validated` /
+  // `cells.endorsement_count` columns on the target row only refresh when the
+  // ROW itself is refetched, which a validation event does not trigger.
+  // Preferring the row therefore left a just-unvalidated cell reading
+  // "validated" with a full endorsement count — pinning its health bar at
+  // 100% long after the validation was removed.
+  //
+  // Resolve the precedence exactly once here, mirroring
+  // `validationContribution` in useActiveCellStore.ts, which already resolves
+  // progress this way: audit stats win when present, the row's denormalized
+  // columns are the fallback (no stats loaded yet, local projects,
+  // mid-migration states). Postgres encodes the same
+  // "validators-meet-threshold" gate at the projection layer (AQU-279 made it
+  // threshold-aware; AQU-280 aligned the client progress surfaces onto it), so
+  // the two agree at rest and differ only while the row is stale.
+  const endorsementCount = stats
+    ? activeValidators.length
+    : Math.max(0, target?.endorsementCount ?? source?.endorsementCount ?? 0)
+  const validatedForStatus = stats
+    ? activeValidators.length >= requiredValidations
+    : (target?.validated ?? activeValidators.length >= requiredValidations)
+
   const validationStatus: ValidationStatus =
     !translated.trim()
       ? "empty"
       : activeValidators.length > 0
         ? classifyValidators(activeValidators, username, requiredValidations)
-        : target?.validated
-          ? "full-others"
-          : "none"
-
-  // Prefer the target row's `validated` flag as the source of truth for the
-  // simple "is it green?" UI. When no stats are present, this is the only
-  // available signal — Postgres encodes the "validators-meet-threshold" gate at the
-  // projection layer (AQU-279 made this threshold-aware; AQU-280 aligns all
-  // client progress surfaces to consume this flag). Falls back to the
-  // activeValidators count only when the server flag is absent (local projects
-  // or mid-migration states).
-  const validatedForStatus =
-    target?.validated ?? activeValidators.length >= requiredValidations
+        : stats
+          ? "none"
+          : target?.validated
+            ? "full-others"
+            : "none"
 
   const startMs = source?.startMs ?? target?.startMs ?? null
   const endMs = source?.endMs ?? target?.endMs ?? null
@@ -339,6 +422,16 @@ export function buildCellData(
   // D1 paragraph grouping flag: source-only, strict boolean (metadata is
   // Record<string, unknown> — non-boolean junk must not leak through as truthy).
   const paragraphStart = source?.metadata?.paragraphStart === true
+  // AQU-2184: same strict read — a non-string value in the JSONB bucket must
+  // not reach consumers as a marker name.
+  const rawParagraphMarker = source?.metadata?.paragraphMarker
+  const paragraphMarker = typeof rawParagraphMarker === "string" && rawParagraphMarker !== "" ? rawParagraphMarker : undefined
+  // AQU-2408: the cell's own label — typed through `cell.label.set`, or the
+  // one a legacy Codex notebook carried in this very key. Source row only,
+  // strict non-empty string; a blank or non-string value is no label at all.
+  const rawCellLabel = source?.metadata?.cellLabel
+  const trimmedCellLabel = typeof rawCellLabel === "string" ? rawCellLabel.trim() : ""
+  const cellLabel = trimmedCellLabel !== "" ? trimmedCellLabel : undefined
 
   return {
     id: cellId,
@@ -357,14 +450,18 @@ export function buildCellData(
     type: target?.type ?? source?.type ?? "text",
     status: deriveStatus(translated, validatedForStatus),
     validationStatus,
-    endorsementCount: target?.endorsementCount ?? source?.endorsementCount ?? 0,
+    endorsementCount,
     activeValidators,
+    validatorDecidedTs: stats?.validatorDecidedTs,
     validationHistory: EMPTY_VALIDATION_HISTORY,
     history: EMPTY_HISTORY,
     threads: EMPTY_THREADS,
     globalReferences: source?.canonicalRef ? [source.canonicalRef] : undefined,
     waivers: stats?.waivers ?? EMPTY_WAIVERS,
     lastEditAt: target?.lastEditAt ?? source?.lastEditAt,
+    // AQU-1571: the TARGET row only. The source row's editor wrote the source,
+    // and a line with no target yet has no text anyone could validate.
+    lastEditor: target?.lastEditor ?? null,
     startTime,
     endTime,
     sequenceIndex,
@@ -373,6 +470,10 @@ export function buildCellData(
     cameraState,
     metadata,
     paragraphStart: paragraphStart || undefined,
+    ...(cellLabel !== undefined ? { cellLabel } : {}),
+    paragraphMarker: paragraphStart ? paragraphMarker : undefined,
+    // AQU-1422: source row only, deliberately — see the field's doc comment.
+    hidden: source?.hidden === true ? true : undefined,
   }
 }
 
@@ -567,6 +668,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // the empty-state UI as if the file genuinely has no cells.
   const tokenRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const tokenAttemptsRef = useRef(0)
+  const grantsVersionRef = useRef("")
   // Tauri offline read branch (see resolveOfflineStore above). `store` is
   // null outside Tauri, before boot completes, or on boot failure — every
   // one of those falls straight through to the unchanged HTTP path below.
@@ -808,13 +910,39 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       return
     }
 
+    let token: string | null = null
+    try {
+      token = getToken ? await getToken(fileId) : null
+    } catch {
+      token = null
+    }
+    if (generationRef.current !== gen) return
+    if (!token) {
+      const attempt = ++tokenAttemptsRef.current
+      inFlightRef.current = false
+      if (attempt >= 6) {
+        setIsError(true)
+        setIsLoading(false)
+        return
+      }
+      const delay = Math.min(4000, 250 * 2 ** (attempt - 1))
+      if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
+      tokenRetryRef.current = setTimeout(() => {
+        tokenRetryRef.current = null
+        if (generationRef.current === gen) void doFetchRef.current(soft)
+      }, delay)
+      return
+    }
+    tokenAttemptsRef.current = 0
+    const grantsVersion = grantsVersionFromSyncToken(token)
+    grantsVersionRef.current = grantsVersion
+
     let usedCache = false
     if (!soft) {
-      // Try the IDB cache before showing a skeleton. A hit paints cached rows
-      // synchronously into rowsRef, hides the skeleton, and demotes the rest
-      // of the fetch to soft mode (atomic swap on completion) so the user
-      // never flickers from cached rows → skeleton → fresh rows.
-      const cached = await readCellsCache(projectId, fileId)
+      // The token is resolved first so a grant change does not paint the
+      // previous snapshot. A warm token is already in memory; a cold mint
+      // shows the skeleton until the key is known.
+      const cached = await readCellsCache(projectId, fileId, grantsVersion)
       if (generationRef.current !== gen) return
       if (cached && cached.rows.length > 0) {
         rowsRef.current = cached.rows
@@ -839,29 +967,6 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     setIsError(false)
     let paintTimer: ReturnType<typeof setTimeout> | undefined
     try {
-      const token = getToken ? await getToken(fileId) : null
-      if (!token) {
-        if (generationRef.current !== gen) return
-        // Token unavailable: probably an auth race or transient /sync-token
-        // failure. Keep the skeleton up and retry with backoff (250ms → 4s)
-        // so the file appears as soon as auth resolves. After ~6 attempts
-        // surface isError so the UI can show a real failure state.
-        const attempt = ++tokenAttemptsRef.current
-        inFlightRef.current = false
-        if (attempt >= 6) {
-          setIsError(true)
-          setIsLoading(false)
-          return
-        }
-        const delay = Math.min(4000, 250 * 2 ** (attempt - 1))
-        if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
-        tokenRetryRef.current = setTimeout(() => {
-          tokenRetryRef.current = null
-          if (generationRef.current === gen) void doFetchRef.current(soft)
-        }, delay)
-        return
-      }
-      tokenAttemptsRef.current = 0
       // M2-1 delta path: with a confirmed watermark, ONE `?since=` request
       // replaces the ~60-page full re-stream for every soft revalidate
       // (window focus, visibilitychange, post-commit) and for warm reopens.
@@ -905,7 +1010,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
             rowsRef.current = kept
             rebuildFromCache()
             if (discardedCellIds.size > 0) nextWatermark = since
-            void writeCellsCache(projectId, fileId, rowsRef.current, nextWatermark, nextEpoch ?? undefined)
+            void writeCellsCache(projectId, fileId, rowsRef.current, nextWatermark, nextEpoch ?? undefined, grantsVersion)
           } else if (result.maxServerSeq !== since) {
             // Watermark moved on row-less events (file.rename etc.) — advance
             // the cursor so those events aren't re-scanned forever.
@@ -915,6 +1020,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
               rowsRef.current,
               result.maxServerSeq,
               nextEpoch ?? undefined,
+              grantsVersion,
             )
           }
           maxServerSeqRef.current = nextWatermark
@@ -1021,6 +1127,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         rowsRef.current,
         watermark ?? undefined,
         watermarkEpoch ?? undefined,
+        grantsVersion,
       )
       // Always clear loading on completion — including when a soft refetch
       // finishes after a hard load that got superseded — so the skeleton can
@@ -1200,6 +1307,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       rowsRef.current,
       maxServerSeqRef.current ?? undefined,
       projectEpochRef.current ?? undefined,
+      grantsVersionRef.current,
     )
   }, [])
 

@@ -1,4 +1,5 @@
-import { type Page, type Locator, expect } from "@playwright/test"
+import { type Page, type Locator, type FrameLocator, expect } from "@playwright/test"
+import { EXTENSION_EDITOR_FRAME, editorUnderTest, type EditorUnderTest } from "../editor-mode"
 
 // A cold editor route hydrates project access, file metadata, sync state, and
 // source/target cells before the first row can render. Three isolated smoke
@@ -6,6 +7,10 @@ import { type Page, type Locator, expect } from "@playwright/test"
 // an assertion budget, not a safe cold-start watchdog. Keep this below the
 // 60-second per-test ceiling so a genuinely stuck editor still fails promptly.
 const EDITOR_READY_TIMEOUT_MS = 30_000
+
+// A target cell's editable surface — see `editCell` for the two shapes.
+const EDITABLE_TARGET_SELECTOR =
+  'textarea, .ProseMirror[contenteditable="true"], [contenteditable="true"]'
 
 interface FilePayload {
   name: string
@@ -16,9 +21,22 @@ interface FilePayload {
 /** Page object for the project workspace route ("/project/:id/editor"). */
 export class Workspace {
   private readonly page: Page
+  private readonly editor: EditorUnderTest
 
-  constructor(page: Page) {
+  /** `editor`: drive this editor regardless of E2E_EDITOR (a spec that
+   *  switches editors itself, e.g. the perf comparison). */
+  constructor(page: Page, editor: EditorUnderTest = editorUnderTest()) {
     this.page = page
+    this.editor = editor
+  }
+
+  /** Where editor rows live: the page (built-in editor), or the first-party
+   *  extension editor's sandboxed frame when the run targets it
+   *  (E2E_EDITOR=extension, see e2e/helpers/editor-mode.ts). The extension
+   *  renders the same row anatomy (data-cell-id, data-cell-type, the read
+   *  view, the action rail and its aria-labels), so journeys run unchanged. */
+  private get root(): Page | FrameLocator {
+    return this.editor === "extension" ? this.page.frameLocator(EXTENSION_EDITOR_FRAME) : this.page
   }
 
   /** Select a file and stop at the human-review preview boundary. */
@@ -49,6 +67,51 @@ export class Workspace {
     await this.confirmImportPreview()
   }
 
+  async importYouTubeCaptions(url: string, payload: FilePayload): Promise<void> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+    const dialog = this.page.getByRole("dialog")
+    await dialog.getByRole("button", { name: /^YouTube video/i }).click()
+    await dialog.getByLabel("YouTube video link").fill(url)
+    await dialog.getByLabel("Import a caption export", { exact: true }).check()
+    await dialog.getByLabel("Your caption export").setInputFiles(payload)
+    await dialog.getByRole("button", { name: "Preview captions" }).click()
+    await expect(dialog.getByRole("button", { name: "Import captions" }))
+      .toBeEnabled({ timeout: 10_000 })
+    await dialog.getByRole("button", { name: "Import captions" }).click()
+    await this.waitForImportSettled()
+  }
+
+  async importYouTubePicture(url: string, name: string): Promise<void> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+    const dialog = this.page.getByRole("dialog")
+    await dialog.getByRole("button", { name: /^YouTube video/i }).click()
+    await dialog.getByLabel("YouTube video link").fill(url)
+    await dialog.getByLabel("Video name", { exact: true }).fill(name)
+    await dialog.getByRole("button", { name: "Preview import" }).click()
+    await dialog.getByRole("button", { name: "Link film", exact: true }).click()
+    await this.waitForImportSettled()
+  }
+
+  async previewYouTubeOriginalMedia(url: string, filePath: string): Promise<void> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+    const dialog = this.page.getByRole("dialog")
+    await dialog.getByRole("button", { name: /^YouTube video/i }).click()
+    await dialog.getByLabel("YouTube video link").fill(url)
+    await dialog.getByLabel("Use original audio or video", { exact: true }).check()
+    await dialog.getByLabel("Your original audio or video").setInputFiles(filePath)
+    await dialog.getByRole("button", { name: "Preview import" }).click()
+    await expect(this.page.getByRole("button", { name: "Import media and link the film" }))
+      .toBeVisible({ timeout: 30_000 })
+  }
+
+  async confirmYouTubeOriginalMedia(): Promise<void> {
+    await this.page.getByRole("button", { name: "Import media and link the film" }).click()
+    await this.waitForImportSettled()
+  }
+
   async importPayload(payload: FilePayload): Promise<void> {
     await this.previewImportPayload(payload)
     await this.confirmImportPreview()
@@ -65,12 +128,150 @@ export class Workspace {
       .toBeVisible({ timeout: 10_000 })
   }
 
-  /** Import an audio/video file. Media files bypass the AQU-310 preview panel
-   * (they have no text cells to show) and upload immediately on selection, so
-   * there is no "Confirm import" step — see ImportDialog.doImportFiles. */
+  /** Import media without companion or embedded captions. */
   async importMediaFile(filePath: string): Promise<void> {
     await this.chooseImportFiles(filePath)
     await this.waitForImportSettled()
+  }
+
+  /**
+   * Import media and wait only for the authoritative sidebar row.
+   *
+   * `importMediaFile` additionally waits for the import dialog's overlay to
+   * go, which AQU-1917's specs cannot use: they hold a transcription request
+   * open on purpose, and the resulting long-lived progress toast keeps that
+   * overlay check busy. Those specs assert the "no modal over the workspace"
+   * rule themselves, against `modalDialogs()`, so the settle heuristic here
+   * would only add a second, flakier copy of it.
+   */
+  async startMediaImport(filePath: string, fileName: string): Promise<void> {
+    await this.chooseImportFiles(filePath)
+    await this.waitForFileInSidebar(fileName)
+  }
+
+  /** Review companion captions before publishing the media file. */
+  async previewMediaWithCaptions(
+    media: FilePayload,
+    captions: FilePayload,
+  ): Promise<void> {
+    await this.chooseImportFiles([media, captions])
+    await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  async previewEmbeddedMedia(media: FilePayload): Promise<void> {
+    await this.chooseImportFiles(media)
+    await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  async confirmMediaPreview(mediaName: string): Promise<void> {
+    await this.page.getByRole("button", { name: "Continue import", exact: true }).click()
+    // Existing sidebar rows cannot prove this import completed.
+    await expect(this.page.getByTestId("shell-dock")
+      .getByRole("button", { name: mediaName, exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await expect(this.modalDialogs()).toHaveCount(0)
+  }
+
+  /** Every open dialog except toasts. AQU-1352's "Created … in …" success toast
+   * is also role="dialog" and outlives the import, so a bare role lookup cannot
+   * prove the import dialog closed. */
+  modalDialogs(): Locator {
+    return this.page.getByRole("dialog").and(this.page.locator(':not([data-slot="toast"])'))
+  }
+
+  sourceAudioClips(): Locator {
+    return this.page.locator('[data-variant="dialogue"] [data-testid^="tl-card-"]')
+  }
+
+  async previewCaptionTrack(captions: FilePayload): Promise<void> {
+    await this.page.getByTestId("tl-sources-menu").click()
+    await this.page.getByRole("menuitem", { name: /Attach captions/i }).click()
+    await this.page.getByLabel("Caption file", { exact: true }).setInputFiles(captions)
+    await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  async confirmCaptionTrack(overwrite = false): Promise<void> {
+    await this.page.getByRole("button", {
+      name: overwrite ? "Overwrite caption track" : "Add caption track", exact: true,
+    }).click()
+    await expect(this.modalDialogs()).toHaveCount(0, { timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  /** AQU-1566: on a linked video with no rows, the empty table's "Attach
+   * captions" adds the reviewed captions as the file's own rows. */
+  async attachCaptionsAsRows(captions: FilePayload): Promise<void> {
+    const empty = this.page.getByTestId("linked-video-empty")
+    await empty.getByRole("button", { name: "Attach captions", exact: true })
+      .click({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await this.page.getByLabel("Caption file", { exact: true }).setInputFiles(captions)
+    await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    // Rows mode asks for no destination track or track name.
+    await expect(this.page.getByLabel("Destination track", { exact: true })).toHaveCount(0)
+    await this.page.getByRole("button", { name: "Add captions as rows", exact: true }).click()
+    await expect(this.modalDialogs()).toHaveCount(0, { timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  /** AQU-2196: zoom lives in the timeline's corner ⋯ (Timeline settings) now,
+   * as a stepper that leaves the menu open, so Escape closes it again. */
+  async zoomTimelineIn(): Promise<void> {
+    await this.page.getByTestId("dock-more-tl").click()
+    await this.page.getByRole("button", { name: "Zoom in", exact: true }).click()
+    await this.page.keyboard.press("Escape")
+    await expect(this.page.getByRole("button", { name: "Zoom in", exact: true })).toHaveCount(0)
+  }
+
+  async declineWhisperDownload(): Promise<void> {
+    const dialog = this.page.getByRole("dialog", { name: /Whisper/i })
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+    await expect(dialog).toHaveCount(0)
+  }
+
+  linkedVideo(): Locator {
+    return this.page.getByTestId("video-pane-media")
+  }
+
+  async playMedia(): Promise<void> {
+    await this.page.getByRole("button", { name: /Play all/i }).click()
+  }
+
+  async pauseMedia(): Promise<void> {
+    await this.page.getByRole("button", { name: "Pause", exact: true }).click()
+  }
+
+  async waitForLinkedVideo(): Promise<void> {
+    await expect(this.linkedVideo()).toBeVisible()
+    await expect.poll(() => this.linkedVideo().evaluate((element: HTMLVideoElement) =>
+      element.readyState), { timeout: EDITOR_READY_TIMEOUT_MS }).toBeGreaterThanOrEqual(2)
+  }
+
+  /** AQU-2196: the media view's playback strip has no scrubber ("the timeline
+   * is the scrubber"), so seek the way a person does: click the ruler. Its
+   * left edge is 0 s; the scale comes from two of its own tick labels. */
+  async seekLinkedVideo(seconds: number): Promise<void> {
+    const ruler = this.page.getByTestId("tl-ruler")
+    const pxPerSec = await ruler.evaluate((element) => {
+      const clock = (text: string) => {
+        const [m, s] = text.trim().split(":")
+        return Number(m) * 60 + Number(s)
+      }
+      const ticks = Array.from(element.children)
+        .map((tick) => ({ left: parseFloat((tick as HTMLElement).style.left), text: tick.textContent ?? "" }))
+        .filter((tick) => Number.isFinite(tick.left) && /^\d+:\d\d(\.\d+)?$/.test(tick.text.trim()))
+      if (ticks.length < 2) return 0
+      return (ticks[1].left - ticks[0].left) / (clock(ticks[1].text) - clock(ticks[0].text))
+    })
+    expect(pxPerSec).toBeGreaterThan(0)
+    const bounds = await ruler.boundingBox()
+    expect(bounds).not.toBeNull()
+    await ruler.click({ position: { x: seconds * pxPerSec, y: bounds!.height / 2 } })
+    await expect.poll(() => this.linkedVideo().evaluate((element: HTMLVideoElement, time) =>
+      element.seeking ? 1 : Math.abs(element.currentTime - time), seconds))
+      .toBeLessThan(0.05)
   }
 
   /** Select and commit one translation through the eBible corpus picker. */
@@ -185,7 +386,9 @@ export class Workspace {
 
   /** Shared import prologue: dismiss the setup checklist, open the
    * ImportDialog's Upload Files panel, and select `filePath`. */
-  private async chooseImportFiles(filePath: string | FilePayload): Promise<void> {
+  private async chooseImportFiles(
+    filePath: string | FilePayload | string[] | FilePayload[],
+  ): Promise<void> {
     await this.dismissSetupChecklist()
     // Open the ImportDialog — lands on the "landing" screen (card grid).
     // Use the card's accessible button name rather than a case-sensitive text
@@ -194,7 +397,7 @@ export class Workspace {
     await this.openImportDialog()
     // Navigate to the Upload Files panel by clicking its card.
     await uploadCard.click()
-    // UploadPanel is now visible with a "Choose Files" button.
+    // UploadPanel is now visible with a "Choose files" button.
     // Prefer the import dialog's file picker — cell audio upload inputs also
     // match a bare `input[type=file]:not([webkitdirectory])` once the editor
     // has hydrated, which trips Playwright's strict mode.
@@ -203,27 +406,58 @@ export class Workspace {
     await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
   }
 
+  /** Accessible name of the dialog still covering the workspace, so a stuck
+   *  import names itself instead of timing out on a click the overlay ate. */
+  private async openDialogAccessibleName(): Promise<string> {
+    const dialog = this.modalDialogs().first()
+    const labelled = (await dialog.getAttribute("aria-label").catch(() => null))?.trim()
+    if (labelled) return labelled
+    const title = (await dialog.locator('[data-slot="dialog-title"]').first().textContent().catch(() => null))?.trim()
+    if (title) return title
+    const heading = (await dialog.getByRole("heading").first().textContent().catch(() => null))?.trim()
+    return heading || "dialog"
+  }
+
   private async waitForImportSettled(): Promise<void> {
     // A hidden confirm button is only the transient "Uploading…" state, not a
     // success signal. Wait for the authoritative sidebar row, while surfacing
     // any import error immediately instead of timing out on an unrelated row.
+    // A file row under an open dialog is not settled: the overlay still eats
+    // the next click. If that overlay is still up when the wait ends, the
+    // error names the dialog.
     const fileActions = this.page
       .locator("aside")
       .locator('button[aria-label="File actions"]')
       .first()
     const importError = this.page.getByText(/^Import failed:/i).first()
+    const overlay = this.page.locator(
+      '[data-slot="dialog-overlay"][data-open], [data-slot="alert-dialog-overlay"][data-open]',
+    )
     let outcome = "pending"
-    await expect.poll(async () => {
-      if (await importError.isVisible().catch(() => false)) {
-        outcome = `error:${(await importError.textContent())?.trim() ?? "Import failed"}`
-        return "settled"
-      }
-      if (await fileActions.isVisible().catch(() => false)) {
-        outcome = "success"
-        return "settled"
-      }
-      return "pending"
-    }, { timeout: 30_000 }).toBe("settled")
+    let blockedBy = ""
+    try {
+      await expect.poll(async () => {
+        if (await importError.isVisible().catch(() => false)) {
+          outcome = `error:${(await importError.textContent())?.trim() ?? "Import failed"}`
+          return "settled"
+        }
+        const rowReady = await fileActions.isVisible().catch(() => false)
+        const overlayOpen = rowReady && await overlay.first().isVisible().catch(() => false)
+        if (rowReady && overlayOpen) {
+          blockedBy = await this.openDialogAccessibleName()
+          return "blocked"
+        }
+        if (rowReady) {
+          outcome = "success"
+          blockedBy = ""
+          return "settled"
+        }
+        return "pending"
+      }, { timeout: 30_000 }).toBe("settled")
+    } catch (error) {
+      if (blockedBy) throw new Error(`Import dialog still open: ${blockedBy}`)
+      throw error
+    }
     if (outcome.startsWith("error:")) throw new Error(outcome.slice("error:".length))
   }
 
@@ -254,11 +488,51 @@ export class Workspace {
     }
   }
 
+  /** Sidebar Re-import → Update this file. The file was already chosen. */
+  async sidebarReimportUpdate(filePath: string): Promise<void> {
+    const row = this.page.locator('[data-showcase="sidebar.file"]').filter({ hasText: /genesis\.usfm/i }).first()
+    await row.hover()
+    await row.getByRole("button", { name: /^File actions$/i }).click()
+    await this.page.getByRole("menuitem", { name: /^Re-import$/i }).click()
+
+    const chooseFilesBtn = this.page.getByRole("button", { name: /Choose Files/i })
+    await expect(chooseFilesBtn).toBeVisible({ timeout: 10_000 })
+    await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
+
+    const update = this.page.getByRole("button", { name: /^Update this file$/i })
+    await expect(update).toBeVisible({ timeout: 30_000 })
+    const reconciled = this.page.waitForResponse(
+      (response) => response.url().endsWith("/import/reconcile") && response.request().method() === "POST",
+      { timeout: 30_000 },
+    )
+    await update.click()
+    const response = await reconciled
+    if (!response.ok()) {
+      throw new Error(`Sidebar re-import failed (${response.status()}): ${await response.text()}`)
+    }
+    await expect(this.page.getByRole("button", { name: /^Update this file$/i })).toBeHidden({ timeout: 30_000 })
+  }
+
+  /** Index of the editor row whose source contains this text. */
+  async cellIndexBySource(text: string): Promise<number> {
+    // A restored row can render before its latest source text hydrates.
+    // Wait for the requested source, rather than taking a one-time snapshot.
+    await expect(
+      this.cellRows().locator('[data-cell-type="source"]').filter({ hasText: text }).first(),
+    ).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    const count = await this.cellRows().count()
+    for (let index = 0; index < count; index += 1) {
+      const source = await this.cellRow(index).locator('[data-cell-type="source"]').innerText()
+      if (source.includes(text)) return index
+    }
+    throw new Error(`No source cell contains ${JSON.stringify(text)}`)
+  }
+
   private uploadFilesCard(): Locator {
     return this.page.getByRole("button", { name: /^Upload files/i }).first()
   }
 
-  private async openImportDialog(): Promise<void> {
+  async openImportDialog(): Promise<void> {
     const uploadCard = this.uploadFilesCard()
     const importButton = this.page
       .getByRole("button", { name: /^Import(?: a file)?$/i })
@@ -309,7 +583,7 @@ export class Workspace {
 
   /** First-cell sparkle: Translate with AI, or Set up AI before the chooser. */
   private firstCellSparkle(): { row: Locator; sparkle: Locator } {
-    const row = this.page.locator("[data-cell-id]").first()
+    const row = this.root.locator("[data-cell-id]").first()
     const sparkle = row
       .locator(
         "[data-tooltip*='Translate with AI'] button, [data-tooltip*='Set up AI'] button, " +
@@ -365,13 +639,19 @@ export class Workspace {
 
   /**
    * AQU-200: the rail keeps only the AI-generate group as direct buttons —
-   * comments, history, record, play, TTS and footnote live behind a single
-   * `⋯`. Reveal the row's rail, open that overflow, and return the named
-   * action. The popup is portalled to the body, so the returned locator is
-   * page-scoped, NOT row-scoped: only one row's overflow is ever open.
+   * comments, history, TTS and footnote live behind a single `⋯`. (Record was
+   * promoted back out by AQU-2287; Play for the line's recording by AQU-2401,
+   * which put it in the left validation gutter beside the audio check — reach
+   * it by its own `cell-audio-play-button` testid, not through here.) Reveal
+   * the row's rail, open that overflow, and return the named action. The popup
+   * is portalled to the body, so the returned locator is page-scoped, NOT
+   * row-scoped: only one row's overflow is ever open.
    */
   async openRowAction(row: Locator, ariaLabel: string): Promise<Locator> {
     await row.scrollIntoViewIfNeeded()
+    // A parked pointer can already be inside an idle-collapsed row. Leave it
+    // before entering again so this is a fresh reveal gesture.
+    await this.page.getByRole("banner").hover()
     await row.hover()
     const rail = row.locator('[data-slot="cell-action-rail"]')
     await expect(rail).toHaveAttribute("data-revealed", "true", { timeout: 5_000 })
@@ -380,9 +660,34 @@ export class Workspace {
     // force for the same reason as the sparkle above: the unrevealed rail
     // wrapper can still intercept the hit-test if idle-hide races the click.
     await overflow.click({ force: true })
-    const action = this.page.locator(`button[aria-label="${ariaLabel}"]`).first()
+    const action = this.root.locator(`button[aria-label="${ariaLabel}"]`).first()
     await expect(action).toBeVisible({ timeout: 5_000 })
     return action
+  }
+
+  /** The branded recovery screen an ErrorBoundary shows after a render throw
+   * (src/components/ErrorBoundary.tsx). The root and AppShell boundaries both
+   * render it; the side-panel boundaries pass their own `fallback` instead, so
+   * this never matches a panel that failed on its own. */
+  private get crashScreen(): Locator {
+    return this.page.locator('[data-slot="error-boundary-fallback"]').first()
+  }
+
+  /** Report a crashed editor as a crash. AQU-642 sat open for three months as
+   * "all editor smokes fail at waitForEditor" because a render throw in the
+   * cell grid is indistinguishable, from the locator's point of view, from a
+   * slow route: the boundary swaps the grid for the recovery screen and
+   * `[data-cell-id]` simply never appears. */
+  private async failCrashedEditor(): Promise<never> {
+    const screen = this.crashScreen
+    const boundary = await screen.getAttribute("data-boundary")
+    const heading = (await screen.locator("h3").first().textContent())?.trim()
+    throw new Error(
+      `Editor crashed at mount: the "${boundary ?? "unknown"}" ErrorBoundary is showing `
+        + `("${heading ?? "no heading"}") in place of the cell grid, so no [data-cell-id] row `
+        + "can ever appear. A component threw during render — re-run this spec with "
+        + "`--trace on` and read the console entries at editor mount for the throw itself.",
+    )
   }
 
   async waitForEditor(expectedCellId?: string): Promise<void> {
@@ -390,21 +695,87 @@ export class Workspace {
     // selector. Passing the expected id prevents a file navigation from being
     // satisfied by a stale row that belonged to the previously open file.
     const firstCell = expectedCellId
-      ? this.page.locator(`[data-cell-id="${expectedCellId}"]`)
-      : this.page.locator("[data-cell-id]").first()
-    await expect(firstCell).toBeVisible({
-      timeout: EDITOR_READY_TIMEOUT_MS,
-    })
+      ? this.root.locator(`[data-cell-id="${expectedCellId}"]`)
+      : this.root.locator("[data-cell-id]").first()
+
+    // Race the first row against the crash screen. Both branches resolve
+    // rather than reject, so neither can win merely by timing out first, and
+    // the whole wait stays bounded by the one EDITOR_READY_TIMEOUT_MS budget —
+    // this is a better diagnosis of the same stall, not a shorter deadline.
+    let rowFailure: unknown = null
+    const ready = firstCell
+      .waitFor({ state: "visible", timeout: EDITOR_READY_TIMEOUT_MS })
+      .then(() => true, (error: unknown) => {
+        rowFailure = error
+        return false
+      })
+    const crashed = this.crashScreen
+      .waitFor({ state: "visible", timeout: EDITOR_READY_TIMEOUT_MS })
+      .then(() => true, () => false)
+
+    const first = await Promise.race<"ready" | "no-row" | "crashed" | "no-crash">([
+      ready.then((ok) => (ok ? "ready" : "no-row")),
+      crashed.then((ok) => (ok ? "crashed" : "no-crash")),
+    ])
+    if (first === "crashed") await this.failCrashedEditor()
+    if (first === "ready") return
+
+    // The race was settled by a branch that only reports what did *not*
+    // happen, so consult both before deciding which stall this is.
+    if (await crashed) await this.failCrashedEditor()
+    if (await ready) return
+    // Only the locator's own deadline means "still hydrating". Anything else
+    // (the page or context closed under the wait, a navigation) is the reason
+    // the row never showed up, and the wait did not run its full budget, so
+    // report that rather than a 30-second stall that never happened.
+    if (rowFailure instanceof Error && rowFailure.name !== "TimeoutError") throw rowFailure
+    throw new Error(
+      `Editor never mounted: ${expectedCellId ? `[data-cell-id="${expectedCellId}"]` : "[data-cell-id]"} `
+        + `was not visible within ${EDITOR_READY_TIMEOUT_MS} ms and the editor did not crash — `
+        + "the route is still hydrating, or the cells request returned no rows.",
+    )
+  }
+
+  async showFilesSidebar(): Promise<void> {
+    const files = this.page.getByRole("button", { name: "Files", exact: true })
+    await expect(files).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    // Media view selects Voices; ensure Files without toggling an open panel.
+    if (await files.getAttribute("aria-pressed") !== "true") await files.click()
+    await expect(files).toHaveAttribute("aria-pressed", "true")
+  }
+
+  /** The view switch's Text tab. AQU-2196's media view also has a Text PANEL
+   * tab in its dock (`dock-tab-text`), with the same name. */
+  viewTab(name: "Text" | "Media"): Locator {
+    return this.page.getByRole("tab", { name, exact: true })
+      .and(this.page.locator(':not([data-testid^="dock-tab-"])'))
+  }
+
+  async openTextView(): Promise<void> {
+    const tab = this.viewTab("Text")
+    await expect(tab).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await tab.click()
+    await expect(tab).toHaveAttribute("aria-selected", "true")
+  }
+
+  async openMediaView(): Promise<void> {
+    const tab = this.viewTab("Media")
+    await expect(tab).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await tab.click()
+    await expect(tab).toHaveAttribute("aria-selected", "true")
+  }
+
+  /** Every rendered editor row (built-in table or extension frame). */
+  cellRows(): Locator {
+    return this.root.locator("[data-cell-id]")
   }
 
   cellRow(index = 0): Locator {
-    return this.page.locator("[data-cell-id]").nth(index)
+    return this.root.locator("[data-cell-id]").nth(index)
   }
 
   private editableTarget(index: number): Locator {
-    return this.targetColumn(index)
-      .locator('textarea, .ProseMirror[contenteditable="true"], [contenteditable="true"]')
-      .first()
+    return this.targetColumn(index).locator(EDITABLE_TARGET_SELECTOR).first()
   }
 
   private targetColumn(index: number): Locator {
@@ -415,44 +786,82 @@ export class Workspace {
     return this.targetColumn(index).locator("[data-target-read-view]").first()
   }
 
+  /** The one surface that takes an activating click right now: the mounted
+   * editor, or the read view while it accepts activation. The column renders
+   * exactly one of the two. A read view is `aria-readonly` while an AI draft
+   * is still saving (or another user holds the focus lock); a click there is
+   * a no-op by design, so it is not a match and callers wait it out. */
+  private activatableTarget(index: number): Locator {
+    return this.targetColumn(index)
+      .locator(`[data-target-read-view]:not([aria-readonly="true"]), ${EDITABLE_TARGET_SELECTOR}`)
+      .filter({ visible: true })
+      .first()
+  }
+
   async activateTargetCell(index: number): Promise<Locator> {
     const row = this.cellRow(index)
     await row.scrollIntoViewIfNeeded()
 
-    const target = this.editableTarget(index)
-    let activatedFromReadView = false
-    if (!(await target.isVisible())) {
-      const readView = this.targetReadView(index)
-      await expect(readView).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
-      await readView.click()
-      activatedFromReadView = true
-    }
+    // Exactly ONE click, on whichever surface is activatable when the click
+    // lands. Do not sample "editor or read view?" first and then act on the
+    // answer: the app swaps the two on its own — the sparkle flow mounts and
+    // focuses the editor when its draft's save settles — so the sampled read
+    // view can be gone by the time it is clicked. The locator re-resolves on
+    // every retry of this single action instead.
+    //
+    // One click also keeps first activation honest: a read-view click is the
+    // user's one activation, and clicking the newly mounted editor again
+    // would normalize IDML's caret through handleClick and hide
+    // focus-placement regressions that only occur on first activation.
+    await this.activatableTarget(index).click({ timeout: EDITOR_READY_TIMEOUT_MS })
 
+    const target = this.editableTarget(index)
     await expect(target).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
-    // A read-view click is the user's one activation. Clicking the newly
-    // mounted editor again normalizes IDML's caret through handleClick and can
-    // hide focus-placement regressions that only occur on first activation.
-    if (!activatedFromReadView) {
-      await target.click()
-    }
     await expect(target).toBeFocused({ timeout: EDITOR_READY_TIMEOUT_MS })
     return target
   }
 
-  private async commitTargetCellEdit(index: number, text: string): Promise<void> {
-    // Blurring commits immediately. Register the response waiter before the
-    // blur so a fast local worker cannot complete the request first.
-    const committed = this.page.waitForResponse((response) => {
-      if (response.request().method() !== "POST" || !response.ok()) return false
+  private async commitTargetCellEdit(
+    index: number,
+    text: string,
+  ): Promise<{ writeMs: number; ackedAt: number }> {
+    const isEventsPost = (url: string, method: string): boolean => {
+      if (method !== "POST") return false
       try {
-        return new URL(response.url()).pathname.endsWith("/events")
+        return new URL(url).pathname.endsWith("/events")
       } catch {
         return false
       }
+    }
+    // Blurring commits immediately. Register waiters before the blur so a
+    // fast local worker cannot complete the request first.
+    const committed = this.page.waitForResponse((response) => {
+      return response.ok() && isEventsPost(response.url(), response.request().method())
     }, { timeout: 20_000 })
-    await this.page.locator("aside").click()
-    await committed
+    let requestAt = 0
+    const requestSeen = this.page.waitForRequest((request) => {
+      return isEventsPost(request.url(), request.method())
+    }, { timeout: 20_000 }).then(() => {
+      requestAt = Date.now()
+    })
+    const blurStarted = Date.now()
+    await this.blurEditor()
+    const response = await committed
+    await requestSeen
+    const ackedAt = Date.now()
+    // Cell-write latency is request-sent → ack (the AQU-1005 seq-lock convoy
+    // shows up here). Blur→ack also includes TipTap idle debounce and
+    // Playwright protocol delay across many contexts — that is not the lock.
+    const timing = response.request().timing()
+    const timedRoundTrip =
+      timing.responseEnd >= 0 && timing.requestStart >= 0
+        ? Math.round(timing.responseEnd - timing.requestStart)
+        : 0
+    const writeMs = timedRoundTrip > 0
+      ? timedRoundTrip
+      : (requestAt > 0 ? ackedAt - requestAt : ackedAt - blurStarted)
     await expect(this.targetColumn(index)).toContainText(text, { timeout: 10_000 })
+    return { writeMs, ackedAt }
   }
 
   /** Click into a cell, type text, blur. Persists on blur per editor design.
@@ -470,6 +879,16 @@ export class Workspace {
     await this.activateTargetCell(index)
     await this.page.keyboard.type(text)
     await this.commitTargetCellEdit(index, text)
+  }
+
+  /** Like `editCell`, but returns blur → `POST /events` ack timing. */
+  async editCellMeasuringWrite(
+    index: number,
+    text: string,
+  ): Promise<{ writeMs: number; ackedAt: number }> {
+    await this.activateTargetCell(index)
+    await this.page.keyboard.type(text)
+    return this.commitTargetCellEdit(index, text)
   }
 
   /**
@@ -732,7 +1151,7 @@ export class Workspace {
         return false
       }
     }, { timeout: 20_000 })
-    await this.page.locator("aside").click()
+    await this.blurEditor()
     await multilineCommitted
 
     const readView = this.targetReadView(index)
@@ -840,7 +1259,9 @@ export class Workspace {
   /** The per-cell validation toggle. `aria-pressed="true"` means the current
    * user is one of the cell's active validators. */
   validationToggle(index: number): Locator {
-    return this.cellRow(index).getByRole("button", { name: /Validate|Validated/i }).first()
+    // Scoped to the validation column: since AQU-2260 the health ribbon is a
+    // button too ("100% assurance · human validated") and comes first in the row.
+    return this.cellRow(index).getByTestId("validation-gutter").getByRole("button", { name: /Validate|Validated/i }).first()
   }
 
   /** Assert the current user has validated this cell (green self-validated). */
@@ -851,6 +1272,19 @@ export class Workspace {
     await expect(this.validationToggle(index)).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 })
   }
 
+  /** Tick a row's selection checkbox, which opens the bottom selection bar. */
+  async selectRow(index: number): Promise<void> {
+    const toggle = this.cellRow(index).getByRole("checkbox", { name: /^Select cell/ })
+    await toggle.click()
+    await expect(this.cellRow(index).getByRole("checkbox", { name: /^Selected cell/ })).toBeVisible()
+  }
+
+  /** The selection bar's "Validate text" — bulk-validates the selected rows.
+   *  Its name carries the eligible count ("Validate text 2"). */
+  async validateSelection(): Promise<void> {
+    await this.page.getByRole("button", { name: /^Validate text \d+$/ }).click()
+  }
+
   /** Remove the current user's validation and wait for the row state to settle. */
   async unvalidateCell(index: number): Promise<void> {
     const row = this.cellRow(index)
@@ -859,7 +1293,7 @@ export class Workspace {
     await expect(validationButton).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 })
     await validationButton.click()
 
-    const removeButton = this.page.getByRole("button", {
+    const removeButton = this.root.getByRole("button", {
       name: "Remove your validation",
       exact: true,
     })
@@ -888,7 +1322,7 @@ export class Workspace {
     // opacity: 0 when not hovered/focused, which makes them invisible to
     // Playwright's toBeVisible() check).
     await row.hover()
-    const validationButton = row.getByRole("button", { name: /Validate|Validated/i }).first()
+    const validationButton = row.getByTestId("validation-gutter").getByRole("button", { name: /Validate|Validated/i }).first()
     await expect(validationButton).toBeVisible({ timeout: 10_000 })
     // After validation, the validation button reports the current user's
     // validation through aria-pressed. This is a server-round-trip
@@ -930,6 +1364,16 @@ export class Workspace {
     await this.page.getByRole("menuitem", { name: /Editor settings/i }).click()
   }
 
+  /** Confirm a draft for every empty cell in the current file. */
+  async draftAllEmptyCells(): Promise<void> {
+    await this.openFileOverflowMenu()
+    await this.page.getByRole("menuitem", { name: /Draft all \(review required\)/i }).click()
+    const dialog = this.page.getByRole("dialog", { name: "Draft this file", exact: true })
+    await expect(dialog).toBeVisible({ timeout: 5_000 })
+    await dialog.getByRole("checkbox", { name: /empty cells$/ }).check()
+    await dialog.getByRole("button", { name: "Draft", exact: true }).click()
+  }
+
   /** Export lives in the file options overflow menu. */
   async openExportDialog(): Promise<void> {
     await this.openFileOverflowMenu()
@@ -942,15 +1386,9 @@ export class Workspace {
     await this.page.getByRole("menuitem", { name: /^Download original$/i }).click()
   }
 
-  /** Translation-injected USFM round-trip from the file options overflow. */
-  async clickExportSource(): Promise<void> {
-    await this.openFileOverflowMenu()
-    await this.page.getByRole("menuitem", { name: /Export source/i }).click()
-  }
-
   /** First editor row whose source column contains `sourceSubstring`. */
   async cellIndexWithSource(sourceSubstring: string): Promise<number> {
-    const rows = this.page.locator("[data-cell-id]")
+    const rows = this.root.locator("[data-cell-id]")
     await expect.poll(async () => {
       const n = await rows.count()
       for (let i = 0; i < n; i++) {
@@ -1022,11 +1460,26 @@ export class Workspace {
     await target.fill(text)
   }
 
-  /** Leave the active editor by clicking sidebar chrome. Unlike editCell this
+  /** Keyboard cell navigation from an ACTIVE editor: Tab steps to the next
+   * cell, Shift+Tab to the previous one. Leaving the cell commits it. Waits
+   * for the destination's editor to take focus. */
+  async tabFromTargetCell(index: number, direction: "next" | "previous"): Promise<Locator> {
+    await expect(this.editableTarget(index)).toBeFocused({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await this.page.keyboard.press(direction === "next" ? "Tab" : "Shift+Tab")
+    const destination = this.editableTarget(direction === "next" ? index + 1 : index - 1)
+    await expect(destination).toBeFocused({ timeout: EDITOR_READY_TIMEOUT_MS })
+    return destination
+  }
+
+  /** Leave the active editor by clicking the source metadata lane. Unlike editCell this
    * does not wait for a commit — the value may already be committed by the
    * idle debounce, in which case blur only releases the focus lock. */
   async blurEditor(): Promise<void> {
-    await this.page.locator("aside").click()
+    // The sidebar's center can land on Comments and navigate away. The source
+    // metadata lane has inert padding and keeps the current editor mounted.
+    // `root`: the extension editor renders the same lane inside its frame.
+    await this.root.getByTestId("source-context-line")
+      .filter({ visible: true }).first().click({ position: { x: 1, y: 1 } })
   }
 
   /** Open the per-cell "Edit history" drawer through the action overflow. */
@@ -1034,6 +1487,11 @@ export class Workspace {
     const button = await this.openRowAction(this.cellRow(index), "Edit history")
     await button.click()
     await expect(this.page.getByRole("heading", { name: /^Edit history/ })).toBeVisible()
+  }
+
+  /** The history drawer's Retry control, shown when a history load failed. */
+  historyRetryButton(): Locator {
+    return this.page.getByRole("button", { name: "Retry", exact: true })
   }
 
   /** A history-drawer revision card whose shown (terminal) value is `text`. */
@@ -1057,11 +1515,10 @@ export class Workspace {
   }
 
   /**
-   * AQU-602: the lane switcher is the TARGET language tag in the editor's
-   * column header (`data-testid="lane-switcher"`). It renders as a dropdown
-   * ONLY when the project has a second target lane — otherwise the tag is a
-   * static pill. The trigger carries `data-active-lane="<tag>"` (default lane
-   * is `""`). Opening it reveals `data-testid="lane-option-<tag>"` items.
+   * AQU-602 / AQU-1601: the lane switcher is the TARGET language tag in the
+   * editor's column header (`data-testid="lane-switcher"`). A maintainer sees
+   * it at one lane. The trigger carries `data-active-lane="<tag>"` (default
+   * lane is `""`). Opening it reveals `data-testid="lane-option-<tag>"` items.
    */
   laneSwitcher(): Locator {
     return this.page.getByTestId("lane-switcher")

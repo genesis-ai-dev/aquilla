@@ -8,10 +8,18 @@
 // 409 — no dedicated chainContains/cycle test existed before this issue.
 
 import { env } from "cloudflare:test"
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi, beforeEach } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
+/** The lane a project's translations live in — what a chain link follows. */
+const targetLaneOf = (projectId: string): string => `${projectId}-target`
+
+// AQU-1605 made a link name WHICH upstream lane it consumes, and a project
+// created through the app always has lanes. A raw `projects` row has none, so
+// the fixture mints the pair the create route would — one source lane and one
+// '' target lane — instead of leaving the link route to refuse the chain link
+// for want of a target lane (AQU-1881).
 async function seedProjectWithLead(projectId: string, name: string, leadUserId: number): Promise<void> {
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES (?, ?, ?)")
     .bind(projectId, name, leadUserId)
@@ -21,7 +29,22 @@ async function seedProjectWithLead(projectId: string, name: string, leadUserId: 
   )
     .bind(projectId, leadUserId, leadUserId)
     .run()
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position)
+     VALUES (?, ?, 'source', NULL, NULL, 0), (?, ?, 'target', ?, '', 1)`,
+  )
+    .bind(`${projectId}-source`, projectId, targetLaneOf(projectId), projectId, name)
+    .run()
 }
+
+beforeEach(() => {
+  vi.restoreAllMocks()
+  // A live link seeds itself through the sync-worker. The seed is not what
+  // this file is about, and a unit test must not reach the network for it.
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ ranSync: true }), { status: 200 }),
+  )
+})
 
 describe("POST /:projectId/link-source — 3-hop cycle rejection", () => {
   it("rejects linking A to C when the chain is already A -> B -> C (A would become its own descendant)", async () => {
@@ -42,7 +65,18 @@ describe("POST /:projectId/link-source — 3-hop cycle rejection", () => {
 
     const linkCB = await app.request(
       "/api/v2/projects/proj-c-chaluba/link-source",
-      { method: "POST", headers: authHeader(jwt), body: JSON.stringify({ sourceProjectId: "proj-b-french", mode: "live", consumes: "target", gate: "validated" }) },
+      {
+        method: "POST",
+        headers: authHeader(jwt),
+        // The picker always names the lane a chain link follows (AQU-1605).
+        body: JSON.stringify({
+          sourceProjectId: "proj-b-french",
+          mode: "live",
+          consumes: "target",
+          gate: "validated",
+          laneId: targetLaneOf("proj-b-french"),
+        }),
+      },
       env,
     )
     expect(linkCB.status).toBe(200)

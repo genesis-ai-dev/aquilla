@@ -6,24 +6,21 @@ import { ROLE } from "@/lib/frontier/roles"
 import type { ContextualDraftsScope } from "@/lib/contextual/drafts-store"
 import { btSeedsFromAlignmentSeeds, type BtSeed } from "@/lib/completion/bt-glosser"
 import type { BacktranslationRecord } from "@/lib/completion/bt-record"
+import type { GlossRecord } from "@/lib/completion/gloss-record"
 import type { CellSummary } from "@/hooks/useActiveCellStore"
+import type { FileSummary } from "@/lib/sync/cells-read-types"
+import type { FileStats } from "@/lib/progress/file-summary-progress"
 import type { ProjectRecord } from "@/lib/parsers/types"
-
-/**
- * Returns true iff the completion-settings save should actually patch
- * systemPrompt on the server. Guards against two failure modes:
- *   1. Empty-prompt clobber: buildCompletionSettings() materialises "" by
- *      default, so provider-only saves would erase the server prompt.
- *   2. Under-MAINTAINER write: sub-600 callers 403 server-side; skipping
- *      avoids IDB/server divergence (same floor as handleImported).
- */
-export function shouldPatchSystemPrompt(
-  systemPrompt: string | null | undefined,
-  roleLevel: number,
-): boolean {
-  if (!systemPrompt || systemPrompt.trim().length === 0) return false
-  return roleLevel >= ROLE.MAINTAINER
-}
+import { isHiddenTimelineFile, type FileReference } from "@/lib/parsers/types"
+import type { Concept } from "@/lib/terminology/types"
+import type { LaneLanguageRow } from "@/lib/lanes/lane-language"
+import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
+import { isLinkSeedFailed, markLinkSeedFailed } from "@/lib/sync/link-seed-status"
+import type { CellData } from "@/hooks/useCells"
+import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
+import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
+import type { SyncTokenCallbacks } from "@/lib/sync/sync-token"
 
 /**
  * Returns true iff the zero-file self-heal should fire a `/link/sync`
@@ -51,6 +48,37 @@ export function shouldSelfHealZeroFileLink(args: {
 }
 
 /**
+ * The zero-file self-heal itself, once `shouldSelfHealZeroFileLink` has said
+ * to fire. Pulled out of the effect so its three outcomes can be tested
+ * without mounting the workspace.
+ *
+ * AQU-1544: a failed attempt used to be dropped, leaving a linked project
+ * with an unexplained empty file list for whoever opened it — the person who
+ * linked it, or a teammate later. It is now parked in `link-seed-status`,
+ * which is what puts LinkSeedFailedBanner (and its "Try again") on screen.
+ * And when a link flow has ALREADY parked a failure for this project (the
+ * Import dialog and the create dialog each retry once before giving up), no
+ * further automatic attempt is made: it would only repeat the failure behind
+ * the banner's back.
+ */
+export async function selfHealZeroFileLink(args: {
+  projectId: string
+  jwt: string
+  triggerSync: (jwt: string, projectId: string) => Promise<boolean>
+  refresh: () => void
+}): Promise<"skipped" | "healed" | "failed"> {
+  const { projectId, jwt, triggerSync, refresh } = args
+  if (isLinkSeedFailed(projectId)) return "skipped"
+  const ok = await triggerSync(jwt, projectId)
+  if (ok) {
+    refresh()
+    return "healed"
+  }
+  markLinkSeedFailed(projectId)
+  return "failed"
+}
+
+/**
  * A deterministic check run describes ONE file's cells. If the user switches
  * files while the (async) run is in flight, its result must not be committed —
  * it would clobber the now-active file's state with the prior file's findings.
@@ -61,16 +89,6 @@ export function shouldApplyCheckResult(
   activeFileId: string | null,
 ): boolean {
   return resultFileId != null && resultFileId === activeFileId
-}
-
-/** Sidebar Agent rail click: focus the workbench only while it is the
- *  active center surface. A leftover Agent tab in the strip (after
- *  minimize / switching to a file) must not steal the click — that is
- *  dock mode again. */
-export function resolveSidebarAgentClick(
-  workbenchActive: boolean,
-): "activate-editor-tab" | "open-dock" {
-  return workbenchActive ? "activate-editor-tab" : "open-dock"
 }
 
 /**
@@ -132,6 +150,33 @@ export async function reconcileContextualDraftsAfterAppliedEvent(args: {
 }
 
 /**
+ * AQU-646 stage 2 / AQU-2214: may this caller RESTRUCTURE the file's timeline —
+ * add tracks, delete them, group them into folders?
+ *
+ * Two independent conditions, which is why they are spelled out here rather
+ * than read off one flag: the maintainer floor `file.track.set` already carries
+ * (role-policy.ts), AND the project's `allowTrackEditing`. The server checks
+ * both separately (sync-worker's `resolveAllowTrackEditing`), so this answers
+ * which controls the timeline OFFERS, never who is permitted.
+ *
+ * `undefined` is the unset case and reads ON since AQU-2214 — the default
+ * flipped, the gate did not, so an explicit `false` from the project or
+ * inherited from its org still withholds the controls from an owner. Keep that
+ * reading in lock-step with the worker's; a client that offers a button the
+ * perimeter refuses is the failure this pair exists to prevent.
+ *
+ * RENAME, DRAG-TO-REORDER AND RECOLOUR ARE DELIBERATELY NOT IN HERE. All three
+ * ship on the maintainer floor alone, so turning the setting off must not take
+ * them away.
+ */
+export function canRestructureTracks(args: {
+  roleLevel: number
+  allowTrackEditing: boolean | undefined
+}): boolean {
+  return args.roleLevel >= ROLE.MAINTAINER && (args.allowTrackEditing ?? true)
+}
+
+/**
  * What the outbox says happened to a track deletion, and therefore whether its
  * recordings may now be removed. (AQU-646, 2026-08-27)
  *
@@ -173,6 +218,7 @@ export function trackDeleteGate(
  * Four sources feed the statistical BT, in ascending order of how explicitly
  * the user asked for them:
  *   - corrected BTs from the cache (2, or 5 when unpolished — a raw human edit)
+ *   - corrected statistical glosses (5 — AQU-1408 §2)
  *   - termbase renderings (preferred 3 / admitted 1 / forbidden -3)
  *   - confirmed / invalidated interlinear alignments (±2 via
  *     `btSeedsFromAlignmentSeeds`)
@@ -184,10 +230,12 @@ export function trackDeleteGate(
 export function buildGlosserSeeds(args: {
   corpusCells: readonly CellSummary[]
   backtranslationCache: ReadonlyMap<string, BacktranslationRecord>
+  /** AQU-1408 §2: hand-corrected glosses, keyed by cell id. */
+  glossCache?: ReadonlyMap<string, GlossRecord>
   terminology: ProjectRecord["terminology"] | undefined
   alignmentSeeds: ProjectRecord["alignmentSeeds"] | undefined
 }): BtSeed[] {
-  const { corpusCells, backtranslationCache, terminology, alignmentSeeds } = args
+  const { corpusCells, backtranslationCache, glossCache, terminology, alignmentSeeds } = args
   const seeds: BtSeed[] = []
 
   // High-weight seeds from previous user-corrected BTs stored in the cache.
@@ -206,6 +254,33 @@ export function buildGlosserSeeds(args: {
       source: record.btText,
       target: record.forText || cell.translated,
       weight: record.polished === false ? 5 : 2,
+      originId: record.cellId,
+    })
+  }
+
+  // AQU-1408 §2: a corrected gloss is the most direct supervision the glosser
+  // can get — the user rewrote this very model's output for these exact words.
+  // It seeds at the same weight as a hand-rewritten BT (5), which is what the
+  // ticket asks for ("the same way hand-edited AI back translations already
+  // re-seed it"), and carries `originId` so the leave-one-out gloss of the
+  // corrected cell is not just its own correction read back. That is also what
+  // makes the correction show up on OTHER cells using the same words, which is
+  // the acceptance criterion.
+  for (const record of glossCache?.values() ?? []) {
+    const text = record.glossText.trim()
+    if (!text) continue
+    const cell = corpusByCellId.get(record.cellId)
+    if (!cell?.translated) continue
+    // Same staleness rule as the BTs above: a correction pinned to a
+    // superseded commit describes words that are gone.
+    if (record.targetEventId && cell.targetEventId && record.targetEventId !== cell.targetEventId) {
+      continue
+    }
+    seeds.push({
+      source: text,
+      target: record.forText || cell.translated,
+      weight: 5,
+      originId: record.cellId,
     })
   }
 
@@ -283,4 +358,319 @@ export function nextPaintGate(
       || (!freshFile && input.cellCount > 0)
   if (!freshFile && prev.open === open && prev.sawLoad === sawLoad) return prev
   return { file, sawLoad, open }
+}
+
+/**
+ * Everything a WebSocket reconnect must pull back (AQU-845, AQU-817).
+ *
+ * The per-project DO holds no durable state and never replays (AD-1), so every
+ * `event.applied` frame that lands while a client's socket is down is lost to
+ * that client permanently. A reopen is the only signal that such a gap may
+ * exist, so each broadcast-fed projection has to be re-read there or it stays
+ * stale until a full page reload.
+ *
+ * Comments were the projection this list forgot: AQU-845 wired cells, audit
+ * stats and file progress, but a comment frame missed during a redeploy, a DO
+ * eviction, a blip or a sleeping laptop left the reader's thread list frozen —
+ * the AQU-817 report of a contributor's comment never reaching another member
+ * in the same cell. Extracted so the fan-out is pinned by a test rather than
+ * living only inside the 11.5k-line shell's async connect effect.
+ */
+export interface ReconnectResyncTargets {
+  revalidateCells(): void
+  revalidateAuditStats(): void
+  invalidateProjectFileProgress(): void
+  /** AQU-817 — comments are broadcast-only too. */
+  refreshComments(): void | Promise<void>
+  refreshAllFilesProgress(): Promise<void>
+}
+
+export function runReconnectResync(targets: ReconnectResyncTargets): void {
+  targets.revalidateCells()
+  targets.revalidateAuditStats()
+  targets.invalidateProjectFileProgress()
+  // useComments.refresh() resolves even on failure (it sets its own isError),
+  // but each leg is isolated anyway: one projection's transient read failure
+  // must not skip the others, and must not surface as an unhandled rejection.
+  void Promise.resolve(targets.refreshComments()).catch(() => {
+    // The next focus return or reconnect retries.
+  })
+  void targets.refreshAllFilesProgress().catch(() => {
+    // The next normal sidebar refresh retries a transient failure.
+  })
+}
+
+/**
+ * What a live-linked project re-reads after a push-triggered mirror sync
+ * (AQU-479's `link.upstream-changed`) has landed.
+ *
+ * The sync writes this project's events server-side without an
+ * `event.applied` broadcast, so nothing else tells this client what it
+ * changed. The open file's cells are always re-read (the existing QA-BUG-2
+ * step). AQU-1545 adds the rest: the sync recomputed the touched files'
+ * progress, so the cached figures are dropped and re-read — a hidden cell
+ * stops counting as work without a reload — and when a frame said the
+ * upstream created or renamed a file, the project is re-read so the file list
+ * shows it (the same re-read a same-project `file.*` frame triggers).
+ *
+ * Decided from the frames, never from what this client's own sync request
+ * reports it mirrored: the fold may have been run by another trigger (a second
+ * tab, a teammate in the same project, the file-open lazy pull), in which case
+ * this client's request is answered by an empty one and would refresh nothing.
+ */
+export interface PushedLinkSyncTargets {
+  revalidateCells(): void
+  refreshProject(): void
+  invalidateProjectFileProgress(): void
+  refreshAllFilesProgress(): Promise<void>
+}
+
+export function runAfterPushedLinkSync(
+  outcome: { synced: boolean; filesChanged: boolean },
+  targets: PushedLinkSyncTargets,
+): void {
+  targets.revalidateCells()
+  if (!outcome.synced) return
+  if (outcome.filesChanged) targets.refreshProject()
+  targets.invalidateProjectFileProgress()
+  void targets.refreshAllFilesProgress().catch(() => {
+    // The next normal sidebar refresh retries a transient failure.
+  })
+}
+
+/**
+ * AQU-1721: which concepts each workspace surface reads. The editor surfaces
+ * (source highlights, the term-lookup popover, Check file) apply the termbases
+ * this project subscribes to ahead of its own concepts, in the order `useRules`
+ * compiles them. The glossary edits this project's own termbase, so it gets
+ * only those. A glossary edit is a `term.*` event keyed by concept id under
+ * this project's id: the server would drop one for an upstream concept while
+ * the glossary showed it saved.
+ *
+ * With no subscriptions, `editor` is `local` itself, so the editor record keeps
+ * its identity and the common case allocates nothing.
+ */
+export function workspaceTerminology(
+  local: Concept[],
+  subscribed: Concept[],
+): { editor: Concept[]; glossary: Concept[] } {
+  return {
+    editor: subscribed.length === 0 ? local : [...subscribed, ...local],
+    glossary: local,
+  }
+}
+
+/**
+ * The active lane's slice of the editor's concept list, for Check file and
+ * the term-lookup popover (AQU-1721, AQU-1508).
+ *
+ * One rule serves both lists: a subscribed rendering arrives from route #8
+ * already stamped with THIS project's lane id (mapped from its termbase lane
+ * by language, AQU-1777), so `conceptsForLaneTag` over this project's lane
+ * rows reads it exactly like a local one. With no subscriptions the editor
+ * list IS `local`, so the local slice is reused and keeps its identity.
+ */
+export function editorConceptsForLane(
+  editor: Concept[],
+  local: Concept[],
+  laneLocal: Concept[],
+  activeLane: string,
+  laneRows: readonly LaneLanguageRow[],
+): Concept[] {
+  return editor === local ? laneLocal : conceptsForLaneTag(editor, activeLane, laneRows)
+}
+
+/**
+ * AQU-1752: timeline Space and "Play from this cue" wait for the file's
+ * audio-attachment read.
+ *
+ * A media cell counts as file-timed only once its source clip is merged in.
+ * Until the timeline's `useFileAudioAttachments` reports `hasLoaded`, the
+ * picture or the virtual clock looks like it owns the file, and a press
+ * starts that engine. When the read lands, ownership can flip to the queue
+ * and the clock that already started is torn down, so nothing sounds.
+ *
+ * The press is dropped. Nothing is handed to the queue when the clip
+ * arrives; the next press goes to whichever engine the read says owns the
+ * file.
+ */
+export function timelinePlayReady(audioHasLoaded: boolean): boolean {
+  return audioHasLoaded
+}
+
+/**
+ * AQU-1805: how a reviewed rule fix may be committed to one cell.
+ *
+ * A rule fix rewrites target text, which on an IDML cell means rewriting
+ * protected runs. AQU-742 is what happens when that is done carelessly: the
+ * anchors InDesign needs are dropped and the file stops round-tripping. So
+ * only a fix carrying a literal find/replace pair may be re-applied inside
+ * protected HTML (`replaceProtectedIdmlText` needs that pair); a regex sweep
+ * has no such pair and would be committed as flattened text.
+ *
+ *  - `plain`     — commit `preview.after` as-is.
+ *  - `protected` — re-apply the literal pair inside the protected HTML.
+ *  - `refuse`    — cannot be applied safely; the whole sweep is abandoned so
+ *                  one bad cell cannot leave it half-written.
+ */
+export function ruleFixPreflight(
+  isIdmlCell: boolean,
+  preview: { find?: string; replace?: string },
+): "plain" | "protected" | "refuse" {
+  if (!isIdmlCell) return "plain"
+  if (preview.find === undefined || preview.replace === undefined) return "refuse"
+  return "protected"
+}
+
+/**
+ * The sentinel fileId a project-level sync-token mint rides.
+ * Must match PROJECT_SENTINEL_FILE_ID in sync-worker/src/events/authorize.ts.
+ */
+const PROJECT_SENTINEL_FILE_ID = "__project__"
+
+/**
+ * AQU-1894: reads the "Recently deleted" (trash) listing with a project SYNC
+ * token. The trash list used to hand sync-worker the identity SESSION jwt,
+ * which `verifyTokenForProject` rejects (it only accepts an `aud: "sync"`
+ * token), so `files?trash=1` answered 401 every single time and deleted files
+ * could never be listed or restored from the UI.
+ *
+ * The mint rides the `__project__` sentinel rather than the first live file's
+ * id — the established sentinel for project-level, non-file-scoped calls (see
+ * useComments / archive.ts / outbox-flush). `verifyTokenForProject` checks
+ * only the projectId claim, and the trash list is precisely the surface that
+ * can be non-empty while the project has NO live files left: deleting a
+ * project's only file is the shortest path to this screen, and keying the mint
+ * on `files[0]` would mint nothing in exactly that case.
+ *
+ * Returns `null` when no token could be minted (signed out, mid-session
+ * expiry), which the caller must treat as "leave the current list alone" —
+ * distinct from `[]`, which is a real empty trash and clears optimistic rows.
+ */
+export async function fetchDeletedFilesWithProjectToken(args: {
+  projectId: string
+  getTokenForFile: (fileId: string) => Promise<string | null>
+  fetchFiles: (projectId: string, token: string) => Promise<FileSummary[]>
+}): Promise<FileSummary[] | null> {
+  const { projectId, getTokenForFile, fetchFiles } = args
+  const token = await getTokenForFile(PROJECT_SENTINEL_FILE_ID)
+  if (!token) return null
+  return fetchFiles(projectId, token)
+}
+
+/**
+ * AQU-2118 / AQU-1832: the sidebar rollup row a pushed file-progress frame
+ * may move. The rollup is read for the lane the switcher shows, so only a
+ * frame for THAT lane may land in it — one lane's numbers in a row reporting
+ * another's is the one thing this must never do. The same map comes back when
+ * the frame is another lane's or changes nothing, so the state setter skips
+ * the render.
+ */
+export function pushedRollupProgress(
+  current: Map<string, FileStats>,
+  push: {
+    file: string
+    lane: string
+    counts: { totalCount: number; filledCount: number; validatedCount: number }
+  },
+  activeLane: string,
+): Map<string, FileStats> {
+  if (push.lane !== activeLane) return current
+  const next: FileStats = {
+    translated: push.counts.filledCount,
+    validated: push.counts.validatedCount,
+    total: push.counts.totalCount,
+  }
+  const existing = current.get(push.file)
+  if (
+    existing
+    && existing.translated === next.translated
+    && existing.validated === next.validated
+    && existing.total === next.total
+  ) return current
+  const merged = new Map(current)
+  merged.set(push.file, next)
+  return merged
+}
+
+/**
+ * Media redesign slice 13 (P13.8): the line a take lookup reads, with its
+ * takes merged in.
+ *
+ * Every take step in the undo history asks "does the take still read the way
+ * this step left it?" through this lookup. It used to merge only the
+ * workspace's audio map, which is fetched in the audio lenses (or for someone
+ * who may restructure lines). In the Text view that map is empty, so undoing a
+ * rename or a recording's validation there reported "what it changed no longer
+ * exists" for a take plainly on screen. The lane's ungated read of the same
+ * takes (one shared fetch) is always loaded; the lookup falls back to it when
+ * the workspace map does not have the line.
+ */
+export function resolveTakeLine(args: {
+  cellId: string
+  fileId: string | null
+  cells: CellData[]
+  workspaceAudio: Map<string, CellAudioEntry>
+  laneAudio: Map<string, CellAudioEntry>
+}): { fileId: string; cell: CellData } | null {
+  const { cellId, fileId, cells, workspaceAudio, laneAudio } = args
+  if (!fileId) return null
+  const own = cells.find((c) => c.id === cellId)
+  if (!own) return null
+  const audio = workspaceAudio.has(cellId) ? workspaceAudio : laneAudio
+  // Raw store cells carry no attachments; reading them unmerged is what made
+  // every timeline trim a silent no-op before the fortify pass.
+  const cell = mergeCellsWithAudio([own], audio)[0] ?? own
+  return { fileId, cell }
+}
+
+/**
+ * AQU-2079: the sync-token fetcher a project-scoped read mints through when it
+ * must not wait for the project-details response.
+ *
+ * The terminology page took ~3.9 s to show its first term row on prod though
+ * the `/concepts` request itself takes ~200 ms, because the read was wired to
+ * the LOADED project (`project?.id`) and so could not even start minting until
+ * `useProject` had answered — details, then token, then terms, three requests
+ * end to end.
+ *
+ * Nothing in a mint needs the loaded record. `POST /api/v2/sync-token` takes a
+ * `projectId` and a `fileId`; the `ProjectBootstrap` payload the workspace
+ * fetcher also carries (`projectName`, `gitlabProjectId`) is the only part that
+ * comes off the project record, and it has been accepted-and-ignored
+ * server-side since AQU-299 / SEC-9 — minting a token is an authorization step,
+ * never a project-creation step. So a read can mint against the id the ROUTE
+ * already carries and run in parallel with the details request.
+ *
+ * `build` is injectable so the rule can be tested without a network.
+ */
+export function buildRouteScopedTokenFetcher(args: {
+  /** `/project/:id` — available on the first render, unlike `project?.id`. */
+  routeProjectId: string | null | undefined
+  getJwt: () => string | null
+  callbacks?: SyncTokenCallbacks
+  build?: typeof buildFileScopedTokenFetcher
+}): (fileId: string) => Promise<string | null> {
+  const { routeProjectId, getJwt, callbacks, build = buildFileScopedTokenFetcher } = args
+  // No route id yet: no scope to mint for. Returning a null fetcher (rather
+  // than minting against a guessed id) keeps the read's fail-closed branch —
+  // AQU-1340: an unmintable token is an error, never an empty termbase.
+  if (!routeProjectId) return async (_fileId: string) => null
+  return build(getJwt, routeProjectId, {}, undefined, callbacks ?? {})
+}
+
+/**
+ * The name a history step gives its file (slice 13): the file a person opens.
+ * A hidden timeline companion (the audio cues, a caption track) is opened
+ * through the file it belongs to, so it is named by that one; a file this
+ * project does not list has no name.
+ */
+export function historyFileName(
+  files: ReadonlyArray<Pick<FileReference, "id" | "name" | "role" | "anchorFileId">>,
+  fileId: string,
+): string | null {
+  const file = files.find((f) => f.id === fileId)
+  if (!file) return null
+  if (!isHiddenTimelineFile(file)) return file.name
+  return file.anchorFileId ? files.find((f) => f.id === file.anchorFileId)?.name ?? null : null
 }

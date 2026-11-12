@@ -2,17 +2,19 @@ import { env } from 'cloudflare:test'
 import { afterEach, expect, it, vi } from 'vitest'
 import app from '../index'
 import type { Env } from '../types'
-import { completedPayment, config } from './helpers/workspace-billing'
+import { completedPayment, config, pinSmallAllowancePolicy } from './helpers/workspace-billing'
 import { authHeader, jwtFor } from './helpers/db'
 import { readUsageTotals } from '../lib/billing/workspace-usage'
 import { readBillingWorkspace } from '../lib/billing/workspace'
 import { resetRateCardCache } from '../lib/billing/rate-card'
 import { rateCard, withRateCard } from './helpers/rate-card'
+import { METERED_MAX_OUTPUT_TOKENS } from '../lib/billing/chat-usage'
 
 afterEach(() => { vi.unstubAllGlobals(); resetRateCardCache() })
 async function setup() {
-  const paid = await completedPayment('pro', 'month')
+  const paid = await completedPayment('team', 'month', undefined, 'personal')
   expect((await paid.send()).status).toBe(200)
+  await pinSmallAllowancePolicy()
   await env.AQUILLA_PG.exec("INSERT INTO projects (id, name, org_id, created_by) VALUES ('chat-project', 'Chat', 1, 1)")
   const settings: Env = { ...config(), OPENROUTER_API_KEY: 'local-fixture', AI_ALLOWED_MODELS: 'local-test',
     OPENROUTER_BASE_URL: 'http://127.0.0.1:9999/v1', BILLING_CHAT_USAGE_REHEARSAL: 'true' }
@@ -32,14 +34,14 @@ function upstream(text: string, stream = false) {
 }
 it('passes real authenticated chat output through cost settlement and blocks duplicate execution', async () => {
   const f = await setup()
-  const body = { choices: [{ message: { content: 'Hello back' } }], usage: { cost: 0.00125 } }
+  const body = { choices: [{ message: { content: 'Hello back' } }], usage: { cost: 0.00625 } }
   const fetch = upstream(JSON.stringify(body)); vi.stubGlobal('fetch', fetch)
   const response = await f.send()
   expect(response.status).toBe(200)
   expect(await response.json()).toEqual(body)
   expect(response.headers.get('X-Billing-Usage-Status')).toBe('settled')
-  expect((await f.totals()).settled).toBe(500_000)
-  // The billing API reports the same ledger: 0.5 of 50 units rounds down to 1%.
+  expect((await f.totals()).settled).toBe(2_500_000)
+  // The billing API reports the same ledger: 2.5 of Team's 250 units is 1%.
   const workspace = await (await app.request('http://127.0.0.1/api/v2/orgs/1/billing/workspace',
     { headers: authHeader(await jwtFor('alice')) }, f.settings)).json() as { usagePercent: number | null; usageResetsAt?: string }
   expect(workspace.usagePercent).toBe(1)
@@ -93,9 +95,10 @@ it('returns valid content with pending accounting when provider cost is missing'
 })
 it('blocks exhausted allowance before starting the provider', async () => {
   const f = await setup()
-  const fetch = upstream(JSON.stringify({ choices: [], usage: { cost: 0.13 } })); vi.stubGlobal('fetch', fetch)
+  const fetch = upstream(JSON.stringify({ choices: [], usage: { cost: 0.65 } })); vi.stubGlobal('fetch', fetch)
   expect((await f.send()).status).toBe(200)
-  expect((await f.send({}, {}, crypto.randomUUID())).status).toBe(429)
+  // The spec §5.3 client contract: an exhausted allowance is 402, never 429 (429 is rate limiting).
+  expect((await f.send({}, {}, crypto.randomUUID())).status).toBe(402)
   expect(completions(fetch)).toBe(1)
 })
 it('rejects projectless and unauthorized requests instead of billing org zero', async () => {
@@ -116,6 +119,50 @@ it('retains the reservation after provider failure', async () => {
   const f = await setup(); vi.stubGlobal('fetch', withRateCard(vi.fn(async () => { throw new Error('Connection lost') })))
   expect((await f.send()).status).toBe(500)
   expect((await f.totals()).reserved).toBe(1_562_500)
+})
+
+// AQU-1241: a request the provider refuses before the model runs costs nothing,
+// so it must not keep consuming the workspace's allowance.
+const rejection = (status: number, body = '{"error":{"message":"rejected"}}') =>
+  withRateCard(vi.fn(async () => new Response(body, { status, headers: { 'Content-Type': 'application/json' } })))
+
+it.each([400, 402, 403, 429])('releases the reservation when the provider rejects with %i before the model', async status => {
+  const f = await setup(); vi.stubGlobal('fetch', rejection(status))
+  const response = await f.send()
+  expect(response.status).toBe(status)
+  expect(response.headers.get('X-Billing-Usage-Status')).toBe('released')
+  expect(await f.totals()).toEqual({ reserved: 0, settled: 0, committed: 0 })
+})
+
+it('releases a pre-model rejection whose body is not JSON', async () => {
+  const f = await setup(); vi.stubGlobal('fetch', rejection(400, 'Bad Request'))
+  expect((await f.send()).headers.get('X-Billing-Usage-Status')).toBe('released')
+  expect((await f.totals()).committed).toBe(0)
+})
+
+it.each([408, 500, 502, 503])('retains the reservation when a %i failure cannot prove the model never ran', async status => {
+  const f = await setup(); vi.stubGlobal('fetch', rejection(status))
+  const response = await f.send()
+  expect(response.headers.get('X-Billing-Usage-Status')).toBe('pending')
+  expect((await f.totals()).reserved).toBe(1_562_500)
+})
+
+it('retains a rejection that still names a generation record', async () => {
+  const f = await setup(); vi.stubGlobal('fetch', rejection(403, '{"id":"gen-abc","error":{"message":"moderated"}}'))
+  const response = await f.send()
+  expect(response.headers.get('X-Billing-Usage-Status')).toBe('pending')
+  expect((await f.totals()).reserved).toBe(1_562_500)
+})
+
+it('frees a released request from the allowance so the next one is admitted', async () => {
+  const f = await setup()
+  vi.stubGlobal('fetch', rejection(429))
+  expect((await f.send()).status).toBe(429)
+  const fetch = upstream(JSON.stringify({ choices: [], usage: { cost: 0.001 } })); vi.stubGlobal('fetch', fetch)
+  const ok = await f.send({}, {}, crypto.randomUUID())
+  expect(ok.status).toBe(200)
+  expect(ok.headers.get('X-Billing-Usage-Status')).toBe('settled')
+  expect(await f.totals()).toEqual({ reserved: 0, settled: 400_000, committed: 400_000 })
 })
 
 it('settles before delivering DONE when the client stops without draining transport EOF', async () => {
@@ -149,4 +196,21 @@ it('enforce mode meters a live provider URL and retires the legacy ledgers for t
   expect((await f.send({}, { BILLING_CHAT_USAGE_REHEARSAL: undefined }, crypto.randomUUID())).status).toBe(200)
   expect((await f.totals()).settled).toBe(400_000)
   expect((await env.AQUILLA_PG.prepare('SELECT count(*) AS n FROM org_credit_usage_daily').first<{ n: number }>())?.n).toBe(1)
+})
+
+// AQU-1870: the metered path's output ceiling is the bound the reservation is
+// computed from, so a client-chosen max_tokens must never reach the provider
+// above it — not even now that the legacy path clamps at its own, looser
+// ceiling first.
+it('clamps a client-chosen max_tokens to the metered output ceiling', async () => {
+  const f = await setup()
+  // Declared params (unlike the shared `upstream` helper's bare thunk) so the
+  // forwarded RequestInit is readable off the mock without an unsound cast.
+  const body = JSON.stringify({ choices: [{ message: { content: 'Hi' } }], usage: { cost: 0.0001 } })
+  const fetch = withRateCard(vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
+    new Response(body, { headers: { 'Content-Type': 'application/json' } })))
+  vi.stubGlobal('fetch', fetch)
+  expect((await f.send({ max_tokens: 100_000 })).status).toBe(200)
+  const sent = JSON.parse(String(fetch.mock.calls[0][1]?.body)) as { max_tokens: number }
+  expect(sent.max_tokens).toBe(METERED_MAX_OUTPUT_TOKENS)
 })

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { formatBuildDay, formatBuildInfo, formatBuildLabel } from "./build-label"
+import {
+  formatBuildDay,
+  formatBuildInfo,
+  formatBuildLabel,
+  formatBuildRailLabel,
+} from "./build-label"
 
 describe("formatBuildLabel", () => {
   const base = { version: "0.1.2", sha: "abc1234", builtAt: "2026-08-27T12:23:21.000Z" }
@@ -15,6 +20,35 @@ describe("formatBuildLabel", () => {
 
   it("omits the date rather than rendering a placeholder when it is unknown", () => {
     expect(formatBuildLabel({ ...base, branch: "dev", builtAt: "" })).toBe("v0.1.2 · dev · abc1234")
+  })
+})
+
+describe("formatBuildRailLabel (AQU-1523)", () => {
+  const base = { version: "0.1.2", sha: "abc1234", builtAt: "2026-08-27T12:23:21.000Z" }
+
+  it("keeps version, sha and date — the three fields support reads off a screenshot", () => {
+    expect(formatBuildRailLabel({ ...base, branch: "dev" })).toBe("v0.1.2 · abc1234 · 2026-08-27")
+  })
+
+  it("drops the branch in every environment, not just production", () => {
+    // The 42-char branch of a preview build is exactly what starved the label
+    // to "v0" in a 224px rail; the rail label must not depend on its length.
+    const long = formatBuildRailLabel({
+      ...base,
+      branch: "agent/AQU-1523-sidebar-footer-feedback-row",
+    })
+    expect(long).toBe("v0.1.2 · abc1234 · 2026-08-27")
+    expect(long).toBe(formatBuildRailLabel({ ...base, branch: "main" }))
+  })
+
+  it("fits the rail's width budget at the footer's 10px monospace", () => {
+    // ~6.5px a glyph measured in the preview walk; the full-width row offers
+    // ~200px after the button's padding. Guard the budget, not the pixels.
+    expect(formatBuildRailLabel({ ...base, branch: "dev" }).length).toBeLessThanOrEqual(30)
+  })
+
+  it("omits the date rather than rendering a placeholder when it is unknown", () => {
+    expect(formatBuildRailLabel({ ...base, branch: "dev", builtAt: "" })).toBe("v0.1.2 · abc1234")
   })
 })
 

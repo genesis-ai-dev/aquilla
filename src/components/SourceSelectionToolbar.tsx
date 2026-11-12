@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { SOURCE_SELECTION_RAIL_Z } from "@/lib/editor/source-cell-layers"
 import type { CellStore } from "@/hooks/useActiveCellStore"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
+import { hasSourceTermMatch } from "@/lib/terminology/source-lookup"
 import { TermLookupPopover } from "./TermLookupPopover"
 import { AddConceptPopover } from "./AddConceptDialog"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -53,14 +54,12 @@ export function SourceSelectionToolbar({
 }: SourceSelectionToolbarProps) {
   const t = useT()
   const activeConcepts = useMemo(() => concepts.filter((c) => c.status === "active"), [concepts])
+  // AQU-1272: the matcher's verdict, not a bidirectional substring test — the
+  // affordance has to appear on exactly the occurrences the project's fold /
+  // affix / forms settings recognise, and on no others.
   const hasMatch = useMemo(
-    () =>
-      activeConcepts.some(
-        (c) =>
-          c.sourceTerm.toLowerCase().includes(sourceSelection.toLowerCase()) ||
-          sourceSelection.toLowerCase().includes(c.sourceTerm.toLowerCase()),
-      ),
-    [activeConcepts, sourceSelection],
+    () => hasSourceTermMatch(sourceSelection, activeConcepts, termMatching),
+    [activeConcepts, sourceSelection, termMatching],
   )
 
   // AQU-260: preserve the browser selection + suppress the selectionchange guard.
@@ -90,6 +89,7 @@ export function SourceSelectionToolbar({
         <TermLookupPopover
           sourceTerm={sourceSelection}
           concepts={activeConcepts}
+          termMatching={termMatching}
           onViewConcept={onViewConcept}
           triggerIsNativeButton
         >

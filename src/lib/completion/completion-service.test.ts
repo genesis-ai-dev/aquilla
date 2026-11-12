@@ -1,3 +1,4 @@
+import { AiRefusalError } from "@/lib/billing/ai-refusal"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
 const shouldUseLocalLlm = vi.fn(async () => false)
@@ -7,7 +8,8 @@ vi.mock("@/lib/offline/local-llm-client", () => ({
   completeWithLocalLlm: (...args: unknown[]) => completeWithLocalLlm(...args),
 }))
 
-import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, shouldPromptAiSetup, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, OPENROUTER_BYOK_ENDPOINT, isHostedOpenRouterUnconfigured, collectValidatedPairs, retainTranslationPairs, selectApprovedExamples, buildRulesBlock, buildStyleRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens } from "./completion-service"
+import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, resolveCompletionTarget, DEFAULT_COMPLETION_SETTINGS, shouldPromptAiSetup, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, OPENROUTER_BYOK_ENDPOINT, isHostedOpenRouterUnconfigured, collectValidatedPairs, retainTranslationPairs, selectApprovedExamples, buildChecksBlock, buildTerminologyBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens, DEFAULT_MAX_INJECTED_TERMS, selectInjectedTerms } from "./completion-service"
+import { compileConceptsToRules } from "@/lib/terminology/compile"
 import { setUserApiKey } from "@/lib/store/user-api-keys"
 import {
   clearUserProviderOverride,
@@ -23,7 +25,6 @@ const BASE: CompletionSettings = {
   maxTokens: 128,
   temperature: 0.3,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
-  llmHealthPenalty: 0.1,
 }
 
 const SESSION: FrontierSession = {
@@ -61,6 +62,18 @@ describe("buildPrompt", () => {
     })
     expect(system.content).toContain("Treat every observable convention in them as binding")
     expect(system.content).toContain("rather than substituting defaults associated with the Urdu label")
+  })
+
+  it("strips trailing bare markers from source, examples and context (AQU-1465)", () => {
+    const messages = buildPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "In the beginning.\n\\p",
+      examples: [{ source: "God created.\n\\p", target: "Dieu crea.\n\\p" }],
+      precedingContext: [{ source: "Earlier.\n\\p", target: "Avant.\n\\p" }],
+    })
+    const user = messages[1].content
+    expect(user).not.toContain("\\p")
+    expect(user).toContain("Source: In the beginning.\nTranslation:")
   })
 
   it("builds a prompt with examples and source text", () => {
@@ -377,6 +390,103 @@ describe("resolveProvider", () => {
   })
 })
 
+// AQU-1671: call sites whose project may never have customized AI settings
+// need "does a provider resolve", not "is there a settings object". Treating an
+// absent object as unconfigured told every fresh project on the Frontier
+// platform default that no provider was configured.
+describe("resolveCompletionTarget", () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetClientLocalStorageOwnerForTests()
+    clearUserProviderOverride()
+  })
+  afterEach(() => {
+    clearUserProviderOverride()
+    localStorage.clear()
+    resetClientLocalStorageOwnerForTests()
+  })
+
+  it("resolves undefined settings to the Frontier platform default, configured", () => {
+    const target = resolveCompletionTarget(undefined)
+    expect(target.configured).toBe(true)
+    expect(target.gap).toBeNull()
+    expect(resolveProvider(target.settings)).toBe("frontier")
+  })
+
+  it("does not require a session JWT — the platform default is configured by the platform", () => {
+    // isCompletionConfigured gates Frontier on a JWT, which makes a
+    // still-hydrating session look like "nothing configured". This resolver
+    // must not, so a slow session cannot produce a false negative.
+    expect(isCompletionConfigured({ ...BASE, provider: "frontier" }, null)).toBe(false)
+    expect(resolveCompletionTarget({ ...BASE, provider: "frontier" }).configured).toBe(true)
+  })
+
+  it("reports the endpoint gap for a custom provider with no endpoint", () => {
+    const target = resolveCompletionTarget({ ...BASE, provider: "custom", endpoint: "" })
+    expect(target.configured).toBe(false)
+    expect(target.gap).toBe("endpoint")
+  })
+
+  it("reports the apiKey gap for a hosted custom endpoint with no key", () => {
+    const target = resolveCompletionTarget({
+      ...BASE,
+      provider: "custom",
+      endpoint: OPENROUTER_BYOK_ENDPOINT,
+    })
+    expect(target.configured).toBe(false)
+    expect(target.gap).toBe("apiKey")
+  })
+
+  it("treats a local custom endpoint as configured without a key", () => {
+    const target = resolveCompletionTarget({
+      ...BASE,
+      provider: "custom",
+      endpoint: "http://localhost:8000",
+    })
+    expect(target.configured).toBe(true)
+    expect(target.settings.endpoint).toBe("http://localhost:8000")
+  })
+
+  it("applies a personal device override to an otherwise uncustomized project", () => {
+    const target = resolveCompletionTarget(undefined, {
+      endpoint: "http://localhost:1234",
+      model: "local",
+    })
+    expect(target.configured).toBe(true)
+    expect(target.settings.endpoint).toBe("http://localhost:1234")
+  })
+
+  it("attributes the gap to the project when the project's own provider is incomplete", () => {
+    const target = resolveCompletionTarget({ ...BASE, provider: "custom", endpoint: "" })
+    expect(target.source).toBe("project")
+  })
+
+  it("attributes the gap to the personal override when the override supplied the provider", () => {
+    // The hint must point at user Settings, not Project Settings, or it sends
+    // the user to a screen that does not own the broken provider.
+    const target = resolveCompletionTarget(undefined, {
+      endpoint: OPENROUTER_BYOK_ENDPOINT,
+    })
+    expect(target.configured).toBe(false)
+    expect(target.gap).toBe("apiKey")
+    expect(target.source).toBe("personal-override")
+  })
+
+  it("keeps a project's own provider ahead of a personal override", () => {
+    const target = resolveCompletionTarget(
+      { ...BASE, provider: "custom", endpoint: "http://localhost:8000" },
+      { endpoint: "http://localhost:9999" },
+    )
+    expect(target.settings.endpoint).toBe("http://localhost:8000")
+    expect(target.source).toBe("project")
+  })
+
+  it("keeps DEFAULT_COMPLETION_SETTINGS on the frontier provider", () => {
+    expect(resolveProvider(DEFAULT_COMPLETION_SETTINGS)).toBe("frontier")
+    expect(DEFAULT_COMPLETION_SETTINGS.endpoint).toBe("")
+  })
+})
+
 describe("isCompletionConfigured", () => {
   beforeEach(() => {
     localStorage.clear()
@@ -508,6 +618,12 @@ describe("complete", () => {
 
   const msg = [{ role: "user" as const, content: "hi" }]
 
+  it("commits a reply without its trailing bare marker (AQU-1465)", async () => {
+    fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "Premier verset.\n\\p" } }] }))
+    const out = await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg })
+    expect(out).toBe("Premier verset.")
+  })
+
   it("frontier: POSTs to Frontier URL with Bearer JWT and model='default' when blank", async () => {
     fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "translated" } }] }))
     const out = await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg })
@@ -542,11 +658,14 @@ describe("complete", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it("frontier: surfaces 402 subscription-limit errors with server message", async () => {
-    fetchMock.mockResolvedValueOnce(new Response("Monthly credits exhausted", { status: 402 }))
-    await expect(
-      complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg }),
-    ).rejects.toThrow(/Frontier AI limit reached: Monthly credits exhausted/)
+  it("frontier: a 402 is the workspace's weekly AI, worded by the one refusal helper (AQU-2068)", async () => {
+    // WHY: the server's body may carry amounts or ledger words; the user gets
+    // what stopped and when it comes back, never "credits" (spec R7).
+    fetchMock.mockResolvedValueOnce(Response.json({ error: "ai_allowance_exhausted", tier: "free", resetsAt: "2026-10-26T00:00:00Z" }, { status: 402 }))
+    const err = await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(AiRefusalError)
+    expect((err as Error).message).toMatch(/^This workspace has used this week's AI\./)
+    expect((err as Error).message).not.toMatch(/credit/i)
   })
 
   it("custom: POSTs to {endpoint}/v1/chat/completions without auth", async () => {
@@ -1057,24 +1176,24 @@ describe("retainTranslationPairs (AQU-153)", () => {
 // Living Memory: buildRulesBlock
 // ---------------------------------------------------------------------------
 
-describe("buildRulesBlock", () => {
+describe("buildChecksBlock (AQU-2342 checks hint)", () => {
   const makeRule = (id: string, check: TranslationRule["check"], enabled = true): TranslationRule => ({
     id, name: id, description: "", severity: "minor", source: "user", scope: "project",
     check, enabled, createdAt: new Date().toISOString(),
   })
 
   it("returns empty string when rules array is empty", () => {
-    expect(buildRulesBlock([])).toBe("")
+    expect(buildChecksBlock([])).toBe("")
   })
 
   it("returns empty string when all rules are disabled", () => {
     const rule = makeRule("r1", { type: "target-forbids", targetPattern: "bienes" }, false)
-    expect(buildRulesBlock([rule])).toBe("")
+    expect(buildChecksBlock([rule])).toBe("")
   })
 
   it("renders source-requires-target as 'if source contains X → target must include Y'", () => {
     const rule = makeRule("r1", { type: "source-requires-target", sourcePattern: "bienestar", targetPattern: "bienes" })
-    const block = buildRulesBlock([rule])
+    const block = buildChecksBlock([rule])
     expect(block).toContain("bienestar")
     expect(block).toContain("bienes")
     expect(block).toMatch(/must include/i)
@@ -1082,21 +1201,211 @@ describe("buildRulesBlock", () => {
 
   it("renders target-forbids rule", () => {
     const rule = makeRule("r1", { type: "target-forbids", targetPattern: "forbidden_word" })
-    const block = buildRulesBlock([rule])
+    const block = buildChecksBlock([rule])
     expect(block).toContain("forbidden_word")
     expect(block).toMatch(/do not use/i)
   })
 
   it("renders source-target-match rule", () => {
     const rule = makeRule("r1", { type: "source-target-match", pattern: "Yahweh" })
-    const block = buildRulesBlock([rule])
+    const block = buildChecksBlock([rule])
     expect(block).toContain("Yahweh")
+  })
+
+  it("prefers the rule's description over its pattern shape", () => {
+    const rule = { ...makeRule("r1", { type: "target-forbids", targetPattern: "x" }), description: "Never use the colloquial form." }
+    expect(buildChecksBlock([rule])).toBe(
+      "Checks (verified automatically after drafting — the draft must pass each one):\n- Never use the colloquial form.",
+    )
   })
 
   it("skips builtin check type (no useful injection)", () => {
     const rule = makeRule("builtin:r1", { type: "builtin", checkId: "no-repeated-word" as TranslationRule["check"] extends { type: "builtin"; checkId: infer C } ? C : never })
     // builtin produces no lines → returns ""
-    expect(buildRulesBlock([rule])).toBe("")
+    expect(buildChecksBlock([rule])).toBe("")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-2209: termbase injection is scoped to the cell and regex-free
+//
+// The bug these encode: a 722-concept termbase rendered 722 lines of raw match
+// regex into EVERY draft call (~30k tokens of system prompt for a 213-char
+// source), so prompt cost and term adherence tracked the size of the glossary
+// instead of the cell. Rules are compiled by the real compiler here, not
+// hand-built, so a change to either side has to keep them agreeing.
+// ---------------------------------------------------------------------------
+
+describe("buildTerminologyBlock narrowing (AQU-2209)", () => {
+  const concept = (id: string, sourceTerm: string, renderings: { rendering: string; status: "preferred" | "admitted" | "forbidden" }[]) => ({
+    id,
+    sourceTerm,
+    renderings,
+    status: "active" as const,
+    createdAt: "2024-01-01T00:00:00Z",
+  })
+
+  const generalRule = (id: string, check: TranslationRule["check"]): TranslationRule => ({
+    id, name: id, description: "", severity: "minor", source: "user", scope: "project",
+    check, enabled: true, createdAt: new Date().toISOString(),
+  })
+
+  const moses = concept("c-moses", "Moses", [{ rendering: "Moisés", status: "preferred" as const }])
+  const jesus = concept("c-jesus", "Jesus", [{ rendering: "Jesús", status: "preferred" as const }])
+
+  it("injects only the concepts present in the source", () => {
+    const rules = compileConceptsToRules([moses, jesus])
+    const block = buildTerminologyBlock(rules, { sourceText: "Moses went up the mountain." })
+    expect(block).toContain("Moses")
+    expect(block).toContain("Moisés")
+    expect(block).not.toContain("Jesus")
+    expect(block).not.toContain("Jesús")
+  })
+
+  it("renders a term as plain guidance, never as the match pattern", () => {
+    const rules = compileConceptsToRules([moses])
+    const block = buildTerminologyBlock(rules, { sourceText: "Moses spoke." })
+    expect(block).toContain('"Moses" → "Moisés"')
+    // The matcher's boundary wrappers are internals; they mean nothing to a model.
+    expect(block).not.toContain("\\p{L}")
+    expect(block).not.toContain("(?<!")
+    expect(block).not.toContain("(?!")
+  })
+
+  it("lists admitted renderings as acceptable alternates", () => {
+    const rules = compileConceptsToRules([
+      concept("c-spirit", "spirit", [
+        { rendering: "espíritu", status: "preferred" as const },
+        { rendering: "aliento", status: "admitted" as const },
+      ]),
+    ])
+    const block = buildTerminologyBlock(rules, { sourceText: "the spirit moved" })
+    expect(block).toContain('"spirit" → "espíritu"')
+    expect(block).toContain('also acceptable: "aliento"')
+  })
+
+  it("renders forbidden renderings as a Do NOT use line on the same concept", () => {
+    const rules = compileConceptsToRules([
+      concept("c-spirit", "spirit", [
+        { rendering: "espíritu", status: "preferred" as const },
+        { rendering: "fantasma", status: "forbidden" as const },
+      ]),
+    ])
+    const block = buildTerminologyBlock(rules, { sourceText: "the spirit moved" })
+    // One concept → one line.
+    expect(block.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(1)
+    expect(block).toContain('"spirit" → "espíritu"')
+    expect(block).toContain('Do NOT use "fantasma"')
+  })
+
+  it("injects nothing when no concept occurs in the source", () => {
+    const rules = compileConceptsToRules([moses, jesus])
+    expect(buildTerminologyBlock(rules, { sourceText: "In the beginning." })).toBe("")
+  })
+
+  it("leaves a project's general rules to the checks hint while narrowing terminology", () => {
+    const general = generalRule("r1", { type: "target-forbids", targetPattern: "bienes" })
+    const rules = [general, ...compileConceptsToRules([jesus])]
+    expect(buildChecksBlock(rules)).toContain("bienes")
+    expect(buildChecksBlock(rules)).not.toContain("Jesús")
+    expect(buildTerminologyBlock(rules, { sourceText: "Moses spoke." })).toBe("")
+  })
+
+  it("carries the termbase note, clipped, after the renderings (AQU-2342)", () => {
+    const rules = compileConceptsToRules([{ ...moses, notes: "Lawgiver; keep the Spanish accent." }])
+    expect(buildTerminologyBlock(rules, { sourceText: "Moses spoke." })).toContain(
+      '- "Moses" → "Moisés". Note: Lawgiver; keep the Spanish accent.',
+    )
+  })
+
+  it("injects no term without a source to narrow against", () => {
+    expect(buildTerminologyBlock(compileConceptsToRules([moses]))).toBe("")
+  })
+
+  it("keeps a 722-concept termbase down to the terms the cell actually bears", () => {
+    const termbase = [
+      ...Array.from({ length: 720 }, (_, i) =>
+        concept(`c-${i}`, `filler${i}`, [{ rendering: `relleno${i}`, status: "preferred" as const }]),
+      ),
+      moses,
+      jesus,
+    ]
+    const rules = compileConceptsToRules(termbase)
+    const source = "Moses wrote of the coming of Jesus to the people of Israel."
+    const block = buildTerminologyBlock(rules, { sourceText: source })
+    const lines = block.split("\n").filter((l) => l.startsWith("- "))
+    expect(lines).toHaveLength(2)
+    // The old behavior put ~115 KB into the system prompt for a short source.
+    expect(block.length).toBeLessThan(source.length * 4)
+  })
+
+  it("bounds the number of injected concepts and reports the overflow", () => {
+    const dense = Array.from({ length: DEFAULT_MAX_INJECTED_TERMS + 5 }, (_, i) =>
+      concept(`c-${i}`, `term${i}`, [{ rendering: `rend${i}`, status: "preferred" as const }]),
+    )
+    const rules = compileConceptsToRules(dense)
+    const sourceText = dense.map((c) => c.sourceTerm).join(" ")
+
+    const selection = selectInjectedTerms(rules, sourceText)
+    expect(selection.matched).toBe(DEFAULT_MAX_INJECTED_TERMS + 5)
+    expect(selection.injected).toHaveLength(DEFAULT_MAX_INJECTED_TERMS)
+    expect(selection.dropped).toBe(5)
+    // Compile order is precedence order: the cap drops from the tail.
+    expect(selection.injected[0].conceptId).toBe("c-0")
+
+    const lines = buildTerminologyBlock(rules, { sourceText }).split("\n").filter((l) => l.startsWith("- "))
+    expect(lines).toHaveLength(DEFAULT_MAX_INJECTED_TERMS)
+  })
+
+  it("merges a concept's approved and forbidden rules into one selection entry", () => {
+    const rules = compileConceptsToRules([
+      concept("c-spirit", "spirit", [
+        { rendering: "espíritu", status: "preferred" as const },
+        { rendering: "aliento", status: "admitted" as const },
+        { rendering: "fantasma", status: "forbidden" as const },
+      ]),
+    ])
+    expect(selectInjectedTerms(rules, "the spirit moved").injected).toEqual([
+      {
+        conceptId: "c-spirit",
+        sourceTerm: "spirit",
+        approvedRenderings: ["espíritu", "aliento"],
+        forbiddenRenderings: ["fantasma"],
+      },
+    ])
+  })
+
+  it("reports nothing for an empty source", () => {
+    const rules = compileConceptsToRules([moses])
+    expect(selectInjectedTerms(rules, "")).toEqual({ injected: [], matched: 0, dropped: 0 })
+  })
+
+  it("narrows the terms buildPrompt injects to the cell being drafted", () => {
+    const rules = compileConceptsToRules([moses, jesus])
+    const [system] = buildPrompt({
+      sourceLanguage: "English",
+      targetLanguage: "Spanish",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      sourceText: "Moses went up the mountain.",
+      examples: [],
+      rules,
+    })
+    expect(system.content).toContain("Moisés")
+    expect(system.content).not.toContain("Jesús")
+  })
+
+  it("narrows a batch's terms to the union of its own cells", () => {
+    const rules = compileConceptsToRules([moses, jesus])
+    const [system] = buildBatchPrompt({
+      sourceLanguage: "English",
+      targetLanguage: "Spanish",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ source: "Moses spoke." }, { source: "The crowd listened." }],
+      examples: [],
+      rules,
+    })
+    expect(system.content).toContain("Moisés")
+    expect(system.content).not.toContain("Jesús")
   })
 })
 
@@ -1348,42 +1657,31 @@ describe("buildBatchPrompt — target-only format", () => {
   })
 })
 
-describe("buildBriefBlock", () => {
-  it("wraps a non-empty summary in a labeled block", () => {
-    expect(buildBriefBlock("Translate for youth.")).toContain("Translation brief")
-    expect(buildBriefBlock("Translate for youth.")).toContain("Translate for youth.")
-  })
-  it("returns empty string for blank input", () => {
-    expect(buildBriefBlock("")).toBe("")
-    expect(buildBriefBlock("   ")).toBe("")
-  })
-})
-
 // ---------------------------------------------------------------------------
 // AQU-934: per-passage style-rule instructions resolved from the applicability
 // graph. Unlike buildRulesBlock these are natural language, so a rule that no
 // regex can express still reaches the model — and only where it applies.
 // ---------------------------------------------------------------------------
 
-describe("buildStyleRulesBlock", () => {
-  it("renders one bullet per instruction under a labeled header", () => {
-    const block = buildStyleRulesBlock(["Use formal register.", "Keep numerals as digits."])
+describe("style rules in the checks hint", () => {
+  it("renders one bullet per instruction under the checks heading", () => {
+    const block = buildChecksBlock(undefined, ["Use formal register.", "Keep numerals as digits."])
     expect(block).toBe(
-      "Style rules that apply to this passage (MUST follow):\n" +
+      "Checks (verified automatically after drafting — the draft must pass each one):\n" +
         "- Use formal register.\n" +
         "- Keep numerals as digits.",
     )
   })
 
   it("returns empty string for empty, blank, undefined, or null input", () => {
-    expect(buildStyleRulesBlock([])).toBe("")
-    expect(buildStyleRulesBlock(["   ", ""])).toBe("")
-    expect(buildStyleRulesBlock(undefined)).toBe("")
-    expect(buildStyleRulesBlock(null)).toBe("")
+    expect(buildChecksBlock(undefined, [])).toBe("")
+    expect(buildChecksBlock(undefined, ["   ", ""])).toBe("")
+    expect(buildChecksBlock(undefined, undefined)).toBe("")
+    expect(buildChecksBlock(undefined, null)).toBe("")
   })
 
   it("drops duplicates so a union across a batch cannot repeat a rule", () => {
-    const block = buildStyleRulesBlock(["Use formal register.", "Use formal register."])
+    const block = buildChecksBlock(undefined, ["Use formal register.", "Use formal register."])
     expect(block.match(/Use formal register\./g)).toHaveLength(1)
   })
 })
@@ -1397,7 +1695,7 @@ describe("style instructions in the prompt builders", () => {
       systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "hello",
       examples: [], styleInstructions,
     })
-    expect(sys.content).toContain("Style rules that apply to this passage")
+    expect(sys.content).toContain("Checks (verified automatically after drafting")
     expect(sys.content).toContain("Render divine names in small caps.")
   })
 
@@ -1430,7 +1728,7 @@ describe("style instructions in the prompt builders", () => {
     expect(buildPrompt(args)).toEqual(buildPrompt({ ...args, styleInstructions: undefined }))
   })
 
-  it("keeps the deterministic rules block and the style block as separate blocks", () => {
+  it("lists the deterministic rules and the style rules in ONE checks hint, rules first", () => {
     const rule: TranslationRule = {
       id: "r1", name: "no LORD", description: "", severity: "minor",
       source: "user", scope: "project", enabled: true, createdAt: new Date().toISOString(),
@@ -1441,28 +1739,42 @@ describe("style instructions in the prompt builders", () => {
       systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "hello",
       examples: [], rules: [rule], styleInstructions,
     })
-    expect(sys.content).toContain("Project terminology and style rules (MUST follow):")
-    expect(sys.content).toContain("Style rules that apply to this passage (MUST follow):")
+    expect(sys.content.split("Checks (verified automatically").length - 1).toBe(1)
     // Deterministic rules first, resolved guidance after.
-    expect(sys.content.indexOf("Project terminology and style rules"))
-      .toBeLessThan(sys.content.indexOf("Style rules that apply to this passage"))
+    expect(sys.content.indexOf('Do NOT use "LORD"'))
+      .toBeLessThan(sys.content.indexOf("Render divine names in small caps."))
   })
 })
 
-describe("buildPrompt with brief summary", () => {
-  it("injects the brief block into the system message when present", () => {
-    const [sys] = buildPrompt({
-      sourceLanguage: "Greek", targetLanguage: "X", systemPrompt: "Base.",
-      sourceText: "logos", examples: [], briefSummary: "Prefer natural phrasing.",
-    })
-    expect(sys.content).toContain("Prefer natural phrasing.")
-  })
-  it("omits the brief block when absent", () => {
-    const [sys] = buildPrompt({
-      sourceLanguage: "Greek", targetLanguage: "X", systemPrompt: "Base.",
-      sourceText: "logos", examples: [],
-    })
-    expect(sys.content).not.toContain("Translation brief")
+// AQU-2342: every copilot recipe carries the fixed role text, then the ONE
+// project-instructions block, then the checks hint — and nothing else project-authored.
+describe("project instructions in every copilot recipe", () => {
+  const rule: TranslationRule = {
+    id: "r1", name: "r1", description: "", severity: "minor", source: "user", scope: "project",
+    check: { type: "target-forbids", targetPattern: "forbidden_word" }, enabled: true, createdAt: "2026-01-01",
+  }
+  const recipes: [string, (instructions?: string) => string][] = [
+    ["single", (instructions) => buildPrompt({
+      sourceLanguage: "Greek", targetLanguage: "Kala", sourceText: "logos", examples: [], rules: [rule], instructions,
+    })[0].content],
+    ["batch", (instructions) => buildBatchPrompt({
+      sourceLanguage: "Greek", targetLanguage: "Kala", cells: [{ source: "logos" }], examples: [], rules: [rule], instructions,
+    })[0].content],
+    ["paragraph", (instructions) => buildParagraphPrompt({
+      sourceLanguage: "Greek", targetLanguage: "Kala", cells: [{ cellId: "c1", source: "logos" }], examples: [], rules: [rule], instructions,
+    })[0].content],
+  ]
+  it.each(recipes)("%s: default role text, then instructions, then rules", (_name, build) => {
+    const sys = build("Prefer natural phrasing for {targetLanguage}.")
+    const role = sys.indexOf("You are a translation assistant completing a project that translates from Greek into Kala.")
+    const block = sys.indexOf("Project instructions (follow these):\nPrefer natural phrasing for Kala.")
+    const rules = sys.indexOf("Checks (verified automatically after drafting")
+    expect(role).toBeGreaterThanOrEqual(0)
+    expect(block).toBeGreaterThan(role)
+    expect(rules).toBeGreaterThan(block)
+    expect(sys.split("Prefer natural phrasing").length - 1).toBe(1)
+    expect(sys).not.toContain("Translation brief")
+    expect(build(undefined)).not.toContain("Project instructions")
   })
 })
 
@@ -1553,6 +1865,22 @@ describe("buildParagraphPrompt", () => {
     expect(c.indexOf("PREV_SRC")).toBeLessThan(c.indexOf("LIVE_SRC"))
   })
 
+  it("labels an unreviewed preceding draft so the model weighs it below approved work", () => {
+    const [, user] = buildParagraphPrompt({
+      sourceLanguage: "Greek", targetLanguage: "English",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ cellId: ID_A, source: "LIVE_SRC" }],
+      examples: [],
+      precedingContext: [
+        { source: "OK_SRC", target: "OK_TGT" },
+        { source: "DRAFT_SRC", target: "DRAFT_TGT", draft: true },
+      ],
+    })
+    expect(user.content).toContain("Translation: OK_TGT")
+    expect(user.content).toContain("Translation (unreviewed draft): DRAFT_TGT")
+    expect(user.content).not.toContain("Translation: DRAFT_TGT")
+  })
+
   it("renders a blank-target preceding cell as source-only fallback, not a Translation pair (D4)", () => {
     const [, user] = buildParagraphPrompt({
       sourceLanguage: "English", targetLanguage: "French",
@@ -1611,16 +1939,6 @@ describe("buildParagraphPrompt", () => {
       examples: [], rules: [rule],
     })
     expect(sys.content).toContain("forbidden_word")
-  })
-
-  it("injects brief summary into the system prompt", () => {
-    const [sys] = buildParagraphPrompt({
-      sourceLanguage: "English", targetLanguage: "French",
-      systemPrompt: DEFAULT_SYSTEM_PROMPT,
-      cells: [{ cellId: ID_A, source: "test" }],
-      examples: [], briefSummary: "Prefer natural phrasing.",
-    })
-    expect(sys.content).toContain("Prefer natural phrasing.")
   })
 
   it("substitutes language placeholders and none remain in output", () => {
@@ -1710,5 +2028,63 @@ describe("activeProjectIdFromPath", () => {
     expect(activeProjectIdFromPath("/settings/ai")).toBeNull()
     // /projects/archived is a static list page, not a project id.
     expect(activeProjectIdFromPath("/projects/archived")).toBeNull()
+  })
+})
+
+describe("unreviewed in-run draft context (AQU-1386)", () => {
+  const base = {
+    sourceLanguage: "English",
+    targetLanguage: "French",
+    systemPrompt: "Translate.",
+    examples: [],
+  }
+
+  it("labels a carried draft as unreviewed in the batch prompt", () => {
+    // A multi-call batch carries its own earlier drafts forward. They must be
+    // distinguishable from approved translations in the prompt, or the model
+    // treats unreviewed machine output as the project's settled style.
+    const [, user] = buildBatchPrompt({
+      ...base,
+      cells: [{ source: "live source" }],
+      precedingContext: [
+        { source: "approved src", target: "approved tgt" },
+        { source: "drafted src", target: "drafted tgt", draft: true },
+      ],
+    })
+    expect(user.content).toContain("Translation: approved tgt")
+    expect(user.content).toContain("Translation (unreviewed draft): drafted tgt")
+  })
+
+  it("labels a carried draft in the single-cell prompt too", () => {
+    const [, user] = buildPrompt({
+      ...base,
+      sourceText: "live source",
+      precedingContext: [{ source: "drafted src", target: "drafted tgt", draft: true }],
+    })
+    expect(user.content).toContain("Translation (unreviewed draft): drafted tgt")
+  })
+
+  it("renders an unflagged row exactly as before", () => {
+    // Every existing call site omits `draft`, so the rendered prompt must be
+    // byte-identical for them.
+    const [, user] = buildBatchPrompt({
+      ...base,
+      cells: [{ source: "live source" }],
+      precedingContext: [{ source: "approved src", target: "approved tgt" }],
+    })
+    expect(user.content).toContain("Source: approved src\nTranslation: approved tgt")
+    expect(user.content).not.toContain("unreviewed")
+  })
+
+  it("strips a trailing bare marker from a carried draft and keeps its label (AQU-1465)", () => {
+    // A batch reply can leave "\p" inside a cell's tag, so the carried draft
+    // reaches the next call's window with the marker still on it.
+    const precedingContext = [{ source: "drafted src\n\\p", target: "drafted tgt\n\\p", draft: true }]
+    const [, batchUser] = buildBatchPrompt({ ...base, cells: [{ source: "live source" }], precedingContext })
+    const [, singleUser] = buildPrompt({ ...base, sourceText: "live source", precedingContext })
+    for (const user of [batchUser, singleUser]) {
+      expect(user.content).toContain("Source: drafted src\nTranslation (unreviewed draft): drafted tgt\n")
+      expect(user.content).not.toContain("\\p")
+    }
   })
 })

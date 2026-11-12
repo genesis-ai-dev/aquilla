@@ -12,8 +12,25 @@
 //
 // Two parallel queries — one over `cells` for stats, one over
 // `cell_validators` for active validators — then joined in JS.
+//
+// AQU-1506: every row carries its lane (`targetLang`, the legacy tag, plus the
+// opaque `laneId`) — the same marker `cells-read-route` sends. A cell on an
+// N-lane file has one target row PER LANE here, and without the marker the
+// client cannot tell them apart: it kept whichever arrived first, which is
+// Postgres heap order, not the active lane. Validators are still keyed on the
+// row's own chain head, so each row's `activeValidators` was always its own
+// lane's — only the client's choice of row was wrong.
+//
+// AQU-2094: `sparse=1` (whole-file reads only) leaves out every cell that has
+// no active validator and no waiver on any of its rows, and says so with
+// `sparse: true`. Everything else in an entry — chain head, content hash,
+// last-edit time — is on the rows the client has already loaded, so on a
+// whole Bible the full answer was ~9 MB of JSON repeating them. The client
+// reads a cell missing from a sparse answer as "no validators, no waivers".
+// An older client never sends the flag and gets the full answer.
 
 import { verifyTokenForFile } from '../auth'
+import { wireLegacyTagSql } from '../../../db/shared/lane-sql'
 
 export interface CellsAuditReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -44,6 +61,7 @@ export async function handleCellsAuditReadRequest(
   if (!fileId) return new Response('missing fileId', { status: 400 })
 
   const cellId = url.searchParams.get('cellId')
+  const sparse = !cellId && url.searchParams.get('sparse') === '1'
 
   const auth = await verifyTokenForFile(token, fileId, env.SYNC_SECRET_KEY)
   if (!auth.ok) return new Response(auth.reason, { status: auth.status })
@@ -60,6 +78,8 @@ export async function handleCellsAuditReadRequest(
     SELECT
       cell_id,
       side,
+      ${wireLegacyTagSql("cells")} AS target_lang,
+      lane_id,
       content_hash,
       last_edit_at,
       event_id        AS last_edit_event_id,
@@ -70,14 +90,14 @@ export async function handleCellsAuditReadRequest(
 
   // DELETE-on-unvalidate: every row is active (no is_active filter needed).
   const validatorsSql = `
-    SELECT cell_id, event_id, username
+    SELECT cell_id, event_id, username, decided_ts
     FROM cell_validators
     WHERE project_id = ? AND file_id = ?${scopeSql}
   `
 
   // DELETE-on-unwaive: every row present is an active waiver.
   const waiversSql = `
-    SELECT cell_id, rule_id, reason, waived_by, waived_ts
+    SELECT cell_id, rule_id, match_hash, reason, waived_by, waived_ts
     FROM cell_waivers
     WHERE project_id = ? AND file_id = ?${scopeSql}
   `
@@ -85,6 +105,10 @@ export async function handleCellsAuditReadRequest(
   interface CellRow {
     cell_id: string
     side: string
+    /** AQU-538 legacy lane tag. '' = the default lane; always '' on source rows. */
+    target_lang: string | null
+    /** AQU-1240 opaque `lanes.id` — the row's real lane identity. */
+    lane_id: string | null
     content_hash: string | null
     last_edit_at: number | null
     last_edit_event_id: string
@@ -94,10 +118,14 @@ export async function handleCellsAuditReadRequest(
     cell_id: string
     event_id: string
     username: string
+    /** AQU-2296: server clock when this person last cast their vote. */
+    decided_ts: number | string | null
   }
   interface WaiverRow {
     cell_id: string
     rule_id: string
+    /** AQU-1740: the waived finding's hash; '' = the rule is waived cell-wide. */
+    match_hash: string | null
     reason: string | null
     waived_by: string | null
     waived_ts: number
@@ -110,7 +138,21 @@ export async function handleCellsAuditReadRequest(
   ])
 
   // Bucket validators by cell_id → event_id → usernames[].
+  //
+  // AQU-1506: no lane column is needed in this key even though
+  // `cell_validators` has one. `event_id` here is the target row's chain head,
+  // and a head is unique to one (cell, lane) — a validate on lane `fr` names
+  // `fr`'s head — so keying on it already partitions validators by lane.
+  // Matching on `target_lang` as well would only add a way to silently drop
+  // validators if the legacy tag ever drifts from `lane_id`.
+  //
+  // AQU-2296: the vote's `decided_ts` rides along in a parallel record keyed
+  // by username, NOT as a second array, so the pairing cannot drift from the
+  // name list the client already reads. BIGINT arrives as a string through
+  // some drivers, hence the Number() and the finite guard — a NaN here would
+  // reach the popover as "Invalid Date".
   const byCell = new Map<string, Map<string, string[]>>()
+  const tsByCell = new Map<string, Map<string, Record<string, number>>>()
   for (const v of validatorsRes.results) {
     let perEdit = byCell.get(v.cell_id)
     if (!perEdit) {
@@ -123,6 +165,21 @@ export async function handleCellsAuditReadRequest(
       perEdit.set(v.event_id, names)
     }
     names.push(v.username)
+
+    let tsPerEdit = tsByCell.get(v.cell_id)
+    if (!tsPerEdit) {
+      tsPerEdit = new Map()
+      tsByCell.set(v.cell_id, tsPerEdit)
+    }
+    let stamps = tsPerEdit.get(v.event_id)
+    if (!stamps) {
+      stamps = {}
+      tsPerEdit.set(v.event_id, stamps)
+    }
+    // `Number(null)` is 0 — a finite number that would date the vote to 1970 —
+    // so a missing stamp is rejected by value rather than by the finite check.
+    const decided = v.decided_ts == null ? NaN : Number(v.decided_ts)
+    if (Number.isFinite(decided) && decided > 0) stamps[v.username] = decided
   }
 
   // Bucket waivers by cell_id → RuleWaiver[]. Shape matches the client's
@@ -130,7 +187,7 @@ export async function handleCellsAuditReadRequest(
   // server clock in ms, surfaced here as an ISO timestamp.
   const waiversByCell = new Map<
     string,
-    { ruleId: string; reason?: string; waivedAt: string; waivedBy?: string }[]
+    { ruleId: string; matchHash?: string; reason?: string; waivedAt: string; waivedBy?: string }[]
   >()
   for (const w of waiversRes.results) {
     let list = waiversByCell.get(w.cell_id)
@@ -140,25 +197,44 @@ export async function handleCellsAuditReadRequest(
     }
     list.push({
       ruleId: w.rule_id,
+      // AQU-1740: '' on the wire would read as a per-finding waiver of the
+      // empty string, so the cell-wide case stays an ABSENT field — the same
+      // shape the client used before the column existed.
+      ...(w.match_hash ? { matchHash: w.match_hash } : {}),
       ...(w.reason ? { reason: w.reason } : {}),
       waivedAt: new Date(w.waived_ts).toISOString(),
       ...(w.waived_by ? { waivedBy: w.waived_by } : {}),
     })
   }
 
-  const cells = cellsRes.results.map((r) => {
+  // A cell is listed with ALL its rows or not at all, so the client's per-lane
+  // choice of row (rankStatsRow) sees exactly what a full answer would give it.
+  const listed = sparse
+    ? new Set(
+        cellsRes.results
+          .filter((r) => (byCell.get(r.cell_id)?.get(r.last_edit_event_id)?.length ?? 0) > 0 || waiversByCell.has(r.cell_id))
+          .map((r) => r.cell_id),
+      )
+    : null
+  const rows = listed ? cellsRes.results.filter((r) => listed.has(r.cell_id)) : cellsRes.results
+
+  const cells = rows.map((r) => {
     const activeValidators =
       byCell.get(r.cell_id)?.get(r.last_edit_event_id) ?? []
     return {
       cellId: r.cell_id,
       side: r.side,
+      targetLang: r.target_lang ?? '',
+      laneId: r.lane_id ?? null,
       contentHash: r.content_hash,
       lastEditAt: r.last_edit_at,
       lastEditEventId: r.last_edit_event_id,
       sourceEventId: r.source_event_id,
       activeValidators,
+      validatorDecidedTs:
+        tsByCell.get(r.cell_id)?.get(r.last_edit_event_id) ?? {},
       waivers: waiversByCell.get(r.cell_id) ?? [],
     }
   })
-  return Response.json({ cells })
+  return Response.json(sparse ? { cells, sparse: true } : { cells })
 }

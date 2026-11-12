@@ -15,12 +15,15 @@ import {
   type OutboxOwnerScope,
   type OutboxRecord,
 } from "./outbox"
+import { sanitizeStoredEvents } from "./outbox-sanitize"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { parseAppliedEventFrame } from "./ws-reconciler"
 import type { AppliedEventFrame } from "./live-apply"
 import { timeoutSignal } from "./fetch-timeout"
 import { observedSyncFetch, readSyncJson } from "./connection-activity"
 import posthog from "@/lib/posthog"
+import { ROLE } from "@/lib/frontier/roles"
+import { notifyElevationRequired } from "@/lib/errors/elevation-required-signal"
 import { OUTBOX_QUARANTINED } from "@/lib/event-names"
 
 const MAX_BATCH = 100
@@ -34,6 +37,8 @@ const MAX_BATCH = 100
  * event head-of-line block the entire queue.
  *
  *   token != null            → mint succeeded
+ *   token == null, status=403, elevationRequired → admin step-up pending: hold
+ *                               the project's events, advance past them
  *   token == null, status=403 → permanent: quarantine the batch and advance
  *   token == null, status=401 → stale JWT: keep retryable, self-heals on re-auth
  *   token == null, status=other/null → transient: keep retryable, back off
@@ -41,6 +46,11 @@ const MAX_BATCH = 100
 export interface TokenMintResult {
   token: string | null
   status: number | null
+  /** OPS-44: the 403 only asks a platform admin to step up (see
+   *  SyncTokenError.elevationRequired). */
+  elevationRequired?: boolean
+  /** AQU-2003: the role the token carries (server `role` field), when known. */
+  role?: { level: number; source: string }
 }
 
 interface PostBody {
@@ -93,6 +103,7 @@ export interface RejectedEntry {
   status: number
   reason: string
   fileId: string | null
+  cellId: string | null
 }
 
 export interface FlushDeps {
@@ -100,8 +111,19 @@ export interface FlushDeps {
    *  workspace's current project. The outbox is a single global store shared
    *  across every project the user has open; minting against the active
    *  workspace's projectId is what produced "403 token scoped to different
-   *  project" on edits queued in another project, wedging the whole queue. */
-  getTokenForFile: (projectId: string, fileId: string) => Promise<TokenMintResult>
+   *  project" on edits queued in another project, wedging the whole queue.
+   *
+   *  AQU-1788: `opts.forceRefresh` asks the minter to discard its cached
+   *  token and mint a new one. The flusher uses it for exactly one case — a
+   *  403 carrying ROLE_DOWNGRADED_REASON — where the cached token is valid
+   *  but asserts a role the member no longer has. A minter that ignores the
+   *  option simply hands back the same token and the single retry is a no-op.
+   */
+  getTokenForFile: (
+    projectId: string,
+    fileId: string,
+    opts?: { forceRefresh?: boolean },
+  ) => Promise<TokenMintResult>
   /**
    * Background drains must name the account whose rows and credential they
    * carry. The exact stored session is checked before minting and again before
@@ -132,8 +154,13 @@ export interface FlushDeps {
    *  work. The caller uses this to revert deliberately and say why.
    *  Deliberately NOT routed through the 403 quarantine path: that copy is
    *  about permissions, and a refused shape is a bug, not a permission
-   *  problem. */
-  onRejected?: (entries: RejectedEntry[]) => void
+   *  problem.
+   *
+   *  AQU-1901: return the ids this caller reports to the user itself; every
+   *  other entry goes on to the tab-wide `subscribeRejected` listeners, which
+   *  undo and announce a refused edit. A caller that returns nothing claims
+   *  nothing — the batch may hold other people's edits, not only its own. */
+  onRejected?: (entries: RejectedEntry[]) => readonly string[] | void
   /** Called before a permanent 403 is quarantined. Foreground committers use
    *  the exact event ids to clear optimistic state and avoid chaining future
    *  writes onto a head the server refused.
@@ -147,6 +174,26 @@ export interface FlushDeps {
    *  rollback wired to `onRejected` alone can never fire for the one case it
    *  exists for. */
   onForbidden?: (entries: ForbiddenEntry[]) => void
+}
+
+/**
+ * AQU-1788: the sync-worker's downgrade-gate reason, verbatim.
+ *
+ * The gate (sync-worker/src/events/route.ts, pen test 2026-09-21) refuses a
+ * write whose token asserts a HIGHER role than the member's live one. The
+ * token is role-stamped at mint time and lives up to 15 minutes, so this
+ * reason never means "you may not do this" — it means "this token can no
+ * longer be trusted to say what you are". It is the one 403 a fresh token can
+ * clear, which is why it is the one 403 the flusher retries.
+ */
+export const ROLE_DOWNGRADED_REASON = 'role downgraded since token was issued'
+
+/** True when a server reason (or a raw 403 body) carries the downgrade gate's
+ *  rejection. Substring + case-insensitive so a wrapped/JSON-encoded body
+ *  ("{\"error\":\"role downgraded since token was issued\"}") still matches. */
+export function isRoleDowngradedReason(reason: string | null | undefined): boolean {
+  if (!reason) return false
+  return reason.toLowerCase().includes(ROLE_DOWNGRADED_REASON)
 }
 
 function forbiddenEntriesFor(
@@ -163,8 +210,68 @@ function forbiddenEntriesFor(
   }))
 }
 
+/**
+ * OPS-44: (owner, project) pairs whose sync-token mint answered "elevation
+ * required". A platform admin who edits a project they reach only through
+ * platform power gets that 403 until they enter the emailed code. It is not a
+ * verdict on access, so quarantining the edits (the generic mint-403 path) threw
+ * away writes a step-up would have saved. Instead the flusher skips these
+ * projects' rows, which stay `pending` in IndexedDB, and carries on with
+ * everything else. Held in memory only: a reload starts clean, and the first
+ * flush mints once more, re-raising the prompt if the session is still not
+ * elevated.
+ */
+const elevationHolds = new Set<string>()
+
+export const ELEVATION_HOLD_REASON = "waiting for admin verification"
+
+function elevationHoldKey(record: OutboxRecord): string {
+  return `${record.ownerKey ?? ""}\u0000${record.event.projectId}`
+}
+
+function isElevationHeld(record: OutboxRecord): boolean {
+  return elevationHolds.has(elevationHoldKey(record))
+}
+
+/**
+ * Let held projects mint again. useOutboxFlusher calls this on every explicit
+ * retry (Retry now, reconnect, re-auth) and when the admin's step-up verifies.
+ * A project still refused is simply held again after one mint.
+ */
+export function releaseElevationHolds(): void {
+  elevationHolds.clear()
+}
+
+/** AQU-2003: a platform-source token below Contributor is the read-only view
+ *  an un-elevated admin is minted. It cannot write anything. */
+function isPlatformViewToken(mint: TokenMintResult): boolean {
+  return mint.role?.source === "platform" && mint.role.level < ROLE.CONTRIBUTOR
+}
+
 function groupOldestFileFirst(records: OutboxRecord[]): OutboxRecord[] {
   if (records.length === 0) return []
+  // AQU-1368: ISOLATE A HEAD THE SERVER HAS ALREADY REFUSED.
+  //
+  // The /events INSERT is atomic, so one event the database will never accept
+  // takes its whole batch down with it — including brand-new, perfectly valid
+  // audio events that happen to be queued behind it. That is what turned a
+  // single 2026-08-15 row into five weeks of "audio can't upload" for the
+  // partner on AQU-1368: the poison sat at the head of every batch and the
+  // valid events never got a request of their own.
+  //
+  // `attempts > 0` is the right trigger because of who bumps it. Transient
+  // failures — offline, 5xx, a stale token, a timeout — go through
+  // `stampOutboxError`, which deliberately does NOT burn the budget. Only a
+  // deterministic refusal (a non-401 4xx, a malformed response, or a
+  // server-rejected event inside a 200) reaches `markOutboxAttempt`. So a
+  // non-zero count means the server saw this record and would not take it,
+  // and batching it with anything else only spreads the damage.
+  //
+  // Posting it alone costs throughput on the failure path and buys the
+  // queue's liveness: the record burns its own retries to the cap, flips to
+  // `failed`, and stops being peeked — after which the events behind it flush
+  // on their own merits.
+  if ((records[0].attempts ?? 0) > 0) return [records[0]]
   const fid = records[0].event.fileId
   // BLOCKER 2 fix: when the head record has no fileId (project-scoped comment.* event),
   // only include other no-fileId comment.* records from the same project in the batch.
@@ -238,6 +345,25 @@ const staleSiblingsListeners = new Set<StaleSiblingsListener>()
 export function subscribeStaleSiblings(listener: StaleSiblingsListener): () => void {
   staleSiblingsListeners.add(listener)
   return () => { staleSiblingsListeners.delete(listener) }
+}
+
+type RejectedListener = (entries: RejectedEntry[]) => void
+const rejectedListeners = new Set<RejectedListener>()
+
+/**
+ * AQU-1901: tab-wide notification of the non-retryable 4xx rejections a flush
+ * dropped. `deps.onRejected` reaches only the caller that ran THIS flush, and
+ * most writes — every hand-typed edit and validation — are posted by the
+ * app-shell drain or by another caller's inline flush, neither of which knows
+ * whose edit it was. So a refused edit was removed from the outbox, the status
+ * chip went back to "Synced", and the editor kept showing text that was never
+ * saved. The workspace subscribes here to undo the optimistic state and say
+ * so. Hears every entry the flush's own `onRejected` did not claim; same
+ * `shouldSurface` gate.
+ */
+export function subscribeRejected(listener: RejectedListener): () => void {
+  rejectedListeners.add(listener)
+  return () => { rejectedListeners.delete(listener) }
 }
 
 // Per-tab serialization. Many inline `flushOutboxBatch` calls run outside the
@@ -335,6 +461,7 @@ export async function flushOutboxUntilSettled(
 }
 
 async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutboxResult> {
+  const analytics = posthog.scope(undefined, deps.ownerScope?.ownerKey ?? undefined)
   const ownerVersion = deps.ownerScope ? null : getActiveOutboxOwnerVersion()
   const outboxScope: OutboxOwnerScope | undefined = deps.ownerScope
     ? { ownerKey: deps.ownerScope.ownerKey }
@@ -345,7 +472,7 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
   }
   const shouldSurface = (): boolean => deps.ownerScope?.shouldSurface?.() ?? true
   const fetchFn = deps.fetchImpl ?? fetch
-  const records = await peekPendingOutboxBatch(MAX_BATCH * 2, outboxScope)
+  const records = await peekPendingOutboxBatch(MAX_BATCH * 2, outboxScope, isElevationHeld)
   if (records.length === 0 || !(await isCredentialCurrent())) {
     return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
@@ -373,19 +500,29 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
   // server accepts (any non-empty string; the sync-worker ignores fileId on
   // comment auth). Events WITH a fileId always use their own for correct scope.
   const tokenFileId = fileId ?? '__project__'
-  const mint = await deps.getTokenForFile(projectId, tokenFileId)
-  // Foreground mode fences account switches. Background mode instead fences
-  // the exact owner/JWT pair, allowing an inactive account to drain while
-  // still cancelling immediately when that stored credential is replaced or
-  // removed.
-  if (!(await isCredentialCurrent())) {
-    return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
-  }
-  if (!mint.token) {
+  // AQU-1788: the mint-failure and POST halves of this flush are nested
+  // functions so the one retryable 403 — a token whose baked-in role went
+  // stale — can re-run them with a freshly minted token. Everything they
+  // close over (batch, scope, surfacing) is already resolved above.
+  async function handleMintFailure(mint: TokenMintResult): Promise<FlushOutboxResult> {
     // Token mint failed. Distinguish permanent from transient so a single
     // un-mintable file can't head-of-line block the rest of the queue (the
     // original wedge: any null token was treated as a transient auth blip,
     // retried forever, and the queue never advanced past the oldest event).
+    if (mint.status === 403 && mint.elevationRequired) {
+      // OPS-44: the minter has already raised the step-up prompt. Keep the
+      // events pending with no budget burn and no onForbidden (which rolls back
+      // optimistic state), hold the project so later peeks skip it, and flush
+      // the next batch now so other projects do not wait a tick behind it.
+      // Each pass holds one more project, so this recursion ends.
+      elevationHolds.add(elevationHoldKey(batch[0]))
+      await stampOutboxError(
+        batch.map((r) => r.id),
+        { status: 403, reason: ELEVATION_HOLD_REASON },
+        outboxScope,
+      )
+      return flushOutboxBatchUnserialized(deps)
+    }
     if (mint.status === 403) {
       // No access to THIS event's project — e.g. it was queued under a
       // different account/role. Re-auth won't fix it. Quarantine the batch and
@@ -395,7 +532,7 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
           batch,
           "no access to this change's project",
         ))
-        posthog.capture(OUTBOX_QUARANTINED, {
+        analytics.capture(OUTBOX_QUARANTINED, {
           count: batch.length,
           reason: "token-mint-403",
           project_id: projectId,
@@ -421,243 +558,341 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
     )
     return { posted: 0, accepted: 0, networkError: false, authError: true, authStatus: mint.status, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
-  const token = mint.token
-  const events: CqrsRawEvent[] = batch.map((r) => r.event)
-  const url = `${syncWorkerHttpOrigin()}/events`
-  let res: Response
-  try {
-    // RES-6: 15s hard timeout so a hung connection doesn't strand the flusher.
-    // AbortError is caught below and treated as transient (no budget burn).
-    // Feature-detected (B3): AbortSignal.timeout is missing on older WebKit —
-    // calling it unconditionally threw here BEFORE the fetch, bricking writes.
-    res = await observedSyncFetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ events }),
-      signal: timeoutSignal(15_000),
-    }, fetchFn)
-  } catch (err) {
-    // RES-2: network throws (including AbortError/timeout) are transient — do NOT
-    // burn the attempt budget. Use stampOutboxError (same policy as token-mint
-    // failures) so the flusher can auto-recover when connectivity is restored.
-    const isTimeout = err instanceof Error && err.name === "TimeoutError"
-    const reason = isTimeout ? "request timed out" : (err instanceof Error ? err.message : "network error")
-    await stampOutboxError(
-      batch.map((r) => r.id),
-      { status: 0, reason },
-      outboxScope,
-    )
-    return { posted: events.length, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
+
+  let mint = await deps.getTokenForFile(projectId, tokenFileId)
+  // Foreground mode fences account switches. Background mode instead fences
+  // the exact owner/JWT pair, allowing an inactive account to drain while
+  // still cancelling immediately when that stored credential is replaced or
+  // removed.
+  if (!(await isCredentialCurrent())) {
+    return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
+  }
+  if (!mint.token) return handleMintFailure(mint)
+
+  // AQU-2003: the auth-worker now answers an un-elevated platform admin with a
+  // read-only Viewer token (source "platform") instead of OPS-44's 403. No
+  // queued event can pass a Viewer token, and posting it would quarantine the
+  // admin's edits as forbidden. Treat it as the same step-up hold the 403 was:
+  // keep the events pending and raise the prompt. A cached token may predate
+  // the grant, so mint once more past the cache before holding.
+  if (isPlatformViewToken(mint)) {
+    mint = await deps.getTokenForFile(projectId, tokenFileId, { forceRefresh: true })
+    if (!(await isCredentialCurrent())) {
+      return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
+    }
+    if (!mint.token) return handleMintFailure(mint)
+    if (isPlatformViewToken(mint)) {
+      notifyElevationRequired({ kind: "sync-token", projectId })
+      return handleMintFailure({ token: null, status: 403, elevationRequired: true })
+    }
   }
 
-  if (!res.ok) {
-    // A whole-batch 403 is non-retryable (wrong project scope / role too low):
-    // quarantine so the flusher advances to the next file instead of looping
-    // on this one forever. 401 and 5xx are transient (token re-mint / server
-    // hiccup) — RES-2: stamp error WITHOUT burning the retry budget.
-    if (res.status === 403) {
-      if (shouldSurface()) {
-        deps.onForbidden?.(forbiddenEntriesFor(batch, "HTTP 403"))
-        posthog.capture(OUTBOX_QUARANTINED, {
-          count: batch.length,
-          reason: "post-403",
-          project_id: projectId,
-        })
-      }
-      await quarantineOutboxEvents(
-        batch.map((r) => r.id),
-        { status: 403, reason: `HTTP 403` },
-        outboxScope,
-      )
-      return { posted: events.length, accepted: 0, networkError: false, authError: false, quarantined: batch.length, staleSiblingCount: 0, staleSourceCount: 0 }
+  // AQU-1788: discard the stale-role token, mint one carrying the member's
+  // LIVE role, and post the same batch once more. The server then either
+  // accepts the write (the live role still allows it — the Maintainer→Project
+  // Lead case, where today every in-flight edit is lost for the rest of the
+  // token's life) or refuses it by the ordinary role floor, whose reason names
+  // what the member may actually not do. Called from at most one place per
+  // flush, and the retry runs with `mayRemint: false`, so there is exactly one
+  // re-mint and one extra POST per flush — never a loop.
+  async function remintAndRetry(): Promise<FlushOutboxResult> {
+    const remint = await deps.getTokenForFile(projectId, tokenFileId, { forceRefresh: true })
+    if (!(await isCredentialCurrent())) {
+      return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
     }
-    // N1: any other whole-request 4xx (400/404/413/422…) is deterministic —
-    // the same batch fails the same way forever, so it must burn the retry
-    // budget (markOutboxAttempt) and surface as `failed` at the cap instead
-    // of looping invisibly. 401 stays transient: a fresh token can fix it.
-    if (res.status >= 400 && res.status < 500 && res.status !== 401) {
-      await markOutboxAttempt(
+    // A re-mint that fails is NOT a reason to quarantine on the downgrade
+    // reason: handleMintFailure keeps a 401/5xx retryable (no budget burn) so
+    // the edits survive to the next cycle, and treats a mint-403 (access to
+    // the project itself is gone) exactly as it does on a first mint.
+    if (!remint.token) return handleMintFailure(remint)
+    return attemptPost(remint.token, false)
+  }
+
+  /** `mayRemint` is true only for the first POST of a flush. */
+  async function attemptPost(
+    token: string,
+    mayRemint: boolean,
+  ): Promise<FlushOutboxResult> {
+    // AQU-1368: repair what was stored before AQU-927's emit-time guard existed.
+    // A payload carrying `durationMs: 2403.5` is refused by the bigint column on
+    // every flush, forever; rounding it here lands the user's stranded audio
+    // instead of dead-lettering it. No-op for every event minted since that fix.
+    const events: CqrsRawEvent[] = sanitizeStoredEvents(batch.map((r) => r.event))
+    const url = `${syncWorkerHttpOrigin()}/events`
+    let res: Response
+    try {
+      // RES-6: 15s hard timeout so a hung connection doesn't strand the flusher.
+      // AbortError is caught below and treated as transient (no budget burn).
+      // Feature-detected (B3): AbortSignal.timeout is missing on older WebKit —
+      // calling it unconditionally threw here BEFORE the fetch, bricking writes.
+      res = await observedSyncFetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ events }),
+        signal: timeoutSignal(15_000),
+      }, fetchFn)
+    } catch (err) {
+      // RES-2: network throws (including AbortError/timeout) are transient — do NOT
+      // burn the attempt budget. Use stampOutboxError (same policy as token-mint
+      // failures) so the flusher can auto-recover when connectivity is restored.
+      const isTimeout = err instanceof Error && err.name === "TimeoutError"
+      const reason = isTimeout ? "request timed out" : (err instanceof Error ? err.message : "network error")
+      await stampOutboxError(
         batch.map((r) => r.id),
-        { error: { status: res.status, reason: `HTTP ${res.status}` } },
+        { status: 0, reason },
         outboxScope,
       )
       return { posted: events.length, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
     }
-    // RES-2: 5xx and 401 are transient — stamp without burning budget.
-    await stampOutboxError(
-      batch.map((r) => r.id),
-      { status: res.status, reason: `HTTP ${res.status}` },
-      outboxScope,
-    )
-    return { posted: events.length, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
-  }
 
-  let body: PostBody
-  try {
-    body = await readSyncJson<PostBody>(res)
-  } catch {
-    await markOutboxAttempt(
-      batch.map((r) => r.id),
-      { error: { status: 0, reason: "malformed server response" } },
-      outboxScope,
-    )
-    return { posted: events.length, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
-  }
-
-  // Surface failures loudly instead of swallowing them. A rejected event
-  // (bad shape, forbidden, server error) and a stale event (accepted but not
-  // applied to the projection) both previously vanished without a trace — the
-  // root of the "edits silently don't save" bug. These logs are the minimum
-  // visible signal; the OutboxSyncIndicator reflects pending/failed counts.
-  if (body.rejected && body.rejected.length > 0) {
-    console.error("[outbox-flush] server REJECTED events:", body.rejected)
-  }
-  if (body.stale && body.stale.length > 0) {
-    console.error(
-      "[outbox-flush] server accepted but did NOT apply (stale siblings):",
-      body.stale.map((s) => s.id),
-    )
-    // F6: surface stale sibling dead-letters to the caller so a toast can be
-    // shown. The full entries (with fileId/cellId) flow through so the
-    // caller can deep-link to the affected cells.
-    if (shouldSurface()) {
-      deps.onStaleSiblings?.(body.stale)
-      for (const listener of staleSiblingsListeners) listener(body.stale)
-    }
-  }
-  // F5: surface stale-source pins to the caller so a "source changed" hint can appear.
-  if (body.staleSource && body.staleSource.length > 0) {
-    console.warn(
-      "[outbox-flush] target.cell.commit events had stale sourceEventId pins:",
-      body.staleSource.map((s) => s.id),
-    )
-    if (shouldSurface()) deps.onStaleSource?.(body.staleSource)
-  }
-
-  const acceptedIds = new Set((body.accepted ?? []).map((a) => a.id))
-  if (Array.isArray(body.applied) && body.applied.length > 0 && shouldSurface()) {
-    const frames: AppliedEventFrame[] = []
-    for (const raw of body.applied) {
-      const frame = parseAppliedEventFrame(raw)
-      if (frame) frames.push(frame)
-    }
-    if (frames.length > 0) {
-      deps.onApplied?.(frames)
-      for (const listener of appliedListeners) listener(frames)
-    }
-  }
-  const permanentlyRejectedIds = new Set(
-    (body.rejected ?? [])
-      .filter((r) => r.status >= 400 && r.status < 500 && r.status !== 401 && r.status !== 403)
-      .map((r) => r.id),
-  )
-  if (permanentlyRejectedIds.size > 0) {
-    // Fired BEFORE the removal below, while the queued records still exist:
-    // the server's `rejected` array carries only id/status/reason, so kind and
-    // fileId have to be read back off the batch. Retrying is pointless (the
-    // same shape fails the same way forever) so the events still go — the
-    // caller just gets one chance to react before they do.
-    const recordById = new Map(batch.map((r) => [r.id, r]))
-    const rejectedEntries: RejectedEntry[] = []
-    for (const r of body.rejected ?? []) {
-      if (!permanentlyRejectedIds.has(r.id)) continue
-      const record = recordById.get(r.id)
-      rejectedEntries.push({
-        id: r.id,
-        kind: record?.event.kind ?? "unknown",
-        status: r.status,
-        reason: r.reason,
-        fileId: record?.event.fileId ?? null,
-      })
-    }
-    if (shouldSurface()) deps.onRejected?.(rejectedEntries)
-  }
-
-  const removableIds = [...acceptedIds, ...permanentlyRejectedIds]
-  if (removableIds.length > 0) {
-    await removeOutboxEvents(removableIds, outboxScope)
-  }
-
-  // 403 = non-retryable (wrong project scope, or role too low). Quarantine
-  // immediately rather than burning the retry budget and head-of-line blocking
-  // the rest of the queue. The record is preserved for the inspector so the
-  // user can see "couldn't save — permission" and discard it. 401 stays in the
-  // normal retry path: it can be a transient token-mint/expiry blip that a
-  // fresh token resolves.
-  const rejectionByid = new Map<string, OutboxAttemptError>()
-  for (const r of body.rejected ?? []) {
-    rejectionByid.set(r.id, { status: r.status, reason: r.reason })
-  }
-  const forbiddenIds = (body.rejected ?? [])
-    .filter((r) => r.status === 403 && !acceptedIds.has(r.id))
-    .map((r) => r.id)
-  if (forbiddenIds.length > 0) {
-    if (shouldSurface()) {
-      const forbiddenIdSet = new Set(forbiddenIds)
-      const records = batch.filter((record) => forbiddenIdSet.has(record.id))
-      deps.onForbidden?.(records.map((record) => ({
-        id: record.id,
-        status: 403,
-        reason: rejectionByid.get(record.id)?.reason ?? "forbidden",
-        kind: record.event.kind,
-        fileId: record.event.fileId ?? null,
-        cellId: record.event.cellId ?? null,
-      })))
-      posthog.capture(OUTBOX_QUARANTINED, {
-        count: forbiddenIds.length,
-        reason: "server-rejected-403",
-        project_id: projectId,
-      })
-    }
-  }
-  for (const id of forbiddenIds) {
-    await quarantineOutboxEvents(
-      [id],
-      rejectionByid.get(id) ?? { status: 403, reason: "forbidden" },
-      outboxScope,
-    )
-  }
-  const forbiddenSet = new Set(forbiddenIds)
-
-  // Records the server kept-back (401 auth retry, or any record we can't tell
-  // from `body` because the server didn't ack it explicitly) get their attempt
-  // recorded so the inspector shows why they're sitting around.
-  const keptBackIds: string[] = []
-  const keptBackUpdates: Array<[string, OutboxAttemptError | null]> = []
-  for (const r of batch) {
-    if (acceptedIds.has(r.id)) continue
-    if (permanentlyRejectedIds.has(r.id)) continue
-    if (forbiddenSet.has(r.id)) continue
-    keptBackIds.push(r.id)
-    keptBackUpdates.push([r.id, rejectionByid.get(r.id) ?? null])
-  }
-  if (keptBackIds.length > 0) {
-    // Group by error so we can mark in shared transactions where possible.
-    const byErr = new Map<string, { err: OutboxAttemptError | null; ids: string[] }>()
-    for (const [id, err] of keptBackUpdates) {
-      const key = err ? `${err.status}|${err.reason}` : "_none_"
-      let bucket = byErr.get(key)
-      if (!bucket) {
-        bucket = { err, ids: [] }
-        byErr.set(key, bucket)
+    if (!res.ok) {
+      // A whole-batch 403 is non-retryable (wrong project scope / role too low):
+      // quarantine so the flusher advances to the next file instead of looping
+      // on this one forever. 401 and 5xx are transient (token re-mint / server
+      // hiccup) — RES-2: stamp error WITHOUT burning the retry budget.
+      if (res.status === 403) {
+        // AQU-1788: the downgrade gate is a per-event rejection inside a 200
+        // today, but a whole-request 403 carrying the same reason gets the
+        // same single retry — the reason, not the response shape, is what
+        // makes a 403 clearable by a fresh token. Reading the body is safe
+        // here: nothing below it consumes the response.
+        if (mayRemint) {
+          const refusal = await res.text().catch(() => "")
+          if (isRoleDowngradedReason(refusal)) return remintAndRetry()
+        }
+        if (shouldSurface()) {
+          deps.onForbidden?.(forbiddenEntriesFor(batch, "HTTP 403"))
+          analytics.capture(OUTBOX_QUARANTINED, {
+            count: batch.length,
+            reason: "post-403",
+            project_id: projectId,
+          })
+        }
+        await quarantineOutboxEvents(
+          batch.map((r) => r.id),
+          { status: 403, reason: `HTTP 403` },
+          outboxScope,
+        )
+        return { posted: events.length, accepted: 0, networkError: false, authError: false, quarantined: batch.length, staleSiblingCount: 0, staleSourceCount: 0 }
       }
-      bucket.ids.push(id)
+      // N1: any other whole-request 4xx (400/404/413/422…) is deterministic —
+      // the same batch fails the same way forever, so it must burn the retry
+      // budget (markOutboxAttempt) and surface as `failed` at the cap instead
+      // of looping invisibly. 401 stays transient: a fresh token can fix it.
+      if (res.status >= 400 && res.status < 500 && res.status !== 401) {
+        await markOutboxAttempt(
+          batch.map((r) => r.id),
+          { error: { status: res.status, reason: `HTTP ${res.status}` } },
+          outboxScope,
+        )
+        return { posted: events.length, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
+      }
+      // RES-2: 5xx and 401 are transient — stamp without burning budget.
+      await stampOutboxError(
+        batch.map((r) => r.id),
+        { status: res.status, reason: `HTTP ${res.status}` },
+        outboxScope,
+      )
+      return { posted: events.length, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
     }
-    for (const { err, ids } of byErr.values()) {
-      await markOutboxAttempt(ids, { error: err }, outboxScope)
+
+    let body: PostBody
+    try {
+      body = await readSyncJson<PostBody>(res)
+    } catch {
+      await markOutboxAttempt(
+        batch.map((r) => r.id),
+        { error: { status: 0, reason: "malformed server response" } },
+        outboxScope,
+      )
+      return { posted: events.length, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
+    }
+
+    // AQU-1788: the batch was refused only because the token's baked-in role
+    // is stale — re-mint and post it once more before anything is written
+    // back to the outbox, so the first (discarded) attempt costs the records
+    // no retry budget and raises no banner.
+    //
+    // Narrowed to a response that accepted NOTHING on purpose. The gate keys
+    // on (project, user), which is uniform across a batch, so a real
+    // downgrade rejects every event in it; a response that also carries
+    // acceptances carries outcomes — `applied[]` frames, `stale[]`
+    // dead-letters — that a retry would silently drop, since the server
+    // answers a replayed id with a bare acceptance.
+    if (
+      mayRemint &&
+      (body.accepted ?? []).length === 0 &&
+      (body.rejected ?? []).some(
+        (r) => r.status === 403 && isRoleDowngradedReason(r.reason),
+      )
+    ) {
+      return remintAndRetry()
+    }
+
+    // Surface failures loudly instead of swallowing them. A rejected event
+    // (bad shape, forbidden, server error) and a stale event (accepted but not
+    // applied to the projection) both previously vanished without a trace — the
+    // root of the "edits silently don't save" bug. These logs are the minimum
+    // visible signal; the OutboxSyncIndicator reflects pending/failed counts.
+    if (body.rejected && body.rejected.length > 0) {
+      console.error("[outbox-flush] server REJECTED events:", body.rejected)
+    }
+    if (body.stale && body.stale.length > 0) {
+      console.error(
+        "[outbox-flush] server accepted but did NOT apply (stale siblings):",
+        body.stale.map((s) => s.id),
+      )
+      // F6: surface stale sibling dead-letters to the caller so a toast can be
+      // shown. The full entries (with fileId/cellId) flow through so the
+      // caller can deep-link to the affected cells.
+      if (shouldSurface()) {
+        deps.onStaleSiblings?.(body.stale)
+        for (const listener of staleSiblingsListeners) listener(body.stale)
+      }
+    }
+    // F5: surface stale-source pins to the caller so a "source changed" hint can appear.
+    if (body.staleSource && body.staleSource.length > 0) {
+      console.warn(
+        "[outbox-flush] target.cell.commit events had stale sourceEventId pins:",
+        body.staleSource.map((s) => s.id),
+      )
+      if (shouldSurface()) deps.onStaleSource?.(body.staleSource)
+    }
+
+    const acceptedIds = new Set((body.accepted ?? []).map((a) => a.id))
+    if (Array.isArray(body.applied) && body.applied.length > 0 && shouldSurface()) {
+      const frames: AppliedEventFrame[] = []
+      for (const raw of body.applied) {
+        const frame = parseAppliedEventFrame(raw)
+        if (frame) frames.push(frame)
+      }
+      if (frames.length > 0) {
+        deps.onApplied?.(frames)
+        for (const listener of appliedListeners) listener(frames)
+      }
+    }
+    const permanentlyRejectedIds = new Set(
+      (body.rejected ?? [])
+        .filter((r) => r.status >= 400 && r.status < 500 && r.status !== 401 && r.status !== 403)
+        .map((r) => r.id),
+    )
+    if (permanentlyRejectedIds.size > 0) {
+      // Fired BEFORE the removal below, while the queued records still exist:
+      // the server's `rejected` array carries only id/status/reason, so kind and
+      // fileId have to be read back off the batch. Retrying is pointless (the
+      // same shape fails the same way forever) so the events still go — the
+      // caller just gets one chance to react before they do.
+      const recordById = new Map(batch.map((r) => [r.id, r]))
+      const rejectedEntries: RejectedEntry[] = []
+      for (const r of body.rejected ?? []) {
+        if (!permanentlyRejectedIds.has(r.id)) continue
+        const record = recordById.get(r.id)
+        rejectedEntries.push({
+          id: r.id,
+          kind: record?.event.kind ?? "unknown",
+          status: r.status,
+          reason: r.reason,
+          fileId: record?.event.fileId ?? null,
+          cellId: record?.event.cellId ?? null,
+        })
+      }
+      if (shouldSurface()) {
+        const claimed = new Set(deps.onRejected?.(rejectedEntries) ?? [])
+        const unclaimed = rejectedEntries.filter((entry) => !claimed.has(entry.id))
+        if (unclaimed.length > 0) {
+          for (const listener of rejectedListeners) listener(unclaimed)
+        }
+      }
+    }
+
+    const removableIds = [...acceptedIds, ...permanentlyRejectedIds]
+    if (removableIds.length > 0) {
+      await removeOutboxEvents(removableIds, outboxScope)
+    }
+
+    // 403 = non-retryable (wrong project scope, or role too low). Quarantine
+    // immediately rather than burning the retry budget and head-of-line blocking
+    // the rest of the queue. The record is preserved for the inspector so the
+    // user can see "couldn't save — permission" and discard it. 401 stays in the
+    // normal retry path: it can be a transient token-mint/expiry blip that a
+    // fresh token resolves.
+    const rejectionByid = new Map<string, OutboxAttemptError>()
+    for (const r of body.rejected ?? []) {
+      rejectionByid.set(r.id, { status: r.status, reason: r.reason })
+    }
+    const forbiddenIds = (body.rejected ?? [])
+      .filter((r) => r.status === 403 && !acceptedIds.has(r.id))
+      .map((r) => r.id)
+    if (forbiddenIds.length > 0) {
+      if (shouldSurface()) {
+        const forbiddenIdSet = new Set(forbiddenIds)
+        const records = batch.filter((record) => forbiddenIdSet.has(record.id))
+        deps.onForbidden?.(records.map((record) => ({
+          id: record.id,
+          status: 403,
+          reason: rejectionByid.get(record.id)?.reason ?? "forbidden",
+          kind: record.event.kind,
+          fileId: record.event.fileId ?? null,
+          cellId: record.event.cellId ?? null,
+        })))
+        analytics.capture(OUTBOX_QUARANTINED, {
+          count: forbiddenIds.length,
+          reason: "server-rejected-403",
+          project_id: projectId,
+        })
+      }
+    }
+    for (const id of forbiddenIds) {
+      await quarantineOutboxEvents(
+        [id],
+        rejectionByid.get(id) ?? { status: 403, reason: "forbidden" },
+        outboxScope,
+      )
+    }
+    const forbiddenSet = new Set(forbiddenIds)
+
+    // Records the server kept-back (401 auth retry, or any record we can't tell
+    // from `body` because the server didn't ack it explicitly) get their attempt
+    // recorded so the inspector shows why they're sitting around.
+    const keptBackIds: string[] = []
+    const keptBackUpdates: Array<[string, OutboxAttemptError | null]> = []
+    for (const r of batch) {
+      if (acceptedIds.has(r.id)) continue
+      if (permanentlyRejectedIds.has(r.id)) continue
+      if (forbiddenSet.has(r.id)) continue
+      keptBackIds.push(r.id)
+      keptBackUpdates.push([r.id, rejectionByid.get(r.id) ?? null])
+    }
+    if (keptBackIds.length > 0) {
+      // Group by error so we can mark in shared transactions where possible.
+      const byErr = new Map<string, { err: OutboxAttemptError | null; ids: string[] }>()
+      for (const [id, err] of keptBackUpdates) {
+        const key = err ? `${err.status}|${err.reason}` : "_none_"
+        let bucket = byErr.get(key)
+        if (!bucket) {
+          bucket = { err, ids: [] }
+          byErr.set(key, bucket)
+        }
+        bucket.ids.push(id)
+      }
+      for (const { err, ids } of byErr.values()) {
+        await markOutboxAttempt(ids, { error: err }, outboxScope)
+      }
+    }
+
+    return {
+      posted: events.length,
+      accepted: acceptedIds.size,
+      networkError: false,
+      authError: false,
+      quarantined: forbiddenIds.length,
+      staleSiblingCount: body.stale?.length ?? 0,
+      staleSourceCount: body.staleSource?.length ?? 0,
     }
   }
 
-  return {
-    posted: events.length,
-    accepted: acceptedIds.size,
-    networkError: false,
-    authError: false,
-    quarantined: forbiddenIds.length,
-    staleSiblingCount: body.stale?.length ?? 0,
-    staleSourceCount: body.staleSource?.length ?? 0,
-  }
+  return attemptPost(mint.token, true)
 }

@@ -1,14 +1,17 @@
 // AQU-538 §3.2 — compact per-lane chips for an OrgHome project row.
 //
 // Each chip = lane tag (the '' lane shows the project's default target
-// language, rendered first) + a mini translated-progress bar + the translated
-// percentage. Visible chips are capped (default 3); the rest collapse into a
-// "+N" affordance that expands the row's per-lane detail (when interactive).
+// language, rendered first) + a mini two-part progress bar (validated, then
+// translated; AQU-1764) + the translated percentage. Visible chips are capped
+// (default 3); the rest collapse into a "+N" affordance that expands the row's
+// per-lane detail (when interactive).
 //
 // A single-lane project renders exactly one chip — visual parity with the
 // old source→target column (no regression).
 
-import { laneTranslatedPct, type PortfolioLane } from "@/lib/frontier/portfolio"
+import { laneDeliversAudioOnly, laneStartedPct, laneValidatedPct, type PortfolioLane } from "@/lib/frontier/portfolio"
+import { textProgressSegments } from "@/lib/progress/progress-palette"
+import { ProgressSplitBar } from "@/components/progress/ProgressSplitBar"
 import { cn } from "@/lib/utils"
 import { laneChipLabel, safePct } from "./project-lanes"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -39,26 +42,45 @@ function LaneChip({
 }) {
   const t = useT()
   const { count } = useFormat()
-  const pct = safePct(laneTranslatedPct(lane))
+  // Media redesign slice 1: an Audio language reads its recorded share where
+  // a Text one reads its translated share (the same figure as before).
+  const audioOnly = laneDeliversAudioOnly(lane)
+  const pct = safePct(laneStartedPct(lane))
   const pctPlain = `${count(pct)}%`
   // Isolate only what is SEEN. The bidi isolates keep "40%" from reordering
   // beside RTL text, but they are invisible control characters: in an
   // accessible name they are noise a screen reader linearises away anyway, and
   // they leak into any assertion on that name.
   const pctDisplay = bidiIsolate(pctPlain)
-  const label = laneChipLabel(lane.lane, defaultLaneLabel, t("org.projectOverview.laneDefaultFallback"))
-  const tooltip = t("org.laneChips.tooltip", { label, pct: pctDisplay })
+  const label = laneChipLabel(lane.lane, defaultLaneLabel, t("org.projectOverview.laneDefaultFallback"), lane.name)
+  const tooltip = audioOnly
+    ? t("org.laneChips.recordedTooltip", { label, pct: pctDisplay })
+    : t("org.laneChips.tooltip", { label, pct: pctDisplay })
   return (
     <AppTooltip content={tooltip}>
       <span
         data-testid={`lane-chip-${projectId}-${lane.lane}`}
         className="inline-flex min-w-0 max-w-full items-center gap-1 overflow-hidden rounded border bg-card px-1.5 py-0.5 text-xs"
-        aria-label={t("org.laneChips.ariaLabel", { label, pct: pctPlain })}
+        aria-label={
+          audioOnly
+            ? t("org.laneChips.recordedAriaLabel", { label, pct: pctPlain })
+            : t("org.laneChips.ariaLabel", { label, pct: pctPlain })
+        }
       >
         <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
-        <span className="h-1.5 w-8 shrink-0 overflow-hidden rounded-full bg-muted" aria-hidden>
-          <span className="block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
-        </span>
+        {/* AQU-1764: the shared two-part bar, validated then translated but
+            not validated, where this was one primary-blue fill for
+            translated. It ends where the printed percentage says. A lane
+            carries no AI-draft count, so there is no striped part. */}
+        <ProgressSplitBar
+          segments={textProgressSegments({
+            validated: safePct(laneValidatedPct(lane)),
+            translated: pct,
+            total: 100,
+          })}
+          height={6}
+          className="w-8 shrink-0"
+        />
         <span className="shrink-0 tabular-nums text-muted-foreground">{pctDisplay}</span>
       </span>
     </AppTooltip>
@@ -81,7 +103,7 @@ export function LaneChips({
     <span className={cn("inline-flex min-w-0 max-w-full flex-wrap items-center gap-1", className)}>
       {visible.map((lane) => (
         <LaneChip
-          key={lane.lane || "__default__"}
+          key={lane.laneId || lane.lane || "__default__"}
           projectId={projectId}
           lane={lane}
           defaultLaneLabel={defaultLaneLabel}

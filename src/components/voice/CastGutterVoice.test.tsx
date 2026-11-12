@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import { screen, fireEvent } from "@testing-library/react"
-import { renderWithTooltips } from "@/test-utils/tooltip"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { CastGutterVoice } from "./CastGutterVoice"
 import type { Voice } from "@/lib/parsers/types"
 
@@ -38,25 +38,60 @@ describe("CastGutterVoice", () => {
     expect(trigger.querySelector("circle")).toBeNull()
   })
 
-  it("picking a character fires PURE assignment with the apply-to-speaker choice", () => {
+  // Sam, Oct 23: how far a pick reaches is a choice of three, not a checkbox.
+  it.each([
+    ["line", undefined],
+    ["file", "gutter-voice-scope-file"],
+    ["everywhere", "gutter-voice-scope-everywhere"],
+  ] as const)("picking a character fires PURE assignment with the %s scope", (scope, choice) => {
     const onPick = vi.fn()
     ui(
       <CastGutterVoice voice={narrator} explicit={false} castName="Mary" editable voices={VOICES} onPick={onPick} />,
     )
     fireEvent.click(screen.getByTestId("gutter-voice"))
-    // Footer present (the cell carries a diarized name) — tick it, then pick.
-    fireEvent.click(screen.getByTestId("gutter-voice-all"))
+    if (choice) fireEvent.click(screen.getByTestId(choice))
     fireEvent.click(screen.getByRole("button", { name: /Mary/ }))
-    expect(onPick).toHaveBeenCalledWith("v-mary", { applyToSpeaker: true })
+    expect(onPick).toHaveBeenCalledWith("v-mary", { scope })
   })
 
-  it("no apply-to-speaker footer without a diarized cast name", () => {
+  it("names the three scopes, says how many lines this file has, and starts at this line", () => {
+    const countSpeakerLines = vi.fn(() => 12)
     ui(
-      <CastGutterVoice voice={mary} explicit castName={null} editable voices={VOICES} onPick={() => {}} />,
+      <CastGutterVoice voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={() => {}} countSpeakerLines={countSpeakerLines} />,
+    )
+    expect(countSpeakerLines).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("gutter-voice"))
+    expect(countSpeakerLines).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("gutter-voice-scope-line")).toBeChecked()
+    expect(screen.getByTestId("gutter-voice-scope-line").closest("label")).toHaveTextContent("This line")
+    expect(screen.getByTestId("gutter-voice-scope-file").closest("label")).toHaveTextContent("Every «Mary» line in this file (12)")
+    expect(screen.getByTestId("gutter-voice-scope-everywhere").closest("label")).toHaveTextContent("Every «Mary» line, in every episode")
+  })
+
+  it("goes back to this line every time the picker opens", () => {
+    ui(
+      <CastGutterVoice voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={() => {}} />,
+    )
+    fireEvent.click(screen.getByTestId("gutter-voice"))
+    fireEvent.click(screen.getByTestId("gutter-voice-scope-everywhere"))
+    expect(screen.getByTestId("gutter-voice-scope-everywhere")).toBeChecked()
+    fireEvent.click(screen.getByRole("button", { name: /^John$/ }))
+    fireEvent.click(screen.getByTestId("gutter-voice"))
+    expect(screen.getByTestId("gutter-voice-scope-line")).toBeChecked()
+  })
+
+  it("a line without a character offers only this line, and says why", () => {
+    const onPick = vi.fn()
+    ui(
+      <CastGutterVoice voice={mary} explicit castName={null} editable voices={VOICES} onPick={onPick} />,
     )
     fireEvent.click(screen.getByTestId("gutter-voice"))
     expect(screen.getByPlaceholderText("Search voices…")).toBeInTheDocument()
-    expect(screen.queryByTestId("gutter-voice-all")).toBeNull()
+    expect(screen.queryByTestId("gutter-voice-scope-file")).toBeNull()
+    expect(screen.queryByTestId("gutter-voice-scope-everywhere")).toBeNull()
+    expect(screen.getByTestId("gutter-voice-scope-none")).toHaveTextContent("This line has no character, so the voice is for this line only.")
+    fireEvent.click(screen.getByRole("button", { name: /^John$/ }))
+    expect(onPick).toHaveBeenCalledWith("v-john", { scope: "line" })
   })
 
   // Matt's QA (2026-08-21): a character could be replaced but never removed.
@@ -69,25 +104,42 @@ describe("CastGutterVoice", () => {
       )
       fireEvent.click(screen.getByTestId("gutter-voice"))
       const clear = screen.getByTestId("gutter-voice-clear")
+      const search = screen.getByPlaceholderText("Search voices…")
+      const maryRow = screen.getByRole("button", { name: /^Mary$/ })
+      // Search stays above the list. "No character" is the first item in it.
+      expect(search.compareDocumentPosition(clear) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(clear.parentElement).toBe(maryRow.parentElement)
       // The row shows what the line becomes: the NC mark, not an icon-of-delete.
       expect(clear.textContent).toContain("NC")
       fireEvent.click(clear)
-      expect(onClear).toHaveBeenCalledWith({ applyToSpeaker: false })
+      expect(onClear).toHaveBeenCalledWith({ scope: "line" })
       expect(onPick).not.toHaveBeenCalled()
     })
 
-    it("the apply-to-all checkbox rides the clear too, not only the pick", () => {
-      // Sam, 2026-08-21: the footer promises "all «name» lines" — ticked, the
-      // clear must take the character off every line sharing the name, not
-      // silently ignore the box for one of the two actions above it.
+    it("the file scope rides the clear too, not only the pick", () => {
+      // Sam, 2026-08-21: the footer must mean it for both actions above it.
       const onClear = vi.fn()
       ui(
         <CastGutterVoice voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={() => {}} onClear={onClear} />,
       )
       fireEvent.click(screen.getByTestId("gutter-voice"))
-      fireEvent.click(screen.getByTestId("gutter-voice-all"))
+      fireEvent.click(screen.getByTestId("gutter-voice-scope-file"))
       fireEvent.click(screen.getByTestId("gutter-voice-clear"))
-      expect(onClear).toHaveBeenCalledWith({ applyToSpeaker: true })
+      expect(onClear).toHaveBeenCalledWith({ scope: "file" })
+    })
+
+    it("removing a character from every episode is not offered, and says so", () => {
+      const onClear = vi.fn()
+      ui(
+        <CastGutterVoice voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={() => {}} onClear={onClear} />,
+      )
+      fireEvent.click(screen.getByTestId("gutter-voice"))
+      fireEvent.click(screen.getByTestId("gutter-voice-scope-everywhere"))
+      const clear = screen.getByTestId("gutter-voice-clear")
+      expect(clear).toBeDisabled()
+      expect(clear).toHaveTextContent("Choose this line or this file to remove a character.")
+      fireEvent.click(clear)
+      expect(onClear).not.toHaveBeenCalled()
     })
 
     it("a lingering name behind an NC ring is still clearable", () => {
@@ -110,6 +162,41 @@ describe("CastGutterVoice", () => {
     })
   })
 
+  // AQU-2212: the picker's list ends with "Add a voice…", which opens New
+  // voice without leaving the line. (The Audio view's field form is gone with
+  // the Audio view, AQU-1758; the circle keeps the footer.)
+  it("ends the list with Add a voice…", () => {
+    const onAddVoice = vi.fn()
+    ui(
+      <CastGutterVoice voice={mary} explicit castName={null} editable voices={VOICES} onPick={() => {}} onAddVoice={onAddVoice} />,
+    )
+    fireEvent.click(screen.getByTestId("gutter-voice"))
+    fireEvent.click(screen.getByTestId("gutter-voice-add"))
+    expect(onAddVoice).toHaveBeenCalledTimes(1)
+    expect(screen.queryByPlaceholderText("Search voices…")).toBeNull()
+  })
+
+  // AQU-2212: the Audio view's field named a person's recording; the circle
+  // does now (AQU-1758).
+  it("names a person's recording, not the default voice, when nobody was cast", () => {
+    ui(
+      <CastGutterVoice voice={narrator} explicit={false} castName={null} editable voices={VOICES} onPick={() => {}} takeLabel="Your recording" />,
+    )
+    const circle = screen.getByTestId("gutter-voice")
+    expect(circle.getAttribute("aria-label")).toContain("Your recording · pick a voice to re-voice it")
+    expect(circle.getAttribute("aria-label")).not.toContain("Narrator")
+    expect(screen.getByTestId("gutter-voice-recording")).toBeInTheDocument()
+    expect(circle).not.toHaveTextContent("NC")
+  })
+
+  it("names the cast voice, not the recording, once someone chose one", () => {
+    ui(
+      <CastGutterVoice voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={() => {}} takeLabel="Your recording" />,
+    )
+    expect(screen.queryByTestId("gutter-voice-recording")).toBeNull()
+    expect(screen.getByTestId("gutter-voice").getAttribute("aria-label")).not.toContain("Your recording")
+  })
+
   it("read-only surfaces show the identity but no picker", () => {
     ui(
       <CastGutterVoice voice={mary} explicit castName="Mary" editable={false} voices={VOICES} onPick={() => {}} />,
@@ -118,5 +205,71 @@ describe("CastGutterVoice", () => {
     expect(el.tagName).not.toBe("BUTTON")
     fireEvent.click(el)
     expect(screen.queryByPlaceholderText("Search voices…")).toBeNull()
+  })
+})
+
+describe("CastGutterVoice — the gutter avatar keeps its name on hover (AQU-2260)", () => {
+  it("names the voice and who it voices", async () => {
+    ui(<CastGutterVoice voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={() => {}} />)
+    await expectTooltip(screen.getByTestId("gutter-voice"), "Mary")
+  })
+})
+
+/**
+ * AQU-1279: an imported camera angle appeared NOWHERE in the editor. The
+ * importer stored it (`readCharacterRows` → `cell.cameraState`) and both
+ * character-sheet exports wrote it back, but the editor's source side had only
+ * this circle, and the circle never said it — so a partner whose subtitle work
+ * depends on the angle could not see it without leaving for the timeline lens.
+ */
+describe("CastGutterVoice — the camera angle (AQU-1279)", () => {
+  it("names the camera angle alongside the character on hover", async () => {
+    ui(
+      <CastGutterVoice voice={mary} explicit castName="Mary Magdalene" cameraState="on" editable voices={VOICES} onPick={() => {}} />,
+    )
+    await expectTooltip(screen.getByTestId("gutter-voice"), "Mary Magdalene — voiced by Mary · on camera")
+  })
+
+  it("carries the angle into the accessible name, so it is not hover-only", () => {
+    ui(
+      <CastGutterVoice voice={mary} explicit castName="Mary Magdalene" cameraState="off" editable voices={VOICES} onPick={() => {}} />,
+    )
+    expect(screen.getByTestId("gutter-voice")).toHaveAttribute(
+      "aria-label",
+      "Mary Magdalene — voiced by Mary · off camera. Choose a character",
+    )
+  })
+
+  // The angle is a fact about the LINE, so it reads the same on a line nobody
+  // has cast — which is exactly the state a freshly imported cast sheet leaves
+  // rows in when its names do not match the project's voices.
+  it("names the angle on a line nobody has cast yet", async () => {
+    ui(
+      <CastGutterVoice voice={narrator} explicit={false} castName={null} cameraState="group" editable voices={VOICES} onPick={() => {}} />,
+    )
+    await expectTooltip(
+      screen.getByTestId("gutter-voice"),
+      "Narrator — default (no one cast yet) · group shot",
+    )
+  })
+
+  it("says nothing extra when the line carries no angle", async () => {
+    ui(
+      <CastGutterVoice voice={mary} explicit castName="Mary Magdalene" editable voices={VOICES} onPick={() => {}} />,
+    )
+    const trigger = screen.getByTestId("gutter-voice")
+    expect(trigger).toHaveAttribute("aria-label", "Mary Magdalene — voiced by Mary. Choose a character")
+    await expectTooltip(trigger, "Mary Magdalene — voiced by Mary")
+    expect(screen.getByRole("tooltip").textContent).not.toContain("·")
+  })
+
+  it("a read-only surface names the angle too", () => {
+    ui(
+      <CastGutterVoice voice={mary} explicit castName="Mary Magdalene" cameraState="mixed" editable={false} voices={VOICES} onPick={() => {}} />,
+    )
+    expect(screen.getByTestId("gutter-voice")).toHaveAttribute(
+      "aria-label",
+      "Mary Magdalene — voiced by Mary · mixed",
+    )
   })
 })

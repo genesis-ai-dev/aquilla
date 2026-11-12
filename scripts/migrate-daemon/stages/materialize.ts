@@ -29,7 +29,7 @@ import { PlanWriter, eventHash, type PlanLine } from "../plan"
 /** MUST equal `CONTENT_LOGIC_VERSION` in scripts/migrate-all.ts — a project is
  *  only skippable while the mapping logic that produced its events is the same
  *  one running now. See the parity test in __tests__/materialize.test.ts. */
-export const CONTENT_LOGIC_VERSION = 4
+export const CONTENT_LOGIC_VERSION = 5
 const FALLBACK_AUTHOR = "legacy-import"
 const COMMENTS_PATH = ".project/comments.json"
 

@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test'
 import { afterEach, expect, it, vi } from 'vitest'
 import app from '../index'
 import type { Env } from '../types'
-import { completedPayment, config } from './helpers/workspace-billing'
+import { completedPayment, config, pinSmallAllowancePolicy } from './helpers/workspace-billing'
 import { authHeader, jwtFor } from './helpers/db'
 import { readUsageTotals, reserveWorkspaceUsage, settleWorkspaceUsage } from '../lib/billing/workspace-usage'
 import { readBillingWorkspace } from '../lib/billing/workspace'
@@ -17,12 +17,18 @@ const FILE = 'file-mrk'
 afterEach(async () => { if (_test.lastLoop) await _test.lastLoop; _test.lastLoop = null; vi.unstubAllGlobals(); resetRateCardCache() })
 
 async function setup() {
-  const paid = await completedPayment('pro', 'month')
+  const paid = await completedPayment('team', 'month', undefined, 'personal')
   expect((await paid.send()).status).toBe(200)
+  await pinSmallAllowancePolicy()
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Autopilot', 1, 1)").bind(PROJECT).run()
-  // The start gate (AQU-827) needs both languages and an answered brief question.
+  // The start gate (AQU-827) needs both languages and an answered brief
+  // question; AQU-1050's release gate needs the project to have opted in.
   await env.AQUILLA_PG.prepare('INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, 1)')
-    .bind(PROJECT, JSON.stringify({ sourceLanguage: 'en', targetLanguage: 'sw', translationBrief: { parameters: { purpose: 'Community reading' } } })).run()
+    .bind(PROJECT, JSON.stringify({ sourceLanguage: 'en', targetLanguage: 'sw', autopilotEnabled: true, translationBrief: { parameters: { purpose: 'Community reading' } } })).run()
+  // AQU-1595: the start gate reads both languages off the lane rows. Seed them
+  // before the cells so the test trigger attaches the cells to these rows.
+  await env.AQUILLA_PG.prepare(`INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+    VALUES ('ctxu-src', ?, 'source', 'English', NULL, 0), ('ctxu-tgt', ?, 'target', 'Swahili', '', 1)`).bind(PROJECT, PROJECT).run()
   for (const [cellId, ref, text] of [['c1', 'MRK 1:1', 'In the beginning'], ['c2', 'MRK 1:2', 'was the word']] as const) {
     await env.AQUILLA_PG.prepare(`INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
       VALUES (?, ?, ?, 'source', ?, ?, ?, 0)`).bind(PROJECT, FILE, cellId, text, ref, `ev-${cellId}`).run()
@@ -73,37 +79,40 @@ it('reserves and settles every autopilot graph call through the run owner worksp
 it('pauses a run at the span edge once the week is spent, without calling the provider', async () => {
   const f = await setup()
   const period = (await readBillingWorkspace(env.AQUILLA_PG, 1))!.entitlement!
-  await reserveWorkspaceUsage(env.AQUILLA_PG, { orgId: 1, projectId: PROJECT, userId: 1, requestId: 'spent', rail: 'agent', maxRawCostCents: 12.5 },
+  await reserveWorkspaceUsage(env.AQUILLA_PG, { orgId: 1, projectId: PROJECT, userId: 1, requestId: 'spent', rail: 'agent', maxRawCostCents: 62.5 },
     new Date(Date.parse(period.usagePeriodStart) + 1000))
-  await settleWorkspaceUsage(env.AQUILLA_PG, 1, 'spent', 12.5)
+  await settleWorkspaceUsage(env.AQUILLA_PG, 1, 'spent', 62.5)
   const { status, runId } = await f.start()
   expect(status).toBe(201)
   const run = await getRun(env.AQUILLA_PG, runId!)
   expect(run?.status).toBe('paused')
   expect(f.completions).toHaveLength(0)
-  expect((await f.totals()).committed).toBe(50_000_000)
+  expect((await f.totals()).committed).toBe(250_000_000)
 })
 it('fails closed on unowned projects and non-local providers before creating a run', async () => {
   const f = await setup()
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES ('unowned', 'Unowned', 1)").run()
   await env.AQUILLA_PG.prepare("INSERT INTO project_settings (project_id, settings, version, updated_by) SELECT 'unowned', settings, 1, 1 FROM project_settings WHERE project_id = ?").bind(PROJECT).run()
+  await env.AQUILLA_PG.prepare(`INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+    VALUES ('unown-src', 'unowned', 'source', 'English', NULL, 0), ('unown-tgt', 'unowned', 'target', 'Swahili', '', 1)`).run()
   expect((await f.start({}, 'unowned')).status).toBe(403)
   expect((await f.start({ OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1' })).status).toBe(503)
   expect(f.completions).toHaveLength(0)
 })
 
-it('meters the segmentation pass and refuses it with a 429 once the week is spent', async () => {
+it('meters the segmentation pass and refuses it with a 402 once the week is spent', async () => {
   const f = await setup()
   const period = (await readBillingWorkspace(env.AQUILLA_PG, 1))!.entitlement!
   const response = await f.generate()
   expect(response.status).toBe(200)
   expect(f.completions).toHaveLength(1)
   expect(await f.totals()).toEqual({ reserved: 0, settled: 160_000, committed: 160_000 })
-  await reserveWorkspaceUsage(env.AQUILLA_PG, { orgId: 1, projectId: PROJECT, userId: 1, requestId: 'spent', rail: 'agent', maxRawCostCents: 12.5 },
+  await reserveWorkspaceUsage(env.AQUILLA_PG, { orgId: 1, projectId: PROJECT, userId: 1, requestId: 'spent', rail: 'agent', maxRawCostCents: 62.5 },
     new Date(Date.parse(period.usagePeriodStart) + 1000))
   const refused = await f.generate()
-  expect(refused.status).toBe(429)
-  expect(await refused.json()).toMatchObject({ error: { code: 'weekly_ai_allowance_exhausted' } })
+  // The spec §5.3 client contract: an exhausted allowance is 402, never 429 (429 is rate limiting).
+  expect(refused.status).toBe(402)
+  expect(await refused.json()).toMatchObject({ error: 'ai_allowance_exhausted' })
   expect(f.completions).toHaveLength(1)
   expect((await f.generate({ AGENT_MODEL_DEFAULT: 'unknown', CONTEXTUAL_FAST_MODEL: 'unknown', AI_ALLOWED_MODELS: 'unknown' })).status).toBe(503)
 })

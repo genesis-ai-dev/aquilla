@@ -85,6 +85,19 @@ export interface SourceRegionLaneProps {
   onRetime?(cellId: string, startSec: number, endSec: number): void
   /** Edge snapping while dragging, from the timeline's global toggle. */
   snapEnabled?: boolean
+  /**
+   * Sam's D3 (2026-10-05): what the dashed placeholder says instead of its
+   * raw time range. On a linked video with no rows the whole row is one such
+   * chip, and "0:00.0–10:35.0" told nobody anything; it is the video's own
+   * sound. Absent — every other file — keeps the time range.
+   */
+  gapLabel?: string
+  /** The timeline's horizontal scroll, so `gapLabel` can stay at the visible
+   *  left edge of a chip that runs the whole length of the film. */
+  scrollLeftPx?: number
+  /** Draw no dashed placeholder at all: on that same file in Free timing the
+   *  video is hidden and nothing sounds there, so the row is left empty. */
+  hideGaps?: boolean
 }
 
 function SourceRegionLaneImpl({
@@ -102,6 +115,9 @@ function SourceRegionLaneImpl({
   retimable = false,
   onRetime,
   snapEnabled = false,
+  gapLabel,
+  scrollLeftPx = 0,
+  hideGaps = false,
 }: SourceRegionLaneProps) {
   const t = useT()
   const spanOf = (c: CellData): { start: number; end: number } => {
@@ -143,7 +159,7 @@ function SourceRegionLaneImpl({
     }
   }
   const { chipH } = useRowMetrics()
-  const visibleGaps = map.regions.filter(
+  const visibleGaps = hideGaps ? [] : map.regions.filter(
     (r) =>
       r.kind === "gap" &&
       r.endSec - r.startSec >= MIN_ADDABLE_SPAN_SEC &&
@@ -169,7 +185,7 @@ function SourceRegionLaneImpl({
           // "No speech", not "no subtitle": these gaps come from a transcript of
           // the soundtrack, so a gap says nobody was talking — a subtitle may
           // well exist over it, and often does.
-          title={t("editor.timeline.noSpeechHere", { seconds: (g.endSec - g.startSec).toFixed(1) })}
+          title={gapLabel ?? t("editor.timeline.noSpeechHere", { seconds: (g.endSec - g.startSec).toFixed(1) })}
           onClick={() => onSeekSec(g.startSec)}
           // TimelineCard's geometry and radius, dashed and unfilled — the
           // established "slot with nothing in it yet" treatment (the untimed
@@ -203,9 +219,20 @@ function SourceRegionLaneImpl({
               overflow-hidden slicing it — so it goes at the same height a
               card's own timecode does. */}
           {widthPx >= MIN_CARD_TEXT_PX && chipH >= MIN_CHIP_META_H_PX && (
-            <span className="absolute bottom-1 left-2.5 font-mono text-[9px] tabular-nums whitespace-nowrap text-muted-foreground">
-              {fmtClock(g.startSec, true)}–{fmtClock(g.endSec, true)}
-            </span>
+            gapLabel ? (
+              // Held at the visible left edge, so it stays readable on a chip
+              // that runs the whole length of the film. (Not `sticky`: the
+              // chip's overflow-hidden makes the chip its scroll container.)
+              <span data-testid="tl-source-gap-label"
+                className="absolute inset-y-0 flex items-center whitespace-nowrap text-xs text-muted-foreground"
+                style={{ left: `${10 + Math.max(0, Math.min(scrollLeftPx - secToPx(g.startSec, pxPerSec), widthPx - 160))}px` }}>
+                {gapLabel}
+              </span>
+            ) : (
+              <span className="absolute bottom-1 left-2.5 font-mono text-[9px] tabular-nums whitespace-nowrap text-muted-foreground">
+                {fmtClock(g.startSec, true)}–{fmtClock(g.endSec, true)}
+              </span>
+            )
           )}
         </div>
         )

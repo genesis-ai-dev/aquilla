@@ -1,5 +1,5 @@
 // AQU-AGENT §2 — new harness tool handlers (run_code, load_artifact,
-// read_sandbox_file, propose_memory, propose_brief_update,
+// read_sandbox_file, propose_memory, propose_brief_update (retired → propose_memory),
 // read_memory). Each returns the tool-result TEXT the model sees and emits the
 // relevant §4 SSE frame(s) via `ctx.send`. Registration + dispatch live in a
 // minimal diff in agent.ts; the logic lives here to keep that file small.
@@ -8,11 +8,18 @@ import {
   sandboxExec,
   sandboxFetchArtifact,
   sandboxReadFile,
+  sandboxConfigured,
+  sandboxTenant,
   type SandboxEnv,
 } from "./sandbox-client"
-import { proposeMemory, proposeBriefUpdate, type MemoryProvenance } from "./memory-writes"
+import type { AiEntitlementEnv } from "../../../../db/shared/ai-entitlement"
+import { projectOrgId } from "../billing/paid-llm"
+import { admitSandboxTime, secondsSince } from "../billing/sandbox-meter"
+import { proposeMemory, type MemoryProvenance } from "./memory-writes"
 import type { HarnessFrame } from "./frames"
 import type { MemoryContext } from "../../../../db/shared/agent-memory"
+// Same path the pending brief proposals move to, so the two never diverge.
+import { briefDecisionPath } from "../../../../db/shared/brief-proposals-to-decisions"
 
 /** read_sandbox_file default/utf-8 cap (contracts §2: 48KB). */
 const READ_SANDBOX_MAX_BYTES = 48 * 1024
@@ -22,7 +29,7 @@ const CODE_PREVIEW_MAX = 400
 
 /** Context threaded from the run loop into every harness tool. */
 export interface HarnessToolCtx {
-  env: SandboxEnv & { AQUILLA_PG: AquillaDb }
+  env: SandboxEnv & AiEntitlementEnv & { AQUILLA_PG: AquillaDb }
   runId: string
   /** The sandbox container id — one per session, or the runId when sessionless. */
   sandboxSessionId: string
@@ -60,6 +67,22 @@ export async function runCode(args: RunCodeArgs, ctx: HarnessToolCtx): Promise<s
   }
   const timeoutMs = typeof args.timeoutMs === "number" ? args.timeoutMs : undefined
 
+  // AQU-2066: container time on the `sandbox` rail, reserved before the call
+  // and settled with the seconds it measured. Always metered: the container
+  // is ours even when the org brings its own model keys.
+  const containerTime = sandboxConfigured(ctx.env)
+    ? await admitSandboxTime(ctx.env.AQUILLA_PG, ctx.env, {
+      orgId: await projectOrgId(ctx.env.AQUILLA_PG, ctx.projectId),
+      userId: ctx.userId,
+      projectId: ctx.projectId,
+    }, runCodeMaxSeconds(timeoutMs))
+    : null
+  if (containerTime && !containerTime.ok) {
+    return `error: ${containerTime.body.error === "ai_allowance_exhausted"
+      ? "the workspace has used its AI allowance for this week, so code cannot run"
+      : containerTime.body.error}`
+  }
+
   // Executing code touches (potentially untrusted) artifact bytes in scope —
   // mark the turn so memory writes lock (contracts §2 untrusted-content guard).
   ctx.markUntrusted()
@@ -71,7 +94,21 @@ export async function runCode(args: RunCodeArgs, ctx: HarnessToolCtx): Promise<s
     codePreview: code.slice(0, CODE_PREVIEW_MAX),
   })
 
-  const out = await sandboxExec(ctx.env, ctx.sandboxSessionId, { language, code, timeoutMs }, ctx.signal)
+  // AQU-1848: agent runs share the per-tenant pool cap with sandbox imports, so
+  // one user cannot drain the container pool from either direction.
+  const startedAt = Date.now()
+  const out = await sandboxExec(
+    ctx.env,
+    ctx.sandboxSessionId,
+    { language, code, timeoutMs },
+    ctx.signal,
+    sandboxTenant(ctx.userId),
+  )
+  // A refused or unreachable sandbox ran no code for us; anything else ran
+  // for as long as the call took (cold start included).
+  if (containerTime) {
+    await (out.available ? containerTime.settleSeconds(secondsSince(startedAt)) : containerTime.release())
+  }
   if (!out.available) {
     ctx.send({
       type: "tool.code.output",
@@ -102,6 +139,13 @@ export async function runCode(args: RunCodeArgs, ctx: HarnessToolCtx): Promise<s
     r.truncated ? "(output truncated)" : "",
   ].filter(Boolean)
   return parts.join("\n")
+}
+
+/** Upper bound for one run_code call: agent-worker's clamped timeout
+ *  (exec.ts, default 60 s, max 300 s) plus a minute for a cold start. */
+function runCodeMaxSeconds(timeoutMs?: number): number {
+  const ms = typeof timeoutMs === "number" && timeoutMs > 0 ? Math.min(timeoutMs, 300_000) : 60_000
+  return ms / 1000 + 60
 }
 
 // ── load_artifact ─────────────────────────────────────────────────────────────
@@ -148,6 +192,7 @@ export async function loadArtifact(args: LoadArtifactArgs, ctx: HarnessToolCtx):
     ctx.sandboxSessionId,
     { key: row.r2_key, path },
     ctx.signal,
+    sandboxTenant(ctx.userId),
   )
   if (!out.available) return `error: ${out.reason}`
   return `ok: loaded artifact ${artifactId} → ${path} (${out.data.bytes} bytes)`
@@ -177,7 +222,7 @@ export async function readSandboxFile(
       ? Math.min(args.maxBytes, READ_SANDBOX_MAX_BYTES)
       : READ_SANDBOX_MAX_BYTES
 
-  const out = await sandboxReadFile(ctx.env, ctx.sandboxSessionId, path, maxBytes, ctx.signal)
+  const out = await sandboxReadFile(ctx.env, ctx.sandboxSessionId, path, maxBytes, ctx.signal, sandboxTenant(ctx.userId))
   if (!out.available) return `error: ${out.reason}`
   return out.data.truncated ? `${out.data.text}\n…(truncated at ${maxBytes} bytes)` : out.data.text
 }
@@ -226,7 +271,13 @@ export async function proposeMemoryTool(
   return `proposed memory ${path} (id ${res.memoryId}, status proposed) — a human must approve it before it is used`
 }
 
-// ── propose_brief_update ───────────────────────────────────────────────────────
+// ── propose_brief_update (retired, AQU-2342) ─────────────────────────────────
+//
+// The brief review screen is gone: the project's standing guidance is ONE
+// text, the instructions. The tool is no longer offered; a call from an older
+// conversation is retargeted to propose_memory under decisions/, whose
+// approval appends the text to the instructions (db/shared/agent-memory.ts
+// reviewMemory). Same human gate, one store.
 
 export interface ProposeBriefArgs {
   content?: unknown
@@ -237,26 +288,12 @@ export async function proposeBriefUpdateTool(
   args: ProposeBriefArgs,
   ctx: HarnessToolCtx,
 ): Promise<string> {
-  if (ctx.isUntrustedActive()) return UNTRUSTED_BLOCK_MSG
   const content = typeof args.content === "string" ? args.content : null
-  const rationale = typeof args.rationale === "string" ? args.rationale : ""
-  if (!content) return "error: propose_brief_update needs {content: string, rationale: string}"
-
-  const res = await proposeBriefUpdate(ctx.env.AQUILLA_PG, {
-    projectId: ctx.projectId,
-    content,
-    rationale,
-    createdBy: ctx.username,
-  })
-  if (!res.ok) return `${res.code}: ${res.message}`
-
-  ctx.send({
-    type: "brief.proposed",
-    runId: ctx.runId,
-    proposalId: res.proposalId,
-    preview: content.slice(0, 200),
-  })
-  return `proposed brief update (id ${res.proposalId}, status proposed) — a human must approve it`
+  if (!content?.trim()) return "error: propose_brief_update is retired — call propose_memory with a decisions/<slug>.md path"
+  return proposeMemoryTool(
+    { path: await briefDecisionPath(content), content, rationale: args.rationale },
+    ctx,
+  )
 }
 
 // ── read_memory ────────────────────────────────────────────────────────────────

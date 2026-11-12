@@ -65,6 +65,17 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'source.cell.reorder': ROLE.COMMENTER,
   'source.cell.metadata.patch': ROLE.PROJECT_LEAD,
   'source.cell.reanchor': ROLE.PROJECT_LEAD,
+  // AQU-1422: hiding a cell takes it out of translation and (AQU-1423) out of
+  // every export for EVERYONE, in every lane. That is a decision about what the
+  // file contains, so it sits with source.cell.commit at PROJECT_LEAD and NOT
+  // with the create/delete/reorder trio at COMMENTER — those are floored low
+  // because re-import, DCS repair and diarization all emit them through a
+  // user's own outbox, and nothing emits this but a person choosing it.
+  'source.cell.visibility.set': ROLE.PROJECT_LEAD,
+  // AQU-1767 phase 2: undoing a removal. The floor matches the delete it
+  // reverses; authorize.ts adds the real rule — only the person who removed the
+  // cell, or a maintainer, may put it back, and never through the external API.
+  'source.cell.restore': ROLE.COMMENTER,
 
   // Target-side: translator commits.
   'target.cell.create': ROLE.CONTRIBUTOR,
@@ -87,8 +98,19 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.audio.remove': ROLE.CONTRIBUTOR,
   'cell.audio.rename': ROLE.CONTRIBUTOR,
   'cell.audio.trim': ROLE.CONTRIBUTOR,
+  // AQU-2327: a take's volume and fades need what trimming it needs.
+  'cell.audio.gain': ROLE.CONTRIBUTOR,
   'cell.audio.place': ROLE.CONTRIBUTOR,
+  // AQU-1767: cutting a take needs exactly what trimming it needs (Sam, 2026-10-12).
+  'cell.audio.cut': ROLE.CONTRIBUTOR,
   'cell.audio.measure': ROLE.CONTRIBUTOR,
+
+  // AQU-777: per-cell file attachments. Same floor as the other per-cell blob
+  // write (cell.audio.attach) — attaching a reference image is editing the
+  // cell's working context, not commenting on it. Mirrored client-side in
+  // src/lib/sync/role-policy.ts.
+  'cell.attachment.add': ROLE.CONTRIBUTOR,
+  'cell.attachment.remove': ROLE.CONTRIBUTOR,
 
   // AQU-646 (Sam, 2026-08-18): RAISED from CONTRIBUTOR to PROJECT_LEAD.
   // The stage-4 reasoning — "pairing a subtitle line with the audio cue that
@@ -100,6 +122,13 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.link.set': ROLE.PROJECT_LEAD,
   // AQU-508: approving/withdrawing approval of a cell's audio is a review
   // action — reviewer(300)+, mirroring the text-side cell.validate gate.
+  //
+  // AQU-1571: THIS IS ONLY THE FLOOR, for both validate pairs. The project's
+  // policy — role floor, named validators, self-validation (against the take's
+  // recorder for audio, the cell's last editor for text) — and the maintainer
+  // bar on removing somebody else's vote are enforced on top of it in
+  // events/route.ts, on every write path. An audit that reads this table alone
+  // will conclude they are client-side only; one did.
   'cell.audio.validate': ROLE.REVIEWER,
   'cell.audio.unvalidate': ROLE.REVIEWER,
 
@@ -112,11 +141,22 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'file.rename': ROLE.CONTRIBUTOR,
   // Sidebar folder label — same class as file.rename (grouping, not inventory).
   'file.corpus.set': ROLE.CONTRIBUTOR,
+  // Smart Extensions apiRev 7: an extension's tags/kind/meta on a file. Same
+  // floor as creating the file (the extension's write:files scope).
+  'file.extension.set': ROLE.PROJECT_LEAD,
+  // AQU-1569: NOT the contributor floor its file.corpus.set neighbour sits at.
+  // A corpus marker moves one file into a folder; a reorder rewrites the
+  // sidebar every member of the project reads, which is the same "project
+  // setup, not an edit" argument that put file.video.set at PROJECT_LEAD.
+  'file.reorder': ROLE.PROJECT_LEAD,
 
   // file.delete/file.restore are structural changes (soft-delete tombstone).
   // Require PROJECT_LEAD (500) — same as file.create and source.* imports.
   'file.delete': ROLE.PROJECT_LEAD,
   'file.restore': ROLE.PROJECT_LEAD,
+  // AQU-2459: server-emitted by the revisions route only (same floor as the
+  // route's own check); dispatch refuses it from POST /events regardless.
+  'file.revision': ROLE.PROJECT_LEAD,
 
   // Comments: any commenter+ can write, edit, delete, or resolve their own
   // comment. Server-side ownership enforcement (only the author can edit/delete
@@ -146,6 +186,12 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // Viewing BTs is gated only at the read route (viewer+); the write event
   // is contributor-level matching target.* for consistency.
   'cell.backtranslation.set': ROLE.CONTRIBUTOR,
+
+  // AQU-1408 §1: correcting the statistical gloss is the same act as writing a
+  // back-translation at a different grain, so it sits on the same rung. The
+  // ticket asks for "any contributor, not only an admin" — contributor(400) is
+  // that floor, and matches cell.backtranslation.set above.
+  'cell.gloss.set': ROLE.CONTRIBUTOR,
 
   // Assignments: a manager (project_lead+) assigns work to members. Reassign
   // and unassign are the same managerial authority.
@@ -181,6 +227,12 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   //   than a crash, because the client mirror throws before anything reaches the
   //   durable outbox.
   'cast.assign': ROLE.MAINTAINER,
+  // AQU-2408: a hand-typed cell label is metadata, not casting. PROJECT_LEAD is
+  // the lowest rung the project's `cellLabelFloor` setting can admit; the
+  // setting itself (maintainer unless set otherwise) is enforced where the
+  // Label field is drawn, exactly like `cellEditingFloor`. See
+  // docs/decisions/0007-cell-labels-are-metadata-never-cast.md.
+  'cell.label.set': ROLE.PROJECT_LEAD,
 
   // Timeline editor: retiming a cell (move/stretch) is a translator-level edit.
   'cell.retime': ROLE.CONTRIBUTOR,
@@ -194,15 +246,29 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // whole team at the wrong episode.
   'file.video.set': ROLE.PROJECT_LEAD,
   // The timing mode changes how the whole file lays out and plays for
-  // everyone — structural, so it keeps the clearance the setting had when it
-  // lived in Project Settings (the shared-settings maintainer floor).
-  'file.timing.set': ROLE.MAINTAINER,
+  // everyone. AQU-2204 (Sam, Oct 26): project lead and above choose it, per
+  // file ("Follows source" / "Follows recordings"); it was the shared-settings
+  // maintainer floor it had when it lived in Project Settings.
+  'file.timing.set': ROLE.PROJECT_LEAD,
   // Track structure IS file structure: renaming, reordering or regrouping a
   // track relayouts the timeline for every collaborator who opens the file —
   // the same rationale that put file.timing.set at this floor. Deliberately
-  // NOT the CONTRIBUTOR floor that file.rename and file.video.set sit at;
-  // those are normal editing flow, this changes the shared layout.
+  // NOT the floors file.rename (contributor) and file.video.set (project
+  // lead) sit at; those are normal editing flow, this changes the shared layout.
   'file.track.set': ROLE.MAINTAINER,
+
+  // AQU-2308: setting, renaming or removing a hand-set milestone. The
+  // file.track.set floor and the file.track.set reason: a division relayouts
+  // the navigator for every collaborator who opens the file, so it is shared
+  // layout rather than normal editing flow. Deliberately NOT the contributor
+  // floor file.rename sits at — a rename changes one file's own label, this
+  // changes how everyone's work in it is divided and counted.
+  //
+  // The project setting that would let a project lead do this is its own slice
+  // (AQU-2309); until it lands the floor is fixed here at maintainer, which is
+  // that setting's default.
+  'file.milestone.set': ROLE.MAINTAINER,
+  'file.milestone.remove': ROLE.MAINTAINER,
 
   // AQU-476: mirror-engine kinds are server-emitted only (link-sync.ts calls
   // buildEventProjectionStmts directly in-process — never through the client

@@ -53,13 +53,20 @@ describe("session replay masking", () => {
   })
 
   it("comment bodies opt in explicitly — they quote the draft", () => {
-    for (const file of ["../components/CommentThread.tsx", "../components/CommentsPage.tsx"]) {
+    // AQU-1958 moved the comment-list body markup out of CommentsPage.tsx into
+    // the thread card both comment lists (project page and org-wide view) now
+    // render, so the guard follows the markup rather than the old filename.
+    for (const file of [
+      "../components/CommentThread.tsx",
+      "../components/comments-thread-card.tsx",
+      "../components/NotificationsInbox.tsx",
+    ]) {
       expect(read(file), `${file} must mask its rendered comment body`).toMatch(/data-ph-mask/)
     }
   })
 
   it("keeps recording opt-out by default, so masking is the second line and not the first", () => {
-    expect(posthogSource).toMatch(/opt_out_capturing_by_default/)
+    expect(posthogSource).toMatch(/analyticsAccount\.eligible\(\)/)
     expect(posthogSource).toMatch(/maskAllInputs:\s*true/)
   })
 })

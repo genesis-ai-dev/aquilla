@@ -49,6 +49,13 @@ beforeEach(async () => {
 })
 
 describe("AiModelsStep skip (AQU-701)", () => {
+  it("describes Whisper with the shared consent copy", () => {
+    render(<AiModelsStep project={makeProject()} onUpdated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /set up transcription/i }))
+    expect(screen.getByText(/after you save a recording/i)).toBeInTheDocument()
+    expect(screen.queryByText(/word-level timing/i)).not.toBeInTheDocument()
+  })
+
   it("skip seeds an IDB row for a server-loaded project and reports the flag", async () => {
     const project = makeProject({ id: "srv-1" })
     const onUpdated = vi.fn()
@@ -77,5 +84,18 @@ describe("AiModelsStep skip (AQU-701)", () => {
     expect(onUpdated.mock.calls[0][0].aiSetupSkipped).toBe(false)
     const row = await getProject("p-skip")
     expect(row?.aiSetupSkipped).toBe(false)
+  })
+})
+
+// AQU-2263: the Gemini choice says which key voices use right now.
+describe("AiModelsStep — which Gemini key is in use", () => {
+  it("your own key saved in this browser, when the project has none", async () => {
+    const { setUserApiKey } = await import("@/lib/store/user-api-keys")
+    setUserApiKey("gemini-tts", "AIza-mine")
+    render(<AiModelsStep project={makeProject({ ttsSettings: { provider: "gemini" } } as Partial<ProjectRecord>)} onUpdated={vi.fn()} />)
+    fireEvent.click(screen.getByText("Set up transcription & voice"))
+    const line = await screen.findByTestId("setup-gemini-key-in-use")
+    expect(line).toHaveTextContent("Using your own key (saved in this browser).")
+    setUserApiKey("gemini-tts", undefined)
   })
 })

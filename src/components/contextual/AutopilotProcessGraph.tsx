@@ -1,23 +1,22 @@
 import { useId, useMemo, useState } from "react"
-import { CircleHelp } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { useI18n, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
-  PROCESS_EDGES,
-  PROCESS_NODE_LAYOUT,
   PROCESS_NODE_SIZE,
-  PROCESS_VIEWBOX,
   deriveProcessGraph,
   deriveProcessGraphFromOverview,
   layoutById,
+  processGraphTopology,
   type ProcessDecision,
   type ProcessEdge,
   type ProcessGraphModel,
+  type ProcessGraphTopology,
   type ProcessNodeId,
   type ProcessNodeInspect,
   type ProcessNodeLayout,
@@ -33,6 +32,7 @@ import type {
 const NODE_COPY = {
   scope: { label: "autopilot.graph.node.scope", role: "autopilot.graph.node.scope.role" },
   segment: { label: "autopilot.graph.node.segment", role: "autopilot.graph.node.segment.role" },
+  bible_facts: { label: "autopilot.graph.node.bible_facts", role: "autopilot.graph.node.bible_facts.role" },
   construe: { label: "autopilot.graph.node.construe", role: "autopilot.graph.node.construe.role" },
   expand_window: { label: "autopilot.graph.node.expand_window", role: "autopilot.graph.node.expand_window.role" },
   register: { label: "autopilot.graph.node.register", role: "autopilot.graph.node.register.role" },
@@ -40,6 +40,7 @@ const NODE_COPY = {
   persist: { label: "autopilot.graph.node.persist", role: "autopilot.graph.node.persist.role" },
   draft: { label: "autopilot.graph.node.draft", role: "autopilot.graph.node.draft.role" },
   lint_rules: { label: "autopilot.graph.node.lint_rules", role: "autopilot.graph.node.lint_rules.role" },
+  bible_checks: { label: "autopilot.graph.node.bible_checks", role: "autopilot.graph.node.bible_checks.role" },
   route_risk: { label: "autopilot.graph.node.route_risk", role: "autopilot.graph.node.route_risk.role" },
   verify_force: { label: "autopilot.graph.node.verify_force", role: "autopilot.graph.node.verify_force.role" },
   verify_ambiguity: { label: "autopilot.graph.node.verify_ambiguity", role: "autopilot.graph.node.verify_ambiguity.role" },
@@ -135,45 +136,32 @@ function edgeStroke(state: ProcessNodeState, kind: ProcessEdge["kind"] = "flow")
     : "color-mix(in oklab, var(--muted-foreground) 32%, transparent)"
 }
 
-function HoverBody({ inspect, t }: { inspect: ProcessNodeInspect; t: TFunction }) {
-  const copy = NODE_COPY[inspect.nodeId]
-  const decision = decisionLine(inspect.decision, t)
-  const brief = inspect.sceneBrief?.l1Summary ?? inspect.sceneBrief?.construal
-  const passage = joinPassageLabels(inspect.spanLabels)
-  return (
-    <div className="flex max-w-xs flex-col gap-1.5 text-start">
-      <p className="font-medium">{t(copy.label)}</p>
-      <p className="text-muted-foreground">{t(copy.role)}</p>
-      {passage && <p>{passage}</p>}
-      {brief && <p className="line-clamp-3 text-muted-foreground">{brief}</p>}
-      {decision && <p>{decision}</p>}
-    </div>
-  )
-}
-
 function GraphSvg({
   model,
+  topology,
   compact,
   selectedId,
   onSelect,
   t,
 }: {
   model: ProcessGraphModel
+  topology: ProcessGraphTopology
   compact: boolean
   selectedId: ProcessNodeId | null
   onSelect?: (id: ProcessNodeId) => void
   t: TFunction
 }) {
   const reactId = useId().replace(/:/g, "")
-  const positions = layoutById()
+  const { nodes, edges, viewBox } = topology
+  const positions = layoutById(nodes)
   const size = compact ? PROCESS_NODE_SIZE - 1 : PROCESS_NODE_SIZE
   const radius = size / 2
   const markerPrefix = `${compact ? "mini" : "full"}-${reactId}`
-  const hit = `${((size + 6) / PROCESS_VIEWBOX.width) * 100}%`
+  const hit = `${((size + 6) / viewBox.width) * 100}%`
   return (
     <div className="relative w-full">
       <svg
-        viewBox={`0 0 ${PROCESS_VIEWBOX.width} ${PROCESS_VIEWBOX.height}`}
+        viewBox={`0 0 ${viewBox.width} ${viewBox.height}`}
         role="img"
         aria-label={t("autopilot.graph.aria")}
         data-testid={compact ? "autopilot-process-graph-mini" : "autopilot-process-graph"}
@@ -212,7 +200,7 @@ function GraphSvg({
             </marker>
           ))}
         </defs>
-        {PROCESS_EDGES.map((edge) => {
+        {edges.map((edge) => {
           const state = model.edgeStates[edge.id] ?? "pending"
           const dashed = edge.kind === "loop" || edge.kind === "redraft"
           const live = state === "active" && !dashed
@@ -231,7 +219,7 @@ function GraphSvg({
             />
           )
         })}
-        {PROCESS_NODE_LAYOUT.map((node) => {
+        {nodes.map((node) => {
           const state = model.nodeStates[node.id]
           const selected = selectedId === node.id
           return (
@@ -261,15 +249,15 @@ function GraphSvg({
           )
         })}
       </svg>
-      {PROCESS_NODE_LAYOUT.map((node) => {
-        const inspect = model.inspect[node.id]
+      {/* AQU-2260 (Sam, Oct 29): a step's hover only names it. What it does,
+          its passage, note and decision open on click, in the inspect card. */}
+      {nodes.map((node) => {
         const selected = selectedId === node.id
         return (
           <AppTooltip
             key={node.id}
             delay={200}
-            content={<HoverBody inspect={inspect} t={t} />}
-            className="max-w-xs"
+            content={t(NODE_COPY[node.id].label)}
           >
             <button
               type="button"
@@ -277,8 +265,8 @@ function GraphSvg({
               aria-pressed={onSelect ? selected : undefined}
               className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-0 bg-transparent p-0"
               style={{
-                left: `${(node.x / PROCESS_VIEWBOX.width) * 100}%`,
-                top: `${(node.y / PROCESS_VIEWBOX.height) * 100}%`,
+                left: `${(node.x / viewBox.width) * 100}%`,
+                top: `${(node.y / viewBox.height) * 100}%`,
                 width: hit,
                 aspectRatio: "1",
               }}
@@ -293,15 +281,20 @@ function GraphSvg({
 
 function InspectPanel({
   inspect,
+  bibleData,
   t,
   onClose,
 }: {
   inspect: ProcessNodeInspect
+  bibleData: boolean
   t: TFunction
   onClose: () => void
 }) {
   const copy = NODE_COPY[inspect.nodeId]
   const decision = decisionLine(inspect.decision, t)
+  // AQU-1685: a span's "bible_data_*" reasons (the pack did not load) are
+  // Bible data, shown only with the experiment on.
+  const reasons = (inspect.decision?.reasons ?? []).filter((reason) => bibleData || !reason.startsWith("bible_data_"))
   const brief = inspect.sceneBrief?.l1Summary ?? inspect.sceneBrief?.construal
   const ambiguities = Array.isArray(inspect.sceneBrief?.ambiguityRegister)
     ? inspect.sceneBrief.ambiguityRegister
@@ -340,8 +333,8 @@ function InspectPanel({
         <div>
           <p className="text-xs font-medium">{t("autopilot.graph.inspect.decision")}</p>
           <p className="text-muted-foreground">{decision ?? t("autopilot.graph.inspect.noDecision")}</p>
-          {inspect.decision?.reasons && inspect.decision.reasons.length > 0 && (
-            <p className="text-xs text-muted-foreground">{inspect.decision.reasons.join(" · ")}</p>
+          {reasons.length > 0 && (
+            <p className="text-xs text-muted-foreground">{reasons.join(" · ")}</p>
           )}
         </div>
       </CardContent>
@@ -354,14 +347,24 @@ export function AutopilotProcessGraph({
   activity,
   overview,
   compact = false,
+  bibleData = false,
 }: {
   run?: ContextualRunRecord | null
   activity?: ContextualRunActivity | null
   overview?: ContextualOverview | null
   compact?: boolean
+  /**
+   * AQU-1685: draw the Bible facts and Bible checks steps. Only for a device
+   * with the Bible data experiment on (useBibleDataExperiment).
+   */
+  bibleData?: boolean
 }) {
   const { locale, t } = useI18n()
+  const topology = processGraphTopology(bibleData)
   const [selectedId, setSelectedId] = useState<ProcessNodeId | null>(null)
+  // AQU-2260: what a span is opens in place under the title, on click.
+  const spanHelpId = useId()
+  const [spanHelpOpen, toggleSpanHelp] = useInfoOpen()
   const model = useMemo(
     () => (compact && !activity && !run
       ? deriveProcessGraphFromOverview(overview)
@@ -380,7 +383,7 @@ export function AutopilotProcessGraph({
   if (compact) {
     return (
       <div className="flex flex-col gap-1" data-testid="autopilot-process-graph-card">
-        <GraphSvg model={model} compact selectedId={null} t={t} />
+        <GraphSvg model={model} topology={topology} compact selectedId={null} t={t} />
       </div>
     )
   }
@@ -391,31 +394,38 @@ export function AutopilotProcessGraph({
         <h3 id="autopilot-graph-title" className="text-sm font-medium">
           {t("autopilot.graph.title")}
         </h3>
-        <AppTooltip content={t("autopilot.graph.spanHelp")} delay={200}>
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            aria-label={t("autopilot.graph.spanHelpAria")}
-            className="text-muted-foreground"
-          >
-            <CircleHelp data-icon="inline-start" aria-hidden />
-          </Button>
-        </AppTooltip>
+        <InfoToggle
+          open={spanHelpOpen}
+          onToggle={toggleSpanHelp}
+          label={t("autopilot.graph.spanHelpAria")}
+          controls={spanHelpId}
+          testId="autopilot-graph-span-help"
+        />
         {model.live && <Badge variant="default">{t("autopilot.status.working")}</Badge>}
       </div>
+      <InfoReveal
+        open={spanHelpOpen}
+        id={spanHelpId}
+        testId="autopilot-graph-span-help-text"
+        // The section's gap would hold the shut text's place open; the
+        // negative margin cancels it, and leaves a small one while it shows.
+        className={cn("text-xs text-muted-foreground", spanHelpOpen ? "-mt-2" : "-mt-3")}
+      >
+        {t("autopilot.graph.spanHelp")}
+      </InfoReveal>
       <p className="text-sm">{liveLine}</p>
       {lastDecision && <p className="text-sm text-muted-foreground">{lastDecision}</p>}
       <p className="text-xs text-muted-foreground">{t("autopilot.graph.inspectHint")}</p>
       <GraphSvg
         model={model}
+        topology={topology}
         compact={false}
         selectedId={selectedId}
         onSelect={(id) => setSelectedId((current) => current === id ? null : id)}
         t={t}
       />
       {selected && (
-        <InspectPanel inspect={selected} t={t} onClose={() => setSelectedId(null)} />
+        <InspectPanel inspect={selected} bibleData={bibleData} t={t} onClose={() => setSelectedId(null)} />
       )}
     </section>
   )

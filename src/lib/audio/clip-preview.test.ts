@@ -14,7 +14,7 @@ import {
 } from "./clip-preview"
 import { resetOutputContextForTests } from "./output-context"
 import { __resetMicHoldForTests, setMicHeld } from "./mic-hold"
-import { getActiveAudio } from "./audio-coordinator"
+import { getActiveAudio, setActiveAudio } from "./audio-coordinator"
 
 const fetchCellAudio = vi.hoisted(() => vi.fn(async () => new Uint8Array([1, 2, 3, 4])))
 const audioCacheGet = vi.hoisted(() => vi.fn(async () => null))
@@ -183,15 +183,22 @@ describe("playing a trimmed clip", () => {
     expect(h.positionSec()).toBeCloseTo(1, 5)
   })
 
-  // ONE AT A TIME IS A PROPERTY OF THE ENGINE, not a protocol every chip keeps —
-  // `setActiveAudio` deliberately does not pause the previous holder, so the
-  // coordinator alone would not give us this.
+  // ONE AT A TIME IS A PROPERTY OF THE ENGINE, not a protocol every chip keeps.
   it("a second press silences the first", async () => {
     const first = playClipWindow(SRC, { startSec: 0, endSec: null })
     await settle()
     const second = playClipWindow(SRC, { startSec: 1, endSec: null })
     expect(first.isPlaying()).toBe(false)
     expect(second.isPlaying()).toBe(true)
+  })
+
+  // 2026-09-29: a take playing on a waveform (the Recording tab, the Audio view
+  // card) used to go on under a preview — the preview only recorded itself.
+  it("silences a take playing on a waveform when it starts", async () => {
+    let playing = true
+    setActiveAudio({ isPlaying: () => playing, play: async () => {}, pause: () => { playing = false } })
+    playClipWindow(SRC, { startSec: 0, endSec: null })
+    expect(playing).toBe(false)
   })
 
   // The recording modal's open path calls `pauseAllPlayback()` precisely so the

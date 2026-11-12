@@ -3,7 +3,7 @@
 // copilot with no in-app step.
 //
 // The acceptance this suite encodes: after a commit, prompt-preview's
-// `parts.brief` is non-empty and carries the rendered summary; a failed render
+// `parts.instructions` is non-empty and carries the rendered summary; a failed render
 // (backend down, credit cap, not configured) answers with a named code and
 // leaves the changeset committable — the approval is never burned on a model
 // failure; the MAINTAINER floor and the settings version pin match SetBrief.
@@ -168,7 +168,7 @@ describe('RegenerateBriefSummary — rendering the L1', () => {
 
     // Before: the prompt carries the OLD (stale) summary.
     const before = await buildPromptPreview(tdb.db, { projectId: PROJECT, cellId: 'c1', targetLang: '' })
-    expect(before.ok && before.body.parts.brief).toContain('old summary')
+    expect(before.ok && before.body.parts.instructions).toContain('old summary')
 
     const { res, body } = await prepare(env, maintainer.token, regen())
     expect(res.status).toBe(200)
@@ -211,9 +211,9 @@ describe('RegenerateBriefSummary — rendering the L1', () => {
     const after = await buildPromptPreview(tdb.db, { projectId: PROJECT, cellId: 'c1', targetLang: '' })
     expect(after.ok).toBe(true)
     if (after.ok) {
-      expect(after.body.parts.brief).not.toBe('')
-      expect(after.body.parts.brief).toContain('Translate for rural youth aged 15–25')
-      expect(after.body.parts.brief).not.toContain('old summary')
+      expect(after.body.parts.instructions).not.toBe('')
+      expect(after.body.parts.instructions).toContain('Translate for rural youth aged 15–25')
+      expect(after.body.parts.instructions).not.toContain('old summary')
     }
   })
 
@@ -386,7 +386,7 @@ describe('RegenerateBriefSummary — guards', () => {
 
     const { res, body } = await prepare(env, maintainer.token, [
       ...regen(),
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'c1', value: 'v' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'c1', laneId: 'deflane1', value: 'v' },
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')

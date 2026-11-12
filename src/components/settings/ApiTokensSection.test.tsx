@@ -10,6 +10,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { pickSelectOption } from "@/test-utils/select"
+import { pickComboboxOption } from "@/test-utils/combobox"
 import { ApiTokensSection } from "./ApiTokensSection"
 import type { ApiCredential, MintCredentialResult } from "@/lib/sync/credentials"
 import type { OrgSummary } from "@/lib/frontier/orgs"
@@ -39,6 +40,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listCredentials, mintCredential, revokeCredential } from "@/lib/sync/credentials"
 import { listMyOrgs } from "@/lib/frontier/orgs"
 import { fetchAccessibleProjectsResult } from "@/lib/sync/cloud-projects"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const mockUseFrontierSession = vi.mocked(useFrontierSession)
 const mockListCredentials = vi.mocked(listCredentials)
@@ -76,6 +78,7 @@ const ASK_CREDENTIAL: ApiCredential = {
   lastUsedAt: null,
   revokedAt: null,
   pii: false,
+  access: "write",
 }
 
 const REVOKED_CREDENTIAL: ApiCredential = {
@@ -90,6 +93,7 @@ const REVOKED_CREDENTIAL: ApiCredential = {
   lastUsedAt: null,
   revokedAt: "2026-06-15T00:00:00.000Z",
   pii: false,
+  access: "write",
 }
 
 beforeEach(() => {
@@ -141,6 +145,16 @@ describe("ApiTokensSection", () => {
     expect(screen.getAllByRole("button", { name: "Revoke" })).toHaveLength(1)
   })
 
+  // An OAuth grant (Zapier, ChatGPT) was never pasted anywhere by the user, so
+  // "Agent setup" instructions would be wrong for it; revoking is what matters.
+  it("labels an OAuth grant as a connected app, revocable but with no agent setup", async () => {
+    mockListCredentials.mockResolvedValue([{ ...ASK_CREDENTIAL, name: "Zapier", oauth: true }])
+    render(<ApiTokensSection />)
+    expect(await screen.findByText("connected app")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Agent setup" })).not.toBeInTheDocument()
+  })
+
   it("shows each token's creation date and labels its reach by kind", async () => {
     // A reader scanning this list needs to see blast radius without opening
     // anything: whole-org tokens read differently from single-project ones,
@@ -163,11 +177,11 @@ describe("ApiTokensSection", () => {
       window.history.replaceState(null, "", "/preferences/api-tokens?awaiting=1")
       mockListCredentials.mockResolvedValue([])
       render(<ApiTokensSection />)
-      await vi.waitFor(() => expect(screen.getByText(/No tokens yet/)).toBeInTheDocument())
+      await vi.waitFor(() => expect(screen.getByText(/No tokens yet/)).toBeInTheDocument(), { timeout: STALL_WATCHDOG_MS })
 
       mockListCredentials.mockResolvedValue([ASK_CREDENTIAL])
       await vi.advanceTimersByTimeAsync(3000)
-      await vi.waitFor(() => expect(screen.getByText(/aqk_abc123/)).toBeInTheDocument())
+      await vi.waitFor(() => expect(screen.getByText(/aqk_abc123/)).toBeInTheDocument(), { timeout: STALL_WATCHDOG_MS })
 
       // Having found it, the section stops polling rather than refreshing forever.
       const calls = mockListCredentials.mock.calls.length
@@ -183,7 +197,7 @@ describe("ApiTokensSection", () => {
     vi.useFakeTimers()
     try {
       render(<ApiTokensSection />)
-      await vi.waitFor(() => expect(mockListCredentials).toHaveBeenCalledTimes(1))
+      await vi.waitFor(() => expect(mockListCredentials).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
       await vi.advanceTimersByTimeAsync(30000)
       expect(mockListCredentials).toHaveBeenCalledTimes(1)
     } finally {
@@ -225,6 +239,7 @@ describe("ApiTokensSection", () => {
         lastUsedAt: null,
         revokedAt: null,
         pii: false,
+        access: "write",
       },
     }
     mockMintCredential.mockResolvedValue(mintResult)
@@ -297,7 +312,7 @@ describe("ApiTokensSection", () => {
       credential: {
         id: "cred-x", name: "Dupe bot", mode: "ask", orgId: null, projectId: null,
         tokenPrefix: "aqk_once", createdAt: "2026-07-17T00:00:00.000Z",
-        expiresAt: null, lastUsedAt: null, revokedAt: null, pii: false,
+        expiresAt: null, lastUsedAt: null, revokedAt: null, pii: false, access: "write",
       },
     })
     await screen.findByText("aqk_once")
@@ -342,7 +357,7 @@ describe("ApiTokensSection", () => {
           id: "cred-3", name: "Deploy bot", mode: "act", orgId: null,
           projectId: "proj-maint", tokenPrefix: "aqk_fresh",
           createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
-          lastUsedAt: null, revokedAt: null, pii: false,
+          lastUsedAt: null, revokedAt: null, pii: false, access: "write",
         },
       })
 
@@ -368,6 +383,43 @@ describe("ApiTokensSection", () => {
       expect(prompt).toContain("Maintainer Project")
     })
 
+    it("post-mint: closing the dialog mid-countdown leaves no timer behind", async () => {
+      mockMintCredential.mockResolvedValue({
+        token: "aqk_freshplaintext",
+        credential: {
+          id: "cred-3", name: "Deploy bot", mode: "act", orgId: null,
+          projectId: "proj-maint", tokenPrefix: "aqk_fresh",
+          createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
+          lastUsedAt: null, revokedAt: null, pii: false, access: "write",
+        },
+      })
+      const { unmount } = render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole("button", { name: "New token" }))
+      await screen.findByText("New API token")
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Deploy bot" } })
+      fireEvent.click(screen.getByRole("button", { name: "Mint token" }))
+      await screen.findByText("aqk_freshplaintext")
+
+      // Real timers: fake ones would also catch waitFor's own scheduling and
+      // leave the later tests in this file stalled.
+      const setSpy = vi.spyOn(globalThis, "setTimeout")
+      const clearSpy = vi.spyOn(globalThis, "clearTimeout")
+      try {
+        fireEvent.click(screen.getByRole("button", { name: /Copy agent instructions/i }))
+        expect(screen.getByRole("button", { name: /Copied/i })).toBeInTheDocument()
+        // The 1.5 s "Copied" reset is pending; tearing the tree down must
+        // cancel it rather than let it fire into an unmounted component.
+        const reset = setSpy.mock.results.find((_, i) => setSpy.mock.calls[i][1] === 1500)
+        expect(reset).toBeDefined()
+        unmount()
+        expect(clearSpy).toHaveBeenCalledWith(reset!.value)
+      } finally {
+        setSpy.mockRestore()
+        clearSpy.mockRestore()
+      }
+    })
+
     it("per-token: shows a placeholder prompt matching that credential's mode and scope", async () => {
       render(<ApiTokensSection />)
       await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
@@ -390,6 +442,237 @@ describe("ApiTokensSection", () => {
       // ASK_CREDENTIAL is ask-mode and unscoped: the safety instruction is present.
       expect(prompt).toMatch(/ask-mode/)
       expect(prompt).toContain("Unscoped (personal)")
+    })
+
+    // AQU-1242: a read-only token's prompt must not read like an ask-mode one.
+    // "Stage writes and wait for my approval" sends the agent down a path that
+    // ends in a 403 it will probably retry; the ceiling has to be stated instead.
+    it("read-only token: the prompt states the ceiling instead of the approval dance", async () => {
+      mockListCredentials.mockResolvedValue([{ ...ASK_CREDENTIAL, access: "read" }])
+      render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      await screen.findByText(/aqk_abc123/)
+
+      fireEvent.click(screen.getByRole("button", { name: "Agent setup" }))
+      await screen.findByText("Instructions for your agent")
+      fireEvent.click(screen.getByRole("button", { name: /Copy instructions/i }))
+
+      await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1))
+      const prompt = vi.mocked(navigator.clipboard.writeText).mock.calls[0][0] as string
+      expect(prompt).toContain("read-only")
+      expect(prompt).toContain("scope_denied")
+      expect(prompt).not.toMatch(/ask-mode/)
+      expect(prompt).not.toMatch(/you can stage writes/)
+    })
+  })
+
+  // AQU-1242 — the token's write ceiling.
+  describe("access ceiling", () => {
+    it("mints a read-only token, and act mode is not offered for one", async () => {
+      mockMintCredential.mockResolvedValue({
+        token: "aqk_readonlyplaintext",
+        credential: {
+          id: "cred-ro", name: "Reporting agent", mode: "ask", orgId: null,
+          projectId: "proj-maint", tokenPrefix: "aqk_ro",
+          createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
+          lastUsedAt: null, revokedAt: null, pii: false, access: "read",
+        },
+      })
+
+      render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole("button", { name: "New token" }))
+      await screen.findByText("New API token")
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Reporting agent" } })
+
+      // A maintainer project would normally unlock act mode...
+      await pickSelectOption(/Organization/i, /Acme Org/i)
+      await pickSelectOption(/^Project$/i, /Maintainer Project/i)
+      expect(screen.getByRole("radio", { name: /Act/i })).not.toHaveAttribute("aria-disabled", "true")
+
+      // ...but a read-only token has nothing to apply, so act is withdrawn and
+      // the reason is stated rather than left as a mysteriously dead control.
+      fireEvent.click(screen.getByRole("radio", { name: /Read-only/i }))
+      expect(screen.getByRole("radio", { name: /Act/i })).toHaveAttribute("aria-disabled", "true")
+      expect(screen.getByText(/Mode only applies to a token that can write/i)).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole("button", { name: "Mint token" }))
+      await waitFor(() => expect(mockMintCredential).toHaveBeenCalledTimes(1))
+      expect(mockMintCredential).toHaveBeenCalledWith(
+        "test-jwt",
+        expect.objectContaining({ access: "read", mode: "ask" }),
+      )
+    })
+
+    it("picking act mode and then read-only never mints the contradiction the server rejects", async () => {
+      mockMintCredential.mockResolvedValue({
+        token: "aqk_x",
+        credential: {
+          id: "cred-y", name: "Flip flop", mode: "ask", orgId: null, projectId: null,
+          tokenPrefix: "aqk_x", createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
+          lastUsedAt: null, revokedAt: null, pii: false, access: "read",
+        },
+      })
+
+      render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole("button", { name: "New token" }))
+      await screen.findByText("New API token")
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Flip flop" } })
+      await pickSelectOption(/Organization/i, /Acme Org/i)
+      await pickSelectOption(/^Project$/i, /Maintainer Project/i)
+      fireEvent.click(screen.getByRole("radio", { name: /Act/i }))
+      fireEvent.click(screen.getByRole("radio", { name: /Read-only/i }))
+
+      fireEvent.click(screen.getByRole("button", { name: "Mint token" }))
+      await waitFor(() => expect(mockMintCredential).toHaveBeenCalledTimes(1))
+      // read + act is a 400 server-side; the dialog must not be able to send it.
+      expect(mockMintCredential).toHaveBeenCalledWith(
+        "test-jwt",
+        expect.objectContaining({ access: "read", mode: "ask" }),
+      )
+    })
+
+    it("defaults to read-write, so a user who ignores the new field mints what they always did", async () => {
+      mockMintCredential.mockResolvedValue({
+        token: "aqk_default",
+        credential: {
+          id: "cred-d", name: "Same as before", mode: "ask", orgId: null, projectId: null,
+          tokenPrefix: "aqk_def", createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
+          lastUsedAt: null, revokedAt: null, pii: false, access: "write",
+        },
+      })
+
+      render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole("button", { name: "New token" }))
+      await screen.findByText("New API token")
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Same as before" } })
+      fireEvent.click(screen.getByRole("button", { name: "Mint token" }))
+
+      await waitFor(() => expect(mockMintCredential).toHaveBeenCalledTimes(1))
+      expect(mockMintCredential).toHaveBeenCalledWith(
+        "test-jwt",
+        expect.objectContaining({ access: "write" }),
+      )
+    })
+
+    it("the list marks a read-only token as read-only instead of showing its unused mode", async () => {
+      mockListCredentials.mockResolvedValue([
+        { ...ASK_CREDENTIAL, id: "cred-ro", tokenPrefix: "aqk_ro1234", access: "read" },
+        { ...ASK_CREDENTIAL, id: "cred-rw", tokenPrefix: "aqk_rw1234", access: "write" },
+      ])
+      render(<ApiTokensSection />)
+      await screen.findByText(/aqk_ro1234/)
+
+      const readOnlyRow = screen.getByText(/aqk_ro1234/).closest("li")!
+      const writeRow = screen.getByText(/aqk_rw1234/).closest("li")!
+      expect(readOnlyRow).toHaveTextContent("read-only")
+      // "ask" would suggest writes are merely gated on approval, not impossible.
+      expect(readOnlyRow).not.toHaveTextContent(/\bask\b/)
+      expect(writeRow).toHaveTextContent("ask")
+      expect(writeRow).not.toHaveTextContent("read-only")
+    })
+  })
+  // AQU-2102: the closed trigger used to print whatever was stored — a numeric org
+  // id, a project uuid, `90d` — so a user could not tell what the token they were
+  // about to mint would be scoped to. Each dropdown must echo the option's own text.
+  describe("scope dropdown labels", () => {
+    const ORG_NAMELESS: OrgSummary = {
+      id: 46445,
+      name: null,
+      role: { level: 600, name: "maintainer" },
+    }
+    const PROJECT_OTHER_ORG: CloudProjectSummary = {
+      id: "proj-other",
+      name: "Other Org Project",
+      gitlabProjectId: null,
+      orgId: 46445,
+      role: { level: 600, name: "maintainer", source: "invite" },
+    }
+
+    async function openMintDialog() {
+      render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole("button", { name: "New token" }))
+      await screen.findByText("New API token")
+    }
+
+    it("shows the expiry preset's label, never its internal id", async () => {
+      await openMintDialog()
+
+      // "90 days" is preselected, so the raw id was visible on open.
+      const expiry = screen.getByRole("combobox", { name: /Expiry/i })
+      expect(expiry).toHaveTextContent("90 days")
+      expect(expiry).not.toHaveTextContent("90d")
+
+      expect(await pickSelectOption(/Expiry/i, /^30 days$/)).toHaveTextContent("30 days")
+      expect(await pickSelectOption(/Expiry/i, /^No expiry$/)).toHaveTextContent("No expiry")
+      expect(await pickSelectOption(/Expiry/i, /^90 days$/)).toHaveTextContent("90 days")
+    })
+
+    it("shows the org's name and the project's name once picked, not their ids", async () => {
+      await openMintDialog()
+
+      // Unpicked, both keep their placeholders rather than an empty box.
+      expect(screen.getByRole("combobox", { name: /Organization/i })).toHaveTextContent(
+        "No organization (personal)",
+      )
+      expect(screen.getByRole("combobox", { name: /^Project$/i })).toHaveTextContent(
+        "No project (org-wide)",
+      )
+
+      const org = await pickSelectOption(/Organization/i, /^Acme Org$/)
+      expect(org).toHaveTextContent("Acme Org")
+      expect(org).not.toHaveTextContent(String(ORG.id))
+
+      const project = await pickSelectOption(/^Project$/i, /^Maintainer Project$/)
+      expect(project).toHaveTextContent("Maintainer Project")
+      expect(project).not.toHaveTextContent(PROJECT_MAINTAINER.id)
+    })
+
+    // AQU-2232 / AQU-2260: someone in many projects could only scroll for the
+    // one to scope a token to. The Project list now has a search box.
+    it("the Project list has a search box that narrows it to matching projects", async () => {
+      mockFetchAccessibleProjects.mockResolvedValue({
+        ok: true,
+        projects: [PROJECT_MAINTAINER, PROJECT_OTHER_ORG],
+      })
+      await openMintDialog()
+      const project = await pickComboboxOption(/^Project$/i, /^Other Org Project$/, { search: "other", searchName: "Search the list" })
+      expect(project).toHaveTextContent("Other Org Project")
+      fireEvent.click(project)
+      const search = await screen.findByRole("combobox", { name: "Search the list" })
+      fireEvent.change(search, { target: { value: "maint" } })
+      expect(await screen.findByRole("option", { name: "Maintainer Project" })).toBeInTheDocument()
+      expect(screen.queryByRole("option", { name: "Other Org Project" })).toBeNull()
+    })
+
+    it("falls back to the org-id label for a nameless org, matching its option text", async () => {
+      mockListMyOrgs.mockResolvedValue([ORG_NAMELESS])
+      await openMintDialog()
+
+      expect(await pickSelectOption(/Organization/i, /^Org 46445$/)).toHaveTextContent("Org 46445")
+    })
+
+    it("resets the project dropdown to its placeholder when the org changes, not to a stale name", async () => {
+      mockListMyOrgs.mockResolvedValue([ORG, ORG_NAMELESS])
+      mockFetchAccessibleProjects.mockResolvedValue({
+        ok: true,
+        projects: [PROJECT_MAINTAINER, PROJECT_OTHER_ORG],
+      })
+      await openMintDialog()
+
+      await pickSelectOption(/Organization/i, /^Acme Org$/)
+      expect(await pickSelectOption(/^Project$/i, /^Maintainer Project$/)).toHaveTextContent(
+        "Maintainer Project",
+      )
+
+      await pickSelectOption(/Organization/i, /^Org 46445$/)
+      const project = screen.getByRole("combobox", { name: /^Project$/i })
+      await waitFor(() => expect(project).toHaveTextContent("No project (org-wide)"))
+      expect(project).not.toHaveTextContent("Maintainer Project")
+      expect(project).not.toHaveTextContent(PROJECT_MAINTAINER.id)
     })
   })
 })

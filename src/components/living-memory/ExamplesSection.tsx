@@ -3,15 +3,18 @@
  * file. Rendered as the Living Memory "examples" pane. The section wrapper
  * keeps `aria-label="Recent Examples"` and the `role="status"` empty state —
  * both are load-bearing for tests/e2e.
+ *
+ * The body is a disclosure that starts COLLAPSED (AQU-921): the pane is an
+ * inspection surface, so it should not dominate Living Memory until asked for.
  */
 
-import { useMemo } from "react"
-import { BookOpen, Users } from "lucide-react"
+import { useId, useMemo, useState } from "react"
+import { BookOpen, ChevronRight, Users } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/ui/empty"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import type { LivingMemoryCell } from "@/hooks/useLivingMemory"
 
@@ -29,9 +32,7 @@ function LivingMemorySkeleton() {
         {Array.from({ length: 6 }).map((_, i) => (
           <Card key={i} className="overflow-hidden">
             <CardContent className="flex flex-col gap-2 p-3">
-              <Skeleton className="h-2.5 w-20" />
-              <Skeleton className="h-3.5 w-full" />
-              <Skeleton className="h-4 w-3/4" />
+              {i === 0 ? <LoadingCursor /> : null}
             </CardContent>
           </Card>
         ))}
@@ -173,23 +174,42 @@ export function RecentExamplesSection({
   isEmpty: boolean
 }) {
   const t = useT()
+  const [open, setOpen] = useState(false)
+  const contentId = useId()
+
   return (
     <section aria-label={t("terminology.livingMemory.recentExamplesTitle")}>
-      <div className="flex items-center gap-2 mb-1">
-        <h2 className="text-xs font-semibold text-muted-foreground">
+      <h2 className="mb-1">
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={contentId}
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-center gap-1.5 rounded-sm text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ChevronRight
+            className={`h-3.5 w-3.5 shrink-0 transition-transform rtl:-scale-x-100 ${open ? "rotate-90" : ""}`}
+            aria-hidden="true"
+          />
           {t("terminology.livingMemory.recentExamplesTitle")}
-        </h2>
+        </button>
+      </h2>
+
+      {/* Collapsed by default (AQU-921): this is an inspection surface, so it
+       *  no longer dominates the pane. The query lives in LivingMemoryPage, so
+       *  collapsing changes only what is rendered, never what is fetched. */}
+      <div id={contentId} hidden={!open}>
+        <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
+          {t("terminology.livingMemory.recentExamplesDescription")}
+        </p>
+        {isLoading ? (
+          <LivingMemorySkeleton />
+        ) : isEmpty ? (
+          <RecentExamplesEmpty />
+        ) : (
+          <CellList cells={cells} />
+        )}
       </div>
-      <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
-        {t("terminology.livingMemory.recentExamplesDescription")}
-      </p>
-      {isLoading ? (
-        <LivingMemorySkeleton />
-      ) : isEmpty ? (
-        <RecentExamplesEmpty />
-      ) : (
-        <CellList cells={cells} />
-      )}
     </section>
   )
 }

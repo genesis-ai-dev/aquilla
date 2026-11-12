@@ -14,7 +14,7 @@ import { rateCard } from './helpers/rate-card'
 
 afterEach(() => { vi.unstubAllGlobals(); resetRateCardCache() })
 async function setup() {
-  const paid = await completedPayment('pro', 'month')
+  const paid = await completedPayment('team', 'month', undefined, 'personal')
   expect((await paid.send()).status).toBe(200)
   await env.AQUILLA_PG.exec("INSERT INTO projects (id, name, org_id, created_by) VALUES ('chat-project', 'Chat', 1, 1)")
   const settings: Env = { ...config(), OPENROUTER_API_KEY: 'local-fixture', AI_ALLOWED_MODELS: 'local-test',

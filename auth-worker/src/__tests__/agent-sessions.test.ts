@@ -100,3 +100,154 @@ describe("compactConvo", () => {
     expect(compactConvo(convo)).toEqual(convo)
   })
 })
+
+// ── AQU-1653: Team chat history ─────────────────────────────────────────────
+// Reading a chat back is what makes "New chat" safe, so these tests encode the
+// two things that can go wrong with it. One is privacy: a session belongs to
+// (project, user), and a caller must not be able to list — or even confirm the
+// existence of — another member's chats. The other is fidelity: the stored
+// convo is the MODEL's view, so the transcript must carry the prose and drop
+// the tool traffic, which was never a message and is a digest after compaction.
+
+describe("transcriptTurns", () => {
+  it("keeps prose and drops tool traffic", async () => {
+    const { transcriptTurns } = await import("../lib/agent/sessions")
+    const convo: StoredMessage[] = [
+      { role: "user", content: "Draft GEN 1" },
+      { role: "assistant", content: null, tool_calls: [{ id: "tc1", type: "function", function: { name: "execute", arguments: "{}" } }] },
+      { role: "tool", tool_call_id: "tc1", content: "cell_id|value\n#c1|In the beginning" },
+      { role: "assistant", content: "Staged 1 draft." },
+    ]
+    expect(transcriptTurns(convo)).toEqual([
+      { role: "user", text: "Draft GEN 1" },
+      { role: "assistant", text: "Staged 1 draft." },
+    ])
+  })
+
+  it("joins prose split across tool calls into one reply", async () => {
+    const { transcriptTurns } = await import("../lib/agent/sessions")
+    // A live run renders this as one reply with a tool chip in the middle;
+    // reading it back as two replies would misrepresent the conversation.
+    expect(
+      transcriptTurns([
+        { role: "user", content: "Check GEN 1" },
+        { role: "assistant", content: "Looking at the chapter." },
+        { role: "tool", tool_call_id: "tc1", content: "…" },
+        { role: "assistant", content: "Two lines need work." },
+      ]),
+    ).toEqual([
+      { role: "user", text: "Check GEN 1" },
+      { role: "assistant", text: "Looking at the chapter.\n\nTwo lines need work." },
+    ])
+  })
+
+  it("skips blank and non-string content rather than emitting empty turns", async () => {
+    const { transcriptTurns } = await import("../lib/agent/sessions")
+    expect(
+      transcriptTurns([
+        { role: "assistant", content: null },
+        { role: "user", content: "   " },
+        { role: "user", content: "Real question" },
+      ]),
+    ).toEqual([{ role: "user", text: "Real question" }])
+  })
+})
+
+describe("listSessionsForUser / loadSessionForUser", () => {
+  const MINE_A = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+  const MINE_B = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+  const THEIRS = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+  const OTHER_PROJECT = "22222222-2222-4222-8222-222222222222"
+
+  async function seedChats(): Promise<void> {
+    const { saveSession } = await import("../lib/agent/sessions")
+    await saveSession(env.AQUILLA_PG, {
+      sessionId: MINE_A, projectId: PROJECT, userId: 7,
+      convo: [{ role: "user", content: "Draft GEN 1" }, { role: "assistant", content: "Staged 2." }],
+    })
+    await saveSession(env.AQUILLA_PG, {
+      sessionId: MINE_B, projectId: PROJECT, userId: 7,
+      convo: [{ role: "user", content: "Why that wording?" }],
+    })
+    await saveSession(env.AQUILLA_PG, {
+      sessionId: THEIRS, projectId: PROJECT, userId: 8,
+      convo: [{ role: "user", content: "Another member's chat" }],
+    })
+    await env.AQUILLA_PG.prepare("UPDATE agent_sessions SET updated_at = ? WHERE session_id = ?")
+      .bind(100, MINE_A)
+      .run()
+    await env.AQUILLA_PG.prepare("UPDATE agent_sessions SET updated_at = ? WHERE session_id = ?")
+      .bind(200, MINE_B)
+      .run()
+  }
+
+  it("lists only the caller's own chats on the project, newest first", async () => {
+    const { listSessionsForUser } = await import("../lib/agent/sessions")
+    await seedChats()
+
+    const mine = await listSessionsForUser(env.AQUILLA_PG, PROJECT, 7)
+    expect(mine.map((s) => s.sessionId)).toEqual([MINE_B, MINE_A])
+    expect(mine.map((s) => s.title)).toEqual(["Why that wording?", "Draft GEN 1"])
+    // The other member's chat is on the same project and is not listed.
+    expect(mine.some((s) => s.sessionId === THEIRS)).toBe(false)
+    expect(await listSessionsForUser(env.AQUILLA_PG, OTHER_PROJECT, 7)).toEqual([])
+  })
+
+  it("returns a chat as a readable transcript", async () => {
+    const { loadSessionForUser } = await import("../lib/agent/sessions")
+    await seedChats()
+
+    const chat = await loadSessionForUser(env.AQUILLA_PG, PROJECT, 7, MINE_A)
+    expect(chat).not.toBeNull()
+    expect(chat!.title).toBe("Draft GEN 1")
+    expect(chat!.turns).toEqual([
+      { role: "user", text: "Draft GEN 1" },
+      { role: "assistant", text: "Staged 2." },
+    ])
+  })
+
+  it("reads another member's chat, and a chat on another project, as absent", async () => {
+    const { loadSessionForUser } = await import("../lib/agent/sessions")
+    await seedChats()
+
+    // All three must be indistinguishable — anything other than null here
+    // confirms that someone else's session id exists.
+    expect(await loadSessionForUser(env.AQUILLA_PG, PROJECT, 7, THEIRS)).toBeNull()
+    expect(await loadSessionForUser(env.AQUILLA_PG, OTHER_PROJECT, 7, MINE_A)).toBeNull()
+    expect(await loadSessionForUser(env.AQUILLA_PG, PROJECT, 7, "no-such-session")).toBeNull()
+  })
+
+  it("names a chat whose first save carried no user turn, once one arrives", async () => {
+    const { saveSession, listSessionsForUser } = await import("../lib/agent/sessions")
+    const id = "ffffffff-ffff-4fff-8fff-ffffffffffff"
+    // First save is assistant-only (an autopilot write), so there is nothing
+    // to take a title from yet.
+    await saveSession(env.AQUILLA_PG, {
+      sessionId: id, projectId: PROJECT, userId: 9,
+      convo: [{ role: "assistant", content: "I had a look at GEN 1." }],
+    })
+    expect((await listSessionsForUser(env.AQUILLA_PG, PROJECT, 9))[0].title).toBe("")
+
+    await saveSession(env.AQUILLA_PG, {
+      sessionId: id, projectId: PROJECT, userId: 9,
+      convo: [{ role: "assistant", content: "I had a look at GEN 1." }, { role: "user", content: "Thanks — now MRK 5" }],
+    })
+    expect((await listSessionsForUser(env.AQUILLA_PG, PROJECT, 9))[0].title).toBe("Thanks — now MRK 5")
+  })
+
+  it("never overwrites the title the user has been seeing", async () => {
+    const { saveSession, listSessionsForUser } = await import("../lib/agent/sessions")
+    const id = "99999999-9999-4999-8999-999999999999"
+    await saveSession(env.AQUILLA_PG, {
+      sessionId: id, projectId: PROJECT, userId: 9,
+      convo: [{ role: "user", content: "Original question" }],
+    })
+    // Compaction can drop the opening exchange, which would change what
+    // "first user turn" means. The chat must not silently rename itself.
+    await saveSession(env.AQUILLA_PG, {
+      sessionId: id, projectId: PROJECT, userId: 9,
+      convo: [{ role: "user", content: "A much later question" }],
+    })
+    expect((await listSessionsForUser(env.AQUILLA_PG, PROJECT, 9))[0].title).toBe("Original question")
+  })
+})

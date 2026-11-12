@@ -4,9 +4,11 @@ import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import process from "node:process"
-import { childArgs, type NeonTargetCommand } from "./neon-target-args"
+import { childArgs, isNeonTargetCommand, NEON_TARGET_COMMANDS, type NeonTargetCommand } from "./neon-target-args"
+import { decideApplyGuard, MIGRATION_COMMANDS, NO_SNAPSHOT_FLAG, SNAPSHOT_FLAG } from "./neon-apply-guard"
 
-type Target = "production" | "dev"
+type RemoteTarget = "production" | "dev"
+type Target = RemoteTarget | "local"
 // One union, owned by neon-target-args.ts, so the two files cannot drift apart.
 type Command = NeonTargetCommand
 type PgKey = "HOST" | "DB" | "ROLE" | "PASSWORD"
@@ -19,15 +21,18 @@ const TARGET_ALIASES: Record<string, Target> = {
   production: "production",
   dev: "dev",
   development: "dev",
+  local: "local",
 }
-const TARGET_BRANCH_DEFAULTS: Record<Target, string> = {
+const TARGET_BRANCH_DEFAULTS: Record<RemoteTarget, string> = {
   production: "production",
   dev: "dev",
 }
-const TARGET_ENV_NAMES: Record<Target, string[]> = {
+const TARGET_ENV_NAMES: Record<RemoteTarget, string[]> = {
   production: ["PRODUCTION", "PROD"],
   dev: ["DEV", "DEVELOPMENT"],
 }
+// Same default and overrides as scripts/dev-stack.ts.
+const DEFAULT_LOCAL_PG_URL = "postgresql://aquilla:aquilla@127.0.0.1:5432/aquilla_dev"
 
 const DEFAULTS: Partial<Record<PgKey, string>> = {
   DB: "neondb",
@@ -36,7 +41,10 @@ const DEFAULTS: Partial<Record<PgKey, string>> = {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 function usage(): never {
-  console.error("usage: tsx scripts/neon-target.ts <production|dev> <status|apply|baseline|prepare-comments-key|backfill-progress|backfill-activity|backfill-lanes|verify-lanes>")
+  // Read off NEON_TARGET_COMMANDS so the usage text cannot advertise a
+  // different set from the one parseCommand accepts (AQU-1946).
+  console.error(`usage: tsx scripts/neon-target.ts <production|dev|local> <${NEON_TARGET_COMMANDS.join("|")}>`)
+  console.error(`       production apply requires ${SNAPSHOT_FLAG} (take a Neon snapshot branch first) or ${NO_SNAPSHOT_FLAG}`)
   process.exit(1)
 }
 
@@ -48,7 +56,9 @@ function parseTarget(value: string | undefined): Target {
 }
 
 function parseCommand(value: string | undefined): Command {
-  if (value === "prepare-comments-key" || value === "status" || value === "apply" || value === "baseline" || value === "backfill-progress" || value === "backfill-activity" || value === "backfill-lanes" || value === "verify-lanes") return value
+  // AQU-1946: membership of the one list, not a hand-written chain. The chain
+  // was missing `repair-lane-grants`, so both of its package scripts exited 1.
+  if (isNeonTargetCommand(value)) return value
   usage()
 }
 
@@ -61,13 +71,13 @@ function loadDotEnv(): void {
   }
 }
 
-function candidates(target: Target, key: PgKey): string[] {
+function candidates(target: RemoteTarget, key: PgKey): string[] {
   if (target === "production") return [`NEON_PG_${key}`]
   const upper = target.toUpperCase()
   return [`NEON_${upper}_PG_${key}`, `NEON_PG_${upper}_${key}`]
 }
 
-function envCandidates(target: Target, suffix: string): string[] {
+function envCandidates(target: RemoteTarget, suffix: string): string[] {
   return TARGET_ENV_NAMES[target].map((name) => `NEON_${name}_${suffix}`)
 }
 
@@ -79,7 +89,7 @@ function firstEnv(names: string[]): string | null {
   return null
 }
 
-function resolveValue(target: Target, key: PgKey): string {
+function resolveValue(target: RemoteTarget, key: PgKey): string {
   const value = firstEnv(candidates(target, key))
   if (value) return value
   const fallback = DEFAULTS[key]
@@ -87,7 +97,7 @@ function resolveValue(target: Target, key: PgKey): string {
   throw new Error(`${candidates(target, key).join(" or ")} is required for Neon ${target}`)
 }
 
-function staticPgEnv(target: Target): NodeJS.ProcessEnv | null {
+function staticPgEnv(target: RemoteTarget): NodeJS.ProcessEnv | null {
   const host = firstEnv(candidates(target, "HOST"))
   const password = firstEnv(candidates(target, "PASSWORD"))
   if (!host && !password) return null
@@ -177,9 +187,13 @@ async function runCapture(command: string, args: string[]): Promise<string> {
   })
 }
 
-async function branchPgEnv(target: Target): Promise<NodeJS.ProcessEnv> {
+function targetBranch(target: RemoteTarget): string {
+  return firstEnv(envCandidates(target, "BRANCH")) ?? TARGET_BRANCH_DEFAULTS[target]
+}
+
+async function branchPgEnv(target: RemoteTarget): Promise<NodeJS.ProcessEnv> {
   const projectId = requiredEnv("NEON_PROJECT_ID", DEFAULT_PROJECT_ID)
-  const branch = firstEnv(envCandidates(target, "BRANCH")) ?? TARGET_BRANCH_DEFAULTS[target]
+  const branch = targetBranch(target)
   const database = firstEnv(envCandidates(target, "DATABASE")) ?? DEFAULTS.DB!
   const role = firstEnv(envCandidates(target, "ROLE")) ?? DEFAULTS.ROLE!
   const connectionString = await runCapture("npx", neonArgs([
@@ -199,6 +213,15 @@ async function branchPgEnv(target: Target): Promise<NodeJS.ProcessEnv> {
 }
 
 async function resolvePgEnv(target: Target): Promise<NodeJS.ProcessEnv> {
+  if (target === "local") {
+    const url =
+      process.env.WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE?.trim() ||
+      process.env.LOCAL_PG_URL?.trim() ||
+      DEFAULT_LOCAL_PG_URL
+    // AQUILLA_LOCAL_PG_URL switches scripts/pg.ts to a no-SSL client;
+    // AQUILLA_DATABASE_URL is what the backfill scripts read.
+    return { ...process.env, AQUILLA_LOCAL_PG_URL: url, AQUILLA_DATABASE_URL: url }
+  }
   if (process.env.GITHUB_ACTIONS === "true" && process.env.NEON_API_KEY?.trim()) {
     return branchPgEnv(target)
   }
@@ -219,18 +242,55 @@ async function run(command: string, args: string[], env: NodeJS.ProcessEnv): Pro
   })
 }
 
+/**
+ * AQU-1877: a production migration apply is gated on a snapshot. The decision
+ * is pure (`neon-apply-guard.ts`); this runs it, and takes the Neon branch
+ * when the operator asked for one.
+ */
+async function guardMigrationApply(target: Target, command: Command, flags: string[]): Promise<void> {
+  if (!(MIGRATION_COMMANDS as readonly string[]).includes(command)) return
+  const decision = decideApplyGuard({
+    target,
+    command,
+    flags,
+    projectId: requiredEnv("NEON_PROJECT_ID", DEFAULT_PROJECT_ID),
+    parentBranch: target === "local" ? "local" : targetBranch(target),
+    cliVersion: requiredEnv("NEON_CLI_VERSION", DEFAULT_NEON_CLI_VERSION),
+    now: new Date(),
+  })
+  if (decision.kind === "refuse") {
+    console.error(decision.message)
+    process.exit(1)
+  }
+  if (decision.note) console.log(decision.note)
+  if (decision.kind === "snapshot") {
+    console.log(await runCapture("npx", neonArgs(decision.args)))
+    console.log(`✓ snapshot branch '${decision.branchName}' created — restore from it if the apply goes wrong`)
+  }
+}
+
 async function main() {
   loadDotEnv()
   const target = parseTarget(process.argv[2])
   const command = parseCommand(process.argv[3])
-  const env = await resolvePgEnv(target)
 
   // Everything after the command reaches a backfill or verify script as its
   // own flags (`--missing-books`, `--apply`, `--require-complete`). See
   // `neon-target-args.ts` for why dropping those flags ever ran the wrong job.
+  // A migration command takes no passthrough flags, so its own are read here
+  // (the snapshot gate) and validated rather than silently dropped.
   const passthrough = process.argv.slice(4)
+  await guardMigrationApply(target, command, passthrough)
+  const env = await resolvePgEnv(target)
+  // The decision above is this run's; neon-migrate.ts must not ask again.
+  env.AQUILLA_MIGRATION_SNAPSHOT_DECISION = `${target}:${command}`
+  // AQU-1941: which database the child is actually pointed at. A script holding
+  // raw NEON_PG_* credentials cannot tell, so a child that gates its own writes
+  // on "is this production?" reads this instead of guessing
+  // (scripts/phantom-voice-prune-gate.ts).
+  env.AQUILLA_NEON_TARGET = target
   const args = childArgs(command, passthrough)
-  console.log(`neon-target ${target} ${command}${passthrough.length ? " " + passthrough.join(" ") : ""} -> ${env.NEON_PG_HOST}`)
+  console.log(`neon-target ${target} ${command}${passthrough.length ? " " + passthrough.join(" ") : ""} -> ${target === "local" ? "local Postgres" : env.NEON_PG_HOST}`)
   process.exit(await run("tsx", args, env))
 }
 

@@ -15,12 +15,15 @@ const fetchCellHistoryMock = vi.fn<
   ) => Promise<CellHistoryEvent[]>
 >()
 
-vi.mock("@/lib/sync/history-read", () => ({
+vi.mock("@/lib/sync/history-read", async (importOriginal) => ({
+  // Keep the real HistoryReadError: the hook classifies failures by it.
+  ...(await importOriginal<typeof import("@/lib/sync/history-read")>()),
   fetchCellHistory: (...args: unknown[]) =>
     fetchCellHistoryMock(...(args as Parameters<typeof fetchCellHistoryMock>)),
 }))
 
 import { useCellEditHistory } from "./useCellEditHistory"
+import { HistoryReadError } from "@/lib/sync/history-read"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 
 function makeEvent(
@@ -102,6 +105,29 @@ describe("useCellEditHistory (Phase 2b)", () => {
     expect(entry.validated).toBe(false)
   })
 
+  // AQU-1656: once the server acks an AI draft it must still read as AI, and
+  // carry the id of the prompt that produced it — otherwise the drawer can
+  // only show prompts for drafts still sitting in the local outbox.
+  it("keeps an acked AI draft marked as AI and linked to its prompt record", async () => {
+    fetchCellHistoryMock.mockResolvedValueOnce([
+      makeEvent({ id: "e2", serverSeq: 2, payload: { value: "human fix" } }),
+      makeEvent({
+        id: "e1",
+        serverSeq: 1,
+        author: "test-model",
+        payload: { value: "ai draft", ai_suggestion: true, ai_draft: { model: "test-model", interventionId: "iv-1" } },
+      }),
+    ])
+    const { result } = renderHook(() =>
+      useCellEditHistory({ enabled: true, projectId: "proj-a", fileId: "file-abc", cellId: "cell-1", getTokenForFile }),
+    )
+    await waitFor(() => expect(result.current.history).toHaveLength(2))
+    const [draft, fix] = result.current.history
+    expect(draft).toMatchObject({ source: "llm", interventionId: "iv-1" })
+    expect(fix.source).toBe("human")
+    expect(fix.interventionId).toBeUndefined()
+  })
+
   it("flags commits off the current head's parent chain as stale (AQU-1154 bumped branch)", async () => {
     // Exact shape the cell-history route returns after the AQU-1154 A/B
     // scenario: H → A1 (won) / B1 (lost CAS) → B2 (parent B1, lost) → A2
@@ -174,8 +200,14 @@ describe("useCellEditHistory (Phase 2b)", () => {
     expect(fetchCellHistoryMock).not.toHaveBeenCalled()
   })
 
-  it("surfaces isError when the fetch wrapper throws", async () => {
-    fetchCellHistoryMock.mockRejectedValueOnce(new Error("boom"))
+  // AQU-1248: the drawer names the network or the server, so the hook passes
+  // the read's classification through; anything else stays unclassified.
+  it.each([
+    ["an unclassified error", new Error("boom"), null],
+    ["a network failure", new HistoryReadError(0, "Failed to fetch"), { kind: "network", status: 0 }],
+    ["a server error", new HistoryReadError(503, "unavailable"), { kind: "server", status: 503 }],
+  ])("surfaces isError and the failure for %s", async (_label, error, failure) => {
+    fetchCellHistoryMock.mockRejectedValueOnce(error)
     const { result } = renderHook(() =>
       useCellEditHistory({
         enabled: true,
@@ -186,6 +218,7 @@ describe("useCellEditHistory (Phase 2b)", () => {
       }),
     )
     await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(result.current.failure).toEqual(failure)
     expect(result.current.history).toEqual([])
   })
 

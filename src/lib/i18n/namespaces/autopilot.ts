@@ -38,6 +38,8 @@ export const autopilot = defineNamespace({
     "autopilot.feedback.resumed": "Autopilot resumed.",
     "autopilot.feedback.newRunStarted": "A new Autopilot run started for this file.",
     "autopilot.error.startFailed": "Autopilot could not start.",
+    "autopilot.error.startThrottled":
+      "Too many Autopilot runs started. Wait a few minutes and try again.",
     "autopilot.error.authRequired": "You need to be signed in to use contextual drafting.",
     "autopilot.progress.passagesComplete": plural(
       {
@@ -50,6 +52,8 @@ export const autopilot = defineNamespace({
     "autopilot.time.checkedNever": "Not checked yet",
     "autopilot.time.checkedAt": "Checked {time}",
     "autopilot.lane.projectDefault": "Project default",
+    "autopilot.lane.label": "Language lane",
+    "autopilot.lane.selectAria": "Language lane Autopilot will draft",
     "autopilot.phase.reading": "Reading context…",
     "autopilot.phase.drafting": "Drafting…",
     "autopilot.phase.checking": "Checking…",
@@ -57,8 +61,7 @@ export const autopilot = defineNamespace({
 
     // — Discovery setting ———————————————————————————————————————————
     "autopilot.settings.experimentalTitle": "Experimental",
-    "autopilot.settings.experimentalDescription":
-      "Early features still in development. Autopilot is turned on for the whole project and everyone working on it; any other switch here stays on this device.",
+    "autopilot.settings.experimentalDescription": "Early features still in development.",
     "autopilot.settings.autopilotLabel": "Try Autopilot",
     "autopilot.settings.autopilotDescription":
       "Turns on Autopilot for this project, for everyone working on it. Until then, nothing about Autopilot appears anywhere. Turning it on does not start work: choose Run Autopilot when you are ready, and suggestions stay in review until you accept them.",
@@ -328,7 +331,7 @@ export const autopilot = defineNamespace({
     "autopilot.inspector.run.stopped": "This run was stopped.",
     "autopilot.inspector.run.failed": "This run stopped before it could finish.",
     "autopilot.inspector.run.passagesComplete": "Passages complete",
-    "autopilot.inspector.run.lane": "Language: {language}",
+    "autopilot.inspector.run.lane": "Language lane: {language}",
     "autopilot.inspector.run.updatedAt": "Updated {time}",
     "autopilot.inspector.run.calls": plural({
       one: "{count} call",
@@ -355,7 +358,8 @@ export const autopilot = defineNamespace({
 
     // — Inspector: errors, recovery, and live announcements —————————
     "autopilot.inspector.error.unsupportedLane":
-      "This run targeted a language lane Autopilot couldn’t draft at the time. Retry it on that lane.",
+      "This run targeted a language lane Autopilot couldn’t draft at the time. Retry it on that " +
+      "language lane.",
     "autopilot.inspector.error.requestAborted":
       "The model request ended before it completed. Retry when you’re ready.",
     "autopilot.inspector.error.transport":
@@ -413,6 +417,8 @@ export const autopilot = defineNamespace({
     "autopilot.inspector.event.status.queued": "Work queued",
     "autopilot.inspector.event.runStarted": "Autopilot run started",
     "autopilot.inspector.event.workQueued": "Autopilot has work queued",
+    "autopilot.inspector.event.queuedForCapacity":
+      "Autopilot is waiting for model capacity",
     "autopilot.inspector.event.running": "Autopilot is running",
     "autopilot.inspector.event.pauseRequested": "Pause requested",
     "autopilot.inspector.event.paused": "Autopilot paused",
@@ -520,8 +526,18 @@ export const autopilot = defineNamespace({
     "autopilot.inspector.context.setupNamed": "Set up {label}",
     "autopilot.inspector.context.noEvidence":
       "No context evidence was recorded for this run.",
+    // AQU-1678: the Context section renders with no run selected, so the
+    // run-scoped sentence above cannot carry the empty state on its own.
+    "autopilot.inspector.context.noProjectContext":
+      "No context has been recorded for this project yet.",
     "autopilot.inspector.context.recentBriefsOnly":
       "Only the most recent scene briefs are shown for this run.",
+    // AQU-1690: the Bible facts each span of a run used.
+    "autopilot.inspector.context.bibleFacts": "Bible facts each passage used",
+    "autopilot.inspector.context.bibleFactsNone": "No Bible facts were used in this run.",
+    "autopilot.inspector.context.bibleFactsLoading": "Loading Bible facts…",
+    "autopilot.inspector.context.bibleFactsError": "Could not load the Bible facts.",
+    "autopilot.inspector.context.bibleFactsTruncated": "Showing the first passages only.",
     "autopilot.inspector.technical.title": "Technical & evidence",
     "autopilot.inspector.technical.copyActivityLog": "Copy activity log",
     "autopilot.inspector.technical.activityLogCopied": "Activity log copied.",
@@ -534,11 +550,11 @@ export const autopilot = defineNamespace({
     "autopilot.graph.title": "Process",
     "autopilot.graph.aria": "Autopilot process graph",
     "autopilot.graph.spanHelp":
-      "Autopilot works on a short piece of text, usually 8 to 12 cells. This lets it read the text around that piece.",
+      "Autopilot works on a short piece of text, about 8 to 12 cells. This lets it read the text around that piece.",
     "autopilot.graph.spanHelpAria": "What a span is",
     "autopilot.graph.liveSpans": "Now: {spans}",
     "autopilot.graph.noLiveSpan": "Autopilot is not working on a passage now.",
-    "autopilot.graph.inspectHint": "Point to a step to see the text. Click to see more.",
+    "autopilot.graph.inspectHint": "Click a step to see what it did.",
     "autopilot.graph.decision.ambiguities": plural({
       one: "Noted {count} part of the meaning not to over-specify in {span}",
       other: "Noted {count} parts of the meaning not to over-specify in {span}",
@@ -558,6 +574,8 @@ export const autopilot = defineNamespace({
     "autopilot.graph.node.scope.role": "Find the cells that still need a translation.",
     "autopilot.graph.node.segment": "Piece",
     "autopilot.graph.node.segment.role": "Cut the next piece of text to work on.",
+    "autopilot.graph.node.bible_facts": "Bible facts",
+    "autopilot.graph.node.bible_facts.role": "Give each verse its speakers and people from Bible data.",
     "autopilot.graph.node.construe": "Situation",
     "autopilot.graph.node.construe.role":
       "Read the situation in this piece of text: who is there, and what they do.",
@@ -575,6 +593,8 @@ export const autopilot = defineNamespace({
     "autopilot.graph.node.draft.role": "Write the translation from the note.",
     "autopilot.graph.node.lint_rules": "Checks",
     "autopilot.graph.node.lint_rules.role": "Run the project checks.",
+    "autopilot.graph.node.bible_checks": "Bible checks",
+    "autopilot.graph.node.bible_checks.role": "Check quotations and questions against Bible data, and fix what fails.",
     "autopilot.graph.node.route_risk": "Review need",
     "autopilot.graph.node.route_risk.role": "Decide how much review this piece of text needs.",
     "autopilot.graph.node.verify_force": "Social function",
@@ -602,7 +622,7 @@ export const autopilot = defineNamespace({
     // — Staged proposal card: the human approval gate on agent writes ————
     "autopilot.proposal.unsupportedKind":
       "not supported yet — apply this kind in the app directly",
-    "autopilot.proposal.currentlyEmpty": "(currently empty)",
+    "autopilot.proposal.currentlyEmpty": "(empty)",
     "autopilot.proposal.newRow": "(new row)",
     "autopilot.proposal.discarded": "Discarded: {summary}",
     "autopilot.proposal.applyFailed": "Apply failed",
@@ -620,6 +640,16 @@ export const autopilot = defineNamespace({
       other: "Affects {count} later passages.",
     }),
     "autopilot.decisions.answer": "Answer",
+    "autopilot.decisions.context.loading": "Finding the passage…",
+    "autopilot.decisions.context.unavailable": "Couldn't load where this applies.",
+    "autopilot.decisions.context.openInEditor": "Open in editor",
+    "autopilot.decisions.context.showPassage": plural({
+      one: "Show {count} verse",
+      other: "Show {count} verses",
+    }),
+    "autopilot.decisions.context.hidePassage": "Hide verses",
+    "autopilot.decisions.context.showSurrounding": "Show surrounding verses",
+    "autopilot.decisions.context.untranslated": "Not translated yet",
     "autopilot.decisions.answerPlaceholder": "Your decision…",
     "autopilot.decisions.dismiss": "Not needed",
     "autopilot.decisions.assign": "Ask someone else",
@@ -640,18 +670,14 @@ export const autopilot = defineNamespace({
     "autopilot.readiness.level.missing": "Missing",
     "autopilot.readiness.terminology.label": "Key terms",
     "autopilot.readiness.terminology.none":
-      "No key terms have an approved rendering yet. Autopilot will translate them ad hoc, and each passage may word them differently.",
+      "No key terms have an approved rendering yet. Autopilot will translate them ad hoc, and each passage may use different words for them.",
     "autopilot.readiness.terminology.some": plural({
       one: "{count} key term has an approved rendering. Autopilot is told the ones that appear in each passage and must use them.",
       other: "{count} key terms have an approved rendering. Autopilot is told the ones that appear in each passage and must use them.",
     }),
-    "autopilot.readiness.brief.label": "Translation brief",
-    "autopilot.readiness.brief.none":
-      "No brief. Autopilot has to guess your audience, register, and how literal to be — the decisions that shape every sentence.",
-    "autopilot.readiness.brief.some":
-      "{count} of the brief’s questions answered. Audience, register, and literalness ride in each draft prompt.",
-    "autopilot.readiness.brief.someWithSummary":
-      "{count} of the brief’s questions answered, summarised for every passage. Audience, register, and literalness ride in each draft prompt.",
+    "autopilot.readiness.instructions.label": "Translation instructions",
+    "autopilot.readiness.instructions.none":
+      "No instructions. Autopilot has to guess your audience, register, and how literal to be — the decisions that shape every sentence.",
     "autopilot.readiness.examples.label": "Approved examples",
     "autopilot.readiness.examples.none":
       "No validated translations yet. Autopilot has no sample of your team’s voice to imitate — validate a few translations first and the drafts will sound far more like you.",
@@ -673,10 +699,10 @@ export const autopilot = defineNamespace({
     "autopilot.startGate.title": "Autopilot needs a little more to go on",
     "autopilot.startGate.languages":
       "Set the project’s source and target languages in project settings.",
-    "autopilot.startGate.brief":
-      "Answer at least one translation-brief question so Autopilot knows what this translation is for.",
+    "autopilot.startGate.instructions":
+      "Write the project instructions so Autopilot knows who this translation is for and how to translate it.",
     "autopilot.startGate.settingsLink": "Open project settings",
-    "autopilot.startGate.briefLink": "Open the translation brief",
+    "autopilot.startGate.instructionsLink": "Open the instructions",
   },
   context: {
     _context: {
@@ -684,6 +710,15 @@ export const autopilot = defineNamespace({
         "Autopilot automation controls, progress, human-review boundaries, recovery messages, and durable evidence across the project overview and translation editor.",
     },
     keys: {
+      "autopilot.lane.label": {
+        description:
+          "Inline label before the target-language lane Autopilot will draft on the project overview card. A noun phrase naming WHICH language a run would work on — it must not imply a run is under way, because the card shows it while paused and stopped too. Sits beside a short dropdown.",
+        maxLength: 24,
+      },
+      "autopilot.lane.selectAria": {
+        description:
+          "Screen-reader name for the dropdown that chooses which of the project's target-language lanes a project-wide Autopilot run will draft.",
+      },
       "autopilot.proposal.unsupportedKind": {
         description: "Explanation beside an agent event kind the current app cannot apply.",
       },
@@ -1000,17 +1035,27 @@ export const autopilot = defineNamespace({
         "Accessible name of a link that opens setup for one context-readiness item.",
         { label: "Localized name of the readiness item being configured." },
       ),
+      "autopilot.readiness.instructions.label": {
+        description:
+          "Name of one readiness row in the Autopilot activity inspector: the project's written instructions for how the AI should translate (audience, register, literalness). Every AI draft reads them.",
+        maxLength: 40,
+      },
+      "autopilot.readiness.instructions.none": {
+        description:
+          "Readiness row detail shown when the project has no written instructions. Explains what Autopilot loses without them.",
+      },
+      "autopilot.startGate.instructions": {
+        description:
+          "Reason Autopilot cannot start yet, in a list of setup gaps: the project has no written instructions for the AI. A link to the instructions editor follows.",
+      },
+      "autopilot.startGate.instructionsLink": {
+        description:
+          "Link text that opens the project's Instructions editor (Living Memory → Instructions), shown under the start-gate reason.",
+        maxLength: 40,
+      },
       "autopilot.readiness.terminology.some": withPlaceholders(
         "Readiness detail counting approved key-term renderings available to Autopilot.",
         { count: "Number of key terms with an approved rendering." },
-      ),
-      "autopilot.readiness.brief.some": withPlaceholders(
-        "Readiness detail counting answered translation-brief questions.",
-        { count: "Number of answered brief questions." },
-      ),
-      "autopilot.readiness.brief.someWithSummary": withPlaceholders(
-        "Readiness detail counting brief answers and noting a per-passage summary.",
-        { count: "Number of answered brief questions." },
       ),
       "autopilot.readiness.examples.some": withPlaceholders(
         "Readiness detail counting validated translations available as voice examples.",
@@ -1104,6 +1149,10 @@ export const autopilot = defineNamespace({
       "autopilot.inspector.review.passageDrafts": withPlaceholders(
         "Count badge on one passage group in the expanded backlog.",
         { count: "Number of staged drafts in that passage." },
+      ),
+      "autopilot.decisions.context.showPassage": withPlaceholders(
+        "Button on a question card that expands the verses the question is about.",
+        { count: "Number of verses the question is about." },
       ),
       "autopilot.decisions.blastRadius": withPlaceholders(
         "Decision-card detail giving how many later passages the answer will affect, so the question reads as worth answering rather than as generic review.",

@@ -1,7 +1,7 @@
 import { render } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
-import type { Concept } from "@/lib/terminology/types"
+import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
 import { SourceWithTermLookup } from "./EditorTable"
 
 function concept(sourceTerm: string, id = sourceTerm): Concept {
@@ -14,7 +14,7 @@ function concept(sourceTerm: string, id = sourceTerm): Concept {
   }
 }
 
-function renderSource(text: string, concepts: Concept[]) {
+function renderSource(text: string, concepts: Concept[], termMatching?: TermMatchingSettings) {
   return render(
     <I18nProvider>
       <SourceWithTermLookup
@@ -23,6 +23,7 @@ function renderSource(text: string, concepts: Concept[]) {
         ranges={[]}
         showEvidence={false}
         concepts={concepts}
+        termMatching={termMatching}
       />
     </I18nProvider>,
   )
@@ -71,6 +72,41 @@ describe("source key-term highlights", () => {
     const marks = container.querySelectorAll(".terminology-highlight")
     expect(marks).toHaveLength(1)
     expect(marks[0]).toHaveTextContent("Holy Spirit")
+  })
+
+  // AQU-1272: the popover used to compare the source text against the concept's
+  // headword STRING, so a project that had taught the matcher about prefixes and
+  // pointing got silence on exactly those occurrences.
+  it("highlights a prefixed occurrence of a pointed term with the project's affix inventory", () => {
+    const { container } = renderSource(
+      "בְּרֵאשִׁית וְהָאָ֗רֶץ הָיְתָה",
+      [concept("הָאָ֗רֶץ", "haaretz")],
+      { prefixes: ["ו", "ה", "ב", "ל"], suffixes: ["ים"] },
+    )
+
+    const marks = container.querySelectorAll(".terminology-highlight")
+    expect(marks).toHaveLength(1)
+    expect(marks[0]).toHaveTextContent("וְהָאָ֗רֶץ")
+  })
+
+  it("highlights an alternate form listed on the concept", () => {
+    const { container } = renderSource("we sought shalom", [
+      { ...concept("peace"), match: { forms: ["shalom"] } },
+    ])
+
+    const marks = container.querySelectorAll(".terminology-highlight")
+    expect(marks).toHaveLength(1)
+    expect(marks[0]).toHaveTextContent("shalom")
+  })
+
+  it("leaves an excluded surface form alone", () => {
+    const { container } = renderSource("grace in Graceland", [
+      { ...concept("grace"), match: { excludedForms: ["Graceland"] } },
+    ])
+
+    const marks = container.querySelectorAll(".terminology-highlight")
+    expect(marks).toHaveLength(1)
+    expect(marks[0]).toHaveTextContent("grace")
   })
 
   it("renders plain text when no concept matches", () => {

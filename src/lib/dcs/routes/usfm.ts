@@ -20,7 +20,7 @@ export const usfmRoute: ResourceRoute = {
   id: "usfm",
   matches: (entry, manifest) =>
     entry.contentFormat.toLowerCase() === "usfm" || isUsfmManifest(manifest),
-  parse: ({ entry, files, options }) => {
+  parse: ({ entry, projectId, files, options }) => {
     const repo = entry.fullName
     const out: DcsFile[] = []
 
@@ -64,7 +64,7 @@ export const usfmRoute: ResourceRoute = {
       }
 
       out.push({
-        fileId: dcsFileId(repo, path),
+        fileId: dcsFileId(projectId, repo, path),
         name: bookCode ? `${bookCode} (${path})` : path,
         sourcePath: path,
         ...(bookCode !== undefined ? { bookCode } : {}),

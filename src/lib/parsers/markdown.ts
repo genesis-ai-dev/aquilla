@@ -1,8 +1,14 @@
 import { v4 as uuid } from "uuid"
-import type { TranslatableString, CellType } from "./core-types"
+import type { CellUnit, TranslatableString, CellType } from "./core-types"
 import { splitIntoSegments } from "./text-splitter"
 
-export function extractMarkdownStrings(content: string): TranslatableString[] {
+export function extractMarkdownStrings(
+  content: string,
+  options?: { cellUnit?: CellUnit },
+): TranslatableString[] {
+  // AQU-1720: see extractPlaintextStrings — "paragraph" emits one cell per
+  // block (heading, list item, paragraph) with no sentence split or length cap.
+  const cellUnit = options?.cellUnit ?? "sentence"
   const lines = content.split("\n")
   const results: TranslatableString[] = []
   let paragraphLines: string[] = []
@@ -22,7 +28,7 @@ export function extractMarkdownStrings(content: string): TranslatableString[] {
   ) {
     const plain = stripMarkdownInline(rawText)
     const html = markdownInlineToHtml(rawText)
-    const segments = splitIntoSegments(plain)
+    const segments = splitIntoSegments(plain, undefined, cellUnit)
 
     for (let i = 0; i < segments.length; i++) {
       const seg = segments[i]

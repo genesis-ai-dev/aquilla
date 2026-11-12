@@ -1,6 +1,7 @@
 import { v4 as uuid } from "uuid"
 import type { TranslatableString } from "./core-types"
 import type { ExportCellFields } from "./core-types"
+import { placeholderMetadata } from "./placeholders"
 
 /** Java .properties importer/exporter.
  *
@@ -111,6 +112,8 @@ export function extractPropertiesStrings(content: string): TranslatableString[] 
     if (line.kind !== "pair") continue
     const value = decodeEscapes(line.rawValue)
     if (value === "") continue // skip empty values
+    // AQU-2386: protected placeholder tokens of this value, if any.
+    const placeholders = placeholderMetadata(value)
     results.push({
       id: uuid(),
       original: value,
@@ -118,6 +121,7 @@ export function extractPropertiesStrings(content: string): TranslatableString[] 
       context: line.key,
       group: line.key,
       type: "text",
+      ...(placeholders ? { metadata: { placeholders } } : {}),
     })
   }
   return results

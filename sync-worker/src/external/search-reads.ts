@@ -23,6 +23,7 @@
 import type { SyncTokenClaims } from "../auth"
 import { makeVerifiedProjectId, queryScopedSearch } from "../events/scoped-search"
 import type { SearchResultOut } from "../events/scoped-search"
+import { visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import { externalError } from "./errors"
 import { paginate, parsePageParams } from "./pagination"
 import {
@@ -76,7 +77,17 @@ async function runOneProjectSearch(
   projectId: string,
   parsed: ParsedSearchQuery,
   fetchLimit: number,
+  laneReadWall: string | undefined,
 ): Promise<SearchResultOut[]> {
+  // Lane read wall: a PAT inherits its owner's lane grants.
+  const { visible } = await visibleTagsForMember(
+    db,
+    laneReadWall,
+    projectId,
+    Number(ctx.credential.userId),
+    ctx.role,
+  )
+  const laneIds = visible === null ? null : [...visible]
   const claims: SyncTokenClaims = {
     userId: Number(ctx.credential.userId),
     projectId,
@@ -89,6 +100,7 @@ async function runOneProjectSearch(
   return queryScopedSearch(db, makeVerifiedProjectId(claims), parsed.q, {
     side: parsed.side,
     limit: fetchLimit,
+    laneIds,
   })
 }
 
@@ -115,7 +127,7 @@ export async function handleExternalSearch(
   if (!authed.ok) return authed.response
 
   if (env.AQUILLA_PG) {
-    const limited = await checkSearchRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    const limited = await checkSearchRateLimit(env.AQUILLA_PG, authed.ctx.credential)
     if (limited) return limited
   }
 
@@ -137,6 +149,7 @@ export async function handleExternalSearch(
       projectId,
       parsed,
       fetchLimit,
+      env.LANE_READ_WALL,
     )
     return Response.json(paginate(results, offset, limit))
   } catch (err) {
@@ -198,7 +211,7 @@ export async function handleExternalCrossProjectSearch(
   // Charged per project searched — see checkSearchRateLimit's `cost`.
   const limited = await checkSearchRateLimit(
     env.AQUILLA_PG,
-    authed.credential.credentialId,
+    authed.credential,
     projectIds.length,
   )
   if (limited) return limited
@@ -226,6 +239,7 @@ export async function handleExternalCrossProjectSearch(
         projectId,
         parsed,
         fetchLimit,
+        env.LANE_READ_WALL,
       )
       for (const r of results) merged.push({ ...r, projectId })
     } catch (err) {

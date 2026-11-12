@@ -243,11 +243,81 @@ describe("SetupChecklistDrawer — AQU-334 role-aware read-only rows", () => {
     expect(nestedOverlay).toBeTruthy()
     expect(nestedOverlay).not.toHaveAttribute("hidden")
   })
+})
 
-  it("Coming Soon rows remain inactive teasers regardless of role (unaffected by this change)", () => {
-    renderDrawer(ROLE.CONTRIBUTOR)
-    expect(screen.getByText("Upload project standards")).toBeInTheDocument()
-    expect(screen.getByText("Import terminology / translation memory")).toBeInTheDocument()
-    expect(screen.getAllByText("Coming soon").length).toBe(2)
+describe("SetupChecklistDrawer — standards and terminology steps", () => {
+  // Both features ship (Living Memory standards, terminology import), so the
+  // checklist must route there instead of advertising them as "Coming soon".
+  // Like step 1, the detour must not go through onOpenChange: the workspace
+  // treats that as a dismissal and would end the setup flow.
+  it("links to the standards pane and the terminology view without dismissing", () => {
+    const onOpenChange = vi.fn()
+    const onNavigate = vi.fn()
+    render(
+      <SetupChecklistDrawer
+        open
+        onOpenChange={onOpenChange}
+        project={makeProject()}
+        roleLevel={ROLE.OWNER}
+        state={EMPTY_STATE}
+        onProjectUpdated={() => {}}
+        onSharesChanged={() => {}}
+        onDismiss={() => {}}
+        onNavigate={onNavigate}
+      />,
+      { wrapper },
+    )
+
+    expect(screen.queryByText(/coming soon/i)).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: /open standards/i }))
+    fireEvent.click(screen.getByRole("button", { name: /open terminology/i }))
+
+    expect(onNavigate.mock.calls).toEqual([
+      ["/project/proj-1/memory/checks"],
+      ["/project/proj-1/terminology"],
+    ])
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-2342: the instructions have ONE editor (Living Memory → Instructions);
+// the setup step previews them and opens that editor rather than editing the
+// retired system prompt.
+describe("SetupChecklistDrawer — instructions step", () => {
+  function renderWithNavigate(project: ProjectRecord) {
+    const onNavigate = vi.fn()
+    const onOpenChange = vi.fn()
+    render(
+      <SetupChecklistDrawer
+        open
+        onOpenChange={onOpenChange}
+        project={project}
+        roleLevel={ROLE.OWNER}
+        state={EMPTY_STATE}
+        onProjectUpdated={() => {}}
+        onSharesChanged={() => {}}
+        onDismiss={() => {}}
+        onNavigate={onNavigate}
+      />,
+      { wrapper },
+    )
+    expandStep("Set translation instructions")
+    return { onNavigate, onOpenChange }
+  }
+
+  it("opens Living Memory → Instructions without dismissing setup", () => {
+    const { onNavigate, onOpenChange } = renderWithNavigate(makeProject())
+
+    expect(screen.queryByRole("textbox")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Open instructions" }))
+    expect(onNavigate).toHaveBeenCalledWith("/project/proj-1/memory/instructions")
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
+
+  it("previews the project's resolved instructions", () => {
+    renderWithNavigate({ ...makeProject(), translationInstructions: "Plain register for youth." })
+
+    expect(screen.getByText("Plain register for youth.")).toBeInTheDocument()
   })
 })

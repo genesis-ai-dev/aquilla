@@ -48,7 +48,7 @@
 import { Fragment, type ReactNode } from "react"
 import { useI18n } from "./I18nProvider"
 import { DEFAULT_LOCALE } from "./locales"
-import { CATALOGS } from "./messages"
+import { catalogFor } from "./messages"
 import type { MessageKey } from "./messages/en"
 import { interpolate, selectTemplate, type TVars } from "./translate"
 
@@ -113,7 +113,7 @@ export function RichMessage({
     count === undefined || "count" in nodeValues ? textVars : { count, ...textVars }
   // Same catalog choice the provider's t() makes; RichMessage needs the
   // uninterpolated template, which t() cannot hand back.
-  const catalog = CATALOGS[locale] ?? CATALOGS[DEFAULT_LOCALE]
+  const catalog = catalogFor(locale) ?? catalogFor(DEFAULT_LOCALE)
   const resolved = interpolate(selectTemplate(catalog, k, scalars, locale), interpolationVars)
   const nodes = renderRichMessage(resolved, nodeValues)
   return (

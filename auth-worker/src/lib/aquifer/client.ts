@@ -22,10 +22,17 @@
 // Design: docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
 
 import type { Env } from "../../types"
+import {
+  logVendorTimeout,
+  vendorTimeoutMessage,
+  VENDOR_TIMEOUT_MS,
+} from "../../../../shared/vendor-timeouts"
 
 const DEFAULT_BASE_URL = "https://bibletranslation.org"
 const DEFAULT_USER_AGENT = "Aquilla/1.0 (+https://aquilla.app)"
-const TIMEOUT_MS = 5_000
+/** AQU-1849: lives in `shared/vendor-timeouts.ts` with every other vendor
+ *  deadline — a translator is waiting on the Search dock, so it is short. */
+const TIMEOUT_MS = VENDOR_TIMEOUT_MS.aquifer
 /** Defensive ceiling even when a caller omits max_chars (≈ 200 KB). */
 const MAX_RESPONSE_BYTES = 200_000
 const DEFAULT_SEARCH_LIMIT = 5
@@ -148,7 +155,11 @@ async function fetchText(
     return { ok: true, data: { text, contentType } }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    return { ok: false, error: controller.signal.aborted ? "aquifer request timed out" : msg }
+    if (controller.signal.aborted) {
+      logVendorTimeout("aquifer", err)
+      return { ok: false, error: vendorTimeoutMessage("aquifer") }
+    }
+    return { ok: false, error: msg }
   } finally {
     clearTimeout(timer)
   }

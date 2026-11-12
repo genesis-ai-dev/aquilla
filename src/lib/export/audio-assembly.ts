@@ -3,19 +3,36 @@
  * entries for a chosen EgressAudioMode. Pure orchestration over injected
  * fetch/decode (Web Audio is browser-only; tests pass fakes), mirroring the
  * audio-by-character DI seam.
+ *
+ * Memory discipline (AQU-1862). An hour of audio is ~690 MB as 48 kHz Float32
+ * and ~345 MB as the PCM16 that actually gets written, so no mode may hold a
+ * whole file's audio — let alone a whole-file stem per voice — as typed arrays
+ * on the heap. Three rules keep peak heap at roughly one clip:
+ *
+ *  1. A decoded clip is quantised to PCM16 and handed to blob storage as soon
+ *     as it exists; the Float32 is released immediately.
+ *  2. The fetch/decode dedupe cache is ref-counted against the number of cells
+ *     sharing the clip, and drops the entry once the last one has had it.
+ *  3. Concatenations and timeline stems are assembled as lists of blob parts
+ *     (silence included, in reusable chunks), never as one big array.
+ *
+ * `peakPcmBytes` on the result reports what the run actually retained, so the
+ * bound is asserted in tests and recordable in the browser (see memMark).
  */
 
+import { applyClipLevelPcm, hasClipLevel } from "@/lib/export/clip-level"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
-import type { EgressAudioMode } from "@/lib/egress/types"
+import type { EgressAudioFormat, EgressAudioMode } from "@/lib/egress/types"
 import { resolveCastVoice } from "@/lib/audio/voices"
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
-import { encodeWavPcm16 } from "@/lib/audio/wav-encode"
+import { encodeWavPcm16Blobs, toPcm16, WAV_HEADER_BYTES } from "@/lib/audio/wav-encode"
 import { TARGET_RATE } from "@/lib/audio/decode-mono"
 import { audioMimeForExt } from "@/lib/audio/mime"
 import { characterKey } from "@/lib/export/audio-by-character"
-import { concatPcm } from "@/lib/audio/decode-mono"
+import { defaultTrackTakeId, isSilencedForExport } from "@/lib/export/audio-validation-scope"
+import { bookLineParts } from "@/lib/export/book-line-parts"
 
 export type AudioAssemblyMode = Exclude<EgressAudioMode, "none">
 
@@ -27,6 +44,10 @@ export interface AudioAssemblyArgs {
   fileSlug: string
   langCode: string
   mode: AudioAssemblyMode
+  /** AQU-1575: "separate-clips" only. "wav" writes every clip as 16-bit /
+   *  48 kHz / mono WAV instead of passing stored bytes through. Absent ⇒
+   *  "original". */
+  audioFormat?: EgressAudioFormat
   /** Fetch raw bytes for one clip (cache-first in production). */
   fetchBytes: (args: {
     projectId: string
@@ -44,6 +65,11 @@ export interface AudioAssemblyResult {
   /** Entry names are relative — the engine prefixes project/lane/file dirs. */
   entries: { name: string; data: Blob }[]
   skipped: { cellId: string; reason: string }[]
+  /** Peak decoded-audio bytes this run retained on the JS heap (AQU-1862).
+   *  Bounded by the clips in flight, never by the file's total length — the
+   *  memory-bound tests assert that, and build-project-export marks it so a
+   *  QA run can record the number. */
+  peakPcmBytes: number
 }
 
 /** Slice a clip's non-destructive trim window (AQU-646) out of decoded PCM.
@@ -67,11 +93,19 @@ export function applyTrimPcm(
 
 // ─── Timeline (voice-timeline mode) ──────────────────────────────────────────
 
+/** Silence is emitted in chunks of this many PCM16 samples (~5.5 s at 48 kHz,
+ *  512 KiB) from ONE reusable buffer. A stem is mostly silence — the other
+ *  voices' spans — and zero-filling it in one allocation is exactly the
+ *  full-length array this mode used to crash on. */
+export const SILENCE_CHUNK_SAMPLES = 1 << 18
+
 export interface TimelineClip {
   cellId: string
   voiceId: string
-  /** Post-trim PCM at TARGET_RATE. */
-  pcm: Float32Array
+  /** Post-trim PCM16 bytes at TARGET_RATE, already in blob storage. */
+  data: Blob
+  /** Sample count — `data.size / 2`, carried so offset maths needs no reads. */
+  samples: number
 }
 
 export interface TimelinePlacement extends TimelineClip {
@@ -86,25 +120,48 @@ export interface Timeline {
 
 /** Cumulative document-order offsets: every clip occupies its own span on ONE
  *  shared timeline, so per-voice stems line up sample-for-sample in a DAW. */
-export function buildTimeline(clips: TimelineClip[]): Timeline {
+export function buildTimeline(clips: readonly TimelineClip[]): Timeline {
   const placements: TimelinePlacement[] = []
   let offset = 0
   for (const clip of clips) {
     placements.push({ ...clip, offset })
-    offset += clip.pcm.length
+    offset += clip.samples
   }
   return { totalSamples: offset, placements }
 }
 
-/** One voice's stem: its clips at their offsets, zero-filled silence while
- *  other voices speak. Every stem is totalSamples long — identical length
- *  across voices, which is what makes the tracks droppable as a set. */
-export function writeTimelineTrack(timeline: Timeline, voiceId: string): Float32Array {
-  const track = new Float32Array(timeline.totalSamples)
-  for (const p of timeline.placements) {
-    if (p.voiceId === voiceId) track.set(p.pcm, p.offset)
+/** Append `samples` worth of silence to `parts`, in SILENCE_CHUNK_SAMPLES
+ *  slices cut from one buffer (the Blob constructor copies, so reuse is safe). */
+function pushSilence(parts: Blob[], samples: number): void {
+  if (samples <= 0) return
+  const zeros = new Int16Array(Math.min(samples, SILENCE_CHUNK_SAMPLES))
+  let left = samples
+  while (left > 0) {
+    const n = Math.min(left, zeros.length)
+    parts.push(new Blob([n === zeros.length ? zeros : zeros.subarray(0, n)]))
+    left -= n
   }
-  return track
+}
+
+/**
+ * One voice's stem as PCM16 blob parts: its clips at their offsets, zero-filled
+ * silence while other voices speak. The parts total `totalSamples` samples for
+ * every voice — identical length across voices is what makes the tracks
+ * droppable as a set — while the heap only ever holds one silence chunk.
+ */
+export function writeTimelineTrackParts(timeline: Timeline, voiceId: string): Blob[] {
+  const parts: Blob[] = []
+  let written = 0
+  for (const p of timeline.placements) {
+    if (p.voiceId !== voiceId || p.samples === 0) continue
+    pushSilence(parts, p.offset - written)
+    parts.push(p.data)
+    written = p.offset + p.samples
+  }
+  // Padded even when the voice placed nothing: a stem is totalSamples long for
+  // every voice on the timeline, silence included.
+  pushSilence(parts, timeline.totalSamples - written)
+  return parts
 }
 
 // ─── Orchestrator ────────────────────────────────────────────────────────────
@@ -122,6 +179,48 @@ interface ResolvedClip {
   clipKey: string
   voice: Voice
   trimmed: boolean
+  /**
+   * AQU-1758 (Sam, Oct 29): on a book, the line as playback lays it out — a
+   * pause someone dragged open before the take as silence, then each piece of
+   * a cut take with the silence between them. Only for the modes that join
+   * takes end to end; absent when the line is just its take.
+   */
+  parts?: LinePart[]
+}
+
+type LinePart = { silenceSamples: number } | { piece: ResolvedClip }
+
+/**
+ * AQU-1758: a book's line as playback lays it out, as parts of `clip` — or
+ * null when the line is just its take (or its layout is not known), and the
+ * take is joined as it always was.
+ */
+function linePartsFor(clip: ResolvedClip): LinePart[] | null {
+  const layout = bookLineParts(clip.cell, clip.attachedId)
+  if (!layout || (layout.length === 1 && layout[0].kind === "take")) return null
+  const parts: LinePart[] = []
+  for (const part of layout) {
+    if (part.kind === "silence") {
+      parts.push({ silenceSamples: Math.round((part.ms / 1000) * TARGET_RATE) })
+      continue
+    }
+    const attachment = clip.cell.attachments?.[part.attachmentId]
+    const parsed = attachment?.url ? parseFrontierAudioUrl(attachment.url) : null
+    if (!attachment || !parsed) return null
+    parts.push({
+      piece: {
+        ...clip,
+        attachment,
+        attachedId: part.attachmentId,
+        audioId: parsed.audioId,
+        ext: parsed.ext,
+        clipKey: `${parsed.audioId}.${parsed.ext}`,
+        // A take at its own volume or fades is re-encoded like a trimmed one.
+        trimmed: (attachment.trimStartMs ?? 0) > 0 || attachment.trimEndMs != null || hasClipLevel(attachment),
+      },
+    })
+  }
+  return parts
 }
 
 export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<AudioAssemblyResult> {
@@ -129,14 +228,26 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
   const skipped: AudioAssemblyResult["skipped"] = []
 
   // Clip selection mirrors audio-by-character: recording slot first, then the
-  // generated-voice slot. Cells without usable audio are recorded, never
-  // silently dropped — the manifest is the transparency contract.
+  // generated-voice slot — and AQU-2148's guard that the slot's selected take
+  // is still there, so a removed recording falls through to the voice that
+  // sounds instead of being manifested as "no audio". Cells without usable
+  // audio are recorded, never silently dropped — the manifest is the
+  // transparency contract.
   const resolved: ResolvedClip[] = []
   args.cells.forEach((cell, docIndex) => {
-    const attachedId = cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId
+    const attachedId = defaultTrackTakeId(cell)
     const attachment = attachedId ? cell.attachments?.[attachedId] : undefined
     if (!attachedId || !attachment?.url) {
       skipped.push({ cellId: cell.id, reason: "no audio" })
+      return
+    }
+    // AQU-965: validated-only withdrew this take. Leaving it out of `resolved`
+    // IS silence in place — every clip is laid on a silent track at its own
+    // timeline second, so the line falls quiet and nothing else moves — and
+    // the manifest says so rather than losing it, which is the transparency
+    // contract this list exists for.
+    if (isSilencedForExport(attachment)) {
+      skipped.push({ cellId: cell.id, reason: "no validated take" })
       return
     }
     const parsed = parseFrontierAudioUrl(attachment.url)
@@ -144,7 +255,7 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
       skipped.push({ cellId: cell.id, reason: "unsupported audio URL (legacy clip)" })
       return
     }
-    resolved.push({
+    const clip: ResolvedClip = {
       cell,
       docIndex,
       attachment,
@@ -152,13 +263,23 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
       audioId: parsed.audioId,
       ext: parsed.ext,
       clipKey: `${parsed.audioId}.${parsed.ext}`,
-      voice: resolveCastVoice(args.settings, cell.id, cell.ttsSettings?.voiceId),
-      trimmed: (attachment.trimStartMs ?? 0) > 0 || attachment.trimEndMs != null,
-    })
+      voice: resolveCastVoice(args.settings, cell, cell.ttsSettings?.voiceId),
+      trimmed: (attachment.trimStartMs ?? 0) > 0 || attachment.trimEndMs != null || hasClipLevel(attachment),
+    }
+    // AQU-1758: the modes that join takes end to end lay a book's line out as
+    // playback does. Separate clips are one file per take, as before.
+    const parts = args.mode === "separate-clips" ? null : linePartsFor(clip)
+    resolved.push(parts ? { ...clip, parts } : clip)
   })
 
+  // Every use of a clip is counted, so the decode cache drops it after its last
+  // (AQU-1862) — each piece of a cut take is a use of its recording.
   const shareCount = new Map<string, number>()
-  for (const c of resolved) shareCount.set(c.clipKey, (shareCount.get(c.clipKey) ?? 0) + 1)
+  for (const c of resolved) {
+    for (const use of c.parts ? c.parts.flatMap((p) => ("piece" in p ? [p.piece] : [])) : [c]) {
+      shareCount.set(use.clipKey, (shareCount.get(use.clipKey) ?? 0) + 1)
+    }
+  }
 
   const total = resolved.length
   let done = 0
@@ -194,27 +315,108 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
     return { bytes, ext: clip.ext }
   }
 
+  // Retained decoded-audio accounting (AQU-1862). Every decoded array this run
+  // is still holding is counted here, so the bound is a number the tests and a
+  // QA walk can read rather than a claim in a comment.
+  let livePcmBytes = 0
+  let peakPcmBytes = 0
+  const retain = (bytes: number): void => {
+    livePcmBytes += bytes
+    if (livePcmBytes > peakPcmBytes) peakPcmBytes = livePcmBytes
+  }
+  const release = (bytes: number): void => {
+    livePcmBytes -= bytes
+  }
+
   // One fetch+decode per unique clip — a combined generation is attached to
   // every cell it covers under the same id. Failures stay cached too, so the
   // per-cell retries don't hammer the worker.
-  const pcmByClip = new Map<string, Promise<Float32Array | null>>()
+  //
+  // The cache is ref-counted against the cells sharing the clip and dropped
+  // after the last of them: a clip held until the end of the file would mean
+  // the whole file's audio resident at once, which is the crash in AQU-1862.
+  interface CachedClip {
+    pcm: Promise<Float32Array | null>
+    remaining: number
+  }
+  const pcmByClip = new Map<string, CachedClip>()
   const decodeClip = (clip: ResolvedClip): Promise<Float32Array | null> => {
-    let promise = pcmByClip.get(clip.clipKey)
-    if (!promise) {
-      promise = fetchClipBytes(clip).then(({ bytes }) => (bytes.length > 0 ? args.decode(bytes) : null))
-      pcmByClip.set(clip.clipKey, promise)
+    let cached = pcmByClip.get(clip.clipKey)
+    if (!cached) {
+      cached = {
+        pcm: fetchClipBytes(clip)
+          .then(({ bytes }) => (bytes.length > 0 ? args.decode(bytes) : null))
+          .then((pcm) => {
+            if (pcm) retain(pcm.length * 4)
+            return pcm
+          }),
+        remaining: shareCount.get(clip.clipKey) ?? 1,
+      }
+      pcmByClip.set(clip.clipKey, cached)
     }
-    return promise
+    return cached.pcm
+  }
+  /** Last consumer of a clip drops it, so the decoded array can be collected.
+   *  Failed decodes stay cached (and cost nothing) until then. */
+  const consumed = (clip: ResolvedClip, pcm: Float32Array | null): void => {
+    const cached = pcmByClip.get(clip.clipKey)
+    if (!cached) return
+    cached.remaining--
+    if (cached.remaining > 0) return
+    pcmByClip.delete(clip.clipKey)
+    if (pcm) release(pcm.length * 4)
   }
 
-  /** Decoded, trim-applied PCM for one cell's clip; null already recorded a skip. */
-  const decodeTrimmed = async (clip: ResolvedClip): Promise<Float32Array | null> => {
+  /** One cell's post-trim audio as PCM16 in blob storage, with the decoded
+   *  Float32 released on the way out; null already recorded a skip. */
+  const pcm16PartFor = async (clip: ResolvedClip): Promise<{ data: Blob; samples: number } | null> => {
     const pcm = await decodeClip(clip)
     if (!pcm) {
       skipped.push({ cellId: clip.cell.id, reason: "empty audio clip" })
+      consumed(clip, pcm)
       return null
     }
-    return applyTrimPcm(pcm, TARGET_RATE, clip.attachment.trimStartMs, clip.attachment.trimEndMs)
+    // AQU-2327: the kept part at its volume and fades, as the timeline plays it.
+    const trimmed = applyClipLevelPcm(applyTrimPcm(pcm, TARGET_RATE, clip.attachment.trimStartMs, clip.attachment.trimEndMs), TARGET_RATE, clip.attachment)
+    // Quantise, hand the bytes to blob storage, drop both arrays: from here on
+    // the clip costs the heap nothing, whatever the mode does with it.
+    const quantised = toPcm16(trimmed)
+    retain(quantised.byteLength)
+    const data = new Blob([quantised])
+    release(quantised.byteLength)
+    consumed(clip, pcm)
+    return { data, samples: quantised.length }
+  }
+
+  /** A line's audio as one PCM16 part: a book's line laid out as playback lays
+   *  it out (its silences, then its pieces), else its take alone. Every piece
+   *  is read, so each releases its share of the cache; null when one fails. */
+  const linePartFor = async (clip: ResolvedClip): Promise<{ data: Blob; samples: number } | null> => {
+    if (!clip.parts) return pcm16PartFor(clip)
+    const blobs: Blob[] = []
+    let samples = 0
+    let readable = true
+    for (const part of clip.parts) {
+      if ("silenceSamples" in part) {
+        pushSilence(blobs, part.silenceSamples)
+        samples += part.silenceSamples
+        continue
+      }
+      const audio = await pcm16PartFor(part.piece)
+      if (!audio) {
+        readable = false
+        continue
+      }
+      if (isSilencedForExport(part.piece.attachment)) {
+        // AQU-965: a piece withdrawn for want of validation is silence of its
+        // own length, so the rest of the line stays where it was.
+        pushSilence(blobs, audio.samples)
+      } else {
+        blobs.push(audio.data)
+      }
+      samples += audio.samples
+    }
+    return readable ? { data: new Blob(blobs), samples } : null
   }
 
   const failReason = (err: unknown): string =>
@@ -227,6 +429,8 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
     usedNames.set(base, seen + 1)
     return seen === 0 ? `${base}.${ext}` : `${base}_${seen + 1}.${ext}`
   }
+  /** Finish one WAV entry from PCM16 parts already in blob storage. */
+  const wav = (parts: readonly Blob[]): Blob => encodeWavPcm16Blobs(parts, TARGET_RATE)
 
   if (args.mode === "separate-clips") {
     for (const clip of resolved) {
@@ -237,56 +441,64 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
         // decode/re-encode. Trimmed or shared clips are sliced per cell
         // (combined-voice clips attach untrimmed to many cells; a naive copy
         // would emit the full multi-minute clip N times).
-        if (!clip.trimmed && (shareCount.get(clip.clipKey) ?? 0) <= 1) {
+        // AQU-1575: asked for WAV, nothing passes through. A stored clip may be
+        // a 24 kHz or 22.05 kHz WAV or compressed webm, and the decode path is
+        // what makes every entry 16-bit / 48 kHz / mono.
+        const passThrough =
+          args.audioFormat !== "wav" && !clip.trimmed && (shareCount.get(clip.clipKey) ?? 0) <= 1
+        if (passThrough) {
           const { bytes, ext } = await fetchClipBytes(clip)
           if (bytes.length === 0) skipped.push({ cellId: clip.cell.id, reason: "empty audio clip" })
           else entries.push({ name: claimName(base, ext), data: new Blob([bytes as BlobPart], { type: audioMimeForExt(ext) }) })
         } else {
-          const pcm = await decodeTrimmed(clip)
-          if (pcm) entries.push({ name: claimName(base, "wav"), data: encodeWavPcm16(pcm, TARGET_RATE) })
+          const part = await pcm16PartFor(clip)
+          if (part) entries.push({ name: claimName(base, "wav"), data: wav([part.data]) })
         }
       } catch (err) {
         skipped.push({ cellId: clip.cell.id, reason: failReason(err) })
       }
       step()
     }
-    return { entries, skipped }
+    return { entries, skipped, peakPcmBytes }
   }
 
   if (args.mode === "file-clip") {
-    const pcms: Float32Array[] = []
+    // Parts, not one growing array: the concatenation of a whole file's audio
+    // exists in blob storage and never as a Float32Array (AQU-1862).
+    const parts: Blob[] = []
     for (const clip of resolved) {
       throwIfAborted()
       try {
-        const pcm = await decodeTrimmed(clip)
-        if (pcm) pcms.push(pcm)
+        const part = await linePartFor(clip)
+        if (part) parts.push(part.data)
       } catch (err) {
         skipped.push({ cellId: clip.cell.id, reason: failReason(err) })
       }
       step()
     }
-    const all = concatPcm(pcms)
-    if (all.length > 0) {
-      entries.push({ name: claimName(`${args.fileSlug}_all`, "wav"), data: encodeWavPcm16(all, TARGET_RATE) })
+    const blob = wav(parts)
+    if (blob.size > WAV_HEADER_BYTES) {
+      entries.push({ name: claimName(`${args.fileSlug}_all`, "wav"), data: blob })
     }
-    return { entries, skipped }
+    return { entries, skipped, peakPcmBytes }
   }
 
-  // voice-clips / voice-timeline: decode everything in document order first,
-  // keeping first-appearance voice order for stable entry ordering.
+  // voice-clips / voice-timeline: walk every clip in document order first,
+  // keeping first-appearance voice order for stable entry ordering. Each clip
+  // is in blob storage by the time the next one is fetched.
   const voiceOrder: string[] = []
   const voiceById = new Map<string, Voice>()
-  const decoded: { clip: ResolvedClip; pcm: Float32Array }[] = []
+  const placed: TimelineClip[] = []
   for (const clip of resolved) {
     throwIfAborted()
     try {
-      const pcm = await decodeTrimmed(clip)
-      if (pcm) {
+      const part = await linePartFor(clip)
+      if (part) {
         if (!voiceById.has(clip.voice.id)) {
           voiceById.set(clip.voice.id, clip.voice)
           voiceOrder.push(clip.voice.id)
         }
-        decoded.push({ clip, pcm })
+        placed.push({ cellId: clip.cell.id, voiceId: clip.voice.id, data: part.data, samples: part.samples })
       }
     } catch (err) {
       skipped.push({ cellId: clip.cell.id, reason: failReason(err) })
@@ -296,27 +508,23 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
 
   if (args.mode === "voice-clips") {
     for (const voiceId of voiceOrder) {
-      const pcm = concatPcm(decoded.filter((d) => d.clip.voice.id === voiceId).map((d) => d.pcm))
-      if (pcm.length === 0) continue // voice ended up with no decodable audio
-      entries.push({
-        name: claimName(characterKey(voiceById.get(voiceId)!.name), "wav"),
-        data: encodeWavPcm16(pcm, TARGET_RATE),
-      })
+      const parts = placed.filter((c) => c.voiceId === voiceId).map((c) => c.data)
+      const blob = wav(parts)
+      if (blob.size === WAV_HEADER_BYTES) continue // voice ended up with no decodable audio
+      entries.push({ name: claimName(characterKey(voiceById.get(voiceId)!.name), "wav"), data: blob })
     }
-    return { entries, skipped }
+    return { entries, skipped, peakPcmBytes }
   }
 
   // voice-timeline: one shared timeline, one equal-length stem per voice.
-  const timeline = buildTimeline(
-    decoded.map((d) => ({ cellId: d.clip.cell.id, voiceId: d.clip.voice.id, pcm: d.pcm })),
-  )
+  const timeline = buildTimeline(placed)
   if (timeline.totalSamples > 0) {
     for (const voiceId of voiceOrder) {
       entries.push({
         name: claimName(`${characterKey(voiceById.get(voiceId)!.name)}_timeline`, "wav"),
-        data: encodeWavPcm16(writeTimelineTrack(timeline, voiceId), TARGET_RATE),
+        data: wav(writeTimelineTrackParts(timeline, voiceId)),
       })
     }
   }
-  return { entries, skipped }
+  return { entries, skipped, peakPcmBytes }
 }

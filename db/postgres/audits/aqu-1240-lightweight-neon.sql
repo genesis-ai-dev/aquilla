@@ -24,9 +24,9 @@ SET lock_timeout      = '2s';
 WITH s AS (
     SELECT
         ps.project_id,
-        NULLIF(BTRIM(ps.target_language), '')                        AS tag,
-        COALESCE(jsonb_array_length(ps.target_lanes), 0)             AS n_lanes,
-        COALESCE(ps.target_lanes, '[]'::jsonb)                       AS lanes_json,
+        NULLIF(BTRIM((ps.settings::jsonb)->>'targetLanguage'), '')   AS tag,
+        COALESCE(jsonb_array_length((ps.settings::jsonb)->'targetLanes'), 0) AS n_lanes,
+        COALESCE((ps.settings::jsonb)->'targetLanes', '[]'::jsonb)   AS lanes_json,
         COALESCE((ps.settings::jsonb)->'archivedLanes', '[]'::jsonb) AS archived_json
     FROM project_settings ps
 ),

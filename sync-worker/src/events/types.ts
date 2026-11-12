@@ -26,6 +26,8 @@ export type TermRenderingStatusPayload = 'preferred' | 'admitted' | 'forbidden'
 export interface TermRenderingPayload {
   rendering: string
   status: TermRenderingStatusPayload
+  /** `lanes.id`. Absent means the project's `legacy_tag === ''` lane. */
+  laneId?: string
 }
 
 /** Mirrors `Concept['status']` in src/lib/terminology/types.ts. */
@@ -37,6 +39,11 @@ export interface TermMatchOptionsPayload {
   affixes?: boolean
   forms?: string[]
   excludedForms?: string[]
+}
+
+/** Mirrors `ConceptExternalIds` in src/lib/terminology/model.ts (AQU-1693). */
+export interface ConceptExternalIdsPayload {
+  acai?: string
 }
 
 export type EventKind =
@@ -52,6 +59,18 @@ export type EventKind =
   // cells.event_id (the AD-9 staleness comparison depends on the source head
   // moving only when content changes) and replays unconditionally on rebuild.
   | 'source.cell.reanchor'
+  // AQU-1422: park (or un-park) one cell. Non-chain-mutating and reversible —
+  // moves ONLY cells.hidden_at on the shared source row. Deliberately NOT a
+  // reuse of source.cell.delete, which hard-deletes the projection row: the
+  // whole point is that the source text, every lane's translation, recordings,
+  // comments and validations survive and come back on show. Hiding is per CELL,
+  // not per lane, which is why one source-side kind covers every language.
+  | 'source.cell.visibility.set'
+  // AQU-1767 phase 2: put back a cell a `source.cell.delete` removed — its
+  // rows, translations, validations, takes, links and comments — from the
+  // archive that delete's projection wrote. Non-chain-mutating (the row does
+  // not exist, so there is no head to extend); the undo of "Remove row".
+  | 'source.cell.restore'
   // Target-side cell events (translator).
   | 'target.cell.create'
   | 'target.cell.commit'
@@ -75,7 +94,12 @@ export type EventKind =
   // timings, a duration heal) wiped them: "no opinion" and "cleared" were both
   // expressed as an absent field. See the payload doc below.
   | 'cell.audio.trim'
+  // AQU-2327: a take's volume and fades — data on the clip, like the trim.
+  | 'cell.audio.gain'
   | 'cell.audio.place'
+  // AQU-1767: cut one dub piece in two at a point in its own audio. Both
+  // pieces share the bytes, stay on the same row, and start unvalidated.
+  | 'cell.audio.cut'
   // Backfill a measured duration onto a take that predates duration capture.
   // Fills only a NULL duration_ms — never selects, never touches url/slot/
   // trims (a re-attach would re-select the clip and plain-assign trims).
@@ -96,6 +120,7 @@ export type EventKind =
   // Restore a soft-deleted file (project_lead+). Non-chain-mutating — clears
   // `files.deleted_at`. Cells and audio remain intact throughout.
   | 'file.restore'
+  | 'file.revision'
   // Comments (non-chain-mutating; contributor-level).
   | 'comment.create'
   | 'comment.edit'
@@ -123,6 +148,10 @@ export type EventKind =
   // Back-translations (non-chain-mutating; contributor-level).
   // Does NOT move cells.event_id; does NOT affect validations or endorsements.
   | 'cell.backtranslation.set'
+  // AQU-1408 §1: a hand-corrected statistical gloss. Its own kind rather than
+  // a flag on the BT event because the two are different readings of the same
+  // commit and must both be addressable — see db/postgres/migrations/0184_cell_glosses.sql.
+  | 'cell.gloss.set'
   // Assignments (project-level, non-chain-mutating; project-lead+). Carry a
   // fileId on the envelope for auth/routing like comments, but their scope is
   // project-level — resolved into assignment_cells from the payload.
@@ -139,6 +168,11 @@ export type EventKind =
   // cells.event_id). Writes cast_name into cells.metadata JSONB without touching
   // target text. Contributor-level — a PM/project-lead labels cells for voice actors.
   | 'cast.assign'
+  // AQU-2408: a hand-typed label on a cell. Non-chain-mutating (does NOT move
+  // cells.event_id). Writes `cellLabel` into the SOURCE row's metadata JSONB
+  // without touching text. Metadata, never a speaker or a voice — see
+  // docs/decisions/0007-cell-labels-are-metadata-never-cast.md.
+  | 'cell.label.set'
   // Timeline editor: retime a cell (move/stretch). Non-chain-mutating — updates
   // start_ms/end_ms on both the source and target rows without moving cells.event_id.
   | 'cell.retime'
@@ -155,6 +189,12 @@ export type EventKind =
   // Non-chain-mutating; contributor-level — same class as file.rename (label
   // cleanup), not track structure. Null clears the file back to Ungrouped.
   | 'file.corpus.set'
+  | 'file.extension.set'
+  // AQU-1569: the file's hand-placed position within its sidebar group,
+  // stored in files.meta JSON. Non-chain-mutating; project-lead floor — it
+  // relayouts the sidebar for every member, the file.video.set rationale.
+  // Null clears it back to the automatic name-derived order.
+  | 'file.reorder'
   // Stage 1 (first-class timeline tracks): one track's presentation overrides
   // — rename, reorder, group, or the whole record of a user-added track —
   // stored in files.meta JSON under `trackOverrides`. Non-chain-mutating;
@@ -164,6 +204,18 @@ export type EventKind =
   // emits this kind until stage 3 puts renaming and adding tracks in the UI.
   // Shipping the pipeline first means stage 3 is a UI change, not a migration.
   | 'file.track.set'
+  // AQU-2308: a hand-set milestone — a named start->end range of cells in one
+  // file — upserted by id, and removed by id. File-scoped and
+  // NON-CHAIN-MUTATING by construction: no parentId, and the projection
+  // touches only `file_milestones`, never a cell row. That is what makes
+  // setting a division cost nothing: no lane's translation goes stale, no
+  // cell's head advances, no source-changed marker appears anywhere.
+  //
+  // Maintainer floor, for the file.track.set reason rather than the
+  // file.rename one: a division relayouts the navigator for every
+  // collaborator who opens the file.
+  | 'file.milestone.set'
+  | 'file.milestone.remove'
   // Stage 4: one edge between a SUBTITLE cell and an AUDIO CUE, the two cue
   // lists an episode ships with. Many-to-many — a sentence the subtitles keep
   // whole may be performed as two heard lines, and one heard line may cover
@@ -174,6 +226,12 @@ export type EventKind =
   // that only by hand. Deliberately never recomputed: recomputing would
   // silently undo every manual correction on the next import.
   | 'cell.link.set'
+  // AQU-777: per-cell file attachments (screenshots / reference images).
+  // Non-chain-mutating; contributor-level. The bytes are PUT to R2 (see
+  // sync-worker/src/cell-attachments.ts) BEFORE the event is emitted, so a
+  // projected row always points at an object that exists.
+  | 'cell.attachment.add'
+  | 'cell.attachment.remove'
   // AQU-476: live source links — mirror engine. Server-emitted only (the
   // mirror sync engine in link-sync.ts; never a client outbox kind). Mirror
   // events replicate an ordering the UPSTREAM already arbitrated, so they
@@ -215,8 +273,10 @@ export interface AiDraftProvenance {
   provider: string
   promptVersion: string
   exampleIds: string[]
+  /** Source/target of examples placed in the prompt (#946 reload). */
+  exampleTexts?: Array<{ cellId: string; source: string; target: string }>
   generatedAt: number
-  mode: 'single' | 'batch' | 'paragraph' | 'agent' | 'read'
+  mode: 'single' | 'batch' | 'paragraph' | 'agent' | 'read' | 'align-styles'
   projectState: {
     sourceLanguage: string
     targetLanguage: string
@@ -225,6 +285,19 @@ export interface AiDraftProvenance {
     evidenceWeight?: number
   }
 }
+
+/** AQU-1673: where an imported proposal's text came from. Stamped on the
+ *  `target.cell.commit` a staged import compiles to (see `imported_origin`). */
+export interface ImportedOriginProvenance {
+  /** Display name of the uploaded file the value was read out of. */
+  fileName: string
+  /** Epoch ms at which the import was staged. */
+  importedAt: number
+}
+
+/** Longest `fileName` accepted on import provenance. Generous enough for real
+ *  upload names, bounded so provenance can never carry a payload. */
+export const IMPORTED_ORIGIN_FILENAME_MAX = 256
 
 // Payload shape per event kind. Using an interface (not Record) so that
 // EventPayloads[K] gives type-safe lookups without `as` casts.
@@ -249,6 +322,8 @@ export interface EventPayloads {
   'source.cell.commit': {
     value?: string
     valueHtml?: string
+    /** Aquilla Tools: an extension's source edit (verified server-side). */
+    tool_origin?: { origin: 'tool'; toolId: string; version: number; codeHash: string }
     /** AQU-847 / AQU-646: corrected source text for a MEDIA section. An
      *  imported media cell's `value` is the import filename, so the user's
      *  edit lands here — the field `effectiveSourceText` (and therefore export
@@ -256,7 +331,11 @@ export interface EventPayloads {
      *  still advances, so targets go stale. */
     transcription?: string
   }
-  'source.cell.delete': Record<string, never>
+  'source.cell.delete': {
+    /** Slice 13: the undo of "make rows from a recording" names the line's
+     *  creating event (recording-line-authority.ts). */
+    undoOfEventId?: string
+  }
   'source.cell.reorder': {
     anchorCellId: string | null
   }
@@ -274,6 +353,24 @@ export interface EventPayloads {
     /** Optional canonical current target HTML; text/history stay untouched. */
     targetHtml?: string
   }
+  'source.cell.visibility.set': {
+    /** true parks the cell (stamps hidden_at), false brings it back (NULL). */
+    hidden: boolean
+  }
+  /**
+   * AQU-1767 phase 2: undo a removal. Restores the cell from
+   * `removed_cell_archive` — the state the removal took, as it was — and only
+   * while no live source row exists for it. `deleteEventId` names the removal
+   * to undo; absent, the cell's newest unrestored removal is used (a removal
+   * the outbox had to re-send under a new id is still found).
+   *
+   * Takes, links and comments come back only where the removal itself took
+   * them and nobody has changed them since. The removal's chain claim is
+   * released, so the restored cell's head can move again.
+   */
+  'source.cell.restore': {
+    deleteEventId?: string
+  }
 
   // ── Target-side ────────────────────────────────────────────────────────
   //
@@ -285,6 +382,14 @@ export interface EventPayloads {
   // non-default lanes (see chain-claims.ts laneQualifiedParentKey): two
   // lanes' first commits both chain on the same source head and must not
   // compete for one slot. Source-side rows/events never carry a lane.
+  //
+  // AQU-1612: a payload that names a lane MAY also carry `laneId`, the lane
+  // row's globally unique id. Writers stamp both — `targetLang` is a frozen
+  // event key that replay, the row key and the chain slot are still built
+  // from, so it never goes away. One resolver reads them
+  // (src/lib/lanes/event-lane.ts): the id wins where the lane rows are in
+  // hand, the tag is the fallback, and an event whose two forms name
+  // different lanes is REFUSED at the perimeter rather than arbitrated twice.
   'target.cell.create': {
     cellId: string
     anchorCellId?: string | null
@@ -300,12 +405,16 @@ export interface EventPayloads {
     cameraState?: string
     /** AQU-538: target-language lane. Absent/'' = default lane. */
     targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
   }
   'target.cell.commit': {
     value: string
     valueHtml?: string
     /** AQU-538: target-language lane. Absent/'' = default lane. */
     targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
     /**
      * UUIDv7 of the source row's `event_id` as observed by the editor at
      * commit time. Stored on `cells.source_event_id` and used for AD-9
@@ -339,11 +448,41 @@ export interface EventPayloads {
      */
     undo_of_agent_run_id?: string
     /**
+     * AQU-1391 / repetition provenance: the cell whose validation propagated
+     * this text to a repeated source segment. Stored verbatim and read back by
+     * the client's history view; the perimeter neither requires nor enforces
+     * it — propagation is an ordinary target commit that already passed the
+     * contributor floor, and the tag only records where the text came from.
+     */
+    propagated_from_cell_id?: string
+    /**
      * AQU-186 / harmonization: when present, tags this commit as a harmonize
      * sweep event (cell.commit.harmonize variant per AD-2). The route layer
      * uses this field to enforce harmonize_min_role and to trigger the AD-14
      * endorsement-revocation cascade. Only set by the harmonize sweep path.
      */
+    /**
+     * Aquilla Tools (prototype): the tool that made this write. Caller-declared;
+     * the sync-worker verifies it against project_tool_versions and stamps the
+     * trusted envelope into events.provenance (events/tool-provenance.ts).
+     */
+    tool_origin?: { origin: 'tool'; toolId: string; version: number; codeHash: string }
+    /** Aquilla Tools: set on the compensating events "revert since T" emits. */
+    revert_of_tool?: { toolId: string; sinceMs: number }
+    /**
+     * AQU-1673 / import provenance: set when this commit came from a
+     * translation set the user brought in as PROPOSALS (through the changeset
+     * approval gate) instead of the direct-commit importer. It records WHERE
+     * the text came from so a reviewer can tell an imported proposal from an
+     * AI draft (which carries `ai_suggestion` + `ai_draft`) and from a
+     * hand-typed edit (which carries neither).
+     *
+     * Deliberately NOT paired with `ai_suggestion`: imported text is somebody
+     * else's human translation, so the cell must not read back as an AI draft.
+     * Purely descriptive — it gates nothing and shifts no role floor, which is
+     * why (unlike `ai_draft`) the caller may set it.
+     */
+    imported_origin?: ImportedOriginProvenance
     harmonize_origin?: {
       /** Stable id of the built-in check or custom rule that drove the sweep. */
       rule_or_check_id: string
@@ -356,11 +495,15 @@ export interface EventPayloads {
   'target.cell.delete': {
     /** AQU-538: target-language lane whose row is deleted. Absent/'' = default lane. */
     targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
   }
   'target.cell.reorder': {
     anchorCellId: string | null
     /** AQU-538: target-language lane. Absent/'' = default lane. */
     targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
   }
 
   // ── Validation ─────────────────────────────────────────────────────────
@@ -368,16 +511,26 @@ export interface EventPayloads {
     /** The target.cell.commit / target.cell.create event being validated. */
     editEventId: string
     /**
+     * Aquilla Tools (prototype): the tool that made this write. Caller-declared;
+     * the sync-worker verifies it against project_tool_versions and stamps the
+     * trusted envelope into events.provenance (events/tool-provenance.ts).
+     */
+    tool_origin?: { origin: 'tool'; toolId: string; version: number; codeHash: string }
+    /**
      * AQU-538: target-language lane of the validated commit. Absent/'' =
      * default lane — same convention as target.cell.commit. A user's standing
      * validation is per-lane: validating the same cell in two lanes yields two
      * cell_validators rows.
      */
     targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
   }
   'cell.unvalidate': {
     /** The target commit event whose validation is being withdrawn. */
     editEventId: string
+    /** Aquilla Tools: the tool that withdrew this validation (provenance, apiRev 2). */
+    tool_origin?: { origin: 'tool'; toolId: string; version: number; codeHash: string }
     /**
      * When a maintainer is removing another user's validation, set this to
      * the username of the validator whose row should be deleted. If omitted
@@ -391,20 +544,46 @@ export interface EventPayloads {
      * default lane — same convention as target.cell.commit.
      */
     targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
   }
 
   // ── QA rule waivers ────────────────────────────────────────────────────
-  // `waive` dismisses a single QA rule infraction on a cell; `unwaive`
-  // restores it. Keyed by `ruleId` (one row per (cell, rule)). The DELETE-on-
-  // unwaive shape mirrors validators: a row exists iff the rule is waived.
+  // `waive` dismisses a QA rule finding on a cell; `unwaive` restores it.
+  // Keyed by (cell, rule, matchHash) — one row per waived finding, or one row
+  // with an empty hash for a rule-wide waiver. The DELETE-on-unwaive shape
+  // mirrors validators: a row exists iff that finding is waived.
   'cell.waive': {
     /** Stable id of the QA rule whose infraction is being dismissed. */
     ruleId: string
+    /**
+     * AQU-1740: hash of the matched text identifying ONE finding of this rule
+     * on this cell (`spanMatchHash`, src/lib/rules/match-hash.ts). Omitted
+     * waives the rule across the cell — the only shape that existed before
+     * AQU-1740, and what every stored row predating it means. The projection
+     * stores the absent case as `''` so it fits the primary key.
+     */
+    matchHash?: string
     /** Optional human-entered justification. */
     reason?: string
+    /**
+     * AQU-1462: the lane the member was working in. Omitted for the default
+     * lane and for a shared write. The waiver row itself is not per-lane;
+     * the tag exists so an archived lane can refuse the write.
+     */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
   }
   'cell.unwaive': {
     ruleId: string
+    /** AQU-1740: see `cell.waive`. The DELETE is key-exact, so omitting this
+     *  lifts the rule-wide waiver and leaves per-finding ones standing. */
+    matchHash?: string
+    /** AQU-1462: see `cell.waive`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
   }
 
   // ── Cell audio ─────────────────────────────────────────────────────────
@@ -414,6 +593,10 @@ export interface EventPayloads {
   'cell.audio.attach': {
     audioId: string
     url: string
+    /** Immutable legacy history: insert unselected; leave an existing take untouched. */
+    historyOnly?: boolean
+    /** Audited missing-row repair; retain the original attach's creation time. */
+    restoreProjectionOf?: string
     /** Open string (AQU-646): extra target tracks use the track id as the slot. */
     slot: string
     mimeType?: string
@@ -454,17 +637,64 @@ export interface EventPayloads {
      * source.cell.create UPSERT clobbering segment fields.
      */
     transcription?: string
+    /**
+     * Two-step transcription (migration 0186): what ASR heard, before learned
+     * corrections. Sent only by the transcription path; a correction never
+     * sends it and the projection keeps the stored value.
+     */
+    asr?: { text: string; model: string }
+    /**
+     * Provenance of an AI cleanup of this clip's transcript. An attach that
+     * carries new `timings` (or `transcription`) without it clears the stored
+     * value: the transcript is no longer the AI's.
+     */
+    transcriptAi?: { model: string; at: number; changes: number }
+    /**
+     * AQU-2327: a version saved from the Station (or made by its Remove noise):
+     * which kinds of change it holds, each once ('deleted', 'inserted',
+     * 'noise'), and the cells it went on. Read back from the event log by the
+     * Station's History ("Version 2 saved: a part deleted · used on line
+     * 331"); the projection ignores it — nothing about the row depends on it.
+     */
+    versionChanges?: { kinds: Array<'deleted' | 'inserted' | 'noise'>; usedOn: string[]; over?: boolean }
+    /** AQU-1462: lane the member was working in. Omitted when the clip is shared. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+    /**
+     * AQU-1767 (Sam, 2026-10-14): this clip is born a PIECE of the take
+     * `pieceOf` (the group's root) — how "Remove noise" on a split take keeps
+     * its cuts: the cleaned root is attached first, then each other piece
+     * naming it. Fill-only, like `created_by`: a routine re-attach never names
+     * a group, and cannot move a take into or out of one. The attach's
+     * deselect spares this group, so attaching a piece never unselects its
+     * siblings.
+     */
+    pieceOf?: string
   }
   'cell.audio.select': {
-    audioId: string
+    /** The take to select — or null to leave the slot with NOTHING selected
+     *  (2026-09-28). A line plays its recording-slot take whenever there is
+     *  one, so switching a line with no imported source clip to its generated
+     *  voice has to empty the recording slot, and there is no source clip to
+     *  park it on instead. */
+    audioId: string | null
     /** Open string (AQU-646): extra target tracks use the track id as the slot. */
     slot: string
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
   }
   // AQU-646 round 8: rename a take — label only, deliberately NOT a
   // re-attach (which would also re-select the clip). null clears.
   'cell.audio.rename': {
     audioId: string
     label: string | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
   }
   /**
    * The clip's COMPLETE playback trim window — both ends, always stated, with
@@ -477,6 +707,26 @@ export interface EventPayloads {
     audioId: string
     trimStartMs: number | null
     trimEndMs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
+  /**
+   * AQU-2327: the clip's COMPLETE level settings — its volume in dB and its
+   * fades in ms — always all three stated, null meaning none (0 dB, no fade),
+   * for the reason `cell.audio.trim` states both ends. Like a trim they never
+   * change the recording, set nothing else, and keep the take's approvals.
+   */
+  'cell.audio.gain': {
+    audioId: string
+    gainDb: number | null
+    fadeInMs: number | null
+    fadeOutMs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
   }
   /**
    * AQU-646 stage 3: where THIS take sits against the line it performs, as an
@@ -498,7 +748,53 @@ export interface EventPayloads {
    */
   'cell.audio.place': {
     audioId: string
+    /** Its place FOLLOWING THE SOURCE (`cell_audio.target_offset_ms`). */
     targetOffsetMs: number | null
+    /**
+     * AQU-2267: its place FOLLOWING THE RECORDINGS, measured the same way from
+     * its line's start in that layout (`cell_audio.recordings_offset_ms`). A
+     * move adds the same distance to both numbers, each held by its own
+     * timing's limits, and states both here — so one event, one undo step.
+     *
+     * `null` and ABSENT mean the same thing: no place of its own there, so the
+     * recordings timing reads `targetOffsetMs` as it always has. Absent is what
+     * an older client sends, and the one place it gave is then the take's
+     * place in both timings, exactly as before this field existed.
+     */
+    recordingsOffsetMs?: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
+  /**
+   * AQU-1767 phase 1: CUT a dub piece in two, at `atMs` — a position in the
+   * clip's OWN audio (the same domain as the trim window), not in the file.
+   *
+   * The projection copies the piece into a new row `newAudioId` over the SAME
+   * bytes (same url), windowed `[atMs, old end]`, and shortens the original to
+   * `[old start, atMs]`. Both stay on this row and in this slot, both stay
+   * selected exactly as the original was, and BOTH START UNVALIDATED (Sam,
+   * 2026-10-12: cutting changes what a reviewer heard). The new row's
+   * `piece_of` names the group's root, so selection treats the pieces as one.
+   *
+   * Refused (a no-op) unless the piece is live, a dub (`role = 'dub'`), has a
+   * known end, and `atMs` lies at least CUT_MIN_PIECE_MS inside its window.
+   * `newAudioId` is minted by the client so the step can be undone (remove it)
+   * and a replay lands on the same row (ON CONFLICT DO NOTHING).
+   */
+  'cell.audio.cut': {
+    audioId: string
+    atMs: number
+    newAudioId: string
+    /** The new (second) piece's permanent name. Absent = the original's. */
+    newLabel?: string
+    /** Optional rename of the first piece in the same step ("Take 3 · 1"). */
+    firstLabel?: string
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
   }
   /**
    * Stage 4: link or unlink ONE subtitle cell and ONE audio cue.
@@ -535,9 +831,17 @@ export interface EventPayloads {
   'cell.audio.measure': {
     audioId: string
     durationMs: number
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
   }
   'cell.audio.remove': {
     audioId: string
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
   }
   // AQU-490 (was AQU-508): one reviewer's vote on ONE take. A cell counts as
   // audio-validated when every SELECTED, live dub take on it has at least the
@@ -547,9 +851,17 @@ export interface EventPayloads {
   // stamped on the row, so changing it reprojects nothing.
   'cell.audio.validate': {
     audioId: string
+    /** AQU-1462: see `cell.audio.attach`. The vote itself stays shared. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
   }
   'cell.audio.unvalidate': {
     audioId: string
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
     /**
      * AQU-490: whose vote to remove. Absent — and it always is, unless a
      * maintainer is clearing up after somebody — means the caller's own. The
@@ -557,6 +869,24 @@ export interface EventPayloads {
      * as it is for the text-side `cell.unvalidate`.
      */
     targetUsername?: string
+  }
+  // AQU-777: attach a file (primarily a screenshot) to a cell. The envelope
+  // carries fileId + cellId; everything else the projection needs to render a
+  // link without fetching the bytes rides here.
+  'cell.attachment.add': {
+    /** Client-generated uuidv7; the projection's key within the project. */
+    attachmentId: string
+    /** R2 object name inside the cell's file scope ("<attachmentId>.<ext>"). */
+    objectName: string
+    /** The user-visible file name, as picked. */
+    name: string
+    mimeType?: string
+    sizeBytes?: number
+  }
+  // Soft-delete, as comment.delete does it: the row survives with deleted_at
+  // stamped so a removal replays from the log.
+  'cell.attachment.remove': {
+    attachmentId: string
   }
 
   // ── File lifecycle ─────────────────────────────────────────────────────
@@ -596,6 +926,13 @@ export interface EventPayloads {
      * exactly. Normal genesis imports omit it.
      */
     projectionMeta?: Record<string, unknown>
+    /**
+     * Smart Extensions apiRev 7: what an extension records about the file —
+     * kind (normal/reference/data), tags, group, owner tool and its own small
+     * meta. Validated by shared/tools/file-extension.ts and stored in
+     * files.meta.extension.
+     */
+    extension?: unknown
   }
   // Rename a file's display label. Non-chain-mutating; parentId omitted.
   'file.rename': {
@@ -607,12 +944,42 @@ export interface EventPayloads {
   'file.corpus.set': {
     corpusMarker: string | null
   }
+  // Smart Extensions apiRev 7: replace files.meta.extension (kind, tags, group,
+  // owner, meta). Null clears it. Project-lead floor, like file.create.
+  'file.extension.set': {
+    extension: unknown
+  }
+  // AQU-1569: hand-placed position within the corpus group, stored in
+  // files.meta.sortIndex. Deliberately fractional — placing a file between two
+  // neighbours is the midpoint of their indices, so two leads moving two
+  // different files write two different rows and neither loses. Null clears.
+  'file.reorder': {
+    sortIndex: number | null
+  }
   // Soft-delete a file. Non-chain-mutating; parentId omitted.
   // Stamps `files.deleted_at`; cells and audio are retained (R2 wipe deferred).
   'file.delete': Record<string, never>
   // Restore a soft-deleted file. Non-chain-mutating; parentId omitted.
   // Clears `files.deleted_at`. All cells and audio remain intact.
   'file.restore': Record<string, never>
+  // AQU-2459: one revision of the file's source side — one parse of one
+  // artifact, aligned against the previous revision (decision 0008). The unit
+  // list lives in the R2 manifest; this payload is the index row. Written only
+  // by the revisions route (events/revisions-route.ts), never by a client, so
+  // dispatch refuses it on POST /events. Non-chain-mutating; parentId omitted.
+  'file.revision': {
+    revisionN: number
+    parentRevisionN: number | null
+    artifactSha256: string
+    /** `<filterId>@<walk>` — db/shared/file-revision.ts::parseFilterStamp. */
+    stamp: string
+    optionsHash: string
+    manifestR2Key: string
+    unitCount: number
+    counts: { equal: number; changed: number; moved: number; inserted: number; deleted: number }
+    /** import | reimport | adopt | drive | git | dcs | langquest */
+    origin: string
+  }
 
   // ── Comments (non-chain-mutating) ──────────────────────────────────────
   'comment.create': {
@@ -656,6 +1023,8 @@ export interface EventPayloads {
     notes?: string
     caseSensitive?: boolean
     match?: TermMatchOptionsPayload
+    /** AQU-1693: the Bible entity the concept names. */
+    externalIds?: ConceptExternalIdsPayload
   }
   // Partial patch. Only the keys present are written — absent keys keep their
   // projected value, so two people editing DIFFERENT fields of the same
@@ -668,6 +1037,8 @@ export interface EventPayloads {
     notes?: string
     caseSensitive?: boolean
     match?: TermMatchOptionsPayload
+    /** AQU-1693: replaces the links wholesale when present; `{}` unlinks. */
+    externalIds?: ConceptExternalIdsPayload
   }
   'term.delete': {
     conceptId: string // soft-delete: stamps deleted_at
@@ -694,6 +1065,27 @@ export interface EventPayloads {
     targetEventId: string
     /** true = LLM-polished BT; false = statistical-only. */
     polished: boolean
+    /** AQU-1462: lane whose translation this back-translation describes. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
+
+  // ── Statistical gloss (non-chain-mutating) ─────────────────────────────
+  // AQU-1408 §1. The gloss is computed from the project's own translated
+  // pairs; this event carries the text a contributor PUT IN ITS PLACE. There
+  // is no `polished` flag: every row here is a human correction by
+  // construction, which is also why §2 can seed the glosser from it without
+  // asking who wrote it. An empty `glossText` clears the correction and falls
+  // the cell back to the computed gloss.
+  'cell.gloss.set': {
+    glossText: string
+    /** The target.cell.commit / target.cell.create event_id this gloss reads. */
+    targetEventId: string
+    /** Lane whose translation this gloss reads (legacy_tag; '' is the default). */
+    targetLang?: string
+    /** The lane row's id, when the caller has it. Must name the same lane as `targetLang`. */
+    laneId?: string
   }
 
   // ── Assignments (project-level, non-chain-mutating) ─────────────────────
@@ -703,13 +1095,15 @@ export interface EventPayloads {
   'assignment.create': {
     /** Client-generated id (ulid/uuid) — the assignment's stable key. */
     assignmentId: string
-    scopeKind: 'books' | 'chapters'
+    scopeKind: 'books' | 'chapters' | 'cells'
     /**
      * One entry per assigned unit. `chapter` present for 'chapters'
      * (e.g. { fileId, chapter: "GEN 1" } -> canonical_ref LIKE "GEN 1:%");
-     * fileId-only for 'books' (all source cells in the file).
+     * `cellIds` present for 'cells' (AQU-1628: exactly those source cells, the
+     * ids the editor selects by); fileId-only for 'books' (all source cells in
+     * the file).
      */
-    scope: { fileId: string; chapter?: string }[]
+    scope: { fileId: string; chapter?: string; cellIds?: string[] }[]
     /** Human-readable label for the assigned scope, e.g. "Genesis 1-3". */
     scopeLabel: string
     /** Frontier user id of the assignee. */
@@ -720,10 +1114,19 @@ export interface EventPayloads {
      * Stored on assignments.target_lang; omitted on the wire when ''.
      */
     targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
     /** Optional ISO date string deadline. */
     deadline?: string | null
     /** Optional instruction note. */
     note?: string | null
+    /**
+     * AQU-1969: what the assignment hands out. Absent = 'translate', the only
+     * kind before this field existed, so every older event replays unchanged.
+     * 'validate' gives the assignee only the approving; its progress counts
+     * their own approvals in the scope.
+     */
+    kind?: 'translate' | 'validate'
   }
   'assignment.reassign': {
     assignmentId: string
@@ -734,6 +1137,8 @@ export interface EventPayloads {
      * only changes the assignee. Present (including '') = set the lane.
      */
     targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
   }
   'assignment.unassign': {
     assignmentId: string
@@ -788,6 +1193,15 @@ export interface EventPayloads {
     lineNumber?: string | null
   }
 
+  // AQU-2408: a hand-typed label on a cell (docs/decisions/0007). Stored as
+  // cells.metadata.cellLabel on the SOURCE row — the key legacy Codex notebooks
+  // already carry — so scoped search and the editor's corner label read both
+  // the same way. Null removes the key. Never cast_name, never a voice.
+  'cell.label.set': {
+    /** The label to show on the cell. Null (or blank) removes it. */
+    label: string | null
+  }
+
   // ── Timeline editor (non-chain-mutating) ────────────────────────────────
   // Retime a cell (move/stretch). cellId rides on the envelope; the projection
   // updates start_ms/end_ms on both the source and target rows.
@@ -807,6 +1221,10 @@ export interface EventPayloads {
     // — still projected so historical events replay, never written any more.
     targetOffsetMs?: number | null
     targetStartMs?: number | null
+    /** AQU-1462: lane this presentation timing belongs to. Omitted when shared. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
   }
   // Set/clear a file's core video URL (timeline preview master clock), stored
   // in files.meta JSON; null clears it. File-level.
@@ -847,7 +1265,35 @@ export interface EventPayloads {
       groupId?: string | null
       color?: string | null
       sourceTrackId?: string | null
+      contentFileId?: string | null
+      /** AQU-2252: false makes an added track a layer (its takes set no line's
+       *  length while the file follows its recordings); null clears it. */
+      setsLineLengths?: boolean | null
     } | null
+  }
+
+  // AQU-2308: upsert one hand-set milestone by id. The covered cells are NOT
+  // in the payload — only the two anchors are, and the navigator resolves the
+  // run between them from the file's live cell order, so a cell inserted
+  // inside the range is covered without a second write.
+  //
+  // The handler refuses a blank or whitespace-only name and an over-long one
+  // (db/shared/file-milestones.ts owns that rule, shared with the dialog so
+  // the two cannot disagree). It does NOT check for overlaps or for crossing a
+  // file-supplied division: those need the file's derived divisions, which live
+  // in the client, so the dialog refuses them and the derivation resolves any
+  // that reach the store anyway (earliest start wins).
+  'file.milestone.set': {
+    milestoneId: string
+    name: string
+    startCellId: string
+    endCellId: string
+  }
+  // AQU-2308: drop one hand-set milestone by id. Idempotent — removing one
+  // that is already gone is a no-op, not an error, so a retried outbox entry
+  // never wedges.
+  'file.milestone.remove': {
+    milestoneId: string
   }
 
   // ── AQU-476: live source links — mirror engine (server-emitted) ────────
@@ -869,17 +1315,44 @@ export interface EventPayloads {
     cameraState?: string
     medium?: string
     metadata?: Record<string, unknown>
+    /**
+     * AQU-1453: the upstream cell's visibility, mirrored so a downstream starts
+     * from the curated source rather than from every cell the upstream lead
+     * parked. Present ONLY when the sync's delta window actually contained a
+     * `source.cell.visibility.set` for this cell — absent means "this mirror
+     * says nothing about visibility" and the downstream's own `hidden_at` is
+     * left as it is, which is what keeps an ordinary text mirror from
+     * un-parking a cell as a side effect.
+     */
+    hidden?: boolean
     /** True = the upstream deleted this cell. Tombstone (stamp
      *  cells.tombstoned_at), never delete the downstream row. */
     deleted?: true
+    /**
+     * AQU-1679: this mirror JOINS a cell the project already had to the
+     * upstream cell named in `upstream.cellId` (link-adopt.ts) — the "replace
+     * the source in my existing file" choice. It carries the upstream's text
+     * like any content mirror, and applies regardless of the row's
+     * `upstream_seq`: the row may hold a seq from an earlier link to a
+     * different upstream, which says nothing about this one.
+     */
+    adopt?: true
     /** Provenance: which upstream event/state this mirror reflects. */
     upstream: {
       projectId: string
+      /**
+       * The upstream's cell. The event's own `cellId` nearly always equals it;
+       * on a file the project already had (AQU-1679) it does not, and the
+       * projection records this one in `cells.upstream_cell_id`.
+       */
       cellId: string
       eventId: string
       /** The upstream event's server_seq — the monotonic apply-guard key. */
       seq: number
       side: 'source' | 'target'
+      /** Upstream lane the text was copied from (`lanes.id`). Provenance only:
+       *  the downstream row is that project's own source lane. */
+      laneId?: string
       contentHash: string
     }
   }
@@ -890,6 +1363,14 @@ export interface EventPayloads {
     /** Passed through to files.meta (JSON) — same shape as file.create's
      *  language/orderedBy fields, merged rather than replacing wholesale. */
     meta?: Record<string, unknown>
+    /** AQU-2345: the upstream file's type columns, so the copy reads as what
+     *  it was imported as (the read side derives `fileType` as
+     *  `kind ?? role ?? 'codex'`). Absent on events mirrored before this
+     *  slice; the projection fills a NULL column from these and never
+     *  overwrites one that is set. */
+    role?: string | null
+    kind?: string | null
+    bookCode?: string | null
     upstream: {
       projectId: string
       eventId: string

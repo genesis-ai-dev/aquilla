@@ -2,6 +2,19 @@ import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { BUILTIN_CHECKS } from "@/lib/lqa/builtin-registry"
+import { isBibleCheckId } from "../../../db/shared/bible-checks/types"
+import { bibleCheckInfraction, type BibleCellCheckInput } from "./bible-check-rules"
+
+/**
+ * AQU-1688: per-cell inputs for checks that need more than the cell's own
+ * text and source. Each field is about THIS cell only, so a keystroke in one
+ * cell still never re-evaluates another. A missing field means the checks
+ * that need it produce nothing for this cell.
+ */
+export interface CellCheckContext {
+  /** Pack facts and the Language profile for the Bible data checks. */
+  bible?: BibleCellCheckInput
+}
 
 // Compiled-regex cache. Rule patterns are stable across cells and across
 // calls; without this the hot keystroke path recompiles every pattern for
@@ -32,38 +45,16 @@ export function rulesForLane(
 }
 
 /**
- * Distinct lanes currently holding at least one lane-scoped rule, in
- * first-appearance order. Drives the Rules-surface lane filter: a project can
- * carry 150+ target lanes, so the filter lists only lanes that actually have
- * rules (an archived lane with a leftover rule still shows, on purpose).
+ * AQU-1509: a rule's scope relative to the lane being viewed — `"all"` applies
+ * in every lane, `"this"` only in `lane`, `"other"` only in some other lane
+ * (so it is NOT enforced in `lane`). Must agree with `rulesForLane`: a rule is
+ * `"other"` exactly when that filter drops it.
  */
-export function lanesWithRules(rules: TranslationRule[]): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const r of rules) {
-    if (r.scope !== "lane") continue
-    const lane = r.lane ?? ""
-    if (seen.has(lane)) continue
-    seen.add(lane)
-    out.push(lane)
-  }
-  return out
-}
+export type RuleLaneScope = "all" | "this" | "other"
 
-/**
- * Apply the Rules-surface lane filter. `"all"` = every rule, `"project"` =
- * only rules that apply in every lane, `"lane:<tag>"` = only that lane's
- * rules (`"lane:"` = the default lane). Display-only — evaluation filtering
- * is `rulesForLane` above.
- */
-export function filterRulesForDisplay(
-  rules: TranslationRule[],
-  filter: string,
-): TranslationRule[] {
-  if (filter === "all") return rules
-  if (filter === "project") return rules.filter((r) => r.scope !== "lane")
-  const lane = filter.slice("lane:".length)
-  return rules.filter((r) => r.scope === "lane" && (r.lane ?? "") === lane)
+export function ruleLaneScope(rule: TranslationRule, lane: string): RuleLaneScope {
+  if (rule.scope !== "lane") return "all"
+  return (rule.lane ?? "") === lane ? "this" : "other"
 }
 
 export function checkRules(
@@ -91,11 +82,14 @@ export function checkRules(
  * keystroke in X never requires re-evaluating rules on any Y.
  *
  * Pass pre-filtered `enabledRules` to avoid re-filtering on every call.
+ * `context` carries this cell's extra inputs (AQU-1688); omit it and the
+ * checks that need it stay silent.
  */
 export function checkRulesForCell(
   cell: CellData,
   fileId: string,
   enabledRules: TranslationRule[],
+  context?: CellCheckContext,
 ): RuleInfraction[] {
   if (enabledRules.length === 0) return []
   const out: RuleInfraction[] = []
@@ -110,7 +104,7 @@ export function checkRulesForCell(
     // the caller has to make the distinction — a dub with no text was being
     // reported as a MAJOR infraction on work that is finished.
     if (rule.check.checkId === "empty-target" && cell.hasOwnTake) continue
-    const infraction = checkRule(rule, cell, fileId)
+    const infraction = checkRule(rule, cell, fileId, context)
     if (infraction) out.push(infraction)
   }
 
@@ -123,13 +117,18 @@ export function checkRulesForCell(
       const def = BUILTIN_CHECKS[rule.check.checkId]
       if (def?.runsOnEmptyTarget) continue
     }
-    const infraction = checkRule(rule, cell, fileId)
+    const infraction = checkRule(rule, cell, fileId, context)
     if (infraction) out.push(infraction)
   }
   return out
 }
 
-function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleInfraction | null {
+function checkRule(
+  rule: TranslationRule,
+  cell: CellData,
+  fileId: string,
+  context: CellCheckContext | undefined,
+): RuleInfraction | null {
   // SUB-28: media sections match rules against their transcript (the displayed
   // source), never the import filename / span offsets stay display-aligned.
   const source = effectiveSourceText(cell)
@@ -147,6 +146,29 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
       : "i"
   switch (check.type) {
     case "target-forbids": {
+      // AQU-1712: an optional SOURCE condition. A forbidden rendering is
+      // usually an ordinary word that is wrong only as a rendering of one
+      // concept, so a compiled `term:` rule carries that concept's source
+      // pattern and the check applies only to a cell whose source bears it —
+      // the same pattern and flags the concept's approved rule matches its
+      // source side with. Autopilot's lintTerminology and the worker's
+      // project-wide scan already judge it that way; this is what makes the
+      // editor agree (AQU-1711). Hand-authored rules carry no `sourcePattern`
+      // and stay unconditional.
+      if (check.sourcePattern !== undefined) {
+        const sourceRe = compile(check.sourcePattern, "g" + caseFlag + uflag)
+        if (!sourceRe) return null
+        // `matchAll` works on a clone, so the cached regex keeps no state.
+        // Zero-length matches are not instances, as in source-requires-target.
+        let sourceBearsTerm = false
+        for (const m of source.matchAll(sourceRe)) {
+          if (m.index !== undefined && m[0].length > 0) {
+            sourceBearsTerm = true
+            break
+          }
+        }
+        if (!sourceBearsTerm) return null
+      }
       const re = compile(check.targetPattern, "g" + caseFlag + uflag)
       if (!re) return null
       const spans: import("@/lib/parsers/types").InfractionSpan[] = []
@@ -219,7 +241,22 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
     case "builtin": {
       const def = BUILTIN_CHECKS[check.checkId]
       if (!def) return null
-      const spans = def.run(source, cell.translated)
+      if (isBibleCheckId(check.checkId)) {
+        return bibleCheckInfraction(rule.id, check.checkId, cell.id, fileId, cell.translated, context?.bible)
+      }
+      // AQU-1906: the lane's punctuation conventions ride on the rule's check
+      // descriptor (resolveBuiltinRules stamped them), so no per-cell input is
+      // needed for them and a keystroke still re-evaluates one cell. Built only
+      // when there are conventions to pass: this runs once per rule per cell,
+      // and a whole Bible is ~31k cells × ~20 rules (AQU-1864).
+      // AQU-1735 adds `bookNames` the same way, AQU-2430 `numberFormat`.
+      const spans = check.punctuation || check.bookNames?.length || check.numberFormat
+        ? def.run(source, cell.translated, {
+            ...(check.punctuation ? { punctuation: check.punctuation } : {}),
+            ...(check.bookNames?.length ? { bookNames: check.bookNames } : {}),
+            ...(check.numberFormat ? { numberFormat: check.numberFormat } : {}),
+          })
+        : def.run(source, cell.translated)
       if (!spans || spans.length === 0) return null
       return {
         ruleId: rule.id,
@@ -244,4 +281,74 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
 function placeholderIntegrityParams(spans: import("@/lib/parsers/types").InfractionSpan[]): Record<string, string> {
   const tokens = spans.map((s) => s.matchedText).filter(Boolean)
   return { tokens: tokens.join(", "), count: String(tokens.length) }
+}
+
+/**
+ * AQU-2350: does `rule` have anything to say about this cell at all?
+ *
+ * `checkRulesForCell` returns no infraction in two very different cases — the
+ * cell satisfied the rule, and the rule never reached the cell. A surface that
+ * partitions cells into "breaking" and "following" by taking everything that is
+ * not breaking conflates the two and reports vacuous compliance: the term panel
+ * listed cells whose source never contains the term as "Following this rule",
+ * burying the real usage a reviewer opened the panel to compare. Those surfaces
+ * filter the second list with this predicate.
+ *
+ * Applicability is the rule's own source precondition, read off the same
+ * patterns and flags `checkRule` matches with, so the two always agree:
+ *  - `source-requires-target` and `source-target-match` can only fire where the
+ *    source pattern occurs, so that occurrence is the precondition;
+ *  - `target-forbids` carries an optional source condition since AQU-1712 — a
+ *    compiled `term:` rule applies only where the source bears the concept,
+ *    while a hand-authored rule with no `sourcePattern` constrains every
+ *    translated cell, so a cell that simply lacks the forbidden text really is
+ *    following it;
+ *  - `builtin` checks constrain every translated cell the same way.
+ *
+ * An uncompilable pattern reaches nothing: `checkRule` raises no infraction
+ * from one either, so no cell can demonstrate compliance with it.
+ */
+export function ruleAppliesToCell(rule: TranslationRule, cell: CellData): boolean {
+  const check = rule.check
+  const source = effectiveSourceText(cell)
+  // Same flag derivation as `checkRule`.
+  const uflag = rule.id.startsWith("term:") ? "u" : ""
+  const caseFlag =
+    (check.type === "source-requires-target" || check.type === "target-forbids") && check.caseSensitive
+      ? ""
+      : "i"
+  switch (check.type) {
+    case "builtin":
+      return true
+    case "target-forbids":
+      if (check.sourcePattern === undefined) return true
+      return sourcePatternOccurs(compile(check.sourcePattern, "g" + caseFlag + uflag), source, true)
+    case "source-requires-target":
+      return sourcePatternOccurs(compile(check.sourcePattern, "g" + caseFlag + uflag), source, true)
+    case "source-target-match":
+      // `checkRule` compiles this one "gi" and counts a zero-length hit.
+      return sourcePatternOccurs(compile(check.pattern, "gi"), source, false)
+  }
+}
+
+/**
+ * Whether a compiled source pattern hits `text`. `requireNonEmpty` mirrors
+ * whether the matching branch of `checkRule` discards zero-length matches.
+ *
+ * The regex comes from the module cache and carries `g`; `matchAll` iterates a
+ * clone, but `lastIndex` is cleared on both sides anyway so this can never be
+ * the reason a later caller starts mid-string.
+ */
+function sourcePatternOccurs(re: RegExp | null, text: string, requireNonEmpty: boolean): boolean {
+  if (!re) return false
+  re.lastIndex = 0
+  try {
+    for (const m of text.matchAll(re)) {
+      if (m.index === undefined) continue
+      if (!requireNonEmpty || m[0].length > 0) return true
+    }
+    return false
+  } finally {
+    re.lastIndex = 0
+  }
 }

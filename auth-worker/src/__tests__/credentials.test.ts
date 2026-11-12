@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test"
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, beforeEach, afterEach} from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { validateApiCredential } from "../../../db/shared/api-credentials"
@@ -11,6 +11,7 @@ type CreateResponse = {
     id: string
     name: string
     mode: "ask" | "act"
+    access: "read" | "write"
     orgId: string | null
     projectId: string | null
     tokenPrefix: string
@@ -339,5 +340,165 @@ describe("DELETE /api/v2/credentials/:id", () => {
       const body = (await res.json()) as CreateResponse
       expect((await validateApiCredential(env.AQUILLA_PG, body.token))?.pii).toBe(false)
     })
+  })
+
+  /**
+   * AQU-1242 — the access ceiling.
+   *
+   * The regression these guard is not "a field round-trips": it is that the
+   * whole read-only feature is only as good as what `validateApiCredential`
+   * reports, because every enforcement point in sync-worker branches on that one
+   * value. A token minted `read` that validates back as `write` is not a cosmetic
+   * bug — it is a token the partner believes cannot touch their translations,
+   * silently able to.
+   */
+  describe("access ceiling (AQU-1242)", () => {
+    it("mints a read-only credential that validates back as read-only", async () => {
+      await seedUser(1, "alice")
+      const res = await mint("alice", { name: "reporting agent", mode: "ask", access: "read" })
+      expect(res.status).toBe(201)
+      const body = (await res.json()) as CreateResponse
+      expect(body.credential.access).toBe("read")
+
+      const ctx = await validateApiCredential(env.AQUILLA_PG, body.token)
+      expect(ctx?.access).toBe("read")
+    })
+
+    it("omitting access mints a read-write credential — every existing caller is unchanged", async () => {
+      await seedUser(1, "alice")
+      const res = await mint("alice", { name: "legacy caller", mode: "ask" })
+      expect(res.status).toBe(201)
+      const body = (await res.json()) as CreateResponse
+      expect(body.credential.access).toBe("write")
+      expect((await validateApiCredential(env.AQUILLA_PG, body.token))?.access).toBe("write")
+    })
+
+    it("rejects read-only + act mode rather than silently picking one", async () => {
+      await seedUser(1, "alice")
+      await seedUser(2, "owner")
+      await seedProject("proj-1", 2)
+      await grantProjectRole("proj-1", 1, 600, 2)
+      const res = await mint("alice", {
+        name: "contradiction",
+        mode: "act",
+        access: "read",
+        projectId: "proj-1",
+      })
+      expect(res.status).toBe(400)
+      expect((await res.json()) as { error: string }).toMatchObject({ error: "validation_failed" })
+
+      // Nothing was minted — a rejected request must not leave a token behind.
+      const rows = await env.AQUILLA_PG.prepare("SELECT id FROM api_credentials").all()
+      expect(rows.results ?? []).toHaveLength(0)
+    })
+
+    it("reports access in the list so a human auditing their tokens can see which can write", async () => {
+      await seedUser(1, "alice")
+      await mint("alice", { name: "ro", mode: "ask", access: "read" })
+      await mint("alice", { name: "rw", mode: "ask", access: "write" })
+
+      const res = await app.request(
+        "/api/v2/credentials",
+        { headers: authHeader(await jwtFor("alice")) },
+        env,
+      )
+      expect(res.status).toBe(200)
+      const { credentials } = (await res.json()) as { credentials: CreateResponse["credential"][] }
+      expect(
+        Object.fromEntries(credentials.map((c) => [c.name, c.access])),
+      ).toEqual({ ro: "read", rw: "write" })
+    })
+
+    it("a read-only credential still carries its scope and pii decisions", async () => {
+      await seedUser(1, "alice")
+      await seedUser(2, "owner")
+      await seedProject("proj-1", 2, null)
+      await grantProjectRole("proj-1", 1, 800, 2) // owner-level on the project
+      const res = await mint("alice", {
+        name: "read-only auditor",
+        mode: "ask",
+        access: "read",
+        projectId: "proj-1",
+        pii: true,
+      })
+      expect(res.status).toBe(201)
+      const body = (await res.json()) as CreateResponse
+      const ctx = await validateApiCredential(env.AQUILLA_PG, body.token)
+      // Access is orthogonal to both: reading real names and reading only are
+      // different questions, and narrowing one must not quietly reset the other.
+      expect(ctx).toMatchObject({ access: "read", projectId: "proj-1", pii: true })
+    })
+  })
+})
+
+describe("credential scope: platform admin needs elevation (OPS-44)", () => {
+  // A PAT outlives the session that minted it, so minting one on bare
+  // platform-admin authority yields a PERMANENT cross-tenant credential that
+  // no later elevation check can reach. "root" is the test ADMIN_EMAILS entry
+  // (pg-test-env) and holds no grant on anything seeded here.
+  beforeEach(async () => {
+    await seedUser(1, "alice")
+    await seedUser(7, "root")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (50, 'Tenant', 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (50, 1, 700, 1)",
+    ).run()
+    await seedProject("tenant-proj", 1, 50)
+    env.ADMIN_REQUIRE_ELEVATION = "true"
+  })
+
+  afterEach(() => {
+    env.ADMIN_REQUIRE_ELEVATION = undefined
+  })
+
+  const elevate = async (jwt: string) => {
+    const req = await app.request("/api/v2/admin/elevation/request", { method: "POST", headers: authHeader(jwt) }, env)
+    const { devCode } = (await req.json()) as { devCode?: string }
+    const res = await app.request(
+      "/api/v2/admin/elevation/verify",
+      { method: "POST", headers: authHeader(jwt), body: JSON.stringify({ code: devCode }) },
+      env,
+    )
+    expect(res.status).toBe(200)
+  }
+
+  it("un-elevated admin cannot scope a credential to a foreign project", async () => {
+    const res = await mint("root", { name: "k", mode: "ask", projectId: "tenant-proj" })
+    expect(res.status).toBe(403)
+    expect(((await res.json()) as { error: string }).error).toBe("scope_denied")
+  })
+
+  it("un-elevated admin cannot scope a credential to a foreign org", async () => {
+    const res = await mint("root", { name: "k", mode: "ask", orgId: "50" })
+    expect(res.status).toBe(403)
+    expect(((await res.json()) as { error: string }).error).toBe("scope_denied")
+  })
+
+  it("un-elevated admin cannot mint an ACT credential on a foreign project", async () => {
+    const res = await mint("root", { name: "k", mode: "act", projectId: "tenant-proj" })
+    expect(res.status).toBe(403)
+  })
+
+  it("un-elevated admin cannot mint a PII credential on a foreign project", async () => {
+    const res = await mint("root", { name: "k", mode: "ask", projectId: "tenant-proj", pii: true })
+    expect(res.status).toBe(403)
+  })
+
+  it("an elevated admin still can", async () => {
+    const jwt = await jwtFor("root")
+    await elevate(jwt)
+    const res = await app.request(
+      "/api/v2/credentials",
+      { method: "POST", headers: authHeader(jwt), body: JSON.stringify({ name: "k", mode: "act", projectId: "tenant-proj" }) },
+      env,
+    )
+    expect(res.status).toBe(201)
+  })
+
+  it("a genuine member is unaffected while un-elevated", async () => {
+    const res = await mint("alice", { name: "k", mode: "act", projectId: "tenant-proj" })
+    expect(res.status).toBe(201)
   })
 })

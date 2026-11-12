@@ -10,6 +10,7 @@ import { membersPath, orgOverviewPath } from "@/lib/navigation/org-paths"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { Page, PageHeader, Section, EmptyState } from "@/components/ui/page"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { AppShell } from "@/components/AppShell"
@@ -145,11 +146,14 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
   const canGovern = (activeOrg?.role.level ?? 0) >= ROLE.MAINTAINER
   const { members, isLoading: membersLoading, error: membersError, rosterHidden, add, addMany, remove, listMemberProjects, refresh } =
     useOrgMembers(orgId)
+  // AQU-2256: scoped to the org whose roster is open — the add-to-projects
+  // picker must never offer a project from another org the caller happens to
+  // maintain.
   const {
     projects: accessibleProjects,
     error: accessibleProjectsError,
     refresh: refreshProjects,
-  } = useAccessibleProjects()
+  } = useAccessibleProjects(orgId)
   const [removeTarget, setRemoveTarget] = useState<{ userId: number; username: string } | null>(null)
   const [multiInviteOpen, setMultiInviteOpen] = useState(false)
 
@@ -214,6 +218,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
 
             <OrgMembersTable
                   orgId={orgId}
+                  orgName={orgName}
                   members={members}
                   loading={membersLoading && members.length === 0}
                   callerOrgRoleLevel={activeOrg?.role.level ?? null}
@@ -354,18 +359,19 @@ function PendingInviteRow({
           <span className="font-medium truncate">{invite.projectName}</span>
           <span className="text-muted-foreground">·</span>
           <RoleLabel name={invite.role.name} />
+          {/* AQU-2260: what the invite's kind means opens on click, not hover. */}
           {invite.email ? (
-            <AppTooltip content={t("org.membersPage.orgPage.targetedInviteTooltip")}>
+            <NoteOnClick note={t("org.membersPage.orgPage.targetedInviteTooltip")}>
               <span className="rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 text-[9px] font-mono">
                 {invite.email}
               </span>
-            </AppTooltip>
+            </NoteOnClick>
           ) : (
-            <AppTooltip content={t("org.membersPage.orgPage.openLinkTooltip")}>
+            <NoteOnClick note={t("org.membersPage.orgPage.openLinkTooltip")}>
               <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">
                 {t("projectSettings.share.openLinkConnector")}
               </span>
-            </AppTooltip>
+            </NoteOnClick>
           )}
         </div>
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">

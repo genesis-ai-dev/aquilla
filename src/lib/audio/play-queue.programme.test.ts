@@ -144,13 +144,17 @@ const settle = async (): Promise<void> => {
 
 const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
 
-/** A dubbed verse: source clip attached, a take selected with a real length. */
+/** A dubbed verse: source clip attached, a take selected with a real length.
+ *  AQU-2204: following the recordings, a verse with no take lasts its
+ *  stand-in length (its words at 14 characters a second), so an undubbed
+ *  verse gets words that read in exactly its span — these tests are about the
+ *  source-clocked transport, not the stand-in. */
 function verse(id: string, startTime: number, endTime: number, takeMs?: number): CellData {
   const takeId = `audio-${id}-1700000000-take.webm`
   return {
     id,
     fileId: "f1",
-    original: "",
+    original: takeMs == null ? "x".repeat(Math.round((endTime - startTime) * 14)) : "",
     translated: "",
     medium: "media",
     startTime,
@@ -201,8 +205,9 @@ describe("audio-first transport — both sides start together", () => {
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v1" })
     expect(sourceEl()?.paused).toBe(false)
     expect(dubEl("v1")?.paused).toBe(false)
-    // The whole assembled length, not the imported file's.
-    expect(getQueueProgress().duration).toBe(11 + 10)
+    // The whole assembled length, not the imported file's: each verse as
+    // long as its take (AQU-2204: v2's 10 s original is cut at its 4 s take).
+    expect(getQueueProgress().duration).toBe(11 + 4)
   })
 
   it("the SHORTER side goes quiet without the programme reading as paused", async () => {
@@ -244,7 +249,9 @@ describe("audio-first transport — both sides start together", () => {
     expect(dubEl("v2")?.paused).toBe(false)
   })
 
-  it("when the ORIGINAL is the longer side, the dub goes quiet and the original ends the verse", async () => {
+  // AQU-2204 (Sam, Oct 27): following the recordings, only the take sets a
+  // verse's length; an original that runs longer is cut where the take ends.
+  it("when the ORIGINAL runs longer, it is cut where the take ends and the take ends the verse (AQU-2204)", async () => {
     // v2: original 10s, translation 4s.
     const cells = [verse("v1", 0, 6, 11_000), verse("v2", 6, 16, 4_000), verse("v3", 16, 20, 3_000)]
     setQueueTimingMode("audioFirst")
@@ -254,13 +261,9 @@ describe("audio-first transport — both sides start together", () => {
     dubEl("v1")!.tick(11)
     await settle()
 
-    // Now on v2. Its dub stops at 4s in; the programme keeps running.
+    // Now on v2. Its take ending 4 s in ends the verse; the original's other
+    // 6 s are never heard.
     dubEl("v2")!.tick(4)
-    await settle()
-    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v2" })
-
-    // The original ending its window is what moves us on.
-    sourceEl()!.tick(16)
     await settle()
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v3" })
   })
@@ -270,7 +273,8 @@ describe("audio-first transport — both sides start together", () => {
     setQueueTimingMode("audioFirst")
     startQueue(ctxFor(cells), 0)
     await settle()
-    sourceEl()!.tick(4)
+    // AQU-2204: the take sets the verse's length, so its end ends the programme.
+    dubEl("v1")!.tick(2)
     await settle()
     expect(getQueueState().kind).toBe("idle")
   })
@@ -364,7 +368,7 @@ describe("audio-first transport — pausing, seeking and re-flowing", () => {
     t.trimEndMs = 6_000
     updateQueueCells(trimmed)
     expect(getQueueState()).toMatchObject({ cellId: "v2" })
-    expect(getQueueProgress().duration).toBe(5 + 4)
+    expect(getQueueProgress().duration).toBe(5 + 3)
   })
 
   it("switching mode stops the transport rather than carrying a stale clock over", async () => {
@@ -766,7 +770,8 @@ describe("audio-first fortify — transport can never wedge", () => {
     // The bug was replaying v2 from its TOP (programme second 3). Landing at
     // the final moment may legitimately play the verse's last instant — what
     // must never happen is a rewind to the verse start.
-    expect(getQueueProgress().currentTime).toBeGreaterThan(6.9)
+    // AQU-2204: each verse as long as its take, so the programme is 2 + 3 s.
+    expect(getQueueProgress().currentTime).toBeGreaterThan(4.9)
   })
 })
 
@@ -944,5 +949,162 @@ describe("planFreeSourceAdvance (pure)", () => {
     expect(shy.kind).toBe("continue")
     expect(shy.kind === "continue" ? shy.intoSec : -1).toBe(0) // …but never a negative landing
     expect(planFreeSourceAdvance(win, "u", "u", el(6 + PROG_CONTIG_EPSILON_SEC)).kind).toBe("continue")
+  })
+})
+
+describe("audio-first transport — video-less subtitle import (AQU-1704)", () => {
+  /** A text cue (SRT/VTT line) with a take of its own and no source clip. */
+  function cue(id: string, startTime: number, endTime: number, takeMs: number): CellData {
+    const takeId = `audio-${id}-1700000000-take.webm`
+    return {
+      id,
+      fileId: "f1",
+      original: "line",
+      translated: "",
+      medium: "text",
+      startTime,
+      endTime,
+      selectedAudioId: takeId,
+      attachments: {
+        [takeId]: { type: "audio", url: `http://audio.test/${id}.webm`, durationMs: takeMs },
+      },
+    } as unknown as CellData
+  }
+
+  it("lays the takes back to back on the programme clock, not at the cue times", async () => {
+    // Cues 0-3, 3-6, 6-9 s; takes 1 s, 5 s, 2 s.
+    const cells = [cue("c1", 0, 3, 1_000), cue("c2", 3, 6, 5_000), cue("c3", 6, 9, 2_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c1" })
+    expect(getQueueProgress().duration).toBe(1 + 5 + 2)
+
+    // The 1 s take ends the verse: c2 starts at once, no wait until 3 s.
+    dubEl("c1")!.tick(1)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(1, 6)
+
+    // The 5 s take is not cut off at the cue's 3 s.
+    dubEl("c2")!.tick(3)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c2" })
+    dubEl("c2")!.tick(5)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c3" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(6, 6)
+  })
+
+  // AQU-1747. The takes played back to back correctly (the test above) while
+  // the timeline's playhead sat on 0:00, because the only thing the queue said
+  // about its clock was `queueClockIsFileTime` — true solely for an imported
+  // source recording, which a video-less subtitle file does not have. So the
+  // transport now says outright when its position is a PROGRAMME second, and
+  // these pin the three answers a consumer may act on.
+  it("publishes `programmeClock` while the programme is the transport", async () => {
+    const cells = [cue("c1", 0, 3, 1_000), cue("c2", 3, 6, 5_000), cue("c3", 6, 9, 2_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+
+    expect(getQueueProgress().programmeClock).toBe(true)
+    // …and it stays true across a verse boundary and a pause — every position
+    // the playhead would paint, not just the first one.
+    dubEl("c1")!.tick(1)
+    await settle()
+    expect(getQueueProgress().programmeClock).toBe(true)
+    pauseQueue()
+    expect(getQueueProgress().programmeClock).toBe(true)
+  })
+
+  it("does NOT claim the programme clock for a one-cell 'play just this line'", async () => {
+    // The guard that keeps the per-take regression from returning by another
+    // route: a snapshot context builds a ONE-slot programme starting at 0, so a
+    // consumer that painted it would yank a file-wide playhead to the left edge
+    // while the take sounding is the one at 6-9 s.
+    const cells = [cue("c1", 0, 3, 1_000), cue("c2", 3, 6, 5_000), cue("c3", 6, 9, 2_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue({ ...ctxFor([cells[2]]), snapshot: true }, 0)
+    await settle()
+
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c3" })
+    expect(getQueueProgress().currentTime).toBe(0) // the slot's own clock
+    expect(getQueueProgress().programmeClock).toBe(false)
+  })
+
+  it("does NOT claim the programme clock in dubbing mode", async () => {
+    const cells = [cue("c1", 0, 3, 1_000), cue("c2", 3, 6, 5_000)]
+    setQueueTimingMode("dubbing")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c1" })
+    expect(getQueueProgress().programmeClock).toBe(false)
+  })
+})
+
+// AQU-2204 (Sam, Oct 26): a file with NO times at all (an audio Bible book)
+// following its recordings plays its recorded lines back to back, in order,
+// and steps over the stand-ins (lines nobody has recorded yet).
+describe("audio-first transport — a file with no times (AQU-2204)", () => {
+  const bookLine = (id: string, takeMs?: number): CellData => {
+    const takeId = `audio-${id}-1700000000-take.webm`
+    return {
+      id,
+      fileId: "f1",
+      original: `${id} words`,
+      translated: "",
+      medium: "text",
+      ...(takeMs != null ? { selectedAudioId: takeId } : {}),
+      attachments:
+        takeMs != null ? { [takeId]: { type: "audio", url: `http://audio.test/${id}.webm`, durationMs: takeMs } } : {},
+    } as unknown as CellData
+  }
+
+  it("lays the book out at the recordings' lengths plus the stand-ins, and starts on the first recorded line", async () => {
+    // b1 recorded 2s, b2 not recorded (a stand-in: "b2 words" = 8 chars → the 1.5s floor), b3 recorded 3s.
+    const cells = [bookLine("b1", 2_000), bookLine("b2"), bookLine("b3", 3_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    expect(getQueueProgress().duration).toBeCloseTo(2 + 1.5 + 3, 5)
+    expect(getQueueState()).toMatchObject({ cellId: "b1" })
+    expect(dubEl("b1")).toBeDefined()
+  })
+
+  it("keeps the plain line-by-line path when a take's length was never measured", async () => {
+    const unmeasured = {
+      id: "t1", fileId: "f1", medium: "text",
+      selectedGeneratedVoiceAudioId: "gen-1",
+      attachments: { "gen-1": { type: "audio", url: "http://audio.test/gen-1.wav" } },
+    } as unknown as CellData
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor([unmeasured, bookLine("b2", 2_000)]), 0)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "t1" })
+  })
+})
+
+// AQU-2204 (Sam, Oct 26): following the recordings, a pause someone left
+// before a take is waited out — the timeline draws it inside the line.
+describe("audio-first transport — a pause before the take (AQU-2204)", () => {
+  it("waits out the pause in silence, then plays the take from its start", async () => {
+    const takeId = "audio-v1-1700000000-take.webm"
+    const paused = {
+      id: "v1", fileId: "f1", medium: "media", startTime: 0, endTime: 4,
+      selectedAudioId: takeId,
+      attachments: { [takeId]: { type: "audio", url: "http://audio.test/v1.webm", durationMs: 2_000, targetOffsetMs: 300 } },
+    } as unknown as CellData
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor([paused]), 0)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v1" })
+    expect(dubEl("v1")?.paused ?? true).toBe(true)
+
+    await new Promise((r) => setTimeout(r, 450))
+    await settle()
+    expect(dubEl("v1")!.paused).toBe(false)
+    expect(getQueueProgress().currentTime).toBeGreaterThanOrEqual(0.29)
   })
 })

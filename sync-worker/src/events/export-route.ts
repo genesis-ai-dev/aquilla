@@ -10,9 +10,9 @@
 // empty cells fall back to the source verse so the file stays valid USFM.
 //
 // `?mode=raw` skips the parse/serialize overlay and returns the stored
-// original upload verbatim (X-Export-Mode: raw-original). Only USFM needs
-// the branch — binary sidecar formats and unserialized formats already
-// return their stored bytes as-is.
+// original upload verbatim (X-Export-Mode: raw-original). Only USFM and plain
+// text need the branch — binary sidecar formats and unserialized formats
+// already return their stored bytes as-is.
 //
 // Auth: sync-token JWT scoped to projectId; role floor = max(MAINTAINER, org
 // exportMinRole setting). Default org floor = MAINTAINER (600) per spec Q32.
@@ -22,6 +22,7 @@
 //
 // Returns null if the URL doesn't match (chainable in the fetch dispatcher).
 
+import { attachmentDisposition } from "./content-disposition"
 import { verifyTokenForProject } from "../auth"
 import { withCors } from "../cors"
 import { ROLE } from "./role-policy"
@@ -32,6 +33,9 @@ import {
   countLossyVerses,
 } from "../lib/usfm-lossless"
 import { buildUsfmExportPlan } from "./usfm-export-plan"
+import { buildPlainTextExport } from "./plaintext-export"
+import { readOriginalSourceBytes } from "./original-source"
+import { detectTextFidelity } from "../../../src/lib/export/text-fidelity"
 
 export interface ExportRouteEnv {
   AQUILLA_PG?: AquillaDb
@@ -167,7 +171,7 @@ export async function handleExportSourceRequest(
         status: 200,
         headers: {
           "Content-Type": mimeType,
-          "Content-Disposition": `attachment; filename="${downloadName.replace(/"/g, "")}"`,
+          "Content-Disposition": attachmentDisposition(downloadName),
           // Signal to client: this is a raw side-car, not injection-substituted.
           // The client should perform its own XML injection using the cells it holds.
           "X-Export-Mode": "raw-sidecar",
@@ -185,7 +189,7 @@ export async function handleExportSourceRequest(
         status: 200,
         headers: {
           "Content-Type": "application/octet-stream",
-          "Content-Disposition": `attachment; filename="${fileName.replace(/"/g, "")}"`,
+          "Content-Disposition": attachmentDisposition(fileName),
           "X-Export-Mode": "raw-original",
         },
       }), request)
@@ -196,10 +200,69 @@ export async function handleExportSourceRequest(
         status: 200,
         headers: {
           "Content-Type": "text/plain; charset=utf-8",
-          "Content-Disposition": `attachment; filename="${fileName.replace(/"/g, "")}"`,
+          "Content-Disposition": attachmentDisposition(fileName),
           // The exact original is recoverable, but translated cells have not
           // been injected. The import manifest reports content-only fidelity.
           "X-Export-Mode": "raw-original",
+        },
+      }),
+      request,
+    )
+  }
+
+  // AQU-1472: plain text has a target serializer — the same paragraph rules as
+  // the in-app export, built from the projection. `?mode=raw` skips it and
+  // falls through to the stored upload below, which is what the project
+  // export's "source documents" folder asks for.
+  //
+  // AQU-2383: the serializer rebuilds the file from cells, so it returns the
+  // parser's normalized form — segments rejoined by the paragraph rules, LF
+  // terminators, no byte-order mark. That is the right answer for a target
+  // somebody has translated and the WRONG answer for one nobody has touched,
+  // where the only honest export is the upload itself. So resolve the stored
+  // blob first and let it decide:
+  //
+  //   - the rebuild says nothing the upload does not (no translation went in
+  //     and no cell was hidden or filtered out) → return the stored bytes
+  //     verbatim (`raw-original`), which is byte-identical by construction;
+  //   - otherwise → rebuild, but put the source's mark and line terminator
+  //     back around the new text.
+  //
+  // A file with no stored blob (imported before blobs were kept, or swept)
+  // keeps the old behavior rather than failing: a normalized export beats no
+  // export at all.
+  if (blob.format === "txt" && !rawMode) {
+    const stored = await readOriginalSourceBytes(blob, env.SNAPSHOTS)
+    // `ignoreBOM: true` KEEPS the mark in the decoded string (the flag name
+    // reads backwards): the default strips it, which would hide the very thing
+    // the envelope detection is looking for. `fatal: false` is the default,
+    // spelled out because workers-types declares both fields required.
+    const storedText = stored.ok
+      ? new TextDecoder("utf-8", { ignoreBOM: true, fatal: false }).decode(stored.bytes)
+      : null
+    const { body, untouched } = await buildPlainTextExport(db, projectId, fileId, lane, {
+      validatedOnly,
+      ...(storedText != null ? { fidelity: detectTextFidelity(storedText) } : {}),
+    })
+    if (untouched && stored.ok) {
+      return withCors(
+        new Response(stored.bytes, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Content-Disposition": attachmentDisposition(fileName),
+            "X-Export-Mode": "raw-original",
+          },
+        }),
+        request,
+      )
+    }
+    return withCors(
+      new Response(body, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": attachmentDisposition(fileName),
         },
       }),
       request,
@@ -217,7 +280,7 @@ export async function handleExportSourceRequest(
       status: 200,
       headers: {
         "Content-Type": "application/octet-stream",
-        "Content-Disposition": `attachment; filename="${fileName.replace(/"/g, "")}"`,
+        "Content-Disposition": attachmentDisposition(fileName),
         "X-Export-Mode": "raw-original",
       },
     }), request)
@@ -262,7 +325,7 @@ export async function handleExportSourceRequest(
         status: 200,
         headers: {
           "Content-Type": "text/plain; charset=utf-8",
-          "Content-Disposition": `attachment; filename="${downloadName.replace(/"/g, "")}"`,
+          "Content-Disposition": attachmentDisposition(downloadName),
           "X-Export-Mode": "raw-original",
         },
       }),
@@ -306,7 +369,7 @@ export async function handleExportSourceRequest(
       status: 200,
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${downloadName.replace(/"/g, "")}"`,
+        "Content-Disposition": attachmentDisposition(downloadName),
         // AQU-276: number of translated verses whose original span contained
         // intra-verse markers (footnotes, poetry, character markers) that the
         // plain-text substitution dropped. 0 = clean round-trip. The client

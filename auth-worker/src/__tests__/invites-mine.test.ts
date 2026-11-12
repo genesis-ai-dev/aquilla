@@ -53,6 +53,10 @@ describe("GET /api/v2/invites/mine", () => {
   beforeEach(async () => {
     await seedUser(1, "alice")
     await seedUser(2, "bob")
+    // /mine only trusts an email the account has verified.
+    await env.AQUILLA_PG.prepare(
+      "UPDATE users SET email_verified_at = CURRENT_TIMESTAMP WHERE id IN (1, 2)",
+    ).run()
     await seedProject("proj-1", "Genesis", 1)
     await seedProject("proj-2", "Exodus", 1)
   })
@@ -74,6 +78,22 @@ describe("GET /api/v2/invites/mine", () => {
     expect(body.invites[0].projects).toEqual([
       { projectId: "proj-1", projectName: "Genesis" },
     ])
+  })
+
+  it("returns nothing for an account whose email is unverified (pre-registration squat)", async () => {
+    await seedInvite({ token: "tok-bob-bbbb", projectId: "proj-1", email: "bob@example.com" })
+    await env.AQUILLA_PG.prepare(
+      "UPDATE users SET email_verified_at = NULL WHERE id = 2",
+    ).run()
+
+    const res = await app.request(
+      "/api/v2/invites/mine",
+      { headers: authHeader(await jwtFor("bob")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as MineResponse
+    expect(body.invites).toHaveLength(0)
   })
 
   it("groups multi-project rows sharing a token into one entry", async () => {
@@ -148,6 +168,10 @@ describe("POST /api/v2/invites/:token/accept — email binding + archived guard"
   })
 
   it("accepts an email-bound invite for the matching account (case-insensitive)", async () => {
+    // AQU-1579: a matching address redeems only after email_verified_at is set.
+    await env.AQUILLA_PG.prepare(
+      "UPDATE users SET email_verified_at = CURRENT_TIMESTAMP WHERE id = 2",
+    ).run()
     await seedInvite({ token: "tok-bound-bbb", projectId: "proj-1", email: "BOB@Example.com" })
     const res = await app.request(
       "/api/v2/invites/tok-bound-bbb/accept",

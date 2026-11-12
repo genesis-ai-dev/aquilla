@@ -18,6 +18,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, act, fireEvent, waitFor } from "@testing-library/react"
 import type { DcsCatalogEntry } from "@/lib/dcs/types"
 import type { CatalogSearchParams } from "@/lib/dcs/catalog"
+import { expectDisabledNote } from "@/test-utils/tooltip"
 import { DcsCatalogBrowser } from "./DcsCatalogBrowser"
 import { toDcsLangSeed } from "@/lib/dcs/lang-seed"
 
@@ -146,6 +147,7 @@ describe("DcsCatalogBrowser", () => {
     expect(toDcsLangSeed("en")).toBe("en")
     expect(toDcsLangSeed("es-419")).toBe("es-419")
     expect(toDcsLangSeed("hbo")).toBe("hbo") // 3-letter code DCS uses verbatim
+    expect(toDcsLangSeed("Traditional Han")).toBe("zh-Hant")
     expect(toDcsLangSeed("Klingon")).toBe("") // unmappable word → empty, not a name
     expect(toDcsLangSeed("")).toBe("")
     expect(toDcsLangSeed(undefined)).toBe("")
@@ -190,6 +192,10 @@ describe("DcsCatalogBrowser", () => {
     })
     expect(onPick).toHaveBeenCalledTimes(1)
     expect(onPick.mock.calls[0][0]).toMatchObject({ name: "en_ult" })
+
+    // AQU-2260 (Sam, Oct 29): why the row can't be picked opens on a click of
+    // the greyed row, never on hover.
+    await expectDisabledNote(twlButton, "Aquilla can't import this resource type yet")
   })
 
   it("surfaces a search error instead of silently showing an empty list", async () => {

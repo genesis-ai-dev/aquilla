@@ -1,4 +1,4 @@
-// AQU-496: org-level "who can self-assign" control.
+// AQU-496 / AQU-581: org-level assignment-authority controls.
 //
 // Generalizes the AQU-485 permission-policy pattern (RosterProgressSection,
 // exportMinRole) to a boolean setting: whether members below project_lead may
@@ -12,6 +12,13 @@
 // able to unilaterally loosen who can assign work. Enforced server-side in
 // sync-worker (authorize.ts self-assign carve-out); this UI is the
 // affordance only.
+//
+// AQU-581 adds a second boolean row on the same OWNER-only gate:
+// allowScopedLaneAssignment — whether a member the org restricted to
+// particular target-language lanes may assign work to OTHER people inside
+// those lanes. The setting alone grants nothing: without lane scopes on the
+// member (Members -> language restrictions) it is inert, which is what makes
+// it a per-lane delegation rather than a blanket one.
 
 import { useState } from "react"
 import { FieldError } from "@/components/ui/field"
@@ -37,15 +44,16 @@ interface AssignmentAuthoritySectionProps {
 
 export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentAuthoritySectionProps) {
   const { t } = useI18n()
-  const { allowSelfAssignment, assignmentMinRole, patch } = orgSettings
+  const { allowSelfAssignment, allowScopedLaneAssignment, assignmentMinRole, patch } = orgSettings
 
-  const [busyKey, setBusyKey] = useState<"floor" | "self" | null>(null)
+  const [busyKey, setBusyKey] = useState<"floor" | "self" | "lane" | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function handleChange(partial: {
     assignmentMinRole?: number
     allowSelfAssignment?: boolean
-  }, key: "floor" | "self") {
+    allowScopedLaneAssignment?: boolean
+  }, key: "floor" | "self" | "lane") {
     setBusyKey(key)
     setError(null)
     const result = await patch(partial)
@@ -61,12 +69,17 @@ export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentA
     <>
       <SettingsRow
         label={t("settings.assignmentAuthority.floorLabel")}
-        description={t("settings.assignmentAuthority.floorDescription")}
+        description={t("settings.assignmentAuthority.floorSummary")}
+        info={{
+          label: t("common.aboutAria", { name: t("settings.assignmentAuthority.floorLabel") }),
+          content: t("settings.assignmentAuthority.floorInfo"),
+          testId: "settings-info-assignment-min-role",
+        }}
         control={
           <Select
             items={ALL_ROLE_LEVELS.map((level) => ({
               value: String(level),
-              label: `${resolveRoleName(t, level)} (${level})`,
+              label: resolveRoleName(t, level),
             }))}
             value={String(assignmentMinRole)}
             onValueChange={(value) => {
@@ -85,7 +98,7 @@ export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentA
               <SelectGroup>
                 {ALL_ROLE_LEVELS.map((level) => (
                   <SelectItem key={level} value={String(level)}>
-                    {resolveRoleName(t, level)} ({level})
+                    {resolveRoleName(t, level)}
                   </SelectItem>
                 ))}
               </SelectGroup>
@@ -95,9 +108,15 @@ export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentA
       />
       <SettingsRow
         label={t("settings.assignmentAuthority.label")}
-        description={t("settings.assignmentAuthority.description")}
+        description={t("settings.assignmentAuthority.summary")}
+        info={{
+          label: t("common.aboutAria", { name: t("settings.assignmentAuthority.label") }),
+          content: t("settings.assignmentAuthority.info"),
+          testId: "settings-info-allow-self-assignment",
+        }}
         control={
-          <div className="flex min-w-44 flex-col items-end gap-1">
+          // A switch needs no wider column: the text runs up to it (Sam, Oct 29).
+          <div className="flex flex-col items-end gap-1">
             <Switch
               id="allow-self-assignment"
               checked={allowSelfAssignment}
@@ -107,7 +126,29 @@ export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentA
               disabled={!canEdit || busyKey !== null}
               aria-label={t("settings.assignmentAuthority.label")}
             />
-            {error && <FieldError className="text-xs">{error}</FieldError>}
+            {error && <FieldError className="max-w-44 text-end text-xs">{error}</FieldError>}
+          </div>
+        }
+      />
+      <SettingsRow
+        label={t("settings.laneAssignmentAuthority.label")}
+        description={t("settings.laneAssignmentAuthority.summary")}
+        info={{
+          label: t("common.aboutAria", { name: t("settings.laneAssignmentAuthority.label") }),
+          content: t("settings.laneAssignmentAuthority.info"),
+          testId: "settings-info-allow-scoped-lane-assignment",
+        }}
+        control={
+          <div className="flex flex-col items-end gap-1">
+            <Switch
+              id="allow-scoped-lane-assignment"
+              checked={allowScopedLaneAssignment}
+              onCheckedChange={(checked) => {
+                void handleChange({ allowScopedLaneAssignment: checked }, "lane")
+              }}
+              disabled={!canEdit || busyKey !== null}
+              aria-label={t("settings.laneAssignmentAuthority.label")}
+            />
           </div>
         }
       />

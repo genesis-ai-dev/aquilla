@@ -1,10 +1,14 @@
-import { Fragment, useEffect, useMemo, useState, type SyntheticEvent } from "react"
-import { Check, CheckCheck, Mic, Trash2 } from "lucide-react"
+import { Fragment, useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react"
+import { Check, CheckCheck, Circle, Info, Trash2 } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
+import type { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Skeleton } from "@/components/ui/skeleton"
+import { NOTE_CONTENT_CLASS, NoteOnClick } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { lineState } from "./audio-validation-state"
+import { ValidatedOnLine } from "./ValidatedOnLine"
 
 /**
  * AQU-490: one line's audio validation, as the five surfaces all draw it.
@@ -22,12 +26,24 @@ import { lineState } from "./audio-validation-state"
 
 export interface AudioValidationTake {
   audioId: string
+  /**
+   * Slice 3A: set on each piece of a cut take (the group's id). Pieces are
+   * approved one by one (decision 7), so a press on the line's control opens
+   * the list of pieces instead of voting on all of them at once.
+   */
+  pieceOf?: string
   /** The take's display name, or null to fall back to the track label. */
   label: string | null
   /** Which track it sits on. "recording" is the default track. */
   slot: string
   validatorCount: number
   validators: string[]
+  /**
+   * AQU-2296: username → when that person validated this take (ms). Optional:
+   * a take built by hand (an unrecorded heard line, a test fixture) has none,
+   * and a name with no stamp simply gets no date line.
+   */
+  validatorDecidedTs?: Record<string, number>
   /** TTS rather than a person. Never auto-validated; can still be validated by hand. */
   isGenerated: boolean
   /**
@@ -38,6 +54,12 @@ export interface AudioValidationTake {
   canValidate: boolean
   /** Why not, when `canValidate` is false. Shown as the tooltip. */
   blockedReason?: string
+  /**
+   * Not a take: a heard line performing this line that nobody has recorded
+   * yet (a line split across heard lines, some done). It takes no vote, and
+   * while it is there the line never reads fully validated.
+   */
+  unrecorded?: boolean
 }
 
 interface AudioValidationControlProps {
@@ -54,6 +76,22 @@ interface AudioValidationControlProps {
    * the two line up. "inline" is bare, for the take block and the chips.
    */
   variant?: "gutter" | "inline"
+  /**
+   * Show the take's validation without taking a vote (Sam, 2026-09-29). Only
+   * the take that PLAYS for the line can be validated — where it can be heard:
+   * the line's audio check, the top of the Recording tab, the recorder's
+   * circled take — so every list of takes shows the others' votes read-only.
+   * The icon and the "validated by" list are the same; the press, the
+   * withdraw buttons and "Validate this take" are not there.
+   */
+  readOnly?: boolean
+  /**
+   * The line's recordings have not been read yet (the gutter only). Until they
+   * have, an empty set means "not known", not "nothing recorded", so the slot
+   * holds a placeholder instead of the faded "no audio" circle — and instead of a
+   * partial count that would change as the heard lines' takes arrive.
+   */
+  checking?: boolean
 }
 
 type PreventableReactEvent<T> = SyntheticEvent<T> & {
@@ -68,9 +106,17 @@ export function AudioValidationControl({
   canValidate,
   onValidationChange,
   variant = "gutter",
+  readOnly = false,
+  checking = false,
 }: AudioValidationControlProps) {
   const { t } = useI18n()
   const [popoverOpen, setPopoverOpen] = useState(false)
+  // Closes the list THROUGH Base UI, as the text control does: setting `open`
+  // to false from outside leaves Base UI remembering a click that opened the
+  // list, and while it remembers one it ignores hover, so the check stopped
+  // opening the list on hover after "Remove your validation".
+  const listActionsRef = useRef<PopoverPrimitive.Root.Actions | null>(null)
+  const listInfoRef = useRef<HTMLButtonElement | null>(null)
   /**
    * audioId → the vote we asked for, plus what the server said at the moment
    * we asked.
@@ -83,7 +129,9 @@ export function AudioValidationControl({
    * would snap the two that had arrived back to their old state while the
    * third was still in flight.
    */
-  const [pending, setPending] = useState<Record<string, { value: boolean; atRequest: boolean }>>({})
+  const [pending, setPending] = useState<
+    Record<string, { value: boolean; atRequest: boolean; at: number }>
+  >({})
 
   // Retire a guess the moment the server's answer for that take has MOVED
   // from what it was when we asked. Leaving it in the map — which is what
@@ -108,17 +156,34 @@ export function AudioValidationControl({
     const guess = pending[take.audioId]
     const has = take.validators.includes(currentUsername)
     if (!guess || guess.atRequest !== has || guess.value === has) return take
+    // AQU-2296: the optimistic row carries the click's own clock, so your name
+    // never appears for a beat with a blank date line beside it. The server's
+    // `decided_ts` replaces it as soon as the read lands.
+    const stamps = { ...(take.validatorDecidedTs ?? {}) }
+    if (guess.value) stamps[currentUsername] = guess.at
+    else delete stamps[currentUsername]
     return {
       ...take,
       validators: guess.value
         ? [...take.validators, currentUsername]
         : take.validators.filter((name) => name !== currentUsername),
       validatorCount: Math.max(0, take.validatorCount + (guess.value ? 1 : -1)),
+      validatorDecidedTs: stamps,
     }
   }), [takes, pending, currentUsername])
 
   const requirement = Math.max(1, validationRequirement)
-  const state = lineState(displayed, currentUsername, requirement)
+  // A heard line nobody has recorded is in the set but is not a take (Sam,
+  // 2026-09-30: a line split across heard lines, one of them done). It takes
+  // no vote and counts toward nothing, but while it is there the line cannot
+  // read fully validated: the double check drops to a single one (yours, or
+  // others'), and the hover names the part still to record.
+  const recorded = displayed.filter((take) => !take.unrecorded)
+  const unrecorded = displayed.filter((take) => take.unrecorded)
+  const recordedState = lineState(recorded, currentUsername, requirement)
+  const state = unrecorded.length > 0 && recordedState === "full"
+    ? (recorded.every((take) => take.validators.includes(currentUsername)) ? "self" : "others")
+    : recordedState
   const mineToGive = displayed.filter(
     (take) => take.canValidate && !take.validators.includes(currentUsername),
   )
@@ -132,16 +197,19 @@ export function AudioValidationControl({
   // says the rest (single check: waiting on others; double: finished). That
   // is also exactly what a click does: give your vote to the tracks without
   // it. The hover list still tells the fuller story per take.
-  const mineDone = displayed.filter((take) => take.validators.includes(currentUsername)).length
-  const showFraction = displayed.length > 1 && state !== "full" && mineToGive.length > 0
-  const allMine = displayed.length > 0 && mineToGive.length === 0
-    && displayed.every((take) => take.validators.includes(currentUsername))
+  const mineDone = recorded.filter((take) => take.validators.includes(currentUsername)).length
+  const showFraction = recorded.length > 1 && state !== "full" && mineToGive.length > 0
+  const allMine = recorded.length > 0 && mineToGive.length === 0
+    && recorded.every((take) => take.validators.includes(currentUsername))
 
   const change = (audioId: string, validated: boolean) => {
     const atRequest = takes
       .find((take) => take.audioId === audioId)
       ?.validators.includes(currentUsername) ?? false
-    setPending((current) => ({ ...current, [audioId]: { value: validated, atRequest } }))
+    setPending((current) => ({
+      ...current,
+      [audioId]: { value: validated, atRequest, at: Date.now() },
+    }))
     void Promise.resolve(onValidationChange(audioId, validated))
       .then((accepted) => {
         if (accepted === false) {
@@ -166,7 +234,13 @@ export function AudioValidationControl({
     for (const take of mineToGive) change(take.audioId, true)
   }
 
-  const Icon = state === "full" ? CheckCheck : state === "self" ? Check : Mic
+  // AQU-2401: the SAME glyphs the text control draws — hollow circle,
+  // filled circle, check, double check. The microphone this used to draw
+  // (AQU-490) dated from before the table header marked the two columns
+  // with the text and audio glyphs (AQU-2139), so since then it repeated on
+  // every row what the header says once. Two checks of one shape also read
+  // as the pair they are, and the header's mic is what tells them apart.
+  const Icon = state === "full" ? CheckCheck : state === "self" ? Check : Circle
   const colorClass = state === "full" || state === "self"
     ? "text-green-500"
     : state === "others" ? "text-muted-foreground/60" : "text-muted-foreground/30"
@@ -180,20 +254,23 @@ export function AudioValidationControl({
    * "somebody has" looked identical, which is precisely the state a second
    * validator needs to find.
    *
-   * Only the CAPSULE fills, not the whole mic. Lucide's mic is three
-   * sub-elements and the U-shaped stand is an open path: SVG closes a path
-   * implicitly to fill it, so a blanket `fill` turns the lower two-thirds of
-   * the icon into a solid blob. The capsule is the one closed shape in it,
-   * and filling that alone reads exactly as the text control's filled circle
-   * does at the same size.
+   * AQU-2401: now the icon IS a circle, this is the text control's own
+   * `fill="currentColor"` on the whole glyph, not the capsule-only
+   * `[&_rect]:fill-current` the microphone needed (lucide's mic is three
+   * sub-elements whose U-shaped stand is an open path, and SVG closes a path
+   * implicitly to fill it, so a blanket fill turned the lower two-thirds of
+   * it into a solid blob). The two checks now fill identically.
    */
-  const fillCapsule = state === "others"
+  const fillCircle = state === "others"
 
   const hasVoterInfo = displayed.some((take) => take.validators.length > 0)
   const blocked = displayed.find((take) => !take.canValidate && take.blockedReason)
-  const tooltip = mineToGive.length > 0
+  const tooltip = readOnly
+    ? t("editor.audioValidation.readOnlyNone")
+    : mineToGive.length > 0
     ? t("editor.audioValidation.notValidatedTooltip")
-    : blocked?.blockedReason
+    : unrecorded[0]?.blockedReason
+      ?? blocked?.blockedReason
       ?? (canValidate
         ? t("editor.audioValidation.outOfScopeTooltip")
         : t("editor.audioValidation.unavailableTooltip"))
@@ -203,14 +280,26 @@ export function AudioValidationControl({
   // beside it is still a single check. Found in the browser: at a threshold of
   // two the button announced "Recording validated" on a line that visibly was
   // not, which is the picture and the words disagreeing.
-  const shortBy = displayed.reduce(
+  const shortBy = recorded.reduce(
     (worst, take) => Math.max(worst, Math.max(0, requirement - take.validatorCount)),
     0,
   )
-  const clickable = mineToGive.length > 0
+  const clickable = !readOnly && mineToGive.length > 0
+  // Slice 3A (decision 7): a cut take's pieces are approved one by one, each
+  // where it can be heard. While a piece still lacks my vote, a press opens
+  // the list of pieces, each with its own "Validate this piece", instead of
+  // voting on every piece at once (the old whole-take approve, removed). One
+  // left to give is just that piece, so a press votes on it, which is also
+  // how a surface showing a single piece (its row, its chip) keeps working.
+  const pressOpensPieces = clickable && mineToGive.length > 1
+    && mineToGive.some((take) => take.pieceOf != null)
+  const pressVotes = clickable && !pressOpensPieces
   // Why the viewer cannot add a vote, for the foot of the list. Nothing when
-  // they can, or when every take already carries theirs.
-  const blockedNote = !clickable && !allMine ? tooltip : null
+  // they can, or when every take already carries theirs. Read-only, it is
+  // why nobody can vote HERE.
+  const blockedNote = readOnly
+    ? t("editor.audioValidation.readOnlyNote")
+    : !clickable && !allMine ? tooltip : null
 
   // THE LABEL IS DERIVED FROM `state`, the same thing the icon is. It used to
   // come from `allMine`, a different question — so a line two other people
@@ -219,7 +308,22 @@ export function AudioValidationControl({
   // last take I was allowed to touch said the same. Four such disagreements
   // were reachable (adversarial review, 2026-09-22); deriving both from one
   // value is what stops a fifth.
-  const ariaLabel = state === "full"
+  const ariaLabel = readOnly
+    // No "click to…" of any kind: there is nothing to click.
+    ? (state === "full" || (state === "self" && shortBy === 0)
+        ? t("editor.audioValidation.ariaValidatedNoAction", { ref: cellRef })
+        : state === "self"
+          ? t("editor.audioValidation.ariaYoursMoreNeeded", { ref: cellRef, count: shortBy })
+          : state === "others"
+            ? t("editor.audioValidation.ariaOthersValidated", { ref: cellRef, count: Math.max(1, shortBy) })
+            : t("editor.audioValidation.ariaNotValidatedByYou", { ref: cellRef }))
+    // Nothing left to give, and part of the line is not recorded: that is
+    // the news, whatever the recorded parts say.
+    : unrecorded.length > 0 && !clickable
+    ? t("editor.audioValidation.ariaPartUnrecorded", { ref: cellRef })
+    : pressOpensPieces
+    ? t("editor.audioValidation.ariaPiecesOneByOne", { done: mineDone, total: recorded.length, ref: cellRef })
+    : state === "full"
     // "Click to remove your validation" only when there IS one of mine on
     // every take. A line others finished used to say it to someone who had
     // never voted (Sam, 2026-09-23) — the text control's "by others" twin.
@@ -233,8 +337,12 @@ export function AudioValidationControl({
           ? t("editor.audioValidation.ariaYoursMoreNeeded", { ref: cellRef, count: shortBy })
           : t("editor.audioValidation.ariaValidated", { ref: cellRef }))
       : showFraction
-        ? t("editor.audioValidation.ariaPartlyValidated", {
-            done: mineDone, total: displayed.length, ref: cellRef,
+        // Slice 3A: a cut take's pieces are pieces, here too. With one piece
+        // left a press votes on it alone, so "the rest" is that piece.
+        ? t(recorded.every((take) => take.pieceOf != null)
+            ? "editor.audioValidation.ariaPiecesPartlyValidated"
+            : "editor.audioValidation.ariaPartlyValidated", {
+            done: mineDone, total: recorded.length, ref: cellRef,
           })
         : state === "others"
           ? t("editor.audioValidation.ariaOthersValidated", { ref: cellRef, count: Math.max(1, shortBy) })
@@ -259,7 +367,7 @@ export function AudioValidationControl({
       type="button"
       data-showcase="cell.audioValidation"
       data-testid="audio-validation-button"
-      aria-pressed={allMine}
+      aria-pressed={readOnly ? undefined : allMine}
       aria-label={ariaLabel}
       onClick={(event) => {
         if (!onClick) return
@@ -289,76 +397,122 @@ export function AudioValidationControl({
       // colour is what says so. (Same trap as the AQU-1068 tooltip.)
     >
       <Icon
-        className={cn("relative h-3.5 w-3.5", fillCapsule && "[&_rect]:fill-current")}
+        className="relative h-3.5 w-3.5"
         strokeWidth={2.5}
+        {...(fillCircle ? { fill: "currentColor" } : {})}
       />
       {showFraction && (
         <span className="text-[10px] font-medium tabular-nums leading-none" data-testid="audio-validation-fraction">
-          {t("editor.audioValidation.takeFraction", { done: mineDone, total: displayed.length })}
+          {t("editor.audioValidation.takeFraction", { done: mineDone, total: recorded.length })}
         </span>
       )}
     </button>
   )
 
-  // A line with nothing recorded draws a FADED mic in the gutter (Sam,
+  // A line with nothing recorded draws a FADED circle in the gutter (Sam,
   // 2026-09-23, reversing the empty slot of 09-21): both gutter columns read
   // full on every row, and "nothing to validate" looks different from "not
   // validated yet". A span, not a disabled button — no tab stop, and it still
   // takes the hover that says why. Inline surfaces (the take block, the chips)
   // only ever mount beside a take, so there it is still nothing.
+  // Still reading the file's recordings (Sam, 2026-10-01, from the 3G pass:
+  // every line said "No audio to validate" for seconds, then changed its
+  // mind). The app's skeleton pulse holds the slot: no click, no tab stop,
+  // and a hover that says what it is waiting for.
+  // AQU-2260 (Sam, Oct 29): what it waits for opens on a click, never a hover.
+  if (checking && variant === "gutter") {
+    return (
+      <div data-testid="audio-validation-gutter" className="audio-check flex w-6 shrink-0 items-start pt-1">
+        <NoteOnClick key="checking" note={t("editor.audioValidation.checkingTooltip")} side="right" tabStop={false} align="start">
+          <span
+            role="img"
+            data-testid="audio-validation-checking"
+            aria-label={t("editor.audioValidation.ariaChecking", { ref: cellRef })}
+            className="flex h-6 w-6 items-center justify-center"
+          >
+            <Skeleton className="size-3.5 rounded-full" />
+          </span>
+        </NoteOnClick>
+      </div>
+    )
+  }
+
   if (state === "empty") {
     if (variant === "inline") return null
     return (
-      <div data-testid="audio-validation-gutter" className="flex w-6 shrink-0 items-start pt-1">
-        <AppTooltip key="unavailable" content={t("editor.audioValidation.noAudioTooltip")}>
+      <div data-testid="audio-validation-gutter" className="audio-check flex w-6 shrink-0 items-start pt-1">
+        <NoteOnClick key="unavailable" note={t("editor.audioValidation.noAudioTooltip")} side="right" tabStop={false} align="start">
           <span
             role="img"
             data-testid="audio-validation-unavailable"
             aria-label={t("editor.audioValidation.ariaNoAudio", { ref: cellRef })}
-            className="flex h-6 w-6 cursor-default items-center justify-center text-muted-foreground/30 opacity-40"
+            className="flex h-6 w-6 items-center justify-center text-muted-foreground/30 opacity-40"
           >
-            <Mic className="h-3.5 w-3.5" strokeWidth={2.5} />
+            <Circle className="h-3.5 w-3.5" strokeWidth={2.5} />
           </span>
-        </AppTooltip>
+        </NoteOnClick>
       </div>
     )
   }
 
   const body = (
-    <Popover open={popoverOpen} onOpenChange={(next: boolean, details: { reason: string; cancel(): void }) => {
+    <Popover open={popoverOpen} actionsRef={listActionsRef} onOpenChange={(next: boolean, details: { reason: string; cancel(): void; event?: Event }) => {
+      // A press on the (i) is its own toggle; the list's outside-press close
+      // must not race it, or a second click would shut and reopen it.
+      const target = details.event?.target
+      if (!next && target instanceof Node && listInfoRef.current?.contains(target)) {
+        details.cancel()
+        return
+      }
       if (!next) { setPopoverOpen(false); return }
       // A press on a line the viewer can still act on is the VOTE, not the
       // popover — the same bargain the text control strikes. Once there is
       // nothing left to give, the press opens the list instead.
-      if ((details.reason === "trigger-press" || details.reason === "keyboard") && clickable) {
+      if ((details.reason === "trigger-press" || details.reason === "keyboard") && pressVotes) {
         details.cancel()
         return
       }
       setPopoverOpen(true)
     }}>
-      <PopoverTrigger
-        openOnHover
-        delay={400}
-        closeDelay={100}
-        render={renderButton(clickable ? validateAll : undefined)}
-      />
+      {/* AQU-2260 (Oct 29, third pass): the list opens on a click, never on
+          hover — on the check itself where a press does not vote, and on
+          the (i) under it where it does. Slice 3A: a press opens the list of
+          pieces instead of voting when there is more than one to validate. */}
+      <PopoverTrigger render={renderButton(pressVotes ? validateAll : undefined)} />
       <PopoverContent side="right" align="start" className="w-72 rounded-xl p-2">
-        {/* "Audio validated by", the twin of the text list's "Text validated
-            by" (Sam, 2026-09-23) — both name their half, since the two sit side
-            by side. Several takes keep the one heading; each take's name
-            follows as a sub-heading above its own list. */}
-        <div className="mb-1 px-1 text-xs text-muted-foreground">
-          {t("editor.audioValidation.validatedBy")}
-        </div>
         <ul className="space-y-1">
+          {/* "Audio validated by", the twin of the text list's "Text validated
+              by" (Sam, 2026-09-23) — both name their half, since the two sit
+              side by side. Several takes keep the one heading; each take's
+              name follows as a sub-heading above its own list.
+
+              The heading is the list's FIRST ROW, as the text list keeps its
+              own — not a sibling above the list. The popover shell is a flex
+              column with a gap between its children, so a heading of its own
+              opened the audio list 10px further below its title than the text
+              list beside it: the "extra space" the two were still showing
+              after AQU-2296's first pass (Oct 30). */}
+          <li className="mb-1 px-1 text-xs text-muted-foreground">
+            {t("editor.audioValidation.validatedBy")}
+          </li>
           {displayed.map((take) => {
             const mine = take.validators.includes(currentUsername)
-            const short = Math.max(0, requirement - take.validatorCount)
+            const short = take.unrecorded ? 0 : Math.max(0, requirement - take.validatorCount)
             return (
-              <li key={take.audioId} className="rounded px-1 py-1 text-xs">
+              // AQU-2296: NO padding of its own. It used to carry `px-1 py-1`
+              // on top of the `px-1 py-0.5` on each name below, so the audio
+              // list sat lower than the text list and its names were indented
+              // a step further — two popovers meant to be read side by side
+              // that did not line up. The padding now lives where the text
+              // list keeps it: on the rows themselves.
+              <li key={take.audioId} className="rounded text-xs">
                 {displayed.length > 1 && (
-                  <div className="mb-0.5 flex items-center gap-1 font-medium">
-                    <span className="truncate">{trackLabel(take)}</span>
+                  <div className="mb-0.5 flex items-center gap-1 px-1 font-medium">
+                    {/* Wraps, never truncates: a piece's own name ends the
+                        label ("“I'm scared.” · Target audio · Take 2 · 1"),
+                        and cut off it left every piece's row reading the same
+                        (slice 3A evidence, Oct 27). */}
+                    <span data-testid="audio-validation-take-label" className="min-w-0 break-words">{trackLabel(take)}</span>
                     {short > 0 && (
                       <span className="ms-auto shrink-0 text-[10px] font-normal text-muted-foreground">
                         {t("editor.audioValidation.needsMore", { count: short })}
@@ -366,15 +520,30 @@ export function AudioValidationControl({
                     )}
                   </div>
                 )}
-                {take.validators.length === 0 ? (
-                  <div className="text-muted-foreground">{t("editor.audioValidation.noValidators")}</div>
+                {take.unrecorded ? (
+                  <div data-testid="audio-validation-unrecorded" className="px-1 py-1 text-muted-foreground">
+                    {t("editor.audioValidation.notRecorded")}
+                  </div>
+                ) : take.validators.length === 0 ? (
+                  <div className="px-1 py-1 text-muted-foreground">
+                    {take.pieceOf != null
+                      ? t("editor.audioValidation.noValidatorsPiece")
+                      : t("editor.audioValidation.noValidators")}
+                  </div>
                 ) : (
+                  // The same breath between names as the text list's.
                   <ul className="space-y-0.5">
                     {take.validators.map((validator) => (
-                      <li key={validator} className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-muted/50">
-                        <span className="truncate">
-                          {validator}
-                          {validator === currentUsername ? ` ${t("editor.validation.you")}` : ""}
+                      <li key={validator} className="flex items-start justify-between gap-2 rounded px-1 py-1 hover:bg-muted/50">
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate">
+                            {validator}
+                            {validator === currentUsername ? ` ${t("editor.validation.you")}` : ""}
+                          </span>
+                          {/* AQU-2296: when they validated this TAKE, on a
+                              second muted line — the same row shape the text
+                              list uses, so the two popovers read alike. */}
+                          <ValidatedOnLine value={take.validatorDecidedTs?.[validator]} />
                         </span>
                         {/* Withdrawing is NOT gated on `canValidate`. That
                             flag is false for a take you recorded yourself on
@@ -384,7 +553,7 @@ export function AudioValidationControl({
                             that setting afterwards used to strand the vote
                             with no way to remove it here. The bulk predicate
                             already refuses this gate for the same reason. */}
-                        {validator === currentUsername && (
+                        {validator === currentUsername && !readOnly && (
                           <AppTooltip content={t("editor.validation.removeYours")}>
                             <button
                               type="button"
@@ -392,7 +561,10 @@ export function AudioValidationControl({
                               className="shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
                               onClick={() => {
                                 change(take.audioId, false)
-                                if (displayed.length === 1) setPopoverOpen(false)
+                                if (displayed.length === 1) {
+                                  if (listActionsRef.current) listActionsRef.current.close()
+                                  else setPopoverOpen(false)
+                                }
                               }}
                             >
                               <Trash2 className="h-3 w-3" />
@@ -403,13 +575,15 @@ export function AudioValidationControl({
                     ))}
                   </ul>
                 )}
-                {!mine && take.canValidate && displayed.length > 1 && (
+                {!mine && take.canValidate && !readOnly && displayed.length > 1 && (
                   <button
                     type="button"
                     className="mt-0.5 rounded px-1 py-0.5 text-[11px] text-green-600 hover:bg-muted/60"
                     onClick={() => change(take.audioId, true)}
                   >
-                    {t("editor.audioValidation.validateThisTake")}
+                    {take.pieceOf != null
+                      ? t("editor.audioValidation.validateThisPiece")
+                      : t("editor.audioValidation.validateThisTake")}
                   </button>
                 )}
               </li>
@@ -434,22 +608,62 @@ export function AudioValidationControl({
   // text said "click to validate", and "you recorded this" was unreachable.
   //
   // THE KEYS ARE LOAD-BEARING. Every line first draws before its audio has
-  // loaded, so as the faded "no audio" mic; the take arrives a moment later.
+  // loaded, so as the faded "no audio" circle; the take arrives a moment later.
   // Without distinct keys React reuses that tooltip for the real button, and
   // Base UI attaches its hover listeners ONCE, to the element it first saw —
   // the span that has just been thrown away. The real button then never opened
   // its tooltip on hover (found in the browser, 2026-09-23: the button had no
   // mouseenter listener at all). A key makes each shape mount its own.
-  const wrapped = hasVoterInfo
-    ? <Fragment key="list">{body}</Fragment>
-    : (
-        <AppTooltip key="tooltip" content={tooltip}>
-          {renderButton(clickable ? validateAll : undefined)}
-        </AppTooltip>
-      )
+  //
+  // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. So the
+  // hover is kept only where a click validates ("Audio not validated — click
+  // to validate"); why a click would NOT opens on that click, in a small note
+  // anchored to the check, and shuts on a second one.
+  // Slice 3A: where a press opens the pieces' list, the list needs no (i) of
+  // its own; the (i) is for lines where a press votes.
+  const listInfo = hasVoterInfo && pressVotes ? (
+    <button
+      ref={listInfoRef}
+      type="button"
+      data-testid="audio-validation-list-info"
+      aria-label={t("common.aboutAria", { name: t("editor.audioValidation.validatedBy") })}
+      aria-expanded={popoverOpen}
+      onClick={(e) => {
+        e.stopPropagation()
+        setPopoverOpen((o) => !o)
+      }}
+      className="inline-flex rounded-sm p-0.5 text-muted-foreground/70 hover:text-foreground"
+    >
+      <Info className="h-3 w-3" aria-hidden="true" />
+    </button>
+  ) : null
+  // Pieces open their list even before anyone has voted: it is where each
+  // one is validated (slice 3A).
+  const wrapped = hasVoterInfo || pressOpensPieces
+    ? <Fragment key="list">{body}{listInfo}</Fragment>
+    : clickable
+      ? (
+          <AppTooltip key="tooltip" content={tooltip}>
+            {renderButton(validateAll)}
+          </AppTooltip>
+        )
+      : (
+          <Popover key="reason">
+            <PopoverTrigger render={renderButton(undefined)} />
+            <PopoverContent
+              side="right"
+              align="start"
+              sideOffset={6}
+              data-slot="disabled-reason-note"
+              className={NOTE_CONTENT_CLASS}
+            >
+              {tooltip}
+            </PopoverContent>
+          </Popover>
+        )
   if (variant === "inline") return wrapped
   return (
-    <div data-testid="audio-validation-gutter" className="flex shrink-0 items-start pt-1">
+    <div data-testid="audio-validation-gutter" className="audio-check flex shrink-0 flex-col items-center pt-1">
       {wrapped}
     </div>
   )

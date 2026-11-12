@@ -62,6 +62,8 @@ describe('discovery root', () => {
     const body = (await res!.json()) as any
     expect(body.name).toBe('Aquilla Agent API')
     expect(body.auth.header).toContain('Bearer aqk_')
+    // OAuth-capable MCP hosts learn they can sign in instead of pasting a token.
+    expect(body.auth.oauth).toContain('resource_metadata')
     expect(body.quickstart.length).toBeGreaterThan(0)
     expect(body.mcp.endpoint).toBe('/api/v1/external/mcp')
     expect(Object.keys(body.endpoints)).toContain('GET /api/v1/external/me')
@@ -70,11 +72,11 @@ describe('discovery root', () => {
     expect(body.privacy.note).toContain('AQU-1180')
     expect(body.orgScopedReads.maxProjectsPerSearch).toBe(10)
     expect(body.errors.codes.confirmation_required).toBeDefined()
-    // AQU-538: the map teaches the multi-target-language (lanes) workflow —
-    // register targetLanes, write SetTranslation.laneId, read ?lane=.
-    expect(body.multiLanguage.note).toContain('targetLanes')
+    // AQU-1615: the map teaches lane ids. A language tag is not an alias.
+    expect(body.multiLanguage.note).toContain('lane id')
+    expect(body.multiLanguage.note).not.toContain('targetLanes')
     expect(body.multiLanguage.workflow.join(' ')).toContain('laneId')
-    expect(body.multiLanguage.workflow.join(' ')).toContain('lane=es')
+    expect(body.multiLanguage.workflow.join(' ')).toContain('lane=<id>')
   })
 
   it('trailing slash also serves the map; non-GET is a JSON 405', async () => {

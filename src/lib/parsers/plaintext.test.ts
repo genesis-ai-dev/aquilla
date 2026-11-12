@@ -33,6 +33,17 @@ describe("extractPlaintextStrings", () => {
     expect(groups.size).toBe(1)
   })
 
+  it("keeps every comma when it segments a long paragraph (AQU-1469)", () => {
+    const para =
+      "And then finally, after a long week of travel through the hills and the valleys and the towns, " +
+      "we came home to the house by the river where the old trees grow, and the lamps were lit, " +
+      "and the table was set for all of us who had come so far"
+    expect(para.length).toBeGreaterThan(200)
+    const result = extractPlaintextStrings(para)
+    expect(result.length).toBeGreaterThan(1)
+    expect(result.map((r) => r.original).join(" ")).toBe(para)
+  })
+
   it("handles empty input", () => {
     expect(extractPlaintextStrings("")).toHaveLength(0)
     expect(extractPlaintextStrings("   ")).toHaveLength(0)

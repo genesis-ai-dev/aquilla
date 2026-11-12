@@ -7,6 +7,7 @@
 import { FRONTIER_BASE } from "./auth"
 import { fetchWithTimeout } from "./orgs"
 import { UserError } from "@/lib/errors/user-error"
+import { notifyElevationGranted } from "@/lib/errors/elevation-required-signal"
 
 const authHeaders = (jwt: string): Record<string, string> => ({
   Authorization: `Bearer ${jwt}`,
@@ -42,6 +43,11 @@ export interface AdminOrg {
   ownerUsername: string | null
   memberCount: number
   projectCount: number
+  /**
+   * AQU-1071: active target lanes in the org — the enterprise billing band.
+   * Optional so a server that predates the field renders "—" rather than a wrong 0.
+   */
+  activeLanguageCount?: number
 }
 
 export interface AdminUser {
@@ -65,8 +71,20 @@ export interface AdminProject {
   creatorUsername: string | null
   totalCells: number
   validatedCells: number
+  /**
+   * AQU-1911: translated cells, with headings left out where the project (or
+   * its org) leaves them out, like the two counts above. Optional: an older
+   * server sends none.
+   */
+  filledCells?: number
   wordCount: number
   lastEditAt: number | null
+  /**
+   * AQU-1911: the latest sign of work — a cell edit, or a validation or
+   * recording, which never move `lastEditAt` (AQU-950). Optional: an older
+   * server sends none.
+   */
+  lastActivityAt?: number | null
   /** True when someone who is not a member of the owning org can access it. */
   shared: boolean
 }
@@ -242,7 +260,11 @@ export async function verifyAdminElevation(jwt: string, code: string): Promise<{
     body: JSON.stringify({ code }),
   })
   if (!res.ok) throw new UserError(res.status, await readError(res))
-  return (await res.json()) as { elevatedUntil: string }
+  const body = (await res.json()) as { elevatedUntil: string }
+  // OPS-44: every step-up path (the global prompt, the admin console gate)
+  // lands here, so this is where waiting work hears that it may retry.
+  notifyElevationGranted()
+  return body
 }
 
 export async function getPlatformSettings(jwt: string): Promise<PlatformSettingsResponse> {
@@ -331,7 +353,70 @@ export async function getAdminProjects(jwt: string): Promise<AdminProject[]> {
   return ((await res.json()) as { projects: AdminProject[] }).projects
 }
 
+export interface AdminOrgMember {
+  userId: number
+  username: string
+  displayName: string | null
+  email: string
+  /** Org role level; label it with `roleDisplayLabel`. */
+  roleLevel: number
+  joinedAt: string | null
+  lastActiveAt: string | null
+}
+
+export async function getAdminOrgMembers(jwt: string, orgId: number): Promise<AdminOrgMember[]> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/orgs/${orgId}/members`, {
+    headers: authHeaders(jwt),
+  })
+  if (!res.ok) throw new UserError(res.status, "")
+  return ((await res.json()) as { members: AdminOrgMember[] }).members
+}
+
+export interface AdminUserDetail {
+  user: { id: number; username: string; email: string; displayName: string | null; createdAt: string }
+  orgs: Array<{
+    orgId: number
+    name: string | null
+    roleLevel: number
+    joinedAt: string | null
+    lastActiveAt: string | null
+  }>
+  /** Direct project memberships only; access through an org role or a team is not listed. */
+  projects: Array<{
+    projectId: string
+    name: string
+    orgId: number | null
+    orgName: string | null
+    archived: boolean
+    roleLevel: number
+  }>
+}
+
+export async function getAdminUser(jwt: string, userId: number): Promise<AdminUserDetail> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/users/${userId}`, {
+    headers: authHeaders(jwt),
+  })
+  if (!res.ok) throw new UserError(res.status, "")
+  return (await res.json()) as AdminUserDetail
+}
+
 export interface AdminFieldPlan {
+  freeWeeklyAllowance?: number
+  freeWeeklyRawUsd?: number
+  teamMultipleOfFree?: number
+  teamWeeklyRawUsd?: number
+  freeWeeklyUnits?: number
+  teamWeeklyUnits?: number
+  /** AQU-2067: Team's raw cost at 100% use against its weekly revenue (spec Q7). */
+  teamCost?: {
+    teamWeeklyRawUsd: number
+    teamWeeklyRevenueUsd: number
+    costShareOfRevenue: number
+    maxCostShare: number
+    exceedsMaxShare: boolean
+  }
+  /** Meter units per raw provider dollar; admin display only. */
+  unitsPerRawUsd?: number
   name: string
   intervalDays: number
   priceCents: number
@@ -348,7 +433,12 @@ export interface AdminFieldPlan {
   enterpriseCreditsPerLanguagePerYear: number
 }
 
+export type BillingMeterMode = "off" | "shadow" | "enforce"
+export type OrgTier = "free" | "team" | "enterprise"
+
 export interface AdminBillingPlans {
+  weeklyUsageEnforced?: boolean
+  meterMode?: BillingMeterMode
   plan: AdminFieldPlan
   version: number
   stripeConfigured: boolean
@@ -356,6 +446,17 @@ export interface AdminBillingPlans {
 }
 
 export interface AdminBillingOrg {
+  ownerUsername?: string | null
+  weeklyAllowance?: number | null
+  /** AQU-2067: the plan an admin set (org_billing.tier). */
+  tier: OrgTier
+  contractEndsAt: string | null
+  /** What the resolver answers now: Stripe Team or a contract grace can differ from `tier`. */
+  resolvedTier: OrgTier
+  planSource: "default" | "stored" | "stripe" | "contract_grace"
+  graceEndsAt: string | null
+  /** Meter units per week in effect; null = unmetered. */
+  effectiveWeeklyAllowance: number | null
   orgId: number
   orgName: string | null
   plan: "none" | "explore" | "field" | "enterprise"
@@ -380,6 +481,9 @@ export interface AdminBillingOrg {
 }
 
 export interface FieldPlanPatch {
+  freeWeeklyAllowance?: number
+  freeWeeklyRawUsd?: number
+  teamMultipleOfFree?: number
   priceCents?: number
   addonPriceCents?: number
   includedWords?: number
@@ -412,10 +516,44 @@ export async function updateAdminBillingPlans(
   return (await res.json()) as { plan: AdminFieldPlan; version: number; warnings: string[] }
 }
 
-export async function getAdminBillingOrgs(jwt: string): Promise<AdminBillingOrg[]> {
-  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/billing/orgs`, { headers: authHeaders(jwt) })
+/** `paid` = Team or Enterprise. */
+export type AdminBillingTierFilter = OrgTier | "paid"
+/** `usage`: most agent credits used this period first. */
+export type AdminBillingSort = "name" | "usage"
+
+export interface AdminBillingOrgQuery {
+  q?: string
+  tier?: AdminBillingTierFilter
+  sort?: AdminBillingSort
+  limit?: number
+  offset?: number
+}
+
+/** One page of orgs; `total` counts every match for paging. */
+export async function getAdminBillingOrgs(
+  jwt: string,
+  query: AdminBillingOrgQuery = {},
+): Promise<{ orgs: AdminBillingOrg[]; total: number }> {
+  const params = new URLSearchParams()
+  if (query.q?.trim()) params.set("q", query.q.trim())
+  if (query.tier) params.set("tier", query.tier)
+  if (query.sort && query.sort !== "name") params.set("sort", query.sort)
+  if (query.limit !== undefined) params.set("limit", String(query.limit))
+  if (query.offset !== undefined) params.set("offset", String(query.offset))
+  const qs = params.toString()
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/billing/orgs${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders(jwt),
+  })
   if (!res.ok) throw new UserError(res.status, await readError(res))
-  return ((await res.json()) as { orgs: AdminBillingOrg[] }).orgs
+  const body = (await res.json()) as { orgs: AdminBillingOrg[]; total: number }
+  return { orgs: body.orgs, total: body.total }
+}
+
+/** One org's row, for refreshing it after a change. */
+export async function getAdminBillingOrg(jwt: string, orgId: number): Promise<AdminBillingOrg> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/billing/orgs/${orgId}`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return ((await res.json()) as { org: AdminBillingOrg }).org
 }
 
 export async function patchAdminBillingOrg(
@@ -614,4 +752,115 @@ export async function sendAdminRetentionReport(
   })
   if (!res.ok) throw new UserError(res.status, await readError(res))
   return (await res.json()) as { subject: string }
+}
+
+/** AQU-2067: the per-org override in raw provider dollars; null = plan default. */
+export async function patchAdminWeeklyAllowance(jwt: string, orgId: number, allowanceRawUsd: number | null) {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/admin/billing/org/${orgId}/weekly-allowance`,
+    { method: 'PATCH', headers: { ...authHeaders(jwt), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ allowanceRawUsd, reason: 'Admin weekly capacity adjustment' }) },
+  )
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+}
+
+/** AQU-2067: set an org's plan. contractEndsAt applies to Enterprise only. */
+export async function patchAdminOrgPlan(
+  jwt: string,
+  orgId: number,
+  plan: { tier: OrgTier; contractEndsAt?: string | null },
+) {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/admin/billing/org/${orgId}/plan`,
+    { method: 'PATCH', headers: { ...authHeaders(jwt), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...plan, reason: 'Admin plan change' }) },
+  )
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+}
+
+export interface WouldBlockPeriod {
+  requests: number
+  rawUsd: number
+  byRail: Partial<Record<string, number>>
+  /** userId null is background work with no live user. */
+  users: { userId: number | null; username: string | null; requests: number; rails: string[] }[]
+}
+
+export interface WouldBlockOrg {
+  orgId: number
+  orgName: string | null
+  current: WouldBlockPeriod
+  previous: WouldBlockPeriod
+  lastAt: string
+  tier?: OrgTier
+  /** Share of this period's allowance used; null = unmetered. */
+  pctUsed?: number | null
+}
+
+/** AQU-2067: shadow-mode would-block report (spec §5.4). */
+export async function getAdminWouldBlock(jwt: string): Promise<{ meterMode: BillingMeterMode; orgs: WouldBlockOrg[] }> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/billing/would-block`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as { meterMode: BillingMeterMode; orgs: WouldBlockOrg[] }
+}
+
+// --- Feedback routes: who is emailed when a user sends "Report a problem" ---
+
+export interface AdminFeedbackRoute {
+  id: number
+  orgId: number
+  orgName: string | null
+  /** Empty = the whole org. */
+  projectIds: string[]
+  projects: { id: string; name: string }[]
+  emails: string[]
+  label: string | null
+  enabled: boolean
+  createdAt: string | null
+}
+
+export interface FeedbackRouteInput {
+  orgId: number
+  projectIds: string[]
+  emails: string[]
+  label: string | null
+  enabled: boolean
+}
+
+export async function getAdminFeedbackRoutes(jwt: string): Promise<AdminFeedbackRoute[]> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/feedback-routes`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return ((await res.json()) as { routes: AdminFeedbackRoute[] }).routes
+}
+
+export async function createAdminFeedbackRoute(jwt: string, input: FeedbackRouteInput): Promise<AdminFeedbackRoute> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/feedback-routes`, {
+    method: "POST",
+    headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return ((await res.json()) as { route: AdminFeedbackRoute }).route
+}
+
+export async function updateAdminFeedbackRoute(
+  jwt: string,
+  id: number,
+  patch: Partial<Omit<FeedbackRouteInput, "orgId">>,
+): Promise<AdminFeedbackRoute> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/feedback-routes/${id}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return ((await res.json()) as { route: AdminFeedbackRoute }).route
+}
+
+export async function deleteAdminFeedbackRoute(jwt: string, id: number): Promise<void> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/feedback-routes/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(jwt),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
 }

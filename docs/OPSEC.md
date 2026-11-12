@@ -143,6 +143,357 @@
 > `project_members`, `agent_runs`, others) are granted to `app_runtime` but carry
 > no RLS policy, unlike `cells`/`events`/`files`/etc. — recommended as a follow-up
 > migration, not a same-day fix.
+>
+> `docs/OPSEC-REVIEW-2026-09-24.md` covers the seventh pass on API security &
+> data exposure. OPS-39: comment `@mention` notifications
+> (`sync-worker/src/notification-email.ts`) resolved recipient emails from the
+> global `users` table with no project-membership check — unlike thread-participant
+> notifications, which were already scoped by `project_id` — so any contributor (or
+> an agent posting via the external Agent API) could `@mention` an arbitrary
+> registered username and leak a comment excerpt plus the project name to an
+> inbox with no role on the project. Fixed by filtering mentions through the same
+> grant-path union the write perimeter already uses (direct membership, creator,
+> org `MAINTAINER`+, group grant) before resolving emails.
+>
+> `docs/OPSEC-REVIEW-2026-09-28.md` takes up that follow-up and finds the reason it
+> should not be done yet, plus the live vulnerability that was resting on it.
+> **OPS-37**: the in-app agent's `sql` tool required only that the substring
+> `project_id = :project` appear *somewhere* in the query, so one correctly-scoped
+> table admitted an arbitrary unscoped one —
+> `SELECT i.token, i.role_level FROM cells c CROSS JOIN project_invites i WHERE
+> c.project_id = :project` returned **every live invite token on the platform**, each a
+> working project-access credential at a stated role (invite tokens are the one
+> credential table still stored in plaintext, OPS-26). Seven more shapes were
+> reproduced: deep-link tokens + PIN hashes, cross-project draft text, the
+> assignment graph, Living Memory, org settings (the unredacted vendor API keys of
+> D7), and `… OR 1 = 1` / `NOT (…)`, which satisfied the check while neutralising it
+> on *every* table. Fixed by replacing the blocklist with a 13-table allowlist and
+> rewriting every reference into a project-scoped derived table, so scoping is
+> structural rather than a property of the model's predicate. **OPS-38**: the guard's
+> own comments delegated that residual gap to the 0034 RLS backstop — which covers 21
+> of the schema's 55 project-scoped tables, was documented in `db/postgres/RLS.md` as
+> covering nine (one of them dropped 60 migrations earlier), and is probably not in
+> the request path at all: 19 project-scoped tables on ordinary request paths were
+> never granted to `app_runtime`, so nothing can be connecting as that role, and every
+> policy here is written `TO app_runtime`. `pnpm neon:status` could not have caught it
+> either — its grant parser did not understand 0034's 30-table `GRANT`, so it verified
+> no privilege for `cells`, `events`, `files` or `comments`. Now measured by
+> `scripts/rls-coverage.test.ts`, documented accurately, and with the one question the
+> repo cannot answer (which role Hyperdrive connects as, and whether it has
+> `BYPASSRLS`) written down as an operator action rather than assumed. This is V4a's
+> shape a third time, and worse: a second control was deliberately left thinner in
+> reliance on a control nobody had measured.
+>
+> `docs/OPSEC-REVIEW-2026-09-25.md` is the first pass scoped to **infrastructure &
+> deployment security** (the Friday slot). OPS-40: `tauri-release.yml` — the only
+> pipeline that ships signed code straight to end users — triggered on any `v*` tag
+> push with no branch/reviewer gate, unlike the production web/worker deploy path,
+> which enters a `production` GitHub Environment restricted to `release/*/*/*`
+> branches. A `v*` tag carried no equivalent: the job checked out and built the
+> tagged commit's own code (`pnpm install` lifecycle scripts, `cargo build`/
+> `build.rs`) with all six Apple/Windows/Tauri signing secrets already in its
+> environment before any human looked at what it was about to sign. Fixed by
+> gating the job behind a new `desktop-release-signing` GitHub Environment — same
+> mechanism `deploy-workers.yml` already uses, just not yet applied here — which
+> holds the job at "Waiting" until a required reviewer approves it, once that
+> Environment's protection rules are configured in repo settings (out-of-band,
+> like every other GitHub-side control this series flags rather than assumes).
+> OPS-41: the Hetzner QA sandbox's containment (`scripts/hetzner-ci/
+> install-smart-host.sh`) firewalls PR-triggered containers with `iptables` only —
+> its own comment states the design goal as "reach public package/model endpoints,
+> not the host or LAN," but there was no `ip6tables` equivalent, so IPv6 was
+> implicitly unfiltered on any host with IPv6 routing enabled (a common Hetzner
+> Cloud default), a gap in the exact containment boundary the rest of the script is
+> built around. Fixed by dropping all IPv6 traffic on the QA bridge outright, since
+> nothing legitimate on that path needs it. Both findings are late-arriving gaps in
+> controls the repo had already built for a different pipeline (production
+> deploys, IPv4 containment) rather than net-new surface — see "Reviewed, no new
+> finding" for what else this pass checked and found already solid.
+>
+> `docs/OPSEC-REVIEW-2026-10-05.md` returns to **auth & session management** (the
+> Monday slot) and spends it on the one authentication surface the series had never
+> read: the OAuth 2.1 authorization server for MCP hosts
+> (`auth-worker/src/routes/mcp-oauth.ts`, `lib/mcp-oauth/`, `src/pages/OAuthConsent.tsx`),
+> which landed 2026-10-01…10-05 in AQU-1584/1529/1641 — after 09-21's route-mount
+> sweep, the pass that would otherwise have caught it. It deliberately skips
+> `routes/auth.ts`, which a parallel pass (commit `87397102`, no review document,
+> so no OPS-n) rewrote hours earlier the same morning — the fourth concurrent-pass
+> collision this note is about. **OPS-42**: eight API routes carry a bearer
+> credential as a *path segment* (project/org invite tokens,
+> AQU-626 access-link tokens), and both workers copy `url.pathname` verbatim into
+> `shipErrorResponse` (every 4xx/5xx → PostHog Logs, a third party) and into
+> `console.warn("[slow-request] …")` (every request over 5s, **successes
+> included** → Cloudflare Workers Logs, `[observability] enabled = true`). The
+> triggering failures leave the credential *live*: a mistyped PIN on
+> `/access-links/:token/redeem` 401s without touching the link, and a lapsed
+> session on `/invites/:token/accept` 401s in `authMiddleware` before the route
+> reads the invite — and invite tokens are the one credential class still stored
+> in plaintext (OPS-26), so a logged one is a working project grant at its stated
+> role. This is OPS-29 on the server side: that pass redacted credential-bearing
+> URLs leaving the *browser* for PostHog and never touched the workers' own
+> shipping. The PostHog arm is latent (`POSTHOG_KEY = ""` in prod, armed by a
+> config edit); the Workers Logs arm is live now. Fixed with a shared path
+> redactor applied at all five sinks, plus a drift guard that re-derives every
+> route's mounted path — it found an eighth route the hand sweep had missed on its
+> first run. **OPS-43**: the AQU-1529 OAuth organization allowlist is re-filtered
+> against live authority on every call, but at `role_level >= 100` (VIEWER) while
+> both the consent screen and the mint-time re-check require 600 (MAINTAINER) — so
+> of the three places the grant floor is applied, the only one that runs *after*
+> the token exists was the one a demotion could not narrow. Bounded by the
+> per-project live-role gate every external route runs, hence drift rather than a
+> breach; now a named `OAUTH_ORG_ALLOWLIST_FLOOR` pinned to `ROLE.MAINTAINER`.
+>
+> `docs/OPSEC-REVIEW-2026-10-12.md` holds the **auth & session** Monday slot and
+> spends it on the authority chain AQU-1239 (`84edc274`, 2026-10-08) rebuilt: the
+> move of platform-admin identity out of a public `wrangler.toml` var into the
+> `platform_admins` table (migration 0157). It again skips `routes/auth.ts` and
+> `routes/monday.ts`, which a parallel pen-test pass (`b225cb40`, no review
+> document, so no OPS-n) rewrote at 09:10 the same morning — the **fifth**
+> concurrent-pass collision, and the second on that file in eight days. AQU-1239
+> itself checks out (per-request-only memoisation so a deleted row revokes on the
+> next request, fail-closed table read, no stale `ADMIN_EMAILS` consumer left
+> behind, and email shadowing closed off by `idx_users_email_ci` plus zod's
+> rejection of every whitespace variant that would trim into an admin address).
+> Reading it exposed the real problem. **OPS-44**: AQU-1322 wrote down the rule
+> *"admin power applies only while elevated"* and applied it to eleven
+> grant-management writes, but never to the four paths whose grant **escapes the
+> session** — `POST /sync-token` (a token carrying `src: "platform"`, the
+> sync-worker's one blanket exemption from its live membership re-check and lane
+> read wall, at six separate check sites), `POST /credentials` (an `aqk_` PAT
+> scoped to any tenant, `act` and `pii` included, that outlives the session
+> entirely), `GET /orgs/:orgId/settings` (the org's live Gemini/TTS vendor keys,
+> **unredacted**, because the redaction floor read `getEffectiveOrgRole`, which
+> hands every operator 700 on every org), and `merge-sibling` (an irreversible
+> cross-tenant fold). The attacker is the one OPS-35 was written for — a stolen
+> but non-elevated 30-day admin JWT — and against D2/D3/D7 that fix was moot,
+> because elevation was never needed: the enumeration half
+> (`GET /orgs`, `GET /projects` in picker mode, "one page of the tenancy") is
+> un-elevated too. Fixed by *de-escalating* rather than refusing — a flat 403 on
+> `source === "platform"` locks operators out of their own projects, since
+> platform's 700 outranks any genuine grant below owner and so that source does
+> **not** imply the absence of a genuine grant (a false premise stated in
+> `elevation-gate.ts`'s own header, now corrected, and the likely reason the gate
+> was never extended). The mint core now fails the platform path closed before
+> signing, so the guarantee is structural rather than per-route. **OPS-45**
+> records the measurement that found it: of the 44 route modules resolving a
+> platform-admin-winnable role, **8** make an elevation decision and **36** make
+> none — the cross-tenant directory reads among them deliberately, the rest
+> unexamined, with `changeset-approvals.ts` (the human gate in front of agent
+> writes) flagged as the one most likely to be wrong next. Reported, not fixed:
+> the right unit of work is one recorded decision per route, which the new
+> coverage test now makes possible. **OPS-46** came out of checking the pass's
+> own PR tick instead of trusting it: `adversarial-jev.yml` is the **only**
+> workflow in the repo with a `pull_request:` trigger, so the checks a PR
+> receives are that workflow's advisory `pr` job plus Cloudflare *compiling* the
+> bundle — `ci.yml`, which owns `lint`, `typecheck`, `unit`, `build`,
+> `schema-migrations` and all three worker suites, is `workflow_dispatch` only.
+> Half of that is a documented cost decision (AQU-564: Workers Builds owns PR
+> compilation); the half that is not is that `ci.yml:68` still labels three of
+> those jobs *"Required branch-protection checks"* inside a workflow that can
+> never report on a PR — and this pass's own PR settles which way it falls, since
+> GitHub called it `mergeable_state: "clean"` with only the Jev check present.
+> So no test, lint or typecheck gates a pull request, which is why this pass
+> found six red test files nothing had flagged and why the green tick on its own
+> PR meant nothing (that run reported *"HARNESS UNAVAILABLE … This run says
+> nothing about the change."*). This is OPS-21 two months on and worse: the
+> worker suites are no longer merely unreachable behind a failing first phase,
+> their workflow is not wired to pull requests at all. Reported, not fixed —
+> wiring the trigger spends the runner minutes AQU-564 set out to save and goes
+> red immediately on the six known-failing files, so the ordering, and whether
+> those contexts are meant to be required at all, is a maintainer's
+> control-plane call. **Update (2026-10-13, AQU-1551, #1275):** `ci.yml` now
+> runs lint, `i18n:check`, the secret scan, unit tests, the worker suites and
+> `pnpm neon:check` on every pull request into `dev`; which of those contexts
+> branch protection requires is still that call.
+>
+> `docs/OPSEC-REVIEW-2026-10-19.md` holds the **auth & session** Monday slot and
+> spends it on the one route 10-12 predicted would be wrong next. It avoids
+> `routes/auth.ts`, `middleware/auth.ts`, `auth/jwt.ts`,
+> `utils/token-revocation.ts` and `types.ts`, which a parallel pen-test pass
+> (`7455641c5`, no review document, so no OPS-n) rewrote at 09:09 the same
+> morning — the **sixth** concurrent-pass collision, and the third on
+> `routes/auth.ts` in fifteen days. **OPS-47**: the one-time human approval
+> surface for ask-mode changesets (`routes/changeset-approvals.ts`, the gate
+> whose whole purpose is that *an agent proposes, a human approves*) gates on
+> authority rather than identity since AQU-CMDREG-P1 §2.1 — and
+> `resolveProjectRole` hands every platform operator level **700**, which is
+> `ROLE.OWNER`, the highest floor any plan can carry. So an un-elevated admin
+> JWT cleared every floor on every tenant's changeset, `UNREADABLE_PLAN_FLOOR`
+> (the deliberate owner-only fail-closed for a corrupt plan) included, on all
+> three writes: approve, reject and assign. What makes it categorically worse
+> than another un-gated route is where the write lands: the confirmation is
+> consumed by the **agent's** credential on
+> `(changeset_id, credential_id, digest)` with no reference to who approved
+> (`sync-worker/src/external/commit-gates.ts:128-141`), so the resulting
+> cross-tenant write is made by the one principal none of the sync-worker's
+> `src: "platform"` rules can see — which is exactly how it escaped AQU-2003's
+> 10-16 decision that un-elevated platform access is **read-only**. The
+> asymmetry that settles it as a mistake rather than a policy: the sync-worker
+> half of the same gate already ignores platform power, because
+> `changesetAuthorityDenied` re-resolves the caller by user id with no admin
+> lookup. Fixed by OPS-44's de-escalation idiom (`roleWithoutUnelevatedAdmin`)
+> on the three writes, re-applying the same floor to the genuine grant that
+> survives; the **read** is left open, which is AQU-2003's call applied here
+> rather than a new one. **OPS-48** sharpens OPS-45's open ledger: of the 36
+> route modules that make no elevation decision, OPS-45 did not separate reads
+> (whose openness AQU-2003 has since made deliberate) from writes (which it did
+> not license) — **ten** of them write, led by `source-linking.ts` (14) and
+> `monday.ts` (11), the latter acting on a tenant's own stored third-party
+> credential against an external system. Reported, not fixed: each one's
+> posture is the kind of call AQU-2003 showed goes to humans, and gating ten
+> modules blind is what "one recorded decision per route" was meant to replace.
+> This pass also records that **OPS-46 is closed** — AQU-1551 wired `ci.yml` to
+> pull requests the day after 10-12 reported it — with two caveats: `typecheck`
+> deliberately stays `workflow_dispatch`, and `enforce_admins` is false.
+>
+> `docs/OPSEC-REVIEW-2026-10-26.md` holds the **auth & session** Monday slot and
+> takes up the first of OPS-48's ten. It avoids `routes/access-links.ts` and
+> `routes/invites.ts`, which a parallel pen-test pass (`12a56f19`, no review
+> document, so no OPS-n) rewrote at 09:13 the same morning — the **seventh**
+> concurrent-pass collision. **OPS-49**: the finding turned out not to be one
+> module's. The day after OPS-48 named `monday.ts`, AQU-804 (`d9b7e9a0`,
+> 2026-10-20) hoisted its two role guards into `routes/_integration-helpers.ts`
+> and pointed a second router at them; AQU-2105 (`ab252cb7`, 10-22) added a
+> third. So `orgGuard`/`projectGuard` became the **only** authorization decision
+> for the Monday, Airtable and LangQuest routers at 38 call sites — none of the
+> three resolves a role itself — and that pair made no elevation decision at
+> all, while every manage route asks for `MANAGE_MIN_ROLE` (600) — LangQuest's
+> state and audio routes 500 — and both resolvers hand a platform admin 700 on
+> every tenant. What the floors protect
+> is not a row: they decide **where a project's progress leaves Aquilla and on
+> whose credential.** The push payload carries project and file names, each
+> language, completion and validation figures, the deadline, the last-activity
+> date and `translators` — the usernames of every member at CONTRIBUTOR+
+> (`lib/monday/metrics.ts:455`) — which is the D2+D3 linkage §2 names as the
+> state-actor asset; `PUT /airtable/orgs/:orgId/connection` stores a
+> caller-supplied PAT as that org's connection; and the `*/5 * * * *` cron keeps
+> pushing, so a link written in one un-elevated request keeps exporting after
+> the session ends and the JWT is revoked. That is OPS-44's "escapes the
+> session" category twice over, and outside AQU-2003's read-only decision for
+> the same reason OPS-47 was — the data lands in a third party's system on the
+> tenant's own credential, where no `src: "platform"` rule can see it. The
+> Monday OAuth token's destination org is decided *only* at
+> `/connection/start`'s guard, since the callback trusts the signed state's
+> `orgId`. Fixed with OPS-44's de-escalation idiom applied once in the shared
+> helper and stated there as a rule — *an asserted role floor is not satisfied
+> by platform-admin power unless the session is elevated* — with the
+> `minRole == null` status reads (the ones the SPA makes on every project open)
+> deliberately left open, which is AQU-2003 applied rather than re-decided.
+> **OPS-50**: that refactor is also why OPS-45's census decayed in a day. It
+> counted modules that *resolve* a platform-winnable role, and a module which
+> delegates to a guard resolves none, so all three routers became invisible to
+> the method that produced the open ledger. Re-measured counting the decision
+> rather than the file: **13 of 48** route modules now decide, against 10 of 48
+> before this change and 8 of 44 on 10-12 — the denominator grew by four in a
+> fortnight while the numerator grew by three. Reported, not fixed: the census
+> should become an assertion that fails on a new undecided module, and eight of
+> OPS-48's ten remain, led now by `source-linking.ts` (14 writes).
+>
+> `docs/OPSEC-REVIEW-2026-11-02.md` holds the **auth & session** Monday slot and
+> takes up both of the things 10-26 handed forward. It avoids `routes/auth.ts`
+> and the `/me` surface, which a parallel pen-test pass (`cf042e21`, no review
+> document, so no OPS-n) rewrote at 09:12 the same morning — the **eighth**
+> concurrent-pass collision, and the fifth in twenty-eight days. **OPS-51**:
+> OPS-48 was right to rank `source-linking.ts` first and wrong about where the
+> finding was. It is not in any of the fourteen writes OPS-48 counted but in the
+> one route whose floor is **OWNER** — `DELETE /:projectId`, a hard
+> `DELETE FROM projects` with every cell, event, file and comment cascading
+> after it, and no Trash step. The platform contribution *is* level 700, so
+> `role.level < ROLE.OWNER` is false for every operator on every project on the
+> platform: the strictest gate on the router was the one that could not hold,
+> and an un-elevated admin JWT passed it by definition. Three things in the repo
+> had already decided it — `routes/projects.ts`, the **sibling router on the
+> same `/api/v2/projects` mount**, requires elevation to remove one member or
+> revoke one invite (AQU-1322); `routes/merge-sibling.ts` says in its own OPS-44
+> comment that *"destroying a donor project outranks [adding one member]"*; and
+> AQU-2003 priced un-elevated platform access as read-only. The same pass found
+> the second half: `POST /:projectId/link-source` carries an explicit
+> cross-tenant check whose comment spells out the IDOR it closed — *"link it to
+> ANY other project id on the platform and clone/mirror its source cells"* —
+> and platform power satisfies that check for free on **both** sides, which is
+> that exploit restored for one principal and made **permanent**, because a live
+> link is a standing data flow the mirror keeps replaying long after any
+> elevation lapses (OPS-44's "escapes the session" category a fourth time). With
+> `replaceFiles` it overwrites a tenant's existing files in place, so every
+> translation, validation and comment stays attached to text swapped underneath
+> it; and the upstream lane wall came with it, since `resolveUpstreamLinkLane`
+> keyed on the un-narrowed 700. Fixed with OPS-44's idiom at seven call sites
+> across the six writes, both sides where two tenancies are involved; the three
+> reads are left open and say so at their own guards. The one edge it had to
+> avoid: `resolveGenuineProjectRole` answers null for an archived project, so
+> the naive narrowing would have locked an operator out of deleting their **own
+> project from their own Trash** — both helpers now take `{ includeArchived }`,
+> threaded only from the call sites that resolved that way. **OPS-52** closes
+> OPS-50 §1: the elevation census is now an assertion in
+> `scripts/platform-elevation-coverage.test.ts`, not a number re-derived by
+> hand. Every route module reaching a platform-winnable role must carry one of
+> three recorded states — `decides` (13), `delegates` (3, asserted to resolve no
+> role of their own), `undecided` (33, the open queue with OPS-48's write counts
+> annotated) — and the set assertion fails in both directions, so the next route
+> to reach that power cannot default into the undecided set silently. **16 of
+> 49** now decide, and the suite computes that, not the document. Still open:
+> `termbase-subscriptions.ts` (7 writes) is the head of OPS-48's remainder, and
+> a project delete writes **no audit row anywhere** — the gate is closed, but
+> nothing can say what went through it before today.
+>
+> `docs/OPSEC-REVIEW-2026-11-09.md` holds the **auth & session** Monday slot and
+> is the first pass in the series located by the OPS-52 ledger rather than by a
+> document: the row said `termbase-subscriptions.ts`, so that file was opened
+> first. It avoids `routes/auth.ts`, which a parallel pen-test pass (`287f7250`,
+> no review document, so no OPS-n) rewrote at 09:10 the same morning — the
+> **ninth** concurrent-pass collision, and the sixth in thirty-five days.
+> **OPS-53**: all five writes on the org-termbase publish/subscribe router
+> checked `role.level < ROLE.MAINTAINER` (600) against a platform contribution
+> of **700**, so an un-elevated admin JWT cleared the floor by definition on
+> every project in every org. Two of those writes are not ordinary rows.
+> `org_published_termbase` is the *only* consent in the design — the subscribe
+> route and `canReadTermbase` both treat the flag as the upstream's permission
+> to be read, and the implicit Q19 grant deliberately performs **no
+> `project_members` write** — so an operator who can flip it forges that
+> consent for a project they hold no grant on. And a subscription row is a
+> **standing** cross-project read: the grant is derived from the row at resolve
+> time, with no floor above *any* role on the subscriber, so every viewer (100)
+> of the subscriber reads the upstream's whole termbase for as long as the row
+> lives (OPS-44's "escapes the session" category a fifth time, after the PAT,
+> the integration link and the source link). Chained, the two are one exploit,
+> and the suite reproduces it end to end: an un-elevated admin published a
+> tenant's termbase and subscribed a second tenant project to it, after which an
+> ordinary **contributor** of the subscriber — no admin access at all — read the
+> upstream's concepts, where the same request answers
+> `403 "no termbase read access"` without the row. Fixed with one guard at all
+> five writes that applies the floor, strips un-elevated platform power
+> (`roleWithoutUnelevatedAdmin`) and re-applies the floor; the three reads stay
+> open per AQU-2003. Unlike OPS-51 this router needs no `{ includeArchived }`,
+> because it resolves with plain `resolveProjectRole`, and it needs no upstream
+> narrowing, because the upstream's exposure rests on the published flag rather
+> than on a role. **OPS-54**: the reorder route turned an uncapped caller array
+> into one atomic `batch()` of N statements, which the shim runs **serially**
+> inside a single open transaction — one authenticated maintainer could pin a
+> pooled Hyperdrive connection for as many round trips as they cared to send.
+> It was the only one of this worker's three per-element batch sites with no
+> caller bound; now capped at 500 ids of ≤256 chars. **17 of 50** route modules
+> now decide. **OPS-55** came from the pass's own pull request rather than from
+> the code it was reading, and is **reported, not fixed**: the **Adversarial Jev**
+> gate posted *"No failures found."* on three commits while **14 of its 18
+> attacks never ran** (*"Model provider returned HTTP 404; no action
+> executed"*), because `harnessHealth` in `smart-tests/adversarial/health.ts`
+> declares a run unhealthy only when `attacks.every(… === "inconclusive")` — so a
+> partial outage is indistinguishable from a healthy run, the four survivors
+> being exactly the four attacks that need no model agent. Coverage fell from
+> **3 inconclusive / 15 passed** (#1927, 11-07) to **14 / 4** (#1934 and #1941,
+> 11-09), green throughout, which is the AQU-1899 dead-canary mode the gate's own
+> README cites as the reason that rule exists. The two cross-project
+> **authorization** attacks are among the dark ones, and
+> `redteam.edit-other-project` passed on 11-07 — so the adversarial suite's
+> authorization coverage went dark inside two days while the gate reported
+> success. Not fixed here for two scope reasons: tightening the threshold would
+> turn the job red on every open PR until the provider is restored, and it is not
+> auth/session code; the patch is written out in the pass, reusing the
+> `agentNeverActed` predicate `health.ts` already exports. Still open: neither
+> termbase write records an actor (11-02's audit gap in a second place);
+> `member-scopes.ts` is the new head of the queue — `undecided` in the ledger
+> *and* the next uncapped caller array; and until the provider is restored a
+> green Adversarial Jev comment should be read as its counts, not its headline.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)
@@ -170,12 +521,12 @@ Ranked by what it would cost us if it leaked, not by volume.
 | # | Asset | Where it lives | Why it matters |
 |---|---|---|---|
 | D1 | **Signing keys** — `SECRET_KEY` (access tokens), `SYNC_SECRET_KEY` (sync tokens, and a plaintext admin bearer) | Worker secrets; `.dev.vars` locally | Holding either mints credentials for *any* user or project. Root of the whole trust tree. |
-| D2 | **Unpublished translation drafts** — per-cell target text, comments, backtranslations | Postgres `cells`/`events`, R2 source blobs | Pre-publication scripture text for named languages. In restricted-access regions, *which* language is being worked on and *by whom* is the sensitive part, not the prose. |
-| D3 | **Translator identity + activity** — emails, usernames, org/project membership, presence, focus locks, `last_used_at` | Postgres; the `ProjectSync` DO in memory | Presence and focus-lock data is a working-hours and collaboration graph. Combined with D2 this answers "who is translating what, and when" — the question that makes this product a target rather than a curiosity. **Not agent-readable by default since AQU-1180**: the Agent API returns per-project pseudonyms rather than names, real identity needs an owner-minted `pii` credential, and a project can set `agentAuthorship: none` to drop author fields entirely — see `docs/AGENT-API.md` § Collaborator identity. |
-| D4 | **Third-party credentials** — `OPENROUTER_API_KEY`, Monday client/signing secrets, GitLab admin token, Neon/Hyperdrive connection strings, R2 keys, `CLOUDFLARE_API_TOKEN`, Apple/Windows/Tauri signing keys | Worker secrets + GitHub Actions secrets | Direct financial loss (LLM spend), or — for the code-signing keys — the ability to ship a signed malicious desktop build. |
-| D5 | **Bearer tokens in circulation** — 30-day access JWTs, 15-minute sync tokens, `aqk_` Agent-API PATs, password-reset and email-verification tokens, admin step-up elevation codes, invite tokens | Client IndexedDB / localStorage; `api_credentials`, `password_reset_tokens`, `email_verification_tokens` (hashed — the latter two since migration 0080, OPS-20, with the plaintext columns themselves dropped by 0087, OPS-31); `admin_elevation_codes` (scrypt-hashed since 0094, OPS-36 — plaintext column retired nullable, drop pending); `project_invites`, `org_invites` (**plaintext** — OPS-26) | Each is a live credential. A password-reset token is account takeover on its own for 24 hours. For the two auth-token tables the guarantee is now structural rather than behavioural: since migration 0087 there is no plaintext column to write to, so restoring a pre-0080 backup into the live schema can no longer re-introduce readable reset links. Invite tokens ride in a URL path, which is the least protected place a bearer token can be — **and they remain the exception to this row's "hashed" claim**: both invite tables store the raw token, so a DB read hands over working invite links (OPS-26, `docs/OPSEC-REVIEW-2026-08-31.md`). |
+| D2 | **Unpublished translation drafts** — per-cell target text, comments, backtranslations | Postgres `cells`/`events`, R2 source blobs | Pre-publication scripture text for named languages. In restricted-access regions, *which* language is being worked on and *by whom* is the sensitive part, not the prose. Since OPS-51 (`docs/OPSEC-REVIEW-2026-11-02.md`) an un-elevated platform admin can no longer **destroy** D2 or open a standing cross-tenant pipe into it: `DELETE /api/v2/projects/:id` had an OWNER floor that the platform contribution's own level 700 satisfied by definition, and `link-source` had a cross-tenant check that the same 700 satisfied on both sides — a live link then kept mirroring one tenant's source cells into another's project, with `replaceFiles` overwriting existing files in place. Both now de-escalate to the operator's genuine grant unless the step-up code has been redeemed. **A project delete still writes no audit row**, so what passed that gate before 2026-11-02 is unrecoverable and unknowable. Since OPS-53 (`docs/OPSEC-REVIEW-2026-11-09.md`) the same principal can no longer publish a tenant's **termbase** — source terms, every rendering, every note, which is D2 content in condensed form — to that tenant's org, nor mint the standing Q19 subscription grant that hands a second project's every viewer a permanent read of it; both writes now de-escalate unless the step-up code has been redeemed. **Neither termbase write records an actor either**, so the same blind spot applies to anything published or subscribed on platform authority before 2026-11-09. |
+| D3 | **Translator identity + activity** — emails, usernames, org/project membership, presence, focus locks, `last_used_at` | Postgres; the `ProjectSync` DO in memory | Presence and focus-lock data is a working-hours and collaboration graph. Combined with D2 this answers "who is translating what, and when" — the question that makes this product a target rather than a curiosity. **Not agent-readable by default since AQU-1180**: the Agent API returns per-project pseudonyms rather than names, real identity needs an owner-minted `pii` credential, and a project can set `agentAuthorship: none` to drop author fields entirely — see `docs/AGENT-API.md` § Collaborator identity. Comment `@mention` emails (D2 excerpt, routed by D3 username/email) are now scoped to actual project grants — OPS-39, `docs/OPSEC-REVIEW-2026-09-24.md`. Since OPS-44 (`docs/OPSEC-REVIEW-2026-10-12.md`) a platform admin's cross-tenant reach over D2/D3 is no longer available to an *un-elevated* session: the sync-token mint, PAT minting and the sibling fold de-escalate to the operator's genuine role unless the step-up code has been redeemed. Cross-tenant *metadata* reads (the org/project directories) remain open un-elevated by design — OPS-45. Since OPS-49 (`docs/OPSEC-REVIEW-2026-10-26.md`) D3 no longer leaves the platform on an un-elevated operator's say-so either: the progress-sync integrations push the `translators` username list, each language and the activity date into a tenant's Monday board or Airtable base, and the three routers' shared role guard now requires elevation before admin power can set that destination or the credential it rides on. |
+| D4 | **Third-party credentials** — `OPENROUTER_API_KEY`, Monday client/signing secrets, GitLab admin token, Neon/Hyperdrive connection strings, R2 keys, `CLOUDFLARE_API_TOKEN`, Apple/Windows/Tauri signing keys | Worker secrets + GitHub Actions secrets | Direct financial loss (LLM spend), or — for the code-signing keys — the ability to ship a signed malicious desktop build. `tauri-release.yml` now enters a `desktop-release-signing` GitHub Environment before touching these (OPS-40, `docs/OPSEC-REVIEW-2026-09-25.md`); the Environment still needs required reviewers configured in repo settings to actually hold the job. |
+| D5 | **Bearer tokens in circulation** — 30-day access JWTs, 15-minute sync tokens, `aqk_` Agent-API PATs, password-reset and email-verification tokens, admin step-up elevation codes, invite tokens | Client IndexedDB / localStorage; `api_credentials`, `password_reset_tokens`, `email_verification_tokens` (hashed — the latter two since migration 0080, OPS-20, with the plaintext columns themselves dropped by 0087, OPS-31); `admin_elevation_codes` (scrypt-hashed since 0094, OPS-36 — plaintext column retired nullable, drop pending); `project_invites`, `org_invites` (**plaintext** — OPS-26) | Each is a live credential. A password-reset token is account takeover on its own for 24 hours. For the two auth-token tables the guarantee is now structural rather than behavioural: since migration 0087 there is no plaintext column to write to, so restoring a pre-0080 backup into the live schema can no longer re-introduce readable reset links. Invite tokens ride in a URL path, which is the least protected place a bearer token can be — **and they remain the exception to this row's "hashed" claim**: both invite tables store the raw token, so a DB read hands over working invite links (OPS-26, `docs/OPSEC-REVIEW-2026-08-31.md`). Since OPS-42 (`docs/OPSEC-REVIEW-2026-10-05.md`) the workers no longer copy those URL paths into PostHog Logs or Cloudflare Workers Logs on the ordinary 4xx (mistyped PIN, lapsed session) or on a slow success; Cloudflare's own edge request logs still record full URLs, as they do for any HTTP service, which is the standing reason this placement is poor. |
 | D6 | **Voice recordings and cloned voices** | R2 `aquilla-snapshots`, Modal services | Biometric-adjacent. A cloned voice is not revocable the way a password is. |
-| D7 | **User-supplied vendor API keys** (Gemini/TTS/completion) | Browser `localStorage`, org settings in Postgres | Someone else's credential that we chose to hold. |
+| D7 | **User-supplied vendor API keys** (Gemini/TTS/completion) | Browser `localStorage`, org settings in Postgres | Someone else's credential that we chose to hold. `GET /api/v2/orgs/:orgId/settings` redacts them below org MAINTAINER, and since OPS-44 (`docs/OPSEC-REVIEW-2026-10-12.md`) that floor is no longer satisfied by bare platform-admin authority — an un-elevated operator received every tenant's keys in plaintext. |
 | D8 | **Session replays** | PostHog (third party) | Inputs are masked, but the page body is deliberately visible — so D2 draft text leaves our infrastructure by design. |
 
 ---
@@ -305,7 +656,7 @@ actually enforced.
 
 **Update (2026-09-09, AQU-1219): validation runs before push.** Cloudflare
 Workers Builds now compiles previews only. `.husky/pre-push` runs
-`pnpm scan:secrets` before the existing commit-based affected E2E gate. The dispatch-only `ci.yml` retains manual equivalents.
+`pnpm scan:secrets` before the existing commit-based affected E2E gate. `ci.yml` runs the same secret scan, plus lint and unit tests, on every pull request into `dev`.
 A green preview check confirms compilation, not security or functional testing.
 Local hooks can be bypassed; API-created commits do not execute them. QA reviews
 published previews under this explicitly chosen policy.
@@ -423,8 +774,8 @@ resolved by AQU-564 — see its section above.)
 | Fail closed on the sync auth bypass in deployed environments | `sync-worker/src/environment-guard.ts`, `index.ts`, `project-do.ts` |
 | Baseline HTTP security headers on the web surface | `worker/security-headers.ts` |
 | Invite tokens fingerprinted, never logged whole | `src/lib/sync/invites.ts` |
-| Credential scanning before push | `scripts/secret-scan.ts`; first command in `.husky/pre-push`; manual fallback in `.github/workflows/ci.yml` |
-| SPA Worker suite available for targeted/manual validation | `pnpm run test:worker`; manual ci.yml `unit` job |
+| Credential scanning before push | `scripts/secret-scan.ts`; first command in `.husky/pre-push`; the pull-request `ci.yml` lint job |
+| SPA Worker suite available for targeted/manual validation | `pnpm run test:worker`; the pull-request `ci.yml` `unit` job |
 | auth-worker `hono` floor raised above the SEC-7 advisory | `auth-worker/package.json` |
 
 Every one has a test. A control without a test is V4 waiting to happen again.
@@ -468,6 +819,11 @@ asset in §1, and none of this repo's controls apply to them.
   and the Apple/Windows certificates are the only assets here that let someone
   ship signed malicious software to users. They should not be reachable with the
   same session that reads a PR.
+- **Configure required reviewers on the `desktop-release-signing` GitHub
+  Environment (OPS-40).** `tauri-release.yml` now declares this Environment, but
+  a declared Environment with no protection rules holds nothing — the reviewer
+  requirement (and, ideally, a deployment tag policy scoping it to `v*`) is a repo
+  setting this code cannot enable on its own.
 - **Scope the `CLOUDFLARE_API_TOKEN` in CI** to the Workers/Pages it actually
   deploys, not account-wide.
 - **Treat invite links as credentials (V9)** — never in a screenshot, a public
@@ -529,7 +885,10 @@ Reviewed against what the June audit and the 2026-08-03 pen test put in place.
 | PostHog input masking | Doesn't cover console output (V3) | Fixed at the source; keep console capture off in the PostHog project |
 | Environment separation | Explicitly defeated for signing keys (V7) | Open — recommendation #1 |
 | Dependency hygiene | Audited only during reviews like this one (V6) | Schedule a recurring audit; add `overrides` for transitive `tar` |
+| **0034 RLS backstop** | Cited by four passes as the layer that catches a mis-scoped query. Covers 21 of 55 project-scoped tables, was documented as nine, and no role that can evaluate its policies appears to be in the request path (OPS-38) | Coverage now measured (`scripts/rls-coverage.test.ts`) and documented (`db/postgres/RLS.md`). **Open:** confirm which Postgres role each environment's Hyperdrive uses and whether it is `BYPASSRLS`, then either finish the `app_runtime` grants and cut over with a soak, or stop counting RLS as a layer here |
+| Agent `sql` escape hatch | Was a blocklist over the whole database whose only scoping requirement was textual (OPS-37) | Fixed — allowlist plus a structural scoping rewrite; drift-guarded against `schema.sql` and the prompt's schema card |
 | Secret hygiene | Verified by hand in June, unenforced since (V5) | Fixed — `scan:secrets` in CI |
+| **Platform-admin elevation census** | OPS-45 counted route modules that *resolve* a platform-winnable role; AQU-804 then moved three routers' authorization into a shared guard, where that method cannot see it, and the open ledger decayed in a day (OPS-50) | **Open:** turn the census into an assertion in `scripts/platform-elevation-coverage.test.ts` that fails when a new undecided module appears. 13 of 48 decide today |
 
 ### Regressed or unchanged since June
 
@@ -537,6 +896,20 @@ Reviewed against what the June audit and the 2026-08-03 pen test put in place.
 - **SEC-5** — `SYNC_SECRET_KEY` still doubles as a plaintext admin bearer with a
   non-constant-time compare. Not re-examined in depth here; still valid.
 - **SEC-9, SEC-10, SEC-11** — not re-examined; assume open.
+
+### Update 2026-10-16 (AQU-2003)
+
+Cross-tenant *read* through the sync token was deliberately reopened at Viewer
+level by agreement of Ryder and Matthew: a step-up code on every foreign project
+made platform QA impractical. An un-elevated platform admin now mints a level 100
+token (still `src: "platform"`); user-content writes are refused by the
+sync-worker's role floors plus an explicit platform-view rule in
+`events/authorize.ts`, and the step-up code re-mints at full level. The one
+exception is the link-sync trigger, which any genuine Viewer can also fire and
+which writes only server-authored mirror data. PAT minting, vendor keys and the sibling
+fold keep their OPS-44 gate. Residual risk: a stolen non-elevated admin JWT can
+read any tenant's project content. Detail: `docs/OPSEC-REVIEW-2026-10-12.md`,
+"Update 2026-10-16".
 
 ---
 

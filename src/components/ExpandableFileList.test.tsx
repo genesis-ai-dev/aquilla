@@ -55,7 +55,7 @@ function renderList(files: FileReference[], props: Partial<React.ComponentProps<
   )
 }
 
-const jumpGroup = () => screen.getByRole("group", { name: "Jump to Testament" })
+const jumpGroup = () => screen.getByRole("group", { name: "Jump to testament" })
 const jumpButton = (name: "Old Testament" | "New Testament") =>
   within(jumpGroup()).getByRole("button", { name })
 // Group headers expose their state through the accessible name of their toggle.
@@ -143,11 +143,11 @@ describe("ExpandableFileList — Jump to Testament control (AQU-1084)", () => {
     unmount()
 
     renderList([file("notes", { type: "txt" }), file("Season 1 ep 1", { corpusMarker: "Season 1" })])
-    expect(screen.queryByRole("group", { name: "Jump to Testament" })).toBeNull()
+    expect(screen.queryByRole("group", { name: "Jump to testament" })).toBeNull()
     unmount()
 
     renderList([file("Matthew", { bookCode: "MAT" }), file("Mark", { bookCode: "MRK" })])
-    expect(screen.queryByRole("group", { name: "Jump to Testament" })).toBeNull()
+    expect(screen.queryByRole("group", { name: "Jump to testament" })).toBeNull()
   })
 
   it("scrolls the chosen group's header into view without touching the other group", () => {
@@ -260,5 +260,48 @@ describe("ExpandableFileList — on-demand chapter health", () => {
     expect(getActiveChapterHealth).not.toHaveBeenCalled()
     fireEvent.click(headerToggle("OT"))
     expect(getActiveChapterHealth).toHaveBeenCalledTimes(1)
+  })
+})
+
+// AQU-894: "make mine obvious" in a project with many files. The list decides
+// WHETHER to de-emphasise; FileRow.test.tsx covers what a de-emphasised row
+// looks like.
+describe("ExpandableFileList — AQU-894 assigned-file emphasis", () => {
+  const rowEl = (name: string) =>
+    fileRow(name)?.closest('[data-showcase="sidebar.file"]') as HTMLElement | null
+
+  it("dims the files the reader does not hold, and leaves theirs alone", () => {
+    renderList(FRESH_BIBLE, { assignedFileIds: new Set(["genesis", "exodus"]) })
+    expect(rowEl("Genesis")?.dataset.unassigned).toBeUndefined()
+    expect(rowEl("Exodus")?.dataset.unassigned).toBeUndefined()
+    expect(rowEl("Matthew")?.dataset.unassigned).toBe("true")
+    expect(rowEl("Revelation")?.dataset.unassigned).toBe("true")
+  })
+
+  it("dims NOTHING when the reader holds no assignment in this project", () => {
+    // The no-assignments-team case, and equally a member of an assigning team
+    // who hasn't been given anything yet: neither may be shown a project where
+    // every file is greyed out. This is why the treatment needs no setting to
+    // be safe — it switches itself off for the people it can't help.
+    renderList(FRESH_BIBLE, { assignedFileIds: new Set() })
+    for (const name of ["Genesis", "Exodus", "Matthew", "Revelation"]) {
+      expect(rowEl(name)?.dataset.unassigned).toBeUndefined()
+    }
+  })
+
+  it("dims nothing when assignments were never read at all", () => {
+    // Prop omitted: the read is still in flight, or the caller doesn't wire it.
+    // Unknown must look like "nothing to say", never like "none are yours".
+    renderList(FRESH_BIBLE)
+    for (const name of ["Genesis", "Matthew"]) {
+      expect(rowEl(name)?.dataset.unassigned).toBeUndefined()
+    }
+  })
+
+  it("keeps a dimmed file openable", () => {
+    const onSelectFile = vi.fn()
+    renderList(FRESH_BIBLE, { assignedFileIds: new Set(["genesis"]), onSelectFile })
+    fireEvent.click(fileRow("Matthew")!)
+    expect(onSelectFile).toHaveBeenCalledWith("matthew")
   })
 })

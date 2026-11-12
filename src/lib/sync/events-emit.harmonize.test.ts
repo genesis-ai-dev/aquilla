@@ -45,6 +45,7 @@ describe("emitCellHarmonize — event variant", () => {
       parentId: "evt-parent",
       value: "Corrected text",
       author: "lead",
+      targetLang: "",
       ruleOrCheckId: "builtin:double-space",
       proposalKind: "batch-regex",
     })
@@ -70,6 +71,7 @@ describe("emitCellHarmonize — event variant", () => {
       parentId: null,
       value: "Fixed",
       author: "lead",
+      targetLang: "",
       ruleOrCheckId: "r-abc",
       proposalKind: "cached-regex",
       parentProposalId: "sweep-session-42",
@@ -79,6 +81,53 @@ describe("emitCellHarmonize — event variant", () => {
     const payload = record.event.payload as Record<string, unknown>
     const origin = payload.harmonize_origin as Record<string, unknown>
     expect(origin.parent_proposal_id).toBe("sweep-session-42")
+  })
+
+  // AQU-1805: a rule fix is proposed against the lane the reviewer is reading,
+  // so it has to commit to THAT lane's row. Before this, the harmonize variant
+  // carried no lane at all and every fix landed on the default lane — silently
+  // overwriting the wrong translation on a multi-lane project.
+  it("carries the lane it was proposed against", async () => {
+    setCqrsOutboxBridge(null)
+
+    await emitCellHarmonize({
+      projectId: "p1",
+      fileId: "f1",
+      cellId: "c3",
+      parentId: "evt-parent",
+      targetLang: "arb",
+      laneId: "lane-arb-1",
+      value: "نص مصحح",
+      author: "lead",
+      ruleOrCheckId: "r-god",
+      proposalKind: "per-cell",
+    })
+
+    const [record] = await peekOutboxBatch(1)
+    const payload = record.event.payload as Record<string, unknown>
+    expect(payload.targetLang).toBe("arb")
+    expect(payload.laneId).toBe("lane-arb-1")
+  })
+
+  it("omits the default lane from the wire, so a one-lane fix stays byte-identical", async () => {
+    setCqrsOutboxBridge(null)
+
+    await emitCellHarmonize({
+      projectId: "p1",
+      fileId: "f1",
+      cellId: "c4",
+      parentId: "evt-parent",
+      targetLang: "",
+      value: "Corrected",
+      author: "lead",
+      ruleOrCheckId: "r-god",
+      proposalKind: "per-cell",
+    })
+
+    const [record] = await peekOutboxBatch(1)
+    const payload = record.event.payload as Record<string, unknown>
+    expect("targetLang" in payload).toBe(false)
+    expect("laneId" in payload).toBe(false)
   })
 })
 
@@ -104,6 +153,7 @@ describe("emitCellHarmonize — client role gate", () => {
         parentId: null,
         value: "x",
         author: "u",
+        targetLang: "",
         ruleOrCheckId: "r",
         proposalKind: "batch-regex",
       }),
@@ -122,6 +172,7 @@ describe("emitCellHarmonize — client role gate", () => {
       parentId: null,
       value: "x",
       author: "u",
+      targetLang: "",
       ruleOrCheckId: "r",
       proposalKind: "batch-regex",
     })
@@ -141,6 +192,7 @@ describe("emitCellHarmonize — client role gate", () => {
           parentId: null,
           value: "x",
           author: "u",
+          targetLang: "",
           ruleOrCheckId: "r",
           proposalKind: "batch-regex",
         },
@@ -161,6 +213,7 @@ describe("emitCellHarmonize — client role gate", () => {
         parentId: null,
         value: "x",
         author: "u",
+        targetLang: "",
         ruleOrCheckId: "r",
         proposalKind: "batch-regex",
       },
@@ -180,6 +233,7 @@ describe("emitCellHarmonize — client role gate", () => {
       parentId: null,
       value: "x",
       author: "u",
+      targetLang: "",
       ruleOrCheckId: "r",
       proposalKind: "per-cell",
     })

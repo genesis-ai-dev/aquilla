@@ -57,6 +57,12 @@ async function seedWorld(): Promise<{ contrib: string; viewer: string }> {
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, ?, ?, 1)",
     ).bind(PROJECT, userId, role).run()
   }
+  // AQU-1050: steering is gated on the project's Autopilot opt-in, and the
+  // cache cases below steer to prove the funnel invalidates.
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO project_settings (project_id, settings, version, updated_by)
+     VALUES (?, ?, 1, 1)`,
+  ).bind(PROJECT, JSON.stringify({ autopilotEnabled: true })).run()
   await env.AQUILLA_PG.prepare(
     `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
      VALUES (?, ?, 'c1', 'source', 'In the beginning', 'MRK 1:1', 'ev-c1', 0)`,
@@ -168,9 +174,9 @@ describe("GET /contextual/overview|runs|activity through the cache", () => {
       })
       // Cold: the route's own reads plus the gate. Warm/304: the gate only —
       // the `projects` row plus the direct + group membership paths (session
-      // cache absorbs auth) — and, for activity, the project-scoping `getRun`
-      // that guards the 404.
-      const gateOnly = path.includes("/activity") ? 4 : 3
+      // cache absorbs auth), the platform_admins lookup (AQU-1239) — and, for
+      // activity, the project-scoping `getRun` that guards the 404.
+      const gateOnly = path.includes("/activity") ? 5 : 4
       expect({ path, cold, warm, conditional }).toEqual({
         path,
         cold: expect.any(Number),
@@ -228,8 +234,7 @@ describe("GET /contextual/overview|runs|activity through the cache", () => {
 
     // 2. Review: the draft flips to applied with no live frame at all.
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at)
-       VALUES (?, ?, 'c1', 'target', '', 'Au commencement', 'ev-review-c1', 0)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at) VALUES (?, ?, 'c1', 'target', 'Au commencement', 'ev-review-c1', 0)`,
     ).bind(PROJECT, FILE).run()
     const { drafts } = (await (await get(`/drafts?fileId=${FILE}`, viewer)).json()) as { drafts: { id: string }[] }
     const review = await post(`/drafts/${drafts[0].id}/review`, contrib, { action: "applied" })

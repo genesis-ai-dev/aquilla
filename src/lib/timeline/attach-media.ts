@@ -10,10 +10,17 @@
 //     only timing/metadata is captured, nothing is copied into project storage.
 
 import { v7 as uuidv7 } from "uuid"
-import { computeMediaSegmentSpecs } from "@/lib/import"
+import { computeMediaSegmentSpecs, mediaSegmentSpecsFromSpeech } from "@/lib/import"
 import { recordMediaImportSeed, buildMediaSeedCells } from "@/lib/audio/auto-transcribe"
 import { buildAudioId, deleteCellAudio, uploadCellAudio } from "@/lib/audio/upload"
-import { emitCellAudioAttach, emitSourceCellCreate } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitSourceCellCreate, InsufficientRoleError } from "@/lib/sync/events-emit"
+import { getCqrsOutboxBridge } from "@/lib/sync/cqrs-bridge"
+import { canAttachSourceAudio, SOURCE_AUDIO_ATTACH_FLOOR } from "@/lib/sync/role-policy"
+import { primeSharedClipPcm } from "@/lib/audio/shared-clip-pcm"
+
+/** A line the recording became, and the event that made it (decision 11:
+ *  the caller records "Make lines from a recording" as an Undo step). */
+export interface MadeLine { cellId: string; eventId: string }
 
 export interface AttachMediaContext {
   projectId: string
@@ -24,6 +31,22 @@ export interface AttachMediaContext {
   getToken: (fileId: string) => Promise<string | null>
 }
 
+export interface AttachMediaFileOptions {
+  /** AQU-1681: speech already found in this clip (a linked video's sound is
+   *  analysed while it is fetched). Given, the clip is not decoded again —
+   *  and with its 16 kHz PCM, not even to transcribe the rows. */
+  analysis?: {
+    segments: readonly { startMs: number; endMs: number }[]
+    durationMs: number
+    pcm16k?: Float32Array
+  }
+  /** Cancels the upload. Once the bytes are stored the rows go in regardless:
+   *  a half-made set of rows is worse than a finished one. */
+  signal?: AbortSignal
+  /** Called as the stored copy is uploaded, then as the rows are made. */
+  onPhase?: (phase: "save" | "rows") => void
+}
+
 /**
  * Upload a local clip's bytes and append its media segments to the file.
  * Caller flushes the outbox and revalidates cells afterwards (diarize pattern).
@@ -31,11 +54,19 @@ export interface AttachMediaContext {
 export async function attachMediaFileToTimeline(
   file: File,
   ctx: AttachMediaContext,
-): Promise<{ segments: number }> {
-  const { durationMs, specs } = await computeMediaSegmentSpecs(file)
+  opts: AttachMediaFileOptions = {},
+): Promise<{ segments: number; lines: MadeLine[] }> {
+  assertMayAttachSourceAudio()
+  const { durationMs, specs } = opts.analysis
+    ? {
+        durationMs: opts.analysis.durationMs,
+        specs: mediaSegmentSpecsFromSpeech(opts.analysis.segments, opts.analysis.durationMs),
+      }
+    : await computeMediaSegmentSpecs(file)
 
   const ext = (file.name.split(".").pop() || "bin").toLowerCase()
   const audioId = buildAudioId(ctx.fileId)
+  opts.onPhase?.("save")
   const upload = await uploadCellAudio({
     projectId: ctx.projectId,
     fileId: ctx.fileId,
@@ -43,12 +74,17 @@ export async function attachMediaFileToTimeline(
     ext,
     blob: file,
     getSyncToken: (_p, f) => ctx.getToken(f),
+    ...(opts.signal ? { signal: opts.signal } : {}),
   })
+  opts.onPhase?.("rows")
+  // Keyed the way transcription names a shared clip: its stored object.
+  if (opts.analysis?.pcm16k) primeSharedClipPcm(`${upload.audioId}.${upload.ext}`, opts.analysis.pcm16k)
 
+  const lines: MadeLine[] = []
   try {
     let prevCellId: string | null = null
     for (const [i, s] of specs.entries()) {
-      await emitSourceCellCreate({
+      const eventId = await emitSourceCellCreate({
         projectId: ctx.projectId,
         fileId: ctx.fileId,
         cellId: s.cellId,
@@ -71,8 +107,16 @@ export async function attachMediaFileToTimeline(
         ...(s.trimStartMs !== undefined && s.trimEndMs !== undefined
           ? { trimStartMs: s.trimStartMs, trimEndMs: s.trimEndMs }
           : {}),
+        audioOrigin: "attach", // AQU-1572
+        surface: "timeline",
+        // AQU-1565 follow-up: this clip is the file's own recording, shared by
+        // every row, not somebody's dub of one line. Without the role the
+        // server stored it as a dub, which put a mic on every row and read the
+        // whole file as "recorded".
+        role: "source",
         author: ctx.author,
       })
+      lines.push({ cellId: s.cellId, eventId })
       prevCellId = s.cellId
     }
   } catch (err) {
@@ -102,7 +146,7 @@ export async function attachMediaFileToTimeline(
     }),
   })
 
-  return { segments: specs.length }
+  return { segments: specs.length, lines }
 }
 
 /**
@@ -113,7 +157,8 @@ export async function attachMediaFileToTimeline(
 export async function attachMediaUrlToTimeline(
   url: string,
   ctx: AttachMediaContext,
-): Promise<{ durationMs: number }> {
+): Promise<{ durationMs: number; lines: MadeLine[] }> {
+  assertMayAttachSourceAudio()
   const trimmed = url.trim()
   let parsed: URL
   try {
@@ -128,7 +173,7 @@ export async function attachMediaUrlToTimeline(
   const durationMs = await probeRemoteMediaDurationMs(trimmed)
 
   const cellId = uuidv7()
-  await emitSourceCellCreate({
+  const eventId = await emitSourceCellCreate({
     projectId: ctx.projectId,
     fileId: ctx.fileId,
     cellId,
@@ -148,10 +193,28 @@ export async function attachMediaUrlToTimeline(
     url: trimmed,
     slot: "recording",
     durationMs: Math.round(durationMs),
+    audioOrigin: "attach", // AQU-1572
+    surface: "timeline",
+    // AQU-1565 follow-up: the file's own recording, not a dub (see above).
+    role: "source",
     author: ctx.author,
   })
 
-  return { durationMs }
+  return { durationMs, lines: [{ cellId, eventId }] }
+}
+
+/**
+ * Refuse BEFORE anything is uploaded or emitted. The attach events would be
+ * refused below Project Lead anyway (`emitCellAudioAttach`), but by then the
+ * rows would already be queued and the bytes uploaded, leaving rows with no
+ * audio behind them. The UI only offers these actions at that rank; this is
+ * the backstop for any other caller.
+ */
+function assertMayAttachSourceAudio(): void {
+  const roleLevel = getCqrsOutboxBridge()?.roleLevel ?? null
+  if (!canAttachSourceAudio(roleLevel)) {
+    throw new InsufficientRoleError("cell.audio.attach", roleLevel ?? 0, SOURCE_AUDIO_ATTACH_FLOOR)
+  }
 }
 
 /** Display name for a URL-attached clip: the path's basename, else the host. */

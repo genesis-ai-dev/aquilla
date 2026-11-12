@@ -1,0 +1,281 @@
+// AQU-1109 "Change voice": re-voice a cell's EXISTING take into a library
+// voice's timbre (voice forge RVC — a character voice or a trained custom
+// voice), or into an ElevenLabs voice (speech-to-speech with the user's own
+// key, AQU-2299). Never synthesizes from text — the words, timing and performance of
+// the take are kept; only who it sounds like changes.
+//
+// Mirrors denoise-take: the result is a NEW take in the SAME slot as the take
+// it came from, selected on attach; the source take stays in the strip and is
+// linked from the new one's `referenceAudioId` (the take lineage field on the
+// attachment — not a voice clip).
+//
+// The worker names a converted clip `vc-<fingerprint>-audio-<cellId>-…`
+// (sync-worker/src/voice-convert.ts `convertedAudioId`). The fingerprint is the
+// library voice it was made with, so a re-run can tell a take converted into
+// this voice from one converted into another without a schema change. Ids
+// minted by the retired short-clip converter carry a `-q<steps>-` segment after
+// the fingerprint; they still parse as voice-changed takes.
+
+import type { CellData } from "@/hooks/useCells"
+import type { CodexCellAttachment } from "@/lib/codex-editor/types"
+import type { FrontierSession } from "@/lib/frontier/types"
+import type { Voice } from "@/lib/parsers/types"
+import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
+import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { playingInSlot, recordTakeAdded } from "@/lib/history/take-steps"
+import { probeDurationMsSafe } from "@/lib/import"
+import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
+import { audioCachePutBlob } from "./bytes-cache"
+import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
+import { setTtsStatus, ttsStatusKey } from "./tts"
+import { fetchCellAudio, audioIdSeededWith } from "./upload"
+import { convertToLibraryVoice, type ConvertToLibraryVoiceResult } from "./voice-clone"
+import { convertElevenLabsSpeech } from "@/lib/sync/elevenlabs"
+import { elevenLabsConversionKey, elevenLabsSettingsOf, isElevenLabsVoice, ELEVENLABS_STS_MODEL } from "./elevenlabs/settings"
+
+const VOICE_CHANGED_PREFIX = "vc-"
+
+/**
+ * FNV-1a (32-bit) of a conversion key, as 8 hex chars. Mirrors
+ * `voiceReferenceFingerprint` in sync-worker/src/voice-convert.ts, which stamps
+ * it into the converted clip's id. Change both or neither.
+ */
+export function voiceReferenceFingerprint(key: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h.toString(16).padStart(8, "0")
+}
+
+/**
+ * What a voice's conversions are pinned to: a library voice's model id, or an
+ * ElevenLabs voice id (both namespaced). Null when the voice can't convert —
+ * only character voices, trained voices and ElevenLabs voices can. Mirrors
+ * `libraryVoiceKey` in sync-worker/src/voice-convert.ts and
+ * `elevenLabsVoiceKey` in sync-worker/src/elevenlabs.ts.
+ */
+export function voiceConversionKey(voice: Voice): string | null {
+  if (voice.libraryVoiceId) return `library:${voice.libraryVoiceId}`
+  if (isElevenLabsVoice(voice) && voice.elevenLabs) return elevenLabsConversionKey(voice.elevenLabs.voiceId)
+  return null
+}
+
+/** True when an audioId names a Change voice conversion. */
+export function isVoiceChangedAudioId(audioId: string): boolean {
+  return audioId.startsWith(VOICE_CHANGED_PREFIX)
+}
+
+/** True when `audioId` was converted with exactly this conversion key. */
+export function voiceChangedWithReference(audioId: string, key: string): boolean {
+  return audioId.startsWith(`${VOICE_CHANGED_PREFIX}${voiceReferenceFingerprint(key)}-`)
+}
+
+export interface ChangeVoiceTake {
+  audioId: string
+  slot: string
+  attachment: CodexCellAttachment
+}
+
+function isImportedSourceClip(cell: CellData, audioId: string, att: CodexCellAttachment): boolean {
+  if (att.role === "source") return true
+  // A stub without `role`: a media cell's recording that isn't seeded with
+  // the cell id is the shared programme clip (SUB-29).
+  return cell.medium === "media" && audioId === cell.selectedAudioId && !audioIdSeededWith(audioId, cell.id)
+}
+
+/**
+ * The take Change voice acts on: the cell's playable take (recording first,
+ * then generated voice — the order the voice panel plays them in), never the
+ * imported programme clip, whose object is the whole file's audio.
+ */
+export function changeVoiceSourceTake(cell: CellData): ChangeVoiceTake | null {
+  for (const audioId of [cell.selectedAudioId, cell.selectedGeneratedVoiceAudioId]) {
+    if (!audioId) continue
+    const att = cell.attachments?.[audioId]
+    if (!att || att.isDeleted) continue
+    if (isImportedSourceClip(cell, audioId, att)) continue
+    const slot = att.slot ?? (audioId === cell.selectedAudioId ? RECORDING_SLOT : GENERATED_VOICE_SLOT)
+    return { audioId, slot, attachment: att }
+  }
+  return null
+}
+
+/**
+ * Where a fresh Generate should land so it becomes the take you hear when the
+ * one playing is a Change voice result.
+ *
+ * A converted take stays selected in the slot it was made in. Generate normally
+ * writes the other slot (`generatedVoice`), and playback prefers a recording,
+ * so the new synthesis never sounds and never becomes the circled take. Landing
+ * it in the converted take's own slot selects it there and leaves the
+ * conversion in the list underneath. A real recording is left alone — it is
+ * meant to keep sounding over a generated voice.
+ */
+export function generateSlotOverVoiceChange(cell: CellData): string | undefined {
+  const playing = changeVoiceSourceTake(cell)
+  if (!playing || !isVoiceChangedAudioId(playing.audioId)) return undefined
+  return playing.slot
+}
+
+/**
+ * Walk back through earlier conversions to the take a person recorded,
+ * imported or generated. Re-converting a conversion compounds artifacts, so a
+ * re-run into another voice always starts from the original. Stops at
+ * the last take still present when the chain is broken.
+ */
+export function originalTakeId(
+  attachments: Record<string, CodexCellAttachment> | undefined,
+  audioId: string,
+): string {
+  let current = audioId
+  for (let hops = 0; hops < 32 && isVoiceChangedAudioId(current); hops++) {
+    const parent = attachments?.[current]?.referenceAudioId
+    if (!parent || !attachments?.[parent] || attachments[parent].isDeleted) break
+    current = parent
+  }
+  return current
+}
+
+/** Why Change voice can't run on a cell, or null when it can. */
+export type ChangeVoiceBlocker = "no-take" | "not-trained" | "up-to-date"
+
+export function changeVoiceBlocker(cell: CellData, voice: Voice): ChangeVoiceBlocker | null {
+  const take = changeVoiceSourceTake(cell)
+  if (!take) return "no-take"
+  const key = voiceConversionKey(voice)
+  if (!key) return "not-trained"
+  if (take.attachment.voiceId === voice.id && voiceChangedWithReference(take.audioId, key)) return "up-to-date"
+  return null
+}
+
+/**
+ * "Take 2 → Narrator": where the new take came from and whose voice it is now.
+ * Undefined when the source take has no name yet — the takes strip backfills
+ * unnamed takes with "Take N" itself.
+ */
+export function changeVoiceLabel(sourceLabel: string | null | undefined, voiceName: string): string | undefined {
+  const from = sourceLabel?.trim()
+  return from ? `${from} → ${voiceName}` : undefined
+}
+
+export interface ChangeVoiceArgs {
+  projectId: string
+  cell: CellData
+  voice: Voice
+  session: FrontierSession | null
+  author: string
+  /** The new take's permanent name. Defaults to `changeVoiceLabel`. */
+  label?: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** Decision 11: record an Undo step for the changed take. Bulk runs leave it off. */
+  recordStep?: boolean
+}
+
+export interface ChangeVoiceResult {
+  audioId: string
+  url: string
+}
+
+/** Convert, attach and select. Throws on failure; see `changeCellVoice`. */
+export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeVoiceResult> {
+  const { projectId, cell, voice, session, author } = args
+  if (!session?.jwt) throw new Error("Not signed in — sign in again to change the voice.")
+  const take = changeVoiceSourceTake(cell)
+  if (!take) throw new Error("This line has no take to change.")
+  const elevenLabs = isElevenLabsVoice(voice) ? voice.elevenLabs : undefined
+  if (!voice.libraryVoiceId && !elevenLabs) {
+    throw new Error(`${voice.name} can read text but can't re-voice recordings — Change voice works with character, trained and ElevenLabs voices.`)
+  }
+
+  const sourceAudioId = originalTakeId(cell.attachments, take.audioId)
+  const label = args.label ?? changeVoiceLabel(cell.attachments?.[sourceAudioId]?.label, voice.name)
+  const getSyncToken = audioSyncTokenFetcherForSession(session)
+  let conv: ConvertToLibraryVoiceResult
+  if (voice.libraryVoiceId || !elevenLabs) {
+    conv = await convertToLibraryVoice({
+      projectId,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      libraryVoiceId: voice.libraryVoiceId ?? "",
+      sourceAudioId,
+      getSyncToken,
+    })
+  } else {
+    // ElevenLabs speech-to-speech: the worker stores the mp3 under the same
+    // vc-<fingerprint>-audio-<cellId>-… naming, keyed on the ElevenLabs voice.
+    conv = await convertElevenLabsSpeech({
+      projectId,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      voiceId: elevenLabs.voiceId,
+      sourceAudioId,
+      modelId: ELEVENLABS_STS_MODEL,
+      voiceSettings: elevenLabsSettingsOf(voice),
+    }, getSyncToken)
+  }
+  const mimeType = conv.ext === "mp3" ? "audio/mpeg" : "audio/wav"
+
+  const bytes = await fetchCellAudio({ projectId, fileId: cell.fileId, audioId: conv.audioId, ext: conv.ext, getSyncToken })
+  const blob = new Blob([bytes as BlobPart], { type: mimeType })
+  void audioCachePutBlob(conv.audioId, conv.ext, blob)
+  const durationMs = await probeDurationMsSafe(blob)
+  const objectName = `${conv.audioId}.${conv.ext}`
+
+  const attachEventId = await emitCellAudioAttach({
+    projectId,
+    fileId: cell.fileId,
+    cellId: cell.id,
+    audioId: objectName,
+    url: conv.url,
+    slot: take.slot,
+    mimeType,
+    voiceId: voice.id,
+    referenceAudioId: sourceAudioId,
+    ...(durationMs != null ? { durationMs } : {}),
+    ...(label ? { label } : {}),
+    ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+    author,
+  })
+  injectOptimisticAudioAttachment(cell.fileId, cell.id, {
+    audioId: objectName,
+    url: conv.url,
+    slot: take.slot,
+    mimeType,
+    voiceId: voice.id,
+    referenceAudioId: sourceAudioId,
+    durationMs: durationMs ?? null,
+    label: label ?? null,
+    trimStartMs: null,
+    trimEndMs: null,
+  }, attachEventId)
+  notifyAudioAttachmentsChanged(cell.fileId)
+  if (args.recordStep) {
+    recordTakeAdded(
+      "changeVoice",
+      { cellId: cell.id, audioId: objectName, slot: take.slot, selectedBefore: playingInSlot(cell, take.slot) },
+      { fileId: cell.fileId },
+    )
+  }
+  return { audioId: objectName, url: conv.url }
+}
+
+/**
+ * `changeVoiceForCell` behind the cell's tts badge — the same status the
+ * generate button drives, so the spinner and the error popover (which already
+ * knows voice-conversion failures) work unchanged. Returns true on success.
+ */
+export async function changeCellVoice(args: ChangeVoiceArgs): Promise<boolean> {
+  const statusKey = ttsStatusKey(args.cell.id)
+  setTtsStatus(statusKey, { kind: "synthesizing" })
+  try {
+    await changeVoiceForCell(args)
+    setTtsStatus(statusKey, { kind: "idle" })
+    return true
+  } catch (e) {
+    setTtsStatus(statusKey, { kind: "error", message: e instanceof Error ? e.message : String(e) })
+    return false
+  }
+}

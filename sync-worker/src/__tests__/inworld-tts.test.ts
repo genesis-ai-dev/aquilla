@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
+  INWORLD_TTS_REQUEST_TIMEOUT_MS,
+  __setInworldBackoffSleepForTests,
+  fetchInworld,
+  inworldBackoffDelayMs,
+  isAbortTimeout,
+  synthesizeInworldSpeech,
   inworldAuthHeader,
   toInworldLanguage,
   wavDurationSeconds,
@@ -139,5 +145,143 @@ describe("voice design helpers", () => {
     )
     expect(parseInworldDesignPromptMode("verbatim")).toBeUndefined()
     expect(parseInworldDesignPromptMode(undefined)).toBeUndefined()
+  })
+})
+
+// AQU-1156: an unbounded upstream subrequest held the /api/v1/voice/tts
+// request open until the platform killed it, so the caller's per-cell generate
+// control spun with no audio and no error. The upstream call is now deadlined
+// and a blown deadline becomes an error the route turns into a 502.
+describe("synthesizeInworldSpeech — request deadline", () => {
+  const config = { apiKey: "k" }
+
+  /** A minimal 44-byte PCM WAV header, 24kHz mono 16-bit, no samples. */
+  function emptyWavBase64(): string {
+    const buf = new ArrayBuffer(44)
+    const view = new DataView(buf)
+    const ascii = (offset: number, text: string) => {
+      for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i))
+    }
+    ascii(0, "RIFF")
+    view.setUint32(4, 36, true)
+    ascii(8, "WAVE")
+    ascii(12, "fmt ")
+    view.setUint32(16, 16, true)
+    view.setUint16(20, 1, true)
+    view.setUint16(22, 1, true)
+    view.setUint32(24, 24000, true)
+    view.setUint32(28, 48000, true)
+    view.setUint16(32, 2, true)
+    view.setUint16(34, 16, true)
+    ascii(36, "data")
+    view.setUint32(40, 0, true)
+    return bytesToBase64(buf)
+  }
+
+  function timeoutRejection(): Error {
+    const err = new Error("The operation was aborted due to timeout")
+    err.name = "TimeoutError"
+    return err
+  }
+
+  afterEach(() => {
+    __setInworldBackoffSleepForTests(null)
+    vi.unstubAllGlobals()
+  })
+
+  it("attaches an abort signal to the upstream call", async () => {
+    let init: RequestInit | undefined
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, requestInit?: RequestInit) => {
+      init = requestInit
+      return new Response(JSON.stringify({ audioContent: emptyWavBase64() }), { status: 200 })
+    }))
+
+    await synthesizeInworldSpeech(config, { text: "In the beginning" })
+
+    expect(init?.signal).toBeInstanceOf(AbortSignal)
+    expect(init?.signal?.aborted).toBe(false)
+  })
+
+  it("reports a blown deadline distinctly from an unreachable host", async () => {
+    const fetchMock = vi.fn(async () => { throw timeoutRejection() })
+    vi.stubGlobal("fetch", fetchMock)
+
+    await expect(synthesizeInworldSpeech(config, { text: "hi" })).rejects.toThrow(
+      `Inworld TTS did not respond within ${INWORLD_TTS_REQUEST_TIMEOUT_MS / 1000}s`,
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("still reports a non-timeout transport failure as unreachable", async () => {
+    __setInworldBackoffSleepForTests(async () => {})
+    const fetchMock = vi.fn(async () => { throw new TypeError("connection reset") })
+    vi.stubGlobal("fetch", fetchMock)
+
+    await expect(synthesizeInworldSpeech(config, { text: "hi" })).rejects.toThrow(
+      /Inworld TTS unreachable/,
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+  })
+
+  it("keeps the deadline below the client's own bound so its 502 wins the race", () => {
+    // Client bound is TTS_REQUEST_TIMEOUT_MS (90s) in
+    // src/lib/audio/tts-engine-error.ts — the server must fail first so the
+    // user reads *why*, not a generic client timeout.
+    expect(INWORLD_TTS_REQUEST_TIMEOUT_MS).toBeLessThan(90_000)
+  })
+})
+
+describe("Inworld exponential backoff", () => {
+  afterEach(() => {
+    __setInworldBackoffSleepForTests(null)
+    vi.unstubAllGlobals()
+  })
+
+  it("waits 1–2s, then 4s, then 8s", () => {
+    expect(inworldBackoffDelayMs(0, () => 0)).toBe(1000)
+    expect(inworldBackoffDelayMs(0, () => 0.999)).toBe(1999)
+    expect(inworldBackoffDelayMs(1)).toBe(4000)
+    expect(inworldBackoffDelayMs(2)).toBe(8000)
+    expect(inworldBackoffDelayMs(3)).toBeNull()
+  })
+
+  it("retries a 502 and returns the later success", async () => {
+    const waits: number[] = []
+    __setInworldBackoffSleepForTests(async (ms) => { waits.push(ms) })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("down", { status: 502 }))
+      .mockResolvedValueOnce(new Response("ok", { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const res = await fetchInworld("https://api.inworld.ai/voices/v1/voices:design", { method: "POST" })
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(waits).toHaveLength(1)
+    expect(waits[0]).toBeGreaterThanOrEqual(1000)
+    expect(waits[0]).toBeLessThanOrEqual(2000)
+  })
+
+  it("does not retry a 400", async () => {
+    const fetchMock = vi.fn(async () => new Response("bad prompt", { status: 400 }))
+    vi.stubGlobal("fetch", fetchMock)
+    const res = await fetchInworld("https://api.inworld.ai/voices/v1/voices:design", { method: "POST" })
+    expect(res.status).toBe(400)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("isAbortTimeout", () => {
+  it("recognizes the AbortSignal rejection shapes and nothing else", () => {
+    const timeout = new Error("t")
+    timeout.name = "TimeoutError"
+    const abort = new Error("a")
+    abort.name = "AbortError"
+
+    expect(isAbortTimeout(timeout)).toBe(true)
+    expect(isAbortTimeout(abort)).toBe(true)
+    expect(isAbortTimeout(new TypeError("Failed to fetch"))).toBe(false)
+    expect(isAbortTimeout(undefined)).toBe(false)
+    expect(isAbortTimeout(null)).toBe(false)
+    expect(isAbortTimeout("TimeoutError")).toBe(false)
   })
 })

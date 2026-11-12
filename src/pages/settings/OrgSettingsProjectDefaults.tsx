@@ -6,24 +6,30 @@
 // says otherwise, which is a different question and was reading as an odd one
 // out. Sam's call, 2026-09-05.
 //
-// One setting today. The page exists because the category is real, not because
-// it is full — a project-level control that offers "use the organization
-// default" needs somewhere honest for that default to live.
+// The page exists because the category is real, not because it is full — a
+// project-level control that offers "use the organization default" needs
+// somewhere honest for that default to live.
 
+import { RepetitionPropagationSection } from "@/components/settings/RepetitionPropagationSection"
+import { MediaDefaultsSection } from "@/components/settings/MediaDefaultsSection"
 import { StructuralCellsSection } from "@/components/settings/StructuralCellsSection"
+import { ValidationDefaultsSection } from "@/components/settings/ValidationDefaultsSection"
 import { SettingsGroup } from "@/components/ui/page"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { ORG_SETTINGS_SECTION_DESCRIPTIONS, ORG_SETTINGS_SECTION_TITLES } from "./constants"
 import { OrgSettingsDetailPage } from "./OrgSettingsDetailPage"
 
 export function OrgSettingsProjectDefaults() {
   const { activeOrg, activeOrgId } = useActiveOrg()
   const orgSettings = useOrgSettings(activeOrgId, activeOrg?.role?.level)
+  const { t } = useI18n()
 
   return (
     <OrgSettingsDetailPage
       title={ORG_SETTINGS_SECTION_TITLES["project-defaults"]}
+      page="project-defaults"
       description={ORG_SETTINGS_SECTION_DESCRIPTIONS["project-defaults"]}
     >
       {/* Label-less: the page title already says "Project defaults" and a
@@ -34,6 +40,23 @@ export function OrgSettingsProjectDefaults() {
         {/* The hook's own MAINTAINER write gate, not the page-level owner
             gate Security passes down: this is not a permission policy. */}
         <StructuralCellsSection orgSettings={orgSettings} canEdit={orgSettings.canEdit} />
+        {/* AQU-1391 — same card, same MAINTAINER gate, same reason: it shapes
+            what a project's editor does, not who may reach it. */}
+        <RepetitionPropagationSection orgSettings={orgSettings} canEdit={orgSettings.canEdit} />
+        {/* AQU-1771 — how many validators a translation and a recording
+            need. Same card and MAINTAINER gate: it decides how progress is
+            counted, not who may validate. Projects may override. */}
+        <ValidationDefaultsSection orgSettings={orgSettings} canEdit={orgSettings.canEdit} />
+        {/* Sam, 2026-10-01 — same card and gate: it changes what a bulk
+            validate covers in every project, not who may validate. Unlike the
+            two above it has no project override. */}
+      </SettingsGroup>
+      {/* AQU-1768 — the timeline and recording defaults. Their own group:
+          the card above shapes how progress is counted; these shape what
+          people may do on a project's timeline and with its recordings. Same
+          MAINTAINER gate, and projects may override each. */}
+      <SettingsGroup label={t("settings.mediaDefaults.groupLabel")}>
+        <MediaDefaultsSection orgSettings={orgSettings} canEdit={orgSettings.canEdit} />
       </SettingsGroup>
     </OrgSettingsDetailPage>
   )

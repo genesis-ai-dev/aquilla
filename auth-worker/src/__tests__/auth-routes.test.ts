@@ -187,6 +187,54 @@ describe("POST /api/v2/auth/register", () => {
     expect(body.gitlab_token).toBeUndefined()
   })
 
+  it.each(["admin\u200b", "adm\u202ein", "  padded", "tab\tname", "nb\u00a0sp"])(
+    "rejects username with invisible/control characters (%j)",
+    async (username) => {
+      const res = await app.request(
+        "/api/v2/auth/register",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, email: "inv@example.com", password: "very-secure" }),
+        },
+        env,
+      )
+      expect(res.status).toBe(400)
+    },
+  )
+
+  it("still accepts non-Latin usernames with an inner space", async () => {
+    const res = await app.request(
+      "/api/v2/auth/register",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: "María José", email: "mj@example.com", password: "very-secure" }),
+      },
+      env,
+    )
+    expect(res.status).toBe(200)
+  })
+
+  it("refuses to self-register an ADMIN_EMAILS address on non-production deploys", async () => {
+    const register = (e: typeof env) =>
+      app.request(
+        "/api/v2/auth/register",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: "qa-fixture",
+            email: "QA-Admin@local.test",
+            password: "very-secure",
+          }),
+        },
+        e,
+      )
+    const preview = { ...env, ENVIRONMENT: "development", ADMIN_EMAILS: "qa-admin@local.test" }
+    expect((await register(preview)).status).toBe(409)
+  })
+
   it("sends a welcome email on successful registration", async () => {
     const send = vi.fn(
       async (_message: {

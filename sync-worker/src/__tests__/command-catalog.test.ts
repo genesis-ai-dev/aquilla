@@ -25,7 +25,7 @@ import {
 import { requiredRoleForCommand, validateCommands, CREATE_PROJECT_FIELDS } from '../external/commands'
 import { structureCommandFloor } from '../external/commands-structure'
 import { POLICY_SETTINGS_KEYS } from '../external/commands-patch-settings'
-import { ALLOWED_EMIT_KINDS, TESTIMONY_EMIT_KINDS } from '../external/commands-emit-events'
+import { ALLOWED_EMIT_KINDS, MATCH_OPTION_KEYS, TESTIMONY_EMIT_KINDS } from '../external/commands-emit-events'
 import { BRIEF_FIELD_MAX_CHARS, BRIEF_NOTES_MAX_CHARS } from '../external/commands-set-brief'
 import { BRIEF_FIELD_IDS } from '../../../db/shared/brief'
 import { ROLE } from '../events/role-policy'
@@ -55,15 +55,15 @@ describe('command catalog — invariants', () => {
 
   it('every catalog kind is accepted by validateCommands (vocabulary parity)', () => {
     const minimal: Record<string, unknown> = {
-      SetTranslation: { kind: 'SetTranslation', fileId: 'f', cellId: 'c', value: 'v' },
-      LinkMedia: { kind: 'LinkMedia', fileId: 'f', cellId: 'c', artifactId: 'a' },
+      SetTranslation: { kind: 'SetTranslation', fileId: 'f', cellId: 'c', laneId: 'lane0001', value: 'v' },
+      LinkMedia: { kind: 'LinkMedia', fileId: 'f', cellId: 'c', artifactId: 'a', laneId: 'lane0001' },
       PlanImport: { kind: 'PlanImport', fileName: 'n', fileType: 'txt', cells: [{ content: 'x' }] },
       CreateOrg: { kind: 'CreateOrg', name: 'O' },
       CreateProject: { kind: 'CreateProject', name: 'P' },
       UpdateProjectSettings: { kind: 'UpdateProjectSettings', projectId: 'p', settings: {}, ifMatchVersion: 0 },
       PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'systemPrompt', value: 'x' }], ifMatchVersion: 0 },
       EmitEvents: { kind: 'EmitEvents', events: [{ kind: 'comment.create', payload: { body: 'hi' } }] },
-      DraftCells: { kind: 'DraftCells', fileId: 'f', cellIds: ['c'] },
+      DraftCells: { kind: 'DraftCells', fileId: 'f', cellIds: ['c'], laneId: 'lane0001' },
       SetSource: { kind: 'SetSource', fileId: 'f', cellId: 'c', value: 'v' },
       SetTranscription: { kind: 'SetTranscription', fileId: 'f', cellId: 'c', transcription: 't' },
       SetTiming: { kind: 'SetTiming', fileId: 'f', cellId: 'c', startMs: 0, endMs: 1 },
@@ -77,7 +77,7 @@ describe('command catalog — invariants', () => {
       UnarchiveProject: { kind: 'UnarchiveProject', projectId: 'p' },
       SetBrief: { kind: 'SetBrief', projectId: 'p', parameters: { audience: 'Rural youth' }, ifMatchVersion: 0 },
       RegenerateBriefSummary: { kind: 'RegenerateBriefSummary', projectId: 'p', ifMatchVersion: 0 },
-      ProjectSetup: { kind: 'ProjectSetup', projectId: 'p', settings: { targetLanguage: 'fr' } },
+      ProjectSetup: { kind: 'ProjectSetup', projectId: 'p', lanes: [{ role: 'target', language: 'fr' }] },
       AddOrgMember: { kind: 'AddOrgMember', orgId: 1, username: 'u', role: 400 },
       SetOrgRole: { kind: 'SetOrgRole', orgId: 1, username: 'u', role: 400 },
       RemoveOrgMember: { kind: 'RemoveOrgMember', orgId: 1, username: 'u' },
@@ -85,9 +85,16 @@ describe('command catalog — invariants', () => {
       AddDecision: { kind: 'AddDecision', slug: 'divine-name', decision: 'Render Lord as Господь.' },
       AddNote: { kind: 'AddNote', fileId: 'f', cellId: 'c', note: 'why this rendering' },
       RetireExample: { kind: 'RetireExample', slug: 'lord-as-hospod' },
+      ReviewStyleRules: {
+        kind: 'ReviewStyleRules',
+        projectId: 'p',
+        decisions: [{ ruleId: 'r1', action: 'approve', ifMatchVersion: 1 }],
+      },
       InsertCell: { kind: 'InsertCell', fileId: 'f', value: 'v' },
       DeleteCell: { kind: 'DeleteCell', fileId: 'f', cellId: 'c' },
       SplitCell: { kind: 'SplitCell', fileId: 'f', cellId: 'c', offset: 3, targets: 'blank' },
+      HideCell: { kind: 'HideCell', fileId: 'f', cellId: 'c' },
+      ShowCell: { kind: 'ShowCell', fileId: 'f', cellId: 'c' },
     }
     for (const entry of COMMAND_CATALOG) {
       const sample = minimal[entry.kind]
@@ -103,6 +110,18 @@ describe('command catalog — invariants', () => {
     expect(describeCommand('EmitEvents')?.minRoleLevel).toBe(ROLE.COMMENTER)
     expect(describeCommand('UpdateProjectSettings')?.minRoleLevel).toBe(ROLE.MAINTAINER)
     expect(describeCommand('Bogus')).toBeNull()
+  })
+
+  it('PatchSettings no longer offers `terminology` and tells the agent where terms go (AQU-1724)', () => {
+    // An agent reads this doc to decide how to write a term. If it still lists
+    // the key, the agent stages a write prepare refuses; if it does not name
+    // term.* events, the agent has no way to land the term at all.
+    const doc = describeCommand('PatchSettings')!.paramsDoc
+    expect(doc).not.toContain('terminology: object[]')
+    expect(doc).not.toContain('termbase-edit floor')
+    expect(doc).toContain('term.create')
+    expect(doc).toContain('term.update')
+    expect(doc).toContain('EmitEvents')
   })
 
   it('the structure commands publish the floor their engine enforces (AQU-1234)', () => {
@@ -165,6 +184,22 @@ describe('command catalog — invariants', () => {
     expect(setBriefDoc).not.toContain('carried over, not cleared')
   })
 
+  it("documents every term match option the validator accepts (AQU-1175)", () => {
+    // Same contract as the CreateProject case below, and the same bug: `match`
+    // was accepted by the event kinds and dropped by the validator, so a
+    // caller had no way to learn the field existed. An option the validator
+    // takes but describe_command never names is that gap reopening.
+    const emitDoc = describeCommand('EmitEvents')!.paramsDoc
+    for (const key of MATCH_OPTION_KEYS) {
+      expect(emitDoc).toContain(key)
+    }
+    // And the two rules that decide whether a staged term does anything: the
+    // option set replaces wholesale, and matching is exact without it.
+    expect(emitDoc).toContain('match')
+    expect(emitDoc).toMatch(/exact/i)
+    expect(emitDoc).toMatch(/wholesale/i)
+  })
+
   it("documents every field CreateProject actually accepts (AQU-1223)", () => {
     // describe_command is how an agent learns the shape before it stages. An
     // accepted field missing from the doc is how the silent-drop bug got its
@@ -183,7 +218,7 @@ describe('get_capabilities — commands index (§6)', () => {
   it('publishes kind/title/tier/minRoleLevel for every agent-reachable command', async () => {
     const cred = {
       credentialId: 'cred-1', userId: '1', username: 'alice',
-      mode: 'act' as const, orgId: null, projectId: null,
+      mode: 'act' as const, access: 'write' as const, orgId: null, projectId: null,
     }
     const result = await callTool('get_capabilities', {}, { AQUILLA_PG: undefined }, cred, 'tok')
     expect(result).not.toBe(Symbol.for('unknown-tool'))

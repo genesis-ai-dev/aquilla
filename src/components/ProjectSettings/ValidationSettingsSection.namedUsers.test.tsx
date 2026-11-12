@@ -42,6 +42,23 @@ vi.mock("@/hooks/useProjectMembers", () => ({
 }))
 
 describe("ValidationSettingsSection — named validators combobox", () => {
+  // Walk 10-02: the label read "Named validators (optional) (optional)" — the
+  // string carried its own note and the row added the shared one after it.
+  it("says (optional) once, and the picker's name carries no note", () => {
+    render(
+      <ValidationSettingsSection
+        projectId="p1"
+        validationCount={2}
+        validationCountAudio={2}
+        validationNamedUsers={[]}
+        onChange={vi.fn()}
+      />,
+    )
+    const label = document.querySelector('label[for="validation-named-users"]')
+    expect(label?.textContent?.match(/optional/gi)).toHaveLength(1)
+    expect(screen.getByRole("combobox", { name: "Named validators" })).toBeInTheDocument()
+  })
+
   it("shows avatar-stack trigger with comma-separated selected names", () => {
     render(
       <ValidationSettingsSection

@@ -6,6 +6,7 @@ import { streamFileCells, fetchCellsByIds, fetchCellsDelta } from "@/lib/sync/ce
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import {
   flushCellsCacheWrites,
+  grantsVersionFromSyncToken,
   mergeCellsDelta,
   readCellsCache,
   scheduleCellsCacheWrite,
@@ -13,19 +14,59 @@ import {
 } from "@/lib/sync/cells-cache"
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { isStructuralCell } from "@/lib/cells/structural"
+import { isHiddenCell } from "@/lib/cells/hidden"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { sortByLens } from "@/lib/timeline/derive"
+import { splitLineOrigin } from "@/lib/timeline/user-line-origin"
 import type { OrderedBy, RuleWaiver } from "@/lib/parsers/types"
 import type { FileProgressResponse, ProgressCounts } from "@/lib/progress/file-progress-resource"
+import {
+  EMPTY_AUDIO_PROGRESS_CELL_IDS,
+  sameAudioProgressCellIds,
+  type AudioProgressCellIds,
+} from "@/lib/progress/audio-progress-cells"
 import { deriveMilestoneNavigation, type MilestoneNavigationCell } from "@/lib/milestone-navigation"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
+import type { FileMilestone } from "../../db/shared/file-milestones"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import { useOfflineStore } from "@/context/OfflineStoreContext"
 import { readOfflineFileCells, resolveOfflineStore, subscribeToOfflineFileCells } from "@/lib/offline/offline-reads"
+import { subscribeToDiscardedOfflineCommits } from "@/lib/offline/refused-writes"
+import {
+  laneCountsAudio,
+  laneLineStatus,
+  type LaneDelivers,
+  type LaneLineState,
+} from "@/lib/lanes/lane-delivers"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
+/** AQU-2094: what a sparse audit read says about a cell it leaves out. */
+const NO_AUDIT: CellAuditStats = Object.freeze({
+  cellId: "",
+  editCount: 0,
+  contentHash: "",
+  lastEditAt: null,
+  lastEditEventId: null,
+  activeValidators: Object.freeze([]) as unknown as string[],
+  validatorDecidedTs: Object.freeze({}) as unknown as Record<string, number>,
+  waivers: Object.freeze([]) as unknown as CellAuditStats["waivers"],
+})
 const EMPTY_TAKES: ReadonlySet<string> = new Set()
+/** AQU-2308: stable identity, so the navigation cache holds for a file with
+ *  no hand-set milestones (the overwhelmingly common case). */
+const EMPTY_USER_MILESTONES: readonly FileMilestone[] = []
+/**
+ * The per-cell bits the navigation rollup counts, and the progress cache
+ * compares: a cell's entry in the mask changes exactly when one of its five
+ * figures would. AQU-2110 added the last three; the first two are the pair
+ * every surface showed before it.
+ */
+const FLAG_TRANSLATED = 1
+const FLAG_VALIDATED = 2
+const FLAG_TEXT_TRANSLATED = 4
+const FLAG_AUDIO_RECORDED = 8
+const FLAG_AUDIO_VALIDATED = 16
 const EMPTY_CELL_IDS: readonly string[] = Object.freeze([])
 const EMPTY_SUMMARIES: readonly CellSummary[] = Object.freeze([])
 const EMPTY_TEXT_PAIRS: readonly CellTextPair[] = Object.freeze([])
@@ -105,14 +146,41 @@ export interface CellSummary {
   aiDrafted?: boolean
   aiDraft?: AiDraftProvenance
   lastEditAt?: number
+  /** AQU-1571: mirrors `CellData.lastEditor` — the active lane's last editor,
+   *  so the bulk paths can leave the reader's own latest change alone. */
+  lastEditor?: string | null
   startTime?: number
   endTime?: number
   sequenceIndex?: number
   medium?: CellData["medium"]
   transcription?: string
+  /** AQU-1424: true while this cell is parked with "Hide cell". Mirrors
+   *  `CellData.hidden`, which is read from the SOURCE row only. Absent on a
+   *  visible cell. */
+  hidden?: boolean
   selectedGeneratedVoiceAudioId?: string
   /** AQU-646: this line carries a recording of its own — see `applyOwnTake`. */
   hasOwnTake?: boolean
+  /** AQU-2125: the character this line names (`metadata.cast_name`), trimmed.
+   *  Carried so the cast lookup can find a character's voice from a summary.
+   *  Absent on a line that names nobody. */
+  castName?: string
+  /** Media redesign slice 2: mirrors `CellData.audioApproved`. */
+  audioApproved?: boolean
+  /** Media redesign slice 2: mirrors `CellData.laneStatus`. */
+  laneStatus?: CellData["status"]
+}
+
+/**
+ * Media redesign slice 2: what the active language delivers, and which of the
+ * open file's lines carry a recording in it and an approved one. Set by the
+ * workspace from the lane-scoped attachment read, apart from `setRuntime` for
+ * the reason `setOwnTakeCellIds` is.
+ */
+export interface LaneAudioState {
+  delivers: LaneDelivers | null
+  recorded: ReadonlySet<string>
+  approved: ReadonlySet<string>
 }
 
 export interface CellTextPair {
@@ -132,7 +200,33 @@ export interface CellCommitHandle {
   sourceEventId: string | null
 }
 
-export interface CellNavigationEntry {
+/**
+ * The five figures a division's progress is read from.
+ *
+ * `translated` / `validated` are the pair every surface has always shown:
+ * translated is target text OR a take of the line's own (AQU-646), validated
+ * is the projected TEXT flag. AQU-2110 adds the three beside them, counted
+ * over the same cells by the same structural and hidden-cell rules:
+ *
+ *   - `textTranslated`: target text only. What tells an audio-only file
+ *     apart — recordings and no text — from one that has both, which is the
+ *     per-file decision the chapter picker makes about which figures to show.
+ *   - `audioRecorded` / `audioValidated`: the audio pair, from the id sets
+ *     the workspace feeds in through `setAudioProgressCellIds`. Audio
+ *     validation lives nowhere in the cell projection, so until that lands
+ *     both read 0 — which is "not known yet", not "none", and why the picker
+ *     only switches to audio figures once something is recorded.
+ */
+export interface CellNavigationProgress {
+  translated: number
+  validated: number
+  textTranslated: number
+  audioRecorded: number
+  audioValidated: number
+  total: number
+}
+
+export interface CellNavigationEntry extends CellNavigationProgress {
   key: string
   label: string
   shortLabel: string
@@ -140,21 +234,15 @@ export interface CellNavigationEntry {
   firstCellId: string
   firstIndex: number
   cellIds: readonly string[]
-  translated: number
-  validated: number
-  total: number
   subsections: readonly CellNavigationSubsection[]
 }
 
-export interface CellNavigationSubsection {
+export interface CellNavigationSubsection extends CellNavigationProgress {
   key: string
   label: string
   firstCellId: string
   firstIndex: number
   cellIds: readonly string[]
-  translated: number
-  validated: number
-  total: number
 }
 
 export const MILESTONE_SUBSECTION_SIZE = 50
@@ -184,6 +272,12 @@ interface RuntimeContext {
   requiredValidations: number
   auditStats: ReadonlyMap<string, CellAuditStats>
   /**
+   * AQU-2094: `auditStats` came from a sparse read, so a cell missing from it
+   * has no validators and no waivers. That is an answer, not "not loaded yet":
+   * the row's denormalized `validated` column must not speak for the cell.
+   */
+  auditStatsComplete?: boolean
+  /**
    * AQU-646: cells that carry a recording of their OWN (a clip seeded with the
    * cell's id, not the file-seeded imported source clip).
    *
@@ -194,6 +288,20 @@ interface RuntimeContext {
    * `cell_audio`, which is a much bigger change for the same answer.
    */
   ownTakeCellIds?: ReadonlySet<string>
+  /**
+   * AQU-2110: which cells are recorded, and which of those are audio
+   * validated, for the navigation rollup's audio figures. Fed in the same way
+   * as `ownTakeCellIds` and for the same reason — audio is not in the cell
+   * projection — through `setAudioProgressCellIds`. Unlike that set it is
+   * not part of any cell's view model, so changing it rebuilds the
+   * navigation index and nothing else.
+   */
+  audioProgressCellIds?: AudioProgressCellIds
+  /**
+   * Media redesign slice 2: see `LaneAudioState`. Absent, or a language that
+   * delivers Text, and every line is counted by its text exactly as before.
+   */
+  laneAudio?: LaneAudioState
   /**
    * AQU-538: the active target LANE the view renders. `''`/undefined = the
    * default lane (byte-identical to pre-lane behaviour). Optional so existing
@@ -215,6 +323,36 @@ interface RuntimeContext {
    * editor: excluding them from PROGRESS is not the same as hiding them.
    */
   countStructural?: boolean
+  /**
+   * AQU-2308: the file's hand-set milestones (`useFileMilestones`).
+   *
+   * They are a navigation INPUT, not cell data, so they arrive here rather
+   * than on any row: the store owns which division each cell belongs to, and
+   * that is the one place the navigator, the split-into-milestones pages and
+   * the per-division figures can agree about it.
+   *
+   * `getNavigationStructure`'s cache compares this by reference, so the hook
+   * must hand over a stable array (its `useMemo`d result) or the navigator
+   * rebuilds on every render.
+   */
+  userMilestones?: readonly FileMilestone[]
+  /**
+   * AQU-1422: reveal cells parked with "Hide cell" instead of dropping them
+   * from the display list. Absent ⇒ false, which is what every reader sees.
+   *
+   * The caller decides who may turn it on — it is the "Show hidden cells"
+   * preference, offered only to people who may edit source text. The store just
+   * takes the flag: it owns WHICH cells the display list contains, so it is the
+   * one place a hidden row can be dropped from the text table, the media lens
+   * and the chapter navigation counts together (they all read
+   * `getCellIdsForLens`). Filtering in the table alone would have left the row
+   * in the timeline and in the sidebar's totals.
+   *
+   * Unlike `countStructural`, this really does HIDE: a parked cell leaves the
+   * display list entirely. It stays in `order`, `sourceById` and `toRows()`, so
+   * nothing is lost and revealing it is free.
+   */
+  showHidden?: boolean
 }
 
 interface PendingOverlay {
@@ -231,6 +369,16 @@ interface OptimisticEdit extends PendingOverlay {
   cellId: string
   targetLang: string
   seq: number
+  /**
+   * AQU-1571: who the server will record as this lane's last editor once this
+   * edit lands, and what the row said before the first unconfirmed edit
+   * (carried along a chain of edits). `applyContentOverlays` shows
+   * `lastEditor`; the base lets a revert to the confirmed text hand the line
+   * back to its real editor instead of to the viewer.
+   */
+  lastEditor: string | null
+  baseValue: string
+  baseEditor: string | null
 }
 
 const FETCH_RETRY_DELAYS_MS = [2000, 5000, 10000] as const
@@ -245,6 +393,70 @@ interface DerivedCache {
   textPairs: CellTextPair[]
 }
 
+/**
+ * AQU-1047: counters for the work in this store whose cost scales with the
+ * file rather than with what the user touched.
+ *
+ * A whole-Bible-in-one-file project (~34k cells) only stays usable because the
+ * per-cell caches (`viewCache`, `summaryCache`) and the deferred whole-file
+ * walks (`computeDerivedIndexes`, `deriveMilestoneNavigation`) keep ordinary
+ * interaction proportional to the VIEWPORT, not to the file. That property is
+ * invisible from the outside: a memo dependency that quietly starts busting on
+ * every keystroke reads identically in a 12-cell test and melts a 34k-cell
+ * file. So the store counts the work instead of only doing it.
+ *
+ * Every field counts CACHE MISSES — work actually performed — never calls. The
+ * counters are plain increments on paths that were already allocating objects,
+ * so they cost nothing measurable and stay on in production, where
+ * `getMemorySnapshot()` reports them alongside the heap figures.
+ *
+ * See `useActiveCellStore.largeFile.test.ts` for the regression guards built on
+ * them, and `useActiveCellStore.largeFile.bench.test.ts` for the benchmark.
+ */
+/** AQU-1759: what `applyOptimisticQuoteSplit` changed, so a refusal can put it back. */
+export interface QuoteSplitUndo {
+  /** Every source row the split touched, as it was before. */
+  rows: Map<string, CellRow>
+  /** The pieces it inserted. */
+  insertedIds: string[]
+}
+
+export interface CellStoreWorkStats {
+  /**
+   * Cells visited by a loop whose length is the FILE's, summed across every
+   * such loop. The headline number: it is the one counter a full-file walk
+   * cannot hide from, because a walk that costs "1 rebuild" at any size costs
+   * 4,000 here on a 4,000-cell file and 34,000 on a 34,000-cell one. Ordinary
+   * interaction — scrolling, arrowing between cells, typing — must leave it
+   * at zero.
+   */
+  cellsWalked: number
+  /** `getCellView` cache misses — one assembled `CellViewModel`. */
+  cellViewsBuilt: number
+  /** `getCellSummary`/`getAllSummaries` cache misses. */
+  cellSummariesBuilt: number
+  /** Full `computeDerivedIndexes()` walks (progress + footnotes + sections). */
+  derivedIndexRebuilds: number
+  /** Full `deriveMilestoneNavigation()` walks (book/chapter structure). */
+  navigationStructureRebuilds: number
+  /** Full navigation-index rebuilds (per-milestone progress rollups). */
+  navigationIndexRebuilds: number
+  /** Full `ensureDerivedCache()` walks (summaries + text pairs for the file). */
+  derivedCacheRebuilds: number
+}
+
+function emptyWorkStats(): CellStoreWorkStats {
+  return {
+    cellsWalked: 0,
+    cellViewsBuilt: 0,
+    cellSummariesBuilt: 0,
+    derivedIndexRebuilds: 0,
+    navigationStructureRebuilds: 0,
+    navigationIndexRebuilds: 0,
+    derivedCacheRebuilds: 0,
+  }
+}
+
 export class CellStore {
   private ctx: RuntimeContext = {
     projectId: null,
@@ -255,9 +467,24 @@ export class CellStore {
     ownTakeCellIds: EMPTY_TAKES,
     lane: "",
     countStructural: true,
+    userMilestones: EMPTY_USER_MILESTONES,
+  }
+
+  /** The language the rows are sorted for now. It follows the hook's `lane`
+   *  one effect pass later (decision 11: an undo waits for it). */
+  get viewLane(): string {
+    return this.ctx.lane ?? ""
   }
 
   private order: string[] = []
+  // AQU-1442: the file the loaded rows were installed under, which is NOT the
+  // same thing as `ctx.fileId`. On a file switch `setRuntime` flips `ctx.fileId`
+  // to the incoming file while `order` still holds the outgoing file's rows
+  // (`setRuntime` only re-partitions them against the lane), so `getFileId()`
+  // alone cannot tell a reader whose rows it is about to resolve against.
+  // Stamped wherever rows land, cleared by `reset()`. Read via
+  // `getLoadedRowsFileId()`.
+  private rowsFileId: string | null = null
   private sourceOrder: string[] = []
   private targetOrder: string[] = []
   private indexById = new Map<string, number>()
@@ -286,6 +513,21 @@ export class CellStore {
    * meaning anything.
    */
   private removedCellIds = new Set<string>()
+  /**
+   * AQU-1422: cells parked with "Hide cell", read off each cell's SOURCE row
+   * (`CellRow.hidden`) — never off a target row, which carries no flag of its
+   * own and would be missing one entirely if it were created after the hide.
+   *
+   * Kept as state rather than derived per read because a membership change here
+   * changes the DISPLAY LIST, and `useCellIds` only re-reads on `listVersion`.
+   * A hide arrives through `replaceRowsForCell`, which leaves `order` alone (the
+   * cell is still in the file), so without an explicit bump the row would keep
+   * rendering until the next reorder.
+   */
+  private hiddenCellIds: ReadonlySet<string> = EMPTY_TAKES
+  /** Memoised `order` minus {@link hiddenCellIds}. Keyed on `listVersion`,
+   *  which {@link setHiddenCellIds} bumps, so a hide/show invalidates it. */
+  private visibleOrderCache: { listVersion: number; ids: readonly string[] } | null = null
   private cellVersionById = new Map<string, number>()
   // Feeds per-cell versions from one store-lifetime counter that reset() never
   // rewinds. useSyncExternalStore bails out when getCellVersion returns a value
@@ -312,6 +554,10 @@ export class CellStore {
   private navIndex: CellNavigationEntry[] = []
   private navigationStructureCache = new WeakMap<readonly string[], {
     cells: MilestoneNavigationCell[]
+    /** AQU-2308: the hand-set milestones this structure was derived from. The
+     *  cache compares the CELLS it was built from, so without this a
+     *  newly-saved milestone would be invisible until a cell changed. */
+    userMilestones: readonly FileMilestone[]
     derived: ReturnType<typeof deriveMilestoneNavigation>
   }>()
   private navigationProgressCache = new WeakMap<readonly string[], {
@@ -340,6 +586,9 @@ export class CellStore {
   private viewCache = new Map<string, { version: number; view: CellViewModel }>()
   private allViewsCache: CellViewModel[] | null = null
   private summaryCache = new Map<string, { version: number; summary: CellSummary; textPair: CellTextPair }>()
+  /** AQU-1047: see `CellStoreWorkStats`. Cumulative for this store instance;
+   *  `resetWorkStats()` zeroes it so a caller can measure one interaction. */
+  private work: CellStoreWorkStats = emptyWorkStats()
 
   /**
    * AQU-646: which cells carry a recording of their own.
@@ -365,25 +614,146 @@ export class CellStore {
     this.emit(changed)
   }
 
+  /**
+   * AQU-2110: which cells are recorded and which are audio validated, for the
+   * navigation rollup (the chapter picker and the sidebar's chapter grid).
+   *
+   * Audio validation is not part of any cell's view model — no row, summary
+   * or status reads it — so unlike `setOwnTakeCellIds` this bumps no cell
+   * version and rebuilds no derived view. It re-counts the navigation index
+   * alone and wakes the whole-file subscribers, which is what moves a
+   * chapter's figure the moment a take is validated, with no reload and
+   * without touching the file-progress snapshot.
+   *
+   * The audio bits ride the same flags bitmask the progress cache compares,
+   * so a membership change misses that cache on its own and an identical
+   * set — a refetch that changed nothing — returns before any work.
+   */
+  setAudioProgressCellIds(next: AudioProgressCellIds): void {
+    const prev = this.ctx.audioProgressCellIds ?? EMPTY_AUDIO_PROGRESS_CELL_IDS
+    if (sameAudioProgressCellIds(prev, next)) {
+      this.ctx = { ...this.ctx, audioProgressCellIds: next }
+      return
+    }
+    this.ctx = { ...this.ctx, audioProgressCellIds: next }
+    // A dirty derived index will rebuild the navigation on its next read;
+    // a clean one is re-counted here so the snapshot beside it is kept.
+    if (!this.derivedIndexesDirty) {
+      this.navIndex = this.buildNavigationIndex(this.order).entries
+    }
+    this.fileVersion++
+    this.emitAll()
+  }
+
+  /**
+   * Media redesign slice 2: what the active language delivers and which lines
+   * are recorded and approved in it. A language that counts its recordings
+   * re-derives every line's progress status from them (`applyOwnTake`); a
+   * Text language ignores it. The chapter counts read the navigation rollup's
+   * audio figures instead, which the workspace feeds the SAME two sets
+   * through `setAudioProgressCellIds`. Bumps exactly the cells whose answer
+   * changed, or every cell when the choice itself did.
+   */
+  setLaneAudio(next: LaneAudioState): void {
+    const prev = this.ctx.laneAudio
+    if (
+      prev
+      && prev.delivers === next.delivers
+      && prev.recorded === next.recorded
+      && prev.approved === next.approved
+    ) return
+    this.ctx = { ...this.ctx, laneAudio: next }
+    const wasCounted = laneCountsAudio(prev?.delivers)
+    const isCounted = laneCountsAudio(next.delivers)
+    if (!wasCounted && !isCounted) return
+    if ((prev?.delivers ?? null) !== next.delivers) {
+      this.bumpAllCells()
+      this.fileVersion++
+      this.rebuildDerivedIndexes()
+      this.emit(this.order)
+      return
+    }
+    const changed = new Set<string>()
+    const diff = (a: ReadonlySet<string>, b: ReadonlySet<string>) => {
+      for (const id of a) if (!b.has(id)) changed.add(id)
+      for (const id of b) if (!a.has(id)) changed.add(id)
+    }
+    diff(prev?.recorded ?? EMPTY_TAKES, next.recorded)
+    diff(prev?.approved ?? EMPTY_TAKES, next.approved)
+    if (changed.size === 0) return
+    this.bumpCells(changed)
+    this.fileVersion++
+    this.rebuildDerivedIndexes()
+    this.emit(changed)
+  }
+
+  /**
+   * Media redesign slice 2: a line's state in a language that counts its
+   * recordings, or null in a Text language (whose lines keep today's rules).
+   */
+  private laneLineOf(cellId: string, textFilled: boolean, textValidated: boolean): LaneLineState | null {
+    const lane = this.ctx.laneAudio
+    if (!lane || !laneCountsAudio(lane.delivers)) return null
+    return {
+      textFilled,
+      textValidated,
+      recorded: lane.recorded.has(cellId),
+      audioApproved: lane.approved.has(cellId),
+    }
+  }
+
+  /** The audit entry for a cell (see `RuntimeContext.auditStatsComplete`). */
+  private auditOf(cellId: string, stats: ReadonlyMap<string, CellAuditStats> = this.ctx.auditStats): CellAuditStats | undefined {
+    return stats.get(cellId) ?? (this.ctx.auditStatsComplete ? NO_AUDIT : undefined)
+  }
+
   setRuntime(next: RuntimeContext): void {
     const prevStats = this.ctx.auditStats
+    // AQU-2094: the first sparse read changes what every cell's MISSING entry
+    // means, which no diff of the two maps can see — so it refreshes every
+    // cell, as a threshold change does.
+    const completeChanged = Boolean(this.ctx.auditStatsComplete) !== Boolean(next.auditStatsComplete)
     const nextLane = next.lane ?? ""
     const statsChanged = prevStats !== next.auditStats
     // AQU-1083: a structural-policy flip changes which cells every derived
     // progress number counts, so it invalidates exactly what a threshold
     // change does — hence it rides the same branch below.
     const nextCountStructural = next.countStructural ?? true
+    const nextUserMilestones = next.userMilestones ?? this.ctx.userMilestones ?? EMPTY_USER_MILESTONES
+    // AQU-2308: a hand-set milestone changes which division every covered cell
+    // belongs to, and therefore every per-division figure — the same blast
+    // radius a structural-policy flip has, so it rides the same branch.
     const userChanged = this.ctx.username !== next.username
       || this.ctx.requiredValidations !== next.requiredValidations
       || (this.ctx.countStructural ?? true) !== nextCountStructural
+      || (this.ctx.userMilestones ?? EMPTY_USER_MILESTONES) !== nextUserMilestones
     const laneChanged = (this.ctx.lane ?? "") !== nextLane
+    // AQU-1422: revealing or re-hiding parked cells changes the DISPLAY LIST,
+    // not any cell's data — so it bumps `listVersion` (what useCellIds watches)
+    // and nothing else. Deliberately NOT folded into `userChanged`, which bumps
+    // every cell's version for a progress-rule change; no row's content moved.
+    const showHiddenChanged =
+      (this.ctx.showHidden ?? false) !== (next.showHidden ?? false)
     // AQU-646: the take set arrives from the attachment hook via its own
     // setter, not from these options, so a runtime update must not blank it.
     this.ctx = {
       ...next,
       lane: nextLane,
       countStructural: nextCountStructural,
+      // AQU-2308: same hand-off as the take set — the milestones arrive from
+      // their own hook, so a runtime update that omits them must not blank them.
+      userMilestones: nextUserMilestones,
       ownTakeCellIds: next.ownTakeCellIds ?? this.ctx.ownTakeCellIds,
+      // AQU-2110: same hand-off, same rule.
+      audioProgressCellIds: next.audioProgressCellIds ?? this.ctx.audioProgressCellIds,
+      laneAudio: next.laneAudio ?? this.ctx.laneAudio,
+    }
+    if (showHiddenChanged) {
+      this.visibleOrderCache = null
+      this.listVersion++
+      // LIST subscribers only: no cell's data (or version) moved, so waking the
+      // per-cell listeners would be a no-op that costs a pass over 30k rows.
+      this.emitList()
     }
     if (laneChanged) {
       // AQU-538: re-partition the already-loaded rows against the new active
@@ -393,7 +763,7 @@ export class CellStore {
       this.replaceRows(this.toRows(), { full: true, maxServerSeq: this.maxServerSeq })
       return
     }
-    if (statsChanged || userChanged) {
+    if (statsChanged || userChanged || completeChanged) {
       // Invariant: a per-cell version bump is ALWAYS paired with a per-cell
       // emit of the same set. Editor rows read useSyncExternalStore over
       // getCellVersion; a bump without an emit lets a parent-driven render
@@ -402,7 +772,7 @@ export class CellStore {
       // row then stays stale until remount. The old bumpAllCells()-but-emit-
       // only-the-changed-cells shape here was exactly that: audit-stats churn
       // during a batch silently inflated every cell's version.
-      if (userChanged) {
+      if (userChanged || completeChanged) {
         this.bumpAllCells()
         this.rebuildDerivedIndexes()
         this.emit(this.order)
@@ -421,19 +791,52 @@ export class CellStore {
   }
 
   reset(projectId: string | null, fileId: string | null): void {
+    // AQU-2132: a DIFFERENT file's recorded / audio-validated lines say nothing
+    // about this one, exactly as `hiddenCellIds` and `removedCellIds` below say
+    // nothing about it. Both sets are handed in from the attachment read
+    // (`setOwnTakeCellIds` / `setAudioProgressCellIds`), which re-asserts per
+    // file, so keeping them across a switch let file B count file A's takes
+    // until that read landed — the footer, the chapter picker and the sidebar's
+    // chapter grid all read this rollup.
+    //
+    // Scoped to a file CHANGE on purpose. `reset()` also runs on every full
+    // re-read of the SAME file, where the sets are still the truth and the
+    // hand-off has nothing new to re-assert: clearing there would blank the
+    // three surfaces on a refetch and leave them blank, which is the defect
+    // this ticket is about rather than a fix for it.
+    const fileChanged = (this.ctx.fileId ?? null) !== (fileId ?? null)
     this.ctx = { ...this.ctx, projectId, fileId }
+    if (fileChanged) {
+      this.ctx = {
+        ...this.ctx,
+        ownTakeCellIds: EMPTY_TAKES,
+        audioProgressCellIds: EMPTY_AUDIO_PROGRESS_CELL_IDS,
+        // Media redesign: the same for the lane's recorded / approved lines;
+        // what the language delivers is the project's, and stays.
+        ...(this.ctx.laneAudio
+          ? { laneAudio: { delivers: this.ctx.laneAudio.delivers, recorded: EMPTY_TAKES, approved: EMPTY_TAKES } }
+          : {}),
+      }
+    }
     // Rows still subscribed to the outgoing cells must hear about the reset —
     // emitAll() alone only wakes subscribeAll consumers (footer/table shell),
     // and a per-cell subscriber left unnotified keeps rendering the old file's
     // content until something else touches its cell.
     const clearedIds = this.order
     this.order = []
+    // AQU-1442: the rows these belonged to are gone, so no file owns the
+    // (now empty) row set until the next load stamps it.
+    this.rowsFileId = null
     this.sourceOrder = []
     this.targetOrder = []
     this.indexById = new Map()
     this.sourceById = new Map()
     this.targetById = new Map()
     this.otherLaneTargetRows = []
+    // AQU-1422: another file's parked ids say nothing about this one, and a
+    // stale set would filter rows out of the incoming file by coincidence of id.
+    this.hiddenCellIds = EMPTY_TAKES
+    this.visibleOrderCache = null
     this.pendingOverlay = new Map()
     this.pendingProgressEventIds = []
     this.optimisticEdits = new Map()
@@ -484,6 +887,14 @@ export class CellStore {
   getAllVersion = (): number => this.fileVersion
   getCellVersion = (cellId: string): number => this.cellVersionById.get(cellId) ?? 0
   getFileId = (): string | null => this.ctx.fileId
+  /** AQU-1442: the file the loaded rows actually came from, for readers that
+   *  must not resolve a lookup against the outgoing file's rows mid-switch.
+   *  `getFileId()` is the file the store is *pointed at*; this is the file the
+   *  rows *are*. They differ for the whole window between `setRuntime` flipping
+   *  the runtime file and the incoming file's rows landing. Null whenever no
+   *  rows are loaded, so a caller never has to pair it with a count check to
+   *  know the answer is "none yet". */
+  getLoadedRowsFileId = (): string | null => this.order.length === 0 ? null : this.rowsFileId
   getProjectId = (): string | null => this.ctx.projectId
   getCellCount = (): number => this.order.length
   getMaxServerSeq = (): number | null => this.maxServerSeq
@@ -505,10 +916,74 @@ export class CellStore {
     return this.order.length === 0 ? EMPTY_CELL_IDS : this.order
   }
 
+  /** AQU-1422: true while this cell is parked. Read off the SOURCE row. */
+  isCellHidden = (cellId: string): boolean => this.hiddenCellIds.has(cellId)
+
+  /** AQU-1422: how many of this file's cells are parked — the "N hidden"
+   *  indicator. Counts every hidden cell, whether or not they are being
+   *  revealed, because the indicator's job is to say what IS hidden. */
+  getHiddenCount = (): number => this.hiddenCellIds.size
+
+  /**
+   * AQU-1422: install the parked set, bumping `listVersion` when it moved so
+   * `useCellIds` re-reads the display list. Returns whether it changed.
+   *
+   * Called from both row-ingestion paths rather than derived lazily: the display
+   * list is what changes, and its subscribers watch `listVersion`, which a hide
+   * would otherwise never touch (the cell is still in `order`).
+   */
+  private setHiddenCellIds(next: ReadonlySet<string>): boolean {
+    const prev = this.hiddenCellIds
+    if (prev.size === next.size) {
+      let same = true
+      for (const id of next) {
+        if (!prev.has(id)) { same = false; break }
+      }
+      if (same) return false
+    }
+    this.hiddenCellIds = next.size === 0 ? EMPTY_TAKES : next
+    this.visibleOrderCache = null
+    this.listVersion++
+    return true
+  }
+
+  /** AQU-1422: rebuild the parked set from the current source rows. */
+  private collectHiddenCellIds(): ReadonlySet<string> {
+    let hidden: Set<string> | null = null
+    for (const [cellId, row] of this.sourceById) {
+      if (row.hidden === true) (hidden ??= new Set()).add(cellId)
+    }
+    return hidden ?? EMPTY_TAKES
+  }
+
+  /**
+   * AQU-1422: `order` with parked cells dropped.
+   *
+   * Returns `this.order` ITSELF whenever nothing is filtered out — identity is
+   * load-bearing. `useCellIds` hands the result to the editor as
+   * `displayCellIds`, and `getNavigationIndex` reuses the store's own index only
+   * when that array IS `this.order` (AQU-1104). A fresh array on every read
+   * would make every navigation lookup miss, on every file, hidden or not.
+   */
+  private visibleOrder(): readonly string[] {
+    if (this.hiddenCellIds.size === 0 || this.ctx.showHidden === true) return this.order
+    const cached = this.visibleOrderCache
+    if (cached && cached.listVersion === this.listVersion) return cached.ids
+    const filtered = this.order.filter((id) => !this.hiddenCellIds.has(id))
+    const ids = filtered.length === this.order.length ? this.order : filtered
+    this.visibleOrderCache = { listVersion: this.listVersion, ids }
+    return ids
+  }
+
   getCellIdsForLens(orderedBy?: OrderedBy, mediaLayer = false): readonly string[] {
-    if (this.order.length === 0) return EMPTY_CELL_IDS
-    if (orderedBy !== "time") return this.order
-    const rows = this.order
+    // AQU-1422: ONE funnel, deliberately. The text table, the media lens and
+    // (via displayCellIds) the chapter navigation counts all read this, so
+    // dropping a parked cell here drops it from all three together.
+    const order = this.visibleOrder()
+    if (order.length === 0) return EMPTY_CELL_IDS
+    if (orderedBy !== "time") return order
+    this.work.cellsWalked += order.length
+    const rows = order
       .map((id) => {
         const summary = this.getCellSummary(id)
         return summary ? {
@@ -615,6 +1090,7 @@ export class CellStore {
     const version = this.cellVersionById.get(cellId) ?? 0
     const cached = this.viewCache.get(cellId)
     if (cached && cached.version === version) return cached.view
+    this.work.cellViewsBuilt++
     const source = this.sourceById.get(cellId)
     const target = this.targetById.get(cellId)
     const cell = buildCellData(
@@ -624,7 +1100,7 @@ export class CellStore {
       this.ctx.fileId ?? "",
       this.ctx.username,
       this.ctx.requiredValidations,
-      this.ctx.auditStats.get(cellId),
+      this.auditOf(cellId),
     )
     this.applyContentOverlays(cell)
     this.applyOwnTake(cell)
@@ -649,6 +1125,14 @@ export class CellStore {
    * can see WHY the status is what it is.
    */
   private applyOwnTake(cell: CellData): void {
+    // Media redesign slice 2: in a language that counts its recordings, the
+    // line's PROGRESS status follows what the language delivers. `status`
+    // itself stays the text's, for the dozen readers that mean text.
+    const line = this.laneLineOf(cell.id, Boolean(cell.translated.trim()), cell.status === "validated")
+    if (line) {
+      cell.audioApproved = line.audioApproved
+      cell.laneStatus = laneLineStatus(this.ctx.laneAudio?.delivers, line)
+    }
     if (!this.ctx.ownTakeCellIds?.has(cell.id)) return
     // ONLY the flag, since 2026-09-22. This used to flip an empty line's
     // status to unvalidated/validated as well, so that a dub with no text
@@ -690,6 +1174,7 @@ export class CellStore {
     const version = this.cellVersionById.get(cellId) ?? 0
     const cached = this.summaryCache.get(cellId)
     if (cached && cached.version === version && cached.summary.index === index) return cached
+    this.work.cellSummariesBuilt++
     const view = this.getCellView(cellId)
     if (!view) return null
     const summary: CellSummary = {
@@ -717,6 +1202,7 @@ export class CellStore {
       aiDrafted: view.aiDrafted,
       aiDraft: view.aiDraft,
       lastEditAt: view.lastEditAt,
+      lastEditor: view.lastEditor,
       startTime: view.startTime,
       endTime: view.endTime,
       sequenceIndex: view.sequenceIndex,
@@ -724,6 +1210,13 @@ export class CellStore {
       transcription: view.transcription,
       selectedGeneratedVoiceAudioId: view.selectedGeneratedVoiceAudioId,
       hasOwnTake: view.hasOwnTake,
+      audioApproved: view.audioApproved,
+      laneStatus: view.laneStatus,
+      // AQU-1424: so the surfaces that read SUMMARIES rather than rows — the
+      // chapter health builder's `isExcluded`, and batch drafting's target list —
+      // can apply the same predicate without reaching back into the store's rows.
+      hidden: view.hidden,
+      ...summaryCastName(view.metadata),
     }
     const entry = {
       version,
@@ -739,6 +1232,16 @@ export class CellStore {
     }
     this.summaryCache.set(cellId, entry)
     return entry
+  }
+
+  /**
+   * AQU-1767 phase 2: a source row's place in the anchor chain and its head —
+   * what undoing a removal needs to point the next row back at the restored one
+   * (only if nobody has moved it since). Null when there is no source row.
+   */
+  getSourceChainInfo(cellId: string): { anchorCellId: string | null; eventId: string } | null {
+    const source = this.sourceById.get(cellId)
+    return source ? { anchorCellId: source.anchorCellId ?? null, eventId: source.eventId } : null
   }
 
   /**
@@ -937,7 +1440,10 @@ export class CellStore {
     // Many workspace consumers read the same version. Resolve its cells once,
     // but retain the public API's fresh array so sorting/splicing a caller's
     // result cannot corrupt subsequent readers.
-    this.allViewsCache ??= this.getCellsByIds(this.order)
+    if (this.allViewsCache === null) {
+      this.work.cellsWalked += this.order.length
+      this.allViewsCache = this.getCellsByIds(this.order)
+    }
     return this.allViewsCache.slice()
   }
 
@@ -1029,12 +1535,20 @@ export class CellStore {
     // re-reads it on listVersion; a fresh array here made every
     // getNavigationIndex(displayCellIds) call miss the store's own index.
     this.order = orderChanged ? order : this.order
+    // AQU-1442: every row install goes through here (full load, cached load and
+    // delta merge alike), and `doFetch` has already pointed `ctx` at the file it
+    // fetched, so this is the provenance of the rows now in `order`.
+    this.rowsFileId = this.ctx.fileId
     this.sourceOrder = sourceOrder
     this.targetOrder = targetOrder
     this.sourceById = sourceById
     this.targetById = targetById
     this.otherLaneTargetRows = otherLaneTargetRows
     this.indexById = new Map(order.map((id, index) => [id, index]))
+    // AQU-1422: after sourceById is installed, so the parked set is rebuilt from
+    // the rows this load actually landed. Bumps listVersion itself when it moved
+    // — a delta that only flips `hidden` changes no order and no membership.
+    this.setHiddenCellIds(this.collectHiddenCellIds())
     const liveIds = new Set(order)
     for (const id of this.footnoteCache.keys()) {
       if (!liveIds.has(id)) this.footnoteCache.delete(id)
@@ -1081,6 +1595,17 @@ export class CellStore {
    */
   wasRemoved(cellId: string): boolean {
     return this.removedCellIds.has(cellId)
+  }
+
+  /**
+   * AQU-1767 phase 2: a removal was undone (`source.cell.restore`), so the
+   * cell is back in the file. Forget that it left — or writes made to it from
+   * now on would drop themselves as writes to a removed cell — and lift its
+   * freshness floor so the confirming read can bring its rows in.
+   */
+  markRestored(cellId: string): void {
+    this.removedCellIds.delete(cellId)
+    this.freshnessFloors.delete(cellId)
   }
 
   toRows(): CellRow[] {
@@ -1281,6 +1806,30 @@ export class CellStore {
     return this.optimisticEdits.size > 0
   }
 
+  /**
+   * AQU-1571: who the line belongs to once an optimistic edit to `value`
+   * lands. The viewer, when the text changes from what the server last
+   * confirmed or a commit of theirs is already queued for this lane; the
+   * confirmed editor otherwise. The second case is the revert a failed
+   * enqueue writes back: it must not leave the viewer named as the editor of
+   * a line they never changed, or "Allow self-validation" off would block
+   * their vote on somebody else's work.
+   */
+  private optimisticAuthorship(
+    cellId: string,
+    lane: string,
+    value: string,
+    existing: CellRow | undefined,
+  ): Pick<OptimisticEdit, "lastEditor" | "baseValue" | "baseEditor"> {
+    const prior = this.optimisticEdits.get(targetOverlayKey(cellId, lane))
+    const baseValue = prior ? prior.baseValue : existing?.value ?? ""
+    const baseEditor = prior ? prior.baseEditor : existing?.lastEditor ?? null
+    const pending = this.pendingOverlay.get(cellId)
+    const queued = pending !== undefined && (pending.targetLang ?? "") === lane
+    const lastEditor = value !== baseValue || queued ? this.ctx.username : baseEditor
+    return { lastEditor, baseValue, baseEditor }
+  }
+
   applyOptimisticTargetEdit(cellId: string, patch: PendingOverlay): void {
     const existing = this.targetById.get(cellId)
     const lane = this.ctx.lane ?? ""
@@ -1298,11 +1847,13 @@ export class CellStore {
       && countNumericFootnotes(existing?.value ?? "") === countNumericFootnotes(patch.value)
     const seq = ++this.writeSeq
     const targetLang = this.ctx.lane ?? ""
+    const authorship = this.optimisticAuthorship(cellId, targetLang, patch.value, existing)
     this.optimisticEdits.set(targetOverlayKey(cellId, targetLang), {
       ...patch,
       cellId,
       targetLang,
       seq,
+      ...authorship,
     })
     this.freshnessFloors.set(cellId, seq)
 
@@ -1313,6 +1864,10 @@ export class CellStore {
         valueHtml: patch.valueHtml ?? null,
         aiDrafted: patch.aiDrafted ?? false,
         aiDraft: patch.aiDrafted ? patch.aiDraft : undefined,
+        // AQU-1571: on the row too, so the line stays the viewer's in the
+        // window after the server confirms (the overlay is dropped) and
+        // before the refetched row, which says the same, is installed.
+        lastEditor: authorship.lastEditor,
       })
     } else {
       const source = this.sourceById.get(cellId)
@@ -1352,7 +1907,7 @@ export class CellStore {
 
     const target = this.targetById.get(cellId)
     const threshold = Math.min(15, Math.max(1, this.ctx.requiredValidations))
-    const audit = this.ctx.auditStats.get(cellId)
+    const audit = this.auditOf(cellId)
     const beforeValidation = validationContribution(audit, existing, threshold)
     const afterValidation = validationContribution(audit, target, threshold)
     const validationUnchanged = beforeValidation.endorsements === afterValidation.endorsements
@@ -1447,6 +2002,11 @@ export class CellStore {
     this.order.splice(orderAt >= 0 ? orderAt + 1 : 0, 0, row.cellId)
     this.indexById = new Map(this.order.map((id, index) => [id, index]))
     this.listVersion++
+    // AQU-1422: an id can be re-used — a removal rolled back, or a re-insert at
+    // the same cell id — so the parked set is re-derived from the rows rather
+    // than carried. A retained entry would filter the NEW row out of the display
+    // list, and nothing on screen would explain why.
+    this.setHiddenCellIds(this.collectHiddenCellIds())
 
     this.rebuildDerivedIndexes()
     this.bumpCells(row.reanchorCellId ? [row.cellId, row.reanchorCellId] : [row.cellId])
@@ -1512,6 +2072,10 @@ export class CellStore {
     // source-less row at the tail.
     this.removedCellIds.add(cellId)
     this.listVersion++
+    // AQU-1422: a revealed parked row can be removed from here, and a stale entry
+    // would then over-report the "N hidden" count for a cell that no longer
+    // exists.
+    this.setHiddenCellIds(this.collectHiddenCellIds())
 
     this.rebuildDerivedIndexes()
     if (successorCellId) this.bumpCells([successorCellId])
@@ -1575,7 +2139,124 @@ export class CellStore {
     this.freshnessFloors.delete(cellId)
     this.indexById = new Map(this.order.map((id, index) => [id, index]))
     this.listVersion++
+    // AQU-1422: restoring a parked row must restore it PARKED — the snapshot
+    // carries its `hidden` flag, so re-deriving is what honours it.
+    this.setHiddenCellIds(this.collectHiddenCellIds())
     this.rebuildDerivedIndexes()
+    this.fileVersion++
+    this.emitAll()
+  }
+
+  /**
+   * AQU-1759: rows split at their quotation marks, visible on the SAME TICK.
+   *
+   * The same reasoning as `applyOptimisticSourceInsert`, for the same reason:
+   * a split changes `order`, and waiting on the confirming read makes
+   * `replaceRows` rebuild every derived index of the file. Applying it here
+   * first means that read arrives with the order already right, so it only
+   * corrects the handful of rows it touched.
+   *
+   * Each split row keeps its id and shows its first piece; the later pieces
+   * are spliced in after it, chained on each other; and the row that followed
+   * it moves onto the last piece. One rebuild and one emit for the whole
+   * batch, so the per-file sweep costs the same as a single row.
+   *
+   * Returns what it changed, for `rollbackOptimisticQuoteSplit` — the floor
+   * stamped here would otherwise protect a refused split forever.
+   */
+  applyOptimisticQuoteSplit(splits: ReadonlyArray<{
+    cellId: string
+    firstText: string
+    pieces: ReadonlyArray<{ cellId: string; value: string; sequenceIndex?: number }>
+    successorCellId: string | null
+  }>): QuoteSplitUndo {
+    const undo: QuoteSplitUndo = { rows: new Map(), insertedIds: [] }
+    const changed: string[] = []
+    const now = Date.now()
+    // First sight of a row is its state before the split: a row that is both
+    // split AND the follower of another split row is touched twice.
+    const snapshot = (row: CellRow) => { if (!undo.rows.has(row.cellId)) undo.rows.set(row.cellId, row) }
+    for (const split of splits) {
+      const source = this.sourceById.get(split.cellId)
+      if (!source) continue
+      snapshot(source)
+      this.sourceById.set(split.cellId, { ...source, value: split.firstText, valueHtml: null })
+      this.freshnessFloors.set(split.cellId, ++this.writeSeq)
+      changed.push(split.cellId)
+
+      let previous = split.cellId
+      for (const piece of split.pieces) {
+        if (this.sourceById.has(piece.cellId)) continue
+        this.sourceById.set(piece.cellId, {
+          cellId: piece.cellId,
+          side: "source",
+          targetLang: "",
+          value: piece.value,
+          valueHtml: null,
+          type: source.type,
+          canonicalRef: null,
+          anchorCellId: previous,
+          // No event id until the flush lands — see applyOptimisticSourceInsert.
+          eventId: "",
+          sourceEventId: null,
+          lastEditor: this.ctx.username,
+          lastEditAt: now,
+          validated: false,
+          wordCount: 0,
+          endorsementCount: 0,
+          ...(piece.sequenceIndex != null ? { sequenceIndex: piece.sequenceIndex } : {}),
+          metadata: { aquillaOrigin: splitLineOrigin(split.cellId) },
+        } as CellRow)
+        this.freshnessFloors.set(piece.cellId, ++this.writeSeq)
+        const sourceAt = this.sourceOrder.indexOf(previous)
+        this.sourceOrder.splice(sourceAt >= 0 ? sourceAt + 1 : this.sourceOrder.length, 0, piece.cellId)
+        const orderAt = this.order.indexOf(previous)
+        this.order.splice(orderAt >= 0 ? orderAt + 1 : this.order.length, 0, piece.cellId)
+        undo.insertedIds.push(piece.cellId)
+        changed.push(piece.cellId)
+        previous = piece.cellId
+      }
+
+      const successor = split.successorCellId ? this.sourceById.get(split.successorCellId) : undefined
+      if (successor && previous !== split.cellId) {
+        snapshot(successor)
+        this.sourceById.set(successor.cellId, { ...successor, anchorCellId: previous })
+        this.freshnessFloors.set(successor.cellId, ++this.writeSeq)
+        changed.push(successor.cellId)
+      }
+    }
+    if (changed.length === 0) return undo
+    this.indexById = new Map(this.order.map((id, index) => [id, index]))
+    this.listVersion++
+    this.setHiddenCellIds(this.collectHiddenCellIds())
+    this.rebuildDerivedIndexes()
+    this.bumpCells(changed)
+    this.fileVersion++
+    this.emit(changed)
+    return undo
+  }
+
+  /** Undo `applyOptimisticQuoteSplit` for a split the server refused. */
+  rollbackOptimisticQuoteSplit(undo: QuoteSplitUndo): void {
+    const inserted = new Set(undo.insertedIds)
+    if (inserted.size === 0 && undo.rows.size === 0) return
+    for (const id of inserted) {
+      this.sourceById.delete(id)
+      this.targetById.delete(id)
+      this.freshnessFloors.delete(id)
+    }
+    this.sourceOrder = this.sourceOrder.filter((id) => !inserted.has(id))
+    this.targetOrder = this.targetOrder.filter((id) => !inserted.has(id))
+    this.order = this.order.filter((id) => !inserted.has(id))
+    for (const row of undo.rows.values()) {
+      this.sourceById.set(row.cellId, row)
+      this.freshnessFloors.delete(row.cellId)
+    }
+    this.indexById = new Map(this.order.map((id, index) => [id, index]))
+    this.listVersion++
+    this.setHiddenCellIds(this.collectHiddenCellIds())
+    this.rebuildDerivedIndexes()
+    this.bumpCells([...undo.rows.keys(), ...inserted])
     this.fileVersion++
     this.emitAll()
   }
@@ -1624,6 +2305,35 @@ export class CellStore {
     this.emit([cellId])
   }
 
+  /**
+   * AQU-1422: optimistic park / un-park. Returns the PREVIOUS flag so the caller
+   * can put it back if the server refuses, and `null` when there was no source
+   * row to patch (nothing was done, so nothing needs rolling back).
+   *
+   * Sets a freshness floor like every other optimistic path: without one, a
+   * correcting read already in flight lands the pre-hide row and the cell
+   * reappears for a beat before the confirming read takes it away again.
+   *
+   * Source row only — `hidden` lives there, and the display-list filter reads it
+   * from there.
+   */
+  applyOptimisticCellHidden(cellId: string, hidden: boolean): boolean | null {
+    const source = this.sourceById.get(cellId)
+    if (!source) return null
+    const previous = source.hidden === true
+    if (previous === hidden) return previous
+    this.freshnessFloors.set(cellId, ++this.writeSeq)
+    this.sourceById.set(cellId, { ...source, hidden: hidden ? true : undefined })
+    // Bumps listVersion itself, which is what drops the row from the display
+    // list — no order or membership changed, so nothing else would.
+    this.setHiddenCellIds(this.collectHiddenCellIds())
+    this.rebuildDerivedIndexes()
+    this.bumpCells([cellId])
+    this.fileVersion++
+    this.emit([cellId])
+    return previous
+  }
+
   /** Bulk version of applyOptimisticTargetEdit. Stamps optimistic shadows for
    *  every cell in the batch and rebuilds derived indexes + emits ONCE at the
    *  end, instead of once per cell (O(N) not O(N²)). Used by the bulk-import
@@ -1635,18 +2345,25 @@ export class CellStore {
     for (const patch of patches) {
       const seq = ++this.writeSeq
       const targetLang = this.ctx.lane ?? ""
+      const existing = this.targetById.get(patch.cellId)
+      const authorship = this.optimisticAuthorship(patch.cellId, targetLang, patch.value, existing)
       this.optimisticEdits.set(targetOverlayKey(patch.cellId, targetLang), {
         cellId: patch.cellId,
         targetLang,
         value: patch.value,
         valueHtml: patch.valueHtml,
         seq,
+        ...authorship,
       })
       this.freshnessFloors.set(patch.cellId, seq)
 
-      const existing = this.targetById.get(patch.cellId)
       if (existing) {
-        this.targetById.set(patch.cellId, { ...existing, value: patch.value, valueHtml: patch.valueHtml ?? null })
+        this.targetById.set(patch.cellId, {
+          ...existing,
+          value: patch.value,
+          valueHtml: patch.valueHtml ?? null,
+          lastEditor: authorship.lastEditor,
+        })
       } else {
         const source = this.sourceById.get(patch.cellId)
         if (!source) {
@@ -1734,6 +2451,14 @@ export class CellStore {
       && previousSource.canonicalRef === source.canonicalRef
       && (previousTarget.canonicalRef ?? previousSource.canonicalRef) === (target.canonicalRef ?? source.canonicalRef)
       && (previousSource.type ?? previousTarget.type) === (source.type ?? target.type)
+      // AQU-1424: a row whose ONLY change is its hidden flag is not "unchanged" —
+      // it moves the file's and the chapter's progress, so it has to take the
+      // full-rebuild branch. The whole-file `replaceRows` path gets this for free
+      // (`sameRow` deep-compares), but this per-cell path enumerates its fields,
+      // and the targeted read after a hide is exactly the one that lands here.
+      // Without it the percentage stayed put until the next reload, which is the
+      // thing this slice promises not to happen.
+      && previousSource.hidden === source.hidden
       && navigationStartMs(previousSource, previousTarget) === navigationStartMs(source, target)
       && sameJsonData(previousSource.metadata ?? previousTarget.metadata ?? null, source.metadata ?? target.metadata ?? null)
       && countNumericFootnotes(previousTarget.value) === countNumericFootnotes(target.value)
@@ -1788,12 +2513,33 @@ export class CellStore {
         this.indexById = new Map(this.order.map((id, index) => [id, index]))
       }
     }
+    // AQU-1422: a hide/show arrives here — a targeted read or an `event.applied`
+    // frame carrying this cell's rows — and changes no order and no membership,
+    // so nothing above would bump `listVersion` and the row would keep rendering
+    // until the next reorder. Recomputing the whole set (rather than patching
+    // one id) keeps this path honest if the frame also drops the source row.
+    if ((previousSource?.hidden ?? false) !== (source?.hidden ?? false)) {
+      this.setHiddenCellIds(this.collectHiddenCellIds())
+    }
     if (indexesUnchanged && this.updateTargetValidationProgress(cellId, previousTarget, target)) {
       this.invalidateDerivedViews()
     } else this.rebuildDerivedIndexes()
     this.bumpCells([cellId])
     this.fileVersion++
     this.emit([cellId])
+  }
+
+  /**
+   * AQU-1047: how much file-proportional work this store has done. A snapshot
+   * copy, so a caller can diff two readings across one interaction.
+   */
+  getWorkStats(): Readonly<CellStoreWorkStats> {
+    return { ...this.work }
+  }
+
+  /** Zero the counters so the next interaction can be measured on its own. */
+  resetWorkStats(): void {
+    this.work = emptyWorkStats()
   }
 
   getMemorySnapshot(extra?: Record<string, unknown>): Record<string, unknown> {
@@ -1819,6 +2565,10 @@ export class CellStore {
       textMB: +(textBytes / 1048576).toFixed(2),
       htmlMB: +(htmlBytes / 1048576).toFixed(2),
       maxServerSeq: this.maxServerSeq,
+      // AQU-1047: file-proportional work done so far. On a large file these
+      // are the numbers that say whether interaction is viewport-scoped —
+      // `cellViewsBuilt` climbing by thousands per keystroke is the tell.
+      ...this.work,
       ...extra,
     }
   }
@@ -1848,6 +2598,12 @@ export class CellStore {
       cell.aiDraft = optimistic.aiDrafted ? optimistic.aiDraft : undefined
       cell.hasPendingEdit = true
     }
+    // AQU-1571: whose change the line now shows. A pending overlay is a commit
+    // of the viewer's still in the outbox, which the server will record as
+    // theirs. Without it, the edit's own answer (a revert to the confirmed
+    // text keeps the line's real editor).
+    if (activePending) cell.lastEditor = this.ctx.username
+    else if (optimistic) cell.lastEditor = optimistic.lastEditor
     if (activePending || optimistic) {
       // The overlay changed `translated`/`status`; recompute validationStatus
       // from the overlaid text so the row's aria/ring can't keep reporting
@@ -1863,6 +2619,8 @@ export class CellStore {
 
   private ensureDerivedCache(): void {
     if (this.derivedCache.baseVersion === this.derivedVersion) return
+    this.work.derivedCacheRebuilds++
+    this.work.cellsWalked += this.order.length
     const summaries: CellSummary[] = []
     const textPairs: CellTextPair[] = []
     for (const id of this.order) {
@@ -1898,6 +2656,10 @@ export class CellStore {
    * Callers must retain the full rebuild for structural/footnote/validation changes.
    */
   private updateTargetFilledProgress(cellId: string, before: boolean, after: boolean): boolean {
+    // Media redesign slice 2: a language that counts its recordings counts a
+    // line by the shared rule, which these text deltas do not speak for; the
+    // full rebuild does.
+    if (laneCountsAudio(this.ctx.laneAudio?.delivers)) return false
     const snapshot = this.fileProgressSnapshot
     const source = this.sourceById.get(cellId)
     if (this.derivedIndexesDirty || !snapshot || !source) return false
@@ -1917,16 +2679,23 @@ export class CellStore {
       sections: snapshot.sections.map(counts => counts.key === section
         ? { ...counts, filledCount: counts.filledCount + delta } : counts),
     }
-    // Navigation treats an audio take as translated even with empty text.
-    if (!this.ctx.ownTakeCellIds?.has(cellId)) {
-      this.navIndex = this.navIndex.map((item, index) => index === entryIndex ? {
-        ...item,
-        translated: item.translated + delta,
-        subsections: item.subsections.map((subsection, subIndex) => subIndex === subsectionIndex
-          ? { ...subsection, translated: subsection.translated + delta } : subsection),
-      } : item)
-      this.navigationProgressCache.delete(this.order)
-    }
+    // Navigation treats an audio take as translated even with empty text, so
+    // `translated` holds still on a line that has one — but `textTranslated`
+    // is text alone (AQU-2110) and always moves with the edit, or an
+    // optimistic first word on an audio-only file would leave the picker
+    // believing the file still has no text.
+    const hasOwnTake = this.ctx.ownTakeCellIds?.has(cellId) === true
+    const patch = <T extends CellNavigationProgress>(counts: T): T => ({
+      ...counts,
+      textTranslated: counts.textTranslated + delta,
+      translated: hasOwnTake ? counts.translated : counts.translated + delta,
+    })
+    this.navIndex = this.navIndex.map((item, index) => index === entryIndex ? {
+      ...patch(item),
+      subsections: item.subsections.map((subsection, subIndex) => subIndex === subsectionIndex
+        ? patch(subsection) : subsection),
+    } : item)
+    this.navigationProgressCache.delete(this.order)
     return true
   }
 
@@ -1935,10 +2704,11 @@ export class CellStore {
    * file totals prefer audit validators, navigation uses the projected flag.
    */
   private updateTargetValidationProgress(cellId: string, previous: CellRow, next: CellRow): boolean {
+    if (laneCountsAudio(this.ctx.laneAudio?.delivers)) return false
     const snapshot = this.fileProgressSnapshot
     const source = this.sourceById.get(cellId)
     if (this.derivedIndexesDirty || !snapshot || !source) return false
-    const audit = this.ctx.auditStats.get(cellId)
+    const audit = this.auditOf(cellId)
     const before = validationContribution(audit, previous, snapshot.validationCount)
     const after = validationContribution(audit, next, snapshot.validationCount)
     const validatedDelta = Number(after.validated) - Number(before.validated)
@@ -2006,8 +2776,8 @@ export class CellStore {
       const source = this.sourceById.get(id)
       if (!source) continue
       const target = this.targetById.get(id)
-      const before = validationContribution(previous.get(id), target, threshold)
-      const after = validationContribution(next.get(id), target, threshold)
+      const before = validationContribution(this.auditOf(id, previous), target, threshold)
+      const after = validationContribution(this.auditOf(id, next), target, threshold)
       if (before.endorsements === after.endorsements && before.validated === after.validated) continue
       add("", before, after)
       const section = source.canonicalRef ? sectionLabelFromCanonical(source.canonicalRef) : ""
@@ -2037,6 +2807,8 @@ export class CellStore {
   }
 
   private computeDerivedIndexes(): void {
+    this.work.derivedIndexRebuilds++
+    this.work.cellsWalked += this.order.length
     const navigation = this.buildNavigationIndex(this.order)
     const footnoteOffsets = new Map<string, { source: number; target: number }>()
     const countsByScope = new Map<string, { source: number; target: number }>()
@@ -2072,8 +2844,21 @@ export class CellStore {
       // else. This snapshot is the local overlay the sidebar paints while an
       // edit is in flight; without the same rule the file bar would jump to
       // the unsubtracted total on every keystroke and settle back after.
-      if (source && (this.ctx.countStructural !== false || !isStructuralCell(source.type))) {
-        const audit = this.ctx.auditStats.get(id)
+      // AQU-1424: a cell parked with "Hide cell" is not work, so it leaves BOTH
+      // the numerator and the denominator — hiding the last untranslated verse of
+      // a 10-cell file reads 100%, and showing it again reads 90%. The server's
+      // projection applies the same predicate, so this local overlay and the
+      // authoritative figure agree instead of the bar jumping between them.
+      //
+      // Read off the SOURCE row, never the target: hiding is per cell, not per
+      // lane, and a target row created after the hide carries no flag of its own.
+      // Deliberately a SEPARATE condition from the structural test beside it —
+      // structural is project policy about which cells count, hidden is a person
+      // taking one row out of the work, and collapsing them would make a project
+      // that counts headings also start counting parked ones.
+      if (source && !isHiddenCell(source)
+        && (this.ctx.countStructural !== false || !isStructuralCell(source.type))) {
+        const audit = this.auditOf(id)
         const endorsements = audit ? audit.activeValidators.length : Math.max(0, target?.endorsementCount ?? 0)
         const authoritative = audit !== undefined || target?.endorsementCount !== undefined
         const validated = authoritative ? endorsements >= progressThreshold : Boolean(target?.validated)
@@ -2131,8 +2916,12 @@ export class CellStore {
    * Arrays can be mutated by structural edits, so identity alone is not enough.
    */
   private getNavigationStructure(ids: readonly string[]): ReturnType<typeof deriveMilestoneNavigation> {
+    const userMilestones = this.ctx.userMilestones ?? EMPTY_USER_MILESTONES
     const cached = this.navigationStructureCache.get(ids)
-    if (cached && cached.cells.length === ids.length && ids.every((id, index) => {
+    if (cached
+      && cached.cells.length === ids.length
+      && cached.userMilestones === userMilestones
+      && ids.every((id, index) => {
       const previous = cached.cells[index]
       const source = this.sourceById.get(id)
       const target = this.targetById.get(id)
@@ -2143,7 +2932,9 @@ export class CellStore {
         && previous.canonicalRef === (target?.canonicalRef ?? source?.canonicalRef ?? null)
         && previous.startMs === startMs
         && previous.metadata === (source?.metadata ?? target?.metadata ?? null)
-    })) return cached.derived
+      })) return cached.derived
+    this.work.navigationStructureRebuilds++
+    this.work.cellsWalked += ids.length
     const cells = ids.map((id): MilestoneNavigationCell => {
       const source = this.sourceById.get(id)
       const target = this.targetById.get(id)
@@ -2156,8 +2947,8 @@ export class CellStore {
         metadata: source?.metadata ?? target?.metadata ?? null,
       }
     })
-    const derived = deriveMilestoneNavigation(cells)
-    this.navigationStructureCache.set(ids, { cells, derived })
+    const derived = deriveMilestoneNavigation(cells, { userMilestones })
+    this.navigationStructureCache.set(ids, { cells, userMilestones, derived })
     return derived
   }
 
@@ -2170,6 +2961,10 @@ export class CellStore {
       shortLabel: string
     }>
   } {
+    // Counted unconditionally: the `flags` loop below runs over every id even
+    // when the cached entries are returned, so entering here is already O(file)
+    // whatever the cache says.
+    this.work.cellsWalked += ids.length
     const derived = this.getNavigationStructure(ids)
     const cached = this.navigationProgressCache.get(ids)
     const flags = new Uint8Array(ids.length)
@@ -2188,51 +2983,108 @@ export class CellStore {
         ?? ""
       // Navigation counts an audio take as translated, and uses the projected
       // validation flag. Keep these semantics distinct from file progress.
-      flags[index] = (targetValue.trim() || this.ctx.ownTakeCellIds?.has(cellId) ? 1 : 0)
-        | (target?.validated ? 2 : 0)
+      //
+      // AQU-2110: the text-only and audio bits ride the same mask, so a take
+      // being validated misses the cache exactly as a text edit does.
+      const hasText = targetValue.trim().length > 0
+      const audio = this.ctx.audioProgressCellIds
+      flags[index] = (hasText || this.ctx.ownTakeCellIds?.has(cellId) ? FLAG_TRANSLATED : 0)
+        | (target?.validated ? FLAG_VALIDATED : 0)
+        | (hasText ? FLAG_TEXT_TRANSLATED : 0)
+        | (audio?.recorded.has(cellId) ? FLAG_AUDIO_RECORDED : 0)
+        | (audio?.audioValidated.has(cellId) ? FLAG_AUDIO_VALIDATED : 0)
       if (cached?.flags[index] !== flags[index]) unchanged = false
     }
     if (unchanged && cached) return { entries: cached.entries, milestoneByCellId: derived.milestoneByCellId }
 
+    this.work.navigationIndexRebuilds++
     const displayIndexByCellId = new Map(ids.map((id, index) => [id, index]))
-    const progressFor = (cellIds: readonly string[]) => {
+    const progressFor = (cellIds: readonly string[]): CellNavigationProgress => {
       let translated = 0
       let validated = 0
+      let textTranslated = 0
+      let audioRecorded = 0
+      let audioValidated = 0
       let total = 0
       for (const cellId of cellIds) {
         // AQU-1083: the chapter keeps every cell in `cellIds` — the sidebar
         // still draws a square for a heading, and jumping to the chapter still
         // lands on it. Only the fraction beside the chapter name changes.
+        const sourceRow = this.sourceById.get(cellId)
+        // AQU-1424: the chapter's fraction excludes parked cells, on BOTH id
+        // lists this runs over — the display list (which drops them outright) and
+        // the store's own `order` (which keeps them, and is what the sidebar's
+        // chapter grid reads). Gating here rather than at the caller is what
+        // makes the two agree; the grid still draws the square, and the health
+        // builder's `isExcluded` is what colours it "not counted".
+        if (isHiddenCell(sourceRow)) continue
         if (this.ctx.countStructural === false
-          && isStructuralCell(this.sourceById.get(cellId)?.type)) continue
+          && isStructuralCell(sourceRow?.type)) continue
         total += 1
         const index = displayIndexByCellId.get(cellId)
         const value = index === undefined ? 0 : flags[index]
-        if (value & 1) translated++
-        if (value & 2) validated++
+        if (value & FLAG_TRANSLATED) translated++
+        if (value & FLAG_VALIDATED) validated++
+        if (value & FLAG_TEXT_TRANSLATED) textTranslated++
+        if (value & FLAG_AUDIO_RECORDED) audioRecorded++
+        if (value & FLAG_AUDIO_VALIDATED) audioValidated++
       }
-      return { translated, validated, total }
+      return { translated, validated, textTranslated, audioRecorded, audioValidated, total }
     }
     const entries = derived.orderedMilestones.map((group): CellNavigationEntry => {
       // AQU-1083: `total` is summed from the subsections rather than read off
       // `group.cellIds.length` because progressFor may skip structural cells.
-      const progress = { translated: 0, validated: 0, total: 0 }
+      const progress: CellNavigationProgress = {
+        translated: 0, validated: 0, textTranslated: 0, audioRecorded: 0, audioValidated: 0, total: 0,
+      }
       const subsections: CellNavigationSubsection[] = []
-      for (let offset = 0; offset < group.cellIds.length; offset += MILESTONE_SUBSECTION_SIZE) {
-        const cellIds = group.cellIds.slice(offset, offset + MILESTONE_SUBSECTION_SIZE)
-        const firstCellId = cellIds[0]
-        const counts = progressFor(cellIds)
+      // AQU-2308: a division the file supplied that has hand-set milestones
+      // inside it lists THOSE as its sub-entries, by name, instead of the
+      // anonymous 50-cell ranges. The division's own `cellIds` — and so its
+      // own figures, summed below — are untouched either way: nesting adds a
+      // way in, it does not re-partition the parent.
+      if (group.named?.length) {
+        for (const named of group.named) {
+          const cellIds = [...named.cellIds]
+          subsections.push({
+            key: named.key,
+            label: named.label,
+            firstCellId: named.firstCellId,
+            firstIndex: displayIndexByCellId.get(named.firstCellId) ?? group.firstIndex,
+            cellIds,
+            ...progressFor(cellIds),
+          })
+        }
+        // The parent's figures still cover the WHOLE division, including any
+        // cells no hand-set milestone reaches, so they are summed from the
+        // division rather than from these sub-entries.
+        const counts = progressFor(group.cellIds)
         progress.translated += counts.translated
         progress.validated += counts.validated
+        progress.textTranslated += counts.textTranslated
+        progress.audioRecorded += counts.audioRecorded
+        progress.audioValidated += counts.audioValidated
         progress.total += counts.total
-        subsections.push({
-          key: `${group.milestone.key}:range:${firstCellId}`,
-          label: `${offset + 1}–${offset + cellIds.length}`,
-          firstCellId,
-          firstIndex: displayIndexByCellId.get(firstCellId) ?? group.firstIndex,
-          cellIds,
-          ...counts,
-        })
+      } else {
+        for (let offset = 0; offset < group.cellIds.length; offset += MILESTONE_SUBSECTION_SIZE) {
+          const cellIds = group.cellIds.slice(offset, offset + MILESTONE_SUBSECTION_SIZE)
+          const firstCellId = cellIds[0]
+          const counts = progressFor(cellIds)
+          progress.translated += counts.translated
+          progress.validated += counts.validated
+          progress.textTranslated += counts.textTranslated
+          progress.audioRecorded += counts.audioRecorded
+          progress.audioValidated += counts.audioValidated
+          progress.total += counts.total
+          subsections.push({
+            key: `${group.milestone.key}:range:${firstCellId}`,
+            label: `${offset + 1}–${offset + cellIds.length}`,
+            firstCellId,
+            firstIndex: displayIndexByCellId.get(firstCellId) ?? group.firstIndex,
+            cellIds,
+            ...counts,
+          })
+        }
       }
       return {
         key: group.milestone.key,
@@ -2286,6 +3138,8 @@ export interface UseActiveCellStoreOptions {
   username?: string
   requiredValidations?: number
   auditStats?: ReadonlyMap<string, CellAuditStats>
+  /** AQU-2094: see `RuntimeContext.auditStatsComplete`. */
+  auditStatsComplete?: boolean
   getToken?: (fileId: string) => Promise<string | null>
   enabled?: boolean
   /**
@@ -2297,6 +3151,13 @@ export interface UseActiveCellStoreOptions {
   lane?: string
   /** AQU-1083: does this project count headings toward progress? Default yes. */
   countStructural?: boolean
+  /** AQU-1422: reveal cells parked with "Hide cell" instead of dropping them
+   *  from the display list. Default false. Only ever passed true for someone who
+   *  may edit source text — see RuntimeContext.showHidden. */
+  showHidden?: boolean
+  /** AQU-2308: the file's hand-set milestones (`useFileMilestones`). Must be a
+   *  stable array — see RuntimeContext.userMilestones. */
+  userMilestones?: readonly FileMilestone[]
 }
 
 export interface UseActiveCellStoreResult {
@@ -2316,6 +3177,9 @@ export interface UseActiveCellStoreResult {
   ) => void
   loadProgress: { loaded: number; total: number | null } | null
   isLoading: boolean
+  /** True while rows painted from the device cache are being brought up to
+   *  date (the `?since=` delta or a full stream after the paint). */
+  isRefreshing: boolean
   isError: boolean
 }
 
@@ -2326,10 +3190,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     username = "local",
     requiredValidations = 1,
     auditStats = EMPTY_STATS,
+    auditStatsComplete = false,
     getToken,
     enabled = true,
     lane = "",
     countStructural = true,
+    showHidden = false,
+    userMilestones = EMPTY_USER_MILESTONES,
   } = opts
   const store = useMemo(() => new CellStore(), [])
   // Debug handle for the console and e2e probes. Published from an effect
@@ -2338,11 +3205,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   // this runs once per mount.
   useEffect(() => {
     if (typeof window === "undefined") return
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(window as any).__cellStore = store
+    ;(window as typeof window & { __cellStore?: CellStore }).__cellStore = store
   }, [store])
   const [loadProgress, setLoadProgress] = useState<UseActiveCellStoreResult["loadProgress"]>(null)
   const [isLoading, setIsLoading] = useState(false)
+  // True from a cache paint until the fetch that brings it up to date ends.
+  // `isLoading` stays false through it, since the editor is already usable.
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [isError, setIsError] = useState(false)
   const projectRef = useRef(projectId)
   const fileRef = useRef(fileId)
@@ -2352,6 +3221,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   const inFlightRef = useRef(false)
   const tokenRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const tokenAttemptsRef = useRef(0)
+  const grantsVersionRef = useRef("")
   const cellFetchInFlightRef = useRef<Set<string>>(new Set())
   // I3: queue, don't drop. A second event.applied for a cell while its GET is
   // in flight marks it dirty; the in-flight fetch re-runs once when it lands.
@@ -2379,8 +3249,8 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     // rows against it on change (instant lane switch, no refetch). This effect
     // is defined before the (projectId, fileId, enabled) reload effect, so on a
     // lane change the store's active lane is updated before any fetch runs.
-    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, lane, countStructural })
-  }, [auditStats, countStructural, fileId, lane, projectId, requiredValidations, store, username])
+    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, auditStatsComplete, lane, countStructural, showHidden, userMilestones })
+  }, [auditStats, auditStatsComplete, countStructural, fileId, lane, projectId, requiredValidations, showHidden, userMilestones, store, username])
 
   // I4 cache hygiene: never persist optimistic values as server rows.
   // `applyOptimisticTargetEdit` mutates the target row in place (value under
@@ -2391,7 +3261,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   // on reload, whereas a poisoned one paints a rejected edit as saved.
   const persistCellsCache = useCallback((pid: string, fid: string, maxServerSeq?: number, projectEpoch?: number) => {
     if (store.hasOptimisticEdits()) return
-    scheduleCellsCacheWrite(pid, fid, store.toRows(), maxServerSeq, projectEpoch)
+    scheduleCellsCacheWrite(pid, fid, store.toRows(), maxServerSeq, projectEpoch, grantsVersionRef.current)
   }, [store])
 
   const doFetchRef = useRef<(soft?: boolean) => Promise<void>>(async () => {})
@@ -2408,6 +3278,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       store.reset(pid, fid)
       setLoadProgress(null)
       setIsLoading(false)
+      setIsRefreshing(false)
       setIsError(false)
       return
     }
@@ -2427,6 +3298,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     inFlightRef.current = true
     // A full fetch supersedes any queued soft one.
     if (!soft) pendingSoftRefetchRef.current = false
+    // A full fetch is loading from the moment it is asked for, not from the
+    // moment the sync token and the cache read (two async hops) resolve. The
+    // project socket can open inside that window, and with zero rows and no
+    // loading flag the editor then read "<file> is empty" for a frame — a
+    // flash for people, and a gap with no busy region that let the Jev
+    // readiness gate through onto a file still loading (QA job 1853).
+    if (!soft) setIsLoading(true)
 
     // Tauri offline branch: an offline-ready project's cells live in the
     // local LiveStore `cells` table (kept live-synced by the Phase 3 sync
@@ -2453,27 +3331,59 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         fetchRetryAttemptsRef.current = 0
         setIsError(false)
         setIsLoading(false)
+        setIsRefreshing(false)
       } finally {
         if (generationRef.current === gen) inFlightRef.current = false
       }
       return
     }
 
+    let token: string | null = null
+    try {
+      token = tokenFetcher ? await tokenFetcher(fid) : null
+    } catch {
+      token = null
+    }
+    if (generationRef.current !== gen) return
+    if (!token) {
+      const attempt = ++tokenAttemptsRef.current
+      inFlightRef.current = false
+      if (attempt >= 6) {
+        setIsError(true)
+        setIsLoading(false)
+        setIsRefreshing(false)
+        return
+      }
+      const delay = Math.min(4000, 250 * 2 ** (attempt - 1))
+      if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
+      tokenRetryRef.current = setTimeout(() => {
+        tokenRetryRef.current = null
+        if (generationRef.current === gen) void doFetchRef.current(soft)
+      }, delay)
+      return
+    }
+    tokenAttemptsRef.current = 0
+    grantsVersionRef.current = grantsVersionFromSyncToken(token)
+
     let usedCache = false
 
     if (!soft) {
       store.reset(pid, fid)
-      const cached = await readCellsCache(pid, fid)
+      const cached = await readCellsCache(pid, fid, grantsVersionRef.current)
       if (generationRef.current !== gen) return
       if (cached && cached.rows.length > 0) {
         store.replaceRows(cached.rows, { full: true, maxServerSeq: cached.maxServerSeq ?? null })
         store.setProjectEpoch(cached.projectEpoch ?? null)
         setIsLoading(false)
+        // AQU-1365 review: the paint is a whole file but maybe a stale one;
+        // a reader that must not act on stale rows waits for this to clear.
+        setIsRefreshing(true)
         usedCache = true
       } else {
         store.setMaxServerSeq(null)
         store.setProjectEpoch(null)
         setIsLoading(true)
+        setIsRefreshing(false)
       }
     }
 
@@ -2481,26 +3391,6 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     setIsError(false)
     let paintTimer: ReturnType<typeof setTimeout> | undefined
     try {
-      const token = tokenFetcher ? await tokenFetcher(fid) : null
-      if (!token) {
-        if (generationRef.current !== gen) return
-        const attempt = ++tokenAttemptsRef.current
-        inFlightRef.current = false
-        if (attempt >= 6) {
-          setIsError(true)
-          setIsLoading(false)
-          return
-        }
-        const delay = Math.min(4000, 250 * 2 ** (attempt - 1))
-        if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
-        tokenRetryRef.current = setTimeout(() => {
-          tokenRetryRef.current = null
-          if (generationRef.current === gen) void doFetchRef.current(soft)
-        }, delay)
-        return
-      }
-      tokenAttemptsRef.current = 0
-
       const since = store.getMaxServerSeq()
       // AQU-943: a cursor whose incarnation is unknown (cache entry written
       // before the epoch existed) cannot be validated against a wipe + re-
@@ -2530,6 +3420,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
           }
           fetchRetryAttemptsRef.current = 0
           setIsLoading(false)
+          setIsRefreshing(false)
           return
         }
       }
@@ -2632,11 +3523,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       persistCellsCache(pid, fid, watermark ?? undefined, watermarkEpoch ?? undefined)
       fetchRetryAttemptsRef.current = 0
       setIsLoading(false)
+      setIsRefreshing(false)
     } catch (err) {
       if (generationRef.current !== gen) return
       console.warn("[useActiveCellStore] fetch failed:", err)
       setIsError(true)
       setIsLoading(false)
+      setIsRefreshing(false)
       // Bounded retry chain (3 attempts, 2s/5s/10s). Previously a failed
       // delta/full fetch left the page on the cache paint with no retry. The
       // timer is fenced by generation and cleared by any newer doFetch, and
@@ -2763,6 +3656,17 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     return subscribeToOfflineFileCells(readyStore, projectId, fileId, () => { void doFetch(true) })
   }, [projectId, fileId, enabled, offlineStore, doFetch])
 
+  // A refused offline edit the user discarded never reaches the `cells` table,
+  // so nothing above would retire its optimistic shadow — the discarded text
+  // would stay on screen as if saved.
+  useEffect(() => {
+    const readyStore = resolveOfflineStore(offlineStore, projectId)
+    if (!enabled || !readyStore || !projectId || !fileId) return
+    return subscribeToDiscardedOfflineCommits(readyStore, projectId, fileId, (cellId, value) => {
+      if (store.clearOptimisticIfValue(cellId, value)) void doFetch(true)
+    })
+  }, [projectId, fileId, enabled, offlineStore, store, doFetch])
+
   useEffect(() => () => {
     if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
     if (fetchRetryTimerRef.current) clearTimeout(fetchRetryTimerRef.current)
@@ -2880,10 +3784,12 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(window as any).__aquillaMemorySnapshot = () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const memory = (performance as any).memory
+    const snapshotHandle = window as typeof window & {
+      __aquillaMemorySnapshot?: () => ReturnType<CellStore["getMemorySnapshot"]>
+    }
+    snapshotHandle.__aquillaMemorySnapshot = () => {
+      const memory = (performance as Performance & { memory?: { usedJSHeapSize?: number; totalJSHeapSize?: number } })
+        .memory
       const root = document.querySelector("[data-aquilla-editor-root]") ?? document
       const rowCount = root.querySelectorAll("[data-cell-id][data-index]").length
       const prosemirrorCount = root.querySelectorAll(".ProseMirror").length
@@ -2912,12 +3818,11 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       })
     }
     return () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if ((window as any).__aquillaMemorySnapshot) delete (window as any).__aquillaMemorySnapshot
+      if (snapshotHandle.__aquillaMemorySnapshot) delete snapshotHandle.__aquillaMemorySnapshot
     }
   }, [store])
 
-  return { store, revalidate, retry, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, applyOptimisticCellTiming, loadProgress, isLoading, isError }
+  return { store, revalidate, retry, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, applyOptimisticCellTiming, loadProgress, isLoading, isRefreshing, isError }
 }
 
 /**
@@ -2959,6 +3864,12 @@ export function useCellStoreViews(store: CellStore): CellViewModel[] {
   return useMemo(() => readAtVersion(version, () => store.getAllCellViews()), [store, version])
 }
 
+function summaryCastName(metadata: CellData["metadata"]): { castName?: string } {
+  const raw = metadata?.cast_name
+  const name = typeof raw === "string" ? raw.trim() : ""
+  return name ? { castName: name } : {}
+}
+
 function deriveStatus(translated: string, validated: boolean): CellData["status"] {
   if (!translated || !translated.trim()) return "empty"
   return validated ? "validated" : "unvalidated"
@@ -2995,6 +3906,19 @@ function waiversEqual(a: readonly RuleWaiver[], b: readonly RuleWaiver[]): boole
   return true
 }
 
+/** AQU-2296: two `username -> timestamp` records, compared by value. */
+function sameStampRecord(
+  a: Record<string, number> | undefined,
+  b: Record<string, number> | undefined,
+): boolean {
+  if (a === b) return true
+  const left = a ?? {}
+  const right = b ?? {}
+  const keys = Object.keys(left)
+  if (keys.length !== Object.keys(right).length) return false
+  return keys.every((key) => left[key] === right[key])
+}
+
 function auditStatsEqual(a: CellAuditStats | undefined, b: CellAuditStats | undefined): boolean {
   if (a === b) return true
   if (!a || !b) return false
@@ -3004,6 +3928,10 @@ function auditStatsEqual(a: CellAuditStats | undefined, b: CellAuditStats | unde
     a.lastEditAt === b.lastEditAt &&
     a.lastEditEventId === b.lastEditEventId &&
     sameStringArray(a.activeValidators, b.activeValidators) &&
+    // AQU-2296: a re-validation on the SAME head moves one person's
+    // `decided_ts` forward without changing the name set, so the stamps have
+    // to be compared or the popover would keep showing the older date.
+    sameStampRecord(a.validatorDecidedTs, b.validatorDecidedTs) &&
     waiversEqual(a.waivers, b.waivers)
   )
 }

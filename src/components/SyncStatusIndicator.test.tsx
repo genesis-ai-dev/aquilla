@@ -55,7 +55,7 @@ describe("SyncStatusIndicator", () => {
     const user = userEvent.setup()
     recordSyncBytes("upload", "x".repeat(3_000))
     renderPill("offline")
-    await user.click(screen.getByRole("button", { name: /saved locally/i }))
+    await user.click(screen.getByRole("button", { name: /saved on this device/i }))
     const dialog = await screen.findByRole("dialog", { name: "Connection" })
     expect(within(dialog).getAllByText("—", { selector: "dd" })).toHaveLength(3)
     expect(within(dialog).queryByText("1 kB/s", { selector: "dd" })).toBeNull()
@@ -102,12 +102,27 @@ describe("SyncStatusIndicator", () => {
     expect(within(dialog).getByText("50 ms", { selector: "dd" })).toBeTruthy()
   })
 
+  // AQU-2260 (Sam, Oct 29): the status says what it means when it is
+  // clicked (the popover's first line), never on hover.
+  it("explains its status in the popover on click, and shows nothing on hover", async () => {
+    const user = userEvent.setup()
+    renderPill("retrying")
+    const trigger = screen.getByRole("button", { name: /last attempt .* failed/i })
+    await user.hover(trigger)
+    // Give a would-be tooltip its chance to open.
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    await user.click(trigger)
+    const dialog = await screen.findByRole("dialog", { name: "Connection" })
+    expect(dialog).toHaveTextContent(/the last attempt to send your changes failed/i)
+  })
+
   it.each<[SyncStatus, string, RegExp]>([
     ["live", "Live", /all changes are saved to the server/i],
     ["syncing", "Syncing", /still being sent/i],
     ["retrying", "Retrying", /last attempt .* failed/i],
     ["reconnecting", "Reconnecting", /live connection dropped/i],
-    ["offline", "Offline", /saved locally/i],
+    ["offline", "Offline", /saved on this device/i],
   ])("%s renders its own label and an honest tooltip", (status, label, tooltip) => {
     renderPill(status)
     expect(screen.getByText(label)).toBeTruthy()

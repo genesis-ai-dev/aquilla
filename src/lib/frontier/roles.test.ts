@@ -15,6 +15,8 @@ import {
   roleDescription,
   roleHelpText,
   PROJECT_ROLE_OPTIONS,
+  ORG_ROLE_CHANGE_OPTIONS,
+  ORG_ROLE_CHANGE_PICKER,
   ORG_ROLE_OPTIONS,
   LINK_ROLE_OPTIONS,
   ALL_ROLE_OPTIONS,
@@ -65,14 +67,15 @@ describe("ROLE constants", () => {
   it("provides a description key for every canonical level, resolving to non-empty text", () => {
     for (const level of ALL_ROLE_LEVELS) {
       expect(roleDescription(level)).not.toBe("")
-      expect(roleHelpText(level)).toContain(String(level))
+      // AQU-2261: role names carry no level numbers in the interface.
+      expect(roleHelpText(level)).not.toContain(`(${level})`)
     }
   })
 
   it("keeps the AD-6 viewer help text", () => {
     expect(roleDescription(100)).toMatch(/read-only access/i)
     expect(roleHelpText(100)).toBe(
-      "Viewer (100) — read-only access. No edit or management actions.",
+      "Viewer — read-only access. No edit or management actions.",
     )
   })
 
@@ -109,6 +112,14 @@ describe("picker subsets", () => {
     expect(ORG_ROLE_PICKER).not.toContain(ROLE.REVIEWER)
     expect(ORG_ROLE_PICKER).not.toContain(ROLE.OWNER)
   })
+
+  // AQU-952: workspace handover. The change-role rung must reach Owner, while
+  // the picker that drives add-member and email invites must not (the invite
+  // endpoint caps at 600 so an org can't be handed over by a leaked link).
+  it("ORG_ROLE_CHANGE_PICKER is ORG_ROLE_PICKER plus owner", () => {
+    expect(ORG_ROLE_CHANGE_PICKER).toEqual([...ORG_ROLE_PICKER, ROLE.OWNER])
+    expect(ORG_ROLE_CHANGE_PICKER).toContain(ROLE.OWNER)
+  })
 })
 
 describe("ROLE_OPTIONS shapes", () => {
@@ -117,6 +128,10 @@ describe("ROLE_OPTIONS shapes", () => {
   })
   it("org options match the picker order", () => {
     expect(ORG_ROLE_OPTIONS.map((o) => o.level)).toEqual([...ORG_ROLE_PICKER])
+  })
+  it("org change-role options match their picker and end at owner", () => {
+    expect(ORG_ROLE_CHANGE_OPTIONS.map((o) => o.level)).toEqual([...ORG_ROLE_CHANGE_PICKER])
+    expect(ORG_ROLE_CHANGE_OPTIONS.at(-1)?.level).toBe(ROLE.OWNER)
   })
   it("link options match the link-allowed list", () => {
     expect(LINK_ROLE_OPTIONS.map((o) => o.level)).toEqual([...LINK_ROLE_ALLOWED])
@@ -129,6 +144,7 @@ describe("ROLE_OPTIONS shapes", () => {
       ...ALL_ROLE_OPTIONS,
       ...PROJECT_ROLE_OPTIONS,
       ...ORG_ROLE_OPTIONS,
+      ...ORG_ROLE_CHANGE_OPTIONS,
       ...LINK_ROLE_OPTIONS,
     ]) {
       expect(opt.name).not.toBe("")
@@ -140,18 +156,18 @@ describe("ROLE_OPTIONS shapes", () => {
 
 describe("role display helpers (resolveRoleName / resolveRoleDescription)", () => {
   it("resolves singular labels", () => {
-    expect(resolveRoleName(t, ROLE.PROJECT_LEAD)).toBe("Project lead")
+    expect(resolveRoleName(t, ROLE.PROJECT_LEAD)).toBe("Project Lead")
     expect(resolveRoleName(t, ROLE.CONTRIBUTOR)).toBe("Contributor")
     expect(resolveRoleName(t, ROLE.VIEWER)).toBe("Viewer")
   })
 
   it("resolves plural labels via the catalog's plural() form, not string concatenation", () => {
     expect(resolveRoleName(t, ROLE.VIEWER, { plural: true })).toBe("Viewers")
-    expect(resolveRoleName(t, ROLE.PROJECT_LEAD, { plural: true })).toBe("Project leads")
+    expect(resolveRoleName(t, ROLE.PROJECT_LEAD, { plural: true })).toBe("Project Leads")
   })
 
   it("accepts the canonical name string as well as the numeric level", () => {
-    expect(resolveRoleName(t, "project_lead")).toBe("Project lead")
+    expect(resolveRoleName(t, "project_lead")).toBe("Project Lead")
     expect(resolveRoleName(t, "owner", { plural: true })).toBe("Owners")
   })
 
@@ -207,7 +223,7 @@ describe("AQU-832/WS-08: a role used for comparison keeps working when its label
     "common.role.commenter": "Commentateur",
     "common.role.reviewer": "Réviseur",
     "common.role.contributor": "Contributeur",
-    "common.role.projectLead": "Chef de projet",
+    "common.role.projectLead": "Chef de Projet",
     "common.role.maintainer": "Mainteneur",
     "common.role.owner": "Propriétaire",
   }

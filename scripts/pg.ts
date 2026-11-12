@@ -33,6 +33,10 @@ export function neonConfig(pooled = false) {
 }
 
 export function neonClient(pooled = false): Client {
+  // `neon-target.ts local` points every neon:* script at the dev-stack
+  // container: plain TCP, no SSL, no Neon creds.
+  const local = process.env.AQUILLA_LOCAL_PG_URL?.trim()
+  if (local) return new Client({ connectionString: local })
   return new Client(neonConfig(pooled))
 }
 

@@ -1,0 +1,1257 @@
+/**
+ * The per-user edit history — Aquilla's app-wide undo. (AQU-1767; phase 1
+ * built the stack for timeline takes, phase 2 makes it app-wide.)
+ *
+ * WHAT A STEP IS. One thing a person did, with a name they would recognise
+ * ("Cut take in two", "Removed a row", "Validated 12 lines"). A step is plain
+ * DATA — a `kind` and the values it needs — so it survives a reload. What a
+ * kind's undo and redo actually do lives in a HANDLER, registered by whoever
+ * owns those writes (the workspace registers most of them). Undo and redo
+ * write COMPENSATING events — new events that put the old values back — and
+ * never delete or rewrite history, the rule the agent undo follows
+ * (src/lib/agent/undo.ts). That keeps undo working offline and in sync: it is
+ * just more events in the outbox.
+ *
+ * WHEN SOMEONE ELSE GOT THERE FIRST. A step stores the state it left behind
+ * when the user acted, and its handler checks that state is still there before
+ * compensating. If a collaborator (or the user, some other way) changed the
+ * same thing since, the step is SKIPPED, says why, and leaves the stack — it
+ * would only clobber their work. Skips are kept in a short log the History
+ * panel shows.
+ *
+ * WHEN IT CANNOT BE DONE FROM HERE. A step made in another file is BLOCKED
+ * while that file is not open: it stays on the stack and says which file to
+ * open. Nothing is lost by switching files. A step made in another LANGUAGE
+ * opens that language first and then runs (decision 11, gap 24), so the change
+ * happens where the person can see it (`setLaneSwitcher`).
+ *
+ * GROUPS. One action that writes many things (bulk validation, applying a
+ * voice to many lines) is ONE step: `withGroup` collects the steps recorded
+ * inside it. Undoing a group undoes its parts newest first; parts someone
+ * changed since are skipped and the rest still go.
+ *
+ * SCOPE AND PERSISTENCE. One stack per (project, user), whatever language is
+ * open (decision 11; it replaces Sam's Oct 14 one-per-language ruling). Steps
+ * are saved to this browser (IndexedDB, history-store.ts) and to the server
+ * (history-remote.ts), so they come back after a reload and on another
+ * computer. The copies are merged step by step (history-merge.ts). A step
+ * recorded in one project is never undone from another, and one account never
+ * reads another's.
+ */
+import { dropLaneHistories, loadHistory, loadLaneHistories, saveHistory } from "./history-store"
+import { GONE_LIMIT, emptyHistoryDoc, mergeDevices, mergeHistories, sameHistory, type DeviceWrite, type HistoryDoc } from "./history-merge"
+import type { HistoryRemote } from "./history-remote"
+import { stepLane } from "./step-lane"
+import { tabConnId } from "@/lib/sync/ws-reconciler"
+
+/**
+ * Why a step was left alone. `approved`: someone else approved what it made
+ * since (`by` names them, gap 25). `notAllowed`: the person may no longer make
+ * that change (gap 29). `otherDevice`: it changed a setting kept only on the
+ * device it was made on (AQU-2262), which this one does not share.
+ */
+export type SkipReason = "changed" | "gone" | "unavailable" | "approved" | "notAllowed" | "linesChanged" | "otherDevice"
+
+/** What an undo or redo did. `skipped` is not an error: it is the guard working. */
+export type StepOutcome =
+  | { kind: "done"; partial?: { skipped: number } }
+  | { kind: "skipped"; reason: SkipReason; by?: string }
+  // `elsewhere`: its file is not open. `language`: its language could not be opened.
+  | { kind: "blocked"; reason: "elsewhere" | "language" }
+  // Another device of the same person undid or redid it first (decision 11):
+  // nothing was written here, and the history now shows where it stands.
+  | { kind: "moved" }
+  | { kind: "failed"; error: unknown }
+
+/** A step as recorded. Plain data: it is saved and read back. */
+export interface StepRecord<D = unknown> {
+  id: string
+  /** Handler key, e.g. "take.trim", "row.remove". */
+  kind: string
+  data: D
+  /** i18n key naming the step, e.g. "editor.history.stepCut". */
+  labelKey: string
+  /** Values for the label's placeholders. */
+  labelParams?: Record<string, string | number>
+  /** When the user acted (ms). Decides who owns the shortcut — see arbiter.ts. */
+  at: number
+  /** The file the step changed, when it changed one: it can only be undone
+   *  while that file is open (see `setOpenFileProbe`). */
+  fileId?: string | null
+  /** That file's name when the step was made, for "open … to undo this". */
+  fileName?: string | null
+  /** The language (lane tag) the step's change lives in; `''` is a lane like
+   *  any other. Absent: it changes something every language shares. */
+  lane?: string
+  /** When it last moved between Undo and Redo (ms): how two copies of the
+   *  history are merged (history-merge.ts). Absent = never moved. */
+  movedAt?: number
+}
+
+/**
+ * What `recordStep` takes; `id` and `at` are filled in. `lane` is filled in
+ * too, from the open language and the step's kind (step-lane.ts); pass `null`
+ * for a step that belongs to no language.
+ */
+export type StepInput<D = unknown> = Omit<StepRecord<D>, "id" | "at" | "lane" | "movedAt"> & {
+  at?: number
+  lane?: string | null
+}
+
+export interface StepHandler<D = unknown> {
+  undo(data: D): Promise<StepOutcome>
+  redo(data: D): Promise<StepOutcome>
+}
+
+/** One undo or redo that did not happen, for the History panel. */
+export interface SkipLogEntry {
+  id: string
+  labelKey: string
+  labelParams?: Record<string, string | number>
+  which: "undo" | "redo"
+  reason: SkipReason | "failed"
+  /** Who changed it, when the reason names someone. */
+  by?: string
+  /** When it was attempted. */
+  at: number
+  /** The step's kind, so a History panel that shows one part of the app's
+   *  steps (Project settings, AQU-2262) shows only its skips. Absent on
+   *  entries logged before it was kept. */
+  kind?: string
+}
+
+interface Stacks extends HistoryDoc {
+  devices: DeviceWrite[]
+  /** The server revision this copy is known to include; null = never synced. */
+  revision: number | null
+  /** Changed here since the server last took a copy. */
+  unpushed: boolean
+}
+
+/** Enough to back out of an afternoon's editing without holding it forever. */
+export const HISTORY_LIMIT = 100
+const LOG_LIMIT = 30
+const GROUP_KIND = "group"
+
+const LIMITS = { steps: HISTORY_LIMIT, log: LOG_LIMIT }
+
+const stacks = new Map<string, Stacks>()
+/** Each kind's registrations, newest last: the newest one runs. */
+const handlers = new Map<string, StepHandler<never>[]>()
+const listeners = new Set<() => void>()
+let activeScope: string | null = null
+let activeUser: string | null = null
+/** The language open in the workspace right now. */
+let activeLane = ""
+let busy = false
+let openFileProbe: ((fileId: string) => boolean) | null = null
+let laneSwitcher: ((lane: string) => Promise<LaneSwitch>) | null = null
+let remote: HistoryRemote | null = null
+let idCounter = 0
+
+/**
+ * The groups running now, newest last. A group that does network work
+ * (generating a voice, validating a chapter) runs for seconds, so two can be
+ * open at once without one being inside the other: each takes in only the
+ * steps it owns (`GroupOwns`), and closes in whatever order its work ends.
+ */
+interface OpenGroup {
+  buffer: StepRecord[]
+  /** Null: it takes in every step recorded while it runs. */
+  owns: ((r: StepRecord) => boolean) | null
+}
+const openGroups: OpenGroup[] = []
+
+/**
+ * One history per project and person, whatever language is open (decision 11,
+ * 2026-10-20, replacing Sam's Oct 14 one-per-language ruling). A step still
+ * knows its language (`StepRecord.lane`): the History panel names it, and
+ * undoing it opens that language first.
+ */
+function scopeKey(projectId: string, username: string): string {
+  return `${projectId}\u0000${username}`
+}
+
+function splitKey(key: string): [projectId: string, username: string] {
+  const [projectId, username = ""] = key.split("\u0000")
+  return [projectId, username]
+}
+
+/** The language each project was last open in, for a step recorded from outside it. */
+const laneByProject = new Map<string, string>()
+
+function stacksFor(key: string): Stacks {
+  let s = stacks.get(key)
+  if (!s) {
+    s = { ...emptyHistoryDoc(), devices: [], revision: null, unpushed: false }
+    stacks.set(key, s)
+  }
+  return s
+}
+
+const docOf = (s: Stacks): HistoryDoc => ({ undo: s.undo, redo: s.redo, log: s.log, gone: s.gone, devices: s.devices })
+
+/** A step leaves both stacks for good: remember it, so no other copy brings it back. */
+function bury(s: Stacks, id: string): void {
+  s.gone.push({ id, at: Date.now() })
+  if (s.gone.length > GONE_LIMIT) s.gone.splice(0, s.gone.length - GONE_LIMIT)
+}
+
+/**
+ * The time to stamp on what this copy does now: this device's clock, but never
+ * earlier than any step it already holds. Each device stamps with its own
+ * clock, and clocks disagree (review, Oct 29): an undo made here after seeing
+ * a step from a device whose clock runs ahead must still count as later than
+ * that step, or merging the copies puts it back on Undo; a new step made here
+ * must still sit above it.
+ */
+function stampFor(s: Stacks): number {
+  let seen = 0
+  for (const list of [s.undo, s.redo]) for (const r of list) seen = Math.max(seen, r.at, r.movedAt ?? 0)
+  return Math.max(Date.now(), seen + 1)
+}
+
+/** When each step recorded in this session was recorded, by this device's
+ *  clock: what the shortcut arbiter compares with a toast's time. */
+const recordedHere = new Map<string, number>()
+
+function newId(): string {
+  idCounter += 1
+  return `${Date.now().toString(36)}-${idCounter.toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+}
+
+function emit(): void {
+  snapshotCache = null
+  for (const fn of listeners) fn()
+}
+
+
+// ── Persistence: this browser ───────────────────────────────────────────────
+
+/** Each scope's saved history is read once; this is that read, in flight or done. */
+const loaded = new Map<string, Promise<void>>()
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+const dirtyScopes = new Set<string>()
+
+function writeLocal(key: string): Promise<void> {
+  const s = stacks.get(key)
+  if (!s) return Promise.resolve()
+  const [projectId, username] = splitKey(key)
+  return saveHistory(projectId, username, { ...docOf(s), revision: s.revision, unpushed: s.unpushed })
+}
+
+// Saved at the end of the current task, not after a delay: a reload a moment
+// after an action (or an undo) must find the history as it was left, or the
+// step is missing, or an undone step is offered again (slow-network pass,
+// 2026-10-13). Changes made in the same task still share one write. The
+// server copy follows right after (see `schedulePush`).
+function scheduleSave(scope: string): void {
+  const s = stacks.get(scope)
+  if (s) s.unpushed = true
+  dirtyScopes.add(scope)
+  if (saveTimer) return
+  saveTimer = setTimeout(() => {
+    saveTimer = null
+    for (const key of dirtyScopes) {
+      void writeLocal(key)
+      schedulePush(key)
+    }
+    dirtyScopes.clear()
+  }, 0)
+}
+
+/** Read the saved history for a scope once, merge it with anything recorded
+ *  this session, then catch up with the server's copy. */
+function loadScope(key: string): Promise<void> {
+  let pending = loaded.get(key)
+  if (!pending) {
+    pending = readScope(key)
+    loaded.set(key, pending)
+  }
+  return pending
+}
+
+async function readScope(key: string): Promise<void> {
+  const [projectId, username] = splitKey(key)
+  const saved = await loadHistory(projectId, username)
+  // Gap 27: the per-language histories of before decision 11 join this one
+  // the first time the project opens on this device. Their steps are stamped
+  // with the language they were saved under, where their kind belongs to one.
+  const lanes = await loadLaneHistories(projectId, username)
+  let incoming: HistoryDoc = saved ?? emptyHistoryDoc()
+  for (const { lane, history } of lanes) {
+    const stamp = (r: StepRecord): StepRecord => {
+      const l = r.lane ?? stepLane(r.kind, r.kind === GROUP_KIND ? stampGroup(r.data, lane) : r.data, lane)
+      return r.kind === GROUP_KIND
+        ? { ...r, data: stampGroup(r.data, lane), ...(l !== undefined ? { lane: l } : {}) }
+        : l !== undefined ? { ...r, lane: l } : r
+    }
+    incoming = mergeHistories(incoming, { ...history, undo: history.undo.map(stamp), redo: history.redo.map(stamp) }, LIMITS)
+  }
+  const s = stacksFor(key)
+  if (saved && s.revision == null) s.revision = saved.revision
+  // Changes the server never took before the tab closed still go (review, Oct 29).
+  if (saved?.unpushed) s.unpushed = true
+  const recordedMeanwhile = s.undo.length + s.redo.length > 0
+  mergeIn(key, incoming)
+  if (lanes.length > 0) {
+    s.unpushed = true
+    await writeLocal(key)
+    await dropLaneHistories(projectId, username, lanes.map((l) => l.lane))
+  } else if (recordedMeanwhile && saved) {
+    // Steps recorded before the read finished sit on top of the saved ones.
+    scheduleSave(key)
+  }
+  // Gap 28: another device's steps arrive when the project opens (and when
+  // the History panel opens), not live.
+  void pullRemote(key)
+}
+
+/** A pre-decision-11 group's parts, stamped with the language they were saved under. */
+function stampGroup(data: unknown, lane: string): unknown {
+  const steps = (data as { steps?: StepRecord[] } | null)?.steps
+  if (!Array.isArray(steps)) return data
+  return {
+    ...(data as object),
+    steps: steps.map((p) => {
+      const l = p.lane ?? stepLane(p.kind, p.data, lane)
+      return l !== undefined ? { ...p, lane: l } : p
+    }),
+  }
+}
+
+/**
+ * Merge another copy into the live stacks, IN PLACE: a running undo holds the
+ * arrays. Returns whether anything moved. Ties keep the local copy's record
+ * objects, so a merge that changes nothing replaces nothing.
+ */
+function mergeIn(key: string, other: HistoryDoc): boolean {
+  const s = stacksFor(key)
+  const merged = mergeHistories(docOf(s), other, LIMITS)
+  // When the other devices last wrote is not shown anywhere: kept whether or
+  // not a step moved.
+  s.devices = merged.devices ?? []
+  if (sameHistory(merged, docOf(s)) && merged.gone.length === s.gone.length) return false
+  s.undo.splice(0, s.undo.length, ...merged.undo)
+  s.redo.splice(0, s.redo.length, ...merged.redo)
+  s.log.splice(0, s.log.length, ...merged.log)
+  s.gone.splice(0, s.gone.length, ...merged.gone)
+  emit()
+  return true
+}
+
+/** Resolves once the active scope's saved history has been read (tests, and
+ *  anything that must not race the load). */
+export function historyReady(): Promise<void> {
+  return activeScope ? loadScope(activeScope) : Promise.resolve()
+}
+
+// ── Persistence: the server, so the history follows the person ─────────────
+
+/** How long an Undo waits to hear whether another device got there first. */
+const CLAIM_WAIT_MS = 1500
+
+/**
+ * An Undo waits for that answer only when another of the person's devices
+ * wrote this project's history this recently (Sam, Oct 22). Otherwise it goes
+ * at once: one person on one device never waits.
+ */
+export const OTHER_DEVICE_WINDOW_MS = 5 * 60_000
+
+const DEVICE_KEY = "aquilla.history.device"
+let device: string | null = null
+
+/**
+ * This browser tab's name in the history's list of writers. A tab, not a
+ * computer: two tabs hold two copies of the history, just as two computers
+ * do. Kept across a reload (sessionStorage), so a reload does not make the tab
+ * look like another device. A duplicated tab starts with the original's name;
+ * the two then undo without waiting for each other, and each step's own
+ * "changed since?" guard still stands.
+ */
+function thisDevice(): string {
+  device ??= tabConnId(DEVICE_KEY)
+  return device
+}
+
+/** When another device last wrote this copy's history, as far as this copy
+ *  knows (ms; 0 = never). Learned from the copies it receives, never asked for. */
+function otherDeviceWroteAt(s: Stacks): number {
+  const me = thisDevice()
+  return s.devices.reduce((newest, d) => (d.id !== me && d.at > newest ? d.at : newest), 0)
+}
+
+/** Where the server copy lives. The workspace sets it once a session exists;
+ *  null keeps the history on this device only (signed out, tests). */
+export function setHistoryRemote(next: HistoryRemote | null): void {
+  remote = next
+  if (next && activeScope) {
+    void loadScope(activeScope).then(() => {
+      if (activeScope) void pullRemote(activeScope)
+    })
+  }
+}
+
+/**
+ * Catch up with the server's copy now (the History panel calls this as it
+ * opens, gap 28). Resolves once it has been merged, or straight away when the
+ * server cannot be reached.
+ */
+export async function refreshHistory(): Promise<void> {
+  if (!activeScope) return
+  const scope = activeScope
+  await loadScope(scope)
+  await pullRemote(scope)
+}
+
+const pushes = new Map<string, { running: boolean; again: boolean }>()
+
+/** Send this copy to the server; one write at a time per scope, the newest last. */
+function schedulePush(key: string): void {
+  if (!remote) return
+  let p = pushes.get(key)
+  if (!p) {
+    p = { running: false, again: false }
+    pushes.set(key, p)
+  }
+  if (p.running) {
+    p.again = true
+    return
+  }
+  p.running = true
+  const state = p
+  void (async () => {
+    try {
+      do {
+        state.again = false
+        await pushOnce(key)
+      } while (state.again)
+    } finally {
+      state.running = false
+    }
+  })()
+}
+
+/**
+ * The most history sent to the server, in characters of the request body. The
+ * server refuses more than 2 MiB (EDIT_HISTORY_MAX_BYTES,
+ * db/shared/edit-history.ts); this keeps clear of that, and of sending
+ * megabytes with every step.
+ */
+const SEND_LIMIT_CHARS = 1_500_000
+
+/**
+ * Make the history fit what the server keeps (review, Oct 29). Its OLDEST
+ * steps give way first, Undo's before Redo's, and on every device: they are
+ * buried, so no copy brings them back. The newest step always stays. False
+ * when the history still does not fit; it then stays on this device.
+ */
+function fitForServer(key: string, s: Stacks, body: string): boolean {
+  let over = body.length - SEND_LIMIT_CHARS
+  if (over <= 0) return true
+  const dropped: string[] = []
+  const giveWay = (list: StepRecord[], keep: number) => {
+    while (over > 0 && list.length > keep) {
+      const [oldest] = list.splice(0, 1)
+      over -= JSON.stringify(oldest).length + 1
+      dropped.push(oldest.id)
+    }
+  }
+  giveWay(s.undo, 1)
+  giveWay(s.redo, s.undo.length > 0 ? 0 : 1)
+  for (const id of dropped) bury(s, id)
+  if (dropped.length > 0) {
+    void writeLocal(key)
+    emit()
+  }
+  return over <= 0
+}
+
+async function pushOnce(key: string): Promise<void> {
+  const [projectId] = splitKey(key)
+  // A conflict means another device wrote first: merge its copy and try again
+  // on top of it. Three tries cover a burst of writes from two devices.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const r = remote
+    const s = stacks.get(key)
+    if (!r || !s) return
+    // Signed with this device and the time, so the person's other devices know
+    // it is in use (see `claim`).
+    const wrote = { id: thisDevice(), at: Date.now() }
+    const sign = () => JSON.stringify({ baseRevision: s.revision ?? 0, history: { ...docOf(s), devices: mergeDevices(s.devices, [wrote]) } })
+    let body = sign()
+    if (body.length > SEND_LIMIT_CHARS) {
+      if (!fitForServer(key, s, body)) return
+      body = sign()
+    }
+    const snapshot = (JSON.parse(body) as { history: HistoryDoc }).history
+    const res = await r.write(projectId, s.revision ?? 0, snapshot)
+    // Offline, refused, or too large after all: it stays unpushed, and goes
+    // with the next write.
+    if (!res || res.kind === "tooLarge") return
+    if (res.kind === "saved") {
+      s.devices = mergeDevices(s.devices, [wrote])
+      s.revision = res.revision
+      if (sameHistory(docOf(s), snapshot)) s.unpushed = false
+      void writeLocal(key)
+      return
+    }
+    if (res.history) mergeIn(key, res.history)
+    // The refusal names the revision the server holds NOW, after every write
+    // of ours (they go one at a time): the next try is built on it, even when
+    // it is older than the one this copy knew. A row that went missing answers
+    // 0, and insisting on the old number was refused forever (review, Oct 29).
+    s.revision = res.revision
+  }
+}
+
+/** Revisions only grow on a READ: one that left before a write of ours landed
+ *  must not take this copy back to an older one. */
+const newer = (a: number | null, b: number) => (a != null && a > b ? a : b)
+
+const pulls = new Map<string, Promise<"unchanged" | "merged" | null>>()
+
+/** Read the server's copy (if it changed since this one last agreed with it)
+ *  and merge it in. Null when the server could not be reached. */
+function pullRemote(key: string): Promise<"unchanged" | "merged" | null> {
+  const inFlight = pulls.get(key)
+  if (inFlight) return inFlight
+  const p = pullOnce(key).finally(() => pulls.delete(key))
+  pulls.set(key, p)
+  return p
+}
+
+async function pullOnce(key: string): Promise<"unchanged" | "merged" | null> {
+  const r = remote
+  if (!r) return null
+  const [projectId] = splitKey(key)
+  const s = stacksFor(key)
+  const res = await r.read(projectId, s.revision)
+  if (!res) return null
+  if (res.kind === "unchanged") {
+    // Steps made here while the server could not be reached go now.
+    if (s.unpushed) schedulePush(key)
+    return "unchanged"
+  }
+  const knewOf = otherDeviceWroteAt(s)
+  const changed = res.history ? mergeIn(key, res.history) : false
+  s.revision = newer(s.revision, res.revision)
+  // This copy holds something the server's lacks: send the merged one back.
+  // (Nothing at all is not worth a row: opening a project writes nothing.)
+  const hasSteps = s.undo.length + s.redo.length + s.gone.length > 0
+  if (res.history ? !sameHistory(docOf(s), res.history) : hasSteps) {
+    s.unpushed = true
+    schedulePush(key)
+  }
+  // Kept here too when only the writers' times moved: after a reload, an Undo
+  // still knows another device is in use.
+  if (changed || otherDeviceWroteAt(s) !== knewOf) void writeLocal(key)
+  return "merged"
+}
+
+/**
+ * Before an undo or redo writes anything, ask the server whether another
+ * device of the same person already took the step (P13.7: two devices cannot
+ * undo the same step twice). Only when another device wrote this history in
+ * the last few minutes, as this copy knows from the copies it has received;
+ * otherwise nothing is asked and the step runs at once. Offline, or with no
+ * answer in time, the step runs too: its own "changed since?" guard still
+ * stands between it and a second write.
+ */
+async function claim(key: string, id: string, which: "undo" | "redo"): Promise<"ok" | "moved"> {
+  if (!remote) return "ok"
+  // A time far ahead of this clock is not taken to mean "just now" either.
+  const since = Date.now() - otherDeviceWroteAt(stacksFor(key))
+  if (since >= OTHER_DEVICE_WINDOW_MS || since <= -OTHER_DEVICE_WINDOW_MS) return "ok"
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), CLAIM_WAIT_MS)
+  })
+  const result = await Promise.race([pullRemote(key), timeout])
+  if (timer) clearTimeout(timer)
+  if (result !== "merged") return "ok"
+  const s = stacksFor(key)
+  return stillOn(which === "undo" ? s.undo : s.redo, id) ? "ok" : "moved"
+}
+
+/**
+ * Whether a step is still where the press found it. Not "still on top": a
+ * step another device made meanwhile may now sit above it, and that device
+ * took nothing (review, Oct 29). The press undoes the step its button named.
+ */
+const stillOn = (list: readonly StepRecord[], id: string) => list.some((r) => r.id === id)
+
+if (typeof window !== "undefined") {
+  // Steps made offline reach the server as soon as the connection is back.
+  window.addEventListener("online", () => {
+    for (const [key, s] of stacks) if (s.unpushed) schedulePush(key)
+  })
+}
+
+// ── Scope, handlers, open-file probe, language switch ────────────────────────
+
+/**
+ * Which project and person the shortcut and the buttons act for, and which
+ * language is open. The workspace sets it when a project opens and whenever
+ * the open language changes; `null` when none is open. Switching language no
+ * longer switches history (decision 11).
+ */
+export function setHistoryScope(projectId: string | null, username: string | null, lane = ""): void {
+  if (projectId) laneByProject.set(projectId, lane)
+  const laneChanged = lane !== activeLane
+  activeLane = lane
+  const next = projectId && username ? scopeKey(projectId, username) : null
+  if (next === activeScope) {
+    if (laneChanged) emit()
+    return
+  }
+  activeScope = next
+  activeUser = username
+  emit()
+  if (next) void loadScope(next)
+}
+
+/**
+ * Host a project's history while nothing else does, and give it back after.
+ * (AQU-2262)
+ *
+ * The workspace hosts the history (`setHistoryScope`, `setHistoryRemote`)
+ * while a project is open. Project settings record steps too, and they can be
+ * open on their own page with no workspace behind them; then they host it, so
+ * Undo, the History panel and the copy on the server work there as well. Over
+ * the workspace (the settings dialog) the history is already hosted for the
+ * same project and person, and this changes nothing.
+ *
+ * Returns the release. It ends only what it started: the scope if it is still
+ * the active one, and the server copy if it set it.
+ */
+export function holdHistoryScope(projectId: string, username: string, makeRemote?: () => HistoryRemote): () => void {
+  const key = scopeKey(projectId, username)
+  if (activeScope === key) return () => {}
+  setHistoryScope(projectId, username, laneByProject.get(projectId) ?? "")
+  const ownRemote = !remote && makeRemote ? makeRemote() : null
+  if (ownRemote) setHistoryRemote(ownRemote)
+  return () => {
+    if (ownRemote && remote === ownRemote) setHistoryRemote(null)
+    if (activeScope === key) setHistoryScope(null, null)
+  }
+}
+
+/**
+ * How opening a step's language went: open and loaded; `denied`, the person
+ * may no longer work in it (the step is dropped, gap 29); `blocked`, it could
+ * not be opened from here or not in time (the step waits, like one made in
+ * another file).
+ */
+export type LaneSwitch = "ready" | "denied" | "blocked"
+
+/**
+ * How to open another language before undoing a step made in it (gap 24). The
+ * workspace registers it; it resolves once that language is on screen and its
+ * lines and takes have loaded.
+ */
+export function setLaneSwitcher(fn: ((lane: string) => Promise<LaneSwitch>) | null): void {
+  laneSwitcher = fn
+}
+
+/**
+ * Register what undo and redo mean for some step kinds. Returns the
+ * unregister function; the newest registration of a kind wins, so a component
+ * that re-registers with fresh closures replaces its earlier one.
+ *
+ * AQU-2262: registrations stack. Project settings open as a dialog over the
+ * workspace register the settings kinds the workspace registers too; when the
+ * dialog closes, the workspace's registration runs again rather than the kind
+ * being left with none (an undo would then drop the step as unavailable).
+ */
+export function registerStepKinds(map: Record<string, StepHandler<never>>): () => void {
+  const mine = Object.entries(map)
+  for (const [kind, handler] of mine) {
+    const list = handlers.get(kind) ?? []
+    list.push(handler)
+    handlers.set(kind, list)
+  }
+  return () => {
+    for (const [kind, handler] of mine) {
+      const list = handlers.get(kind)
+      if (!list) continue
+      const at = list.lastIndexOf(handler)
+      if (at >= 0) list.splice(at, 1)
+      if (list.length === 0) handlers.delete(kind)
+    }
+  }
+}
+
+/** Whether a file is open (so a step that changed it can be undone now). */
+export function setOpenFileProbe(probe: ((fileId: string) => boolean) | null): void {
+  openFileProbe = probe
+}
+
+/**
+ * Names a step's file from its id, for the many steps recorded without one
+ * (a take renamed or deleted from its Recording tab, a translation, a
+ * validation): without it a step held for another file could only say "Open
+ * the file it was made in", and the History panel showed no file under it
+ * (slice 13 evidence, Oct 27). The workspace registers it.
+ */
+let fileNamer: ((fileId: string) => string | null | undefined) | null = null
+export function setFileNamer(namer: ((fileId: string) => string | null | undefined) | null): void {
+  fileNamer = namer
+}
+
+// ── Recording ───────────────────────────────────────────────────────────────
+
+// Steps recorded when their action STARTED, with the action's own write still
+// out: an undo waits for it before running, and a step whose write was refused
+// is dropped. Never saved (a promise can't be); after a reload the write has
+// long settled.
+const pendingWrites = new Map<string, Promise<boolean>>()
+
+/** The language a step recorded into `key` now belongs to. */
+function laneFor(key: string, input: Pick<StepInput, "kind" | "data" | "lane">): string | undefined {
+  if (input.lane === null) return undefined
+  if (input.lane !== undefined) return input.lane
+  const open = key === activeScope ? activeLane : (laneByProject.get(splitKey(key)[0]) ?? "")
+  return stepLane(input.kind, input.data, open)
+}
+
+function toRecord<D>(input: StepInput<D>, key: string, now = stampFor(stacksFor(key))): StepRecord<D> {
+  const { lane: _lane, ...rest } = input
+  const lane = laneFor(key, input)
+  const named = rest.fileName == null && rest.fileId && fileNamer ? fileNamer(rest.fileId) : null
+  return { ...rest, ...(named ? { fileName: named } : {}), id: newId(), at: input.at ?? now, ...(lane !== undefined ? { lane } : {}) }
+}
+
+/**
+ * Record a step the user just took, in the ACTIVE scope. A new step clears the
+ * redo stack, as everywhere: redoing past a fresh edit would replay a branch
+ * that no longer exists. Inside `withGroup`, the step joins the group instead.
+ *
+ * Pass `opts.pending` (resolving true when the action took effect, false when
+ * it was refused) to record it the moment the action starts: an Undo pressed
+ * while the action is still saving must undo THAT action, not the step before
+ * it (slow-network pass, 2026-10-13).
+ */
+export function recordStep<D>(
+  input: StepInput<D>,
+  scope?: { projectId: string; username: string },
+  opts?: { pending?: Promise<boolean> },
+): void {
+  const key = scope ? scopeKey(scope.projectId, scope.username) : activeScope
+  if (!key) return
+  const record = toRecord(input, key)
+  recordedHere.set(record.id, input.at ?? Date.now())
+  if (opts?.pending) {
+    const pending = opts.pending.catch(() => false)
+    pendingWrites.set(record.id, pending)
+    void pending.then((ok) => {
+      pendingWrites.delete(record.id)
+      if (!ok) dropRecord(key, record.id)
+    })
+  }
+  const group = key === activeScope ? groupFor(record as StepRecord) : undefined
+  if (group) {
+    group.buffer.push(record as StepRecord)
+    return
+  }
+  pushRecord(record as StepRecord, key)
+}
+
+/** A recorded step whose action was refused: take it off whichever stack holds it. */
+function dropRecord(key: string, id: string): void {
+  const s = stacks.get(key)
+  if (!s) return
+  for (const list of [s.undo, s.redo]) {
+    const at = list.findIndex((r) => r.id === id)
+    if (at >= 0) {
+      list.splice(at, 1)
+      bury(s, id)
+      scheduleSave(key)
+      emit()
+      return
+    }
+  }
+}
+
+function pushRecord(record: StepRecord, key: string): void {
+  const s = stacksFor(key)
+  s.undo.push(record)
+  if (s.undo.length > HISTORY_LIMIT) s.undo.splice(0, s.undo.length - HISTORY_LIMIT)
+  for (const r of s.redo) bury(s, r.id)
+  s.redo.splice(0, s.redo.length)
+  scheduleSave(key)
+  if (key !== activeScope) void loadScope(key)
+  emit()
+}
+
+/**
+ * Which steps a group takes in: those on its lines, of its kinds. Anything
+ * else recorded while it runs (a translation typed during a generation,
+ * another line's voice generating at the same time) stays a step of its own
+ * (review, Oct 29).
+ */
+export interface GroupOwns {
+  /** The lines (cell ids) its steps are on. */
+  cells: Iterable<string>
+  /** Step kinds: exact ("vote.text"), or a prefix ending in "." ("take."). */
+  kinds: readonly string[]
+}
+
+function ownsFilter(o: GroupOwns): (r: StepRecord) => boolean {
+  const cells = new Set(o.cells)
+  const kindOk = (kind: string) => o.kinds.some((k) => (k.endsWith(".") ? kind.startsWith(k) : kind === k))
+  const owns = (r: StepRecord): boolean => {
+    if (r.kind === GROUP_KIND) {
+      // An inner group joins this one when all of it is this one's.
+      const parts = (r.data as { steps?: StepRecord[] } | null)?.steps ?? []
+      return parts.length > 0 && parts.every(owns)
+    }
+    const cellId = (r.data as { cellId?: unknown } | null)?.cellId
+    return typeof cellId === "string" && cells.has(cellId) && kindOk(r.kind)
+  }
+  return owns
+}
+
+/** The newest open group that takes this step in, if any. */
+function groupFor(record: StepRecord): OpenGroup | undefined {
+  for (let i = openGroups.length - 1; i >= 0; i -= 1) {
+    const g = openGroups[i]
+    if (!g.owns || g.owns(record)) return g
+  }
+  return undefined
+}
+
+/**
+ * Run `fn` and record every step it records as ONE step named `labelKey`. A
+ * group of one keeps its own name unless `alwaysGroup` is set (so "Validated
+ * 1 line" never replaces the plainer "Validated a line"). Groups nest: an
+ * inner group joins the outer one.
+ *
+ * Pass `owns` whenever `fn` waits on the network: without it the group takes
+ * in EVERY step recorded until it ends, whatever line or action it is.
+ */
+export async function withGroup<T>(
+  label: { labelKey: string; labelParams?: Record<string, string | number>; fileId?: string | null; fileName?: string | null },
+  fn: () => Promise<T>,
+  opts?: { alwaysGroup?: boolean; owns?: GroupOwns },
+): Promise<T> {
+  const group: OpenGroup = { buffer: [], owns: opts?.owns ? ownsFilter(opts.owns) : null }
+  const buffer = group.buffer
+  openGroups.push(group)
+  let result: T
+  try {
+    result = await fn()
+  } finally {
+    // Its own entry, wherever it now sits: groups open together end in any order.
+    openGroups.splice(openGroups.indexOf(group), 1)
+  }
+  if (buffer.length === 1 && !opts?.alwaysGroup) {
+    const { id: _id, lane, ...only } = buffer[0]
+    recordStep({ ...only, at: buffer[0].at, lane: lane ?? null })
+  } else if (buffer.length > 0) {
+    recordStep({
+      kind: GROUP_KIND,
+      data: { steps: buffer },
+      labelKey: label.labelKey,
+      labelParams: label.labelParams,
+      fileId: label.fileId ?? buffer[0].fileId ?? null,
+      fileName: label.fileName ?? buffer[0].fileName ?? null,
+      at: buffer[buffer.length - 1].at,
+    })
+  }
+  return result
+}
+
+/**
+ * Record several steps made by one action as ONE step, when the caller already
+ * has them all (a synchronous loop). Async work uses {@link withGroup}.
+ */
+export function recordGroup(
+  label: { labelKey: string; labelParams?: Record<string, string | number>; fileId?: string | null; fileName?: string | null },
+  parts: ReadonlyArray<StepInput>,
+): void {
+  if (parts.length === 0 || !activeScope) return
+  const key = activeScope
+  const now = stampFor(stacksFor(key))
+  const steps: StepRecord[] = parts.map((p) => toRecord(p, key, now))
+  recordStep({
+    kind: GROUP_KIND,
+    data: { steps },
+    labelKey: label.labelKey,
+    labelParams: label.labelParams,
+    fileId: label.fileId ?? steps[0].fileId ?? null,
+    fileName: label.fileName ?? steps[0].fileName ?? null,
+  })
+}
+
+// ── Running ─────────────────────────────────────────────────────────────────
+
+async function runRecord(record: StepRecord, which: "undo" | "redo"): Promise<StepOutcome> {
+  // The action is still saving: let it land first, so the undo compensates
+  // what really happened (and nothing, if it was refused).
+  const pending = pendingWrites.get(record.id)
+  if (pending && !(await pending)) return { kind: "skipped", reason: "gone" }
+  if (record.kind === GROUP_KIND) return runGroup(record as StepRecord<{ steps: StepRecord[] }>, which)
+  const registered = handlers.get(record.kind)
+  const handler = registered?.[registered.length - 1] as StepHandler<unknown> | undefined
+  if (!handler) return { kind: "skipped", reason: "unavailable" }
+  try {
+    return await (which === "undo" ? handler.undo(record.data) : handler.redo(record.data))
+  } catch (error) {
+    return { kind: "failed", error }
+  }
+}
+
+/** A group's parts run newest first on undo, oldest first on redo. Parts that
+ *  were changed since are skipped; the group is done if any part was. */
+async function runGroup(record: StepRecord<{ steps: StepRecord[] }>, which: "undo" | "redo"): Promise<StepOutcome> {
+  const parts = which === "undo" ? [...record.data.steps].reverse() : record.data.steps
+  let done = 0
+  let skipped = 0
+  let firstSkip: StepOutcome | null = null
+  for (const part of parts) {
+    const outcome = await runRecord(part, which)
+    if (outcome.kind === "done") done += 1
+    else {
+      skipped += 1
+      firstSkip ??= outcome
+    }
+  }
+  if (done === 0) return firstSkip ?? { kind: "skipped", reason: "gone" }
+  return skipped > 0 ? { kind: "done", partial: { skipped } } : { kind: "done" }
+}
+
+export interface HistoryResult {
+  step: Pick<StepRecord, "labelKey" | "labelParams" | "fileName" | "lane">
+  outcome: StepOutcome
+}
+
+/**
+ * Undo the newest step. Resolves null when there is nothing to undo. A press
+ * made while another undo/redo is still writing waits for it, then runs.
+ *
+ * Done → the step moves to the redo stack. Blocked → it stays where it was.
+ * Skipped or failed → it is DROPPED: its guard says the world moved on, so
+ * redoing it later would be redoing something that no longer matches either.
+ */
+export async function undoLast(): Promise<HistoryResult | null> {
+  return run("undo")
+}
+
+/** Redo the newest undone step. Same rules as {@link undoLast}, mirrored. */
+export async function redoLast(): Promise<HistoryResult | null> {
+  return run("redo")
+}
+
+// Presses made while a step is still running wait their turn instead of being
+// dropped: five quick Cmd+Z presses undo five steps (slow-network pass,
+// 2026-10-13, where one undo could take seconds and most presses vanished).
+let queue: Promise<unknown> = Promise.resolve()
+
+function run(which: "undo" | "redo", pickId?: string): Promise<HistoryResult | null> {
+  if (!activeScope) return Promise.resolve(null)
+  // A press belongs to the project it was made in; if the user has moved on
+  // by the time its turn comes, it does nothing.
+  const scope = activeScope
+  const turn = queue.then(() => runNow(which, scope, pickId))
+  queue = turn.catch(() => {})
+  return turn
+}
+
+function takeOut(list: StepRecord[], id: string): StepRecord | null {
+  const at = list.findIndex((r) => r.id === id)
+  return at >= 0 ? (list.splice(at, 1)[0] ?? null) : null
+}
+
+async function runNow(which: "undo" | "redo", scope: string, pickId?: string): Promise<HistoryResult | null> {
+  if (activeScope !== scope) return null
+  const s = stacksFor(scope)
+  // Looked up afresh after every wait: a merge may have replaced the arrays' contents.
+  const fromList = () => (which === "undo" ? s.undo : s.redo)
+  const toList = () => (which === "undo" ? s.redo : s.undo)
+  // The newest step — or, for the Station's own Undo (AQU-2327, Q4), one
+  // older step by id: a newer step elsewhere doesn't block it, and each
+  // step's own "changed since?" guard still holds.
+  const top = pickId ? fromList().find((r) => r.id === pickId) : fromList()[fromList().length - 1]
+  if (!top) return null
+  const startedAt = fromList().findIndex((r) => r.id === top.id)
+  const label = { labelKey: top.labelKey, labelParams: top.labelParams, fileName: top.fileName ?? null, lane: top.lane }
+  if (top.fileId && openFileProbe && !openFileProbe(top.fileId)) {
+    return { step: label, outcome: { kind: "blocked", reason: "elsewhere" } }
+  }
+  busy = true
+  emit()
+  let record: StepRecord | null
+  let outcome: StepOutcome
+  try {
+    // Another device of the same person may have taken this step already.
+    if ((await claim(scope, top.id, which)) === "moved") return { step: label, outcome: { kind: "moved" } }
+    if (activeScope !== scope) return null
+    // A step lives in its language: open it there first, so the change happens
+    // where the person can see it (gap 24).
+    if (top.lane !== undefined && top.lane !== activeLane) {
+      const opened = laneSwitcher ? await laneSwitcher(top.lane) : "blocked"
+      if (activeScope !== scope) return null
+      if (!stillOn(fromList(), top.id)) return { step: label, outcome: { kind: "moved" } }
+      if (opened === "denied") {
+        // The person may no longer work in that language (gap 29).
+        takeOut(fromList(), top.id)
+        bury(s, top.id)
+        outcome = { kind: "skipped", reason: "notAllowed" }
+        logSkip(s, top, which, outcome)
+        scheduleSave(scope)
+        return { step: label, outcome }
+      }
+      if (opened !== "ready") return { step: label, outcome: { kind: "blocked", reason: "language" } }
+    }
+    // Saved as already moved before it runs: if the tab closes while its writes
+    // are out, a reload offers it on the other side rather than offering to do
+    // again what has (most likely) landed. Moved back if it doesn't go through.
+    const movedAt = stampFor(s)
+    record = takeOut(fromList(), top.id)
+    if (!record) return null
+    record.movedAt = movedAt
+    toList().push(record)
+    scheduleSave(scope)
+    emit()
+    outcome = await runRecord(record, which)
+  } finally {
+    busy = false
+    emit()
+  }
+  if (outcome.kind !== "done") takeOut(toList(), record.id)
+  if (outcome.kind === "done") {
+    // Already where it belongs.
+  } else if (outcome.kind === "blocked") {
+    // Moving back is a move too, and the newest one: a copy that took the
+    // in-flight one (on the other stack) must not win a later merge.
+    record.movedAt = Math.max(stampFor(s), (record.movedAt ?? record.at) + 1)
+    // An older step picked out of order goes back where it was.
+    if (pickId && startedAt >= 0) fromList().splice(Math.min(startedAt, fromList().length), 0, record)
+    else fromList().push(record)
+  } else {
+    bury(s, record.id)
+    logSkip(s, record, which, outcome)
+  }
+  scheduleSave(scope)
+  emit()
+  return { step: label, outcome }
+}
+
+function logSkip(s: Stacks, record: StepRecord, which: "undo" | "redo", outcome: StepOutcome): void {
+  s.log.push({
+    id: record.id,
+    labelKey: record.labelKey,
+    labelParams: record.labelParams,
+    which,
+    reason: outcome.kind === "skipped" ? outcome.reason : "failed",
+    ...(outcome.kind === "skipped" && outcome.by ? { by: outcome.by } : {}),
+    at: Date.now(),
+    kind: record.kind,
+  })
+  if (s.log.length > LOG_LIMIT) s.log.splice(0, s.log.length - LOG_LIMIT)
+}
+
+/**
+ * Undo back to (and including) the step `id`, one step at a time, newest
+ * first — the History panel's "undo to here". Stops early at a blocked,
+ * failed or moved step; skipped steps are logged and passed. Returns every
+ * result.
+ */
+export async function undoTo(
+  id: string,
+  /** Called as each step finishes, so a long walk can report as it goes. */
+  onStep?: (result: HistoryResult) => void,
+): Promise<HistoryResult[]> {
+  const results: HistoryResult[] = []
+  if (!activeScope) return results
+  const s = stacksFor(activeScope)
+  if (!s.undo.some((r) => r.id === id)) return results
+  for (;;) {
+    const top = s.undo[s.undo.length - 1]
+    if (!top) break
+    const r = await run("undo")
+    if (!r) break
+    results.push(r)
+    onStep?.(r)
+    if (r.outcome.kind === "blocked" || r.outcome.kind === "failed" || r.outcome.kind === "moved") break
+    if (top.id === id) break
+  }
+  return results
+}
+
+/**
+ * Redo one step by id, out of order: the Redo of a part of the app that has
+ * its own Undo and Redo (Project settings, AQU-2262, Sam Oct 30), the
+ * counterpart of `undoStepById`. It then sits on top of Undo.
+ */
+export function redoStepById(id: string): Promise<HistoryResult | null> {
+  return run("redo", id)
+}
+
+/**
+ * Every step Undo and Redo can reach that touches something `match` names —
+ * for a group, any of its parts, as `newestMatchingStep` counts them — in the
+ * order `historyView` lists them (Undo's oldest first, Redo's next one LAST).
+ * What a part of the app with its own Undo, Redo and History panel acts on
+ * (Project settings, AQU-2262, Sam Oct 30).
+ */
+export function matchingSteps(match: (kind: string, data: unknown) => boolean): { undo: StepSummary[]; redo: StepSummary[] } {
+  const s = activeScope ? stacks.get(activeScope) : undefined
+  const touches = (r: StepRecord) =>
+    r.kind === GROUP_KIND
+      ? ((r.data as { steps?: ReadonlyArray<{ kind: string; data: unknown }> }).steps ?? []).some((p) => match(p.kind, p.data))
+      : match(r.kind, r.data)
+  return { undo: (s?.undo ?? []).filter(touches).map(summary), redo: (s?.redo ?? []).filter(touches).map(summary) }
+}
+
+// ── Reading ─────────────────────────────────────────────────────────────────
+
+export type StepSummary = Pick<StepRecord, "id" | "labelKey" | "labelParams" | "at" | "fileId" | "fileName" | "lane">
+
+export interface HistoryView {
+  canUndo: boolean
+  canRedo: boolean
+  /** The step Undo would take back, for the button's tooltip. */
+  nextUndo: StepSummary | null
+  nextRedo: StepSummary | null
+  busy: boolean
+  /** Every step Undo can reach, oldest first — the History panel's list. */
+  undoSteps: readonly StepSummary[]
+  /** Every step Redo can reach, the next one LAST. */
+  redoSteps: readonly StepSummary[]
+  /** Recent undos and redos that did not happen, and why. */
+  skipped: readonly SkipLogEntry[]
+}
+
+let snapshotCache: HistoryView | null = null
+
+function summary(r: StepRecord): StepSummary {
+  return {
+    id: r.id,
+    labelKey: r.labelKey,
+    labelParams: r.labelParams,
+    at: r.at,
+    fileId: r.fileId ?? null,
+    fileName: r.fileName ?? null,
+    ...(r.lane !== undefined ? { lane: r.lane } : {}),
+  }
+}
+
+/** A stable snapshot for useSyncExternalStore: the same object until something changes. */
+export function historyView(): HistoryView {
+  if (snapshotCache) return snapshotCache
+  const s = activeScope ? stacks.get(activeScope) : undefined
+  const undoSteps = (s?.undo ?? []).map(summary)
+  const redoSteps = (s?.redo ?? []).map(summary)
+  snapshotCache = {
+    canUndo: !busy && undoSteps.length > 0,
+    canRedo: !busy && redoSteps.length > 0,
+    nextUndo: undoSteps[undoSteps.length - 1] ?? null,
+    nextRedo: redoSteps[redoSteps.length - 1] ?? null,
+    busy,
+    undoSteps,
+    redoSteps,
+    skipped: [...(s?.log ?? [])],
+  }
+  return snapshotCache
+}
+
+export function subscribeHistory(fn: () => void): () => void {
+  listeners.add(fn)
+  return () => {
+    listeners.delete(fn)
+  }
+}
+
+/** Newest step time in the active scope — the shortcut arbiter's input. */
+export function newestStepAt(): number | null {
+  const s = activeScope ? stacks.get(activeScope) : undefined
+  const top = s?.undo[s.undo.length - 1]
+  return top ? (recordedHere.get(top.id) ?? top.at) : null
+}
+
+/**
+ * The newest step Undo can reach that touches something `match` names — for a
+ * group, any of its parts — or null. The Station's own Undo button (AQU-2327,
+ * Q4, Sam Oct 30) always takes back your last change to the recording it has
+ * open, even when you have changed other things since; ⌘Z stays the
+ * project's newest step.
+ */
+export function newestMatchingStep(match: (kind: string, data: unknown) => boolean): StepSummary | null {
+  const s = activeScope ? stacks.get(activeScope) : undefined
+  if (!s) return null
+  for (let i = s.undo.length - 1; i >= 0; i--) {
+    const r = s.undo[i]
+    const hit =
+      r.kind === GROUP_KIND
+        ? ((r.data as { steps?: ReadonlyArray<{ kind: string; data: unknown }> }).steps ?? []).some((p) => match(p.kind, p.data))
+        : match(r.kind, r.data)
+    if (hit) return summary(r)
+  }
+  return null
+}
+
+/** Undo one step by id, out of order (the Station's own Undo, Q4). It then
+ *  sits on top of Redo, so Redo brings it back as usual. */
+export function undoStepById(id: string): Promise<HistoryResult | null> {
+  return run("undo", id)
+}
+
+/** The signed-in person the active scope belongs to. */
+export function historyUser(): string | null {
+  return activeUser
+}
+
+/** Tests only: forget everything (saved history included is the store's job). */
+export function resetHistoryForTests(): void {
+  fileNamer = null
+  stacks.clear()
+  handlers.clear()
+  loaded.clear()
+  dirtyScopes.clear()
+  pushes.clear()
+  pulls.clear()
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = null
+  openGroups.length = 0
+  activeScope = null
+  activeUser = null
+  activeLane = ""
+  laneByProject.clear()
+  busy = false
+  queue = Promise.resolve()
+  pendingWrites.clear()
+  recordedHere.clear()
+  openFileProbe = null
+  laneSwitcher = null
+  remote = null
+  // The next "device" is a new one.
+  device = null
+  try {
+    globalThis.sessionStorage?.removeItem(DEVICE_KEY)
+  } catch {
+    // unavailable: the next name is minted fresh anyway
+  }
+  emit()
+}
+
+/** Tests only: write pending saves now (this browser's copy; pushes start too). */
+export async function flushHistorySaveForTests(): Promise<void> {
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = null
+  const pending = [...dirtyScopes]
+  dirtyScopes.clear()
+  for (const key of pending) schedulePush(key)
+  await Promise.all(pending.map((key) => writeLocal(key)))
+}
+
+/** Tests only: wait until every server write in flight has settled. */
+export async function settleHistorySyncForTests(): Promise<void> {
+  for (let i = 0; i < 50; i += 1) {
+    await new Promise((r) => setTimeout(r, 0))
+    if (saveTimer) continue
+    if ([...pushes.values()].some((p) => p.running) || pulls.size > 0) continue
+    return
+  }
+}

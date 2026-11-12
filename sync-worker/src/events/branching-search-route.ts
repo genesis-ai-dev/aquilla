@@ -63,6 +63,9 @@ export interface BranchingSearchResponseResult {
   sourceText: string
   targetText: string
   queryCoverage: number
+  /** File holding the hit's source cell (AQU-1393). Absent on a body cached
+   *  before this field existed — clients must treat it as optional. */
+  fileId?: string
 }
 
 export interface BranchingSearchResponse {

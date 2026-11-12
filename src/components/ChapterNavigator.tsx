@@ -6,13 +6,35 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
   type RefObject,
 } from "react"
 import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
-import { ChevronLeft, ChevronRight, CheckIcon, CornerDownRight } from "lucide-react"
+import {
+  ChevronLeft,
+  ChevronRight,
+  CheckCheck,
+  CheckIcon,
+  CornerDownRight,
+  Ellipsis,
+  Plus,
+  type LucideIcon,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+} from "@/components/ui/dropdown-menu"
+import {
+  milestoneRowActions,
+  type MilestoneRowAction,
+} from "@/lib/editor/user-milestone-spans"
+import { groupChaptersByBook } from "@/lib/sidebar/book-sections"
 import {
   Combobox,
   ComboboxContent,
@@ -23,30 +45,87 @@ import {
   ComboboxSeparator,
   ComboboxTrigger,
 } from "@/components/ui/combobox"
+import { PROGRESS_ICON } from "@/lib/progress/progress-icons"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useFormat } from "@/lib/i18n/format"
+import { useOverflowTitle } from "@/hooks/useOverflowTitle"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
+import { progressPercent } from "@/lib/progress/progress-percent"
+import { PROGRESS_BG } from "@/lib/progress/progress-palette"
+import {
+  progressViewFor,
+  type MilestoneProgress,
+  type MilestoneProgressView,
+} from "@/lib/progress/milestone-progress-view"
+import { deliversView, type LaneDelivers } from "@/lib/lanes/lane-delivers"
 
-export interface MilestoneNavigationItem {
+/** AQU-2110: the figures a row carries, and the per-file choice of which to show. */
+export type { MilestoneProgress, MilestoneProgressView }
+
+export interface MilestoneNavigationItem extends MilestoneProgress {
   key: string
   kind: ImportMilestoneKind
   label: string
   shortLabel: string
   description: string
-  translated: number
-  validated: number
-  total: number
   subsections?: readonly MilestoneNavigationSubsection[]
+  /**
+   * AQU-2310: hand-set milestones nested inside this division, on a file whose
+   * divisions are not split into jump ranges (Scripture, prose — anything but
+   * IDML). Listed as their own rows under the division, always, rather than as
+   * `subsections`: the division itself stays a destination, prev/next still
+   * step division by division, and the trigger still names the division.
+   */
+  named?: readonly MilestoneNavigationSubsection[]
 }
 
-export interface MilestoneNavigationSubsection {
+export interface MilestoneNavigationSubsection extends MilestoneProgress {
   key: string
   label: string
   firstCellId: string
-  translated: number
-  validated: number
-  total: number
+}
+
+/**
+ * AQU-2310: correcting milestones from the navigator. Passed only for someone
+ * at or above the milestone floor — absent, no row has an edit control and
+ * there is no "New milestone…" entry, which is the whole permission story on
+ * this side (the server enforces the same floor on the events).
+ */
+export interface MilestoneNavigatorEditing {
+  /**
+   * A row's edit control chose an action. `key` is that row's own key — a
+   * top-level entry's, or a nested hand-set milestone's subsection key —
+   * and the caller resolves it against the store, which knows the cells.
+   */
+  onAction: (key: string, action: MilestoneRowAction) => void
+  /** "New milestone…": the form, with nothing filled in. */
+  onNew: () => void
+}
+
+/** What one row's edit control was opened on. */
+interface RowMenuTarget {
+  key: string
+  label: string
+  actions: readonly MilestoneRowAction[]
+  /** Where the control WAS. The list closes as the menu opens, so the menu is
+   *  anchored to a snapshot of the control's rect, not to the control. */
+  anchor: { getBoundingClientRect: () => DOMRect }
+}
+
+const ROW_ACTION_LABEL: Record<MilestoneRowAction, MessageKey> = {
+  rename: "editor.milestone.rowActions.rename",
+  editRange: "editor.milestone.rowActions.editRange",
+  remove: "editor.milestone.rowActions.remove",
+}
+
+/** What a row's edit control offers — none for book headings. */
+function rowActionsFor(row: NavigationRow): readonly MilestoneRowAction[] {
+  if (row.bookHeader) return []
+  return row.subsection
+    ? milestoneRowActions({ key: row.subsection.key })
+    : milestoneRowActions({ key: row.milestone.key, kind: row.milestone.kind })
 }
 
 /**
@@ -57,12 +136,22 @@ interface NavigationRow {
   key: string
   milestone: MilestoneNavigationItem
   subsection?: MilestoneNavigationSubsection
+  /** AQU-2310: the subsection is a hand-set milestone from `named`, shown by
+   *  its own name rather than as a cell range. */
+  named?: boolean
+  /**
+   * AQU-1187: a book name heading above the chapters of one book, for a file
+   * that spans several books. Present only on heading rows, which label the
+   * list rather than navigating anywhere.
+   */
+  bookHeader?: string
 }
 
 // Fixed row heights so open doesn't wait on measureElement. Nested cell-range
 // rows are one line of label plus the same two-line progress column.
 const MILESTONE_ROW_HEIGHT_PX = 48
 const SUBSECTION_ROW_HEIGHT_PX = 40
+const BOOK_HEADER_ROW_HEIGHT_PX = 28
 
 /** Matches EditorTable: picker is absolutely centered from lg up. */
 const LG_MIN_WIDTH_QUERY = "(min-width: 1024px)"
@@ -95,7 +184,7 @@ export function milestoneMatchesSearch(item: MilestoneNavigationItem, query: str
 
   return `${item.label} ${item.shortLabel} ${item.description} ${
     item.subsections?.map((subsection) => subsection.label).join(" ") ?? ""
-  }`
+  } ${item.named?.map((named) => named.label).join(" ") ?? ""}`
     .toLocaleLowerCase()
     .includes(normalizedQuery)
 }
@@ -223,32 +312,195 @@ function vocabularyFor(items: readonly MilestoneNavigationItem[]): NavigationVoc
   }
   if (kinds.size === 1 && kinds.has("slide")) return VOCABULARIES.slide
   if (kinds.size === 1 && kinds.has("story")) return VOCABULARIES.story
-  if (kinds.size === 1 && kinds.has("section")) return VOCABULARIES.section
+  // An AI section (AQU-1387) is a section a translator navigates the same way;
+  // only its provenance differs, so it shares the section vocabulary rather
+  // than falling through to the generic "milestone" wording.
+  if ([...kinds].every((kind) => kind === "section" || kind === "ai-section")) {
+    return VOCABULARIES.section
+  }
   if (kinds.size === 1 && kinds.has("time-range")) return VOCABULARIES.timeRange
   if (kinds.size === 1 && kinds.has("part")) return VOCABULARIES.part
   if (kinds.size === 1 && kinds.has("group")) return VOCABULARIES.group
   return VOCABULARIES.milestone
 }
 
-function percent(part: number, total: number): number {
-  return total > 0 ? Math.round((part / total) * 100) : 0
+// AQU-1493: never 100 while a cell is outstanding.
+const percent = progressPercent
+
+/**
+ * One progress line: a marker icon, a swatch in the figure's progress tone,
+ * then the percentage right-aligned in the column. `label` ("N% translated")
+ * is what the icon means — carried as hover text and, because the digits
+ * themselves are `aria-hidden`, as the only thing a screen reader reads out, so
+ * the announcement keeps the full wording.
+ */
+function ProgressLine({ icon: Icon, swatchClassName, label, value }: {
+  icon: LucideIcon
+  /** The figure's tone from the shared progress palette (AQU-1764). */
+  swatchClassName: string
+  label: string
+  value: string
+}) {
+  return (
+    <span className="flex items-center gap-1" title={label}>
+      <Icon aria-hidden="true" className="size-3 shrink-0 text-muted-foreground" />
+      <span aria-hidden="true" data-progress-swatch className={cn("size-2 shrink-0 rounded-[2px]", swatchClassName)} />
+      <span aria-hidden="true" className="flex-1 text-end">{value}</span>
+      <span className="sr-only">{label}</span>
+    </span>
+  )
 }
 
-function ProgressSummary({ translated, validated, total }: {
+/**
+ * AQU-1485: this column used to spell out "N% translated" / "N% validated" on
+ * every row. In a fixed-width dropdown that took over 40% of the row and left
+ * milestone titles about 12 characters, so a run of "1 Corinthians …"
+ * milestones all read "1 Corinthian…" and the picker couldn't be used to find
+ * one. The words are now marker icons, which makes the column's width
+ * independent of how long a locale's words for them are, and hands the space
+ * it saves to the title.
+ *
+ * AQU-1764: the icons were amber and emerald; they are grey now, and each
+ * figure has a swatch in the shared progress palette's light blue
+ * (translated) or dark blue (validated), the colours the file rows' bars use.
+ * The swatch costs the column 8px: 64px is the narrowest that fits icon,
+ * swatch and "100 %" in Geist at this size without spilling into the row.
+ */
+function TextProgressColumn({ translated, validated, total }: {
   translated: number
   validated: number
   total: number
 }) {
   const t = useT()
+  const f = useFormat()
+  // AQU-1493: the visible figure follows the same never-100-while-work-is-left
+  // rule as the label read out beside it (Jude 1 at 219/220 showed "100%").
+  const asPercent = (part: number) => f.percent(percent(part, total) / 100)
   return (
-    <span className="w-[7.5rem] shrink-0 justify-self-end text-end text-xs tabular-nums text-muted-foreground">
-      <span className="block">
-        {t("editor.milestone.percentTranslated", { percent: percent(translated, total) })}
-      </span>
-      <span className="block">
-        {t("editor.milestone.percentValidated", { percent: percent(validated, total) })}
-      </span>
+    <span data-progress-column="text" className="w-16 shrink-0 text-xs tabular-nums text-muted-foreground">
+      <ProgressLine
+        icon={PROGRESS_ICON.text}
+        swatchClassName={PROGRESS_BG.textTranslated}
+        label={t("editor.milestone.percentTranslated", { percent: percent(translated, total) })}
+        value={asPercent(translated)}
+      />
+      <ProgressLine
+        icon={CheckCheck}
+        swatchClassName={PROGRESS_BG.textValidated}
+        label={t("editor.milestone.percentValidated", { percent: percent(validated, total) })}
+        value={asPercent(validated)}
+      />
     </span>
+  )
+}
+
+/**
+ * AQU-2110: the audio twin of the text column — recorded over validated, in
+ * the palette's magenta tones, so a chapter on an audio-only project reads
+ * 100% once every take is signed off instead of the 0% validated the text
+ * flag held it at. Same width, same two-line shape, same never-100 rule.
+ */
+function AudioProgressColumn({ audioRecorded, audioValidated, total }: {
+  audioRecorded: number
+  audioValidated: number
+  total: number
+}) {
+  const t = useT()
+  const f = useFormat()
+  const asPercent = (part: number) => f.percent(percent(part, total) / 100)
+  return (
+    <span data-progress-column="audio" className="w-16 shrink-0 text-xs tabular-nums text-muted-foreground">
+      <ProgressLine
+        icon={PROGRESS_ICON.audio}
+        swatchClassName={PROGRESS_BG.audioRecorded}
+        label={t("editor.milestone.percentRecorded", { percent: percent(audioRecorded, total) })}
+        value={asPercent(audioRecorded)}
+      />
+      <ProgressLine
+        icon={CheckCheck}
+        swatchClassName={PROGRESS_BG.audioValidated}
+        label={t("editor.milestone.percentAudioValidated", { percent: percent(audioValidated, total) })}
+        value={asPercent(audioValidated)}
+      />
+    </span>
+  )
+}
+
+/**
+ * The progress column(s) of one row, in the view `progressViewFor` chose for
+ * the whole file. In "both", the text column keeps its place and the audio
+ * column stands beside it; the popover grows by that column (see
+ * `ComboboxContent` below) so titles keep the room AQU-1485 bought them.
+ */
+function ProgressSummary({ view, translated, validated, total, audioRecorded = 0, audioValidated = 0 }: MilestoneProgress & {
+  view: MilestoneProgressView
+}) {
+  return (
+    <>
+      {view !== "audio" && (
+        <TextProgressColumn translated={translated} validated={validated} total={total} />
+      )}
+      {view !== "text" && (
+        <AudioProgressColumn audioRecorded={audioRecorded} audioValidated={audioValidated} total={total} />
+      )}
+    </>
+  )
+}
+
+/**
+ * A label that still doesn't fit its box reveals its full text on hover
+ * (AQU-1485) — before, a clipped milestone title was unreachable.
+ */
+function TruncatedLabel({ text, className }: { text: string; className?: string }) {
+  const { ref, title } = useOverflowTitle(text)
+  return (
+    <span ref={ref} className={cn("block truncate", className)} title={title}>
+      {text}
+    </span>
+  )
+}
+
+/**
+ * AQU-2310: the edit control at the end of one row.
+ *
+ * A Base UI combobox option keeps focus on the search box and commits on
+ * click, so the control stops its own pointer and mouse events from reaching
+ * the option (no navigation), and prevents mousedown's default (focus stays in
+ * the search box, so the list does not close on blur before the click lands).
+ * It deliberately does NOT host the menu: an option swallows the mousedown a
+ * nested menu trigger opens on, so the menu lives beside the combobox and the
+ * control only says which row it was opened on.
+ */
+function RowEditControl({ label, onOpen }: {
+  label: string
+  onOpen: (anchor: RowMenuTarget["anchor"]) => void
+}) {
+  const t = useT()
+  const text = t("editor.milestone.rowActions.label", { label })
+  const stop = (event: { stopPropagation: () => void }) => event.stopPropagation()
+  return (
+    <button
+      type="button"
+      data-testid="milestone-row-edit"
+      aria-label={text}
+      title={text}
+      tabIndex={-1}
+      className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-background hover:text-foreground"
+      onPointerDown={stop}
+      onPointerUp={stop}
+      onMouseDown={(event) => {
+        event.stopPropagation()
+        event.preventDefault()
+      }}
+      onMouseUp={stop}
+      onClick={(event) => {
+        event.stopPropagation()
+        const rect = event.currentTarget.getBoundingClientRect()
+        onOpen({ getBoundingClientRect: () => rect })
+      }}
+    >
+      <Ellipsis aria-hidden="true" className="size-4" />
+    </button>
   )
 }
 
@@ -256,12 +508,22 @@ function VirtualizedMilestoneList({
   activeRowKey,
   expandedKey,
   open,
+  progressView,
   virtualizerRef,
+  onOpenRowMenu,
+  reserveEditColumn,
 }: {
   activeRowKey: string
   expandedKey: string
   open: boolean
+  /** AQU-2110: the file's choice of progress figures, shared by every row. */
+  progressView: MilestoneProgressView
   virtualizerRef: RefObject<MilestoneListVirtualizer | null>
+  /** AQU-2310: absent ⇒ no row has an edit control. */
+  onOpenRowMenu?: (target: RowMenuTarget) => void
+  /** Hold the control's width on rows without one, so the progress columns
+   *  of a file mixing editable and fixed rows still line up. */
+  reserveEditColumn: boolean
 }) {
   const t = useT()
   const filteredItems = ComboboxPrimitive.useFilteredItems<NavigationRow>()
@@ -273,7 +535,9 @@ function VirtualizedMilestoneList({
     getScrollElement: () => scrollElementRef.current,
     getItemKey: (index) => filteredItems[index]?.key ?? index,
     estimateSize: (index) => (
-      filteredItems[index]?.subsection ? SUBSECTION_ROW_HEIGHT_PX : MILESTONE_ROW_HEIGHT_PX
+      filteredItems[index]?.bookHeader
+        ? BOOK_HEADER_ROW_HEIGHT_PX
+        : filteredItems[index]?.subsection ? SUBSECTION_ROW_HEIGHT_PX : MILESTONE_ROW_HEIGHT_PX
     ),
     overscan: 12,
     initialRect: { width: 320, height: 360 },
@@ -335,6 +599,39 @@ function VirtualizedMilestoneList({
             const isActive = row.key === activeRowKey
             const subsection = row.subsection
             const expandable = !subsection && Boolean(row.milestone.subsections?.length)
+            const rowActions = onOpenRowMenu ? rowActionsFor(row) : []
+            const rowLabel = subsection ? subsection.label : row.milestone.label
+
+            if (row.bookHeader) {
+              // Still a Combobox.Item so Base UI's index bookkeeping (and the
+              // virtualizer's) stays 1:1 with filteredItems; `disabled` is what
+              // keeps keyboard navigation from ever landing on a heading.
+              return (
+                <ComboboxPrimitive.Item
+                  key={row.key}
+                  index={virtualItem.index}
+                  data-index={virtualItem.index}
+                  value={row}
+                  disabled
+                  data-testid="milestone-book-header"
+                  data-book={row.bookHeader}
+                  className="flex w-full items-center px-2 text-xs font-semibold text-muted-foreground select-none data-disabled:opacity-100"
+                  aria-setsize={filteredItems.length}
+                  aria-posinset={virtualItem.index + 1}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    width: "auto",
+                    height: virtualItem.size,
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
+                >
+                  <span className="truncate">{row.bookHeader}</span>
+                </ComboboxPrimitive.Item>
+              )
+            }
 
             return (
               <ComboboxPrimitive.Item
@@ -345,7 +642,7 @@ function VirtualizedMilestoneList({
                 data-checked={isActive || undefined}
                 {...(subsection ? { "data-milestone-subsection": "" } : {})}
                 className={cn(
-                  "relative flex w-full cursor-default items-center gap-3 rounded-md px-2 py-1 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50",
+                  "relative flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50",
                   // Cell ranges read as children of the milestone above them.
                   subsection && "ps-6",
                 )}
@@ -368,25 +665,41 @@ function VirtualizedMilestoneList({
                         aria-hidden="true"
                         className="size-3.5 shrink-0 text-muted-foreground"
                       />
-                      <span className="truncate">
-                        {t("editor.milestone.cellRange", { range: subsection.label })}
-                      </span>
+                      <TruncatedLabel
+                        text={row.named
+                          ? subsection.label
+                          : t("editor.milestone.cellRange", { range: subsection.label })}
+                      />
                     </span>
-                    <ProgressSummary {...subsection} />
+                    <ProgressSummary view={progressView} {...subsection} />
                   </>
                 ) : (
                   <>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium tabular-nums">
-                        {row.milestone.label}
-                      </span>
+                      <TruncatedLabel
+                        text={row.milestone.label}
+                        className="font-medium tabular-nums"
+                      />
                       <span className="block text-xs text-muted-foreground">
                         {row.milestone.description}
                       </span>
                     </span>
-                    <ProgressSummary {...row.milestone} />
+                    <ProgressSummary view={progressView} {...row.milestone} />
                   </>
                 )}
+                {onOpenRowMenu && rowActions.length > 0 ? (
+                  <RowEditControl
+                    label={rowLabel}
+                    onOpen={(anchor) => onOpenRowMenu({
+                      key: row.key,
+                      label: rowLabel,
+                      actions: rowActions,
+                      anchor,
+                    })}
+                  />
+                ) : reserveEditColumn ? (
+                  <span className="size-6 shrink-0" aria-hidden="true" />
+                ) : null}
                 {expandable ? (
                   <ChevronRight
                     aria-hidden="true"
@@ -419,30 +732,70 @@ export function MilestoneNavigator({
   onSelect,
   compact = false,
   pageByMilestone = false,
+  delivers = null,
+  extraAction,
+  editing,
 }: {
   items: MilestoneNavigationItem[]
   activeKey: string
   activeSubsectionKey?: string
   onSelect: (key: string, subsectionKey?: string) => void
   compact?: boolean
+  /** AQU-2310: present only for someone allowed to set milestones. */
+  editing?: MilestoneNavigatorEditing
   /**
    * Split-into-milestones view: prev/next turn a whole division at a time, and
    * the trigger names that division rather than a 50-cell jump range inside it.
    * The picker still lists those ranges so a long section stays searchable.
    */
   pageByMilestone?: boolean
+  /**
+   * Media redesign: what the open language delivers, when someone has chosen.
+   * It decides the unit the rows are drawn in (`deliversView`); absent, the
+   * file's own evidence decides.
+   */
+  delivers?: LaneDelivers | null
+  /** An extra icon button joined into the group, between the picker and "next". */
+  extraAction?: ReactNode
 }) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const [expandedKey, setExpandedKey] = useState(activeKey)
   const [iconOnlyTrigger, setIconOnlyTrigger] = useState(false)
+  // AQU-2310: the row whose edit control was clicked. Kept after the menu
+  // shuts (only `rowMenuOpen` flips) so its label does not blank out while
+  // the menu plays its exit animation.
+  const [rowMenu, setRowMenu] = useState<RowMenuTarget | null>(null)
+  const [rowMenuOpen, setRowMenuOpen] = useState(false)
+  // Only files where some row CAN be edited give up the column; a Scripture
+  // file with nothing nested keeps every pixel AQU-1485 bought its titles.
+  const reserveEditColumn = useMemo(
+    () => Boolean(editing) && items.some((item) => (
+      milestoneRowActions({ key: item.key, kind: item.kind }).length > 0
+      || [...(item.subsections ?? []), ...(item.named ?? [])]
+        .some((sub) => milestoneRowActions({ key: sub.key }).length > 0)
+    )),
+    [editing, items],
+  )
   const virtualizerRef = useRef<MilestoneListVirtualizer | null>(null)
   const buttonGroupRef = useRef<HTMLDivElement | null>(null)
   const pickerCentered = useMinWidthLg()
   const vocabulary = useMemo(() => vocabularyFor(items), [items])
+  // AQU-2110: decided over the whole file, once, so every row agrees.
+  // Media redesign: what the language delivers wins where someone has chosen.
+  const progressView = useMemo(() => deliversView(delivers, progressViewFor(items)), [delivers, items])
   const matchedActiveIndex = items.findIndex((item) => item.key === activeKey)
   const activeIndex = matchedActiveIndex >= 0 ? matchedActiveIndex : 0
   const active = items[activeIndex]
+  // AQU-1485: the trigger keeps its width, so a long title still clips (and
+  // disappears entirely in the icon-only state) — hover reveals it, and only
+  // when something is actually hidden. `iconOnlyTrigger` rechecks the measure
+  // because that flip hides the label with `display: none` rather than
+  // resizing it.
+  const { ref: triggerLabelRef, title: triggerLabelTitle } = useOverflowTitle(
+    active?.label ?? "",
+    iconOnlyTrigger,
+  )
   const activeSubsection = pageByMilestone
     ? undefined
     : active?.subsections?.find(
@@ -475,18 +828,42 @@ export function MilestoneNavigator({
   const canGoNext = activeDestinationIndex >= 0 && activeDestinationIndex < destinations.length - 1
 
   const rows = useMemo<NavigationRow[]>(
-    () => items.flatMap((milestone) => {
-      const milestoneRow: NavigationRow = { key: milestone.key, milestone }
-      if (milestone.key !== expandedKey || !milestone.subsections?.length) return [milestoneRow]
-      return [
-        milestoneRow,
-        ...milestone.subsections.map((subsection): NavigationRow => ({
+    () => {
+      const rowsFor = (milestone: MilestoneNavigationItem): NavigationRow[] => {
+        const milestoneRow: NavigationRow = { key: milestone.key, milestone }
+        // AQU-2310: a nested hand-set milestone is always listed — it is a
+        // named place a person chose, not a jump range to page through.
+        const namedRows = (milestone.named ?? []).map((subsection): NavigationRow => ({
           key: subsection.key,
           milestone,
           subsection,
-        })),
-      ]
-    }),
+          named: true,
+        }))
+        if (milestone.key !== expandedKey || !milestone.subsections?.length) {
+          return [milestoneRow, ...namedRows]
+        }
+        return [
+          milestoneRow,
+          ...namedRows,
+          ...milestone.subsections.map((subsection): NavigationRow => ({
+            key: subsection.key,
+            milestone,
+            subsection,
+          })),
+        ]
+      }
+
+      // AQU-1187: a file spanning several books (a whole-Bible import) gets its
+      // chapters filed under book headings, in canonical order, instead of one
+      // flat list of 1,189. Every other file — per-book scripture, media,
+      // prose — groups to null and keeps the flat list it always had.
+      const books = groupChaptersByBook(items)
+      if (!books) return items.flatMap(rowsFor)
+      return books.flatMap((book) => [
+        { key: `book:${book.id}`, milestone: book.chapters[0], bookHeader: book.id },
+        ...book.chapters.flatMap(rowsFor),
+      ])
+    },
     [expandedKey, items],
   )
 
@@ -537,6 +914,12 @@ export function MilestoneNavigator({
     if (nextOpen) setExpandedKey(active.key)
   }
 
+  const openRowMenu = (target: RowMenuTarget) => {
+    setOpen(false)
+    setRowMenu(target)
+    setRowMenuOpen(true)
+  }
+
   return (
     <nav aria-label={t("editor.milestone.region")} className="flex w-full min-w-24 max-w-full items-center lg:w-auto">
       <ButtonGroup
@@ -568,6 +951,11 @@ export function MilestoneNavigator({
           autoHighlight
           onValueChange={(row, eventDetails) => {
             if (!row) return
+            if (row.bookHeader) {
+              // A heading names the group; it is not a destination.
+              eventDetails.cancel()
+              return
+            }
             if (row.subsection) {
               choose(row.milestone.key, row.subsection.key)
               return
@@ -582,13 +970,24 @@ export function MilestoneNavigator({
             choose(row.milestone.key)
           }}
           itemToStringLabel={(row) => (
-            row.subsection
-              ? t("editor.milestone.cellRange", { range: row.subsection.label })
-              : row.milestone.label
+            row.bookHeader
+              ? row.bookHeader
+              : row.subsection
+                ? row.named
+                  ? row.subsection.label
+                  : t("editor.milestone.cellRange", { range: row.subsection.label })
+                : row.milestone.label
           )}
           itemToStringValue={(row) => row.key}
           isItemEqualToValue={(a, b) => a.key === b.key}
-          filter={(row, query) => milestoneMatchesSearch(row.milestone, query)}
+          filter={(row, query) => (
+            // Headings organize the browse list; once the user types, the
+            // matches stand on their own and an unmatched heading above them
+            // would only mislead ("Matthew 5" must not sit under "Genesis").
+            row.bookHeader
+              ? query.trim().length === 0
+              : milestoneMatchesSearch(row.milestone, query)
+          )}
           onItemHighlighted={(row, { reason, index }) => {
             const virtualizer = virtualizerRef.current
             if (!row || !virtualizer || index < 0) return
@@ -611,6 +1010,7 @@ export function MilestoneNavigator({
               <Button
                 variant="outline"
                 data-icon-only={iconOnlyTrigger || undefined}
+                title={triggerLabelTitle}
                 // Default: padded label + chevron. data-icon-only: true icon
                 // button (w-8, p-0, label hidden, chevron centered). xl+: fixed
                 // width with start-aligned label regardless of squeeze.
@@ -636,7 +1036,10 @@ export function MilestoneNavigator({
                   : "flex min-w-0 items-center gap-2 text-start"
               }
             >
-              <span className="min-w-0 truncate font-semibold leading-none">
+              <span
+                ref={triggerLabelRef}
+                className="min-w-0 truncate font-semibold leading-none"
+              >
                 {active.label}
               </span>
               {/* Below xl: chapter label only — drop the verse/cell summary. */}
@@ -654,8 +1057,17 @@ export function MilestoneNavigator({
             // lg+: center under the trigger with the absolute picker.
             align={pickerCentered ? "center" : "start"}
             anchor={pickerCentered ? undefined : buttonGroupRef}
-            // min-w-56 trigger + two size-8 prev/next buttons
-            className="w-[calc(14rem+2rem+2rem)] min-w-[calc(14rem+2rem+2rem)] *:data-[slot=input-group]:mx-0! *:data-[slot=input-group]:my-0! *:data-[slot=input-group]:border-0! *:data-[slot=input-group]:bg-transparent! *:data-[slot=input-group]:shadow-none!"
+            // min-w-56 trigger + two size-8 prev/next buttons. AQU-2110: a
+            // file showing text AND audio figures carries a second 4rem
+            // column, and the popover grows by exactly that so the title
+            // keeps the width AQU-1485 gave it. Both strings are written out
+            // in full because Tailwind only generates classes it can read.
+            className={cn(
+              progressView === "both"
+                ? "w-[calc(14rem+2rem+2rem+4rem)] min-w-[calc(14rem+2rem+2rem+4rem)]"
+                : "w-[calc(14rem+2rem+2rem)] min-w-[calc(14rem+2rem+2rem)]",
+              "*:data-[slot=input-group]:mx-0! *:data-[slot=input-group]:my-0! *:data-[slot=input-group]:border-0! *:data-[slot=input-group]:bg-transparent! *:data-[slot=input-group]:shadow-none!",
+            )}
           >
             <ComboboxInput
               showTrigger={false}
@@ -676,12 +1088,39 @@ export function MilestoneNavigator({
                   activeRowKey={activeRowKey}
                   expandedKey={expandedKey}
                   open={open}
+                  progressView={progressView}
                   virtualizerRef={virtualizerRef}
+                  onOpenRowMenu={editing ? openRowMenu : undefined}
+                  reserveEditColumn={reserveEditColumn}
                 />
               </ComboboxGroup>
             </ComboboxList>
+            {editing ? (
+              <>
+                <ComboboxSeparator className="mx-0 my-0" />
+                <div className="p-1">
+                  {/* AQU-2310. A plain button, not a list option: it is not a
+                      destination, and search must never filter it away. */}
+                  <button
+                    type="button"
+                    data-testid="milestone-new"
+                    className="flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-hidden hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent"
+                    // Keep focus in the search box until the click lands.
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      setOpen(false)
+                      editing.onNew()
+                    }}
+                  >
+                    <Plus aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                    {t("editor.milestone.newMilestone")}
+                  </button>
+                </div>
+              </>
+            ) : null}
           </ComboboxContent>
         </Combobox>
+        {extraAction}
         <Button
           variant="outline"
           size="icon"
@@ -696,6 +1135,35 @@ export function MilestoneNavigator({
           <ChevronRight />
         </Button>
       </ButtonGroup>
+      {editing ? (
+        // AQU-2310: one menu for every row, beside the combobox rather than in
+        // it — see RowEditControl for why it cannot live in the option.
+        <DropdownMenu open={rowMenuOpen} onOpenChange={setRowMenuOpen}>
+          <DropdownMenuContent
+            anchor={rowMenu?.anchor}
+            align="end"
+            className="w-auto min-w-44"
+            data-testid="milestone-row-menu"
+          >
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="max-w-64 truncate">{rowMenu?.label}</DropdownMenuLabel>
+              {rowMenu?.actions.map((action) => (
+                <DropdownMenuItem
+                  key={action}
+                  data-testid={`milestone-row-${action}`}
+                  variant={action === "remove" ? "destructive" : "default"}
+                  onClick={() => {
+                    setRowMenuOpen(false)
+                    editing.onAction(rowMenu.key, action)
+                  }}
+                >
+                  {t(ROW_ACTION_LABEL[action])}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
     </nav>
   )
 }

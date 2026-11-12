@@ -10,6 +10,15 @@
  * Story: aquilla-specs/05-user-stories/search-and-replace-passages.md
  */
 
+import {
+  findPatternError,
+  findTextMatches,
+  replacementForMatch,
+  type TextReplaceOptions,
+} from "../../../db/shared/find-pattern"
+
+export type { TextReplaceOptions }
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface ReplaceCandidate {
@@ -22,6 +31,11 @@ export interface ReplaceCandidate {
   parentId: string | null
   /** Source-side event_id for AD-9 staleness pin. */
   sourceEventId?: string | null
+  /**
+   * The cell's source text, shown beside the target diff so a reviewer can
+   * judge the replacement. Null when the cell has no source row.
+   */
+  sourceText?: string | null
 }
 
 /** One replacement diff for a single cell. */
@@ -36,6 +50,8 @@ export interface CellReplaceDiff {
   after: string
   /** Number of matches replaced inside this cell. */
   matchCount: number
+  /** Source text for this cell, when the search result carried it. */
+  sourceText: string | null
 }
 
 /** Result of computing diffs across multiple cells. */
@@ -66,24 +82,18 @@ export function matchSpansHtmlTag(matchText: string): boolean {
  * Find all non-overlapping occurrences of `needle` in `haystack`, returning
  * their start indices.
  *
- * Case-sensitivity is controlled by `caseSensitive` (default: false).
- * Regex characters in `needle` are always escaped — spec mandates regex is opt-in.
+ * A boolean third argument is `matchCase` (default false), kept so existing
+ * callers stay valid. Pass `TextReplaceOptions` for whole word and regexp.
+ * Regex characters are escaped unless `useRegexp` is set.
  */
 export function findMatches(
   haystack: string,
   needle: string,
-  caseSensitive = false,
+  caseSensitiveOrOptions: boolean | TextReplaceOptions = false,
 ): number[] {
-  if (!needle) return []
-  const flags = caseSensitive ? "g" : "gi"
-  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  const re = new RegExp(escaped, flags)
-  const indices: number[] = []
-  let m: RegExpExecArray | null
-  while ((m = re.exec(haystack)) !== null) {
-    indices.push(m.index)
-  }
-  return indices
+  return findTextMatches(haystack, needle, asFindOptions(caseSensitiveOrOptions)).map(
+    (match) => match.index,
+  )
 }
 
 /**
@@ -99,35 +109,35 @@ export function applySingleCellReplace(
   rawValue: string,
   needle: string,
   replacement: string,
-  caseSensitive = false,
+  caseSensitiveOrOptions: boolean | TextReplaceOptions = false,
 ): { result: string; replaced: number; skipped: number } {
-  const matchIndices = findMatches(rawValue, needle, caseSensitive)
-  if (matchIndices.length === 0) {
+  const options = asFindOptions(caseSensitiveOrOptions)
+  if (!needle || findPatternError(needle, options)) {
+    return { result: rawValue, replaced: 0, skipped: 0 }
+  }
+  const matches = findTextMatches(rawValue, needle, options)
+  if (matches.length === 0) {
     return { result: rawValue, replaced: 0, skipped: 0 }
   }
 
-  const needleLen = needle.length
   let replaced = 0
   let skipped = 0
   let out = ""
   let cursor = 0
 
-  for (const idx of matchIndices) {
-    // Append everything before this match verbatim.
-    out += rawValue.slice(cursor, idx)
-    const matchText = rawValue.slice(idx, idx + needleLen)
-    if (matchSpansHtmlTag(matchText)) {
-      // Skip: leave original match text intact.
-      out += matchText
+  for (const match of matches) {
+    if (match.index < cursor) continue
+    out += rawValue.slice(cursor, match.index)
+    if (matchSpansHtmlTag(match.text)) {
+      out += match.text
       skipped++
     } else {
-      out += replacement
+      out += replacementForMatch(match, replacement, options)
       replaced++
     }
-    cursor = idx + needleLen
+    cursor = match.index + match.text.length
   }
 
-  // Append remainder.
   out += rawValue.slice(cursor)
   return { result: out, replaced, skipped }
 }
@@ -142,8 +152,9 @@ export function computeReplaceDiffs(
   candidates: ReplaceCandidate[],
   needle: string,
   replacement: string,
-  caseSensitive = false,
+  caseSensitiveOrOptions: boolean | TextReplaceOptions = false,
 ): ReplaceActionResult {
+  const options = asFindOptions(caseSensitiveOrOptions)
   const diffs: CellReplaceDiff[] = []
   let totalReplaced = 0
   let totalSkipped = 0
@@ -153,7 +164,7 @@ export function computeReplaceDiffs(
       c.rawValue,
       needle,
       replacement,
-      caseSensitive,
+      options,
     )
     totalSkipped += skipped
     if (replaced === 0) {
@@ -169,8 +180,14 @@ export function computeReplaceDiffs(
       before: c.rawValue,
       after: result,
       matchCount: replaced,
+      sourceText: c.sourceText ?? null,
     })
   }
 
   return { diffs, totalReplaced, totalSkipped }
+}
+
+function asFindOptions(caseSensitiveOrOptions: boolean | TextReplaceOptions): TextReplaceOptions {
+  if (typeof caseSensitiveOrOptions === "boolean") return { matchCase: caseSensitiveOrOptions }
+  return caseSensitiveOrOptions
 }

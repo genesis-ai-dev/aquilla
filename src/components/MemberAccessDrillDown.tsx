@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/page"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useMemberAccess } from "@/hooks/useMemberAccess"
 import type { ProjectAccessBreakdown } from "@/lib/frontier/orgs"
@@ -36,7 +37,7 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div>
-          <UsernameWithAvatar username={username} nameClassName="text-sm font-semibold" />
+          <UsernameWithAvatar userId={userId} username={username} nameClassName="text-sm font-semibold" />
           <p className="mt-0.5 text-xs text-muted-foreground">
             {t("org.memberAccessDrillDown.heading")}
           </p>
@@ -127,12 +128,13 @@ function ProjectRow({ breakdown }: { breakdown: ProjectAccessBreakdown }) {
         </span>
       </div>
       <div className="flex flex-wrap gap-1">
+        {/* AQU-2260: what each path means opens on click, never on hover. */}
         {paths.map((p, i) => (
-          <AppTooltip key={i} content={p.detail}>
+          <NoteOnClick key={i} note={p.detail}>
             <span className="text-[10px] rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
               {p.label}
             </span>
-          </AppTooltip>
+          </NoteOnClick>
         ))}
       </div>
     </div>

@@ -1,6 +1,13 @@
 import { FRONTIER_API_URL } from "./sync-token"
+import {
+  parseOverrideProjectList,
+  type InheritedOverrideKey,
+  type OverrideProjectList,
+} from "./override-projects"
 import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 import { t } from "@/lib/i18n/standalone"
+import type { CellEditingTier } from "./project-settings"
+import type { MediaDefaultKey } from "../../../db/shared/media-setting-defaults"
 
 /**
  * Provider-keyed map of org-scoped API keys. Keys are provider identifiers
@@ -54,7 +61,8 @@ export interface OrgWideSettings {
    * imply being allowed to see WHAT each person did.
    *
    * AQU-498: consumed by ProjectOverview's Team card + the sync-worker's
-   * member-activity-read-route (server-side floor via resolveMemberProgressFloor).
+   * member-activity-read-route (server-side floor via resolveNamedProgressFloor,
+   * which also requires rosterViewMinRole — AQU-1771).
    */
   memberProgressViewMinRole?: number
   /**
@@ -69,12 +77,56 @@ export interface OrgWideSettings {
    */
   allowSelfAssignment?: boolean
   /**
+   * AQU-581: whether a member below the assignment floor who carries lane
+   * scopes (AQU-553) may emit `assignment.create` for OTHER people, inside
+   * the target-language lanes they are scoped to. This is how an org names a
+   * mentor/coordinator who hands out chapters in one lane without also
+   * granting org-admin rights.
+   *
+   * Default (when absent) = false. The setting alone grants nothing — the
+   * caller must also be lane-scoped, so turning it on does NOT give every
+   * contributor assignment rights. Leads/maintainers can always assign
+   * regardless. Same OWNER-only write gate as allowSelfAssignment. Enforced
+   * server-side in sync-worker (authorize.ts lane-delegate carve-out).
+   */
+  allowScopedLaneAssignment?: boolean
+  /**
    * AQU-1083: the org-wide default for whether structural cells — chapter
    * headings, section titles, book names — count toward progress. Unset means
    * they DO, which is what every project did before this existed. A project
    * may override it.
    */
   countStructuralCells?: boolean
+  /**
+   * AQU-1771: the org-wide defaults for how many validations a cell
+   * (validationCount) and a recorded take (validationCountAudio) need. Unset
+   * means 1. A project may set its own; the server re-derives the projects
+   * that follow the default when it changes.
+   */
+  validationCount?: number
+  validationCountAudio?: number
+  /**
+   * AQU-1768: org-wide defaults for the media settings. A project that sets
+   * none of its own follows these; absent here, each reader keeps its
+   * built-in default (timing locked, track editing ON since AQU-2214, cell
+   * editing nobody, audio self-validation on, audio floor reviewer). Enforced
+   * on the server.
+   */
+  timingLocked?: boolean
+  allowTrackEditing?: boolean
+  cellEditingFloor?: CellEditingTier
+  allowSelfValidationAudio?: boolean
+  validationRoleFloorAudio?: "reviewer" | "project_lead" | "maintainer"
+  /**
+   * AQU-1391: the org-wide default for repetition auto-propagation —
+   * validating a cell copies its translation into every other cell in the
+   * file whose source text is identical (the "repetitions" behaviour of
+   * Trados/memoQ/Matecat).
+   *
+   * Unset means ON, which is what CAT-tool users expect and what the feature
+   * shipped with. A project may override it either way.
+   */
+  autoPropagateRepetitions?: boolean
   /**
    * AQU-1037: Minimum effective project role allowed to assign, reassign, or
    * unassign file/chapter/target-lane work and route AI changesets. Default
@@ -111,6 +163,23 @@ export interface OrgWideSettings {
    */
   languageEditMinRole?: number
   /**
+   * AQU-2304: minimum org/project role allowed to bring a NEW source file
+   * into any project of this org — `file.create`, which the Import dialog's
+   * "New source text", the sidebar re-import and the IDML copy repair all
+   * emit. Unset ⇒ PROJECT_LEAD (500), the behaviour before this setting
+   * existed; an org opts in to maintainer-only imports by raising it to 600.
+   *
+   * It does NOT touch importing a TRANSLATION into a file already in the
+   * project (that commits target cells and creates nothing, so it stays at
+   * CONTRIBUTOR), and the Door43 upstream panel stays Maintainer-only either
+   * way.
+   *
+   * Enforced by sync-worker, which owns the event log
+   * (events/import-authority.ts). Same OWNER-only write gate as
+   * languageEditMinRole / termbaseEditMinRole / exportMinRole.
+   */
+  importMinRole?: number
+  /**
    * AQU-1002: Minimum role level allowed to OPEN a comment thread or post a
    * reply. Default (when absent) = COMMENTER (200), the static
    * `comment.create` floor the app has always enforced.
@@ -144,6 +213,12 @@ export interface OrgWideSettings {
    * Precedence: project key > user (localStorage) key > org key.
    */
   orgProviderKeys?: OrgProviderKeys
+  /**
+   * Omnilingual ASR. `zeroShotEnabled: false` hides the zero-shot model from
+   * every member and the server refuses it (403 zero_shot_disabled). Absent
+   * means allowed; each user must still opt in. Owners and maintainers write it.
+   */
+  transcription?: { zeroShotEnabled?: boolean }
 }
 
 export interface OrgSettingsResponse {
@@ -160,7 +235,21 @@ export interface OrgSettingsResponse {
    * not appear, which is the pre-feature behaviour.
    */
   countStructuralOverrides?: number
+  /** AQU-1771: the same count for the two validation defaults. */
+  validationCountOverrides?: number
+  validationCountAudioOverrides?: number
+  /** AQU-2263: and for "Auto-propagate repetitions". */
+  autoPropagateRepetitionsOverrides?: number
+  /**
+   * AQU-1938: which projects those counts are, keyed by the setting they set
+   * their own value for. Absent from an older server: the line then shows the
+   * bare count, as it did before. AQU-1768: and the five media defaults.
+   */
+  overrideProjects?: Partial<Record<InheritedOverrideKey | MediaDefaultKey | "autoPropagateRepetitions", OverrideProjectList>>
+  /** AQU-1768: per media default, how many projects set their own value. */
+  mediaDefaultOverrides?: Partial<Record<MediaDefaultKey, number>>
 }
+
 
 export type OrgPatchResult =
   | { kind: "ok"; value: OrgSettingsResponse }
@@ -280,9 +369,37 @@ export async function resetCountStructuralOverrides(
   orgId: number,
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<{ kind: "ok"; cleared: number } | { kind: "error"; message: string }> {
+  return resetProjectOverrides(jwt, orgId, "count-structural", apiUrl)
+}
+
+/** AQU-1771: the inherited org settings the server can reset project overrides for. */
+export type ProjectOverrideSlug =
+  | "count-structural"
+  | "validation-count"
+  | "validation-count-audio"
+  // AQU-1768: one per media default (MEDIA_DEFAULT_SLUGS).
+  | "timing-locked"
+  | "allow-track-editing"
+  | "cell-editing-floor"
+  | "allow-self-validation-audio"
+  | "validation-role-floor-audio"
+  // AQU-2263: "Auto-propagate repetitions".
+  | "auto-propagate-repetitions"
+
+/**
+ * POST .../settings/<slug>/reset-project-overrides — put every project in the
+ * org back on the org's default for one inherited setting. Clears the
+ * per-project key, like resetCountStructuralOverrides above.
+ */
+export async function resetProjectOverrides(
+  jwt: string,
+  orgId: number,
+  slug: ProjectOverrideSlug,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<{ kind: "ok"; cleared: number } | { kind: "error"; message: string }> {
   try {
     const res = await fetch(
-      `${apiUrl}/api/v2/orgs/${orgId}/settings/count-structural/reset-project-overrides`,
+      `${apiUrl}/api/v2/orgs/${orgId}/settings/${slug}/reset-project-overrides`,
       { method: "POST", headers: authHeaders(jwt) },
     )
     if (!res.ok) {
@@ -293,5 +410,58 @@ export async function resetCountStructuralOverrides(
     return { kind: "ok", cleared: Number(body.cleared) || 0 }
   } catch (err) {
     return { kind: "error", message: String(err) }
+  }
+}
+
+/**
+ * AQU-1771: how many of the org's projects are stricter than each visibility
+ * floor. AQU-2306: and than the org's import floor, which the Security page
+ * shows the same way (same route, same rules — see the auth-worker handler).
+ */
+export interface VisibilityOverrideCounts {
+  rosterViewMinRole: number
+  memberProgressViewMinRole: number
+  importMinRole: number
+  /** AQU-1938: which projects those are. Null from an older server. */
+  overrideProjects: Record<StricterFloorKey, OverrideProjectList | null>
+}
+
+/** The floors the Security page's stricter-projects lines cover. */
+export type StricterFloorKey = "rosterViewMinRole" | "memberProgressViewMinRole" | "importMinRole"
+
+/**
+ * GET /api/v2/orgs/:orgId/settings/visibility-overrides. Null on any failure
+ * (an older server without the route included): the line then says nothing.
+ */
+export async function fetchVisibilityOverrideCounts(
+  jwt: string,
+  orgId: number,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<VisibilityOverrideCounts | null> {
+  try {
+    const res = await fetch(`${apiUrl}/api/v2/orgs/${orgId}/settings/visibility-overrides`, {
+      headers: authHeaders(jwt),
+    })
+    if (!res.ok) return null
+    const body = (await res.json()) as {
+      rosterViewMinRole?: unknown
+      memberProgressViewMinRole?: unknown
+      importMinRole?: unknown
+      overrideProjects?: Partial<Record<StricterFloorKey, unknown>>
+    }
+    return {
+      rosterViewMinRole: Number(body.rosterViewMinRole) || 0,
+      memberProgressViewMinRole: Number(body.memberProgressViewMinRole) || 0,
+      // AQU-2306: absent on a server from before this route grew the key, which
+      // reads as "no project is stricter" — the same zero state as a real zero.
+      importMinRole: Number(body.importMinRole) || 0,
+      overrideProjects: {
+        rosterViewMinRole: parseOverrideProjectList(body.overrideProjects?.rosterViewMinRole),
+        memberProgressViewMinRole: parseOverrideProjectList(body.overrideProjects?.memberProgressViewMinRole),
+        importMinRole: parseOverrideProjectList(body.overrideProjects?.importMinRole),
+      },
+    }
+  } catch {
+    return null
   }
 }

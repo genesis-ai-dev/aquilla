@@ -33,7 +33,7 @@ describe("E2E determinism guardrails", () => {
     const scripts = packageJson.scripts ?? {}
 
     expect(scripts["test:e2e:guard"]).toBe(
-      "vitest run scripts/e2e-determinism.test.ts scripts/e2e-impact.test.ts",
+      "vitest run scripts/e2e-determinism.test.ts scripts/e2e-impact.test.ts scripts/lib/e2e-lock.test.ts scripts/lib/worktree-install-guard.test.ts scripts/lib/spawn-command.test.ts scripts/lib/playwright-loader-env.test.ts scripts/lib/listening-pids.test.ts",
     )
 
     for (const scriptName of [
@@ -86,6 +86,16 @@ describe("E2E determinism guardrails", () => {
         && /expect\([\s\S]{0,200}?\.locator\(\s*["']\[data-cell-id\]["']\s*\)\.first\(\)\s*\)\.toBeVisible/.test(source)
       ) {
         violations.push(`${relative}: bypasses Workspace.waitForEditor readiness contract`)
+      }
+      // AQU-1312: a screenshot/trace/video written to an absolute path only
+      // exists on the OS it was typed on. `/private/tmp` is macOS-only, so the
+      // sink threw ENOENT on Linux and the spec died before its first
+      // assertion — a red smoke gate that said nothing about the app. Artifacts
+      // belong in Playwright's own output directory, which the web config
+      // already fills on failure (`screenshot: "only-on-failure"`), so reach for
+      // `testInfo.outputPath()` or drop the line rather than naming a directory.
+      for (const match of source.matchAll(/\bpath:\s*(["'`])((?:\/|[A-Za-z]:\\)[^"'`]*)\1/g)) {
+        violations.push(`${relative}: absolute artifact path ${match[2]}`)
       }
     }
 
@@ -211,6 +221,34 @@ describe("E2E backend-reset transport retry", () => {
     // does not inherit leftover workerd/vite listeners.
     expect(source).toMatch(/for \(const port of MANAGED_PORTS\) \{\s*await freePort\(port\)/)
     expect(source.match(/for \(const port of MANAGED_PORTS\)/g)?.length).toBe(2)
+  })
+
+  it("pins the IPv4 loopback in every local Postgres URL a worker dials", () => {
+    // AQU-2107: the e2e reset reaches Postgres over a unix socket (`docker
+    // exec`, or E2E_PG_ADMIN_URL), but the workers dial the Hyperdrive
+    // connection string over TCP from inside workerd — the suite's only
+    // resolver-dependent hop. A `localhost` that resolves to `::1` ahead of
+    // 127.0.0.1 (the macOS /etc/hosts default) against a runtime publishing
+    // 5432 on IPv4 only can then add connect latency the database never sees,
+    // which is the leading explanation for that ticket's worker statement
+    // timeouts on sub-millisecond queries. Whatever the final diagnosis,
+    // resolution order must not decide whether the gating suite can reach its
+    // database, so the host stays a literal.
+    const offenders: string[] = []
+    for (const file of sourceFiles(path.join(REPO_ROOT, "scripts"))) {
+      if (/\.test\.ts$/.test(file)) continue
+      const source = readFileSync(file, "utf8")
+      if (/postgresql:\/\/[^\s"'`]*@localhost:/.test(source)) {
+        offenders.push(path.relative(REPO_ROOT, file))
+      }
+    }
+    expect(offenders).toEqual([])
+
+    // The two stack entrypoints whose string the workers actually dial.
+    const e2eUp = readFileSync(path.join(REPO_ROOT, "scripts/e2e-up.ts"), "utf8")
+    expect(e2eUp).toContain("postgresql://aquilla:aquilla@127.0.0.1:5432/")
+    const devStack = readFileSync(path.join(REPO_ROOT, "scripts/dev-stack.ts"), "utf8")
+    expect(devStack).toContain("postgresql://aquilla:aquilla@127.0.0.1:5432/")
   })
 
   it("isolates Wrangler registry heartbeat files per e2e stack", () => {

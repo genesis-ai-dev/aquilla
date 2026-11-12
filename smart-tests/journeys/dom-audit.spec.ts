@@ -19,9 +19,15 @@ test("DOM audit: project surfaces and editor activation use Jev's actual snapsho
       `/project/${seeded.projectId}/memory/quality`,
     ]) {
       await page.goto(route)
-      await expect(page.getByText(seeded.projectName, { exact: true }).first()).toBeVisible({ timeout: 30_000 })
-      await expect(page.locator('[data-testid="cell-area-loading"]')).toHaveCount(0)
-      await expect(page.getByText("Something went wrong", { exact: true })).toHaveCount(0)
+      // AQU-1354: name the route in every assertion. Eight surfaces share this
+      // loop, so a bare failure said only that one of them broke and the row
+      // went unexplained for weeks.
+      await expect(page.getByText(seeded.projectName, { exact: true }).first(),
+        `project name missing on ${route}`).toBeVisible({ timeout: 30_000 })
+      await expect(page.locator('[data-testid="cell-area-loading"]'),
+        `cell area still loading on ${route}`).toHaveCount(0)
+      await expect(page.getByText("Something went wrong", { exact: true }),
+        `error boundary rendered on ${route}`).toHaveCount(0)
       reports.push(await observeDom(page))
     }
     await page.goto(editorUrl(seeded))

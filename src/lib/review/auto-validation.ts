@@ -5,12 +5,21 @@ interface AutoValidationDecision {
   canValidate: boolean
   allowSelfValidation?: boolean
   roleLevel: number | null
+  /** AQU-1571: may this person validate text ANYWHERE on the project — the
+   *  role floor and named-validator list, from `textValidationScope`. Absent
+   *  means yes, for callers with no project policy to read. */
+  scopeCanValidate?: boolean
 }
 
 /**
  * A direct human target edit may auto-validate only when it has content, the
  * editor capability is present, the project permits validating one's own work,
  * and the current server role can perform the validation event.
+ *
+ * AQU-1571: and the project's own validator rules admit them. A contributor
+ * editing under a "project lead and above" floor used to queue a validation
+ * the server refused, which surfaced as the red "1 failed" banner on an
+ * ordinary edit.
  *
  * Keep this policy separate from the enqueue side effect so the security-
  * relevant negative case (`allowSelfValidation === false`) has fast regression
@@ -21,10 +30,12 @@ export function shouldAutoValidateHumanEdit({
   canValidate,
   allowSelfValidation,
   roleLevel,
+  scopeCanValidate = true,
 }: AutoValidationDecision): boolean {
   return Boolean(
     value.trim() &&
     canValidate &&
+    scopeCanValidate &&
     allowSelfValidation !== false &&
     canPerform("cell.validate", roleLevel),
   )

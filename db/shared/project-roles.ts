@@ -20,6 +20,7 @@
 //     isPlatformAdminEmail isn't importable here.
 
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
+import { resolveProjectRoleViaGrants } from "./access-grants"
 
 // AQU-435: mirrors auth-worker/src/services/project-permissions.ts's
 // ORG_WIDE_ACCESS_FLOOR (maintainer) — org-level roles below this open no
@@ -118,6 +119,79 @@ async function safeFirst<T>(stmt: AquillaStatement, label: string): Promise<T | 
 }
 
 /**
+ * AQU-1352 P1 (spec §5): which resolver answers. `off` = today's per-table
+ * queries; `shadow` = today's answer, plus the access_grants view answer
+ * compared and a mismatch logged; `on` = the view answer. Driven by the
+ * ACCESS_GRANTS_RESOLVER var; anything unrecognised is `off` so a typo can
+ * never switch production onto the new path.
+ */
+export type AccessGrantsMode = "off" | "shadow" | "on"
+
+export function parseAccessGrantsMode(raw: string | undefined | null): AccessGrantsMode {
+  return raw === "shadow" || raw === "on" ? raw : "off"
+}
+
+// Mode registered on the request-scoped db handle by each worker's fetch
+// wrapper, so the ~30 Agent-API call sites keep their signature. A handle with
+// nothing registered (tests, withUser() children, DO-built shims) resolves `off`.
+// SWARM-TODO(AQU-1352): when P2 makes `on` the default, drop this registry and
+// the per-table legacy queries rather than threading the mode further.
+const dbModes = new WeakMap<object, AccessGrantsMode>()
+
+export function setAccessGrantsMode(db: AquillaDb, raw: string | undefined | null): void {
+  dbModes.set(db, parseAccessGrantsMode(raw))
+}
+
+type SharedRole = { level: number; source: string }
+
+/**
+ * Run `legacy` and/or the view resolver per `mode`. Shared with auth-worker's
+ * resolveProjectRole so both layers apply the same flag semantics.
+ *   - A throwing view query (e.g. migration 0119 not applied) degrades to the
+ *     legacy answer, so an un-migrated env behaves exactly as today.
+ *   - Legacy errors (auth-worker's AQU-996 RoleLookupError) propagate untouched.
+ */
+export async function resolveWithGrantsMode<T extends SharedRole>(
+  mode: AccessGrantsMode,
+  ctx: { userId: string; projectId: string },
+  legacy: () => Promise<T | null>,
+  viaGrants: () => Promise<SharedRole | null>,
+  fromGrants: (g: SharedRole) => T,
+): Promise<T | null> {
+  if (mode === "off") return legacy()
+  if (mode === "on") {
+    let grants: SharedRole | null
+    try {
+      grants = await viaGrants()
+    } catch (err) {
+      console.warn("[access_grants] view query failed; using legacy resolver:", err)
+      return legacy()
+    }
+    return grants ? fromGrants(grants) : null
+  }
+  const legacyAnswer = await legacy()
+  try {
+    const g = await viaGrants()
+    const a = legacyAnswer ? { level: legacyAnswer.level, source: legacyAnswer.source } : null
+    const b = g ? { level: g.level, source: g.source } : null
+    if (a?.level !== b?.level || a?.source !== b?.source) {
+      console.warn(
+        JSON.stringify({
+          event: "access_grants_parity_mismatch",
+          userId: ctx.userId,
+          projectId: ctx.projectId,
+          legacy: a,
+          grants: b,
+        }),
+      )
+    }
+  } catch (err) {
+    console.warn("[access_grants] shadow view query failed:", err)
+  }
+  return legacyAnswer
+}
+
+/**
  * Resolve a user's effective role on a project — max-wins across direct
  * (override), group, org, creator, and platform paths (AD-12). Archived
  * projects resolve to null. Returns `{ level, source }` (name derivable from
@@ -132,8 +206,9 @@ export async function resolveProjectRoleShared(
   user: { id: string; email?: string | null },
   projectId: string,
   adminEmails?: string,
+  mode?: AccessGrantsMode,
 ): Promise<{ level: number; source: string } | null> {
-  return resolveProjectRoleSharedInternal(db, user, projectId, adminEmails, false)
+  return resolveShared(db, user, projectId, adminEmails, false, mode)
 }
 
 /**
@@ -149,8 +224,26 @@ export async function resolveProjectRoleIncludingArchivedShared(
   user: { id: string; email?: string | null },
   projectId: string,
   adminEmails?: string,
+  mode?: AccessGrantsMode,
 ): Promise<{ level: number; source: string } | null> {
-  return resolveProjectRoleSharedInternal(db, user, projectId, adminEmails, true)
+  return resolveShared(db, user, projectId, adminEmails, true, mode)
+}
+
+function resolveShared(
+  db: AquillaDb,
+  user: { id: string; email?: string | null },
+  projectId: string,
+  adminEmails: string | undefined,
+  includeArchived: boolean,
+  mode: AccessGrantsMode | undefined,
+): Promise<SharedRole | null> {
+  return resolveWithGrantsMode<SharedRole>(
+    mode ?? dbModes.get(db) ?? "off",
+    { userId: String(user.id), projectId },
+    () => resolveProjectRoleSharedInternal(db, user, projectId, adminEmails, includeArchived),
+    () => resolveProjectRoleViaGrants(db, user, projectId, adminEmails, includeArchived),
+    (g) => ({ level: g.level, source: g.source }),
+  )
 }
 
 async function resolveProjectRoleSharedInternal(

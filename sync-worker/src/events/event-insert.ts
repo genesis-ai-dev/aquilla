@@ -100,9 +100,13 @@ export function buildEventInsertStmt(db: AquillaDb, e: EventInsertRow): AquillaS
 // INVARIANT: the reader fence is correct only while every write batch completes
 // in under this TTL. A batch that outlives it has its ledger row purged out from
 // under it, and readers may already have advertised cursors above its seqs.
-// Server-side statement timeouts (audit fix #2, not yet landed) are what will
-// make that a provable bound — until then the settle-returned-zero warning
-// (see buildSettleSeqRangeStmt's RETURNING first_seq) is the tripwire.
+// AQU-1876 makes that a server-side bound rather than an assumption: every
+// worker connection carries DEFAULT_STATEMENT_TIMEOUT_MS (15s) and
+// DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS (30s), and the longest registered
+// opt-out that writes events — `import-finalize`, 120s — is still well inside
+// this TTL, so Postgres aborts a stuck batch long before its ledger row can
+// expire. The settle-returned-zero warning (see buildSettleSeqRangeStmt's
+// RETURNING first_seq) stays as the tripwire if that ever stops holding.
 export const PENDING_ALLOC_TTL_MS = 5 * 60_000
 
 // Allocation = counter bump + ledger announce + expired-row purge, ONE
@@ -221,4 +225,27 @@ export function buildBulkEventInsertStmt(db: AquillaDb, rows: SeqEventInsertRow[
 ON CONFLICT (id) DO NOTHING`,
     )
     .bind(...binds)
+}
+
+/**
+ * Rows per statement for writers whose row count is not bounded by a request
+ * (AQU-1543). postgres.js refuses a statement with 65,534 or more bound values
+ * and an events row binds 12, so ONE multi-row INSERT tops out at 5,461 events
+ * — a ceiling a server-authored batch (the mirror sync seeding a linked project
+ * from its upstream's whole history) crosses on any Bible-sized project. 1,000
+ * rows is the same budget the import route uses: an order of magnitude under
+ * the ceiling, with SQL text that stays small.
+ */
+export const EVENT_INSERT_BULK_ROWS = 1000
+
+/** `buildBulkEventInsertStmt` for ANY number of rows: the same rows, in order,
+ *  split across as many bounded statements as it takes. Append them all to one
+ *  write — the rows land exactly as a single statement would have landed them. */
+export function buildBulkEventInsertStmts(db: AquillaDb, rows: SeqEventInsertRow[]): AquillaStatement[] {
+  if (rows.length === 0) throw new Error('buildBulkEventInsertStmts: empty rows')
+  const stmts: AquillaStatement[] = []
+  for (let i = 0; i < rows.length; i += EVENT_INSERT_BULK_ROWS) {
+    stmts.push(buildBulkEventInsertStmt(db, rows.slice(i, i + EVENT_INSERT_BULK_ROWS)))
+  }
+  return stmts
 }

@@ -25,6 +25,27 @@ export const FULL_INLINE_MAX = 280
 export const PREVIEW_MAX = 200
 export const MAX_CHIPS = 8
 export const LEGEND_MAX = 1500
+/** Words of the selection a chip shows before "…" (full text on hover). */
+export const LABEL_WORDS = 6
+const LABEL_CHARS = 48
+
+/**
+ * The human-readable name of a chip: the opening words of the selected
+ * wording, so the composer pill and the sent bubble both say WHAT was asked
+ * about. The verse ref alone was often empty (cells without a context), which
+ * rendered as a bare "source" pill and a "[]" in chat history.
+ */
+export function chipLabel(chip: Pick<ContextChip, "selection" | "canonicalRef">): string {
+  const words = chip.selection.replace(/\s+/g, " ").trim().split(" ").filter(Boolean)
+  if (words.length === 0) return chip.canonicalRef || "source"
+  let label = words.slice(0, LABEL_WORDS).join(" ")
+  let cut = words.length > LABEL_WORDS
+  if (label.length > LABEL_CHARS) {
+    label = label.slice(0, LABEL_CHARS).trimEnd()
+    cut = true
+  }
+  return cut ? `${label}…` : label
+}
 
 function capPreview(selection: string): string {
   const s = selection.replace(/\s+/g, " ").trim()
@@ -107,12 +128,12 @@ export function serializeWithChips(
       const n = indexById.get(id)
       const chip = kept.find((c) => c.chipId === id)
       // Dropped (overflow) or unknown chip: leave a readable marker.
-      if (!n || !chip) return chip?.canonicalRef ? `[${chip.canonicalRef}]` : ""
+      if (!n || !chip) return chip ? `“${chipLabel(chip)}”` : ""
       return render(chip, n)
     })
 
   const wireText = replace((_c, n) => `⟦ctx:${n}⟧`)
-  const display = replace((c) => `[${c.canonicalRef ?? "source"}]`)
+  const display = replace((c) => `“${chipLabel(c)}”`)
 
   const lines: string[] = [
     "## Context (attached cells — previews truncated; read full text with one SQL query on file_id+cell_id if needed)",
@@ -120,7 +141,7 @@ export function serializeWithChips(
   for (const c of kept) {
     const n = indexById.get(c.chipId)!
     const quoted = c.selection.length <= FULL_INLINE_MAX ? c.selection : c.preview
-    lines.push(`⟦ctx:${n}⟧ ${c.canonicalRef ?? "source"} · file_id=${c.fileId} cell_id=${c.cellId} · source`)
+    lines.push(`⟦ctx:${n}⟧ ${c.canonicalRef || "source"} · file_id=${c.fileId} cell_id=${c.cellId} · source`)
     lines.push(`   "${quoted}"`)
   }
   if (overflow > 0) lines.push(`…+${overflow} more`)

@@ -5,10 +5,16 @@ import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Input } from "@/components/ui/input"
 import {
+  LANGUAGES,
   filterLanguages,
   isSettledLanguage,
   type LanguageEntry,
 } from "@/lib/languages/catalog"
+import {
+  loadFullLanguageCatalog,
+  peekFullLanguageCatalog,
+} from "@/lib/languages/full-catalog"
+import { derivedLanguageCode } from "@/lib/languages/use-derived-language-code"
 
 /**
  * AQU-988 — select-or-type language fields.
@@ -33,6 +39,17 @@ import {
  *  2. The list never writes back into the input on its own. Only an explicit
  *     click, or Enter on a highlighted row, calls `onSelect`/`onEnterSelect`.
  *
+ * AQU-1456 — the catalog itself is lazy. Suggestions start from the bundled
+ * ISO 639-1 set and switch to the full SIL ISO 639-3 catalog (~7,900 languages)
+ * as soon as it has loaded; the load is kicked off by the first focus or
+ * keystroke on any language field, so the initial app load never pays for it.
+ * Loading is purely additive — it widens `items`, and the two rules above are
+ * what still decide whether Enter picks a row.
+ *
+ * AQU-2049 — each row shows `derivedLanguageCode` for that language name (the
+ * same code the lane's Advanced field placeholders), beside the name. Picking
+ * still passes `entry.name` only. A name that derives nothing shows no code.
+ *
  * Opening is deliberately narrow: the list appears only when a real keystroke
  * produced the edit (or on ArrowDown), never on bare focus and never on a
  * value set programmatically. That keeps a popup from ever covering the
@@ -47,6 +64,8 @@ type PopupRect = { top: number; left: number; width: number; maxHeight: number }
 const POPUP_GAP = 4
 const POPUP_MAX_HEIGHT = 264
 const POPUP_MIN_WIDTH = 180
+/** Room for the derived code beside the name (AQU-2049). */
+const POPUP_CODE_GUTTER = 56
 
 function measure(anchor: HTMLElement): PopupRect {
   const rect = anchor.getBoundingClientRect()
@@ -58,7 +77,7 @@ function measure(anchor: HTMLElement): PopupRect {
   return {
     top: flip ? rect.top - POPUP_GAP - maxHeight : rect.bottom + POPUP_GAP,
     left: rect.left,
-    width: Math.max(POPUP_MIN_WIDTH, rect.width),
+    width: Math.max(POPUP_MIN_WIDTH, rect.width + POPUP_CODE_GUTTER),
     maxHeight,
   }
 }
@@ -124,14 +143,43 @@ export function useLanguageSuggestions({
   const typedRef = React.useRef(false)
   const listId = React.useMemo(() => `language-suggestions-${++listIdSeq}`, [])
 
+  // AQU-1456 — the bundled 639-1 set until the full 639-3 catalog arrives.
+  const [catalog, setCatalog] = React.useState<readonly LanguageEntry[]>(
+    () => peekFullLanguageCatalog() ?? LANGUAGES,
+  )
+  const mountedRef = React.useRef(true)
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+  /** Idempotent; called on the first focus and on every text-producing key. */
+  const requestFullCatalog = React.useCallback(() => {
+    const loaded = peekFullLanguageCatalog()
+    if (loaded) {
+      setCatalog(loaded)
+      return
+    }
+    void loadFullLanguageCatalog().then(
+      (entries) => {
+        if (mountedRef.current) setCatalog(entries)
+      },
+      () => {
+        // Chunk fetch failed (offline, cache miss). Stay on the bundled set —
+        // the next keystroke retries, and the field is freeform regardless.
+      },
+    )
+  }, [])
+
   const items = React.useMemo(() => {
     if (disabled) return []
-    const matches = filterLanguages(query, { exclude })
+    const matches = filterLanguages(query, { exclude, catalog })
     // Nothing left to offer once the text IS the only match — hide rather than
     // suggest the user's own value back at them (and keep the popup from
     // covering the controls under a fully-filled field).
     return isSettledLanguage(query, matches) ? [] : matches
-  }, [disabled, exclude, query])
+  }, [catalog, disabled, exclude, query])
 
   const close = React.useCallback(() => {
     setOpen(false)
@@ -204,6 +252,12 @@ export function useLanguageSuggestions({
       "aria-autocomplete": "list",
       "aria-activedescendant":
         open && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined,
+      onFocus: (event) => {
+        props.onFocus?.(event)
+        // Warm the catalog before the first keystroke so the widened list is
+        // already there when the user types. Does NOT open the list.
+        if (!disabled) requestFullCatalog()
+      },
       onChange: (event) => {
         const field = event.currentTarget
         const typed = typedRef.current
@@ -233,6 +287,8 @@ export function useLanguageSuggestions({
             event.key === "Process"
           ) {
             typedRef.current = true
+            // Covers fields filled without a focus event ever firing.
+            requestFullCatalog()
           }
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
             if (items.length > 0) {
@@ -275,7 +331,7 @@ export function useLanguageSuggestions({
         props.onKeyDown?.(event)
       },
     }),
-    [activeIndex, close, disabled, items, listId, open, pick],
+    [activeIndex, close, disabled, items, listId, open, pick, requestFullCatalog],
   )
 
   const visible = open && items.length > 0 && rect !== null
@@ -302,30 +358,38 @@ export function useLanguageSuggestions({
               className="max-h-full overflow-y-auto overscroll-contain"
               style={{ maxHeight: rect.maxHeight - 8 }}
             >
-              {items.map((entry, index) => (
-                <li key={entry.code} role="presentation">
-                  <button
-                    type="button"
-                    id={`${listId}-${index}`}
-                    role="option"
-                    aria-selected={index === activeIndex}
-                    tabIndex={-1}
-                    data-testid={`language-option-${entry.code}`}
-                    data-highlighted={index === activeIndex ? "" : undefined}
-                    className={cn(
-                      "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-start text-sm",
-                      index === activeIndex && "bg-accent/40 text-accent-foreground",
-                    )}
-                    onMouseEnter={() => setActiveIndex(index)}
-                    onClick={() => pick(entry, "click")}
-                  >
-                    <span className="truncate">{entry.name}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {entry.code}
-                    </span>
-                  </button>
-                </li>
-              ))}
+              {items.map((entry, index) => {
+                const code = derivedLanguageCode(entry.name, catalog)
+                return (
+                  <li key={entry.code} role="presentation">
+                    <button
+                      type="button"
+                      id={`${listId}-${index}`}
+                      role="option"
+                      aria-selected={index === activeIndex}
+                      tabIndex={-1}
+                      data-testid={`language-option-${entry.code}`}
+                      data-highlighted={index === activeIndex ? "" : undefined}
+                      className={cn(
+                        "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm",
+                        index === activeIndex && "bg-accent/40 text-accent-foreground",
+                      )}
+                      onMouseEnter={() => setActiveIndex(index)}
+                      onClick={() => pick(entry, "click")}
+                    >
+                      <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                      {code ? (
+                        <span
+                          data-language-code={code}
+                          className="shrink-0 whitespace-nowrap text-muted-foreground"
+                        >
+                          {code}
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                )
+              })}
             </ul>
           </div>,
           document.body,

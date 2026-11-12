@@ -10,6 +10,7 @@ const orgContext = vi.hoisted(() => ({
   guestOrgs: [] as { id: number; name: string | null }[],
   setActiveOrg: vi.fn(),
   setAllOrgs: vi.fn(),
+  isLoading: false,
 }))
 
 vi.mock("@/context/OrgContext", () => ({
@@ -17,7 +18,7 @@ vi.mock("@/context/OrgContext", () => ({
     ...orgContext,
     activeOrg: orgContext.orgs.find((org) => org.id === orgContext.activeOrgId) ?? null,
     guestOrgs: orgContext.guestOrgs,
-    isLoading: false,
+    isLoading: orgContext.isLoading,
     error: null,
     refresh: vi.fn(),
   }),
@@ -43,6 +44,7 @@ describe("OrgBreadcrumb", () => {
     orgContext.isAllOrgs = false
     orgContext.orgs = [{ id: 7, name: "Dev Org" }]
     orgContext.guestOrgs = []
+    orgContext.isLoading = false
     orgContext.setActiveOrg.mockClear()
     orgContext.setAllOrgs.mockClear()
   })
@@ -117,6 +119,16 @@ describe("OrgBreadcrumb", () => {
   // AQU-790: viewing a guest org (`/orgs/:guestId/projects`), the guest org is a
   // sibling of "All organizations" — NOT nested under one of the caller's owned
   // orgs. Same trail shape as a member org's projects page.
+  it("holds the org's place with one cursor while its record is still loading", () => {
+    orgContext.orgs = []
+    orgContext.isLoading = true
+    renderBreadcrumb(<OrgBreadcrumb section="Teams" />, "/orgs/7/teams")
+
+    expect(screen.getByTestId("org-breadcrumb-pending")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "All organizations" })).toBeInTheDocument()
+    expect(screen.queryByText("Organization")).toBeNull()
+  })
+
   it("renders a guest org as its own crumb, not a descendant of an owned org", () => {
     orgContext.activeOrgId = 2
     orgContext.orgs = [{ id: 7, name: "Dev Org" }]

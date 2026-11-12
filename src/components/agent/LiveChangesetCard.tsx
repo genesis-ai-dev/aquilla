@@ -23,6 +23,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
+import { UserChip } from "@/components/UserChip"
 import { formatDateTime } from "@/lib/i18n/format"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
@@ -40,6 +42,7 @@ import {
   changesetStatusBadgeClass,
   changesetStatusLabel,
   changesetStatusVariant,
+  isDecidedChangesetStatus,
   isTerminalChangesetStatus,
   testimonyEntriesFor,
 } from "@/lib/agent/changeset-review"
@@ -111,15 +114,15 @@ export function LiveChangesetCard({
   const allConfirmed = testimony.every((entry) => confirmed.has(entry.key))
 
   // Routing (COMMAND-REGISTRY-P1 §2.2): the payload names an assignee by id,
-  // so the roster supplies the human name. A null projectId makes the hook
-  // inert, so an UNassigned card costs no request; when the roster is
-  // unavailable (org policy hides it, or it hasn't landed yet) the id is a
-  // truthful fallback.
+  // so the roster supplies the username. A null projectId makes the hook
+  // inert, so an unassigned card costs no request. When the roster can't name
+  // them, the chip says "User" and the tooltip keeps the id — the id is not
+  // the label.
   const assignedToUserId = approval?.assignedToUserId ?? null
   const { members } = useProjectMembers(assignedToUserId && approval ? approval.projectId : null)
-  const assignee = useMemo(() => {
+  const assigneeUsername = useMemo(() => {
     if (!assignedToUserId) return null
-    return members.find((m) => String(m.userId) === assignedToUserId)?.username ?? assignedToUserId
+    return members.find((m) => String(m.userId) === assignedToUserId)?.username ?? null
   }, [assignedToUserId, members])
 
   const refresh = () => {
@@ -196,13 +199,21 @@ export function LiveChangesetCard({
   // Superseded is a GOOD terminal outcome (P1 §1) — the work already exists —
   // so it earns an explanation rather than the error treatment `stale` gets.
   const showSupersededNotice = status === "superseded"
+  // AQU-1639: an answered card keeps its header, status chip and receipt (the
+  // trace of what happened) but drops the staged diff — an applied suggestion
+  // that still shows its whole proposal reads as though nothing happened.
+  const decided = isDecidedChangesetStatus(status)
 
   return (
     <div
       data-frame-type="changeset.staged"
       data-changeset-status={displayStatus}
       aria-busy={committing || undefined}
-      className="space-y-1.5 rounded-lg border border-sky-900/60 bg-sky-950/30 px-3 py-2"
+      data-changeset-collapsed={decided ? "true" : undefined}
+      // AQU-1639: sky-950 alone painted a near-black panel in LIGHT mode, so
+      // its muted text was dark-on-dark. Light values first, dark behind the
+      // `dark:` prefix — the pairing ProposalReceipt already uses.
+      className="space-y-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 dark:border-sky-900/60 dark:bg-sky-950/30"
     >
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
         <FileDiff className="h-3.5 w-3.5 shrink-0 text-sky-500" />
@@ -223,12 +234,24 @@ export function LiveChangesetCard({
         </Badge>
       </div>
 
-      {assignee !== null && (
+      {assignedToUserId !== null && (
         <p className="flex items-start gap-1 text-[11px] text-muted-foreground">
           <UserRound className="mt-px h-3 w-3 shrink-0" />
           <span>
-            <span className="font-medium text-foreground">
-              {t("agent.changeset.routedTo", { user: assignee })}
+            <span className="inline-flex items-center gap-1 font-medium text-foreground">
+              <RichMessage
+                k="agent.changeset.routedTo"
+                values={{
+                  user: (
+                    <UserChip
+                      userId={assignedToUserId}
+                      username={assigneeUsername}
+                      size="xs"
+                      nameClassName="text-[11px]"
+                    />
+                  ),
+                }}
+              />
             </span>{" "}
             {t("agent.changeset.routedToNotice")}
           </span>
@@ -259,10 +282,10 @@ export function LiveChangesetCard({
         </div>
       )}
 
-      {approval?.changes && approval.changes.items.length > 0 && (
+      {!decided && approval?.changes && approval.changes.items.length > 0 && (
         <ChangeList changes={approval.changes} maxItems={MAX_DIFF_ROWS} />
       )}
-      {approval?.importPreview && <ImportPreviewView preview={approval.importPreview} />}
+      {!decided && approval?.importPreview && <ImportPreviewView preview={approval.importPreview} />}
 
       {reviewable && testimony.length > 0 && (
         <div className="space-y-1 rounded-md border border-amber-300/50 bg-amber-50/50 p-2 dark:bg-amber-950/20">
@@ -292,7 +315,7 @@ export function LiveChangesetCard({
       )}
 
       {showReceipt && (
-        <p className="flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+        <p className="flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-500">
           <Check className="h-3 w-3 shrink-0" />
           {t("agent.changeset.receiptApplied", { count: appliedCount ?? 0 })}
           {staleCount > 0 && (

@@ -2,6 +2,10 @@
 
 import { describe, it, expect } from "vitest"
 import { parseTnTsv } from "./translation-notes"
+import {
+  readNoteReferenceMetadata,
+  supportReferenceLabel,
+} from "@/lib/notes/note-metadata"
 
 // Standard unfoldingWord three-column format
 const UW_FIXTURE = `Book\tChapter\tVerse\tID\tSupportReference\tOrigQuote\tOccurrence\tNote
@@ -138,5 +142,59 @@ describe("parseTnTsv — robustness", () => {
     for (const s of result.strings) {
       expect(s.type).toBe("text")
     }
+  })
+})
+
+// AQU-527 — the original-language quote is its own field, not prose.
+//
+// It used to be tab-joined into the body with the occurrence digit and the note
+// text, which is why the editor's notes sidebar rendered one undifferentiated
+// run and UW reported the phrase had been "taken out". These cases pin the
+// split AND the seam: what this parser puts in `metadata` is read back through
+// the accessor the sidebar actually calls, so a renamed key fails here rather
+// than silently blanking the phrase in the panel.
+describe("parseTnTsv — original-language quote (AQU-527)", () => {
+  it("reads OrigQuote and Occurrence out as their own fields", () => {
+    const { notes } = parseTnTsv(UW_FIXTURE)
+    expect(notes[0].origQuote).toBe("הַשָּׁמַ֖יִם וְאֵ֥ת הָאָֽרֶץ")
+    expect(notes[0].occurrence).toBe("1")
+    expect(notes[1].origQuote).toBe("בָּרָ֣א")
+    // Third row's OrigQuote column is empty — absent, not an empty string.
+    expect(notes[2].origQuote).toBeUndefined()
+  })
+
+  it("keeps the quote and occurrence out of the note body", () => {
+    const { notes } = parseTnTsv(UW_FIXTURE)
+    expect(notes[0].body).toBe("This is a merism for everything.")
+    expect(notes[0].body).not.toContain("הַשָּׁמַ֖יִם")
+  })
+
+  it("accepts the older `Quote` header as well as `OrigQuote`", () => {
+    const { notes } = parseTnTsv(
+      `Book\tChapter\tVerse\tID\tQuote\tOccurrence\tNote\nMAT\t2\t1\tgrammar-connect\tδὲ\t1\tHere, the word Now introduces the next event.`,
+    )
+    expect(notes[0].origQuote).toBe("δὲ")
+    expect(notes[0].body).toBe("Here, the word Now introduces the next event.")
+  })
+
+  it("carries quote, occurrence and support reference into cell metadata", () => {
+    const { strings } = parseTnTsv(UW_FIXTURE)
+    expect(strings[0].metadata).toEqual({
+      quote: "הַשָּׁמַ֖יִם וְאֵ֥ת הָאָֽרֶץ",
+      occurrence: "1",
+      supportReference: "rc://*/tw/dict/bible/other/creation",
+    })
+    // No reference columns at all → no metadata bucket, not a bucket of blanks.
+    expect(parseTnTsv(MINIMAL_FIXTURE).strings[0].metadata).toBeUndefined()
+  })
+
+  it("hands the sidebar's reader a displayable phrase, script and support article", () => {
+    const { strings } = parseTnTsv(UW_FIXTURE)
+    const read = readNoteReferenceMetadata(strings[0].metadata)
+    expect(read.quote).toBe("הַשָּׁמַ֖יִם וְאֵ֥ת הָאָֽרֶץ")
+    expect(read.quoteScript).toBe("he")
+    // Occurrence 1 singles nothing out, so the panel shows no marker.
+    expect(read.occurrence).toBeNull()
+    expect(supportReferenceLabel(read.supportReference!)).toBe("creation")
   })
 })

@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 /**
  * useComments — live threaded comments on the v3 event log.
  *
@@ -20,10 +21,24 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { v7 as uuidv7 } from "uuid"
 import { enqueueEvent } from "@/lib/sync/events-emit"
 import { fetchCommentCounts, fetchCommentsForProject } from "@/lib/sync/comments-read"
+import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import type { CommentCounts, CommentRecord } from "@/lib/sync/comments-read-types"
 import type { CommentScope } from "@/lib/sync/outbox-types"
+import { useRefusedComments } from "@/hooks/useRefusedComments"
+import type { CommentRefusal } from "@/lib/sync/comment-refusals"
+import { COMMENT_SUBMIT_REFUSED } from "@/lib/event-names"
 
 export type { CommentRecord, CommentScope }
+export type { CommentRefusal }
+
+/**
+ * AQU-1957: outbox record ids already reported to telemetry. Module-level, not
+ * a ref: the workspace and the Comments page each mount their own
+ * `useComments` for the same project, and navigating between them would
+ * otherwise re-report the same refusal on every mount. Holds record ids only,
+ * and a refused comment is rare, so it does not need eviction.
+ */
+const reportedRefusals = new Set<string>()
 
 /**
  * Sentinel fileId for project-scoped comment.* events.
@@ -96,9 +111,17 @@ export interface UseCommentsApi {
   deleteComment: (commentId: string) => Promise<void>
   resolveThread: (commentId: string, resolved: boolean) => Promise<void>
   refresh: () => Promise<void>
+  /**
+   * AQU-1957: this project's `comment.*` events the outbox has given up on.
+   * Their optimistic comments have already been taken back out of `comments`,
+   * so the list no longer claims a refused comment was posted; the caller
+   * renders these to say which comment didn't post and why.
+   */
+  refusals: CommentRefusal[]
 }
 
 export function useComments(opts: UseCommentsOptions): UseCommentsApi {
+  const analytics = useAccountAnalytics()
   const { projectId, getToken, author, scope, tokenReady, priorityFileId } = opts
 
   const [comments, setComments] = useState<CommentRecord[]>([])
@@ -247,6 +270,28 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
       return
     }
     refresh().catch(() => {/* refresh sets isError */})
+  }, [projectId, tokenReady, refresh])
+
+  // AQU-817: refetch when the tab regains focus — the drift mitigation every
+  // other read hook already has (useCells, useCellValidators, useCellHistory,
+  // useCellsAuditStats, useProjectSettings, useStaleSourceCells).
+  //
+  // Until this, the comments list had exactly ONE live path: an `event.applied`
+  // comment frame arriving over the project socket. Per AD-1 the ProjectSync DO
+  // holds no durable state and never replays, so a frame that lands while this
+  // client's socket is down — a sync-worker redeploy, a DO eviction, a network
+  // blip, a sleeping laptop — is lost to this client *permanently*. Unlike
+  // cells (AQU-845), nothing re-armed the comments read afterwards, so a
+  // collaborator's thread stayed invisible until a full page reload. That is
+  // the reported failure: a contributor's comment never reached another member
+  // sitting in the same cell, while traffic the other direction arrived fine —
+  // the asymmetry is whose socket had the gap, not anyone's role.
+  useEffect(() => {
+    if (!projectId) return
+    if (tokenReady === false) return
+    return subscribeWindowRegainedFocus(() => {
+      refresh().catch(() => {/* refresh sets isError */})
+    })
   }, [projectId, tokenReady, refresh])
 
   /**
@@ -401,9 +446,43 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
     if (opt) optimisticRef.current.set(commentId, { ...opt, resolved, updatedAt: Date.now() })
   }, [])
 
+  // AQU-1957: a comment the server refused must come back OUT of the thread.
+  // `mergeWithOptimistic` reads "not in server rows" as "the flush hasn't
+  // landed yet", which is true right up until the outbox gives up — after
+  // which the optimistic record would sit there forever claiming a comment was
+  // posted that nobody else can see. Only the event's own death tells the two
+  // apart, so roll the comment back on it and report the refusal upward.
+  const refusals = useRefusedComments(projectId)
+  useEffect(() => {
+    if (refusals.length === 0) return
+    const rolledBack: string[] = []
+    for (const refusal of refusals) {
+      if (optimisticRef.current.delete(refusal.commentId)) {
+        rolledBack.push(refusal.commentId)
+      }
+      // Telemetry fires once per outbox record, whether or not this tab still
+      // held the optimistic comment (the record outlives the mount that queued
+      // it): the refusal is the signal that was missing when this surface's
+      // only report arrived through meeting notes.
+      // Never the comment body — a refused comment is still the user's text.
+      if (reportedRefusals.has(refusal.id)) continue
+      reportedRefusals.add(refusal.id)
+      analytics.capture(COMMENT_SUBMIT_REFUSED, {
+        kind: refusal.kind,
+        status: refusal.status,
+        reason: refusal.reason,
+        project_id: projectRef.current,
+      })
+    }
+    if (rolledBack.length === 0) return
+    const dropped = new Set(rolledBack)
+    mutationSeqRef.current++
+    setComments((prev) => prev.filter((c) => !dropped.has(c.commentId)))
+  }, [refusals, analytics])
+
   return {
     comments, isLoading, isLoadingRest, isError, counts,
-    addComment, editComment, deleteComment, resolveThread, refresh,
+    addComment, editComment, deleteComment, resolveThread, refresh, refusals,
   }
 }
 

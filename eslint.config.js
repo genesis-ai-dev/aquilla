@@ -24,7 +24,9 @@ export default defineConfig([
   // .claude holds local agent worktrees (full repo copies with their own
   // node_modules); ESLint 10 traverses dot-directories and resolves each file's
   // nearest eslint.config.js, so without this ignore it loads those copies' configs.
-  globalIgnores(['dist', '.claude']),
+  // Browser smoke builds and Wrangler bundles are generated, and Wrangler
+  // removes its temporary files while the local test stack runs.
+  globalIgnores(['dist', 'dist-e2e-*', '**/.wrangler/**', '.claude', '.worktrees', 'zapier']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -109,40 +111,6 @@ export default defineConfig([
       ],
     },
   },
-  // LaneScopedRead perimeter guard: only lane-visibility-authority.ts may mint
-  // the brand. Any other file that constructs the object literal or casts to
-  // LaneScopedRead bypasses the visibility resolver.
-  {
-    files: ['sync-worker/src/**/*.ts'],
-    ignores: ['sync-worker/src/events/lane-visibility-authority.ts'],
-    rules: {
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector:
-            'ObjectExpression > Property[key.name="__brand"][value.value="lane-scoped-read"]',
-          message:
-            'LaneScopedRead must only be minted via makeLaneScopedRead() in events/lane-visibility-authority.ts. Direct brand construction defeats the read perimeter.',
-        },
-        {
-          selector: 'TSAsExpression[typeAnnotation.typeName.name="LaneScopedRead"]',
-          message:
-            'LaneScopedRead must only be minted via makeLaneScopedRead() in events/lane-visibility-authority.ts. Type assertions defeat the read perimeter.',
-        },
-        {
-          selector: 'TSTypeAssertion[typeAnnotation.typeName.name="LaneScopedRead"]',
-          message:
-            'LaneScopedRead must only be minted via makeLaneScopedRead() in events/lane-visibility-authority.ts. Type assertions defeat the read perimeter.',
-        },
-        {
-          selector:
-            'ImportSpecifier[imported.name="LaneScopedRead"]:not([local.name="LaneScopedRead"])',
-          message:
-            'LaneScopedRead must not be aliased on import; this defeats the ESLint perimeter guard.',
-        },
-      ],
-    },
-  },
   // DOM-global shadow guard (AQU-642): these PascalCase browser globals collide with
   // lucide-react icon names. If an icon import is dropped (e.g. in a merge-conflict
   // resolution), the JSX silently resolves to the DOM global — TypeScript accepts it
@@ -161,6 +129,27 @@ export default defineConfig([
             message: `"${name}" here is the browser global, not an import — if this is meant to be a lucide icon or local symbol, import it (see AQU-642).`,
           }),
         ),
+      ],
+    },
+  },
+  // AQU-1937: Smart Extensions' reserved identity color. Only the host-drawn
+  // ExtensionFrame / ExtensionMarker may use the --extension-accent token, so
+  // nothing else (app UI, themes, anything forwarded into extension frames)
+  // can look like — or restyle — the extension identity. Tests check it too.
+  {
+    files: ['src/**/*.{ts,tsx}', 'shared/**/*.ts'],
+    ignores: ['src/components/tools/ExtensionFrame.tsx', 'src/components/tools/ExtensionMarker.tsx', '**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'Literal[value=/extension-accent/]',
+          message: 'The --extension-accent color is reserved for ExtensionFrame / ExtensionMarker (AQU-1937). Use those components.',
+        },
+        {
+          selector: 'TemplateElement[value.raw=/extension-accent/]',
+          message: 'The --extension-accent color is reserved for ExtensionFrame / ExtensionMarker (AQU-1937). Use those components.',
+        },
       ],
     },
   },

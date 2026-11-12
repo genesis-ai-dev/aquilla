@@ -35,7 +35,6 @@ import {
   Sparkles,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { TermRendering } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
@@ -121,17 +120,16 @@ function PredictedRow({
 
         <ConfidenceLabel score={prediction.confidenceScore} />
 
+        {/* Its word names it: no hover (AQU-2260). */}
         {canPromote && onPromote && (
-          <AppTooltip content={t("terminology.equivalents.promoteTooltip")}>
-            <Button
-              variant="ghost"
-              size="xs"
-              className="ms-auto h-6 px-1.5 text-[10px]"
-              onClick={() => onPromote(prediction.target)}
-            >
-              {t("terminology.equivalents.promoteButton")}
-            </Button>
-          </AppTooltip>
+          <Button
+            variant="ghost"
+            size="xs"
+            className="ms-auto h-6 px-1.5 text-[10px]"
+            onClick={() => onPromote(prediction.target)}
+          >
+            {t("terminology.equivalents.promoteButton")}
+          </Button>
         )}
       </div>
 
@@ -164,6 +162,13 @@ export interface EquivalentsPanelProps {
   canPromote?: boolean
   /** Called when the user promotes a predicted gloss. Crosses the line. */
   onPromote?: (target: string) => void
+  /**
+   * Present while suggested renderings have not been scanned yet. An empty
+   * prediction list then offers this action instead of reading as "nothing
+   * found". Opening a term must not scan the whole project for them.
+   */
+  onRequestScan?: () => void
+  scanLoading?: boolean
   className?: string
 }
 
@@ -177,6 +182,8 @@ export function EquivalentsPanel({
   predicted,
   canPromote = false,
   onPromote,
+  onRequestScan,
+  scanLoading = false,
   className,
 }: EquivalentsPanelProps) {
   const t = useT()
@@ -223,7 +230,13 @@ export function EquivalentsPanel({
             {t("terminology.equivalents.suggestedSubtitle")}
           </span>
         </header>
-        {predicted.length === 0 ? (
+        {scanLoading ? (
+          <p className="text-xs text-muted-foreground">{t("terminology.termDetail.loadingExamples")}</p>
+        ) : onRequestScan && predicted.length === 0 ? (
+          <Button type="button" variant="outline" size="sm" onClick={onRequestScan}>
+            {t("terminology.termDetail.scanSuggestions")}
+          </Button>
+        ) : predicted.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">
             {t("terminology.equivalents.noPredicted")}
           </p>

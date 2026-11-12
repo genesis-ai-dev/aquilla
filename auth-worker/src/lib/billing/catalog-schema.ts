@@ -15,7 +15,8 @@ export const catalogSchema = z.object({
     live: z.boolean(),
     // A higher self-service quantity still needs commercial approval.
     maxQuantity: z.literal(1),
-  })).length(10),
+  })).length(2).refine(bindings => new Set(bindings.map(b => b.interval)).size === 2,
+    'Team needs exactly one monthly and one annual price'),
 })
 export const priceSchema = z.object({
   id: z.string(), product: z.union([z.string(), z.object({ id: z.string() })]),

@@ -1,6 +1,8 @@
 import type { Voice } from "@/lib/parsers/types"
 import { pcm16BytesToWavBlob } from "./wav"
 import { DEFAULT_PROMPT_TEMPLATE } from "./voices"
+import { TTS_REQUEST_TIMEOUT_MS, errorFromTtsTimeout, isAbortTimeout } from "./tts-engine-error"
+import { timeoutSignal } from "@/lib/sync/fetch-timeout"
 
 export const GEMINI_TTS_MODEL = "gemini-3.1-flash-tts-preview"
 export { DEFAULT_TTS_PROVIDER, GEMINI_TTS_VOICES } from "./tts-providers"
@@ -90,23 +92,32 @@ export async function synthesizeGeminiTtsToWavBlob(args: {
   const prompt = buildGeminiTtsPrompt(args.text, template, args.context, args.voice)
 
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelPath(model)}:generateContent`
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": apiKey,
-    },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: { prebuiltVoiceConfig: { voiceName } },
-        },
+  // AQU-1156: same bound as the hosted path — a hung generativelanguage.googleapis.com
+  // must not leave the cell's generate control spinning with nothing to retry.
+  let res: Response
+  try {
+    res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
       },
-      model,
-    }),
-  })
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName } },
+          },
+        },
+        model,
+      }),
+      signal: timeoutSignal(TTS_REQUEST_TIMEOUT_MS),
+    })
+  } catch (err) {
+    if (isAbortTimeout(err)) throw errorFromTtsTimeout("Gemini TTS", TTS_REQUEST_TIMEOUT_MS)
+    throw err
+  }
 
   const json = await readJson(res)
   if (!res.ok) {

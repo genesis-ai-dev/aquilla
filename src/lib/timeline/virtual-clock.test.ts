@@ -18,6 +18,7 @@ import {
   virtualClockPause,
   virtualClockPlay,
   virtualClockSeek,
+  virtualClockSeekFromTimeline,
 } from "./virtual-clock"
 
 let now = 0
@@ -235,5 +236,89 @@ describe("the snapshot React reads", () => {
     const a = getVirtualClockSec()
     now += 5000
     expect(getVirtualClockSec()).toBe(a)
+  })
+})
+
+// 2026-09-30: the clock is the transport of a subtitle file with neither film
+// nor source audio, and pressing play there left a take sounding under the
+// timeline. It takes the floor like the play queue does.
+describe("one sound at a time", () => {
+  const other = () => {
+    let playing = true
+    const c = { isPlaying: () => playing, play: async () => { playing = true }, pause: vi.fn(() => { playing = false }) }
+    return c
+  }
+
+  it("stops whatever else is sounding when it starts", async () => {
+    const { claimActiveAudio, getActiveAudio, clearActiveAudioIf } = await import("@/lib/audio/audio-coordinator")
+    const take = other()
+    claimActiveAudio(take)
+    startVirtualClock(10)
+    virtualClockPlay()
+    expect(take.pause).toHaveBeenCalledTimes(1)
+    expect(getActiveAudio()?.isPlaying()).toBe(true)
+    virtualClockPause()
+    expect(getActiveAudio()).toBeNull()
+    clearActiveAudioIf(take)
+  })
+
+  it("is stopped by the next thing that starts", async () => {
+    const { claimActiveAudio, clearActiveAudioIf } = await import("@/lib/audio/audio-coordinator")
+    startVirtualClock(10)
+    virtualClockPlay()
+    const take = other()
+    claimActiveAudio(take)
+    expect(getVirtualClockPlaying()).toBe(false)
+    clearActiveAudioIf(take)
+  })
+
+  it("lets go of the floor at the end and when it stops driving", async () => {
+    const { getActiveAudio } = await import("@/lib/audio/audio-coordinator")
+    startVirtualClock(1)
+    virtualClockPlay()
+    advance(1500)
+    expect(getVirtualClockPlaying()).toBe(false)
+    expect(getActiveAudio()).toBeNull()
+    virtualClockPlay()
+    stopVirtualClock()
+    expect(getActiveAudio()).toBeNull()
+  })
+})
+
+// AQU-1118: "Play from this cue" on a file the clock owns.
+describe("a timeline seek", () => {
+  it("only moves the head when it is a plain seek (chip or row click)", () => {
+    startVirtualClock(30)
+    virtualClockSeekFromTimeline(9, { recorderOpen: false })
+    expect(getVirtualClockSec()).toBe(9)
+    expect(getVirtualClockPlaying()).toBe(false)
+  })
+
+  it("moves the head and starts the clock when the press asked to play", () => {
+    startVirtualClock(30)
+    virtualClockSeekFromTimeline(9, { play: true, recorderOpen: false })
+    expect(getVirtualClockPlaying()).toBe(true)
+    advance(1000)
+    expect(getVirtualClockSec()).toBeCloseTo(10, 5)
+  })
+
+  it("jumps and keeps playing when pressed on another line while playing", () => {
+    startVirtualClock(30)
+    virtualClockSeekFromTimeline(9, { play: true, recorderOpen: false })
+    advance(500)
+    virtualClockSeekFromTimeline(20, { play: true, recorderOpen: false })
+    expect(getVirtualClockPlaying()).toBe(true)
+    advance(1000)
+    expect(getVirtualClockSec()).toBeCloseTo(21, 5)
+  })
+
+  it("never starts while the recorder is open, and nothing resumes later", () => {
+    startVirtualClock(30)
+    virtualClockSeekFromTimeline(9, { play: true, recorderOpen: true })
+    expect(getVirtualClockSec()).toBe(9)
+    expect(getVirtualClockPlaying()).toBe(false)
+    advance(2000)
+    expect(getVirtualClockPlaying()).toBe(false)
+    expect(getVirtualClockSec()).toBe(9)
   })
 })

@@ -21,7 +21,8 @@ describe("generateAndAttachCellVoice routing", () => {
       buildAudioId: () => "id", uploadCellAudio: vi.fn(),
       fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
     }))
-    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    const convert = vi.fn()
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: convert }))
     vi.doMock("./voices", () => ({
       resolveVoice: () => ({ id: "v", name: "N", provider: "inworld", voiceName: "Dennis" }),
     }))
@@ -31,7 +32,14 @@ describe("generateAndAttachCellVoice routing", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       session: { jwt: "j", username: "u" } as any, username: "u",
       geminiContext: { targetLanguage: "es" },
+      surface: "voice-panel",
     })
+    // AQU-1572: one generation is ONE attach carrying the generate origin,
+    // which the emit seam reports as one `audio generated`.
+    expect(emitAttach).toHaveBeenCalledTimes(1)
+    expect(emitAttach).toHaveBeenCalledWith(expect.objectContaining({
+      audioOrigin: "generate", ttsProvider: "inworld", surface: "voice-panel",
+    }))
     expect(synthCellTts).toHaveBeenCalledTimes(1)
     expect(synthCellTts).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -46,6 +54,172 @@ describe("generateAndAttachCellVoice routing", () => {
     expect(synthForCell).not.toHaveBeenCalled()
     expect(emitAttach).toHaveBeenCalledWith(
       expect.objectContaining({ audioId: "audio-tts-1.wav", slot: "generatedVoice", durationMs: 1200 }),
+    )
+    // …and is a plain TTS voice: no instant clone, no conversion.
+    expect((synthCellTts.mock.calls[0] as unknown[])[0]).not.toHaveProperty("referenceAudioId")
+    expect(convert).not.toHaveBeenCalled()
+    expect((emitAttach.mock.calls[0] as unknown[])[0]).not.toHaveProperty("referenceAudioId")
+  })
+
+  it("an Inworld quick clone sends its reference clip to /tts, with no conversion step", async () => {
+    vi.resetModules()
+    const synthCellTts = vi.fn(async () => ({
+      audioId: "audio-tts-2", durationSeconds: 1,
+      objectName: "audio-tts-2.wav", url: "frontier-audio://audio-tts-2.wav",
+    }))
+    const emitAttach = vi.fn(async () => {})
+    vi.doMock("@/lib/sync/tts", () => ({ synthesizeCellTts: synthCellTts }))
+    vi.doMock("./tts", () => ({ synthesizeForCell: vi.fn(), setTtsStatus: vi.fn(), ttsStatusKey: (s: string) => s }))
+    vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: emitAttach }))
+    vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn(), injectOptimisticAudioAttachment: vi.fn() }))
+    vi.doMock("./sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "tok" }))
+    vi.doMock("./upload", () => ({
+      buildAudioId: () => "id", uploadCellAudio: vi.fn(),
+      fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
+    }))
+    const convert = vi.fn()
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: convert }))
+    vi.doMock("./voices", () => ({
+      resolveVoice: () => ({ id: "v-c", name: "Ana", provider: "inworld", voiceName: "Dennis", referenceAudioId: "ref-ana.webm" }),
+    }))
+    const { generateAndAttachCellVoice } = await import("./generate-voice")
+    await generateAndAttachCellVoice({
+      projectId: "p", fileId: "f", cellId: "c", text: "hello",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      session: { jwt: "j", username: "u" } as any, username: "u",
+    })
+    expect(synthCellTts).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "hello", referenceAudioId: "ref-ana.webm" }),
+      expect.any(Function),
+    )
+    expect(convert).not.toHaveBeenCalled()
+    // The voice's clip is not the take's lineage (`referenceAudioId` on an
+    // attachment names the take it was made from — denoise, Change voice).
+    expect((emitAttach.mock.calls[0] as unknown[])[0]).not.toHaveProperty("referenceAudioId")
+  })
+
+  it("an ElevenLabs voice synthesizes through the BYOK route and attaches the stored mp3", async () => {
+    vi.resetModules()
+    const synthCellTts = vi.fn()
+    const synthElevenLabs = vi.fn(async () => ({
+      audioId: "audio-tts-7", durationSeconds: 2,
+      objectName: "audio-tts-7.mp3", url: "frontier-audio://audio-tts-7.mp3",
+    }))
+    const fetchAudio = vi.fn(async () => new ArrayBuffer(4))
+    const emitAttach = vi.fn(async () => {})
+    vi.doMock("@/lib/sync/tts", () => ({ synthesizeCellTts: synthCellTts }))
+    vi.doMock("@/lib/sync/elevenlabs", () => ({ synthesizeElevenLabsTts: synthElevenLabs }))
+    vi.doMock("./tts", () => ({ synthesizeForCell: vi.fn(), setTtsStatus: vi.fn(), ttsStatusKey: (s: string) => s }))
+    vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: emitAttach }))
+    vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn(), injectOptimisticAudioAttachment: vi.fn() }))
+    vi.doMock("./sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "tok" }))
+    vi.doMock("./upload", () => ({ buildAudioId: () => "id", uploadCellAudio: vi.fn(), fetchCellAudio: fetchAudio }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
+    vi.doMock("./voices", () => ({
+      resolveVoice: () => ({
+        id: "v-el", name: "Rachel", provider: "elevenlabs", voiceName: "Dennis",
+        elevenLabs: { voiceId: "el123", modelId: "eleven_flash_v2_5", settings: { stability: 0.2, similarityBoost: 0.75, style: 0, speed: 1.1, speakerBoost: false } },
+      }),
+    }))
+    const { generateAndAttachCellVoice } = await import("./generate-voice")
+    const result = await generateAndAttachCellVoice({
+      projectId: "p", fileId: "f", cellId: "c", text: "hola",
+      session: { jwt: "j", username: "u" } as any, username: "u",
+      geminiContext: { targetLanguage: "es-419" },
+    })
+    expect(synthCellTts).not.toHaveBeenCalled()
+    expect(synthElevenLabs).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "p", fileId: "f", cellId: "c", text: "hola", voiceId: "el123",
+      modelId: "eleven_flash_v2_5", languageCode: "es",
+      voiceSettings: { stability: 0.2, similarityBoost: 0.75, style: 0, speed: 1.1, speakerBoost: false },
+    }), expect.any(Function))
+    expect(emitAttach).toHaveBeenCalledWith(expect.objectContaining({
+      audioId: "audio-tts-7.mp3", url: "frontier-audio://audio-tts-7.mp3", mimeType: "audio/mpeg",
+      durationMs: 2000, ttsProvider: "elevenlabs", voiceId: "v-el",
+    }))
+    expect(fetchAudio).toHaveBeenCalledWith(expect.objectContaining({ audioId: "audio-tts-7", ext: "mp3" }))
+    expect(result.blob.type).toBe("audio/mpeg")
+  })
+
+  it("a character (library) voice reads with the stock voice, then re-voices that clip", async () => {
+    vi.resetModules()
+    const synthCellTts = vi.fn(async () => ({
+      audioId: "audio-tts-1", durationSeconds: 1.2,
+      objectName: "audio-tts-1.wav", url: "frontier-audio://audio-tts-1.wav",
+    }))
+    const emitAttach = vi.fn(async () => {})
+    const convert = vi.fn(async () => ({
+      audioId: "audio-clone-9", ext: "wav", url: "frontier-audio://audio-clone-9.wav", bytes: 4,
+    }))
+    vi.doMock("@/lib/sync/tts", () => ({ synthesizeCellTts: synthCellTts }))
+    vi.doMock("./tts", () => ({ synthesizeForCell: vi.fn(), setTtsStatus: vi.fn(), ttsStatusKey: (s: string) => s }))
+    vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: emitAttach }))
+    vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn(), injectOptimisticAudioAttachment: vi.fn() }))
+    vi.doMock("./sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "tok" }))
+    vi.doMock("./upload", () => ({
+      buildAudioId: () => "id", uploadCellAudio: vi.fn(),
+      fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
+    }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: convert }))
+    vi.doMock("./voices", () => ({
+      resolveVoice: () => ({ id: "v-hearth", name: "Hearth", libraryVoiceId: "narrator-hearth" }),
+    }))
+    const { generateAndAttachCellVoice } = await import("./generate-voice")
+    const res = await generateAndAttachCellVoice({
+      projectId: "p", fileId: "f", cellId: "c", text: "hello",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      session: { jwt: "j", username: "u" } as any, username: "u",
+    })
+    expect(convert).toHaveBeenCalledWith(expect.objectContaining({
+      libraryVoiceId: "narrator-hearth", sourceAudioId: "audio-tts-1.wav",
+    }))
+    expect(emitAttach).toHaveBeenCalledTimes(1)
+    expect(emitAttach).toHaveBeenCalledWith(expect.objectContaining({
+      audioId: "audio-clone-9.wav", url: "frontier-audio://audio-clone-9.wav", voiceId: "v-hearth", durationMs: 1200,
+    }))
+    expect(res.audioId).toBe("audio-clone-9.wav")
+  })
+
+  // Review, Oct 29: the Undo step must name the take that was attached — the
+  // re-voiced clip — or Cmd+Z finds nothing to take back and the voice stays.
+  it("a character voice's Undo step names the re-voiced take, not the stock reading", async () => {
+    vi.resetModules()
+    const recordTakeAdded = vi.fn()
+    vi.doMock("@/lib/history/take-steps", () => ({ recordTakeAdded }))
+    vi.doMock("@/lib/sync/tts", () => ({
+      synthesizeCellTts: vi.fn(async () => ({
+        audioId: "audio-tts-1", durationSeconds: 1.2,
+        objectName: "audio-tts-1.wav", url: "frontier-audio://audio-tts-1.wav",
+      })),
+    }))
+    vi.doMock("./tts", () => ({ synthesizeForCell: vi.fn(), setTtsStatus: vi.fn(), ttsStatusKey: (s: string) => s }))
+    vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: vi.fn(async () => {}) }))
+    vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn(), injectOptimisticAudioAttachment: vi.fn() }))
+    vi.doMock("./sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "tok" }))
+    vi.doMock("./upload", () => ({
+      buildAudioId: () => "id", uploadCellAudio: vi.fn(),
+      fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
+    }))
+    vi.doMock("./voice-clone", () => ({
+      convertToLibraryVoice: vi.fn(async () => ({
+        audioId: "audio-clone-9", ext: "wav", url: "frontier-audio://audio-clone-9.wav", bytes: 4,
+      })),
+    }))
+    vi.doMock("./voices", () => ({
+      resolveVoice: () => ({ id: "v-hearth", name: "Hearth", libraryVoiceId: "narrator-hearth" }),
+    }))
+    const { generateAndAttachCellVoice } = await import("./generate-voice")
+    await generateAndAttachCellVoice({
+      projectId: "p", fileId: "f", cellId: "c", text: "hello",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      session: { jwt: "j", username: "u" } as any, username: "u",
+      history: { selectedBefore: null },
+    })
+    expect(recordTakeAdded).toHaveBeenCalledTimes(1)
+    expect(recordTakeAdded).toHaveBeenCalledWith(
+      "generate",
+      expect.objectContaining({ cellId: "c", audioId: "audio-clone-9.wav" }),
+      { fileId: "f" },
     )
   })
 
@@ -68,7 +242,7 @@ describe("generateAndAttachCellVoice routing", () => {
       buildAudioId: () => "id", uploadCellAudio: vi.fn(),
       fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
     }))
-    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
     vi.doMock("./voices", () => ({
       resolveVoice: () => ({ id: "v", name: "Kid", provider: "kokoro", voiceName: "af_heart" }),
     }))
@@ -103,7 +277,7 @@ describe("generateAndAttachCellVoice routing", () => {
       buildAudioId: () => "id", uploadCellAudio: vi.fn(),
       fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
     }))
-    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
     vi.doMock("./voices", () => ({
       resolveVoice: () => ({
         id: "v", name: "N", provider: "inworld", voiceName: "Dennis",
@@ -145,7 +319,7 @@ describe("generateAndAttachCellVoice routing", () => {
       buildAudioId: () => "id", uploadCellAudio: vi.fn(),
       fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
     }))
-    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
     vi.doMock("./voices", () => ({
       resolveVoice: () => ({
         id: "v", name: "N", provider: "inworld", voiceName: "Dennis",
@@ -209,7 +383,7 @@ describe("generateAndAttachCellVoice routing", () => {
       buildAudioId: () => "base-id", uploadCellAudio: upload,
       fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
     }))
-    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
     // The WAV-fallback path probes the blob's duration with a real media
     // element — which never resolves in jsdom.
     vi.doMock("@/lib/import", async (importActual) => ({

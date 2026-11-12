@@ -18,8 +18,11 @@ import { defineNamespace, plural } from "./types"
 export const onboarding = defineNamespace({
   keys: {
     "onboarding.connect.title": "Connect your agent",
-    "onboarding.connect.description": "Approve access to one Aquilla project. Your agent receives its credential directly.",
+    "onboarding.connect.description": "Approve access to one Aquilla project. Your agent gets its credential from Aquilla.",
     "onboarding.connect.approved": "Access approved. Return to your agent to finish connecting. You can revoke access at any time.",
+    "onboarding.connect.handoff": "Agent still waiting? Paste this message into its chat. It contains no secrets.",
+    "onboarding.connect.handoffCopy": "Copy message",
+    "onboarding.connect.handoffCopied": "Copied",
     "onboarding.connect.denied": "Access denied. Your agent receives no credential.",
     "onboarding.connect.manage": "Manage agent access",
     "onboarding.connect.account": "Signed in as {username}",
@@ -28,8 +31,8 @@ export const onboarding = defineNamespace({
     "onboarding.connect.agent": "Agent name: {name}",
     "onboarding.connect.unverified": "This name is supplied by the agent and is not verified. Only approve a request you just started.",
     "onboarding.connect.ask": "Read project data and stage changes. Applying changes requires your separate approval.",
-    "onboarding.connect.act": "Read project data and apply changes immediately, without further approval.",
-    "onboarding.connect.expiry": "Access expires after 30 days. You can revoke it from API tokens at any time.",
+    "onboarding.connect.act": "Read project data and apply changes with no further approval.",
+    "onboarding.connect.expiry": "Access doesn't expire. You can see when it was last used and revoke it from API tokens at any time.",
     "onboarding.connect.project": "Project",
     "onboarding.connect.choose": "Choose a project",
     "onboarding.connect.noProjects": "You do not have the required access to an available project.",
@@ -52,6 +55,25 @@ export const onboarding = defineNamespace({
     "onboarding.connect.setupBody": "Copy these instructions to your agent. Approve its request in Aquilla without sharing a token or setting an environment variable.",
     "onboarding.connect.copy": "Copy connection instructions",
     "onboarding.connect.copyError": "Could not copy. Select and copy the instructions below.",
+    // — OAuth consent for MCP hosts (ChatGPT, Claude, Codex): /oauth/consent ———
+    "onboarding.oauth.title": "Connect {client} to Aquilla",
+    "onboarding.oauth.titleGeneric": "Connect an app to Aquilla",
+    "onboarding.oauth.description": "This app wants to use Aquilla's agent tools on your behalf. Choose what it may reach.",
+    "onboarding.oauth.verified": "Request from {host}. The app supplies its own name; Aquilla checked only the domain.",
+    "onboarding.oauth.return": "After you choose, you return to {host}.",
+    "onboarding.oauth.act": "This app can create and update content in the organizations you select, within your current permissions.",
+    "onboarding.oauth.organizations": "Organizations",
+    "onboarding.oauth.allOrganizations": "All current organizations",
+    "onboarding.oauth.scopeHint": "Only organizations where you have maintainer access or higher appear here. Access includes their current and future projects. Organizations you join later require a new connection.",
+    "onboarding.oauth.validation": "Saving a change does not mark it as human-validated. Reviewers validate each translation version on its own.",
+    "onboarding.oauth.approve": "Allow access",
+    "onboarding.oauth.redirecting": "Returning you to {host}…",
+    "onboarding.oauth.invalid": "This connection request is not valid. Start the connection again from the app you came from.",
+    "onboarding.oauth.verifiedRegistered": "{client} is registered with Aquilla. Only {client} can complete this connection.",
+    "onboarding.oauth.accessRead": "{client} can watch for activity and read content, but cannot change anything.",
+    "onboarding.oauth.accessWrite": "{client} can also add comments, translations, drafts and imports, subject to the mode below.",
+    "onboarding.oauth.modeAsk": "each change {client} makes waits for a person to approve it.",
+    "onboarding.oauth.modeAct": "changes apply immediately, within your current permissions.",
 
     // — Shared small words reused across this namespace's own surfaces ———————
     "onboarding.common.continue": "Continue",
@@ -62,6 +84,10 @@ export const onboarding = defineNamespace({
     // "Creating…" reuses `common.creating` (identical text)
 
     // — Shared privacy/analytics vocabulary (PrivacyStep + Preferences' Privacy row) —
+    "onboarding.privacy.agreeContinue": "Agree and continue",
+    "onboarding.privacy.continueWithoutSharing": "Continue without sharing",
+    "onboarding.privacy.collectionStarts": "Sharing starts only after you agree and create your account. Your choice applies only to that account.",
+    "onboarding.privacy.saveFailed": "Sharing is off because your preference could not be loaded or saved. Check your connection and try again in Preferences.",
     "onboarding.privacy.shareUsageData": "Share usage data",
     "onboarding.privacy.disabledWarning":
       "With analytics disabled, we may not be able to help diagnose problems you encounter.",
@@ -75,6 +101,8 @@ export const onboarding = defineNamespace({
     // ═══════════════════════════════════════════════════════════════════════
     "onboarding.wizard.setupAriaLabel": "Account setup",
     "onboarding.wizard.stepProgress": "Step {step} of {total}",
+    "onboarding.wizard.billingAfterSetup": "Your selected plan and billing interval will be reviewed after setup. No purchase occurs during setup.",
+    "onboarding.wizard.billingInvalid": "This plan selection is unavailable. You can finish setup and choose a plan later.",
 
     // ═══════════════════════════════════════════════════════════════════════
     // Product tour (ProductTour.tsx) — TOUR_STEPS content + chrome
@@ -104,17 +132,14 @@ export const onboarding = defineNamespace({
     // ═══════════════════════════════════════════════════════════════════════
 
     // — WelcomeStep —
-    "onboarding.step.welcome.getStarted": "Get Started",
+    "onboarding.step.welcome.getStarted": "Get started",
 
     // — PrivacyStep —
     "onboarding.step.privacy.heading": "Help us improve",
     "onboarding.step.privacy.description":
       "We use product analytics to understand which features people use and where things go wrong.",
-    "onboarding.step.privacy.shareDescription":
-      "Helps us provide support and improve Aquilla for everyone. Includes usage events and session recordings for diagnosing issues.",
-    "onboarding.step.privacy.footer":
-      "You can change this anytime in Settings. Read our",
-    "onboarding.step.privacy.policyLink": "Privacy Policy",
+    "onboarding.step.privacy.footer": "You can change this anytime in Preferences. Read our",
+    "onboarding.step.privacy.policyLink": "Privacy policy",
 
     // — SignInStep —
     "onboarding.step.signIn.signedInAs": "Signed in as {username}",
@@ -122,13 +147,13 @@ export const onboarding = defineNamespace({
       "AI translations, sync, and cloud import are available.",
     "onboarding.step.signIn.orgCheckFailed":
       "You're signed in, but we couldn't check whether this account has finished setup. Check your connection and try again.",
-    "onboarding.step.signIn.headingSignup": "Create your Frontier account",
-    "onboarding.step.signIn.headingLogin": "Sign in to Frontier",
+    "onboarding.step.signIn.headingSignup": "Create an Aquilla Account",
+    "onboarding.step.signIn.headingLogin": "Log in to Aquilla",
     // "Reset your password" reuses `auth.resetPassword.title`
     "onboarding.step.signIn.unlockBlurb":
       "Unlock AI-powered translations, sync across devices, and import projects from the cloud.",
     // "Already have an account?" reuses `auth.join.alreadyHaveAccount`
-    // "New to Frontier?" reuses `nav.account.newToFrontier`
+    // "New to Aquilla?" reuses `nav.account.newToFrontier`
     "onboarding.step.signIn.createOne": "Create one",
     "onboarding.step.signIn.devLogin": "Dev login (skip auth)",
 
@@ -182,7 +207,7 @@ export const onboarding = defineNamespace({
     // — ReadyStep —
     "onboarding.step.ready.heading": "You're all set!",
     "onboarding.step.ready.description": "{projectName} is ready. We'll walk you through setting up AI and inviting collaborators next.",
-    "onboarding.step.ready.startTranslating": "Start Translating",
+    "onboarding.step.ready.startTranslating": "Start translating",
 
     // ═══════════════════════════════════════════════════════════════════════
     // Setup checklist drawer + steps (project workspace, post-onboarding)
@@ -216,26 +241,18 @@ export const onboarding = defineNamespace({
     // — AiInstructionsStep —
     "onboarding.checklist.aiInstructions.title": "Set translation instructions",
     "onboarding.checklist.aiInstructions.stepDescription":
-      "A short system prompt that shapes tone, formality, and style. Shared with everyone in this project.",
+      "Tell the AI how to translate this project — audience, tone, names, style. Every AI draft follows them.",
+    "onboarding.checklist.aiInstructions.openButton": "Open instructions",
     "onboarding.checklist.aiInstructions.actionLabel": "Editing translation instructions",
-    "onboarding.checklist.aiInstructions.introPrefix":
-      "Tell the AI how to translate. The starter prompt works for most projects; edit it to match your tone, formality, or domain (legal, scripture, marketing, etc.). Use",
-    "onboarding.checklist.aiInstructions.introAnd": "and",
-    "onboarding.checklist.aiInstructions.introSuffix": "as placeholders.",
-    "onboarding.checklist.aiInstructions.resetToDefault": "Reset to default",
-    "onboarding.checklist.aiInstructions.charCount": plural({
-      one: "{count} character",
-      other: "{count} characters",
-    }),
-    "onboarding.checklist.aiInstructions.saveButton": "Save instructions",
 
     // — AiProviderStep —
     "onboarding.checklist.aiProvider.description":
-      "AI fills in suggested translations as you go and keeps style consistent across the project. You can change this later in Project Settings.",
+      "AI fills in suggested translations as you go and keeps style consistent across the project. " +
+      "You can change this later in Project settings.",
     "onboarding.checklist.aiProvider.frontierSignInRequired":
-      "Sign in with a Frontier account to use the managed model.",
+      "Sign in with a Aquilla account to use the managed model.",
     // "Endpoint URL is required" reuses `projectSettings.advancedLlm.endpointRequiredError` (identical text)
-    "onboarding.checklist.aiProvider.frontierLabel": "Frontier AI",
+    "onboarding.checklist.aiProvider.frontierLabel": "Aquilla AI",
     "onboarding.checklist.aiProvider.recommendedBadge": "Recommended",
     "onboarding.checklist.aiProvider.frontierSignedIn":
       "Signed in as {username} — no setup needed.",
@@ -249,11 +266,10 @@ export const onboarding = defineNamespace({
 
     // — AiModelsStep — model metadata (was module-level ModelMeta consts)
     "onboarding.checklist.aiModels.whisper.label": "Whisper transcription",
-    "onboarding.checklist.aiModels.whisper.blurb":
-      "Word-level timing for recorded audio. Runs locally; no network after download.",
+    // Whisper blurb reuses `audio.consent.whisper.short` (identical text — AQU-1211)
     "onboarding.checklist.aiModels.mms.label": "MMS multilingual voices",
     "onboarding.checklist.aiModels.mms.blurb":
-      "Local voices for many languages — one language model per download.",
+      "On-device voices for many languages — one language model per download.",
     "onboarding.checklist.aiModels.title": "Configure voice & transcription",
     "onboarding.checklist.aiModels.stepDescription":
       "Gemini TTS is recommended for voice; Whisper transcription runs locally.",
@@ -266,7 +282,7 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.aiModels.voiceLegend": "Voice generation",
     "onboarding.checklist.aiModels.noneLabel": "None — set up later",
     "onboarding.checklist.aiModels.noneHint":
-      "Skip voice generation entirely. You can come back from project settings.",
+      "Skip voice generation. You can come back from project settings.",
     "onboarding.checklist.aiModels.geminiLabel": "Gemini (cloud, BYOK)",
     "onboarding.checklist.aiModels.geminiHint":
       "Highest quality, promptable voices. Needs a Google AI Studio API key. No local download.",
@@ -307,7 +323,8 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.invite.actionLabel": "Inviting collaborators",
     "onboarding.checklist.invite.descriptionPrefix": "Add teammates as",
     "onboarding.checklist.invite.descriptionSuffix":
-      "— they can read, comment, and edit cells. You can change roles or upgrade them in Project → Share.",
+      "— they can read, comment, and edit cells. You can change roles or upgrade them in Project " +
+      "settings → Members.",
     "onboarding.checklist.invite.usernameLabel": "Invite by Aquilla username",
     "onboarding.checklist.invite.usernamePlaceholder": "e.g. mariad",
     "onboarding.checklist.invite.signInRequired": "Sign in to invite by username.",
@@ -326,22 +343,23 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.invite.shareLinkHint":
       "Anyone with the link joins as a contributor after signing in. Use this when you don't have the recipient's username yet.",
 
-    // — ComingSoonStep + its two checklist entries —
-    "onboarding.checklist.comingSoon.badge": "Coming soon",
-    "onboarding.checklist.comingSoon.standards.title": "Upload project standards",
-    "onboarding.checklist.comingSoon.standards.description":
+    // — LinkStep: optional steps that open the surface where the work happens —
+    "onboarding.checklist.standards.title": "Set project standards",
+    "onboarding.checklist.standards.description":
       "Style guides and translation standards the AI will follow.",
-    "onboarding.checklist.comingSoon.glossary.title": "Import terminology / translation memory",
-    "onboarding.checklist.comingSoon.glossary.description":
-      "Existing TM or term lists to keep terminology consistent.",
+    "onboarding.checklist.standards.actionLabel": "Open standards",
+    "onboarding.checklist.glossary.title": "Import terminology",
+    "onboarding.checklist.glossary.description":
+      "Existing term lists (CSV, TBX, LIFT) to keep terminology consistent.",
+    "onboarding.checklist.glossary.actionLabel": "Open terminology",
 
     // ═══════════════════════════════════════════════════════════════════════
     // System prompt nudge (editor banner)
     // ═══════════════════════════════════════════════════════════════════════
     "onboarding.systemPromptNudge.message":
-      "Your AI is still using the default translation instructions.",
+      "This project has no translation instructions yet.",
     "onboarding.systemPromptNudge.detail":
-      "Customize them to match your project's tone and domain — shared with everyone on the project.",
+      "Tell the AI your audience, tone and style — every AI draft on the project follows them.",
     // "Customize" button reuses `common.customize` (identical text)
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -359,7 +377,8 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.group.account": "Account",
 
     // — Translator profile fields (was PROFILE_TEXT_FIELDS) —
-    "onboarding.preferences.profile.responseLanguage.label": "Assistant language",
+    // AQU-2263: says what it does; "Assistant language" stays the project-wide one.
+    "onboarding.preferences.profile.responseLanguage.label": "The assistant answers me in",
     "onboarding.preferences.profile.responseLanguage.placeholder":
       "e.g. Tagalog — the AI replies in this language",
     "onboarding.preferences.profile.age.label": "Age",
@@ -394,11 +413,12 @@ export const onboarding = defineNamespace({
       "Follow your system appearance or choose a theme for this device.",
     "onboarding.preferences.fontSize.groupLabel": "App font size",
     "onboarding.preferences.fontSize.rowDescription":
-      "The overall size of menus, sidebars, settings, and editor cell text. A file's View settings can override the cell size; reset there to follow this size again.",
+      "The overall size of menus, sidebars, settings, and editor cell text. A file's Editor settings " +
+      "can override the cell size; reset there to follow this size again.",
     "onboarding.preferences.fontSize.small": "Small",
     "onboarding.preferences.fontSize.default": "Default",
     "onboarding.preferences.fontSize.large": "Large",
-    "onboarding.preferences.fontSize.extraLarge": "Extra Large",
+    "onboarding.preferences.fontSize.extraLarge": "Extra large",
 
     // — LanguageSection — group label reuses `language.label` (identical text)
     "onboarding.preferences.language.rowDescription":
@@ -406,8 +426,6 @@ export const onboarding = defineNamespace({
 
     // — PrivacySection —
     "onboarding.preferences.privacy.groupLabel": "Analytics",
-    "onboarding.preferences.privacy.rowDescription":
-      "Events like project creation, exports, and AI translations. Never the contents of your translations or files.",
 
     // — TranslatorProfileSection —
     "onboarding.preferences.profileSection.groupLabel": "About you",
@@ -433,9 +451,9 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.section.providerKeys.title": "AI provider keys",
     "onboarding.preferences.section.providerKeys.description":
       "Optional personal AI provider override for this device only.",
-    "onboarding.preferences.section.localModels.title": "Local models",
+    "onboarding.preferences.section.localModels.title": "On-device AI models",
     "onboarding.preferences.section.localModels.description":
-      "Whisper transcription and MMS voices run entirely in your browser — stored once and shared across all projects on this device.",
+      "Whisper transcription and MMS voices run in your browser — stored once and shared across all projects on this device.",
     // Tauri desktop app only — not shown in the browser SPA (no local proxy to configure
     // there). Named "Offline AI provider" rather than "Local LLM" so it doesn't read as a
     // sibling of "Local models" right above it — that section is on-device Whisper/MMS
@@ -462,7 +480,7 @@ export const onboarding = defineNamespace({
 
     // — Page chrome — title reuses `nav.account.preferences` (identical text)
     "onboarding.preferences.pageDescription":
-      "Personal preferences that apply to you across all projects on this device.",
+      "Personal preferences that apply to you across all projects.",
     "onboarding.preferences.dialogDescription": "Personal preferences that apply across projects.",
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -516,6 +534,19 @@ export const onboarding = defineNamespace({
     "onboarding.apiTokens.newTokenTrigger": "New token",
     "onboarding.apiTokens.newTokenDialogHeading": "New API token",
     "onboarding.apiTokens.namePlaceholder": "e.g. Import agent",
+    // AQU-1242: access is the write ceiling, asked before mode because it
+    // decides whether mode applies at all.
+    "onboarding.apiTokens.accessLabel": "Access",
+    "onboarding.apiTokens.accessReadLabel": "Read-only",
+    "onboarding.apiTokens.accessReadDescription":
+      "the agent can read, search and export, but cannot change anything.",
+    "onboarding.apiTokens.accessWriteLabel": "Read and write",
+    "onboarding.apiTokens.accessWriteDescription":
+      "the agent can also propose and apply changes, subject to the mode below.",
+    "onboarding.apiTokens.accessReadBadge": "read-only",
+    "onboarding.apiTokens.connectedAppBadge": "connected app",
+    "onboarding.apiTokens.modeNotApplicable":
+      "Mode only applies to a token that can write. A read-only token has nothing to approve.",
     // "Mode" field label reuses `common.modeLabel` (identical text)
     "onboarding.apiTokens.modeAskLabel": "Ask",
     "onboarding.apiTokens.modeAskDescription": "every write waits for your approval.",
@@ -545,7 +576,7 @@ export const onboarding = defineNamespace({
     // agent rail label reuses `nav.dock.agentTab` (identical text)
     "onboarding.credits.rail.llm": "Chat",
     "onboarding.credits.rail.tts": "TTS",
-    "onboarding.credits.panelTitle": "Compute credits",
+    "onboarding.credits.panelTitle": "AI credits",
     "onboarding.credits.panelDescription": "Usage against daily & weekly caps, broken out by rail",
     "onboarding.credits.agentSpendNote": "Agent spend (elevated rail — own cap, 5× markup)",
     "onboarding.credits.dialSummary": "Agent credits used today: {credits}",
@@ -570,6 +601,14 @@ export const onboarding = defineNamespace({
           step: "Current step number (1-based).",
           total: "Total number of steps in the wizard (8).",
         },
+      },
+      "onboarding.wizard.billingAfterSetup": {
+        description:
+          "Note above the onboarding wizard when the user arrived from a pricing link with a plan already chosen. The plan is reviewed after setup; nothing is bought during setup.",
+      },
+      "onboarding.wizard.billingInvalid": {
+        description:
+          "Alert above the onboarding wizard when the pricing link the user arrived from names a plan or billing interval that does not exist. Setup can still be finished.",
       },
       "onboarding.tour.skipAriaLabel": {
         description: "Accessible name of the small X button that dismisses the whole product tour.",
@@ -613,14 +652,9 @@ export const onboarding = defineNamespace({
           "Confirmation line under the Import files checklist step, once at least one file has been imported.",
         placeholders: { count: "Number of files imported into the project so far." },
       },
-      "onboarding.checklist.aiInstructions.charCount": {
-        description:
-          "Small counter under the system-prompt textarea in the AI instructions checklist step, showing its current length.",
-        placeholders: { count: "Number of characters currently typed in the prompt textarea." },
-      },
       "onboarding.checklist.aiProvider.frontierSignedIn": {
         description:
-          "Description under the 'Frontier AI' provider option once the viewer is signed in, naming their account.",
+          "Description under the 'Aquilla AI' provider option once the viewer is signed in, naming their account.",
         placeholders: { username: "The signed-in user's handle. Not translated." },
       },
       "onboarding.checklist.aiModels.downloadNotice": {
@@ -714,6 +748,27 @@ export const onboarding = defineNamespace({
           "Note under the mode picker on the agent-consent page, shown only when the human picked a different mode than the agent requested.",
         placeholders: { requested: "The mode the agent asked for, 'ask' or 'act'. Not translated — a literal API value." },
       },
+      "onboarding.connect.account": {
+        description:
+          "Line at the top of the agent-consent page naming the Aquilla account the approval would be granted under, so the human can spot that they are signed in as the wrong user before authorizing an agent.",
+        placeholders: {
+          username: "The signed-in user's own Aquilla username. Not translated — a user-chosen account name, shown verbatim.",
+        },
+      },
+      "onboarding.connect.agent": {
+        description:
+          "Line on the agent-consent page naming the agent that is asking for access. The warning immediately below it (onboarding.connect.unverified) tells the human this name is self-reported, so keep this string a plain statement of the name rather than an endorsement of it.",
+        placeholders: {
+          name: "The display name the agent supplied when it started the connection request. Not translated, not verified by Aquilla, and chosen by whoever ran the agent.",
+        },
+      },
+      "onboarding.connect.confirm": {
+        description:
+          "Label of the checkbox the human must tick before the 'Authorize agent' button becomes enabled on the agent-consent page. It is the anti-phishing step of the device flow: the human asserts that they started this request and that the code on screen is the same one their agent is displaying.",
+        placeholders: {
+          code: "The connection code the human typed into the 'Connection code' field, in XXXX-XXXX form (uppercase letters and digits, with the ambiguous 0/1/I/O omitted). Not translated — echoed back verbatim so it can be compared character by character with the code the agent shows.",
+        },
+      },
       "onboarding.apiTokens.revokeWarning": {
         description:
           "Confirmation-dialog warning when revoking an API token. Rendered immediately after the bold token name, so it starts with the parenthesised prefix.",
@@ -739,6 +794,60 @@ export const onboarding = defineNamespace({
         description:
           "Small footer line in the agent-credits popover, stating remaining daily allowance.",
         placeholders: { remaining: "Agent credits remaining today, already locale-formatted." },
+      },
+      "onboarding.oauth.title": {
+        description:
+          "Heading of the consent page an AI app (for example ChatGPT) opens when a person connects it to Aquilla. The person is deciding whether that app may act on their projects.",
+        placeholders: {
+          client: "The app's display name as the app itself declares it (for example 'ChatGPT'). Not translated and not verified — the line below the heading shows the verified domain.",
+        },
+      },
+      "onboarding.oauth.verified": {
+        description:
+          "Security note under the heading of the app-consent page. It tells the person that the app name is self-declared and that only the web domain was checked, so they can spot an impostor.",
+        placeholders: { host: "The web domain that identified the app, for example 'chatgpt.com'. Not translated." },
+      },
+      "onboarding.oauth.act": {
+        description: "OAuth consent explains that the app can change content in selected organizations, subject to current permissions.",
+      },
+      "onboarding.oauth.organizations": {
+        description: "Legend above the organization access checkboxes on OAuth consent.",
+      },
+      "onboarding.oauth.allOrganizations": {
+        description: "Checkbox selecting every currently eligible organization. This selection excludes organizations joined later.",
+      },
+      "onboarding.oauth.scopeHint": {
+        description: "Consent note explaining the maintainer permission floor, access to future projects in selected organizations, and a new grant for later organizations.",
+      },
+      "onboarding.oauth.validation": {
+        description: "Consent note distinguishing saving a change from human linguistic validation of a specific translation version.",
+      },
+      "onboarding.oauth.return": {
+        description: "Line on the app-consent page saying which website the browser goes back to after the person allows or denies access.",
+        placeholders: { host: "The web domain the browser returns to, for example 'chatgpt.com'. Not translated." },
+      },
+      "onboarding.oauth.verifiedRegistered": {
+        description: "Security note on the app-consent page for an app Aquilla registered in advance (for example Zapier), replacing the self-declared-name warning.",
+        placeholders: { client: "The registered app's name, for example 'Zapier'. Not translated." },
+      },
+      "onboarding.oauth.accessRead": {
+        description: "Explains the read-only choice on the app-consent page: the connected app can see activity but not change anything.",
+        placeholders: { client: "The registered app's name, for example 'Zapier'. Not translated." },
+      },
+      "onboarding.oauth.accessWrite": {
+        description: "Explains the read-and-write choice on the app-consent page. 'Mode' is the next choice on the page.",
+        placeholders: { client: "The registered app's name, for example 'Zapier'. Not translated." },
+      },
+      "onboarding.oauth.modeAsk": {
+        description: "Follows the label 'Ask' on the app-consent page: every change the app makes is held until a person approves it.",
+        placeholders: { client: "The registered app's name, for example 'Zapier'. Not translated." },
+      },
+      "onboarding.oauth.modeAct": {
+        description: "Follows the label 'Act' on the app-consent page: the app's changes apply straight away.",
+      },
+      "onboarding.oauth.redirecting": {
+        description: "Status shown on the app-consent page while the browser leaves Aquilla and goes back to the app.",
+        placeholders: { host: "The web domain the browser is going back to. Not translated." },
       },
     },
   },

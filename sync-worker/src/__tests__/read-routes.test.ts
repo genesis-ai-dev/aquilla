@@ -139,6 +139,7 @@ describe('GET /cells/audit-stats', () => {
         lastEditEventId: string
         sourceEventId: string | null
         activeValidators: string[]
+        validatorDecidedTs: Record<string, number>
       }[]
     }
     const c1 = body.cells.find((c) => c.cellId === 'c1')!
@@ -146,11 +147,17 @@ describe('GET /cells/audit-stats', () => {
     expect(c1.lastEditEventId).toBe('ev-current')
     expect(c1.sourceEventId).toBe('src-current-1')
     expect(new Set(c1.activeValidators)).toEqual(new Set(['alice', 'bob']))
+    // AQU-2296: WHEN each of them voted, for the date under their name in the
+    // "Text validated by" popover. Keyed by username, and scoped to the
+    // current head exactly as the name list is — carol's vote on `ev-old` is
+    // no more current than her name is.
+    expect(c1.validatorDecidedTs).toEqual({ alice: 1750, bob: 1751 })
 
     const c2 = body.cells.find((c) => c.cellId === 'c2')!
     expect(c2.side).toBe('source')
     expect(c2.sourceEventId).toBe(null)
     expect(c2.activeValidators).toEqual([])
+    expect(c2.validatorDecidedTs).toEqual({})
   })
 
   it('scopes to a single cell when cellId is passed, so a single-cell commit does not have to pull the whole file', async () => {
@@ -185,5 +192,210 @@ describe('GET /cells/audit-stats', () => {
     const body = (await res.json()) as { cells: { cellId: string }[] }
     expect(body.cells).toHaveLength(1)
     expect(body.cells[0].cellId).toBe('c1')
+  })
+})
+
+// ── AQU-1506 ────────────────────────────────────────────────────────────────
+// An N-lane file has one target row per lane for the same cell. Before this the
+// response marked none of them, so the client kept whichever row Postgres
+// returned first — heap order, which a validate or commit rewrites — and showed
+// one lane's validators on another's page.
+describe('GET /cells/audit-stats — lane marker (AQU-1506)', () => {
+  const TWO_LANE_SEED = {
+    lanes: [
+      { id: 'lane-src', project_id: 'proj-x', role: 'source', legacy_tag: '' },
+      { id: 'lane-def', project_id: 'proj-x', role: 'target', legacy_tag: '' },
+      { id: 'lane-fr', project_id: 'proj-x', role: 'target', legacy_tag: 'fr' },
+    ],
+    cells: [
+      {
+        project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1',
+        side: 'source', value: 'in the beginning', content_hash: 'src-hash',
+        event_id: 'ev-src', source_event_id: null,
+        last_editor: 'importer', last_edit_at: 1000, validated: 0, word_count: 3,
+        target_lang: '', lane_id: 'lane-src',
+      },
+      // The fr row is seeded FIRST so heap order puts it ahead of the default
+      // lane's — the arrangement that made the default-lane page wrong.
+      {
+        project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1',
+        side: 'target', value: 'au commencement', content_hash: 'fr-hash',
+        event_id: 'ev-fr-head', source_event_id: 'ev-src',
+        last_editor: 'dev', last_edit_at: 1700, validated: 1, word_count: 2,
+        target_lang: 'fr', lane_id: 'lane-fr',
+      },
+      {
+        project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1',
+        side: 'target', value: 'al principio', content_hash: 'def-hash',
+        event_id: 'ev-def-head', source_event_id: 'ev-src',
+        last_editor: 'dev', last_edit_at: 1800, validated: 0, word_count: 2,
+        target_lang: '', lane_id: 'lane-def',
+      },
+    ],
+    cell_validators: [
+      // Only the fr lane is validated, and only by `dev`.
+      {
+        project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1',
+        target_lang: 'fr', lane_id: 'lane-fr',
+        event_id: 'ev-fr-head', username: 'dev', decided_ts: 1750,
+      },
+    ],
+  }
+
+  interface AuditRow {
+    cellId: string
+    side: string
+    targetLang: string
+    laneId: string | null
+    lastEditEventId: string
+    activeValidators: string[]
+  }
+
+  async function readStats(seed: object, query = 'fileId=file-x'): Promise<AuditRow[]> {
+    const { db } = await makeTestDb(seed)
+    const token = await makeTestToken(SECRET, { fileId: 'file-x', projectId: 'proj-x' })
+    const req = new Request(`https://w/cells/audit-stats?${query}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const res = (await handleCellsAuditReadRequest(req, envWith(db)))!
+    expect(res.status).toBe(200)
+    return ((await res.json()) as { cells: AuditRow[] }).cells
+  }
+
+  it("marks every row with its lane, so two lanes' target rows are tellable apart", async () => {
+    const cells = await readStats(TWO_LANE_SEED)
+    const targets = cells.filter((c) => c.side === 'target')
+    expect(targets).toHaveLength(2)
+    // The regression this guards: two `side: "target"` rows for one cell with no
+    // lane marker on either.
+    expect(targets.every((t) => typeof t.targetLang === 'string')).toBe(true)
+    expect(new Set(targets.map((t) => t.targetLang))).toEqual(new Set(['', 'fr']))
+    expect(targets.find((t) => t.targetLang === 'fr')!.laneId).toBe('lane-fr')
+    expect(targets.find((t) => t.targetLang === '')!.laneId).toBe('lane-def')
+  })
+
+  it('attributes validators to the lane that earned them, not to the first row', async () => {
+    const cells = await readStats(TWO_LANE_SEED)
+    const fr = cells.find((c) => c.side === 'target' && c.targetLang === 'fr')!
+    const def = cells.find((c) => c.side === 'target' && c.targetLang === '')!
+    expect(fr.lastEditEventId).toBe('ev-fr-head')
+    expect(fr.activeValidators).toEqual(['dev'])
+    // The default lane is untouched by the fr validate.
+    expect(def.lastEditEventId).toBe('ev-def-head')
+    expect(def.activeValidators).toEqual([])
+  })
+
+  it('still gives the shared source row no validators, and marks it as lane-less', async () => {
+    const cells = await readStats(TWO_LANE_SEED)
+    const source = cells.find((c) => c.side === 'source')!
+    expect(source.targetLang).toBe('')
+    expect(source.activeValidators).toEqual([])
+  })
+
+  it('carries the lane on the single-cell (?cellId=) scope too', async () => {
+    const cells = await readStats(TWO_LANE_SEED, 'fileId=file-x&cellId=c1')
+    expect(cells).toHaveLength(3)
+    const fr = cells.find((c) => c.side === 'target' && c.targetLang === 'fr')!
+    expect(fr.activeValidators).toEqual(['dev'])
+  })
+
+  it('returns the same shape as before on a single-lane file', async () => {
+    const cells = await readStats({
+      cells: [
+        {
+          project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1',
+          side: 'target', value: 'hello world', content_hash: 'abcd1234',
+          event_id: 'ev-current', source_event_id: 'src-1',
+          last_editor: 'a', last_edit_at: 1700, validated: 1, word_count: 2,
+        },
+      ],
+      cell_validators: [
+        {
+          project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1',
+          event_id: 'ev-current', username: 'alice', decided_ts: 1750,
+        },
+      ],
+    })
+    expect(cells).toHaveLength(1)
+    expect(cells[0].targetLang).toBe('')
+    expect(cells[0].activeValidators).toEqual(['alice'])
+  })
+})
+
+// ── AQU-2094 ────────────────────────────────────────────────────────────────
+// WHY: on a whole Bible the full answer was ~9 MB of JSON, almost all of it the
+// chain head, hash and edit time of rows the client has already loaded. A
+// sparse read lists only cells someone has validated or waived, and the client
+// reads every other cell as "none of either".
+describe('GET /cells/audit-stats — sparse (AQU-2094)', () => {
+  const row = (cellId: string, side: string, eventId: string, lane: Record<string, string> = {}) => ({
+    project_id: 'proj-x', file_id: 'file-x', cell_id: cellId,
+    side, value: 'v', content_hash: `h-${cellId}`,
+    event_id: eventId, source_event_id: null,
+    last_editor: 'dev', last_edit_at: 1000, validated: 0, word_count: 1,
+    ...lane,
+  })
+  const SEED = {
+    lanes: [
+      { id: 'lane-src', project_id: 'proj-x', role: 'source', legacy_tag: '' },
+      { id: 'lane-def', project_id: 'proj-x', role: 'target', legacy_tag: '' },
+      { id: 'lane-fr', project_id: 'proj-x', role: 'target', legacy_tag: 'fr' },
+    ],
+    cells: [
+      row('validated', 'target', 'ev-v', { target_lang: '', lane_id: 'lane-def' }),
+      row('untouched', 'source', 'ev-u', { target_lang: '', lane_id: 'lane-src' }),
+      // A validator on an earlier edit no longer counts, so the cell is unlisted.
+      row('stale', 'target', 'ev-s-new', { target_lang: '', lane_id: 'lane-def' }),
+      row('waived', 'target', 'ev-w', { target_lang: '', lane_id: 'lane-def' }),
+      // Validated on fr only: the default lane's row must come too, or the
+      // client could not tell that lane's row exists and is unvalidated.
+      row('two-lanes', 'source', 'ev-t-src', { target_lang: '', lane_id: 'lane-src' }),
+      row('two-lanes', 'target', 'ev-t-fr', { target_lang: 'fr', lane_id: 'lane-fr' }),
+      row('two-lanes', 'target', 'ev-t-def', { target_lang: '', lane_id: 'lane-def' }),
+    ],
+    cell_validators: [
+      { project_id: 'proj-x', file_id: 'file-x', cell_id: 'validated', target_lang: '', lane_id: 'lane-def', event_id: 'ev-v', username: 'alice', decided_ts: 1 },
+      { project_id: 'proj-x', file_id: 'file-x', cell_id: 'stale', target_lang: '', lane_id: 'lane-def', event_id: 'ev-s-old', username: 'alice', decided_ts: 1 },
+      { project_id: 'proj-x', file_id: 'file-x', cell_id: 'two-lanes', target_lang: 'fr', lane_id: 'lane-fr', event_id: 'ev-t-fr', username: 'bob', decided_ts: 1 },
+    ],
+    cell_waivers: [
+      { project_id: 'proj-x', file_id: 'file-x', cell_id: 'waived', rule_id: 'double-space', match_hash: '', reason: null, waived_by: 'dev', waived_ts: 1 },
+    ],
+  }
+
+  async function read(query: string) {
+    const { db } = await makeTestDb(SEED)
+    const token = await makeTestToken(SECRET, { fileId: 'file-x', projectId: 'proj-x' })
+    const res = (await handleCellsAuditReadRequest(
+      new Request(`https://w/cells/audit-stats?${query}`, { headers: { Authorization: `Bearer ${token}` } }),
+      envWith(db),
+    ))!
+    expect(res.status).toBe(200)
+    return (await res.json()) as { cells: { cellId: string; side: string; targetLang: string; activeValidators: string[] }[]; sparse?: boolean }
+  }
+
+  it('lists only validated or waived cells, with every row of each, and says it is sparse', async () => {
+    const body = await read('fileId=file-x&sparse=1')
+    expect(body.sparse).toBe(true)
+    expect(body.cells.map((c) => `${c.cellId}/${c.side}/${c.targetLang}`).sort()).toEqual([
+      'two-lanes/source/',
+      'two-lanes/target/',
+      'two-lanes/target/fr',
+      'validated/target/',
+      'waived/target/',
+    ])
+    expect(body.cells.find((c) => c.cellId === 'validated')!.activeValidators).toEqual(['alice'])
+  })
+
+  it('answers in full without the flag', async () => {
+    const body = await read('fileId=file-x')
+    expect(body.sparse).toBeUndefined()
+    expect(new Set(body.cells.map((c) => c.cellId))).toEqual(new Set(['validated', 'untouched', 'stale', 'waived', 'two-lanes']))
+  })
+
+  it('ignores the flag on a single-cell read, which must always answer for its cell', async () => {
+    const body = await read('fileId=file-x&cellId=untouched&sparse=1')
+    expect(body.sparse).toBeUndefined()
+    expect(body.cells.map((c) => c.cellId)).toEqual(['untouched'])
   })
 })

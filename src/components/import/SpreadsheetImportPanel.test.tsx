@@ -62,6 +62,50 @@ describe("SpreadsheetImportPanel", () => {
     })
   })
 
+  // AQU-2120: the hand-off from the general dropzone used to drop the
+  // collision screen's answer, so "Update existing" made a second pairs.csv.
+  it("re-imports into the existing file the collision screen chose", async () => {
+    render(
+      <SpreadsheetImportPanel
+        projectId="project-1"
+        username="alice"
+        sourceLanguage="en"
+        targetLanguage="fr"
+        getToken={vi.fn(async () => "token")}
+        onImported={vi.fn()}
+        onCancel={vi.fn()}
+        initialFile={new File(["source,target\nHello,Bonjour\n"], "pairs.csv", { type: "text/csv" })}
+        reimportTarget={{ id: "existing-pairs", name: "pairs.csv" }}
+      />,
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Map columns" }))
+    await waitFor(() => expect(importFile).toHaveBeenCalledOnce())
+    expect(vi.mocked(importFile).mock.calls[0][1].reimportFileIds?.get("pairs.csv")).toBe("existing-pairs")
+  })
+
+  // The sheet suffix is why this needs a name gate: the collision is resolved
+  // against the workbook, but only one of its sheets is that existing file.
+  it("imports fresh when the picked sheet is not the chosen file's sheet", async () => {
+    render(
+      <SpreadsheetImportPanel
+        projectId="project-1"
+        username="alice"
+        sourceLanguage="en"
+        targetLanguage="fr"
+        getToken={vi.fn(async () => "token")}
+        onImported={vi.fn()}
+        onCancel={vi.fn()}
+        initialFile={new File(["source,target\nHello,Bonjour\n"], "pairs.csv", { type: "text/csv" })}
+        reimportTarget={{ id: "existing-other-sheet", name: "pairs.csv — Sheet2" }}
+      />,
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Map columns" }))
+    await waitFor(() => expect(importFile).toHaveBeenCalledOnce())
+    expect(vi.mocked(importFile).mock.calls[0][1].reimportFileIds).toBeUndefined()
+  })
+
   it("starts column mapping for a spreadsheet handed off by the general uploader", async () => {
     render(
       <SpreadsheetImportPanel

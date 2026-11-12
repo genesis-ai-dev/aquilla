@@ -3,8 +3,8 @@
  *
  * The set of locales the UI can switch to, plus their writing direction. English
  * is the base/source locale; every other catalog falls back to it per key (see
- * `translate.ts`). Directions follow the ticket: only Arabic is RTL for now;
- * Thai/Burmese/Malay/Chinese render LTR. Add a locale here + a catalog in
+ * `translate.ts`). Directions follow the ticket: Arabic and Urdu are RTL;
+ * Thai/Burmese/Malay/Chinese/French/Spanish/Portuguese/Swahili/Hindi/Hausa/Bengali/Amharic/Punjabi render LTR. Add a locale here + a catalog in
  * `messages/index.ts` to make it selectable.
  *
  * A locale's `code` and `nativeName` are load-bearing claims, not decoration:
@@ -12,6 +12,14 @@
  * endonym is the only thing a speaker sees in the switcher. Registering a code
  * whose catalog is a different language than the code names is therefore a bug,
  * and a worse one than having no entry at all — see `LOCALE_ALIASES` (AQU-1306).
+ *
+ * Indonesian (`id`, AQU-869) and Malay (`ms`) are listed separately and their
+ * catalogs are translated separately. They are close relatives, which is exactly
+ * why the temptation to derive one from the other has to be named and refused:
+ * the UI register is where they diverge most (`unggah`/`muat naik`,
+ * `pratinjau`/`pratonton`, `hapus`/`padam`, `berkas`/`fail`, `mengunduh`/`memuat
+ * turun`), so a Malay-derived `id` catalog would read as Malay to an Indonesian
+ * speaker and repeat AQU-1306 under a new code.
  *
  * Chinese ships as two script-subtag locales: `zh-Hans` (AQU-978) and `zh-Hant`
  * (AQU-976). `normalizeLocale()` prefers an exact match, so each script gets its
@@ -39,9 +47,58 @@ export const LOCALES: readonly LocaleMeta[] = [
   { code: "th", englishName: "Thai", nativeName: "ไทย", dir: "ltr" },
   { code: "my", englishName: "Burmese", nativeName: "မြန်မာ", dir: "ltr" },
   { code: "ms", englishName: "Malay", nativeName: "Bahasa Melayu", dir: "ltr" },
+  { code: "id", englishName: "Indonesian", nativeName: "Bahasa Indonesia", dir: "ltr" },
   { code: "ar", englishName: "Arabic", nativeName: "العربية", dir: "rtl" },
   { code: "zh-Hans", englishName: "Simplified Chinese", nativeName: "简体中文", dir: "ltr" },
   { code: "zh-Hant", englishName: "Traditional Chinese", nativeName: "繁體中文", dir: "ltr" },
+  { code: "ru", englishName: "Russian", nativeName: "Русский", dir: "ltr" },
+  { code: "fr", englishName: "French", nativeName: "Français", dir: "ltr" },
+  // One Spanish catalog, worded as neutral Latin American (tú/ustedes, no
+  // vosotros, no voseo). `es-MX` / `es-ES` / `es-419` fold onto `es` by the
+  // primary-subtag match, the same way `fr-CA` folds onto `fr`.
+  { code: "es", englishName: "Spanish", nativeName: "Español", dir: "ltr" },
+  // One Portuguese catalog, worded as Brazilian (você, arquivo, salvar, tela).
+  // `pt-BR` and `pt-PT` both fold onto `pt`. The endonym stays "Português" —
+  // the varieties are mutually readable, and the brief, not the menu label,
+  // fixes which one the strings are.
+  { code: "pt", englishName: "Portuguese", nativeName: "Português", dir: "ltr" },
+  // One Swahili catalog, worded as Kiswahili sanifu (the written East African
+  // standard), not a national dialect and not Congolese Swahili. Buttons use
+  // the imperative (Hifadhi, Ghairi). `sw-KE` and `sw-TZ` fold onto `sw` by
+  // the primary subtag; `swc` does not share that subtag and must not.
+  { code: "sw", englishName: "Swahili", nativeName: "Kiswahili", dir: "ltr" },
+  // One Hindi catalog, in Devanagari, addressed with the polite form (आप).
+  // Buttons use the polite imperative (सहेजें, रद्द करें), which is the form
+  // Hindi software uses. `hi-IN` folds onto `hi` by the primary subtag.
+  { code: "hi", englishName: "Hindi", nativeName: "हिन्दी", dir: "ltr" },
+  // One Hausa catalog, worded as standard written Hausa (Kano / Boko, the
+  // variety of education and BBC Hausa). Latin script, including ɓ ɗ ƙ.
+  // Buttons use the polite plural imperative (ku). `ha-NG`, `ha-NE`, and
+  // `ha-Latn` fold onto `ha` by the primary-subtag match. Ajami (`ha-Arab`)
+  // is not registered.
+  { code: "ha", englishName: "Hausa", nativeName: "Hausa", dir: "ltr" },
+  // One Urdu catalog, worded as Modern Standard Urdu (معیاری اردو): formal آپ,
+  // Perso-Arabic script, polite imperative buttons (کریں / کیجیے). Not Deccani,
+  // not Rekhta, and not Hindi written in Urdu script. `ur-PK` and `ur-IN` fold
+  // onto `ur` by the primary-subtag match.
+  { code: "ur", englishName: "Urdu", nativeName: "اردو", dir: "rtl" },
+  // One Bengali catalog, worded as Bangladeshi standard colloquial
+  // (প্রমিত চলিত বাংলা): আপনি imperative, পানি not জল. Not sadhu bhasha and
+  // not a regional dialect. `bn-BD` and `bn-IN` both fold onto `bn`. The
+  // endonym stays "বাংলা" — the brief, not the menu label, fixes which
+  // national standard the strings are.
+  { code: "bn", englishName: "Bengali", nativeName: "বাংলা", dir: "ltr" },
+  // One Amharic catalog, worded as standard written Amharic (the Addis Ababa
+  // standard used in education and the press, Geʽez script, formal written
+  // imperative). Not Tigrinya, and not a regional dialect. `am-ET` folds onto
+  // `am` by the primary-subtag match, the same way `fr-CA` folds onto `fr`.
+  { code: "am", englishName: "Amharic", nativeName: "አማርኛ", dir: "ltr" },
+  // One Punjabi catalog, Gurmukhi Majhi (the written standard of Indian Punjab).
+  // Bare `pa` is Gurmukhi, so `pa-IN` folding onto `pa` is right. `pa-Arab` and
+  // `pa-PK` also fold here by primary subtag, which is the wrong script for a
+  // Shahmukhi reader; Shahmukhi needs its own future locale. Do not alias them
+  // away and do not change `normalizeLocale` to split the scripts.
+  { code: "pa", englishName: "Punjabi", nativeName: "ਪੰਜਾਬੀ", dir: "ltr" },
 ] as const
 
 export const DEFAULT_LOCALE = "en"
@@ -66,9 +123,16 @@ export const DEFAULT_LOCALE = "en"
  * switcher. Drop the `mfa` entry when a genuine Pattani Malay catalog — authored
  * and signed off by Pattani Malay speakers, not machine-derived from `ms` — is
  * registered under `mfa` again.
+ *
+ * `in` is Indonesian's pre-1989 ISO 639-1 code (AQU-869). It was never offered
+ * by this app, but the JVM and older Android builds still emit it, so it can
+ * arrive in a stored preference or an `Accept-Language` header. Without the
+ * alias the primary-subtag branch would not save it — `in` shares no subtag with
+ * `id` — and an Indonesian speaker would silently land on English.
  */
 export const LOCALE_ALIASES: Readonly<Record<string, string>> = {
   mfa: "ms",
+  in: "id",
 }
 
 export function isSupportedLocale(code: string): boolean {

@@ -12,20 +12,20 @@ export const fileDetails = defineNamespace({
     "fileDetails.orderingTimeline": "Timeline (timecodes)",
     "fileDetails.orderingSequence": "Sequence",
     "fileDetails.languages": "Languages",
-    "fileDetails.sourceLanguage": "Source language",
+    "fileDetails.sourceLanguage": "Declared source language",
+    "fileDetails.targetLanguage": "Declared target language",
     "fileDetails.imported": "Imported",
     "fileDetails.progress": "Progress",
     "fileDetails.progressValue": "{translated}% translated · {validated}% validated",
+    // Media redesign slice 2: a language that counts its recordings.
+    "fileDetails.audioProgressValue": "{recorded} of {total} lines recorded · {approved} approved",
+    "fileDetails.bothProgressValue": "{done} of {total} lines done on text and audio",
     "fileDetails.rename": "Rename",
+    "fileDetails.reimport": "Re-import",
     "fileDetails.renameDialogTitle": "Rename file",
     "fileDetails.moveToCorpus": "Move to corpus…",
-    "fileDetails.exportSource": "Export source (.SFM)",
     "fileDetails.downloadOriginal": "Download original",
-    "fileDetails.exportDisabledType": "Only USFM files support round-trip source export.",
-    "fileDetails.exportDisabledPolicy":
-      "Source export is disabled by your organization's export policy.",
-    "fileDetails.deleteRequiresRole":
-      "Deleting files requires the Project Lead role or above.",
+    "fileDetails.deleteRequiresRole": "Deleting files requires the Project Lead role or above.",
   },
   context: {
     _context: {
@@ -98,10 +98,21 @@ export const fileDetails = defineNamespace({
       },
       "fileDetails.sourceLanguage": {
         description:
-          "Metadata row label for the language of the file's source content. The value " +
-          "is a language name or code. This row does not show a target language because " +
-          "targets belong to lanes and the file's import-time target stamp may be stale.",
-        maxLength: 24,
+          "Metadata row label for the source language this file DECLARED at import — " +
+          "what the file says about itself, which may disagree with the language of the " +
+          "lane its rows are in. The value is a language name or code. Translate " +
+          "'declared' as 'stated' / 'as claimed by the file', not as a setting the user " +
+          "chose. Shown next to the declared target language (AQU-1596).",
+        maxLength: 32,
+      },
+      "fileDetails.targetLanguage": {
+        description:
+          "Metadata row label for the target language this file DECLARED at import — " +
+          "what the file says about itself, which may disagree with the lane its rows " +
+          "are in. The value is a language name or code. Translate 'declared' as " +
+          "'stated' / 'as claimed by the file'. It is import information, not the " +
+          "lane's language (AQU-1596).",
+        maxLength: 32,
       },
       "fileDetails.imported": {
         description:
@@ -114,6 +125,25 @@ export const fileDetails = defineNamespace({
           "Metadata row label for the file's translation progress. The value is the " +
           "progressValue string below.",
         maxLength: 20,
+      },
+      "fileDetails.audioProgressValue": {
+        description:
+          "Progress row value for a language that delivers audio: lines recorded out of " +
+          "all lines, and lines whose recording is approved.",
+        placeholders: {
+          recorded: "Already-formatted count of lines with a recording.",
+          total: "Already-formatted count of the file's lines.",
+          approved: "Already-formatted count of lines with an approved recording.",
+        },
+      },
+      "fileDetails.bothProgressValue": {
+        description:
+          "Progress row value for a language that delivers text and audio: lines whose " +
+          "text is validated AND whose recording is approved, out of all lines.",
+        placeholders: {
+          done: "Already-formatted count of lines done on both halves.",
+          total: "Already-formatted count of the file's lines.",
+        },
       },
       "fileDetails.progressValue": {
         description:
@@ -131,6 +161,12 @@ export const fileDetails = defineNamespace({
           "in the sidebar. Imperative verb.",
         maxLength: 24,
       },
+      "fileDetails.reimport": {
+        description:
+          "Overflow-menu item on a file row that opens a dialog to replace or copy " +
+          "that file from a newly chosen source file. Imperative verb with a hyphen.",
+        maxLength: 24,
+      },
       "fileDetails.renameDialogTitle": {
         description:
           "Title of the dialog opened from the chapter-row File options menu to rename the current file.",
@@ -141,27 +177,11 @@ export const fileDetails = defineNamespace({
           "(named file group). Ends with an ellipsis because a dialog follows.",
         maxLength: 30,
       },
-      "fileDetails.exportSource": {
-        description:
-          "Action button that downloads the file back in its source format. '.SFM' is " +
-          "a file extension — keep it verbatim.",
-        maxLength: 30,
-      },
       "fileDetails.downloadOriginal": {
         description:
           "Sidebar and overview action that downloads the exact original file that was imported, " +
           "without injecting translations. Imperative verb plus noun.",
         maxLength: 28,
-      },
-      "fileDetails.exportDisabledType": {
-        description:
-          "Sentence under the disabled export button explaining that only USFM-format " +
-          "files can be exported. 'USFM' is a format name — keep it verbatim.",
-      },
-      "fileDetails.exportDisabledPolicy": {
-        description:
-          "Sentence under the disabled export button explaining that the user's " +
-          "organization has turned off source export for members.",
       },
       "fileDetails.deleteRequiresRole": {
         description:

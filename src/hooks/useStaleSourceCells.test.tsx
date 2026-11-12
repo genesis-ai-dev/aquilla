@@ -35,6 +35,7 @@ vi.mock("@/lib/sync/stale-source-read", () => ({
 }))
 
 import { useStaleSourceCells } from "./useStaleSourceCells"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const getToken = async () => "jwt"
 
@@ -142,7 +143,7 @@ describe("useStaleSourceCells", () => {
       { timeout: 10_000 },
     )
     expect(result.current.isError).toBe(false)
-  }, 12_000)
+  })
 
   // QA-BUG-3: the lazy-pull sync and the stale-source read race — the read
   // can land before the mirror's writes are visible, showing a transient
@@ -155,7 +156,7 @@ describe("useStaleSourceCells", () => {
       const { result } = renderHook(() =>
         useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }),
       )
-      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
       expect(result.current.ancestorBehind).toBe(true)
 
       // The sync's mirror commit is now "done" server-side; the next read
@@ -166,7 +167,7 @@ describe("useStaleSourceCells", () => {
       // fetch mock resolves on the next microtask, so flush that first.
       await vi.advanceTimersByTimeAsync(2600)
 
-      await vi.waitFor(() => expect(result.current.ancestorBehind).toBe(false))
+      await vi.waitFor(() => expect(result.current.ancestorBehind).toBe(false), { timeout: STALL_WATCHDOG_MS })
       expect(fetchMock).toHaveBeenCalledTimes(2)
 
       // No further re-fetches beyond the one scheduled follow-up.
@@ -184,7 +185,7 @@ describe("useStaleSourceCells", () => {
       const { unmount } = renderHook(() =>
         useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }),
       )
-      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
 
       unmount()
       await vi.advanceTimersByTimeAsync(5000)
@@ -223,6 +224,64 @@ describe("useStaleSourceCells", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(result.current.staleCellIds.has("c9")).toBe(true))
+    fetchSpy.mockRestore()
+  })
+
+  // AQU-1545: the push handler re-reads progress and the file list only after
+  // a sync that went through.
+  it("syncNow() sends one sync and resolves true when it succeeds", async () => {
+    // A fresh Response per call: the mount's own lazy-pull sync reads one too.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify({ projectId: "p1", ranSync: true }), { status: 200 }),
+    )
+    fetchMock.mockResolvedValue(makeResponse([]))
+    const { result } = renderHook(() =>
+      useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }),
+    )
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const syncPosts = () => fetchSpy.mock.calls.filter((c) => String(c[0]).includes("/link/sync")).length
+    const before = syncPosts()
+
+    await expect(result.current.syncNow()).resolves.toBe(true)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    // The staleness re-read that follows must not trigger a second sync: the
+    // server answers a sync requested mid-sync with another fold.
+    expect(syncPosts() - before).toBe(1)
+    fetchSpy.mockRestore()
+  })
+
+  it("syncNow() resolves false when the sync request fails", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response("link sync failed", { status: 502 }),
+    )
+    fetchMock.mockResolvedValue(makeResponse([]))
+    const { result } = renderHook(() =>
+      useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }),
+    )
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    await expect(result.current.syncNow()).resolves.toBe(false)
+    fetchSpy.mockRestore()
+  })
+
+  it("refetch() re-reads staleness without triggering a sync", async () => {
+    // The push handler's frame-time read. A sync fired here raced the
+    // handler's own and made it the empty second fold.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify({ ranSync: false }), { status: 200 }),
+    )
+    fetchMock.mockResolvedValue(makeResponse([]))
+    const { result } = renderHook(() =>
+      useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }),
+    )
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const syncPosts = () => fetchSpy.mock.calls.filter((c) => String(c[0]).includes("/link/sync")).length
+    const before = syncPosts()
+
+    act(() => result.current.refetch())
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(syncPosts()).toBe(before)
     fetchSpy.mockRestore()
   })
 })

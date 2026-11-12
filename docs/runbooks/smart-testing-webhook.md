@@ -1,13 +1,26 @@
 # Automatic Jev PR testing on the shared Hetzner host
 
 The service runs independently of GitHub Actions. Its webhook endpoint is
-`https://aquilla-qa.5-161-201-46.sslip.io/aquilla-qa/github`. It accepts signed `pull_request`
-events for `genesis-ai-dev/aquilla` only. Drafts, forks, closed PRs, unrelated
-events, and duplicate PR/commit pairs do not run. GitHub's ping is acknowledged.
+`https://aquilla-qa.5-161-201-46.sslip.io/aquilla-qa/github`. It accepts signed
+`push` events for `genesis-ai-dev/aquilla` only. A run starts when the ref is
+`refs/heads/release/YYYY/MM/DD-NN` and `after` is that commit. Pull requests,
+other branches, tags, deletions, and a repeat push of the same commit do not
+run. GitHub's ping is acknowledged.
+
+That push is how a release-branch HEAD starts the one Hetzner run. The deploy
+bot's cut is a push, so an ordinary slice starts Jev at the cut. A held slice
+is cut alone; a person checks it and ready pull requests are added onto the
+branch. That later push is a new HEAD and starts another run. The runner asks
+GitHub whether the branch still points at the job's commit. A moved branch
+supersedes the old job. Only a result for the current HEAD counts. The report
+is a commit comment on that commit, marker `<!-- aquilla-smart-tests -->`. A
+journey `FAIL` means that HEAD does not deploy. `INCONCLUSIVE` and
+`HARNESS UNAVAILABLE` do not hold.
 
 A SQLite queue survives restarts. One suite runs at a time. Before setup,
-before tests, and before each report, the controller checks the current PR
-head through GitHub. A stale run cannot publish a pass for a newer commit.
+before tests, and before each report, the controller checks that the release
+branch still points at the job's commit. A stale run cannot publish a pass
+for a newer commit.
 No automatic test retries turn failures into passes. A restart marks an
 interrupted run inconclusive instead of rerunning it silently. Failed final
 comment deliveries retry from an outbox without rerunning the tests.
@@ -35,7 +48,7 @@ comment deliveries retry from an outbox without rerunning the tests.
   code and dependencies run normally, but cannot replace the server controller
   or the tests. New journeys require deploying a reviewed harness revision.
 - Evidence identifies both `build` (PR commit) and `harnessBuild` (reviewed
-  test commit). Missing evidence produces INCONCLUSIVE, never a pass.
+  test commit). Missing evidence produces HARNESS UNAVAILABLE, never a pass.
 
 The reporting credential currently uses the owner's existing GitHub identity.
 It stays outside all containers. Rotate it in `runner.json` when the CLI token
@@ -44,10 +57,77 @@ changes. A dedicated GitHub App installation credential can replace it later.
 ## Resource limits and parallelism
 
 This host also serves Koine Greek. QA uses a separate 24 GB container filesystem,
-a shared cgroup capped at 1.5 CPUs and 2500 MB RAM, and at most 512 MB swap.
+a shared cgroup capped at 2.5 CPUs and 2900 MB RAM, and at most 512 MB swap
+(the quota rose from 1.5 CPUs / 2500 MB on 2026-11-03 after the measurements below).
 Containers have process limits, bounded logs, no Linux capabilities, and no
 privilege escalation. The QA bridge cannot reach host or private-network
 addresses. Host Node and the existing application service remain unchanged.
+
+### Memory budget (measured 2026-11-02 on the 3.8 GB host)
+
+Everything below is anonymous memory inside the app container at 1.5 CPUs,
+sampled from the cgroup, dev at `1a5121ab5`:
+
+| Phase                                              | Peak      | Wall    |
+| -------------------------------------------------- | --------- | ------- |
+| `pnpm install` after a dependency-cache miss       | ~1.1 GB (+1.5 GB page cache) | 40–130 s |
+| Worker stack alone (2× wrangler, 2× esbuild, workerd, tsx, mocks) | ~1.5 GB | — |
+| `vite build --mode test` alone                     | ~1.75 GB sampled; ~1.9 GB RSS at the OOM kill | 17–20 s |
+| Worker stack **plus** the build (old order)        | > 2.8 GB → exit 137 or a 10-minute swap thrash | — |
+
+`NODE_OPTIONS=--max-old-space-size` does not lower the build peak (1024, 1536
+and the default all peak within 50 MB): the memory is rolldown's, not V8 heap.
+So the controller builds **before** the workers start: `app_bootstrap.prebuild`
+runs the test-mode build with the baked browser URLs and sets
+`E2E_PREBUILT_DIST=1`, which the reviewed `scripts/e2e-up.ts` honours by
+serving `dist` instead of building again. Install, build and stack then
+happen one after another and each stays under the 2200 MB container cap.
+
+The first real job on this order (1853, 2026-11-03) showed the build's true
+peak is ~1.9 GB anon RSS plus page cache, which still overflowed a 2200 MB
+container (the 1.75 GB above was a 5-second sample). The host now runs
+`container_memory_mb: 2600`, `container_swap_mb: 300` under a slice of
+`MemoryHigh=2700M` / `MemoryMax=2900M`; with that the job completed in 474 s.
+
+`runner.json` may override the per-container limits: `container_memory_mb`
+(default 2200), `container_swap_mb` (default 400) and `build_node_options`
+(default empty). The `aquillaqa.slice` `MemoryMax` is the ceiling for all QA
+containers together; raising only the container limits changes nothing.
+
+A dependency-cache miss (`QA dependencies: changed inputs` in `app.log`) costs
+every job the install column above (170 s on job 1853). It happens when the
+harness image's manifests, lockfiles or pnpm patch files differ from the branch
+under test, or when any `package.json` declares an install hook or an `.npmrc` /
+`.pnpmfile` exists (those always reinstall). Patch files under
+`patchedDependencies` are hashed like lockfiles since 2026-11-03; before that
+the root patch alone forced a reinstall on every job. Rebuild the harness at a
+current commit when the miss is a real manifest change.
+
+### Where a job's time goes (job 1853, release/2026/11/03-01)
+
+| Phase                                   | Wall  |
+| --------------------------------------- | ----- |
+| dependency reinstall (cache miss)       | 170 s |
+| test-mode build                         | 21 s  |
+| worker stack + preview up               | ~30 s |
+| 12 Jev journeys, one worker             | 252 s |
+| evidence + report                       | ~10 s |
+
+With the cache hit the first row disappears. The journeys run serially
+(`workers: 1` in `smart-tests/config.ts`); a second worker needs the test
+phase's memory measured first (stack ~1.5 GB + db + chromium under the slice).
+
+### Live progress in the release comment
+
+The runner updates the commit comment while the job runs, not only at the end.
+The bootstrap appends each finished step (`dependencies`, `build`) with its
+seconds to `/tmp/aquilla-qa-progress.json` inside the app container; the runner
+polls that file once a second during setup, adds `stack` when the ready file
+appears, then tails Playwright's line reporter in `tests.log` and re-renders
+after every `[n/N]` header (a journey started, the previous one finished) and
+every indented `Error:` line (the running journey failed). Progress lines are
+advisory: a failed PATCH is logged and ignored, and the strict `finished`
+report still decides the deploy.
 
 The suite already supports four isolated stacks on a larger machine through
 `SMART_TEST_SHARDS=4`. This host deliberately runs one stack. Starting four
@@ -90,7 +170,8 @@ Add an exact `/aquilla-qa/` nginx prefix that proxies to `127.0.0.1:9086`.
 Limit requests to 1 MB, disable access logging for artifact bearer URLs,
 validate nginx configuration, and reload nginx without restarting the app.
 Register a GitHub repository webhook with JSON content, this secret, HTTPS
-validation enabled, and `pull_request` events. Enable the two QA services.
+validation enabled, and `push` events. `pull_request` deliveries are ignored.
+Enable the two QA services.
 
 For a harness update, build a new immutable commit tag, verify it, then replace
 `harness_sha` in the root-only config. The next job reads it automatically.
@@ -107,6 +188,78 @@ from this host plan the smaller suite and those three checks are NOT VERIFIED, n
 passed. This requires no credential or infrastructure change: build the new tag,
 verify it, and replace `harness_sha`.
 
+The prebuild step above also needs a harness whose `scripts/e2e-up.ts` knows
+`E2E_PREBUILT_DIST`. With an older harness the bootstrap detects that and lets
+e2e-up build as before (the memory-heavy order), so nothing builds twice.
+
+## Re-dispatching a run (AQU-1354)
+
+The same commit is not re-run. `enqueue()` rejects a `(sha)` that already has
+a job row, so a repeat `push` of that commit returns `duplicate`. Closing a
+pull request does nothing: pull requests are not a trigger.
+
+The two ways to get another run:
+
+- **Push a new commit onto the release branch.** That is the pile-on, or the
+  fix after a `FAIL`. The new HEAD enqueues a fresh job. Only that HEAD's
+  result counts.
+- **Ask the QA host operator to requeue.** With root on the host, delete the
+  job row for that commit and re-deliver the webhook:
+  `sqlite3 /var/lib/aquilla-qa/queue.sqlite "DELETE FROM jobs WHERE sha='<sha>'"`,
+  then redeliver the `push` event from the repository webhook's Recent
+  Deliveries. Confirm with `journalctl -u aquilla-qa-runner`.
+
+## Reading a HARNESS UNAVAILABLE report
+
+`HARNESS UNAVAILABLE` (AQU-1350; this header read `INCONCLUSIVE` before) means
+the run produced no usable evidence — it never means the product passed, and
+since AQU-1354 it also never means "we cannot say which part broke". The comment
+names the disqualifying precondition (`evidenceDefect` in
+`scripts/smart-test-comment.mjs`):
+
+| Reason on the PR | Where to look |
+| --- | --- |
+| No evidence file reached the reporter | Setup failed before the suite finished: `docker`/readiness errors in `journalctl -u aquilla-qa-runner` and `/var/lib/aquilla-qa-jobs/<id>/{app,db,tests}.log` |
+| Schema version is not 2 | The deployed harness image predates this reporter — rebuild `aquilla-qa-harness:<commit>` and update `harness_sha` |
+| Evidence was collected for another commit | `SMART_TEST_APP_SHA` disagrees with the release HEAD, or a stale artifact was read |
+| The tested checkout was not clean | Something wrote into the container's tracked tree during setup |
+| No journey plan | Playwright collected zero tests: a config or harness-image fault, not a product fault |
+
+The same header, with no journey table, appears when an oracle qualification
+did not pass or when no journey reached a verdict at all: the self-test
+qualifies every other verdict in the run, so without it no row says anything
+about the commit. The comment names the self-test that did not pass.
+
+A per-journey verdict is not the same thing. A DOM audit that runs and fails an
+assertion reads `FAIL (model-free check)`, because that is real evidence about
+the product. Only a test timeout, an interrupted run, or a skip stays
+`INCONCLUSIVE`. Both are still "not a pass"; only the first is a bug to fix in
+the app. An oracle qualification attaches its evidence only after every
+assertion passes, so one that fails never reads `FAIL`: it makes the whole run
+`HARNESS UNAVAILABLE`.
+
+Changes to `scripts/smart-test-comment.mjs` reach a release comment only after
+the file is copied beside `report.mjs` in `/opt/aquilla-qa`, and changes under
+`smart-tests/` only after a reviewed harness image is rebuilt and `harness_sha`
+is updated. Merging them to `dev` is not enough.
+
+## What still has to happen on the host
+
+A commit in this repo does not deploy the QA box. After this trigger change
+is reviewed, on the host:
+
+1. Copy `scripts/hetzner-ci/webhook.py`, `scripts/hetzner-ci/runner.py`,
+   `scripts/hetzner-ci/report.mjs`, and `scripts/smart-test-comment.mjs` into
+   `/opt/aquilla-qa`. `smart-test-comment.mjs` sits beside `report.mjs`.
+2. Restart `aquilla-qa-webhook` and `aquilla-qa-runner`. The runner adds a
+   `ref` column to the existing sqlite queue on startup. Queued pull-request
+   jobs have an empty `ref` and are marked superseded; they are not run.
+3. On the GitHub repository webhook, send `push`. Leave `pull_request` off;
+   those deliveries are ignored.
+4. The harness image does not need a rebuild for this trigger change. A
+   journey change still does: build a new `aquilla-qa-harness:<commit>` tag
+   and replace `harness_sha`.
+
 ## Operations and evidence
 
 Inspect `systemctl status aquilla-qa-webhook aquilla-qa-runner` and
@@ -114,7 +267,7 @@ Inspect `systemctl status aquilla-qa-webhook aquilla-qa-runner` and
 is listening; it does not prove tests passed. Job logs stay root-only in
 `/var/lib/aquilla-qa-jobs/<id>`. Do not publish raw application/build logs.
 
-Each PR receives a starting comment, then the same comment updates with
+Each release HEAD receives a starting commit comment, then the same comment updates with
 verified outcomes, inconclusive checks, failures, model cost, both commits,
 and elapsed time. JSON evidence lives under `/var/lib/aquilla-qa-evidence`.
 Its URL contains a random 256-bit bearer token, has no directory listing,

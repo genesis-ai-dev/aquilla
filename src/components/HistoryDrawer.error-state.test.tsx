@@ -40,6 +40,7 @@ function hookResult(over: Partial<ReturnType<typeof useCellEditHistory>>) {
     history: [],
     isLoading: false,
     isError: false,
+    failure: null,
     revalidate: vi.fn(),
     ...over,
   }
@@ -57,6 +58,42 @@ describe("HistoryDrawer fetch-error state", () => {
     expect(screen.queryByText("No edits yet.")).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
     expect(revalidate).toHaveBeenCalledTimes(1)
+  })
+
+  // AQU-1248: after the automatic retries give up, the message says whether
+  // the network or the server failed — in place of the list and above a list
+  // of local edits alike — and Retry stays.
+  it.each([
+    [
+      "network",
+      { kind: "network", status: 0 } as const,
+      "Couldn't load edit history — network error. Check your connection.",
+      "Couldn't refresh from the server (network error) — showing local edits.",
+    ],
+    [
+      "server",
+      { kind: "server", status: 503 } as const,
+      "Couldn't load edit history — the server returned an error (503).",
+      "Couldn't refresh from the server (error 503) — showing local edits.",
+    ],
+  ])("names a %s failure, with Retry", (_kind, failure, loadMessage, refreshMessage) => {
+    const entry: CellHistoryEntry = {
+      timestamp: "2026-07-01T10:00:00.000Z",
+      value: "a local edit",
+      source: "human",
+      author: "ana",
+      validated: false,
+    }
+    mockHook.mockReturnValue(hookResult({ isError: true, failure }))
+    const { unmount } = render(<HistoryDrawer {...BASE_PROPS} cell={makeCell()} isSynced />)
+    expect(screen.getByText(loadMessage)).toBeInTheDocument()
+    expect(screen.queryByText("Couldn't load edit history.")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+    unmount()
+
+    render(<HistoryDrawer {...BASE_PROPS} cell={makeCell([entry])} isSynced />)
+    expect(screen.getByText(refreshMessage)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
   })
 
   it("keeps the plain empty state for local (unsynced) projects", () => {

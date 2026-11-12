@@ -10,9 +10,9 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 vi.mock("./OrgSwitcher", () => ({ OrgSwitcher: () => null }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 vi.mock("@/components/HelpMenu", () => ({ HelpMenu: () => null }))
-const platformAdmin = vi.hoisted(() => ({ isAdmin: false }))
+const platformAdmin = vi.hoisted(() => ({ isAdmin: false, loading: false }))
 vi.mock("@/hooks/usePlatformAdmin", () => ({
-  usePlatformAdmin: () => ({ isAdmin: platformAdmin.isAdmin, loading: false }),
+  usePlatformAdmin: () => ({ isAdmin: platformAdmin.isAdmin, loading: platformAdmin.loading }),
 }))
 
 const rosterSettings = vi.hoisted(() => ({ canViewRoster: true, canEgress: true }))
@@ -131,9 +131,36 @@ describe("OrgSidebar in a guest org (AQU-790)", () => {
     expect(screen.queryByRole("link", { name: "Overview" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Organization settings" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("link", { name: "Archived" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Archived projects" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Assigned to me" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Access audit" })).not.toBeInTheDocument()
+  })
+})
+
+describe("OrgSidebar pending cursor", () => {
+  it("prints one cursor at the end of the nav until every permission check has landed", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+    platformAdmin.loading = true
+    try {
+      renderSidebar("/orgs/1")
+      await screen.findByRole("link", { name: "Overview" })
+      expect(screen.getByTestId("org-sidebar-pending")).toBeInTheDocument()
+      expect(document.querySelectorAll("[data-slot='loading-cursor']")).toHaveLength(1)
+      // A secondary cursor: it never prints a surrounding loading label.
+      expect(screen.getByTestId("org-sidebar-pending").textContent).toBe("")
+    } finally {
+      platformAdmin.loading = false
+    }
+  })
+
+  it("drops the cursor once the checks are done", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+    renderSidebar("/orgs/1")
+    await screen.findByRole("link", { name: "Overview" })
+    await waitFor(() => expect(screen.queryByTestId("org-sidebar-pending")).not.toBeInTheDocument())
   })
 })
 
@@ -177,6 +204,7 @@ describe("OrgSidebar Data egress entry (AQU-907)", () => {
 
     expect(await screen.findByRole("link", { name: "Data egress" })).toHaveAttribute("href", "/orgs/1/egress")
     expect(screen.queryByRole("link", { name: "Organization settings" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Access audit" })).not.toBeInTheDocument()
   })
 
   it("hides the entry when the egress policy excludes the caller", async () => {
@@ -231,7 +259,7 @@ describe("OrgSidebar Members nav — AQU-485 roster visibility", () => {
 
     await waitFor(() => expect(screen.getByRole("link", { name: "Organization settings" })).toBeInTheDocument())
     expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Archived" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Archived projects" })).toBeInTheDocument()
   })
 
   it("shows Members when the roster floor allows it", async () => {
@@ -241,6 +269,7 @@ describe("OrgSidebar Members nav — AQU-485 roster visibility", () => {
     renderSidebar("/orgs/1")
 
     expect(await screen.findByRole("link", { name: "Members" })).toHaveAttribute("href", "/orgs/1/members")
+    expect(screen.getByRole("link", { name: "Access audit" })).toHaveAttribute("href", "/orgs/1/access-audit")
   })
 })
 
@@ -251,12 +280,12 @@ describe("OrgSidebar settings link — AQU-1338 ambiguous link purpose", () => {
    * screen reader's link list, and a live Jev journey followed the wrong one
    * into organization settings and gave up.
    */
-  it("names the org settings link for its destination while keeping the visible text", async () => {
+  it("names the org settings link for its destination, on screen too (AQU-2261)", async () => {
     listMyOrgs.mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
     fetchAccessibleProjects.mockResolvedValue([])
     renderSidebar("/orgs/1")
     const link = await screen.findByRole("link", { name: "Organization settings" })
-    expect(link).toHaveTextContent("Settings")
+    expect(link).toHaveTextContent("Organization settings")
     expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument()
   })
 })

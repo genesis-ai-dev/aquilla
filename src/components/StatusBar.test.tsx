@@ -4,6 +4,7 @@ import type { CellSummary } from "@/hooks/useActiveCellStore"
 import { StatusBar as StatusBarView } from "./StatusBar"
 import { useHealth } from "@/hooks/useHealth"
 import { applyStructuralPolicy } from "@/lib/cells/structural"
+import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 import { useCallback, type ComponentProps } from "react"
 
 function StatusBar({ cells, healthMap, countStructural = true, ...props }: {
@@ -58,12 +59,19 @@ describe("StatusBar health breakdown", () => {
     expect(await screen.findByRole("button", { name: /New lane.*5%/ })).toBeDisabled()
   })
 
-  it("opens from hover and handles an empty scope", async () => {
+  // AQU-2260 (Oct 29, fourth pass): a click opens it, never hover.
+  it("opens on a click, not on hover, and handles an empty scope", async () => {
     const { container } = render(<StatusBar cells={[]} healthMap={new Map()} projectHealth={100} />)
     fireEvent.pointerEnter(trigger(container), { pointerType: "mouse" })
     fireEvent.mouseEnter(trigger(container))
     fireEvent.mouseMove(trigger(container))
-    expect(await screen.findByText("project health")).toBeTruthy()
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(screen.queryByText("Project health")).toBeNull()
+    expect(screen.getByRole("button", { name: "Project health: 100%" })).toBe(trigger(container))
+    fireEvent.click(trigger(container))
+    // AQU-2261: the card's title comes from the catalog, in sentence case.
+    expect(await screen.findByText("Project health", { exact: true })).toBeTruthy()
+    expect(screen.queryByText("project health", { exact: true })).toBeNull()
     expect(screen.queryByRole("button", { name: /Genesis/ })).toBeNull()
   })
 
@@ -91,6 +99,22 @@ it("updates footer counts across empty, drafted, validated and removed cells", (
   expect(container.textContent?.replace(/[\u2066-\u2069]/g, "")).toContain("0 cells")
   expect(container.textContent?.replace(/[\u2066-\u2069]/g, "")).toContain("0 translated")
   expect(container.textContent?.replace(/[\u2066-\u2069]/g, "")).not.toContain("unvalidated")
+})
+
+// AQU-1764: the two counts lose their amber and green. They are in the text
+// colour, each after a swatch in the tone the sidebar's file bar uses for it.
+it("marks the unvalidated and validated counts with progress-palette swatches", () => {
+  const drafted = [{ ...cells[0], status: "unvalidated" as const }, cells[1]]
+  render(<StatusBar cells={drafted} healthMap={new Map()} projectHealth={0} />)
+  for (const [id, fill] of [
+    ["status-bar-unvalidated", PROGRESS_BG.textTranslated],
+    ["status-bar-validated", PROGRESS_BG.textValidated],
+  ]) {
+    const badge = screen.getByTestId(id)
+    expect(badge.className, id).toContain("text-foreground")
+    expect(badge.className, id).not.toMatch(/amber|green/)
+    expect(badge.querySelector("[aria-hidden]")!.className, id).toContain(fill)
+  }
 })
 
 // AQU-1083. The editor footer is the ONE progress surface whose number is
@@ -131,5 +155,253 @@ describe("StatusBar and the structural-cell policy", () => {
     expect(plain(container)).toContain("2 cells")
     expect(plain(container)).toContain("50")
     expect(plain(container)).not.toContain("4 cells")
+  })
+})
+
+// AQU-1493: plain rounding put 251 of 252 at "100%" beside a blank line, the
+// one progress figure the shared rule had missed.
+it("never reads 100% while a cell is untranslated", () => {
+  const many = Array.from({ length: 252 }, (_, i) =>
+    ({ id: String(i), cellLabel: String(i), status: i === 0 ? "empty" : "validated" }) as CellSummary)
+  const { container, rerender } = render(<StatusBar cells={many} healthMap={new Map()} projectHealth={0} />)
+  const plain = () => (container.textContent ?? "").replace(/[\u2066-\u2069]/g, "")
+  expect(plain()).toContain("251 translated (99%)")
+  const done = many.map((c) => ({ ...c, status: "validated" as const }))
+  rerender(<StatusBar cells={done} healthMap={new Map()} projectHealth={0} />)
+  expect(plain()).toContain("252 translated (100%)")
+})
+
+// AQU-2111: the footer counts the open file itself, so it is the other half of
+// the "an audio-only file reads 0%" bug. The audio figures ride in on the same
+// progress prop; `StatusBarView` is rendered directly here because the pair is
+// counted from the attachment map, not from cells.
+describe("StatusBar and audio figures", () => {
+  const plain = (el: HTMLElement) => (el.textContent ?? "").replace(/[\u2066-\u2069]/g, "")
+  const view = (progress: ComponentProps<typeof StatusBarView>["progress"]) =>
+    render(<StatusBarView progress={progress} getHealthByCell={() => []} projectHealth={0} />)
+
+  it("reports the recorded figure, and no text figures, on an audio-only file", () => {
+    const { container } = view({ total: 10, translated: 0, validated: 0, recorded: 5, audioValidated: 5 })
+    expect(plain(container)).toContain("10 lines")
+    expect(plain(container)).toContain("5 recorded (50%)")
+    expect(plain(container)).not.toContain("translated")
+    expect(screen.queryByTestId("status-bar-unvalidated")).toBeNull()
+    expect(screen.queryByTestId("status-bar-validated")).toBeNull()
+    const badge = screen.getByTestId("status-bar-validated-audio")
+    expect(plain(badge)).toContain("5 audio validated")
+    expect(badge.querySelector("[aria-hidden]")!.className).toContain(PROGRESS_BG.audioValidated)
+  })
+
+  it("splits recorded-but-unvalidated from audio-validated, in the audio tones", () => {
+    const { container } = view({ total: 10, translated: 0, validated: 0, recorded: 6, audioValidated: 2 })
+    expect(plain(container)).toContain("6 recorded (60%)")
+    const pending = screen.getByTestId("status-bar-unvalidated-audio")
+    expect(plain(pending)).toContain("4 recorded, not validated")
+    expect(pending.querySelector("[aria-hidden]")!.className).toContain(PROGRESS_BG.audioRecorded)
+  })
+
+  it("keeps the text summary and adds the audio badges on a file with both", () => {
+    const { container } = view({ total: 10, translated: 8, validated: 5, recorded: 4, audioValidated: 1 })
+    expect(plain(container)).toContain("8 translated (80%)")
+    expect(plain(container)).toContain("3 unvalidated")
+    expect(plain(container)).toContain("5 validated")
+    expect(plain(container)).toContain("3 recorded, not validated")
+    expect(plain(container)).toContain("1 audio validated")
+  })
+
+  // WHY: an absent pair is "not known here" (an older sync-worker, or the
+  // attachment map before it loads) and a zero is "none" — neither may put a
+  // "0 recorded" badge in a text project's footer.
+  it("draws nothing for audio when there is none, absent or zero", () => {
+    for (const progress of [
+      { total: 10, translated: 8, validated: 5 },
+      { total: 10, translated: 8, validated: 5, recorded: 0, audioValidated: 0 },
+    ]) {
+      const { container, unmount } = view(progress)
+      expect(plain(container)).toContain("8 translated (80%)")
+      expect(plain(container)).not.toContain("recorded")
+      expect(plain(container)).not.toContain("audio validated")
+      unmount()
+    }
+  })
+})
+
+it("groups the badge counts the way the counts beside them are grouped", () => {
+  // The footer read "1,208 cells · 1,207 translated" and then "1207 validated".
+  const many = Array.from({ length: 2500 }, (_, i) =>
+    ({ id: String(i), cellLabel: String(i), status: i < 1207 ? "validated" : "unvalidated" }) as CellSummary)
+  const { container } = render(<StatusBar cells={many} healthMap={new Map()} projectHealth={0} />)
+  const plain = (container.textContent ?? "").replace(/[\u2066-\u2069]/g, "")
+  expect(plain).toContain("1,207 validated")
+  expect(plain).toContain("1,293 unvalidated")
+})
+
+// Media redesign slice 2: the footer counts a language that delivers audio by
+// its audio, through the same live counter (the store's `laneStatus`).
+/** Without the bidi isolates the footer wraps every number in. */
+const plain = (text: string | null) => (text ?? "").replace(/[\u2066-\u2069]/g, "")
+
+describe("StatusBar in a language that counts its recordings", () => {
+  const audioCells = [
+    ...Array.from({ length: 6 }, (_, i) => ({ id: `a${i}`, status: "empty", laneStatus: "validated" })),
+    ...Array.from({ length: 4 }, (_, i) => ({ id: `r${i}`, status: "empty", laneStatus: "unvalidated" })),
+    ...Array.from({ length: 35 }, (_, i) => ({ id: `e${i}`, status: "empty", laneStatus: "empty" })),
+  ] as CellSummary[]
+
+  function AudioFooter({ cells: rows, delivers, extra }: {
+    cells: readonly CellSummary[]
+    delivers: "audio" | "text_and_audio"
+    extra?: { needsText: number; needsAudio: number; textTranslated?: number; textValidated?: number; recorded?: number; audioValidated?: number }
+  }) {
+    const { fileProgress } = useHealth(new Map([["active", rows]]), [], { enabled: false })
+    const progress = { ...fileProgress.get("active")!, delivers, ...extra }
+    return <StatusBarView progress={progress} getHealthByCell={() => []} projectHealth={50} />
+  }
+
+  it("Audio: 45 lines with 10 recorded and 6 approved, and no text badges (P2.1)", () => {
+    render(<AudioFooter cells={audioCells} delivers="audio" />)
+    expect(plain(screen.getByTestId("status-bar-summary").textContent)).toBe("45 lines · 10 recorded (22%)")
+    expect(screen.getByTestId("status-bar-unvalidated-audio").textContent).toMatch(/4.* recorded, not validated/)
+    expect(screen.getByTestId("status-bar-validated-audio").textContent).toMatch(/6.* audio validated/)
+    expect(screen.queryByTestId("status-bar-unvalidated")).toBeNull()
+    expect(screen.queryByText(/translated/)).toBeNull()
+  })
+
+  it("Text: a language that delivers text draws no audio, however much is recorded", () => {
+    render(
+      <StatusBarView
+        progress={{ total: 10, translated: 5, validated: 2, recorded: 8, audioValidated: 3, delivers: "text" }}
+        getHealthByCell={() => []}
+        projectHealth={50}
+      />,
+    )
+    expect(plain(screen.getByTestId("status-bar-summary").textContent)).toBe("10 cells · 5 translated (50%)")
+    expect(screen.queryByTestId("status-bar-unvalidated-audio")).toBeNull()
+    expect(screen.queryByTestId("status-bar-validated-audio")).toBeNull()
+  })
+
+  it("nobody chose: a file with recordings and no text reads its audio (AQU-2110's evidence)", () => {
+    render(
+      <StatusBarView
+        progress={{ total: 10, translated: 0, validated: 0, recorded: 8, audioValidated: 3 }}
+        getHealthByCell={() => []}
+        projectHealth={50}
+      />,
+    )
+    expect(plain(screen.getByTestId("status-bar-summary").textContent)).toBe("10 lines · 8 recorded (80%)")
+  })
+
+  it("Text and audio: lines done on both halves, and how much of each half is left (P2.6)", () => {
+    const rows = [
+      ...Array.from({ length: 4 }, (_, i) => ({ id: `d${i}`, status: "validated", laneStatus: "validated" })),
+      ...Array.from({ length: 5 }, (_, i) => ({ id: `s${i}`, status: "validated", laneStatus: "unvalidated" })),
+      { id: "x", status: "empty", laneStatus: "empty" },
+    ] as CellSummary[]
+    render(<AudioFooter cells={rows} delivers="text_and_audio" extra={{ needsText: 3, needsAudio: 4 }} />)
+    expect(plain(screen.getByTestId("status-bar-summary").textContent)).toBe("10 lines · 4 done (40%)")
+    expect(screen.getByTestId("status-bar-text-left").textContent).toMatch(/Text left: .*3/)
+    expect(screen.getByTestId("status-bar-audio-left").textContent).toMatch(/Audio left: .*4/)
+  })
+
+  it("Text and audio: the file row's two halves leave the footer's done figure alone (Sam, Oct 24)", () => {
+    const rows = [
+      ...Array.from({ length: 4 }, (_, i) => ({ id: `d${i}`, status: "validated", laneStatus: "validated" })),
+      ...Array.from({ length: 5 }, (_, i) => ({ id: `s${i}`, status: "validated", laneStatus: "unvalidated" })),
+      { id: "x", status: "empty", laneStatus: "empty" },
+    ] as CellSummary[]
+    render(
+      <AudioFooter
+        cells={rows}
+        delivers="text_and_audio"
+        extra={{ needsText: 3, needsAudio: 4, textTranslated: 9, textValidated: 9, recorded: 6, audioValidated: 6 }}
+      />,
+    )
+    expect(plain(screen.getByTestId("status-bar-summary").textContent)).toBe("10 lines · 4 done (40%)")
+    expect(screen.queryByTestId("status-bar-unvalidated")).toBeNull()
+    expect(screen.queryByTestId("status-bar-validated")).toBeNull()
+    expect(screen.queryByTestId("status-bar-unvalidated-audio")).toBeNull()
+    expect(screen.queryByTestId("status-bar-validated-audio")).toBeNull()
+  })
+})
+
+// AQU-2337: the media view's status ring opens this footer inside a fixed
+// 320 px popover, where the footer is allowed to wrap. The badges are
+// `shrink-0 whitespace-nowrap`, so while the summary shared one non-wrapping
+// group with them it was the only element that could give way: it collapsed
+// into a word-per-line column ("1,208" / "lines ·" / "1,207" / "recorded" /
+// "(99%)") and the health ring was pushed onto a line of its own above the
+// counts. happy-dom does no layout, so the guard is the structure that
+// decides it — the summary never wraps and rides in the same group as the
+// ring (a flex line breaks on a group's whole content), and the legend
+// badges sit in a separate wrapping row that can drop below them.
+describe("StatusBar layout in the status popover (AQU-2337)", () => {
+  const view = (progress: ComponentProps<typeof StatusBarView>["progress"]) =>
+    render(<StatusBarView progress={progress} getHealthByCell={() => []} projectHealth={60} />)
+
+  it("keeps the summary on one line beside the ring, with the two long badges in their own wrapping row", () => {
+    // The reported file: EXO — 1,208 lines, 1,207 recorded, 1 of them not yet
+    // validated, 1,206 audio validated. Both long badges at once.
+    const { container } = view({ total: 1208, translated: 0, validated: 0, recorded: 1207, audioValidated: 1206 })
+    const summary = screen.getByTestId("status-bar-summary")
+    expect(plain(summary.textContent)).toBe("1,208 lines · 1,207 recorded (99%)")
+    // The summary may never be the element that gives way.
+    expect(summary.className).toContain("whitespace-nowrap")
+
+    // The ring travels with the summary instead of being pushed above it.
+    const counts = screen.getByTestId("status-bar-counts")
+    expect(summary.parentElement).toBe(counts)
+    expect(counts.contains(screen.getByRole("button", { name: /Project health/ }))).toBe(true)
+
+    // ...and the badges are NOT in that group — sharing it is what squeezed it.
+    const legend = screen.getByTestId("status-bar-legend")
+    expect(counts.contains(legend)).toBe(false)
+    expect(legend.contains(summary)).toBe(false)
+    expect(legend.className).toContain("flex-wrap")
+    expect([...legend.children]).toEqual([
+      screen.getByTestId("status-bar-unvalidated-audio"),
+      screen.getByTestId("status-bar-validated-audio"),
+    ])
+    expect(plain(legend.textContent)).toContain("1 recorded, not validated")
+    expect(plain(legend.textContent)).toContain("1,206 audio validated")
+
+    // The editor footer's own row is unchanged: the counts, then the legend.
+    expect([...container.querySelector("footer")!.children]).toEqual([counts, legend])
+  })
+
+  it("lays the text lens's unvalidated/validated pair out the same way, since it shares this footer", () => {
+    view({ total: 1208, translated: 1207, validated: 1206 })
+    const legend = screen.getByTestId("status-bar-legend")
+    expect(legend.className).toContain("flex-wrap")
+    expect(legend.contains(screen.getByTestId("status-bar-summary"))).toBe(false)
+    expect(screen.getByTestId("status-bar-summary").className).toContain("whitespace-nowrap")
+    expect([...legend.children]).toEqual([
+      screen.getByTestId("status-bar-unvalidated"),
+      screen.getByTestId("status-bar-validated"),
+    ])
+  })
+
+  it("keeps the shape with one badge, and draws no legend row at all when there are none", () => {
+    const one = view({ total: 10, translated: 4, validated: 0 })
+    expect([...screen.getByTestId("status-bar-legend").children])
+      .toEqual([screen.getByTestId("status-bar-unvalidated")])
+    one.unmount()
+
+    // An empty group would still eat a gap, so it is left out entirely: the
+    // footer holds the counts and nothing else, with no stray empty row.
+    for (const progress of [
+      // Nothing translated yet.
+      { total: 10, translated: 0, validated: 0 },
+      // "Both done": every line done on both halves, nothing left of either.
+      {
+        total: 10, translated: 10, validated: 10, recorded: 10, audioValidated: 10,
+        delivers: "text_and_audio" as const, needsText: 0, needsAudio: 0,
+      },
+    ]) {
+      const { container, unmount } = view(progress)
+      expect(screen.getByTestId("status-bar-summary").className).toContain("whitespace-nowrap")
+      expect(screen.queryByTestId("status-bar-legend")).toBeNull()
+      expect(container.querySelector("footer")!.children).toHaveLength(1)
+      unmount()
+    }
   })
 })

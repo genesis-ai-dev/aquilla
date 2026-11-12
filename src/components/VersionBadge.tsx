@@ -1,12 +1,28 @@
-import { useCallback, useEffect, useRef, useState } from "react"
-import { useLocation } from "react-router-dom"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 import { Check } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
+import { UpdateIndicator } from "@/components/UpdateIndicator"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { formatBuildInfo, formatBuildLabel, type BuildIdentity } from "@/lib/build-label"
+import {
+  formatBuildInfo,
+  formatBuildLabel,
+  formatBuildRailLabel,
+  type BuildIdentity,
+} from "@/lib/build-label"
 import {
   resolveBackendEnvironment,
   type DeploymentEnvironment,
@@ -25,38 +41,45 @@ const BUILT_AT = __APP_BUILT_AT__
 
 const IDENTITY: BuildIdentity = { version: VERSION, branch: BRANCH, sha: SHA, builtAt: BUILT_AT }
 const label = formatBuildLabel(IDENTITY)
+/** AQU-1523: the width-bound variant for the left rail; see build-label.ts. */
+const railLabel = formatBuildRailLabel(IDENTITY)
 const title = formatBuildInfo(IDENTITY)
 
-// Routes where AppShell / LeftDock already render <VersionTag/> in the left-rail
-// footer. The floating <VersionBadge/> must stand down there or it stacks on top
-// of the in-rail tag and covers the account switcher / report button.
-export function hasChromeVersionTag(pathname: string): boolean {
-  const segs = pathname.split("/").filter(Boolean)
-  if (segs.length === 0) return true // "/" — resumes org overview
+/**
+ * Whether an in-flow version line (the rail <VersionTag/>, or an inline
+ * <VersionBadge/> in an auth-page footer) is mounted somewhere on the page. The
+ * floating <VersionBadge/> stands down while one is, so it never stacks on top
+ * of the rail footer and covers the account switcher, Help or localization.
+ *
+ * A mount count rather than a route list: the list leaked every time a page
+ * adopted AppShell without being added to it (the Paratext bridge pages were
+ * the latest), and the fixed badge then sat on top of the rail's own tag.
+ */
+interface InFlowVersionRegistry {
+  mounted: number
+  register: () => () => void
+}
 
-  const root = segs[0]
+const InFlowVersionContext = createContext<InFlowVersionRegistry>({
+  mounted: 0,
+  register: () => () => {},
+})
 
-  // Org shell (OrgSidebar + footer VersionTag).
-  if (root === "orgs") return true
+/** Wrap the app once, above both the routes and the floating <VersionBadge/>. */
+export function InFlowVersionProvider({ children }: { children: ReactNode }) {
+  const [mounted, setMounted] = useState(0)
+  const register = useCallback(() => {
+    setMounted((n) => n + 1)
+    return () => setMounted((n) => n - 1)
+  }, [])
+  const value = useMemo(() => ({ mounted, register }), [mounted, register])
+  return <InFlowVersionContext.Provider value={value}>{children}</InFlowVersionContext.Provider>
+}
 
-  // Remaining AppShell pages that keep the floating badge suppressed.
-  if (
-    root === "projects" ||
-    root === "preferences" ||
-    root === "admin" ||
-    root === "shared"
-  ) {
-    return true
-  }
-
-  // Project workspace (LeftDock or AppShell footer VersionTag) — editor dock routes
-  // and AppShell pages like settings. Bare debug dumps stay badge-only.
-  if (root === "project" && segs.length >= 2) {
-    if (segs.includes("debug")) return false
-    return true
-  }
-
-  return false
+/** Layout effect, so the floating badge is gone before the first paint. */
+function useRegisterInFlowVersion() {
+  const { register } = useContext(InFlowVersionContext)
+  useLayoutEffect(() => register(), [register])
 }
 
 // AQU-1022: which backend (and so which database) this build talks to. Resolved
@@ -87,23 +110,18 @@ function EnvironmentTag({ className }: { className?: string }) {
   const label = t(ENVIRONMENT_LABEL_KEYS[kind])
   const description = t("nav.environment.tooltip", { host: BACKEND.host })
 
+  // AQU-2260 (Sam, Oct 29): what the badge means opens on click, not hover.
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Badge
-            className={cn(
-              "shrink-0 border-amber-500/40 bg-amber-500/15 font-mono text-[10px] tracking-wide text-amber-800 uppercase dark:text-amber-300",
-              className,
-            )}
-            aria-label={description}
-          >
-            {label}
-          </Badge>
-        }
-      />
-      <TooltipContent className="max-w-xs">{description}</TooltipContent>
-    </Tooltip>
+    <NoteOnClick note={description} label={description} align="start" className="shrink-0">
+      <Badge
+        className={cn(
+          "shrink-0 border-amber-500/40 bg-amber-500/15 font-mono text-[10px] tracking-wide text-amber-800 uppercase dark:text-amber-300",
+          className,
+        )}
+      >
+        {label}
+      </Badge>
+    </NoteOnClick>
   )
 }
 
@@ -127,16 +145,28 @@ function useCopyBuildInfo() {
 }
 
 /**
- * In-flow version line for the bottom of a left rail. `mt-auto` pins it to the
+ * In-flow version block for the bottom of a left rail. `mt-auto` pins it to the
  * foot of a flex column; it never overlaps content because it occupies layout.
+ *
+ * AQU-1523: a column, not a row. The environment badge sits ABOVE the build
+ * label rather than beside it, so the label spans the rail's full width — a
+ * preview walk at the default 224px measured the label's fitted text at 13px
+ * ("v0") while the badge, Help and localization shared its line. Everything
+ * that is not the label itself now sits on a different line. Narrower than the
+ * default still truncates with an ellipsis, which is the intended degradation.
  */
 export function VersionTag() {
   const t = useT()
   const { copied, copy } = useCopyBuildInfo()
+  useRegisterInFlowVersion()
 
   return (
-    <div className="mt-auto flex w-full min-w-0 shrink-0 items-center gap-1">
+    <div
+      data-slot="version-tag"
+      className="mt-auto flex w-full min-w-0 shrink-0 flex-col items-start gap-0.5"
+    >
       <EnvironmentTag />
+      <UpdateIndicator />
       <Tooltip>
         <TooltipTrigger
           render={
@@ -146,7 +176,9 @@ export function VersionTag() {
               size="xs"
               onClick={copy}
               className={cn(
-                "h-auto min-w-0 flex-1 justify-start rounded-md px-3 py-1.5 font-mono text-[10px] leading-none",
+                // px-1, not px-3: 16px of padding is 2.5 glyphs of build string
+                // at this size, and the string is what the row exists to show.
+                "h-auto w-full min-w-0 justify-start rounded-md px-1 py-1.5 font-mono text-[10px] leading-none",
                 copied
                   ? "text-emerald-600 hover:text-emerald-600"
                   : "text-muted-foreground/40 hover:text-muted-foreground/70",
@@ -159,31 +191,47 @@ export function VersionTag() {
                   <span className="truncate">{t("nav.version.copiedLabel")}</span>
                 </>
               ) : (
-                <span className="truncate">{label}</span>
+                <span className="truncate">{railLabel}</span>
               )}
             </Button>
           }
         />
+        {/* AQU-2260: the hover only shows the build it copies, in full (the
+            label is cut to the rail). The button's own words say "Copied". */}
         <TooltipContent side="right" className="max-w-xs whitespace-pre-wrap font-mono">
-          {copied ? t("nav.version.copiedTooltip") : t("nav.version.copyTooltip", { buildInfo: title })}
+          {title}
         </TooltipContent>
       </Tooltip>
     </div>
   )
 }
 
-/**
- * Floating badge for screens without a left rail (dashboard, onboarding, join,
- * settings, centred project pages). Click to copy build info.
- */
-export function VersionBadge() {
+/** Floating on other screens without chrome; inline inside an AuthPage footer. */
+export function VersionBadge({ inline = false }: { inline?: boolean }) {
+  return inline ? <InlineVersionBadge /> : <FloatingVersionBadge />
+}
+
+/** An auth-page footer's own copy; registers so the floating one stands down. */
+function InlineVersionBadge() {
+  useRegisterInFlowVersion()
+  return <VersionBadgeBody inline />
+}
+
+function FloatingVersionBadge() {
+  const { mounted } = useContext(InFlowVersionContext)
+  if (mounted > 0) return null
+  return <VersionBadgeBody inline={false} />
+}
+
+function VersionBadgeBody({ inline }: { inline: boolean }) {
   const t = useT()
-  const { pathname } = useLocation()
   const { copied, copy } = useCopyBuildInfo()
-  if (hasChromeVersionTag(pathname)) return null
 
   return (
-    <div className="fixed bottom-3 start-3 z-30 flex max-w-[90vw] items-center gap-1">
+    <div className={cn(
+      "flex items-center gap-1",
+      inline ? "w-full flex-wrap justify-start" : "fixed bottom-3 start-3 z-30 max-w-[90vw]",
+    )}>
       <EnvironmentTag className="bg-card border-amber-500/50" />
       <Tooltip>
         <TooltipTrigger
@@ -213,9 +261,10 @@ export function VersionBadge() {
           }
         />
         <TooltipContent className="max-w-xs whitespace-pre-wrap font-mono">
-          {copied ? t("nav.version.copiedTooltip") : t("nav.version.copyTooltip", { buildInfo: title })}
+          {title}
         </TooltipContent>
       </Tooltip>
+      <UpdateIndicator className="bg-card px-2 py-1.5" />
     </div>
   )
 }

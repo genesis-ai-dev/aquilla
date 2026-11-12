@@ -20,6 +20,7 @@ const orgContext = vi.hoisted(() => ({
   activeOrgId: null as number | null,
   isAllOrgs: false,
   orgs: [] as { id: number; name: string; role?: { level: number; name: string } }[],
+  guestOrgs: [] as { id: number; name: string | null }[],
   accessibleProjects: [] as Array<{
     id: string
     name?: string
@@ -67,6 +68,16 @@ vi.mock("@/lib/frontier/portfolio", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/frontier/portfolio")>()),
   getPortfolio: vi.fn(async () => []),
   getPortfolios: vi.fn(async () => []),
+  getPortfolioAggregates: vi.fn(async () => ({
+    projectCount: 0,
+    avgTranslatedPct: 0,
+    avgValidatedPct: 0,
+    avgAudioPct: 0,
+    stalledCount: 0,
+    overdueCount: 0,
+    attentionCount: 0,
+    orgs: [],
+  })),
   getPortfolioPage: vi.fn(async () => ({ projects: [], nextCursor: null })),
   getPortfoliosPage: vi.fn(async () => ({ projects: [], nextCursor: null })),
 }))

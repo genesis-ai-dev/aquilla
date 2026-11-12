@@ -41,6 +41,14 @@ export type EgressAudioMode =
   | "voice-clips"
   | "voice-timeline"
 
+/**
+ * AQU-1575: what "separate-clips" writes for each clip. "original" copies the
+ * stored file where it can (today's behaviour); "wav" decodes every clip and
+ * writes 16-bit / 48 kHz / mono WAV, the broadcast deliverable. The other modes
+ * always write that WAV already, so this changes nothing for them.
+ */
+export type EgressAudioFormat = "original" | "wav"
+
 export interface EgressOptions {
   textMode: EgressTextMode
   /** Used when textMode === "convert", and as the fallback for file types
@@ -51,6 +59,8 @@ export interface EgressOptions {
   /** Also export the raw original import documents (sidecar bytes). */
   includeSourceDocs: boolean
   audioMode: EgressAudioMode
+  /** AQU-1575. Absent on options saved before it existed ⇒ "original". */
+  audioFormat?: EgressAudioFormat
   /** Reuse cached per-project exports when the project hasn't changed. */
   useCache: boolean
 }

@@ -1,12 +1,15 @@
+import { renderWithBrand as render } from "@/test-utils/render-with-brand"
+// Every catalog, synchronously: this file asserts translated text (AQU-1991).
+import "@/test-utils/all-catalogs"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { screen, waitFor, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { JoinPage, InviteSummary } from "./JoinPage"
 import { acceptServerInvite, previewMultiInvite, acceptMultiInvite, previewServerInvite } from "@/lib/sync/invites"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { LanguageSwitcher } from "@/lib/i18n/LanguageSwitcher"
-import { CATALOGS } from "@/lib/i18n/messages"
+import { CATALOGS } from "@/lib/i18n/messages/all"
 import { LOCALE_STORAGE_KEY } from "@/lib/i18n/store"
 
 const navigate = vi.fn()
@@ -385,7 +388,7 @@ describe("InviteSummary (AQU-337 singular/plural copy)", () => {
         roleName="project_lead"
       />,
     )
-    expect(screen.getByText("Project lead")).toBeInTheDocument()
+    expect(screen.getByText("Project Lead")).toBeInTheDocument()
   })
 
   it("renders the bound email suffix when present", () => {

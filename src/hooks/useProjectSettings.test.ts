@@ -5,10 +5,15 @@ import {
   useProjectSettings,
   describePatchFailure,
   broadcastProjectSettingsUpdated,
+  PROJECT_SETTINGS_UPDATED_EVENT,
   type PatchOutcome,
+  type ProjectSettingsUpdatedDetail,
   isCountStructuralOnlyPatch,
 } from "./useProjectSettings"
 import * as restClient from "@/lib/sync/project-settings"
+import posthog from "@/lib/posthog"
+
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn(), captureException: vi.fn() } }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "test-jwt", username: "ryder" } }),
@@ -109,6 +114,37 @@ describe("useProjectSettings — StrictMode race (BUG-TERM-1)", () => {
 })
 
 describe("useProjectSettings — read path", () => {
+  // AQU-1771: the org policy rides on this response so a member outside the
+  // org gets the org's real values; the hook must hand it on.
+  it("exposes the org policy and visibility floors carried on the settings response", async () => {
+    const orgPolicy = {
+      rosterViewMinRole: 600,
+      memberProgressViewMinRole: 500,
+      allowSelfAssignment: true,
+      allowScopedLaneAssignment: false,
+      assignmentMinRole: 400,
+      autoPropagateRepetitions: false,
+      exportMinRole: null,
+    }
+    const visibilityFloors = {
+      rosterViewMinRole: { org: 600, project: 700, effective: 700 },
+      memberProgressViewMinRole: { org: 500, project: null, effective: 500 },
+    }
+    mockSettingsFetch({
+      version: 1,
+      updatedAt: "x",
+      updatedBy: null,
+      settings: { rosterViewMinRole: 700 },
+      orgPolicy,
+      visibilityFloors,
+    })
+    const { result } = renderHook(() => useProjectSettings("p1", 400))
+
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.orgPolicy).toEqual(orgPolicy)
+    expect(result.current.visibilityFloors).toEqual(visibilityFloors)
+  })
+
   it("starts exactly one settings request on an initially-online mount", async () => {
     const fetchSpy = mockSettingsFetch({
       version: 1,
@@ -287,16 +323,18 @@ describe("useProjectSettings — write path", () => {
 
   // AQU-255: synced below-floor writes must NOT apply locally — local apply
   // before role-check was the root cause of silent per-device divergence.
+  // validationCount stays on the maintainer floor. Language keys do not
+  // (AQU-984) and are covered in the language-only carve-out.
   it("returns blocked-role for below-MAINTAINER callers on synced projects and does NOT apply locally", async () => {
     const idbMod = await import("@/lib/store/project-index")
     vi.mocked(idbMod.patchProject).mockClear()
     mockSettingsFetch(null)
-    // PROJECT_LEAD (500) is below the MAINTAINER (600) floor
+    // PROJECT_LEAD (500) is below the MAINTAINER (600) floor for non-language keys
     const { result } = renderHook(() => useProjectSettings("p1", 500))
     await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
     let got!: PatchOutcome
     await act(async () => {
-      got = await result.current.patch({ sourceLanguage: "fr" })
+      got = await result.current.patch({ validationCount: 3 })
     })
     expect(got.kind).toBe("blocked")
     if (got.kind === "blocked") expect(got.reason).toBe("role")
@@ -365,9 +403,9 @@ describe("useProjectSettings — write path", () => {
     })
   })
 
-  // AQU-1086: the project-language keys are the second org-configurable scope.
-  // Its default is MAINTAINER, so with no org setting nothing below changes.
-  describe("language-only carve-out (AQU-1086)", () => {
+  // AQU-1086 / AQU-984: language keys default to project lead when unset.
+  // An explicit stored floor is a different value and is kept.
+  describe("language-only carve-out (AQU-1086 / AQU-984)", () => {
     it("lets a project lead change languages when the org floor is 500", async () => {
       mockSettingsFetch({
         version: 1, updatedAt: "x", updatedBy: null,
@@ -413,10 +451,33 @@ describe("useProjectSettings — write path", () => {
       expect(patchSpy).toHaveBeenCalled()
     })
 
-    it("still blocks a project lead's language write at the default floor (600)", async () => {
+    it("lets a project lead change languages at the unset default (500)", async () => {
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { sourceLanguage: "en" },
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+        kind: "ok",
+        value: { version: 2, updatedAt: "y", updatedBy: null, settings: { targetLanguage: "de" } },
+      })
+      const { result } = renderHook(() => useProjectSettings("p1", 500))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      expect(result.current.canEditLanguages).toBe(true)
+      expect(result.current.languageEditFloor).toBe(500)
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ targetLanguage: "de" })
+      })
+      expect(got.kind).toBe("ok")
+      expect(patchSpy).toHaveBeenCalled()
+    })
+
+    it("still blocks a project lead when the org explicitly stored maintainer (600)", async () => {
       mockSettingsFetch(null)
       const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
-      const { result } = renderHook(() => useProjectSettings("p1", 500))
+      const { result } = renderHook(() =>
+        useProjectSettings("p1", 500, { languageEditMinRole: 600 }),
+      )
       await waitFor(() => expect(result.current.hasFetched).toBe(true))
       expect(result.current.canEditLanguages).toBe(false)
       expect(result.current.languageEditFloor).toBe(600)
@@ -449,14 +510,14 @@ describe("useProjectSettings — write path", () => {
       expect(patchSpy).not.toHaveBeenCalled()
     })
 
-    it("clamps an out-of-ladder org floor back to the maintainer default", async () => {
+    it("clamps an out-of-ladder org floor back to the project-lead default", async () => {
       mockSettingsFetch(null)
       const { result } = renderHook(() =>
         useProjectSettings("p1", 500, { languageEditMinRole: 42 }),
       )
       await waitFor(() => expect(result.current.hasFetched).toBe(true))
-      expect(result.current.languageEditFloor).toBe(600)
-      expect(result.current.canEditLanguages).toBe(false)
+      expect(result.current.languageEditFloor).toBe(500)
+      expect(result.current.canEditLanguages).toBe(true)
     })
   })
 
@@ -465,6 +526,59 @@ describe("useProjectSettings — write path", () => {
   // mirrors auth-worker's carve-out, which stays authoritative; the client
   // copy exists to stop a guaranteed-403 and to keep AQU-255 intact (never
   // apply a below-floor patch locally).
+  describe("project leads managing voices (AQU-2041)", () => {
+    it("lets a project lead save voice settings only when the switch is on", async () => {
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { projectLeadsManageVoices: true },
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+        kind: "ok",
+        value: { version: 2, updatedAt: "y", updatedBy: null, settings: { projectLeadsManageVoices: true } },
+      })
+      const { result } = renderHook(() => useProjectSettings("p1", 500))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ ttsSettings: { voices: [] } })
+      })
+      expect(got.kind).toBe("ok")
+      expect(patchSpy).toHaveBeenCalled()
+    })
+
+    it("blocks a contributor even when the switch is on", async () => {
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { projectLeadsManageVoices: true },
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() => useProjectSettings("p1", 400))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ ttsSettings: { voices: [] } })
+      })
+      expect(got.kind).toBe("blocked")
+      expect(patchSpy).not.toHaveBeenCalled()
+    })
+
+    it("blocks a project lead while the switch is off", async () => {
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: {},
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() => useProjectSettings("p1", 500))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ ttsSettings: { voices: [] } })
+      })
+      expect(got.kind).toBe("blocked")
+      expect(patchSpy).not.toHaveBeenCalled()
+    })
+  })
+
   describe("autopilotEnabled-only carve-out (AQU-1246)", () => {
     it("lets a project lead (500) opt the project in", async () => {
       mockSettingsFetch({
@@ -510,8 +624,115 @@ describe("useProjectSettings — write path", () => {
       let otherKey!: PatchOutcome
       let bundled!: PatchOutcome
       await act(async () => {
+        // A non-language key. sourceLanguage is admitted at the unset language
+        // floor (project lead) and would not prove this carve-out stays narrow.
+        otherKey = await result.current.patch({ validationCount: 3 })
+        bundled = await result.current.patch({ autopilotEnabled: true, validationCount: 3 })
+      })
+      expect(otherKey.kind).toBe("blocked")
+      expect(bundled.kind).toBe("blocked")
+      expect(patchSpy).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("parallelBibleVersions-only carve-out (project default Bibles)", () => {
+    it.each([
+      [500, "ok"],
+      [400, "blocked"],
+    ] as const)("role %s setting the project defaults → %s", async (role, kind) => {
+      mockSettingsFetch({ version: 1, updatedAt: "x", updatedBy: null, settings: {} })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+        kind: "ok",
+        value: { version: 2, updatedAt: "y", updatedBy: null, settings: { parallelBibleVersions: ["BSB"] } },
+      })
+      const { result } = renderHook(() => useProjectSettings("p1", role))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      let bundled!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ parallelBibleVersions: ["BSB"] })
+        bundled = await result.current.patch({ parallelBibleVersions: ["BSB"], validationCount: 3 })
+      })
+      expect(got.kind).toBe(kind)
+      expect(bundled.kind).toBe("blocked")
+      expect(patchSpy).toHaveBeenCalledTimes(kind === "ok" ? 1 : 0)
+    })
+  })
+
+  // AQU-1408: confirming (✓) / rejecting (✕) a word alignment in the BT tab
+  // writes `alignmentSeeds`. The panel shows those buttons to the whole
+  // project, so under the flat maintainer floor they were a dead control for
+  // everyone below 600 — the click moved the in-memory model, the AQU-255
+  // guard refused the local apply, and the decision was gone on reload.
+  describe("alignmentSeeds-only carve-out (AQU-1408)", () => {
+    const SEEDS = [{ srcToken: "father", tgtToken: "père", weight: 1 }]
+
+    it("lets a contributor (400) save a confirmation", async () => {
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { sourceLanguage: "en" },
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+        kind: "ok",
+        value: { version: 2, updatedAt: "y", updatedBy: null, settings: { alignmentSeeds: SEEDS } },
+      })
+      const { result } = renderHook(() => useProjectSettings("p1", 400))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ alignmentSeeds: SEEDS })
+      })
+      expect(got.kind).toBe("ok")
+      expect(patchSpy).toHaveBeenCalled()
+    })
+
+    it("lets a contributor save a rejection (the negative seed is the same permission)", async () => {
+      const rejected = [{ srcToken: "father", tgtToken: "papa", weight: -1 }]
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { sourceLanguage: "en" },
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+        kind: "ok",
+        value: { version: 2, updatedAt: "y", updatedBy: null, settings: { alignmentSeeds: rejected } },
+      })
+      const { result } = renderHook(() => useProjectSettings("p1", 400))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ alignmentSeeds: rejected })
+      })
+      expect(got.kind).toBe("ok")
+      expect(patchSpy).toHaveBeenCalled()
+    })
+
+    it("blocks a reviewer (300) — contributor is the floor, not every member", async () => {
+      const idbMod = await import("@/lib/store/project-index")
+      vi.mocked(idbMod.patchProject).mockClear()
+      mockSettingsFetch(null)
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() => useProjectSettings("p1", 300))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ alignmentSeeds: SEEDS })
+      })
+      expect(got.kind).toBe("blocked")
+      if (got.kind === "blocked") expect(got.reason).toBe("role")
+      expect(patchSpy).not.toHaveBeenCalled()
+      expect(idbMod.patchProject).not.toHaveBeenCalled()
+    })
+
+    it("does NOT widen any other key — a contributor bundling another key stays blocked", async () => {
+      mockSettingsFetch(null)
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() => useProjectSettings("p1", 400))
+      await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
+      let otherKey!: PatchOutcome
+      let bundled!: PatchOutcome
+      await act(async () => {
         otherKey = await result.current.patch({ sourceLanguage: "fr" })
-        bundled = await result.current.patch({ autopilotEnabled: true, sourceLanguage: "fr" })
+        bundled = await result.current.patch({ alignmentSeeds: SEEDS, sourceLanguage: "fr" })
       })
       expect(otherKey.kind).toBe("blocked")
       expect(bundled.kind).toBe("blocked")
@@ -589,7 +810,7 @@ describe("useProjectSettings — write path", () => {
       res = await result.current.patch({ sourceLanguage: "fr" })
     })
     expect(res.kind).toBe("conflict")
-    if (res.kind === "conflict") expect(res.latest.updatedBy?.username).toBe("alex")
+    if (res.kind === "conflict") expect(restClient.settingsEditorName(res.latest.updatedBy)).toBe("alex")
     expect(result.current.settings.sourceLanguage).toBe("de")
     expect(result.current.version).toBe(2)
     // Two IDB writes expected: the optimistic local apply with "fr", then the
@@ -948,6 +1169,94 @@ describe("useProjectSettings — same-tab propagation after a write (AQU-979)", 
   })
 })
 
+// AQU-1816 — the lane-row endpoints (create / rename / archive) write around
+// `patch`, so the siblings `patch` would have told — the overview or workspace
+// behind the settings modal — kept their old lanes until a reload. Those
+// writers call `refreshAfterWrite` instead of a bare `refresh()`.
+describe("useProjectSettings — refreshAfterWrite (AQU-1816)", () => {
+  const SOURCE: restClient.ProjectLaneView = {
+    id: "ln-src", role: "source", language: "Greek", name: null, langCode: null,
+    legacyTag: null, position: 0, archivedAt: null,
+  }
+  const FRENCH: restClient.ProjectLaneView = {
+    id: "ln-fr", role: "target", language: "French", name: null, langCode: null,
+    legacyTag: "French", position: 1, archivedAt: null,
+  }
+  const SPANISH: restClient.ProjectLaneView = {
+    id: "ln-es", role: "target", language: "Spanish", name: null, langCode: null,
+    legacyTag: "Spanish", position: 2, archivedAt: null,
+  }
+  const laneIds = (hook: { current: { lanes: restClient.ProjectLaneView[] | null } }) =>
+    (hook.current.lanes ?? []).map((lane) => lane.id)
+
+  it("makes a sibling instance list the lane the writer just created", async () => {
+    const fetchSpy = mockSettingsFetch({
+      version: 1, updatedAt: "x", updatedBy: null, settings: {}, lanes: [SOURCE, FRENCH],
+    })
+    // The overview under the modal…
+    const { result: overview } = renderHook(() => useProjectSettings("p1", 700))
+    // …and the settings dialog whose Languages section creates the lane.
+    const { result: dialog } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(laneIds(overview)).toEqual(["ln-src", "ln-fr"]))
+    await waitFor(() => expect(laneIds(dialog)).toEqual(["ln-src", "ln-fr"]))
+    const before = fetchSpy.mock.calls.length
+
+    // The lane row is on the server; from here on every GET lists it.
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      value: { version: 1, updatedAt: "x", updatedBy: null, settings: {}, lanes: [SOURCE, FRENCH, SPANISH] },
+    })
+    await act(async () => {
+      await dialog.current.refreshAfterWrite()
+    })
+
+    // No reload, no tab focus, no DO frame — the overview instance converges…
+    await waitFor(() => expect(laneIds(overview)).toEqual(["ln-src", "ln-fr", "ln-es"]))
+    // …and so does the writer, through its own refresh.
+    expect(laneIds(dialog)).toEqual(["ln-src", "ln-fr", "ln-es"])
+    // One GET per instance: the writer skips its own broadcast.
+    expect(fetchSpy.mock.calls.length).toBe(before + 2)
+  })
+
+  it("tells the page behind with the project id and its own origin", async () => {
+    mockSettingsFetch({ version: 1, updatedAt: "x", updatedBy: null, settings: {}, lanes: [SOURCE, FRENCH] })
+    const { result } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    const seen: ProjectSettingsUpdatedDetail[] = []
+    const onUpdated = (event: Event) => {
+      seen.push((event as CustomEvent<ProjectSettingsUpdatedDetail>).detail)
+    }
+    window.addEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onUpdated)
+    try {
+      await act(async () => {
+        await result.current.refreshAfterWrite()
+      })
+    } finally {
+      window.removeEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onUpdated)
+    }
+    // The overview keys its portfolio reload on the project id alone; the
+    // origin is what keeps the writer from answering its own event.
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.projectId).toBe("p1")
+    expect(seen[0]?.origin).toBeTruthy()
+  })
+
+  it("is a no-op broadcast with no project", async () => {
+    const { result } = renderHook(() => useProjectSettings(null, 700))
+    const seen: unknown[] = []
+    const onUpdated = (event: Event) => seen.push((event as CustomEvent).detail)
+    window.addEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onUpdated)
+    try {
+      await act(async () => {
+        expect(await result.current.refreshAfterWrite()).toBeNull()
+      })
+    } finally {
+      window.removeEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onUpdated)
+    }
+    expect(seen).toEqual([])
+  })
+})
+
 // AQU-1083 — the client's own role floor has to agree with the server's, or a
 // project lead gets a control that silently does nothing.
 describe("isCountStructuralOnlyPatch (AQU-1083)", () => {
@@ -967,5 +1276,88 @@ describe("isCountStructuralOnlyPatch (AQU-1083)", () => {
     // fall back to the maintainer floor rather than ride this one through.
     expect(isCountStructuralOnlyPatch({ countStructuralCells: false, sourceLanguage: "fr" })).toBe(false)
     expect(isCountStructuralOnlyPatch({})).toBe(false)
+  })
+})
+
+// AQU-1912 — the switch's own gate, at the same project-lead floor `patch`
+// applies to a headings-only write. The page gated it on `canEdit`
+// (maintainer), so a project lead saw a control the server would accept
+// greyed out.
+describe("useProjectSettings — canEditCountStructural (AQU-1912)", () => {
+  it("is true for a project lead (500) while the rest of the form stays locked", async () => {
+    mockSettingsFetch(null)
+    const { result } = renderHook(() => useProjectSettings("p1", 500))
+    await waitFor(() => expect(result.current.canEditCountStructural).toBe(true))
+    expect(result.current.reasonCannotEditCountStructural).toBeNull()
+    expect(result.current.canEdit).toBe(false)
+  })
+
+  it("is false for a contributor (400), with a role reason", async () => {
+    mockSettingsFetch(null)
+    const { result } = renderHook(() => useProjectSettings("p1", 400))
+    await waitFor(() => expect(result.current.reasonCannotEditCountStructural).toBe("role"))
+    expect(result.current.canEditCountStructural).toBe(false)
+  })
+
+  it("is false offline even at owner, with an offline reason", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false })
+    mockSettingsFetch(null)
+    const { result } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(result.current.reasonCannotEditCountStructural).toBe("offline"))
+    expect(result.current.canEditCountStructural).toBe(false)
+  })
+})
+
+describe("useProjectSettings — hydration event once per open (AQU-1470)", () => {
+  // The open is tracked at module scope, so each test uses its own project id.
+  const settingsRow = (): restClient.ProjectSettingsResponse => ({
+    version: 1,
+    updatedAt: "x",
+    updatedBy: null,
+    settings: {},
+  })
+  const captureSpy = vi.mocked(posthog.capture)
+  const hydratedCaptures = () =>
+    captureSpy.mock.calls.filter(([name]) => name === "project settings hydrated")
+  beforeEach(() => captureSpy.mockClear())
+
+  it("captures once when two consumers mount for the same project", async () => {
+    const fetchSpy = mockSettingsFetch(settingsRow())
+    const { result } = renderHook(() => [
+      useProjectSettings("aqu1470-a", 700),
+      useProjectSettings("aqu1470-a", 700),
+    ])
+    await waitFor(() => expect(result.current.every((s) => s.hasFetched)).toBe(true))
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    expect(hydratedCaptures()).toHaveLength(1)
+    expect(hydratedCaptures()[0][1]).toMatchObject({
+      project_id: "aqu1470-a",
+      has_server_row: true,
+    })
+  })
+
+  it("does not capture again on refresh or a settings-updated broadcast", async () => {
+    const fetchSpy = mockSettingsFetch(settingsRow())
+    const { result } = renderHook(() => useProjectSettings("aqu1470-b", 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    await act(async () => {
+      await result.current.refresh()
+    })
+    act(() => broadcastProjectSettingsUpdated({ projectId: "aqu1470-b" }))
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3))
+    expect(hydratedCaptures()).toHaveLength(1)
+  })
+
+  it("captures again when the consumer switches to a different project", async () => {
+    mockSettingsFetch(settingsRow())
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string }) => useProjectSettings(id, 700),
+      { initialProps: { id: "aqu1470-c" } },
+    )
+    await waitFor(() => expect(hydratedCaptures()).toHaveLength(1))
+    rerender({ id: "aqu1470-d" })
+    await waitFor(() => expect(hydratedCaptures()).toHaveLength(2))
+    expect(hydratedCaptures()[1][1]).toMatchObject({ project_id: "aqu1470-d" })
+    expect(result.current.hasFetched).toBe(true)
   })
 })

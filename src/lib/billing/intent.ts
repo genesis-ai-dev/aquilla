@@ -1,9 +1,8 @@
+import { safeLoginNext } from "../navigation/login-path"
 import type { BillingPlanSelection } from '../../../db/shared/billing-review'
 
 const offers: Record<string, BillingPlanSelection['offer']> = {
-  pro: 'pro', max_5x: 'max_5x', 'max-5x': 'max_5x',
-  max_20x: 'max_20x', 'max-20x': 'max_20x',
-  team: 'team', team_20x: 'team_20x', 'team-20x': 'team_20x',
+  team: 'team',
 }
 export type BillingIntent = { kind: 'none' | 'invalid' }
   | { kind: 'paid'; selection: BillingPlanSelection }
@@ -36,8 +35,11 @@ export function billingSelectionPath(selection: BillingPlanSelection): string {
 }
 export function onboardingForBillingNext(next: string): string {
   const url = new URL(next, 'https://aquilla.invalid')
-  if (url.origin !== 'https://aquilla.invalid' || url.pathname !== '/billing/select') return '/onboarding'
+  if (url.origin !== 'https://aquilla.invalid' || url.pathname !== '/billing/select') {
+    const destination = safeLoginNext(next)
+    return destination === '/app' ? '/signup' : `/signup?${new URLSearchParams({ next: destination })}`
+  }
   const intent = readBillingIntent(url.searchParams)
   return intent.kind === 'paid'
-    ? billingSelectionPath(intent.selection).replace('/billing/select', '/onboarding') : '/onboarding'
+    ? billingSelectionPath(intent.selection).replace('/billing/select', '/signup') : '/signup'
 }

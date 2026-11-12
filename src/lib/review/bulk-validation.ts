@@ -10,11 +10,19 @@
 //
 // One predicate, used by both, is what stops that happening again.
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
+import { isOwnTextEdit } from "@/lib/review/text-validation-policy"
 import { isInMemberScope, type MemberScope } from "@/lib/sync/member-scopes"
 
 export interface BulkValidatableCell {
   fileId: string
   activeValidators?: string[]
+  /** Who wrote the line's current text in the active lane (see `isOwnTextEdit`). */
+  lastEditor?: string | null
+}
+
+export interface BulkValidatePolicy {
+  /** The project's "Allow self-validation". Only `false` withholds anything. */
+  allowSelfValidation?: boolean
 }
 
 export function isBulkValidatableByMe(
@@ -22,6 +30,7 @@ export function isBulkValidatableByMe(
   username: string,
   myScopes: MemberScope[],
   activeLane: string,
+  policy: BulkValidatePolicy = {},
 ): boolean {
   if (!isBulkValidationEligible(cell)) return false
   // AQU-633: a scoped member's validate on an out-of-scope cell is a
@@ -32,5 +41,9 @@ export function isBulkValidatableByMe(
   // (cell, user) and folds it away — but it is a wasted round trip, and it
   // makes the count the UI promised disagree with the work actually done.
   if (cell.activeValidators?.includes(username)) return false
+  // AQU-1571: the reader's own latest change, on a project that wants someone
+  // else to sign it off. The server refuses every one of these, and each
+  // refusal used to come back as a line in the red "failed" banner.
+  if (isOwnTextEdit(cell, username, policy.allowSelfValidation)) return false
   return true
 }

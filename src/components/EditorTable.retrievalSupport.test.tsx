@@ -152,7 +152,7 @@ describe("EditorTable retrieval-support summary", () => {
     )
 
     fireEvent.click(await screen.findByRole("button", { name: "Open cell details" }))
-    fireEvent.click(await screen.findByRole("tab", { name: "Retrieval support" }))
+    fireEvent.click(await screen.findByRole("tab", { name: "Health" }))
 
     // Assert the elements and their classes: "Cell estimate 72% · local trend
     // 72%" reads identically flattened, so a text-only assertion would have

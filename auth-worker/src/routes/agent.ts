@@ -4,8 +4,8 @@
 // Wire contract (frames, tool schema, proposal shapes — byte-for-byte):
 // docs/superpowers/specs/2026-06-12-translation-agent-implementation-plan.md.
 //
-// One tool ("execute": sql | emit | docs), max 8 tool iterations, 60k token
-// ceiling, Haiku-class default model through the same OpenRouter key +
+// Bounded tool iterations and a 200k token ceiling, using the configured
+// model through the same OpenRouter key +
 // runAiGuard() path as /api/v1/chat/completions. All writes are STAGED
 // proposals — the client applies them through the normal POST /events path.
 
@@ -20,6 +20,7 @@ import { creditGuard, creditsFor, recordCredit, resolveCreditConfig } from "../l
 import { countWords } from "../lib/billing/plans"
 import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
 import { makeCostMeter } from "../lib/cost-meter"
+import { makeAgentTelemetry } from "../lib/agent/telemetry"
 import { resolveProjectRole } from "../services/project-permissions"
 import { AliasMap, compressRows } from "../lib/agent/compress"
 import { runGuardedSql, type SqlVarContext } from "../lib/agent/sql-guard"
@@ -36,6 +37,7 @@ import { parseAquiferOp } from "../lib/agent/aquifer-guard"
 import { aquiferSearch, aquiferReadPage, type AquiferCitation } from "../lib/aquifer/client"
 import { isBibleResourcesEnabled } from "../lib/aquifer/gate"
 import { buildSystemPrompt } from "../lib/agent/schema-card"
+import { languagesForLanes, loadLaneRows } from "../lib/read-lane-language"
 import { insertAgentRun, finishAgentRun, listAgentRuns } from "../lib/agent/runs"
 import { makePostgres } from "../../../db/shim/postgres"
 import {
@@ -43,12 +45,21 @@ import {
   resolveRunCostCapCents,
 } from "../lib/agent/frames"
 import { buildMemoryContext, type MemoryContext } from "../../../db/shared/agent-memory"
-import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
+import { callerMayReadLane } from "../../../db/shared/lane-visibility"
+import { resolveLaneIdOrTag } from "../../../db/shared/lane-ref"
+import { languageOfTargetLane } from "../../../db/shared/lane-language"
+import { readDraftingSettings } from "../../../db/shared/drafting-settings"
+import { settingsObject } from "../../../db/shared/load-translation-instructions"
+import { loadTranslationInstructions } from "../../../db/shared/load-translation-instructions"
+import { projectChecksHint } from "../lib/contextual/project-context"
+import { resolveAnswerLanguage } from "../lib/agent/answer-language"
+import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
 import { sandboxDestroy } from "../lib/agent/sandbox-client"
 import { openRouterExtras, streamUsageOptions } from "../lib/llm-vendor"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
-import { AgentUsageMeter, agentUsageAllowed, agentUsageEnabled } from "../lib/billing/agent-usage"
+import { AgentUsageMeter } from "../lib/billing/agent-usage"
+import { admitPaidCall, paidCallMeterMode } from "../lib/billing/paid-call"
 import {
   runCode,
   loadArtifact,
@@ -71,6 +82,10 @@ import {
   type ProposeCommandArgs,
   type DescribeCommandArgs,
 } from "../lib/agent/command-tools"
+import {
+  logVendorTimeout,
+  vendorDeadline,
+} from "../../../shared/vendor-timeouts"
 
 const agent = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -120,7 +135,13 @@ function resolveDraftModel(env: Env, settings: PlatformSettings, agentModel: str
 // backstops a model looping on free tools.
 const MAX_TOOL_ITERATIONS = 12
 const MAX_TOTAL_ROUNDS = 30
-const TOKEN_CEILING = 100_000
+// Bounds the CONVERSATION SIZE — the latest orchestrator turn's prompt +
+// completion — not tokens summed across turns. Every turn re-sends the whole
+// context, so a running sum tripped a whole-book task after a few turns with
+// almost nothing spent. Spend is the cost cap's job.
+const TOKEN_CEILING = 200_000
+const TURN_LIMIT_MESSAGE =
+  "Turn length limit reached (200,000 tokens). Send a new message to continue or redirect the agent."
 /** code_result summaries are truncated for the UI per the contract. */
 const RESULT_SUMMARY_MAX = 2000
 
@@ -148,7 +169,7 @@ type AgentFrame =
   | { type: "code_result"; step: number; ok: boolean; summary: string; data?: ToolResultData }
   | { type: "proposal"; proposal: AgentProposal }
   | { type: "aquifer_proposal"; proposal: AquiferPublishProposal }
-  | { type: "progress"; label: string; done: number; total: number }
+  | { type: "progress"; label: string; done?: number; total?: number }
   | { type: "usage"; promptTokens: number; completionTokens: number; costCredits: number }
   | { type: "done"; runId: string; status: "ok" | "capped" | "error" }
   | { type: "error"; message: string }
@@ -163,8 +184,8 @@ type AgentFrame =
 // mocks + old transcripts in stored sessions still call it).
 
 const SCOPE_PROPS = {
-  fileId: { type: "string", description: "File id, #f-alias, or :file (the focused file)." },
-  ref: { type: "string", description: 'Scripture scope: "MRK", "MRK 4", or "MRK 4:1-20". Resolves the file by book code when fileId is omitted.' },
+  fileId: { type: "string", description: "File id, #f-alias, :file (the focused file), or the file's name as the user said it (case and small typos tolerated; several matches return the candidates)." },
+  ref: { type: "string", description: 'Book scope: "<BOOK>", "<BOOK> 4", or "<BOOK> 4:1-20", where <BOOK> is a code the project actually contains (read it from a file, never invent one). Resolves the file by book code when fileId is omitted. Omit ref to work through the file in order.' },
 } as const
 
 const AQUIFER_PROPS = {
@@ -186,7 +207,7 @@ function buildTools(bibleResourcesEnabled: boolean) {
       function: {
         name: "read",
         description:
-          "Aligned source/target rows for a file or ref range, in display order, with per-cell status (untranslated | drafted | stale | validated | translated). Start most tasks here.",
+          "Aligned source/target rows for a file or ref range, in display order, with per-cell status (untranslated | drafted | stale | validated | translated). filter 'flagged' lists drafted/translated cells that break an enabled project rule nobody waived, naming the rule. Start most tasks here.",
         parameters: {
           type: "object",
           properties: {
@@ -237,14 +258,15 @@ function buildTools(bibleResourcesEnabled: boolean) {
       function: {
         name: "draft",
         description:
-          "Draft untranslated cells with a separate evidence-research pass followed by generation from validated exemplars, discourse context, the project brief, and rules; then STAGE the results for user approval. Preferred over writing translations yourself. One call handles up to 10 cells; the result says how many remain.",
+          "Draft untranslated cells with a separate evidence-research pass followed by generation from validated exemplars, preceding validated context, and the project instructions; then STAGE the results for user approval, where the project's rules lint them (violations come back in the verdict). Key terms are not in the drafting prompt: name term choices in instructions. Preferred over writing translations yourself. One call handles up to 10 cells; the result says how many remain.",
         parameters: {
           type: "object",
           properties: {
             ...SCOPE_PROPS,
             cellIds: { type: "array", items: { type: "string" }, description: "Draft exactly these cells (ids or #c-aliases) instead of every untranslated cell in scope." },
             limit: { type: "number", description: "Max cells this call (default 10, cap 10)." },
-            instructions: { type: "string", description: "Extra guidance for this batch (tone, term choices, fixes from lint)." },
+            instructions: { type: "string", description: "Directions for this run only (tone, term choices, fixes from lint) — on top of the project instructions, which every draft already carries." },
+            alternatives: { type: "number", description: "Draft 2-5 ALTERNATIVE wordings of ONE cell for the user to compare and pick from, instead of one draft each for a batch. Use it when they ask for options/versions/another way to word a line. Needs a single cell: pass that one cell in cellIds (or a ref that resolves to it). The user picks one in the app and the rest are discarded, so do not tell them the cell is drafted." },
           },
         },
       },
@@ -378,7 +400,7 @@ function buildTools(bibleResourcesEnabled: boolean) {
       function: {
         name: "propose_memory",
         description:
-          "STAGE a durable project note for human review (never approved by you). Path must match ^[a-z0-9-/]+\\.md$, content ≤10KB. Disabled while parsing untrusted content.",
+          "STAGE a durable project note for human review (never approved by you). Path must match ^[a-z0-9-/]+\\.md$, content ≤10KB. Use decisions/<slug>.md for a standing translation decision (\"render X as Y, never Z\") — once a lead approves it, it is appended to the project instructions every draft follows. Use observations/ for working notes. Disabled while parsing untrusted content.",
         parameters: {
           type: "object",
           properties: {
@@ -387,22 +409,6 @@ function buildTools(bibleResourcesEnabled: boolean) {
             rationale: { type: "string" },
           },
           required: ["path", "content", "rationale"],
-        },
-      },
-    },
-    {
-      type: "function",
-      function: {
-        name: "propose_brief_update",
-        description:
-          "STAGE a proposed change to the project brief for human review. Disabled while parsing untrusted content.",
-        parameters: {
-          type: "object",
-          properties: {
-            content: { type: "string" },
-            rationale: { type: "string" },
-          },
-          required: ["content", "rationale"],
         },
       },
     },
@@ -450,6 +456,11 @@ function buildTools(bibleResourcesEnabled: boolean) {
   return tools
 }
 
+/** Exposed for tests: the tool schemas exactly as the model sees them, so a
+ *  contract test can run every `read` filter the schema offers. Production
+ *  code never reads this. */
+export const _test = { buildTools }
+
 // ── Request body ────────────────────────────────────────────────────────────
 
 // Translator profile: all fields optional free-text. The zod `.max` is a
@@ -480,8 +491,11 @@ const runRequestSchema = z.object({
     .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() }))
     .min(1)
     .max(10),
-  context: z.object({ fileId: z.string().optional(), cellId: z.string().optional() }).optional(),
+  context: z.object({ fileId: z.string().optional(), cellId: z.string().optional(), lane: z.string().max(64).optional() }).optional(),
   translatorProfile: translatorProfileSchema,
+  /** AQU-2263: the language the person uses Aquilla in (its English name), the
+   *  last step of resolveAnswerLanguage. Absent from older clients. */
+  appLanguage: z.string().max(100).optional(),
   /** AQU-AGENT Wave-2: files the user attached in the composer, already
    *  uploaded as project artifacts (POST /projects/:id/agent-artifacts). The
    *  agent is told they're available and can pull them into the sandbox with
@@ -530,18 +544,49 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
     return c.json({ error: "forbidden", message: "No access to this project" }, 403)
   }
 
+  // `context.lane` is an id or a legacy tag. Resolve it once, then apply the
+  // same read wall the sync worker uses. An empty lane is the default target.
+  const requestedLane = (body.context?.lane ?? "").trim()
+  let resolvedLaneId = ""
+  if (requestedLane) {
+    const resolved = await resolveLaneIdOrTag(c.env.AQUILLA_PG, body.projectId, requestedLane)
+    if (!resolved.laneId) {
+      return c.json(
+        { error: "validation_failed", message: "That lane is not a target lane on this project." },
+        400,
+      )
+    }
+    resolvedLaneId = resolved.laneId
+  }
+  const laneVisible = await callerMayReadLane(
+    c.env.AQUILLA_PG,
+    c.env.LANE_READ_WALL,
+    body.projectId,
+    user.id,
+    role.level,
+    resolvedLaneId ? { laneId: resolvedLaneId } : { targetLang: "" },
+  )
+  if (!laneVisible) {
+    return c.json({ error: "forbidden", message: "No access to that lane" }, 403)
+  }
+
   // Volumetric floor: unlike the guards below, this actually blocks (see
   // comment at AGENT_RUN_MAX_PER_USER_PER_WINDOW).
-  const rateLimitIdentifier = `user:${user.id}`
-  const recentAgentRuns = await countRecentRateLimitEvents(
-    c.env.AQUILLA_PG,
-    "agent_run",
-    rateLimitIdentifier,
-  )
-  if (recentAgentRuns >= AGENT_RUN_MAX_PER_USER_PER_WINDOW) {
-    return c.json({ error: "rate_limited", message: "Too many agent runs, slow down." }, 429)
+  // AQU-1843: atomic, and FAIL CLOSED — an agent run spends on the shared LLM
+  // key, so a limiter outage must not uncap it.
+  const runLimit = await enforceRateLimit(c.env.AQUILLA_PG, {
+    kind: "agent_run",
+    identifier: userRateLimitIdentifier(user.id),
+    limit: AGENT_RUN_MAX_PER_USER_PER_WINDOW,
+    failMode: "closed",
+  })
+  if (!runLimit.allowed) {
+    return c.json(
+      { error: "rate_limited", message: "Too many agent runs, slow down." },
+      429,
+      { "Retry-After": String(runLimit.retryAfterSeconds) },
+    )
   }
-  await recordRateLimitEvent(c.env.AQUILLA_PG, "agent_run", rateLimitIdentifier)
 
   // Resolve the agent model from the global store (env/default fallback).
   const platformSettings = await getPlatformSettingsCached(c.env)
@@ -565,14 +610,16 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
   } catch {
     /* best-effort — degrade to org 0 (no-org) so we still record */
   }
-  // AQU-837 weekly allowance. Enforced usage never funds an unowned project
-  // from org 0, and once it meters a run the legacy guards are retired for it.
-  let usage: AgentUsageMeter | undefined
-  if (agentUsageEnabled(c.env)) {
-    if (!agentUsageAllowed(c.env, c.req.url)) return c.json({ error: "usage_rehearsal_unavailable" }, 503)
-    if (orgId <= 0) return c.json({ error: "forbidden", message: "This project has no billing workspace" }, 403)
-    usage = new AgentUsageMeter(c.env, { orgId, userId: user.id, projectId: body.projectId })
-  } else {
+  // AQU-2062: the one entitlement check, once for the run and before the SSE
+  // stream opens — plan, the key every model call uses, and the platform spend
+  // ceiling (AQU-1869). It reserves nothing: while the meter records, each
+  // model call (nested drafting included) reserves its own bound through
+  // AgentUsageMeter, which never funds an unowned project from org 0. The
+  // legacy guards are retired for runs the meter records.
+  const preflight = await admitPaidCall(c.env, { orgId, userId: user.id, projectId: body.projectId, rail: "agent", requestUrl: c.req.url })
+  if (!preflight.ok) return c.json(preflight.body, preflight.status)
+  const metering = paidCallMeterMode(c.env, c.req.url) !== "off"
+  if (!metering) {
     const creditCheck = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "agent")
     if (!creditCheck.ok) {
       return c.json(
@@ -609,6 +656,9 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
   // keep using the injected AQUILLA_PG.
   const runShim = c.env.PG_CONNECTION_STRING ? makePostgres(c.env.PG_CONNECTION_STRING) : null
   const env: Env = runScopedEnv(c.env, runShim)
+  // The meter writes from the loop, after this Response returns: it uses the
+  // run's own connection, not the request's.
+  const usage = metering ? new AgentUsageMeter(env, { orgId, userId: user.id, projectId: body.projectId }) : undefined
   const signal = c.req.raw.signal
   const runId = crypto.randomUUID()
   const lastUserMessage = [...body.messages].reverse().find((m) => m.role === "user")
@@ -623,13 +673,24 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
     sessionId: body.sessionId ?? null,
   })
 
+  // Telemetry flush outlives the response: hand it to the Worker so the SSE
+  // stream closes without waiting on PostHog. The test harness has no real
+  // ExecutionContext and the getter throws, so fall back to a bare promise.
+  const waitUntil = (p: Promise<unknown>) => {
+    try {
+      c.executionCtx.waitUntil(p)
+    } catch {
+      void p
+    }
+  }
+
   const encoder = new TextEncoder()
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const send = (frame: AgentFrame) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`))
       }
-      runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel: role.level, runId, orgId, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send, usage })
+      runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel: role.level, runId, orgId, apiKey: preflight.apiKey, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send, usage, waitUntil, resolvedLaneId })
         .catch((err) => {
           // Last-resort: surface, then settle the ledger as error.
           try {
@@ -699,6 +760,8 @@ interface LoopArgs {
   roleLevel: number
   runId: string
   orgId: number
+  /** The provider key the entitlement check chose for this run. */
+  apiKey: string
   model: string
   /** The draft tool's translation model (resolveDraftModel). */
   draftModel: string
@@ -706,9 +769,31 @@ interface LoopArgs {
   send: (frame: AgentFrame) => void
   /** Weekly-allowance meter; undefined when metering is off. */
   usage?: AgentUsageMeter
+  /** Keeps the telemetry flush alive past the response. */
+  waitUntil?: (p: Promise<unknown>) => void
+  /** Lane id resolved from `context.lane` (id or legacy tag). `""` is the default lane. */
+  resolvedLaneId: string
 }
 
-async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel, runId, orgId, model, draftModel, signal, send, usage }: LoopArgs): Promise<void> {
+function parseToolArgs(raw: string): Record<string, unknown> {
+  try {
+    const v: unknown = JSON.parse(raw || "{}")
+    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/** Telemetry lane: a `targetLang`/`lane` string in the call args wins over the
+ *  lane the user is working in. Never a language name. */
+function pickLane(rawArgs: string, activeLane: string | undefined): string | undefined {
+  const args = parseToolArgs(rawArgs)
+  if (typeof args.targetLang === "string") return args.targetLang
+  if (typeof args.lane === "string") return args.lane
+  return activeLane
+}
+
+async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel, runId, orgId, apiKey, model, draftModel, signal, send, usage, waitUntil, resolvedLaneId }: LoopArgs): Promise<void> {
   const aliases = new AliasMap()
   const sqlVars: SqlVarContext = {
     projectId: body.projectId,
@@ -722,6 +807,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
     roleLevel,
     fileId: body.context?.fileId,
     cellId: body.context?.cellId,
+    lane: resolvedLaneId,
     aliases,
   }
 
@@ -732,7 +818,11 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   // run to ask "what language?". Best-effort, cheap lookups.
   let focusedFile: { name?: string; kind?: string } = {}
   let languages: { sourceLanguage?: string; targetLanguage?: string } = {}
-  let briefSummary: string | undefined
+  // AQU-2342: the settings blob, read once — the project instructions resolve
+  // from it (plus the legacy brief) after the memory context loads below.
+  let settingsBlob: Record<string, unknown> = {}
+  // AQU-2263: the project's "The assistant answers the team in …".
+  let teamLanguage: string | undefined
   try {
     if (body.context?.fileId) {
       const row = await env.AQUILLA_PG.prepare(
@@ -743,19 +833,19 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       if (row) focusedFile = { name: row.name, kind: row.kind ?? undefined }
     }
     const settings = await env.AQUILLA_PG.prepare(
-      `SELECT settings::jsonb ->> 'sourceLanguage' AS source_language,
-              settings::jsonb ->> 'targetLanguage' AS target_language,
-              settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary
-       FROM project_settings WHERE project_id = ?`,
+      `SELECT settings FROM project_settings WHERE project_id = ?`,
     )
       .bind(body.projectId)
-      .first<{ source_language: string | null; target_language: string | null; brief_summary: string | null }>()
+      .first<{ settings: unknown }>()
     if (settings) {
-      languages = {
-        sourceLanguage: settings.source_language ?? undefined,
-        targetLanguage: settings.target_language ?? undefined,
-      }
-      briefSummary = settings.brief_summary ?? undefined
+      settingsBlob = settingsObject(settings.settings)
+      teamLanguage = readDraftingSettings(settingsBlob.draftingSettings)?.main_chat_language
+      const lanes = await loadLaneRows(env.AQUILLA_PG, body.projectId)
+      languages = languagesForLanes(lanes, body.context?.lane ?? "")
+      const fromLane = resolvedLaneId
+        ? await languageOfTargetLane(env.AQUILLA_PG, body.projectId, resolvedLaneId)
+        : null
+      if (fromLane) languages = { ...languages, targetLanguage: fromLane }
     }
   } catch {
     /* prompt grounding is best-effort — the run proceeds without it */
@@ -764,6 +854,12 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   // Feature gate read once per run — gates the L1 aquifer contract (and the
   // execute.aquifer handler re-checks it before every external call).
   const bibleResourcesEnabled = await isBibleResourcesEnabled(env, body.projectId)
+  // AQU-2263: the language the agent answers in (see answer-language.ts).
+  const answerLanguage = resolveAnswerLanguage({
+    personal: body.translatorProfile?.responseLanguage,
+    team: teamLanguage,
+    app: body.appLanguage,
+  })
 
   // AQU-AGENT §2 — read-side memory context (approved memories + brief). Pure
   // reads; degrades to empty on any failure so a run never dies on grounding.
@@ -776,6 +872,25 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
     memory = await buildMemoryContext(env.AQUILLA_PG, body.projectId)
   } catch {
     /* memory grounding is best-effort */
+  }
+  // AQU-2342: THE project instructions — one block, carried by the schema card
+  // and the draft tool alike. The legacy brief already loaded with the memory
+  // context is only a migrate-on-read source here, never a second block.
+  // Phase 2: the shared loader, so approved decisions/ memories and the
+  // decision log fold in exactly as on every other path.
+  const { text: translationInstructions } = await loadTranslationInstructions(
+    env.AQUILLA_PG,
+    body.projectId,
+    settingsBlob,
+  )
+  // AQU-2342: the Checks hint, built by the shared builder every drafting path
+  // uses. Best-effort, like all grounding.
+  let checksHint = ""
+  try {
+    const lane = await resolveLaneIdOrTag(env.AQUILLA_PG, body.projectId, body.context?.lane ?? "")
+    checksHint = await projectChecksHint(env.AQUILLA_PG, body.projectId, settingsBlob, lane.targetLang ?? "")
+  } catch {
+    /* grounding is best-effort */
   }
 
   const convo: ConvoMessage[] = [
@@ -793,21 +908,25 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         targetLanguage: languages.targetLanguage,
         bibleResourcesEnabled,
         translatorProfile: body.translatorProfile,
-        // A configured profile language wins. When unset, the augmentation
-        // prompt below tells the agent to follow the user's latest message —
-        // never the project's translation target.
-        responseLanguage: body.translatorProfile?.responseLanguage,
-        briefSummary,
+        // AQU-2263: the person's own language, then the project's language for
+        // the team. With neither, the augmentation prompt below tells the agent
+        // to follow the user's latest message (the app's language only when
+        // that can't be told) — never the project's translation target.
+        responseLanguage: answerLanguage.reply,
+        translationInstructions,
+        checksHint,
       }),
     },
-    // AQU-AGENT §2 — second system message: verbatim brief + approved-memory
-    // index + new-tool guidance + conversation-language rule. Kept separate so the
+    // AQU-AGENT §2 — second system message: approved-memory index + new-tool
+    // guidance + conversation-language rule (the legacy brief now reaches the
+    // model only through the instructions block above — AQU-2342). Kept separate so the
     // existing schema-card prompt stays byte-identical.
     {
       role: "system" as const,
       content: buildAugmentSystemPrompt({
         memory,
-        responseLanguage: body.translatorProfile?.responseLanguage,
+        responseLanguage: answerLanguage.reply,
+        unclearLanguage: answerLanguage.whenUnclear,
       }),
     },
     // AQU-AGENT Wave-2 — attached artifacts. The user attached these files in
@@ -823,6 +942,8 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
 
   let promptTokens = 0
   let completionTokens = 0
+  /** Latest orchestrator turn's prompt + completion — what TOKEN_CEILING bounds. */
+  let contextTokens = 0
   let costCents = 0
   let steps = 0
   let stagedCount = 0
@@ -833,6 +954,12 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   // draft tool's internal model call, and each tool invocation, so the ACU
   // breakdown shows where an agent run's compute actually goes.
   const meter = makeCostMeter(env, env.AQUILLA_PG)
+  // PostHog events (AQU-1467): counts only, one batch POST at the end of the run.
+  const telemetry = makeAgentTelemetry(env, { runId, projectId: body.projectId, userId: user.id, orgId, model })
+  // AQU-1670: every staging batch reports its cell count and duration. Wired
+  // here rather than passed down each call site, so the `draft` tool's staging
+  // is measured on the same event as a hand `emit`.
+  stageCtx.onStageOutcome = (outcome) => telemetry.stageOutcome(outcome)
 
   // AQU-AGENT §2 run state: cost cap, untrusted-content guard, and the sandbox
   // container id.
@@ -898,16 +1025,16 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         send({ type: "error", message: `Tool-iteration cap reached — run stopped.` })
         break
       }
-      if (promptTokens + completionTokens > TOKEN_CEILING) {
+      if (contextTokens > TOKEN_CEILING) {
         status = "capped"
-        send({ type: "error", message: `Token ceiling reached (${Math.round(TOKEN_CEILING / 1000)}k) — run stopped.` })
+        send({ type: "error", message: TURN_LIMIT_MESSAGE })
         break
       }
       // AQU-AGENT §2 cost cap: halt gracefully BEFORE the next paid model call
       // once the accumulated OpenRouter cost reaches the ceiling.
       if (costCents >= costCapCents) {
         status = "capped"
-        send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents) })
+        send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents), reason: "run_cost_cap" })
         break
       }
 
@@ -934,12 +1061,19 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         stepRequestId = admission.requestId
       }
       const turnStartedAt = Date.now()
+      const promptChars = JSON.stringify(convo).length
+      // AQU-1849: FIRST-BYTE deadline, not a total one — an agent turn
+      // legitimately streams for minutes, but a provider that never sends the
+      // first frame is a hang. Disarmed the moment the headers land, so the
+      // stream below runs unbounded. Linked to the run's own signal so a
+      // cancelled run still aborts upstream.
+      const firstByte = vendorDeadline("openRouterStreamFirstByte", signal)
       let upstream: Response
       try {
         upstream = await fetch(resolveOpenRouterUrl(env), {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+            Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -951,12 +1085,15 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
             ...streamUsageOptions(env.OPENROUTER_BASE_URL),
             ...(usage ? { max_tokens: usage.maxOutputTokens } : {}),
           }),
-          signal,
+          signal: firstByte.signal,
         })
       } catch (error) {
         // Uncertain charge: the reservation stays held for reconciliation.
         if (usage && stepRequestId) await usage.holdStep(stepRequestId, undefined)
+        if (firstByte.timedOut()) logVendorTimeout("openRouterStreamFirstByte", error)
         throw error
+      } finally {
+        firstByte.clear()
       }
 
       if (!upstream.ok) {
@@ -971,6 +1108,14 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           model,
           latencyMs: Date.now() - turnStartedAt,
           ok: false,
+        })
+        telemetry.generation({
+          span: "orchestrator",
+          model,
+          latencyMs: Date.now() - turnStartedAt,
+          ok: false,
+          httpStatus: upstream.status,
+          inputChars: promptChars,
         })
         send({ type: "error", message: `openrouter_error ${upstream.status}: ${text.slice(0, 500)}` })
         status = "error"
@@ -987,6 +1132,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         message = turn.message
         promptTokens += turn.usage?.prompt_tokens ?? 0
         completionTokens += turn.usage?.completion_tokens ?? 0
+        contextTokens = (turn.usage?.prompt_tokens ?? 0) + (turn.usage?.completion_tokens ?? 0)
         costCents += (turn.usage?.cost ?? 0) * 100
         meter.add({
           surface: "agent",
@@ -1001,6 +1147,18 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           latencyMs: Date.now() - turnStartedAt,
           ok: turn.usage !== undefined,
         })
+        telemetry.generation({
+          span: "orchestrator",
+          model,
+          promptTokens: turn.usage?.prompt_tokens ?? 0,
+          completionTokens: turn.usage?.completion_tokens ?? 0,
+          costUsd: turn.usage?.cost ?? 0,
+          latencyMs: Date.now() - turnStartedAt,
+          ok: turn.usage !== undefined,
+          httpStatus: upstream.status,
+          inputChars: promptChars,
+          outputChars: typeof message.content === "string" ? message.content.length : 0,
+        })
       } catch (err) {
         meter.add({
           surface: "agent",
@@ -1011,6 +1169,14 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           model,
           latencyMs: Date.now() - turnStartedAt,
           ok: false,
+        })
+        telemetry.generation({
+          span: "orchestrator",
+          model,
+          latencyMs: Date.now() - turnStartedAt,
+          ok: false,
+          httpStatus: upstream.status,
+          inputChars: promptChars,
         })
         send({ type: "error", message: err instanceof Error ? err.message : String(err) })
         status = "error"
@@ -1034,15 +1200,20 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       for (let ci = 0; ci < toolCalls.length; ci++) {
         const call = toolCalls[ci]
         // races-F3: re-check the caps mid-turn before each BUDGETED call. A prior
-        // tool in this same turn can push cost/tokens past the cap (e.g. a draft's
-        // internal model call folds cost via addUsage). Halt rather than run more
-        // paid work — the top-of-loop check only fires between turns.
+        // tool in this same turn can push cost past the cap (e.g. a draft's
+        // internal model call folds cost via addUsage); a turn whose own context
+        // is already over TOKEN_CEILING runs no more budgeted work. Halt rather
+        // than run more paid work — the top-of-loop check only fires between turns.
         if (
           budgetedCall(call) &&
-          (costCents >= costCapCents || promptTokens + completionTokens > TOKEN_CEILING)
+          (costCents >= costCapCents || contextTokens > TOKEN_CEILING)
         ) {
           status = "capped"
-          send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents) })
+          if (contextTokens > TOKEN_CEILING) {
+            send({ type: "error", message: TURN_LIMIT_MESSAGE })
+          } else {
+            send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents), reason: "run_cost_cap" })
+          }
           // Answer every not-yet-run tool_call so the stored transcript stays
           // valid for a follow-up run (each tool_call needs a tool message).
           for (let cj = ci; cj < toolCalls.length; cj++) {
@@ -1057,22 +1228,33 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         }
         steps++
         const toolStartedAt = Date.now()
+        // Capture this call's last code_result (ok + data) for telemetry
+        // without touching each tool runner; then forward unchanged.
+        let resultOk: boolean | undefined
+        let resultData: ToolResultData | undefined
+        const callSend = (frame: AgentFrame) => {
+          if (frame.type === "code_result") {
+            resultOk = frame.ok
+            resultData = frame.data
+          }
+          send(frame)
+        }
         const result = await executeToolCall(call, {
           env,
           aliases,
           sqlVars,
           stageCtx,
-          send,
+          send: callSend,
           step: steps,
           signal,
           draft: {
             model: draftModel,
-            apiKey: env.OPENROUTER_API_KEY ?? "",
+            apiKey,
             url: resolveOpenRouterUrl(env),
             ...(usage ? { maxTokens: usage.maxOutputTokens } : {}),
             sourceLanguage: languages.sourceLanguage,
             targetLanguage: languages.targetLanguage,
-            briefSummary,
+            translationInstructions,
           },
           addUsage: (u) => {
             promptTokens += u.prompt_tokens ?? 0
@@ -1094,9 +1276,17 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
               costCents: (u.cost ?? 0) * 100,
               ok: true,
             })
+            telemetry.generation({
+              span: `tool-model:${call.function.name}`,
+              model: draftModel,
+              promptTokens: u.prompt_tokens ?? 0,
+              completionTokens: u.completion_tokens ?? 0,
+              costUsd: u.cost ?? 0,
+              ok: true,
+            })
           },
           canContinuePaidWork: () =>
-            costCents < costCapCents && promptTokens + completionTokens <= TOKEN_CEILING,
+            costCents < costCapCents && contextTokens <= TOKEN_CEILING,
           admitPaidCall: usage
             ? async (input) => {
                 const admission = await usage.admitStep(input)
@@ -1131,6 +1321,15 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           latencyMs: Date.now() - toolStartedAt,
           ok: toolOk,
         })
+        telemetry.toolRun({
+          tool: call.function.name,
+          args: parseToolArgs(call.function.arguments),
+          lane: pickLane(call.function.arguments, body.context?.lane ?? ""),
+          ok: resultOk ?? toolOk,
+          data: resultData,
+          resultText: result,
+          latencyMs: Date.now() - toolStartedAt,
+        })
         convo.push({ role: "tool", tool_call_id: call.id, content: result })
       }
 
@@ -1160,6 +1359,12 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
 
   // Drain the cost ledger. After `done` so it never delays the client's frame.
   await meter.flush()
+
+  // Not awaited when the Worker gives us waitUntil: the flush is bounded by a
+  // 3 s timeout and must not hold the stream open. Without it, await.
+  const flushed = telemetry.flush(status)
+  if (waitUntil) waitUntil(flushed)
+  else await flushed
 
   try {
     await finishAgentRun(env.AQUILLA_PG, { runId, status, promptTokens, completionTokens, costCents, steps, stagedCount })
@@ -1217,7 +1422,7 @@ interface ToolCallEnv {
     maxTokens?: number
     sourceLanguage?: string
     targetLanguage?: string
-    briefSummary?: string
+    translationInstructions?: string
   }
   /** Folds a tool-internal model call's usage into the run totals. */
   addUsage: (usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number }) => void
@@ -1304,6 +1509,7 @@ async function runReadTool(args: ReadArgs, t: ToolCallEnv): Promise<string> {
   const outcome = await executeRead(t.env.AQUILLA_PG, args, {
     projectId: t.stageCtx.projectId,
     focusedFileId: t.stageCtx.fileId,
+    lane: t.stageCtx.lane,
     aliases: t.aliases,
   })
   t.send({
@@ -1321,6 +1527,7 @@ async function runExamplesTool(args: ExamplesArgs, t: ToolCallEnv): Promise<stri
   t.send({ type: "code_start", step: t.step, kind: "examples", summary: seed })
   const outcome = await executeExamples(t.env.AQUILLA_PG, args, {
     projectId: t.stageCtx.projectId,
+    lane: t.stageCtx.lane,
     aliases: t.aliases,
   })
   t.send({
@@ -1339,6 +1546,7 @@ async function runSearchTool(args: SearchArgs, t: ToolCallEnv): Promise<string> 
   const outcome = await executeSearch(t.env.AQUILLA_PG, args, {
     projectId: t.stageCtx.projectId,
     focusedFileId: t.stageCtx.fileId,
+    lane: t.stageCtx.lane,
     aliases: t.aliases,
   })
   t.send({
@@ -1369,13 +1577,15 @@ async function runDraftTool(args: DraftArgs, t: ToolCallEnv): Promise<string> {
     {
       projectId: t.stageCtx.projectId,
       focusedFileId: t.stageCtx.fileId,
+      lane: t.stageCtx.lane,
       aliases: t.aliases,
       stageCtx: t.stageCtx,
       sourceLanguage: t.draft.sourceLanguage,
       targetLanguage: t.draft.targetLanguage,
-      briefSummary: t.draft.briefSummary,
+      translationInstructions: t.draft.translationInstructions,
       signal: t.signal,
-      sendProgress: (label, done, total) => t.send({ type: "progress", label, done, total }),
+      sendProgress: (label, done, total) =>
+        t.send({ type: "progress", label, ...(done === undefined ? {} : { done }), ...(total === undefined ? {} : { total }) }),
       addUsage: t.addUsage,
       canContinuePaidWork: t.canContinuePaidWork,
       admitPaidCall: t.admitPaidCall,

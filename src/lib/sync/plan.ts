@@ -45,6 +45,12 @@ export interface PlanUnit {
    * this) means audio shares the text denominator.
    */
   audioTotalCount?: number | null
+  /**
+   * Media redesign slice 2: lines with both their text and their recording
+   * validated — what a "Text and audio" language counts as done. Absent from
+   * a worker that predates it, which reads as none.
+   */
+  bothValidatedCount?: number
   lastEditAt: number | null
   targetDate: string | null
   doneAt: number | null

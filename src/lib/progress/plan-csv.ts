@@ -6,7 +6,15 @@
 // and how far along it is.
 
 import type { PlanUnit, PlanUnitStatus } from "@/lib/plan/plan-status"
-import { audioFileIds, planAudioTotal, planUnitLabel, planUnitStatus } from "@/lib/plan/plan-status"
+import {
+  audioFileIds,
+  planAudioTotal,
+  planUnitLabel,
+  planUnitStatus,
+  textFileIds,
+} from "@/lib/plan/plan-status"
+import { progressPercent } from "./progress-percent"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 
 const HEADER = [
   "Unit",
@@ -48,7 +56,7 @@ function escapeCell(value: string): string {
 }
 
 function pct(part: number, whole: number): string {
-  return whole > 0 ? String(Math.round((part / whole) * 100)) : "0"
+  return String(progressPercent(part, whole))
 }
 
 function isoDate(ms: number | null): string {
@@ -56,7 +64,13 @@ function isoDate(ms: number | null): string {
 }
 
 /** RFC 4180: CRLF line endings, quotes doubled inside quoted fields. */
-export function planRowsToCsv(units: readonly PlanUnit[], now: number): string {
+export function planRowsToCsv(
+  units: readonly PlanUnit[],
+  now: number,
+  recordsAudio = false,
+  /** Media redesign slice 1: what the language delivers; see `textFileIds`. */
+  delivers?: LaneDelivers | null,
+): string {
   // AQU-1278: whether audio is EXPECTED is decided per file across the whole
   // export, the same way the board decides it. Omitting this set makes
   // `planUnitStatus` fall back to the row's own `audioCount`, which is right
@@ -65,10 +79,16 @@ export function planRowsToCsv(units: readonly PlanUnit[], now: number): string {
   // exported as Nearly complete, while the board — counting the recordings it
   // is missing — still calls it In progress. The two surfaces have to say the
   // same word about the same row, or the export is the one that gets believed.
-  const audioFiles = audioFileIds(units)
+  // AQU-1954: and the language's "Records audio" switch with it.
+  const audioFiles = audioFileIds(units, recordsAudio)
+  // AQU-955: and the text set, for the same reason. Without it every book of
+  // an audio-only project exports as Not started however much of it is
+  // recorded — the export is what a PM forwards, so it has to say what the
+  // board says.
+  const textFiles = textFileIds(units, delivers)
   const rows = units.map((u) => [
     planUnitLabel(u),
-    STATUS_TEXT[planUnitStatus(u, now, audioFiles)],
+    STATUS_TEXT[planUnitStatus(u, now, audioFiles, textFiles)],
     u.targetDate ?? "",
     isoDate(u.doneAt),
     u.doneBy ?? "",
@@ -76,8 +96,10 @@ export function planRowsToCsv(units: readonly PlanUnit[], now: number): string {
     pct(u.validatedCount, u.totalCount),
     // AQU-1278: against the cue sheet where the takes actually live, so the
     // export and the board agree on a dubbing project's percentage too.
-    pct(u.audioCount, planAudioTotal(u)),
-    pct(u.audioValidatedCount, planAudioTotal(u)),
+    // AQU-1954: blank where the board draws no audio bar — a file nobody
+    // records is not 0% recorded, it is not recorded work at all.
+    audioFiles.has(u.fileId) ? pct(u.audioCount, planAudioTotal(u)) : "",
+    audioFiles.has(u.fileId) ? pct(u.audioValidatedCount, planAudioTotal(u)) : "",
     isoDate(u.lastEditAt),
   ])
   return [HEADER, ...rows].map((row) => row.map((c) => escapeCell(String(c))).join(",")).join("\r\n")

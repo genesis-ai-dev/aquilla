@@ -30,8 +30,15 @@ export function renderWithTooltips(ui: ReactElement) {
 /**
  * Hover `trigger` and assert the tooltip that opens carries `expected`.
  *
- * base-ui opens the tooltip even for a `disabled` trigger, which is what keeps
- * a gated control's "why is this disabled?" explanation reachable.
+ * ⚠️ AQU-959 — this helper cannot prove a *disabled* control explains itself.
+ * happy-dom dispatches pointer events on disabled elements; a real browser does
+ * not, and `buttonVariants` adds `disabled:pointer-events-none` on top. So
+ * hovering a disabled trigger opens the tooltip here and stays silent in
+ * production — which is exactly how a partner met a dead "New voice" mid-demo
+ * while this helper reported the tooltip reachable. `AppTooltip` now wraps a
+ * natively-disabled child in a focusable, non-disabled stand-in trigger; assert
+ * THAT (`[data-slot="tooltip-disabled-trigger"]`, and that the trigger is not
+ * itself `[disabled]`), because asserting the hover is a false green.
  */
 export async function expectTooltip(trigger: Element, expected: string | RegExp) {
   // Await the complete browser hover sequence (pointerover/enter/move plus
@@ -58,4 +65,46 @@ export async function expectTooltip(trigger: Element, expected: string | RegExp)
  */
 function stripBidiControls(s: string): string {
   return s.replace(/[⁦-⁩‎‏؜]/g, "")
+}
+
+/**
+ * AQU-2260 (Sam, Oct 29): hover may only NAME an icon-only button. Why a
+ * control is disabled opens on CLICK, in a small note anchored to it. Click the
+ * control's stand-in (`[data-slot="tooltip-disabled-trigger"]`, which AppTooltip
+ * wraps a natively-disabled child in) and assert the note carries `expected`.
+ * Hovering must show nothing. Returns the note.
+ */
+export async function expectDisabledNote(control: Element, expected: string | RegExp): Promise<HTMLElement> {
+  const standIn = (control.closest('[data-slot="tooltip-disabled-trigger"]') ?? control) as HTMLElement
+  expect(standIn).not.toHaveAttribute("disabled")
+  const user = userEvent.setup()
+  await user.hover(standIn)
+  expect(screen.queryByRole("tooltip")).toBeNull()
+  await user.click(standIn)
+  let note: HTMLElement | null = null
+  await waitFor(() => {
+    note = document.querySelector<HTMLElement>('[data-slot="disabled-reason-note"]')
+    expect(note).not.toBeNull()
+    const text = stripBidiControls(note!.textContent ?? "")
+    if (typeof expected === "string") expect(text).toContain(expected)
+    else expect(text).toMatch(expected)
+  })
+  return note!
+}
+
+/**
+ * A badge or status mark that explains itself on CLICK (NoteOnClick, AQU-2260).
+ * Hovering it shows nothing; clicking opens a popover carrying `expected`.
+ */
+export async function expectClickNote(trigger: Element, expected: string | RegExp): Promise<void> {
+  const user = userEvent.setup()
+  await user.hover(trigger)
+  expect(screen.queryByRole("tooltip")).toBeNull()
+  await user.click(trigger)
+  await waitFor(() => {
+    const notes = [...document.querySelectorAll<HTMLElement>('[data-slot="popover-content"]')]
+    const text = stripBidiControls(notes.map((n) => n.textContent ?? "").join(" "))
+    if (typeof expected === "string") expect(text).toContain(expected)
+    else expect(text).toMatch(expected)
+  })
 }

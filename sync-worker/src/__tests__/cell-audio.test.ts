@@ -65,18 +65,47 @@ describe("cell-audio projection", () => {
       }),
       stmts,
     )
-    expect(touches).toEqual(["cell_audio"])
-    expect(stmts).toHaveLength(2)
+    expect(touches).toEqual(["cell_audio", "cell_audio_validators"])
+    expect(stmts).toHaveLength(4)
 
-    // First: deselect other clips in the same slot (never this audio_id).
+    // First: deselect other clips in the same slot (never this audio_id) — and
+    // AQU-1591, only in this take's own lane. The three trailing binds are the
+    // lane predicate's (project, tag, tag); the event names no lane, so the tag
+    // is '' — the default lane. A dub recorded in French no longer clears the
+    // Swahili selection in the same slot; audio-lane-projection.test.ts asserts
+    // on the rows that proves. AQU-1978: the two audio ids ahead of them look
+    // the take up — a dub already on file deselects in its OWN stored lane,
+    // and only a new take falls back to the event's tag.
     expect(recorded[0].sql).toContain("UPDATE cell_audio SET selected = 0")
     expect(recorded[0].sql).toContain("slot = ? AND audio_id != ?")
-    expect(recorded[0].args).toEqual(["p1", "f1", "c1", "generatedVoice", "audio-x.wav"])
+    expect(recorded[0].sql).toContain("lane_id")
+    // AQU-1767: + the piece-group subquery's (project, file, cell, audio,
+    // audio) — the attached take's own pieces are never deselected.
+    expect(recorded[0].sql).toContain("COALESCE(piece_of, audio_id) <>")
+    expect(recorded[0].args).toEqual([
+      "p1", "f1", "c1", "generatedVoice", "audio-x.wav",
+      "p1", "f1", "c1", "audio-x.wav", "audio-x.wav",
+      "audio-x.wav", "audio-x.wav", "p1", "", "",
+    ])
 
-    // Second: upsert this clip as selected + live, timings serialized.
-    expect(recorded[1].sql).toContain("INSERT INTO cell_audio")
-    expect(recorded[1].sql).toContain("ON CONFLICT(project_id, file_id, cell_id, audio_id)")
-    const a = recorded[1].args
+    // AQU-1571: then drop the take's votes, but only if this attach swaps its
+    // audio (a different url) — votes were cast on the audio it used to play.
+    expect(recorded[1].sql).toContain("DELETE FROM cell_audio_validators")
+    expect(recorded[1].sql).toContain("a.url IS DISTINCT FROM ?")
+    expect(recorded[1].args).toEqual(["p1", "f1", "c1", "audio-x.wav", "frontier-audio://audio-x.wav"])
+
+    // Then: upsert this clip as selected + live, timings serialized.
+    expect(recorded[2].sql).toContain("INSERT INTO cell_audio")
+    expect(recorded[2].sql).toContain("ON CONFLICT(project_id, file_id, cell_id, audio_id)")
+    // A swapped url is a new recording, credited to whoever attached it; any
+    // other re-attach leaves the recorder alone (fill-only).
+    expect(recorded[2].sql).toContain(
+      "created_by = CASE WHEN cell_audio.url IS DISTINCT FROM excluded.url THEN excluded.created_by " +
+        "ELSE COALESCE(cell_audio.created_by, excluded.created_by) END",
+    )
+    // Last: the take's vote count follows the reset.
+    expect(recorded[3].sql).toContain("SET validator_count")
+    const a = recorded[2].args
     expect(a[0]).toBe("p1")
     expect(a[3]).toBe("audio-x.wav")
     expect(a[4]).toBe("generatedVoice")
@@ -89,8 +118,15 @@ describe("cell-audio projection", () => {
     expect(a[11]).toBeNull() // trim_start_ms (unset)
     expect(a[12]).toBeNull() // trim_end_ms (unset)
     expect(a[13]).toBe(JSON.stringify([{ word: "hi", t0: 0, t1: 0.5, start: 0, end: 2 }]))
-    expect(a[14]).toBe("evt-audio-1") // event_id
-    expect(a[15]).toBe(100) // created_ts = serverTs
+    // 0186: asr_text, asr_model, transcript_ai — unset on a plain attach.
+    expect(a.slice(14, 17)).toEqual([null, null, null])
+    expect(a[17]).toBe("evt-audio-1") // event_id
+    expect(a[18]).toBe(100) // created_ts = serverTs
+    expect(a[19]).toBe("dub") // role — nothing said 'source'
+    // AQU-1591: lane_id's resolve subquery binds (project, role, role, tag).
+    expect(a.slice(21, 25)).toEqual(["p1", "dub", "dub", ""])
+    // AQU-1767: piece_of, last — null unless the attach is a piece being born.
+    expect(a.slice(25)).toEqual([null])
   })
 
   it("attach: binds NULL for optional fields the payload omits", () => {
@@ -105,7 +141,7 @@ describe("cell-audio projection", () => {
       }),
       stmts,
     )
-    const a = recorded[1].args
+    const a = recorded[2].args
     expect(a[6]).toBeNull() // mime_type
     expect(a[7]).toBeNull() // voice_id
     expect(a[8]).toBeNull() // reference_audio_id
@@ -138,6 +174,88 @@ describe("cell-audio projection", () => {
     for (const col of ["duration_ms", "mime_type", "voice_id", "reference_audio_id", "timings_json", "label"]) {
       expect(sql).toContain(`${col} = COALESCE(excluded.${col}, cell_audio.${col})`)
     }
+  })
+
+  // Two-step transcription (0186). The cleanup step learns from pairs of
+  // "ASR heard X → a person settled on Y". A correction is a partial re-attach
+  // with new timings and no `asr`; if that nulled asr_text, every pair would be
+  // destroyed by the very edit that creates it.
+  it("attach: what ASR heard survives a correction, and only a new ASR run replaces it", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent("cell.audio.attach", {
+        audioId: "rec.webm",
+        url: "frontier-audio://rec.webm",
+        slot: "recording",
+        timings: [{ word: "Yesu", t0: 0, t1: 0.5, start: 0, end: 4 }],
+        asr: { text: "eema", model: "omni-ctc" },
+      }),
+      [],
+    )
+    const insert = recorded.find((s) => s.sql.includes("INSERT INTO cell_audio"))!
+    expect(insert.sql).toContain("asr_text = COALESCE(excluded.asr_text, cell_audio.asr_text)")
+    expect(insert.sql).toContain("asr_model = COALESCE(excluded.asr_model, cell_audio.asr_model)")
+    expect(insert.args).toContain("eema")
+    expect(insert.args).toContain("omni-ctc")
+  })
+
+  // The Transcribe lens's "Clear" (src/lib/transcript-cleanup/save.ts
+  // clearTranscript) has no column-level NULL to send: both columns COALESCE.
+  // It clears by sending an EMPTY asr text and EMPTY timings, which must bind
+  // as values (not NULL), so they replace what was stored.
+  it("attach: an empty asr text and empty timings replace the stored ones (Clear)", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent("cell.audio.attach", {
+        audioId: "rec.webm",
+        url: "frontier-audio://rec.webm",
+        slot: "recording",
+        timings: [],
+        asr: { text: "", model: "omni-ctc" },
+      }),
+      [],
+    )
+    const insert = recorded.find((s) => s.sql.includes("INSERT INTO cell_audio"))!
+    expect(insert.args).toContain("[]")
+    expect(insert.args).toContain("")
+  })
+
+  // The "Cleaned up" mark must describe the transcript as it reads NOW. Once a
+  // person corrects it (new timings, no mark) it is theirs; a trim or a
+  // duration heal (no timings) says nothing about the words and leaves it.
+  it("attach: new timings without an AI mark clear it; an attach with no timings keeps it", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent("cell.audio.attach", {
+        audioId: "rec.webm",
+        url: "frontier-audio://rec.webm",
+        slot: "recording",
+        timings: [{ word: "Yesu", t0: 0, t1: 0.5, start: 0, end: 4 }],
+        transcriptAi: { model: "m", at: 5, changes: 1 },
+      }),
+      [],
+    )
+    const insert = recorded.find((s) => s.sql.includes("INSERT INTO cell_audio"))!
+    expect(insert.sql).toContain(
+      "transcript_ai = CASE WHEN excluded.transcript_ai IS NOT NULL THEN excluded.transcript_ai " +
+        "WHEN excluded.timings_json IS NOT NULL THEN NULL ELSE cell_audio.transcript_ai END",
+    )
+    expect(insert.args).toContain(JSON.stringify({ model: "m", at: 5, changes: 1 }))
+  })
+
+  it("source commit of a transcription clears the segment's AI-cleanup mark", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent("source.cell.commit", { transcription: "ni Yesu akaenda" }),
+      [],
+    )
+    const clear = recorded.find((s) => s.sql.startsWith("UPDATE cell_audio SET transcript_ai = NULL"))
+    expect(clear?.sql).toContain("role = 'source'")
+    expect(clear?.args).toEqual(["p1", "f1", "c1"])
   })
 
   // 2026-08-14: this test used to assert the OPPOSITE — that trims stayed a
@@ -176,9 +294,43 @@ describe("cell-audio projection", () => {
     expect(touches).toEqual(["cell_audio"])
     expect(stmts).toHaveLength(2)
     expect(recorded[0].sql).toContain("SET selected = 0")
-    expect(recorded[0].args).toEqual(["p1", "f1", "c1", "recording", "audio-y.wav"])
-    expect(recorded[1].sql).toContain("SET selected = 1, deleted = 0")
-    expect(recorded[1].args).toEqual(["p1", "f1", "c1", "audio-y.wav"])
+    // AQU-1591: + the lane predicate's (project, tag, tag). A select switches
+    // the active take in ONE lane; it used to empty the slot in all of them.
+    // AQU-1767: + the piece-group subquery — other GROUPS are deselected.
+    // AQU-1978: and the take's id twice ahead of the lane predicate — a dub
+    // already on file is selected within its own stored lane, not the event's tag.
+    expect(recorded[0].args).toEqual([
+      "p1", "f1", "c1", "recording", "audio-y.wav",
+      "p1", "f1", "c1", "audio-y.wav", "audio-y.wav",
+      "audio-y.wav", "audio-y.wav", "p1", "", "",
+    ])
+    // The select itself is keyed on audio_id, which is unique without a lane —
+    // and (AQU-1767) brings the take's live pieces with it. Rows are asserted
+    // in cell-audio-cut.test.ts.
+    expect(recorded[1].sql).toContain("SET selected = 1")
+    expect(recorded[1].sql).toContain("deleted = CASE WHEN audio_id = ? THEN 0 ELSE deleted END")
+    expect(recorded[1].args).toEqual([
+      "audio-y.wav", "p1", "f1", "c1", "audio-y.wav",
+      "p1", "f1", "c1", "audio-y.wav", "audio-y.wav",
+    ])
+  })
+
+  // 2026-09-28: a line with no imported source clip switches to its generated
+  // voice by emptying the recording slot — there is nothing to park it on.
+  it("select with no take: empties the slot and selects nothing", () => {
+    const { db, recorded } = makeRecordingDb()
+    const stmts: AquillaStatement[] = []
+    const touches = buildEventProjectionStmts(
+      db,
+      makeEvent("cell.audio.select", { audioId: null, slot: "recording" }),
+      stmts,
+    )
+    expect(touches).toEqual(["cell_audio"])
+    expect(stmts).toHaveLength(1)
+    expect(recorded[0].sql).toContain("SET selected = 0")
+    expect(recorded[0].sql).not.toContain("audio_id")
+    // AQU-1591: ...in this lane's slot only (project, tag, tag).
+    expect(recorded[0].args).toEqual(["p1", "f1", "c1", "recording", "p1", "", ""])
   })
 
   it("remove: soft-deletes and deselects", () => {
@@ -210,10 +362,13 @@ describe("cell-audio projection", () => {
     )
     expect(touches).toEqual(["cell_audio"])
     expect(stmts).toHaveLength(1)
-    expect(recorded[0].sql).toContain("SET target_offset_ms = ?")
+    // AQU-2267: beside its place following the recordings, which this event
+    // (like every event from before that) does not name — so NULL, and that
+    // timing reads the one place given here.
+    expect(recorded[0].sql).toContain("SET target_offset_ms = ?, recordings_offset_ms = ?")
     // Addressed by audio_id alone — it is part of the primary key, so naming
     // the take names the row and a slot term could only disagree with itself.
-    expect(recorded[0].args).toEqual([-250, "p1", "f1", "c1", "audio-z.wav"])
+    expect(recorded[0].args).toEqual([-250, null, "p1", "f1", "c1", "audio-z.wav"])
     // It touches nothing else: not selection, not trims, not the cell.
     expect(recorded[0].sql).not.toContain("selected")
     expect(recorded[0].sql).not.toContain("trim_")
@@ -265,11 +420,11 @@ describe("cell-audio projection", () => {
       }),
       stmts,
     )
-    expect(touches).toEqual(["cell_audio", "cells"])
-    expect(stmts).toHaveLength(3)
-    expect(recorded[2].sql).toContain("UPDATE cells SET transcription = ?")
-    expect(recorded[2].sql).toContain("side = 'source'")
-    expect(recorded[2].args).toEqual(["hello imported world", "p1", "f1", "c1"])
+    expect(touches).toEqual(["cell_audio", "cell_audio_validators", "cells"])
+    expect(stmts).toHaveLength(5)
+    expect(recorded[3].sql).toContain("UPDATE cells SET transcription = ?")
+    expect(recorded[3].sql).toContain("side = 'source'")
+    expect(recorded[3].args).toEqual(["hello imported world", "p1", "f1", "c1"])
   })
 
   it("attach without transcription: cells table is untouched", () => {
@@ -285,8 +440,8 @@ describe("cell-audio projection", () => {
       }),
       stmts,
     )
-    expect(touches).toEqual(["cell_audio"])
-    expect(stmts).toHaveLength(2)
+    expect(touches).toEqual(["cell_audio", "cell_audio_validators"])
+    expect(stmts).toHaveLength(4)
     for (const r of recorded) expect(r.sql).not.toContain("UPDATE cells")
   })
 })

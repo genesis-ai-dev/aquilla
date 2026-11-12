@@ -9,6 +9,37 @@ the "Banned" alternatives or internal spec IDs in the UI.
 
 ---
 
+## The interface's word list (AQU-2261, Oct 29)
+
+Agreed by Sam on Oct 29 and swept into every English message. The retired
+words are enforced: `pnpm i18n:check` (and `src/lib/i18n/retired-terms.test.ts`)
+fails an English message that uses one, naming the word to write instead. The
+list the check reads is `src/lib/i18n/retired-terms.ts`; add a retired word
+there, not here alone.
+
+| Say | Never say |
+|---|---|
+| **Editor settings** | ~~View settings~~ |
+| **Media** (the Project settings pane), with its cards **Audio loading** and **Timeline** | ~~Audio media~~, ~~audio media strategy~~ |
+| **Follows source** · **Follows recordings** | ~~Free timing~~, ~~Original timing~~, ~~the original recording's timing~~ |
+| **AI model (advanced)** (the card); the pane holding it is **AI** | ~~AI & completion~~, ~~Advanced LLM settings~~, ~~Advanced LLM~~ |
+| **AI drafting** (the card of drafting settings); the written instructions are **Instructions** | ~~AI Instructions~~ |
+| **On-device AI models** | ~~Local AI models~~, ~~Local models~~ |
+| **Bible data** · **Source link** · **Settings from {project}** | ~~Bible resources~~, ~~Linked source project~~, ~~Inherited settings~~, ~~Copy these from the upstream project~~ |
+| **Project deadline** (the project) · **Target date** (a plan item) | never swapped; an assignment's own date stays its deadline |
+| **Language lane** / **Language lanes** (lower case mid-sentence) | ~~lane~~, ~~target lane~~, ~~translation lane~~, "language" meaning a lane |
+| Role names alone (**Project lead**) | ~~Project lead (500)~~ |
+| **Film** (the video linked to a file) | ~~Link video~~, ~~Change video~~, ~~Linked video~~ on the film's own controls |
+| **Organization settings** · **Billing** · **Archived projects** · **Member list** · **Project name** | ~~Settings~~ (for the org's), ~~Billing & usage~~, ~~Archived~~ (the page), ~~roster~~, ~~Project title~~, ~~Project Name~~ |
+| Sentence case everywhere (**Font size**) | ~~Font Size~~ |
+
+The check can't see case, or "language" used to mean a lane, so those two rows
+are kept by reading. Names of products, resources, plans and named features
+(Open Bible Stories, Bible Swap, Smart Extensions, Voice Studio, Field Plan)
+keep their capitals.
+
+---
+
 ## Concept names
 
 | Concept | Canonical UI name | Banned / replaced |
@@ -21,12 +52,13 @@ the "Banned" alternatives or internal spec IDs in the UI.
 | Sync status chip tooltip (synced) | **All changes synced** | ~~All audit events synced~~ |
 | Sync status chip tooltip (failed) | **Could not sync changes to the server** | ~~Could not sync audit events~~ |
 | Project glossary / terminology store | **term base** (two words) | ~~termbase~~ (one word) |
-| Term base sharing section | **Term Base Sharing** | ~~Termbase Sharing~~ |
+| Term base sharing section | **Term base sharing** | ~~Termbase Sharing~~, ~~Term Base Sharing~~ |
 | AI reference examples (for translation) | **reference examples** | ~~few-shot examples~~ |
 | Word-level audio timing data | **word timings** | ~~karaoke timings~~ |
 | Original file stored on server for round-trip export | **original file data** | ~~side-car bytes~~ |
 | Nearby cells used for confidence scoring | **nearby context** | ~~retrieval neighborhood~~ |
 | Cell confidence / health indicator text | **Needs attention — nearby context cells haven't been validated yet** | ~~retrieval neighborhood hasn't been validated yet (AD-14)~~ |
+| Decay-derived confidence signal (cell expansion tab + project settings panel) | **Health** | ~~Retrieval support~~, ~~support score~~ |
 
 ---
 
@@ -49,6 +81,42 @@ These verbs are **deliberately different** per object — do not unify them.
 
 ---
 
+## Terminology enforcement — flag, never auto-replace
+
+Settled by AQU-764. The team could not point at a written answer to "does a
+non-approved rendering get flagged or silently replaced?", so this is it.
+
+**Terminology flags. It never rewrites a translator's text.** Concepts compile
+to ordinary translation rules (`src/lib/terminology/compile.ts` →
+`src/lib/rules/rule-engine.ts`) which are evaluated *on read* — no verdict is
+materialized and no target text is mutated. Compiled terminology rules carry no
+`autofix`, so the autofix path in `src/lib/rules/autofix.ts` never touches them.
+This is deliberate: an approved rendering is not safe to substitute
+context-blind (the "general *lord* vs *Adonai* vs *Yahweh*" case).
+
+| Situation | Check emitted | Severity |
+|---|---|---|
+| Source bears the concept, target has none of its approved renderings | `source-requires-target` | `minor` |
+| Source bears the concept, target contains a forbidden rendering | `target-forbids` | `major` |
+
+**Both severities are soft. Nothing terminology-related hard-blocks.** Severity
+drives presentation and triage only — icon and colour in the rule drawer and the
+cell issues tab, and the `violation-major` / `violation-minor` ribbon marks. A
+translator can commit, validate, and export a cell that carries either, and any
+infraction can be waived. Rule and check violations are also a *sibling* surface
+to health: per AD-14 they are never folded into the health score.
+
+Both checks are scoped by the SAME source condition: the concept's source
+pattern. A forbidden rendering is usually an ordinary word that is wrong only
+as a rendering of one concept, so `target-forbids` carries that pattern as
+`check.sourcePattern` and applies only to a cell whose source bears the concept
+(AQU-1712). Hand-authored `target-forbids` rules carry no `sourcePattern` and
+stay unconditional.
+
+Draft and deprecated concepts compile to nothing at all.
+
+---
+
 ## Banned internal spec IDs in UI strings
 
 The following patterns must never appear in user-facing string literals:
@@ -66,3 +134,4 @@ The lint guard test `src/components/ui-jargon-guard.test.ts` enforces this.
 | Date | Change | Issue |
 |---|---|---|
 | 2026-06-10 | Initial glossary; applied copy pass across src/components + src/pages | AQU-290 |
+| 2026-09-27 | "Retrieval support" renamed back to **Health** on the cell expansion tab and the project-settings decay panel; terminology enforcement documented as flag-only, soft-warn | AQU-764 |

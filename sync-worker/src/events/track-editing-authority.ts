@@ -2,9 +2,14 @@
 //
 // `allowTrackEditing` (project settings; the write route is maintainer-gated)
 // decides whether a project's timelines may be restructured at all — tracks
-// added and deleted, grouped into folders, recoloured. It is the sibling of
-// timing-authority.ts, and it fails safe to OFF because the affordance is the
-// liability the setting exists to contain.
+// added and deleted, grouped into folders. It is the sibling of
+// timing-authority.ts.
+//
+// AQU-2214 FLIPPED ITS DEFAULT: unset now reads ON (Sam, Oct 27, after the
+// ETEN demo). The setting is still a real gate — an explicit `false` on the
+// project or its org refuses a gated write to an OWNER, as below — but it is
+// now an opt-OUT. A failed settings READ still reads OFF: "unknown" is not
+// "unset", and this is a write perimeter.
 //
 // IT IS NOW THE ONLY PROJECT SETTING OF ITS KIND STILL ENFORCED HERE, and the
 // contrast worth knowing is with the cell-editing tier. That one was checked
@@ -25,6 +30,12 @@
 // way to keep drag-to-reorder and rename working — which they must, since both
 // already ship and a new setting defaulting to off must not take an existing
 // capability away from every project that has one.
+//
+// RECOLOURING JOINED THEM (Sam, 2026-09-26). The Audio view now draws a file's
+// takes in its dub track's colour and offers the picker there, on Bible
+// projects that will never turn track editing on. A colour changes how a track
+// LOOKS, not what the timeline holds — the same standing as a rename — so it is
+// maintainer work with the setting off too.
 
 /**
  * Does this patch REQUIRE the setting, or is it ordinary maintainer work?
@@ -36,11 +47,11 @@
  * Three clauses, and the first is NOT a special case of the second:
  *
  *   1. `patch === null` is gated, ALWAYS.
- *   2. A patch naming any key outside {name, order} is gated.
+ *   2. A patch naming any key outside {name, order, color} is gated.
  *   3. Everything else is ungated.
  *
  * Clause 1 has to be written out because the tempting one-liner — "ungated iff
- * the keys are a subset of {name, order}" — is wrong in the PERMISSIVE
+ * the keys are a subset of {name, order, color}" — is wrong in the PERMISSIVE
  * direction: null has no keys, so it is vacuously a subset and a delete would
  * sail straight through the gate that exists to stop it.
  *
@@ -48,7 +59,7 @@
  * innocently as "reset this row to its defaults". The projection implements it
  * as `meta #- ARRAY['trackOverrides', <id>]` — it deletes the whole entry — so
  * resetting the target-audio row also clears its colour, its group and its
- * rename in one write. Three of those four are gated fields.
+ * rename in one write — and a group is a gated field.
  *
  * Unknown keys are gated rather than ignored, which is the safe direction: the
  * handler rejects them a moment later anyway (its PATCH_KEYS allow-list), so
@@ -60,6 +71,7 @@
 // module self-contained — needed the moment event-projection began importing
 // it, which pulled this file into the root graph for the first time.
 import type { AquillaDb } from '../../../db/shim/postgres'
+import { effectiveMediaSettings } from './media-settings'
 import { makeRequestCache, type RequestCache } from './request-cache'
 
 /**
@@ -116,7 +128,7 @@ export function trackPatchRequiresExisting(trackId: string, patch: unknown): boo
   return !DEFAULT_TRACK_IDS.has(trackId)
 }
 
-const UNGATED_PATCH_KEYS = new Set(['name', 'order'])
+const UNGATED_PATCH_KEYS = new Set(['name', 'order', 'color'])
 
 export function isGatedTrackPatch(payload: unknown): boolean {
   if (typeof payload !== 'object' || payload === null) return true
@@ -135,12 +147,23 @@ export function isGatedTrackPatch(payload: unknown): boolean {
 }
 
 /**
- * Has this project opted into restructuring its timelines?
+ * Has this project opted out of restructuring its timelines?
  *
- * Returns `false` (the restrictive answer) when the project has no settings
- * row, the blob will not parse, or `allowTrackEditing` is anything other than
- * exactly `true`. Keep in lock-step with the client's read of the same key
- * (`project?.allowTrackEditing ?? false`).
+ * AQU-2214 (Sam, after the ETEN demo): the UNSET default is now ON. A project
+ * that has never been asked, under an org that set no default either, may
+ * restructure its timelines — adding a track is the common case, not the
+ * exceptional one. Only an explicit `false`, on the project or inherited from
+ * its org, turns it off, and an explicit choice on either side is untouched
+ * (`effectiveMediaSettings` already resolves project → org).
+ *
+ * A non-boolean value is NOT an explicit choice: it reads as unset, exactly as
+ * `withOrgMediaDefaults` treats it, so a hand-edited blob falls to the default
+ * instead of silently disabling the setting.
+ *
+ * The one answer that stays `false` is the catch below — an unreachable or
+ * unparseable settings row is not "unset", it is "unknown", and this is a
+ * write perimeter. Keep in lock-step with the client's read of the same key
+ * (`project?.allowTrackEditing ?? true`).
  */
 export async function resolveAllowTrackEditing(
   db: AquillaDb,
@@ -154,8 +177,11 @@ export async function resolveAllowTrackEditing(
   // `authorize` and 500s the whole batch, which can wedge a durable outbox on
   // one poisoned event. An unreachable settings row reads as OFF.
   try {
-    const parsed = await cache.projectSettings(projectId)
-    return parsed?.allowTrackEditing === true
+    // AQU-1768: a project with no setting of its own follows its org's.
+    const parsed = await effectiveMediaSettings(cache, projectId)
+    const chosen = parsed?.allowTrackEditing
+    // AQU-2214: unset (no row, no key, or a value no reader accepts) is ON.
+    return typeof chosen === 'boolean' ? chosen : true
   } catch {
     return false
   }

@@ -7,6 +7,7 @@
 // invoking handleEventsWriteRequest with a synthetic Request. This module mints
 // that token and enforces the credential's scope ceiling first.
 
+import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { sign } from 'hono/jwt'
 import { ExternalError } from './errors'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
@@ -48,7 +49,7 @@ export async function assertCredentialScope(
   }
 
   const projectOrgId = project.org_id == null ? null : String(project.org_id)
-  if (cred.orgId != null && cred.orgId !== projectOrgId) {
+  if (!credentialAllowsOrganization(cred, projectOrgId)) {
     throw new ExternalError(
       'scope_denied',
       'credential org scope does not match this project',
@@ -56,6 +57,35 @@ export async function assertCredentialScope(
   }
 
   return { orgId: projectOrgId }
+}
+
+/**
+ * AQU-1242: refuse a read-only credential at a write surface.
+ *
+ * Called at three depths on purpose, and the deepest one is the load-bearing
+ * gate: `mintInternalSyncToken` below is the ONE door every external event write
+ * goes through (the engine never constructs an AuthorizedEvent itself), so a
+ * future write path that forgets the earlier checks is still refused here rather
+ * than quietly applying. The earlier calls — prepare and commit — exist so an
+ * agent learns it holds a read-only token before it spends work staging a plan
+ * it could never apply, not because they are sufficient on their own.
+ *
+ * `scope_denied` (403), not `permission_denied`: the caller's live project role
+ * may be perfectly sufficient. What is insufficient is the token's own scope,
+ * which is exactly the distinction the two codes already draw for org/project.
+ */
+export function assertCredentialMayWrite(
+  cred: ApiCredentialContext,
+  /** What was refused, e.g. 'stage a changeset' — named in the message so an
+   *  agent's log says which call it was rather than just "read-only". */
+  action = 'write to this project',
+): void {
+  if (cred.access !== 'read') return
+  throw new ExternalError(
+    'scope_denied',
+    `this credential is read-only and cannot ${action} — ` +
+      'mint a read-write token in the Aquilla app (Preferences → Account → "API tokens") to make changes',
+  )
 }
 
 /**
@@ -74,6 +104,11 @@ export async function mintInternalSyncToken(
   if (!env.SYNC_SECRET_KEY) {
     throw new ExternalError('job_failed', 'SYNC_SECRET_KEY not configured')
   }
+
+  // AQU-1242: the backstop. This token is a WRITE token by construction — it is
+  // minted only to push RawEvents through the /events perimeter — so a read-only
+  // credential must never obtain one, whatever route asked for it.
+  assertCredentialMayWrite(cred, 'write to this project')
 
   await assertCredentialScope(db, cred, projectId)
 

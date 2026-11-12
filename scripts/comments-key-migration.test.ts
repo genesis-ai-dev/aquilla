@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs"
 import type { Client } from "pg"
 import { prepareCommentsKey } from "./neon-comments-key"
-import { applyMigrationFile } from "./neon-migration-file"
+import { applyMigrationFile, scanSql } from "./neon-migration-file"
 import { PGlite } from "@electric-sql/pglite"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
@@ -103,9 +103,14 @@ describe("comments primary-key migration", () => {
 })
 
 // PGlite exposes multi-statement execution as exec; pg uses query for both.
+// Route by statement count, the way pg itself picks a protocol: a no-values
+// multi-statement string goes over the simple protocol (exec), a single
+// statement keeps `.rows`. AQU-1877 made the runner send the file wrapped in
+// BEGIN/COMMIT with its ledger row, so matching the file verbatim no longer
+// finds it.
 const client = {
   query: async (text: string, values?: unknown[]) => {
-    if (text === sql) return db.exec(text)
+    if (!values && scanSql(text).statements.length > 1) return db.exec(text)
     return db.query(text, values)
   },
 } as unknown as Pick<Client, "query">

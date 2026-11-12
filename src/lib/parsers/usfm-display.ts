@@ -48,6 +48,13 @@ export interface UsfmTextSegment {
   /** Inline marks in force over this run, deduped and in MARK_ORDER. Empty
    *  (the shared NO_MARKS constant) for unstyled runs — the common case. */
   marks: readonly UsfmInlineMark[]
+  /** AQU-2184: the raw roles of the paired character markers open over this
+   *  run (`usfm-markers.ts` `MarkerSpec.role`), outermost first, after the
+   *  innermost `\no` reset — the same window `marks` is derived from. Marks
+   *  are the VISUAL reduction and lose roles that carry no styling of their
+   *  own; a consumer that must style one of those (`\wj`, words of Jesus, on
+   *  the HTML export's page) reads it here. Empty for unmarked runs. */
+  roles: readonly string[]
 }
 
 /** Character-marker role (usfm-markers.ts) → the marks it renders as. Roles
@@ -69,6 +76,8 @@ const ROLE_MARKS: Record<string, readonly UsfmInlineMark[]> = {
 const MARK_ORDER: readonly UsfmInlineMark[] = ["bold", "italic", "small-caps", "superscript"]
 
 const NO_MARKS: readonly UsfmInlineMark[] = Object.freeze([])
+
+const NO_ROLES: readonly string[] = Object.freeze([])
 
 export interface UsfmNoteSegment {
   kind: "note"
@@ -156,14 +165,19 @@ export function segmentUsfmForDisplay(raw: string): UsfmDisplaySegment[] | null 
   // payload — clipped from display.
   const charStack: string[] = []
 
-  /** Marks in force right now. `\no` (role "normal") cancels everything
-   *  outside it, so only the roles after the innermost \no contribute. */
-  const activeMarks = (): readonly UsfmInlineMark[] => {
-    if (charStack.length === 0) return NO_MARKS
+  /** The open roles that still apply. `\no` (role "normal") cancels
+   *  everything outside it, so only the roles after the innermost \no count. */
+  const activeRoles = (): readonly string[] => {
+    if (charStack.length === 0) return NO_ROLES
     const reset = charStack.lastIndexOf("normal")
-    const open = reset === -1 ? charStack : charStack.slice(reset + 1)
+    return reset === -1 ? [...charStack] : charStack.slice(reset + 1)
+  }
+
+  /** Marks in force right now — the visual reduction of `activeRoles()`. */
+  const activeMarks = (roles: readonly string[]): readonly UsfmInlineMark[] => {
+    if (roles.length === 0) return NO_MARKS
     const found = new Set<UsfmInlineMark>()
-    for (const role of open) {
+    for (const role of roles) {
       for (const mark of ROLE_MARKS[role] ?? NO_MARKS) found.add(mark)
     }
     if (found.size === 0) return NO_MARKS
@@ -178,12 +192,14 @@ export function segmentUsfmForDisplay(raw: string): UsfmDisplaySegment[] | null 
       if (pipe !== -1) end = from + pipe
     }
     if (end > from) {
+      const roles = activeRoles()
       segments.push({
         kind: "text",
         text: raw.slice(from, end),
         rawStart: from,
         rawEnd: end,
-        marks: activeMarks(),
+        marks: activeMarks(roles),
+        roles,
       })
     }
   }

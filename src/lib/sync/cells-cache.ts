@@ -24,10 +24,24 @@ import {
   CELLS_CACHE_DB as DB_NAME,
   CELLS_CACHE_VERSION as DB_VERSION,
   CELLS_CACHE_STORE as STORE,
+  CELLS_CACHE_META_STORE as META_STORE,
   CELLS_CACHE_BATCH_ROWS,
+  estimateCellsSnapshotBytes,
   putCellsCacheSnapshot,
 } from "./cells-cache-writer"
+import {
+  clearCellsCacheForQuota,
+  enforceCellsCacheBudget,
+  evictCellsCacheTo,
+  cellsCacheBudget,
+  touchEntryAccess,
+  __setCellsCacheBudgetForTests,
+} from "./cells-cache-budget"
 import { putCellsCacheInWorker } from "./cells-cache-worker-client"
+import {
+  isQuotaExceededError,
+  withStorageQuotaRecovery,
+} from "@/lib/storage/storage-pressure"
 export const CELLS_CACHE_WRITE_DEBOUNCE_MS = 500
 
 // The database is shared by every account on this browser origin. Prefixing
@@ -74,6 +88,8 @@ interface PendingCellsCacheWrite {
   maxServerSeq?: number
   projectEpoch?: number
   timer: ReturnType<typeof setTimeout> | null
+  /** Unversioned key to delete once a grant-scoped snapshot is stored. */
+  unversionedKey: string | null
 }
 
 interface InFlightCellsCacheWrite {
@@ -85,10 +101,76 @@ interface InFlightCellsCacheWrite {
 const pendingWrites = new Map<string, PendingCellsCacheWrite>()
 const inFlightWrites = new Map<string, InFlightCellsCacheWrite>()
 
-function cacheKey(projectId: string, fileId: string): string {
-  const legacy = `${projectId}:${fileId}`
+/**
+ * LRU bumps in flight. A bump is deliberately not awaited by the reader, but an
+ * unawaited IndexedDB write that can land at any later moment is exactly the
+ * kind of thing that makes a suite flaky (it was: a bump queued by one test's
+ * read consumed the mocked failure another test had armed). Tracking them lets
+ * the test reset drain them without putting a second transaction on the file-open
+ * critical path in production.
+ */
+const pendingTouches = new Set<Promise<void>>()
+
+function trackTouch(promise: Promise<void>): void {
+  const tracked = promise.catch(() => undefined).then(() => {
+    pendingTouches.delete(tracked)
+  })
+  pendingTouches.add(tracked)
+}
+
+function cacheKey(projectId: string, fileId: string, grantsVersion = ""): string {
+  const legacy = grantsVersion
+    ? `${projectId}:${fileId}:gv:${grantsVersion}`
+    : `${projectId}:${fileId}`
   if (activeOwnerKey === undefined) return legacy
   return scopedCacheKey(activeOwnerKey, legacy)
+}
+
+/** FNV-1a. Stable, synchronous, and enough to separate grant sets in a cache key. */
+function fnv1a(text: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0")
+}
+
+function decodeJwtPayload(token: string): unknown {
+  const part = token.split(".")[1]
+  if (!part) return null
+  const b64 = part.replace(/-/g, "+").replace(/_/g, "/")
+  const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4)
+  return JSON.parse(atob(padded))
+}
+
+/**
+ * Cache-key suffix for the sync token's `laneGrants` claim.
+ * An absent or empty claim returns "" so existing snapshots keep their key.
+ */
+export function grantsVersionFromSyncToken(token: string | null | undefined): string {
+  if (!token) return ""
+  let payload: unknown
+  try {
+    payload = decodeJwtPayload(token)
+  } catch {
+    return ""
+  }
+  if (!payload || typeof payload !== "object") return ""
+  const raw = (payload as { laneGrants?: unknown }).laneGrants
+  if (!Array.isArray(raw) || raw.length === 0) return ""
+  const parts: string[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue
+    const lane = (item as { lane?: unknown }).lane
+    const level = (item as { level?: unknown }).level
+    if (typeof lane !== "string" || lane.length === 0) continue
+    if (typeof level !== "number" || !Number.isFinite(level)) continue
+    parts.push(`${lane}:${level}`)
+  }
+  if (parts.length === 0) return ""
+  parts.sort()
+  return fnv1a(parts.join("\n"))
 }
 
 function scopedCacheKey(ownerKey: string | null, legacyKey: string): string {
@@ -114,11 +196,18 @@ async function openDb(): Promise<IDBDatabase> {
       req.onupgradeneeded = (event) => {
         const db = req.result
         const oldVersion = event.oldVersion
-        if (oldVersion > 0 && oldVersion < DB_VERSION && db.objectStoreNames.contains(STORE)) {
-          db.deleteObjectStore(STORE)
+        if (oldVersion > 0 && oldVersion < DB_VERSION) {
+          // Snapshots and their meta rows are one unit: an upgrade that kept
+          // snapshots while recreating the meta store would leave every
+          // existing entry uncounted by the budget and unevictable.
+          if (db.objectStoreNames.contains(STORE)) db.deleteObjectStore(STORE)
+          if (db.objectStoreNames.contains(META_STORE)) db.deleteObjectStore(META_STORE)
         }
         if (!db.objectStoreNames.contains(STORE)) {
           db.createObjectStore(STORE, { keyPath: "key" })
+        }
+        if (!db.objectStoreNames.contains(META_STORE)) {
+          db.createObjectStore(META_STORE, { keyPath: "key" })
         }
       }
     })
@@ -129,13 +218,15 @@ async function openDb(): Promise<IDBDatabase> {
 /** Closes the singleton connection (tests only). */
 export async function resetCellsCacheConnectionForTests(): Promise<void> {
   activeOwnerKey = undefined
+  __setCellsCacheBudgetForTests(null)
   for (const pending of pendingWrites.values()) {
     if (pending.timer !== null) clearTimeout(pending.timer)
   }
   pendingWrites.clear()
   const writes = [...inFlightWrites.values()].map(({ promise }) => promise)
-  await Promise.allSettled(writes)
+  await Promise.allSettled([...writes, ...pendingTouches])
   inFlightWrites.clear()
+  pendingTouches.clear()
   if (!dbPromise) return
   try {
     const db = await dbPromise
@@ -154,8 +245,9 @@ export async function resetCellsCacheConnectionForTests(): Promise<void> {
 export async function claimLegacyCellsCache(ownerKey: string | null): Promise<void> {
   const db = await openDb()
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, "readwrite")
+    const tx = db.transaction([STORE, META_STORE], "readwrite")
     const store = tx.objectStore(STORE)
+    const meta = tx.objectStore(META_STORE)
     const request = store.openCursor()
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error ?? new Error("legacy cells cache claim failed"))
@@ -165,12 +257,23 @@ export async function claimLegacyCellsCache(ownerKey: string | null): Promise<vo
       if (!cursor) return
       const entry = cursor.value as CellsCacheEntry
       if (!isScopedCacheKey(entry.key)) {
-        const targetKey = scopedCacheKey(ownerKey, entry.key)
+        const legacyKey = entry.key
+        const targetKey = scopedCacheKey(ownerKey, legacyKey)
         const existing = store.get(targetKey)
         existing.onsuccess = () => {
           // A scoped write can race the one-time upgrade. Keep that newer,
           // explicitly-owned snapshot and only discard the obsolete legacy key.
-          if (existing.result === undefined) store.put({ ...entry, key: targetKey })
+          if (existing.result === undefined) {
+            store.put({ ...entry, key: targetKey })
+            // The re-keyed snapshot carries its budget accounting with it;
+            // otherwise the claim would silently make it uncountable.
+            meta.put({
+              key: targetKey,
+              sizeBytes: estimateCellsSnapshotBytes(entry.rows),
+              lastAccessAt: Date.now(),
+            })
+          }
+          meta.delete(legacyKey)
           cursor.delete()
           cursor.continue()
         }
@@ -184,17 +287,26 @@ export async function claimLegacyCellsCache(ownerKey: string | null): Promise<vo
 export async function readCellsCache(
   projectId: string,
   fileId: string,
+  grantsVersion = "",
 ): Promise<CellsCacheEntry | null> {
-  const entryKey = cacheKey(projectId, fileId)
+  const entryKey = cacheKey(projectId, fileId, grantsVersion)
+  const unversionedKey = grantsVersion ? cacheKey(projectId, fileId, "") : null
   try {
     const db = await openDb()
-    return await new Promise<CellsCacheEntry | null>((resolve, reject) => {
+    const entry = await new Promise<CellsCacheEntry | null>((resolve, reject) => {
       const tx = db.transaction(STORE, "readonly")
       const store = tx.objectStore(STORE)
       const req = store.get(entryKey)
       req.onsuccess = () => resolve((req.result as CellsCacheEntry | undefined) ?? null)
       req.onerror = () => reject(req.error ?? new Error("IDB get failed"))
     })
+    if (unversionedKey) {
+      await deleteGrantSiblings(unversionedKey, entryKey).catch(() => undefined)
+    }
+    // LRU bump, deliberately not awaited: recency is a hint, and the file open
+    // this read feeds must not wait on a second transaction to paint.
+    if (entry) trackTouch(touchEntryAccess(db, entryKey))
+    return entry
   } catch {
     return null
   }
@@ -206,11 +318,13 @@ export async function writeCellsCache(
   rows: CellRow[],
   maxServerSeq?: number,
   projectEpoch?: number,
+  grantsVersion = "",
 ): Promise<void> {
   // Capture the identity namespace before the first await. An IndexedDB open
   // can settle after an account switch; recomputing then would write the old
   // request's rows into the newly-active account's key.
-  const entryKey = cacheKey(projectId, fileId)
+  const entryKey = cacheKey(projectId, fileId, grantsVersion)
+  const unversionedKey = grantsVersion ? cacheKey(projectId, fileId, "") : null
   // An immediate snapshot supersedes an older queued tuple. Serialize it
   // behind any in-flight write so a slower worker cannot restore older rows.
   const queued = pendingWrites.get(entryKey)
@@ -225,6 +339,7 @@ export async function writeCellsCache(
       maxServerSeq,
       projectEpoch,
       timer: null,
+      unversionedKey,
     })
   } catch {
     /* cache write is best-effort; a failed write must not break the load */
@@ -251,13 +366,87 @@ async function putCellsCacheEntry(
       ? { projectEpoch: pending.projectEpoch }
       : {}),
   }
-  if (entry.rows.length > CELLS_CACHE_BATCH_ROWS && typeof Worker !== "undefined") {
-    // A worker failure leaves the previous honest cache intact. Do not retry
-    // a large clone on the input thread and recreate the typing pause.
-    await putCellsCacheInWorker(entry)
-  } else {
-    await putCellsCacheSnapshot(db, entry)
+  await writeSnapshotWithQuotaRecovery(db, entry)
+  if (pending.unversionedKey) {
+    await deleteGrantSiblings(pending.unversionedKey, pending.entryKey)
   }
+  // AQU-1865: hold the cache to its byte budget, least-recently-accessed file
+  // first. The snapshot just written is exempt — it is the one the open that
+  // triggered this write is about to read back.
+  await enforceCellsCacheBudget(db, entry.key).catch(() => undefined)
+}
+
+/**
+ * Write a snapshot, yielding origin bytes rather than failing hard (AQU-1865).
+ *
+ * The cells cache and the CQRS outbox share one origin quota, and only one of
+ * them is best-effort. So a `QuotaExceededError` here is not just this write's
+ * problem: it is a warning that the next *outbox* write may fail too. The cache
+ * sheds half its budget and retries once; if there is still no room it drops
+ * itself entirely. Callers already treat a missing snapshot as a cache miss, so
+ * the worst outcome is a refetch — never a lost edit.
+ */
+async function writeSnapshotWithQuotaRecovery(
+  db: IDBDatabase,
+  entry: CellsCacheEntry,
+): Promise<void> {
+  // A worker failure leaves the previous honest cache intact. Do not retry
+  // a large clone on the input thread and recreate the typing pause.
+  const write = () =>
+    entry.rows.length > CELLS_CACHE_BATCH_ROWS && typeof Worker !== "undefined"
+      ? putCellsCacheInWorker(entry)
+      : putCellsCacheSnapshot(db, entry)
+  const shedHalfTheBudget = async () => {
+    const budget = await cellsCacheBudget()
+    await evictCellsCacheTo(db, Math.floor(budget / 2), entry.key).catch(() => undefined)
+  }
+  try {
+    await withStorageQuotaRecovery(write, shedHalfTheBudget)
+  } catch (error) {
+    if (!isQuotaExceededError(error)) throw error
+    // Shedding half was not enough. Drop the cache outright rather than keep a
+    // best-effort optimisation competing with the outbox for the last bytes.
+    await clearCellsCacheForQuota(db).catch(() => undefined)
+  }
+}
+
+/**
+ * Hand the origin every byte this cache holds. Called by the outbox when an
+ * enqueue hits the quota: the cache is a latency optimisation and a queued edit
+ * is not, so the cache goes first and without argument.
+ */
+export async function purgeCellsCacheForQuota(): Promise<void> {
+  try {
+    await clearCellsCacheForQuota(await openDb())
+  } catch {
+    /* nothing more to reclaim here */
+  }
+}
+
+/** Drop the pre-grant snapshot and any other grant versions of this file. */
+async function deleteGrantSiblings(unversionedKey: string, keepKey: string): Promise<void> {
+  const db = await openDb()
+  const prefix = `${unversionedKey}:gv:`
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction([STORE, META_STORE], "readwrite")
+    const store = tx.objectStore(STORE)
+    const meta = tx.objectStore(META_STORE)
+    store.delete(unversionedKey)
+    meta.delete(unversionedKey)
+    const request = store.openKeyCursor()
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (!cursor) return
+      const key = String(cursor.key)
+      if (key.startsWith(prefix) && key !== keepKey) {
+        store.delete(key)
+        meta.delete(key)
+      }
+      cursor.continue()
+    }
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error ?? new Error("IDB grant-sibling delete failed"))
+  })
 }
 
 /**
@@ -272,10 +461,12 @@ export function scheduleCellsCacheWrite(
   rows: CellRow[],
   maxServerSeq?: number,
   projectEpoch?: number,
+  grantsVersion = "",
 ): void {
   // Capture the owner-scoped key now. The active account can change before
   // the timer fires, and old rows must never land in the new account's key.
-  const entryKey = cacheKey(projectId, fileId)
+  const entryKey = cacheKey(projectId, fileId, grantsVersion)
+  const unversionedKey = grantsVersion ? cacheKey(projectId, fileId, "") : null
   const previous = pendingWrites.get(entryKey)
   if (previous?.timer != null) {
     clearTimeout(previous.timer)
@@ -291,6 +482,7 @@ export function scheduleCellsCacheWrite(
     maxServerSeq,
     projectEpoch,
     timer: null,
+    unversionedKey,
   }
   pending.timer = setTimeout(() => {
     pending.timer = null
@@ -492,8 +684,10 @@ export async function deleteCellsCache(
   try {
     const db = await openDb()
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, "readwrite")
-      tx.objectStore(STORE).delete(cacheKey(projectId, fileId))
+      const key = cacheKey(projectId, fileId)
+      const tx = db.transaction([STORE, META_STORE], "readwrite")
+      tx.objectStore(STORE).delete(key)
+      tx.objectStore(META_STORE).delete(key)
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error ?? new Error("IDB delete failed"))
       tx.onabort = () => reject(tx.error ?? new Error("IDB delete aborted"))

@@ -4,12 +4,24 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
+import { expectClickNote } from "@/test-utils/tooltip"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
+/** A progress bar's parts inside `el`, as "tone width" in drawing order (AQU-1764). */
+const barParts = (el: HTMLElement) =>
+  [...el.querySelectorAll<HTMLElement>("[data-progress-tone]")]
+    .map((part) => `${part.dataset.progressTone} ${part.style.width}`)
+
 // StaffLanePopover pulls org/project members over the network on mount — stub
 // it (it's covered by its own wave-A suite). We only assert it's wired here.
+const mockNavigate = vi.fn()
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
+  return { ...actual, useNavigate: () => mockNavigate }
+})
+
 vi.mock("@/components/StaffLanePopover", () => ({
   StaffLanePopover: (props: { projectId: string; lane: string }) => (
     <button data-testid={`staff-${props.projectId}-${props.lane}`}>Staff…</button>
@@ -80,7 +92,6 @@ function renderTable(
   projects: PortfolioProject[],
   opts: {
     role?: number
-    defaultLabels?: Record<string, string>
     jwt?: string | null
     viewerUsername?: string | null
     layout?: "page" | "embedded"
@@ -94,14 +105,12 @@ function renderTable(
   const roleByProjectId = new Map<string, CloudProjectSummary["role"]>(
     projects.map((p) => [p.id, { level: opts.role ?? 600, name: "maintainer", source: "direct" }]),
   )
-  const defaultLaneLabelByProjectId = new Map(Object.entries(opts.defaultLabels ?? {}))
   return render(
     <MemoryRouter>
       <OrgProjectsDataTable
         projects={projects}
         now={now}
         roleByProjectId={roleByProjectId}
-        defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
         filesByProjectId={new Map()}
         orgId={1}
         jwt={opts.jwt === undefined ? "jwt" : opts.jwt}
@@ -213,6 +222,18 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     expect(screen.getByText("Maintainer")).toBeInTheDocument()
   })
 
+  it("AQU-2105: marks a LangQuest-linked project with the logo and its sync state; unlinked rows carry no mark", () => {
+    renderTable([
+      baseProject({ id: "lq", name: "Kalam", langquest: { language: "Kalam", health: "broken", lastSyncedAt: null } }),
+      baseProject({ id: "plain", name: "Plain" }),
+    ])
+    const mark = screen.getByTestId("langquest-list-mark")
+    expect(mark).toHaveAttribute("data-health", "broken")
+    expect(mark).toHaveAttribute("aria-label", "Follows Kalam on LangQuest: Sync broken, reconnect LangQuest")
+    expect(within(screen.getByText("Kalam").closest("span")!.parentElement!).getByTestId("langquest-list-mark")).toBe(mark)
+    expect(screen.getAllByTestId("langquest-list-mark")).toHaveLength(1)
+  })
+
   it("renders one chip per lane with the '' default lane first, labeled with the target language", () => {
     const p = baseProject({
       id: "p1",
@@ -222,8 +243,9 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
         { lane: "es", totalCells: 100, filledCells: 22, validatedCells: 8, lastEditAt: now },
         { lane: "fr", totalCells: 100, filledCells: 50, validatedCells: 30, lastEditAt: now },
       ],
+      targetLanguage: "en-target",
     })
-    renderTable([p], { defaultLabels: { p1: "en-target" } })
+    renderTable([p])
 
     const defaultChip = screen.getByTestId("lane-chip-p1-")
     expect(defaultChip).toHaveTextContent("en-target")
@@ -234,6 +256,10 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     expect(esChip).toHaveTextContent("es")
     expect(esChip).toHaveTextContent("22%")
     expect(screen.getByTestId("lane-chip-p1-fr")).toBeInTheDocument()
+    // AQU-1764: each chip's mini bar is the shared two-part bar — validated,
+    // then translated but not validated — ending at the printed percentage.
+    expect(barParts(defaultChip)).toEqual(["textValidated 40%", "textTranslated 28%"])
+    expect(barParts(esChip)).toEqual(["textValidated 8%", "textTranslated 14%"])
 
     // Default lane chip is rendered before the named lane chips.
     const position = esChip.compareDocumentPosition(defaultChip)
@@ -241,10 +267,10 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
   })
 
   it("labels a migrated project's default lane from the project target language (AQU-606)", () => {
-    // Post-lanes-migration shape: the target lives on project settings and no
-    // per-file hint reaches the table, so the chip used to read "Default".
+    // Post-lanes-migration shape: the target lives on project settings, which
+    // a resolver that did not read it rendered as "Default".
     const p = baseProject({ id: "p6", name: "Migrated", totalCells: 100, filledCells: 25, targetLanguage: "French" })
-    renderTable([p], { defaultLabels: {} })
+    renderTable([p])
 
     const chip = screen.getByTestId("lane-chip-p6-")
     expect(chip).toHaveTextContent("French")
@@ -253,14 +279,17 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
 
   it("shows the neutral placeholder when the project has no target language (AQU-606)", () => {
     const p = baseProject({ id: "p7", name: "Untargeted", totalCells: 100, filledCells: 25 })
-    renderTable([p], { defaultLabels: {} })
+    renderTable([p])
 
     expect(screen.getByTestId("lane-chip-p7-")).toHaveTextContent("Default")
   })
 
   it("renders a single chip for a project with no lane breakdown (single-lane, no regression)", () => {
-    const p = baseProject({ id: "p2", name: "Ruth", totalCells: 200, filledCells: 100 })
-    renderTable([p], { defaultLabels: { p2: "sw" } })
+    // AQU-1596: the chip's label comes off the project's own target language.
+    // It used to be able to come from a per-file declared-language hint, which
+    // could name a language the lane does not have.
+    const p = baseProject({ id: "p2", name: "Ruth", totalCells: 200, filledCells: 100, targetLanguage: "sw" })
+    renderTable([p])
 
     const chip = screen.getByTestId("lane-chip-p2-")
     expect(chip).toHaveTextContent("sw")
@@ -303,33 +332,142 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
       { lane: "fr", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
       { lane: "de", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
     ]
-    renderTable([baseProject({ id: "p1", name: "Gospels", lanes })], { defaultLabels: { p1: "en-target" } })
+    renderTable([baseProject({ id: "p1", name: "Gospels", lanes, targetLanguage: "en-target" })])
     fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
 
     const defaultRow = screen.getByTestId("project-lane-row-p1-")
     expect(defaultRow).toHaveTextContent("en-target")
     expect(defaultRow).toHaveTextContent("68%")
-    expect(defaultRow).toHaveTextContent("40% validated")
+    // AQU-2179: the figure names which half it is, as on the overview's
+    // Languages table. These languages owe no audio, so that half is absent.
+    expect(defaultRow).toHaveTextContent("40% text validated")
+    // AQU-1764: the row's bar is the shared two-part bar, not a translated-only fill.
+    expect(barParts(defaultRow)).toEqual(["textValidated 40%", "textTranslated 28%"])
 
     const esRow = screen.getByTestId("project-lane-row-p1-es")
     expect(esRow).toHaveTextContent("22%")
-    expect(esRow).toHaveTextContent("8% validated")
+    expect(esRow).toHaveTextContent("8% text validated")
   })
 
-  it("Open links carry ?lane= for named lanes and no lane query for the default lane", () => {
+  // AQU-2179: these rows draw the same per-language figures as the project
+  // overview's Languages table (AQU-2178), so they must split "N% validated"
+  // the same way — a language's validated TEXT and its approved RECORDINGS
+  // over its own audio total — and print only the halves it owes. A single
+  // mixed "done" share here would contradict the overview for one language.
+  describe("text validated / audio validated (AQU-2179)", () => {
+    // A = Text, B = Audio, C = Text and audio, D = Text with nothing recorded.
+    const deliversLanes = [
+      { lane: "a", delivers: "text" as const, totalCells: 100, filledCells: 60, validatedCells: 40, lastEditAt: now },
+      {
+        lane: "b",
+        delivers: "audio" as const,
+        totalCells: 100,
+        filledCells: 50,
+        validatedCells: 0,
+        audioCells: 50,
+        audioTotalCells: 100,
+        validatedAudioCells: 10,
+        lastEditAt: now,
+      },
+      {
+        lane: "c",
+        delivers: "text_and_audio" as const,
+        totalCells: 100,
+        filledCells: 70,
+        validatedCells: 30,
+        audioCells: 40,
+        audioTotalCells: 100,
+        validatedAudioCells: 20,
+        bothValidatedCells: 15,
+        lastEditAt: now,
+      },
+      { lane: "d", delivers: "text" as const, totalCells: 100, filledCells: 20, validatedCells: 5, lastEditAt: now },
+    ]
+
+    function expandDeliversProject() {
+      renderTable([baseProject({ id: "p1", name: "Gospels", lanes: deliversLanes })])
+      fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
+    }
+
+    it("prints both halves for a language that delivers text and audio", () => {
+      expandDeliversProject()
+      const row = screen.getByTestId("project-lane-row-p1-c")
+      expect(row).toHaveTextContent("30% text validated")
+      expect(row).toHaveTextContent("20% audio validated")
+    })
+
+    it("shows no text-validated figure for an Audio language", () => {
+      expandDeliversProject()
+      const row = screen.getByTestId("project-lane-row-p1-b")
+      expect(within(row).queryByTestId("project-lane-text-validated-p1-b")).not.toBeInTheDocument()
+      expect(row).toHaveTextContent("10% audio validated")
+    })
+
+    it("shows no audio-validated figure — never 0% — for a Text language with nothing recorded", () => {
+      expandDeliversProject()
+      const row = screen.getByTestId("project-lane-row-p1-d")
+      expect(row).toHaveTextContent("5% text validated")
+      expect(within(row).queryByTestId("project-lane-audio-validated-p1-d")).not.toBeInTheDocument()
+      expect(row).not.toHaveTextContent("0% audio validated")
+    })
+
+    // The audio half is approved recordings over the LANGUAGE's own audio
+    // total, exactly as laneAudioValidatedPct measures it for the overview
+    // table and the Progress card's tile — never over the project's total.
+    it("measures the audio half against the language's own audio total", () => {
+      renderTable([
+        baseProject({
+          id: "p1",
+          name: "Gospels",
+          totalCells: 400,
+          lanes: [
+            ...deliversLanes.slice(0, 3),
+            {
+              lane: "d",
+              delivers: "audio" as const,
+              totalCells: 100,
+              filledCells: 20,
+              validatedCells: 0,
+              audioCells: 20,
+              audioTotalCells: 40,
+              validatedAudioCells: 10,
+              lastEditAt: now,
+            },
+          ],
+        }),
+      ])
+      fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
+      // 10 approved of the language's own 40, not of the project's 400.
+      expect(screen.getByTestId("project-lane-row-p1-d")).toHaveTextContent("25% audio validated")
+    })
+
+    // Older servers send no per-language audio counts. Measuring those against
+    // the project's denominator is the one way this row could disagree with
+    // the overview, so the row says nothing about audio instead.
+    it("omits the audio half when the server sent no per-language audio counts", () => {
+      expandDeliversProject()
+      expect(within(screen.getByTestId("project-lane-row-p1-a")).queryByTestId("project-lane-audio-validated-p1-a"))
+        .not.toBeInTheDocument()
+    })
+  })
+
+  // AQU-1474: the default lane is an explicit, empty `?lane=`, never a bare
+  // URL. The editor reads an absent lane param as "keep the lane last used",
+  // so a bare link from the default-lane row could open a different lane.
+  it("Open links carry ?lane=<tag> for named lanes and an empty ?lane= for the default lane", () => {
     const lanes = [
       { lane: "", totalCells: 100, filledCells: 68, validatedCells: 40, lastEditAt: now },
       { lane: "es", totalCells: 100, filledCells: 22, validatedCells: 8, lastEditAt: now },
       { lane: "fr", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
       { lane: "de", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
     ]
-    renderTable([baseProject({ id: "p1", name: "Gospels", lanes })], { defaultLabels: { p1: "en-target" } })
+    renderTable([baseProject({ id: "p1", name: "Gospels", lanes, targetLanguage: "en-target" })])
     fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
 
     const defaultOpen = within(screen.getByTestId("project-lane-row-p1-")).getByRole("link", {
       name: /open/i,
     })
-    expect(defaultOpen.getAttribute("href")).toBe("/project/p1/editor")
+    expect(defaultOpen.getAttribute("href")).toBe("/project/p1/editor?lane=")
 
     const esOpen = within(screen.getByTestId("project-lane-row-p1-es")).getByRole("link", {
       name: /open/i,
@@ -397,6 +535,16 @@ describe("units done column", () => {
     renderTable([baseProject({ id: "p1", unitsTotal: 66, unitsDone: 5, unitsOverdue: 2 })])
     expect(screen.getByTestId("project-table-units-overdue")).toHaveTextContent("2")
     expect(screen.getByTestId("project-table-units-value")).toHaveAttribute("data-units-overdue", "true")
+  })
+
+  // AQU-2260 (Sam, Oct 29): the flag says what it counts on click, never on
+  // hover, and the click stays on the flag rather than opening the project.
+  it("says what the overdue flag counts on click, without opening the row", async () => {
+    renderTable([baseProject({ id: "p1", unitsTotal: 66, unitsDone: 5, unitsOverdue: 2 })])
+    const flag = screen.getByTestId("project-table-units-overdue").closest("button")
+    expect(flag).not.toBeNull()
+    await expectClickNote(flag!, "2 units are past their target date")
+    expect(mockNavigate).not.toHaveBeenCalled()
   })
 
   it("shows no flag when every unit is on time", () => {

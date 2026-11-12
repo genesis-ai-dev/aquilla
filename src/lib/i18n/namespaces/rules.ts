@@ -9,7 +9,7 @@ import { defineNamespace, plural } from "./types"
  *
  * NEVER translate (content, not chrome): the user's OWN rule `name` /
  * `description`, autofix pattern/replacement/flags, every `RuleCheck`
- * pattern, `concept.sourceTerm`, matched cell text. The ten BUILT-IN checks
+ * pattern, `concept.sourceTerm`, matched cell text. The BUILT-IN checks
  * are the one ambiguous case — `resolveBuiltinRules()` copies
  * `BUILTIN_CHECKS[id].name`/`.description` onto a `TranslationRule` so four
  * renderers can't structurally tell a built-in from a user rule apart. Those
@@ -39,6 +39,7 @@ export const rules = defineNamespace({
     "rules.infraction.builtin.emptyTarget": "Source has content but the translation is empty",
     "rules.infraction.builtin.targetEqualsSource": "Translation is identical to the source",
     "rules.infraction.builtin.numberIntegrity": "Number from source missing in translation",
+    "rules.infraction.builtin.numberIntegrityExtra": "Number in translation not found in source",
     "rules.infraction.builtin.endPunctuationMismatch": "Terminal punctuation differs from source",
     "rules.infraction.builtin.punctuationIntegrity":
       "Clause punctuation from source missing in translation",
@@ -46,6 +47,18 @@ export const rules = defineNamespace({
     "rules.infraction.builtin.repeatedWord": "Word repeated in translation",
     "rules.infraction.builtin.unpairedSymbols": "Unpaired bracket/parenthesis/brace in translation",
     "rules.infraction.builtin.abbreviationMismatch": "Abbreviation from source missing in translation",
+    "rules.infraction.builtin.usfmStructure": "Unrecognized or unclosed USFM marker in translation",
+    "rules.infraction.builtin.capitalization": "Lowercase letter where a capital is expected",
+    "rules.infraction.builtin.footnoteQuoteMismatch":
+      "This footnote quotes text that is not in the verse",
+    "rules.infraction.builtin.corruptedCharacters": "Corrupted or garbled characters in translation",
+    "rules.infraction.builtin.unpairedQuotes": "Unpaired quotation mark in translation",
+    "rules.infraction.builtin.untranslatedFragment": "Source word left untranslated",
+    "rules.infraction.builtin.lengthRatio": "Translation is much shorter or longer than the source",
+    "rules.infraction.builtin.scriptureReference":
+      "Scripture reference does not match the project's book names or the canon",
+    "rules.infraction.builtin.numberFormat":
+      "Number is not written the way the target language writes numbers",
     "rules.infraction.builtin.placeholderIntegrity": plural({
       one: "Placeholder {tokens} missing in translation",
       other: "Placeholders {tokens} missing in translation",
@@ -64,6 +77,9 @@ export const rules = defineNamespace({
     "rules.builtin.numberIntegrity.name": "Number integrity",
     "rules.builtin.numberIntegrity.description":
       "Numerals in source must appear in target (locale separators are tolerated).",
+    "rules.builtin.numberIntegrityExtra.name": "Extra numbers",
+    "rules.builtin.numberIntegrityExtra.description":
+      "Numerals in the translation should also appear in the source — catches a number the translator added.",
     "rules.builtin.endPunctuationMismatch.name": "End punctuation",
     "rules.builtin.endPunctuationMismatch.description":
       "Source ends in ?/!/. — translation should end the same way.",
@@ -78,9 +94,36 @@ export const rules = defineNamespace({
     "rules.builtin.unpairedSymbols.name": "Unpaired brackets",
     "rules.builtin.unpairedSymbols.description":
       "Mismatched parentheses, brackets, or braces in translation.",
+    "rules.builtin.usfmStructure.name": "USFM markers",
+    "rules.builtin.usfmStructure.description":
+      "Markers in the translation must be ones USFM defines, and paired markers must be closed.",
     "rules.builtin.abbreviationMismatch.name": "Abbreviation pass-through",
     "rules.builtin.abbreviationMismatch.description":
       "ALL-CAPS abbreviations from source missing in translation.",
+    "rules.builtin.capitalization.name": "Capitalization",
+    "rules.builtin.capitalization.description":
+      "A lowercase letter where a capital is expected — opening a sentence, or opening a paragraph or heading after its marker.",
+    "rules.builtin.footnoteQuoteMismatch.name": "Footnote quote",
+    "rules.builtin.footnoteQuoteMismatch.description":
+      "Text a footnote or cross-reference quotes from the verse must appear in that verse's translation.",
+    "rules.builtin.corruptedCharacters.name": "Corrupted characters",
+    "rules.builtin.corruptedCharacters.description":
+      "Replacement characters (�), stray control characters or garbled text such as \"Ã©\" that the source doesn't have.",
+    "rules.builtin.unpairedQuotes.name": "Unpaired quotes",
+    "rules.builtin.unpairedQuotes.description":
+      "An opening or closing quotation mark without its partner, unless the source leaves a quotation open too.",
+    "rules.builtin.untranslatedFragment.name": "Untranslated words",
+    "rules.builtin.untranslatedFragment.description":
+      "A word copied from the source in the source's script, when the translation is written in a different script.",
+    "rules.builtin.lengthRatio.name": "Length mismatch",
+    "rules.builtin.lengthRatio.description":
+      "Translation is under 40% or over 250% of the source's length — a sign of a dropped or added clause. Off by default: normal length varies by language pair.",
+    "rules.builtin.scriptureReference.name": "Scripture references",
+    "rules.builtin.scriptureReference.description":
+      "Scripture references in the translation use the project's book names and name a chapter the canon has, with one separator throughout. Off by default: it needs the project's book names.",
+    "rules.builtin.numberFormat.name": "Number format",
+    "rules.builtin.numberFormat.description":
+      "Numbers in the translation are written the way the target language writes them — its digits, its thousands separator, its decimal mark. Off by default: it needs the target language, or the project's own answer for it.",
 
     // ── Shared vocabulary ───────────────────────────────────────────────────
     "rules.severity.major": "Major",
@@ -88,13 +131,19 @@ export const rules = defineNamespace({
 
     // ── Built-in checks list (RulesSurface) ─────────────────────────────────
     "rules.builtinChecks.heading": "Built-in checks",
+    // AQU-1906: these switches are per-lane once a project has several lanes,
+    // and the two punctuation rows say which conventions they are applying.
+    "rules.builtinChecks.laneScopeNote":
+      "These switches apply to the {lane} language lane only. Other language lanes keep their own.",
+    "rules.builtinChecks.punctuation.fromLanguage": "Using {language} punctuation conventions.",
+    "rules.builtinChecks.punctuation.fromProfile": "Using the punctuation from the Language profile.",
+    "rules.builtinChecks.punctuation.noSpecialConventions":
+      "Judged by the source's own marks. {language} has no special punctuation conventions.",
+    "rules.builtinChecks.punctuation.sourceRelative":
+      "Judged by the source's own marks — this language lane records no language.",
     "rules.builtinChecks.violationCount": plural({
       one: "{count} violation",
       other: "{count} violations",
-    }),
-    "rules.builtinChecks.harmonizeAllTooltip": plural({
-      one: "Harmonize all {count} violation for this check",
-      other: "Harmonize all {count} violations for this check",
     }),
     "rules.builtinChecks.harmonizeAllButton": "Harmonize all ({count})",
     "rules.builtinChecks.manageNeedsMaintainer": "Only maintainers and owners can change built-in checks",
@@ -117,11 +166,40 @@ export const rules = defineNamespace({
     "rules.checkDrawer.checkedNoIssues": "Checked {summary} — no issues found.",
     "rules.checkDrawer.ruleViolations": "Rule violations ({count})",
     "rules.checkDrawer.termConsistency": "Term consistency ({count})",
+    "rules.checkDrawer.capitalization": "Capitalization ({count})",
+    "rules.checkDrawer.headingStartsLowercase": "Heading starts with a lowercase letter",
+    "rules.checkDrawer.mixedCaseHeadline": plural({
+      one: "{count} cell writes a capital inside this word",
+      other: "{count} cells write a capital inside this word",
+    }),
+    "rules.checkDrawer.caseExceptionsLearned":
+      "Not flagged — recurring in this text, so treated as the project's own spelling: {forms}",
+    // ── Spelling / project wordlist (AQU-1737) ──
+    "rules.checkDrawer.spelling": "Spelling ({count})",
+    "rules.checkDrawer.spellingSoundsLike": plural({
+      one: 'Sounds like "{suggestion}", which this text writes {suggestionCount} time.',
+      other: 'Sounds like "{suggestion}", which this text writes {suggestionCount} times.',
+    }),
+    "rules.checkDrawer.spellingCloseTo": plural({
+      one: 'Almost "{suggestion}", which this text writes {suggestionCount} time.',
+      other: 'Almost "{suggestion}", which this text writes {suggestionCount} times.',
+    }),
+    "rules.checkDrawer.approveSpelling": "Approve",
+    "rules.checkDrawer.approveSpellingAriaLabel": 'Approve the spelling "{form}" everywhere it occurs',
+    "rules.checkDrawer.spellingApproved": plural({
+      one: "{count} spelling approved — every occurrence cleared.",
+      other: "{count} spellings approved — every occurrence cleared.",
+    }),
+    "rules.checkDrawer.spellingAutoApproved":
+      "Not flagged — written often enough in this text to be treated as correct: {forms}",
+    "rules.checkDrawer.wordlistSize": plural({
+      one: "Wordlist: {count} word form.",
+      other: "Wordlist: {count} word forms.",
+    }),
     "rules.checkDrawer.otherTermsClean": plural({
       one: "{count} other term checked with no issues.",
       other: "{count} other terms checked with no issues.",
     }),
-    "rules.checkDrawer.goToCell": "Go to cell",
     "rules.checkDrawer.commentOnCell": "Comment on this cell",
     "rules.checkDrawer.commentOnCellAriaLabel": "Comment on {label}",
     "rules.checkDrawer.matchedDetail": 'matched "{text}"',
@@ -152,25 +230,38 @@ export const rules = defineNamespace({
     "rules.orgSettings.title": "Rules",
     "rules.orgSettings.navHint": "Org-wide translation rules",
     "rules.orgSettings.description":
-      "Rules every project in this organization is checked against. Project leads can promote a project rule up to here.",
+      "Rules every project in this organization is checked against. Project Leads can promote a project rule up to here.",
 
     // ── RulesSurface (the /project/:id/rules view) ──────────────────────────
     "rules.usageSummary": "{fixes} fixes applied · {calls} LLM calls this project",
     "rules.promotion.requested": "Requested ✓",
     "rules.promotion.alreadyRequested": "Already requested",
     "rules.promotion.requestFailed": "Failed — try again",
-    "rules.surface.addRuleButton": "Add Rule",
     "rules.surface.createRuleDialog.title": "Create translation rule",
     "rules.surface.createRuleDialog.description": "Create a project translation rule.",
     "rules.surface.createOrgRuleDialog.title": "Create org rule",
     "rules.surface.createOrgRuleDialog.description": "Create an org-scoped translation rule.",
     "rules.surface.usageTooltip": "LLM usage on this project",
-    "rules.surface.laneFilterAriaLabel": "Filter rules by lane",
-    "rules.surface.laneFilter.all": "All rules",
-    "rules.surface.laneFilter.projectWide": "Project-wide",
-    "rules.surface.laneFilterNoMatches": "No rules match this filter.",
-    "rules.surface.orgRulesCardTitle": "Org Rules ({count})",
-    "rules.surface.addOrgRuleButton": "Add Org Rule",
+    "rules.surface.laneScope.ariaLabel": "Language lane scope",
+    "rules.surface.laneScope.viewingLabel": "Viewing language lane",
+    "rules.surface.laneScope.chooseLaneAriaLabel":
+      "Viewing language lane: {lane}. Choose another language lane",
+    "rules.surface.laneScope.explainer":
+      "Rules marked All language lanes, org rules and built-in checks apply in every language lane. " +
+      "Rules marked This language lane apply only in {lane}.",
+    "rules.surface.laneScope.sharedWithEditor":
+      "Switching language lanes here also switches the editor.",
+    "rules.surface.laneScope.badgeAll": "All language lanes",
+    "rules.surface.laneScope.badgeThis": "This language lane: {lane}",
+    "rules.surface.laneScope.badgeOther": "Other language lane: {lane}",
+    "rules.surface.laneScope.notAppliedHere": "Not applied in {lane}.",
+    "rules.surface.laneScope.showOtherLanes": plural({
+      one: "Show {count} rule from other language lanes",
+      other: "Show {count} rules from other language lanes",
+    }),
+    "rules.surface.laneScope.hideOtherLanes": "Hide rules from other language lanes",
+    "rules.surface.orgRulesCardTitle": "Org rules ({count})",
+    "rules.surface.addOrgRuleButton": "Add org rule",
     // "Read-only" permission badge → common.readOnly (identical text)
     "rules.surface.noOrgRules.title": "No org-level rules yet",
     "rules.surface.noOrgRules.description": "Add one or promote a project rule.",
@@ -182,25 +273,15 @@ export const rules = defineNamespace({
     "rules.surface.pendingRequests": "Pending requests ({count})",
     "rules.surface.requestedBy": "Requested by {requester}",
     "rules.surface.requestedByFallback": "user {userId}",
-    "rules.surface.approveRequestTooltip": "Promote this rule to org scope",
     "rules.surface.approveButton": "Approve",
-    "rules.surface.dismissRequestTooltip": "Dismiss this request",
     "rules.surface.promoteDialog.title": "Promote rule to org?",
     "rules.surface.promoteDialog.body":
       "A copy of {name} will be added to the org's rule library. The project copy is kept.",
     "rules.surface.promoteDialog.promoting": "Promoting…",
-    "rules.surface.projectRulesCardTitle": "Project Rules ({count})",
-    "rules.surface.noProjectRules.title": "No project rules yet",
-    "rules.surface.noProjectRules.description":
-      "Add a rule, import a style guide, or suggest rules from your edits using the buttons above.",
-    "rules.surface.noProjectRules.orgRulesNote": "Org rules above also apply to this project.",
     "rules.surface.autofixBadge": "autofix",
-    "rules.surface.tryToFixAllTooltip": "Opens the editor with this rule's drawer",
     "rules.surface.tryToFixAllButton": "Try to fix all",
-    "rules.surface.promoteToOrgTooltip": "Copy this rule to the org's rule library",
     "rules.surface.promoteToOrgButton": "Promote to org",
     "rules.surface.requestedBadge": "Requested",
-    "rules.surface.requestPromotionTooltip": "Ask an org maintainer to promote this rule to org scope",
     "rules.surface.requestingButton": "Requesting…",
     "rules.surface.requestPromotionButton": "Request promotion",
     "rules.surface.disableRuleAriaLabel": "Disable rule: {name}",
@@ -212,8 +293,14 @@ export const rules = defineNamespace({
 
     // ── RuleDrawer (editor sidebar — one rule's breaking/passing cells) ────
     "rules.drawer.closeAriaLabel": "Close rule details",
-    "rules.drawer.autofixUnavailable": "Autofix is unavailable in this build",
-    "rules.drawer.autofixUnavailableAriaLabel": "Autofix unavailable",
+    // AQU-1805: the fix path is wired again, so "unavailable in this build" is
+    // retired in favour of reasons a user can act on.
+    "rules.drawer.openCellAriaLabel": "Open cell {cellId} in the editor",
+    "rules.drawer.fixCellTooltip": "Propose a fix for this cell",
+    "rules.drawer.fixCellAriaLabel": "Fix this cell with AI",
+    "rules.drawer.proposingFix": "Proposing…",
+    "rules.drawer.aiNotConfigured": "Set up AI to propose fixes",
+    "rules.drawer.fixNotPermitted": "You do not have permission to apply fixes in this project",
     "rules.drawer.amendRuleButton": "Amend rule",
     "rules.drawer.savedAutofix": "Saved autofix: /{pattern}/{flags} → {replacement}",
     "rules.drawer.noSavedFix": "No saved fix yet",
@@ -261,8 +348,11 @@ export const rules = defineNamespace({
     "rules.editor.sideTargetOnlyNote":
       "Forbidden and Required checks constrain the target. Use Must match for a rule that spans both sides.",
     "rules.editor.laneLabel": "Applies to",
-    "rules.editor.lane.allLanes": "All lanes",
-    "rules.editor.lane.defaultLane": "Default lane",
+    "rules.editor.lane.allLanes": "All language lanes",
+    "rules.editor.lane.defaultLane": "Default language",
+    "rules.editor.lane.summaryAll": "This rule will apply in every language lane.",
+    "rules.editor.lane.summaryOne":
+      "This rule will apply only in {lane}. Other language lanes ignore it.",
     "rules.editor.severityLabel": "Severity",
     "rules.editor.sourcePatternLabel": "Source pattern — when source contains this…",
     "rules.editor.targetPatternLabel": "…target must contain this pattern",
@@ -295,6 +385,10 @@ export const rules = defineNamespace({
 
     // ── RuleImportDialog ("Import from doc" — LLM-extracted rule drafts) ───
     "rules.importDialog.noRulesFound": "No verifiable rules found in the document. Try a style guide or terminology.",
+    "rules.importDialog.extractionIncomplete":
+      "Extraction was cut off before a single complete rule came back, so nothing could be imported — this does not mean the document has no rules. Import one section at a time to get through it.",
+    "rules.importDialog.extractionPartial":
+      "Extraction was cut off partway, so these are not all of the document's rules. Import the remaining sections separately to catch the rest.",
     "rules.importDialog.extractionFailed": "Extraction failed",
     "rules.importDialog.unsupportedFileType": "Unsupported file type. Drop a .txt, .md, .pdf, or .docx file.",
     "rules.importDialog.binaryFileTooLarge": "File too large ({size} MB). Maximum is 2 MB for PDF/DOCX.",
@@ -304,8 +398,7 @@ export const rules = defineNamespace({
     "rules.importDialog.fileEmpty": "File appears to be empty.",
     "rules.importDialog.extractingRules": "Extracting rules from document…",
     "rules.importDialog.structuring": "Structuring {structured} / {candidates} rules…",
-    "rules.importDialog.tooltip": "Import rules from a document",
-    "rules.importDialog.tooltipUnconfigured": "Configure LLM in settings first",
+    "rules.importDialog.tooltipUnconfigured": "Set up an AI model in project settings first",
     "rules.importDialog.triggerButton": "Import from doc",
     "rules.importDialog.reviewTitle": plural({
       one: "Review {count} extracted rule",
@@ -317,44 +410,40 @@ export const rules = defineNamespace({
     "rules.importDialog.dropZoneText": "Drop a {txt}, {md}, {pdf}, or {docx} file here",
     "rules.importDialog.browseButton": "Browse file",
     "rules.importDialog.pasteZoneLabel": "Or paste document text:",
-    "rules.importDialog.pastePlaceholder": "Paste text here and it will be processed automatically…",
-    "rules.importDialog.configureLlmFirst": "Configure your LLM endpoint in project settings first.",
+    "rules.importDialog.pastePlaceholder": "Paste text here to process it…",
+    "rules.importDialog.configureLlmFirst": "Set up an AI model in project settings first.",
     "rules.importDialog.candidatesProcessed": "{structured} of {candidates} candidates processed",
     "rules.importDialog.documentTooLarge": "Document is too large ({kb} KB). Please keep it under 200 KB of text.",
 
-    // ── RuleSuggestFromEditsDialog ("Suggest from edits") ──────────────────
+    // ── Suggested rules, reviewed in place in the project rules list ───────
     "rules.suggestFromEdits.noPatternsFound":
       "No edit patterns found. Translate some cells in this file to generate suggestions.",
-    "rules.suggestFromEdits.noTestablePatterns":
-      "The LLM didn't find any testable patterns in your edits. Try validating more diverse translations.",
     "rules.suggestFromEdits.analysisFailed": "Analysis failed",
-    "rules.suggestFromEdits.stats.repeated": "{count} repeated",
-    "rules.suggestFromEdits.stats.recent": "{count} recent",
-    "rules.suggestFromEdits.stats.pairs": "{count} from pairs",
-    "rules.suggestFromEdits.stats.human": "{count} human-authored",
-    "rules.suggestFromEdits.tooltip": "Mine your edits for rule patterns",
-    "rules.suggestFromEdits.tooltipUnconfigured": "Configure LLM in project settings first",
-    "rules.suggestFromEdits.triggerButton": "Suggest from edits",
-    "rules.suggestFromEdits.reviewTitle": plural({
-      one: "Review {count} suggested rule",
-      other: "Review {count} suggested rules",
-    }),
-    "rules.suggestFromEdits.title": "Suggest rules from your edits",
-    "rules.suggestFromEdits.description":
-      "Analyzes your repeated corrections, recent edits, and human-authored translations to propose testable rules. You'll review each suggestion before anything is saved.",
-    "rules.suggestFromEdits.analyzeButton": "Analyze my edits",
-    "rules.suggestFromEdits.miningLabel": "Mining edit patterns…",
-    "rules.suggestFromEdits.minedPatterns": "Mined patterns: {patterns}",
+    "rules.suggestFromEdits.corpusLoading": "Loading your translations…",
+    "rules.suggestFromEdits.corpusLoadFailed": "Couldn't load your translations: {message}",
+    "rules.suggestions.suggestButton": "Suggest rules from my edits",
+    "rules.suggestions.suggestMoreButton": "Suggest more",
+    "rules.suggestions.loading": "Reading your edits…",
+    "rules.suggestions.focusPlaceholder": "Optional topic, such as punctuation",
+    "rules.suggestions.focusAriaLabel": "What the suggested rules should be about",
+    "rules.suggestions.noneNew": "No new rules found in your edits.",
+    "rules.suggestions.noneNewFocused": "No new rules about “{focus}” found in your edits.",
+    "rules.suggestions.draftBadge": "Suggestion",
+    "rules.suggestions.itemAriaLabel": "Suggested rule: {name}",
+    "rules.suggestions.evidence": "Based on: {evidence}",
+    "rules.suggestions.addButton": "Add rule",
+    "rules.suggestions.dismissButton": "Dismiss",
+    "rules.suggestions.addFailed": "Couldn't add that rule. Try again.",
 
     // ── completion-service.ts (LLM completion request errors, lib/) ────────
     "rules.completion.failedToFetchModels": "Failed to fetch models: {status} {statusText}",
-    "rules.completion.frontierLimitReached": "Frontier AI limit reached: {detail}",
+    "rules.completion.frontierLimitReached": "Aquilla AI limit reached: {detail}",
     "rules.completion.outOfCredits": "Out of credits.",
     "rules.completion.completionFailed": "Completion failed: {status} {text}",
     "rules.completion.requestTimedOut": "The AI request timed out. Please try again.",
     "rules.completion.streamError": "Completion stream error",
     "rules.completion.completionAborted": "Completion aborted",
-    "rules.completion.signInRequired": "Sign in to use Frontier AI.",
+    "rules.completion.signInRequired": "Sign in to use Aquilla AI.",
     "rules.completion.noCustomEndpoint": "No custom endpoint configured.",
 
     // ── autofix.ts (LLM autofix proposal, lib/) — fallbacks only; the LLM's
@@ -363,48 +452,12 @@ export const rules = defineNamespace({
     "rules.autofix.noReasonGiven": "No reason given",
     "rules.autofix.couldNotApplyFixes": "Could not apply fixes",
 
-    // ── RuleCreateDialog.tsx (standalone create-rule dialog) ────────────────
-    "rules.createDialog.namePlaceholder": "Preserve numbers",
-    "rules.createDialog.descriptionLabel": "Description",
-    "rules.createDialog.ruleTypeLabel": "Rule Type",
-    "rules.createDialog.checkType.sourceTargetMatch": "Source-target match",
-    "rules.createDialog.checkType.sourceRequiresTarget": "Source requires target",
-    "rules.createDialog.checkType.targetForbids": "Target forbids",
-    "rules.createDialog.patternRegexLabel": "Pattern (regex)",
-    "rules.createDialog.patternFieldHint.match": "Must appear in both source and target",
-    "rules.createDialog.forbiddenPatternRegexLabel": "Forbidden pattern (regex)",
-    "rules.createDialog.patternFieldHint.forbidden": "Target must not contain this",
-    "rules.createDialog.sourcePatternRegexLabel": "Source pattern (regex)",
-    "rules.createDialog.requiredTargetPatternRegexLabel": "Required target pattern (regex)",
-    "rules.createDialog.testYourRuleHeading": "Test your rule",
-    "rules.createDialog.testSourcePlaceholder": "Source text...",
-    "rules.createDialog.testTargetPlaceholder": "Target text...",
-    "rules.createDialog.testButton": "Test",
-
-    // ── RuleSuggestDialog.tsx (standalone "Suggest from edits" dialog) ──────
-    "rules.suggestDialog.description":
-      "The LLM will analyze your human-validated translations and propose rules " +
-      "based on patterns it finds. You'll review each suggestion before anything " +
-      "is saved.",
-    "rules.suggestDialog.analyzeButton": "Analyze my validated edits",
-    "rules.suggestDialog.analyzedSummary": plural({
-      one: "Analyzed {count} validated pair. Toggle suggestions to include or exclude.",
-      other: "Analyzed {count} validated pairs. Toggle suggestions to include or exclude.",
-    }),
-
-    // ── RulesPage.tsx (standalone rules page) ────────────────────────────────
+    // ── ProjectSettings/RulesSection.tsx (the project's rules list) ─────────
     "rules.loadingLabel": "Loading rules",
     // AQU-1340: without this the list just omits every terminology rule, so it
     // disagrees with what the editor enforces and gives no hint why.
     "rules.terminologyUnavailableNotice":
       "Terminology rules could not be loaded, so they are missing from this list.",
-    "rules.page.heading": "Translation Rules",
-    "rules.page.corpusLoadErrorPrefix": "Couldn't load the complete project corpus: {message}",
-    "rules.page.readOnlySuffix": "Changes made here won't be saved.",
-    "rules.page.rulesCardTitle": "Rules ({count})",
-    "rules.page.noRulesYet": "No rules defined yet.",
-    "rules.page.deleteRuleDialogTitle": "Delete rule",
-    "rules.page.deleteRuleAriaLabel": "Delete rule: {name}",
 
     // ── FixReviewPanel (harmonize / bulk-fix review sheet) ──────────────────
     "rules.fixReview.modeCachedRegex": "Cached regex",
@@ -419,6 +472,37 @@ export const rules = defineNamespace({
     "rules.fixReview.irreversibleConfirmSuffix": "to confirm.",
     "rules.fixReview.confirmInputAriaLabel": "Type the rule name to confirm",
     "rules.fixReview.applyButton": "Apply {count} selected",
+
+    // ── AQU-2342: the ONE Checks list (Living Memory → Checks) ─────────────
+    "rules.checks.listTitle": "Checks",
+    "rules.checks.intro":
+      "Every AI draft is checked against these after it is written, and the drafting prompt " +
+      "names them so the AI aims for them. Where two checks overlap, the narrower one wins.",
+    "rules.checks.addButton": "Add check",
+    "rules.checks.empty.title": "No checks of your own yet",
+    "rules.checks.empty.description":
+      "The built-in checks below always run. Add a check to hold drafts to your own conventions.",
+    "rules.checks.scope.project": "Project",
+    "rules.checks.scope.builtin": "Built-in",
+    "rules.checks.scope.book": "Book {name}",
+    "rules.checks.scope.genre": "Genre: {name}",
+    "rules.checks.scope.file": "File: {name}",
+    "rules.checks.scope.section": "Section {name}",
+    "rules.checks.scope.passage": "Passage {name}",
+    "rules.checks.scope.segment": "Line {name}",
+    "rules.checks.scope.more": "+{count}",
+    "rules.checks.add.title": "Add a check",
+    "rules.checks.add.description": "Choose how to start. Every check ends up in the same list.",
+    "rules.checks.add.pattern.title": "Write a check",
+    "rules.checks.add.pattern.description":
+      "Words the translation must or must not contain, for the whole project or one language.",
+    "rules.checks.add.import.title": "Import from a style guide",
+    "rules.checks.add.import.description": "Upload a document. The AI suggests checks for you to review.",
+    "rules.checks.add.extract.title": "Draw style rules from source documents",
+    "rules.checks.add.extract.description":
+      "The AI reads your source documents and suggests style rules for you to review.",
+    "rules.checks.add.org.title": "Write an organization check",
+    "rules.checks.add.org.description": "Applies to every project in your organization.",
   },
   context: {
     _context: {
@@ -426,6 +510,207 @@ export const rules = defineNamespace({
         "Translation rules, quality checks and health — the rule list and editor, the file-check pass and its findings drawer, and completion/health readouts. Note the user's OWN rule names and descriptions are content and are never keyed; only the chrome around them is.",
     },
     keys: {
+      "rules.checks.listTitle": {
+        description:
+          "Heading of the one list of every check a project runs (its own rules, organization rules, " +
+          "style rules and the built-in checks) on the Living Memory → Checks page.",
+        maxLength: 24,
+      },
+      "rules.checks.intro": {
+        description:
+          "Lead sentence of the Checks page: what a check does (drafts are checked after they are " +
+          "written; the drafting prompt also names the checks) and which wins when two overlap.",
+      },
+      "rules.checks.addButton": {
+        description: "The one button that starts adding any kind of check. Opens a short choice of how.",
+        maxLength: 20,
+      },
+      "rules.checks.empty.title": {
+        description: "Shown in the Checks list while the project has no checks besides the built-in ones.",
+      },
+      "rules.checks.empty.description": {
+        description: "Sentence under that empty-state title.",
+      },
+      "rules.checks.scope.project": {
+        description: "Chip on a check that applies to the whole project. Short, like a tag.",
+        maxLength: 16,
+      },
+      "rules.checks.scope.builtin": {
+        description: "Chip on a check that ships with the app (not written by the team). Short, like a tag.",
+        maxLength: 16,
+      },
+      "rules.checks.scope.book": {
+        description: "Chip on a style rule that applies to one Bible book.",
+        placeholders: { name: "The book code, e.g. PSA. Not translated." },
+        maxLength: 24,
+      },
+      "rules.checks.scope.genre": {
+        description: "Chip on a style rule that applies to documents of one genre.",
+        placeholders: { name: "The genre name as the team entered it, e.g. poetry." },
+        maxLength: 32,
+      },
+      "rules.checks.scope.file": {
+        description: "Chip on a style rule that applies to one file.",
+        placeholders: { name: "The file's name." },
+        maxLength: 40,
+      },
+      "rules.checks.scope.section": {
+        description: "Chip on a style rule that applies to one section (a chapter).",
+        placeholders: { name: "The section label, e.g. PSA 23. Not translated." },
+        maxLength: 24,
+      },
+      "rules.checks.scope.passage": {
+        description: "Chip on a style rule that applies to a range of verses.",
+        placeholders: { name: "The verse range, e.g. LUK 1:1-4. Not translated." },
+        maxLength: 32,
+      },
+      "rules.checks.scope.segment": {
+        description: "Chip on a style rule that applies to one line (cell).",
+        placeholders: { name: "The line's id. Not translated." },
+        maxLength: 32,
+      },
+      "rules.checks.scope.more": {
+        description: "Chip after the first few scope chips: how many more places the check applies to.",
+        placeholders: { count: "How many more scope chips are hidden." },
+        maxLength: 8,
+      },
+      "rules.checks.add.title": { description: "Title of the dialog that asks how to start a new check." },
+      "rules.checks.add.description": { description: "Sentence under that dialog's title." },
+      "rules.checks.add.pattern.title": {
+        description: "Choice in that dialog: write a check by hand (opens the rule editor).",
+        maxLength: 40,
+      },
+      "rules.checks.add.pattern.description": { description: "One line under that choice." },
+      "rules.checks.add.import.title": {
+        description: "Choice in that dialog: import checks from an uploaded style-guide document.",
+        maxLength: 40,
+      },
+      "rules.checks.add.import.description": { description: "One line under that choice." },
+      "rules.checks.add.extract.title": {
+        description:
+          "Choice in that dialog: the AI reads the project's source documents (its knowledge base) " +
+          "and suggests style rules.",
+        maxLength: 48,
+      },
+      "rules.checks.add.extract.description": { description: "One line under that choice." },
+      "rules.checks.add.org.title": {
+        description: "Choice in that dialog, for organization maintainers: a check for every project in the organization.",
+        maxLength: 40,
+      },
+      "rules.checks.add.org.description": { description: "One line under that choice." },
+      "rules.builtin.corruptedCharacters.name": {
+        description:
+          "Name of a built-in quality check in the built-in checks list on the Rules page. It flags " +
+          "characters damaged by a text-encoding error. Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.corruptedCharacters.description": {
+        description:
+          "One-line description under that check's name. Keep the replacement character (�) and the " +
+          "example garbled text \"Ã©\" exactly as written: they are literal examples, not words.",
+      },
+      "rules.infraction.builtin.corruptedCharacters": {
+        description:
+          "Finding shown on a row when the translation contains characters damaged by a text-encoding error. " +
+          "The damaged characters are underlined in the translation.",
+      },
+      "rules.builtin.unpairedQuotes.name": {
+        description:
+          "Name of a built-in quality check in the built-in checks list. It flags a quotation mark " +
+          "that has no matching opening or closing mark. Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.unpairedQuotes.description": {
+        description: "One-line description under that check's name in the built-in checks list.",
+      },
+      "rules.infraction.builtin.unpairedQuotes": {
+        description:
+          "Finding shown on a row when a quotation mark in the translation has no partner. Mirrors " +
+          "'Unpaired bracket/parenthesis/brace in translation'.",
+      },
+      "rules.builtin.untranslatedFragment.name": {
+        description:
+          "Name of a built-in quality check in the built-in checks list. It flags a word left in the " +
+          "source language (for example a name left in Latin letters in a Hindi translation). Short.",
+        maxLength: 30,
+      },
+      "rules.builtin.untranslatedFragment.description": {
+        description: "One-line description under that check's name in the built-in checks list.",
+      },
+      "rules.infraction.builtin.untranslatedFragment": {
+        description:
+          "Finding shown on a row when a word from the source was copied into the translation without " +
+          "being translated. The word is underlined in the translation.",
+      },
+      "rules.builtin.lengthRatio.name": {
+        description:
+          "Name of a built-in quality check in the built-in checks list. It flags a translation much " +
+          "shorter or longer than its source. Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.lengthRatio.description": {
+        description:
+          "One-line description under that check's name. Keep the percentages. The check is off by default.",
+      },
+      "rules.infraction.builtin.lengthRatio": {
+        description:
+          "Finding shown on a row when the translation is far shorter or longer than the source, which " +
+          "can mean part of the text was dropped or added.",
+      },
+      "rules.builtin.scriptureReference.name": {
+        description:
+          "Name of a built-in quality check in the built-in checks list. It flags a scripture " +
+          "reference (like \"John 3:16\") written with a book name the project does not use, or " +
+          "naming a chapter that does not exist. Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.scriptureReference.description": {
+        description:
+          "One-line description under that check's name in the built-in checks list. The check is " +
+          "off by default because it needs the project's own book names.",
+      },
+      "rules.infraction.builtin.scriptureReference": {
+        description:
+          "Finding shown on a row when a scripture reference in the translation uses a book name the " +
+          "project does not use, names a chapter the Bible does not have, or separates chapter and " +
+          "verse differently from the other references in the same row.",
+      },
+      "rules.builtin.numberFormat.name": {
+        description:
+          "Name of a built-in quality check in the built-in checks list. It flags a number written " +
+          "the way another language writes numbers — the wrong thousands separator or decimal mark, " +
+          "or digits from a script the language does not use. Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.numberFormat.description": {
+        description:
+          "One-line description under that check's name in the built-in checks list. The check is " +
+          "off by default because it needs the target language to be known.",
+      },
+      "rules.infraction.builtin.numberFormat": {
+        description:
+          "Finding shown on a row when a number in the translation is written the way another " +
+          "language writes numbers: \"3,5\" where this language would write \"3.5\", or digits from " +
+          "a script this language does not use.",
+      },
+      "rules.builtin.numberIntegrityExtra.name": {
+        description:
+          "Name of a built-in quality check, shown in the built-in checks list on the Rules page. " +
+          "It flags a number that appears in the translation but not in the source (the opposite " +
+          "direction of 'Number integrity'). Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.numberIntegrityExtra.description": {
+        description:
+          "One-line description under that check's name in the built-in checks list. The check is " +
+          "minor by default and can be switched off, because an added number is sometimes legitimate.",
+      },
+      "rules.infraction.builtin.numberIntegrityExtra": {
+        description:
+          "Finding shown on a row (in its Issues tab and the rule card) when the translation contains a " +
+          "number the source doesn't. The number is underlined in the translation. Mirrors " +
+          "'Number from source missing in translation'.",
+      },
       "rules.builtin.placeholderIntegrity.description": {
         description:
           "Description of the built-in placeholder-integrity check, shown under its name in the built-in checks list.",
@@ -463,15 +748,39 @@ export const rules = defineNamespace({
           tokens: "The missing placeholder token(s), comma-joined — raw text, never translated.",
         },
       },
+      "rules.builtinChecks.laneScopeNote": {
+        description:
+          "Note above the built-in checks list on a project with several target lanes: the switches and severities below belong to the lane the page is viewing, not the whole project (AQU-1906).",
+        placeholders: {
+          lane: "The viewed lane's display name — the user's own lane name or its language, verbatim, never translated.",
+        },
+      },
+      "rules.builtinChecks.punctuation.fromLanguage": {
+        description:
+          "Note on the End punctuation and Punctuation integrity rows: those checks are judging the translation by this language's own marks rather than the source's (AQU-1906).",
+        placeholders: {
+          language: "The lane's language as the user typed it — verbatim, never translated.",
+        },
+      },
+      "rules.builtinChecks.punctuation.fromProfile": {
+        description:
+          "Same note, when the project's Language profile fills in the punctuation itself and so wins over the per-language defaults.",
+      },
+      "rules.builtinChecks.punctuation.noSpecialConventions": {
+        description:
+          "Same note, when the lane records a language with no special punctuation marks of its own (Spanish, English, French, …): the two punctuation checks compare against the source's own marks (AQU-2000).",
+        placeholders: {
+          language: "The lane's language as the user typed it — verbatim, never translated.",
+        },
+      },
+      "rules.builtinChecks.punctuation.sourceRelative": {
+        description:
+          "Same note, when the lane records no language: the two punctuation checks fall back to comparing against the source's own marks.",
+      },
       "rules.builtinChecks.violationCount": {
         description:
           "Badge on a built-in check's row in the checks list, counting how many cells currently violate it.",
         placeholders: { count: "Number of cells currently violating this check." },
-      },
-      "rules.builtinChecks.harmonizeAllTooltip": {
-        description:
-          "Tooltip on the 'Harmonize all' button for a built-in check, stating how many violations a harmonization sweep would fix.",
-        placeholders: { count: "Number of violations the sweep would fix." },
       },
       "rules.builtinChecks.harmonizeAllButton": {
         description:
@@ -520,6 +829,65 @@ export const rules = defineNamespace({
       "rules.checkDrawer.termConsistency": {
         description: "Section heading in the check-file findings drawer, counting term-consistency findings.",
         placeholders: { count: "Number of flagged term-consistency findings." },
+      },
+      "rules.checkDrawer.capitalization": {
+        description:
+          "Section heading in the check-file findings drawer, counting capitalization findings — a capital inside a word (e.g. 'tHe'), or a heading that opens lowercase.",
+        placeholders: { count: "Number of cells with a capitalization finding." },
+      },
+      "rules.checkDrawer.mixedCaseHeadline": {
+        description:
+          "Headline of one mixed-capitalization card, under the offending word itself (which is raw cell content and never translated).",
+        placeholders: { count: "How many cells use that exact word form." },
+      },
+      "rules.checkDrawer.caseExceptionsLearned": {
+        description:
+          "Footnote under the mixed-capitalization section naming the word forms the check learned to allow because they recur in the project's own text (a noun-class prefix like 'kiSwahili', a brand name). Lets a reviewer confirm or reject what was let through.",
+        placeholders: { forms: "The excepted word forms, comma-joined — raw cell content, never translated." },
+      },
+      "rules.checkDrawer.spelling": {
+        description:
+          "Section heading in the check-file findings drawer, counting suspected misspellings — rare word forms that look or sound like a form the project writes often.",
+        placeholders: { count: "Number of suspected misspellings." },
+      },
+      "rules.checkDrawer.spellingSoundsLike": {
+        description:
+          "Headline of one spelling card, under the suspected word form itself (raw cell content, never translated). Says which spelling the project usually writes, because the two forms fold to the same sound.",
+        placeholders: {
+          suggestion: "The spelling the project usually writes — raw cell content, never translated.",
+          suggestionCount: "How many times the project writes that spelling.",
+        },
+      },
+      "rules.checkDrawer.spellingCloseTo": {
+        description:
+          "Same as rules.checkDrawer.spellingSoundsLike, but for a form that is only a character or two away from the usual spelling rather than a sound-alike of it.",
+        placeholders: {
+          suggestion: "The spelling the project usually writes — raw cell content, never translated.",
+          suggestionCount: "How many times the project writes that spelling.",
+        },
+      },
+      "rules.checkDrawer.approveSpelling": {
+        description:
+          "Button on a spelling card that accepts the suspected form as correct, clearing every occurrence of it at once. Keep it short — it sits inside a narrow card.",
+      },
+      "rules.checkDrawer.approveSpellingAriaLabel": {
+        description: "Accessible label for the spelling card's Approve button.",
+        placeholders: { form: "The word form being approved — raw cell content, never translated." },
+      },
+      "rules.checkDrawer.spellingApproved": {
+        description:
+          "Footnote under the spelling section counting the spellings the reviewer approved during this check, each of which cleared all of its occurrences.",
+        placeholders: { count: "How many spellings the reviewer approved." },
+      },
+      "rules.checkDrawer.spellingAutoApproved": {
+        description:
+          "Footnote under the spelling section naming the word forms the check treated as correct because the text writes them often. Lets a reviewer see what was let through instead of trusting a silent pass.",
+        placeholders: { forms: "The approved word forms, comma-joined — raw cell content, never translated." },
+      },
+      "rules.checkDrawer.wordlistSize": {
+        description:
+          "Footnote under the spelling section stating how many distinct word forms the project wordlist the check built holds.",
+        placeholders: { count: "Number of distinct word forms." },
       },
       "rules.checkDrawer.otherTermsClean": {
         description:
@@ -585,9 +953,37 @@ export const rules = defineNamespace({
           calls: "How many LLM calls the project has made (rule suggestion, harmonization, etc).",
         },
       },
-      "rules.surface.laneFilterAriaLabel": {
+      "rules.surface.laneScope.ariaLabel": {
+        description: "Accessible name of the lane-scope panel at the top of the Rules page (multi-lane projects).",
+      },
+      "rules.surface.laneScope.chooseLaneAriaLabel": {
+        description: "Accessible label of the button that opens the lane chooser on the Rules page.",
+        placeholders: { lane: "The name of the lane being viewed." },
+      },
+      "rules.surface.laneScope.notAppliedHere": {
+        description: "Note under a rule that belongs to another lane, shown when rules from other lanes are revealed.",
+        placeholders: { lane: "The name of the lane being viewed." },
+      },
+      "rules.surface.laneScope.showOtherLanes": {
+        description: "Button on the Project Rules card that reveals rules belonging to lanes other than the one being viewed.",
+        placeholders: { count: "How many rules belong to other lanes." },
+      },
+      "rules.editor.lane.summaryOne": {
+        description: "Line beside the Save button of the rule editor when the rule is limited to one lane.",
+        placeholders: { lane: "The name of the lane the rule will apply in." },
+      },
+      "rules.surface.laneScope.explainer": {
         description:
-          "Accessible label for the lane-filter dropdown on the Project Rules card (multi-lane projects). Filters the listed rules by target-language lane.",
+          "Scope panel at the top of the Rules page (multi-lane projects). \"All lanes\" and \"This lane\" must match the badge texts rules.surface.laneScope.badgeAll / badgeThis.",
+        placeholders: { lane: "The name of the lane being viewed, e.g. \"French\"." },
+      },
+      "rules.surface.laneScope.badgeThis": {
+        description: "Badge on a rule that applies only in the lane being viewed.",
+        placeholders: { lane: "The lane name." },
+      },
+      "rules.surface.laneScope.badgeOther": {
+        description: "Badge on a rule that applies only in a different lane from the one being viewed.",
+        placeholders: { lane: "The name of the rule's own lane." },
       },
       "rules.surface.orgRulesCardTitle": {
         description: "Card heading for the org-scoped rules list.",
@@ -618,10 +1014,6 @@ export const rules = defineNamespace({
           "Confirmation body in the 'Promote rule to org?' dialog, naming the rule about to be copied to the org library.",
         placeholders: { name: "The rule's own name, rendered bold via RichMessage — content, never translated." },
       },
-      "rules.surface.projectRulesCardTitle": {
-        description: "Card heading for the project-scoped (user-authored) rules list.",
-        placeholders: { count: "Number of project rules." },
-      },
       "rules.surface.disableRuleAriaLabel": {
         description: "Accessible label for the enable/disable switch on a project rule row, when currently enabled.",
         placeholders: { name: "The rule's own name — content, never translated." },
@@ -633,8 +1025,27 @@ export const rules = defineNamespace({
       "rules.drawer.closeAriaLabel": {
         description: "Accessible label for the rule drawer's close button.",
       },
-      "rules.drawer.autofixUnavailableAriaLabel": {
-        description: "Accessible label for a disabled per-cell autofix button in the rule drawer.",
+      "rules.drawer.openCellAriaLabel": {
+        description:
+          "Accessible label for an example row in the rule drawer; activating it takes the editor to that cell.",
+        placeholders: { cellId: "The cell's own identifier — content, never translated." },
+      },
+      "rules.drawer.fixCellTooltip": {
+        description: "Hover text for the per-cell AI fix button in the rule drawer.",
+      },
+      "rules.drawer.fixCellAriaLabel": {
+        description: "Accessible label for the per-cell AI fix button in the rule drawer.",
+      },
+      "rules.drawer.proposingFix": {
+        description: "Busy label while the model is being asked for a fix.",
+      },
+      "rules.drawer.aiNotConfigured": {
+        description:
+          "Hover text explaining that a fix button is disabled because AI is not set up for this project.",
+      },
+      "rules.drawer.fixNotPermitted": {
+        description:
+          "Hover text explaining that a fix button is disabled because the user's role may not apply rule fixes.",
       },
       "rules.drawer.savedAutofix": {
         description:
@@ -709,30 +1120,28 @@ export const rules = defineNamespace({
           "Error from checkInputSize() (rule-extractor.ts) when a pasted/loaded document exceeds the 200 KB extraction limit.",
         placeholders: { kb: "The document's size in KB, whole number." },
       },
-      "rules.suggestFromEdits.stats.repeated": {
+      "rules.importDialog.extractionIncomplete": {
         description:
-          "One segment of the comma-joined mining-stats summary ('N repeated, N recent, …') after analyzing edits.",
-        placeholders: { count: "Number of repeated-correction candidates mined." },
+          "Error shown instead of noRulesFound when the LLM's extraction answer was cut off by its output cap before any complete rule came back. The distinction matters: noRulesFound says the DOCUMENT has nothing checkable in it, this says the EXTRACTION failed to finish. Keep the two clearly different in translation.",
       },
-      "rules.suggestFromEdits.stats.recent": {
-        description: "Mining-stats segment counting recently-edited-cell candidates.",
-        placeholders: { count: "Number of recent-edit candidates mined." },
+      "rules.importDialog.extractionPartial": {
+        description:
+          "Warning above the review list when extraction was cut off but some rules did come back, so the list under it is incomplete rather than everything the document contains.",
       },
-      "rules.suggestFromEdits.stats.pairs": {
-        description: "Mining-stats segment counting candidates from validated source/target pairs.",
-        placeholders: { count: "Number of validated-pair candidates mined." },
+      "rules.suggestions.noneNewFocused": {
+        description: "Shown under the suggest row when a topic-focused ask for rule suggestions found nothing new.",
+        placeholders: { focus: "The topic the user typed, e.g. 'punctuation' — user content, never translated." },
       },
-      "rules.suggestFromEdits.stats.human": {
-        description: "Mining-stats segment counting human-authored (non-AI-drafted) candidates.",
-        placeholders: { count: "Number of human-authored candidates mined." },
+      "rules.suggestions.focusAriaLabel": {
+        description: "Screen-reader label for the optional topic box beside the 'Suggest rules' button at the foot of the rules list.",
       },
-      "rules.suggestFromEdits.reviewTitle": {
-        description: "Dialog title once edit-mining + LLM suggestion finishes and drafts are ready for review.",
-        placeholders: { count: "Number of suggested rule drafts." },
+      "rules.suggestions.itemAriaLabel": {
+        description: "Screen-reader label for one suggested (not yet saved) rule in the rules list.",
+        placeholders: { name: "The suggested rule's name — LLM content, never translated." },
       },
-      "rules.suggestFromEdits.minedPatterns": {
-        description: "Summary line above the review list, showing the mining-stats breakdown.",
-        placeholders: { patterns: "Already-localized, comma-joined stats segments (see rules.suggestFromEdits.stats.*)." },
+      "rules.suggestions.evidence": {
+        description: "Small italic line under a suggested rule saying which of the user's edits it came from.",
+        placeholders: { evidence: "Evidence text from the edit miner, e.g. 'Repeated in 3 cells'." },
       },
       "rules.completion.failedToFetchModels": {
         description: "Thrown error when the model-list fetch for a custom OpenAI-compatible endpoint fails.",
@@ -743,7 +1152,7 @@ export const rules = defineNamespace({
       },
       "rules.completion.frontierLimitReached": {
         description:
-          "Thrown error when a Frontier completion request 402s (subscription/credits exhausted).",
+          "Thrown error when a Aquilla completion request 402s (subscription/credits exhausted).",
         placeholders: { detail: "Server-provided detail text, or rules.completion.outOfCredits as a fallback." },
       },
       "rules.completion.completionFailed": {
@@ -768,114 +1177,18 @@ export const rules = defineNamespace({
         description: "Primary button applying the selected fix previews.",
         placeholders: { count: "Number of previews currently selected to apply." },
       },
-      "rules.createDialog.namePlaceholder": {
-        description:
-          "Example placeholder text in the empty rule-name field, illustrating the " +
-          "kind of short name a rule has — not a real rule, purely illustrative.",
-      },
-      "rules.createDialog.descriptionLabel": {
-        description: "Field label for a new rule's free-text description in the standalone create-rule dialog.",
-      },
-      "rules.createDialog.ruleTypeLabel": {
-        description: "Field label above the check-type select (which of the three check shapes the rule uses).",
-      },
-      "rules.createDialog.checkType.sourceTargetMatch": {
-        description:
-          "Option label for the check-type meaning: a pattern must appear in both " +
-          "source and target. Shown in a select dropdown.",
-      },
-      "rules.createDialog.checkType.sourceRequiresTarget": {
-        description:
-          "Option label for the check-type meaning: when the source matches a " +
-          "pattern, the target must contain a (possibly different) required pattern. " +
-          "Shown in a select dropdown.",
-      },
-      "rules.createDialog.checkType.targetForbids": {
-        description:
-          "Option label for the check-type meaning: the target must never match a " +
-          "forbidden pattern. Shown in a select dropdown.",
-      },
-      "rules.createDialog.patternRegexLabel": {
-        description: "Field label for the single shared regex pattern, shown when the check type is source-target-match.",
-      },
-      "rules.createDialog.patternFieldHint.match": {
-        description: "Small helper text under the pattern field for the source-target-match check type.",
-      },
-      "rules.createDialog.forbiddenPatternRegexLabel": {
-        description: "Field label for the forbidden regex pattern, shown when the check type is target-forbids.",
-      },
-      "rules.createDialog.patternFieldHint.forbidden": {
-        description: "Small helper text under the pattern field for the target-forbids check type.",
-      },
-      "rules.createDialog.sourcePatternRegexLabel": {
-        description: "Field label for the source-side regex pattern, shown when the check type is source-requires-target.",
-      },
-      "rules.createDialog.requiredTargetPatternRegexLabel": {
-        description: "Field label for the required target-side regex pattern, shown when the check type is source-requires-target.",
-      },
-      "rules.createDialog.testYourRuleHeading": {
-        description: "Small heading over the live test area at the bottom of the standalone create-rule dialog.",
-      },
-      "rules.createDialog.testSourcePlaceholder": {
-        description: "Placeholder in the empty sample-source-text input of the rule test area.",
-      },
-      "rules.createDialog.testTargetPlaceholder": {
-        description: "Placeholder in the empty sample-target-text input of the rule test area.",
-      },
-      "rules.createDialog.testButton": {
-        description: "Button running the draft rule against the two sample text inputs above it.",
-      },
-      "rules.suggestDialog.description": {
-        description:
-          "Intro paragraph in the standalone 'Suggest from edits' dialog's idle state, " +
-          "explaining what the analysis pass will do before the user starts it.",
-      },
-      "rules.suggestDialog.analyzeButton": {
-        description: "Button starting the LLM analysis of the user's validated translation pairs.",
-      },
-      "rules.suggestDialog.analyzedSummary": {
-        description:
-          "Result-count line shown once analysis finishes, above the list of " +
-          "suggestions to accept or reject.",
-        placeholders: { count: "Number of validated source/target pairs analyzed." },
-      },
       "rules.loadingLabel": {
         description:
           "Loading label on the spinner panel shown while a project's translation " +
-          "rules are still being fetched. Rendered in two places for the same data — " +
-          "the standalone Rules page and the Rules section inside Project Settings — " +
-          "so it is deliberately worded without naming either container.",
+          "rules are still being fetched, in the Rules section inside Project " +
+          "Settings. Deliberately worded without naming its container: it used to " +
+          "be rendered by the standalone Rules page too, and may be shared again.",
       },
-      "rules.page.heading": {
-        description: "Header title of the standalone Rules page.",
-      },
-      "rules.page.corpusLoadErrorPrefix": {
+      "rules.suggestFromEdits.corpusLoadFailed": {
         description:
-          "Inline error banner shown when the Rules page couldn't load the full " +
-          "project corpus needed to evaluate built-in checks.",
+          "Inline error in the 'Suggest rules from your edits' dialog when the " +
+          "project's translations couldn't be read, so Analyze is disabled.",
         placeholders: { message: "The underlying fetch error's own message, verbatim (not translated)." },
-      },
-      "rules.page.readOnlySuffix": {
-        description:
-          "Trailing sentence appended after the (separately-sourced) role-denial " +
-          "reason in the read-only banner shown to users below the rule-management " +
-          "role floor. Reads as a second sentence following that reason.",
-      },
-      "rules.page.rulesCardTitle": {
-        description: "Card heading over the standalone Rules page's project-rules list, with the total rule count.",
-        placeholders: { count: "Total number of project rules." },
-      },
-      "rules.page.noRulesYet": {
-        description: "Empty-state text shown when the standalone Rules page's project-rules list has no rules yet.",
-      },
-      "rules.page.deleteRuleDialogTitle": {
-        description: "Title of the checkbox-confirm dialog shown before permanently deleting a rule.",
-      },
-      "rules.page.deleteRuleAriaLabel": {
-        description:
-          "Accessible name for the trash button opening the delete-rule confirm dialog on a " +
-          "standalone Rules page row.",
-        placeholders: { name: "The rule's own name — content, never translated." },
       },
       "rules.editor.wouldBeFlagged": {
         description:

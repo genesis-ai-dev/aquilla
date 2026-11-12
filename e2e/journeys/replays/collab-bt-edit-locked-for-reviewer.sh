@@ -14,12 +14,13 @@ abA open "$BASE/__dev/login?as=alice" >/dev/null || fail "alice login"
 abA wait --load networkidle >/dev/null
 
 abA open "$BASE/orgs/$ORG/projects" >/dev/null && abA wait --load networkidle >/dev/null
-abA find role button click --name "New Project" >/dev/null || fail "New Project button"
-abA wait --text "Create New Project" >/dev/null || fail "create dialog"
-abA find label "Project title" fill "$NAME" >/dev/null || fail "title field"
-abA find label "Source Language" fill "en" >/dev/null || fail "source field"
-abA find label "Target language(s)" fill "es" >/dev/null || fail "target field"
-abA find role button click --name "Create Project" >/dev/null || fail "Create Project button"
+abA find role button click --name "New project" >/dev/null || fail "New project button"
+abA wait --text "Create new project" >/dev/null || fail "create dialog"
+abA find testid "project-source-scratch" click >/dev/null || fail "Start from scratch (AQU-2105 source step)"
+abA find label "Project name" fill "$NAME" >/dev/null || fail "name field"
+abA find label "Source language" fill "en" >/dev/null || fail "source field"
+abA find label "Language lanes" fill "es" >/dev/null || fail "lanes field"
+abA find role button click --name "Create project" >/dev/null || fail "Create project button"
 abA wait --text "Open project" >/dev/null || fail "overview did not load"
 abA find role button click --name "Open project" >/dev/null || fail "Open project button"
 abA wait --load networkidle >/dev/null

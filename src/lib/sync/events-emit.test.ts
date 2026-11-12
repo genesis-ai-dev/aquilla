@@ -121,6 +121,7 @@ describe("events-emit", () => {
         value: "hello",
         valueHtml: "<p>hello</p>",
         author: "alice",
+        targetLang: "",
       })
       expect(typeof id).toBe("string")
       expect(await outboxPendingCount()).toBe(1)
@@ -136,6 +137,22 @@ describe("events-emit", () => {
       // AQU-538: no targetLang input → the field is OMITTED entirely, so
       // default-lane events stay byte-identical to pre-lane events.
       expect("targetLang" in ev.payload).toBe(false)
+    })
+
+    it("AQU-1578: enqueues under a caller-minted id so the editor can reserve it as the head first", async () => {
+      const id = await emitTargetCellCommit({
+        id: "0190a0b0-0000-7000-8000-000000000001",
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        parentId: "src-head",
+        value: "hello",
+        author: "alice",
+        targetLang: "",
+      })
+      expect(id).toBe("0190a0b0-0000-7000-8000-000000000001")
+      const peek = await peekOutboxBatch(10)
+      expect(peek[0].event.id).toBe("0190a0b0-0000-7000-8000-000000000001")
     })
 
     it("AQU-538: includes targetLang in the payload for a non-default lane", async () => {
@@ -209,6 +226,7 @@ describe("events-emit", () => {
         parentId: null,
         value: "first ever",
         author: "alice",
+        targetLang: "",
       })
       expect(typeof id).toBe("string")
       const peek = await peekOutboxBatch(10)
@@ -239,6 +257,7 @@ describe("events-emit", () => {
         parentId: "head",
         value: "borrador",
         author: "test/model",
+        targetLang: "",
         aiSuggestion: true,
         aiDraft,
       })
@@ -273,6 +292,7 @@ describe("events-emit", () => {
           sourceEventId: "source-1",
           value: "bonjour",
           author: "model",
+          targetLang: "",
           aiSuggestion: true,
           aiDraft: provenance,
         },
@@ -322,6 +342,7 @@ describe("events-emit", () => {
           parentId: "head-1",
           value: "bonjour",
           author: "model",
+          targetLang: "",
           aiSuggestion: true,
         },
         {
@@ -331,6 +352,7 @@ describe("events-emit", () => {
           parentId: "head-2",
           value: "monde",
           author: "model",
+          targetLang: "",
           aiSuggestion: true,
         },
       ])).rejects.toBeInstanceOf(InsufficientRoleError)
@@ -414,6 +436,7 @@ describe("events-emit", () => {
         cellId: "c",
         editEventId: "commit-evt-1",
         author: "alice",
+        targetLang: "",
       })
       const peek = await peekOutboxBatch(10)
       const ev = peek[0].event as unknown as OutboxRawEvent<"cell.validate">
@@ -429,6 +452,7 @@ describe("events-emit", () => {
         cellId: "c",
         editEventId: "commit-evt-1",
         author: "alice",
+        targetLang: "",
       })
       const peek = await peekOutboxBatch(10)
       expect(peek[0].event.kind).toBe("cell.unvalidate")

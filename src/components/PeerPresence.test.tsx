@@ -1,6 +1,9 @@
 import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { PeerPresence } from "./PeerPresence"
+
+let backendReachable: boolean | null = null
+vi.mock("@/lib/offline/connectivity", () => ({ useConnectivity: () => backendReachable }))
 import { act } from "react"
 import { createProjectPresenceStore, type ProjectPresencePeer } from "@/lib/sync/presence-store"
 
@@ -71,5 +74,47 @@ describe("PeerPresence", () => {
       store.applyPresenceLeft("alice")
     })
     expect(screen.queryByRole("button", { name: /alice/i })).toBeNull()
+  })
+
+  // AQU-1791: the field reports were one colleague appearing 2–3× as
+  // "viewing" from a single tab. The roster is per person: extra connections
+  // read as a count on the one row, never as extra rows.
+  it("renders one row per user with a connection count, not a row per connection", () => {
+    const store = createProjectPresenceStore("me")
+    store.setSelfConnId("my-tab")
+    render(<PeerPresence store={store} />)
+
+    act(() => {
+      store.applyPresenceFrame([
+        { connId: "ghost-1", userId: "pmbah", currentFileId: "file-1", viewingCell: "cell-1", ts: 1 },
+        { connId: "ghost-2", userId: "pmbah", currentFileId: "file-1", viewingCell: "cell-1", ts: 2 },
+        { connId: "live-3", userId: "pmbah", currentFileId: "file-1", focusedCell: "cell-4", ts: 3 },
+      ])
+    })
+
+    // One person online, not three.
+    fireEvent.click(screen.getByRole("button", { name: /pmbah/i }))
+    const popover = screen.getByLabelText("1 online")
+    const rows = within(popover).getAllByRole("button")
+    expect(rows).toHaveLength(1)
+    // Strongest state wins, and the other two connections show as a count.
+    expect(rows[0]).toHaveAccessibleName(/pmbah/i)
+    expect(rows[0]).toHaveAccessibleName(/×3/)
+    expect(rows[0]).toHaveAccessibleName(/editing/i)
+  })
+
+  // The roster is a snapshot from the last socket frame; with the backend
+  // unreachable it cannot be trusted, so it must not claim people are here.
+  it("hides the roster while the desktop probe says the backend is unreachable", () => {
+    const peer = { peerId: "p1", username: "alice", color: "#000" } as ProjectPresencePeer
+    backendReachable = false
+    try {
+      const { container } = render(<PeerPresence peers={[peer]} />)
+      expect(container).toBeEmptyDOMElement()
+    } finally {
+      backendReachable = null
+    }
+    render(<PeerPresence peers={[peer]} />)
+    expect(screen.getByText("alice")).toBeInTheDocument()
   })
 })

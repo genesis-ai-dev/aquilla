@@ -27,6 +27,7 @@
 import { projectFileCountersRecomputeStmt } from './event-projection'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
+import { withLongOperationTimeout } from '../../../db/shim/postgres'
 
 const PATH = '/migrate/finalize'
 
@@ -35,11 +36,13 @@ const PATH = '/migrate/finalize'
  *  recompute — same rows, one statement. */
 const MAX_SCOPED_FILE_IDS = 500
 
-/** Statements per pipelined batch. `fullProgressRecomputeStmts` emits 2 per
- *  file, and postgres.js keeps up to 100 statements in flight (see PgRunOpts
- *  in db/shim/postgres.ts), so this fills the pipeline without building an
- *  unbounded batch for a project with hundreds of files. */
-const PROGRESS_BATCH_STMTS = 100
+/** Statements per pipelined batch. `fullProgressRecomputeStmts` emits 3 per
+ *  file (AQU-1493 added the line placements ahead of the two progress
+ *  statements), and postgres.js keeps up to 100 statements in flight (see
+ *  PgRunOpts in db/shim/postgres.ts), so this fills the pipeline without
+ *  building an unbounded batch for a project with hundreds of files. A
+ *  multiple of 3, so one file's statements never straddle two batches. */
+const PROGRESS_BATCH_STMTS = 99
 
 /** Prefer the pipelined executor; test doubles and non-postgres.js shims only
  *  implement `batch()`. Same atomicity and ordering either way. */
@@ -103,7 +106,12 @@ export async function handleMigrateFinalizeRequest(
     return new Response('fileIds must be an array of non-empty strings', { status: 400 })
   }
 
-  const db = env.AQUILLA_PG
+  // AQU-1876: projectFileCountersRecomputeStmt below is a project-WIDE
+  // recompute — one statement over every file — so it runs under the
+  // registered `migration-finalize` ceiling rather than the 15s default every
+  // worker connection otherwise carries. See LONG_OPERATION_TIMEOUTS in
+  // db/shim/postgres.ts, the one list of operations allowed to outrun it.
+  const db = withLongOperationTimeout(env.AQUILLA_PG, 'migration-finalize')
   // One instant for the whole finalize, so every row it touches carries the
   // same `updated_at` rather than drifting across a multi-second loop.
   const finalizedAt = Date.now()

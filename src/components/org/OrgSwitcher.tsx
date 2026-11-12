@@ -1,16 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
-import { AlertTriangle, Building2, Check, Plus, SearchIcon } from "lucide-react"
+import { AlertTriangle, Building2, Check, Home, Laptop, Plus, SearchIcon } from "lucide-react"
 import { useActiveOrg, type GuestOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
 import { useOrgSwitcherCatalog } from "@/hooks/useOrgSwitcherCatalog"
 import { Spinner } from "@/components/ui/spinner"
 import { isOrgScopedRoute } from "./org-route-scope"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
+import { THIS_COMPUTER_PATH, isThisComputerRoute } from "@/components/this-computer/routes"
 import { OrgCreateDialog } from "./OrgCreateDialog"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { RoleLabel } from "@/components/RoleLabel"
+import { Badge } from "@/components/ui/badge"
+import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import {
   ALL_ORGS_PARAM,
@@ -49,6 +53,8 @@ const ORG_META_CLASS = "text-xs text-muted-foreground!"
 
 type OrgSwitcherItem =
   | { kind: "all"; key: "all"; label: string }
+  /** Desktop only: the workspace of folders and Paratext projects on this device. */
+  | { kind: "local"; key: "local"; label: string }
   | {
       kind: "member"
       key: `member:${number}`
@@ -57,12 +63,15 @@ type OrgSwitcherItem =
       roleName: string
       /** Cross-tenant visibility via ADMIN_EMAILS — not a ladder role. */
       viaPlatformAdmin?: boolean
+      personal?: boolean
     }
   | {
       kind: "guest"
       key: `guest:${number}`
       id: number
       label: string
+      /** AQU-1489: holds a grant the caller has never opened since it landed. */
+      isNew?: boolean
     }
 
 function orgMatchesSearch(name: string, query: string): boolean {
@@ -73,6 +82,12 @@ function orgMatchesSearch(name: string, query: string): boolean {
 
 function byName(a: { name: string | null }, b: { name: string | null }) {
   return (a.name ?? "").localeCompare(b.name ?? "")
+}
+
+/** The caller's personal workspace first, then alphabetical. */
+function personalFirstByName(a: OrgSummary, b: OrgSummary) {
+  if (Boolean(a.personal) !== Boolean(b.personal)) return a.personal ? -1 : 1
+  return byName(a, b)
 }
 
 // AQU-1113: an unnamed org falls back to the same translated noun the
@@ -88,15 +103,17 @@ function memberItem(org: OrgSummary, fallbackName: string): OrgSwitcherItem {
     label: org.name ?? fallbackName,
     roleName: org.role.name,
     viaPlatformAdmin: org.viaPlatformAdmin,
+    personal: org.personal,
   }
 }
 
-function guestItem(org: GuestOrg): OrgSwitcherItem {
+function guestItem(org: GuestOrg, isNew = false): OrgSwitcherItem {
   return {
     kind: "guest",
     key: `guest:${org.id}`,
     id: org.id,
     label: org.name ?? `Org #${org.id}`,
+    isNew,
   }
 }
 
@@ -104,10 +121,14 @@ function OrgMark({
   name,
   allOrgs = false,
   create = false,
+  personal = false,
+  local = false,
 }: {
   name: string
   allOrgs?: boolean
   create?: boolean
+  personal?: boolean
+  local?: boolean
 }) {
   if (create) {
     return (
@@ -139,6 +160,34 @@ function OrgMark({
       </InitialsAvatar>
     )
   }
+  if (personal) {
+    return (
+      <InitialsAvatar
+        name={name}
+        size="xs"
+        shape="square"
+        menuSafe
+        menuSafeColor="var(--muted-foreground)"
+        fallbackClassName="bg-muted"
+      >
+        <Home className="size-3 text-muted-foreground!" aria-hidden />
+      </InitialsAvatar>
+    )
+  }
+  if (local) {
+    return (
+      <InitialsAvatar
+        name={name}
+        size="xs"
+        shape="square"
+        menuSafe
+        menuSafeColor="var(--muted-foreground)"
+        fallbackClassName="bg-muted"
+      >
+        <Laptop className="size-3 text-muted-foreground!" aria-hidden />
+      </InitialsAvatar>
+    )
+  }
   return (
     <InitialsAvatar name={name} size="xs" shape="square" menuSafe />
   )
@@ -146,6 +195,7 @@ function OrgMark({
 
 function OrgSwitcherList({
   guestSelected,
+  localSelected,
   isAllOrgs,
   activeOrgId,
   selectedGuestOrgId,
@@ -156,6 +206,7 @@ function OrgSwitcherList({
   onLoadMore,
 }: {
   guestSelected: boolean
+  localSelected: boolean
   isAllOrgs: boolean
   activeOrgId: number | null
   selectedGuestOrgId: number | null
@@ -181,7 +232,9 @@ function OrgSwitcherList({
               selected={
                 item.kind === "all"
                   ? !guestSelected && isAllOrgs
-                  : !guestSelected && activeOrgId === item.id
+                  : item.kind === "local"
+                    ? localSelected
+                    : !guestSelected && !localSelected && activeOrgId === item.id
               }
             />
           ))}
@@ -316,11 +369,28 @@ function OrgSwitcherOption({
       )}
       aria-selected={selected}
     >
-      <OrgMark name={item.label} allOrgs={item.kind === "all"} />
+      <OrgMark
+        name={item.label}
+        allOrgs={item.kind === "all"}
+        personal={item.kind === "member" && item.personal}
+        local={item.kind === "local"}
+      />
       <span className="truncate">{item.label}</span>
       <span className="flex shrink-0 items-center gap-1.5">
+        {/* AQU-1489: a grant that landed since the caller last opened it. The
+            row itself still lives on `/orgs/all` (AQU-417); this is the signal
+            that sends them there without having to sign out first. */}
+        {item.kind === "guest" && item.isNew && (
+          <Badge className="shrink-0" data-testid="new-shared-org-badge">
+            {t("org.guestOrgHome.newBadge")}
+          </Badge>
+        )}
         {item.kind === "all" ? (
           <span className={ORG_META_CLASS}>{t("org.switcher.allProjects")}</span>
+        ) : item.kind === "local" ? (
+          <span className={ORG_META_CLASS}>{t("paratextBridge.thisComputer.switcherMeta")}</span>
+        ) : item.kind === "member" && item.personal ? (
+          <span className={ORG_META_CLASS}>{t("org.switcher.personalWorkspace")}</span>
         ) : item.kind === "member" && (item.viaPlatformAdmin || item.roleName === "admin") ? (
           <span className={ORG_META_CLASS}>{t("org.orgSidebar.admin")}</span>
         ) : item.kind === "member" ? (
@@ -350,11 +420,13 @@ export function OrgSwitcher() {
     refresh,
     error,
     retryOrgLoad,
+    accessibleProjects,
     accessibleProjectsError,
     refreshAccessibleProjects,
   } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
+  const username = session?.username ?? null
   const { isAdmin: isPlatformAdmin, loading: platformAdminLoading } = usePlatformAdmin()
   const location = useLocation()
   const navigate = useNavigate()
@@ -371,10 +443,11 @@ export function OrgSwitcher() {
   })
 
   // AQU-759: keep both member and guest lists alphabetical regardless of the
-  // order the backend returned them in (Joel: "Keep it alphabetical").
+  // order the backend returned them in (Joel: "Keep it alphabetical"). The
+  // caller's personal workspace is pinned above the alphabetical members.
   const sortedOrgs = useMemo(() => {
     const source = catalogEnabled ? catalog.orgs : orgs
-    return [...source].sort(byName)
+    return [...source].sort(personalFirstByName)
   }, [catalogEnabled, catalog.orgs, orgs])
   const sortedGuestOrgs = useMemo(() => [...guestOrgs].sort(byName), [guestOrgs])
 
@@ -388,20 +461,47 @@ export function OrgSwitcher() {
   const guestSelected = selectedGuest != null
 
   const onAllOrgsPath = parseOrgPath(location.pathname)?.orgKey === ALL_ORGS_PARAM
+  // The desktop app's "This computer" workspace is a destination, not an org:
+  // it is selected by route alone and never becomes `activeOrg`.
+  const showLocal = isTauriRuntime()
+  const onLocalRoute = showLocal && isThisComputerRoute(location.pathname)
   // All organizations is the home for foreign-org grants as well as 2+
   // memberships, so offer it whenever there's something to aggregate beyond
   // a single member org.
   const showAllOrgs = orgs.length > 1 || guestOrgs.length > 0
-  const viewingAllOrgs = !guestSelected && (isAllOrgs || onAllOrgsPath)
-  const title = guestSelected
+  const viewingAllOrgs = !guestSelected && !onLocalRoute && (isAllOrgs || onAllOrgsPath)
+  const title = onLocalRoute
+    ? t("paratextBridge.thisComputer.title")
+    : guestSelected
     ? selectedGuest.name ?? `Org #${selectedGuest.id}`
     : viewingAllOrgs
       ? t("org.breadcrumb.allOrganizations")
       : activeOrg?.name ?? t("org.breadcrumb.organizationFallback")
 
+  // AQU-1489: which guest orgs hold a project granted to the caller since they
+  // last opened it. A direct grant in an org the caller does not belong to is
+  // listed on `/orgs/all` and nowhere else (AQU-417), so someone scoped to a
+  // concrete org saw nothing change when they were added to one — signing out
+  // and back in was the only thing that surfaced it, because that resets the
+  // resume org to `all`. The switcher is on every org surface, so this is where
+  // the grant announces itself after a single refresh.
+  const newSharedOrgIds = useMemo(() => {
+    const ids = new Set<number>()
+    if (!username) return ids
+    const memberOrgIds = new Set(orgs.map((org) => org.id))
+    for (const project of accessibleProjects) {
+      if (project.orgId == null || memberOrgIds.has(project.orgId)) continue
+      if (isProjectNew(project.grantedAt, readProjectOpenedAt(username, project.id))) {
+        ids.add(project.orgId)
+      }
+    }
+    return ids
+  }, [accessibleProjects, orgs, username])
+
   const items = useMemo<OrgSwitcherItem[]>(() => {
     const next: OrgSwitcherItem[] = []
     if (showAllOrgs) next.push({ kind: "all", key: "all", label: t("org.breadcrumb.allOrganizations") })
+    if (showLocal) next.push({ kind: "local", key: "local", label: t("paratextBridge.thisComputer.title") })
     const seen = new Set<number>()
     const guestIds = new Set(sortedGuestOrgs.map((org) => org.id))
     for (const org of sortedOrgs) {
@@ -414,21 +514,22 @@ export function OrgSwitcher() {
     if (activeOrg && !seen.has(activeOrg.id) && !guestSelected) {
       next.push(memberItem(activeOrg, t("org.breadcrumb.organizationFallback")))
     }
-    for (const org of sortedGuestOrgs) next.push(guestItem(org))
+    for (const org of sortedGuestOrgs) next.push(guestItem(org, newSharedOrgIds.has(org.id)))
     return next
-  }, [showAllOrgs, sortedOrgs, sortedGuestOrgs, t, activeOrg, guestSelected])
+  }, [showAllOrgs, showLocal, sortedOrgs, sortedGuestOrgs, t, activeOrg, guestSelected, newSharedOrgIds])
 
   const visibleItems = useMemo<OrgSwitcherItem[]>(() => {
     if (!catalogEnabled) return items
     const query = inputValue.trim()
     return items.filter((item) => {
-      if (item.kind === "all") return query === ""
+      if (item.kind === "all" || item.kind === "local") return query === ""
       if (query !== "") return orgMatchesSearch(item.label, query)
       return true
     })
   }, [catalogEnabled, items, inputValue])
 
   const selectedItem = useMemo((): OrgSwitcherItem | null => {
+    if (onLocalRoute) return items.find((item) => item.kind === "local") ?? null
     if (guestSelected && selectedGuestOrgId != null) {
       return items.find((item) => item.kind === "guest" && item.id === selectedGuestOrgId) ?? null
     }
@@ -439,7 +540,7 @@ export function OrgSwitcher() {
       return items.find((item) => item.kind === "member" && item.id === activeOrgId) ?? null
     }
     return null
-  }, [items, guestSelected, selectedGuestOrgId, viewingAllOrgs, showAllOrgs, activeOrgId])
+  }, [items, onLocalRoute, guestSelected, selectedGuestOrgId, viewingAllOrgs, showAllOrgs, activeOrgId])
 
   function retryProjectDirectory() {
     void refreshAccessibleProjects()
@@ -512,6 +613,11 @@ export function OrgSwitcher() {
       return
     }
 
+    if (item.kind === "local") {
+      navigate(THIS_COMPUTER_PATH)
+      return
+    }
+
     if (item.kind === "member") {
       setActiveOrg(item.id)
       // A guest org overview (`/orgs/<guestId>`) is itself an org-scoped route, so
@@ -554,8 +660,8 @@ export function OrgSwitcher() {
           ? { filteredItems: visibleItems, filter: null as null }
           : {
               filter: (item: OrgSwitcherItem, query: string) => {
-                // All-orgs is a navigation shortcut, not a searchable org — hide while typing.
-                if (item.kind === "all") return query.trim() === ""
+                // All-orgs / This computer are navigation shortcuts, not searchable orgs — hide while typing.
+                if (item.kind === "all" || item.kind === "local") return query.trim() === ""
                 return orgMatchesSearch(item.label, query)
               },
             })}
@@ -579,8 +685,20 @@ export function OrgSwitcher() {
             />
           }
         >
-          <OrgMark name={title} allOrgs={viewingAllOrgs} />
+          <OrgMark name={title} allOrgs={viewingAllOrgs} local={onLocalRoute} />
           <span className="truncate">{title}</span>
+          {/* AQU-1489: the closed trigger carries the signal too — otherwise the
+              badge inside the menu only reaches someone who already suspected
+              there was something to find. */}
+          {newSharedOrgIds.size > 0 && !guestSelected && !viewingAllOrgs && (
+            <span
+              data-testid="new-shared-org-dot"
+              title={t("org.guestOrgHome.newBadge")}
+              className="size-2 shrink-0 rounded-full bg-primary"
+            >
+              <span className="sr-only">{t("org.guestOrgHome.newBadge")}</span>
+            </span>
+          )}
         </ComboboxTrigger>
         <ComboboxContent
           className="w-72 min-w-72 flex flex-col p-0 *:data-[slot=input-group]:mx-0! *:data-[slot=input-group]:my-0! *:data-[slot=input-group]:h-10 *:data-[slot=input-group]:rounded-none *:data-[slot=input-group]:border-0! *:data-[slot=input-group]:bg-transparent! *:data-[slot=input-group]:shadow-none!"
@@ -621,6 +739,7 @@ export function OrgSwitcher() {
           <ComboboxList className="max-h-80 flex-1" aria-busy={catalog.searching || catalog.loadingMore || undefined}>
             <OrgSwitcherList
               guestSelected={guestSelected}
+              localSelected={onLocalRoute}
               isAllOrgs={viewingAllOrgs}
               activeOrgId={activeOrgId}
               selectedGuestOrgId={selectedGuestOrgId}

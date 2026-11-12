@@ -15,6 +15,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { renderWithTooltips, expectDisabledNote } from "@/test-utils/tooltip"
 import { RuleImportDialog } from "./RuleImportDialog"
 import { MAX_INPUT_BYTES } from "@/lib/rules/rule-extractor"
 import type { CompletionSettings, ProjectRecord } from "@/lib/parsers/types"
@@ -65,7 +67,6 @@ const SETTINGS: CompletionSettings = {
   maxTokens: 2048,
   temperature: 0.1,
   systemPrompt: "sys",
-  llmHealthPenalty: 0.1,
 }
 
 function structuredRule(name: string) {
@@ -180,6 +181,47 @@ describe("RuleImportDialog — AQU-196", () => {
     })
   })
 
+  it("still reports a genuinely empty document as 'no rules found'", async () => {
+    renderDialog()
+    const paste = await openDialog()
+
+    pass1Response = "[]"
+    pasteInto(paste, "a memo about nothing checkable")
+
+    expect(await screen.findByText(/no verifiable rules found/i)).toBeInTheDocument()
+  })
+
+  it("does not blame the document when extraction was cut off with nothing salvageable (AQU-1254)", async () => {
+    // The user was told their style guide had no checkable rules in it. It did —
+    // pass 1 hit its output cap before finishing a single entry, and an empty
+    // candidate list is indistinguishable from an empty document without the
+    // truncation signal.
+    renderDialog()
+    const paste = await openDialog()
+
+    pass1Response = '["Numbers must be preserved exactly as in the sour'
+    pasteInto(paste, "a long style guide")
+
+    expect(await screen.findByText(/cut off/i)).toBeInTheDocument()
+    expect(screen.queryByText(/no verifiable rules found/i)).not.toBeInTheDocument()
+    // Nothing structured: pass 2 never had a candidate to work on.
+    expect(completeCalls).toEqual(["pass1"])
+  })
+
+  it("reviews what a cut-off extraction did return, and says the list is incomplete (AQU-1254)", async () => {
+    renderDialog()
+    const paste = await openDialog()
+
+    pass1Response = '["Rule one", "Rule two", "Rule thr'
+    pass2Auto = structuredRule("No ellipsis")
+    pasteInto(paste, "a long style guide")
+
+    // The salvaged candidates still import (AQU-466) …
+    expect(await screen.findByText(/review 2 extracted rules/i)).toBeInTheDocument()
+    // … but the review screen must not pass them off as the whole document.
+    expect(screen.getByText(/not all of the document's rules/i)).toBeInTheDocument()
+  })
+
   it("turns pasted prose into reviewable drafts that commit as user rules", async () => {
     const onAdd = renderDialog()
     const paste = await openDialog()
@@ -203,5 +245,25 @@ describe("RuleImportDialog — AQU-196", () => {
         check: { type: "target-forbids", targetPattern: "foo" },
       }),
     )
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): the labelled trigger says nothing on hover; greyed
+// out (no AI set up), it says why on click.
+describe("RuleImportDialog trigger", () => {
+  it("shows nothing on hover when the AI is set up", async () => {
+    renderWithTooltips(<RuleImportDialog completionSettings={SETTINGS} onAdd={vi.fn()} projectId="p1" />)
+    await userEvent.setup().hover(screen.getByRole("button", { name: /import from doc/i }))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+  })
+
+  it("says why it is greyed out, on click, when no AI is set up", async () => {
+    renderWithTooltips(
+      <RuleImportDialog completionSettings={{ ...SETTINGS, endpoint: "", model: "" }} onAdd={vi.fn()} projectId="p1" />,
+    )
+    const trigger = screen.getByRole("button", { name: /import from doc/i })
+    expect(trigger).toBeDisabled()
+    await expectDisabledNote(trigger, "Set up an AI model in project settings first")
   })
 })

@@ -35,6 +35,16 @@ interface MockToolCall {
 }
 
 let callSeq = 0
+/**
+ * Separate from `callSeq` so every completion gets a distinct id even when it
+ * carries no tool call. `respond()` used to stamp `mock-${Date.now()}-${callSeq}`
+ * while only `toolCall()` advanced the counter — so a contextual run, whose
+ * nodes never emit tool calls, minted the SAME id for every response that
+ * landed inside one millisecond. That surfaced live as five identical ids in a
+ * run's seeded activity (2026-08-28 review). Ids that identify a thing must be
+ * minted by the thing that hands them out.
+ */
+let responseSeq = 0
 
 function toolCall(args: Record<string, unknown>): MockToolCall {
   return {
@@ -55,7 +65,7 @@ function namedToolCall(name: string, args: Record<string, unknown>): MockToolCal
 
 function respond(content: string | null, tool_calls?: MockToolCall[]) {
   return {
-    id: `mock-${Date.now()}-${callSeq}`,
+    id: `mock-${Date.now()}-${++responseSeq}`,
     choices: [
       {
         message: { role: "assistant", content, ...(tool_calls ? { tool_calls } : {}) },
@@ -231,6 +241,87 @@ export function scriptMockResponse(messages: ChatMessage[]) {
     }))
   }
 
+  // AQU-2302: a recordings folder's naming. Route on the server-owned system
+  // contract, like the importer above. The names come one per line, each a
+  // JSON string. The "brain" reads the first sampled name:
+  //   - "Mt-ch19_v01": the chapter-and-verse rule, which the team may keep;
+  //     with a letter after a verse ("Mt-ch19_v03a"), a second template for
+  //     the pieces of a verse, kept too;
+  //   - "sermon_01": the verse, with Matthew 20 as constants; it places the
+  //     folder but is never kept (a constant book and chapter);
+  //   - "worse-Mt-ch19_v01": the right rule, then on the retry the chapter and
+  //     the verse swapped, which places fewer, so the first is kept in use;
+  //   - "Mt-ch19_v01-03": with a range after a verse, a template that reads
+  //     the first and last verse ({toVerse}), kept too;
+  //   - "Sermon-ch20_v01": "Sermon" as Matthew, a book word that names no
+  //     book; it places the folder but is never kept;
+  //   - "swap-Mt-ch05_v01": the chapter and the verse swapped on the first
+  //     answer; it places every file, far apart, and is never kept;
+  //   - "fail-…": a rule that fits nothing, then a retry that fails outright;
+  //   - anything else: a rule that fits nothing, twice ("didn't fit").
+  const namesSystemPrompt = messages.some((message) =>
+    message.role === "system"
+      && typeof message.content === "string"
+      && message.content.includes("You work out how a folder of audio recordings is named"),
+  )
+  if (namesSystemPrompt && userText.includes("<file-names>")) {
+    const names = (userText.split("<file-names>\n")[1]?.split("\n</file-names>")[0] ?? "").split("\n").map((line) => {
+      try {
+        return String(JSON.parse(line))
+      } catch {
+        return line
+      }
+    })
+    const first = names[0] ?? ""
+    const retry = userText.includes("<failed-names>")
+    console.log(`[mock] recording-names rule${retry ? " (retry)" : ""} for ${first}`)
+    if (/^fail-/i.test(first) && retry) return respond("Sorry, I can't tell.")
+    if (/^sermon_\d+/i.test(first)) {
+      return respond(JSON.stringify({
+        templates: [{ pattern: "sermon_{verse}" }],
+        book: "MAT",
+        chapter: 20,
+        explanation: "The number is the verse; every recording is Matthew 20.",
+      }))
+    }
+    if (/^worse-/i.test(first)) {
+      return respond(JSON.stringify(retry
+        ? { templates: [{ pattern: "worse-{book}-ch{verse}_v{chapter}" }], books: { Mt: "MAT" }, explanation: "Mt is Matthew, then the verse and the chapter." }
+        : { templates: [{ pattern: "worse-{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT" }, explanation: "Mt is Matthew, then the chapter and the verse." }))
+    }
+    if (/^sermon-ch\d+_v\d+/i.test(first)) {
+      return respond(JSON.stringify({
+        templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }],
+        books: { Sermon: "MAT" },
+        explanation: "Sermon is Matthew, then the chapter and the verse.",
+      }))
+    }
+    if (/^swap-/i.test(first)) {
+      return respond(JSON.stringify({
+        templates: [{ pattern: "swap-{book}-ch{verse}_v{chapter}" }],
+        books: { Mt: "MAT" },
+        explanation: "Mt is Matthew, then the verse and the chapter.",
+      }))
+    }
+    const pieces = names.some((name) => /_v\d+[a-h]\.[A-Za-z0-9]+$/.test(name))
+    const ranges = names.some((name) => /_v\d+-\d+\.[A-Za-z0-9]+$/.test(name))
+    return respond(JSON.stringify(/^[A-Za-z]{2}-ch\d+_v\d+/.test(first)
+      ? {
+          templates: pieces
+            ? [{ pattern: "{book}-ch{chapter}_v{verse}{part}" }, { pattern: "{book}-ch{chapter}_v{verse}" }]
+            : ranges
+              ? [{ pattern: "{book}-ch{chapter}_v{verse}-{toVerse}" }, { pattern: "{book}-ch{chapter}_v{verse}" }]
+              : [{ pattern: "{book}-ch{chapter}_v{verse}" }],
+          books: { Mt: "MAT", Mk: "MRK" },
+          explanation: pieces
+            ? "Mt is Matthew, then the chapter, the verse, and a letter for each piece of a verse."
+            : ranges
+              ? "Mt is Matthew, then the chapter, and the first and last verse of each recording."
+              : "Mt is Matthew, then the chapter and the verse.",
+        }
+      : { templates: [{ pattern: "rec-{verse}" }], explanation: "rec- then the verse." }))
+  }
+
   // Monday.com board SELECTION (auth-worker lib/monday/selectBoardForProject):
   // runs before the mapping call when the wizard omits a boardId. Echo back a
   // real id from the prompt — a bogus one would exercise the fallback instead
@@ -247,6 +338,44 @@ export function scriptMockResponse(messages: ChatMessage[]) {
     return respond(JSON.stringify({
       boardId,
       reason: "[mock] First board in the account.",
+    }))
+  }
+
+  // Airtable table SELECTION (auth-worker lib/airtable/analyze.ts
+  // selectTableForProject, AQU-804): echo back the first real table id.
+  if (userText.includes("Tables available:")) {
+    const tablesMatch = userText.match(/Tables available:\n(\[.*?\])\n/s)
+    let tableId = ""
+    try {
+      const tables = JSON.parse(tablesMatch?.[1] ?? "[]") as { tableId: string }[]
+      tableId = tables[0]?.tableId ?? ""
+    } catch { /* the server falls back to a name match */ }
+    return respond(JSON.stringify({ tableId, reason: "[mock] First table the token can see." }))
+  }
+
+  // Airtable field mapping (lib/airtable/analyze.ts): map completion onto the
+  // first percent or number field and the status onto the first single
+  // select, one record for the project and one per file. The server clamps it.
+  if (userText.includes("Airtable field mapping")) {
+    const fieldsMatch = userText.match(/Table fields: (\[.*?\])\n/s)
+    const tableMatch = userText.match(/\nTable: .* \((tbl[^)]*)\)\n/)
+    const columns: { columnId: string; columnType: string; metric: string }[] = []
+    try {
+      const fields = JSON.parse(fieldsMatch?.[1] ?? "[]") as { id: string; type: string }[]
+      const pct = fields.find((f) => f.type === "percent" || f.type === "number")
+      if (pct) columns.push({ columnId: pct.id, columnType: pct.type, metric: "completion_pct" })
+      const select = fields.find((f) => f.type === "singleSelect")
+      if (select) columns.push({ columnId: select.id, columnType: select.type, metric: "status_auto" })
+    } catch { /* an empty mapping is still a valid proposal */ }
+    return respond(JSON.stringify({
+      mapping: {
+        version: 1,
+        tableId: tableMatch?.[1] ?? "",
+        itemGranularity: "project_and_files",
+        columns,
+        notes: "[mock] Completion and status, one record for the project and one per file.",
+      },
+      summary: "[mock] Keeps a record for the project and one per episode up to date.",
     }))
   }
 
@@ -433,7 +562,55 @@ export function scriptMockResponse(messages: ChatMessage[]) {
   )
 }
 
+export function mockTranscription(audioSeconds?: number) {
+  if (audioSeconds === undefined || audioSeconds <= 0.5) {
+    return { text: "Mock transcription", words: [
+      { word: "Mock", start: 0, end: 0.25 },
+      { word: "transcription", start: 0.25, end: 0.5 },
+    ], usage: { cost: 0.0001, seconds: 1 } }
+  }
+  // AQU-1681: a minute of a recording is sent at once and each word is handed
+  // back to the row it was spoken in, so the stand-in "speaks" all the way
+  // through what it was sent: a word every fifth of a second — often enough
+  // that even the shortest row the splitter makes (200 ms) holds one — named
+  // for when it was said, so a local run shows each row's words are its own.
+  const words = Array.from({ length: Math.floor(audioSeconds / 0.2) }, (_, i) => ({
+    word: `mock@${(i * 0.2).toFixed(1)}`, start: i * 0.2, end: i * 0.2 + 0.15,
+  }))
+  return {
+    text: words.map((w) => w.word).join(" "), words,
+    usage: { cost: 0.0001, seconds: Math.ceil(audioSeconds) },
+  }
+}
+
+/** Seconds of 16 kHz mono 16-bit WAV in a transcription request's base64. */
+export function wavSecondsOfRequest(body: string): number | undefined {
+  try {
+    const data = (JSON.parse(body) as { input_audio?: { data?: string } }).input_audio?.data
+    if (!data) return undefined
+    return Math.max(0, Buffer.from(data, "base64").byteLength - 44) / 32_000
+  } catch {
+    return undefined
+  }
+}
+
 const server = http.createServer((req, res) => {
+  if (req.method === "GET" && req.url?.endsWith("/models?output_modalities=transcription")) {
+    res.writeHead(200, { "Content-Type": "application/json" })
+    res.end(JSON.stringify({ data: [
+      { id: "openai/whisper-1", pricing: { prompt: "0.0001" } },
+    ] }))
+    return
+  }
+  if (req.method === "POST" && req.url?.endsWith("/audio/transcriptions")) {
+    const parts: Buffer[] = []
+    req.on("data", (part: Buffer) => parts.push(part))
+    req.on("end", () => {
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify(mockTranscription(wavSecondsOfRequest(Buffer.concat(parts).toString("utf8")))))
+    })
+    return
+  }
   if (req.method === "GET" && (req.url === "/" || req.url === "/healthz")) {
     res.writeHead(200, { "Content-Type": "application/json" })
     res.end(JSON.stringify({ ok: true }))

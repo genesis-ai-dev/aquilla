@@ -25,13 +25,14 @@
 // NOT a numeric user id.
 //
 // Auth: sync-token JWT scoped to `projectId`. Additionally gated by the
-// org's memberProgressViewMinRole floor (AQU-485) — see
-// member-progress-floor.ts. A caller below the floor gets 403, mirroring the
-// client-side SectionVisibilityGate so the API can't be used to bypass the
-// dashboard's hard gate.
+// project's memberProgressViewMinRole AND rosterViewMinRole floors (AQU-485,
+// AQU-1771: the higher of the two) — see member-progress-floor.ts. A caller
+// below the floor gets 403, mirroring the client-side SectionVisibilityGate so
+// the API can't be used to bypass the dashboard's hard gate.
 
 import { verifyTokenForProject } from "../auth"
-import { resolveMemberProgressFloor } from "./member-progress-floor"
+import { resolveNamedProgressFloor } from "./member-progress-floor"
+import { countedFileSql } from "../../../db/shared/counted-files"
 
 export interface MemberActivityReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -91,7 +92,10 @@ export async function handleMemberActivityReadRequest(
     return new Response(auth.reason, { status: auth.status })
   }
 
-  const floor = await resolveMemberProgressFloor(env.AQUILLA_PG, projectId)
+  // AQU-1771: this is one named person's activity, so it needs the member-list
+  // floor as well as the member-progress one (the higher of the two), like
+  // every other read of named progress.
+  const floor = await resolveNamedProgressFloor(env.AQUILLA_PG, projectId)
   if (auth.claims.role < floor) {
     return new Response("insufficient role for member-progress view", { status: 403 })
   }
@@ -120,7 +124,9 @@ export async function handleMemberActivityReadRequest(
         "COUNT(*) AS cells_touched, COALESCE(SUM(c.word_count), 0) AS word_count, " +
         "MAX(c.last_edit_at) AS last_activity_at " +
         "FROM cells c JOIN files f ON f.id = c.file_id " +
-        "WHERE c.project_id = ? AND c.last_editor = ? AND f.deleted_at IS NULL " +
+        // AQU-1566: retiming a cue on the timeline edits a hidden file's cell;
+        // that is not a file the member worked on in any sense the panel means.
+        `WHERE c.project_id = ? AND c.last_editor = ? AND ${countedFileSql("f")} ` +
         "GROUP BY c.file_id, f.name " +
         "ORDER BY last_activity_at DESC",
     )

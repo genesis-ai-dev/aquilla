@@ -217,7 +217,7 @@ describe('memory commands — validation', () => {
         method: 'POST',
         headers: { Authorization: `Bearer ${lead.token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          commands: [EXAMPLE, { kind: 'SetTranslation', fileId: FILE, cellId: 'GEN 1:1', value: 'x' }],
+          commands: [EXAMPLE, { kind: 'SetTranslation', fileId: FILE, cellId: 'GEN 1:1', laneId: 'deflane1', value: 'x' }],
         }),
       }),
       env,

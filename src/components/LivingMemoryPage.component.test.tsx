@@ -7,14 +7,15 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
+import { expectClickNote } from "@/test-utils/tooltip"
 import { LivingMemoryPage } from "./LivingMemoryPage"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
 import type { LivingMemoryCell } from "@/hooks/useLivingMemory"
 import { ROLE } from "@/lib/frontier/roles"
-import { DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
+import { INSTRUCTIONS_SAVE_DEBOUNCE_MS } from "@/components/living-memory/instructions-merge"
 
 // ── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -90,20 +91,20 @@ vi.mock("@/lib/frontier/knowledge-base", () => ({
   reindexKnowledgeDocument: vi.fn(),
 }))
 
-// The Rules surface owns its own data wiring (org settings, project cells) —
-// stub it; the quality pane only needs to mount it.
+// The Checks list owns its own data wiring (org settings, project cells) —
+// stub it; the checks pane only needs to mount it with the style binding.
 vi.mock("@/components/ProjectSettings/RulesSection", () => ({
-  RulesSettingsSection: ({ projectId }: { projectId: string }) => (
-    <div data-testid="rules-settings-section" data-project-id={projectId} />
+  RulesSettingsSection: ({ projectId, style }: { projectId: string; style?: { canManage: boolean } }) => (
+    <div data-testid="rules-settings-section" data-project-id={projectId} data-has-style={style ? "yes" : "no"} />
   ),
 }))
 
-// Same for the style-rule library section — it owns its own useStyleRules
-// fetch; its behaviour is covered by living-memory/QualityStyleRules.test.tsx.
-vi.mock("@/components/living-memory/QualityStyleRules", () => ({
-  QualityStyleRules: ({ projectId }: { projectId: string }) => (
-    <div data-testid="quality-style-rules" data-project-id={projectId} />
-  ),
+// Same for the style-rule store — it owns its own useStyleRules fetch; its
+// behaviour is covered by living-memory/StyleChecks.test.tsx. The stub hands
+// the list a binding, as the real one does.
+vi.mock("@/components/living-memory/StyleChecks", () => ({
+  StyleChecks: ({ children }: { children: (binding: unknown) => import("react").ReactNode }) =>
+    children({ canManage: false, rules: [], applicability: [], reviewQueue: null, documentGenres: null, errorBanner: null }),
 }))
 
 import { useProject } from "@/hooks/useProject"
@@ -191,6 +192,18 @@ beforeEach(() => {
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe("LivingMemoryPage — index", () => {
+  // AQU-2342: the brief, the system prompt and the instruction entries were
+  // four answers to one question. The index now has ONE row for it, and that
+  // row says plainly that every AI draft reads it.
+  it("points the Instructions row at the one text every AI draft reads", () => {
+    renderPage()
+
+    const row = screen.getByRole("link", { name: /Instructions/ })
+    expect(row).toHaveTextContent(/Every AI draft reads this/)
+    expect(row).toHaveAttribute("href", "/project/proj-1/memory/instructions")
+    expect(screen.queryByRole("link", { name: /Brief/ })).not.toBeInTheDocument()
+  })
+
   it("does not load the complete cell corpus before Examples is opened", () => {
     renderPage()
 
@@ -226,27 +239,48 @@ describe("LivingMemoryPage — index", () => {
     expect(screen.getByText(/Your team's encoded voice/i)).toBeInTheDocument()
   })
 
-  it("lists the five section rows by accessible name", () => {
+  it("lists Instructions, Terminology, Examples, Checks, then Source documents", () => {
     renderPage()
-    expect(screen.getByRole("link", { name: /Brief/ })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Instructions/ })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Translation quality/ })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Knowledge base/i })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Examples/ })).toBeInTheDocument()
+    const rows = screen.getAllByRole("link").filter((l) => /\/(memory|terminology)/.test(l.getAttribute("href") ?? ""))
+    expect(rows).toHaveLength(5)
+    expect(rows[0]).toHaveAccessibleName(/^Instructions/)
+    expect(rows[1]).toHaveAccessibleName(/^Terminology/)
+    expect(rows[2]).toHaveAccessibleName(/^Examples/)
+    expect(rows[3]).toHaveAccessibleName(/^Checks/)
+    expect(rows[4]).toHaveAccessibleName(/^Source documents/)
+    // Terminology leaves for the terminology page, carrying the editor return.
+    expect(rows[1].getAttribute("href")).toMatch(/^\/project\/proj-1\/terminology/)
+    // Source documents never claim to reach drafting prompts.
+    expect(rows[4]).toHaveTextContent(/not added to drafting prompts/)
   })
 
-  it("shows no pane controls on the index (no Add buttons, no textarea)", () => {
+  it("says the instructions are not written yet, until they are", () => {
+    const { unmount } = renderPage()
+    expect(screen.getByRole("link", { name: /Instructions/ })).toHaveTextContent("Not written yet")
+    unmount()
+
+    mockSettings({ settings: { translationInstructions: "Plain register." } })
     renderPage()
-    expect(screen.queryAllByRole("button", { name: /^Add/i })).toHaveLength(0)
+    expect(screen.getByRole("link", { name: /Instructions/ })).not.toHaveTextContent("Not written yet")
+  })
+
+  it("shows no pane controls on the index (no textarea)", () => {
+    renderPage()
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
   })
 
   it("falls back to the index for an unknown section", () => {
     renderPage("/project/proj-1/memory/nope")
     expect(screen.getByText(/Your team's encoded voice/i)).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Translation quality/ })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /^Checks/ })).toBeInTheDocument()
     // No pane content leaked through.
-    expect(screen.queryByText(/No instructions yet\./i)).not.toBeInTheDocument()
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+  })
+
+  it("redirects the retired brief section to the instructions pane", () => {
+    renderPage("/project/proj-1/memory/brief")
+    expect(screen.getByRole("heading", { level: 2, name: "Instructions" })).toBeInTheDocument()
+    expect(screen.getByRole("textbox", { name: "Instructions" })).toBeInTheDocument()
   })
 
   it("keeps the Terminology cross-link with its aria-label", () => {
@@ -256,12 +290,15 @@ describe("LivingMemoryPage — index", () => {
 })
 
 describe("LivingMemoryPage — instructions pane", () => {
-  it("deep link renders the instructions section but not standards or rules", () => {
+  it("is one heading, one sentence, one text box and one secondary button", () => {
     renderPage("/project/proj-1/memory/instructions")
     expect(screen.getByRole("heading", { level: 2, name: "Instructions" })).toBeInTheDocument()
-    expect(screen.getByText(/No instructions yet\./i)).toBeInTheDocument()
-    expect(screen.queryByRole("heading", { name: "Standards" })).not.toBeInTheDocument()
-    expect(screen.queryByText(/No standards yet\./i)).not.toBeInTheDocument()
+    expect(screen.getByText(/How the AI should translate this project\. Every AI draft reads this/)).toBeInTheDocument()
+    expect(screen.getAllByRole("textbox")).toHaveLength(1)
+    expect(screen.getByRole("button", { name: "Help me write this" })).toBeInTheDocument()
+    // The retired surfaces are gone.
+    expect(screen.queryByRole("button", { name: /System prompt/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^Add/i })).not.toBeInTheDocument()
     expect(screen.queryByTestId("rules-settings-section")).not.toBeInTheDocument()
   })
 
@@ -270,107 +307,107 @@ describe("LivingMemoryPage — instructions pane", () => {
     const back = screen.getByRole("link", { name: /Living Memory/i })
     fireEvent.click(back)
     expect(screen.getByText(/Your team's encoded voice/i)).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Translation quality/ })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /^Checks/ })).toBeInTheDocument()
   })
 
-  it("shows entries with edit/delete controls when canEdit=true", () => {
+  it("prefills the migrated text from the old sources when nothing is stored", () => {
     mockProject({ livingMemoryEntries: [makeEntry({ text: "Formal tone" })] })
+    mockSettings({ settings: { systemPrompt: "Keep divine names as in the 1999 Bible." } })
     renderPage("/project/proj-1/memory/instructions")
-    expect(screen.getByText("Formal tone")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Edit entry/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Delete entry/i })).toBeInTheDocument()
-  })
-})
 
-describe("LivingMemoryPage — prediction prompt block", () => {
-  it("is collapsed by default and expands via the aria-expanded trigger", () => {
-    renderPage("/project/proj-1/memory/instructions")
-    expect(
-      screen.queryByRole("textbox", { name: "System prompt" }),
-    ).not.toBeInTheDocument()
-
-    const trigger = screen.getByRole("button", { name: /System prompt/i })
-    expect(trigger).toHaveAttribute("aria-expanded", "false")
-
-    fireEvent.click(trigger)
-    expect(trigger).toHaveAttribute("aria-expanded", "true")
-    const textarea = screen.getByRole("textbox", { name: "System prompt" })
-    expect(textarea).toHaveValue(DEFAULT_SYSTEM_PROMPT)
+    const field = screen.getByRole("textbox", { name: "Instructions" })
+    expect(field).toHaveValue("Keep divine names as in the 1999 Bible.\n\nFormal tone")
+    // Nothing is written back until someone edits it.
+    expect(mockPatch).not.toHaveBeenCalled()
   })
 
-  it("shows the Default badge for the default prompt and no reset button", () => {
+  it("shows the stored instructions, ignoring the old sources", () => {
+    mockProject({ livingMemoryEntries: [makeEntry({ text: "Formal tone" })] })
+    mockSettings({ settings: { translationInstructions: "Plain register for youth." } })
     renderPage("/project/proj-1/memory/instructions")
-    expect(screen.getByText("Default")).toBeInTheDocument()
-    expect(screen.queryByText("Custom")).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: /System prompt/i }))
-    expect(
-      screen.queryByRole("button", { name: /Reset to default/i }),
-    ).not.toBeInTheDocument()
+
+    expect(screen.getByRole("textbox", { name: "Instructions" })).toHaveValue("Plain register for youth.")
   })
 
-  it("shows the Custom badge and reset button for a custom stored prompt", () => {
-    mockSettings({ settings: { systemPrompt: "Translate like a pirate." } })
-    renderPage("/project/proj-1/memory/instructions")
-    expect(screen.getByText("Custom")).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole("button", { name: /System prompt/i }))
-    expect(screen.getByRole("textbox", { name: "System prompt" })).toHaveValue(
-      "Translate like a pirate.",
-    )
-    expect(screen.getByRole("button", { name: /Reset to default/i })).toBeInTheDocument()
+  it("auto-saves the edited text to translationInstructions", async () => {
+    vi.useFakeTimers()
+    try {
+      renderPage("/project/proj-1/memory/instructions")
+      fireEvent.change(screen.getByRole("textbox", { name: "Instructions" }), {
+        target: { value: "Short sentences." },
+      })
+      expect(mockPatch).not.toHaveBeenCalled()
+      await act(async () => {
+        vi.advanceTimersByTime(INSTRUCTIONS_SAVE_DEBOUNCE_MS)
+      })
+      expect(mockPatch).toHaveBeenCalledTimes(1)
+      // The page hands the pane the STORED text, which the save expects to
+      // still be there (nothing stored here), so it cannot erase a newer one.
+      expect(mockPatch).toHaveBeenCalledWith(
+        { translationInstructions: "Short sentences." },
+        { expect: [{ key: "translationInstructions", value: undefined }] },
+      )
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  it("saves an edited prompt via patch", async () => {
+  it("saves at once when the field loses focus", async () => {
     renderPage("/project/proj-1/memory/instructions")
-    fireEvent.click(screen.getByRole("button", { name: /System prompt/i }))
-    const textarea = screen.getByRole("textbox", { name: "System prompt" })
-    const save = screen.getByRole("button", { name: "Save" })
-    expect(save).toBeDisabled()
-
-    fireEvent.change(textarea, { target: { value: "New prompt text" } })
-    expect(save).toBeEnabled()
-    fireEvent.click(save)
+    const field = screen.getByRole("textbox", { name: "Instructions" })
+    fireEvent.change(field, { target: { value: "Use informal you." } })
+    fireEvent.blur(field)
     await waitFor(() =>
-      expect(mockPatch).toHaveBeenCalledWith({ systemPrompt: "New prompt text" }),
+      expect(mockPatch).toHaveBeenCalledWith({ translationInstructions: "Use informal you." }, expect.anything()),
     )
+    expect(await screen.findByText("Saved")).toBeInTheDocument()
+  })
+
+  it("counts characters against the 8000-character limit", () => {
+    mockSettings({ settings: { translationInstructions: "Plain." } })
+    renderPage("/project/proj-1/memory/instructions")
+    expect(screen.getByRole("textbox", { name: "Instructions" })).toHaveAttribute("maxLength", "8000")
+    expect(screen.getByText("6 / 8,000 characters")).toBeInTheDocument()
+  })
+
+  it("opens the brief interview from 'Help me write this'", () => {
+    renderPage("/project/proj-1/memory/instructions")
+    fireEvent.click(screen.getByRole("button", { name: "Help me write this" }))
+    expect(screen.getByRole("dialog", { name: "Help writing the instructions" })).toBeInTheDocument()
   })
 })
 
 describe("LivingMemoryPage — role-gated edit affordances", () => {
-  it("hides Add buttons and the prompt editor's save when canEdit=false", () => {
+  it("shows the instructions read-only, with a note, below Maintainer", async () => {
     mockProject({
       syncRole: { level: ROLE.CONTRIBUTOR, source: "override" },
     } as unknown as Partial<ProjectRecord>)
-    mockSettings({ canEdit: false, reasonCannotEdit: "role" })
+    mockSettings({
+      canEdit: false,
+      reasonCannotEdit: "role",
+      settings: { translationInstructions: "Plain register." },
+    })
     renderPage("/project/proj-1/memory/instructions")
 
-    expect(screen.queryAllByRole("button", { name: /^Add/i })).toHaveLength(0)
-
-    fireEvent.click(screen.getByRole("button", { name: /System prompt/i }))
-    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument()
-    expect(screen.getByRole("textbox", { name: "System prompt" })).toBeDisabled()
+    const field = screen.getByRole("textbox", { name: "Instructions" })
+    expect(field).toHaveAttribute("readonly")
+    expect(field).toHaveValue("Plain register.")
+    expect(screen.queryByRole("button", { name: "Help me write this" })).not.toBeInTheDocument()
+    expect(screen.getByText("Editing requires the Maintainer role or above.")).toBeInTheDocument()
+    fireEvent.change(field, { target: { value: "Changed" } })
+    fireEvent.blur(field)
+    expect(mockPatch).not.toHaveBeenCalled()
   })
 
-  it("hides the Add button on the quality pane when canEdit=false", () => {
-    mockProject({
-      syncRole: { level: ROLE.REVIEWER, source: "override" },
-    } as unknown as Partial<ProjectRecord>)
-    mockSettings({ canEdit: false, reasonCannotEdit: "role" })
-    renderPage("/project/proj-1/memory/quality")
-
-    expect(screen.getByRole("heading", { name: "Standards" })).toBeInTheDocument()
-    expect(screen.queryAllByRole("button", { name: /^Add/i })).toHaveLength(0)
+  it("mounts the one Checks list, fed the style rules, on the checks pane", () => {
+    renderPage("/project/proj-1/memory/checks")
+    expect(screen.queryByRole("heading", { name: "Standards" })).not.toBeInTheDocument()
+    expect(screen.getByTestId("rules-settings-section")).toHaveAttribute("data-has-style", "yes")
   })
 
-  it("shows standards Add button and mounts the Rules surface when canEdit=true", () => {
+  it("redirects the retired quality section to the checks pane", () => {
     renderPage("/project/proj-1/memory/quality")
-    expect(screen.getByRole("heading", { name: "Standards" })).toBeInTheDocument()
-    expect(
-      screen.getByRole("button", { name: /Add standards entry/i }),
-    ).toBeInTheDocument()
-    expect(screen.getByRole("heading", { name: "Rules" })).toBeInTheDocument()
     expect(screen.getByTestId("rules-settings-section")).toBeInTheDocument()
-    expect(screen.getByTestId("quality-style-rules")).toBeInTheDocument()
   })
 })
 
@@ -384,18 +421,58 @@ describe("LivingMemoryPage — examples pane", () => {
     }))
   })
 
-  it("keeps the Recent Examples section and role=status empty state", () => {
+  // AQU-2001: the page already knows the editor's lane (AQU-1509) and hands it
+  // to the Rules pane. The Examples query has to get it too — read at the
+  // default lane, a project translated into a named lane has no target rows to
+  // aggregate, so the pane showed "no validated translations" no matter how
+  // much the team had validated.
+  it("reads validated examples in the lane the page is viewing", () => {
+    renderPage("/project/proj-1/memory/examples", { activeLane: "de" })
+
+    expect(vi.mocked(useLivingMemory)).toHaveBeenLastCalledWith(expect.objectContaining({
+      enabled: true,
+      lane: "de",
+    }))
+  })
+
+  it("asks for the default lane when the page has no active lane", () => {
     renderPage("/project/proj-1/memory/examples")
+
+    expect(vi.mocked(useLivingMemory)).toHaveBeenLastCalledWith(expect.objectContaining({
+      lane: "",
+    }))
+  })
+
+  // AQU-921: the pane is an inspection surface, so its body starts collapsed.
+  it("collapses Recent Examples by default, leaving the disclosure control visible", () => {
+    renderPage("/project/proj-1/memory/examples")
+
     expect(
-      document.querySelector('section[aria-label="Recent Examples"]'),
+      document.querySelector('section[aria-label="Recent examples"]'),
     ).toBeInTheDocument()
+
+    const trigger = screen.getByRole("button", { name: /Recent examples/i })
+    expect(trigger).toBeVisible()
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+
+    // The body — description and empty state — is not exposed until expanded.
+    expect(screen.getByText(/No validated translations yet/i)).not.toBeVisible()
+  })
+
+  it("keeps the Recent Examples section and role=status empty state once expanded", () => {
+    renderPage("/project/proj-1/memory/examples")
+    fireEvent.click(screen.getByRole("button", { name: /Recent examples/i }))
+
+    expect(
+      screen.getByRole("button", { name: /Recent examples/i }),
+    ).toHaveAttribute("aria-expanded", "true")
     expect(
       screen.getByRole("status", { name: /No validated translations/i }),
     ).toBeInTheDocument()
-    expect(screen.getByText(/No validated translations yet/i)).toBeInTheDocument()
+    expect(screen.getByText(/No validated translations yet/i)).toBeVisible()
   })
 
-  it("renders validated cells grouped by file when populated", () => {
+  it("renders validated cells grouped by file when populated and expanded", () => {
     vi.mocked(useLivingMemory).mockReturnValue({
       cells: [makeCell()],
       isLoading: false,
@@ -404,12 +481,29 @@ describe("LivingMemoryPage — examples pane", () => {
       fileCount: 1,
     })
     renderPage("/project/proj-1/memory/examples")
-    expect(screen.getByText("Genesis")).toBeInTheDocument()
-    expect(screen.getByText("In the beginning")).toBeInTheDocument()
-    expect(screen.getByText("Mwanzoni")).toBeInTheDocument()
+
+    // Collapsed first: the cell list is rendered but not exposed.
+    expect(screen.getByText("In the beginning")).not.toBeVisible()
+
+    fireEvent.click(screen.getByRole("button", { name: /Recent examples/i }))
+    expect(screen.getByText("Genesis")).toBeVisible()
+    expect(screen.getByText("In the beginning")).toBeVisible()
+    expect(screen.getByText("Mwanzoni")).toBeVisible()
     expect(
       screen.queryByRole("status", { name: /No validated translations/i }),
     ).not.toBeInTheDocument()
+  })
+
+  it("keeps fetching validated cells while collapsed", () => {
+    renderPage("/project/proj-1/memory/examples")
+
+    // Collapsing is presentational only — the query still runs for the pane.
+    expect(vi.mocked(useLivingMemory)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: true }),
+    )
+    expect(
+      screen.getByRole("button", { name: /Recent examples/i }),
+    ).toHaveAttribute("aria-expanded", "false")
   })
 })
 
@@ -421,9 +515,8 @@ describe("LivingMemoryPage — knowledge pane", () => {
     expect(
       screen.getByRole("button", { name: /Upload document/i }),
     ).toBeInTheDocument()
-    expect(
-      screen.getByRole("switch", { name: /Use knowledge base in drafting/i }),
-    ).toBeInTheDocument()
+    // AQU-2342: knowledge documents never reach a drafting prompt — no switch claims they do.
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument()
   })
 
   it("shows a read-only surface below PROJECT_LEAD", async () => {
@@ -437,5 +530,14 @@ describe("LivingMemoryPage — knowledge pane", () => {
     expect(
       screen.queryByRole("button", { name: /Upload document/i }),
     ).not.toBeInTheDocument()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): the coloured liveness dot is a mark, not a button,
+// so what it means opens on click, never on hover.
+describe("LivingMemoryPage — liveness dot", () => {
+  it("says the memory's state on click", async () => {
+    renderPage()
+    await expectClickNote(screen.getByRole("button", { name: "Live" }), "Live")
   })
 })

@@ -26,9 +26,13 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
+import { ErrorBoundary } from "./ErrorBoundary"
+import { ResourcePaneCrash, ResourcePaneError } from "./ResourcePaneError"
 import { RightSidebarPanel } from "./RightSidebarPanel"
+import { TabithaBriefSection } from "./TabithaBriefSection"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
+  adjacentPassagePaths,
   buildMapMosaic,
   formatCoordinates,
   loadEntityDetail,
@@ -37,9 +41,11 @@ import {
   osmPermalink,
   OSM_TILE_SIZE,
   passagePathFromRef,
+  prefetchPassageEntities,
   type AquiferEntityDetail,
   type AquiferEntityRef,
 } from "@/lib/aquifer/passage-resources"
+import { referencePrefetchAllowed } from "@/lib/net/prefetch-policy"
 
 const OPEN_STORAGE_KEY_PREFIX = "aquilla:verse-resources:"
 
@@ -201,7 +207,20 @@ function EntityCard({
   )
 }
 
-export function VerseResourcesSidebar({
+/** Pane-local crash boundary — a render throw here must not take the workspace
+ *  down until the translator reloads the page (AQU-849). */
+export function VerseResourcesSidebar(props: VerseResourcesSidebarProps) {
+  return (
+    <ErrorBoundary
+      label="verse-resources-sidebar"
+      fallback={(reset) => <ResourcePaneCrash onRetry={reset} />}
+    >
+      <VerseResourcesSidebarBody {...props} />
+    </ErrorBoundary>
+  )
+}
+
+function VerseResourcesSidebarBody({
   projectId,
   trackedRef,
   getJwt,
@@ -213,6 +232,8 @@ export function VerseResourcesSidebar({
   const [entities, setEntities] = useState<AquiferEntityRef[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [details, setDetails] = useState<Map<string, DetailState>>(new Map())
+  // Retry re-arms the lookup without a page reload; see ParallelBiblesSidebar.
+  const [retryNonce, setRetryNonce] = useState(0)
 
   // Hold the last verse-scoped ref so headings and chapter rows don't blank the
   // panel as the translator scrolls past them.
@@ -246,10 +267,20 @@ export function VerseResourcesSidebar({
         setEntities([])
         setError(err instanceof Error ? err.message : String(err))
       })
+      // AQU-843: with the visible verse resolved, warm the verses either side
+      // so a scroll step renders from memory instead of a cold round-trip.
+      // Sequenced after the visible fetch on purpose — on a weak link a
+      // preload must not compete with the verse being waited on.
+      .finally(() => {
+        if (cancelled || !referencePrefetchAllowed()) return
+        for (const target of adjacentPassagePaths(debouncedPath)) {
+          prefetchPassageEntities(jwt, projectId, target)
+        }
+      })
     return () => {
       cancelled = true
     }
-  }, [open, debouncedPath, projectId, getJwt])
+  }, [open, debouncedPath, projectId, getJwt, retryNonce])
 
   // Load each listed entity's header (gloss / coordinates / image), capped.
   useEffect(() => {
@@ -283,22 +314,21 @@ export function VerseResourcesSidebar({
   // Closed: slim edge tab so the helps are one click away while reading.
   if (!open) {
     return (
-      <AppTooltip content={t("editor.resources.openTooltip")} side="left">
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-label={t("editor.resources.show")}
-          className={cn(
-            "hidden h-full w-9 shrink-0 flex-col items-center gap-1.5 border-l bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:flex",
-            className,
-          )}
-        >
-          <Shapes className="h-4 w-4" />
-          <span className="text-sm font-semibold tracking-wide [writing-mode:vertical-rl]">
-            {t("editor.resources.edgeTab")}
-          </span>
-        </button>
-      </AppTooltip>
+      // Its word names it: no hover (AQU-2260).
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={t("editor.resources.show")}
+        className={cn(
+          "hidden h-full w-9 shrink-0 flex-col items-center gap-1.5 border-l bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:flex",
+          className,
+        )}
+      >
+        <Shapes className="h-4 w-4" />
+        <span className="text-sm font-semibold tracking-wide [writing-mode:vertical-rl]">
+          {t("editor.resources.edgeTab")}
+        </span>
+      </button>
     )
   }
 
@@ -313,7 +343,7 @@ export function VerseResourcesSidebar({
       defaultWidth={320}
       minWidth={300}
       className={cn("hidden sm:flex", className)}
-      resizeLabel="Resize verse resources panel"
+      resizeLabel={t("editor.panel.resizeVerseResources")}
     >
       <div className="flex h-full w-full flex-col border-l bg-card text-sm">
         {/* Header — p-2 matches the other side panels' header strip. */}
@@ -346,9 +376,11 @@ export function VerseResourcesSidebar({
               {t("editor.resources.scrollHint")}
             </p>
           ) : error ? (
-            <p className="p-4 text-xs text-destructive">
-              {t("editor.resources.failedToLoad", { error })}
-            </p>
+            <ResourcePaneError
+              className="p-4"
+              message={t("editor.resources.failedToLoad", { error })}
+              onRetry={() => setRetryNonce((n) => n + 1)}
+            />
           ) : entities === null ? (
             <div
               className="flex items-center justify-center p-4 text-muted-foreground"
@@ -367,6 +399,9 @@ export function VerseResourcesSidebar({
               ))}
             </div>
           )}
+          {debouncedPath && (
+            <TabithaBriefSection projectId={projectId} passagePath={debouncedPath} getJwt={getJwt} />
+          )}
         </div>
 
         {/* Footer: attribution for both upstreams the panel draws from. */}
@@ -381,6 +416,11 @@ export function VerseResourcesSidebar({
             >
               {/* i18n-exempt: proper-noun name of the external corpus this data is sourced from */}
               Bible Aquifer
+            </a>
+            {" · "}
+            <a href="https://tabitha.bible/" target="_blank" rel="noreferrer" className="underline">
+              {/* i18n-exempt: proper-noun name of the translation-checks data source (CanIL) */}
+              TaBiThA
             </a>
             {" · "}
             <a

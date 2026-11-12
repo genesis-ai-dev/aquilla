@@ -12,8 +12,10 @@
 // the two states where a moving picture would be wrong — before anything has
 // been asked for, and while a finished take is under review.
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { renderWithTooltips } from "@/test-utils/tooltip"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -73,11 +75,29 @@ vi.mock("@/lib/audio/upload", async (importOriginal) => ({
   uploadCellAudio: (...args: unknown[]) => uploadSpy(...(args as [])),
   deleteCellAudio: vi.fn(async () => {}),
 }))
-vi.mock("@/lib/audio/bytes-cache", () => ({ audioCachePutBlob: vi.fn(async () => {}) }))
+vi.mock("@/lib/audio/bytes-cache", () => ({ audioCacheGet: vi.fn(async () => null), audioCachePutBlob: vi.fn(async () => {}) }))
 vi.mock("@/lib/audio/project-audio-state", () => ({ markProjectHasAudioDataSoon: vi.fn() }))
 vi.mock("@/lib/audio/transcribe-status", () => ({ setTranscribeStatus: vi.fn() }))
 vi.mock("@/lib/audio/transcribe", () => ({ transcribeCell: vi.fn(async () => {}) }))
-vi.mock("@/lib/audio/audio-coordinator", () => ({ pushAudioShortcutOverride: () => () => {} }))
+vi.mock("@/lib/audio/audio-coordinator", () => ({
+  pushAudioShortcutOverride: () => () => {},
+  setActiveAudio: () => {},
+  clearActiveAudioIf: () => {},
+  claimActiveAudio: () => {},
+  getActiveAudio: () => null,
+}))
+// AQU-1217: the ready screen's selected-take waveform has its own suite
+// (AudioRecordingModal.ready.test.tsx); here it only reports where it is, for
+// the film play-along tests.
+const readyPlayer = vi.hoisted(() => ({ isPlaying: false, currentTime: 0 }))
+vi.mock("@/hooks/useCellAudio", () => ({
+  useCellAudio: () => ({
+    state: "idle", error: null, isPlaying: readyPlayer.isPlaying, currentTime: readyPlayer.currentTime, duration: 0,
+    peaks: null, peaksState: "idle",
+    play: async () => {}, pause: () => {}, seek: () => {}, setVolume: () => {},
+    setTrim: () => {}, requestPeaks: async () => {}, ensureBytes: async () => new Uint8Array(),
+  }),
+}))
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
 import { resetRecordingFilmAudibleCacheForTests } from "@/lib/store/recording-film-audible-pref"
@@ -131,6 +151,25 @@ describe("AudioRecordingModal — the film", () => {
     expect(screen.queryByTestId("rec-video")).not.toBeInTheDocument()
   })
 
+  // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. These
+  // two carry their own words ("Collapse video", "Film").
+  it("the film's hide and show buttons have no hover", async () => {
+    const user = userEvent.setup()
+    renderWithTooltips(modal(projectWithFilm))
+    const collapse = screen.getByTestId("rec-collapse-video")
+    await user.hover(collapse)
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    fireEvent.click(collapse)
+    const expand = screen.getByTestId("rec-expand-video")
+    await user.hover(expand)
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    // The choice is a device-wide preference: put the film back for the rest.
+    fireEvent.click(expand)
+    expect(screen.getByTestId("rec-collapse-video")).toBeInTheDocument()
+  })
+
   it("the picture is MUTED by default, and the toggle flips it", () => {
     render(modal(projectWithFilm))
     // The property, not the attribute — happy-dom falls back to the attribute,
@@ -139,6 +178,17 @@ describe("AudioRecordingModal — the film", () => {
     expect((screen.getByTestId("rec-video") as HTMLVideoElement).muted).toBe(true)
     fireEvent.click(screen.getByTestId("rec-film-audible"))
     expect((screen.getByTestId("rec-video") as HTMLVideoElement).muted).toBe(false)
+  })
+
+  it("resolves the imported picture beside the recorder", async () => {
+    render(modal({
+      ...projectWithFilm,
+      files: [{ ...projectWithFilm.files[0],
+        coreMediaUrl: "frontier-audio://imported.mp4" }],
+    }))
+    await waitFor(() => expect(
+      screen.getByTestId("rec-video").getAttribute("src"),
+    ).toContain("/audio/p1/f1/imported.mp4?t=sync-tok"))
   })
 
   // ONE canvas from the countdown into the take. The waveform owns an
@@ -324,23 +374,26 @@ describe("AudioRecordingModal — the countdown preference", () => {
 
     const beep = screen.getByTestId("rec-beep") as HTMLButtonElement
     // Default: the countdown runs, so the beep is a live choice.
-    expect(beep).not.toBeDisabled()
-    expect(beep).toHaveAttribute("aria-pressed", "true")
+    expect(beep).not.toHaveAttribute("aria-disabled", "true")
+    expect(beep).toHaveAttribute("aria-checked", "true")
 
-    fireEvent.click(screen.getByTestId("rec-countdown"))
-    expect(screen.getByTestId("rec-beep")).toBeDisabled()
+    fireEvent.click(screen.getByRole("tab", { name: "Off" }))
+    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-disabled", "true")
     // Not applicable, not changed — the stored answer survives.
-    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-checked", "true")
 
-    fireEvent.click(screen.getByTestId("rec-countdown"))
-    expect(screen.getByTestId("rec-beep")).not.toBeDisabled()
-    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-pressed", "true")
+    // Any speed gives it back — the beep belongs to the count, not to Normal.
+    fireEvent.click(screen.getByRole("tab", { name: "Fast" }))
+    expect(screen.getByTestId("rec-beep")).not.toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-checked", "true")
   })
 
   it("persists the opt-out per device", () => {
     const { unmount } = render(modal(projectNoFilesKey))
     fireEvent.click(screen.getByTestId("rec-settings"))
-    fireEvent.click(screen.getByTestId("rec-countdown"))
+    // Normal is today's count, and the default.
+    expect(screen.getByTestId("rec-countdown")).toHaveAttribute("data-speed", "normal")
+    fireEvent.click(screen.getByRole("tab", { name: "Off" }))
     expect(localStorage.getItem("aq.recording-countdown.v1")).toBe("off")
     unmount()
 
@@ -348,6 +401,114 @@ describe("AudioRecordingModal — the countdown preference", () => {
     resetRecordingCountdownCacheForTests()
     render(modal(projectNoFilesKey))
     fireEvent.click(screen.getByTestId("rec-settings"))
-    expect(screen.getByTestId("rec-countdown")).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByTestId("rec-countdown")).toHaveAttribute("data-speed", "off")
+    expect(screen.getByRole("tab", { name: "Off" })).toHaveAttribute("aria-selected", "true")
+  })
+
+  // AQU-2264: the beep was the one recorder setting nothing remembered — it
+  // came back on with every reload, and in every other project.
+  it("remembers the countdown beep after the recorder closes and the page reloads", () => {
+    const { unmount } = render(modal(projectNoFilesKey))
+    fireEvent.click(screen.getByTestId("rec-settings"))
+    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(screen.getByTestId("rec-beep"))
+    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-checked", "false")
+    unmount()
+
+    resetRecordingCountdownCacheForTests() // a reload
+    render(modal(projectNoFilesKey))
+    fireEvent.click(screen.getByTestId("rec-settings"))
+    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-checked", "false")
+  })
+
+  // AQU-1210 (Sam, 25 Sep): the count has a speed. Fast is half a second a
+  // count, so zero — and the take — arrive at 1.5s, not 3s.
+  it("a Fast count reaches zero in half the time", async () => {
+    installAudioContextSpy()
+    localStorage.setItem("aq.recording-countdown.v1", "fast")
+    resetRecordingCountdownCacheForTests()
+    // AQU-1916: the old 2500 ms window told Fast (1.5 s) from Normal (3 s)
+    // only by sitting between them, so a loaded machine could fail a correct
+    // build. On a fake clock the step is named outright: three counts of
+    // Fast's 500 ms, and nothing before the last millisecond of it.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+    try {
+      render(modal(projectNoFilesKey))
+      fireEvent.click(screen.getByTestId("rec-start"))
+      // The flow is kicked off a setTimeout(…, 0), so let that land first.
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(screen.getByText("3")).toBeInTheDocument()
+
+      // Spelled out, not read back from COUNTDOWN_STEP_MS: a test that derives
+      // its expectation from the constant it guards cannot catch that constant
+      // being changed to Normal's 1000 ms.
+      const fastZeroMs = 1500 // three counts of 500 ms
+      await act(async () => { await vi.advanceTimersByTimeAsync(fastZeroMs - 1) })
+      // One millisecond short of zero the take has NOT been armed. A Normal
+      // count (1 s a step) would still be two seconds away here.
+      expect(recorderStart).not.toHaveBeenCalled()
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(recorderStart).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+// AQU-1210 (Sam, 2026-09-25): FILM PLAY-ALONG, a setting. Playing a take back
+// inside the recorder plays the picture with it, from where the take sits.
+// (The follow mechanics are pinned in RecordingVideoSurface.test.tsx; this is
+// the modal's half: which take, which moment, and the setting.)
+describe("AudioRecordingModal — the film plays along", () => {
+  const withTake = () => {
+    attachmentsState.byCellId = new Map([["c1", {
+      selectedAudioId: "audio-c1-3.wav", selectedGeneratedVoiceAudioId: null, audioTimings: {},
+      attachments: {
+        "audio-c1-3.wav": {
+          audioId: "audio-c1-3.wav", url: "frontier-audio://audio-c1-3.wav", slot: "recording", label: "Take 3",
+          mimeType: "audio/wav", voiceId: null, referenceAudioId: null, durationMs: 3600,
+          trimStartMs: 200, trimEndMs: null, targetOffsetMs: -200,
+        },
+      },
+    }]])
+  }
+  let play: ReturnType<typeof vi.spyOn>
+  let ready: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    onlineState.value = true
+    recorderState.value = { kind: "idle" }
+    localStorage.clear()
+    resetRecordingFilmAudibleCacheForTests()
+    resetRecordingCountdownCacheForTests()
+    readyPlayer.isPlaying = false
+    readyPlayer.currentTime = 0
+    withTake()
+    ready = vi.spyOn(window.HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(4)
+    play = vi.spyOn(window.HTMLMediaElement.prototype, "play").mockResolvedValue(undefined)
+  })
+  afterEach(() => {
+    ready.mockRestore()
+    play.mockRestore()
+  })
+
+  it("playing the ready screen's take rolls the film from the take's place in it", () => {
+    const { rerender } = render(modal(projectWithFilm))
+    expect(play).not.toHaveBeenCalled()
+    // The take's sample zero sits 0.2s before the line (4s); 1.5s into it is
+    // 5.3s into the film.
+    readyPlayer.isPlaying = true
+    readyPlayer.currentTime = 1.5
+    rerender(modal(projectWithFilm))
+    expect(play).toHaveBeenCalled()
+    expect((screen.getByTestId("rec-video") as HTMLVideoElement).currentTime).toBeCloseTo(5.3, 2)
+  })
+
+  // Sam, 2026-09-28: no switch for it — the film is muted by default, and
+  // nobody would want it standing still.
+  it("has no setting to turn it off", () => {
+    render(modal(projectWithFilm))
+    fireEvent.click(screen.getByTestId("rec-settings"))
+    expect(screen.queryByText(/play.?along|plays along/i)).not.toBeInTheDocument()
   })
 })

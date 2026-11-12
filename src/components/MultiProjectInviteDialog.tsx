@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, type ComponentProps } from "react"
 import { Check, Search } from "lucide-react"
+import { LegendList, type LegendListRenderItemProps } from "@legendapp/list/react"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -11,20 +12,179 @@ import {
 } from "@/components/ui/dialog"
 import {
   ROLE,
-  PROJECT_ROLE_OPTIONS,
   LINK_ROLE_OPTIONS,
   roleDisplayText,
   roleName,
   type RoleLevel,
 } from "@/lib/frontier/roles"
 import { addProjectMember, lookupUser } from "@/lib/frontier/members"
-import { createServerInvite } from "@/lib/sync/invites"
+import { createServerInviteWithChoice } from "@/lib/sync/invite-with-choice"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead"
 import { RoleSelect } from "@/components/RoleSelect"
+import { roleChoices as projectRoleChoices } from "@/lib/frontier/role-choices"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { LaneAccessFields } from "@/components/LaneAccessFields"
+import { useCurrentTargetLanes, type TargetLaneOption } from "@/hooks/useCurrentTargetLanes"
+import {
+  laneChoiceReady,
+  needsLaneChoice,
+  toMemberLaneAccess,
+  type LaneAccessChoice,
+} from "@/lib/lanes/lane-access-choice"
+
+/**
+ * AQU-1151: above this many rendered rows the checklist switches from a plain
+ * `<ul>` to a virtualized LegendList, so a 300-project org does not mount 300
+ * rows (each with a tooltip and a conditional role picker) every time the
+ * dialog opens or a checkbox toggles. Below the threshold, mounting everything
+ * is cheaper than virtualization bookkeeping and the box keeps its natural
+ * height, so the common small-org dialog is exactly what it always was.
+ */
+const VIRTUALIZE_ROW_THRESHOLD = 50
+/** An unselected row: `py-2` around a 20px checkbox, plus the 1px divider. */
+const ESTIMATED_ROW_HEIGHT_PX = 37
+/**
+ * The virtualized list needs a definite height to know what is on screen, so
+ * it takes the box's old `max-h-64` cap as a fixed height. Only lists longer
+ * than the threshold get here, and those always overflowed that cap anyway —
+ * the box is the same size it has always been.
+ */
+const VIRTUAL_LIST_HEIGHT_PX = 256
+
+interface ProjectChecklistRowProps {
+  project: CloudProjectSummary
+  /** The chosen role, or undefined when the project is not selected. */
+  selectedRole: RoleLevel | undefined
+  errorMsg: string | undefined
+  isDone: boolean
+  busy: boolean
+  isEmailMode: boolean
+  roleChoices: NonNullable<ComponentProps<typeof RoleSelect>["options"]>
+  onToggle: (projectId: string) => void
+  onRoleChange: (projectId: string, level: RoleLevel) => void
+  laneChoice: LaneAccessChoice | null
+  onLaneChoice: (choice: LaneAccessChoice) => void
+  onLanes: (projectId: string, lanes: readonly TargetLaneOption[]) => void
+  className?: string
+}
+
+/**
+ * One project row in the add-to-projects checklist. Extracted from the dialog
+ * body so both containers render an identical row — the point of AQU-1151 is
+ * that virtualization changes only WHICH rows are mounted, never what a row
+ * is. It reads its own translations so a locale change reaches mounted rows
+ * through context rather than having to travel in LegendList's `extraData`.
+ */
+function ProjectChecklistRow({
+  project,
+  selectedRole,
+  errorMsg,
+  isDone,
+  busy,
+  isEmailMode,
+  roleChoices,
+  onToggle,
+  onRoleChange,
+  laneChoice,
+  onLaneChoice,
+  onLanes,
+  className,
+}: ProjectChecklistRowProps) {
+  const { t } = useI18n()
+  const isSelected = selectedRole !== undefined
+  const { lanes } = useCurrentTargetLanes(
+    isSelected && selectedRole < ROLE.PROJECT_LEAD ? project.id : null,
+  )
+  useEffect(() => {
+    onLanes(project.id, lanes)
+  }, [lanes, onLanes, project.id])
+  return (
+    <div
+      className={`px-3 py-2 text-sm ${isSelected ? "bg-muted/40" : ""}${
+        className ? ` ${className}` : ""
+      }`}
+    >
+      <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={isSelected}
+          aria-label={t("org.multiProjectInviteDialog.selectProjectAriaLabel", { name: project.name })}
+          onClick={() => onToggle(project.id)}
+          disabled={busy}
+          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:opacity-50 ${
+            isSelected
+              ? "bg-primary border-primary text-primary-foreground"
+              : "border-muted-foreground/50 bg-background hover:border-primary hover:bg-accent"
+          }`}
+        >
+          {isSelected && <Check className="h-3.5 w-3.5" />}
+        </button>
+        {/* AQU-1152: `truncate` alone never clipped this.
+          * The button is inline-block, and shrink-to-fit
+          * resolves a `white-space: nowrap` box to its full
+          * text width whatever the 1fr track allows — so a
+          * long name overflowed the track and painted over
+          * the role picker to its right. `max-w-full`
+          * clamps the box to the track, which is what makes
+          * the ellipsis appear. Not `w-full`: short names
+          * must keep hugging their text, hit area included.
+          */}
+        <AppTooltip content={project.name}>
+          <span className="block min-w-0">
+            <button
+              type="button"
+              onClick={() => onToggle(project.id)}
+              disabled={busy}
+              className="min-w-0 max-w-full truncate text-start hover:text-foreground disabled:opacity-50"
+            >
+              {project.name}
+            </button>
+          </span>
+        </AppTooltip>
+        {isDone ? (
+          <span className="shrink-0 text-[10px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
+            <Check className="h-3 w-3" /> {isEmailMode ? "invited" : "added"}
+          </span>
+        ) : isSelected ? (
+          <RoleSelect
+            // AQU-2289: never more than the operator may grant on this project.
+            options={roleChoices.filter((r) => project.role?.level == null || r.level <= project.role.level)}
+            value={selectedRole}
+            onValueChange={(level) => onRoleChange(project.id, level as RoleLevel)}
+            disabled={busy}
+            size="sm"
+            className="shrink-0"
+            aria-label={t("org.teamDetail.roleForAriaLabel", { name: project.name })}
+          />
+        ) : (
+          <span aria-hidden className="w-0" />
+        )}
+      </div>
+      {isSelected && selectedRole !== undefined && needsLaneChoice(selectedRole, lanes.length) && (
+        <div className="mt-2 ps-7">
+          <LaneAccessFields
+            name={`lane-access-${project.id}`}
+            lanes={lanes}
+            value={laneChoice}
+            onChange={onLaneChoice}
+            disabled={busy}
+          />
+        </div>
+      )}
+      {errorMsg && (
+        <AppTooltip content={errorMsg} className="max-w-xs">
+          <p className="mt-1 ps-7 text-[10px] text-destructive break-words">
+            {errorMsg}
+          </p>
+        </AppTooltip>
+      )}
+    </div>
+  )
+}
 
 interface MultiProjectInviteDialogProps {
   open: boolean
@@ -69,6 +229,8 @@ export function MultiProjectInviteDialog({
     raw: "",
   })
   const [selections, setSelections] = useState<Record<string, RoleLevel>>({})
+  const [lanesByProject, setLanesByProject] = useState<Record<string, readonly TargetLaneOption[]>>({})
+  const [laneChoices, setLaneChoices] = useState<Record<string, LaneAccessChoice | null>>({})
   const [query, setQuery] = useState("")
   const [busy, setBusy] = useState(false)
   const [perProjectError, setPerProjectError] = useState<Record<string, string>>({})
@@ -94,7 +256,7 @@ export function MultiProjectInviteDialog({
     selectedIds.length > 0 &&
     Boolean(session?.jwt)
 
-  function toggleProject(projectId: string) {
+  const toggleProject = useCallback((projectId: string) => {
     setSelections((prev) => {
       const next = { ...prev }
       if (projectId in next) {
@@ -104,11 +266,29 @@ export function MultiProjectInviteDialog({
       }
       return next
     })
-  }
+  }, [])
 
-  function setProjectRole(projectId: string, level: RoleLevel) {
+  const setProjectRole = useCallback((projectId: string, level: RoleLevel) => {
     setSelections((prev) => ({ ...prev, [projectId]: level }))
-  }
+  }, [])
+
+  const setProjectLanes = useCallback((projectId: string, lanes: readonly TargetLaneOption[]) => {
+    setLanesByProject((prev) => {
+      const current = prev[projectId]
+      if (
+        current &&
+        current.length === lanes.length &&
+        current.every((lane, index) => lane.id === lanes[index]?.id)
+      ) {
+        return prev
+      }
+      return { ...prev, [projectId]: lanes }
+    })
+  }, [])
+
+  const setProjectLaneChoice = useCallback((projectId: string, choice: LaneAccessChoice) => {
+    setLaneChoices((prev) => ({ ...prev, [projectId]: choice }))
+  }, [])
 
   async function handleInvite() {
     if (!session?.jwt) {
@@ -123,10 +303,29 @@ export function MultiProjectInviteDialog({
       setTopError("Select at least one project.")
       return
     }
+    const blocked: Record<string, string> = {}
+    const grantIds = selectedIds.filter((projectId) => {
+      const role = selections[projectId]
+      const lanes = lanesByProject[projectId] ?? []
+      if (laneChoiceReady(laneChoices[projectId] ?? null, role, lanes.length)) return true
+      blocked[projectId] = t("projectSettings.share.laneChoiceRequired")
+      return false
+    })
+    function accessFor(projectId: string) {
+      const role = selections[projectId]
+      const lanes = lanesByProject[projectId] ?? []
+      const choice = laneChoices[projectId] ?? null
+      if (!needsLaneChoice(role, lanes.length) || !choice) return undefined
+      return toMemberLaneAccess(choice)
+    }
     setBusy(true)
     setTopError(null)
-    setPerProjectError({})
+    setPerProjectError(blocked)
     setDone(null)
+    if (grantIds.length === 0) {
+      setBusy(false)
+      return
+    }
     try {
       // Email mode (AQU-471): mint one email-bound invite link per project —
       // the server sends each invite email. No pre-existing account needed.
@@ -134,14 +333,21 @@ export function MultiProjectInviteDialog({
         const email = recipient.raw.trim()
         const jwt = session.jwt
         const results = await Promise.all(
-          selectedIds.map((projectId) =>
-            createServerInvite(jwt, projectId, selections[projectId], undefined, email)
-          )
+          grantIds.map((projectId) => {
+            return createServerInviteWithChoice(
+              jwt,
+              projectId,
+              selections[projectId],
+              email,
+              undefined,
+              accessFor(projectId),
+            )
+          })
         )
-        const errors: Record<string, string> = {}
+        const errors: Record<string, string> = { ...blocked }
         const successes: Record<string, "ok"> = {}
         results.forEach((created, i) => {
-          const id = selectedIds[i]
+          const id = grantIds[i]
           if (created) {
             successes[id] = "ok"
           } else {
@@ -177,14 +383,17 @@ export function MultiProjectInviteDialog({
       // Issue grants in parallel — they're independent and we want the
       // round-trip cost to be O(1) round-trips, not O(N).
       const results = await Promise.allSettled(
-        selectedIds.map((projectId) =>
-          addProjectMember(session.jwt, projectId, target.username, selections[projectId])
-        )
+        grantIds.map((projectId) => {
+          const access = accessFor(projectId)
+          return access
+            ? addProjectMember(session.jwt, projectId, target.username, selections[projectId], access)
+            : addProjectMember(session.jwt, projectId, target.username, selections[projectId])
+        })
       )
-      const errors: Record<string, string> = {}
+      const errors: Record<string, string> = { ...blocked }
       const successes: Record<string, "ok"> = {}
       results.forEach((r, i) => {
-        const id = selectedIds[i]
+        const id = grantIds[i]
         if (r.status === "fulfilled") {
           successes[id] = "ok"
         } else {
@@ -215,6 +424,8 @@ export function MultiProjectInviteDialog({
     if (busy) return
     setRecipient({ mode: "username", raw: "" })
     setSelections({})
+    setLanesByProject({})
+    setLaneChoices({})
     setQuery("")
     setPerProjectError({})
     setTopError(null)
@@ -222,10 +433,47 @@ export function MultiProjectInviteDialog({
     onOpenChange(false)
   }
 
-  // Username mode: cap role picker at maintainer; owner is conferred on
-  // creation, never via bulk add. Email mode: link-share invites are capped at
-  // contributor server-side, so only offer the link roles.
-  const roleChoices = isEmailMode ? LINK_ROLE_OPTIONS : PROJECT_ROLE_OPTIONS
+  // Username mode: the one project list (AQU-2289), up to Maintainer; owner
+  // is conferred on creation, never via bulk add. Email mode: link-share
+  // invites are capped at contributor server-side, so only offer the link
+  // roles. Each row then caps the list at the operator's own role there.
+  const roleChoices = isEmailMode ? LINK_ROLE_OPTIONS : projectRoleChoices("project", { callerLevel: null })
+
+  const renderProjectRow = useCallback(
+    (project: CloudProjectSummary, className?: string) => (
+      <ProjectChecklistRow
+        project={project}
+        selectedRole={selections[project.id]}
+        errorMsg={perProjectError[project.id]}
+        isDone={done?.[project.id] === "ok"}
+        busy={busy}
+        isEmailMode={isEmailMode}
+        roleChoices={roleChoices}
+        onToggle={toggleProject}
+        onRoleChange={setProjectRole}
+        laneChoice={laneChoices[project.id] ?? null}
+        onLaneChoice={(choice) => setProjectLaneChoice(project.id, choice)}
+        onLanes={setProjectLanes}
+        className={className}
+      />
+    ),
+    [selections, laneChoices, perProjectError, done, busy, isEmailMode, roleChoices, toggleProject, setProjectRole, setProjectLaneChoice, setProjectLanes],
+  )
+
+  // Everything a row reads out of dialog state has to travel in `extraData`:
+  // LegendList only re-renders a mounted row when this reference changes, so a
+  // value left out of here would leave a checked row looking unchecked (or a
+  // failed row without its error) until it scrolled out of view and back.
+  const listExtraData = useMemo(
+    () => ({ selections, laneChoices, perProjectError, done, busy, isEmailMode }),
+    [selections, laneChoices, perProjectError, done, busy, isEmailMode],
+  )
+
+  const renderVirtualRow = useCallback(
+    ({ item }: LegendListRenderItemProps<CloudProjectSummary>) =>
+      renderProjectRow(item, "border-b"),
+    [renderProjectRow],
+  )
 
   // Switching to email mode clamps any managerial selections down to the
   // link-share ceiling so the picker value always matches what the server
@@ -303,77 +551,36 @@ export function MultiProjectInviteDialog({
                   <p className="mt-1.5 text-xs text-muted-foreground py-2">
                     {t("org.orgProjectsDataTable.noSearchMatch")}
                   </p>
+                ) : visibleProjects.length > VIRTUALIZE_ROW_THRESHOLD ? (
+                  // No list/listitem roles here: LegendList absolutely
+                  // positions rows inside its own scroll and spacer elements,
+                  // so a `role="list"` wrapper would own non-listitem
+                  // children. The per-row checkbox keeps its accessible name,
+                  // which is what this control is navigated by.
+                  <div
+                    data-testid="project-checklist-virtualized"
+                    className="mt-1.5 overflow-hidden rounded border"
+                    style={{ height: VIRTUAL_LIST_HEIGHT_PX }}
+                  >
+                    <LegendList
+                      data={visibleProjects}
+                      extraData={listExtraData}
+                      renderItem={renderVirtualRow}
+                      keyExtractor={(p) => p.id}
+                      estimatedItemSize={ESTIMATED_ROW_HEIGHT_PX}
+                      // A row owns popover state (the role picker) and a
+                      // tooltip, so recycling one row's DOM into another
+                      // project would carry that state across.
+                      recycleItems={false}
+                      style={{ height: "100%" }}
+                      contentContainerStyle={{ width: "100%" }}
+                    />
+                  </div>
                 ) : (
                   <ul className="mt-1.5 max-h-64 overflow-y-auto overflow-x-hidden rounded border divide-y">
-                    {visibleProjects.map((p) => {
-                      const isSelected = p.id in selections
-                      const errorMsg = perProjectError[p.id]
-                      const isDone = done?.[p.id] === "ok"
-                      return (
-                        <li
-                          key={p.id}
-                          className={`px-3 py-2 text-sm ${
-                            isSelected ? "bg-muted/40" : ""
-                          }`}
-                        >
-                          <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
-                            <button
-                              type="button"
-                              role="checkbox"
-                              aria-checked={isSelected}
-                              aria-label={t("org.multiProjectInviteDialog.selectProjectAriaLabel", { name: p.name })}
-                              onClick={() => toggleProject(p.id)}
-                              disabled={busy}
-                              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:opacity-50 ${
-                                isSelected
-                                  ? "bg-primary border-primary text-primary-foreground"
-                                  : "border-muted-foreground/50 bg-background hover:border-primary hover:bg-accent"
-                              }`}
-                            >
-                              {isSelected && <Check className="h-3.5 w-3.5" />}
-                            </button>
-                            <AppTooltip content={p.name}>
-                              <span className="min-w-0">
-                                <button
-                                  type="button"
-                                  onClick={() => toggleProject(p.id)}
-                                  disabled={busy}
-                                  className="min-w-0 truncate text-start hover:text-foreground disabled:opacity-50"
-                                >
-                                  {p.name}
-                                </button>
-                              </span>
-                            </AppTooltip>
-                            {isDone ? (
-                              <span className="shrink-0 text-[10px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
-                                <Check className="h-3 w-3" /> {isEmailMode ? "invited" : "added"}
-                              </span>
-                            ) : isSelected ? (
-                              <RoleSelect
-                                options={roleChoices}
-                                value={selections[p.id]}
-                                onValueChange={(level) =>
-                                  setProjectRole(p.id, level as RoleLevel)
-                                }
-                                disabled={busy}
-                                size="sm"
-                                className="shrink-0"
-                                aria-label={t("org.teamDetail.roleForAriaLabel", { name: p.name })}
-                              />
-                            ) : (
-                              <span aria-hidden className="w-0" />
-                            )}
-                          </div>
-                          {errorMsg && (
-                            <AppTooltip content={errorMsg} className="max-w-xs">
-                              <p className="mt-1 ps-7 text-[10px] text-destructive break-words">
-                                {errorMsg}
-                              </p>
-                            </AppTooltip>
-                          )}
-                        </li>
-                      )
-                    })}
+                    {visibleProjects.map((p) => (
+                      <li key={p.id}>{renderProjectRow(p)}</li>
+                    ))}
                   </ul>
                 )}
               </>

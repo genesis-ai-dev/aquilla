@@ -7,7 +7,7 @@ import { type Page, type Locator, expect } from "@playwright/test"
  * (`ProjectSettings.tsx`'s `SETTINGS_GROUPS`, `/settings/<groupId>`). The
  * Languages section (`LanguagesSection.tsx`, `id="section-languages"`,
  * AQU-538 slice 2) lives in the "General" group alongside Project info /
- * Bible resources / User.
+ * Bible data / User.
  */
 export class ProjectSettings {
   private readonly page: Page
@@ -42,11 +42,50 @@ export class ProjectSettings {
   }
 
   private laneRow(tag: string): Locator {
-    return this.page.getByTestId("target-lanes-list").locator("li").filter({ hasText: tag })
+    return this.page.getByTestId("target-lanes-list").getByRole("row").filter({ hasText: tag })
   }
 
-  /** Add a target lane via the Languages section's add-lane form. */
+  async enableTimelineTracks(projectId: string): Promise<void> {
+    await this.page.goto(`/project/${projectId}/settings/audio-media`)
+    const setting = this.page.getByTestId("settings-allow-track-editing")
+    await expect(setting).toBeVisible({ timeout: 10_000 })
+    // AQU-2214: the box now reads ON while the project follows the default, so
+    // this helper pins an EXPLICIT project-level yes rather than flipping the
+    // switch. It stays in the specs that need track editing because an
+    // explicit choice is what they are actually asserting against, and because
+    // an org that turns the default off must not silently disarm them.
+    // AQU-1768: a project follows the organization's default until it sets its
+    // own, and the box stays locked to the organization's value until then.
+    // AQU-2262: there is no Save bar; each pick saves as it is made.
+    const source = this.page.getByTestId("allow-track-editing-source")
+    if (!/Set for this project/.test((await source.textContent()) ?? "")) {
+      const pinned = this.settingsSave()
+      await source.click()
+      await this.page.getByRole("option", { name: "Set for this project" }).click()
+      expect((await pinned).ok(), "pinning track editing to this project should save").toBe(true)
+    }
+    await expect(setting).toBeEnabled()
+    if (!(await setting.isChecked())) {
+      const ticked = this.settingsSave()
+      await setting.click()
+      expect((await ticked).ok(), "ticking track editing should save").toBe(true)
+    }
+    await expect(setting).toBeChecked()
+  }
+
+  /** The next write of the project's settings (AQU-2262: settings save as they change). */
+  private settingsSave() {
+    return this.page.waitForResponse(
+      (r) => /\/api\/v2\/projects\/[^/]+\/settings/.test(r.url())
+        && (r.request().method() === "PATCH" || r.request().method() === "PUT"),
+      { timeout: 15_000 },
+    )
+  }
+
+  /** Add a target lane via the Languages section's "Add language lane" form. */
   async addTargetLanguage(tag: string): Promise<void> {
+    const open = this.page.getByTestId("add-lane-open")
+    if (await open.isVisible()) await open.click()
     const input = this.page.getByTestId("add-target-lang-input")
     await expect(input).toBeVisible({ timeout: 10_000 })
     await input.fill(tag)
@@ -92,7 +131,9 @@ export class ProjectSettings {
   async openAddMemberDialog(projectId: string): Promise<Locator> {
     await this.openMembers(projectId)
     await this.page.getByRole("button", { name: /^Add a member$/i }).click()
-    const dialog = this.page.getByRole("dialog", { name: /Add a member/i })
+    // AQU-1352 §3.9: the header names the scope ("Add people to Org › Project")
+    // once it has loaded, and reads "Add a member" until then.
+    const dialog = this.page.getByRole("dialog", { name: /Add a member|Add people to/i })
     await expect(dialog).toBeVisible({ timeout: 5_000 })
     return dialog
   }

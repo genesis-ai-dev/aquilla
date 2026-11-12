@@ -9,16 +9,25 @@
 
 import { afterEach, describe, it, expect, vi } from "vitest"
 import { useState } from "react"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NewVoiceModal } from "./NewVoiceModal"
+import { expectTooltip } from "@/test-utils/tooltip"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import type { TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { GEMINI_TTS_VOICES } from "@/lib/audio/tts-providers"
-import { buildVoiceReferenceId, uploadVoiceReference } from "@/lib/audio/voice-clone"
-import { parseFrontierAudioUrl, fetchCellAudio } from "@/lib/audio/upload"
-import { designInworldVoice, publishInworldVoice, listInworldSupportedLanguages } from "@/lib/sync/tts"
-import { __resetInworldSupportedLanguagesCacheForTests } from "@/lib/audio/inworld-voices"
+import { uploadVoiceReference } from "@/lib/audio/voice-clone"
+import {
+  designInworldVoice,
+  publishInworldVoice,
+  listInworldSupportedLanguages,
+  listInworldVoices,
+} from "@/lib/sync/tts"
+import {
+  __resetInworldCatalogCacheForTests,
+  __resetInworldSupportedLanguagesCacheForTests,
+} from "@/lib/audio/inworld-voices"
 import type { InworldSupportedLanguage } from "@/lib/audio/inworld-supported-languages"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -29,25 +38,6 @@ vi.mock("@/lib/sync/tts", () => ({
   synthesizeCellTts: vi.fn(),
   designInworldVoice: vi.fn(),
   publishInworldVoice: vi.fn(),
-}))
-vi.mock("@/components/VoiceCloneSection", () => ({
-  VoiceCloneSection: ({
-    voice,
-    onChange,
-  }: {
-    voice: Voice
-    onChange: (patch: Partial<Voice>) => void
-  }) => (
-    <>
-      <button
-        type="button"
-        onClick={() => onChange({ referenceAudioId: "ref.webm", referenceTakeKey: undefined })}
-      >
-        Add reference
-      </button>
-      <span>{voice.referenceAudioId && !voice.referenceTakeKey ? "clip filled" : "clip empty"}</span>
-    </>
-  ),
 }))
 vi.mock("@/lib/audio/sync-token-fetcher", () => ({
   audioSyncTokenFetcherForSession: () => async () => "tok",
@@ -60,6 +50,8 @@ vi.mock("@/lib/audio/upload", () => ({
   parseFrontierAudioUrl: vi.fn(),
   fetchCellAudio: vi.fn(),
   getCellAudioStreamUrl: vi.fn(),
+  // The Clone voice tab's recorder reads the upload ceiling at import.
+  MAX_AUDIO_UPLOAD_BYTES: 95 * 1024 * 1024,
 }))
 
 function renderCreate({
@@ -80,7 +72,7 @@ function renderCreate({
   targetLanes?: string[]
   paletteIndex?: number
   onSave?: (v: Voice) => void
-  initialMode?: "tts" | "clone"
+  initialMode?: "tts" | "character" | "train"
   cells?: CellData[]
   seedCellId?: string | null
   projectId?: string
@@ -119,6 +111,9 @@ function create(name = "Hero") {
 describe("NewVoiceModal engine selection", () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+    __resetInworldCatalogCacheForTests()
+    vi.mocked(listInworldVoices).mockReset()
+    vi.mocked(listInworldVoices).mockResolvedValue([])
     __resetInworldSupportedLanguagesCacheForTests()
     vi.mocked(listInworldSupportedLanguages).mockReset()
     vi.mocked(listInworldSupportedLanguages).mockResolvedValue([])
@@ -271,6 +266,71 @@ describe("NewVoiceModal engine selection", () => {
     expect(await screen.findByRole("option", { name: /^Swahili$/i })).toBeTruthy()
   })
 
+  it("keeps the chosen accent when a speaker is picked afterwards (AQU-2032)", async () => {
+    vi.mocked(listInworldVoices).mockResolvedValue([
+      { voiceId: "Dennis", displayName: "Dennis", language: "en-US" },
+      { voiceId: "Sarah", displayName: "Sarah", language: "en-US" },
+    ])
+    const user = userEvent.setup()
+    const { onSave } = renderCreate({ provider: "inworld", targetLanguage: "en" })
+    await user.click(screen.getByRole("combobox", { name: "Accent" }))
+    await user.click(await screen.findByRole("option", { name: /^British$/ }))
+    await user.click(screen.getByRole("combobox", { name: "Voice" }))
+    await user.click(await screen.findByRole("option", { name: /Sarah/ }))
+    expect(screen.getByRole("combobox", { name: "Accent" })).toHaveTextContent("British")
+    create()
+    const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
+    expect(saved.voiceName).toBe("Sarah")
+    expect(saved.language).toBe("en-GB")
+  })
+
+  // AQU-2152 \u2014 reported as "picking a different voice doesn't work in the Edit
+  // voice menu", on a French voice resting on the English default Dennis. The
+  // pick seeds the draft language, which re-registers the Voice list, and the
+  // null value base-ui emits for that used to be coerced back to Dennis.
+  const frenchCatalog = [
+    { voiceId: "Alain", displayName: "Alain", language: "fr-FR" },
+    { voiceId: "\u00c9tienne", displayName: "\u00c9tienne", language: "fr-FR" },
+    { voiceId: "H\u00e9l\u00e8ne", displayName: "H\u00e9l\u00e8ne", language: "fr-FR" },
+  ]
+  const frenchSession = { jwt: "tok", username: "dev" } as FrontierSession
+
+  it.each(["Alain", "\u00c9tienne", "H\u00e9l\u00e8ne"])(
+    "keeps the prebuilt speaker %s once it is picked (AQU-2152)",
+    async (speaker) => {
+      vi.mocked(listInworldVoices).mockResolvedValue(frenchCatalog)
+      const user = userEvent.setup()
+      const { onSave } = renderCreate({
+        provider: "inworld", targetLanguage: "fr", projectId: "p1", fileId: "f1",
+        session: frenchSession,
+      })
+      await user.click(screen.getByRole("combobox", { name: "Voice" }))
+      await user.click(await screen.findByRole("option", { name: speaker }))
+      expect(screen.getByRole("combobox", { name: "Voice" })).toHaveTextContent(speaker)
+      create()
+      const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
+      expect(saved.voiceName).toBe(speaker)
+      expect(saved.language).toBe("fr-FR")
+    },
+  )
+
+  it("keeps the accent when the Voice list is the built-in English fallback (AQU-2032)", async () => {
+    // No Inworld key: the Voice list falls back to the built-in speakers, every
+    // one of them tagged en-US. That tag must not land on an Arabic voice.
+    vi.mocked(listInworldVoices).mockResolvedValue([])
+    const user = userEvent.setup()
+    const { onSave } = renderCreate({ provider: "inworld", targetLanguage: "ar" })
+    await user.click(screen.getByRole("combobox", { name: "Accent" }))
+    await user.click(await screen.findByRole("option", { name: /Saudi Arabia/ }))
+    await user.click(screen.getByRole("combobox", { name: "Voice" }))
+    await user.click(await screen.findByRole("option", { name: /Sarah/ }))
+    expect(screen.getByRole("combobox", { name: "Accent" })).toHaveTextContent("Saudi Arabia")
+    create()
+    const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
+    expect(saved.voiceName).toBe("Sarah")
+    expect(saved.language).toBe("ar-SA")
+  })
+
   it("lets the user pick a catalog language when an extra lane is unrecognized", async () => {
     const user = userEvent.setup()
     const { onSave } = renderCreate({
@@ -290,190 +350,23 @@ describe("NewVoiceModal engine selection", () => {
   })
 })
 
-describe("NewVoiceModal clone tab engines", () => {
-  it("offers only cloud clone engines, not MMS", () => {
-    renderCreate({ provider: "inworld", initialMode: "clone" })
-    expect(engineCard(/Inworld/)).toBeTruthy()
-    expect(engineCard(/Gemini/)).toBeTruthy()
-    expect(screen.queryByRole("button", { name: /Kokoro/ })).toBeNull()
-    expect(screen.queryByRole("button", { name: /MMS/ })).toBeNull()
+describe("NewVoiceModal kinds", () => {
+  it("offers TTS voice, Clone voice, Characters and Train voice, in that order", () => {
+    renderCreate({ provider: "inworld" })
+    const kinds = screen.getByRole("tablist", { name: "Voice kind" })
+    expect(Array.from(kinds.querySelectorAll("[role=tab]")).map((tab) => tab.textContent?.trim())).toEqual(
+      ["TTS voice", "Clone voice", "Characters", "Train voice"],
+    )
+    // The TTS tab itself says nothing about reference clips.
+    expect(screen.queryByText(/reference clip/i)).toBeNull()
   })
 
-  it("remaps a Kokoro project default to Inworld on the clone tab", () => {
-    renderCreate({ provider: "kokoro", initialMode: "clone" })
-    expect(engineCard(/Inworld/).getAttribute("aria-pressed")).toBe("true")
-    expect(screen.queryByRole("button", { name: /Kokoro/ })).toBeNull()
-  })
-
-  it("keeps Gemini when the project default already clones", () => {
-    renderCreate({ provider: "gemini", initialMode: "clone" })
-    expect(engineCard(/Gemini/).getAttribute("aria-pressed")).toBe("true")
-    expect(screen.getByLabelText("Describe the voice")).toBeTruthy()
-  })
-
-  it("lets the user pick Gemini as the clone engine and saves it", () => {
-    const { onSave } = renderCreate({ provider: "inworld", initialMode: "clone" })
-    fireEvent.click(engineCard(/Gemini/))
-    fireEvent.click(screen.getByRole("button", { name: "Add reference" }))
+  it("never saves a reference clip onto a TTS voice", () => {
+    const { onSave } = renderCreate({ provider: "inworld" })
     create("Keean")
     const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
-    expect(saved.provider).toBe("gemini")
-    expect(saved.referenceAudioId).toBe("ref.webm")
-  })
-
-  it("keeps leftover Kokoro remapped to Inworld when switching to the clone tab", () => {
-    renderCreate({ provider: "kokoro" })
-    expect(engineCard(/Inworld/).getAttribute("aria-pressed")).toBe("true")
-    fireEvent.click(screen.getByRole("tab", { name: /Clone voice/ }))
-    expect(engineCard(/Inworld/).getAttribute("aria-pressed")).toBe("true")
-    expect(screen.queryByRole("button", { name: /Kokoro/ })).toBeNull()
-  })
-})
-
-const lineTakeCell = {
-  id: "cell-1",
-  fileId: "file-1",
-  type: "text",
-  translated: "hola mundo",
-  selectedAudioId: "a1",
-  attachments: { a1: { url: "frontier-audio://a1.webm" } },
-} as unknown as CellData
-
-describe("NewVoiceModal clone reference source tabs", () => {
-  it("splits record/upload and reuse-from-a-line into tabs", () => {
-    renderCreate({ provider: "inworld", initialMode: "clone" })
-    expect(screen.getByRole("tab", { name: "Reference audio" })).toBeTruthy()
-    expect(screen.getByRole("tab", { name: "From a line" })).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Add reference" })).toBeTruthy()
-  })
-
-  it("shows an empty state on From a line when the file has no takes", () => {
-    renderCreate({ provider: "inworld", initialMode: "clone" })
-    fireEvent.click(screen.getByRole("tab", { name: "From a line" }))
-    expect(screen.getByText(/No line audio yet/)).toBeTruthy()
-  })
-
-  it("opens From a line when seeded from a cell take", () => {
-    renderCreate({
-      provider: "inworld",
-      initialMode: "clone",
-      cells: [lineTakeCell],
-      seedCellId: "cell-1",
-    })
-    expect(screen.getByRole("tab", { name: "From a line" }).getAttribute("aria-selected")).toBe("true")
-    expect(screen.getByRole("button", { name: /hola mundo/ })).toBeTruthy()
-  })
-
-  it("scrolls the seeded take into view when cloning from that line", () => {
-    const spy = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {})
-    const cells = Array.from({ length: 12 }, (_, i) => ({
-      id: `cell-${i}`,
-      fileId: "file-1",
-      type: "text",
-      translated: `line ${i} of the chapter`,
-      selectedAudioId: `a${i}`,
-      attachments: { [`a${i}`]: { url: `frontier-audio://a${i}.webm` } },
-    })) as unknown as CellData[]
-    renderCreate({
-      provider: "inworld",
-      initialMode: "clone",
-      cells,
-      seedCellId: "cell-11",
-    })
-    expect(screen.getByRole("button", { name: /line 11/ })).toBeTruthy()
-    expect(spy).toHaveBeenCalled()
-    spy.mockRestore()
-  })
-
-  it("marks the chosen line with a check and generated takes with a sparkle", () => {
-    renderCreate({
-      provider: "inworld",
-      initialMode: "clone",
-      cells: [
-        lineTakeCell,
-        {
-          id: "cell-2",
-          fileId: "file-1",
-          type: "text",
-          translated: "generated line",
-          selectedGeneratedVoiceAudioId: "g1",
-          attachments: { g1: { url: "frontier-audio://g1.webm" } },
-        } as unknown as CellData,
-      ],
-      seedCellId: "cell-1",
-    })
-    const chosen = screen.getByRole("button", { name: /hola mundo/ })
-    const other = screen.getByRole("button", { name: /generated line/ })
-    expect(chosen.getAttribute("aria-pressed")).toBe("true")
-    expect(chosen.className).not.toMatch(/bg-emerald/)
-    expect(chosen.querySelector(".lucide-check")).toBeTruthy()
-    expect(other.getAttribute("aria-pressed")).toBe("false")
-    expect(other.querySelector(".lucide-check")).toBeNull()
-    expect(screen.getByLabelText("AI-generated")).toBeTruthy()
-    expect(screen.getAllByRole("button", { name: "Play take" })).toHaveLength(2)
-    expect(screen.queryByText("Recorded")).toBeNull()
-    expect(screen.queryByText("AI-generated")).toBeNull()
-  })
-
-  it("does not fill Reference audio when a line take is reused", async () => {
-    vi.mocked(parseFrontierAudioUrl).mockReturnValue({ audioId: "a1", ext: "webm" })
-    vi.mocked(fetchCellAudio).mockResolvedValue(new Uint8Array([1]))
-    vi.mocked(buildVoiceReferenceId).mockReturnValue("ref-line.webm")
-    vi.mocked(uploadVoiceReference).mockResolvedValue(undefined)
-
-    const { onSave } = renderCreate({
-      provider: "inworld",
-      initialMode: "clone",
-      cells: [lineTakeCell],
-      seedCellId: "cell-1",
-      projectId: "p",
-    })
-    fireEvent.click(screen.getByRole("button", { name: /hola mundo/ }))
-    await waitFor(() => expect(uploadVoiceReference).toHaveBeenCalled())
-    fireEvent.click(screen.getByRole("tab", { name: "Reference audio" }))
-    expect(screen.getByText("clip empty")).toBeTruthy()
-    expect(screen.queryByText("clip filled")).toBeNull()
-    create("Keean")
-    const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
-    expect(saved.referenceAudioId).toBe("ref-line.webm")
-    expect(saved.referenceTakeKey).toBe("cell-1:recorded")
-  })
-
-  it("shows a spinner in the check slot while lifting, then the check", async () => {
-    let finishUpload: () => void = () => {}
-    vi.mocked(parseFrontierAudioUrl).mockReturnValue({ audioId: "a1", ext: "webm" })
-    vi.mocked(fetchCellAudio).mockResolvedValue(new Uint8Array([1]))
-    vi.mocked(buildVoiceReferenceId).mockReturnValue("ref-line.webm")
-    vi.mocked(uploadVoiceReference).mockReturnValue(new Promise<void>((resolve) => { finishUpload = resolve }))
-
-    renderCreate({
-      provider: "inworld",
-      initialMode: "clone",
-      cells: [lineTakeCell],
-      seedCellId: "cell-1",
-      projectId: "p",
-    })
-    fireEvent.click(screen.getByRole("button", { name: /hola mundo/ }))
-    expect(await screen.findByLabelText("Lifting take…")).toBeTruthy()
-    expect(screen.queryByText("Lifting take…")).toBeNull()
-    finishUpload()
-    await waitFor(() => {
-      expect(screen.queryByLabelText("Lifting take…")).toBeNull()
-    })
-    expect(screen.getByRole("button", { name: /hola mundo/ }).querySelector(".lucide-check")).toBeTruthy()
-  })
-
-  it("shows a selectable error when lifting a take has no project context", () => {
-    renderCreate({
-      provider: "inworld",
-      initialMode: "clone",
-      cells: [lineTakeCell],
-      seedCellId: "cell-1",
-    })
-    fireEvent.click(screen.getByRole("button", { name: /hola mundo/ }))
-    const alerts = screen.getAllByText("No project context to lift a take.")
-    expect(alerts.length).toBeGreaterThan(0)
-    expect(alerts.every((node) => node.classList.contains("select-text"))).toBe(true)
+    expect(saved).not.toHaveProperty("referenceAudioId")
+    expect(saved).not.toHaveProperty("referenceTakeKey")
   })
 })
 
@@ -520,6 +413,35 @@ describe("NewVoiceModal Inworld Voice Design", () => {
     expect(screen.getByText("Edit voice")).toBeTruthy()
     expect(screen.getByRole("tab", { name: "Prebuilt voice" })).toBeTruthy()
     expect(screen.getByRole("tab", { name: "Voice design" })).toBeTruthy()
+  })
+
+  it("saves an unchanged voice without rewriting an unlisted accent (AQU-2032)", async () => {
+    const onSave = vi.fn()
+    render(
+      <NewVoiceModal
+        open
+        onClose={vi.fn()}
+        voice={{
+          id: "voice-1",
+          name: "Narrator",
+          color: "#e2e8f0",
+          provider: "inworld",
+          voiceName: "Dennis",
+          language: "ar-EG",
+          builtIn: false,
+        }}
+        isDefault={false}
+        paletteIndex={0}
+        cells={[]}
+        onSave={onSave}
+      />,
+    )
+    expect(await screen.findByRole("combobox", { name: "Language" })).toHaveTextContent("Arabic")
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    expect(onSave).toHaveBeenCalledTimes(1)
+    const saved = onSave.mock.calls[0][0] as Voice
+    expect(saved.language).toBe("ar-EG")
+    expect(saved.voiceName).toBe("Dennis")
   })
 
   it("opens Edit for a saved Voice Design voice on that tab with playback", () => {
@@ -678,6 +600,31 @@ describe("NewVoiceModal Inworld Voice Design", () => {
     expect(saved.designPreviewAudioId).toMatch(/^design-preview-.+\.wav$/)
   })
 
+  it("shows the next step when publishing a designed voice gets the bare 502 (AQU-1755)", async () => {
+    vi.mocked(designInworldVoice).mockResolvedValue([
+      { voiceId: "ws__design-voice-a", previewText: "Hello", previewAudio: "UklGRQ==" },
+    ])
+    vi.mocked(publishInworldVoice).mockRejectedValue(
+      new Error("Inworld TTS failed (502): voice provider request failed"),
+    )
+    const user = userEvent.setup()
+    const { onSave } = renderCreate({
+      provider: "inworld",
+      projectId: "p1",
+      fileId: "f1",
+      session: { jwt: "tok", username: "dev" } as FrontierSession,
+    })
+    await user.click(screen.getByRole("tab", { name: /Voice design/ }))
+    await user.type(screen.getByLabelText("Describe the voice"), DESIGN_PROMPT)
+    await user.click(screen.getByRole("button", { name: "Generate previews" }))
+    expect(await screen.findByText("Preview 1")).toBeTruthy()
+    create("British narrator")
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent(/Try again later/)
+    expect(alert).not.toHaveTextContent("502")
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
   it("stops the design preview when the dialog closes", async () => {
     const pause = vi.fn()
     vi.stubGlobal(
@@ -721,5 +668,72 @@ describe("NewVoiceModal Inworld Voice Design", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }))
     expect(screen.queryByRole("dialog")).toBeNull()
     expect(pause).toHaveBeenCalled()
+  })
+})
+
+describe("NewVoiceModal narrator control", () => {
+  const voice: Voice = {
+    id: "v1",
+    name: "Mary",
+    color: "#be123c",
+    provider: "gemini",
+    voiceName: "Kore",
+  }
+
+  function modal(isDefault: boolean, onMakeDefault: () => void) {
+    return (
+      <TooltipProvider delay={0}>
+        <NewVoiceModal
+          open
+          onClose={vi.fn()}
+          voice={voice}
+          provider="gemini"
+          isDefault={isDefault}
+          paletteIndex={0}
+          cells={[]}
+          onSave={vi.fn()}
+          onMakeDefault={onMakeDefault}
+        />
+      </TooltipProvider>
+    )
+  }
+
+  it("uses a filled-star button, with the narrator name only in the tooltip", async () => {
+    const onMakeDefault = vi.fn()
+    const { rerender } = render(modal(false, onMakeDefault))
+
+    const makeNarrator = screen.getByRole("button", { name: "Make narrator" })
+    expect(makeNarrator.textContent).not.toContain("Make narrator")
+    expect(makeNarrator.querySelector("svg")?.getAttribute("class")).toContain("fill-current")
+    // AQU-2260 (Sam, Oct 29): the hover only names the button.
+    await expectTooltip(makeNarrator, "Make narrator")
+    expect(screen.getByRole("tooltip").textContent).not.toContain("used for lines without an explicit speaker")
+    fireEvent.click(makeNarrator)
+    expect(onMakeDefault).toHaveBeenCalledTimes(1)
+
+    rerender(modal(true, onMakeDefault))
+    const narrator = screen.getByRole("button", { name: "Narrator" })
+    expect(narrator.textContent).not.toContain("Narrator")
+    expect(narrator.className).toContain("border-primary")
+    expect(narrator.querySelector("svg")?.getAttribute("class")).toContain("fill-current")
+    expect(narrator).not.toBeDisabled()
+    await expectTooltip(narrator, "Narrator")
+    fireEvent.click(narrator)
+    expect(onMakeDefault).toHaveBeenCalledTimes(1)
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. An engine
+// card shows its name, what it is and its catch in words, so it has no hover.
+describe("NewVoiceModal — the engine cards have no hover", () => {
+  it("shows nothing on hover over an engine card", async () => {
+    render(
+      <TooltipProvider delay={0}>
+        <NewVoiceModal open onClose={vi.fn()} voice={null} provider="inworld" isDefault={false} paletteIndex={0} cells={[]} onSave={vi.fn()} />
+      </TooltipProvider>,
+    )
+    await userEvent.setup().hover(engineCard(/Gemini/))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
   })
 })

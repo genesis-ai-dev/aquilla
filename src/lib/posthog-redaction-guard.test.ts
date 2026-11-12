@@ -28,7 +28,7 @@ describe("posthog credential redaction is wired in", () => {
   // comment (src/test-setup.ts does).
   const initSites = collectSourceFiles(SRC).filter((f) => {
     const source = fs.readFileSync(f, "utf8")
-    return source.includes('from "posthog-js"') && source.includes("posthog.init(")
+    return source.includes('from "posthog-js"') && /\b(?:posthog|ph)\.init\(/.test(source)
   })
 
   it("finds the analytics entry point (the scan itself still works)", () => {
@@ -39,10 +39,31 @@ describe("posthog credential redaction is wired in", () => {
     for (const file of initSites) {
       const source = fs.readFileSync(file, "utf8")
       expect(
-        /before_send:\s*redactCaptureEvent/.test(source),
+        /before_send:[^\n]*redactCaptureEvent/.test(source),
         `${path.relative(SRC, file)} calls posthog.init() without before_send: redactCaptureEvent — ` +
           "credential-bearing URLs (/join/:token, /link/:token, ?token=) would be exported verbatim.",
       ).toBe(true)
     }
+  })
+})
+
+// AQU-1572: the rest of the analytics entry point's wiring. The `$exception`
+// noise filter needs no check of its own here: it composes inside
+// `redactCaptureEvent`, which the scan above already pins.
+describe("AQU-1572: the noise guard and app_env are wired in", () => {
+  const source = fs.readFileSync(path.join(SRC, "lib/posthog.ts"), "utf8")
+
+  it("installs the ResizeObserver guard before posthog.init, so it runs ahead of PostHog's own handler", () => {
+    const guard = source.indexOf("installResizeObserverNoiseGuard(window)")
+    expect(guard).toBeGreaterThan(-1)
+    expect(guard).toBeLessThan(source.indexOf("analyticsAccount.subscribe("))
+  })
+
+  it("leaves global exception capture off because background errors have no account owner", () => {
+    expect(source).toContain("capture_exceptions: false")
+  })
+
+  it("registers the app_env super-property at init", () => {
+    expect(source).toMatch(/(?:posthog|ph)\.register\(\{\s*app_env: resolveAppEnv\(window\.location\)\s*\}\)/)
   })
 })

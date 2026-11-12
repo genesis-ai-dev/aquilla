@@ -1,5 +1,5 @@
 import { memo, useCallback, useRef, useState } from "react"
-import { AlertTriangle, HelpCircle, FolderOpen, Users } from "lucide-react"
+import { AlertTriangle, FolderOpen, Users } from "lucide-react"
 import { useProjectsMembersMatrix } from "@/hooks/useProjectsMembersMatrix"
 import { useOrg } from "@/hooks/useOrg"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -10,12 +10,8 @@ import { MembersMatrixCellEditor } from "./MembersMatrixCellEditor"
 import { MemberAccessDrillDown } from "./MemberAccessDrillDown"
 import { AccessModelLegend } from "./AccessModelLegend"
 import { MemberLaneScopeEditor } from "./MemberLaneScopeEditor"
-import {
-  AppTooltip,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
+import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote, NoteOnClick } from "@/components/ui/info-note"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty"
 import {
@@ -25,24 +21,31 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { fetchMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
+import {
+  fetchMemberScopeView,
+  laneScopeLabel,
+  type MemberScope,
+  type MemberScopeView,
+} from "@/lib/sync/member-scopes"
 import type { MatrixMember, MatrixCell } from "@/hooks/useProjectsMembersMatrix"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 
 /** projectId → scopes, for one member. */
-type MemberScopeMap = Map<string, MemberScope[]>
+// AQU-1607: per project, the member's scopes AND the lane names their lane
+// ids stand for — a chip would otherwise print a lane id.
+type MemberScopeMap = Map<string, MemberScopeView>
 
 /**
  * Members × projects scan view, with inline cell editing.
  *
  * Click any cell to open a popover:
- *   - Empty cell → role picker; selecting a role POSTs /members for that
- *     project. Adds the user as a project_external if they aren't an org
- *     member, or as an override on top of their org role if they are.
- *   - Override cell → role picker (changes the override) + Remove button.
- *   - Org-inherited cell → "Make exception" picker that creates an
- *     override that supersedes the org grant for this project only.
+ *   - Empty cell → the one RoleDialog (AQU-2289); saving POSTs /members for
+ *     that project. Adds the user as a project_external if they aren't an
+ *     org member, or as an override on top of their org role if they are.
+ *   - Override cell → Change role (the RoleDialog) + Remove button.
+ *   - Org-inherited cell → "Set a role for this project…" (the RoleDialog),
+ *     an override that supersedes the org grant for this project only.
  *   - Creator / GitLab cell → read-only with explanation of where to
  *     actually edit it (those grants live elsewhere).
  *
@@ -60,7 +63,7 @@ type MemberScopeMap = Map<string, MemberScope[]>
  *   - empty                → no fill
  *
  * Concentration risk: if a project has exactly one Owner, the column header
- * gets a warning indicator. Tooltip surfaces the rationale ("sole Owner —
+ * gets a warning indicator. A click on it gives the rationale ("sole Owner —
  * losing this person locks the project").
  */
 interface SelectedMember { userId: number; username: string }
@@ -69,7 +72,7 @@ export function MembersMatrixView() {
   const { t } = useI18n()
   const { matrix, isLoading, error, refresh } = useProjectsMembersMatrix()
   const { state: orgState } = useOrg()
-  const orgId = orgState.kind === "success" ? orgState.org.id : null
+  const orgId = orgState.kind === "success" ? orgState.org?.id ?? null : null
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const [selectedMember, setSelectedMember] = useState<SelectedMember | null>(null)
@@ -91,7 +94,11 @@ export function MembersMatrixView() {
       loadedRef.current.add(userId)
       void Promise.all(
         projectIds.map(
-          async (pid) => [pid, (await fetchMemberScopes(jwt, pid, userId)) ?? []] as const,
+          async (pid) =>
+            [
+              pid,
+              (await fetchMemberScopeView(jwt, pid, userId)) ?? { scopes: [], laneNames: {} },
+            ] as const,
         ),
       ).then((entries) => {
         setScopesByMember((prev) => {
@@ -104,11 +111,22 @@ export function MembersMatrixView() {
     [jwt],
   )
 
-  const handleScopesSaved = useCallback((userId: number, projectId: string, saved: MemberScope[]) => {
+  const handleScopesSaved = useCallback((
+    userId: number,
+    projectId: string,
+    saved: MemberScope[],
+    laneNames: Record<string, string>,
+  ) => {
     setScopesByMember((prev) => {
       const next = new Map(prev)
       const perProject = new Map(next.get(userId) ?? [])
-      perProject.set(projectId, saved)
+      // AQU-1607: the save's own lane names win — a lane granted by this save
+      // is absent from the names loaded on hover, so reusing those printed
+      // the lane's id in the chip.
+      perProject.set(projectId, {
+        scopes: saved,
+        laneNames: { ...(perProject.get(projectId)?.laneNames ?? {}), ...laneNames },
+      })
       next.set(userId, perProject)
       return next
     })
@@ -161,26 +179,11 @@ export function MembersMatrixView() {
               >
                 <div className="flex items-center gap-1">
                   <span>{t("org.membersMatrixView.memberColumnHeader")}</span>
-                  {/* On-demand model explainer — opens a tooltip with the full explanation */}
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          className="inline-flex items-center text-muted-foreground hover:text-foreground focus-visible:outline-none"
-                          aria-label={t("org.membersMatrixView.howAccessResolvedAriaLabel")}
-                        />
-                      }
-                    >
-                      <HelpCircle aria-hidden />
-                    </TooltipTrigger>
-                    <TooltipContent
-                      side="bottom"
-                      className="max-w-xs leading-snug"
-                    >
-                      {t("org.membersMatrixView.accessResolutionExplanation")}
-                    </TooltipContent>
-                  </Tooltip>
+                  {/* On-demand model explainer. AQU-2260: it opens on click,
+                      in a note anchored to the (i), never on hover. */}
+                  <InfoNote label={t("org.membersMatrixView.howAccessResolvedAriaLabel")}>
+                    {t("org.membersMatrixView.accessResolutionExplanation")}
+                  </InfoNote>
                 </div>
               </TableHead>
               {matrix.projects.map((p) => (
@@ -247,11 +250,13 @@ function ProjectHeaderCell({
           <span className="truncate">{project.name}</span>
         </AppTooltip>
         {concentrationRisk && (
-          <AppTooltip content={t("org.membersMatrixView.soleOwnerWarning")}>
-            <span className="inline-flex items-center text-amber-600 dark:text-amber-400">
-              <AlertTriangle />
-            </span>
-          </AppTooltip>
+          <NoteOnClick
+            note={t("org.membersMatrixView.soleOwnerWarning")}
+            label={t("org.membersMatrixView.soleOwnerWarning")}
+            className="shrink-0 text-amber-600 dark:text-amber-400"
+          >
+            <AlertTriangle aria-hidden />
+          </NoteOnClick>
         )}
       </div>
       <div className="mt-0.5">
@@ -287,7 +292,12 @@ const MatrixRow = memo(function MatrixRow({
   jwt: string | null
   memberScopes: MemberScopeMap | undefined
   onHoverRow: (userId: number, projectIds: string[]) => void
-  onScopesSaved: (userId: number, projectId: string, saved: MemberScope[]) => void
+  onScopesSaved: (
+    userId: number,
+    projectId: string,
+    saved: MemberScope[],
+    laneNames: Record<string, string>,
+  ) => void
 }) {
   const { t } = useI18n()
   function handleMemberClick() {
@@ -313,35 +323,43 @@ const MatrixRow = memo(function MatrixRow({
           ].join(" ")}
         >
           <UsernameWithAvatar
+            userId={member.userId}
             username={member.username}
             nameClassName={isSelected ? "font-semibold text-primary" : undefined}
           />
         </button>
         {member.isOrgInherited && (
-          <AppTooltip content={t("org.membersMatrixView.orgInheritedTooltip")}>
-            <span className="ms-1.5 align-middle rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">
+          <NoteOnClick
+            note={t("org.membersMatrixView.orgInheritedTooltip")}
+            className="ms-1.5 align-middle"
+          >
+            <span className="rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">
               org-wide
             </span>
-          </AppTooltip>
+          </NoteOnClick>
         )}
       </TableHead>
       {projects.map((p) => {
         const cell = memberCells?.get(p.id)
         const palette = cell ? colorForRole(cell.role.level) : ""
-        const { label: sourceHint, badge: sourceBadge } = cell
+        const { badge: sourceBadge } = cell
           ? sourceInfo(cell.role.source)
-          : { label: "", badge: "" }
+          : { badge: "" }
         const scopesForCell = memberScopes?.get(p.id)
         return (
-          <MembersMatrixCellEditor
+            <MembersMatrixCellEditor
             key={p.id}
             cell={cell}
             userId={member.userId}
             username={member.username}
             projectId={p.id}
+            projectName={p.name}
+            // AQU-2289: the caller's own role on this column's project caps
+            // what the role dialog offers.
+            callerLevel={p.role?.level ?? null}
+            grantLanes={cell ? grantLanesForCell(scopesForCell) : "all"}
             onMutated={onMutated}
             cellClassName={palette}
-            sourceHint={sourceHint}
             sourceBadge={sourceBadge}
             secondarySources={cell?.secondarySources}
             footer={
@@ -351,8 +369,13 @@ const MatrixRow = memo(function MatrixRow({
                   projectId={p.id}
                   userId={member.userId}
                   username={member.username}
-                  onSaved={(saved) => onScopesSaved(member.userId, p.id, saved)}
-                  trigger={<LaneScopeChips scopes={scopesForCell} />}
+                  onSaved={(saved, laneNames) => onScopesSaved(member.userId, p.id, saved, laneNames)}
+                  trigger={
+                    <LaneScopeChips
+                      scopes={scopesForCell?.scopes}
+                      laneNames={scopesForCell?.laneNames}
+                    />
+                  }
                 />
               ) : null
             }
@@ -363,12 +386,29 @@ const MatrixRow = memo(function MatrixRow({
   )
 })
 
+/** Lane labels for the grant sentence. Unknown until the row-hover fetch lands. */
+function grantLanesForCell(
+  view: { scopes: MemberScope[]; laneNames: Record<string, string> } | undefined,
+): "all" | "unknown" | string[] {
+  if (!view) return "unknown"
+  const lanes = view.scopes.filter((scope) => scope.kind === "lane")
+  if (lanes.length === 0) return "all"
+  return lanes.map((scope) => laneScopeLabel(scope.value, view.laneNames) || "default")
+}
+
 /**
  * Compact chip row for a member's lane/file scopes on one project. Empty
  * array (or a project the row-hover fetch hasn't resolved yet) renders a
  * plain "scopes" affordance so there's still something to click.
  */
-function LaneScopeChips({ scopes }: { scopes: MemberScope[] | undefined }) {
+function LaneScopeChips({
+  scopes,
+  laneNames,
+}: {
+  scopes: MemberScope[] | undefined
+  /** AQU-1607: lane id → lane name, so a chip reads as a lane, not an id. */
+  laneNames: Record<string, string> | undefined
+}) {
   const laneScopes = (scopes ?? []).filter((s) => s.kind === "lane")
   const fileScopes = (scopes ?? []).filter((s) => s.kind === "file")
 
@@ -383,7 +423,7 @@ function LaneScopeChips({ scopes }: { scopes: MemberScope[] | undefined }) {
           key={`lane:${s.value}`}
           className="rounded bg-indigo-500/15 px-1 text-indigo-700 dark:text-indigo-300"
         >
-          {s.value || "default"}
+          {laneScopeLabel(s.value, laneNames) || "default"}
         </span>
       ))}
       {fileScopes.map((s) => (

@@ -1,4 +1,4 @@
-// AQU-496 / AQU-1037: assignment authority resolver.
+// AQU-496 / AQU-581 / AQU-1037: assignment authority resolver.
 //
 // `assignment.create`'s static floor (role-policy.ts REQUIRED_ROLE) is
 // PROJECT_LEAD (500) — a manager assigns work to members. This resolver backs
@@ -12,6 +12,14 @@
 //     (assigneeUserId === caller) — never for anyone else, and never below
 //     CONTRIBUTOR (400). Leads/maintainers are unaffected — their role already
 //     clears the floor in authorize().
+//   - `allowScopedLaneAssignment` (AQU-581): a second, narrower opt-in
+//     carve-out — when `true`, a below-floor member (CONTRIBUTOR 400+) who
+//     carries lane scopes (AQU-553) may emit `assignment.create` for OTHER
+//     people, but ONLY inside a target-language lane they are scoped to. This
+//     is the "mentor / coordinator" grant: the org names who may hand out
+//     chapters in the Spanish lane without also handing them org-admin
+//     rights. The setting alone grants nothing — authorize() additionally
+//     requires the caller to carry lane scopes covering the assignment.
 //
 // Mirrors resolveExportFloor's shape exactly (export-floor.ts): same
 // project -> org_id -> org_settings lookup, same fail-safe default on any
@@ -27,6 +35,8 @@ export const DEFAULT_ASSIGNMENT_MIN_ROLE = 500
 export interface AssignmentAuthority {
   minRole: number
   allowSelfAssignment: boolean
+  /** AQU-581: the lane-delegate carve-out's org setting. Default false. */
+  allowScopedLaneAssignment: boolean
 }
 
 const VALID_ROLE_LEVELS = new Set([100, 200, 300, 400, 500, 600, 700])
@@ -35,6 +45,8 @@ const VALID_ROLE_LEVELS = new Set([100, 200, 300, 400, 500, 600, 700])
  * Resolve both assignment policies in one project → org_settings lookup:
  * - assignmentMinRole: who may assign/reassign/unassign work for anyone.
  * - allowSelfAssignment: below-floor CONTRIBUTOR+ may create for themselves.
+ * - allowScopedLaneAssignment (AQU-581): below-floor CONTRIBUTOR+ who carry
+ *   lane scopes may create for OTHERS inside those lanes.
  *
  * Missing/malformed data preserves the historical PROJECT_LEAD floor and
  * disabled self-assignment.
@@ -50,6 +62,7 @@ export async function resolveAssignmentAuthority(
   const fallback: AssignmentAuthority = {
     minRole: DEFAULT_ASSIGNMENT_MIN_ROLE,
     allowSelfAssignment: false,
+    allowScopedLaneAssignment: false,
   }
   const orgId = await cache.projectOrgId(projectId)
   if (!orgId) return fallback
@@ -66,6 +79,7 @@ export async function resolveAssignmentAuthority(
         ? rawMinRole
         : DEFAULT_ASSIGNMENT_MIN_ROLE,
     allowSelfAssignment: parsed.allowSelfAssignment === true,
+    allowScopedLaneAssignment: parsed.allowScopedLaneAssignment === true,
   }
 }
 
@@ -83,4 +97,23 @@ export async function resolveAllowSelfAssignment(
   cache: RequestCache = makeRequestCache(db),
 ): Promise<boolean> {
   return (await resolveAssignmentAuthority(db, projectId, cache)).allowSelfAssignment
+}
+
+/**
+ * AQU-581: look up the org's `allowScopedLaneAssignment` setting for the
+ * project's org — whether a lane-scoped member below the assignment floor may
+ * create assignments for other people inside the lanes they are scoped to.
+ *
+ * Same fail-safe default as its AQU-496 sibling: `false` unless the org has
+ * opted in. The setting alone grants nothing — authorize() additionally
+ * requires the caller to carry lane scopes and the assignment's lane to be
+ * among them, so flipping this on does NOT hand assignment rights to every
+ * contributor.
+ */
+export async function resolveAllowScopedLaneAssignment(
+  db: AquillaDb,
+  projectId: string,
+  cache: RequestCache = makeRequestCache(db),
+): Promise<boolean> {
+  return (await resolveAssignmentAuthority(db, projectId, cache)).allowScopedLaneAssignment
 }

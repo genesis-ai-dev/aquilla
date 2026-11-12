@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 // Bouncy spring matches the reference popout, slightly tamed for desktop.
 // Original: cubic-bezier(.68,-0.75,.27,1.75)
@@ -128,6 +129,7 @@ export function CellActionRail({
   primary, overflowOpen = false, onOverflowOpenChange,
   overflowAttentionDot, overflowLabel = "More actions", children,
 }: CellActionRailProps) {
+  const t = useT()
   const mountActions = revealed || expanded || overflowOpen || import.meta.env.MODE === "test"
 
   return (
@@ -178,6 +180,14 @@ export function CellActionRail({
                 data-slot="cell-action-rail-overflow"
                 aria-label={overflowLabel}
                 onClick={(e) => e.stopPropagation()}
+                // AQU-2173: the rail is chrome — it must not take the caret
+                // off the cell the user is editing. Without this the browser
+                // moves focus to the `⋯` on mouse-down, which drops the text
+                // selection (and with it the footnote anchor) before any
+                // action inside the menu gets to run. Keyboard focus is
+                // unaffected: Tab still lands here and Enter/Space still open
+                // the menu.
+                onMouseDown={(e) => e.preventDefault()}
                 className="relative text-muted-foreground/70 hover:text-foreground"
               >
                 <MoreHorizontal className="h-3.5 w-3.5" />
@@ -199,6 +209,12 @@ export function CellActionRail({
             align="end"
             side="bottom"
             className="w-auto flex-row items-center gap-0 p-1"
+            // AQU-2173: this popup is the rail's own button cluster, not a
+            // dialog — pulling focus into it on a mouse open would blur the
+            // cell editor and drop the selection the actions inside act on.
+            // A keyboard open still focuses the first item, or the menu would
+            // be unreachable from the `⋯`.
+            initialFocus={(openType) => openType === "keyboard"}
           >
             {children}
           </PopoverContent>
@@ -224,7 +240,7 @@ export function CellActionRail({
                 }}
               />
             }
-            tooltip={expanded ? "Close cell details" : "Open cell details"}
+            tooltip={expanded ? t("editor.cell.closeDetails") : t("editor.cell.openDetails")}
             onClick={onToggleExpanded}
             dot={expansionAttentionDot ?? undefined}
             toneClass={expanded

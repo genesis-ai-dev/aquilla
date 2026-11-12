@@ -236,4 +236,24 @@ describe("SourceRegionLane", () => {
     expect(wide).toBe(8)
     expect(narrow).toBeLessThan(wide)
   })
+
+  // Sam's D3 (2026-10-05): on a linked video with no rows the row is one dashed
+  // chip the length of the film.
+  it("says what a whole-film placeholder is, at the visible left edge, instead of its time range", () => {
+    renderLane({ map: deriveSourceRegions([], 635), cells: [], viewEndSec: 635,
+      gapLabel: "The video's own sound", scrollLeftPx: 500 })
+    const gap = screen.getByTestId("tl-source-gap")
+    expect(gap).toHaveAttribute("title", "The video's own sound")
+    const label = screen.getByTestId("tl-source-gap-label")
+    expect(label).toHaveTextContent("The video's own sound")
+    // Scrolled 500px in, the label is held 10px inside the visible edge.
+    expect(label.style.left).toBe("510px")
+    expect(gap.textContent).not.toContain("10:35.0")
+  })
+
+  it("draws no placeholder at all when asked to hide them", () => {
+    renderLane({ map: deriveSourceRegions([], 635), cells: [], viewEndSec: 635, hideGaps: true })
+    expect(screen.queryByTestId("tl-source-gap")).toBeNull()
+  })
 })
+

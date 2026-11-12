@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 /**
  * RuleEditor — plain-language rule editor (AQU-195).
  *
@@ -22,7 +23,6 @@ import { ChevronDown, X } from "lucide-react"
 import type { TranslationRule, RuleCheck, RuleAutofix } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
-import posthog from "@/lib/posthog"
 import { cn } from "@/lib/utils"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { t as standaloneT } from "@/lib/i18n/standalone"
@@ -160,9 +160,12 @@ interface RuleEditorProps {
   /** Display label for the default (`''`) lane, e.g. the project's base
    *  target language. Falls back to a generic string. */
   defaultLaneLabel?: string
+  /** Display names keyed by lane tag. The stored value stays the tag. */
+  laneLabels?: Readonly<Record<string, string>>
 }
 
-export function RuleEditor({ initialRule, cells, onSave, onCancel, className, lanes, defaultLaneLabel }: RuleEditorProps) {
+export function RuleEditor({ initialRule, cells, onSave, onCancel, className, lanes, defaultLaneLabel, laneLabels }: RuleEditorProps) {
+  const analytics = useAccountAnalytics()
   const t = useT()
   // ── Field state ──
   const [name, setName] = useState(initialRule?.name ?? "")
@@ -277,7 +280,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className, la
       ? { kind: "regex-replace", pattern: afPattern, replacement: afReplacement, flags: afFlags }
       : undefined
 
-    posthog.capture(initialRule ? "translation rule updated" : "translation rule created", {
+    analytics.capture(initialRule ? "translation rule updated" : "translation rule created", {
       rule_name: name.trim(),
       severity,
       check_type: currentCheck!.type,
@@ -445,8 +448,8 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className, la
             <LaneCombobox
               options={[
                 { value: "scope:project", label: t("rules.editor.lane.allLanes") },
-                { value: "lane:", label: defaultLaneLabel || t("rules.editor.lane.defaultLane") },
-                ...(lanes ?? []).map((l) => ({ value: `lane:${l}`, label: l })),
+                { value: "lane:", label: laneLabels?.[""] || defaultLaneLabel || t("rules.editor.lane.defaultLane") },
+                ...(lanes ?? []).map((l) => ({ value: `lane:${l}`, label: laneLabels?.[l] || l })),
               ]}
               value={laneChoice === null ? "scope:project" : `lane:${laneChoice}`}
               onValueChange={(v) =>
@@ -466,8 +469,8 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className, la
                   {laneChoice === null
                     ? t("rules.editor.lane.allLanes")
                     : laneChoice === ""
-                      ? defaultLaneLabel || t("rules.editor.lane.defaultLane")
-                      : laneChoice}
+                      ? laneLabels?.[""] || defaultLaneLabel || t("rules.editor.lane.defaultLane")
+                      : laneLabels?.[laneChoice] || laneChoice}
                   <ChevronDown className="size-3.5 text-muted-foreground" />
                 </Button>
               }
@@ -661,7 +664,18 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className, la
           {checkError ?? patternError ?? sourcePatternError ?? autofixError}
         </FieldError>
       )}
-      <div className="-mx-4 -mb-4 mt-1 flex flex-col-reverse gap-2 rounded-b-3xl bg-muted/40 p-4 sm:flex-row sm:justify-end">
+      <div className="-mx-4 -mb-4 mt-1 flex flex-col-reverse gap-2 rounded-b-3xl bg-muted/40 p-4 sm:flex-row sm:items-center sm:justify-end">
+        {/* AQU-1509: state the lane scope beside Save so nobody saves a rule
+            into the wrong lane without seeing it. */}
+        {showLanePicker && (
+          <p data-testid="rule-editor-lane-summary" className="text-xs text-muted-foreground sm:me-auto">
+            {laneChoice === null
+              ? t("rules.editor.lane.summaryAll")
+              : t("rules.editor.lane.summaryOne", {
+                  lane: laneLabels?.[laneChoice] || (laneChoice === "" ? defaultLaneLabel || t("rules.editor.lane.defaultLane") : laneChoice),
+                })}
+          </p>
+        )}
         <Button type="button" variant="outline" onClick={onCancel}>
           {t("common.cancel")}
         </Button>

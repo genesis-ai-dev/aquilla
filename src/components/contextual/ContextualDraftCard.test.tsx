@@ -11,6 +11,8 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { act, render, screen, fireEvent, cleanup } from "@testing-library/react"
+import { expectClickNote } from "@/test-utils/tooltip"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { ContextualDraftCard } from "./ContextualDraftCard"
 import {
   applyContextualDraftsFrame,
@@ -19,6 +21,7 @@ import {
   getContextualDraftsSummary,
   resetContextualDraftsStore,
 } from "@/lib/contextual/drafts-store"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const reviewMock = vi.fn(async () => {})
 vi.mock("@/lib/contextual/transport", () => ({
@@ -102,7 +105,7 @@ describe("ContextualDraftCard", () => {
     const { onAccept } = renderCard()
     fireEvent.click(screen.getByLabelText("Use this translation"))
 
-    await vi.waitFor(() => expect(onAccept).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(onAccept).toHaveBeenCalledOnce(), { timeout: STALL_WATCHDOG_MS })
     expect(reviewMock).not.toHaveBeenCalled()
     expect(screen.getByTestId("contextual-draft-card")).toBeInTheDocument()
     expect(getContextualDraftsSummary()).toMatchObject({
@@ -122,7 +125,7 @@ describe("ContextualDraftCard", () => {
     const { onAccept } = renderCard()
     fireEvent.click(screen.getByLabelText("Dismiss this suggestion"))
     expect(onAccept).not.toHaveBeenCalled()
-    await vi.waitFor(() => expect(screen.queryByTestId("contextual-draft-card")).toBeNull())
+    await vi.waitFor(() => expect(screen.queryByTestId("contextual-draft-card")).toBeNull(), { timeout: STALL_WATCHDOG_MS })
     expect(getContextualDraftsSummary()).toMatchObject({
       pending: 0,
       rejectedThisSession: 1,
@@ -133,14 +136,14 @@ describe("ContextualDraftCard", () => {
     seed()
     const { onAccept } = renderCard()
     fireEvent.click(screen.getByLabelText("Use this translation"))
-    await vi.waitFor(() => expect(onAccept).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(onAccept).toHaveBeenCalledOnce(), { timeout: STALL_WATCHDOG_MS })
     expect(reviewMock).not.toHaveBeenCalled()
 
     cleanup()
     seed()
     renderCard()
     fireEvent.click(screen.getByLabelText("Dismiss this suggestion"))
-    await vi.waitFor(() => expect(reviewMock).toHaveBeenCalledWith("p1", "d1", "rejected"))
+    await vi.waitFor(() => expect(reviewMock).toHaveBeenCalledWith("p1", "d1", "rejected"), { timeout: STALL_WATCHDOG_MS })
   })
 
   it("does not make acceptance depend on the review endpoint", async () => {
@@ -149,7 +152,7 @@ describe("ContextualDraftCard", () => {
     const { onAccept } = renderCard()
     fireEvent.click(screen.getByLabelText("Use this translation"))
 
-    await vi.waitFor(() => expect(onAccept).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(onAccept).toHaveBeenCalledOnce(), { timeout: STALL_WATCHDOG_MS })
     expect(reviewMock).not.toHaveBeenCalled()
     expect(screen.queryByRole("alert")).toBeNull()
     expect(screen.getByTestId("contextual-draft-card")).toBeInTheDocument()
@@ -169,7 +172,7 @@ describe("ContextualDraftCard", () => {
 
     reviewMock.mockResolvedValue(undefined)
     fireEvent.click(screen.getByLabelText("Dismiss this suggestion"))
-    await vi.waitFor(() => expect(screen.queryByTestId("contextual-draft-card")).toBeNull())
+    await vi.waitFor(() => expect(screen.queryByTestId("contextual-draft-card")).toBeNull(), { timeout: STALL_WATCHDOG_MS })
     expect(getContextualDraftsSummary()).toMatchObject({ pending: 0, rejectedThisSession: 1 })
   })
 
@@ -200,7 +203,7 @@ describe("ContextualDraftCard", () => {
 
     fireEvent.click(screen.getByLabelText("Use this translation"))
 
-    await vi.waitFor(() => expect(screen.getByLabelText("Use this translation")).not.toBeDisabled())
+    await vi.waitFor(() => expect(screen.getByLabelText("Use this translation")).not.toBeDisabled(), { timeout: STALL_WATCHDOG_MS })
     expect(screen.getByText("must remain reviewable")).toBeInTheDocument()
     expect(getContextualDraftsSummary()).toMatchObject({ pending: 1, acceptedThisSession: 0 })
     expect(reviewMock).not.toHaveBeenCalled()
@@ -268,5 +271,19 @@ describe("ContextualDraftCard", () => {
     expect(screen.getByTestId("contextual-draft-card")).toBeInTheDocument()
     fireEvent.click(screen.getByLabelText("Use this translation"))
     expect(onAccept).toHaveBeenCalledWith("Au commencement était la Parole")
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): the Suggested mark says where the draft came from on
+// a click, never on hover.
+describe("ContextualDraftCard Suggested mark", () => {
+  it("opens where the draft came from on click", async () => {
+    seed()
+    render(
+      <TooltipProvider delay={0}>
+        <ContextualDraftCard cellId="c1" projectId="p1" fileId="file-1" targetLang="" editable onAccept={vi.fn(async () => true)} />
+      </TooltipProvider>,
+    )
+    await expectClickNote(screen.getByRole("button", { name: /Suggested/ }), "Drafted for you")
   })
 })

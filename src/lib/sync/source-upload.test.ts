@@ -303,3 +303,89 @@ describe("bindSourceArtifact", () => {
     })
   })
 })
+
+// The sentence a refusal becomes in the import dialog. "Source upload failed"
+// on its own sent a project member hunting for a cause that only ever reached
+// `.cause` in DevTools; each status now carries its own reason, and a role
+// refusal names the caller's role and the one required.
+describe("source upload refusal messages", () => {
+  const base = {
+    projectId: "p1",
+    fileId: "f1",
+    artifactId: "01900000-0000-7000-8000-000000000007",
+    bytes: new ArrayBuffer(3),
+    format: "docx" as const,
+    baseUrl: "https://sync.test",
+    retryDelaysMs: [0, 0] as const,
+  }
+  const refusal = (status: number, body: string) =>
+    vi.fn(async () => new Response(body, { status }))
+  const failure = (fetchFn: typeof fetch) =>
+    uploadSourceOriginal({ ...base, getToken: async () => "tok", fetchFn }).then(
+      () => { throw new Error("expected the upload to fail") },
+      (e: Error) => e,
+    )
+
+  it("a role refusal names the caller's role and the one required", async () => {
+    const body = JSON.stringify({
+      error: "role too low for source upload",
+      code: "role_required",
+      required: { roleLevel: 500 },
+      actual: { roleLevel: 400, source: null },
+    })
+    const err = await failure(refusal(403, body))
+    expect(err.message).toBe("Source upload failed: You are Contributor here. Project Lead is required.")
+    // The raw status/body still reaches DevTools.
+    expect(err.cause).toMatch(/403.*role too low/)
+  })
+
+  it("a role refusal from an older worker still reads as a permission problem", async () => {
+    const err = await failure(refusal(403, "role too low for source upload"))
+    expect(err.message).toMatch(/^Source upload failed: You don't have permission/)
+  })
+
+  it("an expired session says to sign in again", async () => {
+    // The 401 refresh-and-retry path runs out of attempts before this throws.
+    const err = await failure(refusal(401, "token expired"))
+    expect(err.message).toMatch(/^Source upload failed: Your session expired/)
+  })
+
+  it("a server error says to try again", async () => {
+    const err = await failure(refusal(500, "boom"))
+    expect(err.message).toMatch(/^Source upload failed: Something went wrong on the server/)
+  })
+
+  it("a missing file says it no longer exists", async () => {
+    const err = await failure(refusal(404, "file not found"))
+    expect(err.message).toMatch(/^Source upload failed: That item no longer exists/)
+  })
+
+  it("a validation refusal carries the worker's own reason", async () => {
+    const err = await failure(refusal(400, "invalid source format"))
+    expect(err.message).toBe("Source upload failed: invalid source format")
+  })
+
+  it("an oversize refusal reuses the size-limit sentence", async () => {
+    const err = await failure(refusal(413, "source too large"))
+    expect(err.message).toMatch(/^Source upload failed: the original file exceeds the 95\.0 MB limit/)
+  })
+
+  it("a binding refusal maps the same way", async () => {
+    const err = await bindSourceArtifact({
+      projectId: "p1",
+      fileId: "f2",
+      artifactId: "01900000-0000-7000-8000-000000000006",
+      profileId: "builtin:paratext-project",
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      getToken: async () => "tok",
+      fetchFn: refusal(404, "artifact not found"),
+      baseUrl: "https://sync.test",
+    }).then(
+      () => { throw new Error("expected the binding to fail") },
+      (e: Error) => e,
+    )
+    expect(err.message).toMatch(/^Artifact binding failed: That item no longer exists/)
+    expect(err.cause).toMatch(/404.*artifact not found/)
+  })
+})

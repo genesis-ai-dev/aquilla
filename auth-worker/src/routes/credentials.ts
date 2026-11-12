@@ -12,6 +12,12 @@
 //     org. An 'act' credential must therefore carry a scope.
 //   - The credential is a ceiling only: every API call re-resolves the user's
 //     live role, so a credential never exceeds the user.
+//   - `access` (AQU-1242) is the credential's WRITE ceiling, orthogonal to
+//     `mode`: 'read' refuses every write surface on the Agent API, 'write'
+//     (the default, so existing tokens and callers are unaffected) is the
+//     original grant. 'read' + mode 'act' is a contradiction and is rejected —
+//     'act' means "commits apply immediately", and a read-only token has no
+//     commits. Access is fixed at mint time; no API call can raise it.
 //   - `pii` (AQU-1180) opts the credential IN to seeing real human identities
 //     in agent-facing responses. Default off; requires OWNER of the scoped org
 //     or project, and an unscoped credential can never carry it. Everything
@@ -27,6 +33,10 @@ import type { AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { getEffectiveOrgRole } from "../services/org-permissions"
+import {
+  orgLevelWithoutUnelevatedAdmin,
+  roleWithoutUnelevatedAdmin,
+} from "../services/elevation-gate"
 import { isPlatformAdmin } from "../middleware/platform-admin"
 import { mintApiToken } from "../../../db/shared/api-credentials"
 import { countRecentEvents, recordAuthEvent, userIdentifier, CREDENTIAL_MINT_MAX_PER_USER } from "../utils/rate-limit"
@@ -39,6 +49,9 @@ const credentials = new Hono<AuthHonoEnv>()
 const createSchema = z.object({
   name: z.string().min(1).max(200),
   mode: z.enum(["ask", "act"]),
+  // AQU-1242: omitted = "write", so every existing caller (and the
+  // /connect-agent grant flow) keeps minting read-write tokens unchanged.
+  access: z.enum(["read", "write"]).optional(),
   orgId: z.string().min(1).optional(),
   projectId: z.string().min(1).optional(),
   // ISO-8601 timestamp; validated as a real date below.
@@ -52,7 +65,9 @@ interface CredentialRow {
   id: string
   name: string
   mode: "ask" | "act"
+  access: "read" | "write"
   org_id: string | null
+  org_ids?: string[] | null
   project_id: string | null
   token_prefix: string
   created_at: string
@@ -60,6 +75,8 @@ interface CredentialRow {
   last_used_at: string | null
   revoked_at: string | null
   pii: boolean | null
+  /** Set for OAuth grants (ChatGPT, Zapier); only the list query reads it. */
+  oauth_resource?: string | null
 }
 
 /** Public JSON shape — never includes token_hash. */
@@ -68,7 +85,11 @@ function toDto(r: CredentialRow) {
     id: r.id,
     name: r.name,
     mode: r.mode,
+    // AQU-1242: surfaced so the token list can mark which tokens can change
+    // anything — the same reason `pii` is surfaced below.
+    access: r.access,
     orgId: r.org_id,
+    ...(r.org_ids != null ? { orgIds: r.org_ids } : {}),
     projectId: r.project_id,
     tokenPrefix: r.token_prefix,
     createdAt: r.created_at,
@@ -78,13 +99,32 @@ function toDto(r: CredentialRow) {
     // AQU-1180: surfaced so the token list can mark which tokens see real
     // names — a human auditing their tokens has to be able to tell.
     pii: r.pii === true,
+    // A connected app (OAuth), not a token the user pasted somewhere: the list
+    // labels it and offers no agent-setup instructions for it.
+    oauth: r.oauth_resource != null,
   }
 }
 
 credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c) => {
   const user = c.get("user")
-  const { name, mode, orgId, projectId, expiresAt, pii } = c.req.valid("json")
+  const { name, mode, orgId, projectId, expiresAt, pii, access } = c.req.valid("json")
   const wantsPii = pii === true
+  const accessValue = access ?? "write"
+
+  // AQU-1242: 'act' is a statement about how a commit behaves, so asking for it
+  // on a token that can never commit is a mistake worth naming rather than
+  // silently coercing — a caller who wrote both fields deliberately should learn
+  // which one the server ignored, not discover it from a later 403.
+  if (accessValue === "read" && mode === "act") {
+    return c.json(
+      {
+        error: "validation_failed",
+        message:
+          "A read-only credential cannot be act-mode: act mode describes how a commit applies, and a read-only credential cannot commit. Use mode \"ask\" (it is not consulted on a read-only token) or access \"write\".",
+      },
+      400,
+    )
+  }
 
   // [Pen test] API security & data exposure (2026-08-13): throttle minting
   // before doing any scope resolution — see rate-limit.ts for rationale.
@@ -101,9 +141,20 @@ credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c
   // Resolve the caller's live authority on the requested scope. A credential
   // can only be scoped where the user holds >= CONTRIBUTOR; 'act' needs
   // >= MAINTAINER. scopeLevel === null means "unscoped" (user-global).
+  //
+  // OPS-44: the scope level is taken from the caller's authority with
+  // UN-ELEVATED platform-admin power stripped out. A PAT outlives the session
+  // that minted it, so an admin who could mint one on bare admin authority
+  // would hold a permanent cross-tenant credential that no later elevation
+  // check can reach — routing around the step-up gate rather than passing it.
+  // An elevated admin keeps the cross-tenant path; a genuine member of the
+  // scope is unaffected, because for them the two answers are identical.
   let scopeLevel: number | null = null
   if (projectId) {
-    const role = await resolveProjectRole(c.env, user, projectId)
+    const resolved = await resolveProjectRole(c.env, user, projectId)
+    const role = resolved
+      ? await roleWithoutUnelevatedAdmin(c, user, projectId, resolved)
+      : null
     if (!role || role.level < ROLE.CONTRIBUTOR) {
       return c.json({ error: "scope_denied", message: "You need contributor access on this project to scope a credential to it." }, 403)
     }
@@ -111,7 +162,12 @@ credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c
   } else if (orgId) {
     const numericOrgId = Number(orgId)
     const level = Number.isInteger(numericOrgId)
-      ? await getEffectiveOrgRole(c.env, numericOrgId, user)
+      ? await orgLevelWithoutUnelevatedAdmin(
+          c,
+          numericOrgId,
+          user,
+          await getEffectiveOrgRole(c.env, numericOrgId, user),
+        )
       : null
     if (level == null || level < ROLE.CONTRIBUTOR) {
       return c.json({ error: "scope_denied", message: "You need contributor access on this org to scope a credential to it." }, 403)
@@ -174,9 +230,9 @@ credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c
 
   const row = await c.env.AQUILLA_PG.prepare(
     `INSERT INTO api_credentials
-        (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id, expires_at, pii)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     RETURNING id, name, mode, org_id, project_id, token_prefix,
+        (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id, expires_at, pii, access)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     RETURNING id, name, mode, access, org_id, project_id, token_prefix,
                created_at, expires_at, last_used_at, revoked_at, pii`,
   )
     .bind(
@@ -190,6 +246,7 @@ credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c
       projectId ?? null,
       expiresAtValue,
       wantsPii,
+      accessValue,
     )
     .first<CredentialRow>()
 
@@ -202,8 +259,8 @@ credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c
 credentials.get("/", authMiddleware, async (c) => {
   const user = c.get("user")
   const result = await c.env.AQUILLA_PG.prepare(
-    `SELECT id, name, mode, org_id, project_id, token_prefix,
-            created_at, expires_at, last_used_at, revoked_at, pii
+    `SELECT id, name, mode, access, org_id, org_ids, project_id, token_prefix,
+            created_at, expires_at, last_used_at, revoked_at, pii, oauth_resource
        FROM api_credentials
       WHERE user_id = ?
       ORDER BY created_at DESC`,
@@ -228,7 +285,7 @@ credentials.delete("/:id", authMiddleware, async (c) => {
   // credential gets the same 404 whether the id exists or not, rather than a
   // distinguishing 403 — collapsing an existence oracle on an otherwise-opaque
   // resource id. Only the real owner (or a platform admin) sees past this.
-  if (!row || (row.user_id !== String(user.id) && !isPlatformAdmin(c))) {
+  if (!row || (row.user_id !== String(user.id) && !(await isPlatformAdmin(c)))) {
     return c.json({ error: "not_found", message: "Credential not found." }, 404)
   }
 

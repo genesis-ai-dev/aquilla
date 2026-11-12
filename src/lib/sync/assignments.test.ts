@@ -141,10 +141,49 @@ describe("createAssignment", () => {
       jwt: "jwt", projectId: "p1", fileId: "f1", author: "wendi", assigneeUserId: 2,
       scope: [{ fileId: "f1" }], scopeKind: "books", scopeLabel: "Genesis",
     })
+    await createAssignment({
+      jwt: "jwt", projectId: "p1", fileId: "f1", author: "wendi", assigneeUserId: 2,
+      scope: [{ fileId: "f1" }], scopeKind: "books", scopeLabel: "Genesis", targetLang: "default",
+    })
+    await createAssignment({
+      jwt: "jwt", projectId: "p1", fileId: "f1", author: "wendi", assigneeUserId: 2,
+      scope: [{ fileId: "f1" }], scopeKind: "books", scopeLabel: "Genesis", targetLang: "Swahili",
+    })
 
     expect(bodies[0].targetLang).toBe("es")
     expect("targetLang" in bodies[1]).toBe(false)
     expect("targetLang" in bodies[2]).toBe(false)
+    // AQU-729: the word "default" is not a lane. It stores as the default lane.
+    expect("targetLang" in bodies[3]).toBe(false)
+    expect(bodies[4].targetLang).toBe("Swahili")
+  })
+
+  it("stamps laneId beside the tag, and still omits the tag for the default lane (AQU-1601)", async () => {
+    mockFetchSyncToken.mockResolvedValue({ token: "synctoken" } as Awaited<ReturnType<typeof fetchSyncToken>>)
+    const bodies: Record<string, unknown>[] = []
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const parsed = JSON.parse(init.body as string)
+        bodies.push(parsed.events[0].payload)
+        return jsonRes({ accepted: [{ id: parsed.events[0].id }], rejected: [] })
+      }),
+    )
+
+    await createAssignment({
+      jwt: "jwt", projectId: "p1", fileId: "f1", author: "wendi", assigneeUserId: 2,
+      scope: [{ fileId: "f1" }], scopeKind: "books", scopeLabel: "Genesis",
+      targetLang: "es", laneId: "lane-es",
+    })
+    await createAssignment({
+      jwt: "jwt", projectId: "p1", fileId: "f1", author: "wendi", assigneeUserId: 2,
+      scope: [{ fileId: "f1" }], scopeKind: "books", scopeLabel: "Genesis",
+      targetLang: "", laneId: "lane-default",
+    })
+
+    expect(bodies[0]).toMatchObject({ targetLang: "es", laneId: "lane-es" })
+    expect(bodies[1].laneId).toBe("lane-default")
+    expect("targetLang" in bodies[1]).toBe(false)
   })
 
   it("throws AssignmentEmitError when the server rejects (e.g. role too low → 403)", async () => {
@@ -172,6 +211,37 @@ describe("createAssignment", () => {
 // its own cells_total/cells_done row and its own assignmentId. That's what
 // makes "individual units remain individually removable afterward" true —
 // unassignAssignment (below) only ever closes ONE assignment_id.
+describe("assignment kind (AQU-1969)", () => {
+  it("names the kind only for a validate assignment, so a translate event is unchanged", async () => {
+    mockFetchSyncToken.mockResolvedValue({ token: "synctoken" } as Awaited<ReturnType<typeof fetchSyncToken>>)
+    const bodies: Record<string, unknown>[] = []
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const parsed = JSON.parse(init.body as string)
+        bodies.push(parsed.events[0].payload)
+        return jsonRes({ accepted: [{ id: parsed.events[0].id }], rejected: [] })
+      }),
+    )
+    const base = {
+      jwt: "jwt", projectId: "p1", fileId: "f1", author: "wendi", assigneeUserId: 2,
+      scope: [{ fileId: "f1" }], scopeKind: "books" as const, scopeLabel: "Genesis",
+    }
+    await createAssignment({ ...base, kind: "validate" })
+    await createAssignment({ ...base, kind: "translate" })
+    await createAssignment(base)
+    await createBulkFileAssignments({
+      jwt: "jwt", projectId: "p1", author: "wendi", assigneeUserId: 2,
+      entries: [{ fileId: "f2", scopeLabel: "Exodus" }], kind: "validate",
+    })
+
+    expect(bodies[0].kind).toBe("validate")
+    expect("kind" in bodies[1]).toBe(false)
+    expect("kind" in bodies[2]).toBe(false)
+    expect(bodies[3].kind).toBe("validate")
+  })
+})
+
 describe("createBulkFileAssignments", () => {
   it("emits one event per entry, all sharing the same deadline and assignee, each scoped to exactly its own file", async () => {
     mockFetchSyncToken.mockResolvedValue({ token: "synctoken" } as Awaited<ReturnType<typeof fetchSyncToken>>)

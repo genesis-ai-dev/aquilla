@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { getPortfolio, getPortfolioPage, getPortfolios, getPortfoliosPage, PORTFOLIO_ORG_IDS_MAX, validatedPct, attentionRank, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "./portfolio"
+import { getPortfolio, getPortfolioAggregates, getPortfolioPage, getPortfolios, getPortfoliosPage, validatedPct, attentionRank, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneAudioValidatedPct, laneOwesAudio, laneTextValidatedPct, laneTranslatedPct, laneValidatedPct, isAudioOnlyView, portfolioShowsText, type PortfolioProject, type PortfolioLane } from "./portfolio"
 
 const ORIG = global.fetch
 
@@ -85,18 +85,69 @@ describe("getPortfolioPage / getPortfoliosPage", () => {
     })
   })
 
-  it("omits orgIds when the membership list exceeds the batch cap (AQU-756)", async () => {
+  it("sends every org id with no length cap (AQU-756)", async () => {
     let calledBody: unknown
     global.fetch = vi.fn(async (_input: unknown, init?: RequestInit) => {
       calledBody = JSON.parse(String(init?.body))
       return new Response(JSON.stringify({ portfolios: [], nextCursor: null }), { status: 200 })
     }) as unknown as typeof fetch
 
-    const orgIds = Array.from({ length: PORTFOLIO_ORG_IDS_MAX + 1 }, (_, i) => i + 1)
+    const orgIds = Array.from({ length: 501 }, (_, i) => i + 1)
     await getPortfoliosPage("jwt", orgIds, { limit: 40 })
-    expect(calledBody).toEqual({ limit: 40 })
+    expect(calledBody).toEqual({ orgIds, limit: 40 })
     await getPortfolios("jwt", orgIds)
-    expect(calledBody).toEqual({})
+    expect(calledBody).toEqual({ orgIds })
+  })
+})
+
+describe("getPortfolioAggregates", () => {
+  it("POSTs the explicit org ids under the validation cap", async () => {
+    let calledUrl = ""
+    let calledBody: unknown
+    global.fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+      calledUrl = typeof input === "string" ? input : (input as Request).url
+      calledBody = JSON.parse(String(init?.body))
+      return new Response(JSON.stringify({
+        projectCount: 2,
+        avgTranslatedPct: 0.5,
+        avgValidatedPct: 0.25,
+        avgAudioPct: 0,
+        stalledCount: 1,
+        overdueCount: 0,
+        attentionCount: 1,
+        orgs: [{ orgId: 1, projectCount: 2, avgTranslatedPct: 0.5, avgValidatedPct: 0.25, avgAudioPct: 0, stalledCount: 1, overdueCount: 0, attentionCount: 1 }],
+      }), { status: 200 })
+    }) as unknown as typeof fetch
+
+    const summary = await getPortfolioAggregates("jwt", [1, 1])
+    expect(calledUrl).toMatch(/\/api\/v2\/orgs\/portfolio\/summary$/)
+    expect(calledBody).toEqual({ orgIds: [1] })
+    expect(summary.projectCount).toBe(2)
+    expect(summary.avgTranslatedPct).toBe(0.5)
+    expect(summary.orgs).toEqual([
+      expect.objectContaining({ orgId: 1, projectCount: 2, stalledCount: 1 }),
+    ])
+  })
+
+  it("sends every org id on the summary request (AQU-756)", async () => {
+    let calledBody: unknown
+    global.fetch = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      calledBody = JSON.parse(String(init?.body))
+      return new Response(JSON.stringify({
+        projectCount: 0,
+        avgTranslatedPct: 0,
+        avgValidatedPct: 0,
+        avgAudioPct: 0,
+        stalledCount: 0,
+        overdueCount: 0,
+        attentionCount: 0,
+        orgs: [],
+      }), { status: 200 })
+    }) as unknown as typeof fetch
+
+    const orgIds = Array.from({ length: 501 }, (_, i) => i + 1)
+    await getPortfolioAggregates("jwt", orgIds)
+    expect(calledBody).toEqual({ orgIds })
   })
 })
 
@@ -132,6 +183,104 @@ describe("lane helpers (AQU-538)", () => {
   })
 })
 
+describe("lane validation halves (AQU-2178)", () => {
+  const lane = (over: Partial<PortfolioLane>): PortfolioLane => ({ lane: "", totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null, ...over })
+
+  // The Languages table prints these two side by side where the single
+  // "Validated" column (laneValidatedPct) used to print one DONE share whose
+  // meaning changed with what the language delivers.
+  it("laneTextValidatedPct is validated text alone, whatever the language delivers", () => {
+    const counts = {
+      totalCells: 10, filledCells: 6, validatedCells: 3,
+      audioTotalCells: 10, audioCells: 4, validatedAudioCells: 1, bothValidatedCells: 1,
+    }
+    // Text and audio: validating a line's text without approving its recording
+    // moves this figure. laneValidatedPct counts only both-approved lines, so
+    // it stays at the 1 line that is.
+    expect(laneTextValidatedPct(lane({ ...counts, delivers: "text_and_audio" }))).toBe(0.3)
+    expect(laneValidatedPct(lane({ ...counts, delivers: "text_and_audio" }))).toBe(0.1)
+    // A Text language's figure is the number the old column showed, to the cell.
+    expect(laneTextValidatedPct(lane({ ...counts, delivers: "text" })))
+      .toBe(laneValidatedPct(lane({ ...counts, delivers: "text" })))
+    expect(laneTextValidatedPct(lane({ totalCells: 0, validatedCells: 0 }))).toBe(0)
+  })
+
+  it("laneOwesAudio needs a positive audio total the server actually sent", () => {
+    const owed = { totalCells: 10, audioTotalCells: 10, audioCells: 4, validatedAudioCells: 1 }
+    expect(laneOwesAudio(lane(owed))).toBe(true)
+    // AQU-1954: a Text language nobody has recorded in is measured against 0.
+    expect(laneOwesAudio(lane({ ...owed, audioTotalCells: 0, audioCells: 0 }))).toBe(false)
+    // Pre-AQU-1951: no per-language audio at all. Answering "yes" here would
+    // mean measuring against the project's denominator, the one way this could
+    // disagree with the Progress card's tile for the same language.
+    expect(laneOwesAudio(lane({ totalCells: 10 }))).toBe(false)
+    expect(laneOwesAudio(lane({ totalCells: 10, audioCells: 4 }))).toBe(false)
+  })
+
+  it("laneAudioValidatedPct is approved recordings over the language's own audio total, clamped", () => {
+    expect(laneAudioValidatedPct(lane({ totalCells: 10, audioTotalCells: 10, audioCells: 5, validatedAudioCells: 4 }))).toBe(0.4)
+    // A dubbing language is measured against its cue sheet, not its lines.
+    expect(laneAudioValidatedPct(lane({ totalCells: 10, audioTotalCells: 40, audioCells: 20, validatedAudioCells: 10 }))).toBe(0.25)
+    // Audio left on a re-imported file counts in the numerator and not the
+    // denominator — the clamp keeps a tile off "140%" (AQU-1566).
+    expect(laneAudioValidatedPct(lane({ totalCells: 10, audioTotalCells: 10, audioCells: 14, validatedAudioCells: 14 }))).toBe(1)
+    expect(laneAudioValidatedPct(lane({ totalCells: 10, audioTotalCells: 0, audioCells: 0 }))).toBe(0)
+  })
+
+  it("agrees with the Progress card's Audio Validated tile for the same language", () => {
+    // The card narrows the project to the lane's own counts and runs
+    // audioValidatedPct over it (ProjectOverview's `audioOnTab`). Same number.
+    const target = lane({ lane: "fr", role: "target", totalCells: 10, filledCells: 6, validatedCells: 3, audioTotalCells: 40, audioCells: 20, validatedAudioCells: 7, delivers: "text_and_audio" })
+    const onTab = project({
+      totalCells: 10,
+      audioCells: target.audioCells ?? 0,
+      validatedAudioCells: target.validatedAudioCells ?? 0,
+      audioTotalCells: target.audioTotalCells,
+    })
+    expect(laneAudioValidatedPct(target)).toBe(audioValidatedPct(onTab))
+  })
+})
+
+describe("isAudioOnlyView (AQU-2116)", () => {
+  const lane = (over: Partial<PortfolioLane>): PortfolioLane => ({ lane: "", totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null, ...over })
+
+  // Recording has to have started before the absence of target text means
+  // anything — the plan board's rule (AQU-955). The switch alone never counts.
+  it.each([
+    ["recorded with no target text", { totalCells: 100, filledCells: 0, audioCells: 60 }, true],
+    ["recorded and partly translated", { totalCells: 100, filledCells: 1, audioCells: 60 }, false],
+    ["records audio but nothing recorded yet", { totalCells: 100, filledCells: 0, audioCells: 0, recordsAudio: true, audioTotalCells: 100 }, false],
+    ["brand-new project: no text, no takes", { totalCells: 0, filledCells: 0, audioCells: 0 }, false],
+    ["text-only project", { totalCells: 100, filledCells: 80, audioCells: 0 }, false],
+  ])("%s → %s on the All view", (_name, over, expected) => {
+    expect(isAudioOnlyView(project(over), null)).toBe(expected)
+  })
+
+  it("on All, any target language with text keeps the text figures", () => {
+    const lanes = [lane({ lane: "", filledCells: 0, totalCells: 100 }), lane({ lane: "es", filledCells: 5, totalCells: 100 })]
+    expect(isAudioOnlyView(project({ totalCells: 100, filledCells: 0, audioCells: 60, lanes }), null)).toBe(false)
+  })
+
+  it("on All, the SOURCE lane's text does not count as a target language's", () => {
+    const lanes = [lane({ lane: "", role: "source", filledCells: 100, totalCells: 100 }), lane({ lane: "my", role: "target", filledCells: 0, totalCells: 100 })]
+    expect(isAudioOnlyView(project({ totalCells: 100, filledCells: 0, audioCells: 60, lanes }), null)).toBe(true)
+  })
+
+  it("judges the language tab being viewed, not the project", () => {
+    const audioOnly = lane({ lane: "my", totalCells: 100, filledCells: 0, audioCells: 60, validatedAudioCells: 60 })
+    const withText = lane({ lane: "es", totalCells: 100, filledCells: 40, audioCells: 0 })
+    const p = project({ totalCells: 100, filledCells: 40, audioCells: 60, lanes: [audioOnly, withText] })
+    expect(isAudioOnlyView(p, audioOnly)).toBe(true)
+    expect(isAudioOnlyView(p, withText)).toBe(false)
+  })
+
+  // AQU-1951: a server too old to send per-lane audio cannot answer this, and
+  // the text figures must stay exactly as they were rather than vanish.
+  it("a lane with no per-lane audio field is never audio-only", () => {
+    expect(isAudioOnlyView(project({ totalCells: 100, filledCells: 0, audioCells: 60 }), lane({ lane: "my", totalCells: 100, filledCells: 0 }))).toBe(false)
+  })
+})
+
 describe("audioPct", () => {
   it("returns audio fraction when cells > 0", () => {
     expect(audioPct(project({ totalCells: 200, audioCells: 50 }))).toBe(0.25)
@@ -164,6 +313,23 @@ describe("audioValidatedPct (AQU-508 / AQU-1093)", () => {
     // has no ceiling of its own, so without this the tile renders "140%".
     expect(audioValidatedPct(project({ totalCells: 10, audioCells: 14, validatedAudioCells: 14 }))).toBe(1)
     expect(audioPct(project({ totalCells: 10, audioCells: 14 }))).toBe(1)
+  })
+})
+
+describe("audio denominator (AQU-1566)", () => {
+  // A dubbing episode: 6 subtitle rows, a 40-cue sheet beside them, 7 cues
+  // recorded. The text total no longer carries the sheet, so dividing by it
+  // read 7/6 = 100% recorded while the plan board said 7/40.
+  it("measures recordings against the server's audio total, like the plan board", () => {
+    const p = project({ totalCells: 6, audioTotalCells: 40, audioCells: 7, validatedAudioCells: 4 })
+    expect(audioPct(p)).toBe(7 / 40)
+    expect(audioValidatedPct(p)).toBe(4 / 40)
+  })
+
+  it("falls back to the text total when an older server sends no audio total", () => {
+    const p = project({ totalCells: 200, audioCells: 50, validatedAudioCells: 20 })
+    expect(audioPct(p)).toBe(0.25)
+    expect(audioValidatedPct(p)).toBe(0.1)
   })
 })
 
@@ -256,6 +422,29 @@ describe("languagePairLabel (AQU-523)", () => {
   })
 })
 
+describe("languagePairLabel on lane rows (AQU-1977)", () => {
+  const lane = (l: string, name: string, over: Partial<PortfolioLane> = {}): PortfolioLane => ({
+    lane: l, name, totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null, role: "target", ...over,
+  })
+
+  it("names a new project's first live language, which has no '' lane", () => {
+    expect(languagePairLabel(project({ lanes: [
+      lane("", "English", { role: "source", position: 0 }),
+      lane("French", "French", { position: 2 }),
+      lane("German", "German", { position: 0, archived: true }),
+      lane("Spanish", "Spanish", { position: 1 }),
+    ] }))).toBe("English → Spanish")
+  })
+
+  it("keeps an old project's '' lane as its target", () => {
+    expect(languagePairLabel(project({ lanes: [
+      lane("", "Greek", { role: "source", position: 0 }),
+      lane("es", "Spanish", { position: 0 }),
+      lane("", "Bambara", { position: 1 }),
+    ] }))).toBe("Greek → Bambara")
+  })
+})
+
 describe("attentionRank", () => {
   it("an overdue project out-ranks a merely-stalled one", () => {
     const now = Date.parse("2026-06-01T00:00:00Z")
@@ -275,5 +464,32 @@ describe("attentionRank", () => {
     const now = Date.now()
     const neverEdited = project({ id: "n", name: "Never", totalCells: 100, validatedCells: 100, lastEditAt: null })
     expect(attentionRank(neverEdited, now)).toBeGreaterThanOrEqual(1000)
+  })
+})
+
+describe("portfolioShowsText (AQU-2116 + media redesign)", () => {
+  const lane = (over: Partial<PortfolioLane>): PortfolioLane => ({ lane: "", totalCells: 100, filledCells: 0, validatedCells: 0, lastEditAt: null, ...over })
+
+  it("keeps AQU-2116's evidence answer to the letter when nobody has chosen", () => {
+    const lanes = [lane({ lane: "", audioCells: 60 })]
+    const p = project({ totalCells: 100, filledCells: 0, audioCells: 60, lanes })
+    expect(portfolioShowsText(p, null)).toBe(!isAudioOnlyView(p, null))
+    expect(portfolioShowsText(p, lanes[0])).toBe(!isAudioOnlyView(p, lanes[0]))
+  })
+
+  it("a language set to Text shows its text even with recordings and no text yet", () => {
+    const sw = lane({ lane: "", audioCells: 60, delivers: "text" })
+    expect(portfolioShowsText(project({ totalCells: 100, audioCells: 60, lanes: [sw] }), sw)).toBe(true)
+  })
+
+  it("a language set to Audio hides the text tiles even with some text in it", () => {
+    const sw = lane({ lane: "", filledCells: 5, audioCells: 60, delivers: "audio" })
+    expect(portfolioShowsText(project({ totalCells: 100, filledCells: 5, audioCells: 60, lanes: [sw] }), sw)).toBe(false)
+  })
+
+  it("on All, an Audio language beside one nobody chose that holds text keeps the text tiles", () => {
+    const sw = lane({ lane: "", audioCells: 60, delivers: "audio" })
+    const fr = lane({ lane: "fr", filledCells: 40, audioCells: 0 })
+    expect(portfolioShowsText(project({ totalCells: 200, filledCells: 40, audioCells: 60, lanes: [sw, fr] }), null)).toBe(true)
   })
 })

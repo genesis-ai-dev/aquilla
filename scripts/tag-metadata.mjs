@@ -1,4 +1,5 @@
 import { workersBuildPreviewAlias } from "./cloudflare-pr-preview.mjs"
+import { pathToFileURL } from "node:url"
 
 const PREVIEW_WORKER = "aquilla-web-preview"
 const PREVIEW_SUBDOMAIN = "blue-darkness-7674"
@@ -39,7 +40,7 @@ Preview URL: ${previewUrl}`.trim()
 }
 
 // CLI entrypoint
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [tag, branch, commitSha] = process.argv.slice(2)
   
   if (!tag || !branch || !commitSha) {

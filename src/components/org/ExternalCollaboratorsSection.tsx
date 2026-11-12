@@ -3,7 +3,7 @@ import { ShieldOff } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Section } from "@/components/ui/page"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchOrgMembersMatrix, removeProjectMember } from "@/lib/frontier/members"
 import {
@@ -113,7 +113,7 @@ export function ExternalCollaboratorsSection({
       <ul className="divide-y rounded-lg border">
         {externals.map((e) => (
           <li key={e.userId} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
-            <UsernameWithAvatar username={e.username} />
+            <UsernameWithAvatar userId={e.userId} username={e.username} />
             <Badge className="border-transparent bg-amber-500/15 text-[10px] text-amber-700 dark:text-amber-300">
               {t("org.externalCollaborators.badge")}
             </Badge>
@@ -142,18 +142,18 @@ export function ExternalCollaboratorsSection({
                       <ShieldOff className="size-3" />
                     </Button>
                   ) : (
-                    <AppTooltip
-                      content={
+                    // AQU-2260: why it can't be revoked here opens on click.
+                    <NoteOnClick
+                      note={
                         g.source === "group"
                           ? t("org.externalCollaborators.viaTeamTooltip")
                           : t("projectSettings.share.lockedHintCreator")
                       }
-                      className="max-w-xs"
                     >
                       <span className="text-[10px] text-muted-foreground">
                         {t("org.externalCollaborators.viaSourceLabel", { source: g.source })}
                       </span>
-                    </AppTooltip>
+                    </NoteOnClick>
                   )}
                 </span>
               ))}

@@ -30,10 +30,17 @@ export interface SearchHit {
   snippet: string
 }
 
+/** A file the agent asked the user to choose from (AQU-1468). */
+export interface FileCandidate {
+  id: string
+  name: string
+}
+
 export interface ToolResultData {
   cells?: PassageRow[]
   examples?: ExamplePair[]
   hits?: SearchHit[]
+  candidates?: FileCandidate[]
 }
 
 /** What every semantic tool hands back to the loop. */

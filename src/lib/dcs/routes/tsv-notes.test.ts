@@ -2,7 +2,10 @@ import { describe, it, expect } from "vitest"
 import { tsvNotesRoute } from "./tsv-notes"
 import { dcsCellId, dcsFileId } from "../cell-id"
 import { contentHash } from "../content-hash"
+import { readNoteReferenceMetadata } from "@/lib/notes/note-metadata"
 import type { DcsCatalogEntry, DcsManifest } from "../types"
+
+const PROJECT_ID = "proj-1"
 
 const TN_ENTRY: DcsCatalogEntry = {
   name: "en_tn",
@@ -58,6 +61,7 @@ describe("tsvNotesRoute parse()", () => {
     tsvNotesRoute.parse({
       entry: TN_ENTRY,
       manifest: TN_MANIFEST,
+      projectId: PROJECT_ID,
       files: new Map([["tn_TIT.tsv", TN_TSV]]),
     })
 
@@ -65,7 +69,7 @@ describe("tsvNotesRoute parse()", () => {
     const out = parse()
     expect(out).toHaveLength(1)
     const file = out[0]
-    expect(file.fileId).toBe(dcsFileId("unfoldingWord/en_tn", "tn_TIT.tsv"))
+    expect(file.fileId).toBe(dcsFileId(PROJECT_ID, "unfoldingWord/en_tn", "tn_TIT.tsv"))
     expect(file.bookCode).toBe("TIT")
     expect(file.cells).toHaveLength(2)
 
@@ -111,6 +115,7 @@ describe("tsvNotesRoute parse()", () => {
     const cells = tsvNotesRoute.parse({
       entry: TN_ENTRY,
       manifest: TN_MANIFEST,
+      projectId: PROJECT_ID,
       files: new Map([["tn_TIT.tsv", tsv]]),
     })[0].cells
     expect(cells[0].value).toBe("# Introduction to Titus\n\n## Part 1: General Introduction")
@@ -130,6 +135,7 @@ describe("tsvNotesRoute parse()", () => {
     const cells = tsvNotesRoute.parse({
       entry: TN_ENTRY,
       manifest: TN_MANIFEST,
+      projectId: PROJECT_ID,
       files: new Map([["tn_TIT.tsv", tsv]]),
     })[0].cells
     // The plain value keeps the raw markdown (unescaped only) …
@@ -147,6 +153,7 @@ describe("tsvNotesRoute parse()", () => {
     const cells = tsvNotesRoute.parse({
       entry: TN_ENTRY,
       manifest: TN_MANIFEST,
+      projectId: PROJECT_ID,
       files: new Map([["tn_TIT.tsv", tsv]]),
     })[0].cells
     expect(cells[0].value).toBe("")
@@ -161,11 +168,34 @@ describe("tsvNotesRoute parse()", () => {
     const changed = tsvNotesRoute.parse({
       entry: TN_ENTRY,
       manifest: TN_MANIFEST,
+      projectId: PROJECT_ID,
       files: new Map([
         ["tn_TIT.tsv", TN_TSV.replace("Paul calls himself a servant here.", "REWRITTEN note.")],
       ]),
     })
     expect(changed[0].cells[0].cellId).toBe(a[0].cells[0].cellId)
     expect(changed[0].cells[0].contentHash).not.toBe(a[0].cells[0].contentHash)
+  })
+})
+
+// AQU-527 — the seam between this producer and the panel that displays its
+// output. `Quote` is carried, not translated, so the only way the phrase reaches
+// a translator is the metadata bucket; a renamed key here leaves every test in
+// this file green while the editor's notes sidebar silently drops the phrase.
+describe("tsvNotesRoute → notes sidebar seam (AQU-527)", () => {
+  it("emits the original-language quote where the sidebar's reader looks for it", () => {
+    const cells = tsvNotesRoute.parse({
+      entry: TN_ENTRY,
+      manifest: TN_MANIFEST,
+      projectId: PROJECT_ID,
+      files: new Map([["tn_TIT.tsv", TN_TSV]]),
+    })[0].cells
+
+    const read = readNoteReferenceMetadata(cells[0].metadata)
+    expect(read.quote).toBe("δοῦλος")
+    expect(read.quoteScript).toBe("grc")
+    expect(read.supportReference).toBe("rc://en/ta/man/figs-abstractnouns")
+    // The prose stays the cell's value — the quote is never folded into it.
+    expect(cells[0].value).toBe("Paul calls himself a servant here.")
   })
 })

@@ -21,6 +21,7 @@
 // a space — and the preview shows exactly what commits.
 
 import { errorResponse } from './errors'
+import { laneIdRequiredMessage } from './external-lane'
 import { detectFormat, loadArtifact, type ArtifactRow } from './artifacts-route'
 import { PLAN_IMPORT_MAX_CELLS, type PlanImportCell } from './commands'
 import type { ExternalEnv } from './types'
@@ -29,43 +30,29 @@ import {
   TEXT_PARSE_FILE_TYPES,
   type TextParseFileType,
 } from '../../../src/lib/parsers/parse-text-formats'
+// The format tables live in their own module so they can be read without this
+// module's Worker-only graph (AQU-2384). Re-exported below for every existing
+// importer.
+import {
+  BINARY_PARSE_FILE_TYPES,
+  CLIENT_ONLY_FORMATS,
+  CLIENT_ONLY_HINT,
+  SERVER_PARSEABLE_FILE_TYPES,
+  type ServerParseFileType,
+} from './import-parse-formats'
 import { extractDocxStrings } from '../../../src/lib/parsers/docx'
 import { usfmContentOnly } from '../../../src/lib/parsers/usfm-content-only'
 import type { ParsedTextFileResult, TranslatableString } from '../../../src/lib/parsers/core-types'
 import { loadProjectSettings } from '../../../db/shared/projects'
+import type { UsfmNoteRecord } from '../lib/usfm-notes'
 
-/** Formats parsed from BYTES rather than decoded text — zip containers whose
- *  parser reads members itself. Routed around the text-parse core below. */
-export const BINARY_PARSE_FILE_TYPES: ReadonlySet<string> = new Set<string>(['docx'])
-
-/** The union the parse route accepts. */
-export type ServerParseFileType = TextParseFileType | 'docx'
-
-/** Formats the server can parse (published by discovery + get_capabilities). */
-export const SERVER_PARSEABLE_FILE_TYPES: readonly string[] = [
-  ...TEXT_PARSE_FILE_TYPES,
-  ...BINARY_PARSE_FILE_TYPES,
-].sort()
-
-/** Detected formats we recognize but cannot parse in the worker (DOM-bound
- *  parsers, binary containers, or multi-member packages). Kept as data so the
- *  error and the capability docs can never drift. */
-export const CLIENT_ONLY_FORMATS: readonly string[] = [
-  'pptx',
-  'doc',
-  'html',
-  'xliff',
-  'tmx',
-  'usx',
-  'idml',
-  'paratext-project',
-  'zip',
-]
-
-const CLIENT_ONLY_HINT =
-  'this format is not yet server-parseable — import it through the in-app Import dialog ' +
-  '(which runs the full parser set in the browser), or parse it yourself and stage raw ' +
-  'PlanImport cells via POST .../changesets'
+export {
+  BINARY_PARSE_FILE_TYPES,
+  CLIENT_ONLY_FORMATS,
+  CLIENT_ONLY_HINT,
+  SERVER_PARSEABLE_FILE_TYPES,
+  type ServerParseFileType,
+}
 
 /** Caller-supplied fileType spellings → canonical parse types. */
 const FILE_TYPE_ALIASES: Record<string, ServerParseFileType> = {
@@ -97,24 +84,27 @@ export interface ParseWarning {
 }
 
 /** Footnote/endnote/crossref lifted out of a content-only USFM cell and kept
- *  in `metadata.usfmNotes` (AQU-1283). */
-export interface UsfmNoteRecord {
-  kind: 'footnote' | 'endnote' | 'xref'
-  caller: string
-  ref: string
-  text: string
-}
+ *  in `metadata.usfmNotes` (AQU-1283). Defined in ../lib/usfm-notes.ts, which
+ *  also owns the export-side reconstruction (AQU-1295); re-exported here
+ *  because this module is where the records are written. */
+export type { UsfmNoteRecord } from '../lib/usfm-notes'
 
 /** Project a parsed string's text (and metadata) to content-only form. */
 function contentOnlyText(
   s: TranslatableString,
 ): { original: string; translated: string; metadata: Record<string, unknown> | undefined } {
   const source = usfmContentOnly(s.original)
+  // AQU-1295: `raw` is kept so export can put the note back byte-for-byte.
+  // The parsed fields alone rebuild a note faithfully in content but not
+  // necessarily character-for-character (a file's own `\fq`/`\fk` sub-markers
+  // are flattened into `text`), and this is the only moment the original span
+  // is in hand.
   const usfmNotes: UsfmNoteRecord[] = source.notes.map((n) => ({
     kind: n.noteKind,
     caller: n.caller,
     ref: n.ref,
     text: n.text,
+    raw: n.raw,
   }))
   return {
     original: source.text,
@@ -134,7 +124,7 @@ function contentOnlyText(
  *  survives is counted into a `residual-markup` warning — it should be zero. */
 export function stringsToPlanImportCells(
   strings: TranslatableString[],
-  opts?: { contentOnly?: boolean },
+  opts?: { contentOnly?: boolean; laneId?: string },
 ): { cells: PlanImportCell[]; warnings: ParseWarning[] } {
   const warnings: ParseWarning[] = []
   const contentOnly = opts?.contentOnly === true
@@ -169,14 +159,12 @@ export function stringsToPlanImportCells(
       ...(s.speaker !== undefined ? { speaker: s.speaker } : {}),
       ...(s.paragraphStart ? { paragraphStart: true } : {}),
       ...(metadata !== undefined ? { metadata } : {}),
-      // Bilingual formats (csv/tsv, po, json with values) carry an existing
-      // translation — land it in the DEFAULT lane ('' — no lane registration
-      // needed), matching the browser's bilingual import.
+      // A translation lands on the lane id the caller named. '' is not a lane.
       ...(translated.trim() !== ''
         ? {
             variants: [
               {
-                laneId: '',
+                laneId: opts?.laneId ?? '',
                 content: translated,
                 ...(s.translatedHtml !== undefined ? { contentHtml: s.translatedHtml } : {}),
               },
@@ -319,6 +307,15 @@ export interface ParseArtifactOptions {
    *  caller that is about to CREATE a file — a silent "first book only" is the
    *  failure mode this guards. */
   requireSingleResult?: boolean
+  /** Lane id for translations the artifact already carries. Required when any
+   *  string has a translation, unless {@link deferMissingLaneId} is set. */
+  laneId?: string
+  /**
+   * ProjectSetup only. Parse a bilingual artifact that omitted laneId and
+   * stamp `''` on the variants, so the plan can bind the single target lane
+   * it is about to create. Other callers still get the required-id 400.
+   */
+  deferMissingLaneId?: boolean
 }
 
 /**
@@ -427,9 +424,19 @@ export async function parseArtifactToCells(
   }
 
   const chosen = results[opts.resultIndex ?? 0]
+  const hasTranslation = chosen.strings.some((s) => (s.translated ?? '').trim() !== '')
+  if (hasTranslation && !opts.laneId && !opts.deferMissingLaneId) {
+    return {
+      ok: false,
+      response: errorResponse('validation_failed', laneIdRequiredMessage('laneId')),
+    }
+  }
   // The `agent:usfm` import profile is content-only (sfm aliases to usfm in
   // resolveFileType, so one check covers both spellings).
-  const { cells, warnings } = stringsToPlanImportCells(chosen.strings, { contentOnly: fileType === 'usfm' })
+  const { cells, warnings } = stringsToPlanImportCells(chosen.strings, {
+    contentOnly: fileType === 'usfm',
+    ...(opts.laneId !== undefined ? { laneId: opts.laneId } : {}),
+  })
   if (cells.length > PLAN_IMPORT_MAX_CELLS) {
     warnings.push({
       code: 'over-cell-cap',

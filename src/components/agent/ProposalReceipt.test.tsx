@@ -6,6 +6,8 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import type { AgentProposal } from "@/lib/agent/protocol"
+import userEvent from "@testing-library/user-event"
+import { renderWithTooltips, expectClickNote } from "@/test-utils/tooltip"
 import { ProposalReceipt } from "./ProposalReceipt"
 
 function proposal(refs: string[]): AgentProposal {
@@ -43,16 +45,22 @@ describe("ProposalReceipt", () => {
     expect(onReview).toHaveBeenCalled()
   })
 
-  it("settles once every row is decided: no Review jump, a done marker", () => {
+  it("collapses to a quiet one-line trace once every row is decided", () => {
+    // A finished receipt must get out of the way (the full card lingering
+    // after everything was applied read as "still needs me"), but it keeps
+    // the outcome and Undo, since this is the only place to reverse it.
     render(
       <ProposalReceipt
-        proposal={proposal(["MRK 1:1"])}
-        counts={{ accepted: 1, edited: 0, rejected: 0, undone: 0, pending: 0, checks: 0 }}
+        proposal={proposal(["MRK 1:1", "MRK 1:2"])}
+        counts={{ accepted: 1, edited: 0, rejected: 1, undone: 0, pending: 0, checks: 0 }}
         onReview={() => {}}
+        onUndo={() => {}}
       />,
     )
+    expect(screen.getByTestId("proposal-receipt-settled")).toHaveTextContent("1 accepted · 1 rejected")
+    expect(screen.queryByText("2 drafts staged")).toBeNull()
     expect(screen.queryByRole("button", { name: /Review/ })).toBeNull()
-    expect(screen.getByText("Done")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^Undo applied$/ })).toBeInTheDocument()
   })
 
   it("offers Undo while applied rows exist, then reports them undone", () => {
@@ -64,7 +72,7 @@ describe("ProposalReceipt", () => {
         onUndo={onUndo}
       />,
     )
-    fireEvent.click(screen.getByRole("button", { name: /Undo applied/ }))
+    fireEvent.click(screen.getByRole("button", { name: /^Undo applied$/ }))
     expect(onUndo).toHaveBeenCalled()
 
     // After the compensating events apply, the rows read "undone" and the
@@ -77,7 +85,7 @@ describe("ProposalReceipt", () => {
       />,
     )
     expect(screen.getByText("2 undone")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /Undo applied/ })).toBeNull()
+    expect(screen.queryByRole("button", { name: /^Undo applied$/ })).toBeNull()
   })
 
   it("never offers Undo before anything has been applied", () => {
@@ -89,6 +97,23 @@ describe("ProposalReceipt", () => {
         onUndo={() => {}}
       />,
     )
-    expect(screen.queryByRole("button", { name: /Undo applied/ })).toBeNull()
+    expect(screen.queryByRole("button", { name: /^Undo applied$/ })).toBeNull()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): Undo applied is a labelled button, so what it does
+// is in an (i) beside it that opens on click, never a hover.
+describe("ProposalReceipt — Undo says what it does on click", () => {
+  it("explains Undo applied behind an (i), not on hover", async () => {
+    renderWithTooltips(
+      <ProposalReceipt
+        proposal={proposal(["MRK 1:1"])}
+        counts={{ accepted: 1, edited: 0, rejected: 0, undone: 0, pending: 0, checks: 0 }}
+        onUndo={() => {}}
+      />,
+    )
+    await userEvent.setup().hover(screen.getByRole("button", { name: /^Undo applied$/ }))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    await expectClickNote(screen.getByRole("button", { name: "About Undo applied" }), /nothing is deleted/)
   })
 })

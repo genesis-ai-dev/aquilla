@@ -14,7 +14,7 @@ ln -sfn "$ROOT/node_modules" "$ROOT/.worktrees/swarm-ws-foo/node_modules"
 
 **Per-worker node_modules**: symlink the root `node_modules` so agents don't need to re-install. For workers with their own `node_modules` (e.g. `sync-worker/`, `auth-worker/`), symlink those too.
 
-**Integration branch**: always based on a clean, verified commit — never on a dirty working tree. Re-create it from HEAD whenever it's been running awhile and main has advanced significantly.
+**Integration branch**: always based on a clean, verified commit — never on a dirty working tree. Re-create it from HEAD whenever it's been running awhile and `dev` has advanced significantly.
 
 ---
 
@@ -36,10 +36,10 @@ ln -sfn "$ROOT/node_modules" "$ROOT/.worktrees/swarm-ws-foo/node_modules"
 - [ ] every known gap has a SWARM-TODO trace in TRACES.md
 
 ## §1 Operating model
-- main = sacred. Never touch its uncommitted changes.
+- main checkout (on `dev`, the trunk — `main` the branch is retired) = sacred. Never touch its uncommitted changes.
 - swarm/integration = accumulation branch (node_modules symlinked).
 - Each agent → its own worktree off integration tip.
-- Merge protocol: verify on integration first; promote to main only when clean.
+- Merge protocol: verify on integration first; land on `dev` via a PR (bot walk PASS) only when clean.
 - Cron: job id `<id>` (`*/10 * * * *`). CronDelete on STOP.
 - Forbidden paths: <list the actor's in-flight files here>
 
@@ -141,7 +141,8 @@ npm run test:e2e:smoke
 git log --oneline -1  # record the sha in §4
 ```
 
-### Promoting to main
+### Promoting to `dev` (the trunk)
+Run these checks in the main checkout, then push the result as a PR branch to `dev` — never push straight to `dev`, and never target `main` (retired).
 ```bash
 # Check first:
 H=$(git rev-parse --short HEAD)   # should not be the old base
@@ -149,29 +150,27 @@ D=$(git status --short | wc -l)   # must be 0 (or only untracked files YOU own)
 MID=$(git rev-parse -q --verify MERGE_HEAD || echo none)  # must be "none"
 
 # If H != base AND D == 0 AND MID == none:
-git merge swarm/integration --no-edit
-# OR if FF possible:
-git merge --ff-only swarm/integration
+git push -u origin swarm/integration && gh pr create --base dev --head swarm/integration
+# Merge the PR once the bot walk is PASS at its head sha (QA-BOT-REGIMEN.md §1).
 ```
 
-### Squash-merge (fast-moving main target)
-When main has advanced past your integration base by many commits, a rebase replays every conflict for every commit that touched the conflicting files. Use squash instead:
+### Squash-merge (fast-moving `dev` target)
+When `dev` has advanced past your integration base by many commits, a rebase replays every conflict for every commit that touched the conflicting files. Use squash instead:
 ```bash
-# Fresh promote worktree off CURRENT main:
-git worktree add -b swarm/promote .worktrees/swarm-promote $(git rev-parse HEAD)
+# Fresh promote worktree off CURRENT origin/dev:
+git fetch origin dev
+git worktree add -b swarm/promote .worktrees/swarm-promote origin/dev
 ln -sfn <root>/node_modules .worktrees/swarm-promote/node_modules
 cd .worktrees/swarm-promote
 git merge --squash swarm/integration
 # Resolve all conflicts once (not once per commit)
-git add -A && git commit -m "merge(swarm→main): ..."
-# Then FF main:
-cd <main> && git merge --ff-only swarm/promote
-# OR if main moved again:
-git merge swarm/promote --no-edit
+git add -A && git commit -m "merge(swarm→dev): ..."
+# Then open the PR to dev and merge it once the bot walk is PASS at its head sha:
+git push -u origin swarm/promote && gh pr create --base dev --head swarm/promote
 ```
 
 ### Conflict resolution principle: keep both sides
-When main has Paratext cases and swarm has CAT cases in the same switch/import block — union them. Don't pick one. Same for route declarations in App.tsx, FileType unions, etc. The rule: **if both sides add additive, non-conflicting functionality, take both.**
+When `dev` has Paratext cases and swarm has CAT cases in the same switch/import block — union them. Don't pick one. Same for route declarations in App.tsx, FileType unions, etc. The rule: **if both sides add additive, non-conflicting functionality, take both.**
 
 ---
 
@@ -203,7 +202,7 @@ nohup npx vite --port 5273 --strictPort >/tmp/swarm-qa-vite.log 2>&1 &
 For interactive waves, express the fan-out + QA + verify as a single `Workflow` call. The orchestrator scouts the backlog inline (it already does this for ORCHESTRATION.md), passes the scoped slices as `args`, reads the structured result, then does the git side effects itself. One workflow = one wave; you stay in the loop between waves.
 
 **What goes in the script:** implement (parallel, worktree-isolated), QA (pipeline: walk surface → fix surface as each finding returns), and the *agents'* own tsc/vitest self-checks.
-**What stays out of the script** (orchestrator, after the workflow returns): merge into `swarm/integration`, the final gate, promotion to `main`, push to `dev`, and any `AskUserQuestion` HITL.
+**What stays out of the script** (orchestrator, after the workflow returns): merge into `swarm/integration`, the final gate, the PR to `dev` and its merge, and any `AskUserQuestion` HITL.
 
 ```js
 export const meta = {
@@ -235,7 +234,7 @@ return { built: built.filter(Boolean), fixes: punch.filter(Boolean) }      // or
 - *Convergence (§8)* → a wave that returns zero fresh findings across the QA pipeline is the dry signal; stop calling workflows, drop to the watcher cron.
 - *Resume* → if a wave is interrupted, relaunch with `{ scriptPath, resumeFromRunId }`; completed `agent()` calls return cached results. This complements (does not replace) the durable markdown state.
 
-**The orchestrator's post-workflow git step is unchanged** — merge each returned branch into `swarm/integration` per §5 (keep both sides), then run the §0 gate yourself before promotion. The workflow never touches `swarm/integration`, `main`, or `dev`.
+**The orchestrator's post-workflow git step is unchanged** — merge each returned branch into `swarm/integration` per §5 (keep both sides), then run the §0 gate yourself before promotion. The workflow never touches `swarm/integration` or `dev`.
 
 ---
 
@@ -252,8 +251,8 @@ return { built: built.filter(Boolean), fixes: punch.filter(Boolean) }      // or
 2. Write a trace in TRACES.md describing what failed.
 3. Respawn a fixer agent with the failure detail in the brief.
 
-**Stale promote branch** (main moved while you were resolving):
-- Tear down the promote worktree, recreate off the new main HEAD, and redo the squash-merge. It's faster than rebasing.
+**Stale promote branch** (`dev` moved while you were resolving):
+- Tear down the promote worktree, recreate off the new `origin/dev`, and redo the squash-merge. It's faster than rebasing.
 
 ---
 
@@ -287,7 +286,7 @@ A HITL item gated on a user decision is a legitimate convergence endpoint for th
 |---|---|---|
 | One QA agent walking 34 surfaces | Context filled ~surface 15; depth quietly dropped | Decompose per-surface, one agent each |
 | 5-min loop after build phase done | Burned tokens spinning on finished work | Drop to 30-min watcher on convergence |
-| Rebase of many swarm commits vs fast-moving main | Resolved the same 4 files once per commit | Use squash-merge instead |
+| Rebase of many swarm commits vs fast-moving `dev` | Resolved the same 4 files once per commit | Use squash-merge instead |
 | Back-translation "auth bypass" scare | All 6 sync-worker failures were stale tests, not bugs | Run tsc/vitest before filing a security bug |
 | eBible 404 QA finding | Upstream data gap, not a code bug | Distinguish env-limitation from real bugs before fixing |
 | Round-trip fidelity verification | Found TSV corruption + TMX selection bug unit tests missed | Always add round-trip tests for import/export |

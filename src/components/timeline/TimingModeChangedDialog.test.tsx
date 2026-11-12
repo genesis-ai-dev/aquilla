@@ -15,8 +15,9 @@ describe("TimingModeChangedDialog", () => {
       <TimingModeChangedDialog ack={{ from: "dubbing", to: "audioFirst" }} onAcknowledge={onAcknowledge} />,
     )
     const dialog = screen.getByTestId("timing-mode-changed-ack")
-    expect(dialog).toHaveTextContent("Original's timing")
-    expect(dialog).toHaveTextContent("Free timing")
+    // AQU-2204: the choices are named for what the file follows.
+    expect(dialog).toHaveTextContent("Follows source")
+    expect(dialog).toHaveTextContent("Follows recordings")
     fireEvent.click(screen.getByTestId("timing-ack-ok"))
     expect(onAcknowledge).toHaveBeenCalledTimes(1)
   })

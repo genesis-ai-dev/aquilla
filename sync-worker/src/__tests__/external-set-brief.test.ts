@@ -279,7 +279,7 @@ describe('SetBrief — L1 auto-render on commit (AQU-1282)', () => {
 
     // ACCEPTANCE: prompt-preview's brief part is non-empty straight after the commit.
     const preview = await buildPromptPreview(tdb.db, { projectId: PROJECT, cellId: 'c1', targetLang: '' })
-    expect(preview.ok && preview.body.parts.brief).toContain('Translate for rural youth; warm register.')
+    expect(preview.ok && preview.body.parts.instructions).toContain('Translate for rural youth; warm register.')
   })
 
   it('a failed render never fails the commit — the sections land and the receipt says why', async () => {
@@ -393,7 +393,7 @@ describe('SetBrief — validation (rejected at prepare, never staged)', () => {
     const maintainer = await memberToken(tdb, 600)
     const { res, body } = await prepare(env, maintainer.token, [
       ...setBrief({ parameters: { purpose: 'x' } }),
-      { kind: 'SetTranslation', fileId: 'f', cellId: 'c', value: 'v' },
+      { kind: 'SetTranslation', fileId: 'f', cellId: 'c', laneId: 'deflane1', value: 'v' },
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')

@@ -320,6 +320,29 @@ describe("OrgSwitcher", () => {
     await waitFor(() => expect(screen.getByText(/no organizations found/i)).toBeInTheDocument())
   })
 
+  // A user's own workspace is where they land and create by default, so it is
+  // pinned above the alphabetical list and tagged so it reads as "home", not
+  // as one more org they happen to own.
+  it("pins the personal workspace first with a Personal tag", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Alpha Org", role: { level: 700, name: "owner" } },
+      { id: 2, name: "Zed's workspace", role: { level: 700, name: "owner" }, personal: true },
+      { id: 3, name: "Bravo Org", role: { level: 600, name: "maintainer" } },
+    ])
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    const trigger = await screen.findByRole("combobox", { name: /organization switcher/i })
+    await act(async () => { trigger.click() })
+    await screen.findByLabelText(/find an organization/i)
+
+    const options = screen.getAllByRole("option").map((n) => n.textContent ?? "")
+    const memberRows = options.filter((t) => /Org|workspace/.test(t))
+    expect(memberRows[0]).toContain("Zed's workspace")
+    expect(memberRows[0]).toContain("Personal")
+    expect(memberRows[1]).toContain("Alpha Org")
+    expect(memberRows[1]).not.toContain("Personal")
+    expect(memberRows[2]).toContain("Bravo Org")
+  })
+
   // AQU-759 (regression guard for AQU-473): filtering also narrows guest orgs
   // while each surviving guest row keeps its "Guest" tag.
   it("search filters guest orgs and preserves the Guest tag", async () => {
@@ -676,5 +699,83 @@ describe("OrgSwitcher", () => {
       expect(optionTexts.some((text) => text.includes("Organization") && text.includes("Owner"))).toBe(true)
       expect(optionTexts.some((text) => text.includes("Workspace"))).toBe(false)
     })
+  })
+})
+
+// AQU-1489: a project granted directly in an org the caller does not belong to
+// is listed on `/orgs/all` and nowhere else (AQU-417). Someone scoped to a
+// concrete org therefore saw nothing change when they were added to one, and a
+// sign-out was the only thing that surfaced it — signing out writes
+// `org:active = all`, so the next sign-in lands on the portfolio that does list
+// it. The switcher renders on every org surface, so it is where such a grant
+// announces itself after a single page refresh.
+describe("OrgSwitcher — a newly shared project announces itself (AQU-1489)", () => {
+  const OPENED_KEY = "aq.opened-shared.v1"
+
+  function oneMembershipPlusForeignGrant() {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Biblica", role: { level: 400, name: "contributor" } },
+    ])
+    fetchAccessibleProjects.mockResolvedValue([
+      { id: "own-1", name: "BSB Marathi", orgId: 1, orgName: "Biblica", role: { level: 400, name: "contributor", source: "override" } },
+      {
+        id: "ebl-1",
+        name: "EBL Oromo",
+        orgId: 3,
+        orgName: "EBL",
+        grantedAt: "2026-11-05T10:00:00.000Z",
+        role: { level: 400, name: "contributor", source: "override" },
+      },
+    ])
+  }
+
+  it("marks the trigger and the granting org while the caller is scoped to their own org", async () => {
+    oneMembershipPlusForeignGrant()
+
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+
+    await waitFor(() => expect(screen.getByText("Biblica")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId("new-shared-org-dot")).toBeInTheDocument())
+
+    await openOrgSwitcher("Organization switcher: Biblica")
+    expect(screen.getByText("EBL")).toBeInTheDocument()
+    expect(screen.getByTestId("new-shared-org-badge")).toBeInTheDocument()
+  })
+
+  it("drops the mark once the caller has opened that project since the grant", async () => {
+    oneMembershipPlusForeignGrant()
+    localStorage.setItem(
+      OPENED_KEY,
+      JSON.stringify([{ userId: "anna", projectId: "ebl-1", openedAt: Date.parse("2026-11-05T12:00:00.000Z") }]),
+    )
+
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+
+    await waitFor(() => expect(screen.getByText("Biblica")).toBeInTheDocument())
+    await openOrgSwitcher("Organization switcher: Biblica")
+    expect(screen.getByText("EBL")).toBeInTheDocument()
+    expect(screen.queryByTestId("new-shared-org-badge")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("new-shared-org-dot")).not.toBeInTheDocument()
+  })
+
+  it("leaves the trigger unmarked when every accessible project is in a membership", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Biblica", role: { level: 400, name: "contributor" } },
+    ])
+    fetchAccessibleProjects.mockResolvedValue([
+      {
+        id: "own-1",
+        name: "BSB Marathi",
+        orgId: 1,
+        orgName: "Biblica",
+        grantedAt: "2026-11-05T10:00:00.000Z",
+        role: { level: 400, name: "contributor", source: "override" },
+      },
+    ])
+
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+
+    await waitFor(() => expect(screen.getByText("Biblica")).toBeInTheDocument())
+    expect(screen.queryByTestId("new-shared-org-dot")).not.toBeInTheDocument()
   })
 })

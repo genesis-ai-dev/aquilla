@@ -162,7 +162,7 @@ export function usePostEditMetrics({
         }
 
         for (const [cellId, cellEvents] of byCellId) {
-          const pairs = extractPostEditPairs(cellEvents, cellId, file.id)
+          const pairs = extractPostEditPairs(cellEvents, cellId, file.id, file.name)
           allPairs.push(...pairs)
         }
       }

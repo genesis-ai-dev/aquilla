@@ -11,16 +11,21 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { AgentProposal } from "@/lib/agent/protocol"
+import type { CellData } from "@/hooks/useCells"
 import { ROLE } from "@/lib/agent/role-floors"
+import { renderWithTooltips, expectClickNote, expectDisabledNote } from "@/test-utils/tooltip"
 import { ProposalCard } from "./ProposalCard"
 
 vi.mock("@/lib/agent/apply", () => ({
   applyStagedEvents: vi.fn(async () => ["evt-1"]),
+  // The validation queue applies one row at a time through the singular form.
+  applyStagedEvent: vi.fn(async () => "evt-1"),
 }))
 
-import { applyStagedEvents } from "@/lib/agent/apply"
+import { applyStagedEvent, applyStagedEvents } from "@/lib/agent/apply"
 
 const mockApply = vi.mocked(applyStagedEvents)
+const mockApplyOne = vi.mocked(applyStagedEvent)
 
 const FORBID_RULE: TranslationRule = {
   id: "rule-forbid",
@@ -70,6 +75,8 @@ const BASE_PROPS = {
 beforeEach(() => {
   mockApply.mockClear()
   mockApply.mockResolvedValue(["evt-1"])
+  mockApplyOne.mockClear()
+  mockApplyOne.mockResolvedValue("evt-1")
 })
 
 describe("rendering", () => {
@@ -176,10 +183,12 @@ describe("rendering", () => {
 })
 
 describe("role gate", () => {
-  it("disables Apply with a reason when the role is below the kind's floor", () => {
-    render(<ProposalCard {...BASE_PROPS} proposal={makeProposal()} roleLevel={ROLE.REVIEWER} />)
+  it("disables Apply with a reason when the role is below the kind's floor", async () => {
+    renderWithTooltips(<ProposalCard {...BASE_PROPS} proposal={makeProposal()} roleLevel={ROLE.REVIEWER} />)
     expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled()
     expect(screen.getByText("Requires Contributor role or higher")).toBeInTheDocument()
+    // AQU-2260: the reason opens on click of the greyed button, never on hover.
+    await expectDisabledNote(screen.getByRole("button", { name: "Apply" }), "Requires Contributor role or higher")
   })
 
   it("enables Apply at the floor and fails open when the role is unknown", () => {
@@ -267,9 +276,141 @@ describe("destination file (AQU-846)", () => {
     expect(screen.getByText("Mark.usfm")).toBeInTheDocument()
   })
 
+  // AQU-2260 (Sam, Oct 29): the file badge says where the change lands on a
+  // click, never on hover.
+  it("says on click which file a change lands in", async () => {
+    renderWithTooltips(
+      <ProposalCard
+        {...BASE_PROPS}
+        proposal={makeProposal({
+          events: [{
+            kind: "target.cell.commit",
+            fileId: "f-gen",
+            cellId: "c-1",
+            payload: { value: "En el principio" },
+            display: { canonicalRef: "GEN 1:1", fileName: "Genesis.usfm", after: "En el principio" },
+          }],
+        })}
+      />,
+    )
+    await expectClickNote(screen.getByText("Genesis.usfm").closest("button")!, "This change lands in Genesis.usfm")
+  })
+
   it("omits the file badge rather than guessing when the server sent no name", () => {
     render(<ProposalCard {...BASE_PROPS} proposal={makeProposal()} />)
     expect(screen.getByText("MRK 4:1")).toBeInTheDocument()
     expect(screen.queryByText(/\.usfm$/)).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * AQU-1630 — the project's "Allow self-validation" switch is off, so the
+ * server refuses a `cell.validate` from the line's own last editor. A
+ * prepared validation of the reader's own edit must therefore read as not
+ * applicable, with the reason, rather than offering a button whose Apply
+ * ends in the red rejection banner.
+ */
+describe("self-validation gate (AQU-1630)", () => {
+  const validationProposal = (cellId: string) =>
+    makeProposal({
+      summary: "Validate 1 line",
+      events: [
+        {
+          kind: "cell.validate",
+          fileId: "f-1",
+          cellId,
+          payload: { editEventId: "evt-edit" },
+          display: { canonicalRef: "MRK 4:1", before: "my own translation" },
+        },
+      ],
+    })
+
+  /** Minimal live cell, carrying only what the gate reads. */
+  const cellWithEditor = (cellId: string, lastEditor: string) =>
+    ({
+      id: cellId,
+      fileId: "f-1",
+      original: "source",
+      translated: "my own translation",
+      context: "",
+      group: "MRK 4:1",
+      type: "text",
+      status: "unvalidated",
+      validationStatus: "unvalidated",
+      activeValidators: [],
+      validationHistory: [],
+      history: [],
+      threads: [],
+      lastEditor,
+    }) as unknown as CellData
+
+  it("shows the prepared validation as not applicable on the reader's own line", () => {
+    render(
+      <ProposalCard
+        {...BASE_PROPS}
+        proposal={validationProposal("c-1")}
+        roleLevel={ROLE.REVIEWER}
+        allowSelfValidation={false}
+        resolveCell={() => cellWithEditor("c-1", "anna")}
+      />,
+    )
+    expect(
+      screen.getByText("Not applicable — this project doesn't allow validating your own edit"),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Validate MRK 4:1" })).not.toBeInTheDocument()
+  })
+
+  it("still offers the validation when somebody else last edited the line", () => {
+    render(
+      <ProposalCard
+        {...BASE_PROPS}
+        proposal={validationProposal("c-1")}
+        roleLevel={ROLE.REVIEWER}
+        allowSelfValidation={false}
+        resolveCell={() => cellWithEditor("c-1", "bob")}
+      />,
+    )
+    expect(screen.getByRole("button", { name: "Validate MRK 4:1" })).toBeEnabled()
+  })
+
+  it("still offers the validation when the project allows self-validation", () => {
+    render(
+      <ProposalCard
+        {...BASE_PROPS}
+        proposal={validationProposal("c-1")}
+        roleLevel={ROLE.REVIEWER}
+        allowSelfValidation
+        resolveCell={() => cellWithEditor("c-1", "anna")}
+      />,
+    )
+    expect(screen.getByRole("button", { name: "Validate MRK 4:1" })).toBeEnabled()
+  })
+
+  it("blocks Apply on a mixed proposal carrying a validation the reader may not make", () => {
+    const proposal = makeProposal({
+      events: [
+        ...makeProposal().events,
+        {
+          kind: "cell.validate",
+          fileId: "f-1",
+          cellId: "c-1",
+          payload: { editEventId: "evt-edit" },
+          display: { canonicalRef: "MRK 4:1" },
+        },
+      ],
+    })
+    render(
+      <ProposalCard
+        {...BASE_PROPS}
+        proposal={proposal}
+        roleLevel={ROLE.CONTRIBUTOR}
+        allowSelfValidation={false}
+        resolveCell={() => cellWithEditor("c-1", "anna")}
+      />,
+    )
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled()
+    expect(
+      screen.getByText("Not applicable — this project doesn't allow validating your own edit"),
+    ).toBeInTheDocument()
   })
 })

@@ -41,12 +41,13 @@ abA wait --load networkidle >/dev/null
 
 # 1. Alice creates the project.
 abA open "$BASE/orgs/$ORG/projects" >/dev/null && abA wait --load networkidle >/dev/null
-retryFind abA "New Project" || fail "New Project button"
-abA wait --text "Create New Project" >/dev/null || fail "create dialog"
-abA find label "Project title" fill "$NAME" >/dev/null || fail "title field"
-abA find label "Source Language" fill "en" >/dev/null || fail "source field"
-abA find label "Target language(s)" fill "fr" >/dev/null || fail "target field"
-retryFind abA "Create Project" || fail "Create Project button"
+retryFind abA "New project" || fail "New project button"
+abA wait --text "Create new project" >/dev/null || fail "create dialog"
+abA find testid "project-source-scratch" click >/dev/null || fail "Start from scratch (AQU-2105 source step)"
+abA find label "Project name" fill "$NAME" >/dev/null || fail "name field"
+abA find label "Source language" fill "en" >/dev/null || fail "source field"
+abA find label "Language lanes" fill "fr" >/dev/null || fail "lanes field"
+retryFind abA "Create project" || fail "Create project button"
 abA wait --text "Open project" >/dev/null || fail "overview did not load"
 projectUrl=$(abA get url)
 projectId=$(echo "$projectUrl" | sed -n 's#.*/projects/\([^/?#]*\).*#\1#p')
@@ -101,7 +102,7 @@ SENTENCE="Cross-validate alice translation $(date +%H%M%S)"
 abA type "@$editRef" "$SENTENCE" >/dev/null || fail "type sentence"
 abA click "aside" >/dev/null || fail "commit edit"
 [ "$(countA "$SENTENCE" "[data-cell-id]:first-of-type [data-cell-type=target]")" -ge 1 ] || fail "sentence not committed"
-[ "$(countA "Validated — row 1. Click to remove your validation." "[data-cell-id]:first-of-type")" -ge 1 ] || fail "alice's own commit did not auto-validate"
+[ "$(countA "Validated by you, row 1. Click to see the list, where you can remove your validation." "[data-cell-id]:first-of-type")" -ge 1 ] || fail "alice's own commit did not auto-validate"
 
 url=$(abA get url)
 fileId=$(echo "$url" | sed -n 's#.*/file/\([^/?#]*\).*#\1#p')
@@ -127,6 +128,6 @@ done
 btn=$(findRef abB 'button "Validated by others[^]]*ref=e[0-9]*') || fail "'Validated by others' control not found for bob"
 abB click "@$btn" >/dev/null || fail "click validation control"
 sleep 1
-[ "$(countB "Validated — row 1. Click to remove your validation." "[data-cell-id]:first-of-type")" -ge 1 ] || fail "validation control did not switch to 'Validated — row 1. Click to remove your validation.' for bob"
+[ "$(countB "Validated by you, row 1. Click to see the list, where you can remove your validation." "[data-cell-id]:first-of-type")" -ge 1 ] || fail "validation control did not switch to 'Validated by you, row 1.' for bob"
 
 pass "bob validated cell 0 on project $projectId, file $fileId — control reads 'Validated — row 1. Click to remove your validation.'"

@@ -88,6 +88,17 @@ export interface TimelineTrack {
    *  on added tracks only: a derived row's alignment comes from the file, so
    *  there is nothing here to override. */
   sourceTrackId?: string | null
+  /** Hidden cue file owned by this timeline. Each text track has its own content. */
+  contentFileId?: string
+  /**
+   * AQU-2252 (Sam, Oct 29): `false` on an added audio track made a LAYER —
+   * music, sound effects, ambience. While the file follows its recordings its
+   * takes set no line's length; they sit against their lines the way takes do
+   * following the source. Absent (the default, and always on the derived rows
+   * and folders) means the track's takes set their lines' lengths: a new track
+   * is most often another voice.
+   */
+  setsLineLengths?: false
 }
 
 /**
@@ -115,6 +126,12 @@ export interface PersistedTrackPatch {
    *  newer client that wrote it still sees what it meant. */
   color?: string
   sourceTrackId?: string
+  contentFileId?: string
+  /** AQU-2252: `false` makes an added audio track a layer (see
+   *  TimelineTrack.setsLineLengths). Widened to `boolean` because that is what
+   *  the server accepts; only `false` means anything. HAND-MIRRORED with the
+   *  handler's PATCH_KEYS. */
+  setsLineLengths?: boolean
 }
 
 export type PersistedTrackOverrides = Record<string, PersistedTrackPatch>
@@ -207,6 +224,17 @@ export interface TrackDerivationContext {
   /** An audio-cue sibling file exists for this file, so there are cues for a
    *  Source-audio row to draw. */
   hasAudioCues: boolean
+  /** The file plays a linked video with its sound on (Original's timing), so
+   *  the Source-audio row has the video's own sound to stand for even with no
+   *  cues. Absent reads as false. */
+  hasLinkedVideoSound?: boolean
+  /** AQU-1758: the file is in reading order — a Bible book, a document —
+   *  rather than timed. Absent reads as false. */
+  sequenceOrdered?: boolean
+  /** AQU-1758: some line of the file has a source recording of its own (an
+   *  attached source clip), so a book or document has source audio to draw.
+   *  Absent reads as false. */
+  hasSourceAudio?: boolean
 }
 
 /** Own-key check rather than `in`, because these strings arrive from remote
@@ -284,8 +312,21 @@ export function deriveDefaultTracks(context?: TrackDerivationContext | null): Ti
   // these numbers are never compared against anything but each other. That
   // invisibility is the guarantee the whole renumber hangs on; it is the
   // highest-blast-radius part of the change and tracks.test.ts pins it twice.
-  if (!context || context.hasMediaCells || !context.isSubtitleImport) {
+  if (!context || context.hasMediaCells || (!context.isSubtitleImport && !context.sequenceOrdered)) {
     return [trackRow("source-subtitles"), trackRow("source-audio"), trackRow("target-audio")]
+  }
+  // AQU-1758: a book or document opens on the timeline since the Audio view
+  // went. With no source audio there is nothing for a Source-audio row to
+  // hold, and an empty one reads as "the source is silent", so it is left
+  // out, the same rule as a subtitle file's below.
+  if (!context.isSubtitleImport) {
+    return [
+      trackRow("source-subtitles"),
+      ...(context.hasAudioCues || context.hasLinkedVideoSound || context.hasSourceAudio
+        ? [trackRow("source-audio")]
+        : []),
+      trackRow("target-audio"),
+    ]
   }
 
   return [
@@ -293,7 +334,11 @@ export function deriveDefaultTracks(context?: TrackDerivationContext | null): Ti
     trackRow("target-subtitles"),
     // No audio VTT imported yet means no cues, and a row with nothing to draw
     // is worse than no row: it reads as "this episode has no speech".
-    ...(context.hasAudioCues ? [trackRow("source-audio")] : []),
+    //
+    // A linked video's own sound IS something to draw (Sam, Oct 5): the row
+    // stays as one dashed band, "The video's own sound", with its mute button,
+    // the same row the file had before its captions became rows (AQU-1566).
+    ...(context.hasAudioCues || context.hasLinkedVideoSound ? [trackRow("source-audio")] : []),
     trackRow("target-audio"),
   ]
 }
@@ -383,6 +428,8 @@ export function mergeTrackOverrides(
       // track anyone will recolour.
       const color = overrideString(patch.color)
       if (color !== null) target.color = color
+      const contentFileId = overrideContentFileId(patch.contentFileId)
+      if (contentFileId !== undefined) target.contentFileId = contentFileId
       continue
     }
     // A reserved id the caller left out of `defaults` stays reserved — a delta
@@ -415,10 +462,19 @@ export function mergeTrackOverrides(
       // exists, it just aligns to nothing, which is exactly how a groupId
       // naming a track this build cannot see already behaves.
       sourceTrackId: overrideString(patch.sourceTrackId) === id ? null : overrideString(patch.sourceTrackId),
+      ...(overrideContentFileId(patch.contentFileId) !== undefined
+        ? { contentFileId: overrideContentFileId(patch.contentFileId) } : {}),
+      // AQU-2252: only an audio track has takes to set a line's length with.
+      ...(patch.kind === "audio" && patch.setsLineLengths === false ? { setsLineLengths: false as const } : {}),
     })
   }
 
   return tracks.sort(compareTracksBySeat(seats, userSeat))
+}
+
+function overrideContentFileId(value: unknown): string | undefined {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,200}$/.test(value)
+    ? value : undefined
 }
 
 /** The tracks to draw for a file: the rows its context derives, patched with

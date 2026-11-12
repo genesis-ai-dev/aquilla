@@ -22,6 +22,7 @@ import {
 } from "./completion"
 import {
   ProtectedIdmlHtmlError,
+  chooseIdmlHtmlMatchingTranslation,
   replaceProtectedIdmlText,
 } from "./protected-html"
 
@@ -35,6 +36,9 @@ describe("IDML AI completion contract", () => {
 
     expect(idmlCompletionPromptSource(cell, unit.sourceText)).toBe(unit.sourceHtml)
     expect(idmlCompletionSystemAddendum([cell])).toBe(IDML_COMPLETION_INSTRUCTION)
+    expect(IDML_COMPLETION_INSTRUCTION).toMatch(/translate the sentence as a whole/)
+    expect(IDML_COMPLETION_INSTRUCTION).toMatch(/Do not translate each run by itself/)
+    expect(IDML_STRUCTURE_REPAIR_INSTRUCTION).toMatch(/Do not retranslate each slot as its own phrase/)
   })
 
   it("accepts exact anchors, derives plain text, and preserves rich HTML for persistence", async () => {
@@ -186,6 +190,8 @@ describe("IDML AI completion contract", () => {
       expect(messages[0]?.content).toBe(IDML_STRUCTURE_REPAIR_INSTRUCTION)
       expect(messages[1]?.content).toContain(unit.sourceHtml)
       expect(messages[1]?.content).toContain("EDITABLE SLOTS")
+      expect(messages[1]?.content).toContain("parts of one sentence")
+      expect(messages[1]?.content).not.toContain("translate each")
       expect(messages[1]?.content).toContain("plain broken draft")
       return JSON.stringify({ slots: [{ i: 0, t: "Bon" }, { i: 1, t: "JOUR" }] })
     })
@@ -274,6 +280,66 @@ describe("IDML AI completion contract", () => {
     }
     expect(() => idmlCompletionPromptSource(cell, "source")).toThrow(/unsupported IDML metadata version 3/i)
     expect(() => normalizeProtectedCompletion(cell, "plain output")).toThrow(IdmlCompletionError)
+  })
+})
+
+describe("IDML wording integrity", () => {
+  it("drops copied English during ordinary completion and keeps it when the translation already includes it", async () => {
+    const unit = await parseFixtureUnit([
+      '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Bold"><Content>Kingdom</Content></CharacterStyleRange>',
+      '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>. </Content></CharacterStyleRange>',
+      '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Bold"><Content>New creation</Content></CharacterStyleRange>',
+    ])
+    const cell = {
+      id: unit.id,
+      originalHtml: unit.sourceHtml,
+      metadata: {
+        idml: unit.metadata,
+        biblica: { contentType: "notes" },
+      },
+    }
+    const texts = new Map<number, string>([
+      [0, "Reino"],
+      [1, ". "],
+      [2, "Nova criação"],
+    ])
+    const translation = "Reino. Nova criação"
+
+    const cleared = stitchIdmlSlotTexts(cell, texts)
+    const kept = stitchIdmlSlotTexts(cell, texts, { preserveWording: translation })
+    const clearedSlots = validateIdmlTranslation(unit.sourceHtml, cleared.valueHtml ?? "", unit.metadata)
+    const keptSlots = validateIdmlTranslation(unit.sourceHtml, kept.valueHtml ?? "", unit.metadata)
+
+    expect(clearedSlots.valid).toBe(true)
+    expect(clearedSlots.slots[1]).toBe("")
+    expect(keptSlots.valid).toBe(true)
+    expect(keptSlots.slots[1]).toBe(". ")
+    expect(kept.value).toBe(translation)
+  })
+
+  it("keeps export HTML whose text is already the stored translation", () => {
+    expect(chooseIdmlHtmlMatchingTranslation(
+      "<current>",
+      "<reflowed>",
+      "Reino. Nova criação",
+      "ReinoNova criação",
+      "Reino. Nova criação",
+    )).toBe("<current>")
+    expect(chooseIdmlHtmlMatchingTranslation(
+      "<current>",
+      "<reflowed>",
+      "Reino the Nova",
+      "Reino Nova",
+      "Reino Nova",
+    )).toBe("<reflowed>")
+    // Both spell the translation. The reflow only moved the period between runs.
+    expect(chooseIdmlHtmlMatchingTranslation(
+      "<current>",
+      "<reflowed>",
+      "Davi. O rei de Israel.",
+      "Davi. O rei de Israel.",
+      "Davi. O rei de Israel.",
+    )).toBe("<reflowed>")
   })
 })
 

@@ -4,11 +4,15 @@
 // here so every existing "@/lib/parsers/types" import keeps working unchanged.
 export type {
   CellType,
+  CellUnit,
   SourceLocation,
   TranslatableString,
   ParsedTextFileResult,
+  SubtitleCueRepair,
   ExportCellFields,
 } from "./core-types"
+// Also needed in local type positions below, not just re-exported.
+import type { CellUnit } from "./core-types"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
 import type { CameraState } from "@/lib/sync/cells-read-types"
@@ -37,6 +41,24 @@ export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html"
 export const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set(["usfm", "ebible", "helloao", "codex"])
 export function fileTypeHasSections(type: FileType): boolean {
   return SCRIPTURE_FILE_TYPES.has(type)
+}
+
+/** The domain kind an imported TMX file is stored under (`importedFileKind`).
+ *  Like `"codex"` above it reaches the client as `file.type` without being a
+ *  member of `FileType`. */
+export const TRANSLATION_MEMORY_FILE_KIND = "translation-memory"
+
+/**
+ * Is this file an imported translation memory?
+ *
+ * Takes the wire string rather than `FileType` on purpose: a TMX imported
+ * through the app arrives as `"translation-memory"`, which a `type === "tmx"`
+ * test never matches (AQU-1393 — the Examples panel showed a real TMX as an
+ * ordinary project file). `"tmx"` still counts: rows created with the parser id
+ * as their kind — API imports, and files that predate the domain kind.
+ */
+export function isTranslationMemoryFile(type: string): boolean {
+  return type === TRANSLATION_MEMORY_FILE_KIND || type === "tmx"
 }
 
 /** Content-aware section capability. `hasScriptureContent` is persisted in
@@ -74,17 +96,8 @@ export function resolveBibleResourcesEnabled(
   return explicit !== undefined ? explicit : hasScriptureFiles
 }
 
-export type BuiltinCheckId =
-  | "empty-target"
-  | "target-equals-source"
-  | "placeholder-integrity"
-  | "number-integrity"
-  | "end-punctuation-mismatch"
-  | "punctuation-integrity"
-  | "double-space"
-  | "repeated-word"
-  | "unpaired-symbols"
-  | "abbreviation-mismatch"
+/** Text checks plus the Bible data checks — defined in ../rules/rule-check. */
+export type BuiltinCheckId = import("../rules/rule-check").BuiltinCheckId
 
 export interface AlgorithmicCheckOverride {
   enabled: boolean
@@ -110,13 +123,13 @@ export interface TranslationRule {
   autofixAttemptedAt?: string  // ISO; absent means never tried
   /** For org-scoped rules promoted from a project: the originating project id. */
   sourceProjectId?: string
+  /** Terminology rules only (AQU-2209): the regex-free term data prompt
+   *  injection reads instead of the `check` patterns — set by
+   *  `compileConceptsToRulesCore`, derived on read, never persisted. */
+  term?: import("../completion/prompt-build").PromptTermInfo
 }
 
-export type RuleCheck =
-  | { type: "source-requires-target"; sourcePattern: string; targetPattern: string; caseSensitive?: boolean }
-  | { type: "target-forbids"; targetPattern: string; caseSensitive?: boolean }
-  | { type: "source-target-match"; pattern: string }
-  | { type: "builtin"; checkId: BuiltinCheckId }
+export type RuleCheck = import("../rules/rule-check").RuleCheck
 
 export type RuleAutofix =
   | { kind: "regex-replace"; pattern: string; replacement: string; flags: string }
@@ -144,6 +157,14 @@ export interface PromotionRequest {
 
 export interface RuleWaiver {
   ruleId: string
+  /**
+   * AQU-1740: when present, this waiver dismisses only the ONE finding whose
+   * matched text hashes to this value (`spanMatchHash` in
+   * `src/lib/rules/match-hash.ts`); other matches of the same rule on the same
+   * cell stay active. Absent = the rule is waived on the whole cell, which is
+   * what every waiver stored before AQU-1740 means.
+   */
+  matchHash?: string
   /** Optional human-entered reason. */
   reason?: string
   /** ISO timestamp. */
@@ -158,7 +179,7 @@ export interface RuleWaiver {
  * compose a localized sentence itself — it returns a reason CODE instead,
  * and a render-time helper (`formatInfractionReason` /
  * `formatInfractionMessage` in `src/lib/rules/format-infraction.ts`) turns
- * that into text via `t()`. `builtin:${BuiltinCheckId}` covers the ten
+ * that into text via `t()`. `builtin:${BuiltinCheckId}` covers the
  * algorithmic checks; the other three are the user-authored rule shapes.
  */
 export type RuleInfractionReason =
@@ -187,6 +208,22 @@ export interface RuleInfraction {
    *  concrete match (e.g. absence rules with no source trigger) — those
    *  fall back to the gutter icon only. */
   spans: InfractionSpan[]
+  /**
+   * AQU-1699: this infraction's own severity, when it is LOWER than its
+   * rule's. A Bible data check can report a minor finding under a major rule:
+   * P5 names a stray person (major) but also a stray place or group (minor).
+   * It never raises a rule's severity, so a project's own severity choice
+   * still holds. Read it through `infractionSeverity`.
+   */
+  severity?: "minor"
+}
+
+/** The severity an infraction shows at: its rule's, or lower when the infraction says so. */
+export function infractionSeverity(
+  infraction: Pick<RuleInfraction, "severity">,
+  ruleSeverity: "major" | "minor" | undefined,
+): "major" | "minor" | undefined {
+  return infraction.severity === "minor" ? "minor" : ruleSeverity
 }
 
 export interface RulePenalties {
@@ -221,22 +258,30 @@ export type AudioMediaStrategy =
 // keys a component resolves with `t()` — same "return a descriptor, let the
 // caller localize" shape as `roleNameKey()`/`roleDescriptionKey()` in
 // src/lib/frontier/roles.ts. Only AudioMediaStrategySection.tsx renders these.
-export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { nameKey: MessageKey; descriptionKey: MessageKey }> = {
+// `summaryKey` is the short phrase always shown under the name; `infoKey` is
+// what the card's (i) opens beneath it (Sam, Oct 29). Stream and Manual share
+// theirs: both only wait for a click before drawing a take's waveform
+// (autoLoadsPeaks), and nothing else reads the difference.
+export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { nameKey: MessageKey; summaryKey: MessageKey; infoKey: MessageKey }> = {
   stream: {
     nameKey: "projectSettings.audioMedia.strategyStreamName",
-    descriptionKey: "projectSettings.audioMedia.strategyStreamDescription",
+    summaryKey: "projectSettings.audioMedia.strategyOnClickSummary",
+    infoKey: "projectSettings.audioMedia.strategyOnClickInfo",
   },
   lazy: {
     nameKey: "projectSettings.audioMedia.strategyLazyName",
-    descriptionKey: "projectSettings.audioMedia.strategyLazyDescription",
+    summaryKey: "projectSettings.audioMedia.strategyLazySummary",
+    infoKey: "projectSettings.audioMedia.strategyLazyInfo",
   },
   eager: {
     nameKey: "projectSettings.audioMedia.strategyEagerName",
-    descriptionKey: "projectSettings.audioMedia.strategyEagerDescription",
+    summaryKey: "projectSettings.audioMedia.strategyEagerSummary",
+    infoKey: "projectSettings.audioMedia.strategyEagerInfo",
   },
   manual: {
     nameKey: "projectSettings.audioMedia.strategyManualName",
-    descriptionKey: "projectSettings.audioMedia.strategyManualDescription",
+    summaryKey: "projectSettings.audioMedia.strategyOnClickSummary",
+    infoKey: "projectSettings.audioMedia.strategyOnClickInfo",
   },
 }
 
@@ -245,7 +290,36 @@ export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { nameKey: 
  * rewrites them to `"inworld"` (language tags included); runtime still remaps
  * unread copies so generate uses hosted Inworld (AQU-1189, AQU-1051).
  */
-export type TtsProvider = "inworld" | "omnivoice" | "gemini" | "kokoro" | "mms"
+export type TtsProvider = "inworld" | "omnivoice" | "gemini" | "kokoro" | "mms" | "elevenlabs"
+
+/**
+ * ElevenLabs voice tuning (AQU-2299), camelCase mirror of the API's
+ * `voice_settings`. Defaults live in src/lib/audio/elevenlabs/settings.ts.
+ */
+export interface ElevenLabsVoiceSettings {
+  /** 0–1. Lower is more expressive, higher more consistent. */
+  stability: number
+  /** 0–1. How closely to stick to the original voice. */
+  similarityBoost: number
+  /** 0–1. Style exaggeration; 0 is the voice's own delivery. */
+  style: number
+  /** 0.7–1.2. Talking speed. */
+  speed: number
+  speakerBoost: boolean
+}
+
+/** The ElevenLabs side of a `provider: "elevenlabs"` voice (AQU-2299). */
+export interface ElevenLabsVoiceRef {
+  /** The account's ElevenLabs voice id. */
+  voiceId: string
+  /** Display copy of the ElevenLabs voice name (the cast name may differ). */
+  voiceName?: string
+  /** premade | cloned | generated | professional. */
+  category?: string
+  /** TTS model; absent → eleven_multilingual_v2. */
+  modelId?: string
+  settings?: ElevenLabsVoiceSettings
+}
 
 /**
  * A reusable voice in the project's voice library. Voice owns *all* the knobs
@@ -275,6 +349,29 @@ export interface Voice {
    */
   language?: string
   /**
+   * The target lane this voice belongs to (a lane ROW id, AQU-2037). A voice is
+   * made in one lane and is offered only there: the Voices panel, the per-cell
+   * picker, the batch dialog and the Media-timeline picker all list the active
+   * lane's voices, and Generate never speaks a lane's text with another lane's
+   * voice.
+   *
+   * ABSENT means "every lane", and that is load-bearing twice over: voices
+   * stored before this field existed have no lane yet and must keep working on
+   * every lane until AQU-2039 migrates them, and `builtIn` presets (the
+   * Narrator) are deliberately never stamped — every lane falls back to the
+   * Narrator, so it cannot belong to one lane.
+   *
+   * Stamped once, at the write that first stores the voice (`useProjectTts`'s
+   * `saveTts`), so every mint site — New voice / voice design / training, an
+   * import with speaker labels, diarization, "Adopt voices as cast" — lands in
+   * the active lane without each one having to know about lanes. An edit never
+   * re-stamps: a voice does not move lane because someone renamed it.
+   *
+   * A lane ID rather than the lane's tag, per AQU-1612/AQU-1613: ids survive a
+   * lane being renamed or having its language edited, tags do not.
+   */
+  laneId?: string
+  /**
    * Inworld talking speed in [0.5, 1.5]. Default 1. Maps to
    * `audioConfig.speakingRate`.
    */
@@ -301,12 +398,22 @@ export interface Voice {
   /** Preset voices shipped with the app. Cannot be deleted, only forked. */
   builtIn?: boolean
   /**
-   * Voice-clone reference clip id (object name incl. ext) stored project-scoped
-   * in R2. When set, TTS output is re-voiced into this clip's timbre via Seed-VC
-   * (sync-worker POST /api/v1/voice/convert) before being attached. Absent means
-   * plain TTS, no conversion.
+   * Inworld instant ("quick") clone: the short reference clip (object name incl.
+   * ext) stored project-scoped in R2 (`projects/{p}/voices/{id}`). The
+   * sync-worker's /api/v1/voice/tts clones it once through Inworld's
+   * `voices:clone` (cached beside the clip as `{id}.inworld.json`) and reads the
+   * line with the cloned voice. Meaningful ONLY on a voice whose provider is
+   * "inworld" — read it through `inworldCloneReferenceId`. Voices from before
+   * AQU-2291 may carry one on Gemini/MMS (those clones needed Seed-VC, now
+   * removed); it is ignored there. An instant clone reads text; it cannot
+   * re-voice a take (Change voice).
    */
   referenceAudioId?: string
+  /**
+   * When the clone reference was copied from a line's take, `${cellId}:${audioId}`
+   * of that take. Absent for a clip recorded or uploaded in the Clone voice tab.
+   */
+  referenceTakeKey?: string
   /**
    * R2 object name (incl. ext) of the Voice Design sample the user picked.
    * The editor plays this clip so it matches the preview, instead of
@@ -315,11 +422,46 @@ export interface Voice {
    */
   designPreviewAudioId?: string
   /**
-   * When the clone reference was lifted from a line take, `${cellId}:${slot}`
-   * of that take. The Reference audio tab is filled only when `referenceAudioId`
-   * is set *without* this key (a recorded or uploaded clip).
+   * A pre-built character voice from the Voice library (src/lib/audio/character-voices.ts),
+   * i.e. an RVC model trained by infra/modal/voice_forge.py — or a trained custom voice
+   * (`c-<hex>`). The only speech-to-speech path: Change voice re-voices a take into it
+   * through the voice forge (sync-worker POST /api/v1/voice/convert with
+   * `libraryVoiceId`), and Generate re-voices fresh TTS the same way. The take's
+   * words, pronunciation, timing and intonation are kept; only the timbre changes.
    */
-  referenceTakeKey?: string
+  libraryVoiceId?: string
+  /**
+   * Set when `libraryVoiceId` is a custom voice trained from the organization's own
+   * recordings of a real speaker (src/lib/audio/custom-voice.ts). A display copy of
+   * the consent confirmation; the authoritative audit record lives server-side
+   * (sync-worker custom-voice.ts). Consent is the organization's responsibility.
+   */
+  /**
+   * ElevenLabs (AQU-2299, bring-your-own-key): the account voice this cast
+   * voice speaks with. Generate synthesizes through sync-worker
+   * /api/v1/elevenlabs/tts and Change voice re-voices takes through
+   * /api/v1/elevenlabs/sts, both with the user's own device-local key.
+   */
+  elevenLabs?: ElevenLabsVoiceRef
+  /**
+   * Set when `elevenLabs.voiceId` is an Instant Voice Clone of a real speaker
+   * made from this project. Same consent statement as `customVoice`; the audit
+   * record lives server-side (sync-worker elevenlabs.ts).
+   */
+  elevenLabsClone?: {
+    consentAttestedAt: string
+    consentAttestedBy: string
+    consentStatementVersion: string
+  }
+  customVoice?: {
+    speakerName: string
+    /** ISO time the maintainer confirmed the consent statement. */
+    consentAttestedAt: string
+    consentAttestedBy: string
+    consentStatementVersion: string
+    /** ISO time training was queued, for the "ready in ~N min" hint. */
+    trainingStartedAt: string
+  }
 }
 
 export interface ProjectTtsSettings {
@@ -330,8 +472,8 @@ export interface ProjectTtsSettings {
   /**
    * Project's voice library. Empty/absent means: use the built-in presets.
    * In the Voice Studio these are presented as the project's *cast* — each
-   * voice is a character/speaker (a base TTS voice + an optional actor-clone
-   * reference) that lines get assigned to.
+   * voice is a character/speaker (a TTS voice, a ready-made character voice,
+   * or a voice trained from an actor's recordings) that lines get assigned to.
    */
   voices?: Voice[]
   /** Voice id used when a cell doesn't specify one (the narrator/default cast member). */
@@ -345,6 +487,24 @@ export interface ProjectTtsSettings {
    * files. Absent for projects that never opened the Studio.
    */
   castAssignments?: Record<string, string>
+  /**
+   * AQU-2038: the per-lane cast, keyed by lane legacy tag (`''` is the default
+   * lane — the same convention as `cells`/`lanes` since AQU-538), then by
+   * cellId. A lane with no entry for a cell falls back to the project-wide
+   * `castAssignments` above, so every project that predates this field keeps
+   * generating exactly as it did. The empty string is a SENTINEL meaning "this
+   * lane uses its own default voice" — it has to be storable, because a lane
+   * that is sent back to its default must outrank a project-wide assignment
+   * naming a voice.
+   */
+  laneCastAssignments?: Record<string, Record<string, string>>
+  /**
+   * AQU-2038: the starred/default voice per lane, keyed by lane legacy tag.
+   * Absent for a lane that never starred one — it then falls back to
+   * `defaultVoiceId`. The empty-string sentinel means "this lane has no
+   * default of its own", which outranks the project-wide default.
+   */
+  laneDefaultVoiceId?: Record<string, string>
   /**
    * Character disagreements a person has settled. (AQU-646, 2026-08-18)
    *
@@ -480,6 +640,32 @@ export interface ProjectRecord {
    * by default (still reachable via the "show archived" reveal / deep links).
    */
   archivedLanes?: string[]
+  /**
+   * AQU-1418: lane rows. Selection and cell storage still use `legacyTag` ('' is
+   * the default target lane). Absent until the settings read returns them.
+   *
+   * AQU-1592: read the display name and the language code through
+   * `laneDisplayName` / `laneLanguageCode` (src/lib/lanes/lane-display.ts) — a
+   * lane stores only what the user typed, so `name` is null when it just shows
+   * its `language`, and `langCode` is null when the code is derived.
+   */
+  lanes?: {
+    id: string
+    role: "source" | "target"
+    language?: string | null
+    name: string | null
+    langCode: string | null
+    legacyTag: string | null
+    position: number
+    archivedAt: string | null
+    /** AQU-1954: the row's "Records audio" switch. */
+    recordsAudio?: boolean
+    /**
+     * Media redesign slice 1: what the language delivers, or null when nobody
+     * has chosen yet. Read it through `laneRowDelivers`.
+     */
+    delivers?: import("@/lib/lanes/lane-delivers").LaneDelivers | null
+  }[]
   /** AQU-1271: overlaid from ProjectWideSettings.termMatching by useProject. */
   termMatching?: import("@/lib/terminology/types").TermMatchingSettings
   createdAt: string
@@ -487,11 +673,22 @@ export interface ProjectRecord {
   members: ProjectMember[]
   completionSettings?: CompletionSettings
   ttsSettings?: ProjectTtsSettings
+  /**
+   * AQU-2041: project leads may manage voices on lanes they can write.
+   * Absent is off. Only a maintainer can change it.
+   */
+  projectLeadsManageVoices?: boolean
   username?: string
   rules?: TranslationRule[]
   /** Per-project enable/severity overrides for built-in algorithmic checks.
    *  Absent → registry defaults apply. */
   algorithmicChecks?: Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>>
+  /** AQU-1906: the same overrides for ONE target lane, keyed by legacy tag
+   *  (`''` = the default lane). Overlaid from
+   *  ProjectWideSettings.algorithmicChecksByLane. Read it through
+   *  `laneCheckOverrides` (src/lib/lqa/lane-builtin-checks.ts), never directly:
+   *  a lane's entry lies over `algorithmicChecks` rather than replacing it. */
+  algorithmicChecksByLane?: Record<string, Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>>>
   rulePenalties?: RulePenalties
   origin?: ProjectOrigin
   permissions?: ProjectPermissions
@@ -517,13 +714,20 @@ export interface ProjectRecord {
    *  value straight into this field, so a rung missing here is a compile
    *  error, which is what keeps the two honest. */
   cellEditingFloor?: "none" | "commenter" | "reviewer" | "contributor" | "project_lead" | "maintainer"
+  /** AQU-2408: who may type a label on a cell. Absent = maintainer. Spelled
+   *  out for the same reason as `cellEditingFloor` above (`CellLabelTier` in
+   *  `@/lib/sync/project-settings`); `resolveCellLabelFloor` maps it. */
+  cellLabelFloor?: "maintainer" | "project_lead"
   /** AQU-646 stage 2: may this project's timelines be restructured — tracks
-   *  added, deleted, foldered, recoloured? Off unless turned on; a SECOND gate
-   *  on top of the maintainer floor, so with it off the write is refused even
-   *  to an owner. Rename and drag-to-reorder are NOT gated on it. See
-   *  ProjectWideSettings.allowTrackEditing for why switching it off is allowed
-   *  to strand tracks that are already there. */
+   *  added, deleted, foldered, recoloured? ON unless turned off (AQU-2214); a
+   *  SECOND gate on top of the maintainer floor, so with it off the write is
+   *  refused even to an owner. Rename and drag-to-reorder are NOT gated on it.
+   *  See ProjectWideSettings.allowTrackEditing for why switching it off is
+   *  allowed to strand tracks that are already there. */
   allowTrackEditing?: boolean
+  /** AQU-1758: show the Film button and the timeline's Sources menu (see
+   *  ProjectWideSettings.filmAndSources). Unset: the project's kind decides. */
+  filmAndSources?: boolean
   /**
    * AQU-701: set when the user explicitly skips the voice & transcription setup
    * step ("we don't use voice or transcription"). Marks that step complete in
@@ -576,31 +780,23 @@ export interface ProjectRecord {
   /**
    * Minimum role level required to cast a validation vote.
    * "reviewer" (default) | "project_lead" | "maintainer"
-   * Server enforcement: sync-worker cell.validate branch must check the
-   * validator's syncRole.level against the floor before accepting the event.
-   * SWARM-TODO(server-enforcement): apply validationRoleFloor in
-   *   sync-worker/src/routes/sync.ts — the cell.validate event-projection
-   *   branch. Fetch the validator's role from the project member list (or
-   *   the sync-token claim) and reject if role.level < floor.
+   * Enforced by the server on every `cell.validate` (sync-worker
+   * src/events/route.ts, FRO-189) and mirrored client-side by
+   * `textValidationScope` (AQU-1571) so the UI never offers a refused vote.
    */
   validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
   /**
    * Optional allowlist of usernames that may cast validation votes.
-   * When present AND non-empty, only listed users' votes count toward the
-   * threshold (AND'd with validationRoleFloor).
-   * SWARM-TODO(server-enforcement): apply validationNamedUsers in
-   *   sync-worker/src/routes/sync.ts — cell.validate branch. If list is
-   *   non-empty, reject votes from users not in the list.
+   * When present AND non-empty, only listed users may validate (AND'd with
+   * validationRoleFloor). Enforced and mirrored as the floor above.
    */
   validationNamedUsers?: string[]
   /**
    * When true (default), a contributor may validate their own commit and
    * the vote counts toward the threshold.
-   * When false, self-votes are silently ignored in threshold counting.
-   * SWARM-TODO(server-enforcement): apply allowSelfValidation in
-   *   sync-worker/src/routes/sync.ts — cell.validate branch. Compare
-   *   validator identity to the last-editor identity; skip if equal and
-   *   allowSelfValidation is false.
+   * When false, the server refuses a vote from the cell's last editor in the
+   * validated lane (route.ts, FRO-189/AQU-1571); the client blocks it up
+   * front with `isOwnTextEdit` and skips auto-validate-on-edit.
    */
   allowSelfValidation?: boolean
   /**
@@ -608,8 +804,8 @@ export interface ProjectRecord {
    * ruling — a project can want two ears on a recording and one on a
    * translation, or trust a different set of people with each. Neither set is
    * ever read as a fallback for the other; absent means unrestricted on both
-   * sides. All three ARE enforced server-side (sync-worker route.ts), unlike
-   * the text trio's long-standing SWARM-TODOs.
+   * sides. All three are enforced server-side (sync-worker route.ts), as the
+   * text trio is.
    */
   validationRoleFloorAudio?: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsersAudio?: string[]
@@ -671,6 +867,11 @@ export interface ProjectRecord {
   sourceLinkConsumes?: "source" | "target" | null
   sourceLinkGate?: "head" | "validated" | null
   sourceLinkCursor?: number | null
+  /** AQU-1559: which of the upstream's files the link follows — null/absent =
+   *  the whole project — and the upstream's current file count, for the
+   *  "N of M files" the Source link card states. */
+  sourceLinkFileIds?: string[] | null
+  sourceLinkUpstreamFileCount?: number | null
   /** Cached sync role from the most recent /sync-token response. Lets the
    * Dashboard show the owner-only "Move to Trash" action without a round-trip
    * per card. Stale values are tolerable — server re-validates on every
@@ -687,8 +888,15 @@ export interface ProjectRecord {
    *  compiled to TranslationRule instances at rule-evaluation time — violations
    *  are DERIVED on read, no materialized verdicts. */
   terminology?: import("@/lib/terminology/types").Concept[]
-  /** Authored living-memory entries (instructions + standards). Persisted and
-   *  synced via ProjectWideSettings the same way as `rules` / `terminology`. */
+  /** AQU-2342: THE project instructions every AI draft reads. Synced via
+   *  ProjectWideSettings. Absent → resolved on read from the legacy sources
+   *  (see `projectTranslationInstructions` in src/lib/instructions). */
+  translationInstructions?: string
+  /** AQU-2342: the agent's legacy free-text brief, from the settings GET
+   *  (never persisted). Only a migrate-on-read source for the instructions. */
+  legacyProjectBriefText?: string
+  /** Authored living-memory entries. Legacy (AQU-2342): "instruction" entries
+   *  only feed `translationInstructions` on read until it is written. */
   livingMemoryEntries?: LivingMemoryEntry[]
   /** AQU-934: per-file genre assignment (fileId → genre id). Synced settings. */
   fileGenres?: Record<string, string>
@@ -710,6 +918,24 @@ export interface ProjectRecord {
    *  never persisted just by opening/viewing). Gates the Search-dock "Bible
    *  resources" mode and the agent's aquifer branch. */
   bibleResourcesEnabled?: boolean
+  /** AQU-1686: explicit per-enrichment Bible data choices, synced via
+   *  ProjectWideSettings. A missing id means that enrichment's default. Do not
+   *  read it directly for gating; use `resolveBibleEnrichment`
+   *  (db/shared/bible-enrichments.ts), which also applies the Bible data
+   *  switch above. */
+  bibleEnrichments?: import("../../../db/shared/bible-enrichments").BibleEnrichmentSettings
+  /** AQU-1688: the Language profile Bible data checks read, synced via
+   *  ProjectWideSettings. Read it through `readLanguageProfile`
+   *  (db/shared/language-profile.ts), which drops a damaged slot. */
+  languageProfile?: import("../../../db/shared/language-profile").LanguageProfile
+  /** AQU-1699: the decision log, synced via ProjectWideSettings. Bible data
+   *  check pack B reads its `render.*` and `clusivity.*` decisions. Read it
+   *  through `readProjectFacts` (db/shared/project-facts.ts); never write it
+   *  from here (decision cards write it, server-side; AQU-2342). */
+  projectFacts?: unknown[]
+  /** AQU-1692: maintainers' voice corrections, synced via ProjectWideSettings.
+   *  Read it through `readBibleVoiceOverrides` (db/shared/bible-voice-overrides.ts). */
+  bibleVoiceOverrides?: import("../../../db/shared/bible-voice-overrides").BibleVoiceOverrides
   /** AI-draft context budget. Synced via ProjectWideSettings; absent →
    *  DEFAULT_DRAFT_CONTEXT applies. See D10 in paragraph-drafting spec. */
   draftContext?: import("@/lib/completion/draft-context").DraftContextSettings
@@ -717,6 +943,17 @@ export interface ProjectRecord {
    *  front matter (per-project opt-out). Synced via ProjectWideSettings; absent/
    *  false imports front matter as translatable cells. */
   importExcludeFrontMatter?: boolean
+  /** AQU-1720: what one imported cell is for docx/txt/md uploads. `paragraph`
+   *  emits one cell per non-empty paragraph with no sentence split and no
+   *  length cap — the unit a dubbing/podcast project generates one voice clip
+   *  for. Absent/`sentence` (the default) keeps the segmenting behaviour that
+   *  suits subtitle and document work. Formats whose cell identity comes from
+   *  the format itself (USFM verses, subtitle cues, key/value resources) are
+   *  unaffected. */
+  importCellUnit?: CellUnit
+  /** Curly quotes as you type in the translation editor. Synced via
+   *  ProjectWideSettings; absent/false leaves straight quotes alone. */
+  smartQuotes?: boolean
 }
 
 /** A single authored guidance entry in the Living Memory page. */
@@ -739,6 +976,24 @@ export interface FileReference {
   createdAt: string
   cellCount: number
   corpusMarker?: string  // From notebook metadata.corpusMarker, OT/NT fallback for biblical book stems
+  /** Importer profile (`parserVersion` before `@`). Re-import reopens that importer. */
+  importProfile?: string
+  /**
+   * AQU-1569: hand-placed position within this file's sidebar corpus group,
+   * from files.meta.sortIndex (set via the `file.reorder` event). Fractional
+   * on purpose — see `src/lib/sidebar/file-sort-index.ts`.
+   *
+   * Absent means "nobody has reordered this group", which is the state of
+   * every file until a Project Lead drags one, and the reason an untouched
+   * project's sidebar is unchanged by this feature. Consume it only through
+   * `groupByCorpus` / the helpers in `file-sort-index.ts`, never by sorting on
+   * it directly: an unplaced file has to sort AFTER a placed one, which a bare
+   * numeric sort on an `undefined` cannot express.
+   */
+  sortIndex?: number
+  /** AQU-1937: what to SHOW for this file when an extension labelled it
+   *  ("Titus · ULT"); `name` stays the stored name. Read through fileDisplayName. */
+  displayLabel?: string
   originalName?: string  // Set the first time `name` is auto-rewritten by a suggestion or user rename. Enables hover-to-see-original. Never overwritten after set.
   /** Stable USFM/Scripture book identity used for re-import collision matching. */
   bookCode?: string
@@ -756,9 +1011,17 @@ export interface FileReference {
    * mutates cell data — it only chooses the sort key. Fully reversible.
    */
   orderedBy?: OrderedBy
-  /** Optional file-level language hints from import metadata. */
-  sourceLanguage?: string
-  targetLanguage?: string
+  /**
+   * AQU-1596: the languages this file's header *declared* at import. Import
+   * information about the file, not the language of any lane — a Macula file
+   * declares the corpus code `hbo`, and a file declaring Spanish may have been
+   * imported into the French lane. Nothing resolves a lane's or project's
+   * language from these (see `resolveActiveSourceLanguage` / AQU-848 and
+   * `resolveActiveTargetLanguage` / AQU-583); the one surface that shows them
+   * is the file-details modal, which labels them as declared.
+   */
+  declaredSourceLanguage?: string
+  declaredTargetLanguage?: string
   /** Optional file-level text direction hints from import metadata. */
   sourceTextDirection?: "ltr" | "rtl"
   targetTextDirection?: "ltr" | "rtl"
@@ -861,6 +1124,9 @@ export function isSubtitleImportFile(
  * timeline's Source-audio row) reach it explicitly by id.
  */
 export const AUDIO_CUES_ROLE = "audio-cues"
+export const TIMELINE_CONTENT_ROLE = "timeline-content"
+/** Smart Extensions apiRev 7: an extension's data file (shared/tools/file-extension.ts). */
+export { EXTENSION_DATA_ROLE } from "../../../shared/tools/file-extension"
 
 /**
  * True for that sibling. The canonical predicate — every surface that lists,
@@ -871,31 +1137,120 @@ export function isAudioCueFile(file: Pick<FileReference, "role"> | null | undefi
   return file?.role === AUDIO_CUES_ROLE
 }
 
+/** Internal cue files appear as tracks in their parent media timeline. */
+export function isHiddenTimelineFile(file: Pick<FileReference, "role"> | null | undefined): boolean {
+  return isAudioCueFile(file) || file?.role === TIMELINE_CONTENT_ROLE || isExtensionDataFile(file)
+}
+
+/** Smart Extensions apiRev 7: an extension's own data file — hidden like the
+ *  timeline companions unless the user turns on "Show extension data files". */
+export function isExtensionDataFile(file: Pick<FileReference, "role"> | null | undefined): boolean {
+  return file?.role === "extension-data"
+}
+
 /**
- * Resolve a file's audio timing mode: Original timing for every subtitle import
- * (see below), else the file's own choice, else the project-level value (the
- * legacy Project Settings field, kept as a read-only fallback so pre-existing
- * projects keep the mode they had chosen), else Original timing. Mixed-mode
- * projects are allowed by design.
+ * True for a subtitle import that actually HAS the video its cues were timed
+ * against (`coreMediaUrl` — absent means no video). The one case where the
+ * timing mode is not a choice: the cues belong to that footage, so laying them
+ * end to end has nothing to fit.
+ *
+ * AQU-1704: the predicate the withdrawal in `resolveFileTimingMode` is scoped
+ * to. AQU-646 withdrew Free timing from every subtitle import on the grounds
+ * that "their cues are already timed to a video" — true of a film's VTT, and
+ * false of an audio-only dubbing project, whose source IS an SRT and which has
+ * no video at all. LOTE (sermon dubbing: podcast, YouTube, app) is that
+ * project, and the blanket rule made the mode unreachable for it: the picker
+ * was hidden AND the project-level key was inert, so a maintainer who set
+ * `audioTimingMode=audioFirst` through the API saw playback carry on fitting
+ * clips into the English cue slots — dead air after a short clip, overlap after
+ * a long one. The footage, not the file format, is what makes the cues binding.
+ */
+export function isVideoTimedSubtitleFile(
+  file: Pick<FileReference, "type" | "coreMediaUrl"> | null | undefined,
+): boolean {
+  return isSubtitleImportFile(file) && Boolean(file?.coreMediaUrl)
+}
+
+/**
+ * AQU-2204 (Sam, Oct 26): a file whose lines are TIMED TO A FILM can only
+ * follow its source. That is any file with footage linked (`coreMediaUrl`: an
+ * uploaded film or a YouTube video), and any file carrying an audio cue file,
+ * whose cues transcribe the film's own sound. Laying such a file's lines back
+ * to back would pull the dub off the actors, so the timing control offers only
+ * "Follows source" there, with an (i) saying why.
+ *
+ * Supersedes the narrower AQU-1704 rule (`isVideoTimedSubtitleFile`), which
+ * locked only subtitle imports with footage and let other video-linked files
+ * pick Free timing through a "the video stays hidden" warning.
+ */
+export function isFilmTimedFile(
+  file: Pick<FileReference, "coreMediaUrl"> | null | undefined,
+  opts?: { hasAudioCues?: boolean },
+): boolean {
+  return Boolean(file?.coreMediaUrl) || Boolean(opts?.hasAudioCues)
+}
+
+/**
+ * Resolve a file's audio timing mode: "Follows source" ("dubbing") for a file
+ * timed to a film (see `isFilmTimedFile`), else the file's own choice, else the
+ * project-level value (the legacy Project Settings field, kept as a read-only
+ * fallback so pre-existing projects keep the mode they had chosen), else
+ * "Follows source". Mixed-mode projects are allowed by design.
  */
 export function resolveFileTimingMode(
-  file: Pick<FileReference, "timingMode" | "type"> | null | undefined,
+  file: Pick<FileReference, "timingMode" | "type" | "coreMediaUrl"> | null | undefined,
   project: Pick<ProjectRecord, "audioTimingMode"> | null | undefined,
+  opts?: {
+    /**
+     * AQU-2204: the file carries an audio cue file (its cues transcribe the
+     * film), so it is timed to the film even with no footage linked here.
+     */
+    hasAudioCues?: boolean
+    /**
+     * AQU-2204 (board 24): the file has no times and no source recording, so
+     * there is nothing to follow — it follows its recordings, whatever it
+     * stored (the control greys "Follows source" out with the reason).
+     */
+    nothingToFollow?: boolean
+    /**
+     * AQU-1565 follow-up: the file is timed to a linked YouTube video, so its
+     * DEFAULT is Original timing and the Media view shows the video. The
+     * legacy project-level Free timing no longer reaches it (it hid the video
+     * on a "Link video only" file that nobody had set). A choice made on the
+     * file itself still stands: Free timing there was picked through a
+     * warning that the video stays hidden. A flag rather than a URL test so
+     * this module stays import-free.
+     */
+    timedToLinkedVideo?: boolean
+  },
 ): AudioTimingMode {
-  // AQU-646: Free timing does not exist for subtitle imports — their cues are
-  // already timed to a video, so laying them end to end has nothing to fit.
-  // Withdrawing it at RESOLUTION rather than from the picker is the whole
-  // point: hiding the control would have left three ways back in. (a) The
-  // file's own stored `timingMode`, written before the mode was withdrawn.
-  // (b) Inheritance from the LEGACY project-level `audioTimingMode` below — a
-  // VTT nobody has ever touched still resolves to Free timing off a project
-  // setting made back when the control lived in Project Settings. (c) A
-  // `file.timing.set` from an OLDER client that still offers the mode; the
-  // server deliberately keeps accepting it, since rejecting it would break
-  // those clients for no gain. A stray "audioFirst" on a subtitle file is
-  // simply inert from here on — nothing migrates it away.
-  if (isSubtitleImportFile(file)) return "dubbing"
+  // AQU-646, rescoped by AQU-1704: Free timing does not exist for a subtitle
+  // import whose video is linked here. This check runs BEFORE the file's own
+  // choice, and withdrawing the mode at RESOLUTION rather than from the picker
+  // is still the point: the picker is hidden for these files, so any stored
+  // value would otherwise be one nobody can change back. That covers (a) a
+  // Free timing the user picked while the file had no video, followed by
+  // linking one (file.video.set leaves timingMode untouched), (b) a value
+  // written before AQU-646 or by an OLDER client that still offers the mode,
+  // and (c) inheritance from the LEGACY project-level `audioTimingMode` below.
+  if (isVideoTimedSubtitleFile(file)) return "dubbing"
+  // AQU-2204: every other file timed to a film follows its source too, whatever
+  // it stored — the control shows only "Follows source" for these files, so a
+  // stored "audioFirst" (picked before the rule, or by an older client) would
+  // otherwise be one nobody can see or change back.
+  if (isFilmTimedFile(file, { hasAudioCues: opts?.hasAudioCues })) return "dubbing"
+  // AQU-2204 (board 24): nothing to follow, so it follows its recordings.
+  if (opts?.nothingToFollow) return "audioFirst"
+  // AQU-1704: every other file reads its own choice next, so the picker the
+  // workspace now shows a video-less subtitle file is not inert.
   if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode
+  // Below the file's own choice, above the project's: see `timedToLinkedVideo`.
+  if (opts?.timedToLinkedVideo) return "dubbing"
+  // AQU-2204 (Sam, Oct 27 — board 23's LOTE row): a NEW file with no linked
+  // film starts on "Follows source", subtitle and cue files included. A LOTE
+  // sermon's VTT and a Come and See audio-only project's base VTT look the same
+  // here, so neither is guessed into following its recordings; a lead switches
+  // a new LOTE file once. Files that chose Free timing keep that choice above.
   // Only "audioFirst" opts out of the original behaviour — anything else,
   // including a value the settings blob happens to carry (the server accepts
   // arbitrary top-level keys), reads as Original timing. Same normalization
@@ -913,7 +1268,7 @@ export type CompletionProvider = "frontier" | "custom"
 export type ContextSize = "small" | "medium" | "large"
 
 export interface CompletionSettings {
-  provider?: CompletionProvider // "frontier" (default, uses api.frontierrnd.com) or "custom" (self-hosted, local, or third-party OpenAI-compatible endpoint like OpenRouter, OpenAI, Groq, etc.)
+  provider?: CompletionProvider // "frontier" (default, uses the Aquilla chat proxy at api.aquilla.app/chat) or "custom" (self-hosted, local, or third-party OpenAI-compatible endpoint like OpenRouter, OpenAI, Groq, etc.)
   endpoint: string              // only used when provider === "custom". Base URL (e.g. "http://localhost:8000" or "https://openrouter.ai/api/v1"). Trailing "/v1" or "/chat/completions" is tolerated and normalized.
   apiKey?: string               // only used when provider === "custom". Sent as "Authorization: Bearer <key>". Leave blank for unauthenticated local endpoints.
   model: string                 // blank = provider's default (e.g. Frontier picks DEFAULT_LLM_MODEL server-side)
@@ -924,8 +1279,6 @@ export interface CompletionSettings {
    * internal clarity; the two names refer to the same concept.
    */
   systemPrompt: string
-  /** 0-1, default 0.1. Only consumed by the legacy health engine (flag-off path). Will be removed once the composite-health flag is default-on. */
-  llmHealthPenalty?: number
 
   // ── v1 AI retrieval-tuning settings (spec: ai-copilot.md config table) ────
 
@@ -1020,14 +1373,21 @@ export interface CellHistoryEntry {
   isStale?: boolean
   /** Local outbox state; absent once the server history has acknowledged it. */
   syncState?: "pending" | "failed"
+  /** AQU-1656: ai_interventions row holding this AI draft's prompt and raw
+   *  model output (from the commit's `ai_draft.interventionId`). */
+  interventionId?: string
 }
 
 export interface CommentMessage {
   id: string
   author: string
+  /** Username when the record has one. Edit and delete use it, not the label. */
+  authorId?: string
   authorType: "user" | "anonymous"
   text: string
   timestamp: string
+  /** Set when the body was changed after it was posted. */
+  editedAt?: string
   mentions?: string[]
 }
 

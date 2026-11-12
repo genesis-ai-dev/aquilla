@@ -29,7 +29,9 @@ import { createProposal, listMemories, reviewMemory } from "../../../db/shared/a
 import { raiseDecision, answerDecision } from "../../../db/shared/contextual-decisions"
 import {
   gatherReflectionEvidence,
+  loadReflectionKnown,
   reflectAtPark,
+  reflectionUserPrompt,
   reflectionWatermark,
 } from "../lib/contextual/reflect"
 import { runOneTick, makeLlmCall } from "../lib/contextual/tick"
@@ -448,5 +450,40 @@ describe("the tick reflects when a run parks", () => {
     // The watermark stays put, so the next park retries over the same work
     // rather than losing it to one bad provider minute.
     expect((await getRunReflection(db, run.id))?.reflectedAt).toBeNull()
+  })
+})
+
+describe("reflection prompt — lane language", () => {
+  it("names the lane's language, never the hex id its tag was set to", async () => {
+    const laneId = "a3f09c1e"
+    await db
+      .prepare(
+        `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+         VALUES ('span0001', ?, 'target', 'Spanish', 'es', 'Spanish', 1),
+                (?, ?, 'target', 'Spanish team', 'Spanish', ?, 2)`,
+      )
+      .bind(PROJECT, laneId, PROJECT, laneId)
+      .run()
+    await db
+      .prepare(`INSERT INTO project_settings (project_id, settings) VALUES (?, ?)`)
+      .bind(PROJECT, JSON.stringify({ targetLanguage: "Swahili" }))
+      .run()
+    const created = await createRun(db, {
+      projectId: PROJECT,
+      fileId: FILE,
+      laneId,
+      initiatedBy: "tester",
+      roleSnapshot: { userId: 1, username: "tester", level: 400 },
+    })
+    if (created.status !== "ok") throw new Error("run not created")
+
+    const { known } = await loadReflectionKnown(db, created.run)
+    const prompt = reflectionUserPrompt(
+      { drafts: [], directions: [], answeredDecisions: [] },
+      known,
+    )
+    expect(prompt).toContain("## Target language\nSpanish")
+    expect(prompt).not.toContain(laneId)
+    expect(prompt).not.toContain("Swahili")
   })
 })

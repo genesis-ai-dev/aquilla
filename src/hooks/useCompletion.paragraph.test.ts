@@ -29,7 +29,7 @@ vi.mock("@/lib/parsers/paragraphs", () => ({
 // The real parseParagraphResponse works fine; we stub complete() instead.
 
 // ---- Stub posthog ----
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn(), captureException: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn(), captureException: vi.fn() } }))
 
 // ---- Stub frontier-health ----
 vi.mock("@/lib/completion/frontier-health", () => ({

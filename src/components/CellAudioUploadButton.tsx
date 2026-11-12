@@ -24,6 +24,7 @@ import { RailButton } from "./CellActionRail"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { ACCEPT, attachAudioFileToCell } from "@/lib/audio/attach-file"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { toUserFacingError } from "@/lib/errors/user-error"
 
 interface Props {
   projectId: string
@@ -36,9 +37,11 @@ interface Props {
   /** Author attribution for the cell.audio.attach event. */
   username: string
   disabled?: boolean
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
 }
 
-export function CellAudioUploadButton({ projectId, fileId, cellId, username, disabled, onTakeSaved }: Props) {
+export function CellAudioUploadButton({ projectId, fileId, cellId, username, disabled, onTakeSaved, targetLang }: Props) {
   const t = useT()
   const { session } = useFrontierSession()
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -61,14 +64,26 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
     try {
       // No `label`: this rail has no takes list to number against, and
       // fetching one to name a single icon click isn't worth the request.
-      await attachAudioFileToCell({ session, projectId, fileId, cellId, file, username })
+      await attachAudioFileToCell({
+        session, projectId, fileId, cellId, file, username,
+        ...(targetLang ? { targetLang } : {}),
+        surface: "cell",
+        // Decision 11: an Undo step. The rail shows only on a line with no
+        // audio yet, so nothing played before.
+        history: { selectedBefore: null },
+      })
       onTakeSaved?.(cellId)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      // AQU-510: no `context` noun is passed. `error.network.contextSuffix`
+      // translates its frame but interpolates the caller's noun verbatim, so
+      // "audio" would sit in English inside a Burmese sentence — the very
+      // defect this ticket is about. A wholly localized sentence beats a
+      // more specific half-translated one.
+      setError(toUserFacingError(e).message)
     } finally {
       setUploading(false)
     }
-  }, [session, projectId, fileId, cellId, username, onTakeSaved, t])
+  }, [session, projectId, fileId, cellId, username, onTakeSaved, t, targetLang])
 
   const onInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]

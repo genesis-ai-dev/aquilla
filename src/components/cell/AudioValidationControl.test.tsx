@@ -5,14 +5,18 @@
 // case, because that is where audio stops behaving like text. A line's takes
 // all sound at once, so the line is only as validated as its weakest track.
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import {
   AudioValidationControl,
   type AudioValidationTake,
 } from "./AudioValidationControl"
+import { TargetValidationControl } from "./TargetValidationControl"
 import { lineState, takeState } from "./audio-validation-state"
+import { fmtShortCalendarDate, fmtShortCalendarDateTime } from "@/lib/format-date"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
+import { expectClickNote, expectDisabledNote } from "@/test-utils/tooltip"
 
 const take = (over: Partial<AudioValidationTake> & { audioId: string }): AudioValidationTake => ({
   label: null,
@@ -46,6 +50,7 @@ function draw(
 }
 
 const button = () => screen.queryByTestId("audio-validation-button")
+const listInfo = () => screen.getByRole("button", { name: "About Audio validated by" })
 const fraction = () => screen.queryByTestId("audio-validation-fraction")
 
 // ── The arithmetic, on its own ────────────────────────────────────────────
@@ -81,17 +86,23 @@ describe("takeState / lineState", () => {
 // ── What the line draws ───────────────────────────────────────────────────
 
 describe("the readout", () => {
-  // Sam, 2026-09-23: a line with nothing recorded draws a FADED mic that
-  // does nothing, so the gutter column is full on every row. (Replaces the
-  // empty slot of 2026-09-21.) Not a button: no tab stop, no click.
-  it("draws a faded, unclickable mic on a line with no recording", () => {
-    draw([])
+  // Sam, 2026-09-23: a line with nothing recorded draws a FADED mark that
+  // casts no vote, so the gutter column is full on every row. (Replaces the
+  // empty slot of 2026-09-21.) AQU-2260 (Oct 29): why it is faded opens on a
+  // click, never a hover. AQU-2401: the mark is a circle, not a microphone.
+  it("draws a faded circle on a line with no recording, which says why on a click", async () => {
+    const { onValidationChange } = draw([])
     expect(button()).toBeNull()
     const faded = screen.getByTestId("audio-validation-unavailable")
     expect(faded.tagName).toBe("SPAN")
     expect(faded).toHaveAccessibleName(/no audio to validate/i)
     expect(faded.className).toContain("opacity-40")
-    expect(faded.querySelector("svg")).not.toBeNull()
+    // AQU-2401: a circle, and specifically NOT a microphone — the header's
+    // mic (AQU-2139) is what names the column, once.
+    expect(faded.querySelector("svg.lucide-circle")).not.toBeNull()
+    expect(faded.querySelector("svg.lucide-mic")).toBeNull()
+    await expectClickNote(faded, "No audio to validate")
+    expect(onValidationChange).not.toHaveBeenCalled()
   })
 
   it("draws nothing inline for a line with no recording", () => {
@@ -100,31 +111,94 @@ describe("the readout", () => {
     expect(screen.queryByTestId("audio-validation-gutter")).toBeNull()
   })
 
+  // Sam, 2026-10-01 (the 3G pass): while the line's recordings are still
+  // being read, an empty set is not "no audio". The slot pulses in the app's
+  // skeleton style instead — not a button, and saying what it waits for.
+  it("holds a placeholder, not the faded circle, while the recordings are being read", () => {
+    draw([], { checking: true })
+    expect(button()).toBeNull()
+    expect(screen.queryByTestId("audio-validation-unavailable")).toBeNull()
+    const placeholder = screen.getByTestId("audio-validation-checking")
+    expect(placeholder.tagName).toBe("SPAN")
+    expect(placeholder).toHaveAccessibleName(/checking for audio/i)
+    expect(placeholder.querySelector("[data-slot=skeleton]")).not.toBeNull()
+  })
+
+  it("says what the placeholder waits for on a click, never a hover (AQU-2260)", async () => {
+    draw([], { checking: true })
+    await expectClickNote(screen.getByTestId("audio-validation-checking"), "Checking for audio")
+  })
+
+  it("holds the placeholder even over takes it already knows, so no count changes under it", () => {
+    draw([take({ audioId: "a" })], { checking: true })
+    expect(button()).toBeNull()
+    expect(screen.getByTestId("audio-validation-checking")).toBeInTheDocument()
+  })
+
+  it("ignores it inline, where it only ever stands beside a take", () => {
+    draw([take({ audioId: "a" })], { checking: true, variant: "inline" })
+    expect(button()).not.toBeNull()
+    expect(screen.queryByTestId("audio-validation-checking")).toBeNull()
+  })
+
   // Sam, 2026-09-21: on a second account, a line somebody else had already
   // validated looked exactly like one nobody had touched. The text control
   // fills its circle for that state; this one only stepped the grey, which is
-  // invisible at 14px. The mic's capsule now fills the same way — and only the
-  // capsule, because lucide's mic stand is an open path that fills as a blob.
-  it("fills the mic's capsule when someone else has validated but I have not", () => {
+  // invisible at 14px. It filled the mic's CAPSULE for a while (the stand is
+  // an open path that fills as a blob) — AQU-2401 made the glyph a circle, so
+  // it is now the text control's own whole-glyph fill.
+  it("fills the circle when someone else has validated but I have not", () => {
     draw([take({ audioId: "a", validatorCount: 1, validators: ["bo"] })], { validationRequirement: 2 })
     const icon = button()!.querySelector("svg")!
-    expect(icon.getAttribute("class")).toContain("[&_rect]:fill-current")
-    // The stand must NOT be filled — that is the difference between a filled
-    // mic and a solid blob.
-    expect(icon.getAttribute("class")).not.toContain("fill-current path")
-    expect(icon.querySelector("rect")).not.toBeNull()
+    expect(icon.getAttribute("class")).toContain("lucide-circle")
+    expect(icon.getAttribute("fill")).toBe("currentColor")
+    // The capsule-only workaround is gone with the microphone it was for.
+    expect(icon.getAttribute("class")).not.toContain("[&_rect]:fill-current")
   })
 
-  it("leaves the mic hollow when nobody has validated", () => {
+  it("leaves the circle hollow when nobody has validated", () => {
     draw([take({ audioId: "a" })], { validationRequirement: 2 })
-    expect(button()!.querySelector("svg")!.getAttribute("class")).not.toContain("fill-current")
+    const icon = button()!.querySelector("svg")!
+    expect(icon.getAttribute("class")).toContain("lucide-circle")
+    expect(icon.getAttribute("fill")).not.toBe("currentColor")
   })
 
-  // Once the viewer has voted the icon is a CHECK, not a mic, so the fill
+  // Once the viewer has voted the icon is a CHECK, not a circle, so the fill
   // would have nothing to act on — and must not be asked to.
   it("does not fill once I have validated", () => {
     draw([take({ audioId: "a", validatorCount: 1, validators: ["ana"] })], { validationRequirement: 2 })
-    expect(button()!.querySelector("svg")!.getAttribute("class")).not.toContain("fill-current")
+    const icon = button()!.querySelector("svg")!
+    expect(icon.getAttribute("class")).toContain("lucide-check")
+    expect(icon.getAttribute("fill")).not.toBe("currentColor")
+  })
+
+  // AQU-2401, the whole point of the change: the two checks beside each other
+  // now draw the SAME glyph for the same state, so a reviewer reads one shape
+  // vocabulary down the gutter. The microphone that used to be here repeated
+  // on every row what the header's mic (AQU-2139) says once.
+  it.each([
+    ["none", [] as string[], 2, "lucide-circle"],
+    ["others", ["bo"], 2, "lucide-circle"],
+    ["self", ["ana"], 2, "lucide-check"],
+    ["full", ["ana"], 1, "lucide-check-check"],
+  ])("draws the text control's own glyph for %s, and never a microphone", (_state, validators, requirement, expected) => {
+    draw(
+      [take({ audioId: "a", validatorCount: validators.length, validators })],
+      { validationRequirement: requirement },
+    )
+    const icon = button()!.querySelector("svg")!
+    expect(icon.getAttribute("class")).toContain(expected)
+    expect(button()!.querySelector("svg.lucide-mic")).toBeNull()
+  })
+
+  // Every surface that draws the audio vote shares this component, so the
+  // inline one (the Recording tab's take block, the timeline's takes strip)
+  // must show the same circle — a vote looks the same wherever it is shown.
+  it("draws the same circle inline, in the take block and the takes strip", () => {
+    draw([take({ audioId: "a" })], { validationRequirement: 2, variant: "inline" })
+    const icon = button()!.querySelector("svg")!
+    expect(icon.getAttribute("class")).toContain("lucide-circle")
+    expect(button()!.querySelector("svg.lucide-mic")).toBeNull()
   })
 
   it("shows no fraction on an ordinary one-take line", () => {
@@ -223,6 +297,82 @@ describe("casting a vote", () => {
     expect(onValidationChange).not.toHaveBeenCalledWith("a", true)
   })
 
+  // Slice 3A (decision 7): a cut take's pieces are approved one by one, each
+  // where it can be heard. The line's control used to approve every piece in
+  // one click and call them "takes" — the whole-take approve decision 7 took
+  // out. A press now opens the pieces, each with its own button.
+  it("opens the pieces of a cut take instead of approving them all at once", async () => {
+    const { onValidationChange } = draw([
+      take({ audioId: "p1", pieceOf: "t2", label: "Take 2 · 1", validatorCount: 1, validators: ["ana"] }),
+      take({ audioId: "p2", pieceOf: "t2", label: "Take 2 · 2" }),
+      take({ audioId: "p3", pieceOf: "t2", label: "Take 2 · 3" }),
+    ])
+    expect(button()).toHaveAccessibleName(/validated 1 of 3 pieces/i)
+    expect(button()).not.toHaveAccessibleName(/takes/i)
+    await userEvent.click(button()!)
+    expect(onValidationChange).not.toHaveBeenCalled()
+    const list = await screen.findByRole("dialog")
+    const perPiece = within(list).getAllByRole("button", { name: "Validate this piece" })
+    expect(perPiece).toHaveLength(2)
+    await userEvent.click(perPiece[0])
+    expect(onValidationChange).toHaveBeenCalledExactlyOnceWith("p2", true)
+  })
+
+  // Slice 3A evidence (Oct 27): with one piece left the label fell back to
+  // "You have validated 2 of 3 takes", and in the list every piece's row read
+  // "“I'm scared.” · Target aud…" with its own name cut off, and "Nobody has
+  // validated this take". jsdom has no layout, so the row's title is pinned to
+  // wrap rather than truncate.
+  it("calls a cut take's pieces pieces, and names each one whole in the list", async () => {
+    const { onValidationChange } = draw([
+      take({ audioId: "p1", pieceOf: "t2", label: "“I'm scared.” · Target audio · Take 2 · 1", validatorCount: 1, validators: ["ana"] }),
+      take({ audioId: "p2", pieceOf: "t2", label: "“I'm scared.” · Target audio · Take 2 · 2", validatorCount: 1, validators: ["ana"] }),
+      take({ audioId: "p3", pieceOf: "t2", label: "“I'm scared.” · Target audio · Take 2 · 3", validatorCount: 1, validators: ["bo"] }),
+    ], { validationRequirement: 2 })
+    expect(button()).toHaveAccessibleName(/validated 2 of 3 pieces/i)
+    expect(button()).not.toHaveAccessibleName(/takes/i)
+    // One piece left to give, so a press on the check votes on it; the list
+    // is on the (i) under it (AQU-2260, third pass), never a hover.
+    await userEvent.hover(button()!)
+    expect(screen.queryByRole("dialog")).toBeNull()
+    await userEvent.click(listInfo())
+    const list = await screen.findByRole("dialog")
+    const labels = within(list).getAllByTestId("audio-validation-take-label")
+    expect(labels.map((l) => l.textContent)).toEqual([
+      "“I'm scared.” · Target audio · Take 2 · 1",
+      "“I'm scared.” · Target audio · Take 2 · 2",
+      "“I'm scared.” · Target audio · Take 2 · 3",
+    ])
+    for (const l of labels) {
+      expect(l.className).not.toMatch(/\btruncate\b/)
+      expect(l.className).toMatch(/\bbreak-words\b/)
+    }
+    await userEvent.click(listInfo())
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    await userEvent.click(button()!)
+    expect(onValidationChange).toHaveBeenCalledExactlyOnceWith("p3", true)
+  })
+
+  it("says nobody has validated this piece, not this take", async () => {
+    draw([
+      take({ audioId: "p1", pieceOf: "t2", label: "Take 2 · 1", validatorCount: 1, validators: ["bo"] }),
+      take({ audioId: "p2", pieceOf: "t2", label: "Take 2 · 2" }),
+    ])
+    // Two pieces still lack ana's vote, so a press on the check opens the list
+    // of pieces (slice 3A); nothing opens on hover (AQU-2260).
+    await userEvent.hover(button()!)
+    expect(screen.queryByRole("dialog")).toBeNull()
+    await userEvent.click(button()!)
+    expect(await screen.findByText("Nobody has validated this piece")).toBeInTheDocument()
+    expect(screen.queryByText(/nobody has validated this take/i)).not.toBeInTheDocument()
+  })
+
+  it("still votes in one press on a surface showing a single piece", async () => {
+    const { onValidationChange } = draw([take({ audioId: "p2", pieceOf: "t2", label: "Take 2 · 2" })])
+    await userEvent.click(button()!)
+    expect(onValidationChange).toHaveBeenCalledExactlyOnceWith("p2", true)
+  })
+
   it("skips a take the viewer may not vote on", async () => {
     const { onValidationChange } = draw([
       take({ audioId: "a" }),
@@ -269,8 +419,11 @@ describe("the validator list", () => {
       take({ audioId: "b", slot: "track-2", label: "Narration", validatorCount: 1, validators: ["bo"] }),
     ], { currentUsername: "ana", validationRequirement: 1 })
     // ana has validated 'a'; 'b' already meets the threshold via bo, but ana
-    // has not voted on it, so a click would still give it — open by hover.
+    // has not voted on it, so a click on the check would still give it — the
+    // list is on the (i) under it (AQU-2260, Oct 29, third pass).
     await userEvent.hover(button()!)
+    expect(screen.queryByRole("dialog")).toBeNull()
+    await userEvent.click(listInfo())
     const list = await screen.findByRole("dialog")
     expect(within(list).getByText("Take 2")).toBeInTheDocument()
     expect(within(list).getByText("Narration")).toBeInTheDocument()
@@ -289,12 +442,42 @@ describe("the validator list", () => {
     expect(onValidationChange).toHaveBeenCalledExactlyOnceWith("a", false)
   })
 
+  // The text control's PR 1 area 5 step 6 bug, here too (2026-10-03): the
+  // trash button closed a click-opened list behind Base UI's back, and Base
+  // UI ignores hover while it thinks a click opened the list, so the check
+  // never opened the list on hover again.
+  it("opens again from its (i) after Remove your validation closed a click-opened list", async () => {
+    const { onValidationChange, rerender } = draw([
+      take({ audioId: "a", validatorCount: 2, validators: ["ana", "bo"] }),
+    ], { validationRequirement: 2 })
+    await userEvent.click(button()!)
+    const list = await screen.findByRole("dialog")
+    await userEvent.click(within(list).getByRole("button", { name: /remove your validation/i }))
+    expect(onValidationChange).toHaveBeenCalledExactlyOnceWith("a", false)
+    rerender(
+      <I18nProvider>
+        <AudioValidationControl
+          cellRef="GEN 1:1"
+          takes={[take({ audioId: "a", validatorCount: 1, validators: ["bo"] })]}
+          currentUsername="ana"
+          validationRequirement={2}
+          canValidate
+          onValidationChange={onValidationChange}
+        />
+      </I18nProvider>,
+    )
+    await vi.waitFor(() => expect(screen.queryByText("Audio validated by")).toBeNull(), { timeout: STALL_WATCHDOG_MS })
+    await userEvent.click(listInfo())
+    expect(await screen.findByText("Audio validated by")).toBeInTheDocument()
+    expect(screen.getByText("bo")).toBeInTheDocument()
+  })
+
   it("says plainly when nobody has validated one of several takes", async () => {
     draw([
       take({ audioId: "a", validatorCount: 1, validators: ["bo"] }),
       take({ audioId: "b", slot: "track-2" }),
     ])
-    await userEvent.hover(button()!)
+    await userEvent.click(listInfo())
     expect(await screen.findByText(/nobody has validated this take/i)).toBeInTheDocument()
   })
 })
@@ -314,18 +497,33 @@ describe("the hover matches the text control", () => {
   })
 
   // The why-not was unreachable before: the popover always won.
+  // AQU-2260 (Oct 29): on a click, in a note anchored to it — never a hover.
   it("an untouched line I recorded says why I cannot validate it", async () => {
-    draw([take({ audioId: "a", canValidate: false, blockedReason: "You recorded this" })])
-    await userEvent.hover(button()!)
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("You recorded this")
+    const { onValidationChange } = draw([take({ audioId: "a", canValidate: false, blockedReason: "You recorded this" })])
+    await expectDisabledNote(button()!, "You recorded this")
+    expect(onValidationChange).not.toHaveBeenCalled()
   })
 
-  it("once somebody has voted, the hover is the Audio validated by list", async () => {
-    draw([take({ audioId: "a", validatorCount: 1, validators: ["bo"] })], { validationRequirement: 2 })
+  // AQU-2260 (Oct 29, third pass): the list never opens on hover. Where a
+  // click on the check would vote, the (i) under it opens the list.
+  it("once somebody has voted, the (i) opens the Audio validated by list, and hover shows nothing", async () => {
+    const { onValidationChange } = draw([take({ audioId: "a", validatorCount: 1, validators: ["bo"] })], { validationRequirement: 2 })
     await userEvent.hover(button()!)
+    await new Promise((r) => setTimeout(r, 500))
+    expect(screen.queryByText("Audio validated by")).toBeNull()
+    await userEvent.click(listInfo())
+    expect(onValidationChange).not.toHaveBeenCalled()
     expect(await screen.findByText("Audio validated by")).toBeInTheDocument()
     expect(screen.getByText("bo")).toBeInTheDocument()
     expect(screen.queryByTestId("audio-validation-blocked-note")).toBeNull()
+  })
+
+  it("closes the list from a second click on its (i)", async () => {
+    draw([take({ audioId: "a", validatorCount: 1, validators: ["bo"] })], { validationRequirement: 2 })
+    await userEvent.click(listInfo())
+    expect(await screen.findByText("Audio validated by")).toBeInTheDocument()
+    await userEvent.click(listInfo())
+    await waitFor(() => expect(screen.queryByText("Audio validated by")).toBeNull())
   })
 
   // …and a reason I cannot join them rides at the foot of that list rather
@@ -335,7 +533,8 @@ describe("the hover matches the text control", () => {
       audioId: "a", validatorCount: 1, validators: ["bo"],
       canValidate: false, blockedReason: "You recorded this",
     })], { validationRequirement: 2 })
-    await userEvent.hover(button()!)
+    // A click cannot vote here, so the check itself opens the list.
+    await userEvent.click(button()!)
     expect(await screen.findByTestId("audio-validation-blocked-note")).toHaveTextContent("You recorded this")
   })
 
@@ -438,5 +637,209 @@ describe("the optimistic vote retires when the server answers", () => {
     // …then somewhere else I withdraw it, and the server says so.
     draw2([take({ audioId: "a" })])
     expect(button()).toHaveAccessibleName(/not validated/i)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Read-only in lists of takes (Sam, 2026-09-29): a vote is cast only on the
+// take that plays, from the line's audio check, because that is the take you
+// can hear. Every other list shows the votes and takes none.
+// ---------------------------------------------------------------------------
+
+describe("read-only", () => {
+  it("draws the same state, and a press casts nothing", async () => {
+    const { onValidationChange } = draw([take({ audioId: "a" })], { readOnly: true })
+    expect(button()).toHaveAccessibleName("Audio not validated — GEN 1:1.")
+    await userEvent.click(button()!)
+    expect(onValidationChange).not.toHaveBeenCalled()
+  })
+
+  it("says why there is nothing to vote on a take nobody has validated, on a click", async () => {
+    draw([take({ audioId: "a" })], { readOnly: true })
+    await expectDisabledNote(
+      button()!,
+      "Nobody has validated this take. Only the take that plays for the line can be validated.",
+    )
+  })
+
+  it("lists who validated, with no way to withdraw, and says why at the foot", async () => {
+    const { onValidationChange } = draw(
+      [take({ audioId: "a", validatorCount: 2, validators: ["ana", "bo"] })],
+      { readOnly: true, validationRequirement: 2 },
+    )
+    expect(button()).toHaveAccessibleName("Audio validated — GEN 1:1.")
+    expect(button()).not.toHaveAttribute("aria-pressed")
+    // Read-only: a click cannot vote, so it opens the list (AQU-2260).
+    await userEvent.click(button()!)
+    const list = await screen.findByRole("dialog")
+    expect(within(list).getByText("bo")).toBeInTheDocument()
+    expect(within(list).queryByRole("button", { name: /remove your validation/i })).toBeNull()
+    expect(within(list).getByTestId("audio-validation-blocked-note"))
+      .toHaveTextContent("Only the take that plays for the line can be validated")
+    await userEvent.click(button()!)
+    expect(onValidationChange).not.toHaveBeenCalled()
+  })
+
+  it("never offers to validate a take from the list", async () => {
+    draw([
+      take({ audioId: "a", validatorCount: 1, validators: ["bo"] }),
+      take({ audioId: "b", slot: "track-2", validatorCount: 1, validators: ["bo"] }),
+    ], { readOnly: true, validationRequirement: 2 })
+    await userEvent.click(button()!)
+    const list = await screen.findByRole("dialog")
+    expect(within(list).queryByRole("button", { name: /validate this take/i })).toBeNull()
+  })
+})
+
+// Sam, 2026-09-30: a line split across heard lines, one recorded and one not.
+// The unrecorded part is in the set but is not a take.
+describe("AudioValidationControl — a part of the line not yet recorded", () => {
+  const missing = take({
+    audioId: "unrecorded:cue-b",
+    label: "“and some milk too.”",
+    canValidate: false,
+    blockedReason: "Part of this line is not recorded yet",
+    unrecorded: true,
+  })
+
+  it("never reads fully validated while a part is silent", () => {
+    draw([take({ audioId: "a", validatorCount: 1, validators: ["ana"] }), missing])
+    // Validated by me at a threshold of one would be the double check; with a
+    // part missing it is the single one, and the label says why.
+    expect(button()).toHaveAttribute("aria-label", "Part of this line is not recorded yet — GEN 1:1.")
+    expect(fraction()).toBeNull()
+  })
+
+  it("votes on the recorded part only, and counts only it", async () => {
+    const user = userEvent.setup()
+    const { onValidationChange } = draw([
+      take({ audioId: "a" }),
+      take({ audioId: "b" }),
+      missing,
+    ])
+    expect(fraction()).toHaveTextContent("0/2")
+    await user.click(button()!)
+    expect(onValidationChange.mock.calls.map((c) => c[0]).sort()).toEqual(["a", "b"])
+  })
+
+  it("names the missing part in the list", async () => {
+    const user = userEvent.setup()
+    draw([take({ audioId: "a", validatorCount: 1, validators: ["bo"], label: "“Bring back some bread,”" }), missing])
+    // A click on the check would vote on the recorded part, so the list is on its (i).
+    await user.click(listInfo())
+    const list = await screen.findByText("“and some milk too.”")
+    expect(within(list.closest("li")!).getByTestId("audio-validation-unrecorded")).toHaveTextContent("Not recorded yet")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-2296: the date under each name, and the spacing the two lists share.
+//
+// "Text validated by" and "Audio validated by" open from checks that sit side
+// by side on the same line, and a reader opens one straight after the other.
+// They were built as twins but drifted: each audio name sat inside TWO padded
+// rows (one for the take, one for the name) where text had one, so the audio
+// list started lower and its names were indented a step further.
+// ---------------------------------------------------------------------------
+
+const validatorRow = (list: HTMLElement, name: string) =>
+  within(list).getByText(new RegExp(`^${name}`)).closest("li")!
+
+/** The classes that decide where a row sits — what the two lists must share. */
+const boxClasses = (el: Element) =>
+  [...el.classList].filter((c) => /^-?(p|m)[xytrbles]?-/.test(c)).sort().join(" ")
+
+describe("the date under each validator", () => {
+  it("dates each name from that person's vote on THAT take, and leaves an unknown one bare", async () => {
+    const boVoted = Date.now() - 3 * 24 * 60 * 60 * 1000
+    draw([
+      take({
+        audioId: "a",
+        validatorCount: 2,
+        validators: ["bo", "cy"],
+        validatorDecidedTs: { bo: boVoted },
+      }),
+    ], { validationRequirement: 2, readOnly: true })
+    await userEvent.click(button()!)
+    const list = await screen.findByRole("dialog")
+
+    // The day and the clock time, not the day alone (Matthew, 2026-10-30).
+    expect(validatorRow(list, "bo")).toHaveTextContent(fmtShortCalendarDateTime(boVoted))
+    // No stamp for cy: the name alone, never a blank line or "Invalid Date".
+    expect(validatorRow(list, "cy").textContent).toBe("cy")
+  })
+
+  it("keeps each take's own dates when a line has several", async () => {
+    const onFirst = Date.now() - 10 * 24 * 60 * 60 * 1000
+    const onSecond = Date.now() - 2 * 24 * 60 * 60 * 1000
+    draw([
+      take({ audioId: "a", label: "Take 1", validatorCount: 1, validators: ["bo"], validatorDecidedTs: { bo: onFirst } }),
+      take({ audioId: "b", slot: "track-2", label: "Take 2", validatorCount: 1, validators: ["bo"], validatorDecidedTs: { bo: onSecond } }),
+    ], { validationRequirement: 1, readOnly: true })
+    await userEvent.click(button()!)
+    const list = await screen.findByRole("dialog")
+
+    const [first, second] = within(list).getAllByText(/^bo/).map((el) => el.closest("li")!)
+    expect(first).toHaveTextContent(fmtShortCalendarDateTime(onFirst))
+    expect(second).toHaveTextContent(fmtShortCalendarDateTime(onSecond))
+    // The sub-headings still name their takes above their own lists.
+    expect(within(list).getByText("Take 1")).toBeInTheDocument()
+    expect(within(list).getByText("Take 2")).toBeInTheDocument()
+  })
+
+  it("dates my own row from the click, before the server has answered", async () => {
+    draw([take({ audioId: "a" })])
+    await userEvent.click(button()!)   // the press is the VOTE
+    await userEvent.click(button()!)   // now it opens the list
+    const list = await screen.findByRole("dialog")
+    // The day only: the click and this line can straddle a minute boundary.
+    expect(validatorRow(list, "ana")).toHaveTextContent(fmtShortCalendarDate(Date.now()))
+  })
+})
+
+describe("the two validated-by lists are spaced alike", () => {
+  it("indents and spaces a name exactly as the text list does", async () => {
+    draw([take({ audioId: "a", validatorCount: 1, validators: ["bo"], validatorDecidedTs: { bo: Date.now() } })], {
+      validationRequirement: 1,
+      readOnly: true,
+    })
+    await userEvent.click(button()!)
+    const audioList = await screen.findByRole("dialog")
+    const audioRow = validatorRow(audioList, "bo")
+    // The take wrapper the row sits in must add nothing of its own: its own
+    // padding on top of the row's is what pushed the audio names down and in.
+    expect(boxClasses(audioRow.parentElement!.closest("li")!)).toBe("")
+
+    render(
+      <I18nProvider>
+        <TargetValidationControl
+          cellRef="GEN 1:1"
+          hasContent
+          validationStatus="others"
+          activeValidators={["bo"]}
+          validatorDecidedTs={{ bo: Date.now() }}
+          validationHistory={[]}
+          currentUsername="ana"
+          validationRequirement={1}
+          canValidate
+          canValidateThisCell={false}
+          onValidationChange={vi.fn()}
+        />
+      </I18nProvider>,
+    )
+    await userEvent.click(screen.getByRole("button", { name: /Validated by others/ }))
+    const textList = (await screen.findAllByRole("dialog")).find((el) => el !== audioList)!
+
+    expect(boxClasses(audioRow)).toBe(boxClasses(validatorRow(textList, "bo")))
+
+    // The heading is the list's own first row, as the text list keeps it —
+    // not a sibling above the list. The popover shell is a flex column with a
+    // gap between its children, so a heading of its own opened a gap between
+    // the title and the first name that the text popover does not have.
+    const headingOf = (list: HTMLElement) => within(list).getByText(/validated by$/)
+    expect(headingOf(audioList).tagName).toBe("LI")
+    expect(headingOf(audioList).parentElement!.parentElement).toBe(audioList)
+    expect(headingOf(audioList).parentElement!.contains(audioRow)).toBe(true)
+    expect(headingOf(audioList).className).toBe(headingOf(textList).className)
   })
 })

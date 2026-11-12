@@ -9,7 +9,8 @@
 // Idempotent: a committed changeset returns its stored receipt without
 // re-applying. Ask-mode confirmations are consumed exactly once.
 
-import { errorResponse, toErrorResponse } from './errors'
+import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
+import { ExternalError, errorResponse, toErrorResponse } from './errors'
 import {
   cellKey,
   isStructureCommandKind,
@@ -43,6 +44,7 @@ import type { ProjectSetupCommand } from './commands-project-setup'
 import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
 import { commitOrgMember } from './org-members-engine'
 import { commitMemoryCommand, isMemoryCommand } from './commands-memory'
+import { commitStyleRuleCommand, isStyleRuleCommand } from './commands-style-rules'
 import { commitEmitEvents } from './emit-events-engine'
 import { commitCellFields } from './cell-fields-engine'
 import { isCellFieldCommand, type CellFieldCommand } from './commands-cell-fields'
@@ -59,13 +61,15 @@ import { resolveCellStates } from './preconditions'
 import { isPlanSatisfied } from './supersede'
 import { resolveSupersedeState } from './supersede-state'
 import { compilePlanImport } from './import-manifest'
+import { linkMediaTelemetry, reviewTelemetryAllowed, sendReviewTelemetry, telemetrySourceFor } from './review-telemetry'
+import { locateEvents, locateRejections, rejectedWarnings } from './rejected-warnings'
 import { loadChangeset } from './store'
 import { SOURCE_ARTIFACT_FORMATS } from '../../../shared/import-contract'
-import { assertCredentialScope, mintInternalSyncToken } from './token-bridge'
+import { assertCredentialMayWrite, assertCredentialScope, mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
 import { audioObjectKey } from '../audio'
 import { handleEventsWriteRequest } from '../events/route'
-import { laneIdResolveSql } from '../events/lane-id-sql'
+import { artifactBindingConflictColumn, laneIdResolveSql } from '../events/lane-id-sql'
 import { ROLE } from '../events/role-policy'
 import { resolveAssignmentAuthority } from '../events/assignment-authority'
 import type { RawEvent } from '../events/types'
@@ -78,15 +82,16 @@ import type {
   ReceiptOnlyReceipt,
   StoredChangeset,
 } from './types'
-import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import {
   createProjectShared,
   loadProjectSettings,
   updateProjectSettingsShared,
 } from '../../../db/shared/projects'
+import { stampStoredLaneId } from './external-lane'
 import { createOrgShared, findRecentOrgByCreator } from '../../../db/shared/orgs'
-import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
+import { enforceRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
 
 /** Provenance channel for a PAT commit request. MCP-originated commits arrive
  *  via a synthetic in-process Request carrying `x-aquilla-channel: mcp`
@@ -95,11 +100,6 @@ import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/sh
  *  never header-derived: only the session routes pass it, as a code parameter. */
 function readChannel(request: Request): ProvenanceChannel {
   return request.headers.get('x-aquilla-channel') === 'mcp' ? 'mcp' : 'rest'
-}
-
-function bearer(request: Request): string | null {
-  const h = request.headers.get('Authorization') ?? ''
-  return h.startsWith('Bearer ') ? h.slice(7) : null
 }
 
 /** Who is committing, under which ownership rule, on which channel (AQU-926).
@@ -116,7 +116,7 @@ export interface CommitCaller {
 // prepare — a leaked/malicious PAT could otherwise commit changesets
 // (real writes) without bound. Kept generous per credential/15min so a
 // legitimate agent applying a plan every few seconds never trips it.
-const COMMIT_MAX_PER_CREDENTIAL = 300
+const COMMIT_MAX_PER_USER = 300
 
 /** PAT-authenticated entrypoint (REST + the MCP adapter's synthetic request). */
 export async function handleCommit(
@@ -129,15 +129,21 @@ export async function handleCommit(
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
 
-  const cred = await validateApiCredential(db, bearer(request) ?? "", request.headers.get('CF-Connecting-IP'))
+  const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return errorResponse('permission_denied', 'invalid or missing API credential')
 
-  const identifier = `credential:${cred.credentialId}`
-  const recent = await countRecentRateLimitEvents(db, 'external_commit', identifier)
-  if (recent >= COMMIT_MAX_PER_CREDENTIAL) {
+  // AQU-1843: atomic, keyed on the credential's owner (a second PAT must not
+  // buy a second budget), and FAIL CLOSED — applying a changeset writes to the
+  // event log, so a limiter outage must not leave that uncapped.
+  const commitLimit = await enforceRateLimit(db, {
+    kind: 'external_commit',
+    identifier: userRateLimitIdentifier(cred.userId),
+    limit: COMMIT_MAX_PER_USER,
+    failMode: 'closed',
+  })
+  if (!commitLimit.allowed) {
     return errorResponse('rate_limited', 'changeset commit rate limit exceeded, slow down')
   }
-  await recordRateLimitEvent(db, 'external_commit', identifier)
 
   return commitChangesetCore(
     request,
@@ -166,6 +172,17 @@ export async function commitChangesetCore(
   const db = env.AQUILLA_PG
   const { cred, channel } = caller
 
+  // AQU-1242: a read-only credential cannot apply a plan. Unreachable in the
+  // normal course — prepare refused the staging too — but a changeset can also
+  // be committed by a DIFFERENT caller than the one that staged it (the
+  // session/delegated-approval path), so the access ceiling is asserted against
+  // whoever is committing, not only against whoever staged.
+  try {
+    assertCredentialMayWrite(cred, 'commit a changeset')
+  } catch (err) {
+    return toErrorResponse(err)
+  }
+
   const cs = await loadChangeset(db, projectId, id)
   if (!cs) return errorResponse('not_found', `changeset ${id} not found`)
 
@@ -183,6 +200,27 @@ export async function commitChangesetCore(
   } else {
     const denied = await changesetAuthorityDenied(db, cs, cred)
     if (denied) return denied
+  }
+
+  // AQU-1529: enforce the live OAuth ceiling before returning receipts or
+  // claiming a staged plan. Pre-creation plans use their command's org scope.
+  if (cred.orgIds !== undefined) {
+    try {
+      for (const command of cs.commands) {
+        if (command.kind === 'CreateOrg') {
+          throw new ExternalError('scope_denied', 'organization grant cannot create another organization')
+        }
+        if (command.kind === 'CreateProject' || isOrgMemberCommand(command)) {
+          if (!credentialAllowsOrganization(cred, String(command.orgId))) {
+            throw new ExternalError('scope_denied', 'organization is outside the credential scope')
+          }
+        } else {
+          await assertCredentialScope(db, cred, projectId)
+        }
+      }
+    } catch (err) {
+      return toErrorResponse(err)
+    }
   }
 
   // ── Status gate ──────────────────────────────────────────────────────────
@@ -300,6 +338,12 @@ export async function commitChangesetCore(
   const memoryCmd = cs.commands.find(isMemoryCommand)
   if (memoryCmd) {
     return commitMemoryCommand(db, cred, cs, memoryCmd, channel)
+  }
+
+  // AQU-2195 ReviewStyleRules: receipt-only; re-checks both role gates live.
+  const styleRuleCmd = cs.commands.find(isStyleRuleCommand)
+  if (styleRuleCmd) {
+    return commitStyleRuleCommand(db, cred, cs, styleRuleCmd, channel)
   }
 
   // ── Live role/membership precheck (§2) ────────────────────────────────────
@@ -517,12 +561,16 @@ export async function commitChangesetCore(
   const plannedSet = new Map(
     (cs.plannedIds?.setTranslation ?? []).map((p) => [laneCellKey(p.fileId, p.cellId, p.laneId), p.eventId]),
   )
+  // A current plan stores lanes.id. An older staged plan may still store a
+  // tag; stampStoredLaneId writes that tag as targetLang and does not alias it.
+  const laneRows = (await loadProjectSettings(db, projectId)).lanes ?? []
   const eventsByFile = new Map<string, RawEvent<'target.cell.commit'>[]>()
   const allEventIds: string[] = []
   const clientTs = Date.now()
   for (const pre of cs.preconditions) {
     const cmd = commandByCell.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId))
     if (!cmd) continue
+    const laneStamp = stampStoredLaneId(cmd.laneId, laneRows)
     const ev: RawEvent<'target.cell.commit'> = {
       id: plannedSet.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId)) ?? uuidv7(),
       schemaVersion: 1,
@@ -535,14 +583,20 @@ export async function commitChangesetCore(
       payload: {
         value: cmd.value,
         ...(cmd.valueHtml !== undefined ? { valueHtml: cmd.valueHtml } : {}),
-        // AQU-538: stamp the lane so the projection lands the commit on its
-        // own (cell, target_lang) row and chain slot.
-        ...(cmd.laneId ? { targetLang: cmd.laneId } : {}),
+        // targetLang is the frozen event key (the lane's legacy_tag). laneId
+        // is lanes.id so resolveEventLane agrees.
+        ...laneStamp,
         // AQU-1186: a DraftCells expansion carries the copilot's provenance,
         // so the projection sets ai_drafted = 1 and the cell reads back as a
         // pending AI draft — identical to an in-app draft. Only the server
         // sets this (validateCommands drops a caller-supplied aiDraft).
         ...(cmd.aiDraft ? { ai_suggestion: true as const, ai_draft: cmd.aiDraft } : {}),
+        // AQU-1673: an "import as proposals" staging carries the uploaded
+        // file's name, so the approved commit records that this text was
+        // imported rather than typed or AI-drafted. Note it does NOT set
+        // `ai_suggestion` — imported text is a human translation from
+        // elsewhere, so the cell must not land as a pending AI draft.
+        ...(cmd.importOrigin ? { imported_origin: cmd.importOrigin } : {}),
         sourceEventId: pre.sourceEventId,
       },
       clientTs,
@@ -554,39 +608,88 @@ export async function commitChangesetCore(
   }
 
   // ── Route each file's events through the /events perimeter ────────────────
+  // AQU-1852: CHUNKED, like the PlanImport and EmitEvents paths. The perimeter
+  // refuses a POST carrying more than its own MAX_EVENTS_PER_REQUEST (500) with
+  // a 413, so posting a whole file in one request made every changeset above
+  // that cap fail at apply — and because the refusal body is `{ error }` with no
+  // `accepted` key, reading it threw and left the changeset stranded in
+  // `committing`, where each retry repeated the same failure.
   const acceptedIds = new Set<string>()
   const rejected: { id: string; status: number; reason: string }[] = []
   const staleFromPerimeter: string[] = []
   const staleSource: string[] = []
 
   for (const [fileId, events] of eventsByFile) {
-    let token: string
-    try {
-      token = await mintInternalSyncToken(env, db, cred, projectId, fileId)
-    } catch (err) {
-      return toErrorResponse(err)
+    // AQU-1852: RE-MINT as the apply runs. The internal sync token lives 300s,
+    // and a whole-book apply posts tens of chunks — so one token minted up
+    // front expires mid-apply, the perimeter rejects every remaining event with
+    // "token expired", and the changeset still closed as `committed` carrying
+    // only the events that beat the clock. Silent tail loss on the largest
+    // plans, which is exactly where it is least likely to be noticed. Each
+    // mint re-checks the credential's scope and the owner's LIVE role, so
+    // refreshing tightens the gate rather than bypassing it.
+    let token = ''
+    let tokenMintedAt = 0
+    for (let i = 0; i < events.length; i += EVENTS_POST_CHUNK) {
+      if (Date.now() - tokenMintedAt >= INTERNAL_TOKEN_REFRESH_MS) {
+        try {
+          token = await mintInternalSyncToken(env, db, cred, projectId, fileId)
+          tokenMintedAt = Date.now()
+        } catch (err) {
+          // A mint that fails partway (membership revoked mid-apply) must not
+          // strand the changeset either — record what landed, then surface it.
+          const applied = allEventIds.filter((eid) => acceptedIds.has(eid))
+          await stampProvenance(db, buildProvenance(request, cs, confirmationId, channel), applied)
+          await recordPartialApply(db, id, applied, cs.summary.warnings, 'could not refresh the internal write token')
+          return toErrorResponse(err)
+        }
+      }
+      const chunk = events.slice(i, i + EVENTS_POST_CHUNK)
+      const req = new Request('https://internal/events', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ events: chunk }),
+      })
+      const res = await handleEventsWriteRequest(req, env, ctx)
+      if (!res) return errorResponse('job_failed', 'events perimeter did not respond')
+      const out = (await res.json()) as EventsWriteResponse | { error?: unknown }
+      // AQU-1852: a refusal of the WHOLE post (413, 400, …) carries no
+      // `accepted` key. Never read it as a write response — record what did
+      // apply and stop, so the partial state is visible on the changeset and a
+      // retry resumes from it (the stored planned ids keep the re-post
+      // idempotent) instead of the apply throwing with nothing written down.
+      if (!Array.isArray((out as EventsWriteResponse).accepted)) {
+        const reason =
+          typeof (out as { error?: unknown }).error === 'string'
+            ? (out as { error: string }).error
+            : `events perimeter refused the batch (HTTP ${res.status})`
+        const applied = allEventIds.filter((eid) => acceptedIds.has(eid))
+        await stampProvenance(db, buildProvenance(request, cs, confirmationId, channel), applied)
+        await recordPartialApply(db, id, applied, cs.summary.warnings, reason)
+        return errorResponse('job_failed', `apply stopped partway: ${reason}`, {
+          appliedCount: applied.length,
+          totalCount: allEventIds.length,
+          retryable: true,
+        })
+      }
+      const write = out as EventsWriteResponse
+      for (const a of write.accepted) acceptedIds.add(a.id)
+      for (const r of write.rejected) rejected.push(r)
+      for (const s of write.stale ?? []) staleFromPerimeter.push(s.id)
+      for (const s of write.staleSource ?? []) staleSource.push(s.id)
     }
-    const req = new Request('https://internal/events', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ events }),
-    })
-    const res = await handleEventsWriteRequest(req, env, ctx)
-    if (!res) return errorResponse('job_failed', 'events perimeter did not respond')
-    const out = (await res.json()) as EventsWriteResponse
-    for (const a of out.accepted) acceptedIds.add(a.id)
-    for (const r of out.rejected) rejected.push(r)
-    for (const s of out.stale ?? []) staleFromPerimeter.push(s.id)
-    for (const s of out.staleSource ?? []) staleSource.push(s.id)
   }
 
   // If nothing applied but the perimeter rejected events, surface the reason.
+  // AQU-1571: each refusal names the file and line it was about, the same way
+  // the receipt warnings below do when only some events are refused.
+  const where = locateEvents([...eventsByFile.values()].flat())
   if (acceptedIds.size === 0 && rejected.length > 0) {
     const anyForbidden = rejected.some((r) => r.status === 403)
     return errorResponse(
       anyForbidden ? 'permission_denied' : 'job_failed',
       'no events were applied',
-      { rejected },
+      { rejected: locateRejections(rejected, where) },
     )
   }
 
@@ -597,9 +700,7 @@ export async function commitChangesetCore(
 
   // ── Receipt ───────────────────────────────────────────────────────────────
   const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  warnings.push(...rejectedWarnings(rejected, where))
   for (const eid of [...staleFromPerimeter, ...staleSource]) {
     warnings.push({ code: 'stale_pin', fileId: '', cellId: '', message: `event ${eid} landed stale` })
   }
@@ -626,11 +727,61 @@ export async function commitChangesetCore(
 }
 
 /** Statements per POST to the /events perimeter — mirrors the perimeter's own
- *  BATCH_LIMIT (100). A PlanImport can seed thousands of source cells, so the
- *  compiled events are chunked. The new file remains soft-hidden until every
- *  chunk and artifact binding succeeds; an interrupted apply is retryable and
- *  never exposes a silently truncated file. */
-const PLAN_IMPORT_CHUNK = 100
+ *  BATCH_LIMIT (100), and so is provably under its MAX_EVENTS_PER_REQUEST (500)
+ *  refusal. EVERY apply path that can compile more than a handful of events
+ *  chunks by this: a PlanImport can seed thousands of source cells, and
+ *  AQU-1852 a SetTranslation changeset can carry thousands of target commits.
+ *  The new file remains soft-hidden until every chunk and artifact binding
+ *  succeeds; an interrupted apply is retryable and never exposes a silently
+ *  truncated file. */
+const EVENTS_POST_CHUNK = 100
+
+/** Re-mint the internal sync token once it is this old (AQU-1852). The token
+ *  itself lives 300s (mintInternalSyncToken); refreshing at 120s leaves ample
+ *  headroom for the chunk in flight, so no POST in a long apply can arrive with
+ *  an expired token and be rejected after the plan was already approved. */
+const INTERNAL_TOKEN_REFRESH_MS = 120_000
+
+/** @deprecated prefer EVENTS_POST_CHUNK — kept as the PlanImport call site's name. */
+const PLAN_IMPORT_CHUNK = EVENTS_POST_CHUNK
+
+/**
+ * AQU-1852: record a mid-apply stop so it is VISIBLE and resumable.
+ *
+ * The changeset row stays in `committing` — that is the retry-resumable state,
+ * and the planned event ids stored at prepare make a re-post idempotent — but
+ * it now carries a receipt naming exactly which events landed and why the apply
+ * stopped. Before this, a refused batch threw and left a bare `committing` row
+ * with no receipt: the approver could not see what had applied, and the next
+ * retry started blind.
+ */
+async function recordPartialApply(
+  db: AquillaDb,
+  changesetId: string,
+  appliedIds: readonly string[],
+  priorWarnings: readonly ChangesetWarning[],
+  reason: string,
+): Promise<void> {
+  const receipt: ChangesetReceipt = {
+    eventIds: [...appliedIds],
+    appliedCount: appliedIds.length,
+    staleCount: 0,
+    warnings: [
+      ...priorWarnings,
+      {
+        code: 'apply_incomplete',
+        fileId: '',
+        cellId: '',
+        message: `apply stopped partway: ${reason} — retry the commit to resume from here`,
+      },
+    ],
+    committedAt: new Date().toISOString(),
+  }
+  await db
+    .prepare(`UPDATE changesets SET receipt = ?::text::jsonb WHERE id = ? AND status = 'committing'`)
+    .bind(JSON.stringify(receipt), changesetId)
+    .run()
+}
 
 /**
  * AQU-1120: the `file_source_blobs.format` the export route switches on, derived
@@ -712,6 +863,12 @@ export async function applyPlanImport(
       kind: cmd.fileType.toLowerCase() === 'tmx' ? 'translation-memory' : cmd.fileType,
       ...(cmd.sourceLanguage !== undefined ? { sourceLanguage: cmd.sourceLanguage } : {}),
       ...(cmd.targetLanguage !== undefined ? { targetLanguage: cmd.targetLanguage } : {}),
+      // AQU-1471: stamped ONLY when the command named one. The project-level
+      // default is resolved on every read (db/shared/text-direction.ts), so
+      // copying it onto the row here would silently turn a project default into
+      // 49 per-file overrides and freeze them against a later language change.
+      ...(cmd.sourceTextDirection !== undefined ? { sourceTextDirection: cmd.sourceTextDirection } : {}),
+      ...(cmd.targetTextDirection !== undefined ? { targetTextDirection: cmd.targetTextDirection } : {}),
       importManifest: compiled.fileSummary,
     },
     clientTs,
@@ -778,12 +935,15 @@ export async function applyPlanImport(
 
   // Explicit target variants reuse the same source unit and name their lane.
   // The source event id is both the first target-chain parent and the staleness
-  // pin, matching browser bilingual imports.
+  // pin, matching browser bilingual imports. laneId on a current plan is
+  // lanes.id; an older staged tag is stamped as targetLang only.
+  const laneRows = (await loadProjectSettings(db, projectId)).lanes ?? []
   const targetEvents: RawEvent<'target.cell.commit'>[] = []
   compiled.units.forEach((unit, cellIndex) => {
     const sourceEvent = cellEvents[cellIndex]
     const planned = plannedImport?.cells[cellIndex]
-    for (const [variantIndex, variant] of (unit.cell.variants ?? []).entries()) {
+    for (const [variantIndex, stored] of (unit.cell.variants ?? []).entries()) {
+      const laneStamp = stampStoredLaneId(stored.laneId, laneRows)
       targetEvents.push({
         id: planned?.variantEventIds?.[variantIndex] ?? uuidv7(),
         schemaVersion: 1,
@@ -794,10 +954,10 @@ export async function applyPlanImport(
         parentId: sourceEvent.id,
         author: cred.username,
         payload: {
-          value: variant.content,
-          ...(variant.contentHtml !== undefined ? { valueHtml: variant.contentHtml } : {}),
+          value: stored.content,
+          ...(stored.contentHtml !== undefined ? { valueHtml: stored.contentHtml } : {}),
           sourceEventId: sourceEvent.id,
-          ...(variant.laneId ? { targetLang: variant.laneId } : {}),
+          ...laneStamp,
         },
         clientTs,
       })
@@ -810,16 +970,28 @@ export async function applyPlanImport(
   const allEvents: RawEvent[] = [...stagedEvents, revealEvent]
   const allEventIds = allEvents.map((e) => e.id)
 
-  let token: string
-  try {
-    token = await mintInternalSyncToken(env, db, cred, projectId, fileId)
-  } catch (err) {
-    return { ok: false, fileId, receipt: null, rejected: [], error: toErrorResponse(err) }
+  // AQU-1852: re-minted as the apply runs, for the same reason the
+  // SetTranslation path above is — a PLAN_IMPORT_MAX_CELLS import posts ~50
+  // chunks, long enough to outlive one 300s token and have the perimeter reject
+  // the tail of the file with "token expired".
+  let token = ''
+  let tokenMintedAt = 0
+  const mintIfStale = async (): Promise<Response | null> => {
+    if (Date.now() - tokenMintedAt < INTERNAL_TOKEN_REFRESH_MS) return null
+    try {
+      token = await mintInternalSyncToken(env, db, cred, projectId, fileId)
+      tokenMintedAt = Date.now()
+      return null
+    } catch (err) {
+      return toErrorResponse(err)
+    }
   }
 
   const acceptedIds = new Set<string>()
   const rejected: { id: string; status: number; reason: string }[] = []
   for (let i = 0; i < stagedEvents.length; i += PLAN_IMPORT_CHUNK) {
+    const mintError = await mintIfStale()
+    if (mintError) return { ok: false, fileId, receipt: null, rejected, error: mintError }
     const chunk = stagedEvents.slice(i, i + PLAN_IMPORT_CHUNK)
     const req = new Request('https://internal/events', {
       method: 'POST',
@@ -857,7 +1029,7 @@ export async function applyPlanImport(
       error: errorResponse(
         anyForbidden ? 'permission_denied' : 'job_failed',
         'no events were applied',
-        { rejected },
+        { rejected: locateRejections(rejected, locateEvents(allEvents)) },
       ),
     }
   }
@@ -906,20 +1078,20 @@ export async function applyPlanImport(
         .run()
     }
 
+    const conflictColumn = await artifactBindingConflictColumn(db)
     await db
       .prepare(
         `INSERT INTO artifact_bindings (
-           id, project_id, artifact_id, file_id, binding_role, target_lang,
+           id, project_id, artifact_id, file_id, binding_role,
            member_path, profile_id, profile_version, fidelity, manifest, recipe, lane_id
-         ) VALUES (?, ?, ?::uuid, ?, 'source', '', ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ${laneIdResolveSql('source')})
-         ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
+         ) VALUES (?, ?, ?::uuid, ?, 'source', ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ${laneIdResolveSql('source')})
+         ON CONFLICT (artifact_id, file_id, binding_role, ${conflictColumn}, member_path)
          DO UPDATE SET
            profile_id = excluded.profile_id,
            profile_version = excluded.profile_version,
            fidelity = excluded.fidelity,
            manifest = excluded.manifest,
            recipe = excluded.recipe,
-           lane_id = COALESCE(excluded.lane_id, artifact_bindings.lane_id),
            updated_at = now()`,
       )
       .bind(
@@ -941,6 +1113,12 @@ export async function applyPlanImport(
 
   // Reveal only after every staged event and optional binding succeeded.
   if (rejected.length === 0) {
+    // AQU-1852: this is the event that un-hides the file, and it is posted
+    // after the chunk loop AND the artifact/side-car writes — the point in the
+    // apply furthest from the original mint. A stale token here would leave a
+    // fully imported file permanently soft-hidden.
+    const mintError = await mintIfStale()
+    if (mintError) return { ok: false, fileId, receipt: null, rejected, error: mintError }
     const revealRequest = new Request('https://internal/events', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -971,9 +1149,7 @@ export async function applyPlanImport(
   }
 
   const warnings: ChangesetWarning[] = [...(opts.baseWarnings ?? [])]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  warnings.push(...rejectedWarnings(rejected, locateEvents(allEvents)))
 
   const receipt: ChangesetReceipt = {
     eventIds: appliedIds,
@@ -1088,7 +1264,7 @@ async function commitCreateProject(
     return errorResponse('scope_denied', 'a project-scoped credential cannot create projects')
   }
   const targetOrgStr = orgId == null ? null : String(orgId)
-  if (cred.orgId != null && cred.orgId !== targetOrgStr) {
+  if (!credentialAllowsOrganization(cred, targetOrgStr)) {
     return errorResponse('scope_denied', 'credential org scope does not match the target org')
   }
   if (orgId != null) {
@@ -1103,24 +1279,22 @@ async function commitCreateProject(
   const confirmationId = gate.confirmationId
 
   // Apply — MANDATORY writeCreatorMembership: true (see JSDoc above).
-  const { inserted } = await createProjectShared(db, {
-    projectId,
-    name: cmd.name,
-    orgId,
-    createdBy: cred.userId,
-    writeCreatorMembership: true,
-    // AQU-1223: the language pair rides the create instead of being dropped.
-    // Sent only when the command carried one, so a bare name+orgId create still
-    // writes no settings row at all.
-    ...(cmd.sourceLanguage !== undefined || cmd.targetLanguage !== undefined
-      ? {
-          settingsSeed: {
-            ...(cmd.sourceLanguage !== undefined ? { sourceLanguage: cmd.sourceLanguage } : {}),
-            ...(cmd.targetLanguage !== undefined ? { targetLanguage: cmd.targetLanguage } : {}),
-          },
-        }
-      : {}),
-  })
+  let inserted: boolean
+  try {
+    const created = await createProjectShared(db, {
+      projectId,
+      name: cmd.name,
+      orgId,
+      createdBy: cred.userId,
+      writeCreatorMembership: true,
+      // Lanes become rows. The four project-level language keys are not written.
+      ...(cmd.lanes !== undefined ? { lanes: cmd.lanes } : {}),
+    })
+    inserted = created.inserted
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'could not create the project lanes'
+    return errorResponse('validation_failed', message)
+  }
 
   if (!inserted) {
     // The id already exists. Distinguish a genuine race (someone else claimed it
@@ -1193,7 +1367,7 @@ async function commitCreateOrg(
   if (cred.projectId != null) {
     return errorResponse('scope_denied', 'a project-scoped credential cannot create organizations')
   }
-  if (cred.orgId != null) {
+  if (cred.orgId != null || cred.orgIds !== undefined) {
     return errorResponse('scope_denied', 'an org-scoped credential cannot create organizations')
   }
 
@@ -1267,8 +1441,26 @@ async function commitLinkMedia(
     ]),
   )
 
+  // AQU-2086: the lane each take belongs to. `laneId` on a current plan is
+  // lanes.id, resolved at prepare; stampStoredLaneId writes the lane's tag as
+  // targetLang alongside it, and stamps nothing for a plan staged before
+  // LinkMedia carried a lane (the '' bridge, exactly as before).
+  const laneRows = (await loadProjectSettings(db, projectId)).lanes ?? []
+
   const eventsByFile = new Map<string, RawEvent[]>()
   const allEventIds: string[] = []
+  // AQU-1572: which cell each attach event lands on, for the telemetry below;
+  // AQU-2086: and what it attached there, for the receipt.
+  const attaches: {
+    eventId: string
+    fileId: string
+    cellId: string
+    artifactId: string
+    audioId: string
+    slot: string
+    lane: { targetLang?: string; laneId?: string }
+    durationMs?: number
+  }[] = []
 
   for (const cmd of cmds) {
     // Re-check the artifact: still present, still audio, same project.
@@ -1291,8 +1483,9 @@ async function commitLinkMedia(
     }
 
     // Re-check the target cell still exists (lane-independent — the
-    // default-lane entry reports source/any-lane-target existence).
-    const cellStates = await resolveCellStates(db, projectId, [cmd])
+    // default-lane entry reports source/any-lane-target existence, so the
+    // command's own laneId is deliberately left out of the lookup).
+    const cellStates = await resolveCellStates(db, projectId, [{ fileId: cmd.fileId, cellId: cmd.cellId }])
     const s = cellStates.get(laneCellKey(cmd.fileId, cmd.cellId))
     if (!s || (!s.sourceExists && !s.targetExists)) {
       await db
@@ -1315,15 +1508,21 @@ async function commitLinkMedia(
         .run()
       return errorResponse('plan_stale', `artifact ${cmd.artifactId} bytes missing from storage`)
     }
-    const destKey = audioObjectKey(env, projectId, cmd.fileId, artifact.audio_id)
-    await env.SNAPSHOTS.put(destKey, await src.arrayBuffer(), {
-      httpMetadata: artifact.content_type ? { contentType: artifact.content_type } : undefined,
-    })
-
     const planned = plannedByKey.get(`${cellKey(cmd.fileId, cmd.cellId)}${KEY_SEP}${cmd.artifactId}`)
     const attachId = planned?.attachEventId ?? uuidv7()
     const selectId = planned?.selectEventId ?? uuidv7()
-    const url = `frontier-audio://${artifact.audio_id}`
+    // AQU-2086: the take's native id is the prepare-minted, cell-seeded one
+    // (db/shared/audio-id.ts) — the SPA tells a dub from the programme clip by
+    // that seed, so the artifact's bare UUID never sounded on the Target track.
+    // A plan staged before the ledger carried it keeps the artifact's name.
+    const audioId = planned?.audioId ?? artifact.audio_id
+    const slot = cmd.slot ?? 'recording'
+    const lane = stampStoredLaneId(cmd.laneId, laneRows)
+    const destKey = audioObjectKey(env, projectId, cmd.fileId, audioId)
+    await env.SNAPSHOTS.put(destKey, await src.arrayBuffer(), {
+      httpMetadata: artifact.content_type ? { contentType: artifact.content_type } : undefined,
+    })
+    const url = `frontier-audio://${audioId}`
 
     const attachEvent: RawEvent<'cell.audio.attach'> = {
       id: attachId,
@@ -1335,10 +1534,14 @@ async function commitLinkMedia(
       parentId: null,
       author: cred.username,
       payload: {
-        audioId: artifact.audio_id,
+        audioId,
         url,
-        slot: 'recording',
+        slot,
         ...(artifact.content_type ? { mimeType: artifact.content_type } : {}),
+        ...(cmd.durationMs !== undefined ? { durationMs: cmd.durationMs } : {}),
+        // AQU-2086: the lane the take is read in. The projection resolves
+        // lane_id from targetLang, and the select below is scoped the same way.
+        ...lane,
       },
       clientTs,
     }
@@ -1351,12 +1554,22 @@ async function commitLinkMedia(
       cellId: cmd.cellId,
       parentId: null,
       author: cred.username,
-      payload: { audioId: artifact.audio_id, slot: 'recording' },
+      payload: { audioId, slot, ...lane },
       clientTs,
     }
     // attach must precede select in the batch so the projection sees the row
     // before the select re-affirms it.
     allEventIds.push(attachId, selectId)
+    attaches.push({
+      eventId: attachId,
+      fileId: cmd.fileId,
+      cellId: cmd.cellId,
+      artifactId: cmd.artifactId,
+      audioId,
+      slot,
+      lane,
+      ...(cmd.durationMs !== undefined ? { durationMs: cmd.durationMs } : {}),
+    })
     const list = eventsByFile.get(cmd.fileId)
     if (list) list.push(attachEvent, selectEvent)
     else eventsByFile.set(cmd.fileId, [attachEvent, selectEvent])
@@ -1386,12 +1599,13 @@ async function commitLinkMedia(
 
   // Nothing applied but events were rejected — surface the reason (an observer
   // credential is 403'd by the perimeter since cell.audio.* needs CONTRIBUTOR).
+  const where = locateEvents([...eventsByFile.values()].flat())
   if (acceptedIds.size === 0 && rejected.length > 0) {
     const anyForbidden = rejected.some((r) => r.status === 403)
     return errorResponse(
       anyForbidden ? 'permission_denied' : 'job_failed',
       'no events were applied',
-      { rejected },
+      { rejected: locateRejections(rejected, where) },
     )
   }
 
@@ -1407,16 +1621,26 @@ async function commitLinkMedia(
   }
 
   const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  warnings.push(...rejectedWarnings(rejected, where))
 
+  // AQU-2086: what landed, by take. The receipt is how a caller learns the
+  // native audio id — the one the app plays, lists and exports — which is not
+  // the upload's audioId.
+  const landed = attaches.filter((a) => acceptedIds.has(a.eventId))
   const receipt: ChangesetReceipt = {
     eventIds: appliedIds,
     appliedCount: appliedIds.length,
     staleCount: 0,
     warnings,
     committedAt: new Date().toISOString(),
+    media: landed.map((a) => ({
+      fileId: a.fileId,
+      cellId: a.cellId,
+      artifactId: a.artifactId,
+      audioId: a.audioId,
+      slot: a.slot,
+      ...(a.lane.laneId ? { laneId: a.lane.laneId } : {}),
+    })),
   }
 
   await db
@@ -1427,6 +1651,29 @@ async function commitLinkMedia(
     )
     .bind(JSON.stringify(receipt), confirmationId, cs.id)
     .run()
+
+  // AQU-1572: one `audio attached` per line whose attach landed. After the
+  // terminal write, and before the partial-failure reply: a partly rejected
+  // changeset is still committed, and its accepted attaches are real. A
+  // session commit reports only with the person's analytics switch on.
+  if (reviewTelemetryAllowed(request, channel)) {
+    sendReviewTelemetry(
+      env,
+      ctx,
+      cred.username,
+      linkMediaTelemetry(
+        projectId,
+        landed.map((a) => ({
+          fileId: a.fileId,
+          cellId: a.cellId,
+          slot: a.slot,
+          lane: a.lane.targetLang ?? '',
+          ...(a.durationMs !== undefined ? { durationMs: a.durationMs } : {}),
+        })),
+        telemetrySourceFor(channel),
+      ),
+    )
+  }
 
   if (rejected.length > 0) {
     return errorResponse('job_failed', 'link-media partially failed — some events were rejected', {
@@ -1500,6 +1747,8 @@ async function commitUpdateProjectSettings(
     settings: cmd.settings,
     ifMatchVersion: expectedVersion,
     updatedBy: cred.userId,
+    // The four language keys are rejected at validation. Do not let a leftover
+    // key on the stored blob mint a lane row (AQU-1615).
   })
 
   if (result.status === 'conflict') {

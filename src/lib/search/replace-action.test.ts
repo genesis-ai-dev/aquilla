@@ -172,9 +172,27 @@ describe("computeReplaceDiffs", () => {
       before: "hello world",
       after: "hello earth",
       matchCount: 1,
+      sourceText: null,
     })
     expect(result.totalReplaced).toBe(1)
     expect(result.totalSkipped).toBe(0)
+  })
+
+  it("carries the cell's source text onto the diff without changing the replacement", () => {
+    const candidates = [
+      makeCandidate({
+        cellId: "c1",
+        fileId: "f1",
+        rawValue: "teste",
+        parentId: "evt-1",
+        sourceText: "test",
+      }),
+    ]
+    const result = computeReplaceDiffs(candidates, "teste", "prova")
+    expect(result.diffs).toHaveLength(1)
+    expect(result.diffs[0].before).toBe("teste")
+    expect(result.diffs[0].after).toBe("prova")
+    expect(result.diffs[0].sourceText).toBe("test")
   })
 
   it("handles multiple cells, some with matches and some without", () => {
@@ -240,5 +258,32 @@ describe("computeReplaceDiffs", () => {
     const result = computeReplaceDiffs(candidates, "foo", "bar")
     expect(result.diffs[0].matchCount).toBe(3)
     expect(result.totalReplaced).toBe(3)
+  })
+
+  it("limits a whole-word replace to the word, and preserves the match's case", () => {
+    const candidates = [makeCandidate({ rawValue: "Goddess and God" })]
+    const result = computeReplaceDiffs(candidates, "God", "lord", {
+      wholeWord: true,
+      preserveCase: true,
+    })
+    expect(result.diffs).toHaveLength(1)
+    expect(result.diffs[0].after).toBe("Goddess and Lord")
+    expect(result.diffs[0].matchCount).toBe(1)
+  })
+
+  it("replaces with a regular expression and its capture", () => {
+    const candidates = [makeCandidate({ rawValue: "color colour" })]
+    const result = computeReplaceDiffs(candidates, "colou?r", "hue", { useRegexp: true })
+    expect(result.diffs[0].after).toBe("hue hue")
+    const captured = computeReplaceDiffs(candidates, "(colou?r)", "[$1]", {
+      useRegexp: true,
+    })
+    expect(captured.diffs[0].after).toBe("[color] [colour]")
+  })
+
+  it("does not rewrite a cell when the regular expression is invalid", () => {
+    const candidates = [makeCandidate({ rawValue: "hello" })]
+    const result = computeReplaceDiffs(candidates, "(", "x", { useRegexp: true })
+    expect(result.diffs).toHaveLength(0)
   })
 })

@@ -1,11 +1,61 @@
 // Organization-permission helpers for the codex-web identity/project backend.
 
 import type { Env, AuthUser } from "../types"
-import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole } from "./project-permissions"
+import { langquestStateByProject, type ProjectLangQuestState } from "../lib/langquest/connections"
+import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole, resolveProjectRoles } from "./project-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
+import {
+  inAudioCountedFileSetSql,
+  inAudioCountedFileSql,
+  inCountedFileSql,
+  inCountedFileSetSql,
+  uncountedAudioFilesCteSql,
+  uncountedFilesCteSql,
+  countedFileSql,
+  notHiddenFileSql,
+} from "../../../db/shared/counted-files"
 import { orgPathContribution } from "../../../db/shared/project-roles"
 import { takeSoundsOnItsTrackSql } from "../../../db/shared/audio-progress"
+import { laneDisplayNameSql } from "../../../db/shared/lanes"
+import {
+  loadLaneGrantsForProjects,
+  loadTargetLaneIdentitiesForProjects,
+} from "../../../db/shared/lane-visibility"
+import {
+  READ_WALL_MAINTAINER,
+  laneReadWallEnabled,
+  legacyTagsForVisibleLanes,
+  portfolioTextFromVisibleLanes,
+  visibleLaneTags,
+} from "../../../src/lib/lanes/read-wall"
+import {
+  emptyPortfolioAggregate,
+  summarizePortfoliosByOrg,
+  type OrgPortfolioAggregate,
+  type PortfolioAggregate,
+} from "../../../src/lib/frontier/portfolio-metrics"
+import { effectiveThresholdSql } from "../../../db/shared/validation-threshold"
+import {
+  bothApprovedFromHistogram,
+  laneCountsAudio,
+  parseLaneDelivers,
+  type LaneDelivers,
+} from "../../../src/lib/lanes/lane-delivers"
+import {
+  loadOrgProjectVisibilityOverrides,
+  loadProjectVisibilityOverride,
+  loadProjectVisibilityOverrides,
+  parseProjectVisibilityFloor,
+  stricterProjectFloor,
+  VISIBILITY_FLOOR_KEYS,
+  type ProjectVisibilityOverrides,
+  type VisibilityFloorKey,
+} from "../../../db/shared/visibility-floors"
+import {
+  loadOrgProjectImportFloors,
+  stricterProjectImportFloor,
+} from "../../../db/shared/import-floor"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -24,7 +74,30 @@ export interface UserOrg {
 }
 
 /**
- * Return the user's owned organization, lazy-creating one if absent.
+ * Find the user's personal org without creating one. Prefers billing_scope
+ * 'personal'; falls back to an owned org with billing_scope NULL (legacy
+ * personal workspaces predate the column and were never backfilled). A
+ * 'team' org is never personal.
+ */
+export async function findPersonalOrg(
+  env: Env,
+  userId: number,
+): Promise<{ id: number; name: string | null } | null> {
+  return env.AQUILLA_PG.prepare(
+    `SELECT id, name FROM organizations
+      WHERE owner_user_id = ? AND (billing_scope = 'personal' OR billing_scope IS NULL)
+      ORDER BY (billing_scope = 'personal') DESC NULLS LAST, id ASC
+      LIMIT 1`,
+  )
+    .bind(userId)
+    .first<{ id: number; name: string | null }>()
+}
+
+/**
+ * Return the user's personal organization, creating one if absent. Call it
+ * only where the person CHOSE a personal workspace (POST /orgs/personal, a
+ * personal project): a read never creates one (AQU-2259).
+ * Owning a team org does not count: only billing_scope 'personal' matches.
  * Personal orgs are created without a Stripe customer. The caller becomes
  * a role-700 owner.
  */
@@ -32,11 +105,7 @@ export async function getOrCreateUserOrg(
   env: Env,
   user: AuthUser,
 ): Promise<UserOrg> {
-  const existing = await env.AQUILLA_PG.prepare(
-    "SELECT id, name FROM organizations WHERE owner_user_id = ? ORDER BY id ASC LIMIT 1",
-  )
-    .bind(user.id)
-    .first<{ id: number; name: string | null }>()
+  const existing = await findPersonalOrg(env, user.id)
 
   if (existing) {
     return { id: existing.id, name: existing.name, role: 700 }
@@ -81,6 +150,87 @@ export async function renameOrg(env: Env, orgId: number, name: string): Promise<
   ).bind(name, orgId).run()
 }
 
+export type DeleteOrganizationResult =
+  | { ok: true }
+  | { ok: false; reason: "has_projects"; projectCount: number }
+
+/**
+ * Hard-delete an organization and the rows that belong only to it.
+ *
+ * AQU-1108 decisions, taken from the ticket's acceptance tests:
+ * - Any project row (including archived) blocks the delete. There is no
+ *   hard-delete for projects, so cascading them would orphan or destroy
+ *   translation data. `projects.org_id` is never left pointing at a missing org.
+ * - Members, teams, invites, org-scoped PATs, device grants, integrations,
+ *   billing, and usage rows are removed in the same transaction.
+ * - The personal workspace may be deleted. Nothing recreates it until the
+ *   person chooses one again (POST /orgs/personal, a personal project).
+ *
+ * Caller authorization stays in the route: membership role >= owner, with no
+ * platform-admin elevation.
+ */
+export async function deleteOrganization(
+  env: Env,
+  orgId: number,
+): Promise<DeleteOrganizationResult> {
+  const db = env.AQUILLA_PG
+  if (!db.transaction) throw new Error("Deleting an organization requires Postgres transactions")
+  return db.transaction(async (tx) => {
+    const counted = await tx.prepare(
+      "SELECT COUNT(*) AS n FROM projects WHERE org_id = ?",
+    ).bind(orgId).first<{ n: number | string }>()
+    const projectCount = Number(counted?.n ?? 0)
+    if (projectCount > 0) return { ok: false, reason: "has_projects", projectCount }
+
+    const orgText = String(orgId)
+    // Child tables first. Some of these FKs cascade and some do not; deleting
+    // explicitly keeps the same result on a database whose FKs were omitted.
+    const byOrgId = [
+      "DELETE FROM workspace_plan_change_reviews WHERE org_id = ?",
+      "DELETE FROM workspace_subscription_state WHERE org_id = ?",
+      "DELETE FROM workspace_usage_requests WHERE org_id = ?",
+      "DELETE FROM workspace_checkout_attempts WHERE org_id = ?",
+      "DELETE FROM workspace_plan_entitlements WHERE org_id = ?",
+      "DELETE FROM billing_price_cohorts WHERE org_id = ?",
+      "DELETE FROM org_billing_events WHERE org_id = ?",
+      "DELETE FROM org_word_usage_daily WHERE org_id = ?",
+      "DELETE FROM org_credit_usage_daily WHERE org_id = ?",
+      "DELETE FROM tts_usage_daily WHERE org_id = ?",
+      "DELETE FROM org_billing WHERE org_id = ?",
+      "DELETE FROM rule_applicability WHERE rule_id IN (SELECT id FROM style_rules WHERE org_id = ?)",
+      "DELETE FROM style_rules WHERE org_id = ?",
+      "DELETE FROM knowledge_docs WHERE org_id = ?",
+      "DELETE FROM org_invites WHERE org_id = ?",
+      "DELETE FROM org_settings WHERE org_id = ?",
+      "DELETE FROM group_members WHERE group_id IN (SELECT id FROM groups WHERE org_id = ?)",
+      "DELETE FROM group_project_grants WHERE group_id IN (SELECT id FROM groups WHERE org_id = ?)",
+      "DELETE FROM groups WHERE org_id = ?",
+      "DELETE FROM org_members WHERE org_id = ?",
+    ]
+    for (const sql of byOrgId) {
+      await tx.prepare(sql).bind(orgId).run()
+    }
+    const byOrgText = [
+      `DELETE FROM integration_item_links WHERE link_id IN (
+         SELECT l.id FROM integration_links l
+         JOIN integration_connections c ON c.id = l.connection_id
+         WHERE c.org_id = ?
+       )`,
+      `DELETE FROM integration_links WHERE connection_id IN (
+         SELECT id FROM integration_connections WHERE org_id = ?
+       )`,
+      "DELETE FROM integration_connections WHERE org_id = ?",
+      "DELETE FROM api_credentials WHERE org_id = ?",
+      "DELETE FROM agent_authorizations WHERE org_id = ?",
+    ]
+    for (const sql of byOrgText) {
+      await tx.prepare(sql).bind(orgText).run()
+    }
+    await tx.prepare("DELETE FROM organizations WHERE id = ?").bind(orgId).run()
+    return { ok: true }
+  })
+}
+
 export interface UserOrgSummary {
   id: number
   name: string | null
@@ -89,8 +239,9 @@ export interface UserOrgSummary {
 
 /**
  * Every org the user belongs to: owned orgs (role 700) unioned with
- * org_members rows (role per row). Owner wins on conflict. Lazy-creates the
- * personal org if the user has none yet, so the switcher always has >=1 entry.
+ * org_members rows (role per row). Owner wins on conflict. Empty for an
+ * account with no organization: this is a read, and since AQU-2259 a read
+ * never creates one.
  */
 export async function listUserOrgs(env: Env, user: AuthUser): Promise<UserOrgSummary[]> {
   const byId = new Map<number, UserOrgSummary>()
@@ -115,10 +266,8 @@ export async function listUserOrgs(env: Env, user: AuthUser): Promise<UserOrgSum
     }
   }
 
-  if (byId.size === 0) {
-    const personal = await getOrCreateUserOrg(env, user)
-    byId.set(personal.id, { id: personal.id, name: personal.name, role: personal.role })
-  }
+  // AQU-2259: no auto-create. An account with no organization lists none;
+  // listing is a read, and a read never creates anything (see GET /orgs/me).
 
   return Array.from(byId.values()).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""))
 }
@@ -295,7 +444,7 @@ export async function getEffectiveOrgRole(
   user: AuthUser,
 ): Promise<number | null> {
   const membership = await getOrgMemberRole(env, orgId, user.id)
-  if (isPlatformAdminEmail(env, user.email)) {
+  if (await isPlatformAdminEmail(env, user.email)) {
     return Math.max(membership ?? 0, 700)
   }
   return membership
@@ -937,8 +1086,24 @@ export interface OrgGroupDetail {
   name: string
   description: string | null
 
-  members: Array<{ userId: number; username: string; email: string | null; roleLevel: number | null; addedAt: string | null }>
-  projects: Array<{ id: string; name: string; grantedRoleLevel: number; grantedAt: string | null }>
+  members: Array<{
+    userId: number
+    username: string
+    email: string | null
+    /** Org role (unchanged meaning). */
+    roleLevel: number | null
+    /** AQU-1352 P2: team-scope role; null = legacy member (per-project grants only). */
+    teamRoleLevel: number | null
+    addedAt: string | null
+  }>
+  projects: Array<{
+    id: string
+    name: string
+    grantedRoleLevel: number
+    grantedAt: string | null
+    lanesExplicit: boolean
+    laneIds: string[]
+  }>
 }
 
 /** Members + attached projects of a single group. Null if not in this org. */
@@ -956,7 +1121,7 @@ export async function getOrgGroupDetail(
 
   const members = await env.AQUILLA_PG.prepare(
     `SELECT gm.user_id AS user_id, u.username AS username, u.email AS email, om.role_level AS role_level,
-            gm.added_at AS added_at
+            gm.role_level AS team_role_level, gm.added_at AS added_at
        FROM group_members gm
        JOIN users u ON u.id = gm.user_id
        LEFT JOIN org_members om ON om.org_id = ? AND om.user_id = gm.user_id
@@ -964,18 +1129,35 @@ export async function getOrgGroupDetail(
       ORDER BY LOWER(u.username)`,
   )
     .bind(orgId, groupId)
-    .all<{ user_id: number; username: string; email: string | null; role_level: number | null; added_at: string | Date | null }>()
+    .all<{ user_id: number; username: string; email: string | null; role_level: number | null; team_role_level: number | null; added_at: string | Date | null }>()
 
   const projects = await env.AQUILLA_PG.prepare(
     `SELECT gpg.project_id AS id, p.name AS name, gpg.role_level AS granted,
-            gpg.granted_at AS granted_at
+            gpg.granted_at AS granted_at, gpg.lanes_explicit AS lanes_explicit
        FROM group_project_grants gpg
        JOIN projects p ON p.id = gpg.project_id
       WHERE gpg.group_id = ? AND p.org_id = ?
       ORDER BY LOWER(p.name)`,
   )
     .bind(groupId, orgId)
-    .all<{ id: string; name: string; granted: number; granted_at: string | Date | null }>()
+    .all<{
+      id: string
+      name: string
+      granted: number
+      granted_at: string | Date | null
+      lanes_explicit: boolean | number | string
+    }>()
+  const laneRows = await env.AQUILLA_PG.prepare(
+    "SELECT project_id, lane_id FROM group_project_lanes WHERE group_id = ? ORDER BY lane_id",
+  )
+    .bind(groupId)
+    .all<{ project_id: string; lane_id: string }>()
+  const lanesByProject = new Map<string, string[]>()
+  for (const row of laneRows.results ?? []) {
+    const list = lanesByProject.get(row.project_id) ?? []
+    list.push(row.lane_id)
+    lanesByProject.set(row.project_id, list)
+  }
 
   return {
     id: group.id,
@@ -986,6 +1168,7 @@ export async function getOrgGroupDetail(
       username: m.username,
       email: m.email ?? null,
       roleLevel: m.role_level,
+      teamRoleLevel: m.team_role_level == null ? null : Number(m.team_role_level),
       addedAt: timestampIso(m.added_at),
     })),
     projects: (projects.results ?? []).map((p) => ({
@@ -993,6 +1176,12 @@ export async function getOrgGroupDetail(
       name: p.name,
       grantedRoleLevel: p.granted,
       grantedAt: timestampIso(p.granted_at),
+      lanesExplicit:
+        p.lanes_explicit === true ||
+        p.lanes_explicit === 1 ||
+        p.lanes_explicit === "t" ||
+        p.lanes_explicit === "true",
+      laneIds: lanesByProject.get(p.id) ?? [],
     })),
   }
 }
@@ -1050,14 +1239,41 @@ export async function deleteGroup(env: Env, orgId: number, groupId: number): Pro
   ])
 }
 
-/** Add an org member to a group. Returns "not-org-member" if the target isn't in the org. */
-export async function addGroupMember(env: Env, orgId: number, groupId: number, targetUserId: number, addedBy: number): Promise<"ok" | "not-org-member"> {
+/**
+ * Add someone to a group. Returns "not-org-member" when the target has no
+ * org_members row and `allowExternal` was not asked for.
+ *
+ * AQU-2238: `allowExternal` adds someone who has no org_members row — a guest
+ * staffed onto one team and nothing else.
+ *
+ * Without it, staffing a team with an outside person meant adding them to the
+ * org roster, adding them to the team, then removing the org row again to claw
+ * the org-wide visibility back. That dance needs an org OWNER, writes a roster
+ * row nobody wanted, and is invisibly lossy if the last step is forgotten.
+ *
+ * The guest's reach is exactly the team's `group_project_grants` (resolved by
+ * resolveProjectRole's group path) plus the guest-org visibility
+ * `listProjectGrantOrgIds` already grants to a team-granted user — never the
+ * org-wide path, which fires only at ORG_WIDE_ACCESS_FLOOR on a real
+ * org_members row they do not have. It confers no more than
+ * `POST /projects/:id/members` (project_lead+, any platform user by username)
+ * already did at the project scope; this closes the gap where team membership
+ * was the one access path that demanded prior org membership.
+ */
+export async function addGroupMember(
+  env: Env,
+  orgId: number,
+  groupId: number,
+  targetUserId: number,
+  addedBy: number,
+  opts: { allowExternal?: boolean } = {},
+): Promise<"ok" | "ok-external" | "not-org-member"> {
   const orgRole = await getOrgMemberRole(env, orgId, targetUserId)
-  if (orgRole == null) return "not-org-member"
+  if (orgRole == null && !opts.allowExternal) return "not-org-member"
   await env.AQUILLA_PG.prepare(
     "INSERT INTO group_members (group_id, user_id, added_by) VALUES (?, ?, ?) ON CONFLICT(group_id, user_id) DO NOTHING",
   ).bind(groupId, targetUserId, addedBy).run()
-  return "ok"
+  return orgRole == null ? "ok-external" : "ok"
 }
 
 export async function removeGroupMember(env: Env, groupId: number, userId: number): Promise<void> {
@@ -1089,19 +1305,27 @@ export async function updateGroupProjectRole(env: Env, groupId: number, projectI
 }
 
 export async function detachGroupProject(env: Env, groupId: number, projectId: string): Promise<void> {
+  await env.AQUILLA_PG.prepare("DELETE FROM group_project_lanes WHERE group_id = ? AND project_id = ?").bind(groupId, projectId).run()
   await env.AQUILLA_PG.prepare("DELETE FROM group_project_grants WHERE group_id = ? AND project_id = ?").bind(groupId, projectId).run()
 }
 
 /**
  * AQU-538: per-target-language-lane rollup for a project. Aggregated from
- * `file_section_progress` file-scope rows (`scope='file'`) grouped by
- * `target_lang`. `lane: ''` is the default lane (the project's configured
- * `targetLanguage`, labeled client-side) and is always present whenever the
- * project has any file-scope progress rows. `validatedCells` mirrors the
- * per-file progress route: cells whose endorsement count meets the project's
- * `validationCount` threshold (default 1, cap 15). `lastEditAt` is the most
- * recent progress-projection update in the lane (updated on every edit /
- * validation that touches the lane), which avoids a heavy per-lane cells scan.
+ * `file_section_progress` file-scope rows (`scope='file'`) grouped by the
+ * lane's tag. `lane: ''` is the former default lane (the project's configured
+ * `targetLanguage`, labeled client-side) and is present whenever the project
+ * has a lane row or file-scope progress rows for it.
+ *
+ * `validatedCells` mirrors the per-file progress route: cells whose endorsement
+ * count meets the project's `validationCount` threshold (default 1, cap 15).
+ * `lastEditAt` is the most recent progress-projection update in the lane
+ * (updated on every edit / validation that touches the lane), which avoids a
+ * heavy per-lane cells scan.
+ *
+ * AQU-1599: `totalCells` on a lane with no progress rows of its own is borrowed
+ * from the SOURCE lane's rows, not from the `''` lane's — the source-cell count
+ * is a fact about the source text, and reading it off the former default target
+ * lane meant archiving that lane zeroed every other lane's denominator.
  */
 export interface PortfolioLane {
   lane: string
@@ -1109,9 +1333,53 @@ export interface PortfolioLane {
   filledCells: number
   validatedCells: number
   lastEditAt: number | null
+  /** Display name from the `lanes` row. Absent when the project has no row yet. */
+  name?: string | null
+  /** Opaque lane id. */
+  laneId?: string | null
+  /** Display order from `lanes.position`. */
+  position?: number
+  /** AQU-1458: archived lanes stay in the payload so the overview can tuck them away. */
+  archived?: boolean
+  /** Source lanes ride along so the language pair is read from the row. Chips skip them. */
+  role?: "source" | "target"
+  /**
+   * AQU-1951: this language's recordings. Cells with a selected dub take in
+   * this lane, and those whose takes meet the project's audio threshold. Read
+   * from the same file-scope progress rows as the text numbers above (and as
+   * the plan board's AUD bars), over the AUDIO form of the counted-file rule,
+   * so a dubbing project's cue sheet counts. Measured against the project's
+   * `audioTotalCells`: which cells exist does not change with the language.
+   */
+  audioCells: number
+  validatedAudioCells: number
+  /**
+   * AQU-1954: what this language's recordings are measured against. Every
+   * file (its cue sheet where it has one) when the language's "Records audio"
+   * switch is on; otherwise only the files with a recording in this language,
+   * plus any file with a cue sheet. A language nobody records in therefore owes
+   * nothing, and does not pull the project's "All" audio down.
+   */
+  audioTotalCells: number
+  /** AQU-1954: the language row's "Records audio" switch. */
+  recordsAudio: boolean
+  /**
+   * Media redesign slice 1: what the language delivers — Text, Audio, or Text
+   * and audio — or null when nobody has chosen yet (counts as Text). The
+   * client measures each language by it (`portfolioMeasure`,
+   * src/lib/frontier/portfolio-metrics.ts).
+   */
+  delivers: LaneDelivers | null
+  /**
+   * Media redesign slice 1: lines whose text is validated AND whose recording
+   * is approved, at the project's two thresholds — what a "Text and audio"
+   * language counts as done. From the joint histogram of the same rows as
+   * `validatedCells`.
+   */
+  bothValidatedCells: number
 }
 
-export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; sourceLanguage: string | null; targetLanguage: string | null; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
+export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioTotalCells: number; recordsAudio: boolean; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number; /** AQU-2105: set on a LangQuest-linked project — the followed language and whether its sync is healthy. */ langquest?: ProjectLangQuestState | null }
 export interface OrgPortfolioRow extends PortfolioRow { orgId: number }
 
 /** Soft-deleted file in an org the caller can see (Archived → Recently deleted). */
@@ -1135,38 +1403,100 @@ interface PortfolioDbRow {
   filled_cells: number
   ai_drafted_cells: number
   last_edit_at: number | null
+  /** AQU-1566: what audio coverage divides by (a dubbing file's cue sheet, else the file). */
+  audio_total_cells: number
+  /** AQU-1954: whether any of the project's languages has "Records audio" on (lane rows, migration 0173). */
+  records_audio: boolean | null
   audio_cells: number
   validated_audio_cells: number
   recorded_ms: number
-  // AQU-523: project language pair, read from the project_settings JSON blob
-  // (the canonical per-project source useProject overlays). Null when unset.
-  source_language: string | null
-  target_language: string | null
   // AQU-1097: planning units — how many this project has, how many a manager
   // has marked done, and how many are past their target date without a mark.
   units_total: number
   units_done: number
   units_overdue: number
+  created_by: number | string | null
 }
 
-function mapPortfolioRow(r: PortfolioDbRow, lanesByProject: Map<string, PortfolioLane[]>): PortfolioRow {
+/** Text totals recomputed from the lanes this caller may see. */
+interface VisiblePortfolioText {
+  lanes: PortfolioLane[]
+  totalCells: number
+  filledCells: number
+  validatedCells: number
+  lastEditAt: number | null
+  aiDraftedCells: number
+}
+
+function laterEdit(a: number | null, b: number | null): number | null {
+  if (a == null || !Number.isFinite(a)) return b
+  if (b == null || !Number.isFinite(b)) return a
+  return Math.max(a, b)
+}
+
+/**
+ * AQU-1952: a project's text totals across two or more target languages. The
+ * file counters cannot give them: `files.filled_count` and `approved_count`
+ * count one row per LANE while `files.cell_count` counts each cell once, so a
+ * two-language project read e.g. 3540/3042 and its "All" percentages pinned
+ * at 100% (German 94% and Tok Pisin 22% were simply added). Summing the lanes,
+ * totals included, gives all the languages' work done over all the languages'
+ * work — 94% and 22% read 58% — the same answer the read wall's per-caller
+ * totals below and the Monday push (AQU-1620) already give. With one language
+ * the file counters ARE that language's work, so they stand and a one-language
+ * project reads exactly as before. Null keeps the counters.
+ */
+function textAcrossLanes(lanes: readonly PortfolioLane[]) {
+  const targets = lanes.filter((lane) => lane.role !== "source")
+  if (targets.length < 2) return null
+  return portfolioTextFromVisibleLanes(targets, new Set(targets.map((lane) => lane.lane)))
+}
+
+/**
+ * AQU-1954 (Sam, 2026-10-14): the "All" audio of a project with two or more
+ * languages is every language's recordings over every language's audio work,
+ * the same rule as `textAcrossLanes`. German at 76% beside a Tok Pisin that
+ * owes the same files and has recorded none reads 38%, not 76%. A language
+ * whose switch is off and that has recorded nothing owes nothing, so it leaves
+ * the average alone. Every target lane counts, archived ones included, as for
+ * text; the read wall does not apply (a recording is not a lane's text). Null
+ * keeps the project-wide counts.
+ */
+function audioAcrossLanes(lanes: readonly PortfolioLane[]) {
+  const targets = lanes.filter((lane) => lane.role !== "source")
+  if (targets.length < 2) return null
+  return {
+    audioTotalCells: targets.reduce((sum, lane) => sum + (lane.audioTotalCells ?? 0), 0),
+    audioCells: targets.reduce((sum, lane) => sum + lane.audioCells, 0),
+    validatedAudioCells: targets.reduce((sum, lane) => sum + lane.validatedAudioCells, 0),
+    recordsAudio: targets.some((lane) => lane.recordsAudio === true),
+  }
+}
+
+function mapPortfolioRow(
+  r: PortfolioDbRow,
+  lanesByProject: Map<string, PortfolioLane[]>,
+  visibleText?: VisiblePortfolioText,
+  sourceActivityAt: number | null = null,
+): PortfolioRow {
+  const acrossLanes = visibleText ? null : textAcrossLanes(lanesByProject.get(r.id) ?? [])
+  const audioLanes = audioAcrossLanes(lanesByProject.get(r.id) ?? [])
   return {
     id: r.id,
     name: r.name,
-    totalCells: r.total_cells,
-    validatedCells: r.validated_cells,
-    filledCells: r.filled_cells,
-    aiDraftedCells: r.ai_drafted_cells,
-    lastEditAt: r.last_edit_at,
-    audioCells: r.audio_cells,
-    validatedAudioCells: r.validated_audio_cells,
+    totalCells: visibleText ? visibleText.totalCells : acrossLanes?.totalCells ?? r.total_cells,
+    validatedCells: visibleText ? visibleText.validatedCells : acrossLanes?.validatedCells ?? r.validated_cells,
+    filledCells: visibleText ? visibleText.filledCells : acrossLanes?.filledCells ?? r.filled_cells,
+    aiDraftedCells: visibleText ? visibleText.aiDraftedCells : r.ai_drafted_cells,
+    lastEditAt: laterEdit(visibleText ? visibleText.lastEditAt : r.last_edit_at, sourceActivityAt),
+    // Lane-independent like the audio counts, so the read wall leaves it alone.
+    audioTotalCells: audioLanes?.audioTotalCells ?? (Number(r.audio_total_cells) || 0),
+    recordsAudio: audioLanes?.recordsAudio ?? r.records_audio === true,
+    audioCells: audioLanes?.audioCells ?? r.audio_cells,
+    validatedAudioCells: audioLanes?.validatedAudioCells ?? r.validated_audio_cells,
     recordedMs: r.recorded_ms,
     deadlineAt: r.deadline_at,
-    // "" (empty settings default) is normalized to null so the client shows a
-    // graceful "no language set" rather than a blank/broken "→" (AQU-523).
-    sourceLanguage: r.source_language || null,
-    targetLanguage: r.target_language || null,
-    lanes: lanesByProject.get(r.id) ?? [],
+    lanes: visibleText ? visibleText.lanes : (lanesByProject.get(r.id) ?? []),
     unitsTotal: Number(r.units_total) || 0,
     unitsDone: Number(r.units_done) || 0,
     unitsOverdue: Number(r.units_overdue) || 0,
@@ -1177,7 +1507,14 @@ const MAX_VALIDATION_LEVEL = 15
 
 interface LaneDbRow {
   project_id: string
-  target_lang: string
+  target_lang: string | null
+  /**
+   * AQU-1599: which lane this progress row belongs to. `'source'` rows are the
+   * project's lane-independent numbers (the source-cell denominator), not a
+   * language anyone translates into, so they feed the denominator below and
+   * never become a lane chip.
+   */
+  lane_role: string
   total_count: number | string
   filled_count: number | string
   validator_histogram: Record<string, number> | string | null
@@ -1187,21 +1524,43 @@ interface LaneDbRow {
   structural_count: number | string | null
   structural_filled_count: number | string | null
   structural_validator_histogram: Record<string, number> | string | null
+  // AQU-1951: the lane's audio pair, and its structural subset.
+  audio_count: number | string | null
+  audio_validator_histogram: Record<string, number> | string | null
+  structural_audio_count: number | string | null
+  structural_audio_validator_histogram: Record<string, number> | string | null
+  /** Media redesign slice 1: the joint text × audio histogram, and its structural share. */
+  text_audio_validator_histogram: Record<string, number> | string | null
+  structural_text_audio_validator_histogram: Record<string, number> | string | null
+  /**
+   * AQU-1951: 1 when the row's file counts as TEXT work, else 0. The query admits
+   * every file whose RECORDINGS count, a superset that adds the cue sheet, so
+   * the text sums must skip the rows this is false for.
+   */
+  text_counted: number | string
+  /** AQU-1954: the row's file, and for a cue sheet the file it is anchored to. */
+  file_id: string
+  file_role: string | null
+  anchor_file_id: string | null
 }
 
 interface PortfolioSettingsDbRow {
   project_id: string
   validation_count: number | string | null
-  target_lanes: unknown
+  /** AQU-1951: the audio threshold, read the way the portfolio's policy CTE reads it. */
+  validation_count_audio?: number | string | null
   /** AQU-1083 effective policy, already COALESCEd project → org → 'true'. */
   count_structural?: string | null
 }
 
 /** Endorsement threshold at which a cell counts as validated, per the project's settings (default 1, cap 15). */
-function readValidationCounts(settingsRows: PortfolioSettingsDbRow[]): Map<string, number> {
+function readValidationCounts(
+  settingsRows: PortfolioSettingsDbRow[],
+  column: "validation_count" | "validation_count_audio" = "validation_count",
+): Map<string, number> {
   const out = new Map<string, number>()
   for (const row of settingsRows) {
-    const value = Math.floor(Number(row.validation_count))
+    const value = Math.floor(Number(row[column]))
     const threshold = Number.isFinite(value) ? Math.min(MAX_VALIDATION_LEVEL, Math.max(1, value)) : 1
     out.set(row.project_id, threshold)
   }
@@ -1228,15 +1587,20 @@ function validatedFromHistogram(raw: LaneDbRow["validator_histogram"], threshold
  * Per-lane rollup for the given org's non-archived projects, keyed by project
  * id. Derive-on-read over `file_section_progress` file-scope rows (one row per
  * file per lane since migration 0055) — a SUM, not new bookkeeping. Lanes are
- * ordered default ('') first, then by tag, for deterministic output.
+ * ordered by `lanes.position`, with the tag as a tiebreak for rows that have no
+ * lane row to carry a position. AQU-1599 dropped the "default ('') first" rule
+ * that sat in front of it: the former default lane is an ordinary lane and
+ * sorts where its position says, including after a lane added later and moved
+ * above it.
  */
 async function fetchPortfolioLanes(
   env: Env,
   orgIds: number[],
   projectIds?: readonly string[],
-): Promise<Map<string, PortfolioLane[]>> {
+): Promise<{ lanes: Map<string, PortfolioLane[]>; sourceActivity: Map<string, number> }> {
   const byProject = new Map<string, PortfolioLane[]>()
-  if (orgIds.length === 0) return byProject
+  const sourceActivity = new Map<string, number>()
+  if (orgIds.length === 0) return { lanes: byProject, sourceActivity }
   const placeholders = orgIds.map(() => "?").join(", ")
   const projectFilter =
     projectIds != null && projectIds.length > 0
@@ -1244,17 +1608,41 @@ async function fetchPortfolioLanes(
       : ""
   const orgBinds: unknown[] = [...orgIds]
   const projectBinds: unknown[] = projectIds != null && projectIds.length > 0 ? [...projectIds] : []
-  const [laneRows, settingsRows] = await Promise.all([
+  const [laneRows, settingsRows, nameRows] = await Promise.all([
     env.AQUILLA_PG.prepare(
-      `SELECT fsp.project_id AS project_id, fsp.target_lang AS target_lang,
+      // AQU-1599: the lane comes from the `lanes` row the projection wrote this
+      // progress row under, not from `fsp.target_lang`. The source lane's row
+      // carries '' there as well (its `legacy_tag` is NULL), so grouping by the
+      // column would fold the source lane's denominator into the former default
+      // lane's chip and double its cells.
+      `SELECT fsp.project_id AS project_id, l.legacy_tag AS target_lang,
+              l.role AS lane_role,
               fsp.total_count AS total_count, fsp.filled_count AS filled_count,
               fsp.validator_histogram AS validator_histogram, fsp.updated_at AS updated_at,
               fsp.structural_count AS structural_count,
               fsp.structural_filled_count AS structural_filled_count,
-              fsp.structural_validator_histogram AS structural_validator_histogram
+              fsp.structural_validator_histogram AS structural_validator_histogram,
+              fsp.audio_count AS audio_count,
+              fsp.audio_validator_histogram AS audio_validator_histogram,
+              fsp.structural_audio_count AS structural_audio_count,
+              fsp.structural_audio_validator_histogram AS structural_audio_validator_histogram,
+              fsp.text_audio_validator_histogram AS text_audio_validator_histogram,
+              fsp.structural_text_audio_validator_histogram AS structural_text_audio_validator_histogram,
+              CASE WHEN ${inCountedFileSql('fsp')} THEN 1 ELSE 0 END AS text_counted,
+              fsp.file_id AS file_id, fr.role AS file_role, fr.anchor_file_id AS anchor_file_id
          FROM file_section_progress fsp
          JOIN projects p ON p.id = fsp.project_id
-        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'${projectFilter}`,
+         JOIN lanes l ON l.project_id = fsp.project_id AND l.id = fsp.lane_id
+         LEFT JOIN files fr ON fr.project_id = fsp.project_id AND fr.id = fsp.file_id
+        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'
+          -- AQU-1626: one progress row per file per lane, so a hidden or
+          -- deleted file contributes one here too — and a lane chip that
+          -- disagreed with the project total beside it is how the caption-track
+          -- inflation first showed up.
+          -- AQU-1951: the AUDIO form of the rule, which also admits the cue
+          -- sheet a dubbing project records against; \`text_counted\` above
+          -- keeps those rows out of the text sums, as the text rule did here.
+          AND ${inAudioCountedFileSql('fsp')}${projectFilter}`,
     ).bind(...orgBinds, ...projectBinds).all<LaneDbRow>(),
     env.AQUILLA_PG.prepare(
       // Driven FROM projects, not from project_settings: a project that has
@@ -1262,17 +1650,39 @@ async function fetchPortfolioLanes(
       // joining the settings table hides exactly those projects. The columns
       // this used to read come back null for them, which is what they meant
       // before anyway (default threshold, no registered lanes).
+      // AQU-1771: both thresholds (text, and AQU-1951's audio) resolve
+      // project → org → 1 like the structural policy beside them.
       `SELECT p.id AS project_id,
-              ps.validation_count AS validation_count,
-              ps.target_lanes AS target_lanes,
+              ${effectiveThresholdSql("ps.validation_count", "os.validation_count")} AS validation_count,
+              ${effectiveThresholdSql("ps.validation_count_audio", "os.validation_count_audio")} AS validation_count_audio,
               COALESCE(ps.count_structural, os.count_structural, 'true') AS count_structural
          FROM projects p
          LEFT JOIN project_settings ps ON ps.project_id = p.id
          LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
     ).bind(...orgBinds, ...projectBinds).all<PortfolioSettingsDbRow>(),
+    env.AQUILLA_PG.prepare(
+      `SELECT l.project_id AS project_id, l.id AS id, ${laneDisplayNameSql("l")} AS name,
+              l.role AS role, l.legacy_tag AS legacy_tag, l.position AS position,
+              l.archived_at AS archived_at, l.records_audio AS records_audio,
+              l.delivers AS delivers
+         FROM lanes l
+         JOIN projects p ON p.id = l.project_id
+        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
+    ).bind(...orgBinds, ...projectBinds).all<{
+      project_id: string
+      id: string
+      name: string
+      legacy_tag: string | null
+      position: number
+      archived_at: string | null
+      role: string
+      records_audio: boolean | null
+      delivers: string | null
+    }>(),
   ])
   const thresholds = readValidationCounts(settingsRows.results ?? [])
+  const audioThresholds = readValidationCounts(settingsRows.results ?? [], "validation_count_audio")
   // AQU-1083: which projects leave structural cells out. Absent = count them,
   // so a project with no settings row at all keeps today's numbers.
   const excluding = new Set(
@@ -1280,19 +1690,152 @@ async function fetchPortfolioLanes(
       .filter((row) => row.count_structural === "false")
       .map((row) => row.project_id),
   )
-  // Accumulate one lane entry per (project, target_lang).
+  // Media redesign slice 1: what each language delivers, per (project, tag),
+  // so a language that counts its recordings takes its activity clock from
+  // its cue sheets too (below).
+  const deliversOf = new Map<string, LaneDelivers | null>()
+  for (const row of nameRows.results ?? []) {
+    if (row.role === "target") deliversOf.set(`${row.project_id}\u0000${row.legacy_tag ?? ""}`, parseLaneDelivers(row.delivers))
+  }
+  // Accumulate one lane entry per (project, lane tag).
   const acc = new Map<string, Map<string, PortfolioLane>>()
+  // AQU-1951: each lane's recordings, per (project, lane tag).
+  const audioAcc = new Map<
+    string,
+    Map<string, { audioCells: number; validatedAudioCells: number; lastEditAt: number | null }>
+  >()
+  // AQU-1599: the project's source-cell count, summed over the SOURCE lane's
+  // file rows. The lane-independent denominator every lane without progress
+  // rows of its own borrows, and the number that used to be read off the ''
+  // lane's chip.
+  const sourceTotals = new Map<string, number>()
+  // AQU-1954: what each language's recordings are measured against, built from
+  // the same rows. Per project: each file's cell count (any lane's row says it;
+  // structural cells off when the project leaves them out), each file's cue
+  // sheet, and per language the files it has recorded in. A recording on a cue
+  // sheet belongs to the file the sheet is anchored to.
+  const fileCells = new Map<string, Map<string, number>>()
+  const cueSheetOf = new Map<string, Map<string, string>>()
+  const audioFiles = new Map<string, Set<string>>()
+  const recordedIn = new Map<string, Map<string, Set<string>>>()
+  /**
+   * AQU-1599: the lane-independent denominator a lane with no progress rows of
+   * its own borrows — the project's source-cell count, from the SOURCE lane's
+   * file rows.
+   *
+   * Falls back to the largest denominator any lane DOES report, because a
+   * project whose rows were projected before AQU-1599 has no source-lane rows
+   * until AQU-1616's batch recompute (AQU-1419's "work before and after the
+   * backfill" rule), and every lane's rows carried the same denominator then.
+   * Deliberately not "the '' lane's", which is the pin this ticket removes.
+   */
+  const laneIndependentTotal = (projectId: string): number => {
+    const fromSource = sourceTotals.get(projectId)
+    if (fromSource != null) return fromSource
+    const lanes = acc.get(projectId)
+    if (!lanes) return 0
+    let best = 0
+    for (const entry of lanes.values()) best = Math.max(best, entry.totalCells)
+    return best
+  }
   for (const row of laneRows.results ?? []) {
     const threshold = thresholds.get(row.project_id) ?? 1
-    let lanes = acc.get(row.project_id)
-    if (!lanes) { lanes = new Map(); acc.set(row.project_id, lanes) }
-    const lane = row.target_lang ?? ""
-    let entry = lanes.get(lane)
-    if (!entry) { entry = { lane, totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null }; lanes.set(lane, entry) }
     // AQU-1083: subtract per file row, then clamp — a partially backfilled
     // project must never contribute a negative number to the lane's sum.
     const drop = excluding.has(row.project_id)
     const structuralTotal = drop ? Number(row.structural_count) || 0 : 0
+    const textCounted = Number(row.text_counted) === 1
+    // AQU-1954: the file's cell count, its cue sheet, and (target rows only,
+    // below) whether this language has recorded in it.
+    const isCueSheet = row.file_role === "audio-cues" && row.anchor_file_id != null
+    const audioHome = isCueSheet ? row.anchor_file_id! : row.file_id
+    {
+      let cells = fileCells.get(row.project_id)
+      if (!cells) { cells = new Map(); fileCells.set(row.project_id, cells) }
+      const total = Math.max(0, (Number(row.total_count) || 0) - structuralTotal)
+      cells.set(row.file_id, Math.max(cells.get(row.file_id) ?? 0, total))
+      if (isCueSheet) {
+        let cues = cueSheetOf.get(row.project_id)
+        if (!cues) { cues = new Map(); cueSheetOf.set(row.project_id, cues) }
+        cues.set(audioHome, row.file_id)
+      } else if (row.file_role !== "audio-cues") {
+        // Every file that can hold recordings is a candidate, recorded or not.
+        let files = audioFiles.get(row.project_id)
+        if (!files) { files = new Set(); audioFiles.set(row.project_id, files) }
+        files.add(audioHome)
+      }
+    }
+    if (row.lane_role === "source") {
+      // A cue sheet's source rows are not the project's text: the denominator
+      // and the activity clock read text files only, as they always have.
+      if (!textCounted) continue
+      sourceTotals.set(
+        row.project_id,
+        (sourceTotals.get(row.project_id) ?? 0)
+          + Math.max(0, (Number(row.total_count) || 0) - structuralTotal),
+      )
+      // A source-cell edit stamps this row and no target lane. The project
+      // clock has to see it or a source-only session looks idle.
+      const sourceUpdated = row.updated_at == null ? null : Number(row.updated_at)
+      if (sourceUpdated != null && Number.isFinite(sourceUpdated)) {
+        const prev = sourceActivity.get(row.project_id)
+        if (prev == null || sourceUpdated > prev) sourceActivity.set(row.project_id, sourceUpdated)
+      }
+      continue
+    }
+    const lane = row.target_lang ?? ""
+    // AQU-1951: the lane's recordings, from every file whose recordings count
+    // (the cue sheet included), less the structural share exactly as the text
+    // numbers below are. A tally of their own, so a cue sheet's row never
+    // creates a text entry: a lane without text rows must still borrow the
+    // lane-independent denominator below.
+    let audioLanes = audioAcc.get(row.project_id)
+    if (!audioLanes) { audioLanes = new Map(); audioAcc.set(row.project_id, audioLanes) }
+    let audioEntry = audioLanes.get(lane)
+    if (!audioEntry) {
+      audioEntry = { audioCells: 0, validatedAudioCells: 0, lastEditAt: null }
+      audioLanes.set(lane, audioEntry)
+    }
+    const audioThreshold = audioThresholds.get(row.project_id) ?? 1
+    const structuralAudio = drop ? Number(row.structural_audio_count) || 0 : 0
+    const structuralAudioValidated = drop
+      ? validatedFromHistogram(row.structural_audio_validator_histogram, audioThreshold)
+      : 0
+    audioEntry.audioCells += Math.max(0, (Number(row.audio_count) || 0) - structuralAudio)
+    if ((Number(row.audio_count) || 0) > 0) {
+      let homes = recordedIn.get(row.project_id)
+      if (!homes) { homes = new Map(); recordedIn.set(row.project_id, homes) }
+      let recorded = homes.get(lane)
+      if (!recorded) { recorded = new Set(); homes.set(lane, recorded) }
+      recorded.add(audioHome)
+    }
+    audioEntry.validatedAudioCells += Math.max(
+      0,
+      validatedFromHistogram(row.audio_validator_histogram, audioThreshold) - structuralAudioValidated,
+    )
+    // Media redesign slice 1: recording and approving are activity. A dubbing
+    // project records on its cue sheet, whose rows the text clock below never
+    // reads, so a language that counts its recordings reads them here. A Text
+    // language's clock is exactly what it was.
+    if (laneCountsAudio(deliversOf.get(`${row.project_id}\u0000${lane}`))) {
+      const audioUpdated = row.updated_at == null ? null : Number(row.updated_at)
+      if (audioUpdated != null && Number.isFinite(audioUpdated)) {
+        audioEntry.lastEditAt = audioEntry.lastEditAt == null ? audioUpdated : Math.max(audioEntry.lastEditAt, audioUpdated)
+      }
+    }
+    // A cue sheet's row carries recordings, not text work.
+    if (!textCounted) continue
+    let lanes = acc.get(row.project_id)
+    if (!lanes) { lanes = new Map(); acc.set(row.project_id, lanes) }
+    let entry = lanes.get(lane)
+    if (!entry) {
+      entry = {
+        lane, totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null,
+        audioCells: 0, validatedAudioCells: 0, audioTotalCells: 0, recordsAudio: false,
+        delivers: null, bothValidatedCells: 0,
+      }
+      lanes.set(lane, entry)
+    }
     const structuralFilled = drop ? Number(row.structural_filled_count) || 0 : 0
     const structuralValidated = drop
       ? validatedFromHistogram(row.structural_validator_histogram, threshold)
@@ -1303,47 +1846,99 @@ async function fetchPortfolioLanes(
       0,
       validatedFromHistogram(row.validator_histogram, threshold) - structuralValidated,
     )
+    const structuralBoth = drop
+      ? bothApprovedFromHistogram(row.structural_text_audio_validator_histogram, threshold, audioThreshold)
+      : 0
+    entry.bothValidatedCells += Math.max(
+      0,
+      bothApprovedFromHistogram(row.text_audio_validator_histogram, threshold, audioThreshold) - structuralBoth,
+    )
     const updatedAt = row.updated_at == null ? null : Number(row.updated_at)
     if (updatedAt != null && Number.isFinite(updatedAt)) {
       entry.lastEditAt = entry.lastEditAt == null ? updatedAt : Math.max(entry.lastEditAt, updatedAt)
     }
   }
-  // AQU-538: union in REGISTERED lanes that have no progress rows yet — a PM
-  // who just added a language must see its 0% chip immediately, not after the
-  // first translation lands. The denominator is borrowed from the '' row
-  // (source-cell count is lane-independent); no '' row means the project has
-  // no progress rows at all and the registered lane stays 0/0.
-  for (const row of settingsRows.results ?? []) {
-    const registered = readTargetLanes(row.target_lanes)
-    if (registered.length === 0) continue
-    let lanes = acc.get(row.project_id)
-    if (!lanes) {
-      lanes = new Map()
-      acc.set(row.project_id, lanes)
+  // One portfolio lane per lane row, keyed by lanes.id. Progress still hangs
+  // off legacy_tag (the event key). Two rows that share a tag — or that a
+  // language comparison would call the same tag — stay two lanes. Settings
+  // targetLanes / archivedLanes / targetLanguage are not read (AQU-1595). A
+  // target lane with no progress rows of its own borrows the lane-independent
+  // denominator (AQU-1599): the source lane's cell count, never the '' lane's.
+  /**
+   * AQU-1954: one language's audio denominator. A file counts when the
+   * language's switch is on, when the file has a cue sheet (the dubbing is
+   * planned), or when the language has recorded in it; it counts its cue
+   * sheet's cells where it has one, else its own.
+   */
+  const laneAudioTotal = (projectId: string, tag: string, recordsAudio: boolean): number => {
+    const files = audioFiles.get(projectId)
+    if (!files) return 0
+    const recorded = recordedIn.get(projectId)?.get(tag)
+    const cues = cueSheetOf.get(projectId)
+    const cells = fileCells.get(projectId)
+    let total = 0
+    for (const file of files) {
+      const cue = cues?.get(file)
+      if (!recordsAudio && cue == null && !recorded?.has(file)) continue
+      total += cells?.get(cue ?? file) ?? 0
     }
-    const denominator = lanes.get("")?.totalCells ?? 0
-    for (const lane of registered) {
-      if (lane === "" || lanes.has(lane)) continue
-      lanes.set(lane, { lane, totalCells: denominator, filledCells: 0, validatedCells: 0, lastEditAt: null })
-    }
+    return total
   }
-  for (const [projectId, lanes] of acc) {
+  const listed = new Map<string, PortfolioLane[]>()
+  for (const row of nameRows.results ?? []) {
+    const role = row.role === "source" ? "source" : "target"
+    const tag = role === "target" ? (row.legacy_tag ?? "") : ""
+    const progress = role === "target" ? acc.get(row.project_id)?.get(tag) : undefined
+    const borrowed = role === "target" && !progress ? laneIndependentTotal(row.project_id) : 0
+    const delivers = role === "target" ? parseLaneDelivers(row.delivers) : null
+    const recordings = role === "target" ? audioAcc.get(row.project_id)?.get(tag) : undefined
+    const entry: PortfolioLane = {
+      lane: tag,
+      role,
+      name: row.name,
+      laneId: row.id,
+      position: Number(row.position) || 0,
+      totalCells: progress?.totalCells ?? borrowed,
+      filledCells: progress?.filledCells ?? 0,
+      validatedCells: progress?.validatedCells ?? 0,
+      lastEditAt: laneCountsAudio(delivers)
+        ? laterEdit(progress?.lastEditAt ?? null, recordings?.lastEditAt ?? null)
+        : progress?.lastEditAt ?? null,
+      delivers,
+      bothValidatedCells: progress?.bothValidatedCells ?? 0,
+      audioCells: role === "target" ? audioAcc.get(row.project_id)?.get(tag)?.audioCells ?? 0 : 0,
+      validatedAudioCells: role === "target" ? audioAcc.get(row.project_id)?.get(tag)?.validatedAudioCells ?? 0 : 0,
+      audioTotalCells: role === "target" ? laneAudioTotal(row.project_id, tag, row.records_audio === true) : 0,
+      recordsAudio: role === "target" && row.records_audio === true,
+      ...(row.archived_at != null && row.archived_at !== "" ? { archived: true } : {}),
+    }
+    let lanes = listed.get(row.project_id)
+    if (!lanes) {
+      lanes = []
+      listed.set(row.project_id, lanes)
+    }
+    lanes.push(entry)
+  }
+  for (const [projectId, lanes] of listed) {
     byProject.set(
       projectId,
-      [...lanes.values()].sort((a, b) => (a.lane === b.lane ? 0 : a.lane === "" ? -1 : b.lane === "" ? 1 : a.lane < b.lane ? -1 : 1)),
+      // AQU-1599: position, then the tag purely as a tiebreak so the output is
+      // deterministic; the former default lane gets no head start. Source
+      // lanes ride along after the target lanes (chips skip them), and two
+      // rows that share a tag fall back to the lane id.
+      lanes.sort((a, b) => {
+        const aSource = a.role === "source" ? 1 : 0
+        const bSource = b.role === "source" ? 1 : 0
+        if (aSource !== bSource) return aSource - bSource
+        const ap = a.position ?? 1_000_000
+        const bp = b.position ?? 1_000_000
+        if (ap !== bp) return ap - bp
+        if (a.lane !== b.lane) return a.lane < b.lane ? -1 : 1
+        return (a.laneId ?? "").localeCompare(b.laneId ?? "")
+      }),
     )
   }
-  return byProject
-}
-
-/** Parse the generated target_lanes projection defensively across PG adapters. */
-function readTargetLanes(raw: unknown): string[] {
-  let value = raw
-  if (typeof raw === "string") {
-    try { value = JSON.parse(raw) } catch { return [] }
-  }
-  if (!Array.isArray(value)) return []
-  return value.filter((lane): lane is string => typeof lane === "string" && lane !== "")
+  return { lanes: byProject, sourceActivity }
 }
 
 /**
@@ -1380,9 +1975,29 @@ const PORTFOLIO_VISIBILITY_PREDICATE = `(
 const PORTFOLIO_EXCLUDE_STRUCTURAL =
   "COALESCE(MAX(ps.count_structural), MAX(os.count_structural)) = 'false'"
 
-/** `total − structural` when the policy excludes, floored at zero. */
-const lessStructural = (total: string, structural: string) =>
+/**
+ * `total − structural` when the policy excludes, floored at zero.
+ *
+ * Exported for the admin console's project rollup (AQU-1911), which joins
+ * `project_settings ps` and `org_settings os` under the same aliases so a
+ * project reads the same validated % there as on its org dashboard.
+ */
+export const lessStructural = (total: string, structural: string) =>
   `GREATEST(0, ${total} - CASE WHEN ${PORTFOLIO_EXCLUDE_STRUCTURAL} THEN ${structural} ELSE 0 END)`
+
+/**
+ * AQU-1954: does this file's audio count toward the project's audio numbers?
+ *
+ * Every file does when the project's language records audio (`ra`, from the
+ * lane rows' switch, migration 0173). Otherwise only a file somebody has
+ * recorded in, or one with a cue sheet, which declares the dubbing before the
+ * first take: the plan board's own rule (`audioFileIds`). Without this a
+ * project with one recorded book among sixty-five text books divided its
+ * takes by the whole Bible, while its board, on the same page, measured only
+ * the recorded book.
+ */
+const PORTFOLIO_FILE_EXPECTS_AUDIO =
+  "(ra.records_audio IS TRUE OR cue.anchor_file_id IS NOT NULL OR af.file_id IS NOT NULL)"
 
 /**
  * The per-project cell rollups.
@@ -1395,14 +2010,30 @@ const PORTFOLIO_CELL_COLUMNS = `
             ${lessStructural('COALESCE(SUM(f.cell_count), 0)', 'COALESCE(SUM(f.structural_cell_count), 0)')} AS total_cells,
             ${lessStructural('COALESCE(SUM(f.approved_count), 0)', 'COALESCE(SUM(f.structural_approved_count), 0)')} AS validated_cells,
             ${lessStructural('COALESCE(SUM(f.filled_count), 0)', 'COALESCE(SUM(f.structural_filled_count), 0)')} AS filled_cells,
-            ${lessStructural('COALESCE(SUM(f.ai_drafted_count), 0)', 'COALESCE(SUM(f.structural_ai_drafted_count), 0)')} AS ai_drafted_cells,`
+            ${lessStructural('COALESCE(SUM(f.ai_drafted_count), 0)', 'COALESCE(SUM(f.structural_ai_drafted_count), 0)')} AS ai_drafted_cells,
+            ${lessStructural(`COALESCE(SUM(CASE WHEN ${PORTFOLIO_FILE_EXPECTS_AUDIO} THEN COALESCE(cue.cell_count, f.cell_count) END), 0)`, `COALESCE(SUM(CASE WHEN ${PORTFOLIO_FILE_EXPECTS_AUDIO} THEN COALESCE(cue.structural_cell_count, f.structural_cell_count) END), 0)`)} AS audio_total_cells,
+            COALESCE(BOOL_OR(ra.records_audio), false) AS records_audio,`
 
-/** Shared join tail — the org default now has to reach the rollups too. */
+/**
+ * Shared join tail — the org default now has to reach the rollups too.
+ *
+ * AQU-1626: the files join carries `countedFileSql`, so a tombstoned file and a
+ * hidden companion (a cue sheet, a linked video's caption track) stay out of
+ * every column above. Without it a 500-cue caption track added 500 untranslated
+ * cells to this org's totals while the plan board — which has always applied the
+ * rule — showed the real number two tiles away. It belongs in the JOIN rather
+ * than the WHERE because this is a LEFT join: in the WHERE it would discard the
+ * project row itself for a project whose only file is hidden, instead of
+ * counting it as empty.
+ */
 const PORTFOLIO_JOINS = `
-       LEFT JOIN files f ON f.project_id = p.id
+       LEFT JOIN files f ON f.project_id = p.id AND ${countedFileSql('f')}
+       LEFT JOIN cue ON cue.project_id = f.project_id AND cue.anchor_file_id = f.id
        LEFT JOIN project_settings ps ON ps.project_id = p.id
        LEFT JOIN org_settings os ON os.org_id = p.org_id
        LEFT JOIN au ON au.project_id = p.id
+       LEFT JOIN af ON af.project_id = f.project_id AND af.file_id = f.id
+       LEFT JOIN ra ON ra.project_id = p.id
        LEFT JOIN pu ON pu.project_id = p.id`
 
 /** AQU-1097: planning-unit counts, read from the `pu` CTE above. */
@@ -1415,11 +2046,11 @@ const PORTFOLIO_UNIT_COLUMNS = `
  * Audio coverage and validation, with structural cells dropped where a project
  * excludes them.
  *
- * `audioPct` divides audio cells by the TEXT total while `audioValidatedPct`
- * divides by the audio total, so leaving audio alone while the text denominator
- * shrank would let a scripture project whose headings were voiced read over
- * 100% covered. Bulk synthesis has no type filter, so those takes genuinely
- * exist.
+ * Both audio fractions divide by `audio_total_cells` (AQU-1566: each file's
+ * cue sheet, else the file), which drops structural cells the same way the
+ * text total does, so leaving audio alone while that denominator shrank would
+ * let a scripture project whose headings were voiced read over 100% covered.
+ * Bulk synthesis has no type filter, so those takes genuinely exist.
  *
  * `recorded_ms` never takes the exclusion: it measures work that was actually
  * done rather than progress against a denominator — the same reasoning that
@@ -1433,6 +2064,34 @@ const PORTFOLIO_UNIT_COLUMNS = `
  * until someone opts out) that CTE is empty and the join costs nothing. The
  * previous shape of this query, three correlated subqueries over ~300k rows,
  * is what caused the 15s dashboard timeout; this must not walk back into it.
+ *
+ * It did walk back into it once (2026-10-05), and both halves of how are now
+ * closed by construction rather than left to the planner:
+ *
+ *   * "Costs nothing" was only true while Postgres happened to hash the
+ *     excluding projects first and skip `cells` on finding none. `cells` was
+ *     joined TO `policy`, so nothing required that order, and one more
+ *     predicate on the join (AQU-1626's counted-files probe) flipped it to a
+ *     merge join that read all of `cells` — 2.2M pages — before discovering
+ *     there was nothing to match. `structural_cells` therefore names its
+ *     projects up front, as an array the executor has in hand before it
+ *     touches `cells`: empty array, no read; otherwise an index lookup per
+ *     excluding project.
+ *   * The counted-files rule is applied against `uncounted_audio_files`, one
+ *     small set built once for the page's projects, never as a probe per audio
+ *     row (see `inCountedFileSetSql`). That probe ran ~140k times here. It is
+ *     the AUDIO form of the set (AQU-1566), which keeps a dubbing project's
+ *     cue sheet: both of its readers here describe recordings.
+ *
+ * Measured on the dev database for an 8-org, 433-project caller, same rows
+ * either way: 6-9s warm and 74s cold before, 0.7s after.
+ *
+ * What this does NOT make free is a scope where many projects really do
+ * exclude headings. The array bounds the read to those projects' source cells
+ * (about 1.3s per million cells; 5s with a 198-project org simulated as opted
+ * out), which beats reading the whole table but is not nothing. If orgs start
+ * opting out at that scale the answer is a partial index on structural source
+ * cells, not another join shape.
  */
 const portfolioCtes = (orgPredicate: string) => `
      WITH policy AS (
@@ -1445,18 +2104,30 @@ const portfolioCtes = (orgPredicate: string) => `
               -- decoration: the column is TEXT off a jsonb ->>, so a project
               -- that ever stored a non-integer would abort the whole portfolio
               -- query with a cast error rather than just reading wrong.
-              GREATEST(1, LEAST(15, COALESCE(
-                CASE WHEN ps.validation_count_audio ~ '^[0-9]+$'
-                     THEN ps.validation_count_audio::integer END, 1))) AS audio_threshold
+              -- AQU-1771: project → org → 1.
+              ${effectiveThresholdSql("ps.validation_count_audio", "os.validation_count_audio")} AS audio_threshold
          FROM projects p
          LEFT JOIN project_settings ps ON ps.project_id = p.id
          LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.${orgPredicate}
-     ), structural_cells AS (
+     ), ${uncountedAudioFilesCteSql('SELECT project_id FROM policy')},
+     structural_cells AS (
+       -- AQU-1626: scoped to counted files, because this set is a SUBTRACTOR
+       -- and has to describe the same files the totals it is taken off do. A
+       -- heading inside a deleted file is no longer in the numerator, so
+       -- subtracting it would push a project's count below its real one.
+       -- AQU-1566: its only reader is au_cells below, so it takes the AUDIO
+       -- form of the rule, the one au_cells uses: a dubbing project's cue
+       -- sheet stays in, as it does there.
+       --
+       -- The project filter is an ARRAY on purpose, not a join to policy: see
+       -- the note above portfolioCtes. Do not turn it back into a join.
        SELECT DISTINCT c.project_id, c.file_id, c.cell_id
          FROM cells c
-         JOIN policy pol ON pol.project_id = c.project_id AND pol.excluded
-        WHERE c.side = 'source' AND c.type IN ('heading', 'paratext')
+        WHERE c.project_id = ANY(ARRAY(
+                SELECT pol.project_id FROM policy pol WHERE pol.excluded))
+          AND c.side = 'source' AND c.type IN ('heading', 'paratext')
+          AND ${inAudioCountedFileSetSql('c')}
      ), au_cells AS MATERIALIZED (
        -- AQU-490, level one: one row per CELL, carrying the minimum vote count
        -- across its selected dub takes. Two tracks sound together, so a cell is
@@ -1487,6 +2158,14 @@ const portfolioCtes = (orgPredicate: string) => `
           AND sc.file_id = a.file_id
           AND sc.cell_id = a.cell_id
         WHERE a.deleted = 0 AND a.selected = 1 AND a.role = 'dub'
+          -- AQU-1626: takes recorded against a deleted file are not coverage
+          -- of the work. The recorded-milliseconds sum takes the same filter:
+          -- a tombstoned file's hours are not hours the project has banked.
+          -- AQU-1566: the AUDIO form of the rule, which keeps the cue sheet. A
+          -- dubbing project records every take against its hidden audio-cues
+          -- sibling (AQU-1278), so the text rule here read every dubbed
+          -- episode as 0% recorded while its plan board showed the takes.
+          AND ${inAudioCountedFileSetSql('a')}
           AND a.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})
         GROUP BY a.project_id, a.file_id, a.cell_id
      ), au AS MATERIALIZED (
@@ -1503,6 +2182,40 @@ const portfolioCtes = (orgPredicate: string) => `
          FROM au_cells c
          JOIN policy pol ON pol.project_id = c.project_id
         GROUP BY c.project_id
+     ), af AS MATERIALIZED (
+       -- AQU-1954: the files that carry a recording, one row each, so the
+       -- audio denominator can leave out the files nobody records (see
+       -- PORTFOLIO_FILE_EXPECTS_AUDIO). Read off au_cells, so a take counts
+       -- here exactly when it counts in the numerator. A dubbing file's takes
+       -- sit on its cue sheet, which the cue join below already speaks for.
+       SELECT DISTINCT c.project_id, c.file_id FROM au_cells c
+     ), ra AS MATERIALIZED (
+       -- AQU-1954: whether the project's language records audio, from the
+       -- lane rows' switch. Only a one-language project's row reads it: with
+       -- two or more, mapPortfolioRow sums the languages' own audio instead.
+       SELECT l.project_id, BOOL_OR(l.records_audio) AS records_audio
+         FROM lanes l
+         JOIN policy pol ON pol.project_id = l.project_id
+        WHERE l.role = 'target'
+        GROUP BY l.project_id
+     ), cue AS MATERIALIZED (
+       -- AQU-1566: each counted file's cue sheet, for the AUDIO denominator.
+       -- A dubbing project records against its hidden audio-cues sibling, not
+       -- its subtitles, and the two do not share a cell count (646 subtitle
+       -- rows against 548 cues on The Chosen's first episode). The text total
+       -- above no longer carries the sheet, so dividing the sheet's takes by
+       -- it read a part-recorded episode as 100% recorded. This is the plan
+       -- board's own rule (readPlanUnitsSql): measure the recording against
+       -- the newest live sheet where there is one, else against the file
+       -- itself. DISTINCT ON keeps the join 1:1 with its file, so the SUMs
+       -- beside it do not fan out. Scoped through policy, which is already
+       -- bounded to the org set, so it needs no binds of its own.
+       SELECT DISTINCT ON (s.project_id, s.anchor_file_id)
+              s.project_id, s.anchor_file_id, s.cell_count, s.structural_cell_count
+         FROM files s
+         JOIN policy pol ON pol.project_id = s.project_id
+        WHERE s.role = 'audio-cues' AND s.deleted_at IS NULL AND s.anchor_file_id IS NOT NULL
+        ORDER BY s.project_id, s.anchor_file_id, s.id DESC
      ), pu AS MATERIALIZED (
        ${planUnitCountsSql(`f.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})`)}
      )`
@@ -1511,6 +2224,271 @@ export type PortfolioPageOpts = {
   q: string
   limit: number
   cursor: { id: string; name: string } | null
+}
+
+/**
+ * Machine-drafted target cells per lane, for the projects a below-Maintainer
+ * caller is about to see. Skipped entirely when the wall does not restrict
+ * anyone on the page. Structural cells drop out only when the project excludes
+ * them, matching the portfolio's own text totals.
+ *
+ * This is the one statement on the dashboard that has to look at `cells`
+ * itself: `files.ai_drafted_count` is per file, and the wall needs the count
+ * per lane. Two things keep that from being a read of the whole table, which
+ * is what it was (2.28M pages on dev: 4.4s warm, 75s cold, for a caller with
+ * 155 projects below the wall).
+ *
+ *   * `cells` is driven by an ARRAY of the page's project ids, not joined to
+ *     `pol` and left to the planner. Joined, Postgres used an index for 52
+ *     projects and a parallel seq scan of `cells` for 155, and then threw
+ *     away every row but 132. An array is in the executor's hands
+ *     before the scan starts and is costed as a handful of lookups, so the
+ *     plan cannot flip back however long the list gets. Same reasoning as
+ *     `structural_cells` above; do not turn it back into a join.
+ *   * `idx_cells_ai_drafted` (migration 0137) holds only the rows this
+ *     statement wants: target cells still carrying an untouched machine
+ *     draft, keyed by project. With it the read is those rows and nothing
+ *     else. Without it the array still bounds the read to the listed
+ *     projects' target cells through `idx_cells_lane_last_edit`, which for
+ *     the same caller is 255k pages instead of 2.28M: 1.0s when they are
+ *     cached and 23-29s when they are not. So the statement is correct
+ *     either side of the migration, but it is the index that makes it fast.
+ *
+ * The counted-files rule takes its set form for the reason given on
+ * `inCountedFileSetSql`: this filters rows across many projects, and the
+ * per-row probe reads a project's whole file list each time it runs.
+ */
+async function aiDraftedByLane(
+  env: Env,
+  projectIds: readonly string[],
+): Promise<Map<string, Map<string, number>>> {
+  const byProject = new Map<string, Map<string, number>>()
+  if (projectIds.length === 0) return byProject
+  const placeholders = projectIds.map(() => "?").join(", ")
+  const { results } = await env.AQUILLA_PG.prepare(
+    `WITH pol AS (
+       SELECT p.id AS project_id,
+              COALESCE(ps.count_structural, os.count_structural, 'true') = 'false' AS excluded
+         FROM projects p
+         LEFT JOIN project_settings ps ON ps.project_id = p.id
+         LEFT JOIN org_settings os ON os.org_id = p.org_id
+        WHERE p.id IN (${placeholders})
+     ), ${uncountedFilesCteSql('SELECT project_id FROM pol')}
+     SELECT c.project_id AS project_id,
+            COALESCE(l.legacy_tag, '') AS target_lang,
+            COUNT(*)::int AS n
+       FROM cells c
+       JOIN public.lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+       JOIN pol ON pol.project_id = c.project_id
+      WHERE c.project_id = ANY(ARRAY(SELECT project_id FROM pol))
+        -- These two literals are idx_cells_ai_drafted's predicate. Postgres
+        -- uses a partial index only when the query implies its WHERE, so
+        -- they have to stay literals and stay in step with the index.
+        AND c.side = 'target' AND c.ai_drafted = 1
+        -- AQU-1626: the client divides this by the portfolio's total_cells, so
+        -- it has to be scoped to the same files that total now counts. A
+        -- caption track machine-drafted on import would otherwise push the
+        -- share past 100% against a denominator that no longer includes it.
+        AND ${inCountedFileSetSql('c')}
+        AND NOT (
+          pol.excluded AND EXISTS (
+            SELECT 1 FROM cells src
+             WHERE src.project_id = c.project_id
+               AND src.file_id = c.file_id
+               AND src.cell_id = c.cell_id
+               AND src.side = 'source'
+               AND src.type IN ('heading', 'paratext')
+          )
+        )
+      GROUP BY c.project_id, l.id, COALESCE(l.legacy_tag, '')`,
+  ).bind(...projectIds).all<{ project_id: string; target_lang: string; n: number }>()
+  for (const row of results ?? []) {
+    let lanes = byProject.get(row.project_id)
+    if (!lanes) {
+      lanes = new Map()
+      byProject.set(row.project_id, lanes)
+    }
+    lanes.set(row.target_lang ?? "", Number(row.n) || 0)
+  }
+  return byProject
+}
+
+/**
+ * Per-project text the caller may see. Null when the wall is off, the caller
+ * is a platform admin, or every project on the page is already unrestricted
+ * (org role at maintainer or above, creator, or a resolved project role at
+ * maintainer or above). A missing map entry means that project
+ * stays on the SQL totals.
+ */
+async function visiblePortfolioText(
+  env: Env,
+  viewer: { userId: number; isAdmin: boolean },
+  rows: PortfolioDbRow[],
+  lanesByProject: Map<string, PortfolioLane[]>,
+): Promise<Map<string, VisiblePortfolioText> | null> {
+  if (viewer.isAdmin || !laneReadWallEnabled(env.LANE_READ_WALL) || rows.length === 0) return null
+
+  const orgIds = [...new Set(rows.map((row) => row.org_id))]
+  const orgPlaceholders = orgIds.map(() => "?").join(", ")
+  const orgRoles = await env.AQUILLA_PG.prepare(
+    `SELECT org_id, role_level FROM org_members
+      WHERE user_id = ? AND org_id IN (${orgPlaceholders})`,
+  ).bind(viewer.userId, ...orgIds).all<{ org_id: number; role_level: number }>()
+  const orgLevel = new Map(
+    (orgRoles.results ?? []).map((row) => [Number(row.org_id), Number(row.role_level)]),
+  )
+
+  // Role resolution reads user.id and user.email. Platform admins are already
+  // handled by viewer.isAdmin, so an empty email cannot match the allowlist
+  // and widen this caller.
+  const user = { id: viewer.userId, email: "" } as AuthUser
+  // One set-based resolve for the page. This used to be resolveProjectRole per
+  // row: four statements a project, seven under ACCESS_GRANTS_RESOLVER=shadow,
+  // which came to 1,085 for one dev caller's 155 projects below the wall.
+  const unsettled = rows.filter(
+    (row) =>
+      (orgLevel.get(Number(row.org_id)) ?? 0) < READ_WALL_MAINTAINER &&
+      Number(row.created_by) !== viewer.userId,
+  )
+  const roles = await resolveProjectRoles(env, user, unsettled.map((row) => row.id))
+  const restricted = unsettled.filter((row) => {
+    const role = roles.get(row.id)
+    return !(role != null && role.level >= READ_WALL_MAINTAINER)
+  })
+  if (restricted.length === 0) return null
+
+  const projectIds = restricted.map((row) => row.id)
+  const [identities, grants, aiCounts] = await Promise.all([
+    loadTargetLaneIdentitiesForProjects(env.AQUILLA_PG, projectIds),
+    loadLaneGrantsForProjects(env.AQUILLA_PG, viewer.userId, projectIds),
+    aiDraftedByLane(env, projectIds),
+  ])
+
+  const overrides = new Map<string, VisiblePortfolioText>()
+  for (const row of restricted) {
+    const role = roles.get(row.id)
+    const visible = visibleLaneTags({
+      enabled: true,
+      role: role?.level ?? 0,
+      laneGrants: grants.get(row.id) ?? [],
+    })
+    const tags = legacyTagsForVisibleLanes(identities.get(row.id) ?? [], visible) ?? new Set<string>()
+    const all = lanesByProject.get(row.id) ?? []
+    const text = portfolioTextFromVisibleLanes(
+      all.filter((lane) => lane.role !== "source"),
+      tags,
+    )
+    let aiDraftedCells = 0
+    for (const [lane, count] of aiCounts.get(row.id) ?? []) {
+      if (tags.has(lane)) aiDraftedCells += count
+    }
+    overrides.set(row.id, {
+      lanes: [...(text?.lanes ?? []), ...all.filter((lane) => lane.role === "source")],
+      totalCells: text?.totalCells ?? 0,
+      filledCells: text?.filledCells ?? 0,
+      validatedCells: text?.validatedCells ?? 0,
+      lastEditAt: text?.lastEditAt ?? null,
+      aiDraftedCells,
+    })
+  }
+  return overrides
+}
+
+/**
+ * AQU-1515: how many active target lanes this caller may see.
+ *
+ * Same population billing counts (`countTargetLanesByOrg`): unarchived target
+ * lanes on projects that are not archived and not paused. Same decision as
+ * `visiblePortfolioText` about which of those lanes the caller may see: a
+ * project they created, or where their project role is maintainer or above,
+ * contributes every active lane; otherwise only lanes whose legacy tag the
+ * read wall would show. Projects they cannot open contribute nothing.
+ *
+ * The select list is ids and tags. Lane names are not read, so fixing the
+ * number cannot put a hidden name on the response.
+ */
+export async function countVisibleActiveLanguages(
+  env: Env,
+  orgId: number,
+  userId: number,
+): Promise<number> {
+  const { results } = await env.AQUILLA_PG.prepare(
+    `SELECT l.id AS lane_id, p.id AS project_id, p.created_by AS created_by,
+            l.legacy_tag AS legacy_tag, l.archived_at AS archived_at
+       FROM lanes l
+       JOIN projects p ON p.id = l.project_id
+      WHERE p.org_id = ?
+        AND p.archived_at IS NULL
+        AND COALESCE(p.is_active, TRUE)
+        AND l.role = 'target'
+        AND ${PORTFOLIO_VISIBILITY_PREDICATE}`,
+  ).bind(orgId, 0, userId, userId, userId, userId).all<{
+    lane_id: string
+    project_id: string
+    created_by: number | string | null
+    legacy_tag: string | null
+    archived_at: string | null
+  }>()
+
+  const byProject = new Map<string, {
+    createdBy: number
+    lanes: { id: string; legacyTag: string | null; archivedAt: string | null }[]
+  }>()
+  for (const row of results ?? []) {
+    let entry = byProject.get(row.project_id)
+    if (!entry) {
+      entry = { createdBy: Number(row.created_by), lanes: [] }
+      byProject.set(row.project_id, entry)
+    }
+    entry.lanes.push({ id: row.lane_id, legacyTag: row.legacy_tag, archivedAt: row.archived_at })
+  }
+  if (byProject.size === 0) return 0
+
+  const activeCount = (lanes: { archivedAt: string | null }[]) =>
+    lanes.reduce((n, lane) => n + (lane.archivedAt == null || lane.archivedAt === "" ? 1 : 0), 0)
+
+  // Same stand-in as visiblePortfolioText: an empty email cannot match the
+  // platform-admin allowlist and widen this caller. Admins never reach here.
+  const user = { id: userId, email: "" } as AuthUser
+  const unsettled: string[] = []
+  let count = 0
+  for (const [projectId, entry] of byProject) {
+    if (entry.createdBy === userId) count += activeCount(entry.lanes)
+    else unsettled.push(projectId)
+  }
+  if (unsettled.length === 0) return count
+
+  const roles = await resolveProjectRoles(env, user, unsettled)
+  const restricted: string[] = []
+  for (const projectId of unsettled) {
+    const role = roles.get(projectId)
+    if (role != null && role.level >= READ_WALL_MAINTAINER) count += activeCount(byProject.get(projectId)!.lanes)
+    else restricted.push(projectId)
+  }
+  if (restricted.length === 0) return count
+
+  const grants = await loadLaneGrantsForProjects(env.AQUILLA_PG, userId, restricted)
+  for (const projectId of restricted) {
+    const lanes = byProject.get(projectId)!.lanes
+    const visible = visibleLaneTags({
+      enabled: true,
+      role: roles.get(projectId)?.level ?? 0,
+      laneGrants: grants.get(projectId) ?? [],
+    })
+    const tags = legacyTagsForVisibleLanes(
+      lanes.map((lane) => ({ id: lane.id, name: null, legacyTag: lane.legacyTag })),
+      visible,
+    )
+    if (tags === null) {
+      count += activeCount(lanes)
+      continue
+    }
+    for (const lane of lanes) {
+      if (lane.archivedAt != null && lane.archivedAt !== "") continue
+      if (tags.has(lane.legacyTag ?? "")) count += 1
+    }
+  }
+  return count
 }
 
 /**
@@ -1545,10 +2523,10 @@ export async function listOrgPortfolioPage(
   if (page) extraBinds.push(page.limit + 1)
 
   // Perf (dashboard 15s timeout fix):
-  //  - The AQU-523 language pair reads the STORED generated columns on
-  //    project_settings (migration 0054) — never (settings::jsonb)->>'…'
-  //    inline: settings blobs run to ~6 MB and the inline extraction
-  //    re-parsed that JSON on every file-fan-out row (~100x per project).
+  //  - Languages come from lane rows (AQU-1595), not the generated
+  //    source_language / target_language columns and not the settings blob.
+  //    Parsing ~6 MB of JSON per file-fan-out row is what timed this
+  //    dashboard out.
   //  - au: the previous 3 correlated cell_audio subqueries re-scanned and
   //    re-sorted cell_audio (~300k rows) per project; one MATERIALIZED
   //    grouped pass replaces them. It joins 1:1 on project_id, so MAX()
@@ -1560,8 +2538,7 @@ export async function listOrgPortfolioPage(
     `${portfolioCtes(`org_id IN (${placeholders})`)}
      SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,${PORTFOLIO_CELL_COLUMNS}
             MAX(f.last_edit_at)                     AS last_edit_at,
-            MAX(ps.source_language)                 AS source_language,
-            MAX(ps.target_language)                 AS target_language,
+            MAX(p.created_by)                       AS created_by,
             COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
             COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
             COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms,${PORTFOLIO_UNIT_COLUMNS}
@@ -1587,13 +2564,25 @@ export async function listOrgPortfolioPage(
   const hasMore = page != null && list.length > page.limit
   const pageRows = hasMore ? list.slice(0, page.limit) : list
   const last = pageRows[pageRows.length - 1]
-  const lanesByProject = await fetchPortfolioLanes(
+  const { lanes: lanesByProject, sourceActivity } = await fetchPortfolioLanes(
     env,
     uniqueOrgIds,
     page ? pageRows.map((row) => row.id) : undefined,
   )
+  // AQU-1421: below Maintainer, with the read wall on, lane names and the text
+  // totals that sum them come from the granted lanes only. Audio stays (a take
+  // is keyed by cell, not by lane). Plan-unit counts stay (a unit is a file
+  // section, not a lane). Wall off is the query as written.
+  const visibleText = await visiblePortfolioText(env, viewer, pageRows, lanesByProject)
+  // AQU-2105: the list marks LangQuest-linked projects and says whether their
+  // sync is healthy. One small read beside the rollup, not a join into it.
+  const langquest = await langquestStateByProject(env, pageRows.map((row) => row.id), now)
   return {
-    projects: pageRows.map((row) => ({ ...mapPortfolioRow(row, lanesByProject), orgId: row.org_id })),
+    projects: pageRows.map((row) => ({
+      ...mapPortfolioRow(row, lanesByProject, visibleText?.get(row.id), sourceActivity.get(row.id) ?? null),
+      langquest: langquest.get(row.id) ?? null,
+      orgId: row.org_id,
+    })),
     nextCursor: hasMore && last ? encodeProjectDirectoryCursor(last.id, last.name) : null,
   }
 }
@@ -1629,6 +2618,10 @@ export async function getOrgDeletedFiles(
        JOIN projects p ON p.id = f.project_id
       WHERE p.org_id = ?
         AND f.deleted_at IS NOT NULL
+        -- AQU-1626: a hidden companion file is machinery, so deleting its
+        -- parent must not put a "Cues" row in Recently deleted for a person to
+        -- puzzle over (or restore on its own).
+        AND ${notHiddenFileSql('f')}
         AND ${PORTFOLIO_VISIBILITY_PREDICATE}
       ORDER BY f.deleted_at DESC NULLS LAST, LOWER(f.name)`,
   ).bind(
@@ -1664,6 +2657,29 @@ export async function getOrgPortfolios(
 ): Promise<OrgPortfolioRow[]> {
   const { projects } = await listOrgPortfolioPage(env, orgIds, viewer, null, now)
   return projects
+}
+
+/**
+ * Overview totals for the same visible projects `getOrgPortfolios` would
+ * return. The client dashboard no longer needs that full payload to paint
+ * translated/validated averages and stalled, overdue, and attention counts.
+ *
+ * This does not change the portfolio SQL. Query-plan work on that rollup is
+ * separate (the cells-scan follow-up). Values stay the unweighted per-project
+ * mean, under the same visibility predicate and lane-activity rules.
+ */
+export async function summarizeVisiblePortfolios(
+  env: Env,
+  orgIds: number[],
+  viewer: { userId: number; isAdmin: boolean },
+  now: number = Date.now(),
+): Promise<{ totals: PortfolioAggregate; orgs: OrgPortfolioAggregate[] }> {
+  const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
+  if (uniqueOrgIds.length === 0) {
+    return { totals: emptyPortfolioAggregate(), orgs: [] }
+  }
+  const { projects } = await listOrgPortfolioPage(env, uniqueOrgIds, viewer, null, now)
+  return summarizePortfoliosByOrg(projects, uniqueOrgIds, now)
 }
 
 export interface ProjectAccessBreakdown {
@@ -1943,16 +2959,9 @@ export function canViewRoster(callerRoleLevel: number | null, rosterMinRole: num
 
 /**
  * True when `callerRoleLevel` meets or exceeds the org's configured
- * member-progress floor.
- *
- * SWARM-TODO(AQU-498): still unconsumed by any auth-worker route — the
- * per-member activity view AQU-498 shipped reads straight from sync-worker
- * (GET /api/v1/projects/:projectId/members/:author/activity, gated by its
- * own resolveMemberProgressFloor in member-progress-floor.ts, since
- * sync-worker doesn't depend on auth-worker). If a future auth-worker route
- * needs the same floor (e.g. a member-progress summary folded into
- * /projects/:projectId/members), it should call this helper rather than
- * re-deriving the comparison.
+ * member-progress floor. The sync-worker's per-member activity read has its
+ * own copy of the floor (member-progress-floor.ts), since sync-worker does
+ * not depend on auth-worker.
  */
 export function canViewMemberProgress(callerRoleLevel: number | null, progressMinRole: number): boolean {
   if (callerRoleLevel == null) return false
@@ -2101,46 +3110,373 @@ export async function getAssignmentMinRoleForProject(
  * subject to `rosterViewMinRole` exactly as before, so AQU-485's
  * safe-by-default promise for contributors/reviewers/viewers is untouched.
  *
+ * The carve-out stops at the default roster floor (MAINTAINER). Raising the
+ * roster above that — "only owners can see this" — is an explicit choice that
+ * the assignment floor must not punch through. Otherwise the badge saves
+ * owner-only, then a maintainer still reads the project roster because the
+ * assignment default (PROJECT_LEAD) pulls the effective floor back down.
+ *
  * Scoped to the per-project roster (the picker's source). The org-wide
  * members list keeps the plain `rosterViewMinRole` gate — assigning work is a
  * project-scoped authority and confers no org-wide roster visibility.
  */
-export async function getProjectRosterViewMinRole(env: Env, orgId: number): Promise<number> {
-  const [rosterFloor, assignmentFloor] = await Promise.all([
+export async function getProjectRosterViewMinRole(
+  env: Env,
+  orgId: number,
+  projectId?: string,
+): Promise<number> {
+  const [rosterFloor, assignmentFloor, own] = await Promise.all([
     getRosterViewMinRole(env, orgId),
     getAssignmentMinRole(env, orgId),
+    projectId != null ? loadProjectVisibilityOverride(env.AQUILLA_PG, projectId) : null,
   ])
-  return Math.min(rosterFloor, assignmentFloor)
+  return resolveProjectRosterListFloor(rosterFloor, assignmentFloor, own?.rosterViewMinRole)
+}
+
+/**
+ * The project member-list floor from its parts: the org's roster floor with
+ * the assigner carve-out above, raised by the project's own stricter value.
+ *
+ * AQU-1771: the carve-out is the ORG's (its assignment floor reading its
+ * roster), so it never lowers a project's own stricter value — that would let
+ * a project lead read a roster the project closed to them. A project value at
+ * or below the org's is inert and leaves the carve-out alone.
+ */
+function resolveProjectRosterListFloor(
+  rosterFloor: number,
+  assignmentFloor: number,
+  ownRaw: unknown,
+): number {
+  const orgResolved = rosterFloor > DEFAULT_ROSTER_VIEW_MIN_ROLE
+    ? rosterFloor
+    : Math.min(rosterFloor, assignmentFloor)
+  return Math.max(orgResolved, stricterProjectFloor(rosterFloor, ownRaw) ?? 0)
+}
+
+/**
+ * AQU-1771: `getProjectRosterViewMinRole` for several projects of one org in
+ * one read each — for the org surfaces that list many projects' members at
+ * once (the members matrix).
+ */
+export async function getProjectRosterListFloors(
+  env: Env,
+  orgId: number,
+  projectIds: readonly string[],
+): Promise<Map<string, number>> {
+  const [rosterFloor, assignmentFloor, overrides] = await Promise.all([
+    getRosterViewMinRole(env, orgId),
+    getAssignmentMinRole(env, orgId),
+    loadProjectVisibilityOverrides(env.AQUILLA_PG, projectIds),
+  ])
+  return new Map(projectIds.map((id) => [
+    id,
+    resolveProjectRosterListFloor(rosterFloor, assignmentFloor, overrides.get(id)?.rosterViewMinRole),
+  ]))
+}
+
+/**
+ * AQU-1771: the floor on a project's own member list (GET …/members and the
+ * mention candidates): `getProjectRosterViewMinRole` for a project in an org.
+ * A project with no org has no org policy and its list was never gated, so
+ * only its own value can gate it. Null = ungated.
+ */
+export async function getProjectRosterListFloor(
+  env: Env,
+  projectId: string,
+  orgId: number | null,
+): Promise<number | null> {
+  if (orgId != null) return getProjectRosterViewMinRole(env, orgId, projectId)
+  return (await loadProjectVisibilityOverride(env.AQUILLA_PG, projectId)).rosterViewMinRole
+}
+
+/**
+ * AQU-1771: the roster and member-progress floors that apply to ONE project:
+ * the org's (AQU-485), raised by the project's own stricter values. A project
+ * can make either floor stricter and never looser — a stored value at or below
+ * the org's has no effect. A project with no org has no org policy to read, so
+ * it starts from the defaults, the same reading /assignments/unit has always
+ * taken for one.
+ */
+export interface VisibilityFloors {
+  rosterViewMinRole: number
+  memberProgressViewMinRole: number
+}
+
+export interface ProjectVisibilityFloors extends VisibilityFloors {
+  /** The org's floors, defaults applied. */
+  org: VisibilityFloors
+  /** The project's own values where STRICTER than the org's, else null. */
+  project: { rosterViewMinRole: number | null; memberProgressViewMinRole: number | null }
+}
+
+/** The org's two floors, defaults applied; the defaults for no org. */
+export async function getOrgVisibilityFloors(env: Env, orgId: number | null): Promise<VisibilityFloors> {
+  if (orgId == null) {
+    return {
+      rosterViewMinRole: DEFAULT_ROSTER_VIEW_MIN_ROLE,
+      memberProgressViewMinRole: DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE,
+    }
+  }
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  return {
+    rosterViewMinRole: extractRoleFloor(settings, "rosterViewMinRole", DEFAULT_ROSTER_VIEW_MIN_ROLE),
+    memberProgressViewMinRole: extractRoleFloor(
+      settings, "memberProgressViewMinRole", DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE,
+    ),
+  }
+}
+
+/** Combine the org's floors with one project's own values. */
+export function combineVisibilityFloors(
+  org: VisibilityFloors,
+  own: ProjectVisibilityOverrides,
+): ProjectVisibilityFloors {
+  const project = {
+    rosterViewMinRole: stricterProjectFloor(org.rosterViewMinRole, own.rosterViewMinRole),
+    memberProgressViewMinRole: stricterProjectFloor(
+      org.memberProgressViewMinRole, own.memberProgressViewMinRole,
+    ),
+  }
+  return {
+    org,
+    project,
+    rosterViewMinRole: project.rosterViewMinRole ?? org.rosterViewMinRole,
+    memberProgressViewMinRole: project.memberProgressViewMinRole ?? org.memberProgressViewMinRole,
+  }
+}
+
+export async function getProjectVisibilityFloors(
+  env: Env,
+  projectId: string,
+  orgId: number | null,
+): Promise<ProjectVisibilityFloors> {
+  const [org, own] = await Promise.all([
+    getOrgVisibilityFloors(env, orgId),
+    loadProjectVisibilityOverride(env.AQUILLA_PG, projectId),
+  ])
+  return combineVisibilityFloors(org, own)
+}
+
+/**
+ * AQU-1938: at most this many project names ride along with one of the org
+ * settings pages' "N projects …" counts. The count itself stays exact; the
+ * page ends a capped list with "and N more".
+ */
+export const OVERRIDE_PROJECT_LIST_CAP = 50
+
+/**
+ * AQU-1938: the projects behind one "N projects set their own …" / "N projects
+ * are stricter" count on the org settings pages.
+ */
+export interface OverrideProjectList {
+  /** Every live project in the org that counts — the same number as the bare count. */
+  total: number
+  /**
+   * The ones the caller may see (the AQU-745 rule), by name, at most
+   * OVERRIDE_PROJECT_LIST_CAP. Shorter than `total` when the list was capped
+   * or when some of those projects are not the caller's to see.
+   */
+  projects: Array<{ id: string; name: string }>
+}
+
+/** Who is asking, for projectNameVisibleSql. */
+export interface ProjectNameViewer {
+  userId: number
+  isAdmin: boolean
+}
+
+/**
+ * AQU-1938: the AQU-745 rule the org dashboard uses (PORTFOLIO_VISIBILITY_PREDICATE)
+ * as a condition over `projects p`, with its binds in order. The org settings
+ * counts are open to every org member, but a project's NAME is not: below
+ * Maintainer a member sees only the projects they created or were given. So
+ * the names that ride along with a count go through the same rule, and the
+ * rest are left to "and N more".
+ */
+export function projectNameVisibleSql(viewer: ProjectNameViewer): { sql: string; binds: unknown[] } {
+  return {
+    sql: PORTFOLIO_VISIBILITY_PREDICATE,
+    binds: [viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId],
+  }
+}
+
+/**
+ * AQU-1771: how many of the org's live projects make each floor stricter than
+ * the org does — the "N projects are stricter" line under the org's setting.
+ * AQU-1938: and which ones, so the line can name them.
+ */
+export async function listStricterVisibilityProjects(
+  env: Env,
+  orgId: number,
+  viewer: ProjectNameViewer,
+): Promise<Record<VisibilityFloorKey, OverrideProjectList>> {
+  const [org, rows] = await Promise.all([
+    getOrgVisibilityFloors(env, orgId),
+    loadOrgProjectVisibilityOverrides(env.AQUILLA_PG, orgId, projectNameVisibleSql(viewer)),
+  ])
+  const lists: Record<VisibilityFloorKey, OverrideProjectList> = {
+    rosterViewMinRole: { total: 0, projects: [] },
+    memberProgressViewMinRole: { total: 0, projects: [] },
+  }
+  // Rows arrive in name order, so each list is too.
+  for (const row of rows) {
+    for (const key of VISIBILITY_FLOOR_KEYS) {
+      if (stricterProjectFloor(org[key], row[key]) == null) continue
+      const list = lists[key]
+      list.total += 1
+      if (row.nameVisible && list.projects.length < OVERRIDE_PROJECT_LIST_CAP) {
+        list.projects.push({ id: row.projectId, name: row.name })
+      }
+    }
+  }
+  return lists
+}
+
+/**
+ * AQU-2306: how many of the org's live projects require MORE than the org does
+ * to import a file — the "N projects are stricter than this" line under "Who
+ * can import files" — and which ones, so the line can name them.
+ *
+ * Deliberately the same shape and the same rules as the two visibility floors
+ * above, because the Security page shows all three the same way: any org
+ * member may read the count, only the names the caller may already see come
+ * back, and the total still covers the rest. It reads the org's floor fresh
+ * rather than taking it from the caller, so a project that was stricter stops
+ * counting the moment the ORG rises past it — with no write to the project.
+ */
+export async function listStricterImportProjects(
+  env: Env,
+  orgId: number,
+  viewer: ProjectNameViewer,
+): Promise<OverrideProjectList> {
+  const [settings, rows] = await Promise.all([
+    loadOrgSettingsBlob(env, orgId),
+    loadOrgProjectImportFloors(env.AQUILLA_PG, orgId, projectNameVisibleSql(viewer)),
+  ])
+  const orgFloor = extractRoleFloor(settings, "importMinRole", DEFAULT_IMPORT_MIN_ROLE)
+  const list: OverrideProjectList = { total: 0, projects: [] }
+  // Rows arrive in name order, so the list is too.
+  for (const row of rows) {
+    if (stricterProjectImportFloor(orgFloor, row.importMinRole) == null) continue
+    list.total += 1
+    if (row.nameVisible && list.projects.length < OVERRIDE_PROJECT_LIST_CAP) {
+      list.projects.push({ id: row.projectId, name: row.name })
+    }
+  }
+  return list
+}
+
+/**
+ * AQU-1771: per-member progress is shown with the member's NAME, so reading it
+ * needs both floors — the stricter one wins. True when `roleLevel` meets both.
+ */
+export function canViewNamedProgress(
+  roleLevel: number | null,
+  floors: VisibilityFloors,
+): boolean {
+  return canViewMemberProgress(roleLevel, floors.memberProgressViewMinRole)
+    && canViewRoster(roleLevel, floors.rosterViewMinRole)
+}
+
+/**
+ * AQU-1771: the org values a project's own surfaces need, carried on the
+ * project's settings response. A member who is in the project but not in its
+ * org cannot read the org's settings (GET /orgs/:id/settings answers 403), so
+ * without these the browser fell back to built-in defaults: the wrong
+ * visibility floors, the wrong assignment authority, and repetition copying
+ * switched ON in a project whose org had turned it off.
+ */
+export interface ProjectOrgPolicy {
+  /** The org's floors (defaults applied). The project's own are in its settings. */
+  rosterViewMinRole: number
+  memberProgressViewMinRole: number
+  allowSelfAssignment: boolean
+  allowScopedLaneAssignment: boolean
+  assignmentMinRole: number
+  autoPropagateRepetitions: boolean
+  /** Null when the org set none (the client applies no export gate then). */
+  exportMinRole: number | null
+  /**
+   * AQU-2304: the org's import floor (`file.create`), defaults applied. Unlike
+   * `exportMinRole` this is never null — the floor always has a value, and the
+   * default IS the behaviour (PROJECT_LEAD), so a project surface can gate on
+   * it without first asking whether the org expressed a preference.
+   */
+  importMinRole: number
+}
+
+export async function getProjectOrgPolicy(
+  env: Env,
+  projectId: string,
+  /** The project's own settings blob, when the caller already holds it. */
+  projectSettings?: Readonly<Record<string, unknown>>,
+): Promise<{ orgPolicy: ProjectOrgPolicy; visibility: ProjectVisibilityFloors }> {
+  const project = await env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  const orgId = project?.org_id ?? null
+  const [settings, own] = await Promise.all([
+    orgId != null ? loadOrgSettingsBlob(env, orgId) : Promise.resolve({} as Record<string, unknown>),
+    projectSettings
+      ? {
+          rosterViewMinRole: parseProjectVisibilityFloor(projectSettings.rosterViewMinRole),
+          memberProgressViewMinRole: parseProjectVisibilityFloor(projectSettings.memberProgressViewMinRole),
+        }
+      : loadProjectVisibilityOverride(env.AQUILLA_PG, projectId),
+  ])
+  const org: VisibilityFloors = {
+    rosterViewMinRole: extractRoleFloor(settings, "rosterViewMinRole", DEFAULT_ROSTER_VIEW_MIN_ROLE),
+    memberProgressViewMinRole: extractRoleFloor(
+      settings, "memberProgressViewMinRole", DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE,
+    ),
+  }
+  const exportRaw = settings.exportMinRole
+  return {
+    orgPolicy: {
+      ...org,
+      allowSelfAssignment: settings.allowSelfAssignment === true,
+      allowScopedLaneAssignment: settings.allowScopedLaneAssignment === true,
+      assignmentMinRole: extractRoleFloor(settings, "assignmentMinRole", DEFAULT_ASSIGNMENT_MIN_ROLE),
+      // Unset is ON (AQU-1391); only an explicit false turns it off.
+      autoPropagateRepetitions: settings.autoPropagateRepetitions !== false,
+      exportMinRole:
+        typeof exportRaw === "number" && Number.isFinite(exportRaw) && exportRaw >= 100 && exportRaw <= 700
+          ? exportRaw
+          : null,
+      // AQU-2304: the import floor rides the same bundle so a project member
+      // outside the org gates on the org's real value instead of the default.
+      importMinRole: extractRoleFloor(settings, "importMinRole", DEFAULT_IMPORT_MIN_ROLE),
+    },
+    visibility: combineVisibilityFloors(org, own),
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// AQU-1086: configurable project-language edit floor
+// AQU-1086 / AQU-984: configurable project-language edit floor
 //
 // Second write-gating permission-policy key, built on exactly the same
 // org_settings plumbing as termbaseEditMinRole above. It answers "who may
-// change a project's source/target language and its extra target lanes" —
-// Project managers (project_lead 500) running day-to-day projects hit wrong
-// or reset languages and today must escalate to a Maintainer for a routine
-// correction.
+// change a project's source/target language and its extra target lanes."
 //
-// The default is MAINTAINER (600), i.e. today's behaviour byte-for-byte: an
-// org opts in by lowering the floor to PROJECT_LEAD. This is the opposite
-// choice from the termbase floor (which defaults to 500 to close a
-// pre-existing client/server divergence) and matches the read floors —
-// other partners deliberately keep languages maintainer-only.
+// The default is PROJECT_LEAD (500) when the key is absent or not a role-ladder
+// number (AQU-984). extractRoleFloor is what tells "never set" from an explicit
+// choice: a stored finite number in 100..700 is that org's choice and is kept,
+// including an explicit Maintainer (600). Only a missing or invalid key uses
+// this default.
 //
-// Scope is the language keys ONLY. Lowering this floor must never widen
-// write access to AI config, validation, health, timeline, or anything else
-// in the settings blob — enforcement is the language-scoped carve-out in
-// routes/project-settings.ts, which keys off the CHANGED keys of a write.
+// Scope is the language keys ONLY, lanes included. Changing this default must
+// never widen write access to AI config, validation, health, timeline, or
+// anything else in the settings blob — enforcement is the language-scoped
+// carve-out in routes/project-settings.ts, which keys off the CHANGED keys
+// of a write.
 // ──────────────────────────────────────────────────────────────────────────
 
 /** Default floor for editing a project's languages when the org hasn't set one. */
-export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = 600 // ROLE.MAINTAINER
+export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = 500 // ROLE.PROJECT_LEAD
 
 /**
  * Resolve the effective language-edit floor for an org (falls back to the
- * MAINTAINER default when the org hasn't configured one, or configured a
+ * PROJECT_LEAD default when the org hasn't configured one, or configured a
  * value outside the role ladder).
  */
 export async function getLanguageEditMinRole(env: Env, orgId: number): Promise<number> {
@@ -2151,7 +3487,7 @@ export async function getLanguageEditMinRole(env: Env, orgId: number): Promise<n
 /**
  * Resolve the language-edit floor that applies to a project, via its org.
  * Projects with no org (personal / not-yet-attached) fall back to the same
- * MAINTAINER default — there is no org policy to consult.
+ * PROJECT_LEAD default — there is no org policy to consult.
  */
 export async function getLanguageEditMinRoleForProject(
   env: Env,
@@ -2165,6 +3501,38 @@ export async function getLanguageEditMinRoleForProject(
   if (!project?.org_id) return DEFAULT_LANGUAGE_EDIT_MIN_ROLE
   return getLanguageEditMinRole(env, project.org_id)
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-2304: configurable import floor
+//
+// Who may bring a NEW source file into a project — `file.create`, which the
+// sync-worker's static role table floors at PROJECT_LEAD. Same org_settings
+// plumbing as the two floors above, same OWNER-only write gate, same
+// PROJECT_LEAD default, so an org that never touches the key behaves exactly
+// as it did before the key existed.
+//
+// ENFORCEMENT LIVES IN SYNC-WORKER, which owns the event log — see
+// sync-worker/src/events/import-authority.ts, which reads this key with this
+// default. auth-worker resolves it here so the floor can travel with the
+// project's settings response for client gating (getProjectOrgPolicy above),
+// exactly as the assignment floor does: a project member who is not a member
+// of the org cannot read the org's settings, so without the carried value
+// their browser would fall back to the built-in PROJECT_LEAD and offer an
+// import the server was always going to refuse.
+//
+// Scope is `file.create` ONLY. Importing a translation into an existing file
+// commits target cells and creates nothing, so it stays at Contributor; the
+// Door43 upstream panel stays hard-wired to Maintainer either way.
+// ──────────────────────────────────────────────────────────────────────────
+
+// Deliberately NO getImportMinRole[ForProject] sibling of the two resolvers
+// above: nothing in auth-worker enforces this floor, so a per-org resolver here
+// would be a fourth reader of the key with no caller. The default below is all
+// this worker needs — `getProjectOrgPolicy` resolves the value onto the
+// project's settings response, and sync-worker does the enforcing.
+
+/** Default floor for importing a new source file when the org hasn't set one. */
+export const DEFAULT_IMPORT_MIN_ROLE = 500 // ROLE.PROJECT_LEAD
 
 // ──────────────────────────────────────────────────────────────────────────
 // AQU-1002: configurable comment floors

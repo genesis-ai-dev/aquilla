@@ -6,8 +6,9 @@ import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { TableEmptyState } from "@/components/ui/empty"
-import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { UserChip } from "@/components/UserChip"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
+import { adminUserHref } from "@/lib/admin/drilldown-paths"
 import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
 
 function CopyEmailButton({ email }: { email: string }) {
@@ -33,7 +34,19 @@ function CopyEmailButton({ email }: { email: string }) {
  * a row; allowlisted emails show as Role = Platform admin. Allowlisted emails
  * with no matching account are surfaced as a callout so the list stays auditable.
  */
-export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admins: AdminAdmin[] }) {
+export function AdminPeopleSection({
+  users,
+  admins,
+  onSelectUser,
+  initialSort = "name",
+}: {
+  users: AdminUser[]
+  admins: AdminAdmin[]
+  /** Open the admin page for this person. */
+  onSelectUser?: (userId: number) => void
+  /** Starting sort: A to Z by name, or most recently active first. */
+  initialSort?: "name" | "lastActive"
+}) {
   const adminEmails = useMemo(
     () => new Set(admins.map((a) => a.email.trim().toLowerCase())),
     [admins],
@@ -44,14 +57,14 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
     () => [
       {
         id: "user",
-        accessorFn: (u) => (u.displayName ?? u.username).toLowerCase(),
+        accessorFn: (u) => u.username.toLowerCase(),
         header: ({ column }) => <DataTableColumnHeader column={column} title="User" />,
         cell: ({ row }) => {
           const u = row.original
           return (
-            <UsernameWithAvatar
+            <UserChip
+              userId={u.id}
               username={u.username}
-              label={u.displayName ? `${u.displayName} (${u.username})` : u.username}
               size="xs"
               nameClassName="font-normal"
             />
@@ -112,7 +125,7 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
               {orphanAdmins.length} allowlisted {orphanAdmins.length === 1 ? "email has" : "emails have"} no account
             </span>{" "}
             ({orphanAdmins.map((a) => a.email).join(", ")}) — a typo in{" "}
-            <code className="text-xs">ADMIN_EMAILS</code>, or the person hasn't registered yet.
+            <code className="text-xs">platform_admins</code>, or the person hasn't registered yet.
           </p>
         </div>
       )}
@@ -121,7 +134,15 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
         columns={columns}
         data={users}
         getRowId={(u) => String(u.id)}
-        initialSorting={[{ id: "user", desc: false }]}
+        // Remount when the starting sort changes (a stat tile opened this tab).
+        key={initialSort}
+        onRowClick={onSelectUser ? (u) => onSelectUser(u.id) : undefined}
+        rowLink={onSelectUser ? { columnId: "user", to: (u) => adminUserHref(u.id) } : undefined}
+        initialSorting={
+          initialSort === "lastActive"
+            ? [{ id: "lastActive", desc: true }]
+            : [{ id: "user", desc: false }]
+        }
         searchPlaceholder="Search people…"
         globalFilterFn={(row, _columnId, filterValue) => {
           const q = String(filterValue).trim().toLowerCase()

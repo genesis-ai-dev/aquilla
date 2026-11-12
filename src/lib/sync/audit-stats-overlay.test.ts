@@ -125,6 +125,7 @@ const baseStats = (overrides: Partial<CellAuditStats> = {}): CellAuditStats => (
   lastEditAt: 1000,
   lastEditEventId: "ev-base",
   activeValidators: ["carol"],
+  validatorDecidedTs: { carol: 1050 },
   waivers: [],
   ...overrides,
 })
@@ -236,6 +237,44 @@ describe("applyOutboxOverlay", () => {
       pending: [rec(unvalidate("u1", "c1", "carol", "ev-base", 1100), 1100)],
     })
     expect(out.get("c1")?.activeValidators).toEqual(["dan"])
+  })
+
+  // AQU-2296: the popover's date line follows the same three rules as the name
+  // beside it, so a queued vote carries today's date straight away and a
+  // withdrawn or invalidated one leaves no stamp behind to date a name that is
+  // no longer there.
+  it("keeps validatorDecidedTs in step with activeValidators", () => {
+    const base = () => new Map([
+      [
+        "c1",
+        baseStats({
+          lastEditEventId: "ev-base",
+          activeValidators: ["carol", "dan"],
+          validatorDecidedTs: { carol: 1050, dan: 1060 },
+        }),
+      ],
+    ])
+
+    const voted = applyOutboxOverlay({
+      base: base(),
+      pending: [rec(validate("v1", "c1", "alice", "ev-base", 1100), 1100)],
+    })
+    expect(voted.get("c1")?.activeValidators).toEqual(["carol", "dan", "alice"])
+    expect(voted.get("c1")?.validatorDecidedTs).toEqual({ carol: 1050, dan: 1060, alice: 1100 })
+
+    const withdrawn = applyOutboxOverlay({
+      base: base(),
+      pending: [rec(unvalidate("u1", "c1", "carol", "ev-base", 1100), 1100)],
+    })
+    expect(withdrawn.get("c1")?.activeValidators).toEqual(["dan"])
+    expect(withdrawn.get("c1")?.validatorDecidedTs).toEqual({ dan: 1060 })
+
+    const recommitted = applyOutboxOverlay({
+      base: base(),
+      pending: [rec(commit("e1", "c1", "alice", 1100), 1100)],
+    })
+    expect(recommitted.get("c1")?.activeValidators).toEqual([])
+    expect(recommitted.get("c1")?.validatorDecidedTs).toEqual({})
   })
 
   it("cell.unvalidate against a non-current edit is a no-op", () => {
@@ -368,5 +407,184 @@ describe("applyOutboxOverlay", () => {
     expect(out.get("c1")?.waivers).toEqual([
       { ruleId: "rule-x", waivedAt: new Date(1000).toISOString(), waivedBy: "alice" },
     ])
+  })
+})
+
+// ── AQU-1506 ────────────────────────────────────────────────────────────────
+// The server read is lane-scoped now; the optimistic overlay on top of it has to
+// be too, or a queued validate on one lane paints "you validated this" onto
+// another lane's view until the outbox drains — the same wrong answer, just
+// sourced from the client.
+describe("applyOutboxOverlay — lane scoping (AQU-1506)", () => {
+  function laneValidate(
+    id: string,
+    author: string,
+    editEventId: string,
+    clientTs: number,
+    targetLang?: string,
+  ): CqrsRawEvent<"cell.validate"> {
+    return {
+      id,
+      schemaVersion: SCHEMA,
+      kind: "cell.validate",
+      projectId: "p",
+      fileId: "f",
+      cellId: "c1",
+      author,
+      payload: { editEventId, ...(targetLang ? { targetLang } : {}) },
+      clientTs,
+    }
+  }
+
+  function laneCommit(id: string, clientTs: number, targetLang?: string): CqrsRawEvent<"target.cell.commit"> {
+    return {
+      id,
+      schemaVersion: SCHEMA,
+      kind: "target.cell.commit",
+      projectId: "p",
+      fileId: "f",
+      cellId: "c1",
+      author: "alice",
+      payload: { value: "v", valueHtml: "<p>v</p>", ...(targetLang ? { targetLang } : {}) },
+      clientTs,
+    }
+  }
+
+  const base = () => new Map([["c1", baseStats({ activeValidators: [] })]])
+
+  it("applies a pending validate on the lane being viewed", () => {
+    const out = applyOutboxOverlay({
+      base: base(),
+      pending: [rec(laneValidate("v1", "alice", "ev-base", 1100, "fr"), 1100)],
+      lane: "fr",
+    })
+    expect(out.get("c1")!.activeValidators).toEqual(["alice"])
+  })
+
+  it("does not leak a pending validate from another lane into this lane's view", () => {
+    const out = applyOutboxOverlay({
+      base: base(),
+      pending: [rec(laneValidate("v1", "alice", "ev-base", 1100, "fr"), 1100)],
+      lane: "",
+    })
+    expect(out.get("c1")!.activeValidators).toEqual([])
+  })
+
+  it("treats an omitted targetLang as the default lane, on both sides of the check", () => {
+    // The wire omits `targetLang` for '' — the overwhelmingly common case, and
+    // every pre-lane event in an outbox that survived an upgrade.
+    const pending = [rec(laneValidate("v1", "alice", "ev-base", 1100), 1100)]
+    expect(applyOutboxOverlay({ base: base(), pending, lane: "" }).get("c1")!.activeValidators)
+      .toEqual(["alice"])
+    expect(applyOutboxOverlay({ base: base(), pending, lane: "fr" }).get("c1")!.activeValidators)
+      .toEqual([])
+    // No lane passed at all = the default lane (single-lane callers, N=1).
+    expect(applyOutboxOverlay({ base: base(), pending }).get("c1")!.activeValidators)
+      .toEqual(["alice"])
+  })
+
+  it("does not let another lane's pending commit clear this lane's validators", () => {
+    const out = applyOutboxOverlay({
+      base: new Map([["c1", baseStats({ activeValidators: ["carol"] })]]),
+      pending: [rec(laneCommit("ev-new", 1500, "fr"), 1500)],
+      lane: "",
+    })
+    expect(out.get("c1")!.activeValidators).toEqual(["carol"])
+    expect(out.get("c1")!.lastEditEventId).toBe("ev-base")
+  })
+
+  it("synthesizes no stub for a cell touched only in another lane", () => {
+    const out = applyOutboxOverlay({
+      base: new Map<string, CellAuditStats>(),
+      pending: [rec(laneValidate("v1", "alice", "ev-x", 1100, "fr"), 1100)],
+      lane: "",
+    })
+    expect(out.has("c1")).toBe(false)
+  })
+
+  it("keeps waivers lane-blind — cell_waivers has no lane column", () => {
+    // A waiver is per cell, not per lane, so it must apply in every lane. The
+    // event carries the lane the member happened to be working in (AQU-1462);
+    // that is provenance, not scope.
+    const out = applyOutboxOverlay({
+      base: base(),
+      pending: [rec(
+        { ...waive("w1", "c1", "alice", "rule-1", 1100), payload: { ruleId: "rule-1", targetLang: "fr" } },
+        1100,
+      )],
+      lane: "",
+    })
+    expect(out.get("c1")!.waivers.map((w) => w.ruleId)).toEqual(["rule-1"])
+  })
+
+  // ── AQU-1740: per-finding waivers ────────────────────────────────────────
+  // The overlay is what makes a waive feel instant, so it has to key the same
+  // way the projection does — otherwise waiving a second repeated word would
+  // appear to lift the first until the authoritative read lands.
+  it("keys pending waivers by (ruleId, matchHash), so a second finding adds a row", () => {
+    const out = applyOutboxOverlay({
+      base: base(),
+      pending: [
+        rec({ ...waive("w1", "c1", "alice", "rule-1", 1100), payload: { ruleId: "rule-1", matchHash: "h-a" } }, 1100),
+        rec({ ...waive("w2", "c1", "alice", "rule-1", 1200), payload: { ruleId: "rule-1", matchHash: "h-b" } }, 1200),
+      ],
+    })
+    expect(out.get("c1")!.waivers.map((w) => w.matchHash)).toEqual(["h-a", "h-b"])
+  })
+
+  it("re-waiving the SAME finding replaces its entry (set semantics preserved)", () => {
+    const out = applyOutboxOverlay({
+      base: base(),
+      pending: [
+        rec({ ...waive("w1", "c1", "alice", "rule-1", 1100), payload: { ruleId: "rule-1", matchHash: "h-a", reason: "old" } }, 1100),
+        rec({ ...waive("w2", "c1", "alice", "rule-1", 1200), payload: { ruleId: "rule-1", matchHash: "h-a", reason: "new" } }, 1200),
+      ],
+    })
+    const waivers = out.get("c1")!.waivers
+    expect(waivers).toHaveLength(1)
+    expect(waivers[0].reason).toBe("new")
+  })
+
+  it("a per-finding waiver does not displace the cell-wide one, or vice versa", () => {
+    const out = applyOutboxOverlay({
+      base: base(),
+      pending: [
+        rec(waive("w1", "c1", "alice", "rule-1", 1100), 1100),
+        rec({ ...waive("w2", "c1", "alice", "rule-1", 1200), payload: { ruleId: "rule-1", matchHash: "h-a" } }, 1200),
+      ],
+    })
+    expect(out.get("c1")!.waivers.map((w) => w.matchHash)).toEqual([undefined, "h-a"])
+  })
+
+  it("un-waiving one finding leaves the rule's other findings waived", () => {
+    const out = applyOutboxOverlay({
+      base: base(),
+      pending: [
+        rec({ ...waive("w1", "c1", "alice", "rule-1", 1100), payload: { ruleId: "rule-1", matchHash: "h-a" } }, 1100),
+        rec({ ...waive("w2", "c1", "alice", "rule-1", 1200), payload: { ruleId: "rule-1", matchHash: "h-b" } }, 1200),
+        rec({ ...unwaive("u1", "c1", "alice", "rule-1", 1300), payload: { ruleId: "rule-1", matchHash: "h-a" } }, 1300),
+      ],
+    })
+    expect(out.get("c1")!.waivers.map((w) => w.matchHash)).toEqual(["h-b"])
+  })
+
+  it("a cell-wide unwaive does not lift per-finding waivers", () => {
+    const out = applyOutboxOverlay({
+      base: base(),
+      pending: [
+        rec(waive("w1", "c1", "alice", "rule-1", 1100), 1100),
+        rec({ ...waive("w2", "c1", "alice", "rule-1", 1200), payload: { ruleId: "rule-1", matchHash: "h-a" } }, 1200),
+        rec(unwaive("u1", "c1", "alice", "rule-1", 1300), 1300),
+      ],
+    })
+    expect(out.get("c1")!.waivers.map((w) => w.matchHash)).toEqual(["h-a"])
+  })
+
+  it("omits matchHash for a cell-wide waive, matching the read route's wire shape", () => {
+    const out = applyOutboxOverlay({
+      base: base(),
+      pending: [rec(waive("w1", "c1", "alice", "rule-1", 1100), 1100)],
+    })
+    expect("matchHash" in out.get("c1")!.waivers[0]).toBe(false)
   })
 })

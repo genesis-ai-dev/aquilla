@@ -1,15 +1,21 @@
 import { describe, it, expect } from "vitest"
 import {
   ROLE,
+  canAttachSourceAudio,
   requiredRoleFor,
   canPerform,
   canOpenAssignUi,
+  scopedLanesFor,
   canSubmitAssignment,
   foreignRoleFor,
   effectiveCommentRoleFor,
   canMutateComment,
   commentFloorsFrom,
   DEFAULT_COMMENT_FLOORS,
+  DEFAULT_IMPORT_MIN_ROLE,
+  resolveImportFloor,
+  canImportSourceFiles,
+  importDenialFloor,
 } from "./role-policy"
 
 describe("role-policy (client mirror)", () => {
@@ -117,7 +123,8 @@ describe("role-policy (client mirror)", () => {
     // Both relayout the timeline for every collaborator, so they sit a rung
     // above the contributor-level editing kinds. Drift here costs a redundant
     // 403 rather than a hole, but it defeats the guard — so pin both sides.
-    expect(requiredRoleFor("file.timing.set")).toBe(ROLE.MAINTAINER)
+    // AQU-2204: project lead and above choose a file's timing.
+    expect(requiredRoleFor("file.timing.set")).toBe(ROLE.PROJECT_LEAD)
     expect(requiredRoleFor("file.track.set")).toBe(ROLE.MAINTAINER)
   })
 
@@ -125,6 +132,17 @@ describe("role-policy (client mirror)", () => {
     expect(requiredRoleFor("file.corpus.set")).toBe(ROLE.CONTRIBUTOR)
     expect(canPerform("file.corpus.set", ROLE.CONTRIBUTOR)).toBe(true)
     expect(canPerform("file.corpus.set", ROLE.REVIEWER)).toBe(false)
+  })
+
+  // AQU-1569: deliberately a rung ABOVE its file.corpus.set neighbour. Moving
+  // one file into a folder is that file's business; reordering a group rewrites
+  // the sidebar every member of the project reads. The client mirror has to
+  // agree with sync-worker/src/events/role-policy.ts or the drag handle shows
+  // for people whose drop the server will refuse.
+  it("keeps a hand-placed file order at the project-setup floor", () => {
+    expect(requiredRoleFor("file.reorder")).toBe(ROLE.PROJECT_LEAD)
+    expect(canPerform("file.reorder", ROLE.PROJECT_LEAD)).toBe(true)
+    expect(canPerform("file.reorder", ROLE.CONTRIBUTOR)).toBe(false)
   })
 
   // ── The setup/handoff line (AQU-646, Sam 2026-08-18) ────────────────────
@@ -153,6 +171,18 @@ describe("role-policy (client mirror)", () => {
     expect(requiredRoleFor("cast.assign")).toBe(ROLE.MAINTAINER)
     expect(canPerform("cast.assign", ROLE.PROJECT_LEAD)).toBe(false)
     expect(canPerform("cast.assign", ROLE.MAINTAINER)).toBe(true)
+  })
+
+  it("lets a project lead label a cell, but not a contributor (AQU-2408)", () => {
+    // A label is metadata on the line, not a character: it sits a rung below
+    // cast.assign. Project lead is the static floor — the lowest rung the
+    // project's cellLabelFloor tier can admit; the tier itself (maintainer
+    // unless opened) is enforced by src/lib/cell-label-gate.ts.
+    expect(requiredRoleFor("cell.label.set")).toBe(ROLE.PROJECT_LEAD)
+    expect(canPerform("cell.label.set", ROLE.CONTRIBUTOR)).toBe(false)
+    expect(canPerform("cell.label.set", ROLE.PROJECT_LEAD)).toBe(true)
+    expect(canPerform("cell.label.set", ROLE.MAINTAINER)).toBe(true)
+    expect(requiredRoleFor("cell.label.set")!).toBeLessThan(requiredRoleFor("cast.assign")!)
   })
 
   it("knows about cast.assign at all", () => {
@@ -341,5 +371,143 @@ describe("role-policy (client mirror)", () => {
         commentFloorsFrom({ commentCreateMinRole: 9999, commentResolveMinRole: -1 }),
       ).toEqual(DEFAULT_COMMENT_FLOORS)
     })
+  })
+})
+
+describe("scopedLanesFor — the lanes a lane-limited member may open", () => {
+  const lanes = ["", "es", "de"]
+  const lane = (value: string) => ({ kind: "lane", value })
+
+  it("leaves MAINTAINER+ to the full switcher (null), whatever their scopes", () => {
+    expect(scopedLanesFor(ROLE.MAINTAINER, [lane("es")], lanes)).toBeNull()
+    expect(scopedLanesFor(ROLE.OWNER, [lane("es")], lanes)).toBeNull()
+  })
+
+  it("limits a project lead to the lanes their scopes name", () => {
+    expect(scopedLanesFor(ROLE.PROJECT_LEAD, [lane("es")], lanes)).toEqual(["es"])
+  })
+
+  it("leaves a member with no lane scopes on the AQU-608 rule (null)", () => {
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [], lanes)).toBeNull()
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, null, lanes)).toBeNull()
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [{ kind: "file", value: "f1" }], lanes)).toBeNull()
+  })
+
+  it("gives a lane-limited contributor or reviewer their lanes, in the project's order", () => {
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("de"), lane("es")], lanes)).toEqual(["es", "de"])
+    expect(scopedLanesFor(ROLE.REVIEWER, [lane("es")], lanes)).toEqual(["es"])
+  })
+
+  it("counts the default lane ('') as a lane like any other", () => {
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("")], lanes)).toEqual([""])
+  })
+
+  it("yields [] for a scope naming no lane the project has — nothing to move to", () => {
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("Spansih")], lanes)).toEqual([])
+  })
+
+  // AQU-1607: a lane scope is a lane id, which the lane rows turn back into
+  // the tag the switcher is written in.
+  it("resolves a lane id scope through the project's lane rows", () => {
+    const laneRows = [
+      { id: "ln-main", name: "German", legacyTag: "" },
+      { id: "ln-es", name: "Spanish", legacyTag: "es" },
+      { id: "ln-de", name: "Low German", legacyTag: "de" },
+    ]
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("ln-es")], lanes, laneRows)).toEqual(["es"])
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("ln-main")], lanes, laneRows)).toEqual([""])
+    // A tag-valued scope the backfill has not converted still resolves.
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("de")], lanes, laneRows)).toEqual(["de"])
+    // A lane that is gone offers nothing to switch to.
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("ln-gone")], lanes, laneRows)).toEqual([])
+  })
+})
+
+// AQU-1565 follow-up. WHY: marking a clip as the file's source audio takes it
+// out of "recorded" and out of review on every row. The workspace offers the
+// recording upload only where this says yes, and the server refuses the same
+// attach below Project Lead, so the two must agree rung for rung.
+describe("canAttachSourceAudio", () => {
+  it("is Project Lead and up", () => {
+    expect(canAttachSourceAudio(ROLE.CONTRIBUTOR)).toBe(false)
+    expect(canAttachSourceAudio(ROLE.REVIEWER)).toBe(false)
+    expect(canAttachSourceAudio(ROLE.VIEWER)).toBe(false)
+    expect(canAttachSourceAudio(ROLE.PROJECT_LEAD)).toBe(true)
+    expect(canAttachSourceAudio(ROLE.MAINTAINER)).toBe(true)
+    expect(canAttachSourceAudio(ROLE.OWNER)).toBe(true)
+  })
+
+  it("fails open on an unknown role, like canPerform", () => {
+    expect(canAttachSourceAudio(null)).toBe(true)
+    expect(canAttachSourceAudio(undefined)).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-2304: the org-configurable import floor, on the client side.
+//
+// WHY THESE AND NOT A WORKSPACE RENDER: the workspace reads one value
+// (`canImportSourceFiles`) for all five source-import affordances — the header
+// button, the dialog's "New source text", the sidebar re-import, the IDML copy
+// repair and the openImportFlow backstop — so what can regress is this
+// decision, not any one button's wiring. The dialog's greyed-out state given a
+// `sourceDisabledReason` is already covered in ImportDialog.translation.test.tsx.
+// ──────────────────────────────────────────────────────────────────────────
+
+describe("resolveImportFloor", () => {
+  it("keeps an in-range org value", () => {
+    expect(resolveImportFloor(ROLE.MAINTAINER)).toBe(600)
+    expect(resolveImportFloor(ROLE.PROJECT_LEAD)).toBe(500)
+  })
+
+  it("falls back to Project Lead when the org set nothing or set nonsense", () => {
+    // Mirrors the server's resolveImportMinRole: a misconfigured floor is a
+    // no-op, never a lockout.
+    expect(resolveImportFloor(undefined)).toBe(DEFAULT_IMPORT_MIN_ROLE)
+    expect(resolveImportFloor(null)).toBe(DEFAULT_IMPORT_MIN_ROLE)
+    expect(resolveImportFloor(NaN)).toBe(DEFAULT_IMPORT_MIN_ROLE)
+    expect(resolveImportFloor(-1)).toBe(DEFAULT_IMPORT_MIN_ROLE)
+    expect(resolveImportFloor(9999)).toBe(DEFAULT_IMPORT_MIN_ROLE)
+  })
+})
+
+describe("canImportSourceFiles", () => {
+  it("is Project Lead and up when the org set nothing — today's behaviour", () => {
+    expect(canImportSourceFiles(ROLE.CONTRIBUTOR)).toBe(false)
+    expect(canImportSourceFiles(ROLE.PROJECT_LEAD)).toBe(true)
+    expect(canImportSourceFiles(ROLE.MAINTAINER)).toBe(true)
+    expect(canImportSourceFiles(ROLE.OWNER)).toBe(true)
+  })
+
+  it("withdraws a project lead's import when the org asks for Maintainer", () => {
+    expect(canImportSourceFiles(ROLE.PROJECT_LEAD, ROLE.MAINTAINER)).toBe(false)
+    expect(canImportSourceFiles(ROLE.MAINTAINER, ROLE.MAINTAINER)).toBe(true)
+    expect(canImportSourceFiles(ROLE.OWNER, ROLE.MAINTAINER)).toBe(true)
+  })
+
+  it("never LOWERS the static file.create bar, whatever the org stores", () => {
+    // The org's value only ever raises. A stored 400 cannot hand imports to
+    // translators, because the server's static table refuses them too.
+    expect(canImportSourceFiles(ROLE.CONTRIBUTOR, ROLE.CONTRIBUTOR)).toBe(false)
+    expect(canImportSourceFiles(ROLE.REVIEWER, ROLE.VIEWER)).toBe(false)
+  })
+
+  it("fails open on an unknown role, like canPerform", () => {
+    // A local / git-imported project has no sync role and no org floor.
+    expect(canImportSourceFiles(null, ROLE.MAINTAINER)).toBe(true)
+    expect(canImportSourceFiles(undefined, ROLE.MAINTAINER)).toBe(true)
+  })
+})
+
+describe("importDenialFloor", () => {
+  it("names the org's floor when the org is what refused", () => {
+    // A lead locked out by an org at Maintainer must be told "Maintainer".
+    expect(importDenialFloor(ROLE.MAINTAINER)).toBe(ROLE.MAINTAINER)
+  })
+
+  it("names the static bar when the org set nothing or set it lower", () => {
+    expect(importDenialFloor()).toBe(ROLE.PROJECT_LEAD)
+    expect(importDenialFloor(ROLE.CONTRIBUTOR)).toBe(ROLE.PROJECT_LEAD)
+    expect(importDenialFloor(9999)).toBe(ROLE.PROJECT_LEAD)
   })
 })

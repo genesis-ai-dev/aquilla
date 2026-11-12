@@ -20,6 +20,7 @@ import { extractMarkdownStrings } from "./markdown"
 import { extractPlaintextStrings } from "./plaintext"
 import { deriveParagraphs } from "./paragraphs"
 import { buildBulkCellsWithSpeakers } from "../import"
+import { usfmSectionToStrings } from "./parse-text-formats"
 import type { ParagraphCell } from "./paragraphs"
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -181,5 +182,47 @@ describe("buildBulkCellsWithSpeakers — paragraphStart carry-through (D2)", () 
     const { cells } = buildBulkCellsWithSpeakers(strings)
     expect(cells[0].paragraphStart).toBeUndefined()
     expect(cells[1].paragraphStart).toBeUndefined()
+  })
+})
+
+// ── AQU-2184: paragraphMarker along the same commit path ─────────────────────
+//
+// The parser's `paragraphMarker` is worthless unless it survives the whole way
+// into `cells.metadata`, because the HTML export reads it from there (via
+// `CellData.paragraphMarker`) and the marker itself is gone by then — it lives
+// between verse spans in the raw USFM, not inside any cell's text. So this
+// walks the real producer's output through the real consumer: USFM in,
+// `BulkImportCell.metadata` out.
+
+describe("USFM → BulkImportCell.metadata — paragraphMarker (AQU-2184)", () => {
+  const PSALM = `\\id PSA
+\\c 1
+\\q1
+\\v 1 Blessed is the man
+\\q2 who walks not in the counsel
+\\q1
+\\v 2 but his delight is in the law
+\\p
+\\v 3 He is like a tree
+\\v 4 planted by the water`
+
+  it("carries each verse's marker from the raw USFM into the cell's metadata", () => {
+    const { strings } = usfmSectionToStrings(PSALM)
+    const { cells } = buildBulkCellsWithSpeakers(strings, { fileName: "psa.usfm", fileType: "usfm" })
+
+    const byRef = new Map(cells.map((c, i) => [strings[i].group, c]))
+    expect(byRef.get("PSA 1:1")?.metadata?.paragraphMarker).toBe("q1")
+    expect(byRef.get("PSA 1:2")?.metadata?.paragraphMarker).toBe("q1")
+    expect(byRef.get("PSA 1:3")?.metadata?.paragraphMarker).toBe("p")
+    // A continuation verse opens no paragraph, so it carries no marker.
+    expect(byRef.get("PSA 1:4")?.metadata?.paragraphMarker).toBeUndefined()
+    expect(byRef.get("PSA 1:4")?.paragraphStart).toBeUndefined()
+  })
+
+  it("leaves the field off entirely for a parser that supplies no marker", () => {
+    const strings = extractPlaintextStrings("First paragraph.\n\nSecond paragraph.")
+    const { cells } = buildBulkCellsWithSpeakers(strings)
+    expect(cells[0].paragraphStart).toBe(true)
+    expect(cells[0].metadata).not.toHaveProperty("paragraphMarker")
   })
 })

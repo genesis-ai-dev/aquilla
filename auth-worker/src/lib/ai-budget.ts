@@ -97,33 +97,23 @@ export async function recordAndCheckBudget(
   const userLimit = settings?.aiUserDailyLimit ?? Number(env.AI_USER_DAILY_REQUEST_LIMIT ?? 500)
   const globalLimit = settings?.aiGlobalDailyLimit ?? Number(env.AI_GLOBAL_DAILY_REQUEST_LIMIT ?? 5000)
 
-  // Upsert user counter.
-  const userRow = await db
+  // One statement bumps both counters (user_id=0 is the "global" sentinel),
+  // so a request pays one round trip, not two (AQU-617). Rows are always
+  // written user-first, so concurrent upserts take the locks in one order.
+  const rows = userId === 0 ? [0] : [userId, 0]
+  const res = await db
     .prepare(
       `INSERT INTO ai_usage_daily (user_id, date_utc, request_count)
-       VALUES (?, ?, 1)
+       VALUES ${rows.map(() => "(?, ?, 1)").join(", ")}
        ON CONFLICT (user_id, date_utc)
        DO UPDATE SET request_count = ai_usage_daily.request_count + 1
-       RETURNING request_count`,
+       RETURNING user_id, request_count`,
     )
-    .bind(userId, today)
-    .first<{ request_count: number }>()
-
-  const userCount = userRow?.request_count ?? 1
-
-  // Upsert global counter (user_id=0 is the sentinel for "global").
-  const globalRow = await db
-    .prepare(
-      `INSERT INTO ai_usage_daily (user_id, date_utc, request_count)
-       VALUES (0, ?, 1)
-       ON CONFLICT (user_id, date_utc)
-       DO UPDATE SET request_count = ai_usage_daily.request_count + 1
-       RETURNING request_count`,
-    )
-    .bind(today)
-    .first<{ request_count: number }>()
-
-  const globalCount = globalRow?.request_count ?? 1
+    .bind(...rows.flatMap((id) => [id, today]))
+    .all<{ user_id: number; request_count: number }>()
+  const counts = new Map((res.results ?? []).map((r) => [Number(r.user_id), r.request_count]))
+  const userCount = counts.get(userId) ?? 1
+  const globalCount = counts.get(0) ?? 1
 
   const userOver = userCount > userLimit
   const globalOver = globalCount > globalLimit
@@ -163,6 +153,8 @@ export async function runAiGuard(
   userId: number,
   db: AquillaDb,
   env: Env,
+  /** Runs work after the caller's response. Given, log-only counting uses it. */
+  defer?: (work: (db: AquillaDb) => Promise<void>) => void,
 ): Promise<GuardOutcome> {
   // Load global overrides once; the cache keeps this off the per-request DB path.
   const settings = await getPlatformSettingsCached(env)
@@ -178,7 +170,17 @@ export async function runAiGuard(
     }
   }
 
-  // 2. Budget counters.
+  const enforce = settings.aiBudgetEnforce ?? (env.AI_BUDGET_ENFORCE === "true")
+
+  // 2. Budget counters. In log-only mode they can never reject, so a caller
+  // that can defer keeps the counter upsert off its response path (AQU-617).
+  if (!enforce && defer) {
+    defer(async (deferredDb) => {
+      warnOverBudget(await recordAndCheckBudget(deferredDb, userId, env, settings), userId, enforce)
+    })
+    return { ok: true }
+  }
+
   let budget: BudgetResult
   try {
     budget = await recordAndCheckBudget(db, userId, env, settings)
@@ -187,42 +189,39 @@ export async function runAiGuard(
     console.error("[ai-budget] counter error (allowing through):", err)
     return { ok: true }
   }
+  warnOverBudget(budget, userId, enforce)
 
-  const enforce = settings.aiBudgetEnforce ?? (env.AI_BUDGET_ENFORCE === "true")
-
-  if (budget.globalOver) {
-    console.warn(
-      `[ai-budget] global ceiling hit: ${budget.globalCount}/${budget.globalLimit} on ${utcDateKey()}`,
-      enforce ? "(enforcing)" : "(log-only)",
-    )
-    if (enforce) {
-      return {
-        ok: false,
-        status: 429,
-        body: {
-          error: "global_budget_exceeded",
-          message: "Platform AI capacity for today has been reached. Please try again tomorrow.",
-        },
-      }
+  if (enforce && budget.globalOver) {
+    return {
+      ok: false,
+      status: 429,
+      body: {
+        error: "global_budget_exceeded",
+        message: "Platform AI capacity for today has been reached. Please try again tomorrow.",
+      },
     }
   }
 
-  if (budget.userOver) {
-    console.warn(
-      `[ai-budget] user ${userId} over budget: ${budget.userCount}/${budget.userLimit} on ${utcDateKey()}`,
-      enforce ? "(enforcing)" : "(log-only)",
-    )
-    if (enforce) {
-      return {
-        ok: false,
-        status: 429,
-        body: {
-          error: "daily_budget_exceeded",
-          message: "Daily AI limit reached — resets at midnight UTC.",
-        },
-      }
+  if (enforce && budget.userOver) {
+    return {
+      ok: false,
+      status: 429,
+      body: {
+        error: "daily_budget_exceeded",
+        message: "Daily AI limit reached — resets at midnight UTC.",
+      },
     }
   }
 
   return { ok: true }
+}
+
+function warnOverBudget(budget: BudgetResult, userId: number, enforce: boolean): void {
+  const mode = enforce ? "(enforcing)" : "(log-only)"
+  if (budget.globalOver) {
+    console.warn(`[ai-budget] global ceiling hit: ${budget.globalCount}/${budget.globalLimit} on ${utcDateKey()}`, mode)
+  }
+  if (budget.userOver) {
+    console.warn(`[ai-budget] user ${userId} over budget: ${budget.userCount}/${budget.userLimit} on ${utcDateKey()}`, mode)
+  }
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -11,17 +11,33 @@ interface ConfirmActionDialogProps {
   onOpenChange: (open: boolean) => void
   title: string
   description: string
+  /** A second paragraph under the description. */
+  notice?: string
   confirmLabel: string
   checkboxLabel?: string
+  /**
+   * False when the description already says the action can do nothing here.
+   * The dialog then shows the description with a single Close button: no
+   * acknowledgement to tick and no confirm that would only fail. Defaults to
+   * true.
+   */
+  canConfirm?: boolean
   /** Button variant for the confirm action. Defaults to "default". */
   variant?: "default" | "destructive"
+  /** Extra controls between the description and the attribution checkbox. */
+  extra?: ReactNode
+  /** Keeps confirm off even after the checkbox, for example when the chosen options match nothing. */
+  confirmDisabled?: boolean
   onConfirm: () => void
 }
 
 export function ConfirmActionDialog({
-  open, onOpenChange, title, description, confirmLabel,
+  open, onOpenChange, title, description, notice, confirmLabel,
   checkboxLabel,
+  canConfirm = true,
   variant = "default",
+  extra,
+  confirmDisabled = false,
   onConfirm,
 }: ConfirmActionDialogProps) {
   const t = useT()
@@ -34,24 +50,32 @@ export function ConfirmActionDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
+          {notice ? <p className="text-sm text-muted-foreground">{notice}</p> : null}
         </DialogHeader>
-        <label className="flex items-start gap-2 py-2 text-sm">
-          <Checkbox
-            checked={checked}
-            onCheckedChange={(value) => setChecked(value === true)}
-            className="mt-0.5"
-          />
-          <span>{resolvedCheckboxLabel}</span>
-        </label>
+        {extra}
+        {canConfirm && (
+          <label className="flex items-start gap-2 py-2 text-sm">
+            <Checkbox
+              checked={checked}
+              onCheckedChange={(value) => setChecked(value === true)}
+              className="mt-0.5"
+            />
+            <span>{resolvedCheckboxLabel}</span>
+          </label>
+        )}
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
-          <Button
-            variant={variant}
-            disabled={!checked}
-            onClick={() => { onConfirm(); onOpenChange(false) }}
-          >
-            {confirmLabel}
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {canConfirm ? t("common.cancel") : t("common.close")}
           </Button>
+          {canConfirm && (
+            <Button
+              variant={variant}
+              disabled={!checked || confirmDisabled}
+              onClick={() => { onConfirm(); onOpenChange(false) }}
+            >
+              {confirmLabel}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

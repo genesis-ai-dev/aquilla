@@ -30,4 +30,32 @@ describe("KaraokeReadText", () => {
     expect(container.querySelector(".karaoke-active")).toBeNull()
     expect(container.textContent).toBe("hello")
   })
+
+  // AQU-2254: an AI transcript cleanup rewrites the text under timings that
+  // keep the pre-cleanup offsets. Painting them anyway highlights letters the
+  // audio is not saying.
+  it("paints nothing once the span no longer selects its own word", () => {
+    // Offsets were measured against "hello world"; the cleanup made it
+    // "hello whirled", so [6, 11) now reads "whirl".
+    const { container } = render(
+      <KaraokeReadText text="hello whirled" range={{ start: 6, end: 11, word: "world" }} />,
+    )
+    expect(container.querySelector(".karaoke-active")).toBeNull()
+    expect(container.textContent).toBe("hello whirled")
+  })
+
+  it("still paints a word the rewrite left in place", () => {
+    const { container } = render(
+      <KaraokeReadText text="hello whirled" range={{ start: 0, end: 5, word: "hello" }} />,
+    )
+    expect(container.querySelector(".karaoke-active")?.textContent).toBe("hello")
+    expect(container.textContent).toBe("hello whirled")
+  })
+
+  it("ignores case and punctuation the person retyped", () => {
+    const { container } = render(
+      <KaraokeReadText text="hello world" range={{ start: 6, end: 11, word: "World," }} />,
+    )
+    expect(container.querySelector(".karaoke-active")?.textContent).toBe("world")
+  })
 })

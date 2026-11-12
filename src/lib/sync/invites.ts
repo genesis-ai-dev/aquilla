@@ -2,13 +2,13 @@
 //
 // TWO INVITE FLOWS — intentionally separate UX surfaces:
 //
-//   Single-project invite (this file + auth-worker/routes/projects-invites.ts):
+//   Single-project invite (this file + auth-worker/src/routes/projects.ts):
 //     Used by the project Share panel (Dashboard → ProjectCard → ShareDialog).
 //     Creates one invite token scoped to a single projectId. Any role up to
 //     ROLE.CONTRIBUTOR (400) is allowed. This is the standard "share this
 //     project" flow for project owners/leads.
 //
-//   Multi-project invite (auth-worker/routes/invites.ts POST /multi):
+//   Multi-project invite (auth-worker/src/routes/invites.ts POST /multi):
 //     Used by MembersPage → MultiProjectInviteDialog (org-admin surface only).
 //     Creates one token that spans N projects in a single accept call. Intended
 //     for org admins onboarding a whole team to a workspace. Not wired to
@@ -16,7 +16,9 @@
 //
 // Graceful degradation: helpers return null on failure (no jwt, HTTP error,
 // network error). Callers surface null as "couldn't create / preview / accept"
-// and log — the UI shows a retry path.
+// and log — the UI shows a retry path. Exception (AQU-1541): the project-invite
+// helpers rethrow the "elevation required" UserError so the caller can show the
+// admin-code message.
 //
 // Preview functions (previewServerInvite, previewMultiInvite) return a
 // discriminated result so callers can distinguish:
@@ -28,6 +30,7 @@
 import { AUTH_API_URL } from "./sync-token"
 import { ROLE } from "@/lib/frontier/roles"
 import { UserError } from "@/lib/errors/user-error"
+import { isElevationRequiredError, throwIfElevationRequired } from "@/lib/frontier/elevation"
 
 /**
  * Invite tokens are bearer credentials — anyone holding one can join the
@@ -166,7 +169,9 @@ export async function createServerInvite(
   expiresInDays?: number | null,
   /** AQU-528: lane (target-language) scopes to auto-grant on join. Omit/empty
    * for an unscoped invite (grants access across every lane the role allows). */
-  scopeLanes?: string[]
+  scopeLanes?: string[],
+  /** AQU-1808: explicit every-current-lane choice. Omit to leave the choice unmade. */
+  allCurrentLanes?: boolean,
 ): Promise<ServerInviteCreated | null> {
   try {
     const body: Record<string, unknown> = { role }
@@ -174,6 +179,7 @@ export async function createServerInvite(
     // Pass expires_in_days to server (null = no expiry; omit = server default 30 days).
     if (expiresInDays !== undefined) body.expires_in_days = expiresInDays
     if (scopeLanes && scopeLanes.length > 0) body.scopeLanes = scopeLanes
+    if (allCurrentLanes) body.allCurrentLanes = true
     const res = await fetch(
       `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/invites`,
       {
@@ -185,6 +191,7 @@ export async function createServerInvite(
         body: JSON.stringify(body),
       }
     )
+    await throwIfElevationRequired(res)
     if (!res.ok) {
       console.warn(
         `[invites] createServerInvite ${projectId} → HTTP ${res.status}`
@@ -193,6 +200,7 @@ export async function createServerInvite(
     }
     return (await res.json()) as ServerInviteCreated
   } catch (err) {
+    if (isElevationRequiredError(err)) throw err
     console.warn("[invites] createServerInvite failed:", err)
     return null
   }
@@ -291,7 +299,8 @@ export interface ActiveProjectInvite {
 
 /**
  * GET /api/v2/projects/:projectId/invites — list active (unused + unexpired) invites.
- * Requires project_lead+ role on the project. Returns null on auth/permission error.
+ * Requires project_lead+ role on the project. Returns null on auth/permission error;
+ * throws the UserError when a platform admin needs the step-up code.
  */
 export async function listProjectInvites(
   jwt: string,
@@ -305,6 +314,7 @@ export async function listProjectInvites(
         headers: { Authorization: `Bearer ${jwt}` },
       }
     )
+    await throwIfElevationRequired(res)
     if (!res.ok) {
       console.warn(`[invites] listProjectInvites ${projectId} → HTTP ${res.status}`)
       return null
@@ -312,6 +322,7 @@ export async function listProjectInvites(
     const body = (await res.json()) as { invites: ActiveProjectInvite[] }
     return body.invites
   } catch (err) {
+    if (isElevationRequiredError(err)) throw err
     console.warn("[invites] listProjectInvites failed:", err)
     return null
   }
@@ -319,7 +330,8 @@ export async function listProjectInvites(
 
 /**
  * DELETE /api/v2/projects/:projectId/invites/:token — revoke an unused invite.
- * Returns true when the invite was deleted, false on 403/404 or network error.
+ * Returns true when the invite was deleted, false on 403/404 or network error;
+ * throws the UserError when a platform admin needs the step-up code.
  */
 export async function revokeProjectInvite(
   jwt: string,
@@ -335,6 +347,7 @@ export async function revokeProjectInvite(
         headers: { Authorization: `Bearer ${jwt}` },
       }
     )
+    await throwIfElevationRequired(res)
     if (!res.ok) {
       console.warn(`[invites] revokeProjectInvite ${tokenFingerprint(token)} → HTTP ${res.status}`)
       return false
@@ -342,6 +355,7 @@ export async function revokeProjectInvite(
     const body = (await res.json()) as { removed: boolean }
     return body.removed
   } catch (err) {
+    if (isElevationRequiredError(err)) throw err
     console.warn("[invites] revokeProjectInvite failed:", err)
     return false
   }
@@ -349,7 +363,7 @@ export async function revokeProjectInvite(
 
 // ── Multi-project invite (one token spanning N projects) ───────────────────
 // The org-admin MultiProjectInviteDialog mints these; the endpoints live in
-// auth-worker/routes/invites.ts. The preview/accept query project_invites by
+// auth-worker/src/routes/invites.ts. The preview/accept query project_invites by
 // token, so they return 1 row for a single-project token too — JoinPage tries
 // the multi endpoint first and falls back to the single-project flow.
 

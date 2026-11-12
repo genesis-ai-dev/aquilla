@@ -9,14 +9,19 @@ import { test, expect, orgRoute } from "../../helpers/multi-user"
 test.beforeEach(async () => { await resetBackend() })
 
 test("org billing settings preserves access while new pricing is unavailable", async ({ alice }) => {
+  // Pin the unavailable-price branch independently of local Stripe credentials.
+  await alice.route("**/api/v2/orgs/*/billing/offers", route =>
+    route.fulfill({ status: 503, contentType: "application/json",
+      body: JSON.stringify({ error: "prices_unavailable" }) }))
   await alice.goto(orgRoute(alice, "/settings"))
   await expect(alice.locator("h1").filter({ hasText: /Organization settings/i })).toBeVisible()
-  await alice.getByRole("link", { name: /Billing & usage/i }).click()
+  // The index link's name is its title and its line: "Billing Plan & AI usage".
+  await alice.getByRole("link", { name: /^Billing\b/i }).click()
   await expect(alice).toHaveURL(orgRoute(alice, "/settings/billing"))
-  await expect(alice.locator("h1").filter({ hasText: /Billing & usage/i })).toBeVisible()
+  await expect(alice.locator("h1").filter({ hasText: /^Billing$/i })).toBeVisible()
   await expect(alice.getByTestId("billing-plan")).toBeVisible()
   await expect(alice.getByTestId("billing-usage")).toContainText("rolling seven-day")
-  await expect(alice.getByRole("tab", { name: "Team & Enterprise" })).toBeVisible()
+  await expect(alice.getByRole("link", { name: "Discuss your rollout" })).toBeVisible()
   await expect(alice.getByText(/Plan prices are temporarily unavailable/)).toBeVisible()
   await expect(alice.getByTestId("subscribe-field-plan")).toHaveCount(0)
   await expect(alice.getByRole("link", { name: "Check covered access" })).toHaveAttribute("href", /ETEN%20affiliate/)
@@ -37,8 +42,9 @@ test("new workspace scope survives billing navigation and reload", async ({ bob 
   await billing.expectWorkspaceScope("team")
   await billing.openWorkspace(bob.orgId)
   await billing.expectWorkspaceScope("personal")
-  await billing.reviewSelectedPlan({ offer: "pro", interval: "year", quantity: 1 }, "Billing team")
-  await billing.expectIncompatibleWorkspace()
+  // AQU-2058: Team is the one paid plan and any workspace may buy it.
+  await billing.reviewSelectedPlan({ offer: "team", interval: "year", quantity: 1 }, "Billing team")
+  await billing.expectWorkspaceTypeAccepted()
 })
 
 
@@ -48,15 +54,15 @@ test("recorded paid plan survives reload and stays with its workspace", async ({
   await recordTestWorkspacePlan(team.id)
   const billing = new BillingSettingsPage(bob)
   await billing.openWorkspace(team.id)
-  await billing.expectRecordedPlan("Team 20×")
+  await billing.expectRecordedPlan("Team")
   await bob.reload()
-  await billing.expectRecordedPlan("Team 20×")
+  await billing.expectRecordedPlan("Team")
   await bob.screenshot({ path: testInfo.outputPath("paid-workspace-billing.png"), fullPage: true })
   await billing.openWorkspace(bob.orgId)
   await billing.expectWorkspaceScope("personal")
   await expect(bob.getByTestId("billing-plan")).toHaveText("Free")
   await billing.openWorkspace(team.id)
-  await billing.expectRecordedPlan("Team 20×")
+  await billing.expectRecordedPlan("Team")
   await recordTestWorkspaceFailure(team.id)
   await bob.reload()
   await billing.expectFreeAllowanceAfterFailure()

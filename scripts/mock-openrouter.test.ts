@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { scriptMockResponse } from "./mock-openrouter"
+import { mockTranscription, scriptMockResponse, wavSecondsOfRequest } from "./mock-openrouter"
 import { expandSlashCommand } from "../src/lib/agent/slash-commands"
 
 type MockResponse = ReturnType<typeof scriptMockResponse>
@@ -9,6 +9,26 @@ function message(response: MockResponse) {
 }
 
 describe("scripted local agent", () => {
+  it("returns provider-shaped transcription with word timestamps", () => {
+    expect(mockTranscription()).toEqual({
+      text: "Mock transcription", usage: { cost: 0.0001, seconds: 1 }, words: [
+        { word: "Mock", start: 0, end: 0.25 },
+        { word: "transcription", start: 0.25, end: 0.5 },
+      ],
+    })
+  })
+  // AQU-1681: a minute-long request has its words handed back to the rows they
+  // were spoken in; a stand-in that only ever "says" two words in the first
+  // half second would leave every row but the first empty in a local run.
+  it("speaks all the way through the audio it was sent", () => {
+    const wav = Buffer.alloc(44 + 32_000 * 3)
+    const seconds = wavSecondsOfRequest(JSON.stringify({ input_audio: { data: wav.toString("base64") } }))
+    expect(seconds).toBe(3)
+    const reply = mockTranscription(seconds)
+    expect(reply.words).toHaveLength(15)
+    expect(reply.words.slice(0, 3).map((w) => w.start)).toEqual([0, 0.2, 0.4])
+    expect(reply.text.startsWith("mock@0.0 mock@0.2 mock@0.4 ")).toBe(true)
+  })
   it("returns a declarative JSON recipe for the owned importer contract", () => {
     const reply = message(scriptMockResponse([
       {
@@ -109,5 +129,76 @@ describe("scripted local agent", () => {
       { i: 2, t: "[bozza] Second source" },
     ])
     expect(generation.tool_calls).toBeUndefined()
+  })
+
+  // Regression (2026-08-28 live review): a run's seeded activity showed five
+  // identical ids. The completion id was `mock-${Date.now()}-${callSeq}`, and
+  // only tool calls advanced callSeq — so the contextual nodes, which emit no
+  // tool calls, minted one id for every response inside the same millisecond.
+  it("mints a distinct id per completion, even for back-to-back tool-call-free replies", () => {
+    const contextualNode = (marker: string) => [
+      { role: "system", content: `[[ctx:${marker}]] contextual node` },
+      { role: "user", content: "Summarize this span for the reader." },
+    ]
+
+    const ids = [
+      scriptMockResponse(contextualNode("summarize")).id,
+      scriptMockResponse(contextualNode("summarize")).id,
+      scriptMockResponse(contextualNode("summarize")).id,
+      scriptMockResponse(contextualNode("summarize")).id,
+      scriptMockResponse(contextualNode("summarize")).id,
+    ]
+
+    // The bodies are deliberately identical — only the ids must differ.
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+})
+
+// AQU-2302: the scripted answers a local walk of the naming assistant needs.
+describe("scripted recordings naming", () => {
+  const ask = (names: string[], retry = false) => message(scriptMockResponse([
+    { role: "system", content: "You work out how a folder of audio recordings is named, so an app can put each recording on its line." },
+    // As the server sends them: each name a JSON string.
+    { role: "user", content: ["<file-names>", ...names.map((n) => JSON.stringify(n)), "</file-names>", ...(retry ? ["<failed-names>", `${JSON.stringify(names[0])} → no template fitted ("noTemplate")`, "</failed-names>"] : [])].join("\n") },
+  ])).content as string
+
+  it("reads Mt-ch19_v01 as the book, the chapter and the verse", () => {
+    expect(JSON.parse(ask(["Mt-ch19_v01.ogg"]))).toMatchObject({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT" } })
+  })
+
+  it("reads sermon_01 with a constant book and chapter", () => {
+    expect(JSON.parse(ask(["sermon_01.ogg"]))).toMatchObject({ templates: [{ pattern: "sermon_{verse}" }], book: "MAT", chapter: 20 })
+  })
+
+  it("adds a template for the pieces of a verse when a name has a letter after its verse", () => {
+    expect(JSON.parse(ask(["Mt-ch19_v01.ogg", "Mt-ch19_v03a.wav", "Mt-ch19_v03b.wav"]))).toMatchObject({
+      templates: [{ pattern: "{book}-ch{chapter}_v{verse}{part}" }, { pattern: "{book}-ch{chapter}_v{verse}" }],
+      books: { Mt: "MAT" },
+    })
+  })
+
+  it("answers a worse- folder's retry with the chapter and the verse swapped", () => {
+    expect(JSON.parse(ask(["worse-Mt-ch19_v01.ogg"]))).toMatchObject({ templates: [{ pattern: "worse-{book}-ch{chapter}_v{verse}" }] })
+    expect(JSON.parse(ask(["worse-Mt-ch19_v99.ogg"], true))).toMatchObject({ templates: [{ pattern: "worse-{book}-ch{verse}_v{chapter}" }] })
+  })
+
+  it("adds a template for a range of verses when a name has a range after its verse", () => {
+    expect(JSON.parse(ask(["Mt-ch19_v01-03.ogg", "Mt-ch19_v04-06.ogg"]))).toMatchObject({
+      templates: [{ pattern: "{book}-ch{chapter}_v{verse}-{toVerse}" }, { pattern: "{book}-ch{chapter}_v{verse}" }],
+      books: { Mt: "MAT" },
+    })
+  })
+
+  it("maps Sermon, a word that names no book, to Matthew", () => {
+    expect(JSON.parse(ask(["Sermon-ch20_v01.ogg"]))).toMatchObject({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Sermon: "MAT" } })
+  })
+
+  it("answers a swap- folder with the chapter and the verse swapped on the first answer", () => {
+    expect(JSON.parse(ask(["swap-Mt-ch05_v01.ogg"]))).toMatchObject({ templates: [{ pattern: "swap-{book}-ch{verse}_v{chapter}" }], books: { Mt: "MAT" } })
+  })
+
+  it("answers a fail- folder's retry with no rule at all", () => {
+    expect(JSON.parse(ask(["fail-a.ogg"]))).toMatchObject({ templates: [{ pattern: "rec-{verse}" }] })
+    expect(() => JSON.parse(ask(["fail-a.ogg"], true))).toThrow()
   })
 })

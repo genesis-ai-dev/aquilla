@@ -179,7 +179,7 @@ describe("what the matcher found but would not pair", () => {
 
   it("offers a weak-wording match as a different group", () => {
     renderDrawer(review({ weakCandidates: [{ ...row, similarity: 0.3 }], actionable: 1 }))
-    expect(screen.getByText(/Overlapping, words barely agree/)).toBeInTheDocument()
+    expect(screen.getByText(/Overlapping, few words match/)).toBeInTheDocument()
   })
 
   it("counts them in the size of the job", () => {

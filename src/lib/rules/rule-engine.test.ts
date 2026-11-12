@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest"
-import { checkRules, checkRulesForCell, rulesForLane, lanesWithRules, filterRulesForDisplay } from "./rule-engine"
+import { checkRules, checkRulesForCell, rulesForLane, ruleLaneScope, ruleAppliesToCell } from "./rule-engine"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
+import { RULE_LINT_PARITY_CASES } from "./__fixtures__/rule-lint-parity"
+import { resolveBuiltinRules, withBuiltinOverrides } from "@/lib/lqa/builtin-resolver"
+import { resolvePunctuation, type PunctuationConventions } from "../../../db/shared/punctuation-conventions"
 
 function makeCell(overrides: Partial<CellData> & { id: string }): CellData {
   return {
@@ -51,6 +54,31 @@ describe("checkRules", () => {
     const rules = [makeRule({ id: "r1", check: { type: "target-forbids", targetPattern: "bad" } })]
     const result = checkRules(cells, rules)
     expect(result.has("c1")).toBe(false)
+  })
+
+  // AQU-1712: a forbidden rendering is wrong only as a rendering of its
+  // concept, so the compiled `term:` rule carries a source condition.
+  it.each([
+    { name: "flags when the source bears the term", original: "to baptize them", flagged: true },
+    { name: "does not flag when the source lacks the term", original: "to lower the net", flagged: false },
+  ])("target-forbids with a sourcePattern: $name", ({ original, flagged }) => {
+    const cells = new Map([["f1", [
+      makeCell({ id: "c1", original, translated: "para sumergir", status: "validated" }),
+    ]]])
+    const rules = [makeRule({
+      id: "term:baptize:forbidden:sumergir",
+      check: { type: "target-forbids", targetPattern: "sumergir", sourcePattern: "baptiz" },
+    })]
+    const result = checkRules(cells, rules)
+    expect(result.has("c1")).toBe(flagged)
+  })
+
+  it("target-forbids without a sourcePattern stays unconditional", () => {
+    const cells = new Map([["f1", [
+      makeCell({ id: "c1", original: "to lower the net", translated: "para sumergir", status: "validated" }),
+    ]]])
+    const rules = [makeRule({ id: "r1", check: { type: "target-forbids", targetPattern: "sumergir" } })]
+    expect(checkRules(cells, rules).has("c1")).toBe(true)
   })
 
   it("detects source-requires-target infraction", () => {
@@ -292,6 +320,41 @@ describe("rule engine — builtin variant", () => {
     const out = checkRulesForCell(cell, "f1", [rule])
     expect(out).toHaveLength(1)
   })
+
+  // AQU-1736: the registry's own default rule set, through the engine, over the
+  // canonical plain `value` a cell stores (footnote nodes expanded back to raw
+  // `\f…\f*` — see src/lib/richtext/usfm-plain-text.ts). Composition, not the
+  // check function in isolation: a check that is not registered, not enabled by
+  // default, or not dispatched would pass its own unit test and still never
+  // reach a translator.
+  it("footnote-quote-mismatch reaches a cell through the default builtin rules", () => {
+    const rules = resolveBuiltinRules(undefined)
+    const note = "\\f + \\fr 5:11 \\fq persecute you \\ft Or: harass.\\f*"
+    const source = "Blessed are you when they persecute you."
+
+    const edited = makeCell({
+      id: "c1",
+      original: source,
+      translated: `Blessed are you when they harass you ${note}`,
+      status: "unvalidated",
+    })
+    const flagged = checkRulesForCell(edited, "f1", rules)
+      .filter((i) => i.ruleId === "builtin:footnote-quote-mismatch")
+    expect(flagged).toHaveLength(1)
+    expect(flagged[0].reason).toBe("builtin:footnote-quote-mismatch")
+    expect(flagged[0].spans[0]).toMatchObject({ side: "target", matchedText: "persecute you" })
+
+    const intact = makeCell({
+      id: "c1",
+      original: source,
+      translated: `Blessed are you when they persecute you ${note}`,
+      status: "unvalidated",
+    })
+    expect(
+      checkRulesForCell(intact, "f1", rules)
+        .filter((i) => i.ruleId === "builtin:footnote-quote-mismatch"),
+    ).toEqual([])
+  })
 })
 
 describe("builtin infractions name the offending content via reasonParams (FRO-345 / AQU-832)", () => {
@@ -393,26 +456,176 @@ describe("rulesForLane", () => {
 })
 
 
-// AQU-609: the Rules-surface lane filter. WHY: with up to ~150 target lanes a
-// filter over ALL project lanes would be as unusable as the unfiltered list —
-// options must derive from lanes that actually hold rules, and the filter is
-// display-only (evaluation stays with rulesForLane).
-describe("lane display filter", () => {
+// AQU-1509: every rule card on the Rules surface states its scope relative to
+// the lane being viewed. WHY: a lane rule must never read as if it applies in
+// another lane (users edit the wrong lane's rules), and the classification
+// must agree with evaluation (`rulesForLane`) — "all" / "this" rules are
+// exactly the ones the editor enforces in that lane.
+describe("ruleLaneScope", () => {
   const proj = makeRule({ id: "p1", scope: "project", check: { type: "target-forbids", targetPattern: "x" } })
-  const fr1 = makeRule({ id: "fr1", scope: "lane", lane: "fr", check: { type: "target-forbids", targetPattern: "x" } })
-  const fr2 = makeRule({ id: "fr2", scope: "lane", lane: "fr", check: { type: "target-forbids", targetPattern: "y" } })
+  const org = makeRule({ id: "o1", scope: "org", check: { type: "target-forbids", targetPattern: "x" } })
+  const fr = makeRule({ id: "fr1", scope: "lane", lane: "fr", check: { type: "target-forbids", targetPattern: "x" } })
   const def = makeRule({ id: "def", scope: "lane", lane: "", check: { type: "target-forbids", targetPattern: "z" } })
+  const bare = makeRule({ id: "bare", scope: "lane", check: { type: "target-forbids", targetPattern: "z" } })
 
-  it("lanesWithRules lists each lane once, in first appearance order, ignoring non-lane rules", () => {
-    expect(lanesWithRules([proj, fr1, def, fr2])).toEqual(["fr", ""])
-    expect(lanesWithRules([proj])).toEqual([])
+  it("non-lane rules apply in every lane", () => {
+    expect(ruleLaneScope(proj, "fr")).toBe("all")
+    expect(ruleLaneScope(org, "")).toBe("all")
   })
 
-  it("filterRulesForDisplay: all / project-wide / one lane (incl. the default lane)", () => {
-    const rules = [proj, fr1, fr2, def]
-    expect(filterRulesForDisplay(rules, "all").map((r) => r.id)).toEqual(["p1", "fr1", "fr2", "def"])
-    expect(filterRulesForDisplay(rules, "project").map((r) => r.id)).toEqual(["p1"])
-    expect(filterRulesForDisplay(rules, "lane:fr").map((r) => r.id)).toEqual(["fr1", "fr2"])
-    expect(filterRulesForDisplay(rules, "lane:").map((r) => r.id)).toEqual(["def"])
+  it("a lane rule is 'this' only in its own lane, including the default lane", () => {
+    expect(ruleLaneScope(fr, "fr")).toBe("this")
+    expect(ruleLaneScope(fr, "")).toBe("other")
+    expect(ruleLaneScope(def, "")).toBe("this")
+    expect(ruleLaneScope(def, "fr")).toBe("other")
+    // A lane rule with no `lane` field belongs to the default lane.
+    expect(ruleLaneScope(bare, "")).toBe("this")
+  })
+
+  it("agrees with rulesForLane: 'other' rules are exactly the ones evaluation drops", () => {
+    const rules = [proj, org, fr, def, bare]
+    for (const lane of ["", "fr", "es"]) {
+      const applied = new Set(rulesForLane(rules, lane).map((r) => r.id))
+      for (const r of rules) {
+        expect(ruleLaneScope(r, lane) !== "other").toBe(applied.has(r.id))
+      }
+    }
+  })
+})
+
+// AQU-1705: the editor's half of the shared verdict table. auth-worker's
+// agent-lint.test.ts runs the same rows through the agent's lintDraft, so the
+// model is told about exactly the violations the person sees.
+describe("checkRulesForCell — verdicts the agent's lint must match", () => {
+  it.each(RULE_LINT_PARITY_CASES)("$name", ({ ruleId, check, source, target, flagged }) => {
+    const cell = makeCell({ id: "c1", original: source, translated: target, status: "unvalidated" })
+    const infractions = checkRulesForCell(cell, "f1", [makeRule({ id: ruleId, check })])
+    expect(infractions.map((i) => i.ruleId)).toEqual(flagged ? [ruleId] : [])
+  })
+})
+
+// AQU-1906: the lane's punctuation conventions reach the check function from
+// the rule's own descriptor, so every consumer of a lane-resolved rule set
+// agrees — no per-cell context needed.
+describe("checkRulesForCell — target-language punctuation (AQU-1906)", () => {
+  const cell = (translated: string) =>
+    makeCell({ id: "c1", original: "He went home.", translated, status: "unvalidated" })
+
+  const endPunctuationRules = (punctuation: PunctuationConventions | null) =>
+    withBuiltinOverrides(resolveBuiltinRules(undefined), undefined, punctuation).filter(
+      (rule) => rule.id === "builtin:end-punctuation-mismatch",
+    )
+
+  it("flags a bare Thai translation without conventions, and accepts it with them", () => {
+    const bare = cell("เขากลับบ้าน")
+    expect(checkRulesForCell(bare, "f1", endPunctuationRules(null))).toHaveLength(1)
+    const thai = resolvePunctuation({ language: "Thai" }).conventions
+    expect(checkRulesForCell(bare, "f1", endPunctuationRules(thai))).toHaveLength(0)
+  })
+
+  it("still flags a wrong-class mark in the same lane", () => {
+    const thai = resolvePunctuation({ language: "Thai" }).conventions
+    expect(checkRulesForCell(cell("เขากลับบ้าน?"), "f1", endPunctuationRules(thai))).toHaveLength(1)
+  })
+})
+
+// AQU-2350: `checkRulesForCell` is silent both when a cell satisfies a rule and
+// when the rule never reached it, so a surface that calls everything-not-broken
+// "following this rule" reports vacuous compliance. `ruleAppliesToCell` is the
+// missing half of that partition; every row below also asserts that the cell
+// raises no infraction, which is what makes the predicate necessary rather than
+// derivable from `checkRulesForCell`.
+describe("ruleAppliesToCell — does the rule reach this cell at all (AQU-2350)", () => {
+  const cases: {
+    name: string
+    ruleId?: string
+    check: TranslationRule["check"]
+    source: string
+    target: string
+    applies: boolean
+  }[] = [
+    {
+      name: "source-requires-target: source carries the term",
+      check: { type: "source-requires-target", sourcePattern: "Christian", targetPattern: "Cristão" },
+      source: "a Christian family", target: "uma família Cristão", applies: true,
+    },
+    {
+      name: "source-requires-target: source never mentions the term",
+      check: { type: "source-requires-target", sourcePattern: "Christian", targetPattern: "Cristão" },
+      source: "Advent Season: What Is It", target: "Tempo do Advento: o que é", applies: false,
+    },
+    {
+      name: "source-requires-target: case-insensitive by default",
+      check: { type: "source-requires-target", sourcePattern: "Christian", targetPattern: "Cristão" },
+      source: "a christian family", target: "uma família Cristão", applies: true,
+    },
+    {
+      name: "source-requires-target: caseSensitive means the case must match",
+      check: { type: "source-requires-target", sourcePattern: "Christian", targetPattern: "Cristão", caseSensitive: true },
+      source: "a christian family", target: "uma família Cristão", applies: false,
+    },
+    {
+      name: "source-requires-target: a term rule's \\p{L} pattern compiles under `u`",
+      ruleId: "term:christian",
+      check: { type: "source-requires-target", sourcePattern: "Christian\\p{L}*", targetPattern: "Cristão" },
+      source: "Christians everywhere", target: "Cristão em toda parte", applies: true,
+    },
+    {
+      name: "source-requires-target: an uncompilable pattern reaches nothing",
+      check: { type: "source-requires-target", sourcePattern: "[unclosed", targetPattern: "x" },
+      source: "[unclosed", target: "x", applies: false,
+    },
+    {
+      name: "source-target-match: source carries the pattern",
+      check: { type: "source-target-match", pattern: "\\d+" },
+      source: "in 1995", target: "em 1995", applies: true,
+    },
+    {
+      name: "source-target-match: source does not",
+      check: { type: "source-target-match", pattern: "\\d+" },
+      source: "in the spring", target: "na primavera", applies: false,
+    },
+    {
+      name: "target-forbids without a source condition constrains every translated cell",
+      check: { type: "target-forbids", targetPattern: "Allah" },
+      source: "He went home", target: "Ele foi para casa", applies: true,
+    },
+    {
+      name: "target-forbids with a source condition (AQU-1712) reaches only cells bearing the concept",
+      ruleId: "term:god",
+      check: { type: "target-forbids", targetPattern: "Allah", sourcePattern: "God" },
+      source: "He went home", target: "Ele foi para casa", applies: false,
+    },
+    {
+      name: "target-forbids with a source condition applies where the source bears it",
+      ruleId: "term:god",
+      check: { type: "target-forbids", targetPattern: "Allah", sourcePattern: "God" },
+      source: "God saw", target: "Deus viu", applies: true,
+    },
+    {
+      name: "builtin checks constrain every translated cell",
+      check: { type: "builtin", checkId: "end-punctuation-mismatch" },
+      source: "He went home.", target: "Ele foi para casa.", applies: true,
+    },
+  ]
+
+  it.each(cases)("$name", ({ ruleId, check, source, target, applies }) => {
+    const rule = makeRule({ id: ruleId ?? "r1", check })
+    const cell = makeCell({ id: "c1", original: source, translated: target, status: "unvalidated" })
+    expect(ruleAppliesToCell(rule, cell)).toBe(applies)
+    // None of these rows is an infraction, which is exactly why the drawer
+    // could not tell "satisfied" from "never reached" without this predicate.
+    expect(checkRulesForCell(cell, "f1", [rule])).toEqual([])
+  })
+
+  it("does not leave the cached /g regex advanced between cells", () => {
+    const rule = makeRule({
+      id: "term:christian",
+      check: { type: "source-requires-target", sourcePattern: "Christian", targetPattern: "Cristão" },
+    })
+    const cell = makeCell({ id: "c1", original: "Christian", translated: "Cristão", status: "unvalidated" })
+    expect(ruleAppliesToCell(rule, cell)).toBe(true)
+    // A stale lastIndex would make the second scan start past the only match.
+    expect(ruleAppliesToCell(rule, cell)).toBe(true)
   })
 })

@@ -35,9 +35,10 @@ import {
   type CommitTarget,
   type MembershipCommand,
 } from './commands-membership'
-import { briefPatchOfSetup, splitSettingsOps, type ProjectSetupCommand } from './commands-project-setup'
+import { briefPatchOfSetup, type ProjectSetupCommand } from './commands-project-setup'
 import { projectSetupFloor } from './prepare-project-setup'
 import type { PatchSettingsOp } from './commands-patch-settings'
+import { ensureProjectLanes, listProjectLanes } from '../../../db/shared/lanes'
 import type { PlanImportCommand } from './commands'
 import type {
   ExternalEnv,
@@ -54,6 +55,8 @@ import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings, patchProjectSettingsShared } from '../../../db/shared/projects'
 import { loosensPolicy } from '../../../db/shared/policy-direction'
+import { loadInheritedPolicyDefaults } from '../../../db/shared/validation-threshold'
+import { loadTranslationInstructions } from '../../../db/shared/load-translation-instructions'
 import {
   applyBriefL1Summary,
   applyBriefPatch,
@@ -122,8 +125,7 @@ export async function commitProjectSetup(
     return toErrorResponse(err)
   }
 
-  const ops = splitSettingsOps(cmd.settings)
-  const requiredRole = await projectSetupFloor(db, projectId, cmd, ops)
+  const requiredRole = projectSetupFloor(cmd)
   const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
   if (!role || role.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role to commit this project setup', {
@@ -134,6 +136,19 @@ export async function commitProjectSetup(
   const plan = cs.plannedIds?.projectSetup
   if (!plan) {
     return errorResponse('job_failed', 'ProjectSetup changeset is missing its step ledger')
+  }
+
+  if (cmd.plannedLanes && cmd.plannedLanes.length > 0) {
+    try {
+      const existing = await listProjectLanes(db, projectId)
+      await ensureProjectLanes(db, projectId, {
+        lanes: cmd.plannedLanes,
+        existingLanes: existing,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'could not create the project lanes'
+      return errorResponse('validation_failed', message)
+    }
   }
 
   const gate = await receiptOnlyGates(db, cs)
@@ -219,7 +234,12 @@ async function writeSettingsOps(
   return { ok: false, error: 'the project settings were being written concurrently — retry the commit' }
 }
 
+/**
+ * Settings ops other than the retired language keys. Lanes are created from
+ * `cmd.plannedLanes` before this step, not from settings.
+ */
 async function applySettingsStep(step: StepContext, ops: PatchSettingsOp[]): Promise<StepOutcome> {
+  if (ops.length === 0) return { ok: true }
   const written = await writeSettingsOps(step.db, step.cs.projectId, ops, step.cred.userId)
   return written.ok ? { ok: true } : { ok: false, error: written.error }
 }
@@ -232,7 +252,8 @@ async function applySettingsStep(step: StepContext, ops: PatchSettingsOp[]): Pro
  */
 async function applyPolicyStep(step: StepContext, ops: PatchSettingsOp[]): Promise<StepOutcome> {
   const live = await loadProjectSettings(step.db, step.cs.projectId)
-  const refused = new Set(loosensPolicy(ops, live.settings).map((verdict) => verdict.key))
+  const inherited = await loadInheritedPolicyDefaults(step.db, step.cs.projectId)
+  const refused = new Set(loosensPolicy(ops, live.settings, inherited).map((verdict) => verdict.key))
   const admissible = ops.filter((op) => !refused.has(op.key))
   for (const key of refused) {
     if (!step.policyKeysNotApplied.includes(key)) step.policyKeysNotApplied.push(key)
@@ -369,6 +390,7 @@ async function applyImportStep(
   const parsed = await parseArtifactToCells(step.env, projectId, current.artifactId, {
     fileType: current.fileType,
     ...(current.resultIndex !== undefined ? { resultIndex: current.resultIndex } : {}),
+    ...(current.laneId !== undefined ? { laneId: current.laneId } : {}),
     requireSingleResult: true,
   })
   if (!parsed.ok) {
@@ -389,6 +411,8 @@ async function applyImportStep(
     fileType: current.fileType,
     ...(current.sourceLanguage !== undefined ? { sourceLanguage: current.sourceLanguage } : {}),
     ...(current.targetLanguage !== undefined ? { targetLanguage: current.targetLanguage } : {}),
+    ...(current.sourceTextDirection !== undefined ? { sourceTextDirection: current.sourceTextDirection } : {}),
+    ...(current.targetTextDirection !== undefined ? { targetTextDirection: current.targetTextDirection } : {}),
     artifactId: current.artifactId,
     cells: parsed.parsed.cells,
   }
@@ -585,6 +609,11 @@ async function verifyBriefReachesCopilot(
     details: { ...caveat, reason },
   })
 
+  // AQU-2342: written instructions replace the brief in every prompt.
+  if (l1 !== '' && (await loadTranslationInstructions(step.db, step.cs.projectId)).stored) {
+    return notInjected('the project has written translationInstructions, which replace the brief in every prompt')
+  }
+
   const first = files[0]
   if (!first || l1 === '') {
     return l1 !== ''
@@ -605,11 +634,15 @@ async function verifyBriefReachesCopilot(
   const preview = await buildPromptPreview(step.db, {
     projectId: step.cs.projectId,
     cellId: cell.cell_id,
-    targetLang: typeof settings.targetLanguage === 'string' ? settings.targetLanguage : '',
+    targetLang: '',
     fileId: first.fileId,
   })
   if (!preview.ok) return { reaches: true, details: caveat }
-  return preview.body.parts.brief.trim() !== ''
+  // AQU-2342: the brief reaches a prompt only as part of the ONE instructions
+  // block (composed on read until `translationInstructions` is written), so
+  // the claim is that the block carries the summary — not merely that a block
+  // exists, which stored instructions alone would satisfy.
+  return preview.body.parts.instructions.includes(l1)
     ? { reaches: true, details: caveat }
-    : notInjected('prompt-preview renders no brief block on the first imported cell')
+    : notInjected('prompt-preview renders no instructions block carrying the brief on the first imported cell')
 }

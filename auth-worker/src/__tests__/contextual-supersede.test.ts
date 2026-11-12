@@ -10,6 +10,8 @@ import { describe, it, expect } from "vitest"
 import { isSuperseded, type SupersessionSnapshot } from "../lib/contextual/supersede"
 
 const base: SupersessionSnapshot = {
+  decidedFactKeys: new Set<string>(),
+  newestOpenFactQuestion: new Map<string, string>(),
   conceptsWithApprovedRenderings: new Set<string>(),
   validatedExamples: 0,
   briefFieldsAnswered: 0,
@@ -77,5 +79,38 @@ describe("isSuperseded", () => {
     expect(
       isSuperseded(d, { ...base, conceptsWithApprovedRenderings: new Set(["c-1"]) }),
     ).toBe(false)
+  })
+
+  // AQU-1691: fact questions. One open question per fact is the point: an
+  // older wording left open beside a newer one makes a person answer twice,
+  // and the second answer silently overwrites the first.
+  describe("a question that names a fact key", () => {
+    const older = { id: "q-1", readinessItem: "bible-fact" as const, conceptId: null, factKey: "measures" }
+    const newer = { ...older, id: "q-2" }
+
+    it("is superseded by a newer open question for the same key, and the newer one stays open", () => {
+      const snap = { ...base, newestOpenFactQuestion: new Map([["measures", "q-2"]]) }
+      expect(isSuperseded(older, snap)).toBe(true)
+      expect(isSuperseded(newer, snap)).toBe(false)
+    })
+
+    it("is not superseded by a newer question for a different key", () => {
+      const snap = { ...base, newestOpenFactQuestion: new Map([["headings", "q-9"]]) }
+      expect(isSuperseded(older, snap)).toBe(false)
+    })
+
+    it("closes once the project has decided the key by any route", () => {
+      expect(isSuperseded(newer, { ...base, decidedFactKeys: new Set(["measures"]) })).toBe(true)
+    })
+
+    it("wins over the readiness item: a fact key is checked as a fact even on a terminology question", () => {
+      const keyed = { id: "q-3", readinessItem: "terminology" as const, conceptId: "c-1", factKey: "render.the-twelve" }
+      expect(isSuperseded(keyed, { ...base, conceptsWithApprovedRenderings: new Set(["c-1"]) })).toBe(false)
+    })
+
+    it("never closes a bible-fact question that names no key", () => {
+      const unkeyed = { id: "q-4", readinessItem: "bible-fact" as const, conceptId: null, factKey: null }
+      expect(isSuperseded(unkeyed, { ...base, decidedFactKeys: new Set(["measures"]) })).toBe(false)
+    })
   })
 })

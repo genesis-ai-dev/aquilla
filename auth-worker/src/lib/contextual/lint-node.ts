@@ -6,7 +6,9 @@
 
 import { lintDraft, type LintRule } from "../agent/lint"
 import type { CellPair } from "../agent/tools/select-cells"
+import { bibleFindings, type BibleGate } from "./bible-gates"
 import { lintTerminology, type Concept } from "./project-context"
+import type { TermMatchingSettings } from "../../../../src/lib/terminology/model"
 import type { LintFlag, SpanDraft } from "./types"
 
 /**
@@ -19,12 +21,19 @@ import type { LintFlag, SpanDraft } from "./types"
  * risk router and the redraft loop, which means the run had no way to
  * self-correct the one defect a translation consultant is most certain to
  * reject a book over.
+ *
+ * AQU-1690: with `bible`, each cell is also checked against its Bible data
+ * expectations (quotation marks, question marks) through the shared evaluator
+ * the editor's built-in rules use. Those flags carry rule id `bkp:<check>` and
+ * the finding itself; the router counts them apart from lint.
  */
 export function lintSpanDraft(
   rules: LintRule[],
   pairs: CellPair[],
   draft: SpanDraft,
   concepts: Concept[] = [],
+  termMatching?: TermMatchingSettings,
+  bible?: BibleGate,
 ): LintFlag[] {
   const sourceById = new Map(pairs.map((p) => [p.cellId, p.source]))
   const flags: LintFlag[] = []
@@ -32,10 +41,13 @@ export function lintSpanDraft(
     const source = sourceById.get(cell.cellId) ?? ""
     const hits = [
       ...lintDraft(rules, source, cell.text),
-      ...lintTerminology(concepts, source, cell.text),
+      ...lintTerminology(concepts, source, cell.text, termMatching),
     ]
     for (const hit of hits) {
       flags.push({ spanId: draft.spanId, cellId: cell.cellId, ruleId: hit.ruleId, message: hit.message })
+    }
+    for (const finding of bible ? bibleFindings(bible, cell.cellId, cell.text) : []) {
+      flags.push({ spanId: draft.spanId, cellId: cell.cellId, ruleId: finding.code, message: finding.reason, bible: finding })
     }
   }
   return flags

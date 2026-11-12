@@ -12,9 +12,9 @@
 
 import { withCors } from "../cors"
 import { r2KeyPrefix, type AudioEnv } from "../audio"
-import { verifyTokenForDoc } from "../auth"
+import { verifyTokenForDoc, type SyncTokenClaims } from "../auth"
 import { ROLE } from "./role-policy"
-import { laneIdResolveBindingBinds, laneIdResolveBindingSql } from "./lane-id-sql"
+import { artifactBindingConflictColumn, laneIdResolveBindingBinds, laneIdResolveBindingSql } from "./lane-id-sql"
 import {
   MAX_BUFFERED_SOURCE_ARTIFACT_BYTES,
   MAX_SOURCE_ARTIFACT_BYTES,
@@ -115,6 +115,28 @@ function hasInvalidEncodedHeader(request: Request, name: string): boolean {
   return Boolean(request.headers.get(name)?.trim()) && decodedHeader(request, name) === undefined
 }
 
+/**
+ * A role-gated 403 in the AQU-1352 §3.9 shape (auth-worker/src/lib/role-denial.ts),
+ * so the client's `roleRequiredMessage()` can say "You are Contributor here.
+ * Project Lead is required." instead of a bare "Source upload failed". `error`
+ * keeps the legacy plain-text reason for older clients and logs; `source` is the
+ * role-resolution path /sync-token stamped on the token, when it did.
+ */
+function roleTooLowResponse(request: Request, error: string, claims: SyncTokenClaims): Response {
+  return withCors(
+    Response.json(
+      {
+        error,
+        code: 'role_required',
+        required: { roleLevel: ROLE.PROJECT_LEAD },
+        actual: { roleLevel: claims.role, source: claims.src ?? null },
+      },
+      { status: 403 },
+    ),
+    request,
+  )
+}
+
 async function handleSourceBindingRequest(
   request: Request,
   env: SourceUploadEnv,
@@ -131,7 +153,7 @@ async function handleSourceBindingRequest(
   )
   if (!auth.ok) return withCors(new Response(auth.reason, { status: auth.status }), request)
   if (auth.claims.role < ROLE.PROJECT_LEAD) {
-    return withCors(new Response('role too low for artifact binding', { status: 403 }), request)
+    return roleTooLowResponse(request, 'role too low for artifact binding', auth.claims)
   }
 
   let body: Record<string, unknown>
@@ -173,20 +195,20 @@ async function handleSourceBindingRequest(
   if (!artifact) return withCors(new Response('artifact not found', { status: 404 }), request)
 
   try {
+    const conflictColumn = await artifactBindingConflictColumn(env.AQUILLA_PG)
     await env.AQUILLA_PG.prepare(
       `INSERT INTO artifact_bindings (
-         id, project_id, artifact_id, file_id, binding_role, target_lang,
+         id, project_id, artifact_id, file_id, binding_role,
          member_path, profile_id, profile_version, fidelity, manifest, lane_id
-       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, '{}'::jsonb, ${laneIdResolveBindingSql()})
-       ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
+       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, '{}'::jsonb, ${laneIdResolveBindingSql()})
+       ON CONFLICT (artifact_id, file_id, binding_role, ${conflictColumn}, member_path)
        DO UPDATE SET
          profile_id = EXCLUDED.profile_id,
          profile_version = EXCLUDED.profile_version,
          fidelity = EXCLUDED.fidelity,
-         lane_id = COALESCE(EXCLUDED.lane_id, artifact_bindings.lane_id),
          updated_at = now()`,
       // AQU-1240 slice 8: 'support'/'target' role -> target lane by tag.
-    ).bind(crypto.randomUUID(), projectId, artifactId, fileId, bindingRole, targetLang, memberPath, profileId, profileVersion, fidelity, ...laneIdResolveBindingBinds(projectId, bindingRole, targetLang)).run()
+    ).bind(crypto.randomUUID(), projectId, artifactId, fileId, bindingRole, memberPath, profileId, profileVersion, fidelity, ...laneIdResolveBindingBinds(projectId, bindingRole, targetLang)).run()
   } catch (error) {
     console.error("[source-upload] artifact binding failed:", error)
     return withCors(Response.json({ error: "Artifact binding failed" }, { status: 500 }), request)
@@ -228,10 +250,7 @@ export async function handleSourceUploadRequest(
     return withCors(new Response(auth.reason, { status: auth.status }), request)
   }
   if (auth.claims.role < ROLE.PROJECT_LEAD) {
-    return withCors(
-      new Response("role too low for source upload", { status: 403 }),
-      request,
-    )
+    return roleTooLowResponse(request, "role too low for source upload", auth.claims)
   }
 
   const format = request.headers.get("X-Source-Format")?.trim().toLowerCase() ?? ""
@@ -407,7 +426,7 @@ export async function handleSourceUploadRequest(
   // The sidecar is the export skeleton, not necessarily the source lane's
   // original. A target-side Paratext import deliberately selects its target
   // USFM skeleton; other target artifacts explicitly send update=false.
-  const statements = buildSourceArtifactPersistenceStatements(db, {
+  const statements = await buildSourceArtifactPersistenceStatements(db, {
     projectId,
     fileId,
     artifactId,

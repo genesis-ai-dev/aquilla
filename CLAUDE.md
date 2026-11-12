@@ -1,8 +1,16 @@
 # CLAUDE.md
 
 Guidance for Claude Code working in this repo. See also **`AGENTS.md`** (testing/E2E rules,
-shared by all AI assistants) and `docs/` (SYNC, AGENT-API, AGENT-SANDBOX, SEO, OPSEC, FEATURE-STORIES;
+shared by all AI assistants) and `docs/` (SYNC, AGENT-API, AGENT-SANDBOX, SEO, OPSEC,
+FEATURE-STORIES, PARTNER-INTEGRATIONS, ZAPIER;
 SPEC.md covers the separate VS Code Codex extension that uses Aquilla as a backend).
+
+**Why a rule is the rule: `docs/decisions/INDEX.md`.** One page per decision that shapes
+behaviour you cannot read off a single file — parser version stamps, byte-identical
+exports, the inline-tag ladder, the partner seam, the event log's head compare-and-swap.
+Claims there are *pinned* to a file (and an exported symbol), never a line number, and
+`pnpm run check:doc-pins` fails when a pin stops resolving. New architecture decisions go
+there rather than into a Linear issue quoted in a code comment.
 
 ## Layout — flat single-SPA trunk
 
@@ -20,16 +28,21 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 │   │                   #   dcs, codex-editor, brief, credits, entitlements, store, …
 │   ├── hooks/          # read hooks (useCells, useProject, …) + outbox flusher
 │   ├── pages/ components/ context/ branding/
+│   ├── partner-integrations/  # publisher-specific code; see PARTNER INTEGRATIONS below
 │   └── test-setup.ts
 ├── auth-worker/        # identity + agent-API Worker — see Backend below
 ├── sync-worker/        # realtime/sync Worker — see Backend below
 ├── agent-worker/       # sandboxed agent code-execution Worker — see Backend below
+├── monitor-worker/     # uptime cron → Discord alerts with @mentions (monitor-worker/README.md)
 ├── db/                 # LIVE Postgres schema: postgres/schema.sql, postgres/migrations/,
 │                       #   rollout/, shim/ (D1-compatible executor over Hyperdrive)
 ├── worker/             # root SPA-serving Worker (index.ts + og/) for the production deploy
-├── infra/modal/        # Modal services: diarization.py, seed_vc.py
-├── src-tauri/          # Tauri desktop shell
+├── infra/modal/        # Modal services: voice_forge.py, diarization.py, omni_asr.py
+├── src-tauri/          # Tauri desktop shell. Hot-bundle update channel: docs/superpowers/specs/
+│                       #   2026-11-05-desktop-hot-bundle.md. Rust command/event/capability
+│                       #   changes bump the tauri.conf.json version (= minShellVersion).
 ├── e2e/                # Playwright specs + page objects + JOURNEYS.md (see AGENTS.md)
+│                       #   specs/partner-integrations/<partner>/ is partner-owned
 ├── scripts/            # dev-stack.ts (local full stack), e2e-up.ts, brand/build helpers
 └── vite.config.ts      # drives the SPA + Tauri build; @/ → ./src
 ```
@@ -43,6 +56,26 @@ Worker claims `/`, `/homepage`, `/beta`, `/bible-translation`, `/case-studies/*`
 `aquilla.app/*` catch-all. This repo builds only `index.html`; marketing deploys do
 not ride the app's QA-gated release cycle. See **`docs/SEO.md`**.
 
+## Partner integrations — a folder you can delete
+
+Publisher-specific code (Biblica's importers today, Martin's Bible-swap code when
+it ports over) lives in **`src/partner-integrations/<partner>/`**, and any folder
+named `partner-integrations` at any depth is partner-owned. Two rules, and AQU-1286
+is where they come from:
+
+1. **Nothing outside such a folder may import from inside one.** Generic code
+   reaches partner code only through `src/lib/partners/registry.ts`, which
+   discovers `register.ts` files with an `import.meta.glob` — a glob that matches
+   nothing is an empty object, so the seam survives the folders being deleted. Do
+   not replace it with a static import list.
+2. **Deleting the folders must leave the app compiling, building and running**,
+   with that partner's import options simply absent. `npx tsx
+   scripts/make-public-copy.ts` produces the open-source copy by filtering them
+   out, and fails if a partner copyright notice survives anywhere else.
+
+Full convention, how to register one, and the known string-level gaps:
+**`docs/PARTNER-INTEGRATIONS.md`**.
+
 ## Commands
 
 ```bash
@@ -50,7 +83,7 @@ pnpm i
 pnpm dev          # tsx scripts/dev-stack.ts — full local stack (SPA + workers; agent-worker :8790)
 pnpm dev:vite     # just the vite dev server
 pnpm build        # tsc -b && vite build && scripts/check-brand-build.ts aquilla
-pnpm lint         # eslint .
+pnpm lint         # eslint . with an 8 GiB heap (NODE_OPTIONS in the script; AQU-2084)
 pnpm test         # vitest run — root suite EXCLUDES e2e/** and all worker packages
                   #   (auth-worker, sync-worker, agent-worker, worker, parity)
 pnpm test:watch
@@ -63,6 +96,7 @@ pnpm test:e2e
 cd sync-worker && npm test
 cd auth-worker && npm test
 cd agent-worker && npm test    # worker/ also has its own vitest suite
+cd monitor-worker && npm test
 
 # Run one test file / pattern
 pnpm test src/lib/parsers/usfm.test.ts
@@ -95,9 +129,27 @@ worker binds D1; workers fail fast if `HYPERDRIVE` is unbound and query through
   (translation agent, SSE), `aquifer` (Bible Aquifer proxy), `usage`.
 - **`sync-worker/`** — Worker `aquilla-sync-worker`, R2 `aquilla-snapshots`. Owns the
   append-only event log and its projection to `cells`/`files`, the per-project `ProjectSync`
-  Durable Object (presence, focus-lock leases, `event.applied`/`event.stale` broadcast — no
-  durable DO state), comments (+ email notifications via CF Email Service), `/audio/*`,
-  diarization, voice-convert, and the external **Agent API** under `/api/v1/external/*`
+  Durable Object (presence, focus-lock leases, `event.applied`/`event.stale` broadcast —
+  hibernatable sockets; its only durable state is two DO-storage keys for leases and the
+  member-removed denylist, no Postgres/R2 writes), comments (+ email notifications via CF
+  Email Service), `/audio/*`, diarization, voice-convert, this worker's three crons — the
+  nightly R2 orphan sweep (AQU-1856, `src/r2-gc-cron.ts`; `POST /admin/r2-gc?dryRun=1` for
+  an on-demand report), the nightly projection-snapshot sweep (AQU-1833,
+  `src/projection-snapshot-cron.ts`; `POST /admin/projection-snapshot?projectId=…` on
+  demand) that keeps `/admin/projects/:id/rebuild-projection` from having to replay a
+  project's whole history, and the nightly progress self-heal sweep (AQU-2145,
+  `src/progress-selfheal-cron.ts`; `POST /admin/progress-selfheal?projectId=…` on demand)
+  that re-projects files whose progress rows fell behind their own audio events — its
+  `repaired=N` log line is the alarm for a write-path regression — and files missing a
+  row for one of their project's lanes (`laneRows=N`, not an alarm: "Add language" and
+  unarchive write those rows themselves via `db/shared/lane-progress.ts`, but imports
+  and migrations that add a language leave them to the sweep) — plus the on-demand
+  `POST /admin/link-provenance?projectId=…&dryRun=1` (AQU-2345,
+  `src/events/link-provenance.ts`) that gives files a source link brought in their
+  upstream type and a `file_source_blobs` pointer at the upstream's original (the
+  rules: `db/shared/link-file-provenance.ts`; every mirror window applies them to
+  the files it touches, this is the backfill) — and the external
+  **Agent API** under `/api/v1/external/*`
   (changeset engine + apply gate, artifacts, tools-only MCP server, self-describing
   discovery — see `docs/AGENT-API.md`). Every PR DOES get its own per-branch sync-worker and
   auth-worker preview (`aquilla-sync-preview` / `aquilla-auth-preview`, deployed by

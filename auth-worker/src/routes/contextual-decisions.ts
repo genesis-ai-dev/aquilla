@@ -6,6 +6,13 @@
 // The surfacing cap is enforced HERE, read-side, not at raise time: a held
 // decision stays open so the supersession sweep can still close it, and is
 // very likely to be closed that way before anyone would have reached it.
+//
+// AQU-1691: answering a fact question records a project fact in the same
+// transaction (db/shared/contextual-decision-lifecycle.ts). One whose key names
+// a Language-profile slot changes the Language profile, so it needs the role
+// that may change the profile in Settings (maintainer): answering a card must
+// not be a way around that floor. After the commit the sync-worker hears that
+// the settings moved, exactly as after a settings PATCH.
 
 import { Hono } from "hono"
 import { z } from "zod"
@@ -22,7 +29,12 @@ import {
 } from "../../../db/shared/contextual-decisions"
 import { resolveBlockingDecision } from "../../../db/shared/contextual-decision-lifecycle"
 import type { BlockingDecisionTransition } from "../../../db/shared/contextual-decision-lifecycle"
+import { profileSlotOfFactKey } from "../../../db/shared/project-facts"
+import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import { kickLoop, publishRunStateOutsideTick } from "./contextual"
+
+/** The floor of a settings write that changes the Language profile (project-settings.ts SETTINGS_WRITE_MIN_ROLE). */
+const PROFILE_ANSWER_MIN_ROLE = ROLE.MAINTAINER
 
 const decisions = new Hono<AuthHonoEnv>()
 
@@ -80,6 +92,10 @@ decisions.post(
         const { body, status } = errorJson("validation_failed", "answer is required", 400)
         return c.json(body, status)
       }
+      if (existing.factKey && profileSlotOfFactKey(existing.factKey)) {
+        const profileGate = await requireRole(c, projectId, PROFILE_ANSWER_MIN_ROLE)
+        if (!profileGate.ok) return profileGate.res
+      }
       result = await resolveBlockingDecision(
         c.env.AQUILLA_PG,
         {
@@ -121,6 +137,26 @@ decisions.post(
       )
       return c.json(body, status)
     }
+    if (result.status === "invalid_answer") {
+      // Rolled back: the card is still open. `reason` is a code the card renders.
+      const { body, status } = errorJson(
+        "validation_failed",
+        "the answer cannot be stored as this project fact",
+        400,
+        { reason: result.reason },
+      )
+      return c.json(body, status)
+    }
+    const recorded = "fact" in result ? result.fact : undefined
+    if (recorded) {
+      const notify = notifySyncWorkerOfProjectSettingsChange(c.env, projectId, recorded.settingsVersion)
+      try {
+        c.executionCtx.waitUntil(notify)
+      } catch {
+        // Hono's direct test harness has no ExecutionContext; the notice stays best-effort.
+        void notify
+      }
+    }
     const wokeRun = "run" in result ? result.run : undefined
     if (wokeRun) {
       await publishRunStateOutsideTick(c.env, c.env.AQUILLA_PG, projectId, wokeRun)
@@ -129,6 +165,7 @@ decisions.post(
     return c.json({
       decision: result.decision,
       ...(wokeRun ? { wokeRunId: wokeRun.id } : {}),
+      ...(recorded ? { factRecorded: recorded.kind } : {}),
     })
   },
 )

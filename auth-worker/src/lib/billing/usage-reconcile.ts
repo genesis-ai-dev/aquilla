@@ -1,6 +1,11 @@
 import type { Env } from '../../types'
 import { providerCostToMicroCents } from '../../../../db/shared/billing-cost'
 import { listHeldUsage, readUsageRequest, settleWorkspaceUsage } from './workspace-usage'
+import {
+  isAbortTimeout,
+  logVendorTimeout,
+  VENDOR_TIMEOUT_MS,
+} from "../../../../shared/vendor-timeouts"
 
 export type UsageReconcileStatus = 'settled' | 'already_settled' | 'released' | 'unreferenced' | 'unavailable'
 
@@ -31,7 +36,13 @@ async function fetchGenerationCostCents(env: Env, ref: string): Promise<number |
   if (!env.OPENROUTER_BASE_URL || !env.OPENROUTER_API_KEY) return undefined
   try {
     const url = `${env.OPENROUTER_BASE_URL.replace(/\/$/, '')}/generation?id=${encodeURIComponent(ref)}`
-    const response = await fetch(url, { headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}` } })
+    // AQU-1849: reconciliation runs over a batch of held rows, so one hung
+    // lookup must not stall the rest. `undefined` leaves the row held for the
+    // next pass, exactly as any other failure here does.
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}` },
+      signal: AbortSignal.timeout(VENDOR_TIMEOUT_MS.openRouterMetadata),
+    })
     if (!response.ok) return undefined
     const body = await response.json() as { data?: { id?: unknown; total_cost?: unknown } } | null
     const record = body?.data
@@ -39,7 +50,10 @@ async function fetchGenerationCostCents(env: Env, ref: string): Promise<number |
     const cents = record.total_cost * 100
     providerCostToMicroCents(cents)
     return cents
-  } catch { return undefined }
+  } catch (err) {
+    if (isAbortTimeout(err)) logVendorTimeout('openRouterMetadata', err)
+    return undefined
+  }
 }
 
 export async function heldUsageSummary(env: Env, orgId: number) {

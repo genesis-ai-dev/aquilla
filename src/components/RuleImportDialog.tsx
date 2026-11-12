@@ -7,7 +7,7 @@
  */
 
 import { useState, useRef, useCallback } from "react"
-import { Upload } from "lucide-react"
+import { AlertTriangle, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
@@ -57,26 +57,38 @@ const FALLBACK_SETTINGS: CompletionSettings = {
   maxTokens: 2048,
   temperature: 0.1,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
-  llmHealthPenalty: 0.1,
 }
 
 interface Props {
   completionSettings: CompletionSettings | undefined
   onAdd: (rule: Omit<TranslationRule, "id" | "createdAt">) => void | Promise<void>
   projectId?: string
+  /** AQU-2342: controlled from the Checks list's one "Add check" flow — no
+   *  trigger button of its own is rendered then. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 type Stage = "idle" | "extracting" | "review"
 
-export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props) {
+export function RuleImportDialog({ completionSettings, onAdd, projectId, open: controlledOpen, onOpenChange }: Props) {
   const t = useT()
   const { session } = useFrontierSession()
   const { available: frontierAvailable } = useFrontierHealth()
-  const [open, setOpen] = useState(false)
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
+  const controlled = controlledOpen !== undefined
+  const open = controlled ? controlledOpen : uncontrolledOpen
+  const setOpen = (next: boolean) => {
+    if (!controlled) setUncontrolledOpen(next)
+    onOpenChange?.(next)
+  }
   const [stage, setStage] = useState<Stage>("idle")
   const [error, setError] = useState<string | null>(null)
   const [progress, setProgress] = useState<ExtractionProgress | null>(null)
   const [drafts, setDrafts] = useState<RuleSuggestion[]>([])
+  // AQU-1254: pass-1 chunks whose answer was cut off by the output cap. Non-zero
+  // means rules the document does contain never made it out of extraction.
+  const [truncatedChunks, setTruncatedChunks] = useState(0)
   const [committing, setCommitting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -104,7 +116,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
     setProgress({ phase: "extracting", candidateCount: 0, structuredCount: 0 })
 
     try {
-      const results = await extractRulesFromDocument(
+      const { rules, truncatedChunks: truncated } = await extractRulesFromDocument(
         text,
         effectiveSettings,
         session,
@@ -117,13 +129,22 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
         },
       )
 
-      if (results.length === 0) {
-        setError(t("rules.importDialog.noRulesFound"))
+      setTruncatedChunks(truncated)
+
+      if (rules.length === 0) {
+        // AQU-1254: "no rules found" is a claim about the document. Only make it
+        // when extraction actually ran to completion — otherwise the user is told
+        // their style guide is empty when in fact the answer was cut off.
+        setError(
+          truncated > 0
+            ? t("rules.importDialog.extractionIncomplete")
+            : t("rules.importDialog.noRulesFound"),
+        )
         setStage("idle")
         return
       }
 
-      setDrafts(results)
+      setDrafts(rules)
       setStage("review")
     } catch (err) {
       setError(err instanceof Error ? err.message : t("rules.importDialog.extractionFailed"))
@@ -239,6 +260,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
     setError(null)
     setProgress(null)
     setDrafts([])
+    setTruncatedChunks(0)
   }
 
   function handleOpenChange(next: boolean) {
@@ -255,28 +277,23 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <AppTooltip
-        content={
-          isConfigured
-            ? t("rules.importDialog.tooltip")
-            : t("rules.importDialog.tooltipUnconfigured")
-        }
-      >
-        {/* Span wrapper so the tooltip still receives hover when the button is disabled. */}
-        <span className="inline-flex">
-          <DialogTrigger
-            render={
-              <Button
-                variant="outline"
-                disabled={!isConfigured}
-              />
-            }
-          >
+      {/* AQU-2260 (Sam, Oct 29): the labelled trigger says nothing on hover.
+          Greyed out, it says why on click: AppTooltip wraps the disabled
+          button itself (a hand-made span between them would bring the hover
+          back), and with nothing to open it is not a dialog trigger. */}
+      {controlled ? null : isConfigured ? (
+        <DialogTrigger render={<Button variant="outline" />}>
+          <Upload className="me-1 h-3.5 w-3.5" />
+          {t("rules.importDialog.triggerButton")}
+        </DialogTrigger>
+      ) : (
+        <AppTooltip content={t("rules.importDialog.tooltipUnconfigured")}>
+          <Button variant="outline" disabled>
             <Upload className="me-1 h-3.5 w-3.5" />
             {t("rules.importDialog.triggerButton")}
-          </DialogTrigger>
-        </span>
-      </AppTooltip>
+          </Button>
+        </AppTooltip>
+      )}
 
       <DialogContent className="max-w-2xl">
         <DialogHeader>
@@ -373,12 +390,23 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
         )}
 
         {stage === "review" && (
-          <RuleImportReview
-            drafts={drafts}
-            onCommit={handleCommit}
-            onBack={() => setStage("idle")}
-            committing={committing}
-          />
+          <>
+            {/* AQU-1254: these drafts are what survived a cut-off answer, not the
+                whole document. Say so here — the review screen otherwise reads as
+                the complete set. */}
+            {truncatedChunks > 0 && (
+              <p className="flex items-start gap-2 text-sm text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                {t("rules.importDialog.extractionPartial")}
+              </p>
+            )}
+            <RuleImportReview
+              drafts={drafts}
+              onCommit={handleCommit}
+              onBack={() => setStage("idle")}
+              committing={committing}
+            />
+          </>
         )}
       </DialogContent>
     </Dialog>

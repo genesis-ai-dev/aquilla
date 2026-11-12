@@ -39,8 +39,24 @@ import { billing } from "./billing"
 import { knowledgeBase } from "./knowledgeBase"
 import { settings } from "./settings"
 import { agent } from "./agent"
+import { agentDraftReview } from "./agentDraftReview"
 import { workspace } from "./workspace"
 import { segmentation } from "./segmentation"
+import { smartEdits } from "./smartEdits"
+import { langquest } from "./langquest"
+import { harmonizer } from "./harmonizer"
+import { bibleData } from "./bibleData"
+import { extensions } from "./extensions"
+import { languageProfile } from "./languageProfile"
+import { projectDecisions } from "./projectDecisions"
+import { bibleAlignment } from "./bibleAlignment"
+import { bibleChecks } from "./bibleChecks"
+import { bibleHelps } from "./bibleHelps"
+import { bibleParticipants } from "./bibleParticipants"
+import { bibleVoices } from "./bibleVoices"
+import { transcribe } from "./transcribe"
+import { recordingsUpload } from "./recordingsUpload"
+import { paratextBridge } from "./paratextBridge"
 
 export const NAMESPACES = [
   common,
@@ -66,6 +82,22 @@ export const NAMESPACES = [
   knowledgeBase,
   settings,
   agent,
+  agentDraftReview,
   workspace,
   segmentation,
+  smartEdits,
+  langquest,
+  harmonizer,
+  bibleData,
+  extensions,
+  languageProfile,
+  projectDecisions,
+  bibleAlignment,
+  bibleChecks,
+  bibleHelps,
+  bibleParticipants,
+  bibleVoices,
+  transcribe,
+  recordingsUpload,
+  paratextBridge,
 ] as const

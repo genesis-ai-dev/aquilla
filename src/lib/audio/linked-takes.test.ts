@@ -68,12 +68,19 @@ describe("buildLinkedTakes", () => {
     expect(out.get("s1")!.map((t) => t.cell.id)).toEqual(["first", "third"])
   })
 
-  it("skips a cue nobody has recorded yet", () => {
-    // The tab would have nothing to draw, and its empty state already offers
-    // the way to record it.
+  it("gives no entry to a line none of whose heard lines is recorded", () => {
+    // The tab's empty state already offers the way to record it.
     const cueCells = [cue("c1", { take: false })]
     const out = buildLinkedTakes({ cueCells, ...index([["s1", ["c1"]]]) })
     expect(out.has("s1")).toBe(false)
+  })
+
+  // Sam, 2026-09-29: a line split across two heard lines showed only the
+  // recorded one, so the other could not be recorded from the tab.
+  it("lists every heard line of a line once any is recorded, saying which are", () => {
+    const cueCells = [cue("part1"), cue("part2", { take: false })]
+    const out = buildLinkedTakes({ cueCells, ...index([["s1", ["part2", "part1"]]]) })
+    expect(out.get("s1")!.map((t) => [t.cell.id, t.hasTake])).toEqual([["part1", true], ["part2", false]])
   })
 
   it("counts how many lines share one heard line", () => {
@@ -294,5 +301,29 @@ describe("divergentVoiceTargets", () => {
 
   it("says nothing about an ordinary one-subtitle line", () => {
     expect(divergentVoiceTargets([plan(["s1"])], () => "v-peter")).toEqual([])
+  })
+})
+
+// Sam, 2026-09-30: what a heard line's take is checked against.
+describe("buildLinkedTakes — what each heard line performs", () => {
+  it("names the lines a shared heard line performs", () => {
+    const out = buildLinkedTakes({ cueCells: [cue("c1")], ...index([["s1", ["c1"]], ["s2", ["c1"]]]) })
+    expect(out.get("s1")![0]).toMatchObject({ performs: ["s1", "s2"], sharedWith: 2, partOfSplit: false })
+  })
+
+  it("marks each heard line of a split line as one part of it", () => {
+    const out = buildLinkedTakes({ cueCells: [cue("a"), cue("b")], ...index([["s1", ["a", "b"]]]) })
+    expect(out.get("s1")!.map((t) => t.partOfSplit)).toEqual([true, true])
+  })
+
+  it("marks a heard line whose OTHER line is split, too", () => {
+    // c1 performs s1 and s2; s2 is also performed by c2.
+    const out = buildLinkedTakes({ cueCells: [cue("c1"), cue("c2")], ...index([["s1", ["c1"]], ["s2", ["c1", "c2"]]]) })
+    expect(out.get("s1")![0].partOfSplit).toBe(true)
+  })
+
+  it("marks nothing on a line performed by one heard line alone", () => {
+    const out = buildLinkedTakes({ cueCells: [cue("c1")], ...index([["s1", ["c1"]]]) })
+    expect(out.get("s1")![0]).toMatchObject({ performs: ["s1"], partOfSplit: false })
   })
 })

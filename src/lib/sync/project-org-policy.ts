@@ -1,0 +1,220 @@
+// AQU-1771: the org policy a PROJECT's own surfaces apply — the workspace,
+// the project overview, project settings.
+//
+// These surfaces used to read the org's settings directly (useOrgSettings). A
+// member who is in the project but not in its org cannot read those (the org
+// settings route answers 403), so the browser fell back to built-in defaults:
+// the wrong visibility floors, the wrong assignment authority, and repetition
+// copying switched ON in a project whose org had turned it off — after which
+// the browser wrote the copies. The project's settings response now carries
+// the org's values (`orgPolicy`) and the floors the project enforces
+// (`visibilityFloors`, its own stricter values included).
+//
+// Project-scoped surfaces ALWAYS prefer those carried values, for every
+// member, not only when the org read is refused: they are resolved by the
+// server for this exact project (its own org, never whichever org happens to
+// be active in the switcher), they include the project's stricter floors, and
+// the settings response is the one an open editor re-reads on a remote change
+// and on focus. The org read is only the fallback for a server that predates
+// the fields.
+
+import { ROLE } from "@/lib/frontier/roles"
+import { DEFAULT_IMPORT_MIN_ROLE, resolveImportFloor } from "@/lib/sync/role-policy"
+
+/** The org values carried on the project's settings response. */
+export interface ProjectOrgPolicy {
+  /** The org's floors, defaults applied. */
+  rosterViewMinRole: number
+  memberProgressViewMinRole: number
+  allowSelfAssignment: boolean
+  allowScopedLaneAssignment: boolean
+  assignmentMinRole: number
+  autoPropagateRepetitions: boolean
+  /** Null when the org set none: no client export gate. */
+  exportMinRole: number | null
+  /**
+   * AQU-2304: the org's `file.create` floor. Absent on a server that predates
+   * the field, which `resolveProjectPolicy` reads as the PROJECT_LEAD default
+   * — i.e. the behaviour before the key existed.
+   */
+  importMinRole?: number
+}
+
+/**
+ * One stricter-only floor: the org's, the project's own (null = follows the
+ * org), and the one enforced. Named for the visibility floors it was written
+ * for (AQU-1771); the import floor (AQU-2305) reports the same three values
+ * the same way, so it shares the shape rather than cloning it.
+ */
+export interface VisibilityFloorView {
+  org: number
+  project: number | null
+  effective: number
+}
+
+export interface ProjectVisibilityFloors {
+  rosterViewMinRole: VisibilityFloorView
+  memberProgressViewMinRole: VisibilityFloorView
+}
+
+/** What the fallback needs from useOrgSettings. */
+export interface OrgSettingsFallback {
+  hasFetched: boolean
+  /** Null when the org's settings were never read (refused, or not yet). */
+  version: number | null
+  rosterViewMinRole: number
+  memberProgressViewMinRole: number
+  allowSelfAssignment: boolean
+  allowScopedLaneAssignment: boolean
+  assignmentMinRole: number
+  autoPropagateRepetitions: boolean
+  exportMinRole: number | null
+  canExport: boolean
+  /** AQU-2304: the org's import floor, defaults applied. */
+  importMinRole: number
+}
+
+export interface ResolvedProjectPolicy {
+  /** True once the floors below are known — before it, gates render nothing. */
+  ready: boolean
+  /** True when the values came from the project's own settings response. */
+  carried: boolean
+  rosterViewMinRole: VisibilityFloorView
+  memberProgressViewMinRole: VisibilityFloorView
+  allowSelfAssignment: boolean
+  allowScopedLaneAssignment: boolean
+  assignmentMinRole: number
+  /** The ORG's repetition default; the project's own setting is applied by the caller. */
+  autoPropagateRepetitions: boolean
+  exportMinRole: number | null
+  /** Whether the caller's project role meets the export floor (see useOrgSettings.canExport). */
+  canExport: boolean
+  /**
+   * AQU-2304: the floor to import a NEW source file, defaults applied —
+   * AQU-2305: raised by this project's own stricter value, so this is the floor
+   * actually ENFORCED and the one every affordance gates on. Pair it with the
+   * caller's role through `canImportSourceFiles` (role-policy.ts), which also
+   * keeps the static `file.create` bar — this value alone is only half the gate.
+   */
+  importMinRole: number
+  /**
+   * AQU-2305: the same floor split three ways — the org's, this project's own
+   * where stricter (null = follows the organization), and the effective one.
+   * The Project Settings → Import row needs all three; a gate wants
+   * `importMinRole` above.
+   */
+  importFloor: VisibilityFloorView
+}
+
+const LADDER: readonly number[] = Object.values(ROLE)
+
+/** A project's own floor where stricter than the org's — the server's reading. */
+function stricter(org: number, raw: unknown): number | null {
+  return typeof raw === "number" && LADDER.includes(raw) && raw > org ? raw : null
+}
+
+function floorView(org: number, raw: unknown): VisibilityFloorView {
+  const project = stricter(org, raw)
+  return { org, project, effective: project ?? org }
+}
+
+export function resolveProjectPolicy(input: {
+  orgPolicy: ProjectOrgPolicy | null | undefined
+  visibilityFloors: ProjectVisibilityFloors | null | undefined
+  /** The project's own settings (for the fallback's floors). */
+  projectSettings:
+    | { rosterViewMinRole?: unknown; memberProgressViewMinRole?: unknown; importMinRole?: unknown }
+    | null
+    | undefined
+  /**
+   * AQU-2305: the import floor as the server split it (`importFloor` on the
+   * project's settings response). Absent on a server that predates the field,
+   * which is then derived here from `orgPolicy.importMinRole` and the project's
+   * stored key — the same arithmetic, so the answer does not change.
+   */
+  importFloor?: VisibilityFloorView | null
+  org: OrgSettingsFallback
+  /** The caller's project-resolved role. */
+  roleLevel: number | null | undefined
+  /**
+   * Whether the project's settings response has arrived. Surfaces that gate
+   * on the floors pass it for a synced project: the project's own stricter
+   * value comes only with that response, so treating the org's floor alone as
+   * known would show a Members or Team frame to a maintainer for a moment
+   * before an Owners-only project hides it. Omitted, nothing waits on it.
+   */
+  projectSettingsFetched?: boolean
+}): ResolvedProjectPolicy {
+  const { orgPolicy, visibilityFloors, projectSettings, org, roleLevel } = input
+  const projectSettingsFetched = input.projectSettingsFetched ?? true
+  if (orgPolicy && visibilityFloors) {
+    const exportMinRole = orgPolicy.exportMinRole
+    const importFloor = input.importFloor
+      ?? floorView(resolveImportFloor(orgPolicy.importMinRole), projectSettings?.importMinRole)
+    return {
+      ready: true,
+      carried: true,
+      rosterViewMinRole: visibilityFloors.rosterViewMinRole,
+      memberProgressViewMinRole: visibilityFloors.memberProgressViewMinRole,
+      allowSelfAssignment: orgPolicy.allowSelfAssignment,
+      allowScopedLaneAssignment: orgPolicy.allowScopedLaneAssignment,
+      assignmentMinRole: orgPolicy.assignmentMinRole,
+      autoPropagateRepetitions: orgPolicy.autoPropagateRepetitions,
+      exportMinRole,
+      canExport: exportMinRole == null || roleLevel == null || roleLevel >= exportMinRole,
+      // AQU-2304: a server that predates the field sends nothing, which
+      // resolves to the PROJECT_LEAD default — the behaviour before the key.
+      // AQU-2305: `importFloor` is the server's own three-way split; a server
+      // that predates IT is read the same way the fallback below reads it, off
+      // the org's value and the project's stored key.
+      importMinRole: importFloor.effective,
+      importFloor,
+    }
+  }
+  // AQU-2305: the import floor for a server that carries no `orgPolicy` — the
+  // org's value (see the note on the field below for why an unknown org floor
+  // reads as the permissive default), with the project's own stricter value on
+  // top, read off its stored settings exactly as the server reads it.
+  const fallbackImportFloor = floorView(
+    org.version != null ? org.importMinRole : DEFAULT_IMPORT_MIN_ROLE,
+    projectSettings?.importMinRole,
+  )
+  return {
+    ready: org.hasFetched && projectSettingsFetched,
+    carried: false,
+    rosterViewMinRole: floorView(org.rosterViewMinRole, projectSettings?.rosterViewMinRole),
+    memberProgressViewMinRole: floorView(
+      org.memberProgressViewMinRole, projectSettings?.memberProgressViewMinRole,
+    ),
+    allowSelfAssignment: org.allowSelfAssignment,
+    allowScopedLaneAssignment: org.allowScopedLaneAssignment,
+    assignmentMinRole: org.assignmentMinRole,
+    // Fail safe: without a real org answer (refused, or not read yet) repetition
+    // copying stays OFF. The built-in default is ON, and reading a refusal as
+    // that default is how a project-only member's browser wrote copies the
+    // org had turned off.
+    autoPropagateRepetitions: org.version != null ? org.autoPropagateRepetitions : false,
+    exportMinRole: org.exportMinRole,
+    canExport: org.canExport,
+    // Fail SAFE in the permissive direction here, unlike autoPropagateRepetitions
+    // above: an unknown floor reads as the PROJECT_LEAD default, which is what
+    // every org that never set the key means. Closing it instead would hide
+    // Import from the leads of every org on an older server, and the server
+    // refuses the write regardless — this value only decides affordances.
+    importMinRole: fallbackImportFloor.effective,
+    importFloor: fallbackImportFloor,
+  }
+}
+
+/**
+ * AQU-1391 / AQU-1771: does validating a cell copy its translation into the
+ * file's repetitions? The project's own answer, else its org's (from
+ * `resolveProjectPolicy`, which is OFF until the org's answer is known). The
+ * workspace writes the copies itself, so OFF here is the whole guard.
+ */
+export function effectiveRepetitionPropagation(
+  projectOwn: boolean | null | undefined,
+  policy: Pick<ResolvedProjectPolicy, "autoPropagateRepetitions">,
+): boolean {
+  return projectOwn ?? policy.autoPropagateRepetitions
+}

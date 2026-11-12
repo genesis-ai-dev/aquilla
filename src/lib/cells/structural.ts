@@ -61,7 +61,7 @@ interface ProgressTriple {
  */
 export function applyStructuralPolicy<T extends ProgressTriple>(
   progress: T,
-  cells: ReadonlyArray<{ type: string | null | undefined; status: string }>,
+  cells: ReadonlyArray<{ type: string | null | undefined; status: string; laneStatus?: string }>,
   countStructural: boolean,
 ): T {
   if (countStructural) return progress
@@ -71,8 +71,11 @@ export function applyStructuralPolicy<T extends ProgressTriple>(
   for (const cell of cells) {
     if (!isStructuralCell(cell.type)) continue
     total += 1
-    if (cell.status !== "empty") translated += 1
-    if (cell.status === "validated") validated += 1
+    // Media redesign slice 2: the same status the counts beside it were taken
+    // by — the language's, where it counts its recordings.
+    const status = cell.laneStatus ?? cell.status
+    if (status !== "empty") translated += 1
+    if (status === "validated") validated += 1
   }
   if (total === 0) return progress
   return {

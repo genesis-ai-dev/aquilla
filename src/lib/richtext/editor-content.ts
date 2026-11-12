@@ -10,11 +10,50 @@ export interface ReadOnlyRichTextOptions {
   showFootnoteTooltips?: boolean
 }
 
+/**
+ * Encode a stored PLAIN-TEXT value as the HTML the editor hydrates from.
+ *
+ * AQU-1063: the editor hydrates from HTML, so a plain value has to be *encoded*
+ * rather than handed to the parser as-is. HTML collapses a newline to a space,
+ * so `"line one\nline two"` used to arrive in the editor as `line one line two`
+ * — and because the next commit serialises whatever the editor holds, that
+ * collapse was then persisted. A translator's deliberate Shift+Enter line break
+ * was silently turned into a space and lost.
+ *
+ * The plain fallback is live, not theoretical: an AI completion that returns no
+ * html commits `value` alone, which clears `translatedHtml` on purpose so the
+ * fresh text wins over stale markup (see `applyContentOverlays`); imported
+ * target text and agent-applied changesets are plain-only for the same reason.
+ *
+ * So a newline becomes the same `<br>` / hardBreak the editor itself emits for
+ * Shift+Enter, with `\r\n` / `\r` normalised to `\n` the way the IDML slot writer
+ * already does. A cell is ONE paragraph carrying hard breaks — not a paragraph
+ * per line — which is the same shape plain Enter's commit-and-exit leaves behind
+ * (AQU-584), so the result is wrapped in a single `<p>`: the exact form the
+ * editor's own `getHTML()` emits, giving the hydrate form and the commit form
+ * one shape to agree on.
+ *
+ * Only line breaks are rewritten. Entities and tags in a plain value are left to
+ * the parser exactly as before: legacy imports stored HTML-escaped plain text
+ * (`--&gt;`, which hydrates as `-->`), and the committed-baseline seeding in
+ * `TranslatedEditor` is built around that load-time normalisation (AQU-216).
+ * Escaping here would change what those cells display and make the seeded
+ * baseline disagree with the editor's own serialisation.
+ */
+export function plainTextToEditorHtml(plain: string): string {
+  if (!plain) return ""
+  const inline = plain.replace(/\r\n?/g, "\n").replace(/\n/g, "<br>")
+  return `<p>${inline}</p>`
+}
+
 // Normalise stored content (HTML or plain) into the form TipTap hydrates from:
 // allowed inline marks only, with raw `\f...\f*` turned into footnote-node spans.
+// A plain fallback is encoded first (`plainTextToEditorHtml`) so its line breaks
+// survive the HTML parser instead of collapsing to spaces (AQU-1063).
 export function prepareEditorContent(html: string | undefined, plain: string): string {
-  const base = html && html.length > 0 ? html : plain
-  return sanitizeEditorHtml(base)
+  return html && html.length > 0
+    ? sanitizeEditorHtml(html)
+    : sanitizeEditorHtml(plainTextToEditorHtml(plain))
 }
 
 export function sanitizeEditorHtml(html: string): string {

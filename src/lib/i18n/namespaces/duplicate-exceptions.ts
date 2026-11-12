@@ -54,10 +54,9 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "renamed the other.",
   "importExport.dialog.audioSectionTitle":
     "Title of the export dialog's .zip card, naming a KIND OF DELIVERABLE the " +
-    "user is about to download. nav.lens.audio names the editor's Audio lens — " +
-    "a mode you switch into — and its own context pins it as shared by every " +
-    "entry point that toggles that lens so the name can never drift. Reusing it " +
-    "here would tie a file-format label to a UI mode's name, and a later edit " +
+    "user is about to download. nav.lens.audio is a bare 'Audio' heading on " +
+    "other surfaces (a project-table column, a side of the character check). " +
+    "Reusing it here would tie a file-format label to those headings, and a later edit " +
     "for one would silently change the other.",
   "nav.sidebarSection.more":
     "Expands a collapsed sidebar section. common.moreBreadcrumbs is screen-reader " +
@@ -91,7 +90,7 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   "audio.newVoice.inworldVoiceLabel":
     "Field label for the Inworld stock-voice dropdown in the New voice modal — " +
     "which catalog voice this engine should speak with. editor.navTitle.voice is " +
-    "the editor's own audio-lens tab label naming a workspace mode. A form-field " +
+    "the label of the editor's Voice route naming a workspace mode. A form-field " +
     "label and a navigation tab are different UI roles that happen to share the " +
     "word 'Voice' and diverge in most target languages.",
   "audio.newVoice.inworldLanguageLabel":
@@ -130,13 +129,10 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "audio.recordingModal.recordingStatus is the present participle shown beside a " +
     "pulsing dot while the microphone is live. Noun vs progressive verb: English " +
     "spells both 'Recording', almost nothing else does.",
-  "auth.signup.usernameLabel":
-    "Labels the account identifier being chosen at sign-up and sent to the identity " +
-    "server — the name this person will type to sign in from then on. " +
-    "projectSettings.user.usernameLabel labels the local author name recorded " +
-    "against edits in a project's history, a per-device display preference that " +
-    "never authenticates anything. Languages that distinguish a chosen login " +
-    "handle from a displayed personal name need the two separately.",
+  "auth.login.title":
+    "Names the authentication form as a heading, while common.logIn is an " +
+    "imperative action. Locales may nominalize this heading (for example " +
+    "German Anmeldung) while retaining a verb on the action (Anmelden).",
   "auth.login.submitDefault":
     "The submit button of the sign-in form. auth.login.title is the heading naming " +
     "the whole form. Languages that nominalize headings ('Anmeldung') while keeping " +
@@ -144,7 +140,7 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   "search.mode.replace":
     "Names the find-and-replace mode, a term of art paired with 'Find' and usually " +
     "fixed by local software convention. audio.clone.replaceButton is an everyday " +
-    "imperative that swaps an attached reference clip for another file.",
+    "imperative that swaps something already set (existing audio, a saved key) for a new one.",
   "editor.milestone.vocab.startLabel":
     "Names the synthetic first division in the milestone navigator — a noun for " +
     "'the beginning of the file'. audio.recordingModal.startButton is the " +
@@ -205,9 +201,23 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "awaiting accept/dismiss. A controlled-vocabulary review state and a per-cell " +
     "AI-authorship marker are different referents that happen to share one English " +
     "adjective.",
+  "projectSettings.languages.deliversText":
+    "One option of the 'Delivers' dropdown on a target language row, naming what " +
+    "that language PRODUCES. It is worded as one set with its siblings " +
+    "projectSettings.languages.deliversAudio and deliversTextAndAudio, and a " +
+    "translator has to keep the three parallel. Reusing the editor's Text lens " +
+    "tab or the timeline's Text pane title would tie a deliverable choice to a " +
+    "UI mode, and an edit to either would silently break the set.",
+  "projectSettings.languages.deliversAudio":
+    "One option of the 'Delivers' dropdown on a target language row, naming what " +
+    "that language PRODUCES. It is worded as one set with its siblings " +
+    "projectSettings.languages.deliversText and deliversTextAndAudio, and a " +
+    "translator has to keep the three parallel. Reusing the lens tab's or the " +
+    "export card's 'Audio' would tie a deliverable choice to a UI mode or a file " +
+    "label, and an edit to either would silently break the set.",
   "nav.lens.audio":
-    "Standalone tab label of the header Text/Audio segmented lens switch — a " +
-    "primary navigation control read on its own, alongside its sibling 'Text'. " +
+    "A standalone heading — the Audio column of the organization's project table " +
+    "and the Audio side of the character check — read on its own. " +
     "nav.outbox.previewAudio is a one-word fallback preview for an audio-attach " +
     "event row deep in the outbox diagnostics popover, standing in for a missing " +
     "text body among noun-phrase siblings like 'edit {id}'. A standalone control " +
@@ -223,13 +233,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "translator render this column with interface-language wording, which is " +
     "wrong for a content column, and several languages distinguish the two " +
     "senses lexically rather than by context.",
-  "org.addLanguagePopover.triggerLabel":
-    "Visible text of a small chip BUTTON beside a project row that opens the " +
-    "add-a-language-lane popover; it names an action's object, not a heading. " +
-    "org.orgHome.table.languageHeader is the noun heading of a table column, and " +
-    "language.label names the interface-language switcher. Button object, column " +
-    "heading, and interface-chrome name take different forms in languages that " +
-    "inflect for grammatical role, so one shared string cannot serve all three.",
 
   // -- AQU-511/AQU-832 org-namespace dedupe (WS-11) --------------------------
   // The org.ts sweep left 41+ keys re-minting English another namespace (or
@@ -288,14 +291,25 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "English participle; collapsing them would leak review-workflow wording into " +
     "a plain stats column in languages that lexicalize the two differently.",
   "org.orgSidebar.archived":
-    "Sidebar nav-link text AND breadcrumb section name for the org's permanent " +
-    "archived-projects route — a page/section identity, the same grammatical " +
-    "role as the editor.navTitle.* page titles it sits beside in the sidebar. " +
+    "Column heading AND date label for when a project was archived, on the org's " +
+    "archived-projects page (AQU-2261 moved the sidebar link and page title onto " +
+    "editor.navTitle.archivedProjects) — a heading naming a moment. " +
     "autopilot.evidence.status.archived is a lifecycle state of one piece of AI " +
     "evidence in the same stable status enum as .approved above. A destination " +
     "name and an item's lifecycle status are different concepts sharing one " +
     "English participle; several languages would render a place-name and a " +
     "state-of-an-item differently.",
+  "org.overviewLaneTable.archivedBadge":
+    "Inline status badge beside one retired target-LANGUAGE LANE in the project " +
+    "overview's collapsed Archived group (AQU-1458) — it says that lane is " +
+    "archived. autopilot.evidence.status.archived is one value of the fixed " +
+    "evidence-review lifecycle enum (Proposed/Applied/Rejected/Superseded/Approved/" +
+    "Archived/Unknown) badging a piece of AI-gathered EVIDENCE, and " +
+    "org.orgSidebar.archived above heads a date column. A language lane and an " +
+    "evidence item are unrelated referents, and where a participle agrees with the " +
+    "noun it describes the two cannot share a form — the ar catalog already gives " +
+    "the evidence state and the sidebar name different genders, and ru renders " +
+    "them as different phrases altogether.",
   "org.membersPage.orgPage.unknownInviter":
     "Lower-case filler substituted into the middle of a byline sentence ('by " +
     "{username}') when the inviter is unavailable — grammatically the object of " +
@@ -305,15 +319,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "context). A lower-case mid-sentence filler and a capitalized standalone " +
     "enum/badge value take different forms in languages that case- or " +
     "register-mark that distinction.",
-  "org.membersPage.addMemberHeading":
-    "Static <h2> SECTION HEADING introducing the add-member area of the " +
-    "per-project Members page — a nominal label naming what's below it. " +
-    "org.teamDetail.addMemberButton is the imperative text of an actual clickable " +
-    "button/menu item that starts the add-member flow. This is the same " +
-    "nominalized-heading-vs-imperative-button split already documented for " +
-    "auth.login.title vs auth.login.submitDefault above: languages that " +
-    "nominalize headings while keeping buttons imperative need both forms even " +
-    "though English spells them identically.",
   "org.membersPage.orgPage.noExpiry":
     "Lower-case inline status caption ('no expiry') standing in for a computed " +
     "relative-time phrase on a pending-invite row, in the same register as its " +
@@ -354,9 +359,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   "projectSettings.sourceLink.modeClone":
     "Badge naming the AD-9 link-mode ('Clone' vs 'Live') on a linked project's " +
     "Source Link card, and reused for the same radio option in the create-project " +
-    "dialog. audio.library.cloneEngineLabel names a voice-cloning TTS engine in " +
-    "the Voice Studio's engine picker. A project-linking term of art and an " +
-    "audio-engine brand-ish label that happen to share the English word 'Clone'.",
+    "dialog. audio.library.cloneEngineLabel labels a quick-cloned voice (a copy of " +
+    "a real person's voice) in the Voices panel. A project-linking term of art and " +
+    "a kind-of-voice label that happen to share the English word 'Clone'.",
+  "audio.newVoice.tabClone":
+    "Tab label naming a kind of voice in the New voice dialog (a quick clone, " +
+    "next to TTS voice / Characters / Train voice) — a noun phrase in most " +
+    "languages. audio.elevenLabs.cloneButton is the imperative action button that " +
+    "starts an ElevenLabs clone. A tab name and a command.",
   "projectSettings.section.experimental":
     "Section/nav-group heading for this project's device-local experimental " +
     "feature flags. autopilot.settings.experimentalTitle is the same heading for " +
@@ -370,16 +380,11 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "vs a report-style detail-row label for the same underlying value read very " +
     "differently in languages that distinguish an editable field from a fact.",
   "projectSettings.decay.summary":
-    "Collapsed-details summary for this project's AD-14 confidence-propagation " +
+    "Collapsed-details summary for this project's AD-14 health-propagation " +
     "tuning (max hops / attention threshold). editor.expansion.retrievalSupport " +
-    "is the cell-level badge shown on an individual cell's expansion panel. A " +
-    "settings-panel heading and a per-cell status badge naming the same feature " +
-    "at two different granularities read as different parts of speech.",
-  "projectSettings.share.tabMembers":
-    "Tab label in the Share dialog switching to the per-project member list. " +
-    "editor.navTitle.members is the breadcrumb/nav title for the standalone " +
-    "Members page. A tab within a dialog and a full page's nav title are " +
-    "different UI roles that happen to share the plain noun 'Members'.",
+    "is the cell-level health badge shown on an individual cell's expansion " +
+    "panel. A settings-panel heading and a per-cell status badge naming the same " +
+    "feature at two different granularities read as different parts of speech.",
   "projectSettings.breadcrumbEditor":
     "Breadcrumb trail segment in Project Settings linking back to the workspace " +
     "editor. editor.navTitle.editor is the editor's own nav-title/tab label when " +
@@ -391,7 +396,7 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "settings. A page naming itself vs a link naming its destination.",
   "projectSettings.section.voice":
     "Card heading for this project's Voice/TTS API-key configuration. " +
-    "editor.navTitle.voice is the editor's own audio-lens tab label. A settings " +
+    "editor.navTitle.voice is the label of the editor's Voice route. A settings " +
     "card and a workspace lens switch that happen to share the word 'Voice'.",
   "projectSettings.sourceLink.modeLive":
     "Badge naming the AD-9 link-mode ('Live' vs 'Clone') on a linked project's " +
@@ -428,16 +433,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "new file import. A settings-card noun heading vs an action-triggering verb " +
     "button — languages that nominalize headings but keep buttons imperative " +
     "need both spelled differently even though English collapses them.",
-  "projectSettings.share.copied":
-    "Transient confirmation after copying a minted invite link's URL in the " +
-    "Share dialog. nav.report.copied is the equivalent confirmation for the " +
-    "unrelated diagnostics-report copy action. Two independent copy-to-clipboard " +
-    "confirmations that happen to share the same short exclamation.",
-  "projectSettings.section.bibleResources":
-    "Card heading toggling this project's Bible-resources (bibletranslation.org) " +
-    "integration on/off. search.mode.bibleTooltip is the tooltip on the search " +
-    "panel's Bible-resources search-mode toggle. A settings on/off card heading " +
-    "vs a tooltip naming a search filter mode for the same underlying dataset.",
   "importExport.landing.badgeBeta":
     "Per-format maturity pill on one import-option card on the landing screen " +
     "('this specific importer is beta'). nav.beta.badge is the app-chrome pill " +
@@ -518,16 +513,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "shadcn Badge component on a personal API-token row. A lower-case inline " +
     "status word and a capitalized standalone badge take different forms in " +
     "languages that case- or register-mark that distinction.",
-  "onboarding.preferences.profile.responseLanguage.label":
-    "Field label in the personal Translator Profile (Preferences page) for " +
-    "the language the AI assistant should use when replying to THIS person in " +
-    "chat — a device-local, per-person override. projectSettings.ai." +
-    "assistantLanguageLabel is the PROJECT-WIDE default for the same-named " +
-    "setting, shared by everyone on the project, configured in Project " +
-    "Settings' AI card. Same surface word, different scope and different " +
-    "underlying data (personal profile field vs shared project setting) — " +
-    "collapsing them would risk a translator conflating a personal override " +
-    "with a shared team default.",
   "onboarding.preferences.hint.notSet":
     "Standalone Title-Case index-row hint on the Preferences page ('Not set'), " +
     "alongside sibling Title-Case hints 'Personal'/'On-device'/'Sharing on'. " +
@@ -536,6 +521,17 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "or not set}'), never read on its own. A standalone Title-Case hint and an " +
     "inline lower-case template fragment take different forms in languages " +
     "that case- or register-mark that distinction.",
+  "rules.checkDrawer.approveSpelling":
+    "Imperative button on a spelling card in the file-check panel (AQU-1737) " +
+    "that accepts a suspected word form as this project's own spelling, " +
+    "clearing every occurrence of it at once. rules.surface.approveButton " +
+    "promotes a project-level translation rule up to org scope, agent.approve " +
+    "accepts an agent's staged proposal, and editor.station.approve casts an " +
+    "audio-validation vote — four independent human-gate acts on four " +
+    "different kinds of object, already split from each other at " +
+    "agent.approve above. They share only the English verb 'Approve', and a " +
+    "language that inflects the act by what is being approved cannot borrow " +
+    "one translation for the others.",
   "rules.editor.mode.forbidden":
     "One value of the fixed three-option RULE MODE enum (Forbidden/Required/" +
     "Must match) selected in RuleEditor's Mode field, describing how a " +
@@ -571,6 +567,15 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "link and snapshots its data. A casual toggle and a one-way destructive " +
     "operation carry very different weight, and many languages would render " +
     "'detach' with a stronger verb for the latter.",
+  "projectSettings.inherit.detach":
+    "One-click button beside a single setting the project is still copying " +
+    "from its upstream: it stops future copies of that one field and keeps " +
+    "the current value, with no confirmation. projectSettings.sourceLink." +
+    "detachConfirmButton confirms a typed, irreversible dialog that severs the " +
+    "project's whole live source link. Same reasoning as org.teamDetail." +
+    "detachButton above: a light per-field choice and a one-way destructive " +
+    "operation carry different weight, and many languages use a stronger verb " +
+    "for the latter.",
   "terminology.editor.errorImportFailed":
     "Failure notice for importing TERMS into the project termbase — a glossary " +
     "operation. importExport.errors.importFailed reports a failed SOURCE-DOCUMENT " +
@@ -584,13 +589,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "picker, sitting beside 'Source' and 'Audio' as a kind-of-thing label. A " +
     "specific instance and a category name take different forms wherever nouns " +
     "inflect for definiteness.",
-  "importExport.paratext.languageLabel":
-    "Labels the SOURCE LANGUAGE detected in a Paratext project during import — a " +
-    "property of the file being read. autopilot.inspector.run.lane names the " +
-    "language LANE an Autopilot run targeted, i.e. which translation track the " +
-    "run wrote into. One describes an input's language, the other identifies a " +
-    "destination track; languages that mark that difference with case or an " +
-    "adposition cannot share a single rendering.",
   "agent.approve":
     "Imperative button that accepts a translation agent's staged, human-gated " +
     "proposal (a changeset, a memory, or a brief update) — reused across the " +
@@ -601,14 +599,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "'Approve'.",
   "agent.memory.tabApproved":
     "Tab-trigger heading over the list of already-approved agent-authored " +
-    "memories, in the translation-agent's Memory tab (paired with sibling tabs " +
-    "'Proposed' / 'Project brief') — the counterpart split to agent.memory." +
+    "memories, in the translation-agent's Memory tab (paired with the sibling " +
+    "tab 'Proposed') — the counterpart split to agent.memory." +
     "tabProposed just below, against the same unrelated autopilot evidence-" +
     "status enum documented at org.projectOverview.columnApproved above.",
   "agent.memory.tabProposed":
     "Tab-trigger heading over the queue of agent-authored memories awaiting human " +
-    "review, in the translation-agent's Memory tab (paired with sibling tabs " +
-    "'Approved' / 'Project brief'). autopilot.evidence.status.proposed is one " +
+    "review, in the translation-agent's Memory tab (paired with the sibling " +
+    "tab 'Approved'). autopilot.evidence.status.proposed is one " +
     "value of the fixed, unrelated evidence-review lifecycle enum (Proposed/" +
     "Applied/Rejected/Superseded/Approved/Archived/Unknown) in the autopilot " +
     "readiness inspector, the same kind of split already documented for " +
@@ -720,27 +718,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "features that happen to share the generic English verb — the object " +
     "being applied differs in each, and several target languages would " +
     "translate the verb differently depending on that object.",
-  "terminology.libraryStats.enforcedLabel":
-    "Stat-tile HEADING above a percentage figure on the Terminology page's " +
-    "summary panel — a title-case label naming what the number below it means. " +
-    "terminology.termDetail.verdictEnforced is a lowercase inline VERDICT word " +
-    "describing a single occurrence's outcome ('enforced' / 'infringed' / 'n/a') " +
-    "in a table cell. A panel-heading noun and an inline verdict adjective are " +
-    "different grammatical roles that many languages inflect or phrase " +
-    "differently depending on which one they are.",
-  "terminology.libraryStats.infringedLabel":
-    "Stat-tile heading counterpart to terminology.libraryStats.enforcedLabel, " +
-    "for the infringed-percentage tile. Distinct from " +
-    "terminology.termDetail.verdictInfringed (lowercase inline verdict word) for " +
-    "the same heading-vs-verdict reason documented on enforcedLabel above.",
-  "terminology.conceptDialog.renderingPlaceholder":
-    "Inline placeholder hint shown INSIDE an empty rendering-text input in the " +
-    "add/edit concept dialog's renderings list — a terse, lowercase instructional " +
-    "hint per normal placeholder convention. terminology.editor.renderingLabel is " +
-    "a visible FIELD LABEL heading (title case) above a single-rendering input " +
-    "elsewhere in GlossaryEditor. A heading noun and an inline instructional hint " +
-    "are different grammatical registers that several languages phrase " +
-    "differently (e.g. an imperative or truncated hint vs. a standalone noun).",
   "terminology.common.statusLabel":
     "Field/column label for a TERM's review status (draft/active/deprecated) in " +
     "the Terminology page's own add/edit-concept dialog and concepts table. " +
@@ -750,15 +727,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "many languages lexicalize 'a term's review state' and 'a project's state' " +
     "differently, or decline the noun differently depending on the thing it " +
     "describes.",
-  "rules.createDialog.descriptionLabel":
-    "Visible field label above the free-text description input in the standalone " +
-    "rule-creation dialog — a sighted user reads it beside the input. " +
-    "nav.report.descriptionFieldLabel is a visually-hidden (screen-reader-only) " +
-    "label for a bug-report textarea that shows a placeholder instead of a visible " +
-    "label. A visible form label and an sr-only accessible name serve different " +
-    "audiences and often take different phrasing (e.g. a visible label can be " +
-    "terser since layout already implies context; an sr-only label must stand " +
-    "alone).",
   "audio.voice.clear":
     "One of a fixed set of one-word Gemini TTS voice tone descriptions (see " +
     "audio.voice.bright) — an ADJECTIVE describing how a voice sounds ('distinct, " +
@@ -825,6 +793,53 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "same operation-name-vs-imperative-button split already documented for " +
     "nav.outbox.eventEdit above — a different feature (the outbox diagnostics feed) " +
     "with the identical register distinction.",
+  "editor.station.helpEditTerm":
+    "Term heading (a <dt>) in the Station's (i) explanation, naming the group of " +
+    "cut-and-insert controls (Keep this, Delete this, Insert audio here) beside its " +
+    "sibling headings 'Select', 'Trim', 'Volume', 'Fades', 'Saving' and 'Keys' — a " +
+    "nominalized glossary label, not an action. common.edit is the imperative " +
+    "button that opens editing. The same heading-against-imperative split " +
+    "documented for nav.outbox.eventEdit and agent.proposal.kind.edit above: a " +
+    "language that nominalizes the heading writes it differently from the button.",
+  "editor.station.start":
+    "Noun label in the Station's transport, before the kept part's start time and " +
+    "paired with 'End' — 'the start' of the kept part, clicked to type a time. " +
+    "audio.recordingModal.startButton is the imperative button that begins " +
+    "recording. The same noun-against-verb split documented for " +
+    "editor.milestone.vocab.startLabel above; languages that spell the noun and " +
+    "the imperative differently need the two apart.",
+  "editor.station.approved":
+    "State adjective in the Station's heading after a check mark ('✓ Approved', " +
+    "beside 'Waiting' and 'Waiting · 1 of 2'): the open recording has the approvals " +
+    "the project asks for, a term of the audio-validation vote. " +
+    "autopilot.evidence.status.approved is one member of an AI agent's evidence-" +
+    "review enum — the unrelated review pipeline documented at " +
+    "org.projectOverview.columnApproved above; a recording's validation state and " +
+    "an evidence item's review state are different referents.",
+  "editor.station.hApproved":
+    "History row in the Station naming an EVENT — someone approved the recording — " +
+    "read with who and when ('Approved · Ana · Oct 30'), a past-tense act beside " +
+    "sibling rows 'Recorded', 'Trimmed', 'Deleted'. editor.station.approved " +
+    "is the current STATE in the heading; autopilot.evidence.status.approved is an " +
+    "AI evidence-review status. Languages that inflect an act done by someone " +
+    "differently from a state label (and from a review-pipeline enum) write the " +
+    "three apart, so none can borrow another's translation.",
+  "editor.station.approve":
+    "Imperative button in the Station's heading that casts this person's approval " +
+    "vote on the open recording — the audio-validation act the project counts " +
+    "('Waiting · 1 of 2' → '✓ Approved'), the same act as the take's vote on the " +
+    "timeline. rules.surface.approveButton promotes a project-level translation " +
+    "rule up to org scope and agent.approve accepts an agent's staged proposal: " +
+    "the three independent human-gate actions already split at agent.approve " +
+    "above, sharing only the English verb.",
+  "editor.station.hDeleted":
+    "Title-case History row in the Station naming what happened to the recording " +
+    "— it was deleted — read with who and when beside 'Trimmed'/'Approved' rows. " +
+    "comments.file.deletedBadge is lower-case 'deleted', a small inline status " +
+    "badge on a file reference inside a comment thread. A past-tense event line " +
+    "and a lower-case inline badge take different forms in languages that case- " +
+    "or register-mark that distinction, the split already documented for " +
+    "org.archivedProjects.deletedColumnLabel above.",
   "agent.proposal.kind.validate":
     "Badge naming the KIND of a staged agent-authored proposal row ('cell.validate') " +
     "in ProposalCard, the same noun-phrase operation-name register as its sibling " +
@@ -841,54 +856,99 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "has already arrived at. Same English words, different grammatical role — " +
     "the same navigate-vs-heading split already documented for the language " +
     "switcher in namespaces/language.ts.",
-  "terminology.livingMemory.section.brief.title":
-    "Index-row title naming the translation brief — the skopos document, a " +
-    "translation-studies term of art that several languages render with a " +
-    "loanword or fixed phrase. autopilot.graph.node.summarize shows 'Brief' as " +
-    "the caption of the summarize STAGE in the autopilot pipeline graph — a " +
-    "process-step label, not the document, and free to translate as 'summary'.",
   "org.projectOverview.plan.statusNotStarted":
     "Status of a PLANNING UNIT on the project dashboard's plan board \u2014 a " +
     "book, episode or document nobody has put any content into yet. " +
     "autopilot.status.notStarted is a value of the run-status enum for a " +
-    "background PROCESS that has not run; terminology.livingMemory.section." +
-    "brief.statusNone is the authoring state of one document. All three are " +
-    "'not started' in English and routinely take different verbs, participles " +
-    "or genders elsewhere \u2014 a unit of planned work, a job that has not " +
-    "fired, and an unwritten document are three different subjects.",
-  "terminology.livingMemory.section.brief.statusNone":
-    "Hint on the Living Memory index saying the brief document has not been " +
-    "begun — an authoring state of a document. autopilot.status.notStarted is a " +
-    "value of the run-status enum for a background PROCESS that has not run " +
-    "yet; document-authoring and process-lifecycle states often take different " +
-    "verbs or participles.",
-  "terminology.livingMemory.section.brief.statusDraft":
-    "Hint on the Living Memory index saying the brief document is partially " +
-    "filled in — a document maturity state ('a draft'). " +
-    "autopilot.graph.node.draft labels the autopilot DRAFTING step and its " +
-    "produced draft translations (the pipeline-graph caption and the review " +
-    "inspector's card title) — the activity of machine-drafting text, a " +
-    "different sense languages split from 'unfinished document'.",
-  "terminology.livingMemory.section.brief.statusComplete":
-    "Hint on the Living Memory index saying every brief field is filled in — " +
-    "'complete' as document completeness. autopilot.status.complete is the " +
-    "terminal value of the run-status enum — a PROCESS that finished; " +
-    "'filled-in' vs 'finished' are commonly different words outside English.",
-  "terminology.livingMemory.prompt.defaultBadge":
-    "Badge on the prediction-prompt block stating the prompt is the unmodified " +
-    "built-in one — 'default' as a setting state, paired with the sibling " +
-    "Custom badge. org.projectOverview.laneDefaultFallback names the unnamed " +
-    "target LANE shown when a project has no named lanes — a placeholder noun " +
-    "('the default one'), a different grammatical role.",
+    "background PROCESS that has not run. Both are 'not started' in English " +
+    "and routinely take different verbs, participles or genders elsewhere " +
+    "\u2014 a unit of planned work and a job that has not fired are different " +
+    "subjects.",
   "onboarding.preferences.fontSize.default":
     "Option in the app-wide font-size select for the baseline UI scale (root " +
-    "unset, today's sizes). Distinct from terminology.livingMemory.prompt.defaultBadge " +
-    "(a status badge on a built-in prompt) and org.projectOverview.laneDefaultFallback " +
-    "(placeholder name of an unnamed workflow lane). A scale choice, a badge, and a " +
-    "lane noun take different words outside English.",
+    "unset, today's sizes). Distinct from org.projectOverview.laneDefaultFallback " +
+    "(placeholder name of an unnamed workflow lane). A scale choice and a lane noun " +
+    "take different words outside English.",
   "terminology.livingMemory.section.examples.title":
     "Index-row title for the validated-example-pairs section of Living Memory " +
     "— a plain plural noun heading. agent.run.tool.examples is the display " +
     "name of the agent's retrieve-examples TOOL call in the run log — an " +
     "operation name that several languages render verbal ('fetch examples').",
+  "agent.card.read.termbase.label":
+    "Row label on an agent card's 'what it reads' list, naming the standing " +
+    "project state the teammate consults before drafting. It collides with " +
+    "nav.sidebarSection.terminology (the left-sidebar entry) and with " +
+    "projectSettings.section.terminology, which already holds the same " +
+    "exception for the same reason: a disclosure list naming a body of project " +
+    "data the agent READS is a different UI role from a navigation entry, and " +
+    "languages that distinguish the subject matter from the place it lives " +
+    "should be free to split them.",
+  "bibleData.enrichment.voices.label":
+    "AQU-1686: names the Bible data enrichment that labels who SPEAKS in the " +
+    "Bible text (Jesus, the narrator, a crowd). common.voices is the panel of " +
+    "synthetic text-to-speech voices. People speaking and machine voices are " +
+    "different words in most target languages.",
+  "languageProfile.notSet":
+    "AQU-1691: in the Language profile card it is both the status of a closed " +
+    "row (this fact about the language is not recorded) and the first choice in " +
+    "its yes/no lists (the question is not answered yet). " +
+    "onboarding.preferences.hint.notSet is a hint on a personal Preferences " +
+    "index row, and projectSettings.advancedLlm.notSet a lower-case fragment " +
+    "inside a template. An unanswered question about the target language is " +
+    "worded differently from an unset personal preference in many languages.",
+  "bibleData.enrichment.terms.label":
+    "AQU-1686: names the enrichment that marks biblical key terms (a term of art " +
+    "in Bible translation, as in Paratext's Biblical Terms) in the source text. " +
+    "autopilot.readiness.terminology.label names the readiness check on the " +
+    "project's own approved renderings, which several languages call terminology.",
+  "bibleData.voices.author":
+    "AQU-1687: the writer of a Bible letter (Paul, Peter), shown in the voice chip " +
+    "where a Gospel shows 'Narrator'. comments.filter.authorLabel filters comments " +
+    "by the person who wrote them. A biblical author and a comment's author are " +
+    "different words in many languages (writer of scripture vs. poster).",
+  "bibleData.voices.type.dialogue":
+    "AQU-1687: a kind of quotation in the Bible text, people talking with each " +
+    "other in the story. agentWorkspace.conversation is the user's chat thread with " +
+    "the AI agent. A dialogue between characters and a chat session are different " +
+    "words in most target languages.",
+  "bibleData.whosWho.pronoun.secondSingular":
+    "AQU-1689: the grammatical pronoun for ONE person addressed in the Bible text, " +
+    "inside a hint '[you = Samaritan woman]'. agent.emptyState.introYou addresses " +
+    "the app's user. Languages with a polite form use it for the user and the plain " +
+    "singular here (French 'vous' vs 'tu'), so the two cannot share a translation.",
+  "bibleData.whosWho.panel.edgeTab":
+    "AQU-1689: the people in a Bible passage (Jesus, a Samaritan woman), on the " +
+    "Who's Who panel's tab. org.overviewLaneTable.peopleColumn counts the project's " +
+    "users. Characters in a story and members of a team are different words in " +
+    "many target languages (Indonesian 'tokoh' vs 'orang').",
+  "bibleData.context.tab":
+    "AQU-1689: the tab of an expanded Bible cell holding the verse's original-" +
+    "language context (Greek or Hebrew words, who they refer to). " +
+    "autopilot.inspector.context.title is the material an AI agent was given. " +
+    "Textual context and an AI's input are different words in several target " +
+    "languages.",
+  "editor.batchFile.confirmDraft":
+    "AQU-1822: the confirm BUTTON of the batch draft modal (BatchFileModal) — the " +
+    "imperative command that starts drafting the chosen cells, in the same slot " +
+    "where the modal's validate mode shows 'Validate'. autopilot.graph.node.draft " +
+    "is the caption of the DRAFTING STAGE in the Autopilot pipeline graph (and the " +
+    "review inspector's card title), which every locale already renders as the " +
+    "noun 'a draft' (fr 'Brouillon', ru 'Черновик'). An imperative verb on a " +
+    "button and a nominalized stage caption take different words in most target " +
+    "languages, so the two cannot share a translation.",
+  "dialog.assign.kind.translate":
+    "AQU-1969: an OPTION in the Assign dialog's Task field naming a KIND OF WORK a " +
+    "person is given (and read back on the closed field: 'Task: Translate'). " +
+    "editor.selection.translate is the selection toolbar's imperative button that " +
+    "asks the AI to draft the selected cells right now. A named kind of assigned " +
+    "work and a command to an AI are different words in many target languages " +
+    "(an infinitive or noun against an imperative), and the AI button must not " +
+    "start reading as a human task.",
+  "dialog.assign.kind.validate":
+    "AQU-1969: an OPTION in the Assign dialog's Task field naming a KIND OF WORK a " +
+    "person is given — only the approving, on lines somebody else translates. " +
+    "editor.selection.validate is the selection toolbar's imperative button that " +
+    "signs off the selected lines now, with a count badge after it. A named kind " +
+    "of assigned work and an imperative one-click action take different forms in " +
+    "many target languages (an infinitive or noun against an imperative).",
 }

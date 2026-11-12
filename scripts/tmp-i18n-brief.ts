@@ -7,7 +7,7 @@
  */
 import { writeFileSync } from "node:fs"
 import { en, type MessageKey } from "../src/lib/i18n/messages/en"
-import { CATALOGS } from "../src/lib/i18n/messages/index"
+import { CATALOGS } from "../src/lib/i18n/messages/all"
 import { isPluralMessage, type MessageValue } from "../src/lib/i18n/plurals"
 import { resolveKeyContext } from "../src/lib/i18n/context"
 

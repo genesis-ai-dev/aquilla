@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
+import { resolveProjectForRead } from "@/lib/sync/project-resolve"
 import { useFrontierSession } from "./useFrontierSession"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { toUserFacingError, UserError } from "@/lib/errors/user-error"
@@ -36,7 +36,7 @@ export function useProjectOrgId(projectId: string | null): {
     let alive = true
     setLoading(true)
     setError(null)
-    resolveCloudProjectResult(projectId, jwt)
+    resolveProjectForRead(projectId, jwt)
       .then((r) => {
         if (!alive) return
         if (!r.ok) {

@@ -10,7 +10,7 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote } from "@/components/ui/info-note"
 import { Textarea } from "@/components/ui/textarea"
 import { InworldDesignLocaleFields } from "@/components/voice/InworldDesignLocaleFields"
 import { InworldDesignPresetChips } from "@/components/voice/InworldDesignPresetChips"
@@ -38,6 +38,7 @@ import {
   structuredDesignPromptHasValue,
   type InworldDesignMode,
 } from "@/lib/audio/inworld-voice-design"
+import { explainVoiceRequestError } from "@/lib/audio/voice-request-error"
 import { designInworldVoice, synthesizeCellTts, type InworldDesignedPreview } from "@/lib/sync/tts"
 import { cn } from "@/lib/utils"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -81,6 +82,19 @@ export type InworldDesignSelection = {
 
 function unpublishedSelection(preview: InworldDesignedPreview): InworldDesignSelection {
   return { voiceId: preview.voiceId, unpublished: true, previewAudio: preview.previewAudio }
+}
+
+function haltAudio(audio: HTMLAudioElement | null): void {
+  if (!audio) return
+  audio.pause()
+  audio.onended = null
+  audio.removeAttribute("src")
+  audio.src = ""
+  try {
+    audio.load()
+  } catch {
+    /* stubs / environments without a media pipeline */
+  }
 }
 
 export function InworldVoiceDesignField({
@@ -166,7 +180,7 @@ export function InworldVoiceDesignField({
       } catch (err) {
         setPreviews([])
         onSelectionChange(null)
-        setSubmitError(err instanceof Error ? err.message : String(err))
+        setSubmitError(explainVoiceRequestError(err instanceof Error ? err.message : String(err)))
       }
     },
   })
@@ -203,19 +217,6 @@ export function InworldVoiceDesignField({
     savedSrcRef.current = null
   }
 
-  const haltAudio = (audio: HTMLAudioElement | null) => {
-    if (!audio) return
-    audio.pause()
-    audio.onended = null
-    audio.removeAttribute("src")
-    audio.src = ""
-    try {
-      audio.load()
-    } catch {
-      /* stubs / environments without a media pipeline */
-    }
-  }
-
   useEffect(() => {
     aliveRef.current = true
     return () => {
@@ -233,13 +234,19 @@ export function InworldVoiceDesignField({
     setPlayingId(null)
   }
 
+  // A fresh element every time. Reusing `audioRef.current` and then writing
+  // `onended` / `src` aliases that element to the ref the unmount effect
+  // already captured, which `react-hooks/immutability` rejects (AQU-1402).
+  // The previous element is halted first, so a second preview replaces it.
   const playSrc = (src: string, id: string) => {
-    const audio = audioRef.current ?? new Audio()
-    audioRef.current = audio
+    haltAudio(audioRef.current)
+    audioRef.current = null
+    const audio = new Audio()
     audio.onended = () => {
       if (audioRef.current === audio) setPlayingId(null)
     }
     audio.src = src
+    audioRef.current = audio
     void audio.play().then(() => {
       if (!aliveRef.current || audioRef.current !== audio) {
         haltAudio(audio)
@@ -332,7 +339,9 @@ export function InworldVoiceDesignField({
       savedSrcRef.current = src
       playSrc(src, existingVoiceId)
     } catch (err) {
-      if (aliveRef.current) setSubmitError(err instanceof Error ? err.message : String(err))
+      if (aliveRef.current) {
+        setSubmitError(explainVoiceRequestError(err instanceof Error ? err.message : String(err)))
+      }
     } finally {
       if (aliveRef.current) setLoadingSaved(false)
     }
@@ -374,22 +383,36 @@ export function InworldVoiceDesignField({
                 </p>
               </div>
 
-              <Tabs
-                value={mode}
-                onValueChange={(value) => {
-                  if (value === "freeform" || value === "structured") selectMode(value)
-                }}
-                className="gap-0"
-              >
-                <TabsList aria-label={t("audio.newVoice.designModeGroupLabel")}>
-                  <AppTooltip content={t("audio.newVoice.designModeFreeformHint")} className="max-w-xs">
+              {/* What each mode does is behind the (i) beside them, on a
+                  click (AQU-2260 — it was each tab's hover). */}
+              <div className="flex items-center gap-1.5">
+                <Tabs
+                  value={mode}
+                  onValueChange={(value) => {
+                    if (value === "freeform" || value === "structured") selectMode(value)
+                  }}
+                  className="gap-0"
+                >
+                  <TabsList aria-label={t("audio.newVoice.designModeGroupLabel")}>
                     <TabsTrigger value="freeform">{t("audio.newVoice.designModeFreeform")}</TabsTrigger>
-                  </AppTooltip>
-                  <AppTooltip content={t("audio.newVoice.designModeStructuredHint")} className="max-w-xs">
                     <TabsTrigger value="structured">{t("audio.newVoice.designModeStructured")}</TabsTrigger>
-                  </AppTooltip>
-                </TabsList>
-              </Tabs>
+                  </TabsList>
+                </Tabs>
+                <InfoNote label={t("common.aboutAria", { name: t("audio.newVoice.designModeGroupLabel") })}>
+                  <span className="flex flex-col gap-1.5">
+                    <span>
+                      <span className="font-medium">{t("audio.newVoice.designModeFreeform")}</span>
+                      {" — "}
+                      {t("audio.newVoice.designModeFreeformHint")}
+                    </span>
+                    <span>
+                      <span className="font-medium">{t("audio.newVoice.designModeStructured")}</span>
+                      {" — "}
+                      {t("audio.newVoice.designModeStructuredHint")}
+                    </span>
+                  </span>
+                </InfoNote>
+              </div>
 
               <form.Field
                 name="prompt"

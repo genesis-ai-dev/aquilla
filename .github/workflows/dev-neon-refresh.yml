@@ -2,6 +2,15 @@ name: Refresh Dev Neon Branch
 
 on:
   workflow_dispatch:
+    inputs:
+      preflight_only:
+        description: "Only verify NEON_API_KEY against the Neon API (read-only, restores nothing)"
+        type: boolean
+        default: false
+      media_copy_only:
+        description: "Skip the restore and only copy prod media (audio + uploaded source originals) into the dev R2 bucket (AQU-2115 backfill)"
+        type: boolean
+        default: false
   schedule:
     # GitHub cron is UTC. These two schedules cover 4:07 a.m. Eastern during
     # daylight and standard time; the first step gates execution to the 4 a.m.
@@ -16,8 +25,32 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    # The media copy below takes a wall-clock budget of its own (AQU-2115); the
+    # job has to outlive it, or Actions kills the step before it can report.
+    timeout-minutes: 350
     permissions:
       contents: read
+    env:
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      NEON_PROJECT_ID: sweet-paper-88472094
+      NEON_DEV_BRANCH: dev
+      NEON_PRODUCTION_BRANCH: production
+      NEON_DEV_DATABASE: neondb
+      NEON_DEV_ROLE: neondb_owner
+      DEV_API_HEALTH_URL: https://api.dev.aquilla.app/identity/api/v2/health
+      DEV_API_PROJECT_READ_URL: ${{ secrets.DEV_API_PROJECT_READ_URL }}
+      DEV_API_PROJECT_READ_TOKEN: ${{ secrets.DEV_API_PROJECT_READ_TOKEN }}
+      # AQU-2113's dedicated copy key: read `aquilla-snapshots`, write
+      # `aquilla-snapshots-dev`, nothing else. Absent until that issue lands —
+      # the copy step warns and skips rather than failing the refresh.
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID || '6a80496d1e59948a9cbaa3c643ba81d7' }}
+      R2_DEV_MEDIA_COPY_ACCESS_KEY_ID: ${{ secrets.R2_DEV_MEDIA_COPY_ACCESS_KEY_ID }}
+      R2_DEV_MEDIA_COPY_SECRET_ACCESS_KEY: ${{ secrets.R2_DEV_MEDIA_COPY_SECRET_ACCESS_KEY }}
+      # Per-run ceiling for the media copy. The first backfill (~561k objects /
+      # 167 GB) spans several nights and resumes on its own, because an object
+      # already in dev is never copied twice.
+      DEV_MEDIA_COPY_BUDGET_MINUTES: "240"
+      DEV_MEDIA_COPY_CONCURRENCY: "4"
     steps:
       - name: Gate scheduled run to 4 a.m. Eastern
         id: eastern_gate
@@ -42,10 +75,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: steps.eastern_gate.outputs.should_run == 'true'
 
-      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         if: steps.eastern_gate.outputs.should_run == 'true'
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         if: steps.eastern_gate.outputs.should_run == 'true'
         with:
           node-version: 22
@@ -56,10 +89,6 @@ jobs:
 
       - name: Verify Neon refresh credentials are configured
         if: steps.eastern_gate.outputs.should_run == 'true'
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-          DEV_API_PROJECT_READ_URL: ${{ secrets.DEV_API_PROJECT_READ_URL }}
-          DEV_API_PROJECT_READ_TOKEN: ${{ secrets.DEV_API_PROJECT_READ_TOKEN }}
         run: |
           if [ -z "$NEON_API_KEY" ]; then
             echo "::error::NEON_API_KEY is required to restore the dev Neon branch from production."
@@ -70,16 +99,45 @@ jobs:
             exit 1
           fi
 
-      - name: Restore dev branch from production and apply dev migrations
+      # Read-only: `neon branches get` on dev and production with the secret.
+      # A rejected NEON_API_KEY fails here with the rotation steps, instead of
+      # the Neon CLI's misleading "Not enough non-option arguments" retry line
+      # (every 08:07 UTC run from 2026-10-16 to 2026-10-20, e.g. run 39393566862).
+      - name: Verify NEON_API_KEY against the Neon API (read-only)
         if: steps.eastern_gate.outputs.should_run == 'true'
         env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-          NEON_PROJECT_ID: sweet-paper-88472094
-          NEON_DEV_BRANCH: dev
-          NEON_PRODUCTION_BRANCH: production
-          NEON_DEV_DATABASE: neondb
-          NEON_DEV_ROLE: neondb_owner
-          DEV_API_HEALTH_URL: https://api.dev.aquilla.app/identity/api/v2/health
-          DEV_API_PROJECT_READ_URL: ${{ secrets.DEV_API_PROJECT_READ_URL }}
-          DEV_API_PROJECT_READ_TOKEN: ${{ secrets.DEV_API_PROJECT_READ_TOKEN }}
+          NEON_REFRESH_PREFLIGHT_ONLY: "1"
         run: pnpm neon:refresh:dev
+
+      - name: Restore dev branch from production and apply dev migrations
+        id: restore
+        if: steps.eastern_gate.outputs.should_run == 'true' && inputs.preflight_only != true && inputs.media_copy_only != true
+        run: pnpm neon:refresh:dev
+
+      # AQU-2115 — the restore above copies every audio ROW out of production
+      # and none of the audio BYTES, which live in R2, so prod recordings 404 on
+      # dev.aquilla.app. The same goes for uploaded source originals: the
+      # `file_source_blobs` / `artifacts` rows restore, the objects they name do
+      # not, and every file imported on prod exports on dev with 404 "source
+      # bytes missing from storage". This copies the bytes the rows just
+      # restored reference — takes, voice clips and originals — most recently
+      # active project first, under a per-run budget.
+      #
+      # ITS OWN STEP, AND LAST, DELIBERATELY. The restore has already succeeded
+      # by the time this runs; a copy failure turns only this step red and
+      # cannot undo or roll back the restore, so dev still shows last night's
+      # production data. Nothing is added after it for the same reason.
+      #
+      # `media_copy_only` runs this without the restore — to push the backfill
+      # along during the day, or to re-run after a failure.
+      - name: Copy prod media to dev
+        id: media_copy
+        if: steps.eastern_gate.outputs.should_run == 'true' && inputs.preflight_only != true
+        run: |
+          if [ -z "$R2_ACCOUNT_ID" ] || [ -z "$R2_DEV_MEDIA_COPY_ACCESS_KEY_ID" ] || [ -z "$R2_DEV_MEDIA_COPY_SECRET_ACCESS_KEY" ]; then
+            echo "::warning title=Dev media copy skipped::R2_ACCOUNT_ID, R2_DEV_MEDIA_COPY_ACCESS_KEY_ID and R2_DEV_MEDIA_COPY_SECRET_ACCESS_KEY are required (AQU-2113). The restore is unaffected; prod audio and source originals will keep 404ing on dev until they are set."
+            exit 0
+          fi
+          pnpm neon:copy-dev-audio-all:dev -- \
+            --budget-minutes "$DEV_MEDIA_COPY_BUDGET_MINUTES" \
+            --concurrency "$DEV_MEDIA_COPY_CONCURRENCY"

@@ -9,6 +9,7 @@ import {
   defaultVoiceNameForProvider,
   effectiveTtsProvider,
   inferMmsLanguageCode,
+  inworldCloneReferenceId,
   isInworldVoiceName,
   isLegacyKokoroVoiceName,
   isServerTtsProvider,
@@ -71,13 +72,26 @@ describe("TTS provider normalization", () => {
     expect(normalizeVoiceForProvider(leftover, "gemini").voiceName).toBe(DEFAULT_GEMINI_VOICE)
   })
 
+  it("keeps an ElevenLabs voice's account voice and drops it when switching engines (AQU-2299)", () => {
+    const el: Voice = {
+      id: "v", name: "Rachel", provider: "elevenlabs", voiceName: "Dennis", language: "es", audioQuality: "highest",
+      elevenLabs: { voiceId: "el123" },
+    }
+    const kept = normalizeVoiceForProvider(el, "elevenlabs")
+    expect(kept).toMatchObject({ provider: "elevenlabs", language: "es", elevenLabs: { voiceId: "el123", modelId: "eleven_multilingual_v2" } })
+    expect(kept.voiceName).toBeUndefined()
+    expect(kept.audioQuality).toBeUndefined()
+    expect(isServerTtsProvider("elevenlabs")).toBe(true)
+    expect(normalizeVoiceForProvider(el, "inworld").elevenLabs).toBeUndefined()
+  })
+
   it("defaults to inworld", () => {
     expect(DEFAULT_TTS_PROVIDER).toBe("inworld")
   })
 
-  it("lists the three remaining engines with cloud engines first", () => {
+  it("lists the engines with cloud engines first", () => {
     expect(TTS_PROVIDER_INFOS.map((p) => p.id)).toEqual([
-      "inworld", "gemini", "mms",
+      "inworld", "gemini", "elevenlabs", "mms",
     ])
   })
 
@@ -88,13 +102,6 @@ describe("TTS provider normalization", () => {
     const hint = audio.keys["audio.provider.inworldHint"]
     expect(hint).toMatch(/TTS 2 Flash/)
     expect(hint).toMatch(/Highest uses Inworld TTS 2/)
-  })
-
-  it("marks only cloud engines as cloning-capable", () => {
-    const byId = Object.fromEntries(TTS_PROVIDER_INFOS.map((p) => [p.id, p]))
-    expect(byId.inworld.supportsCloning).toBe(true)
-    expect(byId.gemini.supportsCloning).toBe(true)
-    expect(byId.mms.supportsCloning).toBe(false)
   })
 
   it("gives every engine named voices, including Inworld", () => {
@@ -149,5 +156,60 @@ describe("TTS provider normalization", () => {
     expect(isInworldVoiceName("Kore")).toBe(false)
     expect(isInworldVoiceName("af_bella")).toBe(false)
     expect(normalizeVoiceForProvider({ ...geminiVoice, voiceName: "Alex" }, "inworld").voiceName).toBe("Alex")
+  })
+
+  // AQU-2152 — the catalog ids are Inworld's own display names, so the accented
+  // ones (fr Étienne/Hélène, pt Maitê) are as valid as Alain. An ASCII-only
+  // shape check rejected them and every normalize put Dennis back, so the Edit
+  // voice picker and the generate path both spoke as Dennis.
+  it("accepts accented catalog ids", () => {
+    expect(isInworldVoiceName("Étienne")).toBe(true)
+    expect(isInworldVoiceName("Hélène")).toBe(true)
+    expect(isInworldVoiceName("Maitê")).toBe(true)
+    expect(isInworldVoiceName("Alain")).toBe(true)
+    // Same name NFD-decomposed (E + combining acute) — one byte sequence apart.
+    expect(isInworldVoiceName("E\u0301tienne")).toBe(true)
+  })
+
+  it("keeps an accented catalog id through normalization", () => {
+    for (const voiceName of ["Étienne", "Hélène", "Alain"]) {
+      expect(normalizeVoiceForProvider({ ...geminiVoice, voiceName }, "inworld").voiceName).toBe(voiceName)
+    }
+  })
+
+  it("still narrows to Dennis for an empty, Gemini or leftover Kokoro speaker", () => {
+    expect(normalizeVoiceForProvider({ ...geminiVoice, voiceName: "" }, "inworld").voiceName)
+      .toBe(DEFAULT_INWORLD_VOICE)
+    expect(normalizeVoiceForProvider({ ...geminiVoice, voiceName: "Kore" }, "inworld").voiceName)
+      .toBe(DEFAULT_INWORLD_VOICE)
+    expect(normalizeVoiceForProvider({ ...geminiVoice, voiceName: "af_bella" }, "inworld").voiceName)
+      .toBe(DEFAULT_INWORLD_VOICE)
+    expect(isInworldVoiceName("eng")).toBe(false)
+    expect(isInworldVoiceName("fra")).toBe(false)
+  })
+})
+
+describe("Inworld quick clones (inworldCloneReferenceId)", () => {
+  const ref = { referenceAudioId: "ref.webm" }
+  it("is the clip only for a voice on Inworld", () => {
+    expect(inworldCloneReferenceId({ provider: "inworld", ...ref })).toBe("ref.webm")
+    // Leftover hosted ids still run on Inworld.
+    expect(inworldCloneReferenceId({ provider: "omnivoice", ...ref })).toBe("ref.webm")
+  })
+
+  it("ignores a clip on Gemini/MMS (pre-AQU-2291 Seed-VC clones) and on non-TTS voices", () => {
+    expect(inworldCloneReferenceId({ provider: "gemini", ...ref })).toBeUndefined()
+    expect(inworldCloneReferenceId({ provider: "mms", ...ref })).toBeUndefined()
+    expect(inworldCloneReferenceId({ ...ref })).toBeUndefined()
+    expect(inworldCloneReferenceId({ provider: "inworld", libraryVoiceId: "narrator-hearth", ...ref })).toBeUndefined()
+    expect(inworldCloneReferenceId({ provider: "inworld" })).toBeUndefined()
+  })
+
+  it("normalizing onto another engine drops the clip; onto Inworld keeps it", () => {
+    const clone = { id: "v", name: "Ana", provider: "inworld" as const, referenceAudioId: "ref.webm", referenceTakeKey: "c1:a1" }
+    expect(normalizeVoiceForProvider(clone, "inworld").referenceAudioId).toBe("ref.webm")
+    const gemini = normalizeVoiceForProvider(clone, "gemini")
+    expect(gemini.referenceAudioId).toBeUndefined()
+    expect(gemini.referenceTakeKey).toBeUndefined()
   })
 })

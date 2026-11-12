@@ -18,6 +18,7 @@ import {
 } from "../routes/contextual"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import {
+  CONTEXTUAL_MAX_STARTS_PER_USER,
   createRun,
   getRun,
   insertDrafts,
@@ -83,11 +84,16 @@ afterEach(async () => {
   vi.stubGlobal("fetch", realFetch)
 })
 
-/** A project with the steering context the start gate requires. */
+/** A project with the steering context the start gate requires, and the
+ *  AQU-1050 release flag ON — the server now refuses every start, retry and
+ *  steering direction for a project that never opted in, so a world meant to
+ *  exercise those routes has to be a project that did. The OFF case lives in
+ *  contextual-release-gate.test.ts. */
 const READY_SETTINGS = {
   sourceLanguage: "en",
   targetLanguage: "sw",
   translationBrief: { parameters: { purpose: "Community reading" } },
+  autopilotEnabled: true,
 }
 
 /** Replace the seeded project's settings, keeping the start-gate minimum. */
@@ -123,6 +129,15 @@ async function seedWorld(): Promise<{ lead: string; contrib: string; viewer: str
      VALUES (?, ?, 1, 1)`,
   )
     .bind(PROJECT, JSON.stringify(READY_SETTINGS))
+    .run()
+  // AQU-1595: the start gate reads both languages off the lane rows, not the
+  // settings blob. Seed them before the cells so the test trigger attaches the
+  // cells to these rows instead of minting language-less ones.
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+     VALUES ('ctxr-src', ?, 'source', 'English', NULL, 0), ('ctxr-tgt', ?, 'target', 'Swahili', '', 1)`,
+  )
+    .bind(PROJECT, PROJECT)
     .run()
   // A tiny file so the kicked loop has real work: one chapter, two cells.
   for (const [cellId, ref, text] of [
@@ -215,13 +230,53 @@ describe("POST /contextual/runs", () => {
     expect(activityBody.events.map((event) => event.kind)).toContain("run_created")
   })
 
+  // AQU-1847. The capacity ceilings bound how much is in flight; they cannot
+  // bound how often someone presses start, and each press fans out to up to 24
+  // files. Like the AQU-827 gate below, this must refuse before any spend —
+  // and it must say WHY, because "Autopilot could not start" sends the user
+  // hunting for a fault that does not exist.
+  it("throttles a user who keeps starting runs, before any spend, and leaves other users alone", async () => {
+    const { contrib, lead } = await seedWorld()
+    const snapshot = JSON.stringify({ userId: 2, username: "contrib", level: 400 })
+    for (let i = 0; i < CONTEXTUAL_MAX_STARTS_PER_USER; i++) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO contextual_runs (id, project_id, file_id, lane_id, status, initiated_by, role_snapshot)
+         VALUES (?, ?, ?, 'ctxr-tgt', 'terminated', 'contrib', ?)`,
+      ).bind(`throttle-seed-${i}`, PROJECT, `throttle-file-${i}`, snapshot).run()
+    }
+
+    const throttled = await req("POST", "/runs", contrib, { fileId: FILE })
+    expect(throttled.status).toBe(429)
+    const body = (await throttled.json()) as {
+      error: { code: string; message: string; details: { retryAfterSeconds: number } }
+    }
+    expect(body.error.code).toBe("start_throttled")
+    expect(body.error.message).toContain("Too many Autopilot runs started")
+    expect(body.error.details.retryAfterSeconds).toBeGreaterThan(0)
+    // Refused before the run row, the model call, and the live relay.
+    expect(modelCallCount).toBe(0)
+    expect(syncFrames).toEqual([])
+    expect(await listDrafts(env.AQUILLA_PG, PROJECT, FILE, "proposed")).toEqual([])
+
+    // It is a PER-USER throttle: one noisy account must not take Autopilot
+    // away from their teammates.
+    const other = await req("POST", "/runs", lead, { fileId: FILE })
+    expect(other.status).toBe(201)
+    if (_test.lastLoop) await _test.lastLoop
+    _test.lastLoop = null
+  })
+
   // AQU-827. The gate is server-side because the client's disabled button is a
   // courtesy, not a guarantee — the pill, the panel, and any API caller all
   // arrive on this one route. It must refuse BEFORE the run row exists and
   // before a single model call is billed.
-  it("refuses to start without the project's languages and any brief, naming what is missing", async () => {
+  it("refuses to start without the project's languages and any instructions, naming what is missing", async () => {
     const { contrib } = await seedWorld()
-    await setSettings({ sourceLanguage: "", targetLanguage: "", translationBrief: {} })
+    await setSettings({ translationBrief: {} })
+    // AQU-1595: languages live on the lane rows. Blank them there.
+    await env.AQUILLA_PG.prepare("UPDATE lanes SET language = NULL, name = NULL WHERE project_id = ?")
+      .bind(PROJECT)
+      .run()
 
     const blocked = await req("POST", "/runs", contrib, { fileId: FILE })
     expect(blocked.status).toBe(400)
@@ -229,7 +284,7 @@ describe("POST /contextual/runs", () => {
       error: { code: string; details: { missing: string[] } }
     }
     expect(body.error.code).toBe("context_required")
-    expect(body.error.details.missing).toEqual(["languages", "brief"])
+    expect(body.error.details.missing).toEqual(["languages", "instructions"])
     // Nothing was started and no model was called — the point of gating early.
     expect(modelCallCount).toBe(0)
     expect(syncFrames).toEqual([])
@@ -243,20 +298,25 @@ describe("POST /contextual/runs", () => {
 
     // Supplying the missing context unblocks it without any other change.
     await setSettings({})
+    await env.AQUILLA_PG.prepare(
+      "UPDATE lanes SET language = CASE role WHEN 'source' THEN 'English' ELSE 'Swahili' END WHERE project_id = ?",
+    )
+      .bind(PROJECT)
+      .run()
     const started = await req("POST", "/runs", contrib, { fileId: FILE })
     expect(started.status).toBe(201)
     if (_test.lastLoop) await _test.lastLoop
     _test.lastLoop = null
   })
 
-  it("blocks on the brief alone once the languages are set", async () => {
+  it("blocks on the instructions alone once the languages are set", async () => {
     const { contrib } = await seedWorld()
     await setSettings({ translationBrief: { parameters: { purpose: "   " } } })
 
     const blocked = await req("POST", "/runs", contrib, { fileId: FILE })
     expect(blocked.status).toBe(400)
     const body = (await blocked.json()) as { error: { details: { missing: string[] } } }
-    expect(body.error.details.missing).toEqual(["brief"])
+    expect(body.error.details.missing).toEqual(["instructions"])
   })
 
   it("refuses a second active run with 409 + the existing runId", async () => {
@@ -279,7 +339,16 @@ describe("POST /contextual/runs", () => {
     expect(body.error.message).toMatch(/not registered/i)
     expect(syncFrames).toEqual([])
 
+    // AQU-2223: a lane row registers the lane; the settings registry does not.
     await setSettings({ targetLanes: ["fr", "es"] })
+    const stillUnregistered = await req("POST", "/runs", contrib, { fileId: FILE, targetLang: "fr" })
+    expect(stillUnregistered.status).toBe(400)
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+       VALUES ('ctxr-fr', ?, 'target', 'French', 'fr', 2), ('ctxr-es', ?, 'target', 'Spanish', 'es', 3)`,
+    )
+      .bind(PROJECT, PROJECT)
+      .run()
 
     const started = await req("POST", "/runs", contrib, { fileId: FILE, targetLang: "fr" })
     expect(started.status).toBe(201)
@@ -1095,9 +1164,7 @@ describe("draft listing + review handshake", () => {
     expect(JSON.stringify(pendingBody)).not.toContain(drafts[0].text)
 
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells
-          (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at)
-       VALUES (?, ?, ?, 'target', '', ?, ?, 0)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at) VALUES (?, ?, ?, 'target', ?, ?, 0)`,
     ).bind(
       PROJECT,
       FILE,
@@ -1208,10 +1275,7 @@ async function seedFanoutFiles(count: number): Promise<void> {
          VALUES (?, ?, ?, 'usfm', ?, 1)`,
       ).bind(fileId, PROJECT, `Book ${suffix}`, `ev-file-${suffix}`),
       env.AQUILLA_PG.prepare(
-        `INSERT INTO cells
-            (project_id, file_id, cell_id, side, target_lang, value,
-             canonical_ref, event_id, last_edit_at)
-         VALUES (?, ?, ?, 'source', '', ?, ?, ?, 0)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at) VALUES (?, ?, ?, 'source', ?, ?, ?, 0)`,
       ).bind(
         PROJECT,
         fileId,
@@ -1238,10 +1302,7 @@ async function seedFairnessFiles(): Promise<void> {
     for (const chapter of [1, 2]) {
       statements.push(
         env.AQUILLA_PG.prepare(
-          `INSERT INTO cells
-              (project_id, file_id, cell_id, side, target_lang, value,
-               canonical_ref, event_id, last_edit_at)
-           VALUES (?, ?, ?, 'source', '', ?, ?, ?, 0)`,
+          `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at) VALUES (?, ?, ?, 'source', ?, ?, ?, 0)`,
         ).bind(
           PROJECT,
           fileId,
@@ -1522,11 +1583,8 @@ describe("GET /contextual/overview", () => {
     const { viewer } = await seedWorld()
     for (const cellId of ["c1", "c2"]) {
       await env.AQUILLA_PG.prepare(
-        `INSERT INTO cells
-            (project_id, file_id, cell_id, side, target_lang, value, canonical_ref,
-             event_id, source_event_id, last_edit_at, validated)
-         VALUES (?, ?, ?, 'target', 'fr', 'traduit', 'MRK 1:1', ?, ?, 0, 1)`,
-      ).bind(PROJECT, FILE, cellId, `ev-fr-${cellId}`, `ev-${cellId}`).run()
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, source_event_id, last_edit_at, validated, lane_id) VALUES (?, ?, ?, 'target', 'traduit', 'MRK 1:1', ?, ?, 0, 1, (SELECT aquilla_test_resolve_target_lane(?, 'fr')))`,
+      ).bind(PROJECT, FILE, cellId, `ev-fr-${cellId}`, `ev-${cellId}`, PROJECT).run()
     }
     const response = await req("GET", "/overview", viewer)
     const body = await response.json() as {

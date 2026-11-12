@@ -1,21 +1,28 @@
-// "Set up with AI" — the one-dialog path from nothing to progress landing on a
+// Monday board setup: three short steps from nothing to progress landing on a
 // Monday board.
 //
-// Deliberately NOT a chat. It's a linear state machine with gates:
+//   intro → [connect] → scanning → 1 board → 2 columns → 3 confirm → applying → done
 //
-//   intro → [connect] → scanning → review → applying → done
+// One decision per step, with sensible choices already made:
+//   1. Which board? The AI's pick (and why), with a way to change it.
+//   2. What should your board show? Every column Aquilla can fill, grouped,
+//      with the recommended ones and anything already on the board ticked.
+//   3. Confirm. A plain summary, and one button that says what happens:
+//      "Add columns and connect" (or "Connect" when nothing new is needed).
 //
-// The AI runs once, unattended, and proposes EVERYTHING (which board, item
-// granularity, every column↔metric pair). The user's job is to correct a
-// proposal, not to answer questions — every question we'd ask is a scan we
-// failed to do. Corrections use the same row controls as the saved-mapping
-// editor, and "done" is only claimed after a real push has landed.
+// Nothing is written to Monday before step 3: columns are created only on
+// confirm, then mapped, linked and pushed. "Done" is only claimed after a real
+// push has landed.
+//
+// The manual path (mode "manual") is the same flow without the AI: the user
+// picks the board, and step 2's "Advanced: match columns myself" lets them send
+// a number to any existing column.
 //
 // The AI can never widen what gets written: the server clamps every proposal
 // through sanitizeMapping, and read-only Monday column types stay out of the
 // pickers.
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { AlertTriangle, Check, ExternalLink, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -34,9 +41,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { SearchSelect } from "@/components/ui/search-select"
 import { Spinner } from "@/components/ui/spinner"
+import { Input } from "@/components/ui/input"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { cn } from "@/lib/utils"
 import {
+  addMondayColumns,
   analyzeMondayMapping,
+  createMondayBoard,
   deleteMondayLink,
   fetchMondayBoards,
   fetchMondayBoardStructure,
@@ -44,16 +57,30 @@ import {
   putMondayLink,
   startMondayConnect,
   syncMondayNow,
+  type MondayAddColumnsResult,
   type MondayAnalysis,
   type MondayBoard,
   type MondayBoardLink,
   type MondayBoardStructure,
+  type MondayNewBoardResult,
 } from "@/lib/monday/api"
-import type { MondayColumnMapping, MondayMapping } from "@/lib/monday/types"
+import { connectFailureKey, useMondayOAuthOutcome } from "@/lib/monday/oauth-return"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
+import { openExternal } from "@/lib/open-external"
+import type { MondayColumnMapping, MondayMapping, MondayMetricKey } from "@/lib/monday/types"
+import {
+  REQUIRED_METRIC,
+  columnSelectionCounts,
+  initialColumnSelection,
+  metricsToAdd,
+  newBoardMetrics,
+  selectedRows,
+} from "@/lib/monday/column-selection"
 import { MondayMappingRows } from "./MondayMappingEditor"
+import { MondayColumnChooser } from "./MondayColumnChooser"
 import { useT } from "@/lib/i18n/I18nProvider"
 
-type Stage = "intro" | "connect" | "scanning" | "review" | "applying" | "done"
+type Stage = "intro" | "connect" | "scanning" | "board" | "columns" | "confirm" | "applying" | "done"
 
 interface Props {
   open: boolean
@@ -63,10 +90,13 @@ interface Props {
   jwt: string | null
   /** Whether the org already holds a Monday connection. */
   orgConnected: boolean
-  /** Monday account slug, for the "View board" deep link. */
-  accountSlug?: string | null
-  /** A link was created — parent refreshes its own view. */
-  onLinked: (link: MondayBoardLink) => void
+  /** "manual": the user picks the board and nothing is asked of the AI. */
+  mode?: "ai" | "manual"
+  /**
+   * A link was created — parent refreshes its own view and keeps showing the
+   * server's link warnings (e.g. webhooks could not be created).
+   */
+  onLinked: (link: MondayBoardLink, warnings: string[]) => void
   /** The wizard's Undo removed the link it had just created. */
   onUnlinked: () => void
   /** OAuth completed in the other tab — parent refetches connection status. */
@@ -93,6 +123,50 @@ function ScanStep({ state, label }: { state: "pending" | "running" | "done"; lab
   )
 }
 
+/**
+ * The server's own words for a failed call: readError keeps them in `cause`
+ * ("HTTP 409 — no boards found…") behind a generic message.
+ */
+function serverReason(e: unknown): string {
+  const detail = e instanceof MondayApiError && typeof e.cause === "string" ? /— (.+)$/s.exec(e.cause)?.[1] : undefined
+  return detail ?? errMsg(e)
+}
+
+/** One of step 1's two choices: a radio and its words, with anything it needs below. */
+function BoardChoice({
+  value,
+  selected,
+  label,
+  help,
+  aside,
+  children,
+}: {
+  value: "existing" | "new"
+  selected: boolean
+  label: string
+  help?: string
+  aside?: ReactNode
+  children?: ReactNode
+}) {
+  return (
+    <div className={cn("flex flex-col gap-2 rounded-lg border p-3", selected ? "border-primary/40 bg-muted/40" : "")}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <label className="flex min-w-0 flex-1 items-start gap-2.5 text-sm">
+          <RadioGroupItem value={value} className="mt-0.5 shrink-0" />
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="font-medium break-words">{label}</span>
+            {help && <span className="text-xs text-muted-foreground">{help}</span>}
+          </span>
+        </label>
+        {aside}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+const STEP_NUMBER: Partial<Record<Stage, number>> = { board: 1, columns: 2, confirm: 3 }
+
 export function MondaySetupWizard({
   open,
   onOpenChange,
@@ -100,29 +174,51 @@ export function MondaySetupWizard({
   orgId,
   jwt,
   orgConnected,
-  accountSlug,
+  mode = "ai",
   onLinked,
   onUnlinked,
   onConnected,
 }: Props) {
   const t = useT()
+  const manual = mode === "manual"
   const [stage, setStage] = useState<Stage>("intro")
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const [analysis, setAnalysis] = useState<MondayAnalysis | null>(null)
+  const [boardId, setBoardId] = useState("")
   const [structure, setStructure] = useState<MondayBoardStructure | null>(null)
   const [rows, setRows] = useState<MondayColumnMapping[]>([])
   const [granularity, setGranularity] = useState<MondayMapping["itemGranularity"]>("project")
+  const [selected, setSelected] = useState<Set<MondayMetricKey>>(new Set([REQUIRED_METRIC]))
+  const [advanced, setAdvanced] = useState(false)
   /** Which of the two scan steps has completed (0 = none). */
   const [scanDone, setScanDone] = useState(0)
 
   const [boards, setBoards] = useState<MondayBoard[] | null>(null)
   const [changingBoard, setChangingBoard] = useState(false)
 
+  const [applyStep, setApplyStep] = useState<"making" | "adding" | "linking">("linking")
+  const [notAdded, setNotAdded] = useState<MondayAddColumnsResult["failed"]>([])
+  const [linkedBoardUrl, setLinkedBoardUrl] = useState<string | null>(null)
   const [linkedBoardName, setLinkedBoardName] = useState<string | null>(null)
   const [pushNotice, setPushNotice] = useState<{ ok: boolean; text: string } | null>(null)
+  /** Warnings the link route returned — the same ones the manual path shows. */
+  const [linkWarnings, setLinkWarnings] = useState<string[]>([])
   const [awaitingOAuth, setAwaitingOAuth] = useState(false)
+
+  // AQU-2087: step 1's other choice. Aquilla makes a clean board instead of
+  // linking one of the user's; its columns are ticked apart from an existing
+  // board's, so switching back and forth loses neither.
+  const [newBoard, setNewBoard] = useState(false)
+  const [newBoardName, setNewBoardName] = useState("")
+  const [newSelected, setNewSelected] = useState<Set<MondayMetricKey>>(
+    () => initialColumnSelection([], undefined, { recommend: true }),
+  )
+  /** The Monday account has no boards at all, so a new one is the only choice. */
+  const [noBoards, setNoBoards] = useState(false)
+  /** The board this run already made, so a retry after a failed link doesn't make another. */
+  const [madeBoard, setMadeBoard] = useState<MondayNewBoardResult | null>(null)
 
   const aliveRef = useRef(true)
   useEffect(() => {
@@ -132,60 +228,99 @@ export function MondaySetupWizard({
     }
   }, [])
 
-  // Reset to a clean intro every time the dialog is opened, so a previous
-  // run's proposal or error never greets the next one.
+  // ── Board list (the change-board dropdown, and the manual path's step 1) ──
+  const loadBoards = useCallback(async () => {
+    if (boards !== null || !jwt || orgId == null) return
+    try {
+      const got = await fetchMondayBoards(jwt, orgId)
+      if (aliveRef.current) setBoards(got)
+    } catch {
+      // Board listing needs org maintainer; without it the AI's pick stands.
+      if (aliveRef.current) setBoards([])
+    }
+  }, [boards, jwt, orgId])
+
+  // Reset every time the dialog is opened, so a previous run's proposal or
+  // error never greets the next one.
   useEffect(() => {
     if (!open) return
-    setStage("intro")
+    setStage(manual ? "board" : "intro")
     setError(null)
     setAnalysis(null)
+    setBoardId("")
     setStructure(null)
     setRows([])
+    setGranularity("project")
+    setSelected(new Set([REQUIRED_METRIC]))
+    setAdvanced(false)
     setScanDone(0)
     setChangingBoard(false)
+    setNotAdded([])
     setLinkedBoardName(null)
+    setLinkedBoardUrl(null)
     setPushNotice(null)
+    setLinkWarnings([])
     setAwaitingOAuth(false)
+    setNewBoard(false)
+    setNewBoardName(t("projectSettings.monday.newBoardDefaultName"))
+    setNewSelected(initialColumnSelection([], undefined, { recommend: true }))
+    setNoBoards(false)
+    setMadeBoard(null)
+    // Only on open; the manual path's board list loads below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  // ── Scan: one analyze call, then the chosen board's structure ────────────
+  useEffect(() => {
+    if (open && manual && stage === "board") void loadBoards()
+  }, [open, manual, stage, loadBoards])
+
+  /** The board's columns: needed for real titles and for "On your board". */
+  const loadStructure = useCallback(
+    async (id: string): Promise<MondayBoardStructure | null> => {
+      if (!jwt || orgId == null || !id) return null
+      // Needs ORG maintainer server-side, so a 403 degrades quietly.
+      return fetchMondayBoardStructure(jwt, orgId, id).catch(() => null)
+    },
+    [jwt, orgId],
+  )
+
+  // ── Scan (AI path): one analyze call, then the chosen board's structure ──
   const runScan = useCallback(
-    async (boardId?: string) => {
+    async (pickBoardId?: string) => {
       if (!jwt) return
       setStage("scanning")
       setError(null)
       setScanDone(0)
       setChangingBoard(false)
       try {
-        const got = await analyzeMondayMapping(jwt, projectId, boardId ? { boardId } : {})
+        const got = await analyzeMondayMapping(jwt, projectId, pickBoardId ? { boardId: pickBoardId } : {})
         if (!aliveRef.current) return
         setAnalysis(got)
+        setBoardId(got.boardId)
         setRows(got.proposal.columns)
         setGranularity(got.proposal.itemGranularity)
         setScanDone(1)
-
-        // Structure gives the review table real column titles instead of raw
-        // ids. It needs ORG maintainer server-side, so a 403 degrades quietly.
-        if (orgId != null && got.boardId) {
-          const built = await fetchMondayBoardStructure(jwt, orgId, got.boardId).catch(() => null)
-          if (!aliveRef.current) return
-          setStructure(built)
-        }
+        const built = got.boardId ? await loadStructure(got.boardId) : null
+        if (!aliveRef.current) return
+        setStructure(built)
+        setSelected(initialColumnSelection(got.proposal.columns, built?.columns, { recommend: true }))
         setScanDone(2)
-        setStage("review")
+        setStage("board")
       } catch (e) {
         if (!aliveRef.current) return
         // 409 = the account has no boards to sync to. Retrying can't fix that,
-        // so say what to do instead of offering "Scan and propose" again.
-        setError(
-          e instanceof MondayApiError && e.status === 409 && /no boards/i.test(e.message)
-            ? "This Monday account has no boards yet. Create one in Monday, then run setup again."
-            : errMsg(e),
-        )
+        // and AQU-2087 means it needn't: step 1 opens on making one.
+        if (e instanceof MondayApiError && e.status === 409 && /no boards/i.test(serverReason(e))) {
+          setNoBoards(true)
+          setNewBoard(true)
+          setStage("board")
+          return
+        }
+        setError(errMsg(e))
         setStage("intro")
       }
     },
-    [jwt, projectId, orgId],
+    [jwt, projectId, loadStructure],
   )
 
   // ── Connect gate (org has no Monday connection yet) ──────────────────────
@@ -197,13 +332,12 @@ export function MondaySetupWizard({
     setError(null)
     const popup = window.open("about:blank", "_blank")
     try {
-      const { url } = await startMondayConnect(
-        jwt,
-        orgId,
-        `/project/${projectId}/settings/integrations`,
-      )
+      const { url } = await startMondayConnect(jwt, orgId, `/project/${projectId}/settings/integrations`)
       if (popup && !popup.closed) {
         popup.location.href = url
+      } else if (isTauriRuntime()) {
+        // The desktop WebView has no popups; use the system browser.
+        await openExternal(url)
       } else {
         window.location.assign(url)
         return
@@ -223,6 +357,13 @@ export function MondaySetupWizard({
     window.addEventListener("focus", onFocus)
     return () => window.removeEventListener("focus", onFocus)
   }, [awaitingOAuth, onConnected])
+  // The Monday tab says how it ended (or the wait times out), so a cancelled
+  // or failed connection doesn't leave "Waiting for Monday…" up forever.
+  useMondayOAuthOutcome(awaitingOAuth, orgId, (outcome) => {
+    setAwaitingOAuth(false)
+    if (outcome.ok) onConnected()
+    else setError(t(connectFailureKey(outcome.reason)))
+  })
 
   // The parent's connection refetch lands here: leave the connect gate and go
   // straight into the scan the user already asked for.
@@ -238,55 +379,137 @@ export function MondaySetupWizard({
     void runScan()
   }, [orgConnected, runScan])
 
-  // ── Board change ─────────────────────────────────────────────────────────
-  const openBoardPicker = useCallback(async () => {
-    setChangingBoard(true)
-    if (boards !== null || !jwt || orgId == null) return
-    try {
-      const got = await fetchMondayBoards(jwt, orgId)
-      if (aliveRef.current) setBoards(got)
-    } catch {
-      // Board listing needs org maintainer; without it the AI's pick stands.
-      if (aliveRef.current) setBoards([])
+  // ── Step 1 → 2 ───────────────────────────────────────────────────────────
+  const goToColumns = useCallback(async () => {
+    if (manual && !newBoard) {
+      // No AI: read the board, then tick what's already there plus the
+      // recommended set.
+      setBusy(true)
+      const built = await loadStructure(boardId)
+      if (!aliveRef.current) return
+      setBusy(false)
+      setStructure(built)
+      setRows([])
+      setSelected(initialColumnSelection([], built?.columns, { recommend: true }))
     }
-  }, [boards, jwt, orgId])
+    setError(null)
+    setStage("columns")
+  }, [manual, newBoard, boardId, loadStructure])
 
-  // ── Apply: create the link, then prove it by pushing ─────────────────────
-  const handleApply = useCallback(async () => {
-    if (!jwt || !analysis) return
+  // Advanced matching: a number sent to an existing column is used, so tick it.
+  const handleAdvancedRows = useCallback((next: MondayColumnMapping[]) => {
+    setRows(next)
+    setSelected((prev) => {
+      const out = new Set(prev)
+      for (const r of next) if (r.columnId) out.add(r.metric)
+      return out
+    })
+  }, [])
+
+  // ── Step 3: create the new columns, then link and prove it by pushing ────
+  const boards_ = boards ?? []
+  const existingBoardName =
+    analysis?.boardName ?? boards_.find((b) => b.id === boardId)?.name ?? structure?.name ?? boardId
+  const typedBoardName = newBoardName.trim() || t("projectSettings.monday.newBoardDefaultName")
+  const boardName = newBoard ? typedBoardName : existingBoardName
+  // A new board has no columns of its own and nothing for the AI's rows to point at.
+  const chooserRows = newBoard ? [] : rows
+  const chooserColumns = newBoard ? undefined : structure?.columns
+  const ticks = newBoard ? newSelected : selected
+  const setTicks = newBoard ? setNewSelected : setSelected
+  const { adds } = columnSelectionCounts(ticks, chooserRows, chooserColumns)
+  const pickedBeyondId = [...ticks].some((m) => m !== REQUIRED_METRIC)
+
+  const handleConfirm = useCallback(async () => {
+    if (!jwt || (!newBoard && !boardId)) return
     setStage("applying")
     setError(null)
-    const boardName = analysis.boardName ?? boards?.find((b) => b.id === analysis.boardId)?.name
+    setNotAdded([])
+
+    let added: MondayAddColumnsResult | null = null
+    let linkBoardId = boardId
+    let linkBoardName: string | null = boardName
+    if (newBoard) {
+      // AQU-2087: make the board first (once per run), then link it like any other.
+      let made = madeBoard
+      if (!made) {
+        setApplyStep("making")
+        try {
+          made = await createMondayBoard(jwt, projectId, { name: typedBoardName, metrics: newBoardMetrics(newSelected) })
+        } catch (e) {
+          if (!aliveRef.current) return
+          setError(t("projectSettings.monday.wizardNewBoardFailed", { reason: serverReason(e) }))
+          setStage("confirm")
+          return
+        }
+        if (!aliveRef.current) return
+        setMadeBoard(made)
+      }
+      added = made
+      linkBoardId = made.boardId
+      linkBoardName = made.structure.name ?? typedBoardName
+      setBoardId(made.boardId)
+      setStructure(made.structure)
+      setNotAdded(made.failed)
+    } else {
+      const need = metricsToAdd(selected, rows)
+      if (need.length > 0) {
+        setApplyStep("adding")
+        try {
+          added = await addMondayColumns(jwt, projectId, { boardId, metrics: need })
+          if (!aliveRef.current) return
+          setStructure(added.structure)
+          setNotAdded(added.failed)
+        } catch (e) {
+          if (!aliveRef.current) return
+          setError(t("projectSettings.monday.wizardAddColumnsFailed", { reason: errMsg(e) }))
+          setStage("confirm")
+          return
+        }
+      }
+    }
+    setApplyStep("linking")
 
     // The AI writes itemNameTemplate for the granularity it proposed. If the
-    // user flips that here, the template no longer fits — a project-shaped
+    // user flips that, the template no longer fits — a project-shaped
     // "{projectName}" would name every file item identically (and, under
     // matchExisting byName, collapse them onto one board item). Drop it and let
-    // the server pick its granularity-correct default.
-    const { itemNameTemplate, ...rest } = analysis.proposal
-    const keepTemplate = granularity === analysis.proposal.itemGranularity && itemNameTemplate
+    // the server pick its granularity-correct default. A new board ignores the
+    // AI's proposal altogether: it was made for another board.
+    const proposal = newBoard ? undefined : analysis?.proposal
+    const { itemNameTemplate: template, fileSubitems: _proposedSubitems, ...rest } = proposal ?? {
+      version: 1 as const,
+      itemGranularity: granularity,
+      columns: [] as MondayColumnMapping[],
+    }
+    const keepTemplate = proposal && granularity === proposal.itemGranularity && template
 
     try {
       const out = await putMondayLink(jwt, projectId, {
-        boardId: analysis.boardId,
-        ...(boardName ? { boardName } : {}),
+        boardId: linkBoardId,
+        ...(linkBoardName ? { boardName: linkBoardName } : {}),
         config: {
           ...rest,
-          ...(keepTemplate ? { itemNameTemplate } : {}),
+          ...(keepTemplate ? { itemNameTemplate: template } : {}),
           itemGranularity: granularity,
-          columns: rows.filter((r) => r.columnId),
+          // One row for the project lists its files as subitems under it; the
+          // server finds the subitem columns on the first push.
+          ...(granularity === "project" ? { fileSubitems: { columns: [] } } : {}),
+          columns: newBoard ? selectedRows([], newSelected, added) : selectedRows(rows, selected, added),
         },
       })
       if (!aliveRef.current) return
-      setLinkedBoardName(out.link.boardName ?? boardName ?? null)
-      onLinked(out.link)
+      setLinkedBoardUrl(out.link.boardUrl ?? added?.structure.url ?? structure?.url ?? analysis?.boardUrl ?? null)
+      setLinkedBoardName(out.link.boardName ?? linkBoardName ?? null)
+      setLinkWarnings(out.warnings)
+      onLinked(out.link, out.warnings)
 
       // Verify rather than assert: a link that pushes nothing is not "set up".
       try {
         const res = await syncMondayNow(jwt, projectId)
         if (!aliveRef.current) return
         setPushNotice(
-          res.ok
+          res.ok && res.pushed
             ? {
                 ok: true,
                 text:
@@ -303,9 +526,12 @@ export function MondaySetupWizard({
     } catch (e) {
       if (!aliveRef.current) return
       setError(errMsg(e))
-      setStage("review")
+      setStage("confirm")
     }
-  }, [jwt, analysis, projectId, granularity, rows, boards, onLinked])
+  }, [
+    jwt, newBoard, boardId, boardName, madeBoard, projectId, typedBoardName, newSelected, selected, rows,
+    analysis, granularity, structure, onLinked, t,
+  ])
 
   const handleUndo = useCallback(async () => {
     if (!jwt) return
@@ -322,43 +548,70 @@ export function MondaySetupWizard({
     }
   }, [jwt, projectId, onUnlinked, onOpenChange])
 
-  const boardUrl =
-    accountSlug && analysis?.boardId
-      ? `https://${accountSlug}.monday.com/boards/${analysis.boardId}`
-      : null
-  const mappedCount = rows.filter((r) => r.columnId).length
+  const boardUrl = linkedBoardUrl ?? structure?.url ?? analysis?.boardUrl ?? null
+  const stepNumber = STEP_NUMBER[stage]
+  const title =
+    stage === "done"
+      ? pushNotice?.ok && linkWarnings.length === 0 && notAdded.length === 0
+        ? "Monday.com is set up"
+        : t("projectSettings.monday.wizardDoneNeedsAttentionTitle")
+      : stage === "board"
+        ? t("projectSettings.monday.wizardBoardTitle")
+        : stage === "columns"
+          ? t("projectSettings.monday.wizardColumnsTitle")
+          : stage === "confirm"
+            ? t("projectSettings.monday.wizardConfirmTitle")
+            : "Set up Monday.com with AI"
+  const perFile = granularity === "file"
+
+  // AQU-2260: an account can hold hundreds of boards, so a search box; a
+  // board is found by its workspace's name too.
+  const boardSelect = (
+    <SearchSelect
+      aria-label={t("projectSettings.monday.boardSelectAriaLabel")}
+      className="w-full"
+      options={boards_.map((b) => ({ value: b.id, label: b.name, keywords: b.workspace?.name ?? "", workspace: b.workspace?.name ?? "" }))}
+      value={boardId || null}
+      onValueChange={(id) => {
+        setNewBoard(false)
+        if (!id || id === boardId) return
+        if (manual) setBoardId(id)
+        else void runScan(id)
+      }}
+      placeholder={t("projectSettings.monday.pickBoardPlaceholder")}
+      renderOption={(b) => (
+        <span className="min-w-0 truncate">
+          {b.label}
+          {b.workspace ? ` — ${b.workspace}` : ""}
+        </span>
+      )}
+    />
+  )
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl" data-testid="monday-setup-wizard">
+    // A click outside never closes the setup: a double-click on the button
+    // that opened it, or on Next, would land on the backdrop and throw the
+    // scan away. Escape and the X still close it.
+    <Dialog open={open} onOpenChange={onOpenChange} disablePointerDismissal>
+      <DialogContent className="max-w-xl" data-testid="monday-setup-wizard">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-primary" />
-            {stage === "done" ? "Monday.com is set up" : "Set up Monday.com with AI"}
-          </DialogTitle>
-          {stage === "intro" && (
-            <DialogDescription>
-              {t("projectSettings.monday.introDescription")}
-            </DialogDescription>
+          {stepNumber != null && (
+            <p className="text-xs text-muted-foreground">
+              {t("projectSettings.monday.wizardStepOf", { step: stepNumber, total: 3 })}
+            </p>
           )}
+          <DialogTitle className="flex items-center gap-2">
+            {stepNumber == null && <Sparkles className="h-4 w-4 text-primary" />}
+            {title}
+          </DialogTitle>
+          {stage === "intro" && <DialogDescription>{t("projectSettings.monday.wizardIntroLine")}</DialogDescription>}
         </DialogHeader>
 
-        {stage === "intro" && (
-          <div className="space-y-3">
-            <ul className="space-y-1.5 text-sm text-muted-foreground">
-              <li>· {t("projectSettings.monday.introBullet1")}</li>
-              <li>· {t("projectSettings.monday.introBullet2")}</li>
-              <li>· {t("projectSettings.monday.introBullet3")}</li>
-            </ul>
-            {error && <p className="text-sm text-destructive">{error}</p>}
-          </div>
-        )}
+        {stage === "intro" && error && <p className="text-sm text-destructive">{error}</p>}
 
         {stage === "connect" && (
           <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              {t("projectSettings.monday.connectGateDescription")}
-            </p>
+            <p className="text-sm text-muted-foreground">{t("projectSettings.monday.connectGateDescription")}</p>
             {awaitingOAuth && (
               <p className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Spinner className="h-4 w-4" /> {t("projectSettings.monday.waitingForMonday")}
@@ -370,10 +623,7 @@ export function MondaySetupWizard({
 
         {stage === "scanning" && (
           <ul className="space-y-2 py-2" data-testid="monday-wizard-scan">
-            <ScanStep
-              state={scanDone >= 1 ? "done" : "running"}
-              label={t("projectSettings.monday.scanStep1Label")}
-            />
+            <ScanStep state={scanDone >= 1 ? "done" : "running"} label={t("projectSettings.monday.scanStep1Label")} />
             <ScanStep
               state={scanDone >= 2 ? "done" : scanDone >= 1 ? "running" : "pending"}
               label={t("projectSettings.monday.scanStep2Label")}
@@ -381,92 +631,82 @@ export function MondaySetupWizard({
           </ul>
         )}
 
-        {stage === "review" && analysis && (
-          <div className="space-y-4" data-testid="monday-wizard-review">
-            <p className="text-sm">{analysis.summary}</p>
-
-            <div className="rounded-lg border p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">{t("projectSettings.monday.boardCaption")}</p>
-                  <p className="text-sm font-medium break-words">
-                    {analysis.boardName ??
-                      boards?.find((b) => b.id === analysis.boardId)?.name ??
-                      analysis.boardId}
-                  </p>
-                </div>
-                {!changingBoard && (
-                  <Button variant="outline" size="sm" onClick={() => void openBoardPicker()}>
-                    {t("org.projectOverview.change")}
-                  </Button>
-                )}
-              </div>
-              {analysis.boardReason && !changingBoard && (
-                <p className="mt-1 text-xs text-muted-foreground">{analysis.boardReason}</p>
+        {stage === "board" && (
+          <div className="space-y-3" data-testid="monday-wizard-board">
+            {noBoards && <p className="text-sm text-muted-foreground">{t("projectSettings.monday.noBoardsYet")}</p>}
+            <RadioGroup
+              name="monday-board-choice"
+              value={newBoard ? "new" : "existing"}
+              onValueChange={(value) => setNewBoard(value === "new")}
+              className="flex flex-col gap-2"
+            >
+              {!noBoards && (
+                <BoardChoice
+                  value="existing"
+                  selected={!newBoard}
+                  label={manual ? t("projectSettings.monday.existingBoardOption") : existingBoardName}
+                  help={manual ? undefined : analysis?.boardReason || undefined}
+                  aside={
+                    !manual && !changingBoard ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setNewBoard(false)
+                          setChangingBoard(true)
+                          void loadBoards()
+                        }}
+                      >
+                        {t("org.projectOverview.change")}
+                      </Button>
+                    ) : undefined
+                  }
+                >
+                  {(manual || changingBoard) &&
+                    (boards === null ? (
+                      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Spinner className="h-4 w-4" /> {t("projectSettings.monday.loadingBoards")}
+                      </p>
+                    ) : boards.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">{t("projectSettings.monday.boardListFailed")}</p>
+                    ) : (
+                      boardSelect
+                    ))}
+                </BoardChoice>
               )}
-              {changingBoard && (
-                <div className="mt-2">
-                  {boards === null ? (
-                    <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Spinner className="h-4 w-4" /> {t("projectSettings.monday.loadingBoards")}
-                    </p>
-                  ) : boards.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      {t("projectSettings.monday.boardListFailed")}
-                    </p>
-                  ) : (
-                    <Select
-                      items={Object.fromEntries(boards.map((b) => [b.id, b.name]))}
-                      value={analysis.boardId || null}
-                      onValueChange={(value) => {
-                        const id = (value as string) ?? ""
-                        if (id && id !== analysis.boardId) void runScan(id)
-                      }}
-                    >
-                      <SelectTrigger aria-label={t("projectSettings.monday.boardSelectAriaLabel")} className="w-full">
-                        <SelectValue placeholder={t("projectSettings.monday.pickBoardPlaceholder")} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          {boards.map((b) => (
-                            <SelectItem key={b.id} value={b.id}>
-                              {b.name}
-                              {b.workspace?.name ? ` — ${b.workspace.name}` : ""}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <p className="mb-1 text-xs text-muted-foreground">{t("projectSettings.monday.boardItemsLabel")}</p>
-              <Select
-                items={{
-                  project: t("projectSettings.monday.granularityProjectLabel"),
-                  file: t("projectSettings.monday.granularityFileLabel"),
-                }}
-                value={granularity}
-                onValueChange={(value) =>
-                  setGranularity((value as MondayMapping["itemGranularity"]) ?? "project")
-                }
+              <BoardChoice
+                value="new"
+                selected={newBoard}
+                label={t("projectSettings.monday.newBoardOption")}
+                help={t("projectSettings.monday.newBoardHelp")}
               >
-                <SelectTrigger aria-label={t("projectSettings.monday.boardItemsLabel")} className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="project">{t("projectSettings.monday.granularityProjectLabel")}</SelectItem>
-                    <SelectItem value="file">{t("projectSettings.monday.granularityFileLabel")}</SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
+                {newBoard && (
+                  <Input
+                    id="monday-new-board-name"
+                    aria-label={t("projectSettings.monday.newBoardNameLabel")}
+                    value={newBoardName}
+                    maxLength={255}
+                    onChange={(e) => setNewBoardName(e.target.value)}
+                    data-testid="monday-new-board-name"
+                  />
+                )}
+              </BoardChoice>
+            </RadioGroup>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+          </div>
+        )}
 
-            {analysis.warnings.length > 0 && (
+        {stage === "columns" && (
+          <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1" data-testid="monday-wizard-columns">
+            <MondayColumnChooser
+              rows={chooserRows}
+              boardColumns={chooserColumns}
+              boardName={boardName}
+              selected={ticks}
+              onChange={setTicks}
+            />
+
+            {!newBoard && analysis && analysis.warnings.length > 0 && (
               <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
                 <p className="flex items-center gap-1.5 text-sm font-medium">
                   <AlertTriangle className="h-4 w-4 text-amber-600" />
@@ -480,34 +720,87 @@ export function MondaySetupWizard({
               </div>
             )}
 
-            <div>
-              <p className="mb-1 text-xs text-muted-foreground">
-                {t("projectSettings.monday.reviewRowsCaption")}
-              </p>
-              <MondayMappingRows
-                rows={rows}
-                structure={structure}
-                disabled={false}
-                onChange={setRows}
-              />
-            </div>
+            <button
+              type="button"
+              className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+              aria-expanded={advanced}
+              onClick={() => setAdvanced((v) => !v)}
+            >
+              {advanced ? t("projectSettings.monday.wizardAdvancedHide") : t("projectSettings.monday.wizardAdvancedShow")}
+            </button>
+            {advanced && (
+              <div className="space-y-3" data-testid="monday-wizard-advanced">
+                <div>
+                  <p className="mb-1 text-xs text-muted-foreground">{t("projectSettings.monday.boardItemsLabel")}</p>
+                  <Select
+                    items={{
+                      project: t("projectSettings.monday.granularityProjectLabel"),
+                      file: t("projectSettings.monday.granularityFileLabel"),
+                    }}
+                    value={granularity}
+                    onValueChange={(value) => setGranularity((value as MondayMapping["itemGranularity"]) ?? "project")}
+                  >
+                    <SelectTrigger aria-label={t("projectSettings.monday.boardItemsLabel")} className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectItem value="project">{t("projectSettings.monday.granularityProjectLabel")}</SelectItem>
+                        <SelectItem value="file">{t("projectSettings.monday.granularityFileLabel")}</SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {!newBoard && (
+                  <div>
+                    <p className="mb-1 text-xs text-muted-foreground">{t("projectSettings.monday.reviewRowsCaption")}</p>
+                    <MondayMappingRows rows={rows} structure={structure} disabled={false} onChange={handleAdvancedRows} />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
+        {stage === "confirm" && (
+          <div className="space-y-3" data-testid="monday-wizard-confirm">
+            <p className="text-sm">
+              {newBoard
+                ? t(
+                    perFile
+                      ? "projectSettings.monday.wizardConfirmNewBoardPerFile"
+                      : "projectSettings.monday.wizardConfirmNewBoard",
+                    { count: adds, board: boardName },
+                  )
+                : adds > 0
+                ? t(
+                    perFile ? "projectSettings.monday.wizardConfirmAddsPerFile" : "projectSettings.monday.wizardConfirmAdds",
+                    { count: adds },
+                  )
+                : t(
+                    perFile ? "projectSettings.monday.wizardConfirmNoAddsPerFile" : "projectSettings.monday.wizardConfirmNoAdds",
+                    { board: boardName },
+                  )}
+            </p>
             {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
         )}
 
         {stage === "applying" && (
           <p className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-            <Spinner className="h-4 w-4" /> {t("projectSettings.monday.applyingStatus")}
+            <Spinner className="h-4 w-4" />{" "}
+            {applyStep === "making"
+              ? t("projectSettings.monday.wizardMakingBoard")
+              : applyStep === "adding"
+                ? t("projectSettings.monday.wizardAddingColumns")
+                : t("projectSettings.monday.applyingStatus")}
           </p>
         )}
 
         {stage === "done" && (
           <div className="space-y-3" data-testid="monday-wizard-done">
             <p className="text-sm">
-              {linkedBoardName
-                ? `This project now syncs to ${linkedBoardName}.`
-                : "This project now syncs to Monday."}{" "}
+              {linkedBoardName ? `This project now syncs to ${linkedBoardName}.` : "This project now syncs to Monday."}{" "}
               {t("projectSettings.monday.progressPushesAutomatically")}
             </p>
             {pushNotice && (
@@ -528,6 +821,36 @@ export function MondaySetupWizard({
                   : `Linked, but the first push failed: ${pushNotice.text} You can retry with Sync now.`}
               </p>
             )}
+            {notAdded.length > 0 && (
+              <p
+                role="alert"
+                data-testid="monday-wizard-not-added"
+                className="flex items-start gap-1.5 text-sm text-amber-700 dark:text-amber-500"
+              >
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                {t("projectSettings.monday.wizardSomeColumnsNotAdded", {
+                  columns: notAdded.map((f) => f.title).join(", "),
+                  reason: notAdded[0]?.error ?? "",
+                })}
+              </p>
+            )}
+            {linkWarnings.length > 0 && (
+              <div
+                role="alert"
+                data-testid="monday-wizard-link-warnings"
+                className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40"
+              >
+                <p className="flex items-center gap-1.5 text-sm font-medium">
+                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+                  {t("projectSettings.monday.wizardLinkWarningsTitle")}
+                </p>
+                <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                  {linkWarnings.map((w) => (
+                    <li key={w}>· {w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {boardUrl && (
               <a
                 href={boardUrl}
@@ -537,6 +860,11 @@ export function MondaySetupWizard({
               >
                 {t("projectSettings.monday.viewBoardLink")} <ExternalLink className="h-3.5 w-3.5" />
               </a>
+            )}
+            {!boardUrl && (
+              <p className="text-sm text-muted-foreground">
+                {t("projectSettings.monday.wizardFindBoardManually", { name: linkedBoardName ?? boardId })}
+              </p>
             )}
             {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
@@ -565,13 +893,38 @@ export function MondaySetupWizard({
               </Button>
             </>
           )}
-          {stage === "review" && (
+          {stage === "board" && (
             <>
               <Button variant="ghost" onClick={() => onOpenChange(false)}>
                 {t("common.cancel")}
               </Button>
-              <Button onClick={() => void handleApply()} disabled={mappedCount === 0}>
-                {t("projectSettings.monday.applyAndPushButton")}
+              <Button onClick={() => void goToColumns()} disabled={(newBoard ? !newBoardName.trim() : !boardId) || busy}>
+                {busy && <Spinner data-icon="inline-start" />}
+                {t("common.next")}
+              </Button>
+            </>
+          )}
+          {stage === "columns" && (
+            <>
+              <Button variant="ghost" onClick={() => setStage("board")}>
+                {t("common.back")}
+              </Button>
+              <Button onClick={() => setStage("confirm")} disabled={!pickedBeyondId}>
+                {t("common.next")}
+              </Button>
+            </>
+          )}
+          {stage === "confirm" && (
+            <>
+              <Button variant="ghost" onClick={() => setStage("columns")}>
+                {t("common.back")}
+              </Button>
+              <Button onClick={() => void handleConfirm()}>
+                {newBoard
+                  ? t("projectSettings.monday.wizardMakeBoardButton")
+                  : adds > 0
+                  ? t("projectSettings.monday.wizardAddAndConnectButton")
+                  : t("projectSettings.advancedLlm.connectButton")}
               </Button>
             </>
           )}

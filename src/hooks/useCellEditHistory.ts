@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { CellHistoryEntry } from "@/lib/parsers/types"
-import { fetchCellHistory } from "@/lib/sync/history-read"
+import { fetchCellHistory, HistoryReadError, type HistoryReadFailureKind } from "@/lib/sync/history-read"
 import type { CellHistoryEvent } from "@/lib/sync/history-read-types"
 import {
   getOutboxRecordsForCell,
@@ -47,11 +47,30 @@ export interface UseCellEditHistoryOptions {
   currentEventId?: string | null
 }
 
+/** AQU-1248: why the last load failed, after fetchCellHistory's retries.
+ *  `status` is the HTTP status of a server error, 0 for a network failure. */
+export interface CellEditHistoryFailure {
+  kind: HistoryReadFailureKind
+  status: number
+}
+
 export interface UseCellEditHistoryResult {
   history: CellHistoryEntry[]
   isLoading: boolean
   isError: boolean
+  /** Set with `isError` when the history read itself failed; null when the
+   *  failure had no classification (no sync token, an unparseable reply). */
+  failure: CellEditHistoryFailure | null
   revalidate: () => void
+}
+
+/** The commit-payload fields history reads. */
+type AiCommitPayload = {
+  value?: string
+  valueHtml?: string
+  transcription?: string
+  ai_suggestion?: true
+  ai_draft?: { interventionId?: string }
 }
 
 function mapEventsToEntries(
@@ -73,13 +92,17 @@ function mapEventsToEntries(
       // `value` — its stored value is the import filename and must not change.
       // Reading `value` alone rendered every transcript correction as a blank
       // history entry.
-      const payload = e.payload as { value?: string; valueHtml?: string; transcription?: string } | null
+      const payload = e.payload as AiCommitPayload | null
       const idx = entries.length
+      const interventionId = payload?.ai_draft?.interventionId
       entries.push({
         timestamp: new Date(e.serverTs).toISOString(),
         value: payload?.transcription ?? payload?.value ?? "",
         ...(payload?.valueHtml !== undefined ? { valueHtml: payload.valueHtml } : {}),
-        source: "human",
+        // AQU-1656: server entries were always "human" before, so an AI draft
+        // lost its AI marker once the outbox acked it.
+        source: payload?.ai_suggestion ? "llm" : "human",
+        ...(interventionId ? { interventionId } : {}),
         author: e.author,
         validated: false,
         eventId: e.id,
@@ -105,13 +128,10 @@ function mapOutboxToEntries(records: OutboxRecord[]): CellHistoryEntry[] {
   for (const record of records) {
     const event = record.event
     if (event.kind !== "target.cell.commit" && event.kind !== "source.cell.commit") continue
-    const payload = event.payload as {
-      value?: string
-      valueHtml?: string
-      transcription?: string
-      ai_suggestion?: true
-    }
+    const payload = event.payload as AiCommitPayload
+    const interventionId = payload.ai_draft?.interventionId
     entries.push({
+      ...(interventionId ? { interventionId } : {}),
       timestamp: new Date(event.clientTs || record.enqueuedAt).toISOString(),
       // See the projected twin above: a media source commit carries only a
       // transcription.
@@ -145,6 +165,7 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
   const [history, setHistory] = useState<CellHistoryEntry[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isError, setIsError] = useState(false)
+  const [failure, setFailure] = useState<CellEditHistoryFailure | null>(null)
 
   const projectRef = useRef(projectId)
   const fileRef = useRef(fileId)
@@ -171,11 +192,13 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
       setHistory([])
       setIsLoading(false)
       setIsError(false)
+      setFailure(null)
       return
     }
     const gen = ++generationRef.current
     setIsLoading(true)
     setIsError(false)
+    setFailure(null)
     try {
       // IndexedDB is the local durability point. Show those commits even when
       // auth, network, or server projection is temporarily unavailable.
@@ -213,6 +236,7 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
       if (generationRef.current !== gen) return
       console.warn("[useCellEditHistory] fetch failed:", err)
       setIsError(true)
+      setFailure(err instanceof HistoryReadError ? { kind: err.kind, status: err.status } : null)
       setIsLoading(false)
     }
   }, [])
@@ -254,5 +278,5 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
     void doFetch()
   }, [doFetch])
 
-  return { history, isLoading, isError, revalidate }
+  return { history, isLoading, isError, failure, revalidate }
 }

@@ -1,5 +1,6 @@
 import { FRONTIER_BASE } from "./auth";
 import { UserError } from "@/lib/errors/user-error";
+import { throwIfElevationRequired } from "./elevation";
 import type { MemberGrantResult } from "./members";
 
 /**
@@ -113,6 +114,8 @@ export interface OrgSummary {
   /** True when the org is visible only via the ADMIN_EMAILS allowlist
    *  (not a genuine membership). Server appends these after real orgs. */
   viaPlatformAdmin?: boolean
+  /** The caller's own personal workspace. Pinned first in the org switcher. */
+  personal?: boolean
 }
 
 export async function listMyOrgs(jwt: string): Promise<OrgSummary[]> {
@@ -168,6 +171,30 @@ export async function renameOrg(jwt: string, orgId: number, name: string): Promi
   if (!res.ok) throw new UserError(res.status, "", "org")
 }
 
+/** 409 from DELETE /api/v2/orgs/:orgId — the org still has project rows. */
+export class OrgHasProjectsError extends Error {
+  readonly projectCount: number
+  constructor(projectCount: number) {
+    super("organization_has_projects")
+    this.name = "OrgHasProjectsError"
+    this.projectCount = projectCount
+  }
+}
+
+export async function deleteOrg(jwt: string, orgId: number): Promise<void> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}`, {
+    method: "DELETE",
+    headers: authHeaders(jwt),
+  })
+  if (res.status === 409) {
+    const body = await res.json().catch(() => null) as { error?: string; projectCount?: number } | null
+    if (body?.error === "organization_has_projects") {
+      throw new OrgHasProjectsError(body.projectCount ?? 0)
+    }
+  }
+  if (!res.ok) throw new UserError(res.status, "", "org")
+}
+
 // ── Email-based org invitations (owner-only; backend: routes/orgs.ts) ──────
 
 export interface OrgInviteResult {
@@ -193,6 +220,7 @@ export async function createOrgInvite(
       ...(opts.expiresInDays !== undefined ? { expires_in_days: opts.expiresInDays } : {}),
     }),
   });
+  await throwIfElevationRequired(res, "org");
   if (!res.ok) throw new UserError(res.status, "", "org");
   return (await res.json()) as OrgInviteResult;
 }
@@ -210,26 +238,18 @@ export interface OrgInvitePreview {
 }
 
 /**
- * GET /api/v2/orgs/invite-preview/:token — public, no JWT. Returns null on ANY
- * failure (unknown/expired/used token, old server, network): JoinOrgPage falls
- * back to its generic copy and the accept endpoint stays the authority on
- * token validity.
+ * Null means the server confirmed an unavailable invitation (404/410).
+ * Other failures throw so the page can offer retry. An optional session lets
+ * the server recognize a still-member redeemer reopening their own used link.
  */
-export async function previewOrgInvite(token: string): Promise<OrgInvitePreview | null> {
-  try {
-    const res = await fetchWithTimeout(
-      `${FRONTIER_BASE}/api/v2/orgs/invite-preview/${encodeURIComponent(token)}`,
-      {},
-    );
-    if (!res.ok) {
-      console.warn(`[org-invites] previewOrgInvite → HTTP ${res.status}`);
-      return null;
-    }
-    return (await res.json()) as OrgInvitePreview;
-  } catch (err) {
-    console.warn("[org-invites] previewOrgInvite failed:", err);
-    return null;
-  }
+export async function previewOrgInvite(token: string, jwt?: string): Promise<OrgInvitePreview | null> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/orgs/invite-preview/${encodeURIComponent(token)}`,
+    jwt ? { headers: authHeaders(jwt) } : {},
+  );
+  if (res.status === 404 || res.status === 410) return null;
+  if (!res.ok) throw new UserError(res.status, "", "org");
+  return (await res.json()) as OrgInvitePreview;
 }
 
 export interface AcceptOrgInviteResult {
@@ -269,8 +289,27 @@ export async function getMemberAccess(jwt: string, orgId: number, userId: number
   return (await res.json()) as MemberEffectiveAccess
 }
 
-export async function getOrCreateMyOrg(jwt: string): Promise<MyOrg> {
+/**
+ * The caller's personal workspace, or null when they own none. AQU-2259: the
+ * read never creates one any more; see {@link createPersonalOrg}.
+ */
+export async function getMyOrg(jwt: string): Promise<MyOrg | null> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/me`, {
+    headers: authHeaders(jwt),
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new UserError(res.status, "", "org");
+  return (await res.json()) as MyOrg;
+}
+
+/**
+ * AQU-2259: make the caller's personal workspace, at the moment they choose
+ * to work on their own (onboarding's "Just me"). Returns the existing one if
+ * they already have it.
+ */
+export async function createPersonalOrg(jwt: string): Promise<MyOrg> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/personal`, {
+    method: "POST",
     headers: authHeaders(jwt),
   });
   if (!res.ok) throw new UserError(res.status, "", "org");
@@ -322,6 +361,7 @@ export async function addOrgMember(
     headers: authHeaders(jwt),
     body: JSON.stringify({ username, role }),
   });
+  await throwIfElevationRequired(res, "org");
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new UserError(res.status, text, "org");
@@ -341,6 +381,7 @@ export async function addOrgMembers(
     headers: authHeaders(jwt),
     body: JSON.stringify({ members }),
   });
+  await throwIfElevationRequired(res, "org");
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new UserError(res.status, text, "org");
@@ -355,9 +396,49 @@ export async function removeOrgMember(
     method: "DELETE",
     headers: authHeaders(jwt),
   });
+  await throwIfElevationRequired(res, "org");
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new UserError(res.status, text, "org");
+  }
+}
+
+/**
+ * AQU-1993: why leaving was refused. Both reasons are actionable, so the UI
+ * says which one it was instead of showing a bare 409.
+ */
+export class LeaveOrgBlockedError extends Error {
+  readonly reason: "last_owner" | "cannot_leave_personal_org"
+  constructor(reason: "last_owner" | "cannot_leave_personal_org") {
+    super(reason)
+    this.name = "LeaveOrgBlockedError"
+    this.reason = reason
+  }
+}
+
+/**
+ * DELETE /api/v2/orgs/:orgId/members/me — leave the organization yourself
+ * (AQU-1993). Distinct from `removeOrgMember`, which is the owner-only
+ * moderation route and refuses self-removal.
+ *
+ * Leaving drops the org-wide role and the caller's team rows in that org. A
+ * project they were added to individually still reaches them — they leave
+ * each of those with `leaveProject`.
+ */
+export async function leaveOrg(jwt: string, orgId: number): Promise<void> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/members/me`, {
+    method: "DELETE",
+    headers: authHeaders(jwt),
+  })
+  if (res.status === 409) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null
+    if (body?.error === "last_owner" || body?.error === "cannot_leave_personal_org") {
+      throw new LeaveOrgBlockedError(body.error)
+    }
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new UserError(res.status, text, "org")
   }
 }
 
@@ -389,6 +470,7 @@ export async function listPendingOrgInvites(
   const res = await fetch(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/project-invites`, {
     headers: authHeaders(jwt),
   });
+  await throwIfElevationRequired(res, "org");
   if (res.status === 403) return null;
   if (!res.ok) throw new UserError(res.status, "", "org");
   return ((await res.json()) as { invites: PendingOrgInvite[] }).invites;
@@ -411,6 +493,7 @@ export async function revokeProjectInvite(
     )}/invites/${encodeURIComponent(token)}`,
     { method: "DELETE", headers: authHeaders(jwt) }
   );
+  await throwIfElevationRequired(res, "invite");
   if (!res.ok) {
     throw new UserError(res.status, "", "invite");
   }

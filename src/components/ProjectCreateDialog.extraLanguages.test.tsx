@@ -6,8 +6,32 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
+import { toast } from "@/components/ui/toast"
 
+// AQU-1352: the destination picker fetches create-targets on open; submit waits
+// for it, so resolve to Personal (the server always lists it).
+// AQU-1561: the dialog reads the chosen upstream's file list so the lead can
+// pick which files to bring in. These tests are about everything else in the
+// create flow, so the list resolves to one file and stays all-checked — the
+// whole-project default, which keeps `linkProjectSource` carrying no `fileIds`
+// exactly as it did before that slice.
+vi.mock("@/lib/sync/link-source-preview", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/sync/link-source-preview")>()
+  return {
+    ...actual,
+    loadUpstreamFileChoices: vi
+      .fn()
+      .mockResolvedValue([{ id: "up-file-1", name: "MAT", clashes: false }]),
+  }
+})
+
+vi.mock("@/lib/sync/create-targets", () => ({
+  fetchCreateTargets: vi.fn().mockResolvedValue([
+    { kind: "personal", orgId: null, name: "Personal", path: ["Personal"], role: 700, teams: [] },
+  ]),
+}))
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
     session: { jwt: "tok", username: "wendi" },
@@ -36,8 +60,26 @@ vi.mock("@/lib/sync/project-settings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sync/project-settings")>()
   return {
     ...actual,
-    fetchProjectSettings: vi.fn(),
-    patchProjectSettings: vi.fn(),
+    fetchProjectSettings: vi.fn().mockResolvedValue({
+      version: 0,
+      updatedAt: "2026-07-13T00:00:00.000Z",
+      updatedBy: null,
+      settings: {},
+      lanes: [
+        {
+          id: "source-lane",
+          role: "source",
+          language: "",
+          name: null,
+          langCode: null,
+          legacyTag: "",
+          position: 0,
+          archivedAt: null,
+        },
+      ],
+    }),
+    renameProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "source-lane" } }),
+    createProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "target-lane" } }),
   }
 })
 
@@ -57,16 +99,23 @@ vi.mock("@/lib/store/project-index", () => ({
   createProject: vi.fn().mockResolvedValue(undefined),
 }))
 
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
+
+// AQU-1519: the partial-success warning now rides a toast (the dialog closes),
+// so the assertion is on what was handed to the toast manager.
+vi.mock("@/components/ui/toast", () => ({
+  toast: { add: vi.fn(), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
+}))
 
 import { createCloudProject } from "@/lib/sync/cloud-projects"
 import { createProject } from "@/lib/store/project-index"
-import { fetchProjectSettings, patchProjectSettings } from "@/lib/sync/project-settings"
+import { createProjectLane, fetchProjectSettings, renameProjectLane } from "@/lib/sync/project-settings"
 
 const mockCreateCloudProject = vi.mocked(createCloudProject)
 const mockCreateProject = vi.mocked(createProject)
 const mockFetchProjectSettings = vi.mocked(fetchProjectSettings)
-const mockPatchProjectSettings = vi.mocked(patchProjectSettings)
+const mockRenameProjectLane = vi.mocked(renameProjectLane)
+const mockCreateProjectLane = vi.mocked(createProjectLane)
 
 function targetLangInput(index = 0) {
   return index === 0
@@ -81,8 +130,10 @@ function addLaneButton() {
 function openDialogWithBasics(opts?: { name?: string; source?: string; target?: string }) {
   render(<ProjectCreateDialog onCreated={vi.fn()} />)
   fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+  // The wizard asks where the project comes from first (AQU-2105).
+  fireEvent.click(screen.getByTestId("project-source-scratch"))
 
-  fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+  fireEvent.change(screen.getByPlaceholderText("My translation project"), {
     target: { value: opts?.name ?? "Multilingual Episode 1" },
   })
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
@@ -99,32 +150,49 @@ function addExtraLanguage(tag: string) {
   fireEvent.change(extras[extras.length - 1]!, { target: { value: tag } })
 }
 
+// AQU-2263: New Project adds a language with the same "Add language lane" piece as
+// Project settings → Languages, in the same words.
+describe("ProjectCreateDialog — the shared Add language piece", () => {
+  it("is the same Add language button Project settings uses", () => {
+    openDialogWithBasics()
+    const add = addLaneButton()
+    expect(add).toHaveTextContent("Add language lane")
+    expect(add).toHaveAttribute("data-add-language")
+  })
+})
+
 describe("ProjectCreateDialog — self-contained target language chips (AQU-538)", () => {
   beforeEach(() => {
     mockCreateCloudProject.mockClear()
     mockCreateProject.mockClear()
     mockFetchProjectSettings.mockReset()
-    mockPatchProjectSettings.mockReset()
-    mockPatchProjectSettings.mockResolvedValue({
-      kind: "ok",
-      value: {
-        version: 1,
-        updatedAt: "2026-07-13T00:00:00.000Z",
-        updatedBy: { id: 1, username: "wendi" },
-        settings: {},
-      },
-    })
+    mockRenameProjectLane.mockReset()
+    mockCreateProjectLane.mockReset()
+    mockRenameProjectLane.mockResolvedValue({ kind: "ok", lane: { id: "source-lane" } } as never)
+    mockCreateProjectLane.mockResolvedValue({ kind: "ok", lane: { id: "target-lane" } } as never)
     mockFetchProjectSettings.mockResolvedValue({
-      version: 2,
+      version: 0,
       updatedAt: "2026-07-13T00:00:00.000Z",
-      updatedBy: { id: 1, username: "wendi" },
-      settings: { sourceLanguage: "English", targetLanguage: "French" },
+      updatedBy: null,
+      settings: {},
+      lanes: [
+        {
+          id: "source-lane",
+          role: "source",
+          language: "",
+          name: null,
+          langCode: null,
+          legacyTag: "",
+          position: 0,
+          archivedAt: null,
+        },
+      ],
     })
   })
 
-  it("labels the field 'Target Language(s)' on the default self-contained shape", () => {
+  it("labels the field 'Language lanes' on the default self-contained shape", () => {
     openDialogWithBasics()
-    expect(screen.getByText("Target Language(s)")).toBeTruthy()
+    expect(screen.getByText("Language lanes")).toBeTruthy()
     expect(targetLangInput()).toBeTruthy()
     expect(screen.getByTestId("create-target-lang-inputs")).toBeTruthy()
   })
@@ -133,39 +201,39 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     openDialogWithBasics()
     fireEvent.click(screen.getByText("Advanced: project shape"))
 
-    expect(screen.getByText("Target Language(s)")).toBeTruthy()
+    expect(screen.getByText("Language lanes")).toBeTruthy()
     expect(
       screen.getByText(/owns both its source and its target\./),
     ).toBeTruthy()
     expect(
       screen.getByTestId("create-shape-linked-target").closest("label")?.textContent,
-    ).toMatch(/Linked Target/)
+    ).toMatch(/Linked target/)
     expect(
       screen.getByTestId("create-shape-linked-target").closest("label")?.textContent,
-    ).not.toMatch(/Linked Targets/)
+    ).not.toMatch(/Linked targets/)
 
     addExtraLanguage("es")
 
-    expect(screen.getByText("Target Language(s)")).toBeTruthy()
+    expect(screen.getByText("Language lanes")).toBeTruthy()
     expect(
       screen.getByText(/owns both its source and its targets\./),
     ).toBeTruthy()
     expect(
       screen.getByTestId("create-shape-linked-target").closest("label")?.textContent,
-    ).toMatch(/Linked Targets/)
+    ).toMatch(/Linked targets/)
 
     fireEvent.click(screen.getByTestId("create-target-lang-remove-1"))
 
-    expect(screen.getByText("Target Language(s)")).toBeTruthy()
+    expect(screen.getByText("Language lanes")).toBeTruthy()
     expect(
       screen.getByText(/owns both its source and its target\./),
     ).toBeTruthy()
     expect(
       screen.getByTestId("create-shape-linked-target").closest("label")?.textContent,
-    ).toMatch(/Linked Target/)
+    ).toMatch(/Linked target/)
     expect(
       screen.getByTestId("create-shape-linked-target").closest("label")?.textContent,
-    ).not.toMatch(/Linked Targets/)
+    ).not.toMatch(/Linked targets/)
   })
 
   it("appends one box per language via the plus button", () => {
@@ -234,25 +302,33 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     })
     expect(screen.getByTestId("create-bulk-target-langs-count").textContent).toContain("3")
 
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
 
     await waitFor(() => {
       expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
     })
     await waitFor(() => {
-      expect(mockPatchProjectSettings).toHaveBeenCalledTimes(1)
-      const [, , settings] = mockPatchProjectSettings.mock.calls[0]!
-      expect((settings as { targetLanes: string[] }).targetLanes).toEqual([
-        "French",
-        "lang-1", "lang-2", "lang-3", "lang-4", "lang-5",
-        "lang-6", "lang-7", "lang-8", "lang-9",
-        "Swahili", "Yoruba", "Hausa",
-      ])
-      expect(settings).toMatchObject({
-        sourceLanguage: "English",
-        targetLanguage: "French",
-      })
+      expect(mockCreateProjectLane).toHaveBeenCalledTimes(13)
     })
+    expect(mockRenameProjectLane).toHaveBeenCalledWith("tok", expect.any(String), "source-lane", {
+      language: "English",
+    })
+    expect(mockCreateProjectLane.mock.calls.map((call) => call[2])).toEqual([
+      { name: "", language: "French", delivers: "text" },
+      { name: "", language: "lang-1", delivers: "text" },
+      { name: "", language: "lang-2", delivers: "text" },
+      { name: "", language: "lang-3", delivers: "text" },
+      { name: "", language: "lang-4", delivers: "text" },
+      { name: "", language: "lang-5", delivers: "text" },
+      { name: "", language: "lang-6", delivers: "text" },
+      { name: "", language: "lang-7", delivers: "text" },
+      { name: "", language: "lang-8", delivers: "text" },
+      { name: "", language: "lang-9", delivers: "text" },
+      { name: "", language: "Swahili", delivers: "text" },
+      { name: "", language: "Yoruba", delivers: "text" },
+      { name: "", language: "Hausa", delivers: "text" },
+    ])
   })
 
   it("drops overflow entries duplicating the primary, a box, or each other", () => {
@@ -276,114 +352,118 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(screen.queryAllByTestId(/^create-target-lang-input-\d+$/)).toHaveLength(0)
   })
 
-  it("submit with 2 extras: creates the project, then PATCHes settings once with languages and lanes at version 0", async () => {
+  it("submit with 2 extras: creates the project, then writes a source lane and one lane per target", async () => {
     openDialogWithBasics({ name: "Multilingual Episode 1", source: "English", target: "French" })
     addExtraLanguage("es")
     addExtraLanguage("pt-BR")
 
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
 
     await waitFor(() => {
       expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
     })
 
-    // AQU-1250: exactly ONE settings PATCH. The old second, lanes-only PATCH
-    // replaced the whole blob and silently wiped sourceLanguage/targetLanguage,
-    // so there is no version re-fetch to make either.
     await waitFor(() => {
-      expect(mockPatchProjectSettings).toHaveBeenCalledTimes(1)
+      expect(mockCreateProjectLane).toHaveBeenCalledTimes(3)
     })
-    expect(mockFetchProjectSettings).not.toHaveBeenCalled()
+    expect(mockFetchProjectSettings).toHaveBeenCalled()
 
     const createOrder = mockCreateCloudProject.mock.invocationCallOrder[0]!
-    const patchOrder = mockPatchProjectSettings.mock.invocationCallOrder[0]!
-    expect(createOrder).toBeLessThan(patchOrder)
+    const laneOrder = mockCreateProjectLane.mock.invocationCallOrder[0]!
+    expect(createOrder).toBeLessThan(laneOrder)
 
-    // AQU-1240: targetLanes is the COMPLETE registry — primary first, then extras.
-    const [, projectId, settings, version] = mockPatchProjectSettings.mock.calls[0]!
-    expect(projectId).toEqual(expect.any(String))
-    expect(settings).toEqual({
-      sourceLanguage: "English",
-      targetLanguage: "French",
-      targetLanes: ["French", "es", "pt-BR"],
+    expect(mockRenameProjectLane).toHaveBeenCalledWith("tok", expect.any(String), "source-lane", {
+      language: "English",
     })
-    expect(version).toBe(0)
+    expect(mockCreateProjectLane.mock.calls.map((call) => call[2])).toEqual([
+      { name: "", language: "French", delivers: "text" },
+      { name: "", language: "es", delivers: "text" },
+      { name: "", language: "pt-BR", delivers: "text" },
+    ])
 
     expect(mockCreateProject).toHaveBeenCalledTimes(1)
   })
 
-  it("submits with no extras and still writes targetLanes as [primary]", async () => {
+  it("submits with no extras and still creates the primary target lane", async () => {
     openDialogWithBasics()
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
 
     await waitFor(() => {
       expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
     })
-    expect(mockFetchProjectSettings).not.toHaveBeenCalled()
     await waitFor(() => {
-      expect(mockPatchProjectSettings).toHaveBeenCalledTimes(1)
+      expect(mockCreateProjectLane).toHaveBeenCalledTimes(1)
     })
-    expect(mockPatchProjectSettings.mock.calls[0]![2]).toEqual({
-      sourceLanguage: "English",
-      targetLanguage: "French",
-      targetLanes: ["French"],
+    expect(mockCreateProjectLane).toHaveBeenCalledWith("tok", expect.any(String), {
+      name: "",
+      language: "French",
+      delivers: "text",
     })
-    expect(mockPatchProjectSettings.mock.calls[0]![3]).toBe(0)
   })
 
   it("creates with only the primary box filled and no lanes added", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
-    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
+    fireEvent.change(screen.getByPlaceholderText("My translation project"), {
       target: { value: "Draft Primary" },
     })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
       target: { value: "English" },
     })
     fireEvent.change(targetLangInput(), { target: { value: "Swahili" } })
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
 
     await waitFor(() => {
       expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
     })
     await waitFor(() => {
-      expect(mockPatchProjectSettings).toHaveBeenCalledTimes(1)
+      expect(mockCreateProjectLane).toHaveBeenCalledTimes(1)
     })
-    expect(mockPatchProjectSettings.mock.calls[0]![2]).toEqual({
-      sourceLanguage: "English",
-      targetLanguage: "Swahili",
-      targetLanes: ["Swahili"],
+    expect(mockCreateProjectLane).toHaveBeenCalledWith("tok", expect.any(String), {
+      name: "",
+      language: "Swahili",
+      delivers: "text",
     })
-    expect(mockFetchProjectSettings).not.toHaveBeenCalled()
   })
 
-  it("a failed settings PATCH still resolves with the created project, and surfaces a non-fatal warning", async () => {
-    // AQU-1250: the single languages+lanes PATCH fails.
-    mockPatchProjectSettings.mockResolvedValueOnce({ kind: "error", status: 500, message: "boom" })
+  it("a failed lane create still resolves with the created project, closes the dialog, and toasts the warning (AQU-1519)", async () => {
+    mockCreateProjectLane.mockResolvedValueOnce({ kind: "error", message: "boom" })
 
     openDialogWithBasics()
     addExtraLanguage("es")
 
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
 
     await waitFor(() => {
       expect(mockCreateProject).toHaveBeenCalledTimes(1)
     })
 
-    expect(
-      screen.getByText(
-        "Project created; adding extra languages failed — add them in Settings → Languages.",
-      ),
-    ).toBeTruthy()
-
-    // Non-fatal: the project was still created (not rolled back), and the
-    // dialog is left open (not the hard-failure "submitError" path).
-    expect(screen.getByText("Create New Project")).toBeTruthy()
+    // AQU-1519: partial success is no longer a reason to hold the dialog open.
+    // The project exists, so the dialog closes and the warning survives the
+    // close on a toast instead of being wiped by it.
+    await waitFor(() => {
+      expect(screen.queryByText("Create new project")).toBeNull()
+    })
+    expect(vi.mocked(toast.add)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "warning",
+        title:
+          "Project created; adding extra languages failed — add them in Settings → Languages.",
+      }),
+    )
   })
 
   it("no longer offers the retired source-only shape", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fireEvent.click(screen.getByText("Advanced: project shape"))
 
     expect(screen.queryByText(/Source-only/i)).toBeNull()
@@ -392,13 +472,15 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
   it("offers the same multi-lane boxes on the linked-target shape", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
 
     // A linked target is the Biblica case — one upstream source, several
     // languages — so it needs lanes at creation just as much as a
     // self-contained project does.
-    expect(screen.getByText("Target Language(s)")).toBeTruthy()
+    expect(screen.getByText("Language lanes")).toBeTruthy()
     expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
     expect(screen.getByTestId("create-add-target-lang")).toBeTruthy()
   })
@@ -406,6 +488,8 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
   it("toggles between the two shapes from the project-shape radios", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fireEvent.click(screen.getByText("Advanced: project shape"))
 
     const selfContained = () => screen.getByTestId("create-shape-self-contained")
@@ -418,17 +502,90 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     // Corpus choice stays hidden until an upstream is picked on self-contained.
     expect(screen.queryByText(/Which corpus should become/i)).toBeNull()
 
-    fireEvent.click(screen.getByText(/Linked Target/i))
+    fireEvent.click(screen.getByText(/Linked target/i))
     expect(linkedTarget().getAttribute("data-checked")).toBe("")
     expect(screen.getByText(/creating a/i)).toBeTruthy()
     expect(screen.getByText("Upstream project")).toBeTruthy()
     expect(screen.getByText(/Which corpus should become/i)).toBeTruthy()
     expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
 
-    fireEvent.click(screen.getByText(/Self Contained/i))
+    fireEvent.click(screen.getByText(/Self-contained/i))
     expect(selfContained().getAttribute("data-checked")).toBe("")
     expect(screen.getByText(/import a/i)).toBeTruthy()
     expect(screen.getByText("Upstream project")).toBeTruthy()
     expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
+  })
+  // Media redesign slice 1 (Sam, Oct 22): each target language picks what it
+  // delivers, preset to Text.
+  it("lets each target language pick what it delivers, every one starting at Text", async () => {
+    openDialogWithBasics({ target: "Swahili" })
+    addExtraLanguage("French")
+    expect(screen.getByTestId("create-target-lang-delivers-0")).toHaveTextContent("Text")
+    expect(screen.getByTestId("create-target-lang-delivers-1")).toHaveTextContent("Text")
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("combobox", { name: "What Swahili delivers" }))
+    await user.click(await screen.findByRole("option", { name: "Audio" }))
+    expect(screen.getByTestId("create-target-lang-delivers-0")).toHaveTextContent("Audio")
+
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
+    await waitFor(() => {
+      expect(mockCreateProjectLane).toHaveBeenCalledTimes(2)
+    })
+    expect(mockCreateProjectLane.mock.calls.map((call) => call[2])).toEqual([
+      { name: "", language: "Swahili", delivers: "audio" },
+      { name: "", language: "French", delivers: "text" },
+    ])
+  })
+
+  it("gives each pasted overflow language its own choice, preset to Text", async () => {
+    openDialogWithBasics()
+    fillToBoxLimit()
+    fireEvent.change(screen.getByTestId("create-bulk-target-langs"), {
+      target: { value: "Swahili, Yoruba" },
+    })
+    const list = screen.getByTestId("create-bulk-target-langs-delivers")
+    expect(list.querySelectorAll("li")).toHaveLength(2)
+    expect(screen.getByRole("combobox", { name: "What Swahili delivers" })).toHaveTextContent("Text")
+    expect(screen.getByRole("combobox", { name: "What Yoruba delivers" })).toHaveTextContent("Text")
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("combobox", { name: "What Yoruba delivers" }))
+    await user.click(await screen.findByRole("option", { name: "Text and audio" }))
+
+    await screen.findByTestId("project-create-destination")
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
+    await waitFor(() => {
+      expect(mockCreateProjectLane).toHaveBeenCalledTimes(12)
+    })
+    const calls = mockCreateProjectLane.mock.calls.map((call) => call[2])
+    expect(calls.slice(-2)).toEqual([
+      { name: "", language: "Swahili", delivers: "text" },
+      { name: "", language: "Yoruba", delivers: "text_and_audio" },
+    ])
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): the language fields' (i) opens its text in place,
+// under the label, on click — and closes on a second click. No hover.
+describe("ProjectCreateDialog — the language fields' (i) (AQU-2260)", () => {
+  it("opens what you can enter, under the label, on click, and shuts it again", async () => {
+    render(<ProjectCreateDialog onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
+    const [sourceInfo] = screen.getAllByRole("button", { name: "What can I enter here?" })
+    await userEvent.setup().hover(sourceInfo!)
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    expect(sourceInfo).toHaveAttribute("aria-expanded", "false")
+    const note = document.getElementById(sourceInfo!.getAttribute("aria-controls")!)!
+    expect(note).toHaveAttribute("data-open", "false")
+    fireEvent.click(sourceInfo!)
+    expect(sourceInfo).toHaveAttribute("aria-expanded", "true")
+    expect(note).toHaveAttribute("data-open", "true")
+    expect(note).toHaveTextContent(/Type a language name or a description/)
+    fireEvent.click(sourceInfo!)
+    expect(note).toHaveAttribute("data-open", "false")
   })
 })

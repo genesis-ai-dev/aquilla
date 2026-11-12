@@ -63,6 +63,115 @@ describe("portfolioActivityStatus", () => {
       portfolioActivityStatus({ ...base, filledCells: 5, lastEditAt: now - 3 * DAY }, now),
     ).toBe("active")
   })
+
+  // AQU-950 regression guard. `lastEditAt` is MAX(cells.last_edit_at), and
+  // cell.validate / cell.unvalidate never stamp that column (they write
+  // cell_validators + cells.validated) — nor do audio takes, which live in
+  // cell_audio. A team reviewing or recording daily therefore looked idle on
+  // the scalar alone. The per-lane timestamp is file_section_progress.updated_at,
+  // restamped by every counter-affecting event, so it sees that work.
+  it("a project whose only recent work is review/audio is active, not stalled", () => {
+    expect(
+      portfolioActivityStatus(
+        {
+          ...base,
+          filledCells: 50,
+          lastEditAt: now - 40 * DAY,
+          lanes: [{ lane: "", totalCells: 100, filledCells: 50, validatedCells: 20, lastEditAt: now - 2 * DAY }],
+        },
+        now,
+      ),
+    ).toBe("active")
+  })
+
+  it("takes the most recent lane, not the first — work in any lane counts", () => {
+    expect(
+      portfolioActivityStatus(
+        {
+          ...base,
+          filledCells: 50,
+          lastEditAt: now - 40 * DAY,
+          lanes: [
+            { lane: "", totalCells: 100, filledCells: 50, validatedCells: 0, lastEditAt: now - 40 * DAY },
+            { lane: "gan", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now - DAY },
+          ],
+        },
+        now,
+      ),
+    ).toBe("active")
+  })
+
+  // The other half of the contract: widening the signal must not make every
+  // project look busy. A project idle in the cells AND in every lane is still
+  // Stalled, and that is what the partner wants the flag to mean.
+  it("stays stalled when the cells and every lane have gone quiet", () => {
+    expect(
+      portfolioActivityStatus(
+        {
+          ...base,
+          filledCells: 50,
+          lastEditAt: now - 40 * DAY,
+          lanes: [
+            { lane: "", totalCells: 100, filledCells: 50, validatedCells: 0, lastEditAt: now - 30 * DAY },
+            { lane: "gan", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now - 60 * DAY },
+          ],
+        },
+        now,
+      ),
+    ).toBe("stalled")
+  })
+
+  it("a lane with no activity yet never drags a recently edited project to stalled", () => {
+    expect(
+      portfolioActivityStatus(
+        {
+          ...base,
+          filledCells: 50,
+          lastEditAt: now - DAY,
+          lanes: [{ lane: "gan", totalCells: 100, filledCells: 0, validatedCells: 0, lastEditAt: null }],
+        },
+        now,
+      ),
+    ).toBe("active")
+  })
+
+  it("an untranslated project stays not-started however fresh its lane rows are", () => {
+    expect(
+      portfolioActivityStatus(
+        {
+          ...base,
+          filledCells: 0,
+          lastEditAt: now - 30 * DAY,
+          lanes: [{ lane: "", totalCells: 100, filledCells: 0, validatedCells: 0, lastEditAt: now }],
+        },
+        now,
+      ),
+    ).toBe("not-started")
+  })
+})
+
+// AQU-950: the Status column and the attention sort must agree. Ranking a row
+// as idle while its chip says otherwise is the failure mode AQU-1097 already
+// called out for "Behind plan".
+describe("attentionRank reads the same activity signal as the Stalled chip", () => {
+  const now = Date.now()
+  const quiet: PortfolioProject = { ...base, filledCells: 50, validatedCells: 0, lastEditAt: now - 40 * DAY }
+
+  it("does not add the stale penalty to a project whose lanes show recent work", () => {
+    const reviewed = {
+      ...quiet,
+      lanes: [{ lane: "", totalCells: 100, filledCells: 50, validatedCells: 20, lastEditAt: now - DAY }],
+    }
+    expect(attentionRank(reviewed, now)).toBeLessThan(attentionRank(quiet, now))
+  })
+
+  it("still penalises a project idle in the cells and in every lane", () => {
+    const idle = {
+      ...quiet,
+      lanes: [{ lane: "", totalCells: 100, filledCells: 50, validatedCells: 0, lastEditAt: now - 40 * DAY }],
+    }
+    expect(attentionRank(idle, now)).toBe(attentionRank(quiet, now))
+  })
 })
 
 describe("portfolioAttentionReasons: units late inside a healthy deadline (AQU-1097)", () => {

@@ -1,4 +1,4 @@
-"""Trusted serial controller. PR code executes only in disposable containers."""
+"""Trusted serial controller. Release-branch code executes only in disposable containers."""
 import json
 import os
 import re
@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from webhook import REPO, REPO_ID, STATE, database
+from webhook import REPO, RELEASE_REF, STATE, database
 
 CODE = Path("/opt/aquilla-qa")
 JOBS = Path("/var/lib/aquilla-qa-jobs")
@@ -24,16 +24,34 @@ CONFIG = Path("/etc/aquilla-qa/runner.json")
 NETWORK = "aquilla-qa"
 SHA = re.compile(r"[a-f0-9]{40}")
 COMMON = ["--init", "--cgroup-parent=aquillaqa.slice", "--cpus=1.5",
-          "--memory=2200m", "--memory-swap=2600m", "--pids-limit=512",
+          "--pids-limit=512",
           "--cap-drop=ALL", "--security-opt=no-new-privileges",
           "--log-opt=max-size=5m", "--log-opt=max-file=1"]
+# Per-container memory. The aquillaqa.slice MemoryMax is the real ceiling for
+# every QA container together; raise both, never only this one.
+MEMORY_MB, SWAP_MB = 2200, 400
+# Browser-facing URLs baked into the test-mode build. The app container builds
+# before its workers start (app_bootstrap.prebuild); the test container must
+# see the same addresses.
+BROWSER_ENV = dict(VITE_AUTH_BASE="http://127.0.0.1:9787",
+                   VITE_FRONTIER_BASE="http://127.0.0.1:9787",
+                   VITE_CHAT_BASE="http://127.0.0.1:9787/chat",
+                   VITE_SYNC_WORKER_HOST="127.0.0.1:9788")
+
+
+def memory(config):
+    memory_mb = int(config.get("container_memory_mb", MEMORY_MB))
+    swap_mb = int(config.get("container_swap_mb", SWAP_MB))
+    if not 512 <= memory_mb <= 16384 or not 0 <= swap_mb <= memory_mb:
+        raise ValueError("Unreasonable container memory limits")
+    return [f"--memory={memory_mb}m", f"--memory-swap={memory_mb + swap_mb}m"]
 
 
 class ReportPending(Exception):
     pass
 
 
-def command(args, log=None, timeout=900, env=None, check=True, input=None):
+def command(args, log=None, timeout=900, env=None, check=True, input=None, on_output=None):
     if log is None:
         return subprocess.run(args, input=input, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE, timeout=timeout,
@@ -56,6 +74,8 @@ def command(args, log=None, timeout=900, env=None, check=True, input=None):
                 log.write(chunk[:remaining])
                 log.flush()
                 remaining = max(0, remaining - len(chunk))
+                if on_output:
+                    on_output(chunk)
         code = process.wait(timeout=max(1, deadline - time.monotonic()))
         if check and code:
             raise subprocess.CalledProcessError(code, args)
@@ -85,19 +105,99 @@ def github(config, path):
         return json.load(response)
 
 
-def current(config, pr, sha):
-    pull = github(config, f"/pulls/{pr}")
-    return (pull["state"] == "open" and not pull.get("draft")
-            and pull["head"]["sha"] == sha
-            and pull["head"].get("repo", {}).get("id") == REPO_ID)
+def current(config, ref, sha):
+    if not RELEASE_REF.fullmatch(ref or ""):
+        return False
+    commit = github(config, "/commits/" + ref)
+    return commit.get("sha") == sha
 
 
-def report(config, pr, sha, phase, suite=None, url=None, status=None):
+def report(config, ref, sha, phase, suite=None, url=None, status=None, progress=None):
     # Credentials travel over stdin, never command arguments or job logs.
-    payload = dict(pr=pr, sha=sha, phase=phase, suite=suite, runUrl=url,
+    payload = dict(ref=ref, sha=sha, phase=phase, suite=suite, runUrl=url, progress=progress,
                    jobStatus=status, token=config["github_token"], author=config["author"])
     command(["node", str(CODE / "report.mjs")], timeout=150,
             input=json.dumps(payload).encode())
+
+
+JOURNEY_HEADER = re.compile(rb"^\[(\d+)/(\d+)\] \S+ \xe2\x80\xba (.+?)\s*$")
+JOURNEY_ERROR = re.compile(rb"^ {4}Error\b")
+
+
+class Progress:
+    """Keeps the release commit comment current while a job runs.
+
+    Steps come from the app container's progress file (reviewed bootstrap
+    code), journeys from Playwright's line reporter in the test log. Both are
+    untrusted bytes and are validated and bounded before they reach the
+    reporter. Publishing is best effort: a failed PATCH never fails the job,
+    and the final "finished" report is still delivered the strict way.
+    """
+
+    def __init__(self, config, ref, sha, started):
+        self.config, self.ref, self.sha, self.started = config, ref, sha, started
+        self.steps, self.journeys, self.total = [], [], None
+        self.buffer, self.sent = b"", None
+
+    def steps_from(self, raw):
+        try:
+            entries = json.loads(raw[:4096].decode("utf-8", "replace"))
+        except ValueError:
+            return False
+        if not isinstance(entries, list):
+            return False
+        steps = []
+        for entry in entries[:8]:
+            if not isinstance(entry, dict):
+                return False
+            name, seconds, detail = entry.get("name"), entry.get("seconds"), entry.get("detail", "")
+            if not isinstance(name, str) or not isinstance(seconds, (int, float)) or not isinstance(detail, str):
+                return False
+            steps.append({"name": name[:40], "seconds": round(float(seconds), 1), "detail": detail[:80]})
+        if steps == self.steps:
+            return False
+        self.steps = steps
+        return True
+
+    def stack_ready(self):
+        elapsed = time.monotonic() - self.started
+        self.steps.append({"name": "stack", "seconds": round(elapsed - sum(s["seconds"] for s in self.steps), 1),
+                           "detail": "workers and preview up"})
+        self.publish()
+
+    def feed(self, chunk):
+        self.buffer += chunk
+        *lines, self.buffer = self.buffer.split(b"\n")
+        for line in lines:
+            header = JOURNEY_HEADER.match(line)
+            if header:
+                self.total = int(header.group(2))
+                for journey in self.journeys:
+                    if journey["state"] == "running":
+                        journey["state"] = "finished"
+                if len(self.journeys) < 64:
+                    self.journeys.append({"title": header.group(3).decode("utf-8", "replace")[:120],
+                                          "state": "running"})
+                self.publish()
+            elif JOURNEY_ERROR.match(line) and self.journeys and self.journeys[-1]["state"] == "running":
+                self.journeys[-1]["state"] = "failed"
+                self.publish()
+
+    def payload(self):
+        return dict(stage="tests" if self.journeys else "setup",
+                    elapsedS=round(time.monotonic() - self.started),
+                    steps=self.steps, journeys=self.journeys, total=self.total)
+
+    def publish(self):
+        # Snapshot: steps/journeys are mutated in place after this is sent.
+        payload = json.loads(json.dumps(self.payload()))
+        if payload == self.sent:
+            return
+        try:
+            report(self.config, self.ref, self.sha, "running", progress=payload)
+            self.sent = payload
+        except Exception as error:  # noqa: BLE001 - progress is advisory
+            print("Progress report:", type(error).__name__, flush=True)
 
 
 def download(config, sha, destination):
@@ -152,10 +252,13 @@ def cleanup_containers(prefix):
 
 
 def execute(config, job):
-    job_id, pr, sha = job
-    if type(pr) is not int or pr <= 0 or not SHA.fullmatch(sha):
+    job_id, _pr, sha, ref = job
+    if not SHA.fullmatch(sha or ""):
         raise ValueError("Invalid persisted job")
-    if not current(config, pr, sha):
+    # Queued pull-request jobs have no release ref. Do not run them.
+    if not RELEASE_REF.fullmatch(ref or ""):
+        return "superseded"
+    if not current(config, ref, sha):
         return "superseded"
     provider_env = model_environment(config)
     harness_sha = config["harness_sha"]
@@ -169,11 +272,12 @@ def execute(config, job):
     suite, status, artifact_url = None, "failure", None
     started = time.monotonic()
     try:
-        report(config, pr, sha, "running")
+        report(config, ref, sha, "running")
         download(config, sha, source)
-        if not current(config, pr, sha):
+        if not current(config, ref, sha):
             return "superseded"
-        command(["docker", "run", "-d", "--name", prefix + "db", *COMMON,
+        limits = memory(config)
+        command(["docker", "run", "-d", "--name", prefix + "db", *COMMON, *limits,
                  "--network=" + NETWORK, "--user=postgres", "--read-only",
                  "--tmpfs=/var/lib/postgresql/data:rw,uid=999,gid=999,size=256m",
                  "--tmpfs=/var/run/postgresql:rw,uid=999,gid=999,size=16m",
@@ -188,10 +292,12 @@ def execute(config, job):
             raise RuntimeError("Database readiness timeout")
         # Reuse installed dependencies without building/copying a multi-GB image
         # for every commit. All PR extraction and install hooks stay sandboxed.
-        command(["docker", "create", "--name", prefix + "app", *COMMON,
+        app_env = dict(BROWSER_ENV, E2E_SERVE_ONLY="1", HUSKY="0",
+                       E2E_PG_ADMIN_URL="postgresql://aquilla:aquilla@localhost:5432/postgres",
+                       QA_BUILD_NODE_OPTIONS=str(config.get("build_node_options", "")))
+        command(["docker", "create", "--name", prefix + "app", *COMMON, *limits,
                  "--network=container:" + prefix + "db",
-                 "-e", "E2E_SERVE_ONLY=1", "-e", "HUSKY=0",
-                 "-e", "E2E_PG_ADMIN_URL=postgresql://aquilla:aquilla@localhost:5432/postgres",
+                 *(f"-e={key}={value}" for key, value in app_env.items()),
                  harness, "python3", "/tmp/app_bootstrap.py"], timeout=60)
         # The enclosing job directory is root-only; the archive must be readable
         # by the unprivileged container user after docker cp.
@@ -201,35 +307,38 @@ def execute(config, job):
                  prefix + "app:/tmp/app_bootstrap.py"])
         source.unlink()
         command(["docker", "start", prefix + "app"], timeout=60)
+        progress = Progress(config, ref, sha, started)
         for _ in range(480):
             if command(["docker", "exec", prefix + "app", "test", "-f",
                         "/tmp/aquilla-stack-ready.json"], check=False).returncode == 0:
+                progress.stack_ready()
                 break
+            steps = command(["docker", "exec", prefix + "app", "cat",
+                             "/tmp/aquilla-qa-progress.json"], check=False)
+            if steps.returncode == 0 and progress.steps_from(steps.stdout):
+                progress.publish()
             running = command(["docker", "inspect", "-f", "{{.State.Running}}", prefix + "app"])
             if running.stdout.strip() != b"true":
                 raise RuntimeError("Application setup exited")
             time.sleep(1)
         else:
             raise RuntimeError("Application readiness timeout")
-        if not current(config, pr, sha):
+        if not current(config, ref, sha):
             return "superseded"
         # Fixed trusted test image, separate mount/PID namespace, no host mounts.
         # Only the network namespace is shared to preserve localhost safeguards.
         test_env = dict(provider_env)
-        test_env.update(CI="1", SMART_TEST_APP_SHA=sha, SMART_TEST_HARNESS_SHA=harness_sha,
+        test_env.update(BROWSER_ENV, CI="1", SMART_TEST_APP_SHA=sha, SMART_TEST_HARNESS_SHA=harness_sha,
                         SMART_TEST_RUN_ID="server", E2E_BASE_URL="http://127.0.0.1:6173",
-                        E2E_DATABASE_URL="postgresql://aquilla:aquilla@localhost:5432/aquilla_e2e",
-                        VITE_AUTH_BASE="http://127.0.0.1:9787",
-                        VITE_FRONTIER_BASE="http://127.0.0.1:9787",
-                        VITE_CHAT_BASE="http://127.0.0.1:9787/chat",
-                        VITE_SYNC_WORKER_HOST="127.0.0.1:9788")
-        args = ["docker", "run", "--name", prefix + "tests", *COMMON,
+                        E2E_DATABASE_URL="postgresql://aquilla:aquilla@localhost:5432/aquilla_e2e")
+        args = ["docker", "run", "--name", prefix + "tests", *COMMON, *limits,
                 "--shm-size=256m", "--network=container:" + prefix + "db"]
         for key in test_env:
             args += ["-e", key]
         args += [harness, "pnpm", "exec", "playwright", "test", "--config", "smart-tests/config.ts"]
         with (directory / "tests.log").open("wb") as log:
-            result = command(args, log, timeout=960, check=False, env={**os.environ, **test_env})
+            result = command(args, log, timeout=960, check=False, env={**os.environ, **test_env},
+                             on_output=progress.feed)
         suite = read_suite(prefix + "tests")
         if suite.get("build") != sha or suite.get("harnessBuild") != harness_sha:
             raise RuntimeError("Evidence identity mismatch")
@@ -254,7 +363,7 @@ def execute(config, job):
         outbox = dict(suite=suite, url=artifact_url, status=status)
         (directory / "report.json").write_text(json.dumps(outbox))
         try:
-            report(config, pr, sha, "finished", **outbox)
+            report(config, ref, sha, "finished", **outbox)
         except Exception as error:
             raise ReportPending() from error
 
@@ -266,12 +375,12 @@ def drain_interrupted(config, job):
     Once the grace window closes it becomes terminal, so one undeliverable
     report cannot stop every later PR from being tested.
     """
-    job_id, pr, sha, interrupted_at = job
+    job_id, _pr, sha, ref, interrupted_at = job
     cleanup_containers(f"aquilla-qa-{job_id}-")
     try:
         outbox_path = JOBS / str(job_id) / "report.json"
         outbox = json.loads(outbox_path.read_text()) if outbox_path.exists() else {}
-        report(config, pr, sha, "finished", **outbox)
+        report(config, ref, sha, "finished", **outbox)
         status = "completed" if outbox.get("status") == "success" else "failed"
     except Exception as error:
         print("Interrupted report:", type(error).__name__, flush=True)
@@ -297,8 +406,9 @@ def main():
         config = json.loads(CONFIG.read_text())
         with database() as db:
             interrupted = db.execute(
-                "SELECT id,pr,sha,updated FROM jobs WHERE status='interrupted' LIMIT 1").fetchone()
-            job = db.execute("SELECT id,pr,sha FROM jobs WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
+                "SELECT id,pr,sha,ref,updated FROM jobs WHERE status='interrupted' LIMIT 1").fetchone()
+            job = db.execute(
+                "SELECT id,pr,sha,ref FROM jobs WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
             if job and not interrupted:
                 db.execute("UPDATE jobs SET status='running',updated=? WHERE id=?", (time.time(), job[0]))
         if interrupted:

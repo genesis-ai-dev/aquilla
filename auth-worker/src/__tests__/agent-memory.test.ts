@@ -10,6 +10,7 @@ import { describe, it, expect } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { buildMemoryContext } from "../../../db/shared/agent-memory"
+import { loadTranslationInstructions } from "../../../db/shared/load-translation-instructions"
 
 const PROJECT = "proj-mem"
 
@@ -136,6 +137,75 @@ describe("memory propose → review lifecycle", () => {
     expect(r.status).toBe(200)
     const { memory } = (await r.json()) as { memory: { status: string } }
     expect(memory.status).toBe("rejected")
+  })
+})
+
+// AQU-2342 phase 2: an approved decisions/ memory is standing guidance, so it
+// lands in THE project instructions every drafting prompt reads.
+describe("approving a decisions/ memory appends it to the project instructions", () => {
+  const instructionsOf = async () => {
+    const row = await env.AQUILLA_PG.prepare("SELECT settings FROM project_settings WHERE project_id = ?")
+      .bind(PROJECT)
+      .first<{ settings: string }>()
+    return (JSON.parse(row?.settings ?? "{}") as { translationInstructions?: string }).translationInstructions
+  }
+  const proposeAndApprove = async (path: string, content: string) => {
+    const leadJwt = await jwtFor("lead")
+    const p = await req("POST", `${PROJECT}/agent-memory`, leadJwt, { path, content })
+    const { memoryId } = (await p.json()) as { memoryId: string }
+    return req("POST", `${PROJECT}/agent-memory/${memoryId}/review`, leadJwt, { action: "approve" })
+  }
+
+  it("materializes the migrate-on-read text, then appends the decision once", async () => {
+    await seedUser(1, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 1, 500)
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES (?, ?)
+       ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+    )
+      .bind(PROJECT, JSON.stringify({ livingMemoryEntries: [{ id: "1", kind: "standard", text: "Use guillemets.", createdAt: "", author: "" }] }))
+      .run()
+
+    const res = await proposeAndApprove("decisions/divine-name.md", "Decision — Render Lord as Señor.\n\nRender Lord as Señor.")
+    expect(res.status).toBe(200)
+    expect(await instructionsOf()).toBe("Use guillemets.\nRender Lord as Señor.")
+
+    // The same decision again (another path) is not appended twice.
+    expect((await proposeAndApprove("decisions/divine-name-2.md", "Render Lord as Señor.")).status).toBe(200)
+    expect(await instructionsOf()).toBe("Use guillemets.\nRender Lord as Señor.")
+  })
+
+  it("folds decisions approved BEFORE phase 2 in on read while nothing is stored", async () => {
+    await seedUser(1, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 1, 500)
+    // An approval made by an older build: the row is approved, the
+    // instructions were never written.
+    const leadJwt = await jwtFor("lead")
+    const p = await req("POST", `${PROJECT}/agent-memory`, leadJwt, { path: "decisions/old.md", content: "Decision — Keep verse numbers." })
+    const { memoryId } = (await p.json()) as { memoryId: string }
+    await env.AQUILLA_PG.prepare("UPDATE agent_memories SET status = 'approved' WHERE id = ?").bind(memoryId).run()
+    const loaded = await loadTranslationInstructions(env.AQUILLA_PG, PROJECT)
+    expect(loaded).toEqual({ text: "Keep verse numbers.", stored: false })
+  })
+
+  it("leaves other paths alone, and refuses the approval when the instructions are full", async () => {
+    await seedUser(1, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 1, 500)
+    expect((await proposeAndApprove("observations/x.md", "Seen twice.")).status).toBe(200)
+    expect(await instructionsOf()).toBeUndefined()
+
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES (?, ?)
+       ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+    )
+      .bind(PROJECT, JSON.stringify({ translationInstructions: "x".repeat(7999) }))
+      .run()
+    const refused = await proposeAndApprove("decisions/long.md", "A decision that does not fit.")
+    expect(refused.status).toBe(409)
+    expect(await instructionsOf()).toBe("x".repeat(7999))
   })
 })
 
@@ -542,6 +612,20 @@ describe("project brief", () => {
     expect(w2.status).toBe(200)
     const { brief: b2 } = (await w2.json()) as { brief: { version: number } }
     expect(b2.version).toBe(2)
+
+    // AQU-2342: GET reads the RESOLVED project instructions (same shape, the
+    // row's version) — the legacy text until stored instructions replace it.
+    const readContent = async () =>
+      ((await (await req("GET", `${PROJECT}/brief`, leadJwt)).json()) as {
+        brief: { content: string; version: number }
+      }).brief
+    expect(await readContent()).toMatchObject({ content: "Revised brief.", version: 2 })
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, 1)",
+    )
+      .bind(PROJECT, JSON.stringify({ translationInstructions: "Plain register." }))
+      .run()
+    expect(await readContent()).toMatchObject({ content: "Plain register.", version: 2 })
   })
 
   it("brief PUT via the agent channel → 403 brief_human_only", async () => {
@@ -602,6 +686,47 @@ describe("project brief", () => {
     const brief = await req("GET", `${PROJECT}/brief`, leadJwt)
     const { brief: b } = (await brief.json()) as { brief: { content: string } }
     expect(b.content).toBe("Add a pronunciation guide.")
+  })
+})
+
+describe("pending brief proposals join the memory queue (AQU-2342)", () => {
+  it("listing memories moves each pending proposal to one decisions/ memory, whose approval appends to the instructions", async () => {
+    await seedUser(1, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 1, 500)
+    const leadJwt = await jwtFor("lead")
+    const propose = async (content: string) => {
+      const r = await req("POST", `${PROJECT}/brief/proposals`, leadJwt, { content, rationale: "gap" }, agentHeader(leadJwt))
+      return ((await r.json()) as { proposalId: string }).proposalId
+    }
+    const pending = await propose("Keep verse numbers in the margin.")
+    const reviewed = await propose("Already handled.")
+    await req("POST", `${PROJECT}/brief/proposals/${reviewed}/review`, leadJwt, { action: "reject" })
+
+    type Listed = { id: string; path: string; status: string; content: string; provenance: { briefProposalId?: string } | null }
+    const list = async () =>
+      ((await (await req("GET", `${PROJECT}/agent-memory`, leadJwt)).json()) as { memories: Listed[] }).memories
+    const first = await list()
+    expect(first).toHaveLength(1)
+    expect(first[0]).toMatchObject({
+      status: "proposed",
+      content: "Keep verse numbers in the margin.",
+      provenance: { briefProposalId: pending },
+    })
+    expect(first[0].path).toMatch(/^decisions\/instructions-[0-9a-f]{12}\.md$/)
+    // Moved once: listing again does not add a second copy, and the proposal is closed as moved.
+    expect(await list()).toHaveLength(1)
+    const row = await env.AQUILLA_PG.prepare("SELECT status, reviewed_by FROM project_brief_proposals WHERE id = ?")
+      .bind(pending)
+      .first<{ status: string; reviewed_by: string }>()
+    expect(row).toEqual({ status: "rejected", reviewed_by: "aqu-2342:moved-to-decisions" })
+
+    const approved = await req("POST", `${PROJECT}/agent-memory/${first[0].id}/review`, leadJwt, { action: "approve" })
+    expect(approved.status).toBe(200)
+    expect(await loadTranslationInstructions(env.AQUILLA_PG, PROJECT)).toEqual({
+      text: "Keep verse numbers in the margin.",
+      stored: true,
+    })
   })
 })
 

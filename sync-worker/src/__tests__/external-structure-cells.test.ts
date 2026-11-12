@@ -146,10 +146,12 @@ interface CellRow {
 
 async function cells(tdb: TestDb, side?: string): Promise<CellRow[]> {
   const { rows } = await tdb.pg.query<CellRow>(
-    `SELECT cell_id, side, target_lang, value, anchor_cell_id, event_id, validated, type, canonical_ref
-       FROM cells WHERE project_id = $1 AND file_id = $2
-        ${side ? 'AND side = $3' : ''}
-      ORDER BY cell_id, target_lang`,
+    `SELECT c.cell_id, c.side, COALESCE(l.legacy_tag, '') AS target_lang, c.value, c.anchor_cell_id, c.event_id, c.validated, c.type, c.canonical_ref
+       FROM cells c
+       LEFT JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+      WHERE c.project_id = $1 AND c.file_id = $2
+        ${side ? 'AND c.side = $3' : ''}
+      ORDER BY c.cell_id, target_lang`,
     side ? [PROJECT, FILE, side] : [PROJECT, FILE],
   )
   return rows
@@ -180,6 +182,7 @@ async function eventKinds(tdb: TestDb): Promise<string[]> {
 
 let tdb: TestDb
 let env: ReturnType<typeof makeEnv>
+let bridgeLane = ''
 
 // Three source cells in chain order a → b → c, with `b` translated.
 beforeEach(async () => {
@@ -211,6 +214,11 @@ beforeEach(async () => {
     ],
   })
   env = makeEnv(tdb.db)
+  const lane = await tdb.pg.query<{ id: string }>(
+    `SELECT id FROM lanes WHERE project_id = $1 AND role = 'target' AND legacy_tag = ''`,
+    [PROJECT],
+  )
+  bridgeLane = lane.rows[0].id
 })
 
 // ── InsertCell ───────────────────────────────────────────────────────────────
@@ -330,8 +338,7 @@ describe('DeleteCell', () => {
 
   it('refuses a cell that still owns rows the delete would orphan', async () => {
     await tdb.pg.query(
-      `INSERT INTO cell_validators (project_id, file_id, cell_id, target_lang, event_id, username, decided_ts)
-       VALUES ($1, $2, 'b', '', 'evt-bt', 'seeder', 1)`,
+      `INSERT INTO cell_validators (project_id, file_id, cell_id, event_id, username, decided_ts) VALUES ($1, $2, 'b', 'evt-bt', 'seeder', 1)`,
       [PROJECT, FILE],
     )
     await tdb.pg.query(
@@ -395,7 +402,7 @@ describe('SplitCell', () => {
     await apply(env, token, {
       kind: 'SplitCell', fileId: FILE, cellId: 'b', newCellId: 'b2',
       offset: SPLIT_AT, targets: 'divide',
-      targetOffsets: [{ offset: 'El zorro marron rapido'.length }],
+      targetOffsets: [{ laneId: bridgeLane, offset: 'El zorro marron rapido'.length }],
     })
 
     const all = await cells(tdb)
@@ -418,7 +425,7 @@ describe('SplitCell', () => {
     await apply(env, token, {
       kind: 'SplitCell', fileId: FILE, cellId: 'b', newCellId: 'b2',
       offset: SPLIT_AT, targets: 'divide',
-      targetOffsets: [{ offset: 'El zorro marron rapido'.length }],
+      targetOffsets: [{ laneId: bridgeLane, offset: 'El zorro marron rapido'.length }],
     })
 
     for (const row of (await cells(tdb)).filter((r) => r.side === 'target')) {
@@ -475,7 +482,7 @@ describe('SplitCell', () => {
     const token = await memberToken(tdb, ROLE.PROJECT_LEAD)
     const { res, body } = await prepare(env, token, {
       kind: 'SplitCell', fileId: FILE, cellId: 'b', offset: SPLIT_AT, targets: 'divide',
-      targetOffsets: [{ offset: 9999 }],
+      targetOffsets: [{ laneId: bridgeLane, offset: 9999 }],
     })
     expect(res.status).toBe(400)
     expect(body.error?.message).toContain('past the end')
@@ -615,7 +622,7 @@ describe('structure commands — guards', () => {
     const token = await memberToken(tdb, ROLE.PROJECT_LEAD)
     const { res, body } = await prepare(env, token, [
       commands.InsertCell,
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'a', value: 'x' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'a', laneId: bridgeLane, value: 'x' },
     ])
     expect(res.status).toBe(400)
     expect(body.error?.message).toContain('only command')

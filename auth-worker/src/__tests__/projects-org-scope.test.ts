@@ -57,6 +57,77 @@ describe("GET /api/v2/projects org scoping", () => {
   })
 })
 
+// AQU-2256 item 1: the add-to-projects picker on an org's Members page calls
+// this endpoint with the invite threshold (`?minRole=600`) and the org whose
+// roster is open. Both halves of that call shape are asserted here, because
+// the reported symptom — "the picker lists projects from orgs the actor isn't
+// in, so anyone can be added to any project" — would be a server-side leak if
+// the org filter or the membership predicate ever stopped holding under
+// `minRole`.
+describe("GET /api/v2/projects?minRole=600 — the add-to-projects picker's call", () => {
+  async function seedPickerOrgs() {
+    await seedUser(1, "wendi")    // maintainer in org 1 AND org 3
+    await seedUser(7, "stranger") // owns org 2; wendi is not a member
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Org A', 1), (2, 'Org B', 7), (3, 'Org C', 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 600, 1), (2, 7, 700, 7), (3, 1, 600, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('a1', 'A1', 1, 1), ('b1', 'B1', 2, 7), ('c1', 'C1', 3, 1)",
+    ).run()
+  }
+
+  it("returns no project from an org the caller is not a member of, scoped to that org", async () => {
+    await seedPickerOrgs()
+    const res = await app.request(
+      "/api/v2/projects?orgId=2&minRole=600",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string }> }
+    expect(body.projects).toEqual([])
+  })
+
+  it("returns no project from an org the caller is not a member of, unscoped", async () => {
+    await seedPickerOrgs()
+    const res = await app.request(
+      "/api/v2/projects?minRole=600",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    const body = (await res.json()) as { projects: Array<{ id: string }> }
+    expect(body.projects.map((p) => p.id)).not.toContain("b1")
+  })
+
+  // The unscoped list is where the client-side half of the defect lived: it
+  // legitimately spans every org the caller maintains, so the picker has to
+  // pass `?orgId=` to keep one org's page to one org's projects.
+  it("spans every org the caller maintains when no orgId is passed", async () => {
+    await seedPickerOrgs()
+    const res = await app.request(
+      "/api/v2/projects?minRole=600",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    const body = (await res.json()) as { projects: Array<{ id: string }> }
+    expect(body.projects.map((p) => p.id).sort()).toEqual(["a1", "c1"])
+  })
+
+  it("returns only the named org's projects when orgId is passed", async () => {
+    await seedPickerOrgs()
+    const res = await app.request(
+      "/api/v2/projects?orgId=1&minRole=600",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    const body = (await res.json()) as { projects: Array<{ id: string }> }
+    expect(body.projects.map((p) => p.id)).toEqual(["a1"])
+  })
+})
+
 describe("POST /api/v2/projects org gating", () => {
   async function seedOrg() {
     await seedUser(1, "wendi") // org owner
@@ -84,6 +155,19 @@ describe("POST /api/v2/projects org gating", () => {
     expect(res.status).toBe(403)
   })
 
+  // AQU-1352 §3.9 rule 2: the denial names the scope so the client can say
+  // "you are a Contributor in Come and See" instead of a bare 403.
+  it("names the org in the denial for a member, never for a non-member", async () => {
+    await seedOrg()
+    await seedUser(7, "outsider")
+    const member = (await (await create("tom", { id: "p-y", name: "Y", orgId: 1 })).json()) as { actual: { scopePath?: string[] } }
+    expect(member.actual.scopePath).toEqual(["Come and See"])
+    const outsider = await create("outsider", { id: "p-z", name: "Z", orgId: 1 })
+    expect(outsider.status).toBe(403)
+    const body = (await outsider.json()) as { actual: { scopePath?: string[] } }
+    expect(body.actual.scopePath).toBeUndefined()
+  })
+
   it("falls back to the personal org when orgId omitted", async () => {
     await seedUser(5, "solo")
     const res = await create("solo", { id: "p-solo", name: "Solo" })
@@ -91,5 +175,23 @@ describe("POST /api/v2/projects org gating", () => {
     const proj = await env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = 'p-solo'").first<{ org_id: number }>()
     const org = await env.AQUILLA_PG.prepare("SELECT id FROM organizations WHERE owner_user_id = 5").first<{ id: number }>()
     expect(proj?.org_id).toBe(org?.id)
+  })
+
+  // AQU-1352: owning a TEAM org is not having a personal one. Matching on
+  // owner_user_id alone dropped a no-orgId create into the owner's team org,
+  // where every team member could then see it.
+  it("creates into a new personal org, not an owned team org, when orgId omitted", async () => {
+    await seedUser(6, "teamowner")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id, billing_scope) VALUES (60, 'Team Org', 6, 'team')",
+    ).run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (60, 6, 700, 6)").run()
+    const res = await create("teamowner", { id: "p-mine", name: "Mine" })
+    expect(res.status).toBe(200)
+    const proj = await env.AQUILLA_PG.prepare(
+      "SELECT o.id, o.billing_scope FROM projects p JOIN organizations o ON o.id = p.org_id WHERE p.id = 'p-mine'",
+    ).first<{ id: number; billing_scope: string }>()
+    expect(proj?.id).not.toBe(60)
+    expect(proj?.billing_scope).toBe("personal")
   })
 })

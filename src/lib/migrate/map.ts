@@ -6,6 +6,8 @@
 //   source.cell.create                    (one per cell, in canonical order)
 //   target.cell.commit                    (one per value-edit — full history,
 //                                          original author + legacy timestamp)
+//   source.cell.visibility.set            (only for a cell Codex parked with the
+//                                          eye icon, or un-parked again — AQU-1425)
 //
 // Pairing: source (.source) and target (.codex) cells share `metadata.id`.
 // Canonical order comes from the target file; the source side is matched in by
@@ -20,12 +22,15 @@ import {
   fileCreateEventId,
   sourceCellCreateEventId,
   sourceCellDeleteEventId,
+  sourceCellVisibilityEventId,
   targetCellDeleteEventId,
   targetCommitEventId,
   validateEventId,
 } from "./ids"
 import type { IngestEvent } from "./types"
 import { decodeHtmlEntities } from "../html-entities"
+import { isKnownBookCode } from "../file-labeling/bible-book-names"
+import { legacyCodexFileMeta, legacyFileTypeFor } from "./file-type"
 import { validateIdmlTranslation } from "@aquilla/idml-roundtrip"
 import {
   canonicalIdmlCellMetadata,
@@ -93,6 +98,58 @@ function isCellDeleted(cell: CodexCell | undefined): boolean {
 function isCellMerged(cell: CodexCell | undefined): boolean {
   if (!cell) return false
   return latestLedgerFlag(cell, "metadata.data.merged") ?? (cell.metadata.data?.merged === true)
+}
+
+// A cell HIDDEN in Codex (the Source Editing Mode eye icon) is parked, not
+// removed: Codex drops it from the view, progress and every exporter but keeps
+// its data, and an unhide brings it back. So — unlike `deleted` and `merged` —
+// it must NOT take the retraction branch below, which hard-deletes the
+// projection row. It migrates as a normal pair (create + full target history,
+// advancing the anchor chain so its position survives) PLUS the reversible
+// `source.cell.visibility.set` event from AQU-1422. AQU-1425.
+const HIDDEN_EDIT_PATH = "metadata.data.hidden"
+
+// Latest `metadata.data.hidden` ledger edit on one cell, with its timestamp —
+// the ts is what keys the emitted event's id (see sourceCellVisibilityEventId),
+// so it has to come back out with the value.
+function latestHiddenEdit(
+  cell: CodexCell | undefined,
+): { hidden: boolean; ts: number } | undefined {
+  if (!cell) return undefined
+  let latest: { hidden: boolean; ts: number } | undefined
+  for (const e of cell.metadata.edits ?? []) {
+    if (e.editMap?.join(".") !== HIDDEN_EDIT_PATH) continue
+    const ts = typeof e.timestamp === "number" ? e.timestamp : -Infinity
+    if (!latest || ts >= latest.ts) latest = { hidden: e.value === true, ts }
+  }
+  return latest
+}
+
+// Codex's visibility decision for a cell, or `undefined` when Codex never
+// expressed one (the overwhelmingly common case — those cells emit nothing, so
+// a project with no hidden cells maps to a byte-identical event stream).
+//
+// Codex writes the flag on BOTH notebooks' copies of the cell, so the latest
+// ledger edit across them wins (same latest-edit-wins rule isCellDeleted and
+// isCellMerged use, which is what makes hide-then-unhide read as shown). A
+// materialized `hidden: true` with no ledger entry is still a decision — a
+// trimmed ledger must not silently un-park the cell — but a materialized
+// `false`/absent one is just the default and says nothing.
+function hiddenDecisionOf(
+  ...cells: (CodexCell | undefined)[]
+): { hidden: boolean; ts?: number } | undefined {
+  let latest: { hidden: boolean; ts: number } | undefined
+  for (const c of cells) {
+    const e = latestHiddenEdit(c)
+    if (e && (!latest || e.ts >= latest.ts)) latest = e
+  }
+  if (latest) {
+    return { hidden: latest.hidden, ...(Number.isFinite(latest.ts) ? { ts: latest.ts } : {}) }
+  }
+  for (const c of cells) {
+    if (c?.metadata.data?.hidden === true) return { hidden: true }
+  }
+  return undefined
 }
 
 // Timestamp of the latest edit that set `metadata.data.deleted = true`, used as
@@ -182,6 +239,26 @@ function canonicalTargetWithProof(
   return validation.valid ? upgraded.targetHtml : html
 }
 
+/**
+ * The USFM book a legacy-Codex file names outright (AQU-1196).
+ *
+ * A migrated file is named by its `.codex` basename stem (see
+ * `scripts/migrate.ts`), so a Scripture file's name IS a bare code — `1CH`,
+ * `MAT`. Only an exact known code counts: the fuzzy file-name detector
+ * (`bookCodeFromFileName`) reads a code out of any stem that merely starts or
+ * ends with three matching letters, which would stamp a book onto notes,
+ * `intro` and other paratext. Undefined means "leave `book_code` NULL" —
+ * `files.book_code` is what the Testament grouping, re-import collision
+ * matching and server-side rollups read, so a guess there is worse than a gap.
+ *
+ * Shared with `scripts/neon-backfill-book-codes.ts` so the migrator's rule and
+ * the backfill's rule cannot drift apart.
+ */
+export function legacyBookCodeFor(fileName: string): string | undefined {
+  const stem = (fileName || "").trim()
+  return isKnownBookCode(stem) ? stem.toUpperCase() : undefined
+}
+
 /** Map one source/target file pair to its deterministic event stream. */
 export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): IngestEvent[] {
   const { projectId, projectKey, fallbackAuthor, fallbackTs } = opts
@@ -192,6 +269,16 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
   const idmlReadiness = idml
     ? idmlAssessment?.readiness ?? "needs-artifact"
     : "not-idml"
+  // An IDML pair is a layout document, never Scripture — no book code.
+  const bookCode = idml ? undefined : legacyBookCodeFor(pair.name)
+  // AQU-2211: the type the file had in Codex, from the notebook's own record of
+  // its importer (file-type.ts). An IDML pair keeps its structural detection;
+  // anything the rule cannot place stays `codex`, as every migrated file did
+  // before. The raw origin facts ride along in `projectionMeta` — the one
+  // file.create payload key the projection copies into `files.meta` verbatim —
+  // as `meta.legacyCodex`, so nothing is lost where no mapping has been decided.
+  const legacyMeta = legacyCodexFileMeta(pair)
+  const fileType = idml ? "idml" : legacyFileTypeFor(legacyMeta) ?? "codex"
 
   events.push({
     id: fileCreateEventId(projectId, fileId),
@@ -203,7 +290,9 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
     clientTs: fallbackTs,
     payload: {
       name: pair.name,
-      fileType: idml ? "idml" : "codex",
+      fileType,
+      ...(bookCode ? { bookCode } : {}),
+      ...(legacyMeta ? { projectionMeta: { legacyCodex: legacyMeta } } : {}),
       ...(idml
         ? {
             kind: "idml",
@@ -333,11 +422,16 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
                 ? { relationships: carrier.metadata.data.relationships }
                 : {}),
             },
+            // AQU-1780: the diagnostics describe the FILE, not this cell.
+            // Copied onto every row they made one 1,389-cell file ~290 MB of
+            // metadata and its paged read too big for a Worker. Keep the
+            // count; assessIdmlPair recomputes the list from the legacy file.
+            // Version 2 rows written before this carry `diagnostics` instead;
+            // nothing reads either field.
             idmlMigration: {
               version: 2,
               readiness: idmlReadiness,
-              diagnostics: (idmlAssessment?.diagnostics ?? [])
-                .map(({ code, message }) => ({ code, message })),
+              diagnosticCount: idmlAssessment?.diagnostics.length ?? 0,
             },
           }
         : undefined
@@ -368,6 +462,38 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
       },
     })
     prevCellId = cellId
+
+    // AQU-1425: carry Codex's eye-icon state across. The cell is already a
+    // normal pair (created just above, anchor chain advanced, target history
+    // emitted below — nothing of its data is dropped); this one extra event
+    // parks it, and a `hidden: false` decision un-parks a cell an earlier run
+    // parked. Emitted only when Codex actually expressed a decision, so a
+    // project with no hidden cells maps to the same stream as before.
+    //
+    // Deliberately AFTER the create (the projection's UPDATE needs the source
+    // row) and parent-less: the hide event is non-chain-mutating by design, so
+    // it must not sit in the cell's parent chain — chaining it would advance the
+    // source head and flag every lane's migrated translation as stale (AD-9)
+    // for a change that touched no text.
+    const visibility = hiddenDecisionOf(ordered, t, s)
+    if (visibility) {
+      events.push({
+        id: sourceCellVisibilityEventId(
+          projectId,
+          fileId,
+          cellId,
+          visibility.hidden,
+          visibility.ts,
+        ),
+        kind: "source.cell.visibility.set",
+        fileId,
+        cellId,
+        parentId: null,
+        author: fallbackAuthor,
+        clientTs: visibility.ts ?? fallbackTs,
+        payload: { hidden: visibility.hidden },
+      })
+    }
 
     if (!t) continue
 

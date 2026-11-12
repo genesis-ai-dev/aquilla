@@ -19,6 +19,8 @@
 // the source pin; the target head is cells.event_id where side='target').
 
 import { cellKey, laneCellKey } from './commands'
+import { wireLegacyTagSql } from '../../../db/shared/lane-sql'
+import { selectByCellKeys } from '../lib/cell-key-lookup'
 
 export interface CellPrecondition {
   fileId: string
@@ -48,6 +50,23 @@ export interface CellState {
   /** Current target text in the requested lane — the text an approver is being
    *  asked to endorse (AQU-1184 guardrail 2). Null when no target row. */
   targetValue: string | null
+  /** AQU-1426: whether the cell is currently PARKED ("Hide cell", AQU-1422).
+   *  Read off the shared SOURCE row, because that is the only row that carries
+   *  the flag — hiding is per cell, not per lane. Null when no source row
+   *  exists (there is no cell to have a visibility). */
+  sourceHidden: boolean | null
+}
+
+interface CellRow {
+  file_id: string
+  cell_id: string
+  side: string
+  target_lang: string | null
+  lane_id: string | null
+  event_id: string
+  ai_drafted: number | null
+  value: string | null
+  hidden_at?: number | null
 }
 
 /** Resolve current source + lane-qualified target head event ids for the given
@@ -74,27 +93,19 @@ export async function resolveCellStates(
   }
   const list = [...lanesByCell.values()]
 
-  const placeholders = list.map(() => '(?, ?)').join(', ')
-  const binds: unknown[] = []
-  for (const c of list) binds.push(c.fileId, c.cellId)
-
-  const { results } = await db
-    .prepare(
-      `SELECT file_id, cell_id, side, target_lang, event_id, ai_drafted, value FROM cells
+  // AQU-1852 / AQU-1982: a whole-book changeset is thousands of cells, so the
+  // lookup is paged (lib/cell-key-lookup.ts) rather than sized by the caller's
+  // batch. The reads are independent, so paging cannot change the result.
+  const results = await selectByCellKeys<CellRow>(
+    db,
+    list,
+    [projectId],
+    (placeholders) =>
+      `SELECT file_id, cell_id, side, ${wireLegacyTagSql("cells")} AS target_lang, lane_id, event_id, ai_drafted, value, hidden_at FROM cells
        WHERE project_id = ?
          AND side IN ('source', 'target')
          AND (file_id, cell_id) IN (${placeholders})`,
-    )
-    .bind(projectId, ...binds)
-    .all<{
-      file_id: string
-      cell_id: string
-      side: string
-      target_lang: string | null
-      event_id: string
-      ai_drafted: number | null
-      value: string | null
-    }>()
+  )
 
   for (const c of list) {
     for (const lane of c.lanes) {
@@ -105,6 +116,7 @@ export async function resolveCellStates(
         targetExists: false,
         targetAiDrafted: null,
         targetValue: null,
+        sourceHidden: null,
       })
     }
   }
@@ -116,7 +128,9 @@ export async function resolveCellStates(
       if (!s) continue
       if (r.side === 'target') {
         s.targetExists = true
-        if ((r.target_lang ?? '') === lane) {
+        // The external API asks by lanes.id. A staged plan from before
+        // AQU-1615 still asks by target_lang. Either match is this lane.
+        if (r.lane_id === lane || (r.target_lang ?? '') === lane) {
           s.targetHeadEventId = r.event_id
           s.targetAiDrafted = Number(r.ai_drafted ?? 0) === 1
           s.targetValue = r.value ?? null
@@ -124,6 +138,10 @@ export async function resolveCellStates(
       } else {
         s.sourceEventId = r.event_id
         s.sourceExists = true
+        // AQU-1426: resolved from the source row only — a target row created
+        // AFTER a hide carries no flag of its own (AQU-1422), so reading it
+        // from either side would report a parked cell as visible.
+        s.sourceHidden = r.hidden_at != null
       }
     }
   }

@@ -1,12 +1,16 @@
 // Members settings pane — DataTable roster + Add dialog (members / invite tabs).
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { MembersSection } from "./MembersSection"
+
+vi.mock("@/hooks/useCurrentTargetLanes", () => ({
+  useCurrentTargetLanes: () => ({ lanes: [], ready: true }),
+}))
 import type { ProjectMember } from "@/lib/frontier/members"
 
-const mockMembers: ProjectMember[] = [
+const DEFAULT_MEMBERS: ProjectMember[] = [
   {
     userId: 1,
     username: "alice",
@@ -30,10 +34,33 @@ const mockMembers: ProjectMember[] = [
   },
 ]
 
+// AQU-853: the caller's own roster entry now decides what the pane offers, so
+// both the roster and the signed-in username are per-test state. The gating
+// roster adds a directly-granted contributor ("dave") — the below-floor caller
+// the ticket's reproduction is about, and a legal grant target for carol.
+const GATING_MEMBERS: ProjectMember[] = [
+  ...DEFAULT_MEMBERS,
+  {
+    userId: 4,
+    username: "dave",
+    email: "dave@example.com",
+    role: { level: 400, name: "contributor", source: "override" },
+    secondarySources: [],
+  },
+]
+
+let mockMembers: ProjectMember[] = DEFAULT_MEMBERS
+let mockSessionUsername = "alice"
+
 const mockAddMany = vi.fn().mockResolvedValue([])
 const mockRemove = vi.fn()
 const mockAdd = vi.fn()
 const mockRefresh = vi.fn()
+
+// AQU-1352 §3.9: the scope breadcrumb title reads the project name.
+vi.mock("@/hooks/useProject", () => ({
+  useProject: () => ({ project: { name: "Pattani Malay Bible" } }),
+}))
 
 vi.mock("@/hooks/useProjectMembers", () => ({
   useProjectMembers: () => ({
@@ -51,7 +78,7 @@ vi.mock("@/hooks/useProjectMembers", () => ({
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
-    session: { jwt: "tok", username: "alice" },
+    session: { jwt: "tok", username: mockSessionUsername },
     loading: false,
   }),
 }))
@@ -108,6 +135,8 @@ const bodyUsernames = () =>
 describe("MembersSection", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockMembers = DEFAULT_MEMBERS
+    mockSessionUsername = "alice"
   })
 
   it("renders Name / Email / Role columns and member rows without a nested Team members card", () => {
@@ -155,7 +184,11 @@ describe("MembersSection", () => {
     renderSection()
     fireEvent.click(screen.getByRole("button", { name: /add a member/i }))
     expect(screen.getByRole("dialog")).toBeTruthy()
-    expect(screen.getByRole("heading", { name: /add a member/i })).toBeTruthy()
+    // AQU-2289: the one role dialog, with the project list.
+    expect(screen.getByTestId("role-dialog")).toHaveAttribute("data-role-dialog-mode", "add")
+    expect(screen.getByTestId("role-dialog")).toHaveAttribute("data-role-level", "project")
+    // AQU-1352 §3.9 rule 2: the header names the scope people are added to.
+    expect(screen.getByRole("heading", { name: /^Add people to .*Pattani Malay Bible$/ })).toBeTruthy()
     expect(screen.getByRole("tab", { name: /add members/i })).toBeTruthy()
     expect(screen.getByRole("tab", { name: /invite link/i })).toBeTruthy()
   })
@@ -165,5 +198,122 @@ describe("MembersSection", () => {
     fireEvent.click(screen.getByRole("button", { name: /add a member/i }))
     fireEvent.click(screen.getByRole("tab", { name: /invite link/i }))
     expect(screen.getByRole("button", { name: /create invite link/i })).toBeTruthy()
+  })
+
+  it("confirms Remove direct access by naming the direct membership it deletes", () => {
+    renderSection()
+    fireEvent.click(screen.getByRole("button", { name: "Actions for carol" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove direct access" }))
+    const dialog = screen.getByRole("dialog")
+    expect(
+      within(dialog).getByRole("heading", { name: "Remove direct access" }),
+    ).toBeTruthy()
+    expect(
+      within(dialog).getByText(
+        "This removes carol's direct Project Lead membership on this project. Access through the organization, a team, or as the project creator stays.",
+      ),
+    ).toBeTruthy()
+    expect(within(dialog).queryByRole("heading", { name: "Remove member" })).toBeNull()
+    expect(within(dialog).queryByText(/revoke all/i)).toBeNull()
+  })
+})
+
+// AQU-853 — the in-project role control is present (this pane IS the "inside
+// the project" surface the ticket asked for), but it used to assume every
+// reader was a Maintainer: `callerMaxRole = ROLE.MAINTAINER` was hardcoded, so
+// a contributor was offered role grants the server answers 403 to, with no
+// explanation. These pin the caller-role derivation and the stated reasons.
+describe("MembersSection — caller-role gating (AQU-853)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockMembers = GATING_MEMBERS
+    mockSessionUsername = "alice"
+  })
+
+  const openRowMenu = (username: string) =>
+    fireEvent.click(screen.getByRole("button", { name: `Actions for ${username}` }))
+
+  // AQU-2289: Change role opens the one role dialog (it was a submenu).
+  const openChangeRole = (username: string) => {
+    openRowMenu(username)
+    fireEvent.click(screen.getByRole("menuitem", { name: /change role/i }))
+    const dialog = screen.getByTestId("role-dialog")
+    expect(dialog).toHaveAttribute("data-role-dialog-mode", "change")
+    expect(dialog).toHaveAttribute("data-role-level", "project")
+    fireEvent.click(within(dialog).getByRole("combobox", { name: new RegExp(`role for ${username}`, "i") }))
+    return within(screen.getByRole("listbox"))
+  }
+
+  it("offers the role picker to a maintainer, capped at their own level", () => {
+    renderSection() // alice is maintainer (600)
+    const list = openChangeRole("carol")
+    expect(list.getByRole("option", { name: /^maintainer/i })).toBeTruthy()
+    expect(list.getByRole("option", { name: /^contributor/i })).toBeTruthy()
+  })
+
+  it("never offers a role above the caller's own level", () => {
+    mockSessionUsername = "carol" // project_lead (500)
+    renderSection()
+    const list = openChangeRole("dave")
+    expect(list.getByRole("option", { name: /^project lead/i })).toBeTruthy()
+    expect(list.queryByRole("option", { name: /^maintainer/i })).toBeNull()
+  })
+
+  it("saves the new role through the dialog", async () => {
+    mockAdd.mockResolvedValue(null)
+    mockSessionUsername = "carol" // project_lead (500)
+    renderSection()
+    const list = openChangeRole("dave")
+    const reviewer = list.getByRole("option", { name: /^reviewer/i })
+    fireEvent.pointerMove(reviewer)
+    fireEvent.mouseMove(reviewer)
+    fireEvent.keyDown(reviewer, { key: "Enter" })
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(mockAdd).toHaveBeenCalledWith("dave", 300))
+  })
+
+  it("tells a below-floor caller which role is required instead of offering a doomed picker", () => {
+    mockSessionUsername = "dave" // contributor (400)
+    renderSection()
+    openRowMenu("carol")
+    expect(screen.queryByRole("menuitem", { name: /change role/i })).toBeNull()
+    expect(
+      within(screen.getByRole("menu")).getByText(/project lead or higher can change member roles/i),
+    ).toBeTruthy()
+  })
+
+  it("disables Add a member for a below-floor caller and says why", () => {
+    mockSessionUsername = "dave" // contributor (400)
+    renderSection()
+    const addButton = screen.getByRole("button", { name: /add a member/i })
+    expect(addButton).toBeDisabled()
+    // AQU-2260: said once at the top of the section, not as a hover title.
+    expect(addButton.getAttribute("title")).toBeNull()
+    expect(screen.getByTestId("settings-members-locked")).toHaveTextContent(
+      /project lead or higher can change member roles/i,
+    )
+  })
+
+  // Found by the QA bot's walk of PR #798: the row menu was capped correctly
+  // but the "Add a member" dialog still filtered PROJECT_ROLE_OPTIONS to
+  // <= MAINTAINER, so a project_lead was offered a Maintainer grant the server
+  // refuses with `role_above_caller`.
+  it("caps the Add-a-member role picker at the caller's own level too", () => {
+    mockSessionUsername = "carol" // project_lead (500)
+    renderSection()
+    fireEvent.click(screen.getByRole("button", { name: /add a member/i }))
+    fireEvent.click(screen.getByRole("combobox", { name: /role/i }))
+    expect(screen.getByRole("option", { name: /project lead/i })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: /maintainer/i })).toBeNull()
+  })
+
+  it("explains that a member at or above the caller's own role can't be changed", () => {
+    mockSessionUsername = "carol" // project_lead (500)
+    renderSection()
+    openRowMenu("alice") // maintainer (600) — outranks carol
+    expect(screen.queryByRole("menuitem", { name: /change role/i })).toBeNull()
+    expect(
+      screen.getByText(/can't change a member whose role is at or above your own/i),
+    ).toBeTruthy()
   })
 })

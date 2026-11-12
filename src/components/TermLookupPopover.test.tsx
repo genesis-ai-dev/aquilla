@@ -157,6 +157,30 @@ describe("TermLookupPopover", () => {
     expect(onViewConcept).toHaveBeenCalledWith("c1")
   })
 
+  it("shows a subscribed termbase's concept without the terminology action (AQU-1721)", () => {
+    // The concept belongs to another project's termbase. This project's
+    // Terminology page neither lists nor edits it, so the action would lead
+    // nowhere — and an edit made there would never reach the owner.
+    const onViewConcept = vi.fn()
+    const concepts: Concept[] = [
+      makeConcept({ id: "own", notes: "Own note" }),
+      makeConcept({ id: "upstream", notes: "Org note", termbaseProjectId: "org-termbase" }),
+    ]
+    render(
+      <TermLookupPopover sourceTerm="spirit" concepts={concepts} onViewConcept={onViewConcept}>
+        <span>spirit</span>
+      </TermLookupPopover>,
+    )
+    fireEvent.click(screen.getByText("spirit"))
+
+    expect(screen.getByText("Own note")).toBeInTheDocument()
+    expect(screen.getByText("Org note")).toBeInTheDocument()
+    const actions = screen.getAllByRole("button", { name: /Go to Terminology page/i })
+    expect(actions).toHaveLength(1)
+    fireEvent.click(actions[0]!)
+    expect(onViewConcept).toHaveBeenCalledWith("own")
+  })
+
   // ── Notes displayed ────────────────────────────────────────────────────────
 
   it("shows concept notes when present", () => {

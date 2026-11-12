@@ -16,13 +16,26 @@ export const error = defineNamespace({
     "error.privateMode.message":
       "Private browsing is restricting local storage. Audio will stream and play, but " +
       "waveforms and downloads can't be cached — you'll see slower loads on each visit.",
+    "error.storageNearlyFull.message":
+      "This device is almost out of storage. Your work still saves and syncs, but " +
+      "files will reload more slowly until you free up space.",
     "error.notFound.title": "Page not found",
     "error.notFound.description": "The link you followed doesn't exist or may have moved.",
     "error.notFound.goHome": "Go home",
     "error.network.contextSuffix": " for this {context}",
+    // AQU-1821: the nouns error.network.contextSuffix may be given. The three
+    // scope nouns it also needs (org / team / project) are already carried by
+    // org.access.scope.*; these are the ones no other surface names.
+    "error.network.context.user": "user",
+    "error.network.context.invite": "invite",
+    "error.network.context.changeset": "changeset",
     "error.network.badRequest": "The request was invalid{contextSuffix}. Check your input and try again.",
     "error.network.sessionExpired": "Your session expired — sign in again.",
     "error.network.forbidden": "You don't have permission to do that{contextSuffix}.",
+    "error.network.roleRequired": "You are {role} here ({origin}). {required} is required.",
+    "error.network.roleRequiredNoOrigin": "You are {role} here. {required} is required.",
+    "error.network.roleRequiredNoRole": "You don't have a role here. {required} is required.",
+    "error.network.elevationRequired": "Verify with your admin code, then try again.",
     "error.network.notFound": "That item no longer exists{contextSuffix}.",
     "error.network.conflict": "A conflict occurred{contextSuffix} — please refresh and try again.",
     "error.network.gone": "That item has been permanently removed{contextSuffix}.",
@@ -49,6 +62,27 @@ export const error = defineNamespace({
     "error.monday.removeLink": "Couldn't remove the Monday board link.",
     "error.monday.analyze": "Couldn't build a board mapping suggestion.",
     "error.monday.sync": "Couldn't push this project to Monday.",
+    "error.monday.addColumns": "Couldn't add the columns to the Monday board.",
+    "error.monday.newBoard": "Couldn't make the new board in Monday.",
+    // AQU-804: the Airtable integration (src/lib/airtable/api.ts).
+    "error.airtable.loadConnection": "Couldn't load the Airtable connection status.",
+    "error.airtable.connect": "Couldn't connect Airtable. Try again.",
+    "error.airtable.tokenRejected":
+      "Airtable didn't accept this token. Check that you copied all of it and that it hasn't been deleted.",
+    "error.airtable.missingScopes": "This token needs more access in Airtable: add {scopes} to it, then paste it again.",
+    "error.airtable.unreachable": "Couldn't reach Airtable. Try again in a minute.",
+    "error.airtable.disconnect": "Couldn't disconnect Airtable.",
+    "error.airtable.loadBases": "Couldn't load your Airtable bases.",
+    "error.airtable.loadTables": "Couldn't load that base's tables and fields.",
+    "error.airtable.noTables":
+      "This Airtable token can't see any tables yet. In Airtable, give the token access to the base you track progress in, then try again.",
+    "error.airtable.loadLink": "Couldn't load this project's Airtable table link.",
+    "error.airtable.saveLink": "Couldn't save the Airtable table link.",
+    "error.airtable.updateLink": "Couldn't update the Airtable table link.",
+    "error.airtable.removeLink": "Couldn't remove the Airtable table link.",
+    "error.airtable.analyze": "Couldn't build a field mapping suggestion.",
+    "error.airtable.sync": "Couldn't push this project to Airtable.",
+    "error.airtable.addFields": "Couldn't add the fields to the Airtable table.",
     "error.termbase.publish": "Couldn't share this termbase with the organization.",
     "error.termbase.unpublish": "Couldn't stop sharing this termbase.",
     "error.termbase.listPublished": "Couldn't load the termbases shared in this organization.",
@@ -72,6 +106,14 @@ export const error = defineNamespace({
       screenshot: "error-state",
     },
     keys: {
+      "error.airtable.missingScopes": {
+        description:
+          "Shown under the token field in Airtable settings when the pasted personal access " +
+          "token lacks a permission Aquilla needs (AQU-804).",
+        placeholders: {
+          scopes: "One or more Airtable scope names, comma-separated, exactly as Airtable spells them (e.g. 'schema.bases:read'). Never translated.",
+        },
+      },
       "error.generic.title": {
         description:
           "Heading of the generic failure panel shown when an unexpected error is " +
@@ -168,10 +210,34 @@ export const error = defineNamespace({
           "caller knows what kind of thing failed (e.g. 'project', 'invite'), e.g. " +
           "' for this project'. Never shown alone — always substituted into another " +
           "key's {contextSuffix} placeholder. Keep the leading space so it reads " +
-          "correctly appended to the sentence.",
+          "correctly appended to the sentence. AQU-1821: {context} is itself a " +
+          "translated noun from this catalogue, so translate the clause as a whole " +
+          "phrase — if your language has no translation for the noun, the app drops " +
+          "this clause rather than showing the English word.",
         placeholders: {
-          context: "Short lowercase noun naming what failed, e.g. 'project' or 'member'.",
+          context:
+            "The already-translated noun naming what failed, taken from " +
+            "org.access.scope.* or error.network.context.* — never an English word " +
+            "supplied by the code.",
         },
+      },
+      "error.network.context.user": {
+        description:
+          "AQU-1821: the noun 'user' substituted into error.network.contextSuffix's " +
+          "{context} when a request about one person's account failed. Lowercase, " +
+          "mid-sentence, and inflected as 'for this ___' requires in your language.",
+      },
+      "error.network.context.invite": {
+        description:
+          "AQU-1821: the noun 'invite' substituted into error.network.contextSuffix's " +
+          "{context} when a request about an email invitation failed. Lowercase and " +
+          "mid-sentence; the same word as the Invite surfaces use.",
+      },
+      "error.network.context.changeset": {
+        description:
+          "AQU-1821: the noun 'changeset' substituted into error.network.contextSuffix's " +
+          "{context} when a request about an agent's staged changeset failed. Lowercase " +
+          "and mid-sentence; the same word as the approval surfaces use.",
       },
       "error.network.badRequest": {
         description:
@@ -179,7 +245,12 @@ export const error = defineNamespace({
           "(sync-worker, auth-worker, agent API) shown inline or in a toast. Non-" +
           "technical — never shows the raw server validation string.",
         placeholders: {
-          contextSuffix: "Either empty, or the rendered error.network.contextSuffix string — insert exactly as given, do not add extra spacing.",
+          contextSuffix:
+            "Either empty, or the rendered error.network.contextSuffix clause — " +
+            "insert exactly as given, do not add extra spacing. AQU-1821: it is " +
+            "empty whenever the caller named no object, and also whenever this " +
+            "locale has no translation for that object's noun, so the sentence " +
+            "must read correctly on its own.",
         },
       },
       "error.network.sessionExpired": {
@@ -192,15 +263,51 @@ export const error = defineNamespace({
           "Generic message for an HTTP 403 response — the signed-in account isn't " +
           "allowed to perform the action. Non-technical, doesn't blame the user.",
         placeholders: {
-          contextSuffix: "Either empty, or the rendered error.network.contextSuffix string — insert exactly as given, do not add extra spacing.",
+          contextSuffix:
+            "Either empty, or the rendered error.network.contextSuffix clause — " +
+            "insert exactly as given, do not add extra spacing. AQU-1821: it is " +
+            "empty whenever the caller named no object, and also whenever this " +
+            "locale has no translation for that object's noun, so the sentence " +
+            "must read correctly on its own.",
         },
+      },
+      "error.network.elevationRequired": {
+        description:
+          "AQU-1322: HTTP 403 shown to a platform admin whose change was refused until they " +
+          "complete the emailed admin-code step-up. Tells them what to do next.",
+      },
+      "error.network.roleRequired": {
+        description:
+          "AQU-1352: HTTP 403 when the server says which role is required. Names the viewer's " +
+          "current role, where it came from (e.g. Direct, Via group, Org-wide), and the required role.",
+        placeholders: {
+          role: "The viewer's current role name, e.g. Contributor.",
+          origin: "Where the role comes from, e.g. 'Via group' or 'Org-wide'.",
+          required: "The role name required for the action, e.g. Maintainer.",
+        },
+      },
+      "error.network.roleRequiredNoOrigin": {
+        description: "AQU-1352: like error.network.roleRequired when the role's origin is unknown.",
+        placeholders: {
+          role: "The viewer's current role name.",
+          required: "The role name required for the action.",
+        },
+      },
+      "error.network.roleRequiredNoRole": {
+        description: "AQU-1352: HTTP 403 when the viewer holds no role at this scope.",
+        placeholders: { required: "The role name required for the action." },
       },
       "error.network.notFound": {
         description:
           "Generic message for an HTTP 404 response — the requested item is gone " +
           "or was never there.",
         placeholders: {
-          contextSuffix: "Either empty, or the rendered error.network.contextSuffix string — insert exactly as given, do not add extra spacing.",
+          contextSuffix:
+            "Either empty, or the rendered error.network.contextSuffix clause — " +
+            "insert exactly as given, do not add extra spacing. AQU-1821: it is " +
+            "empty whenever the caller named no object, and also whenever this " +
+            "locale has no translation for that object's noun, so the sentence " +
+            "must read correctly on its own.",
         },
       },
       "error.network.conflict": {
@@ -208,7 +315,12 @@ export const error = defineNamespace({
           "Generic message for an HTTP 409 response — another change landed first. " +
           "Tells the user what to do next (refresh and retry).",
         placeholders: {
-          contextSuffix: "Either empty, or the rendered error.network.contextSuffix string — insert exactly as given, do not add extra spacing.",
+          contextSuffix:
+            "Either empty, or the rendered error.network.contextSuffix clause — " +
+            "insert exactly as given, do not add extra spacing. AQU-1821: it is " +
+            "empty whenever the caller named no object, and also whenever this " +
+            "locale has no translation for that object's noun, so the sentence " +
+            "must read correctly on its own.",
         },
       },
       "error.network.gone": {
@@ -216,7 +328,12 @@ export const error = defineNamespace({
           "Generic message for an HTTP 410 response — the item was intentionally " +
           "and permanently removed (distinct from 404's 'no longer exists').",
         placeholders: {
-          contextSuffix: "Either empty, or the rendered error.network.contextSuffix string — insert exactly as given, do not add extra spacing.",
+          contextSuffix:
+            "Either empty, or the rendered error.network.contextSuffix clause — " +
+            "insert exactly as given, do not add extra spacing. AQU-1821: it is " +
+            "empty whenever the caller named no object, and also whenever this " +
+            "locale has no translation for that object's noun, so the sentence " +
+            "must read correctly on its own.",
         },
       },
       "error.network.tooManyRequests": {

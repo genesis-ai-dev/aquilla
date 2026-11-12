@@ -7,7 +7,7 @@
 // Lives on the personal Preferences page (device-scoped, like the model cache
 // itself). Project Settings links here rather than duplicating the controls.
 
-import { useEffect, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 import { CheckCircle2, AlertCircle, Download, RotateCw, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -20,15 +20,20 @@ import {
   useModelStatus,
   type ModelId,
 } from "@/lib/audio/prefetch"
-import { clearStoredConsent } from "@/lib/audio/ai-consent"
+import { clearStoredConsent, storeAiModelConsent } from "@/lib/audio/ai-consent"
 import { DEFAULT_MMS_LANGUAGE } from "@/lib/audio/tts-providers"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import {
+  setTranscriptionProvider, useTranscriptionProvider,
+} from "@/lib/audio/transcription-preference"
+import { TranscriptionModelPicker } from "./TranscriptionModelPicker"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 interface ModelMeta {
   id: ModelId
   label: string
   sizeMb: number
-  blurb: string
+  blurbKey: Parameters<ReturnType<typeof useT>>[0]
 }
 
 const MODELS: ModelMeta[] = [
@@ -38,18 +43,20 @@ const MODELS: ModelMeta[] = [
     // label below (already atomic — untranslated in every locale).
     label: "Whisper",
     sizeMb: 140,
-    blurb: "Transcribes recordings and adds word-level timing for karaoke playback.",
+    blurbKey: "audio.consent.whisper.short",
   },
   {
     id: "mms",
     label: "MMS",
     sizeMb: 130,
-    blurb: "Multilingual text-to-speech — one language model per download.",
+    blurbKey: "audio.consent.mms.short",
   },
 ]
 
 export function LocalModelsSection() {
   const t = useT()
+  const { session } = useFrontierSession()
+  const provider = useTranscriptionProvider(session?.username)
   // Derive ready-state from Cache Storage on mount so the section reflects
   // what's actually downloaded, not just what was fetched this session.
   useEffect(() => {
@@ -57,7 +64,43 @@ export function LocalModelsSection() {
   }, [])
 
   return (
-    <div id="local-models">
+    <div id="local-models" className="space-y-6">
+      <SettingsGroup label={t("settings.transcription.title")}>
+        <fieldset className="space-y-3 px-5 py-4">
+          <legend className="sr-only">{t("settings.transcription.title")}</legend>
+          <p className="text-xs text-muted-foreground">
+            {t("settings.transcription.scope")}
+          </p>
+          {(["hosted", "local"] as const).map(value => (
+            <Fragment key={value}>
+            <label className="flex items-start gap-3 text-sm">
+              <input
+                type="radio"
+                name="transcription-provider"
+                value={value}
+                checked={provider === value}
+                onChange={() => setTranscriptionProvider(session?.username, value)}
+                className="mt-1 accent-primary"
+              />
+              <span>
+                <span className="font-medium">
+                  {t(value === "hosted"
+                    ? "settings.transcription.hosted"
+                    : "settings.transcription.local")}
+                </span>
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  {t(value === "hosted"
+                    ? "settings.transcription.hostedDescription"
+                    : "settings.transcription.localDescription")}
+                </span>
+              </span>
+            </label>
+            {/* The model list belongs to the hosted option, so it sits under it. */}
+            {value === "hosted" && provider === "hosted" && <TranscriptionModelPicker />}
+            </Fragment>
+          ))}
+        </fieldset>
+      </SettingsGroup>
       <SettingsGroup label={t("projectSettings.localModels.onDeviceLabel")}>
         {MODELS.map((meta) => (
           <ModelRow key={meta.id} meta={meta} />
@@ -77,6 +120,7 @@ function ModelRow({ meta }: { meta: ModelMeta }) {
   const isError = status.kind === "error"
 
   const download = async () => {
+    storeAiModelConsent(meta.id)
     setBusy(true)
     try {
       await prefetchAiModels({
@@ -104,7 +148,7 @@ function ModelRow({ meta }: { meta: ModelMeta }) {
           <span className="text-sm font-medium">{meta.label}</span>
           <StatusBadge status={status} sizeMb={meta.sizeMb} />
         </div>
-        <p className="text-xs text-muted-foreground">{meta.blurb}</p>
+        <p className="text-xs text-muted-foreground">{t(meta.blurbKey)}</p>
         {status.kind === "downloading" && <DownloadBar loaded={status.loaded} total={status.total} />}
         {isError && <p className="text-xs text-destructive">{status.message}</p>}
       </div>

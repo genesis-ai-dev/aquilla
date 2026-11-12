@@ -74,14 +74,31 @@ vi.mock("@/lib/audio/upload", async (importOriginal) => ({
   uploadCellAudio: (...args: unknown[]) => uploadSpy(...(args as [])),
   deleteCellAudio: vi.fn(async () => {}),
 }))
-vi.mock("@/lib/audio/bytes-cache", () => ({ audioCachePutBlob: vi.fn(async () => {}) }))
+vi.mock("@/lib/audio/bytes-cache", () => ({ audioCacheGet: vi.fn(async () => null), audioCachePutBlob: vi.fn(async () => {}) }))
 vi.mock("@/lib/audio/project-audio-state", () => ({ markProjectHasAudioDataSoon: vi.fn() }))
 vi.mock("@/lib/audio/transcribe-status", () => ({ setTranscribeStatus: vi.fn() }))
 vi.mock("@/lib/audio/transcribe", () => ({ transcribeCell: vi.fn(async () => {}) }))
-vi.mock("@/lib/audio/audio-coordinator", () => ({ pushAudioShortcutOverride: () => () => {} }))
+vi.mock("@/lib/audio/audio-coordinator", () => ({
+  pushAudioShortcutOverride: () => () => {},
+  setActiveAudio: () => {},
+  clearActiveAudioIf: () => {},
+  claimActiveAudio: () => {},
+  getActiveAudio: () => null,
+}))
+// AQU-1217: the ready screen's selected-take waveform has its own suite
+// (AudioRecordingModal.ready.test.tsx); here it is inert.
+vi.mock("@/hooks/useCellAudio", () => ({
+  useCellAudio: () => ({
+    state: "idle", error: null, isPlaying: false, currentTime: 0, duration: 0,
+    peaks: null, peaksState: "idle",
+    play: async () => {}, pause: () => {}, seek: () => {}, setVolume: () => {},
+    setTrim: () => {}, requestPeaks: async () => {}, ensureBytes: async () => new Uint8Array(),
+  }),
+}))
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
 import { resetRecordingAutoAdvanceCacheForTests } from "@/lib/store/recording-auto-advance-pref"
+import { setRecordingTakesDrawerOpen } from "@/lib/store/recording-takes-drawer-pref"
 
 const project = { id: "p1", name: "P", ttsSettings: {} } as unknown as ProjectRecord
 const cell = {
@@ -158,6 +175,17 @@ describe("AudioRecordingModal — upload a file", () => {
     // The workspace hears about it exactly as it does for a recorded take, so a
     // text-less line still gets the target row that makes it countable work.
     await waitFor(() => expect(onTakeSaved).toHaveBeenCalledWith("c1"))
+  })
+
+  // AQU-1572: an upload is `audio attached`, never `audio recorded`.
+  // The emit seam counts one event per attach that carries an origin, so the
+  // upload must be exactly one attach, and it must say "attach".
+  it("reports the upload once as an attached file", async () => {
+    emitAttach.mockClear()
+    renderModal()
+    pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
+    await waitFor(() => expect(emitAttach).toHaveBeenCalledTimes(1))
+    expect(emitAttach.mock.calls[0][0]).toMatchObject({ fileId: "f1", cellId: "c1", audioOrigin: "attach", surface: "recorder" })
   })
 
   it("keeping a take leaves every way of making another one live (2026-08-13)", async () => {
@@ -328,7 +356,7 @@ describe("AudioRecordingModal — an upload stays on the line (AQU-1216)", () =>
     // Auto-advance really is on — otherwise this passes for the wrong reason,
     // and the default is the whole point (it is what the operator hit).
     fireEvent.click(screen.getByTestId("rec-settings"))
-    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "true")
 
     pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
     await waitFor(() => expect(emitAttach).toHaveBeenCalled()) // the attach DID happen
@@ -342,21 +370,38 @@ describe("AudioRecordingModal — an upload stays on the line (AQU-1216)", () =>
     expect(screen.getByTestId("rec-saved-note")).toHaveTextContent("Take 1 added")
   })
 
-  it("opens the collapsed takes list so the new take is reachable without a hunt", async () => {
+  // The drawer's resting state is a setting since 2026-09-28 (Sam); resting
+  // CLOSED is the state the take used to disappear into.
+  it("with the drawer resting closed, raises the takes so the new take is reachable without a hunt", async () => {
+    setRecordingTakesDrawerOpen(false)
+    try {
+      attachmentsState.byCellId = ONE_TAKE
+      renderTwo(filmProject)
+      expect(screen.getByTestId("rec-video")).toBeInTheDocument()
+      expect(screen.getByTestId("rec-takes-toggle")).toHaveAttribute("aria-expanded", "false")
+      expect(screen.queryByTestId("rec-takes-drawer")).toBeNull()
+
+      pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
+
+      await waitFor(() =>
+        expect(screen.getByTestId("rec-takes-toggle")).toHaveAttribute("aria-expanded", "true"),
+      )
+      // Not just the flag: the rows are actually rendered, each with the
+      // audition control that makes the take listenable on the spot.
+      expect(screen.getByTestId("take-row-audio-c1-1000.webm")).toBeInTheDocument()
+    } finally {
+      setRecordingTakesDrawerOpen(true)
+    }
+  })
+
+  it("with the drawer resting open (the default), the new take shows in it and nothing is raised", async () => {
     attachmentsState.byCellId = ONE_TAKE
     renderTwo(filmProject)
-    // The film layout, and the list starts shut — the state the take used to
-    // disappear into.
-    expect(screen.getByTestId("rec-video")).toBeInTheDocument()
-    expect(screen.getByTestId("rec-takes-toggle")).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByTestId("rec-takes-drawer")).toBeInTheDocument()
 
     pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
 
-    await waitFor(() =>
-      expect(screen.getByTestId("rec-takes-toggle")).toHaveAttribute("aria-expanded", "true"),
-    )
-    // Not just the flag: the rows are actually rendered, each with the audition
-    // control that makes the take listenable on the spot.
-    expect(screen.getByTestId("take-row-audio-c1-1000.webm")).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId("take-row-audio-c1-1000.webm")).toBeInTheDocument())
+    expect(screen.getByTestId("rec-takes-group")).toHaveAttribute("data-sheet", "down")
   })
 })

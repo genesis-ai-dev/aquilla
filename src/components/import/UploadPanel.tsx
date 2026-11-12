@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -12,12 +13,11 @@ import { t as tStandalone } from "@/lib/i18n/standalone"
 import { formatNumber } from "@/lib/i18n/format"
 import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
-import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
+import { buildSpeakerCastWrite, type SpeakerAssignment } from "@/lib/import/cast-from-speakers"
 import { v7 as uuidv7 } from "uuid"
 import { filesToProjectEntries } from "@/lib/import/file-entries"
 import { detectParatextProject, type ProjectEntry } from "@/lib/parsers/paratext-project"
 import { detectCollisions, type CollisionResult } from "@/lib/import-collision"
-import posthog from "@/lib/posthog"
 import { IMPORT_FAILED } from "@/lib/event-names"
 import type { CollisionResolution } from "./import-dialog-types"
 
@@ -103,6 +103,7 @@ function idmlParsePhase(
 }
 
 export function UploadPanel({ variant = "upload", projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter }: UploadPanelProps) {
+  const analytics = useAccountAnalytics()
   const { locale } = useI18n()
   const t = useT()
   const [importing, setImporting] = useState(false)
@@ -227,8 +228,8 @@ export function UploadPanel({ variant = "upload", projectId, username, sourceLan
           }
         } catch (err) {
           if (parseController.signal.aborted) return
-          posthog.captureException(err, { import_stage: "parse", project_id: projectId, file_exts: fileExts(list) })
-          posthog.capture(IMPORT_FAILED, {
+          analytics.captureException(err, { import_stage: "parse", project_id: projectId, file_exts: fileExts(list) })
+          analytics.capture(IMPORT_FAILED, {
             import_stage: "parse",
             project_id: projectId,
             file_exts: fileExts(list),
@@ -256,7 +257,7 @@ export function UploadPanel({ variant = "upload", projectId, username, sourceLan
       await doCommit(list, undefined, reimportFileIds)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview, onSpreadsheetFile, t]
+    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview, onSpreadsheetFile, t, analytics]
   )
 
   /** Upload all files (called after preview confirmation, or directly for media). */
@@ -295,7 +296,7 @@ export function UploadPanel({ variant = "upload", projectId, username, sourceLan
       const allRefs: FileReference[] = []
       const allSkipped: { book: string; reason: string }[] = []
       // Accumulate speaker pairs across all subtitle files in this batch.
-      const allSpeakerPairs: { cellId: string; speaker: string | undefined }[] = []
+      const allSpeakerPairs: SpeakerAssignment[] = []
       // AQU-520: byte totals so the progress UI can show "X / Y MB", not just a
       // cell count/percentage that "feels stalled" on large partner imports.
       // Totals come from the real File.size; within a file we scale by the cell
@@ -308,14 +309,9 @@ export function UploadPanel({ variant = "upload", projectId, username, sourceLan
       const persistCastAdditions = async () => {
         castAttempted = true
         if (onCastUpdated && allSpeakerPairs.some((p) => p.speaker)) {
-          const additions = buildCastAdditions(allSpeakerPairs, ttsSettings, uuidv7)
-          await onCastUpdated({
-            voices: additions.voices,
-            castAssignments: {
-              ...(ttsSettings?.castAssignments ?? {}),
-              ...additions.castAssignments,
-            },
-          })
+          // AQU-2125: a line the import named is cast by its character.
+          const cast = buildSpeakerCastWrite(allSpeakerPairs, ttsSettings, uuidv7)
+          await onCastUpdated({ voices: cast.voices, castAssignments: cast.castAssignments })
         }
       }
       try {
@@ -367,8 +363,8 @@ export function UploadPanel({ variant = "upload", projectId, username, sourceLan
         finalizationCheckpointRef.current = null
       } catch (err) {
         const message = err instanceof Error ? err.message : t("importExport.errors.importFailed")
-        posthog.captureException(err, { import_stage: "upload", project_id: projectId, file_exts: fileExts(list) })
-        posthog.capture(IMPORT_FAILED, {
+        analytics.captureException(err, { import_stage: "upload", project_id: projectId, file_exts: fileExts(list) })
+        analytics.capture(IMPORT_FAILED, {
           import_stage: "upload",
           project_id: projectId,
           file_exts: fileExts(list),
@@ -429,7 +425,7 @@ export function UploadPanel({ variant = "upload", projectId, username, sourceLan
         onCommitPhase?.("")
       }
     },
-    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError, t]
+    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError, t, analytics]
   )
 
   function handleDrop(e: React.DragEvent) {

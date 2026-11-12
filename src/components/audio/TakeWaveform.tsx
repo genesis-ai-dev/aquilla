@@ -1,0 +1,325 @@
+// A saved take, playing, drawn as the timeline chip. (AQU-1210 / AQU-1217, 2026-09-25)
+//
+// WaveformRect is the picture; this is the take behind it. It binds one
+// `useCellAudio` controller to the rectangle — peaks, position, play/pause,
+// seek — and owns the one thing every surface that shows a saved take now
+// shares: its trim.
+//
+//   - The KEPT part is what plays. Trimmed-off audio is still drawn, faded.
+//   - Where trimming is allowed (the Recording tab, the Audio view card — Sam:
+//     "trim right where you see it", which is why the Crop popover is retired)
+//     the kept part's two edges are plain lines you drag, or click and nudge
+//     with the arrow keys. The drag's value leads while you hold it; on release
+//     the caller persists it and the stored trim catches up.
+//   - Where it is only shown (the recorder's ready screen) the edges are grey
+//     and inert.
+//   - An imported SOURCE-AUDIO section is not a take: its window is the
+//     section's own timing. It is drawn as that section alone and never
+//     offers edges — retime the section on the timeline instead.
+//
+// Needs-a-click, missing and failed are CellWaveform's states, carried over
+// unchanged (the design pass parked restyling them). Loading is a placeholder
+// shape pulsing where the take will be drawn (2026-10-01).
+
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { AlertCircle, CloudDownload, CloudOff, Download, RotateCw } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
+import { WAVEFORM_BINS, autoLoadsPeaks } from "@/lib/audio/peaks-loader"
+import {
+  formatTrimTime,
+  moveTrimEnd,
+  moveTrimStart,
+  sameTrim,
+  TRIM_NUDGE_COARSE_SEC,
+  TRIM_NUDGE_SEC,
+  type TrimValue,
+} from "@/lib/audio/trim-edit"
+import type { KeptWindow, PiecesWindow } from "@/lib/audio/kept-window"
+import type { UseCellAudioResult } from "@/hooks/useCellAudio"
+import type { AudioMediaStrategy } from "@/lib/parsers/types"
+import { WaveformRect, type WaveformEdge } from "./WaveformRect"
+
+
+export interface TakeWaveformProps {
+  controller: UseCellAudioResult
+  /** Identifies the take, so a drag in progress never leaks onto the next one. */
+  audioId: string | null | undefined
+  kept: KeptWindow
+  /**
+   * AQU-1767: a split take — its pieces lit, the cuts marked, the space
+   * between them faded and skipped in playback. `kept` then runs from the
+   * first piece's start to the last's end. No trim edges: trim each piece.
+   */
+  pieces?: PiecesWindow
+  height: number
+  kind?: "take" | "generated"
+  /** The take's track colour (take-colors.ts); grey when absent. */
+  trackVars?: Record<string, string>
+  /** The project's media strategy: "stream"/"manual" wait for a click. */
+  strategy?: AudioMediaStrategy
+  /** Offer draggable trim edges. Ignored for a source-audio section. */
+  trimEditable?: boolean
+  /**
+   * AQU-1767: how far each edge may be trimmed back OUT, in seconds — a piece
+   * of a split take stops at its neighbouring piece. Null = the clip's end.
+   */
+  trimLimits?: { minStart: number | null; maxEnd: number | null }
+  /** Persist a finished drag or nudge. Null = back to the clip's edge. */
+  onCommitTrim?: (start: number | null, end: number | null) => void
+  /**
+   * AQU-1642 follow-up (Sam, 2026-10-17): the Audio view, where the bottom
+   * bar's player is this take's player. `kind` is what it is doing on this
+   * take (null: elsewhere, or stopped) and `sec` where, on the clip's clock —
+   * drawn while it waits as well as while it plays. The corner button is Play,
+   * and Stop while it plays here; a click along the body puts the place there.
+   */
+  run?: {
+    kind: "playing" | "loading" | "paused" | null
+    sec: number | null
+    onPress: () => void
+    onPick: (atSeconds: number) => void
+  } | null
+  onRecord?: () => void
+  recordLabel?: string
+  recordGlyph?: React.ReactNode
+  /**
+   * Replaces the missing-audio sentence. The voice card uses it to offer
+   * Generate on a take whose bytes are gone.
+   */
+  missingAction?: ReactNode
+  validation?: "self" | "full" | null
+  className?: string
+  testId?: string
+  children?: React.ReactNode
+}
+
+export function TakeWaveform({
+  controller,
+  audioId,
+  kept,
+  pieces,
+  height,
+  kind = "take",
+  trackVars,
+  strategy = "lazy",
+  trimEditable = false,
+  trimLimits,
+  onCommitTrim,
+  run = null,
+  onRecord,
+  recordLabel,
+  recordGlyph,
+  missingAction,
+  validation = null,
+  className,
+  testId,
+  children,
+}: TakeWaveformProps) {
+  const t = useT()
+  const { peaks, peaksState, currentTime, duration, isPlaying, state, error, play, pause, seek, setTrim, requestPeaks } = controller
+
+  // ── Peaks, on the project's terms ────────────────────────────────────
+  const [userTriggered, setUserTriggered] = useState(false)
+  const shouldLoad = autoLoadsPeaks(strategy) || userTriggered
+  useEffect(() => {
+    if (shouldLoad) void requestPeaks(WAVEFORM_BINS)
+  }, [shouldLoad, requestPeaks, audioId])
+
+  // ── The trim: stored, with a drag leading it ──────────────────────────
+  const isSection = kept.kind === "section"
+  const stored: TrimValue = { start: kept.start, end: kept.end }
+  const [draft, setDraftState] = useState<(TrimValue & { audioId: string | null | undefined }) | null>(null)
+  // The commit fires in the same event as the last nudge, before React has
+  // re-rendered — so it reads the draft from here, never from a stale closure.
+  const draftRef = useRef<TrimValue | null>(null)
+  const setDraft = (v: (TrimValue & { audioId: string | null | undefined }) | null) => {
+    draftRef.current = v
+    setDraftState(v)
+  }
+  const live = draft && draft.audioId === audioId && !sameTrim(draft, stored) ? draft : null
+  const trim: TrimValue = live ?? stored
+  // AQU-1767: a split take's gaps ride with the window, so the player skips
+  // them itself — on every frame, on a click and on play — whichever of the
+  // take's players is the one sounding.
+  const gapsKey = pieces?.gaps.map((g) => `${g.start}-${g.end}`).join(",") ?? ""
+  useEffect(() => {
+    setTrim(trim.start, trim.end, pieces?.gaps)
+    // audioId: the controller drops its window when the take changes, so an
+    // identical window on the new take must re-apply.
+  }, [setTrim, trim.start, trim.end, audioId, gapsKey]) // eslint-disable-line react-hooks/exhaustive-deps -- gapsKey stands for pieces.gaps
+
+  // ── What is drawn: the whole clip, or a source section's slice of it ──
+  const dur = duration > 0 ? duration : 0
+  const viewStart = isSection ? (kept.start ?? 0) : 0
+  const viewEnd = isSection ? (kept.end ?? dur) : dur
+  const viewLen = Math.max(0, viewEnd - viewStart)
+  const drawnPeaks = useMemo(() => {
+    if (!peaks || peaks.length === 0) return peaks
+    if (!isSection || !(dur > 0)) return peaks
+    const n = peaks.length
+    const a = Math.max(0, Math.floor((viewStart / dur) * n))
+    const b = Math.min(n, Math.max(a + 1, Math.ceil((viewEnd / dur) * n)))
+    return peaks.slice(a, b)
+  }, [peaks, isSection, dur, viewStart, viewEnd])
+  const toFrac = (sec: number) => (viewLen > 0 ? (sec - viewStart) / viewLen : 0)
+  // Still on its way — downloading, waiting its turn to decode, decoding. The
+  // frame before the request starts counts too, or every take would flash flat
+  // first. (A flat body read as a silent take: the 3G pass, Sam 2026-10-01.)
+  const shapeLoading = !(drawnPeaks && drawnPeaks.length > 0) &&
+    (peaksState === "loading" || (peaksState === "idle" && shouldLoad && Boolean(audioId)))
+
+  const keep = !isSection && dur > 0 && (trim.start != null || trim.end != null)
+    ? { start: toFrac(trim.start ?? 0), end: toFrac(trim.end ?? dur) }
+    : null
+
+  const gaps = pieces && dur > 0 ? pieces.gaps.map((g) => ({ start: toFrac(g.start), end: toFrac(g.end) })) : undefined
+
+  // ── Edges ─────────────────────────────────────────────────────────────
+  const canEdit = !pieces && trimEditable && !isSection && dur > 0 && Boolean(onCommitTrim)
+  const showReadOnly = !canEdit && !isSection && dur > 0 && kept.kind === "trim"
+  // The save paints the new window at once (an optimistic overlay, in the same
+  // event), so the drag's own value can retire as it is handed over.
+  // A drag that ends where it began saves nothing.
+  const commit = (v: TrimValue) => {
+    if (!sameTrim(v, stored)) onCommitTrim?.(v.start, v.end)
+    setDraft(null)
+  }
+  const atLeastMinStart = (sec: number) => (trimLimits?.minStart != null ? Math.max(sec, trimLimits.minStart) : sec)
+  const atMostMaxEnd = (sec: number) => (trimLimits?.maxEnd != null ? Math.min(sec, trimLimits.maxEnd) : sec)
+  const trimEdges: WaveformEdge[] = canEdit || showReadOnly
+    ? [
+        {
+          key: "start",
+          at: toFrac(trim.start ?? 0),
+          label: t("editor.waveform.trimStart"),
+          valueText: formatTrimTime(trim.start ?? 0),
+          editable: canEdit,
+          onDrag: (f) => setDraft({ audioId, ...moveTrimStart(trim, atLeastMinStart(f * dur), dur) }),
+          onNudge: (dir, coarse) => {
+            const next = moveTrimStart(trim, atLeastMinStart((trim.start ?? 0) + dir * (coarse ? TRIM_NUDGE_COARSE_SEC : TRIM_NUDGE_SEC)), dur, { snap: false })
+            setDraft({ audioId, ...next })
+          },
+          onCommit: () => { if (draftRef.current) commit(draftRef.current) },
+        },
+        {
+          key: "end",
+          at: toFrac(trim.end ?? dur),
+          label: t("editor.waveform.trimEnd"),
+          valueText: formatTrimTime(trim.end ?? dur),
+          editable: canEdit,
+          onDrag: (f) => setDraft({ audioId, ...moveTrimEnd(trim, atMostMaxEnd(f * dur), dur) }),
+          onNudge: (dir, coarse) => {
+            const next = moveTrimEnd(trim, atMostMaxEnd((trim.end ?? dur) + dir * (coarse ? TRIM_NUDGE_COARSE_SEC : TRIM_NUDGE_SEC)), dur, { snap: false })
+            setDraft({ audioId, ...next })
+          },
+          onCommit: () => { if (draftRef.current) commit(draftRef.current) },
+        },
+      ]
+    : []
+  // AQU-1767: a split take's cuts, as read-only lines.
+  const cutEdges: WaveformEdge[] = pieces && dur > 0
+    ? pieces.cuts.map((at) => ({ key: `cut-${at}`, at: toFrac(at), label: t("editor.recordingTab.cutAt"), valueText: formatTrimTime(at), editable: false, dashed: true }))
+    : []
+  const edges = cutEdges.length > 0 ? [...trimEdges, ...cutEdges] : trimEdges
+
+  // ── Status overlays (CellWaveform's, unchanged) ───────────────────────
+  const needsClick = !shouldLoad && peaksState === "idle"
+  const status = needsClick ? (
+    <button
+      type="button"
+      onClick={() => setUserTriggered(true)}
+      className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground"
+    >
+      <Download className="h-3 w-3" />
+      <span>{t("editor.waveform.load")}</span>
+    </button>
+  ) : peaksState === "offline" ? (
+    <span role="status" data-testid="audio-offline-unavailable" className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+      <CloudOff className="h-3 w-3" aria-hidden />
+      {t("audio.error.notAvailableOffline")}
+    </span>
+  ) : peaksState === "missing" ? (
+    missingAction ?? (
+      <span role="status" className="text-[10px] font-medium text-muted-foreground">{MISSING_AUDIO_MESSAGE}</span>
+    )
+  ) : peaksState === "error" ? (
+    <button
+      type="button"
+      onClick={() => { setUserTriggered(true); void requestPeaks(WAVEFORM_BINS, { force: true }) }}
+      aria-label={t("editor.waveform.retry")}
+      title={t("editor.waveform.retryTooltip")}
+      className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-medium text-amber-700 transition-colors hover:bg-amber-500/10 dark:text-amber-300"
+    >
+      <RotateCw className="h-3 w-3" />
+      <span>{t("editor.waveform.retry")}</span>
+    </button>
+  ) : null
+
+  // AQU-1642 follow-up: the bar's player is this take's — unless the take's own
+  // player is the one sounding (a fresh take playing itself after Generate).
+  const viaRun = run != null && !isPlaying
+  const runSounding = viaRun && (run.kind === "playing" || run.kind === "loading")
+  const playGlyph = viaRun
+    ? (run.kind === "loading" ? <Spinner className="size-2.5" /> : undefined)
+    : state === "loading"
+    ? <Spinner className="size-2.5" />
+    : state === "error" && error?.kind === "offline-unavailable"
+      ? <CloudOff className="h-2.5 w-2.5 text-muted-foreground" />
+      : state === "error"
+      ? <AlertCircle className="h-2.5 w-2.5 text-destructive" />
+      : state === "cloud" && !isPlaying
+        ? <CloudDownload className="h-2.5 w-2.5" />
+        : undefined
+
+  return (
+    <WaveformRect
+      peaks={drawnPeaks}
+      height={height}
+      kind={kind}
+      trackVars={trackVars}
+      keep={keep}
+      gaps={gaps}
+      playing={viaRun ? runSounding : isPlaying}
+      progress={viaRun
+        ? (run.sec != null && viewLen > 0 ? toFrac(run.sec) : null)
+        : (viewLen > 0 ? toFrac(currentTime) : null)}
+      holdProgress={viaRun}
+      onTogglePlay={() => {
+        if (viaRun) run.onPress()
+        else if (isPlaying) {
+          pause()
+          // In the Audio view the corner button stops: back to the start.
+          if (run) seek(trim.start ?? 0)
+        } else void play()
+      }}
+      playLabel={t("editor.audio.play")}
+      // A pause wherever the button pauses; in the Audio view it stops (Sam).
+      stopLabel={run ? t("common.stop") : t("common.pause")}
+      playGlyph={playGlyph}
+      playDisabled={!viaRun && state === "loading"}
+      onRecord={onRecord}
+      recordLabel={recordLabel}
+      recordGlyph={recordGlyph}
+      validation={validation}
+      validationLabel={validation === "full"
+        ? t("workspace.targetAudioLane.takeValidated")
+        : t("workspace.targetAudioLane.takeValidatedByYou")}
+      onSeek={viewLen > 0
+        ? (f) => (viaRun ? run.onPick(viewStart + f * viewLen) : seek(viewStart + f * viewLen))
+        : undefined}
+      seekLabel={t("common.seek")}
+      edges={edges}
+      status={status}
+      loading={shapeLoading}
+      className={className}
+      testId={testId}
+    >
+      {state === "error" && error && (
+        <span className="sr-only" role="status">{error.message}</span>
+      )}
+      {children}
+    </WaveformRect>
+  )
+}

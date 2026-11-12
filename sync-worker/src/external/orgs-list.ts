@@ -65,6 +65,11 @@ export async function listOrgsForCredential(
     sql += ` AND o.id::text = ?`
     binds.push(cred.orgId)
   }
+  if (cred.orgIds !== undefined) {
+    if (cred.orgIds.length === 0) return []
+    sql += ` AND o.id::text IN (${cred.orgIds.map(() => '?').join(', ')})`
+    binds.push(...cred.orgIds)
+  }
   if (cred.projectId !== null) {
     // A project-scoped credential sees exactly the org owning that project.
     // An org-less (personal) project makes the subquery NULL, so nothing

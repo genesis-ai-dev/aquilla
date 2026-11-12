@@ -4,6 +4,13 @@ export type SchemaTable = {
   columns: Array<{ name: string; def: string }>
 }
 
+export type SchemaView = {
+  /** Unqualified view name, lower-cased — what DROP VIEW needs. */
+  name: string
+  /** Full CREATE VIEW statement, with OR REPLACE forced in. */
+  createSql: string
+}
+
 function sqlParenthesisDelta(line: string): number {
   let delta = 0
   let inSingleQuote = false
@@ -48,19 +55,23 @@ const TABLE_CONSTRAINT_KEYWORDS = new Set([
  * deploys on a comma-splitting parse of the same file): blocks open with
  * `CREATE TABLE name (` and close with `);`. Entries are comma-separated; a
  * column or constraint may wrap onto continuation lines (e.g. a DEFAULT
- * expression), which are folded into the entry that opened them. Index
- * statements may span lines and are accumulated through their semicolon.
+ * expression), which are folded into the entry that opened them. Index and
+ * view statements may span lines and are accumulated through their semicolon;
+ * views come back in file order, which is also their dependency order.
  */
 export function parsePgSchema(sql: string): {
   tables: Map<string, SchemaTable>
   indexesByTable: Map<string, string[]>
+  views: SchemaView[]
 } {
   const tables = new Map<string, SchemaTable>()
   const indexesByTable = new Map<string, string[]>()
+  const views: SchemaView[] = []
   let current: SchemaTable | null = null
   let block: string[] = []
   let tableDepth = 0
   let pendingIndex: string[] | null = null
+  let pendingView: string[] | null = null
   // Entry tracking: a top-level line starts a new column/constraint only when
   // the previous entry was closed by a trailing comma; otherwise it continues
   // the open entry. openColumn is that entry when it is a column (null for
@@ -83,6 +94,20 @@ export function parsePgSchema(sql: string): {
     if (!indexesByTable.has(tableName)) indexesByTable.set(tableName, [])
     indexesByTable.get(tableName)!.push(idempotent)
   }
+  const recordView = (lines: string[]): void => {
+    const statement = lines.join("\n").trim()
+    const view = statement.match(
+      /^CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+([A-Za-z_][A-Za-z0-9_]*)/i,
+    )
+    if (!view) return
+    views.push({
+      name: view[1].toLowerCase(),
+      createSql: statement.replace(
+        /^CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+/i,
+        "CREATE OR REPLACE VIEW ",
+      ),
+    })
+  }
   for (const raw of sql.split("\n")) {
     const line = raw.replace(/--.*$/, "").trimEnd()
     const trimmed = line.trim()
@@ -92,6 +117,14 @@ export function parsePgSchema(sql: string): {
         if (trimmed.endsWith(";")) {
           recordIndex(pendingIndex)
           pendingIndex = null
+        }
+        continue
+      }
+      if (pendingView) {
+        if (trimmed) pendingView.push(trimmed)
+        if (trimmed.endsWith(";")) {
+          recordView(pendingView)
+          pendingView = null
         }
         continue
       }
@@ -112,6 +145,13 @@ export function parsePgSchema(sql: string): {
         if (trimmed.endsWith(";")) {
           recordIndex(pendingIndex)
           pendingIndex = null
+        }
+      }
+      if (/^CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\b/i.test(trimmed)) {
+        pendingView = [trimmed]
+        if (trimmed.endsWith(";")) {
+          recordView(pendingView)
+          pendingView = null
         }
       }
       continue
@@ -150,5 +190,5 @@ export function parsePgSchema(sql: string): {
     }
     current.columns.push(openColumn)
   }
-  return { tables, indexesByTable }
+  return { tables, indexesByTable, views }
 }

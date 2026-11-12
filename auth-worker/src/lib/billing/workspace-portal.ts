@@ -1,13 +1,14 @@
+import { stripeLiveMode, workspaceBillingMode } from './environment'
 import { z } from 'zod'
 import type { Env } from '../../types'
 import { catalogSchema, readValidatedBillingCatalog } from './catalog'
 import type { BillingWorkspace } from '../../../../db/shared/billing-workspace'
 import { stripeForm } from './stripe'
 import { readWorkspaceEntitlement } from './workspace'
-import { sandboxReturnOrigin, workspaceCheckoutRehearsalEnabled, WorkspaceCheckoutConflict } from './workspace-checkout'
+import { sandboxReturnOrigin, WorkspaceCheckoutConflict } from './workspace-checkout'
 
 const configurationSchema = z.object({
-  id: z.string(), active: z.literal(true), livemode: z.literal(false),
+  id: z.string(), active: z.literal(true), livemode: z.boolean(),
   features: z.object({
     invoice_history: z.object({ enabled: z.literal(true) }),
     payment_method_update: z.object({ enabled: z.literal(true) }),
@@ -29,7 +30,7 @@ const configurationSchema = z.object({
 export async function startWorkspacePortalRehearsal(
   env: Env, orgId: number, requestUrl: string,
 ) {
-  if (!workspaceCheckoutRehearsalEnabled(env, requestUrl)) throw new Error('Portal disabled')
+  if (!workspaceBillingMode(env, requestUrl)) throw new Error('Portal disabled')
   const stored = await readWorkspaceEntitlement(env.AQUILLA_PG, orgId)
   if (!stored) throw new WorkspaceCheckoutConflict('No workspace subscription to manage')
   const configuration = stored.scope === 'personal'
@@ -50,7 +51,7 @@ export async function startWorkspacePortalRehearsal(
   if (account.id !== attempt.account_id) throw new Error('Stripe account mismatch')
   const portal = configurationSchema.parse(await stripeForm(env, 'GET',
     `/billing_portal/configurations/${configuration}?expand%5B%5D=features.subscription_update.products`))
-  if (portal.id !== configuration) throw new Error('Portal configuration mismatch')
+  if (portal.id !== configuration || portal.livemode !== stripeLiveMode(env)) throw new Error('Portal configuration mismatch')
   const update = portal.features.subscription_update
   const cancel = portal.features.subscription_cancel
   if (update.enabled || cancel.enabled) {
@@ -79,7 +80,7 @@ export async function startWorkspacePortalRehearsal(
   const subscription = await stripeForm(env, 'GET',
     `/subscriptions/${encodeURIComponent(stored.stripe_subscription_id)}`)
   const metadata = subscription.metadata as Record<string, unknown> | undefined
-  if (subscription.id !== stored.stripe_subscription_id || subscription.livemode !== false
+  if (subscription.id !== stored.stripe_subscription_id || subscription.livemode !== stripeLiveMode(env)
     || subscription.customer !== stored.stripe_customer_id
     || metadata?.checkoutAttemptId !== attempt.id || metadata?.orgId !== String(orgId)) {
     throw new Error('Subscription customer mismatch')
@@ -88,16 +89,16 @@ export async function startWorkspacePortalRehearsal(
     customer: stored.stripe_customer_id, configuration, return_url: returnUrl,
   })
   const url = typeof session.url === 'string' ? new URL(session.url) : null
-  if (session.livemode !== false || session.customer !== stored.stripe_customer_id
+  if (session.livemode !== stripeLiveMode(env) || session.customer !== stored.stripe_customer_id
     || session.configuration !== configuration || session.return_url !== returnUrl
     || !url || url.protocol !== 'https:' || url.hostname !== 'billing.stripe.com'
     || url.username || url.password || url.port) throw new Error('Invalid portal session')
-  return { url: url.toString(), sandbox: true }
+  return { url: url.toString(), sandbox: !stripeLiveMode(env) }
 }
 
 /** Summary capability only; session creation still verifies live Stripe facts. */
 export function workspacePortalAvailable(env: Env, requestUrl: string, workspace: BillingWorkspace) {
-  if (!workspace.entitlement || !workspaceCheckoutRehearsalEnabled(env, requestUrl)) return false
+  if (!workspace.entitlement || !workspaceBillingMode(env, requestUrl)) return false
   try {
     const catalog = catalogSchema.parse(JSON.parse(env.STRIPE_PRICE_CATALOG ?? 'null'))
     const id = workspace.entitlement.scope === 'personal'

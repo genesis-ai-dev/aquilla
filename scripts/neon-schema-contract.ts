@@ -130,12 +130,21 @@ export function expectedSchemaContract(schemaSql: string, migrationSql: string[]
     if (!policies.has(table)) policies.set(table, new Set())
     policies.get(table)!.add(policy)
   }
+  // One GRANT may name several tables, and `TABLE` is optional — 0034 grants 30
+  // tables in a single comma-separated statement and 0090 omits the keyword.
+  // The original single-identifier pattern matched neither, so `pnpm neon:status`
+  // silently verified no grant for any table granted that way (2026-09-28 OPSEC
+  // review). Privileges are `[A-Z,\s]+` rather than `[^;]+?` so that
+  // `GRANT EXECUTE ON FUNCTION f(TEXT) TO app_runtime;` still doesn't match.
   const grants = new Map<string, Set<string>>()
-  for (const match of migrations.matchAll(/GRANT\s+([^;]+?)\s+ON\s+TABLE\s+("?[A-Za-z_][A-Za-z0-9_]*"?)\s+TO\s+app_runtime\s*;/gi)) {
-    const table = match[2].replaceAll('"', "").toLowerCase()
-    if (!grants.has(table)) grants.set(table, new Set())
-    match[1].split(",").map((value) => value.trim().toUpperCase()).filter(Boolean)
-      .forEach((privilege) => grants.get(table)!.add(privilege))
+  const GRANT_RE =
+    /GRANT\s+([A-Za-z,\s]+?)\s+ON\s+(?:TABLE\s+)?((?:"?[A-Za-z_][A-Za-z0-9_]*"?\s*,\s*)*"?[A-Za-z_][A-Za-z0-9_]*"?)\s+TO\s+app_runtime\s*;/gi
+  for (const match of migrations.matchAll(GRANT_RE)) {
+    const privileges = match[1].split(",").map((value) => value.trim().toUpperCase()).filter(Boolean)
+    for (const table of identifiers(match[2])) {
+      if (!grants.has(table)) grants.set(table, new Set())
+      for (const privilege of privileges) grants.get(table)!.add(privilege)
+    }
   }
 
   return { tables, constraints, indexes, rls, policies, grants }

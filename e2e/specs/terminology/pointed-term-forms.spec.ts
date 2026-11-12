@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url"
 import { test, expect } from "../../helpers/multi-user"
 import { Glossary } from "../../helpers/page-objects/Glossary"
 import { readProjectSettings } from "../../helpers/frontier-api"
@@ -37,7 +38,7 @@ const VARIANT_POINTING = "הָאָֽרֶץ"
 test("pointed term matches variant pointing and prefixes; exclusion sticks", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), {
     name: `Forms ${Date.now()}`,
-    fixturePath: new URL("../../fixtures/genesis-1-pointed.md", import.meta.url).pathname,
+    fixturePath: fileURLToPath(new URL("../../fixtures/genesis-1-pointed.md", import.meta.url)),
   })
   await openSeededProject(alice, seeded)
 
@@ -53,25 +54,23 @@ test("pointed term matches variant pointing and prefixes; exclusion sticks", asy
   await expect(glossary.formChip(VARIANT_POINTING, "included")).toBeVisible()
   await expect(glossary.formsChips()).toHaveCount(1)
 
-  // ── Project affix inventory (settings → AI & completion → Terminology) ─────
+  // ── Project affix inventory (settings → AI → Terminology) ─────
   await alice.goto(`/project/${seeded.projectId}/settings/ai`)
   // The "Prefixes and suffixes" group renders its label as body text, not a
   // heading — the preset trigger is the section's stable landmark.
   const loadPreset = alice.getByRole("button", { name: "Load preset", exact: true })
   await expect(loadPreset).toBeVisible({ timeout: 15_000 })
-  await loadPreset.click()
-  await alice.getByRole("menuitem", { name: "Hebrew", exact: true }).click()
-  // The preset is loaded into the form, not yet persisted. Assert on the
-  // inseparable ב: the waw this journey actually needs appears in BOTH the
-  // prefix and suffix lists, so its chip is not a unique locator.
-  await expect(alice.getByRole("button", { name: "Remove ב", exact: true })).toBeVisible()
-
+  // AQU-2262: no Save bar; loading the preset saves it.
   const settingsSaved = alice.waitForResponse(
     (response) =>
       response.request().method() === "PATCH"
       && /\/api\/v2\/projects\/[^/]+\/settings$/.test(new URL(response.url()).pathname),
   )
-  await alice.getByRole("button", { name: "Save changes", exact: true }).click()
+  await loadPreset.click()
+  await alice.getByRole("menuitem", { name: "Hebrew", exact: true }).click()
+  // Assert on the inseparable ב: the waw this journey actually needs appears
+  // in BOTH the prefix and suffix lists, so its chip is not a unique locator.
+  await expect(alice.getByRole("button", { name: "Remove ב", exact: true })).toBeVisible()
   expect(
     (await settingsSaved).ok(),
     "project shared-settings PATCH (termMatching) failed",

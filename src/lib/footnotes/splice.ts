@@ -95,3 +95,69 @@ export function updateFootnoteRaw(raw: string, newText: string): string {
   // No translatable field yet: append one before the closing \f*
   return raw.replace(/\\f\*$/, `\\ft ${newText}\\f*`)
 }
+
+/**
+ * The slice of the Add Footnote dialog's anchor this module needs: the text the
+ * dialog previewed BEFORE the marker. `FootnoteInsertionAnchor` (TranslatedEditor)
+ * satisfies it structurally, so the component does not have to reshape its anchor
+ * and this module does not have to import from the editor.
+ */
+export interface FootnoteMarkerAnchor {
+  previewBefore?: string
+}
+
+/**
+ * Insert a freshly built `\f...\f*` marker into `cellText` where the Add
+ * Footnote dialog previewed it.
+ *
+ * AQU-2206: the dialog's autofocused text field pulls focus out of the cell, the
+ * editor's blur deactivates the cell, and the row swaps the live editor for the
+ * read-only target surface. By the time Add runs there is no editor to insert
+ * into, so the row commits the stored text itself — and it used to do that by
+ * APPENDING the marker, which put every footnote at the end of the cell no
+ * matter what the preview promised (AQU-2173 fixed the anchor capture; the
+ * anchor was then thrown away here).
+ *
+ * The anchor's `previewBefore` is exactly the text the dialog rendered to the
+ * left of the marker, so splicing at its length makes the result agree with the
+ * preview by construction.
+ */
+export function insertFootnoteMarkerAtAnchor(
+  cellText: string,
+  marker: string,
+  anchor: FootnoteMarkerAnchor | null | undefined,
+): string {
+  const offset = footnoteMarkerOffset(cellText, anchor)
+  return cellText.slice(0, offset) + marker + cellText.slice(offset)
+}
+
+function footnoteMarkerOffset(
+  cellText: string,
+  anchor: FootnoteMarkerAnchor | null | undefined,
+): number {
+  const before = anchor?.previewBefore
+  // No anchor at all, or one the editor could not preview: the dialog showed the
+  // marker at the end of the cell, so that is where it belongs. This is also the
+  // never-focused row (anchor `source: "end"`), whose previewBefore is the whole
+  // cell and lands here anyway.
+  if (before === undefined) return cellText.length
+  // Only splice while the stored text still carries that prefix. If it does not,
+  // the cell changed underneath the open dialog (a remote edit landing between
+  // open and Add) and the previewed position no longer describes this text —
+  // appending is wrong, but it cannot overwrite the other edit.
+  if (!cellText.startsWith(before)) return cellText.length
+  return offsetOutsideExistingFootnote(cellText, before.length)
+}
+
+/**
+ * Never let an insertion point land in the middle of an existing `\f...\f*`
+ * span: splicing there would break both markers. The containing note's end is
+ * the nearest position that keeps the cell's USFM parseable.
+ */
+function offsetOutsideExistingFootnote(cellText: string, offset: number): number {
+  for (const footnote of extractUsfmFootnotes(cellText)) {
+    const end = footnote.index + footnote.raw.length
+    if (offset > footnote.index && offset < end) return end
+  }
+  return offset
+}

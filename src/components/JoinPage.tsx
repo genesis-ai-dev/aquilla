@@ -1,9 +1,11 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useEffect, useState, type ReactNode } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { AlertCircle, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { AuthPage, AuthPanel } from "@/components/auth/AuthPage"
 import {
   acceptServerInvite,
   previewServerInvite,
@@ -18,7 +20,6 @@ import { isJwtExpired } from "@/lib/frontier/auth"
 import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
-import posthog from "@/lib/posthog"
 import { INVITE_REDEEMED } from "@/lib/event-names"
 import { RoleLabel } from "@/components/RoleLabel"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -45,6 +46,7 @@ type PreviewLoadState = null | InvitePreviewFailReason
  * must be signed in.
  */
 export function JoinPage() {
+  const analytics = useAccountAnalytics()
   const t = useT()
   const { token } = useParams<{ token: string }>()
   const navigate = useNavigate()
@@ -60,6 +62,8 @@ export function JoinPage() {
   // null = still loading; string = failed with that reason
   const [previewLoadState, setPreviewLoadState] = useState<PreviewLoadState>(null)
   const [authMode, setAuthMode] = useState<AuthMode>("login")
+  // AQU-1345: the identifier sign-up refused, carried into the sign-in form.
+  const [loginPrefill, setLoginPrefill] = useState<string | null>(null)
   const [rejectedJwt, setRejectedJwt] = useState<string | null>(null)
 
   // Fetch invite preview (public). Try the multi-project endpoint first — it
@@ -125,7 +129,7 @@ export function JoinPage() {
     // (one row) — then fall back to the legacy single-project accept.
     const multi = await acceptMultiInvite(jwt, token)
     if (multi.ok && multi.data.accepted.length > 0) {
-      posthog.capture(INVITE_REDEEMED, {
+      analytics.capture(INVITE_REDEEMED, {
         invite_kind: "multi",
         project_count: multi.data.accepted.length,
         project_id: multi.data.accepted[0].projectId,
@@ -135,7 +139,7 @@ export function JoinPage() {
     }
     const single = await acceptServerInvite(jwt, token)
     if (single.ok) {
-      posthog.capture(INVITE_REDEEMED, {
+      analytics.capture(INVITE_REDEEMED, {
         invite_kind: "single",
         project_count: 1,
         project_id: single.data.projectId,
@@ -249,10 +253,10 @@ export function JoinPage() {
     ) : null
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
+    <AuthPage>
+      <AuthPanel>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
+          <CardTitle role="heading" aria-level={1} className="flex items-center gap-2">
             <Users className="h-5 w-5" />
             {(showPreviewCard || showConfirmCard) && !previewFailed
               ? t("auth.join.invitedTitle")
@@ -350,6 +354,7 @@ export function JoinPage() {
                     <FrontierLoginForm
                       onSuccess={() => {}}
                       onForgotPassword={() => setAuthMode("forgot")}
+                      initialUsername={loginPrefill}
                     />
                     <p className="text-center text-xs text-muted-foreground">
                       {t("auth.login.newHerePrefix")}{" "}
@@ -376,7 +381,14 @@ export function JoinPage() {
                           : t("auth.join.emailUnboundNote")}
                       </p>
                     )}
-                    <FrontierSignupForm onSuccess={() => {}} initialEmail={boundEmail} />
+                    <FrontierSignupForm
+                      onSuccess={() => {}}
+                      initialEmail={boundEmail}
+                      onSwitchToLogin={(identifier) => {
+                        setLoginPrefill(identifier)
+                        setAuthMode("login")
+                      }}
+                    />
                     <p className="text-center text-xs text-muted-foreground">
                       {t("auth.join.alreadyHaveAccount")}{" "}
                       <button
@@ -416,8 +428,8 @@ export function JoinPage() {
             <p className="text-sm text-muted-foreground">{t("auth.join.initializing")}</p>
           )}
         </CardContent>
-      </Card>
-    </div>
+      </AuthPanel>
+    </AuthPage>
   )
 }
 

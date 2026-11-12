@@ -10,8 +10,8 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import type { Env, Variables } from "../types"
-import { admitChatUsage, settleChatUsage, type ChatUsage } from "../lib/billing/chat-usage"
-import { weeklyUsageActive } from "../lib/billing/usage-mode"
+import { openRouterEstimate, providerRejectedPreModel, releaseChatUsage, settleChatUsage } from "../lib/billing/chat-usage"
+import { admitPaidCall } from "../lib/billing/paid-call"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
 import { creditGuard, recordCredit } from "../lib/credits"
@@ -21,6 +21,11 @@ import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { openRouterExtras } from "../lib/llm-vendor"
 import { resolveProjectRole } from "../services/project-permissions"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
+import {
+  logVendorTimeout,
+  vendorDeadline,
+  vendorTimeoutMessage,
+} from "../../../shared/vendor-timeouts"
 
 const imports = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -124,7 +129,7 @@ imports.post(
     const user = c.get("user")
     const role = await resolveProjectRole(c.env, user, input.projectId)
     if (!role || role.level < MIN_IMPORT_ROLE) {
-      return c.json({ error: "project_lead_required", message: "Project lead access is required to import files." }, 403)
+      return c.json({ error: "project_lead_required", message: "Project Lead access is required to import files." }, 403)
     }
     if (!c.env.OPENROUTER_API_KEY) {
       return c.json({ error: "import_classifier_unavailable", message: "AI import classification is not configured" }, 503)
@@ -139,21 +144,18 @@ imports.post(
       "SELECT org_id FROM projects WHERE id = ?",
     ).bind(input.projectId).first<{ org_id: number | null }>()
     const orgId = project?.org_id ?? 0
-    // Same local scripted-provider rehearsal gate as chat: one non-streaming
-    // provider call reserved before the request and settled from reported cost.
-    let usage: ChatUsage | undefined
-    const weekly = weeklyUsageActive(c.env, c.req.url)
-    if (weekly === "unavailable") return c.json({ error: "usage_rehearsal_unavailable" }, 503)
-    if (weekly === "on") {
-      // Enforced usage never funds an unowned project from org 0.
-      if (orgId <= 0) return c.json({ error: "forbidden" }, 403)
-      const suppliedId = c.req.header("Idempotency-Key")
-      if (suppliedId && !z.string().uuid().safeParse(suppliedId).success) {
-        return c.json({ error: "invalid_request_id" }, 400)
-      }
-      usage = { orgId, requestId: suppliedId ?? crypto.randomUUID() }
-    }
-    // Legacy credit/word guards are retired once the weekly ledger meters this call.
+    // AQU-2062: the one entitlement check — plan, key, platform spend ceiling
+    // (AQU-1869) and, when the meter is on, a reservation for this one
+    // non-streaming call, settled below from the reported cost.
+    const gate = await admitPaidCall(c.env, {
+      orgId, userId: user.id, projectId: input.projectId, rail: "llm",
+      requestUrl: c.req.url, idempotencyKey: c.req.header("Idempotency-Key"),
+      estimate: openRouterEstimate(c.env, { model,
+        promptChars: promptFor(input).reduce((n, m) => n + m.content.length, 0), maxOutputTokens: CLASSIFY_MAX_TOKENS }),
+    })
+    if (!gate.ok) return c.json(gate.body, gate.status)
+    const { usage, apiKey } = gate
+    // Legacy credit/word guards are retired once the meter records this call.
     if (!usage) {
       const credits = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
       if (!credits.ok) {
@@ -167,25 +169,15 @@ imports.post(
       if (!words.ok) return c.json(wordCapBody(words.reason), 429)
     }
 
-    if (usage) {
-      try {
-        const created = await admitChatUsage(c.env, { ...usage, userId: user.id, projectId: input.projectId,
-          model, promptChars: promptFor(input).reduce((n, m) => n + m.content.length, 0), maxOutputTokens: CLASSIFY_MAX_TOKENS })
-        // A repeated key never starts another provider call.
-        if (!created) return c.json({ error: "usage_request_already_admitted" }, 409)
-      } catch (error) {
-        if (error instanceof Error && error.message === "Weekly AI allowance exhausted") {
-          return c.json({ error: "weekly_ai_allowance_exhausted", message: "This workspace has used its available AI allowance. Try again after the weekly reset or update its plan." }, 429)
-        }
-        if (error instanceof Error && error.message === "Model price unavailable") return c.json({ error: "model_price_unavailable" }, 503)
-        return c.json({ error: "usage_accounting_unavailable" }, 503)
-      }
-    }
+    // AQU-1849: total deadline (`stream: false` — nothing arrives until the
+    // completion is whole), linked to the client's signal so a user who
+    // navigates away still cancels upstream.
+    const deadline = vendorDeadline("openRouterNonStreaming", c.req.raw.signal)
     try {
       const upstream = await fetch(resolveOpenRouterUrl(c.env), {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -197,10 +189,18 @@ imports.post(
           ...openRouterExtras(c.env.OPENROUTER_BASE_URL),
           response_format: { type: "json_object" },
         }),
-        signal: c.req.raw.signal,
+        signal: deadline.signal,
       })
       if (!upstream.ok) {
         const detail = await upstream.text().catch(() => "")
+        // AQU-1241: a rejection the provider decided before any generation
+        // existed cost nothing, so release its reservation instead of leaving
+        // it against the workspace's allowance. Less certain failures stay held.
+        if (usage) {
+          c.header("X-Billing-Usage-Status", providerRejectedPreModel(upstream.status, detail)
+            ? await releaseChatUsage(c.env, usage)
+            : "pending")
+        }
         return c.json({
           error: "import_classifier_upstream_error",
           message: detail.slice(0, 500) || `Upstream returned ${upstream.status}`,
@@ -213,7 +213,7 @@ imports.post(
       }
       // The provider charged for this response even when the recipe below is
       // unusable, so settle before validating content. Upstream errors above
-      // keep the reservation: their charge is uncertain, not proven free.
+      // keep the reservation unless the rejection proves no model ran.
       if (usage) c.header("X-Billing-Usage-Status", await settleChatUsage(c.env, usage, data))
       const content = data.choices?.[0]?.message?.content
       if (!content) {
@@ -240,11 +240,20 @@ imports.post(
       }
       return c.json({ classification: classification.data })
     } catch (error) {
+      if (deadline.timedOut()) {
+        logVendorTimeout("openRouterNonStreaming", error)
+        return c.json({
+          error: "import_classifier_timeout",
+          message: vendorTimeoutMessage("openRouterNonStreaming"),
+        }, 504)
+      }
       console.error("Import classification failed:", error)
       return c.json({
         error: "import_classifier_unavailable",
-        message: error instanceof Error ? error.message : String(error),
+        message: "Import classification is temporarily unavailable",
       }, 502)
+    } finally {
+      deadline.clear()
     }
   },
 )

@@ -10,26 +10,43 @@
 // disclosure — a raw provider payload (an OpenRouter 413 JSON blob, say) is
 // never the primary message.
 //
-// `title` is translated via `t()` from src/lib/i18n/standalone.ts (this
-// module has no React tree to call the useT() hook from, and each `title` is
-// a fresh value computed per call, not frozen module-scope data — see that
-// module's header). The `m.includes(...)` pattern matching below stays keyed
-// against ENGLISH substrings deliberately: `rawMessage` is diagnostic text
-// produced elsewhere in the app and by upstream providers, most of which is
-// never itself translated, so the matches must not be run through `t()`.
+// `title` AND `body` are translated via `t()` from src/lib/i18n/standalone.ts
+// (this module has no React tree to call the useT() hook from, and each value
+// is computed per call, not frozen module-scope data — see that module's
+// header). AQU-510: the bodies were English literals until then, which meant a
+// translated heading sat above an untranslated instruction — and the body is
+// the half that says what to do.
+//
+// Three things here are English ON PURPOSE:
+//   1. The `m.includes(...)` pattern matching below. `rawMessage` is diagnostic
+//      text produced elsewhere in the app and by upstream providers, most of it
+//      never translated, so the matches must not be run through `t()`.
+//   2. `body: raw` — the raw text in those branches is a sentence we wrote and
+//      threw ourselves. Localizing it means localizing each throw site.
+//   3. The four `*_BODY` constants imported below. They are match keys as well
+//      as copy: tts-engine-error.ts THROWS them, and the branches above select
+//      on English substrings of them ("this line uses inworld", "voice
+//      conversion isn't set up"). Translating them would break the matching that
+//      picks their own branch, so the throw sites and the matcher must change
+//      together.
+// `src/lib/errors/localized-error-text.test.ts` pins 2 and 3 so they cannot
+// quietly widen.
 
 import { t } from "@/lib/i18n/standalone"
+import { isAiAllowanceMessage } from "@/lib/billing/ai-refusal"
 import {
   HOSTED_TTS_FAILED_BODY,
   HOSTED_TTS_NOT_CONFIGURED_BODY,
-  SEED_VC_FAILED_BODY,
-  SEED_VC_NOT_CONFIGURED_BODY,
+  VOICE_CONVERT_FAILED_BODY,
+  VOICE_CONVERT_NOT_CONFIGURED_BODY,
 } from "./tts-engine-error"
+import { ELEVENLABS_ERROR_RE, type ElevenLabsFailure } from "./elevenlabs/errors"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 /** Shown when hosted drafting has no OpenRouter key. Names the setting to
  *  change and states that a user-supplied key is not Aquilla-billed. */
 const OPENROUTER_KEY_REQUIRED_BODY =
-  "This server has no OpenRouter key for hosted AI. In Project Settings → Advanced LLM, switch the provider to Custom, choose OpenRouter, and paste your key. Your key is sent from this browser to OpenRouter and is not billed as Aquilla usage."
+  "This server has no OpenRouter key for hosted AI. In Project settings → AI → AI model (advanced), switch the provider to Custom, choose OpenRouter, and paste your key. Your key is sent from this browser to OpenRouter and is not billed as Aquilla usage."
 
 /** Drafting/chat-proxy failures. Must not be classified as TTS/voice errors. */
 function isTextGenerationFailure(lowered: string): boolean {
@@ -42,8 +59,15 @@ export type ErrorCategory =
   | "gemini-failed"
   | "hosted-tts-not-configured"
   | "hosted-tts-failed"
-  | "seed-vc-not-configured"
-  | "seed-vc-failed"
+  | "ai-allowance-exhausted"
+  | "voice-convert-not-configured"
+  | "voice-convert-failed"
+  | "elevenlabs-key-missing"
+  | "elevenlabs-invalid-key"
+  | "elevenlabs-quota"
+  | "elevenlabs-clone-not-allowed"
+  | "elevenlabs-rate-limited"
+  | "elevenlabs-failed"
   | "consent-denied"
   | "no-source-text"
   | "translation-not-configured"
@@ -55,11 +79,14 @@ export type ErrorCategory =
   | "model-load-failed"
   | "audio-format-unsupported"
   | "daily-quota-exceeded"
+  | "ai-spend-ceiling"
   | "model-not-allowed"
   | "request-too-large"
+  | "protected-format"
   | "rate-limited"
   | "timed-out"
   | "provider-unavailable"
+  | "transcription-model-unavailable"
   | "provider-rejected"
   | "unknown"
 
@@ -82,6 +109,18 @@ function extractStatus(lowered: string): number | null {
   return match ? Number(match[1]) : null
 }
 
+/** ElevenLabs (AQU-2299, BYOK) failures by their message lead-in
+ *  (elevenlabs/errors.ts). Every title and body names ElevenLabs and only
+ *  ElevenLabs — the user's own key and account, never another engine. */
+const ELEVENLABS_CATEGORIES: Record<ElevenLabsFailure, { category: ErrorCategory; titleKey: MessageKey; bodyKey: MessageKey }> = {
+  "no key": { category: "elevenlabs-key-missing", titleKey: "audio.aiError.elevenLabsNoKeyTitle", bodyKey: "audio.aiError.elevenLabsNoKeyBody" },
+  "invalid key": { category: "elevenlabs-invalid-key", titleKey: "audio.aiError.elevenLabsInvalidKeyTitle", bodyKey: "audio.aiError.elevenLabsInvalidKeyBody" },
+  "out of characters": { category: "elevenlabs-quota", titleKey: "audio.aiError.elevenLabsQuotaTitle", bodyKey: "audio.aiError.elevenLabsQuotaBody" },
+  "cloning not allowed": { category: "elevenlabs-clone-not-allowed", titleKey: "audio.aiError.elevenLabsCloneNotAllowedTitle", bodyKey: "audio.aiError.elevenLabsCloneNotAllowedBody" },
+  "rate limited": { category: "elevenlabs-rate-limited", titleKey: "audio.aiError.elevenLabsRateLimitedTitle", bodyKey: "audio.aiError.elevenLabsRateLimitedBody" },
+  failed: { category: "elevenlabs-failed", titleKey: "audio.aiError.elevenLabsFailedTitle", bodyKey: "audio.aiError.elevenLabsFailedBody" },
+}
+
 export interface ActionableError {
   category: ErrorCategory
   /** One-line heading for the popover. Plain English, no jargon. */
@@ -96,6 +135,42 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   const raw = rawMessage.trim()
   const m = raw.toLowerCase()
   const status = extractStatus(m)
+
+  // The hosted transcription model failed (transcribe-hosted.ts
+  // HostedTranscriptionUnavailableError). Unlike a generic provider outage
+  // there is a way out the user controls: another model in Preferences.
+  if (m.includes("hosted transcription model unavailable")) {
+    return {
+      category: "transcription-model-unavailable",
+      title: t("audio.aiError.transcriptionModelUnavailableTitle"),
+      body: t("audio.aiError.transcriptionModelUnavailableBody"),
+      raw,
+    }
+  }
+
+  // ElevenLabs is bring-your-own-key: its failures are about the user's own
+  // key and account, so they are matched before every platform branch (none of
+  // the platform's budgets or ceilings apply to it).
+  const elevenLabs = raw.match(ELEVENLABS_ERROR_RE)
+  if (elevenLabs) {
+    const entry = ELEVENLABS_CATEGORIES[elevenLabs[1].toLowerCase() as ElevenLabsFailure]
+    return { category: entry.category, title: t(entry.titleKey), body: t(entry.bodyKey), raw }
+  }
+
+  // Platform daily SPEND ceiling (AQU-1869): a 503 from any paid AI path once
+  // the platform's dollar floor for the day is reached. It must be matched
+  // BEFORE the daily-quota branch below, whose "resets at midnight" substring
+  // also appears here — and it must not wear that branch's copy, because this
+  // is not the user's own limit and "switch to a custom AI provider" is the
+  // only thing they could actually do about it.
+  if (m.includes("ai_spend_ceiling_reached") || m.includes("daily ai spend ceiling")) {
+    return {
+      category: "ai-spend-ceiling",
+      title: t("audio.aiError.providerUnavailableTitle"),
+      body: t("audio.aiError.spendCeilingBody"),
+      raw,
+    }
+  }
 
   // Platform daily quota (AQU-265): 429 responses from the Frontier/Aquilla proxy.
   if (
@@ -115,7 +190,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "daily-quota-exceeded",
       title: t("audio.aiError.dailyLimitTitle"),
-      body: "Daily AI limit reached — resets at midnight UTC. Try again tomorrow, or switch this project to a custom AI provider.",
+      body: t("audio.aiError.dailyLimitBody"),
       raw,
     }
   }
@@ -125,6 +200,31 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       category: "model-not-allowed",
       title: t("audio.aiError.modelNotAvailableTitle"),
       body: raw,
+      raw,
+    }
+  }
+
+  // AQU-1964: an AI draft refused for touching a protected IDML anchor. This
+  // MUST have its own branch, and it must sit above the generic fallback,
+  // because `looksLikeMachineDump` rejects this message on two counts at once:
+  // an IDML cell id IS its anchor locator
+  // (`Stories/Story_u363.xml#/idPkg:Story[1]/…:part-1`), so the sentence we
+  // threw carries square brackets and runs past 180 characters. It therefore
+  // scored as a payload and the reader got "The AI request didn't finish" —
+  // which is how a correct, deliberate refusal reached a Biblica reviewer as
+  // "nothing happened". The locator still matters for support, so it stays in
+  // the Technical detail disclosure; what changes is the primary message,
+  // which now names the cause and what to do instead.
+  if (
+    m.includes("protected idml anchor") ||
+    m.includes("protected idml slot") ||
+    m.includes("editable idml slot") ||
+    m.includes("canonical idml paragraph")
+  ) {
+    return {
+      category: "protected-format",
+      title: t("audio.aiError.protectedFormatTitle"),
+      body: t("audio.aiError.protectedFormatBody"),
       raw,
     }
   }
@@ -144,7 +244,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "request-too-large",
       title: t("audio.aiError.tooLargeTitle"),
-      body: "This request was larger than the selected model can handle. Draft fewer cells at once, lower the number of examples in AI settings, or pick a model with a larger context window.",
+      body: t("audio.aiError.tooLargeBody"),
       raw,
     }
   }
@@ -166,7 +266,24 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     }
   }
 
-  // Hosted TTS / clone conversion — name the engine BEFORE the Gemini-key
+  // AQU-1872/AQU-2068: a workspace out of weekly AI is refused BEFORE the
+  // vendor is called, so it is not a vendor failure. This must precede the
+  // hosted-tts branches: the raw 429 body also carries "voice/tts", which
+  // would otherwise title it "Inworld TTS failed" and tell the user the engine
+  // broke when nothing was ever sent to it. The one helper recognises both
+  // its own message and a raw refusal body folded into a string.
+  if (isAiAllowanceMessage(raw)) {
+    // Our own message already says when it comes back; a raw body does not.
+    const allowanceBody = raw.startsWith(t("billing.refusal.allowance")) ? raw : t("billing.refusal.allowance")
+    return {
+      category: "ai-allowance-exhausted",
+      title: t("billing.refusal.title"),
+      body: allowanceBody,
+      raw,
+    }
+  }
+
+  // Hosted TTS / voice conversion — name the engine BEFORE the Gemini-key
   // heuristic. A local sync-worker 503 ("TTS not configured") is Inworld,
   // not a missing Google key; sending people to Gemini settings is a lie.
   // Text-generation failures must not take these branches either.
@@ -195,25 +312,33 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     }
   }
   if (
-    m.includes("this clone voice needs seed-vc") ||
+    m.includes("voice conversion isn't set up") ||
     m.includes("voice conversion not configured")
   ) {
     return {
-      category: "seed-vc-not-configured",
-      title: t("audio.aiError.seedVcNotConfiguredTitle"),
-      body: SEED_VC_NOT_CONFIGURED_BODY,
+      category: "voice-convert-not-configured",
+      title: t("audio.aiError.voiceConvertNotConfiguredTitle"),
+      body: VOICE_CONVERT_NOT_CONFIGURED_BODY,
+      raw,
+    }
+  }
+  if (m.includes("voice service took too long")) {
+    return {
+      category: "voice-convert-failed",
+      title: t("audio.aiError.voiceConvertSlowTitle"),
+      body: t("audio.aiError.voiceConvertSlowBody"),
       raw,
     }
   }
   if (
-    m.includes("voice cloning (seed-vc) failed") ||
-    m.includes("voice cloning (seed-vc) couldn't") ||
+    m.includes("voice conversion failed") ||
+    m.includes("voice conversion couldn't") ||
     m.includes("voice convert failed")
   ) {
     return {
-      category: "seed-vc-failed",
-      title: t("audio.aiError.seedVcFailedTitle"),
-      body: SEED_VC_FAILED_BODY,
+      category: "voice-convert-failed",
+      title: t("audio.aiError.voiceConvertFailedTitle"),
+      body: VOICE_CONVERT_FAILED_BODY,
       raw,
     }
   }
@@ -227,7 +352,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "missing-gemini-key",
       title: t("audio.aiError.geminiKeyRequiredTitle"),
-      body: "Add a Gemini API key to use this Gemini voice, or switch the line to Inworld TTS (hosted, no key) or a local MMS engine.",
+      body: t("audio.aiError.geminiKeyRequiredBody"),
       raw,
     }
   }
@@ -235,7 +360,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "gemini-failed",
       title: t("audio.aiError.geminiFailedTitle"),
-      body: "Gemini couldn't generate this line. Check the API key, or switch this voice to Inworld TTS.",
+      body: t("audio.aiError.geminiFailedBody"),
       raw,
     }
   }
@@ -257,7 +382,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "translation-not-configured",
       title: t("audio.aiError.translationNotConfiguredTitle"),
-      body: "Set up a completion provider for this project before generating voice on untranslated cells.",
+      body: t("audio.aiError.translationNotConfiguredBody"),
       raw,
     }
   }
@@ -283,7 +408,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       title: t("audio.aiError.ttsNotConfiguredTitle"),
       // Worded to follow its own title rather than repeat it — the recorder
       // renders the two as one sentence.
-      body: "Switch this project to a local MMS voice, which runs in the browser, or ask an administrator to configure the server voice service.",
+      body: t("audio.aiError.ttsNotConfiguredBody"),
       raw,
     }
   }
@@ -300,7 +425,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "network",
       title: t("audio.aiError.networkTitle"),
-      body: "Check your connection and try again. Local voices keep working offline once their model is downloaded.",
+      body: t("audio.aiError.networkBody"),
       raw,
     }
   }
@@ -317,7 +442,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "audio-format-unsupported",
       title: t("audio.aiError.audioFormatUnsupportedTitle"),
-      body: "Try uploading a .wav, .mp3, or .ogg file.",
+      body: t("audio.aiError.audioFormatUnsupportedBody"),
       raw,
     }
   }
@@ -325,7 +450,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "timed-out",
       title: t("audio.aiError.timedOutTitle"),
-      body: "The AI provider took too long to respond. Try again — if it keeps happening, send a smaller request or switch models.",
+      body: t("audio.aiError.timedOutBody"),
       raw,
     }
   }
@@ -334,7 +459,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "rate-limited",
       title: t("audio.aiError.rateLimitedTitle"),
-      body: "The AI provider is rate-limiting requests. Wait a moment and try again.",
+      body: t("audio.aiError.rateLimitedBody"),
       raw,
     }
   }
@@ -342,7 +467,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "provider-unavailable",
       title: t("audio.aiError.providerUnavailableTitle"),
-      body: "The AI provider returned a server error. This is usually temporary — try again in a moment.",
+      body: t("audio.aiError.providerUnavailableBody"),
       raw,
     }
   }
@@ -350,7 +475,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "provider-rejected",
       title: t("audio.aiError.providerRejectedTitle"),
-      body: "The request didn't reach a model. Open the technical detail below and copy it to support if this keeps happening.",
+      body: t("audio.aiError.providerRejectedBody"),
       raw,
     }
   }
@@ -362,7 +487,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "unknown",
       title: t("audio.aiError.unknownTitle"),
-      body: "The AI request didn't finish. Open the technical detail below and copy it to support if this keeps happening.",
+      body: t("audio.aiError.unknownBody"),
       raw,
     }
   }

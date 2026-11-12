@@ -16,6 +16,9 @@
 // query, not a gate.
 
 import { loadProjectSettings } from '../../../db/shared/projects'
+import { filterSettingsBlobForMember, visibleTagsForMember } from '../../../db/shared/lane-visibility'
+import { loadEffectiveChecks, type EffectiveChecksView } from './effective-checks'
+import { laneContextFrom, lanesVisibleToCaller } from './external-lane'
 
 export interface ExternalProjectDetail {
   id: string
@@ -27,10 +30,18 @@ export interface ExternalProjectDetail {
   role: number
   /** Normalized project settings blob (empty object when never written). */
   settings: Record<string, unknown>
+  /** AQU-2192: the built-in checks in force (defaults + overrides), beside the
+   *  raw `settings` blob that holds only the overrides. */
+  builtinChecks: EffectiveChecksView['builtinChecks']
+  /** Lanes with their own overrides only, keyed by lane tag ("" = default lane). */
+  builtinChecksByLane: EffectiveChecksView['builtinChecksByLane']
   /** Live project_settings.version — pass this as PatchSettings.ifMatchVersion.
    *  0 when the project has no settings row yet (the first write creates it). */
   settingsVersion: number
   settingsUpdatedAt: string | null
+  /** Lanes this caller may see. A hidden lane is absent, same as one that
+   *  does not exist. `id` is what writes pass as laneId. */
+  lanes: { id: string; name: string; language: string; role: 'source' | 'target' }[]
 }
 
 interface ProjectDetailRow {
@@ -40,12 +51,20 @@ interface ProjectDetailRow {
   archived_at: string | null
 }
 
+/** Who is asking, so the settings blob can be cut to their grants. Omit it and
+ *  the blob is returned whole — callers that show settings to an agent pass it. */
+export interface LaneSettingsViewer {
+  flag: string | undefined
+  userId: number
+}
+
 /** Read one project plus its live settings/version. Returns null when no such
  *  project exists — the caller maps that to not_found. */
 export async function loadProjectDetail(
   db: AquillaDb,
   projectId: string,
   role: number,
+  viewer?: LaneSettingsViewer,
 ): Promise<ExternalProjectDetail | null> {
   const row = await db
     .prepare('SELECT id, name, org_id, archived_at FROM projects WHERE id = ?')
@@ -54,14 +73,39 @@ export async function loadProjectDetail(
   if (!row) return null
 
   const settings = await loadProjectSettings(db, projectId)
+  const visibleSettings = viewer
+    ? await filterSettingsBlobForMember(db, viewer.flag, projectId, viewer.userId, role, settings.settings)
+    : settings.settings
+  const { visible } = viewer
+    ? await visibleTagsForMember(db, viewer.flag, projectId, viewer.userId, role)
+    : { visible: null }
+  const lanes = lanesVisibleToCaller(
+    laneContextFrom(settings.lanes ?? [], visible),
+  ).map((lane) => ({
+    id: lane.id,
+    name: lane.name,
+    language: lane.language,
+    role: lane.role,
+  }))
+  const checks = await loadEffectiveChecks(
+    db,
+    viewer?.flag,
+    projectId,
+    viewer?.userId ?? 0,
+    role,
+    settings.settings,
+  )
   return {
     id: row.id,
     name: row.name,
     org_id: row.org_id == null ? null : String(row.org_id),
     archived: row.archived_at != null,
     role,
-    settings: settings.settings,
+    settings: visibleSettings,
+    builtinChecks: checks.builtinChecks,
+    builtinChecksByLane: checks.builtinChecksByLane,
     settingsVersion: settings.version,
     settingsUpdatedAt: settings.updatedAt,
+    lanes,
   }
 }

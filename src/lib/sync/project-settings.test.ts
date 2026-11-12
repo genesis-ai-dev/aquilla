@@ -3,8 +3,10 @@ import {
   fetchProjectSettings,
   fetchProjectSettingsResult,
   patchProjectSettings,
+  postSplitCastCopies,
   PROJECT_SETTINGS_VERSION_INITIAL,
   resolveTimingLocked,
+  settingsEditorName,
 } from "./project-settings"
 import type { TranslationBrief } from "@/lib/brief/types"
 
@@ -54,7 +56,17 @@ describe("patchProjectSettings", () => {
       }),
       { status: 200, headers: { "content-type": "application/json" } }
     ))
-    const got = await patchProjectSettings("jwt", "p1", { systemPrompt: "x" }, 4, API)
+    const got = await patchProjectSettings(
+      "jwt",
+      "p1",
+      { sourceLanguage: "en", targetLanguage: "es", targetLanes: ["es"], archivedLanes: ["fr"], systemPrompt: "x" },
+      4,
+      API,
+    )
+    const sent = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body)) as {
+      settings: Record<string, unknown>
+    }
+    expect(sent.settings).toEqual({ systemPrompt: "x" })
     expect(got.kind).toBe("ok")
     if (got.kind === "ok") expect(got.value.version).toBe(5)
   })
@@ -76,8 +88,18 @@ describe("patchProjectSettings", () => {
     expect(got.kind).toBe("conflict")
     if (got.kind === "conflict") {
       expect(got.latest.version).toBe(7)
-      expect(got.latest.updatedBy?.username).toBe("alex")
+      expect(settingsEditorName(got.latest.updatedBy)).toBe("alex")
     }
+  })
+
+  // Walk 10-02: the identity worker sends the saver as a bare user id, and
+  // the General page printed "Last edited by undefined" off it.
+  it("names the saver only when the response carries a username", () => {
+    expect(settingsEditorName({ id: 12, username: "alex" })).toBe("alex")
+    expect(settingsEditorName(1)).toBeNull()
+    expect(settingsEditorName("agent:7")).toBeNull()
+    expect(settingsEditorName(null)).toBeNull()
+    expect(settingsEditorName(undefined)).toBeNull()
   })
 
   it("accepts identity's current field on 409 conflicts", async () => {
@@ -112,6 +134,25 @@ describe("patchProjectSettings", () => {
       expect(got.required).toBe(500)
       expect(got.role).toBe(400)
     }
+  })
+
+  it("hands over a refusal's `error` text, not the raw JSON body", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(
+      JSON.stringify({ error: "rosterViewMinRole 400 is below the organization's setting (600)." }),
+      { status: 400, headers: { "content-type": "application/json" } }
+    ))
+    const got = await patchProjectSettings("jwt", "p1", { rosterViewMinRole: 400 }, 3, API)
+    expect(got).toEqual({
+      kind: "error",
+      status: 400,
+      message: "rosterViewMinRole 400 is below the organization's setting (600).",
+    })
+  })
+
+  it("keeps a non-JSON error body as the message", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("upstream down", { status: 502 }))
+    const got = await patchProjectSettings("jwt", "p1", { sourceLanguage: "en" }, 3, API)
+    expect(got).toEqual({ kind: "error", status: 502, message: "upstream down" })
   })
 })
 
@@ -199,6 +240,32 @@ describe("fetchProjectSettingsResult (fail-closed contract)", () => {
   })
 })
 
+describe("postSplitCastCopies", () => {
+  const splits = [{ cellId: "line", sameKindAsFirst: ["line-b"] }]
+
+  it("retries a conflict and then reports the copy saved", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("", { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ changed: true }), { status: 200 }))
+    expect(await postSplitCastCopies("jwt", "p1", "f1", splits, API)).toBe("saved")
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const sent = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { fileId: string }
+    expect(sent.fileId).toBe("f1")
+  })
+
+  it("stops on a refusal and does not retry it", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ error: "not a split piece" }), { status: 422 }))
+    expect(await postSplitCastCopies("jwt", "p1", "f1", splits, API)).toBe("refused")
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("reports unsaved after the retries are used up", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"))
+    expect(await postSplitCastCopies("jwt", "p1", "f1", splits, API)).toBe("unsaved")
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3)
+  })
+})
 
 // ── The timing lock (AQU-646, Sam 2026-08-20) ────────────────────────────
 //

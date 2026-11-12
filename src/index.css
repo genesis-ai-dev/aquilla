@@ -8,6 +8,14 @@
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Geist Variable', sans-serif;
+    /* AQU-2464: lighter weight scale, matching help.aquilla.app. The help site sets
+       nearly all text in the same Geist Variable at 400 with headings at 500-600,
+       while the app leans on font-medium (~960 uses) and font-semibold (~200),
+       which reads heavier. Lightening the tokens one step lightens every surface
+       at once without touching components. */
+    --font-weight-medium: 400;
+    --font-weight-semibold: 500;
+    --font-weight-bold: 600;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -24,6 +32,12 @@
     --color-chart-3: var(--chart-3);
     --color-chart-2: var(--chart-2);
     --color-chart-1: var(--chart-1);
+    /* AQU-1764: the progress palette, defined in the theme blocks below. */
+    --color-progress-text-validated: var(--progress-text-validated);
+    --color-progress-text-translated: var(--progress-text-translated);
+    --color-progress-ai-stripe: var(--progress-ai-stripe);
+    --color-progress-audio-validated: var(--progress-audio-validated);
+    --color-progress-audio-recorded: var(--progress-audio-recorded);
     --color-ring: var(--ring);
     --color-input: var(--input);
     --color-border: var(--border);
@@ -74,7 +88,203 @@
 
     /* OTP fake-caret blink (shadcn input-otp). */
     --animate-caret-blink: caret-blink 1.2s ease-out infinite;
+    /* Loading cursor (ui/loading-cursor.tsx): a hard terminal-style blink. */
+    --animate-cursor-blink: cursor-blink 1s steps(1, end) infinite;
 }
+
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Content "types in" (ui/loading-cursor.tsx's counterpart): when a region
+   marked data-reveal mounts its children, they appear top to bottom in a
+   fast stagger — two levels deep, 20 ms per sibling, 160 ms each, so a full
+   page is in within about half a second. The keyframe has only a `from`, so
+   each element ends on its own styles (a hover-only opacity survives). */
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+[data-reveal] > *,
+[data-reveal] > * > * {
+  animation: reveal-in 160ms ease-out backwards;
+  animation-delay: var(--reveal-delay, 0ms);
+}
+[data-reveal] > * > * {
+  --reveal-delay: var(--reveal-parent-delay, 0ms);
+}
+[data-reveal] > :nth-child(2) {
+  --reveal-delay: 20ms;
+  --reveal-parent-delay: 20ms;
+}
+[data-reveal] > :nth-child(3) {
+  --reveal-delay: 40ms;
+  --reveal-parent-delay: 40ms;
+}
+[data-reveal] > :nth-child(4) {
+  --reveal-delay: 60ms;
+  --reveal-parent-delay: 60ms;
+}
+[data-reveal] > :nth-child(5) {
+  --reveal-delay: 80ms;
+  --reveal-parent-delay: 80ms;
+}
+[data-reveal] > :nth-child(6) {
+  --reveal-delay: 100ms;
+  --reveal-parent-delay: 100ms;
+}
+[data-reveal] > :nth-child(7) {
+  --reveal-delay: 120ms;
+  --reveal-parent-delay: 120ms;
+}
+[data-reveal] > :nth-child(8) {
+  --reveal-delay: 140ms;
+  --reveal-parent-delay: 140ms;
+}
+[data-reveal] > :nth-child(9) {
+  --reveal-delay: 160ms;
+  --reveal-parent-delay: 160ms;
+}
+[data-reveal] > :nth-child(10) {
+  --reveal-delay: 180ms;
+  --reveal-parent-delay: 180ms;
+}
+[data-reveal] > :nth-child(11) {
+  --reveal-delay: 200ms;
+  --reveal-parent-delay: 200ms;
+}
+[data-reveal] > :nth-child(12) {
+  --reveal-delay: 220ms;
+  --reveal-parent-delay: 220ms;
+}
+[data-reveal] > :nth-child(13) {
+  --reveal-delay: 240ms;
+  --reveal-parent-delay: 240ms;
+}
+[data-reveal] > :nth-child(14) {
+  --reveal-delay: 260ms;
+  --reveal-parent-delay: 260ms;
+}
+[data-reveal] > :nth-child(15) {
+  --reveal-delay: 280ms;
+  --reveal-parent-delay: 280ms;
+}
+[data-reveal] > :nth-child(16) {
+  --reveal-delay: 300ms;
+  --reveal-parent-delay: 300ms;
+}
+[data-reveal] > :nth-child(17) {
+  --reveal-delay: 320ms;
+  --reveal-parent-delay: 320ms;
+}
+[data-reveal] > :nth-child(18) {
+  --reveal-delay: 340ms;
+  --reveal-parent-delay: 340ms;
+}
+[data-reveal] > :nth-child(19) {
+  --reveal-delay: 360ms;
+  --reveal-parent-delay: 360ms;
+}
+[data-reveal] > :nth-child(20) {
+  --reveal-delay: 380ms;
+  --reveal-parent-delay: 380ms;
+}
+[data-reveal] > :nth-child(21) {
+  --reveal-delay: 400ms;
+  --reveal-parent-delay: 400ms;
+}
+[data-reveal] > :nth-child(22) {
+  --reveal-delay: 420ms;
+  --reveal-parent-delay: 420ms;
+}
+[data-reveal] > :nth-child(23) {
+  --reveal-delay: 440ms;
+  --reveal-parent-delay: 440ms;
+}
+[data-reveal] > :nth-child(24) {
+  --reveal-delay: 460ms;
+  --reveal-parent-delay: 460ms;
+}
+[data-reveal] > * > :nth-child(2) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 15ms);
+}
+[data-reveal] > * > :nth-child(3) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 30ms);
+}
+[data-reveal] > * > :nth-child(4) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 45ms);
+}
+[data-reveal] > * > :nth-child(5) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 60ms);
+}
+[data-reveal] > * > :nth-child(6) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 75ms);
+}
+[data-reveal] > * > :nth-child(7) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 90ms);
+}
+[data-reveal] > * > :nth-child(8) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 105ms);
+}
+[data-reveal] > * > :nth-child(9) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 120ms);
+}
+[data-reveal] > * > :nth-child(10) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 135ms);
+}
+[data-reveal] > * > :nth-child(11) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 150ms);
+}
+[data-reveal] > * > :nth-child(12) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 165ms);
+}
+[data-reveal] > * > :nth-child(13) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 180ms);
+}
+[data-reveal] > * > :nth-child(14) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 195ms);
+}
+[data-reveal] > * > :nth-child(15) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 210ms);
+}
+[data-reveal] > * > :nth-child(16) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 225ms);
+}
+[data-reveal] > * > :nth-child(17) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 240ms);
+}
+[data-reveal] > * > :nth-child(18) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 255ms);
+}
+[data-reveal] > * > :nth-child(19) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 270ms);
+}
+[data-reveal] > * > :nth-child(20) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 285ms);
+}
+[data-reveal] > * > :nth-child(21) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 300ms);
+}
+[data-reveal] > * > :nth-child(22) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 315ms);
+}
+[data-reveal] > * > :nth-child(23) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 330ms);
+}
+[data-reveal] > * > :nth-child(24) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 345ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal] > *,
+  [data-reveal] > * > * {
+    animation: none;
+  }
+}
+
 
 @keyframes caret-blink {
   0%,
@@ -86,6 +296,18 @@
   50% {
     opacity: 0;
   }
+}
+
+/* AQU-1764: an AI draft nobody has validated yet, on any progress surface —
+   diagonal stripes of the translated colour and the stripe colour. One
+   utility so the Progress card, the bars and the swatches all draw the same
+   stripes; the colours are the palette tokens in the theme blocks below. */
+@utility bg-progress-ai {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--progress-text-translated) 0 3px,
+    var(--progress-ai-stripe) 3px 6px
+  );
 }
 
 @layer base {
@@ -121,6 +343,24 @@
        dark steps UP from a mid grey-blue one — a heading is "slightly apart
        from the page" either way, not "always darker". */
     --tl-folder-band: oklch(0.945 0.003 264);
+    /* AQU-2138: THE EDITOR TAB STRIP's own fills. The active tab has to read as
+       selected against two different grounds at once — its inactive
+       neighbours AND the `bg-sidebar` header the strip floats on — and
+       --card could do neither: in light it is pure white on a near-white
+       header, in dark it is defined to exactly --surface, so the active
+       tab's fill vanished into the header behind it and only the border
+       carried the state. Same reason --tl-folder-band exists. Inactive steps
+       away from the header neutrally and hover stays neutral too, so a
+       hovered inactive tab can never be mistaken for the active one. Light
+       recedes the inactive tabs below a near-white header; dark lifts
+       everything above a mid grey-blue one.
+       AQU-2147: in light the active tab is NOT tinted. It is the one white
+       fill (--surface, the editor sheet it opens onto) and so the only tab
+       lighter than the 0.965 header, with its full-opacity border drawing
+       the edge. The tinted active fill survives in dark only. */
+    --tab-active: var(--surface);
+    --tab-inactive: oklch(0.928 0.002 264);
+    --tab-hover: oklch(0.948 0.002 264);
     /* Neutral hover/selection overlay — no blue tint on the chrome. */
     --accent: oklch(0.94 0.003 264);
     --accent-foreground: oklch(0.27 0.008 264);
@@ -136,6 +376,20 @@
     --chart-3: oklch(0.76 0.07 150);
     --chart-4: oklch(0.74 0.10 70);
     --chart-5: oklch(0.66 0.12 25);
+    /* AQU-1764: THE PROGRESS PALETTE. Sam picked it on 2026-10-13 ("Layout A,
+       softest"), and every progress bar, swatch and chapter square draws from
+       it (src/lib/progress/progress-palette.ts names the classes). Text is
+       blue, audio is plum (magenta until Oct 25, when Sam switched it to the
+       calmer, darker plum). Dark = validated, light = done but not
+       validated yet (translated, or recorded); the dark theme flips the
+       lightness so validated still stands out most. Stripes = AI drafts
+       nobody has validated: the translated colour striped with
+       --progress-ai-stripe, drawn by the `bg-progress-ai` utility below. */
+    --progress-text-validated: oklch(0.62 0.15 252);
+    --progress-text-translated: oklch(0.81 0.07 245);
+    --progress-ai-stripe: oklch(0.93 0.025 245);
+    --progress-audio-validated: oklch(0.52 0.13 340);
+    --progress-audio-recorded: oklch(0.82 0.05 340);
     --sidebar: oklch(0.965 0.002 264);
     --sidebar-foreground: oklch(0.32 0.008 264);
     --sidebar-primary: oklch(0.78 0.07 245);
@@ -167,6 +421,14 @@
        must sit clear of it; 0.355 reads as a band without becoming a second
        surface. */
     --tl-folder-band: oklch(0.355 0.014 250);
+    /* AQU-2138: the tab strip's dark fills; see the light block. Dark keeps
+       the tinted active fill (AQU-2147 made only the light one white): its
+       header IS --surface, so there is no "lighter than the header" to use.
+       Active sits clear of --accent (0.38 0.04 248) in BOTH lightness and
+       chroma so the neutral hover below it cannot catch up to it. */
+    --tab-active: oklch(0.42 0.045 248);
+    --tab-inactive: oklch(0.345 0.012 250);
+    --tab-hover: oklch(0.375 0.014 250);
     --accent: oklch(0.38 0.04 248);
     --accent-foreground: oklch(0.82 0.09 245);
     --destructive: oklch(0.62 0.15 25);
@@ -180,6 +442,12 @@
     --chart-3: oklch(0.78 0.07 150);
     --chart-4: oklch(0.76 0.10 70);
     --chart-5: oklch(0.68 0.12 25);
+    /* AQU-1764: the progress palette's dark pair; see the light block. */
+    --progress-text-validated: oklch(0.80 0.12 245);
+    --progress-text-translated: oklch(0.52 0.10 248);
+    --progress-ai-stripe: oklch(0.36 0.05 248);
+    --progress-audio-validated: oklch(0.76 0.11 340);
+    --progress-audio-recorded: oklch(0.48 0.10 340);
     --sidebar: var(--surface);
     --sidebar-foreground: oklch(0.92 0.008 250);
     --sidebar-primary: oklch(0.78 0.09 245);
@@ -321,11 +589,17 @@
 
        SCOPED to `html[data-app-frame]`, which AppShell sets while mounted.
        The blanket version of this rule broke every page rendered OUTSIDE the
-       frame: /privacy-policy is a 3,400px document in the body, and two
-       thirds of it — its analytics opt-out included — became unreachable. */
+       frame: the in-app privacy policy (removed in AQU-2243) was a 3,400px
+       document in the body, and two thirds of it — its analytics opt-out
+       included — became unreachable. Login, the invite/verify routes, the
+       approval page and the 404 still render outside the frame. */
   }
   html {
     @apply font-sans;
+    /* AQU-2464: antialiased smoothing, as on help.aquilla.app. Without it macOS
+       Safari draws Geist with heavier strokes. */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     overscroll-behavior: none;
   }
   /* The frame's no-scroll rule, only while the frame is on screen. */
@@ -335,6 +609,23 @@
   }
   html.dark {
     color-scheme: dark;
+  }
+
+  /* Solid primary for surfaces whose main action must read as THE action
+     (Smart Extensions builder, extension page, permission prompt). The brand
+     --primary is a deliberately muted, light accent with dark text; on these
+     pages it read as disabled next to outline buttons (owner, 2026-10-13).
+     Derived from the brand token (same hue, deeper and more saturated, white
+     text), so every brand and both themes keep their own hue; an achromatic
+     brand primary stays achromatic. Declared on :root so it resolves against
+     the root's --primary; `.solid-primary` then swaps the pair for a subtree. */
+  :root {
+    --primary-solid: oklch(from var(--primary) min(l, 0.52) calc(c * 1.8) h);
+    --primary-solid-foreground: oklch(0.99 0 0);
+  }
+  .solid-primary {
+    --primary: var(--primary-solid);
+    --primary-foreground: var(--primary-solid-foreground);
   }
 
   /* Links are the one place the hand cursor isn't ours to remove by dropping a
@@ -385,6 +676,22 @@ textarea,
   opacity: 0.6;
 }
 
+/* Smart edits: a straight, quieter underline than a rule violation's wavy
+   one — a suggestion from the team's own edits, not a broken rule. */
+.smart-edit-blot {
+  text-decoration-line: underline;
+  text-decoration-style: solid;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in oklch, var(--color-violet-500, oklch(0.606 0.25 292.717)) 70%, transparent);
+  cursor: pointer;
+}
+.smart-edit-blot-jev { text-decoration-style: dotted; }
+.smart-edit-blot-llm {
+  text-decoration-style: dashed;
+  text-decoration-color: color-mix(in oklch, var(--color-sky-500, oklch(0.685 0.169 237.323)) 75%, transparent);
+}
+
 /* Managed terminology uses one quiet, marker-like treatment. Target terms add
    this class only when their editor display preference calls for it. */
 .terminology-highlight,
@@ -421,6 +728,93 @@ textarea,
 .term-chip-host {
   position: relative;
   display: inline;
+}
+
+/* AQU-1689: Who's Who mention words in a Greek or Hebrew source. At rest a
+   dotted underline, so a mention can be found without hovering. Lit (its
+   participant is hovered or focused anywhere in view): the term marker's 12%
+   wash plus a solid underline. "Always" mode keeps every mention washed in
+   its participant's thread color. The underline style changes too, so the
+   state never rests on color alone. */
+.mention-mark {
+  --mention-color: var(--primary);
+  margin-inline: -0.08em;
+  padding-inline: 0.08em;
+  border-radius: 0.22em;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in oklch, var(--mention-color) 55%, transparent);
+  text-underline-offset: 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.mention-mark[data-mention-tinted="true"],
+.mention-mark[data-mention-lit="true"] {
+  background-image: linear-gradient(
+    100deg,
+    transparent 0%,
+    color-mix(in oklch, var(--mention-color) 12%, transparent) 8%,
+    color-mix(in oklch, var(--mention-color) 12%, transparent) 92%,
+    transparent 100%
+  );
+}
+.mention-mark[data-mention-lit="true"] {
+  text-decoration-style: solid;
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--mention-color);
+}
+.mention-mark[data-thread-slot="1"] { --mention-color: var(--color-sky-600, oklch(0.588 0.158 241.966)); }
+.mention-mark[data-thread-slot="2"] { --mention-color: var(--color-rose-600, oklch(0.586 0.253 17.585)); }
+.mention-mark[data-thread-slot="3"] { --mention-color: var(--color-emerald-600, oklch(0.596 0.145 163.225)); }
+.mention-mark[data-thread-slot="4"] { --mention-color: var(--color-amber-600, oklch(0.666 0.179 58.318)); }
+.mention-mark[data-thread-slot="5"] { --mention-color: var(--color-violet-600, oklch(0.541 0.281 293.009)); }
+.mention-mark[data-thread-slot="6"] { --mention-color: var(--color-teal-600, oklch(0.6 0.118 184.704)); }
+
+/* AQU-1694: a mention placed by word alignment with low confidence is
+   "approximate". Lit or tinted, it keeps a dotted underline and a fainter
+   wash, so it never looks as sure as the rest. */
+.mention-mark[data-mention-approximate="true"][data-mention-tinted="true"],
+.mention-mark[data-mention-approximate="true"][data-mention-lit="true"] {
+  background-image: linear-gradient(
+    100deg,
+    transparent 0%,
+    color-mix(in oklch, var(--mention-color) 6%, transparent) 8%,
+    color-mix(in oklch, var(--mention-color) 6%, transparent) 92%,
+    transparent 100%
+  );
+}
+.mention-mark[data-mention-approximate="true"][data-mention-lit="true"] {
+  text-decoration-style: dotted;
+}
+
+/* AQU-1694: Who's Who tints on the target column, painted with the CSS
+   Custom Highlight API (src/components/bible-data/target-tint-layer.ts), so
+   the editor's rendering is untouched. Same language as the source: a wash
+   and a solid underline when lit, dotted when approximate. */
+::highlight(aq-mention-lit) {
+  background-color: color-mix(in oklch, var(--primary) 12%, transparent);
+  text-decoration: underline solid 2px var(--primary);
+}
+::highlight(aq-mention-lit-approx) {
+  background-color: color-mix(in oklch, var(--primary) 6%, transparent);
+  text-decoration: underline dotted 2px var(--primary);
+}
+::highlight(aq-mention-slot-0) { background-color: color-mix(in oklch, var(--primary) 12%, transparent); }
+::highlight(aq-mention-slot-1) { background-color: color-mix(in oklch, var(--color-sky-600, oklch(0.588 0.158 241.966)) 12%, transparent); }
+::highlight(aq-mention-slot-2) { background-color: color-mix(in oklch, var(--color-rose-600, oklch(0.586 0.253 17.585)) 12%, transparent); }
+::highlight(aq-mention-slot-3) { background-color: color-mix(in oklch, var(--color-emerald-600, oklch(0.596 0.145 163.225)) 12%, transparent); }
+::highlight(aq-mention-slot-4) { background-color: color-mix(in oklch, var(--color-amber-600, oklch(0.666 0.179 58.318)) 12%, transparent); }
+::highlight(aq-mention-slot-5) { background-color: color-mix(in oklch, var(--color-violet-600, oklch(0.541 0.281 293.009)) 12%, transparent); }
+::highlight(aq-mention-slot-6) { background-color: color-mix(in oklch, var(--color-teal-600, oklch(0.6 0.118 184.704)) 12%, transparent); }
+::highlight(aq-mention-slot-0-approx),
+::highlight(aq-mention-slot-1-approx),
+::highlight(aq-mention-slot-2-approx),
+::highlight(aq-mention-slot-3-approx),
+::highlight(aq-mention-slot-4-approx),
+::highlight(aq-mention-slot-5-approx),
+::highlight(aq-mention-slot-6-approx) {
+  text-decoration: underline dotted 1px currentColor;
 }
 
 .usfm-footnote-marker {
@@ -528,7 +922,11 @@ textarea,
   transition: background-color 80ms linear;
 }
 
-.codex-search-flash {
+/* AQU-1493: an attribute, not a class. The row's className is React's, and
+   React rewrites it whole whenever it changes, which wiped a class added from
+   outside. React leaves alone an attribute it does not render. See
+   src/lib/editor/row-flash.ts. */
+[data-row-flash] {
   animation: codex-search-flash 1.8s ease-out;
   border-radius: 4px;
 }
@@ -538,6 +936,13 @@ textarea,
         background-color: color-mix(in oklch, var(--color-primary, oklch(0.65 0.2 250)) 14%, transparent); }
   80% { box-shadow: inset 0 0 0 2px var(--color-primary, oklch(0.65 0.2 250));
         background-color: color-mix(in oklch, var(--color-primary, oklch(0.65 0.2 250)) 8%, transparent); }
+}
+
+/* AQU-2265: a link with ?highlight=<id> scrolls to one setting and flashes it
+   (src/hooks/useSettingHighlight.ts). The search flash's colours, held longer. */
+[data-setting-highlight] {
+  animation: codex-search-flash 2.4s ease-out;
+  border-radius: 6px;
 }
 
 /* AQU-646 round 8: clicking a silence on the source band scrolls the table to
@@ -561,3 +966,189 @@ textarea,
    — never persisted, never editable. Bold and italic only. */
 .idml-style-bold { font-weight: 700; }
 .idml-style-italic { font-style: italic; }
+
+/* Visible style segments: only bold and italic runs are blocks. Consecutive
+   plain runs are one typing space. An empty plain run shows a single faint
+   "Regular" on its first slot, with no box; the plain slots after it add
+   neither another word nor a gap. An empty bold or italic run shows its own
+   faint label until the translator types. Labels are not document text. */
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic {
+  border-radius: 0.2em;
+  padding-inline: 0.18em;
+  margin-inline: 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  background-color: color-mix(in oklch, var(--color-foreground) 7%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-foreground) 16%, transparent);
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold {
+  background-color: color-mix(in oklch, var(--color-foreground) 14%, transparent);
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold[data-style-segment-empty],
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic[data-style-segment-empty] {
+  display: inline-block;
+  min-height: 1.15em;
+  vertical-align: baseline;
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic:not(.idml-style-bold)[data-style-segment-empty]::before,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold:not(.idml-style-italic)[data-style-segment-empty]::before,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-style-italic[data-style-segment-empty]::before {
+  color: color-mix(in oklch, var(--color-foreground) 40%, transparent);
+  pointer-events: none;
+  user-select: none;
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic:not(.idml-style-bold)[data-style-segment-empty]::before {
+  content: var(--aq-style-label-italic, "Italic");
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold:not(.idml-style-italic)[data-style-segment-empty]::before {
+  content: var(--aq-style-label-bold, "Bold");
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-style-italic[data-style-segment-empty]::before {
+  content: var(--aq-style-label-bold-italic, "Bold italic");
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-segment-caret,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic.idml-segment-caret {
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-foreground) 48%, transparent);
+}
+[data-visible-style-segments] [data-idml-protected="slot"][data-style-plain-group="label"] {
+  display: inline-block;
+  min-height: 1.15em;
+  vertical-align: baseline;
+}
+[data-visible-style-segments] [data-idml-protected="slot"][data-style-plain-group="label"]::before {
+  content: var(--aq-style-label-regular, "Regular");
+  color: color-mix(in oklch, var(--color-foreground) 32%, transparent);
+  pointer-events: none;
+  user-select: none;
+}
+[data-visible-style-segments] [data-idml-protected="slot"][data-style-plain-group="join"] {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+}
+
+/* While style segments are visible, a placed translation is adjusted by
+   dragging the side of a bold or italic box, the way a window is resized.
+   The bar is the grab. The resize cursor is set on the slot itself. */
+[data-segment-edge-mode] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+[data-segment-edge-mode] [data-idml-protected="slot"][data-segment-edge="left"] {
+  cursor: ew-resize;
+  box-shadow:
+    inset 2px 0 0 color-mix(in oklch, var(--color-foreground) 55%, transparent),
+    inset 0 0 0 1px color-mix(in oklch, var(--color-foreground) 28%, transparent);
+}
+[data-segment-edge-mode] [data-idml-protected="slot"][data-segment-edge="right"] {
+  cursor: ew-resize;
+  box-shadow:
+    inset -2px 0 0 color-mix(in oklch, var(--color-foreground) 55%, transparent),
+    inset 0 0 0 1px color-mix(in oklch, var(--color-foreground) 28%, transparent);
+}
+/* During a drag the box is the words still inside it, and the plain runs it
+   can take from or give to are underlined. The fixed bar is the cut itself,
+   including when the pointer has moved past the box to drop words. */
+[data-segment-edge-mode][data-segment-dragging] [data-segment-drag-region="emphasis"] {
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklch, var(--color-foreground) 62%, transparent);
+}
+[data-segment-edge-mode][data-segment-dragging] [data-segment-drag-region="plain"] {
+  background-color: color-mix(in oklch, var(--color-foreground) 7%, transparent);
+  box-shadow: inset 0 -2px 0 color-mix(in oklch, var(--color-foreground) 50%, transparent);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.aq-segment-drag-guide {
+  position: fixed;
+  z-index: 80;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  pointer-events: none;
+  background: var(--color-foreground);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-background, white) 65%, transparent);
+}
+
+/* Audio view (Sam, 2026-09-28): a line's waveform and its audio check point at
+   each other, since a validated line shows the same green check for text and
+   audio. Pointing at the audio check outlines the waveform it is about;
+   pointing at the waveform frames its check — in a rounded square, the
+   waveform's own 6px corners, not a circle (Sam, same day). Hooks: `.audio-check` on the
+   validation column (AudioValidationControl), `.voice-card-wave` on the card's
+   waveform (CellVoicePanel). */
+[data-grid-row]:has(.audio-check:hover) .voice-card-wave {
+  outline: 2px solid var(--tl-track-hue);
+  outline-offset: 2px;
+}
+[data-grid-row]:has(.voice-card-wave:hover) .audio-check > * {
+  outline: 2px solid color-mix(in oklab, var(--foreground) 35%, transparent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* AQU-1937: Smart Extensions' reserved identity. A muted iris (low-chroma
+   violet, hue 292: well away from Aquilla's blue at 245) outside every brand's
+   palette, used ONLY by the host-drawn ExtensionFrame and ExtensionMarker
+   (src/components/tools/) so people can always tell app-proper UI from
+   extension-drawn content. Reserved: an ESLint rule forbids the token anywhere
+   else, no brand or theme defines it, and it is NOT one of the CSS variables
+   forwarded into extension frames (srcdoc.ts THEME_VARS).
+   One family everywhere: -accent (label text + icon), -subtle (tab/chip tint),
+   -line (1px hairline), -glow (faint inner edge tint).
+   WCAG AA for the label text: light 6.2:1 on white, 5.6:1 on -subtle;
+   dark 9.5:1 on the dark surface, 7.5:1 on -subtle. */
+:root {
+  --extension-accent: oklch(0.5 0.11 292);
+  --extension-accent-subtle: oklch(0.962 0.02 292);
+  --extension-accent-line: oklch(0.5 0.11 292 / 0.28);
+  --extension-accent-glow: oklch(0.5 0.11 292 / 0.07);
+}
+:root.dark,
+.dark {
+  --extension-accent: oklch(0.8 0.085 292);
+  --extension-accent-subtle: oklch(0.29 0.04 292);
+  --extension-accent-line: oklch(0.8 0.085 292 / 0.26);
+  --extension-accent-glow: oklch(0.8 0.085 292 / 0.08);
+}
+
+/* AQU-2317 (AQU-1352 design board 2, "the role ladder"): the seven role levels
+   on one lightness scale derived from --primary — darker is more. Only chroma
+   and hue come from the brand token, so an achromatic brand stays achromatic;
+   the lightness of each rung is absolute, which is what lets a rung and its
+   ink carry the SAME contrast in light and dark theme instead of chasing
+   --background. Chroma is scaled per rung to stay inside sRGB at that
+   lightness — a clipped colour would move the lightness and with it the
+   contrast. The pairing and the 4.5:1 floor are machine-checked in
+   src/lib/access/role-scale.test.ts; RoleBadge is the only component that
+   paints these. */
+:root {
+  --role-ink-dark: oklch(from var(--primary) 0.2 calc(c * 0.6) h);
+  --role-ink-light: oklch(0.99 0 0);
+  --role-rung-1: oklch(from var(--primary) 0.96 calc(c * 0.3) h);
+  --role-rung-2: oklch(from var(--primary) 0.89 calc(c * 0.55) h);
+  --role-rung-3: oklch(from var(--primary) 0.82 calc(c * 0.8) h);
+  --role-rung-4: oklch(from var(--primary) 0.75 calc(c * 1.05) h);
+  --role-rung-5: oklch(from var(--primary) 0.68 calc(c * 1.3) h);
+  --role-rung-6: oklch(from var(--primary) 0.45 calc(c * 1.7) h);
+  --role-rung-7: oklch(from var(--primary) 0.32 calc(c * 1.5) h);
+}
+
+/* Fill + ink as one utility per rung, so a caller cannot pair rung 7's fill
+   with rung 1's ink. `-edge` is the dashed outline of an inherited pill, whose
+   ink stays --foreground. */
+@utility role-rung-1 { background-color: var(--role-rung-1); color: var(--role-ink-dark); }
+@utility role-rung-2 { background-color: var(--role-rung-2); color: var(--role-ink-dark); }
+@utility role-rung-3 { background-color: var(--role-rung-3); color: var(--role-ink-dark); }
+@utility role-rung-4 { background-color: var(--role-rung-4); color: var(--role-ink-dark); }
+@utility role-rung-5 { background-color: var(--role-rung-5); color: var(--role-ink-dark); }
+@utility role-rung-6 { background-color: var(--role-rung-6); color: var(--role-ink-light); }
+@utility role-rung-7 { background-color: var(--role-rung-7); color: var(--role-ink-light); }
+@utility role-rung-1-edge { border-color: var(--role-rung-1); }
+@utility role-rung-2-edge { border-color: var(--role-rung-2); }
+@utility role-rung-3-edge { border-color: var(--role-rung-3); }
+@utility role-rung-4-edge { border-color: var(--role-rung-4); }
+@utility role-rung-5-edge { border-color: var(--role-rung-5); }
+@utility role-rung-6-edge { border-color: var(--role-rung-6); }
+@utility role-rung-7-edge { border-color: var(--role-rung-7); }

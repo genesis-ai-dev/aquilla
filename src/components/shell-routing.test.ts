@@ -19,7 +19,6 @@
  * still maps them to "editor".
  */
 import { describe, it, expect } from "vitest"
-import { resolveSidebarAgentClick } from "./project-workspace-helpers"
 
 // ── Replicate the pure derivation logic from ProjectWorkspace ──────────────
 // Keep in sync with the `centerSurface` derivation in ProjectWorkspace.tsx.
@@ -141,7 +140,7 @@ describe("shell-routing: back-nav contract", () => {
   })
 
   it("overlay surface derivation covers all shell overlay subroutes", () => {
-    const overlayRoutes = ["/comments", "/terminology", "/agent", "/memory", "/memory/quality"]
+    const overlayRoutes = ["/comments", "/terminology", "/agent", "/memory", "/memory/checks"]
     for (const suffix of overlayRoutes) {
       const path = `/project/proj1${suffix}`
       expect(deriveCenterSurface(path)).not.toBe("editor")
@@ -171,12 +170,3 @@ describe("shouldShowAudioToolbar", () => {
   })
 })
 
-describe("resolveSidebarAgentClick", () => {
-  it("activates the editor Agent tab only while the workbench is the active surface", () => {
-    expect(resolveSidebarAgentClick(true)).toBe("activate-editor-tab")
-  })
-
-  it("opens the agent panel inline in the dock when the workbench is minimized", () => {
-    expect(resolveSidebarAgentClick(false)).toBe("open-dock")
-  })
-})

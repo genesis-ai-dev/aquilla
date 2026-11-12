@@ -19,14 +19,16 @@ import { zstdDecompressSync } from "node:zlib"
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { SEED_TABLES, TABLE_HEADER_KEY, type IdSet } from "./lib/seed-tables"
+import { DEPENDENT_TABLES, SEED_TABLES, TABLE_HEADER_KEY, type IdSet } from "./lib/seed-tables"
 import { assertSeedTargetAllowed } from "./lib/seed-target-guard"
 import { ensureBundle, readMeta } from "./seed-fetch"
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const DEFAULT_LOCAL_PG_URL = "postgresql://aquilla:aquilla@127.0.0.1:5432/aquilla_dev"
-// Generated columns are recomputed by Postgres from their source fields and
-// must never be included in INSERT statements from a production bundle.
+// Never INSERT these. validation_count and value_tsv are still generated.
+// source_language, target_language, and target_lanes were generated until
+// 0156 dropped them; a bundle dumped before that drop still carries the
+// names, and the target schema no longer has the columns.
 const GENERATED_COLS = new Set([
   "source_language",
   "target_language",
@@ -139,7 +141,16 @@ async function main() {
     console.log(`Loading ${meta.projectIds.length} projects into ${host} …`)
     await assertTargetSchema(c, sections)
     await c.query("BEGIN")
-    // delete existing (reverse order; harmless without FKs but tidy)
+    // AQU-1953: rows the seed never carries but that point at seeded rows
+    // without ON DELETE CASCADE (agent artifact bindings, contextual runs,
+    // usage requests). Clear them first, or the lanes / files / projects
+    // deletes below fail on a re-load over a project someone used locally.
+    for (const d of DEPENDENT_TABLES) {
+      const set = idSets[d.by.set]
+      if (set.length) await c.query(`DELETE FROM ${d.name} WHERE ${d.by.col} = ANY($1)`, [set])
+    }
+    // delete existing in reverse load order — the lane foreign keys make the
+    // order load-bearing (cells before lanes, lanes before projects)
     for (const t of [...SEED_TABLES].reverse()) {
       const set = idSets[t.by.set]
       if (set.length) await c.query(`DELETE FROM ${t.name} WHERE ${t.by.col} = ANY($1)`, [set])

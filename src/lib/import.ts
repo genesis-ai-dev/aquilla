@@ -21,14 +21,21 @@ import { proxyOrigin } from "./net/resource-proxy"
 // This module runs outside React (plain import-pipeline code, no hooks), so it
 // uses the standalone t() rather than useT() — see src/lib/i18n/standalone.ts.
 import { t } from "./i18n/standalone"
-import type { FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
-import { detectFileType, isMediaFileType } from "./parsers/types"
-import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
-import { detectSpeechSegments } from "./timeline/silence-split"
+import { formatByteLimit } from "./i18n/format"
+import { normalizeLocale } from "./i18n/locales"
+import { readStoredLocale } from "./i18n/store"
+import type { CellUnit, FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
+import type { SpeakerAssignment } from "./import/cast-from-speakers"
+import { detectFileType, isMediaFileType, TRANSLATION_MEMORY_FILE_KIND } from "./parsers/types"
+import { buildAudioId, MAX_AUDIO_OBJECT_BYTES, uploadCellAudio } from "./audio/upload"
+import { analyseSpeechInFile } from "./audio/speech-analysis"
 import { tileSegments } from "./timeline/tile-segments"
 import { recordMediaImportSeed, buildMediaSeedCells } from "./audio/auto-transcribe"
+import { createMediaCueSpecs } from "./import/media-cues"
+import { youTubeVideoId } from "./video/youtube"
 import { parseTextFormatOffMainThread } from "./parsers/parse-worker-client"
 import { usfmSectionToStrings } from "./parsers/parse-text-formats"
+import type { UsfmStructureFinding } from "./parsers/usfm-structure-check"
 import {
   assembleParatextProject,
   type ParatextBook,
@@ -36,6 +43,7 @@ import {
   type ProjectEntry,
   type ProjectEntryCollection,
   type ProjectSourceArtifact,
+  type SkippedProjectEntry,
 } from "./parsers/paratext-project"
 import { buildBilingualPlan, type SourceVerse } from "./parsers/paratext-pairing"
 import type { ParatextSettings } from "./parsers/paratext"
@@ -45,23 +53,28 @@ import {
   bulkUploadMorphRows,
   publishStagedImport,
   reconcileSourceImport,
+  reviseSourceImport,
   type MorphRow,
   type TargetCommit,
 } from "./sync/bulk-import"
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { extractIdmlStrings } from "./parsers/idml"
-import { extractBiblicaStudyNoteStrings } from "./parsers/biblica"
-import { extractTreasureHuntStrings } from "./parsers/biblica-treasure-hunt"
-import { extractReach4LifeStrings } from "./parsers/biblica-reach4life"
-import { extractEblStrings } from "./parsers/biblica-ebl"
+import { alignReimportedIdmlFile, type IdmlReimportAlignHost } from "./idml/align-reimported-targets"
+// Partner readers are NOT imported here — they arrive on the `edition` descriptor
+// passed to `importPartnerNotes`, so this module still compiles with the
+// partner-integrations folders deleted. See docs/PARTNER-INTEGRATIONS.md.
+import type { PartnerImportEdition, PartnerImportProgress } from "./partners/types"
 import { extractHtmlStrings } from "./parsers/html"
 import { extractEpubImport, type EpubSpineMember } from "./parsers/epub"
-import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
+import { bulkUploadSource, BULK_IMPORT_CHUNK, type BulkImportCell } from "./sync/bulk-import"
+import { canImportAsRevision, revisionUnitsFromCells } from "./sync/revision-import"
+import { importCellEventId, releaseImportSession, resolveImportSession } from "./sync/import-session"
 import {
   assertSourceUploadByteLength,
   assertSourceUploadSize,
   bindSourceArtifact,
+  isSourceUploadRoleRefusal,
   uploadSourceOriginal,
 } from "./sync/source-upload"
 import {
@@ -78,7 +91,12 @@ import { parseXliff } from "./parsers/xliff"
 import { parseTmx } from "./parsers/tmx"
 import { parseMaculaTsv } from "./parsers/macula"
 import { parseTnTsv } from "./parsers/translation-notes"
+import { TRANSLATION_NOTES_FILE_KIND } from "./notes/note-files"
 import { parseObsStories } from "./parsers/obs"
+import { splitStringsByBook, type BookSlice } from "./import/split-by-book"
+import { reimportKeysFor } from "./import/reimport-keys"
+import { planSidebarReimport, type SidebarReimportMode } from "./import/reimport-copy-name"
+import { getBookName } from "./file-labeling/bible-book-names"
 import {
   aquillaImportMetadata,
   normalizeTranslatableStrings,
@@ -87,6 +105,8 @@ import {
 } from "./import/normalized-manifest"
 import { ImportService } from "./import/import-service"
 import type { ImportPreviewNotice, PreparedImportFile } from "./import/import-service"
+import type { SubtitleCueRepair } from "./parsers/core-types"
+import type { FramesAsHundredths } from "./parsers/frame-timecode"
 import {
   classifyAndParseUnknownText,
   readUnknownTextFile,
@@ -102,6 +122,7 @@ import type {
 } from "../../shared/import-contract"
 import { parseUnknownFileInSandbox } from "./import/sandbox-parser"
 import { assertImportCellsWithinSizeLimit } from "./import/cell-size"
+import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 
 export type EBibleImportPhase = "download" | "parse" | "save"
 export interface EBibleProgress {
@@ -220,8 +241,13 @@ export function matchEBibleToSourceCells(
     const currentText = cell.translated ?? ""
     // AD-2 parentId: chain off existing targetEventId if present, else off the
     // source cell's sourceEventId (genesis target commit). Fallback to empty
-    // string only when neither is available (rare legacy cells with no event id).
-    const parentId = cell.targetEventId ?? cell.sourceEventId ?? ""
+    // string only when neither is available (rare legacy cells with no event id,
+    // or a lane whose cells have not finished loading). "" means "unchainable"
+    // and applyEBibleTargetImport refuses to apply such a cell (AQU-1669).
+    const parentId = resolveTargetCommitParent({
+      targetEventId: cell.targetEventId,
+      sourceEventId: cell.sourceEventId,
+    }) ?? ""
     matched.push({
       cellId: cell.cellId,
       fileId: cell.fileId,
@@ -287,7 +313,10 @@ export async function prepareEBibleTargetImport(
  * Cells with hasConflict=true and not in selectedCellIds are kept (skipped).
  *
  * parentId handling: each MatchedCell already carries the correct AD-2 parentId
- * (targetEventId ?? sourceEventId), so commits are always properly chained.
+ * (targetEventId ?? sourceEventId), so commits are always properly chained. A
+ * selected cell that resolved to neither (parentId "") cannot be chained at
+ * all, and AQU-1669 is what dropping those quietly cost: this throws instead,
+ * so the caller can roll its optimistic patch back and show the failure.
  */
 export async function applyEBibleTargetImport(
   matchResult: EBibleMatchResult,
@@ -310,56 +339,53 @@ export async function applyEBibleTargetImport(
     byFile.set(m.fileId, arr)
   }
 
+  // AQU-1669: a selected cell whose AD-2 parent never resolved (parentId "" —
+  // no targetEventId and no sourceEventId) used to be dropped right here, with
+  // the drop folded into `committedCount`. When that silently emptied the whole
+  // batch the caller still reported success: the artifact upload below was
+  // skipped (`groups.length > 0` was false), no commit was enqueued, and the
+  // dialog closed over an optimistic patch nobody ever undid — the translations
+  // sat in the editor looking saved and were gone on reopen, with no warning.
+  // A cell the user explicitly selected is never safe to drop quietly, so fail
+  // the whole apply loudly instead and let handleApply roll the patch back.
+  const unchainable = toCommit.filter((cell) => !cell.parentId)
+  if (unchainable.length > 0) {
+    throw new Error(
+      t("importExport.errors.unchainableTargetCells", {
+        count: unchainable.length,
+        total: toCommit.length,
+      }),
+    )
+  }
+
   const groups = [...byFile].map(([fileId, cells]) => ({
     fileId,
-    commits: cells
-      .filter((cell) => cell.parentId)
-      .map((cell) => ({
-        id: uuidv7(),
-        cellId: cell.cellId,
-        parentId: cell.parentId!,
-        value: cell.incomingText,
-      })),
+    commits: cells.map((cell) => ({
+      id: uuidv7(),
+      cellId: cell.cellId,
+      parentId: cell.parentId,
+      value: cell.incomingText,
+    })),
   })).filter((group) => group.commits.length > 0)
+  // Every selected cell is chainable by the guard above, so this is exactly the
+  // count the user approved — never a quietly reduced one (AQU-1669).
   const committedCount = groups.reduce((count, group) => count + group.commits.length, 0)
 
   // Preserve the exact target-side input before queuing any edits. One
   // immutable artifact can bind to several Aquilla files, and the active lane
   // is part of every binding so later audit/export never confuses languages.
+  //
+  // AQU-1365: the artifact routes sit at Project lead (500), but a target
+  // import only needs Contributor (400) for its commits, and the Import
+  // button now opens a translation import for Contributors. A role refusal
+  // (403) therefore skips the preserved copy and still imports the text;
+  // any other failure still stops the import before a commit is queued.
   const sourceArtifact = ctx.sourceArtifact ?? matchResult.sourceArtifact
   if (sourceArtifact && groups.length > 0) {
-    const [firstFileId, ...otherFileIds] = groups.map((group) => group.fileId)
-    const artifactId = uuidv7()
-    await uploadSourceOriginal({
-      projectId: ctx.projectId,
-      fileId: firstFileId,
-      artifactId,
-      bytes: sourceArtifact.bytes,
-      format: sourceArtifact.format,
-      artifactName: sourceArtifact.name,
-      bindingRole: "target",
-      targetLang: ctx.targetLang,
-      profileId: `builtin:target-${sourceArtifact.format}`,
-      profileVersion: "1",
-      fidelity: "preserved-only",
-      updateSourceSidecar: false,
-      getToken: ctx.getToken,
-      signal: ctx.signal,
-    })
-    for (const fileId of otherFileIds) {
-      await bindSourceArtifact({
-        projectId: ctx.projectId,
-        fileId,
-        artifactId,
-        memberPath: sourceArtifact.name,
-        profileId: `builtin:target-${sourceArtifact.format}`,
-        profileVersion: "1",
-        fidelity: "preserved-only",
-        bindingRole: "target",
-        targetLang: ctx.targetLang,
-        getToken: ctx.getToken,
-        signal: ctx.signal,
-      })
+    try {
+      await preserveTargetArtifact(sourceArtifact, groups.map((group) => group.fileId), ctx)
+    } catch (error) {
+      if (!isSourceUploadRoleRefusal(error)) throw error
     }
   }
 
@@ -378,6 +404,47 @@ export async function applyEBibleTargetImport(
 
   const skippedCount = matchResult.matched.length - committedCount
   return { committedCount, skippedCount }
+}
+
+/** Upload a target import's original once and bind it to every file it fills. */
+async function preserveTargetArtifact(
+  sourceArtifact: TargetImportArtifact,
+  fileIds: readonly string[],
+  ctx: Pick<ImportContext, "projectId" | "getToken" | "signal" | "targetLang">,
+): Promise<void> {
+  const [firstFileId, ...otherFileIds] = fileIds
+  const artifactId = uuidv7()
+  await uploadSourceOriginal({
+    projectId: ctx.projectId,
+    fileId: firstFileId,
+    artifactId,
+    bytes: sourceArtifact.bytes,
+    format: sourceArtifact.format,
+    artifactName: sourceArtifact.name,
+    bindingRole: "target",
+    targetLang: ctx.targetLang,
+    profileId: `builtin:target-${sourceArtifact.format}`,
+    profileVersion: "1",
+    fidelity: "preserved-only",
+    updateSourceSidecar: false,
+    getToken: ctx.getToken,
+    signal: ctx.signal,
+  })
+  for (const fileId of otherFileIds) {
+    await bindSourceArtifact({
+      projectId: ctx.projectId,
+      fileId,
+      artifactId,
+      memberPath: sourceArtifact.name,
+      profileId: `builtin:target-${sourceArtifact.format}`,
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      bindingRole: "target",
+      targetLang: ctx.targetLang,
+      getToken: ctx.getToken,
+      signal: ctx.signal,
+    })
+  }
 }
 
 export type MaculaImportPhase = "parse" | "save" | "morph"
@@ -431,7 +498,7 @@ export interface ImportResult {
    *  sidebar can group + order by canonical book. */
   bookCode?: string
   /** Sidebar folder for the imported file — "OT"/"NT" for scripture, or a
-   *  named collection such as "Treasure Hunt Bible" for a Biblica edition. */
+   *  named collection such as one publisher title from a partner integration. */
   corpusMarker?: string | undefined
   /** Original filename (e.g. "01GENarONAV12.SFM") — preserved for export naming
    *  and hover-to-see-original when we rename the file to a localized book name. */
@@ -440,6 +507,16 @@ export interface ImportResult {
   importRecipe?: DeclarativeImportRecipe
   importClassification?: Omit<AiImportClassification, "recipe"> & { recipe: DeclarativeImportRecipe }
   importNotices?: ImportPreviewNotice[]
+  /** Paratext-parity chapter/verse + marker findings (AQU-1731), USFM only.
+   *  Carried as codes + refs and translated in the preview. */
+  structureFindings?: UsfmStructureFinding[]
+  /** Subtitle cue counts from the parse core (AQU-2119). Turned into preview
+   *  notices by `preparedParsedFile`; absent when nothing was repaired or
+   *  refused. */
+  cueRepair?: SubtitleCueRepair
+  /** AQU-2197: cue times that look like frame numbers written as hundredths.
+   *  The preview offers to convert them at a frame rate the person picks. */
+  framesAsHundredths?: FramesAsHundredths
   roundTripFidelity?: RoundTripFidelity
   /** Exact container for a multi-book import. Stored once and bound to every
    * emitted book instead of becoming every book's export skeleton. */
@@ -460,6 +537,11 @@ export interface ImportContext {
   targetLang?: string
   /** Identity JWT used only for AI-assisted classification of unknown text. */
   identityToken?: string
+  /** AQU-1720: what one imported cell is for docx/txt/md. `paragraph` keeps a
+   *  paragraph whole (one dubbing clip per cell); absent/`sentence` segments it
+   *  as before. Forwarded to `prepareImportFile` when this context drives the
+   *  parse itself (no pre-`prepared` result from the dialog's preview). */
+  cellUnit?: CellUnit
   sourceTextDirection?: "ltr" | "rtl"
   targetTextDirection?: "ltr" | "rtl"
   /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
@@ -480,6 +562,22 @@ export interface ImportContext {
   /** Existing files selected for safe unit-identity reconciliation. Keys use
    * the same normalized book-code/name vocabulary as skipKeys. */
   reimportFileIds?: ReadonlyMap<string, string>
+  /** IDML re-import that keeps translations (update, or an updated copy):
+   *  after reconcile, place each kept translation into the new style runs.
+   *  Absent when AI completion is not configured. */
+  alignReimportedIdml?: IdmlReimportAlignHost
+  /** Replaces the upload phase label, for example while styles are aligning. */
+  onPhase?: (label: string) => void
+  onAlignProgress?: (done: number, total: number) => void
+  /** Sidebar re-import of one chosen file. Forces that file (or a copy of it)
+   *  and ignores any translation embedded in the upload. */
+  sidebarReimport?: {
+    mode: SidebarReimportMode
+    targetFileId: string
+    existingNames: readonly string[]
+    /** Already-translated collision suffix ("updated" or "blank"). */
+    suffix: string
+  }
   /** Advanced orchestrators can keep fresh files hidden while persisting
    * package-level or format-specific secondary data. */
   deferPublication?: boolean
@@ -488,11 +586,18 @@ export interface ImportContext {
    *  entry is stamped as `importManifest.origin` and projected verbatim to
    *  `files.meta.aquillaImport.origin` (linked-sync hook, e.g. Google Drive). */
   origins?: ReadonlyMap<string, Record<string, unknown>>
+  /** Optional YouTube picture paired with the user's uploaded source media. */
+  mediaPictureUrl?: string
+  /** User-reviewed timed wording for this media file. */
+  mediaTextSource?: {
+    cues: readonly TranslatableString[]
+    artifact?: TargetImportArtifact
+  }
 }
 
 type PrepareImportContext = Pick<
   ImportContext,
-  "projectId" | "identityToken" | "sourceLanguage" | "targetLanguage" | "signal"
+  "projectId" | "identityToken" | "sourceLanguage" | "targetLanguage" | "signal" | "cellUnit"
 > & {
   onIdmlProgress?: (progress: IdmlProgress) => void
   /** AQU-634: USFM front-matter opt-out forwarded into parseFile. */
@@ -520,7 +625,37 @@ function preparedParsedFile(
   if (results.length === 0 || results.every((result) => result.strings.length === 0)) {
     throw new Error(t("importExport.errors.noImportableContent", { fileName: file.name, fileType }))
   }
-  return { fileType, results }
+  return { fileType, results: results.map(withSubtitleCueNotices) }
+}
+
+/** AQU-2119: turn the parse core's subtitle cue counts into preview notices.
+ *  The core carries numbers only, so the wording is resolved here — the same
+ *  split `structureFindings` uses. A repaired cue is reported rather than
+ *  passed over in silence because the alternative, before the repair existed,
+ *  was losing it; a cue the parser still refused is reported for the same
+ *  reason. */
+function withSubtitleCueNotices(result: ImportResult): ImportResult {
+  const repair = result.cueRepair
+  if (!repair) return result
+  const notices: ImportPreviewNotice[] = []
+  if (repair.repairedShortForm > 0) {
+    notices.push({
+      code: "subtitle-short-form-timestamps",
+      severity: "warning",
+      message: t("importExport.notices.subtitleShortFormTimestamps", {
+        count: repair.repairedShortForm,
+      }),
+    })
+  }
+  if (repair.droppedCues > 0) {
+    notices.push({
+      code: "subtitle-cues-unreadable",
+      severity: "warning",
+      message: t("importExport.notices.subtitleCuesUnreadable", { count: repair.droppedCues }),
+    })
+  }
+  if (notices.length === 0) return result
+  return { ...result, importNotices: [...(result.importNotices ?? []), ...notices] }
 }
 
 async function prepareSandboxImport(
@@ -565,7 +700,7 @@ export interface ImportFileResult {
   refs: FileReference[]
   /** Speaker→cellId pairs from every subtitle cue, sharing the same cellIds as
    *  the uploaded cells (single parse). Empty for non-subtitle formats. */
-  speakerPairs: { cellId: string; speaker: string | undefined }[]
+  speakerPairs: SpeakerAssignment[]
   skipped?: { book: string; reason: string }[]
 }
 
@@ -573,7 +708,7 @@ export interface ImportFileResult {
  * TMX files participate in translation-memory retrieval even though their
  * deterministic parser id remains `tmx`. */
 export function importedFileKind(fileType: FileType): string {
-  return fileType === "tmx" ? "translation-memory" : fileType
+  return fileType === "tmx" ? TRANSLATION_MEMORY_FILE_KIND : fileType
 }
 
 /** Merge caller-supplied provenance into the versioned import summary. */
@@ -608,6 +743,9 @@ export async function importFile(
     emitParsedFile,
   })
   const ready = prepared ?? await prepareImportFile(file, ctx)
+  if (ctx.sidebarReimport && ready.results.length !== 1) {
+    throw new Error(t("importExport.reimport.oneDocument"))
+  }
   const sharedArtifact = ready.results.find((result) => result.sharedSourceArtifact)?.sharedSourceArtifact
   const multiResult = ready.results.length > 1
   const imported = await service.importFile(
@@ -705,7 +843,7 @@ export async function prepareImportFile(
             extensionType,
             extensionType === "idml"
               ? { signal: ctx.signal, onIdmlProgress: ctx.onIdmlProgress }
-              : undefined,
+              : { cellUnit: ctx.cellUnit },
           ),
         )
       }
@@ -747,13 +885,14 @@ export async function prepareImportFile(
       }
       const prepared = preparedParsedFile(file, fileType, await parseFile(file, fileType, {
         excludeFrontMatter: ctx.excludeFrontMatter,
+        cellUnit: ctx.cellUnit,
       }))
       if (analysisError) {
         prepared.results = prepared.results.map((result) => ({
           ...result,
-          importNotices: [{
-            code: "basic-parser-fallback",
-            severity: "warning",
+          importNotices: [...(result.importNotices ?? []), {
+            code: "basic-parser-fallback" as const,
+            severity: "warning" as const,
             message: t("importExport.notices.basicParserFallback"),
           }],
         }))
@@ -778,6 +917,7 @@ export async function prepareImportFile(
     if (sniffedType) {
       return preparedParsedFile(file, sniffedType, await parseFile(file, sniffedType, {
         excludeFrontMatter: ctx.excludeFrontMatter,
+        cellUnit: ctx.cellUnit,
       }))
     }
     if (!ctx.identityToken) {
@@ -822,7 +962,7 @@ export async function importEBible(
   ctx: ImportContext,
   onProgress?: (p: EBibleProgress) => void,
   signal?: AbortSignal,
-): Promise<FileReference> {
+): Promise<FileReference[]> {
   onProgress?.({ phase: "download", received: 0, total: 0 })
 
   const corpusText = await fetchTranslationText(
@@ -844,20 +984,101 @@ export async function importEBible(
   const fileName = `${translation.title} (${translation.id})`
 
   // eBible has no speaker tags — ignore speakerPairs.
-  const { ref } = await emitParsedFile(
-    { name: fileName, strings, rawSource: corpusText, rawSourceFormat: "ebible" },
-    "ebible",
+  return emitScriptureBooks(
+    strings,
+    {
+      fileType: "ebible",
+      singleFileName: fileName,
+      rawSourceFormat: "ebible",
+      wholeRawSource: corpusText,
+      // A book's slice of a vref-aligned corpus is the same one-line-per-verse
+      // shape, so each per-book file gets a valid original of its own rather
+      // than 66 copies of the whole Bible. Same trade the multi-book USFM split
+      // makes: content-only fidelity, per-book skeleton.
+      bookRawSource: (slice) => slice.strings.map((string) => string.original).join("\n"),
+    },
     {
       ...ctx,
       sourceTextDirection: normalizeImportedDirection(translation.textDirection) ?? ctx.sourceTextDirection,
       signal: signal ?? ctx.signal,
-      onCellEnqueued: (count, total) => {
-        onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total })
-        ctx.onCellEnqueued?.(count, total)
-      },
+    },
+    (enqueued, total) => {
+      onProgress?.({ phase: "save", cellsEnqueued: enqueued, cellsTotal: total })
+      ctx.onCellEnqueued?.(enqueued, total)
     },
   )
-  return ref
+}
+
+/**
+ * Emit parsed scripture cells as one source file per book (AQU-1187).
+ *
+ * The web-catalog scripture importers (eBible, Hello AO) parse a whole
+ * selection in one pass, so the split happens here rather than in the parser.
+ * Books are emitted in parse order — both parsers already produce canonical
+ * order — and each file carries its `bookCode`, which is what lets the sidebar
+ * group them into OT/NT and order them canonically (AQU-1084). Cells the split
+ * cannot attribute to a known book keep the old single-file shape.
+ *
+ * Progress is reported cumulatively across books so the dialog's bar stays
+ * monotonic over a 31k-cell whole-Bible import.
+ */
+async function emitScriptureBooks(
+  strings: TranslatableString[],
+  spec: {
+    fileType: FileType
+    /** Name used when the import is not split (one book, or no book codes). */
+    singleFileName: string
+    rawSourceFormat: SourceArtifactFormat
+    wholeRawSource: string
+    /** The raw original for one book, when the import is split per book. */
+    bookRawSource: (slice: BookSlice) => string
+  },
+  ctx: ImportContext,
+  onCellsEnqueued: (enqueued: number, total: number) => void,
+): Promise<FileReference[]> {
+  const slices = splitStringsByBook(strings)
+  const total = strings.length
+
+  if (slices === null || slices.length === 1) {
+    const { ref } = await emitParsedFile(
+      {
+        name: spec.singleFileName,
+        strings,
+        rawSource: spec.wholeRawSource,
+        rawSourceFormat: spec.rawSourceFormat,
+        // One book still learns its code, so a single-book import groups under
+        // its testament instead of landing in "Ungrouped".
+        ...(slices?.length === 1 ? { bookCode: slices[0].bookCode } : {}),
+      },
+      spec.fileType,
+      { ...ctx, onCellEnqueued: (count) => onCellsEnqueued(count, total) },
+    )
+    return [ref]
+  }
+
+  const refs: FileReference[] = []
+  let enqueuedBefore = 0
+  for (const slice of slices) {
+    const { ref } = await emitParsedFile(
+      {
+        name: getBookName(slice.bookCode) ?? slice.bookCode,
+        strings: slice.strings,
+        rawSource: spec.bookRawSource(slice),
+        rawSourceFormat: spec.rawSourceFormat,
+        bookCode: slice.bookCode,
+        roundTripFidelity: "content-only",
+      },
+      spec.fileType,
+      {
+        ...ctx,
+        onCellEnqueued: (count) => onCellsEnqueued(enqueuedBefore + count, total),
+      },
+    )
+    refs.push(ref)
+    enqueuedBefore += slice.strings.length
+    onCellsEnqueued(enqueuedBefore, total)
+  }
+  return refs
 }
 
 // ---------------------------------------------------------------------------
@@ -1008,7 +1229,7 @@ export async function importHelloao(
   ctx: ImportContext,
   onProgress?: (p: EBibleProgress) => void,
   signal?: AbortSignal,
-): Promise<FileReference> {
+): Promise<FileReference[]> {
   onProgress?.({ phase: "download", received: 0, total: 0 })
 
   let rawComplete = ""
@@ -1029,25 +1250,31 @@ export async function importHelloao(
 
   const fileName = `${translation.englishName || translation.name} (${translation.id})`
 
-  const { ref } = await emitParsedFile(
+  return emitScriptureBooks(
+    strings,
     {
-      name: fileName,
-      strings,
-      rawSource: rawComplete || JSON.stringify(complete),
+      fileType: "helloao",
+      singleFileName: fileName,
       rawSourceFormat: "helloao",
+      wholeRawSource: rawComplete || JSON.stringify(complete),
+      // Hello AO's payload is already per-book, so a book's original is the
+      // same envelope carrying just that book — valid on its own, and it keeps
+      // a whole-Bible import from storing the bulk payload 66 times.
+      bookRawSource: (slice) => JSON.stringify({
+        ...complete,
+        books: complete.books.filter((book) => book.id.toUpperCase() === slice.bookCode),
+      }),
     },
-    "helloao",
     {
       ...ctx,
       sourceTextDirection: normalizeImportedDirection(translation.textDirection) ?? ctx.sourceTextDirection,
       signal: signal ?? ctx.signal,
-      onCellEnqueued: (count, total) => {
-        onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total })
-        ctx.onCellEnqueued?.(count, total)
-      },
+    },
+    (enqueued, total) => {
+      onProgress?.({ phase: "save", cellsEnqueued: enqueued, cellsTotal: total })
+      ctx.onCellEnqueued?.(enqueued, total)
     },
   )
-  return ref
 }
 
 /**
@@ -1217,7 +1444,7 @@ export async function importTranslationNotes(
       name: file.name,
       fileType: "tsv",
       role: "source",
-      kind: "translation-notes",
+      kind: TRANSLATION_NOTES_FILE_KIND,
       importFormat: "tn-tsv",
       parserVersion: "tn-tsv-v1",
     },
@@ -1239,132 +1466,103 @@ export async function importTranslationNotes(
   }
 }
 
-/** Distinguishes a notes-only Biblica import from a whole-package IDML import. */
-export const BIBLICA_NOTES_PROFILE_ID = "builtin:biblica-study-notes"
-
 /**
- * The Treasure Hunt Bible is a different InDesign template with the opposite
- * marking convention, so it gets its own profile — the cells are not
- * interchangeable with study-Bible notes even though both are Biblica IDML.
- */
-export const TREASURE_HUNT_PROFILE_ID = "builtin:biblica-treasure-hunt"
-
-/**
- * Reach4Life is a third template again — a teenagers' workbook wrapped around
- * the NIrV, organized by lesson rather than by chapter.
- */
-export const REACH4LIFE_PROFILE_ID = "builtin:biblica-reach4life"
-
-/**
- * Equipping Biblical Leaders is a fourth template — a training programme's
- * facilitator and participant guides, divided by topic and lesson rather than
- * by book, and holding no published scripture to set anything around.
- */
-export const EBL_PROFILE_ID = "builtin:biblica-ebl"
-
-/**
- * Which Biblica title an IDML package is. Nothing in the package identifies the
- * edition, and the four templates disagree about what a paragraph style means,
- * so the person importing it says which one this is.
- */
-export type BiblicaEdition = "study-notes" | "treasure-hunt" | "reach4life" | "ebl"
-
-/**
- * Sidebar folder per edition, so a project holding more than one Biblica title
- * keeps them apart. The label is the file's corpus marker, which the sidebar
- * groups by and the user can rename or move a file out of later.
- */
-const BIBLICA_CORPUS_MARKERS: Readonly<Record<BiblicaEdition, string>> = {
-  "study-notes": "Biblica Study Notes",
-  "treasure-hunt": "Treasure Hunt Bible",
-  reach4life: "Reach 4 Life",
-  ebl: "Equipping Biblical Leaders",
-}
-
-export type BiblicaImportPhase = "parse" | "save"
-export interface BiblicaProgress {
-  phase: BiblicaImportPhase
-  /** Engine parse progress, while the package is being read. */
-  idml?: IdmlProgress
-  cellsEnqueued?: number
-  cellsTotal?: number
-  /** Paragraphs left out because they are scripture rather than notes. */
-  verseUnitCount?: number
-}
-
-/**
- * Import the notes from a Biblica IDML package.
+ * Import the note/prose cells from a partner's IDML package (AQU-1286).
+ *
+ * This is the generic half of the old publisher-specific notes importer. Which
+ * template the package is, what counts as a note in it, and what to say when it
+ * yields nothing are all the partner's business and travel in the `edition`
+ * descriptor — see `src/lib/partners/types.ts` and
+ * `docs/PARTNER-INTEGRATIONS.md`. Nothing here names a publisher, so deleting the
+ * partner folders leaves this function compiling with no caller, which is
+ * exactly the intended stripped state.
  *
  * The package parses through the same shared v2 engine as a plain IDML import,
  * so cells keep their protected anchors, exact locators, and preserved source
- * bytes — strict IDML export still works. Only the note paragraphs become cells:
- * the Bible text is set from the publisher's scripture files, so importing it
- * here would ask translators to retype scripture they must not edit.
- *
- * Which paragraphs count as notes depends on the edition. A study Bible marks
- * its notes positively (`intro:*`); the Treasure Hunt Bible and Reach4Life mark
- * scripture instead, so everything set around the Bible text is imported —
- * facts and hunts, lessons and journeys, book introductions and front matter.
- * See `@/lib/biblica/treasure-hunt/notes` and `@/lib/biblica/reach4life/notes`.
- *
- * The study Bible's own front and back matter — contents, "how to use", the
- * Bible Dictionary, the timelines, the maps, the cover — ships as separate
- * volumes holding no scripture at all, which is how the reader recognizes them
- * without another toggle. There every text-bearing paragraph is a cell.
+ * bytes — strict IDML export still works.
  */
-export interface BiblicaImportOptions {
+export interface PartnerNotesImportOptions {
+  /** Which of the partner's templates to read the package with. */
+  edition: PartnerImportEdition
   /**
    * When true, cut long note lines into one cell per sentence.
    * When false, each line stays a single cell (lists still split per line).
    */
   splitSentences?: boolean
-  /** Which template's rules to read the package with. Defaults to a study Bible. */
-  edition?: BiblicaEdition
 }
 
-export async function importBiblicaStudyNotes(
-  file: File,
-  ctx: ImportContext,
-  onProgress?: (p: BiblicaProgress) => void,
-  options?: BiblicaImportOptions,
-): Promise<FileReference> {
-  if (!/\.idml$/i.test(file.name)) {
-    throw new Error(t("importExport.errors.biblicaExpectsIdml"))
-  }
-  assertSourceUploadByteLength(file.size)
-  onProgress?.({ phase: "parse" })
+export interface PreparedPartnerNotes {
+  name: string
+  strings: TranslatableString[]
+  bookCodes: string[]
+  skippedScriptureCount: number
+  frontBackMatter: boolean
+}
 
-  const edition: BiblicaEdition = options?.edition ?? "study-notes"
+/**
+ * Parse a partner IDML package without writing it. Re-import uses this to
+ * count added and updated cells before the user picks a choice; the commit
+ * path parses again so a changed edition or sentence split cannot save a
+ * stale read.
+ */
+export async function readPartnerNoteStrings(
+  file: File,
+  options: PartnerNotesImportOptions,
+  extras?: {
+    signal?: AbortSignal
+    onProgress?: (p: PartnerImportProgress) => void
+  },
+): Promise<PreparedPartnerNotes> {
+  const { edition } = options
+  assertSourceUploadByteLength(file.size)
+  extras?.onProgress?.({ phase: "parse" })
+
   // The worker transfers (detaches) its input, so the preserved source artifact
   // is read from the File a second time rather than shared with the parse buffer.
   const parseBuffer = await file.arrayBuffer()
   assertIdmlPackageBytes(parseBuffer, file.name)
-  const parseOptions = {
-    ...(ctx.signal ? { signal: ctx.signal } : {}),
-    onProgress: (idml: IdmlProgress) => onProgress?.({ phase: "parse", idml }),
-    ...(options?.splitSentences !== undefined
+  const parsed = await edition.parse(parseBuffer, {
+    ...(extras?.signal ? { signal: extras.signal } : {}),
+    onProgress: (idml: IdmlProgress) => extras?.onProgress?.({ phase: "parse", idml }),
+    ...(options.splitSentences !== undefined
       ? { splitSentences: options.splitSentences }
       : {}),
-  }
-  const { strings, bookCodes, skippedScriptureCount, frontBackMatter } = await parseBiblicaEdition(
-    edition,
-    parseBuffer,
-    parseOptions,
-  )
+  })
 
-  // A study-Bible volume that yields nothing was almost certainly read with the
-  // wrong edition. A front/back matter volume that yields nothing is simply
-  // artwork — the maps and plates hold no text — and still imports, so the file
-  // stays part of the project and exports back unchanged.
-  if (strings.length === 0 && !frontBackMatter) {
-    throw new Error(emptyBiblicaImportMessage(edition, file.name))
+  // A volume that yields nothing was almost certainly read with the wrong
+  // edition. A front/back matter volume that yields nothing is simply artwork —
+  // the maps and plates hold no text — and still imports, so the file stays part
+  // of the project and exports back unchanged.
+  if (parsed.strings.length === 0 && !parsed.frontBackMatter) {
+    throw new Error(edition.emptyImportMessage(file.name))
   }
 
   const name = file.name.replace(/\.idml$/i, "").replace(/[-_]?notes$/i, "").trim() || file.name
+  return {
+    name,
+    strings: parsed.strings,
+    bookCodes: parsed.bookCodes,
+    skippedScriptureCount: parsed.skippedScriptureCount,
+    frontBackMatter: parsed.frontBackMatter,
+  }
+}
+
+export async function importPartnerNotes(
+  file: File,
+  ctx: ImportContext,
+  onProgress: ((p: PartnerImportProgress) => void) | undefined,
+  options: PartnerNotesImportOptions,
+): Promise<FileReference> {
+  const prepared = await readPartnerNoteStrings(file, options, {
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
+    onProgress,
+  })
+  const { edition } = options
+  const { name, strings, bookCodes, skippedScriptureCount } = prepared
   const normalized = normalizeTranslatableStrings(strings, {
     fileName: name,
     fileType: "idml",
-    profileId: BIBLICA_PROFILE_IDS[edition],
+    profileId: edition.profileId,
     profileVersion: "1",
     fidelity: "content-only",
   })
@@ -1384,7 +1582,7 @@ export async function importBiblicaStudyNotes(
       rawBytes: await file.arrayBuffer(),
       rawSourceFormat: "idml",
       roundTripFidelity: "content-only",
-      corpusMarker: BIBLICA_CORPUS_MARKERS[edition],
+      corpusMarker: edition.corpusMarker,
       ...(bookCodes.length === 1 ? { bookCode: bookCodes[0] } : {}),
     },
     "idml",
@@ -1405,104 +1603,6 @@ export async function importBiblicaStudyNotes(
   return ref
 }
 
-const BIBLICA_PROFILE_IDS: Readonly<Record<BiblicaEdition, string>> = {
-  "study-notes": BIBLICA_NOTES_PROFILE_ID,
-  "treasure-hunt": TREASURE_HUNT_PROFILE_ID,
-  reach4life: REACH4LIFE_PROFILE_ID,
-  ebl: EBL_PROFILE_ID,
-}
-
-interface BiblicaParseOutcome {
-  strings: TranslatableString[]
-  bookCodes: string[]
-  /** Paragraphs left out because they are the published Bible text. */
-  skippedScriptureCount: number
-  /**
-   * The package is one of the study Bible's front/back matter volumes — no
-   * scripture anywhere, so an empty result is a legitimate artwork-only volume
-   * rather than a package read with the wrong edition.
-   */
-  frontBackMatter: boolean
-}
-
-/**
- * Run the reader for one edition. Each returns the same three things under its
- * own names, because each counts a different thing as scripture.
- */
-async function parseBiblicaEdition(
-  edition: BiblicaEdition,
-  buffer: ArrayBuffer,
-  parseOptions: {
-    signal?: AbortSignal
-    onProgress: (progress: IdmlProgress) => void
-    splitSentences?: boolean
-  },
-): Promise<BiblicaParseOutcome> {
-  if (edition === "treasure-hunt") {
-    const { strings, bookCodes, skipped } =
-      await extractTreasureHuntStrings(buffer, undefined, parseOptions)
-    return {
-      strings,
-      bookCodes,
-      skippedScriptureCount: skipped.scriptureUnitCount,
-      frontBackMatter: false,
-    }
-  }
-  if (edition === "reach4life") {
-    const { strings, bookCodes, skipped } =
-      await extractReach4LifeStrings(buffer, undefined, parseOptions)
-    return {
-      strings,
-      bookCodes,
-      skippedScriptureCount: skipped.scriptureUnitCount,
-      frontBackMatter: false,
-    }
-  }
-  if (edition === "ebl") {
-    // A guide is written material throughout, so nothing is skipped for being
-    // scripture and no one book owns the file.
-    const { strings } = await extractEblStrings(buffer, undefined, parseOptions)
-    return { strings, bookCodes: [], skippedScriptureCount: 0, frontBackMatter: false }
-  }
-  const { strings, bookCodes, skipped, frontBackMatter } =
-    await extractBiblicaStudyNoteStrings(buffer, undefined, parseOptions)
-  return {
-    strings,
-    bookCodes,
-    skippedScriptureCount: skipped.verseUnitCount,
-    frontBackMatter,
-  }
-}
-
-/**
- * What to say when a package parsed but yielded nothing. The overwhelmingly
- * likely cause is the wrong edition, so each message names the styles it looked
- * for and — for the default reading — the toggles that change it.
- */
-function emptyBiblicaImportMessage(edition: BiblicaEdition, fileName: string): string {
-  if (edition === "treasure-hunt") {
-    return `${fileName} parsed successfully but contained no Treasure Hunt notes. `
-      + "Treasure Hunt content lives in `!meta_*`, `_intro_*` and front-matter paragraph "
-      + "styles — check that this is a Treasure Hunt volume."
-  }
-  if (edition === "reach4life") {
-    return `${fileName} parsed successfully but contained no Reach 4 Life content. `
-      + "Reach 4 Life content lives in the `R4Lv4 Paragraph Styles:*` lesson groups and in "
-      + "the `Metatext_BBI Bible Book Intros:*`, `Intros:*` and `Copyright:*` styles — check "
-      + "that this is a Reach 4 Life package."
-  }
-  if (edition === "ebl") {
-    // Nothing is filtered out by edition here, so an empty result means the
-    // package carried no text at all rather than the wrong template.
-    return `${fileName} parsed successfully but contained no text. An EBL guide imports `
-      + "every text-bearing paragraph, so this package holds only artwork — check that "
-      + "this is the guide rather than a cover or plate volume."
-  }
-  return `${fileName} parsed successfully but contained no study notes. `
-    + "Biblica notes live in `intro:*` paragraph styles — check that this is the notes "
-    + "document. If this is a Treasure Hunt Bible, a Reach 4 Life or an EBL file, tick the "
-    + "matching box and import it again."
-}
 
 /** IDML is a UCF/ZIP package — reject anything that is not one before parsing. */
 function assertIdmlPackageBytes(bytes: ArrayBuffer, fileName: string): void {
@@ -1520,7 +1620,7 @@ function assertIdmlPackageBytes(bytes: ArrayBuffer, fileName: string): void {
  */
 export function buildBulkCellsWithSpeakers(strings: TranslatableString[]): {
   cells: BulkImportCell[]
-  speakerPairs: { cellId: string; speaker: string | undefined }[]
+  speakerPairs: SpeakerAssignment[]
 }
 export function buildBulkCellsWithSpeakers(
   strings: TranslatableString[],
@@ -1530,10 +1630,11 @@ export function buildBulkCellsWithSpeakers(
     profileId?: string
     profileVersion?: string
     normalizedFile?: NormalizedImportFile
+    speakerAsCastName?: boolean
   },
 ): {
   cells: BulkImportCell[]
-  speakerPairs: { cellId: string; speaker: string | undefined }[]
+  speakerPairs: SpeakerAssignment[]
 }
 export function buildBulkCellsWithSpeakers(
   strings: TranslatableString[],
@@ -1543,10 +1644,18 @@ export function buildBulkCellsWithSpeakers(
     profileId?: string
     profileVersion?: string
     normalizedFile?: NormalizedImportFile
+    /**
+     * AQU-2125: write each string's speaker onto its line as the line's
+     * character (`metadata.cast_name`), so the import can cast the character
+     * once instead of every line. Only for a fresh import: on a re-import the
+     * incoming metadata wins the reconcile merge, so sending a name would
+     * overwrite a character someone has since corrected.
+     */
+    speakerAsCastName?: boolean
   } = {},
 ): {
   cells: BulkImportCell[]
-  speakerPairs: { cellId: string; speaker: string | undefined }[]
+  speakerPairs: SpeakerAssignment[]
 } {
   const normalizedFile = options.normalizedFile ?? normalizeTranslatableStrings(strings, {
     fileName: options.fileName ?? "import",
@@ -1560,16 +1669,23 @@ export function buildBulkCellsWithSpeakers(
     throw new Error("Normalized import unit count does not match parsed string count")
   }
   const cells: BulkImportCell[] = []
-  const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
+  const speakerPairs: SpeakerAssignment[] = []
   let prevCellId: string | null = null
   for (let seq = 0; seq < strings.length; seq++) {
     const str = strings[seq]
     const unit = normalizedFile.units[seq]
     const cellId = str.id || uuidv7()
+    const speaker = str.speaker?.trim()
+    const castNamed = Boolean(options.speakerAsCastName && speaker)
     const metadata = {
       ...(str.metadata ?? {}),
+      ...(castNamed ? { cast_name: speaker } : {}),
       aquillaImport: aquillaImportMetadata(normalizedFile, unit),
       ...(str.paragraphStart ? { paragraphStart: true } : {}),
+      // AQU-2184: the paragraph's own USFM marker, so the HTML export can
+      // tell a \q2 poetry line from a \p paragraph. Deliberately NOT inside
+      // `aquillaImport` — re-import replaces that envelope wholesale.
+      ...(str.paragraphMarker ? { paragraphMarker: str.paragraphMarker } : {}),
     }
     cells.push({
       id: uuidv7(),
@@ -1591,7 +1707,7 @@ export function buildBulkCellsWithSpeakers(
       // into the bulk POST body verbatim → cells.metadata JSONB on the server.
       metadata,
     })
-    speakerPairs.push({ cellId, speaker: str.speaker })
+    speakerPairs.push({ cellId, speaker: str.speaker, ...(castNamed ? { castNamed: true } : {}) })
     prevCellId = cellId
   }
   return { cells, speakerPairs }
@@ -1615,11 +1731,26 @@ export function buildBulkCells(
   return buildBulkCellsWithSpeakers(strings, options).cells
 }
 
+/**
+ * How one parsed source file is recognised again across import attempts
+ * (`resolveImportSession`). Deliberately the same shape of identity
+ * `reimportKeysFor` uses — format, book, name — so retrying "Jonah.usfm" into
+ * a project resolves the session the failed attempt left, while a different
+ * file in the same project gets its own.
+ */
+export function importSessionKeyFor(
+  fileType: FileType,
+  result: { name: string; originalName?: string; bookCode?: string },
+): string {
+  const name = (result.originalName ?? result.name).trim().toLowerCase()
+  return `${fileType}:${result.bookCode?.trim().toUpperCase() ?? ""}:${name}`
+}
+
 export interface EmitParsedFileResult {
   ref: FileReference
   /** (cellId, speaker) pairs from the same `buildBulkCellsWithSpeakers` call
    *  that produced the uploaded cells — cellIds are guaranteed to match. */
-  speakerPairs: { cellId: string; speaker: string | undefined }[]
+  speakerPairs: SpeakerAssignment[]
 }
 
 /**
@@ -1635,15 +1766,21 @@ export async function emitParsedFile(
   ctx: ImportContext,
   normalizedFile?: NormalizedImportFile,
 ): Promise<EmitParsedFileResult> {
-  const reimportKeys = [
-    result.bookCode?.trim().toUpperCase(),
-    result.name.trim().toLowerCase(),
-    result.originalName?.trim().toLowerCase(),
-  ].filter((key): key is string => Boolean(key))
-  const existingFileId = reimportKeys
-    .map((key) => ctx.reimportFileIds?.get(key))
-    .find((id): id is string => Boolean(id))
-  const fileId = existingFileId ?? uuidv7()
+  const sidebar = ctx.sidebarReimport
+    ? planSidebarReimport({
+      mode: ctx.sidebarReimport.mode,
+      targetFileId: ctx.sidebarReimport.targetFileId,
+      uploadName: result.name,
+      existingNames: ctx.sidebarReimport.existingNames,
+      suffix: ctx.sidebarReimport.suffix,
+      forkFileId: uuidv7(),
+    })
+    : null
+  const existingFileId = sidebar
+    ? sidebar.reconcileFileId
+    : reimportKeysFor(result)
+      .map((key) => ctx.reimportFileIds?.get(key))
+      .find((id): id is string => Boolean(id))
 
   const normalized = normalizedFile ?? normalizeTranslatableStrings(result.strings, {
     fileName: result.name,
@@ -1663,13 +1800,42 @@ export async function emitParsedFile(
   // call that mints the cellIds — avoids the double-parse cellId mismatch.
   const { cells, speakerPairs } = buildBulkCellsWithSpeakers(result.strings, {
     normalizedFile: normalized,
+    speakerAsCastName: !existingFileId,
   })
-  const targets: TargetCommit[] = cells.flatMap((cell, index) => {
+
+  // AQU-1859: a fresh import runs inside a resumable session, so a chunk that
+  // fails half-way through a Bible can be retried into the same file instead
+  // of leaving a hidden partial file behind and starting a second one. A
+  // re-import of an EXISTING file already has its own identity and goes
+  // through the reconcile path, which is not chunked.
+  const session = existingFileId
+    ? undefined
+    : await resolveImportSession({
+      projectId: ctx.projectId,
+      importKey: importSessionKeyFor(fileType, result),
+      fileName: sidebar?.displayName ?? result.name,
+      cellKeys: cells.map((cell) => cell.cellId),
+      chunkSize: BULK_IMPORT_CHUNK,
+    })
+  const fileId = existingFileId ?? session?.fileId ?? uuidv7()
+
+  // Inside a session the event ids are derived from the file id rather than
+  // minted per parse, so re-parsing the file to retry produces byte-identical
+  // chunks and the already-landed ones replay as no-ops. Mutated in place
+  // because `speakerPairs` is keyed to these same cell objects' `cellId`.
+  if (session) {
+    cells.forEach((cell, index) => {
+      cell.id = importCellEventId(fileId, index, cell.cellId)
+    })
+  }
+
+  const displayName = sidebar?.displayName ?? result.name
+  const targets: TargetCommit[] = sidebar?.stripTargets ? [] : cells.flatMap((cell, index) => {
     const value = result.strings[index]?.translated
     const valueHtml = result.strings[index]?.translatedHtml
     return value || valueHtml
       ? [{
-          id: uuidv7(),
+          id: session ? importCellEventId(fileId, index, cell.cellId, "target") : uuidv7(),
           cellId: cell.cellId,
           parentId: cell.id,
           value: value ?? "",
@@ -1687,17 +1853,25 @@ export async function emitParsedFile(
   // AQU-990: the bulk-import route rejects an oversized cell with a bare 413
   // after the whole payload has been chunked and uploaded. Check the same
   // ceiling here so an unsplittable section fails immediately, naming itself.
-  assertImportCellsWithinSizeLimit(result.name, cells, targets)
+  try {
+    assertImportCellsWithinSizeLimit(result.name, cells, targets)
+  } catch (error) {
+    // Nothing was uploaded, so hand the session key back here rather than
+    // leaving this file un-resumable for the rest of the tab's life;
+    // `bulkUploadSource` owns the release once the upload has started.
+    if (session) releaseImportSession(session.key)
+    throw error
+  }
 
-  const upload = existingFileId ? reconcileSourceImport : bulkUploadSource
-  await upload({
+  const shared = {
     projectId: ctx.projectId,
     fileId,
+    ...(session ? { session } : {}),
     file: {
-      id: uuidv7(),
-      name: result.name,
+      id: session?.fileEventId ?? uuidv7(),
+      name: displayName,
       fileType,
-      role: "source",
+      role: "source" as const,
       kind: importedFileKind(fileType),
       importFormat: fileType,
       parserVersion: `${normalized.profileId}@${normalized.profileVersion}`,
@@ -1717,16 +1891,80 @@ export async function emitParsedFile(
     artifactFidelity: normalized.fidelity,
     targets,
     targetLang: ctx.targetLang,
-    ...(!existingFileId && ctx.deferPublication ? { deferPublication: true } : {}),
     getToken: ctx.getToken,
     onProgress: ctx.onCellEnqueued,
     signal: ctx.signal,
+  }
+  // AQU-2459: a fresh import of a filter-backed format travels as one
+  // revision; everything else keeps the N-row path until its format is
+  // wrapped onto the contract.
+  const reimport = !existingFileId
+    ? false
+    : sidebar?.fork && sidebar.sourceFileId
+      ? "fork" as const
+      : sidebar?.reviewChangedSource
+        ? "review" as const
+        : "update" as const
+  const revision = canImportAsRevision({
+    fileType,
+    reimport,
+    hasTargets: targets.length > 0,
+    hasOriginalBytes: result.rawBytes !== undefined || result.rawSource !== undefined,
+    cells,
   })
+    ? { stamp: shared.file.parserVersion, units: revisionUnitsFromCells(cells) }
+    : undefined
+
+  if (existingFileId && revision) {
+    // AQU-2459: "Update existing" aligns by content as one revision.
+    await reviseSourceImport({ ...shared, revision })
+  } else if (existingFileId) {
+    await reconcileSourceImport({
+      ...shared,
+      ...(sidebar?.reviewChangedSource ? { reviewChangedSource: true as const } : {}),
+      ...(sidebar?.fork && sidebar.sourceFileId
+        ? { fork: true as const, sourceFileId: sidebar.sourceFileId }
+        : {}),
+    })
+  } else {
+    await bulkUploadSource({
+      ...shared,
+      ...(revision ? { revision } : {}),
+      ...(!existingFileId && ctx.deferPublication ? { deferPublication: true } : {}),
+    })
+  }
+
+  // Update and "Make updated copy" both keep the translations. A blank copy
+  // has no existing file here, so it does not try to place styles.
+  if (existingFileId && fileType === "idml" && ctx.alignReimportedIdml) {
+    try {
+      await alignReimportedIdmlFile({
+        projectId: ctx.projectId,
+        fileId,
+        lane: ctx.targetLang,
+        getToken: ctx.getToken,
+        host: ctx.alignReimportedIdml,
+        sourceLanguage: ctx.sourceLanguage ?? "",
+        targetLanguage: ctx.targetLanguage ?? "",
+        signal: ctx.signal,
+        onProgress: (done, total) => {
+          ctx.onPhase?.(t("importExport.upload.aligningIdmlStyles", {
+            fileName: result.name,
+            count: done.toLocaleString(),
+            total: total.toLocaleString(),
+          }))
+          ctx.onAlignProgress?.(done, total)
+        },
+      })
+    } catch (error) {
+      console.warn("[idml-reimport] style alignment failed", error)
+    }
+  }
 
   return {
     ref: {
       id: fileId,
-      name: result.name,
+      name: displayName,
       type: fileType,
       createdAt: new Date().toISOString(),
       cellCount: cells.length,
@@ -1741,6 +1979,7 @@ export async function emitParsedFile(
       ...(ctx.sourceTextDirection ? { sourceTextDirection: ctx.sourceTextDirection } : {}),
       ...(ctx.targetTextDirection ? { targetTextDirection: ctx.targetTextDirection } : {}),
       ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
+      ...(normalized.profileId ? { importProfile: normalized.profileId } : {}),
       ...(result.originalName ? { originalName: result.originalName } : {}),
       ...(result.bookCode ? { bookCode: result.bookCode } : {}),
       ...(result.rawBytes || result.rawSource ? { hasOriginalSource: true as const } : {}),
@@ -1764,6 +2003,8 @@ export interface MediaSegmentSpec {
   /** Playback window into the shared clip — the bytes are uploaded once, not N times. */
   trimStartMs?: number
   trimEndMs?: number
+  transcription?: string
+  metadata?: Record<string, unknown>
 }
 
 /**
@@ -1784,173 +2025,217 @@ export interface MediaSegmentSpec {
 export async function computeMediaSegmentSpecs(
   file: File,
 ): Promise<{ durationMs: number | undefined; specs: MediaSegmentSpec[] }> {
-  const decoded = await decodeAudioFile(file).catch(() => null)
-  const durationMs = decoded?.durationMs ?? (await probeMediaDurationMs(file).catch(() => undefined))
-  const segments = decoded ? detectSpeechSegments(decoded.channel, decoded.sampleRate) : []
-
-  const timings = tileSegments(segments, durationMs)
-  const specs: MediaSegmentSpec[] =
-    segments.length >= 2
-      ? segments.map((s, i) => ({
-          cellId: uuidv7(),
-          startMs: timings[i].startMs,
-          endMs: timings[i].endMs,
-          trimStartMs: s.startMs,
-          trimEndMs: s.endMs,
-        }))
-      : [{ cellId: uuidv7(), ...(durationMs !== undefined ? { startMs: 0, endMs: Math.round(durationMs) } : {}) }]
-  return { durationMs, specs }
+  // AQU-1857: the analysis decode is sized to the recording — a 100-minute MP3
+  // is decoded a minute at a time instead of as one multi-gigabyte PCM buffer.
+  // `null` (platform can't decode) and an empty `segments` (too long to
+  // analyse at all) both land on the single whole-file fallback below.
+  const analysis = await analyseSpeechInFile(file, {
+    probeDurationMs: (blob) => probeMediaDurationMs(blob).catch(() => undefined),
+  }).catch(() => null)
+  const durationMs = analysis?.durationMs ?? (await probeMediaDurationMs(file).catch(() => undefined))
+  const segments = analysis?.segments ?? []
+  return { durationMs, specs: mediaSegmentSpecsFromSpeech(segments, durationMs) }
 }
 
 /**
- * Import an audio/video FILE as a single media segment on a time-ordered file.
- * Scope A "B-option": one clip spanning the whole file (silence-split into many
- * segments is Part B). Creates file.create (orderedBy='time') + one
- * source.cell.create (medium='media', timing = probed duration), uploads the
- * bytes to R2, and attaches them so the clip is playable in the media layer.
+ * Detected speech → segment specs: tiled cell timing, tight trims, and the
+ * single whole-clip spec when there is nothing to split. Split out of
+ * `computeMediaSegmentSpecs` (AQU-1681) for a caller that found the speech
+ * itself — a linked video's sound is analysed while it streams in, so
+ * decoding it again here would only repeat the work.
  */
+export function mediaSegmentSpecsFromSpeech(
+  segments: readonly { startMs: number; endMs: number }[],
+  durationMs: number | undefined,
+): MediaSegmentSpec[] {
+  const timings = tileSegments(segments, durationMs)
+  return segments.length >= 2
+    ? segments.map((s, i) => ({
+        cellId: uuidv7(),
+        startMs: timings[i].startMs,
+        endMs: timings[i].endMs,
+        trimStartMs: s.startMs,
+        trimEndMs: s.endMs,
+      }))
+    : [{ cellId: uuidv7(), ...(durationMs !== undefined ? { startMs: 0, endMs: Math.round(durationMs) } : {}) }]
+}
+
+/** Import source media as timed segments, preserving the uploaded clip once. */
 export async function emitMediaFile(
   file: File,
   fileType: FileType,
   ctx: ImportContext,
 ): Promise<FileReference> {
-  if (file.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: file.name }))
-  if (file.size > MAX_AUDIO_UPLOAD_BYTES) {
-    throw new Error(t("importExport.errors.mediaFileTooLarge", { fileName: file.name }))
-  }
-  const fileId = uuidv7()
-  const { durationMs, specs } = await computeMediaSegmentSpecs(file)
-
-  const cells: BulkImportCell[] = specs.map((s, i) => ({
-    id: uuidv7(),
-    cellId: s.cellId,
-    anchorCellId: i === 0 ? null : specs[i - 1].cellId,
-    value: file.name,
-    medium: "media",
-    sequenceIndex: i,
-    ...(s.startMs !== undefined && s.endMs !== undefined ? { startMs: s.startMs, endMs: s.endMs } : {}),
-  }))
-
-  await bulkUploadSource({
-    projectId: ctx.projectId,
-    fileId,
-    file: {
-      id: uuidv7(),
-      name: file.name,
-      fileType,
-      role: "source",
-      kind: importedFileKind(fileType),
-      importFormat: fileType,
-      parserVersion: "workspace-import-v1",
-      sourceLanguage: ctx.sourceLanguage,
-      targetLanguage: ctx.targetLanguage,
-      sourceTextDirection: ctx.sourceTextDirection,
-      targetTextDirection: ctx.targetTextDirection,
-      orderedBy: "time",
-    },
-    cells,
-    deferPublication: true,
-    getToken: ctx.getToken,
-    onProgress: ctx.onCellEnqueued,
-    signal: ctx.signal,
-  })
-
-  // Upload the media bytes ONCE, then attach the shared clip to each segment
-  // cell with its trim window. Slot 'recording' is reused for the source clip;
-  // a dedicated source-media slot is a later refinement.
-  const ext = (file.name.split(".").pop() || "bin").toLowerCase()
-  const audioId = buildAudioId(fileId)
-  const artifactId = uuidv7()
-  const upload = await uploadCellAudio({
-    projectId: ctx.projectId,
-    fileId,
-    audioId,
-    ext,
-    blob: file,
-    artifactId,
-    artifactName: file.name,
-    getSyncToken: (_p, f) => ctx.getToken(f),
-    signal: ctx.signal,
-  })
-  // Persist every attachment and reveal the staged file in one worker
-  // transaction. If the response is lost after commit, publishStagedImport
-  // retries the same event ids; never delete the clip on an ambiguous publish
-  // failure because the server may already have made it live.
-  await publishStagedImport({
-    projectId: ctx.projectId,
-    fileId,
-    attachments: specs.map((s) => ({
-      cellId: s.cellId,
-      audioId: `${upload.audioId}.${upload.ext}`,
-      url: upload.url,
-      slot: "recording",
-      ...(file.type ? { mimeType: file.type } : {}),
-      ...(durationMs !== undefined ? { durationMs: Math.round(durationMs) } : {}),
-      ...(s.trimStartMs !== undefined && s.trimEndMs !== undefined
-        ? { trimStartMs: s.trimStartMs, trimEndMs: s.trimEndMs }
-        : {}),
-    })),
-    getToken: ctx.getToken,
-    signal: ctx.signal,
-  })
-
-  // AQU-646: seed the post-import auto-transcribe — the workspace's
-  // import-completion handler consumes this (the cell store won't have these
-  // cells, let alone their attachments, until an unawaitable revalidate).
-  recordMediaImportSeed({
-    fileId,
-    cells: buildMediaSeedCells({
-      fileId,
-      fileName: file.name,
-      specs,
-      audioId: `${upload.audioId}.${upload.ext}`,
-      url: upload.url,
-      ...(durationMs !== undefined ? { durationMs } : {}),
-    }),
-  })
-
-  return {
-    id: fileId,
-    name: file.name,
-    type: fileType,
-    createdAt: new Date().toISOString(),
-    cellCount: cells.length,
-    orderedBy: "time",
-  }
+  return createMediaFileCommit(file, fileType, ctx)()
 }
 
-/**
- * Decode an audio file to mono PCM for silence-splitting. Returns null when
- * the platform can't decode it (no AudioContext, or an undecodable container
- * such as most video) — callers then fall back to a single whole-file segment.
- */
-async function decodeAudioFile(
+/** Keep staging and blob identity through publication retries for one preview. */
+export function createMediaFileCommit(
   file: File,
-): Promise<{ channel: Float32Array; sampleRate: number; durationMs: number } | null> {
-  const AC: typeof AudioContext | undefined =
-    typeof window !== "undefined"
-      ? window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-      : undefined
-  if (!AC) return null
-  const buf = await file.arrayBuffer()
-  const audioCtx = new AC()
-  try {
-    // decodeAudioData rejects with a cryptic DOMException ("EncodingError:
-    // Decoding failed") — rewrap so anything that surfaces or logs the message
-    // is user-actionable. The original error is preserved as `cause`.
-    const audio = await audioCtx.decodeAudioData(buf).catch((err: unknown) => {
-      throw new Error(
-        t("importExport.errors.couldNotDecodeAudio", { fileName: file.name }),
-        { cause: err },
-      )
-    })
-    return {
-      channel: audio.getChannelData(0),
-      sampleRate: audio.sampleRate,
-      durationMs: audio.duration * 1000,
+  fileType: FileType,
+  ctx: ImportContext,
+): () => Promise<FileReference> {
+  let fileId = uuidv7()
+  const publishEventId = uuidv7()
+  const videoEventId = uuidv7()
+  const videoId = ctx.mediaPictureUrl ? youTubeVideoId(ctx.mediaPictureUrl) : null
+  const pictureUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : undefined
+  const prepare = async () => {
+    if (ctx.mediaPictureUrl && !videoId) throw new Error("Enter a YouTube video link.")
+    if (file.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: file.name }))
+    // AQU-1853: large media rides the multipart upload path, so the gate is
+    // the whole-object ceiling, not the single-request one.
+    if (file.size > MAX_AUDIO_OBJECT_BYTES) {
+      // AQU-1975: interpolate the ceiling rather than naming it in the copy —
+      // the string outlived the 95 MB cap it used to quote.
+      const locale = normalizeLocale(readStoredLocale())
+      throw new Error(t("importExport.errors.mediaFileTooLarge", {
+        fileName: file.name, limit: formatByteLimit(MAX_AUDIO_OBJECT_BYTES, locale),
+      }))
     }
-  } finally {
-    void audioCtx.close?.()
+    ctx.signal?.throwIfAborted()
+    const suppliedDuration = ctx.mediaTextSource
+      ? await probeMediaDurationMs(file).catch(() => undefined) : undefined
+    const { durationMs, specs } = ctx.mediaTextSource
+      ? { durationMs: suppliedDuration, specs: createMediaCueSpecs(ctx.mediaTextSource.cues, suppliedDuration) }
+      : await computeMediaSegmentSpecs(file)
+
+    const cells: BulkImportCell[] = specs.map((s, i) => ({
+      id: uuidv7(),
+      cellId: s.cellId,
+      anchorCellId: i === 0 ? null : specs[i - 1].cellId,
+      value: file.name,
+      medium: "media",
+      sequenceIndex: i,
+      ...(s.metadata ? { metadata: s.metadata } : {}),
+      ...(s.startMs !== undefined && s.endMs !== undefined ? { startMs: s.startMs, endMs: s.endMs } : {}),
+    }))
+
+    await bulkUploadSource({
+      projectId: ctx.projectId,
+      fileId,
+      file: {
+        id: uuidv7(),
+        name: file.name,
+        fileType,
+        role: "source",
+        kind: importedFileKind(fileType),
+        importFormat: fileType,
+        parserVersion: "workspace-import-v1",
+        sourceLanguage: ctx.sourceLanguage,
+        targetLanguage: ctx.targetLanguage,
+        sourceTextDirection: ctx.sourceTextDirection,
+        targetTextDirection: ctx.targetTextDirection,
+        orderedBy: "time",
+      },
+      cells,
+      deferPublication: true,
+      getToken: ctx.getToken,
+      onProgress: ctx.onCellEnqueued,
+      signal: ctx.signal,
+    })
+
+    // Upload the media bytes ONCE, then attach the shared clip to each segment
+    // cell with its trim window. Slot 'recording' is reused for the source clip;
+    // a dedicated source-media slot is a later refinement.
+    const ext = (file.name.split(".").pop() || "bin").toLowerCase()
+    const textArtifact = ctx.mediaTextSource?.artifact
+    if (textArtifact) {
+      await uploadSourceOriginal({
+        projectId: ctx.projectId, fileId, artifactId: uuidv7(),
+        bytes: textArtifact.bytes, format: textArtifact.format,
+        artifactName: textArtifact.name, memberPath: textArtifact.name,
+        bindingRole: "source", profileId: `builtin:media-cues-${textArtifact.format}`,
+        profileVersion: "1", fidelity: "preserved-only", updateSourceSidecar: false,
+        getToken: ctx.getToken, signal: ctx.signal,
+      })
+    }
+    const audioId = buildAudioId(fileId)
+    const artifactId = uuidv7()
+    const upload = await uploadCellAudio({
+      projectId: ctx.projectId,
+      fileId,
+      audioId,
+      ext,
+      blob: file,
+      artifactId,
+      artifactName: file.name,
+      getSyncToken: (_p, f) => ctx.getToken(f),
+      signal: ctx.signal,
+    })
+    return { durationMs, specs, cells, upload }
+  }
+  let staged: ReturnType<typeof prepare> | null = null
+  let inFlight: Promise<FileReference> | null = null
+  let result: FileReference | null = null
+  return () => {
+    if (result) return Promise.resolve(result)
+    if (inFlight) return inFlight
+    inFlight = (async () => {
+      ctx.signal?.throwIfAborted()
+      if (!staged) staged = prepare().catch(error => {
+        staged = null
+        fileId = uuidv7()
+        throw error
+      })
+      const { durationMs, specs, cells, upload } = await staged
+      // Persist every attachment and reveal the staged file in one worker
+      // transaction. If the response is lost after commit, publishStagedImport
+      // retries the same event ids; never delete the clip on an ambiguous publish
+      // failure because the server may already have made it live.
+      await publishStagedImport({
+        projectId: ctx.projectId,
+        fileId,
+        ...(pictureUrl || fileType === "video"
+          ? { coreMediaUrl: pictureUrl ?? upload.url } : {}),
+        publishEventId, videoEventId,
+        attachments: specs.map((s) => ({
+          cellId: s.cellId,
+          audioId: `${upload.audioId}.${upload.ext}`,
+          url: upload.url,
+          slot: "recording",
+          // AQU-1565 follow-up: the imported recording is the file's shared
+          // programme audio, not a dub of each row (see attach-media.ts).
+          role: "source",
+          ...(s.transcription !== undefined ? { transcription: s.transcription } : {}),
+          ...(file.type ? { mimeType: file.type } : {}),
+          ...(durationMs !== undefined ? { durationMs: Math.round(durationMs) } : {}),
+          ...(s.trimStartMs !== undefined && s.trimEndMs !== undefined
+            ? { trimStartMs: s.trimStartMs, trimEndMs: s.trimEndMs }
+            : {}),
+        })),
+        getToken: ctx.getToken,
+        signal: ctx.signal,
+      })
+
+      // AQU-646: seed the post-import auto-transcribe — the workspace's
+      // import-completion handler consumes this (the cell store won't have these
+      // cells, let alone their attachments, until an unawaitable revalidate).
+      if (!ctx.mediaTextSource) recordMediaImportSeed({
+        fileId,
+        cells: buildMediaSeedCells({
+          fileId,
+          fileName: file.name,
+          specs,
+          audioId: `${upload.audioId}.${upload.ext}`,
+          url: upload.url,
+          ...(durationMs !== undefined ? { durationMs } : {}),
+        }),
+      })
+      result = {
+        id: fileId,
+        name: file.name,
+        type: fileType,
+        createdAt: new Date().toISOString(),
+        cellCount: cells.length,
+        orderedBy: "time",
+        hasOriginalSource: true,
+        ...(pictureUrl || fileType === "video"
+          ? { coreMediaUrl: pictureUrl ?? upload.url } : {}),
+      }
+      return result
+    })().finally(() => { inFlight = null })
+    return inFlight
   }
 }
 
@@ -2042,6 +2327,9 @@ export interface ParatextBookPlan {
   strings: TranslatableString[]
   /** Verse refs that appear more than once in the book (surfaced in preview). */
   duplicateRefs: string[]
+  /** Paratext-parity chapter/verse + marker findings for this book (AQU-1731),
+   *  surfaced in preview next to the duplicate-ref count. */
+  structureFindings: UsfmStructureFinding[]
   cellCount: number
 }
 
@@ -2054,6 +2342,10 @@ export interface ParatextPlan {
   /** Whole ZIP/folder package, including Settings, BookNames, support files,
    * and any media members. One immutable artifact binds to every book file. */
   sourceArtifact?: ProjectSourceArtifact
+  /** Support members the archive reader could not read and left out (AQU-1406).
+   *  They still travel inside the preserved package; the commit phase reports
+   *  them so a consultant sees what was passed over. */
+  skippedEntries?: SkippedProjectEntry[]
 }
 
 /**
@@ -2070,10 +2362,10 @@ export async function prepareParatextProject(
     throw new Error(t("importExport.errors.notAParatextProject"))
   }
   const books: ParatextBookPlan[] = project.books.map((book) => {
-    const { strings, duplicateRefs } = usfmSectionToStrings(book.rawSource, {
+    const { strings, duplicateRefs, structureFindings } = usfmSectionToStrings(book.rawSource, {
       excludeFrontMatter: opts?.excludeFrontMatter,
     })
-    return { book, strings, duplicateRefs, cellCount: strings.length }
+    return { book, strings, duplicateRefs, structureFindings, cellCount: strings.length }
   })
   // Materialize and validate the complete package during preview. Commit then
   // uploads these exact immutable bytes; a large folder-derived ZIP cannot
@@ -2084,7 +2376,12 @@ export async function prepareParatextProject(
     assertSourceUploadSize(bytes)
     sourceArtifact = { ...entries.sourceArtifact, bytes: async () => bytes }
   }
-  return { project, books, ...(sourceArtifact ? { sourceArtifact } : {}) }
+  return {
+    project,
+    books,
+    ...(sourceArtifact ? { sourceArtifact } : {}),
+    ...(entries.skippedEntries?.length ? { skippedEntries: entries.skippedEntries } : {}),
+  }
 }
 
 async function preserveParatextPackage(
@@ -2158,6 +2455,13 @@ export async function importParatextProject(
   return commitParatextProject(plan, ctx, onProgress)
 }
 
+/** Members the archive reader left out before parsing, in the shape the import
+ *  summary lists — so an unreadable support file is accounted for next to any
+ *  book-level skips instead of vanishing (AQU-1406). */
+function archiveSkips(plan: ParatextPlan): { book: string; reason: string }[] {
+  return (plan.skippedEntries ?? []).map((entry) => ({ book: entry.name, reason: entry.reason }))
+}
+
 /**
  * Upload a prepared (client-side-parsed, user-confirmed) Paratext plan: each
  * book becomes one Aquilla File via the bulk endpoint. Progress fires per
@@ -2170,7 +2474,7 @@ export async function commitParatextProject(
   onProgress?: (p: ParatextImportProgress) => void,
 ): Promise<ParatextImportResult> {
   const refs: FileReference[] = []
-  const skipped: { book: string; reason: string }[] = []
+  const skipped = archiveSkips(plan)
   const total = plan.books.length
   // Source language defaults to the project's ISO code so the Aquilla project
   // inherits it (caller may override per source/target choice).
@@ -2304,7 +2608,7 @@ export async function importParatextAsTarget(
   const project = plan.project
   const plans = buildBilingualPlan(project.books, sourceVerses, project.bookNames)
   const refs: FileReference[] = []
-  const skipped: { book: string; reason: string }[] = []
+  const skipped = archiveSkips(plan)
   const total = plans.length
   const isSkipped = (bookId: string) => ctx.skipKeys?.has(bookId.toUpperCase()) ?? false
   // Overall cell budget: source cells + target commits per non-skipped book.
@@ -2341,7 +2645,16 @@ export async function importParatextAsTarget(
         group: cell.ref,
         globalReferences: [cell.ref],
         type: cell.type,
-        ...(cell.paragraphStart ? { paragraphStart: true, metadata: { paragraphStart: true } } : {}),
+        ...(cell.paragraphStart
+          ? {
+              paragraphStart: true,
+              metadata: {
+                paragraphStart: true,
+                // AQU-2184: poetry level for the HTML export's page.
+                ...(cell.paragraphMarker ? { paragraphMarker: cell.paragraphMarker } : {}),
+              },
+            }
+          : {}),
       }))
       const normalized = normalizeTranslatableStrings(strings, {
         fileName: bookPlan.displayName,
@@ -2497,6 +2810,12 @@ export interface ParseFileOptions {
    *  intro-block front matter from the imported cells (AQU-634). Default:
    *  false (import front matter). */
   excludeFrontMatter?: boolean
+  /** docx/txt/md: what one imported cell is (AQU-1720). `paragraph` emits one
+   *  cell per non-empty paragraph — no sentence split, no length cap — which is
+   *  the unit a dubbing project generates one voice clip for. Formats whose
+   *  cell identity is fixed by the format (USFM verses, subtitle cues,
+   *  key/value resources) ignore it. Default: `sentence`. */
+  cellUnit?: CellUnit
 }
 
 export async function parseFile(
@@ -2522,7 +2841,12 @@ export async function parseFile(
       // USFM split live in parse-text-formats.ts (worker-safe core).
       const bytes = await file.arrayBuffer()
       const text = decodeImportText(bytes, file.name)
-      const parsed = await parseTextFormatOffMainThread({ fileType, text, name: file.name })
+      const parsed = await parseTextFormatOffMainThread({
+        fileType,
+        text,
+        name: file.name,
+        cellUnit: options?.cellUnit,
+      })
       return parsed.map((result) => ({
         ...result,
         rawBytes: bytes,
@@ -2568,7 +2892,7 @@ export async function parseFile(
     }
     case "docx": {
       const buffer = await file.arrayBuffer()
-      const strings = await extractDocxStrings(buffer)
+      const strings = await extractDocxStrings(buffer, { cellUnit: options?.cellUnit })
       // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
       return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "docx" }]
     }

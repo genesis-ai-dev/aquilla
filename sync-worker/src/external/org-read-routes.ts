@@ -19,6 +19,7 @@
 // PII: ids, names, and the caller's own role level. No member lists or emails —
 // see orgs-list.ts.
 
+import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { externalError } from "./errors"
 import { listOrgsForCredential } from "./orgs-list"
 import { listProjectsForCredential } from "./projects-list"
@@ -42,7 +43,7 @@ export async function assertOrgInCredentialScope(
   cred: ApiCredentialContext,
   orgId: string,
 ): Promise<Response | null> {
-  if (cred.orgId !== null && cred.orgId !== orgId) {
+  if (!credentialAllowsOrganization(cred, orgId)) {
     return externalError("scope_denied", "credential is not scoped to this org", 403)
   }
   if (cred.projectId !== null) {
@@ -70,7 +71,7 @@ async function handleExternalOrgs(request: Request, env: ExternalReadsEnv): Prom
   if (!env.AQUILLA_PG) return externalError("job_failed", "AQUILLA_PG not configured", 500)
   const authed = await authenticateCredential(request, env)
   if (!authed.ok) return authed.response
-  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential.credentialId)
+  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential)
   if (limited) return limited
   const orgs = await listOrgsForCredential(env.AQUILLA_PG, authed.credential)
   return Response.json({ data: orgs, nextCursor: null })
@@ -88,7 +89,7 @@ async function handleExternalOrgProjects(
   if (!env.AQUILLA_PG) return externalError("job_failed", "AQUILLA_PG not configured", 500)
   const authed = await authenticateCredential(request, env)
   if (!authed.ok) return authed.response
-  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential.credentialId)
+  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential)
   if (limited) return limited
 
   const denied = await assertOrgInCredentialScope(env.AQUILLA_PG, authed.credential, orgId)

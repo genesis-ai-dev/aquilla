@@ -12,6 +12,8 @@
 // a two-row dubbing file want different amounts of timeline, and one global
 // number would have each visit undo the other.
 
+import type { PanelSize } from "./media-layout-start"
+
 /**
  * The height the timeline takes on a file nobody has resized.
  *
@@ -69,8 +71,14 @@ const timelinePaneHeightKey = (fileId: string) => `aquilla:timelinePaneHeight:${
  * open in, and a height from a taller window applied on a short one would push
  * the table under its own floor before the group had a chance to arbitrate.
  */
-export function readStoredTimelinePaneHeight(fileId: string): number {
-  if (typeof window === "undefined") return TIMELINE_PANE_DEFAULT_HEIGHT
+export function readStoredTimelinePaneHeight(
+  fileId: string,
+  // The height this KIND of file starts at when it has none of its own (the
+  // media redesign's starting layouts; see media-layout-start.ts): pixels, or
+  // a share of the media view for a file with a film (AQU-2343).
+  fallback: PanelSize = TIMELINE_PANE_DEFAULT_HEIGHT,
+): PanelSize {
+  if (typeof window === "undefined") return fallback
   try {
     const saved = window.localStorage.getItem(timelinePaneHeightKey(fileId))
     if (saved) {
@@ -80,13 +88,23 @@ export function readStoredTimelinePaneHeight(fileId: string): number {
   } catch {
     /* private mode / unavailable — the height just won't persist */
   }
-  return TIMELINE_PANE_DEFAULT_HEIGHT
+  return fallback
 }
 
 export function writeStoredTimelinePaneHeight(fileId: string, px: number): void {
   if (typeof window === "undefined") return
   try {
     window.localStorage.setItem(timelinePaneHeightKey(fileId), String(Math.round(px)))
+  } catch {
+    /* ignore */
+  }
+}
+
+/** "Reset layout": the file goes back to its kind's starting height. */
+export function clearStoredTimelinePaneHeight(fileId: string): void {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.removeItem(timelinePaneHeightKey(fileId))
   } catch {
     /* ignore */
   }

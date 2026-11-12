@@ -12,6 +12,8 @@
 //   GET /api/v1/external/projects/:projectId/files/:fileId/cells?since=&limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/cells/:cellId/history?limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/settings          — settings + live version
+//   GET /api/v1/external/projects/:projectId/activity?kinds=&fileId=&limit=&cursor=  (activity-route.ts)
+//   GET /api/v1/external/projects/:projectId/changesets/pending  (pending-changesets-route.ts)
 //   GET /api/v1/external/projects/:projectId/cells/:cellId/prompt-preview?targetLang=&fileId=
 //
 // /me, /orgs and /projects are the REST cold-start set (mirrors of the MCP
@@ -59,18 +61,25 @@
 // alongside `data` when present). Errors: `{ error: { code, message } }`
 // with codes from external/errors.ts.
 
-import { externalError } from "./errors"
+import { errorResponse, externalError } from "./errors"
+import { resolveExternalLaneParam } from "./external-lane"
 import { listProjectsForCredential } from "./projects-list"
 import { assertOrgInCredentialScope, handleExternalOrgReadRequest } from "./org-read-routes"
 import { handleExternalCrossProjectSearch, handleExternalSearch } from "./search-reads"
 import { handleFilesReadRequest } from "../events/files-read-route"
 import { handleCellsReadRequest } from "../events/cells-read-route"
 import { loadProjectSettings } from "../../../db/shared/projects"
+import { loadTranslationInstructions } from "../../../db/shared/load-translation-instructions"
+import { filterSettingsBlobForMember } from "../../../db/shared/lane-visibility"
 import { paginate, parsePageParams } from "./pagination"
 import { recordAgentRead, resolveAuthorshipPolicy, scrubAuthorField } from "./pii"
 import { handleExternalSimilarRequest } from "./similar-route"
+import { handleExternalActivityRequest } from "./activity-route"
+import { handleExternalPendingChangesetsRequest } from "./pending-changesets-route"
 import { handlePromptPreview } from "./prompt-preview"
 import { loadProjectDetail } from "./project-detail"
+import { listProjectMembers, MEMBERS_READ_FLOOR } from "./members-read"
+import { loadEffectiveChecks } from "./effective-checks"
 import {
   authenticateAndScope,
   authenticateCredential,
@@ -92,6 +101,7 @@ const FILES_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/files$/
 const CELL_HISTORY_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/cells\/([^/]+)\/history$/
 const SETTINGS_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/settings$/
 const PROMPT_PREVIEW_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/cells\/([^/]+)\/prompt-preview$/
+const MEMBERS_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/members$/
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/external/me — cold-start step 1: prove the token works, learn
@@ -102,7 +112,7 @@ async function handleExternalMe(request: Request, env: ExternalReadsEnv): Promis
   if (!env.AQUILLA_PG) return externalError("job_failed", "AQUILLA_PG not configured", 500)
   const authed = await authenticateCredential(request, env)
   if (!authed.ok) return authed.response
-  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential.credentialId)
+  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential)
   if (limited) return limited
   const cred = authed.credential
   return Response.json({
@@ -113,17 +123,39 @@ async function handleExternalMe(request: Request, env: ExternalReadsEnv): Promis
     // stay: they are the credential's own reach, not a person.
     ...(cred.pii === true ? { userId: cred.userId, username: cred.username } : {}),
     mode: cred.mode,
+    // AQU-1242: a read-only token has to learn that from /me. Otherwise its
+    // first discovery of the ceiling is a 403 on a plan it already built, and
+    // an agent cannot tell that refusal apart from a role problem it might
+    // usefully retry.
+    access: cred.access,
     orgId: cred.orgId,
+    ...(cred.orgIds !== undefined ? { orgIds: cred.orgIds } : {}),
     projectId: cred.projectId,
     credentialId: cred.credentialId,
     hints: {
+      access:
+        cred.access === "read"
+          ? "read-only token: every write surface (changeset prepare/commit, artifact upload) answers 403 scope_denied. Reads, search and export work normally. Nothing you do can change this project."
+          : "read-write token: you may stage and commit changesets, subject to the mode below and your live project role.",
       mode:
-        cred.mode === "ask"
+        cred.access === "read"
+          ? "not applicable on a read-only token: there is nothing to approve because nothing can be staged."
+          : cred.mode === "ask"
           ? "ask mode: you can prepare changesets but a commit needs a human approval at the approvalUrl first (commit returns 428 confirmation_required until then)."
           : "act mode: commit applies a prepared changeset immediately.",
       next: "GET /api/v1/external/projects to find a projectId, then GET /api/v1/external/projects/:projectId/files. Managing a whole workspace? GET /api/v1/external/orgs, then /api/v1/external/orgs/:orgId/projects, and search several at once with GET /api/v1/external/search?q=&projectIds=a,b. GET /api/v1/external for the full API map.",
     },
   })
+}
+
+/** `?sort=created` (newest first) on the list reads a "new X" poller walks.
+ *  Absent = each route's existing order; anything else is a 400, so a typo
+ *  cannot silently fall back to an order the poller would misread. */
+function parseSortParam(params: URLSearchParams): "created" | null | Response {
+  const sort = params.get("sort")
+  if (sort === null || sort === "") return null
+  if (sort === "created") return "created"
+  return externalError("validation_failed", `unknown sort "${sort}" (supported: created)`, 400)
 }
 
 // ---------------------------------------------------------------------------
@@ -137,10 +169,13 @@ async function handleExternalProjects(request: Request, env: ExternalReadsEnv): 
   if (!env.AQUILLA_PG) return externalError("job_failed", "AQUILLA_PG not configured", 500)
   const authed = await authenticateCredential(request, env)
   if (!authed.ok) return authed.response
-  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential.credentialId)
+  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential)
   if (limited) return limited
 
-  const orgId = new URL(request.url).searchParams.get("orgId")
+  const params = new URL(request.url).searchParams
+  const orgId = params.get("orgId")
+  const sort = parseSortParam(params)
+  if (sort instanceof Response) return sort
   const cred = authed.credential
   if (orgId !== null) {
     // Same gate as /orgs/:orgId/projects, deliberately shared: the two spellings
@@ -154,7 +189,7 @@ async function handleExternalProjects(request: Request, env: ExternalReadsEnv): 
   const projects = await listProjectsForCredential(
     env.AQUILLA_PG,
     cred,
-    orgId !== null ? { orgId } : {},
+    { ...(orgId !== null ? { orgId } : {}), ...(sort ? { sort } : {}) },
   )
   return Response.json({ data: projects, nextCursor: null })
 }
@@ -177,13 +212,16 @@ async function handleExternalProjectDetail(
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
   if (env.AQUILLA_PG) {
-    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential)
     if (limited) return limited
   }
 
   // authenticateAndScope already 404s an unknown project id; a null here means
   // the project was deleted between the two reads.
-  const detail = await loadProjectDetail(env.AQUILLA_PG as AquillaDb, projectId, authed.ctx.role)
+  const detail = await loadProjectDetail(env.AQUILLA_PG as AquillaDb, projectId, authed.ctx.role, {
+    flag: env.LANE_READ_WALL,
+    userId: Number(authed.ctx.credential.userId),
+  })
   if (!detail) return externalError("not_found", "project not found", 404)
   return Response.json(detail)
 }
@@ -200,12 +238,14 @@ async function handleExternalFiles(
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
   if (env.AQUILLA_PG) {
-    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential)
     if (limited) return limited
   }
 
   const url = new URL(request.url)
   const { limit, offset } = parsePageParams(url)
+  const sort = parseSortParam(url.searchParams)
+  if (sort instanceof Response) return sort
 
   const token = await mintInternalToken(env, authed.ctx, projectId, "")
   const internalUrl = new URL(request.url)
@@ -220,8 +260,68 @@ async function handleExternalFiles(
     return externalError("validation_failed", await internalRes.text(), internalRes.status)
   }
 
-  const body = (await internalRes.json()) as { files: unknown[] }
-  return Response.json(paginate(body.files, offset, limit))
+  const body = (await internalRes.json()) as { files: Array<{ fileId?: unknown }> }
+  const files = sort === "created" ? await sortFilesNewestFirst(env.AQUILLA_PG as AquillaDb, projectId, body.files) : body.files
+  return Response.json(paginate(files, offset, limit))
+}
+
+/** The internal files route orders by last edit and does not serialize
+ *  `created_at`, so the newest-first order is read separately and applied to
+ *  the rows that route already filtered (deleted files, lane wall). */
+async function sortFilesNewestFirst<T extends { fileId?: unknown }>(
+  db: AquillaDb,
+  projectId: string,
+  files: T[],
+): Promise<T[]> {
+  const { results } = await db
+    .prepare("SELECT id FROM files WHERE project_id = ? ORDER BY created_at DESC NULLS LAST, id DESC")
+    .bind(projectId)
+    .all<{ id: string }>()
+  const rank = new Map(results.map((r, i) => [r.id, i]))
+  const at = (f: T) => (typeof f.fileId === "string" ? rank.get(f.fileId) : undefined) ?? Number.MAX_SAFE_INTEGER
+  return [...files].sort((a, b) => at(a) - at(b))
+}
+
+/**
+ * AQU-1426: give every cell row an EXPLICIT `hidden` boolean before it leaves
+ * the agent boundary.
+ *
+ * The internal serializer OMITS the key on a visible row on purpose (AQU-1422) —
+ * it serves the SPA, where a 30k-cell Bible file would pay ~15 bytes a row for a
+ * field that is false on all but a handful. An agent reading the API has the
+ * opposite problem: an absent key is indistinguishable from "this server does
+ * not know about hiding", and the whole point of the flag is that an agent can
+ * SEE what is parked and skip it. So the explicit boolean is stamped here, at
+ * the boundary, exactly where the authorship scrub is — not by loosening the
+ * shared serializer.
+ *
+ * The flag lives on the SOURCE row only (hiding is per cell, not per lane), so a
+ * cell's visibility is resolved from its source row and stamped onto every row
+ * of that cell — a target row of a parked cell reads `hidden: true` rather than
+ * making the caller join the two itself. A cell with no source row IN THIS
+ * PAYLOAD (a `since=` delta read can carry a lone target row) keeps no `hidden`
+ * key at all: reporting `false` there would be asserting a visibility this
+ * response never read.
+ */
+export function stampCellVisibility(cells: readonly unknown[]): unknown[] {
+  const isRow = (v: unknown): v is Record<string, unknown> =>
+    typeof v === "object" && v !== null && !Array.isArray(v)
+  const hiddenByCell = new Map<string, boolean>()
+  for (const row of cells) {
+    if (!isRow(row) || row.side !== "source") continue
+    const cellId = row.cellId
+    if (typeof cellId !== "string") continue
+    hiddenByCell.set(cellId, row.hidden === true)
+  }
+  if (hiddenByCell.size === 0) return [...cells]
+  return cells.map((row) => {
+    if (!isRow(row)) return row
+    const cellId = row.cellId
+    if (typeof cellId !== "string") return row
+    const hidden = hiddenByCell.get(cellId)
+    if (hidden === undefined) return row
+    return { ...row, hidden }
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -237,16 +337,29 @@ async function handleExternalFileCells(
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
   if (env.AQUILLA_PG) {
-    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential)
     if (limited) return limited
   }
 
-  // since/limit/cursor (and the cellIds fast-path param and the AQU-538
-  // lane=<tag> target-lane filter) are supported natively by the internal
-  // cells route — forward the querystring as-is.
+  // ?lane= is a lane id. The internal cells route still filters by the frozen tag.
+  if (!env.AQUILLA_PG) return externalError("job_failed", "AQUILLA_PG not configured", 500)
+  const cellUrl = new URL(request.url)
+  const lane = await resolveExternalLaneParam(
+    env.AQUILLA_PG,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(authed.ctx.credential.userId),
+    authed.ctx.role,
+    cellUrl.searchParams.get("lane"),
+    "lane",
+  )
+  if (!lane.ok) return externalError("validation_failed", lane.message, 400)
+  cellUrl.searchParams.set("lane", lane.lane.legacyTag ?? "")
+
   const token = await mintInternalToken(env, authed.ctx, projectId, fileId)
   const internalUrl = new URL(request.url)
   internalUrl.pathname = `/api/v1/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/cells`
+  internalUrl.search = cellUrl.search
   const internalRes = await handleCellsReadRequest(
     new Request(internalUrl.toString(), { headers: { Authorization: `Bearer ${token}` } }),
     env,
@@ -270,12 +383,14 @@ async function handleExternalFileCells(
   // edited by Anna" is the whole point — so the scrub happens HERE, at the
   // agent boundary, rather than in the shared serializer.
   const policy = await resolveAuthorshipPolicy(env.AQUILLA_PG, authed.ctx.credential, projectId)
-  const cells = await scrubAuthorField(
-    body.cells ?? [],
-    "lastEditor",
-    policy,
-    env.SYNC_SECRET_KEY,
-    projectId,
+  const cells = stampCellVisibility(
+    await scrubAuthorField(
+      body.cells ?? [],
+      "lastEditor",
+      policy,
+      env.SYNC_SECRET_KEY,
+      projectId,
+    ),
   )
   await recordAgentRead(env.AQUILLA_PG, {
     credentialId: authed.ctx.credential.credentialId,
@@ -298,7 +413,7 @@ async function handleExternalFileCells(
 // GET /api/v1/external/projects/:projectId/cells/:cellId/history
 // ---------------------------------------------------------------------------
 
-interface EventRowRaw {
+export interface EventRowRaw {
   id: string
   parent_id: string | null
   kind: string
@@ -320,7 +435,7 @@ interface CellHistoryEvent {
   payload: unknown
 }
 
-function mapHistoryRow(row: EventRowRaw): CellHistoryEvent {
+export function mapHistoryRow(row: EventRowRaw): CellHistoryEvent {
   return {
     id: row.id,
     parentId: row.parent_id,
@@ -350,7 +465,7 @@ async function handleExternalCellHistory(
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
   if (env.AQUILLA_PG) {
-    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential)
     if (limited) return limited
   }
 
@@ -407,7 +522,7 @@ async function handleExternalProjectSettings(
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
   if (env.AQUILLA_PG) {
-    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential)
     if (limited) return limited
   }
 
@@ -416,11 +531,44 @@ async function handleExternalProjectSettings(
   // is an agent-facing surface and the id identifies a human translator. The
   // blob + version are all `ifMatchVersion` needs. A project with no settings
   // row yet reads as `{}` at version 0 — patch against 0 to create it.
+  // AQU-1421: the blob's lane registry is cut to this caller's grants when the
+  // read wall is on. The version stays the live one so PatchSettings still matches.
+  const settings = await filterSettingsBlobForMember(
+    env.AQUILLA_PG as AquillaDb,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(authed.ctx.credential.userId),
+    authed.ctx.role,
+    current.settings,
+  )
+  // AQU-2192: `settings` holds only overrides (a default-on built-in check is
+  // never stored), so the checks actually in force ride beside it. PatchSettings
+  // still patches `settings`, never these.
+  const checks = await loadEffectiveChecks(
+    env.AQUILLA_PG as AquillaDb,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(authed.ctx.credential.userId),
+    authed.ctx.role,
+    current.settings,
+  )
+  // AQU-2342: the RESOLVED project instructions — what every drafting prompt
+  // actually carries — beside the raw blob, which holds the stored key only
+  // once someone wrote it. PatchSettings still patches `settings`.
+  const instructions = await loadTranslationInstructions(
+    env.AQUILLA_PG as AquillaDb,
+    projectId,
+    current.settings,
+  )
   return Response.json({
     projectId: current.projectId,
-    settings: current.settings,
+    settings,
+    builtinChecks: checks.builtinChecks,
+    builtinChecksByLane: checks.builtinChecksByLane,
     version: current.version,
     updatedAt: current.updatedAt,
+    translationInstructions: instructions.text,
+    translationInstructionsStored: instructions.stored,
   })
 }
 
@@ -440,10 +588,78 @@ async function handleExternalPromptPreview(
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
   if (env.AQUILLA_PG) {
-    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential)
     if (limited) return limited
   }
-  return handlePromptPreview(request, { AQUILLA_PG: env.AQUILLA_PG }, projectId, cellId)
+  if (!env.AQUILLA_PG) return externalError("job_failed", "AQUILLA_PG not configured", 500)
+  const previewUrl = new URL(request.url)
+  const targetLane = await resolveExternalLaneParam(
+    env.AQUILLA_PG,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(authed.ctx.credential.userId),
+    authed.ctx.role,
+    previewUrl.searchParams.get("targetLang"),
+    "targetLang",
+  )
+  if (!targetLane.ok) return externalError("validation_failed", targetLane.message, 400)
+  previewUrl.searchParams.set("targetLang", targetLane.lane.legacyTag ?? "")
+  const preview = await handlePromptPreview(
+    new Request(previewUrl.toString(), request),
+    { AQUILLA_PG: env.AQUILLA_PG },
+    projectId,
+    cellId,
+  )
+  if (!preview.ok) return preview
+  const body = (await preview.json()) as Record<string, unknown>
+  return Response.json({ ...body, laneId: targetLane.lane.id })
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/external/projects/:projectId/members — the governance roster
+// (AQU-2403): who is on the project, at what effective role, by which grant
+// path, and whether they hold a direct `project_members` row.
+//
+// MAINTAINER-floored, like the InviteMember / SetRole / RemoveMember commands
+// it feeds. Before this read, an agent could only discover the roster by
+// staging a membership command and reading the `conflict` code back.
+// ---------------------------------------------------------------------------
+
+async function handleExternalProjectMembers(
+  request: Request,
+  env: ExternalReadsEnv,
+  projectId: string,
+): Promise<Response> {
+  const authed = await authenticateAndScope(request, env, projectId)
+  if (!authed.ok) return authed.response
+  if (env.AQUILLA_PG) {
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential)
+    if (limited) return limited
+  }
+  if (authed.ctx.role < MEMBERS_READ_FLOOR) {
+    // Same envelope and the same `requiredRole` detail as
+    // commands-membership.ts's callerLevelOrDenial, so a caller that already
+    // handles the write half's refusal needs no new branch for the read.
+    return errorResponse(
+      "permission_denied",
+      "project role >= maintainer required to read the membership roster",
+      { requiredRole: MEMBERS_READ_FLOOR },
+    )
+  }
+
+  const roster = await listProjectMembers(env.AQUILLA_PG as AquillaDb, projectId)
+  // authenticateAndScope already 404s an unknown id; null here means the
+  // project was deleted between the two reads.
+  if (!roster) return externalError("not_found", "project not found", 404)
+  // `total` and `truncated` are always present, so a capped roster says so
+  // rather than reading as the whole list. nextCursor is null by design: this
+  // read does not page (see MEMBERS_MAX_ROWS).
+  return Response.json({
+    data: roster.members,
+    total: roster.total,
+    truncated: roster.truncated,
+    nextCursor: null,
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -474,6 +690,14 @@ export async function handleExternalReadRequest(
   const similar = await handleExternalSimilarRequest(request, env)
   if (similar) return similar
 
+  // Trigger feeds (Zapier plan, workstream B) — own modules, same reason.
+  // /changesets/pending must be answered here: changesets-route.ts runs later
+  // in index.ts and would read "pending" as a changeset id.
+  const activity = await handleExternalActivityRequest(request, env)
+  if (activity) return activity
+  const pending = await handleExternalPendingChangesetsRequest(request, env)
+  if (pending) return pending
+
   // Must be checked before FILES_RE — FILES_RE is anchored with $ so it
   // won't accidentally match /files/:fileId/cells, but ordering here makes
   // the intent explicit (mirrors search-route.ts's /search vs /search/passages).
@@ -501,6 +725,9 @@ export async function handleExternalReadRequest(
   if (match) {
     return handleExternalCellHistory(request, env, decodeURIComponent(match[1]), decodeURIComponent(match[2]))
   }
+
+  match = url.pathname.match(MEMBERS_RE)
+  if (match) return handleExternalProjectMembers(request, env, decodeURIComponent(match[1]))
 
   match = url.pathname.match(SETTINGS_RE)
   if (match) return handleExternalProjectSettings(request, env, decodeURIComponent(match[1]))

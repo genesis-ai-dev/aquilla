@@ -1,5 +1,6 @@
 /**
- * VoiceCloneSection.test.tsx — empty dropzone vs filled clip; line reuse stays empty.
+ * VoiceCloneSection.test.tsx — the Inworld quick-clone clip: empty dropzone vs
+ * filled clip; a clip copied from a line leaves the dropzone empty.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
@@ -44,10 +45,11 @@ describe("VoiceCloneSection filled state", () => {
     vi.mocked(uploadVoiceReference).mockClear()
   })
 
-  it("shows Active/Preview for a recorded or uploaded clip", () => {
-    renderSection({ id: "v", name: "N", referenceAudioId: "ref.webm" })
+  it("shows Active/Preview/Replace for a recorded or uploaded clip", () => {
+    renderSection({ id: "v", name: "N", provider: "inworld", referenceAudioId: "ref.webm" })
     expect(screen.getByText("Active")).toBeTruthy()
     expect(screen.getByRole("button", { name: /Preview/ })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /Replace/ })).toBeTruthy()
   })
 
   it("stays an empty dropzone when the clip was reused from a line", () => {
@@ -55,14 +57,24 @@ describe("VoiceCloneSection filled state", () => {
       id: "v",
       name: "N",
       referenceAudioId: "ref.webm",
-      referenceTakeKey: "cell-1:recorded",
+      referenceTakeKey: "cell-1:take-1.webm",
     })
     expect(screen.queryByText("Active")).toBeNull()
     expect(screen.queryByRole("button", { name: /Preview/ })).toBeNull()
     expect(screen.getByRole("group", { name: "Add a reference clip" })).toBeTruthy()
-    expect(screen.getByText(/A short clip is enough \(5–15s of one clear speaker\)/)).toBeTruthy()
+    expect(screen.getByText(/5–15 seconds of one clear speaker/)).toBeTruthy()
     expect(screen.getByRole("button", { name: /Record reference/ })).toBeTruthy()
     expect(screen.getByRole("button", { name: /Upload audio/ })).toBeTruthy()
+  })
+
+  it("opens the file picker from Upload audio", () => {
+    renderSection({ id: "v", name: "N" })
+    const input = screen.getByLabelText("Upload audio", { selector: "input" }) as HTMLInputElement
+    expect(input.className).toContain("sr-only")
+    expect(input.tabIndex).toBe(-1)
+    const click = vi.spyOn(input, "click").mockImplementation(() => {})
+    fireEvent.click(screen.getByRole("button", { name: /Upload audio/ }))
+    expect(click).toHaveBeenCalledOnce()
   })
 
   it("uploads a dropped audio file as the reference", async () => {

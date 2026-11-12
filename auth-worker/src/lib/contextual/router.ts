@@ -8,6 +8,7 @@
 // that check is never skipped; the router only gates the expensive rest of
 // the panel.
 
+import { isBibleCode } from "./bible-gates"
 import type { SupportSignal } from "./support"
 import type { AmbiguityEntry, ClosureExit, LintFlag, Risk, SpanDraft, VerifierKey } from "./types"
 
@@ -50,9 +51,13 @@ export function classifyRisk(
     reasons.push(`ambiguity register has ${register.length} entries (≥${REGISTER_HIGH_THRESHOLD})`)
     sourceFindingIds.push(...register.map((a) => a.id))
   }
-  if (flags.length >= FLAGS_HIGH_THRESHOLD) {
-    reasons.push(`${flags.length} lint flag(s)`)
-    sourceFindingIds.push(...flags.map((f) => f.ruleId))
+  // AQU-1690: Bible data flags (`bkp:` rule ids) are counted apart from lint.
+  // They get a cheap repair of their own (a mid-tier redraft and a re-check),
+  // so a misplaced quotation mark must not buy the deep panel on its own.
+  const lintFlags = flags.filter((f) => !isBibleCode(f.ruleId))
+  if (lintFlags.length >= FLAGS_HIGH_THRESHOLD) {
+    reasons.push(`${lintFlags.length} lint flag(s)`)
+    sourceFindingIds.push(...lintFlags.map((f) => f.ruleId))
   }
   if (exampleCoverage < COVERAGE_LOW_THRESHOLD) {
     reasons.push(`validated-example coverage ${exampleCoverage.toFixed(2)} < ${COVERAGE_LOW_THRESHOLD}`)

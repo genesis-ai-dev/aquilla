@@ -98,7 +98,7 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
           {proposal.citations.map((c, i) => (
             <AppTooltip key={`${proposal.proposalId}-cite-${i}`} content={c.url}>
               <a
-                href={c.url}
+                href={/^https?:\/\//i.test(c.url) ? c.url : undefined}
                 target="_blank"
                 rel="noreferrer"
                 className="flex items-center gap-1 truncate text-[10px] text-muted-foreground hover:text-foreground"
@@ -120,7 +120,7 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
           <div className="flex items-center gap-1">
             <Check className="h-3 w-3" /> {t("agent.aquifer.published")}
           </div>
-          {publishedUrl && (
+          {publishedUrl && /^https?:\/\//i.test(publishedUrl) && (
             <AppTooltip content={publishedUrl}>
               <a
                 href={publishedUrl}

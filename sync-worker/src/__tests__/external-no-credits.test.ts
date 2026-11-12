@@ -115,6 +115,11 @@ async function seedOrgProject(): Promise<TestDb> {
     `INSERT INTO users (id, username, email, password_hash) VALUES (99, 'owner', 'owner@x.com', 'h')
      ON CONFLICT (id) DO NOTHING`,
   )
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
   return tdb
 }
 
@@ -133,7 +138,7 @@ describe('external API accrues zero AI credits (design §5 billing guard)', () =
     })
 
     const { body: prep } = await prepare(env, PROJECT, token, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'hola' },
     ])
     const { res, body } = await commit(env, PROJECT, token, prep.changeset.id)
 

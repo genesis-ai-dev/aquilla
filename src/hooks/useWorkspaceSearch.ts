@@ -6,11 +6,12 @@
 // search UI compiles unchanged; new server-only fields (rank, snippet) are
 // exposed alongside.
 
+import { fileDisplayName } from "@/lib/file-display-name"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { fetchProjectSearch, fetchParallelPassages } from "@/lib/sync/search-read"
 import type { ParallelPassageResult, SearchResult } from "@/lib/sync/search-read-types"
 import type { MatchField } from "@/lib/search/workspace-index"
-import { isAudioCueFile, type FileReference } from "@/lib/parsers/types"
+import { isHiddenTimelineFile, type FileReference } from "@/lib/parsers/types"
 
 export type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
@@ -39,6 +40,9 @@ interface SearchOptionsApi {
   limit?: number
   /** "source" | "target" | "both". When omitted or "both", both sides are returned. */
   side?: "both" | "source" | "target"
+  caseSensitive?: boolean
+  matchWord?: boolean
+  useRegexp?: boolean
 }
 
 function makeResult(row: SearchResult, files: FileReference[] | undefined): WorkspaceSearchResult {
@@ -47,7 +51,7 @@ function makeResult(row: SearchResult, files: FileReference[] | undefined): Work
   return {
     cellId: row.cellId,
     fileId: row.fileId,
-    fileName: f?.name ?? "",
+    fileName: f ? fileDisplayName(f) : "",
     original: row.side === "source" ? row.value : "",
     translated: row.side === "target" ? row.value : "",
     context: "",
@@ -58,6 +62,13 @@ function makeResult(row: SearchResult, files: FileReference[] | undefined): Work
     matchedTokens: [],
     snippet: row.snippet,
     rank: row.rank,
+    // Opposite side of this hit: source text on a target match, target text
+    // on a source match. Find & Replace reads this without a second fetch.
+    paired: row.pairedValue ?? null,
+    canonicalRef: row.canonicalRef ?? null,
+    cellType: row.cellType ?? null,
+    placeLabel: row.placeLabel ?? null,
+    position: row.position ?? null,
   }
 }
 
@@ -73,7 +84,7 @@ function makeResult(row: SearchResult, files: FileReference[] | undefined): Work
 function audioCueFileIds(files: FileReference[] | undefined): ReadonlySet<string> {
   const ids = new Set<string>()
   for (const f of files ?? []) {
-    if (isAudioCueFile(f)) ids.add(f.id)
+    if (isHiddenTimelineFile(f)) ids.add(f.id)
   }
   return ids
 }
@@ -182,7 +193,13 @@ export function useWorkspaceSearch(
       const rows = await fetchProjectSearch(
         pid,
         cleaned,
-        { side: sideParam, limit: opts.limit },
+        {
+          side: sideParam,
+          limit: opts.limit,
+          matchCase: opts.caseSensitive,
+          wholeWord: opts.matchWord,
+          useRegexp: opts.useRegexp,
+        },
         token,
       )
       if (generationRef.current !== gen) return

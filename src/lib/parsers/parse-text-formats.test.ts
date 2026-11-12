@@ -52,6 +52,63 @@ describe("parseTextFormat (worker-safe DOM-free parse core)", () => {
     expect(optedTexts).toEqual(expect.arrayContaining(["The Creation", "In the beginning."]))
   })
 
+  it("AQU-2119: reads short-form VTT cue times instead of dropping the cues, and reports the repair", () => {
+    // Legal WebVTT: the hours field is optional. The strict matcher behind
+    // `extractVttStrings` never opens these cues, so before the repair their
+    // words were swallowed as junk and the file imported short.
+    const vtt =
+      "WEBVTT\n\n01:03.209 --> 01:03.667\nFirst line\n\n" +
+      "1:04.000 --> 1:05.500\nSecond line\n\n" +
+      "00:00:06.000 --> 00:00:07.000\nAlready strict\n"
+
+    const [result] = parseTextFormat({ fileType: "vtt", text: vtt, name: "clip.vtt" })
+
+    expect(result.strings.map((cue) => cue.original)).toEqual([
+      "First line",
+      "Second line",
+      "Already strict",
+    ])
+    // Short form is minutes and seconds, not hours and minutes.
+    expect(result.strings[0].start).toBeCloseTo(63.209)
+    expect(result.strings[0].end).toBeCloseTo(63.667)
+    expect(result.strings[1].start).toBeCloseTo(64)
+    // Only the two short-form lines count as repaired; nothing was refused.
+    expect(result.cueRepair).toEqual({ repairedShortForm: 2, droppedCues: 0 })
+  })
+
+  it("AQU-2119: reports a cue timestamp line it still cannot read rather than losing it in silence", () => {
+    // Centisecond fractions: neither the strict matcher nor the short-form pad
+    // (which wants three digits) can read them, so the cue is genuinely lost.
+    const vtt =
+      "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nKept\n\n" +
+      "00:00:03.1 --> 00:00:04.5\nLost wording\n"
+
+    const [result] = parseTextFormat({ fileType: "vtt", text: vtt, name: "clip.vtt" })
+
+    expect(result.strings.map((cue) => cue.original)).toEqual(["Kept"])
+    expect(result.cueRepair).toEqual({ repairedShortForm: 0, droppedCues: 1 })
+  })
+
+  it("AQU-2119: leaves a clean subtitle file with no cue report at all", () => {
+    const [vtt] = parseTextFormat({
+      fileType: "vtt",
+      text: "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nOne\n",
+      name: "clip.vtt",
+    })
+    const [srt] = parseTextFormat({
+      fileType: "srt",
+      text: "1\n00:00:01,000 --> 00:00:02,000\nOne\n",
+      name: "clip.srt",
+    })
+
+    expect(vtt.strings).toHaveLength(1)
+    expect(vtt.cueRepair).toBeUndefined()
+    // SRT has no short form to pad, so it parses the original text — but an
+    // unreadable range is still counted against the loose `-->` denominator.
+    expect(srt.strings).toHaveLength(1)
+    expect(srt.cueRepair).toBeUndefined()
+  })
+
   it("declares exactly the DOM-free file types it can handle", () => {
     expect(TEXT_PARSE_FILE_TYPES.has("usfm")).toBe(true)
     expect(TEXT_PARSE_FILE_TYPES.has("txt")).toBe(true)

@@ -103,6 +103,27 @@ export const ORG_ROLE_PICKER: readonly RoleLevel[] = [
 ]
 
 /**
+ * AQU-952: roles an org owner may set on an existing member from the Members
+ * table's "Change role" dialog — `ORG_ROLE_PICKER` plus Owner (700).
+ *
+ * Owner is the workspace-handover rung. Without it there was no path to hand a
+ * pre-loaded workspace to a partner: the owner-gated `POST /orgs/:orgId/members`
+ * has always accepted 700, but every client picker topped out at Maintainer, so
+ * the ODB onboarding had to abandon the loaded workspace and rebuild a second
+ * one from scratch.
+ *
+ * It is deliberately NOT in `ORG_ROLE_PICKER` itself, because that list also
+ * drives the add-member and email-invite pickers: the invite endpoint caps the
+ * granted level at 600 (`createOrgInviteBody`) so an org can never be handed
+ * over by a leaked link. Only the change-role dialog — already gated behind a
+ * genuine org owner — offers this rung.
+ */
+export const ORG_ROLE_CHANGE_PICKER: readonly RoleLevel[] = [
+  ...ORG_ROLE_PICKER,
+  ROLE.OWNER,
+]
+
+/**
  * Roles offered as the project's "minimum validator role" floor
  * (ValidationSettingsSection). An intentional subset of the canonical ladder:
  * reviewer (300) is the lowest role that can validate cells (see
@@ -251,12 +272,12 @@ export function roleDescription(level: number): string {
   return key ? tStandalone(key) : ""
 }
 
-/** Full "Viewer (100) — …" string for tooltips and help affordances. */
+/** Full "Viewer — …" string for tooltips and help affordances (no level number, AQU-2261). */
 export function roleHelpText(level: number): string {
   const description = roleDescription(level)
   if (!description) return ""
   const blurb = description.charAt(0).toLowerCase() + description.slice(1)
-  return `${roleDisplayLabel(level)} (${level}) — ${blurb}`
+  return `${roleDisplayLabel(level)} — ${blurb}`
 }
 
 /**
@@ -356,6 +377,10 @@ export const PROJECT_ROLE_OPTIONS: readonly RoleOption[] =
 
 export const ORG_ROLE_OPTIONS: readonly RoleOption[] =
   ORG_ROLE_PICKER.map(toOption)
+
+/** AQU-952: change-role dialog only — includes the Owner handover rung. */
+export const ORG_ROLE_CHANGE_OPTIONS: readonly RoleOption[] =
+  ORG_ROLE_CHANGE_PICKER.map(toOption)
 
 export const LINK_ROLE_OPTIONS: readonly RoleOption[] =
   LINK_ROLE_ALLOWED.map(toOption)

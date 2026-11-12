@@ -5,11 +5,9 @@ import {
   type BillingPlan,
   type BillingStatus,
   type ResolvedFieldPlan,
-  type TargetLaneProject,
   type WordBlockReason,
   FIELD_PLAN,
   checkWordAllowance,
-  countDistinctTargetLanes,
   periodAllowanceCredits,
   periodAllowanceWords,
   periodDaysBetween,
@@ -95,7 +93,7 @@ export function emptyBillingRow(orgId: number): OrgBillingRow {
   }
 }
 
-function normalizeBillingRow(row: OrgBillingRow): OrgBillingRow {
+export function normalizeBillingRow(row: OrgBillingRow): OrgBillingRow {
   return {
     ...row,
     plan: (row.plan as BillingPlan) || "none",
@@ -189,12 +187,22 @@ async function sumWordsSince(db: AquillaDb, orgId: number, since: string): Promi
   }
 }
 
-function periodStartDate(billing: OrgBillingRow): string {
+/** First day of the trailing-year window the talk-to-us check reads. */
+export function trailingYearStart(): string {
+  return nDaysAgoUtc(364)
+}
+
+/** Where a period starts when the org has none on record. */
+export function defaultPeriodStart(): string {
+  return nDaysAgoUtc(FIELD_PLAN.intervalDays - 1)
+}
+
+export function periodStartDate(billing: OrgBillingRow): string {
   if (billing.current_period_start) {
     const parsed = Date.parse(billing.current_period_start)
     if (Number.isFinite(parsed)) return utcDateKey(new Date(parsed))
   }
-  return nDaysAgoUtc(FIELD_PLAN.intervalDays - 1)
+  return defaultPeriodStart()
 }
 
 export async function resetWordUsage(db: AquillaDb, orgId: number, since?: string): Promise<number> {
@@ -210,28 +218,24 @@ export async function resetWordUsage(db: AquillaDb, orgId: number, since?: strin
   }
 }
 
-function parseLaneList(value: unknown): string[] {
-  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string")
-  if (typeof value === "string") {
-    try {
-      const parsed: unknown = JSON.parse(value)
-      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []
-    } catch {
-      return []
-    }
-  }
-  return []
-}
-
 export async function readOrgBillingOverrides(db: AquillaDb, orgId: number): Promise<OrgBillingOverrides> {
-  const empty: OrgBillingOverrides = { includedCredits: null, billedLanguageCount: null }
   try {
     const row = await db
       .prepare(`SELECT settings FROM org_settings WHERE org_id = ?`)
       .bind(orgId)
       .first<{ settings: string }>()
-    if (!row?.settings) return empty
-    const parsed = JSON.parse(row.settings) as Record<string, unknown>
+    return parseBillingOverrides(row?.settings)
+  } catch {
+    return { includedCredits: null, billedLanguageCount: null }
+  }
+}
+
+/** The `billing` key of an org_settings blob. Malformed JSON reads as no overrides. */
+export function parseBillingOverrides(settings: string | null | undefined): OrgBillingOverrides {
+  const empty: OrgBillingOverrides = { includedCredits: null, billedLanguageCount: null }
+  if (!settings) return empty
+  try {
+    const parsed = JSON.parse(settings) as Record<string, unknown>
     const billing = parsed.billing
     if (!billing || typeof billing !== "object" || Array.isArray(billing)) return empty
     const blob = billing as Record<string, unknown>
@@ -245,99 +249,190 @@ export async function readOrgBillingOverrides(db: AquillaDb, orgId: number): Pro
   }
 }
 
+/**
+ * What a billing override save did. "conflict": another organization settings
+ * save won the race twice, so nothing was written. "error": the write failed
+ * and was logged.
+ */
+export type BillingOverridesWrite = "saved" | "conflict" | "error"
+
+/**
+ * Save an org's billing overrides into the `billing` key of its settings row.
+ *
+ * AQU-2328: the row is shared with every organization setting, so this checks
+ * and bumps `version` like the other org_settings writers. A settings save
+ * made from an older read is then refused instead of putting the old overrides
+ * back, and a settings save that lands between this read and write makes the
+ * write miss, so it reads the row again and tries once more.
+ */
 export async function writeOrgBillingOverrides(
   db: AquillaDb,
   orgId: number,
   patch: Partial<OrgBillingOverrides>,
-): Promise<void> {
-  const current = await readOrgBillingOverrides(db, orgId)
-  const next: OrgBillingOverrides = {
-    includedCredits: patch.includedCredits === undefined ? current.includedCredits : patch.includedCredits,
-    billedLanguageCount:
-      patch.billedLanguageCount === undefined ? current.billedLanguageCount : patch.billedLanguageCount,
+): Promise<BillingOverridesWrite> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const row = await db
+        .prepare(`SELECT settings, version FROM org_settings WHERE org_id = ?`)
+        .bind(orgId)
+        .first<{ settings: string; version: number }>()
+      const current = parseBillingOverrides(row?.settings)
+      const next: OrgBillingOverrides = {
+        includedCredits: patch.includedCredits === undefined ? current.includedCredits : patch.includedCredits,
+        billedLanguageCount:
+          patch.billedLanguageCount === undefined ? current.billedLanguageCount : patch.billedLanguageCount,
+      }
+      const parsed = row?.settings ? (JSON.parse(row.settings) as Record<string, unknown>) : {}
+      const billing =
+        parsed.billing && typeof parsed.billing === "object" && !Array.isArray(parsed.billing)
+          ? { ...(parsed.billing as Record<string, unknown>) }
+          : {}
+      if (next.includedCredits == null) delete billing.includedCredits
+      else billing.includedCredits = next.includedCredits
+      if (next.billedLanguageCount == null) delete billing.billedLanguageCount
+      else billing.billedLanguageCount = next.billedLanguageCount
+      const settings = JSON.stringify({ ...parsed, billing })
+      const result = row
+        ? await db
+            .prepare(
+              `UPDATE org_settings
+                  SET settings = ?, version = version + 1, updated_at = now()
+                WHERE org_id = ? AND version = ?`,
+            )
+            .bind(settings, orgId, row.version)
+            .run()
+        : await db
+            .prepare(
+              `INSERT INTO org_settings (org_id, settings, version, updated_at)
+               VALUES (?, ?, 1, now())
+               ON CONFLICT (org_id) DO NOTHING`,
+            )
+            .bind(orgId, settings)
+            .run()
+      // Same reading as the other writers: only a reported 0 is a lost race.
+      const changes = result.meta?.changes
+      if (typeof changes !== "number" || changes > 0) return "saved"
+    } catch (err) {
+      if (!isMissingTableError(err)) console.error("[billing] writeOrgBillingOverrides error:", err)
+      return "error"
+    }
   }
+  return "conflict"
+}
+
+/**
+ * Target-lane counts for the org dashboard and the tenants table. One query
+ * for every org asked about. `combined` is the sum of `byOrg`.
+ *
+ * A lane is a `lanes` row with role `target` and `archived_at` IS NULL, on a
+ * project that is not archived and not paused. A project with no such row
+ * counts as zero. The language is the lane row (AQU-1595); the dropped
+ * `project_settings` language columns are not a fallback.
+ */
+export interface OrgTargetLaneCounts {
+  byOrg: Map<number, number>
+  combined: number
+}
+
+export async function countTargetLanesByOrg(
+  db: AquillaDb,
+  orgIds: readonly number[],
+): Promise<OrgTargetLaneCounts> {
+  const unique = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
+  const empty: OrgTargetLaneCounts = { byOrg: new Map(), combined: 0 }
+  if (unique.length === 0) return empty
   try {
-    const row = await db
-      .prepare(`SELECT settings FROM org_settings WHERE org_id = ?`)
-      .bind(orgId)
-      .first<{ settings: string }>()
-    const parsed = row?.settings ? (JSON.parse(row.settings) as Record<string, unknown>) : {}
-    const billing =
-      parsed.billing && typeof parsed.billing === "object" && !Array.isArray(parsed.billing)
-        ? { ...(parsed.billing as Record<string, unknown>) }
-        : {}
-    if (next.includedCredits == null) delete billing.includedCredits
-    else billing.includedCredits = next.includedCredits
-    if (next.billedLanguageCount == null) delete billing.billedLanguageCount
-    else billing.billedLanguageCount = next.billedLanguageCount
-    const settings = JSON.stringify({ ...parsed, billing })
-    await db
+    const placeholders = unique.map(() => "?").join(", ")
+    const { results } = await db
       .prepare(
-        `INSERT INTO org_settings (org_id, settings, version, updated_at)
-         VALUES (?, ?, 1, now())
-         ON CONFLICT (org_id) DO UPDATE SET
-           settings = EXCLUDED.settings,
-           updated_at = now()`,
+        `SELECT p.org_id AS org_id,
+                COALESCE(SUM(COALESCE(lc.active_targets, 0)), 0) AS lane_count
+           FROM projects p
+           LEFT JOIN (
+             SELECT l.project_id,
+                    COUNT(*) FILTER (WHERE l.role = 'target' AND l.archived_at IS NULL)::int AS active_targets
+               FROM lanes l
+               JOIN projects lp ON lp.id = l.project_id
+              WHERE lp.org_id IN (${placeholders})
+              GROUP BY l.project_id
+           ) lc ON lc.project_id = p.id
+          WHERE p.org_id IN (${placeholders})
+            AND p.archived_at IS NULL
+            AND COALESCE(p.is_active, TRUE)
+          GROUP BY p.org_id`,
       )
-      .bind(orgId, settings)
-      .run()
+      .bind(...unique, ...unique)
+      .all<{ org_id: number; lane_count: number | string }>()
+    const counted = new Map<number, number>()
+    for (const row of results ?? []) {
+      counted.set(Number(row.org_id), Number(row.lane_count) || 0)
+    }
+    const byOrg = new Map<number, number>()
+    // Every org asked about gets an answer, including the ones with no projects
+    // — an absent entry would read as "unknown" at the call site, not as zero.
+    let combined = 0
+    for (const orgId of unique) {
+      const n = counted.get(orgId) ?? 0
+      byOrg.set(orgId, n)
+      combined += n
+    }
+    return { byOrg, combined }
   } catch (err) {
-    if (isMissingTableError(err)) return
-    console.error("[billing] writeOrgBillingOverrides error:", err)
+    if (isMissingTableError(err)) return empty
+    console.error("[billing] countTargetLanesByOrg error:", err)
+    return empty
   }
 }
 
 export async function countOrgTargetLanes(db: AquillaDb, orgId: number): Promise<number> {
-  try {
-    const { results } = await db
-      .prepare(
-        `SELECT ps.target_language,
-                ps.target_lanes,
-                (ps.settings::jsonb)->'archivedLanes' AS archived_lanes
-           FROM project_settings ps
-           JOIN projects p ON p.id = ps.project_id
-          WHERE p.org_id = ? AND p.archived_at IS NULL`,
-      )
-      .bind(orgId)
-      .all<{ target_language: string | null; target_lanes: unknown; archived_lanes: unknown }>()
-    const projects: TargetLaneProject[] = (results ?? []).map((row) => ({
-      targetLanguage: row.target_language,
-      targetLanes: parseLaneList(row.target_lanes),
-      archivedLanes: parseLaneList(row.archived_lanes),
-    }))
-    return countDistinctTargetLanes(projects)
-  } catch (err) {
-    if (isMissingTableError(err)) return 0
-    console.error("[billing] countOrgTargetLanes error:", err)
-    return 0
-  }
+  const { byOrg } = await countTargetLanesByOrg(db, [orgId])
+  return byOrg.get(orgId) ?? 0
+}
+
+export type SnapshotCatalog = Pick<
+  ResolvedFieldPlan,
+  | "includedWords"
+  | "addonWords"
+  | "talkToUsWordsPerYear"
+  | "wordsPerCredit"
+  | "exploreCreditsPerCycle"
+  | "fieldCreditsPerCycle"
+  | "addonCredits"
+  | "enterpriseCreditsPerLanguagePerYear"
+>
+
+/** The rows one snapshot is computed from. readWordSnapshot reads them for one
+ * org; readWordSnapshots (word-snapshots.ts) reads them for many at once. */
+export interface WordSnapshotInputs {
+  billing: OrgBillingRow
+  wordsUsed: number
+  trailingYearWords: number
+  overrides: OrgBillingOverrides
+  autoLaneCount: number
 }
 
 export async function readWordSnapshot(
   db: AquillaDb,
   orgId: number,
-  catalog?: Pick<
-    ResolvedFieldPlan,
-    | "includedWords"
-    | "addonWords"
-    | "talkToUsWordsPerYear"
-    | "wordsPerCredit"
-    | "exploreCreditsPerCycle"
-    | "fieldCreditsPerCycle"
-    | "addonCredits"
-    | "enterpriseCreditsPerLanguagePerYear"
-  >,
+  catalog?: SnapshotCatalog,
 ): Promise<OrgWordSnapshot> {
   const billing = await readOrgBilling(db, orgId)
   const periodStart = periodStartDate(billing)
-  const [wordsUsed, trailingYearWords, overrides, autoLanguageCount] = await Promise.all([
+  const [wordsUsed, trailingYearWords, overrides, autoLaneCount] = await Promise.all([
     sumWordsSince(db, orgId, periodStart),
-    sumWordsSince(db, orgId, nDaysAgoUtc(364)),
+    sumWordsSince(db, orgId, trailingYearStart()),
     readOrgBillingOverrides(db, orgId),
     countOrgTargetLanes(db, orgId),
   ])
+  return buildWordSnapshot({ billing, wordsUsed, trailingYearWords, overrides, autoLaneCount }, catalog)
+}
+
+export function buildWordSnapshot(
+  { billing, wordsUsed, trailingYearWords, overrides, autoLaneCount }: WordSnapshotInputs,
+  catalog?: SnapshotCatalog,
+): OrgWordSnapshot {
   const wordsPerCredit = catalog?.wordsPerCredit ?? 100
-  const languageCount = overrides.billedLanguageCount ?? autoLanguageCount
+  const languageCount = overrides.billedLanguageCount ?? autoLaneCount
   const includedWords = catalog?.includedWords ?? FIELD_PLAN.includedWords
   const addonWords = catalog?.addonWords ?? FIELD_PLAN.addonWords
   const allowanceWords = periodAllowanceWords({

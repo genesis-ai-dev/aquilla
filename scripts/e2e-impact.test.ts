@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { selectAffectedE2E } from "./lib/e2e-impact"
+import { existsSync, readdirSync } from "node:fs"
+import path from "node:path"
+import { affectedSpecPool, selectAffectedE2E } from "./lib/e2e-impact"
 import {
   affectedRunMode,
   FAST_AFFECTED_SPEC_LIMIT,
@@ -7,12 +9,15 @@ import {
 } from "./lib/e2e-run-mode"
 
 const specs = [
+  "e2e/specs/agent/agent-connection.smoke.spec.ts",
   "e2e/specs/orgs/org-settings-billing.smoke.spec.ts",
   "e2e/specs/ai/completion.smoke.spec.ts",
   "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
   "e2e/specs/auth/session-expired-banner.smoke.spec.ts",
   "e2e/specs/collab/concurrent-edit.smoke.spec.ts",
   "e2e/specs/editor/import-and-edit.smoke.spec.ts",
+  "e2e/specs/editor/import-media-captions.smoke.spec.ts",
+  "e2e/specs/editor/sidebar-reimport.smoke.spec.ts",
   "e2e/specs/editor/comments.smoke.spec.ts",
   "e2e/specs/editor/search.smoke.spec.ts",
   "e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts",
@@ -21,14 +26,83 @@ const specs = [
   "e2e/specs/projects/project-settings.smoke.spec.ts",
   "e2e/specs/projects/route-health.smoke.spec.ts",
   "e2e/specs/rules/violation.smoke.spec.ts",
+  "e2e/specs/editor/ghost-text.spec.ts",
 ]
 
+/** The repo's real smoke specs, as scripts/e2e-affected.ts lists them. */
+function realSmokeSpecs(dir = "e2e/specs"): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const rel = path.posix.join(dir, entry.name)
+    if (entry.isDirectory()) return realSmokeSpecs(rel)
+    return entry.name.endsWith(".smoke.spec.ts") ? [rel] : []
+  })
+}
+
+describe("affected spec pool (the real pre-push composition)", () => {
+  it("keeps non-smoke domain sentinels, so a forecast change runs the ghost-text journey", () => {
+    // Regression: the gate used to pass only *.smoke.spec.ts files, which
+    // silently dropped e2e/specs/editor/ghost-text.spec.ts from every push.
+    const pool = affectedSpecPool(realSmokeSpecs(), (spec) => existsSync(spec))
+    expect(pool).toContain("e2e/specs/editor/ghost-text.spec.ts")
+    expect(selectAffectedE2E(["src/lib/forecast/bia-engine.ts"], pool).specs).toContain("e2e/specs/editor/ghost-text.spec.ts")
+  })
+
+  it("only adds sentinels that exist on disk", () => {
+    expect(affectedSpecPool([], () => false)).toEqual([])
+  })
+})
+
 describe("changed-file E2E impact selection", () => {
+  it("selects media publication coverage for media import contracts", () => {
+    for (const file of [
+      "src/lib/import.ts", "src/lib/import/media-cues.ts",
+      "src/components/import/MediaImportPreviewDialog.tsx",
+      "src/lib/sync/bulk-import.ts", "sync-worker/src/events/import-route.ts",
+      "src/lib/import/timeline-text.ts", "shared/timeline-import.ts",
+      "sync-worker/src/events/import-track-publication.ts",
+      "sync-worker/src/events/import-caption-promotion.ts",
+      "src/hooks/useTimelineTextCells.ts", "src/components/timeline/TimelineEditor.tsx",
+      "src/lib/audio/script-alignment.ts",
+      "src/lib/audio/align-source-script.ts", "src/lib/audio/source-alignment.ts",
+      "src/lib/parsers/embedded-subtitles.ts", "sync-worker/src/audio.ts",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/editor/import-media-captions.smoke.spec.ts",
+      )
+    }
+  })
+  it("selects the sidebar re-import journey for the review apply", () => {
+    for (const file of [
+      "src/components/FileActionMenu.tsx",
+      "src/components/ImportDialog.tsx",
+      "src/components/import/PreviewPanel.tsx",
+      "src/lib/cells/source-review.ts",
+      "src/lib/import/reimport-copy-name.ts",
+      "src/lib/import.ts",
+      "src/lib/sync/bulk-import.ts",
+      "sync-worker/src/events/import-reconcile-route.ts",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/editor/sidebar-reimport.smoke.spec.ts",
+      )
+    }
+  })
+  it("selects the ghost-text journey for BIA forecasting changes", () => {
+    for (const file of [
+      "src/lib/forecast/bia-engine.ts", "src/lib/richtext/ghost-text-plugin.ts",
+      "src/hooks/useForecastCorpus.ts", "src/components/WordsThatFitMenu.tsx",
+      "src/context/ForecastContext.tsx", "src/lib/store/ghost-text-pref.ts",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain("e2e/specs/editor/ghost-text.spec.ts")
+    }
+  })
   it("selects billing for catalog, client, and shared-contract changes", () => {
     for (const file of ["config/pricing/stripe-sandbox.json", "db/shared/billing-offers.ts", "db/shared/billing-workspace.ts", "src/pages/Login.tsx", "src/components/onboarding/OnboardingWizard.tsx",
       "auth-worker/src/services/org-permissions.ts", "db/postgres/migrations/0092_workspace_billing.sql", "db/postgres/migrations/0093_workspace_checkout_attempts.sql",
       "db/postgres/migrations/0095_workspace_subscription_state.sql",
-      "db/postgres/migrations/0096_workspace_plan_change_reviews.sql", "db/postgres/migrations/0097_workspace_usage_requests.sql", "db/postgres/migrations/0098_workspace_usage_provider_ref.sql", "db/shared/billing-cost.ts", "auth-worker/src/routes/chat.ts", "auth-worker/src/routes/import-classify.ts", "auth-worker/src/routes/agent.ts", "auth-worker/src/routes/contextual.ts", "db/shared/workspace-access.ts",
+      "db/postgres/migrations/0148_weekly_allowance_overrides.sql",
+      "db/postgres/migrations/0149_live_workspace_checkout.sql",
+      "db/postgres/migrations/0096_workspace_plan_change_reviews.sql", "db/postgres/migrations/0097_workspace_usage_requests.sql", "db/postgres/migrations/0098_workspace_usage_provider_ref.sql", "db/shared/billing-cost.ts", "auth-worker/src/routes/chat.ts", "auth-worker/src/routes/import-classify.ts", "auth-worker/src/routes/transcription.ts", "auth-worker/src/routes/agent.ts", "auth-worker/src/routes/contextual.ts", "db/shared/workspace-access.ts",
       "src/components/org/BillingOffers.tsx", "auth-worker/src/lib/billing/catalog.ts"]) {
       expect(selectAffectedE2E([file], specs).specs).toContain(
         "e2e/specs/orgs/org-settings-billing.smoke.spec.ts")
@@ -40,6 +114,23 @@ describe("changed-file E2E impact selection", () => {
       "e2e/specs/editor/import-and-edit.smoke.spec.ts",
     )
   })
+  it("maps imported video producers and picture resolution to the import journey", () => {
+    for (const file of ["src/hooks/useMediaPictureUrl.ts", "src/lib/sync/bulk-import.ts",
+      "sync-worker/src/events/import-route.ts",
+      "sync-worker/src/events/import-caption-promotion.ts"]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/editor/import-and-edit.smoke.spec.ts",
+      )
+    }
+  })
+  it("maps flexible YouTube sources and empty-picture readiness to import coverage", () => {
+    for (const file of ["src/lib/import/youtube-captions.ts",
+      "src/lib/import/youtube-caption-commit.ts",
+      "src/components/import/YouTubeImportPanel.tsx", "src/lib/editor/cell-area-state.ts"]) {
+      expect(selectAffectedE2E([file], specs).specs, file)
+        .toContain("e2e/specs/editor/import-and-edit.smoke.spec.ts")
+    }
+  })
   it("keeps comment coverage when its no-hover entry point changes", () => {
     expect(selectAffectedE2E(["src/components/CellActionRail.tsx"], specs).specs).toContain(
       "e2e/specs/editor/comments.smoke.spec.ts",
@@ -49,6 +140,22 @@ describe("changed-file E2E impact selection", () => {
     expect(selectAffectedE2E([specs[3]], specs).specs).toEqual([specs[3]])
   })
 
+  it("does not treat the word popover as a feature match", () => {
+    const withPresence = [
+      ...specs,
+      "e2e/specs/collab/member-presence-popover.smoke.spec.ts",
+    ]
+    const selected = selectAffectedE2E(
+      ["src/components/ProjectSettings/RevokeAllDialog.tsx"],
+      withPresence,
+    ).specs
+    expect(selected).not.toContain("e2e/specs/collab/member-presence-popover.smoke.spec.ts")
+    expect(selectAffectedE2E(
+      ["src/components/collab/MemberPresence.tsx"],
+      withPresence,
+    ).specs).toContain("e2e/specs/collab/member-presence-popover.smoke.spec.ts")
+  })
+
   it("maps domain code to a sentinel and close filename matches", () => {
     expect(selectAffectedE2E([
       "src/components/ProjectSettings/ProjectSettingsValidation.tsx",
@@ -56,6 +163,13 @@ describe("changed-file E2E impact selection", () => {
       "e2e/specs/projects/project-settings.smoke.spec.ts",
       "e2e/specs/projects/route-health.smoke.spec.ts",
     ])
+  })
+
+  it("selects browser authorization for plugin package, credential and OAuth changes", () => {
+    for (const file of ["plugins/aquilla/.codex-plugin/plugin.json", "sync-worker/src/external/mcp-chatgpt.ts",
+      "db/shared/api-credentials.ts", "db/postgres/migrations/0130_mcp_oauth_resource.sql"]) {
+      expect(selectAffectedE2E([file], specs).specs).toContain("e2e/specs/agent/agent-connection.smoke.spec.ts")
+    }
   })
 
   it("maps sync-worker changes to the collaboration boundary", () => {
@@ -95,11 +209,53 @@ describe("changed-file E2E impact selection", () => {
     }
   })
 
+  it("maps the document-understanding tag layer to the AI completion journey", () => {
+    // AQU-657: tags reach a user through retrieval and few-shot selection, so a
+    // change to them must not fall through to the generic shared-runtime sentinel.
+    for (const file of [
+      "src/lib/understanding/passage-tags.ts",
+      "src/lib/understanding/passage-tag-store.ts",
+      "auth-worker/src/routes/ai-passage-tags.ts",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/ai/completion.smoke.spec.ts",
+      )
+    }
+  })
+
   it("maps Knowledge Base clients and routes to the project-settings persistence journey", () => {
     expect(selectAffectedE2E([
       "src/components/knowledge/KnowledgeBaseSurface.tsx",
       "auth-worker/src/routes/knowledge.ts",
     ], specs).specs).toContain("e2e/specs/projects/project-settings.smoke.spec.ts")
+  })
+
+  it("maps the share / invite surfaces to the share-invite journey (AQU-1153)", () => {
+    // PR #882 restyled UsernameTypeahead's mode switch as tabs and merged with a
+    // stale button locator in share-invite.smoke: none of these files carried a
+    // domain keyword, so the push gate ran only the core sentinels.
+    const available = [...specs, "e2e/specs/projects/share-invite.smoke.spec.ts"]
+    for (const file of [
+      "src/components/UsernameTypeahead.tsx",
+      "src/components/MemberMultiAddRow.tsx",
+      "src/components/MultiProjectInviteDialog.tsx",
+      "src/components/ProjectSettings/AddProjectMemberDialog.tsx",
+      "src/components/ProjectSettings/InviteLinkTab.tsx",
+      "src/components/ProjectSettings/RevokeAllDialog.tsx",
+      "src/components/JoinPage.tsx",
+      "src/hooks/useUserSearch.ts",
+      "src/lib/sync/invites.ts",
+      "auth-worker/src/routes/invites.ts",
+      "auth-worker/src/services/invite-scopes.ts",
+    ]) {
+      expect(selectAffectedE2E([file], available).specs, file).toContain(
+        "e2e/specs/projects/share-invite.smoke.spec.ts",
+      )
+    }
+    // A matched domain rule replaces the core-sentinel fallback outright.
+    expect(selectAffectedE2E(["src/components/UsernameTypeahead.tsx"], available).specs).toEqual([
+      "e2e/specs/projects/share-invite.smoke.spec.ts",
+    ])
   })
 
   it("maps app font-size preference and boot script to preferences persist-reload", () => {
@@ -117,8 +273,9 @@ describe("changed-file E2E impact selection", () => {
 
   it("maps a format parser to the import journey rather than shared runtime", () => {
     for (const file of [
-      "src/lib/parsers/biblica-ebl.ts",
-      "src/lib/biblica/ebl/notes.ts",
+      "src/lib/parsers/usfm.ts",
+      "src/partner-integrations/biblica/parsers/biblica-ebl.ts",
+      "src/partner-integrations/biblica/ebl/notes.ts",
     ]) {
       expect(selectAffectedE2E([file], specs).specs, file).toContain(
         "e2e/specs/editor/import-and-edit.smoke.spec.ts",

@@ -1,0 +1,230 @@
+/**
+ * The partner-integration contract (AQU-1286).
+ *
+ * Publisher-specific code — importers that read one publisher's InDesign
+ * templates, their note rules, their fixtures — lives in a `partner-integrations`
+ * folder and is reachable from the generic app ONLY through the descriptors in
+ * this file. Nothing under `src/lib` or `src/components` may import a partner
+ * module directly.
+ *
+ * The point is that the open-source copy of this repo is produced by *deleting*
+ * those folders (see `scripts/make-public-copy.ts`), so every seam has to
+ * survive their absence: the app must still compile, still build, and still run,
+ * with the partner's import options simply not offered. See
+ * `docs/PARTNER-INTEGRATIONS.md`.
+ */
+
+import type { ComponentType } from "react"
+import type { LucideIcon } from "lucide-react"
+import type { IdmlFormatMetadataV2, IdmlProgress } from "@aquilla/idml-roundtrip"
+import type { MessageKey } from "@/lib/i18n/messages/en"
+import type { IdmlReimportAlignHost } from "@/lib/idml/align-reimported-targets"
+import type { ReimportCountedCell } from "@/lib/import/reimport-diff"
+import type { FileReference, TranslatableString } from "@/lib/parsers/types"
+import type { PartnerFormatFilterRegistration } from "@/lib/formats/partner-contract"
+
+/** Progress phases reported while a partner package is read and saved. */
+export type PartnerImportPhase = "parse" | "save"
+
+export interface PartnerImportProgress {
+  phase: PartnerImportPhase
+  /** Engine parse progress, while the package is being read. */
+  idml?: IdmlProgress
+  cellsEnqueued?: number
+  cellsTotal?: number
+  /** Paragraphs left out because they are scripture rather than notes. */
+  verseUnitCount?: number
+}
+
+/**
+ * What one partner reader returns, normalized. Each upstream extractor names
+ * these differently because each counts a different thing as scripture; the
+ * edition descriptor is where that difference is flattened, so the generic
+ * importer never has to know which reader ran.
+ */
+export interface PartnerParseOutcome {
+  strings: TranslatableString[]
+  bookCodes: string[]
+  /** Paragraphs left out because they are the published Bible text. */
+  skippedScriptureCount: number
+  /**
+   * The package is a front/back matter volume — no scripture anywhere, so an
+   * empty result is a legitimate artwork-only volume rather than a package read
+   * with the wrong edition.
+   */
+  frontBackMatter: boolean
+}
+
+export interface PartnerParseOptions {
+  signal?: AbortSignal
+  onProgress: (progress: IdmlProgress) => void
+  splitSentences?: boolean
+}
+
+/**
+ * One title/template a partner ships. Nothing inside an IDML package identifies
+ * which template it is and the templates disagree about what a paragraph style
+ * means, so the person importing picks the edition and this descriptor says how
+ * to read it, where its cells file, and what to say when it yields nothing.
+ */
+export interface PartnerImportEdition {
+  /** Stable id, namespaced by partner — e.g. `biblica:study-notes`. */
+  id: string
+  /** `builtin:*` profile id stamped onto the file and its `parserVersion`. */
+  profileId: string
+  /** Sidebar folder, so a project holding several of a partner's titles keeps them apart. */
+  corpusMarker: string
+  /** Read the package. Lazily pulls in the partner's parser, so it stays code-split. */
+  parse(buffer: ArrayBuffer, options: PartnerParseOptions): Promise<PartnerParseOutcome>
+  /**
+   * What to say when a package parsed but yielded nothing. The overwhelmingly
+   * likely cause is the wrong edition, so the message names what it looked for.
+   */
+  emptyImportMessage(fileName: string): string
+}
+
+export interface PartnerImportPanelProps {
+  projectId: string
+  username: string
+  sourceLanguage?: string
+  targetLanguage?: string
+  getToken: (fileId: string) => Promise<string | null>
+  /** Lane whose copied translations should be placed into style runs. */
+  targetLang?: string
+  /**
+   * After a re-import that keeps translations, place each one into the new
+   * style runs. Absent when AI completion is not configured.
+   */
+  alignReimportedIdml?: IdmlReimportAlignHost
+  onImported: (ref: FileReference) => void | Promise<void>
+  /**
+   * Sidebar re-import of a file this partner already imported. The panel keeps
+   * its own file chooser and edition, then commits through the three choices
+   * instead of creating a fresh file.
+   */
+  reimport?: {
+    fileId: string
+    profileId?: string
+    corpusMarker?: string
+    existingNames: readonly string[]
+    /**
+     * Source cells already in the file. Present once they have loaded, so the
+     * panel can say how many cells the upload would add or update.
+     */
+    existingSource?: readonly ReimportCountedCell[]
+  }
+}
+
+/**
+ * The tile a partner contributes to the import dialog's landing screen, and the
+ * panel behind it. The panel is a lazy import so the partner's UI — and the
+ * parsers it reaches — stay out of the app's initial bundle.
+ */
+export interface PartnerImportScreen {
+  titleKey: MessageKey
+  hintKey?: MessageKey
+  descriptionKey: MessageKey
+  icon: LucideIcon
+  badge?: "beta" | "soon"
+  panel: () => Promise<{ default: ComponentType<PartnerImportPanelProps> }>
+}
+
+/**
+ * A rewrite of an already-exported IDML package. `apply` receives the notes
+ * export and returns the bytes to download. Failure is the caller's to
+ * handle — the notes export is already valid on its own.
+ */
+export interface PartnerIdmlExportTransform {
+  busyMessage: string
+  failureMessage: (reason: string) => string
+  apply: (idml: Uint8Array) => Promise<{ bytes: Uint8Array; statusMessage: string }>
+}
+
+export interface PartnerIdmlExportPanelProps {
+  disabled?: boolean
+  /** Original imported file name, used to pick a language mapping volume. */
+  fileName: string | null
+  /** The imported package, not the notes-only export. Compatibility reads this. */
+  loadSourcePackage?: () => Promise<Uint8Array>
+  onTransformChange: (transform: PartnerIdmlExportTransform | null) => void
+}
+
+export interface PartnerIdmlExportOption {
+  id: string
+  /** `builtin:*` profile ids this option is offered for. */
+  profileIds: readonly string[]
+  panel: () => Promise<{ default: ComponentType<PartnerIdmlExportPanelProps> }>
+}
+
+/**
+ * A publisher-specific normalization applied to a translated IDML cell before it
+ * is validated, for typesetting a publisher's templates carry that is not text
+ * (see the apostrophe glue in AQU-1174). Returns the html unchanged when it does
+ * not apply, and must be synchronous — it runs inside the completion path.
+ */
+export type IdmlTargetHtmlNormalizer = (
+  cellMetadata: Record<string, unknown> | null | undefined,
+  sourceHtml: string,
+  targetHtml: string,
+  metadata: IdmlFormatMetadataV2,
+) => string
+
+/**
+ * One partner's whole contribution, the default export of its `register.ts`.
+ *
+ * Editions stay off the eager surface. A fresh import still has the partner's
+ * panel pick a template and hand that descriptor to `importPartnerNotes`.
+ * Repair is the exception: it has to reproduce those cell breaks without the
+ * person picking a template again, so `idmlImportEditions` is a lazy list the
+ * repair path can score against the cells already in the file. With the
+ * partner folders deleted the hook is simply absent.
+ */
+export interface PartnerIntegration {
+  /** Folder name under `src/partner-integrations/`, e.g. `biblica`. */
+  id: string
+  importScreen?: PartnerImportScreen
+  /**
+   * The partner's IDML templates, loaded only when a repair copy has to
+   * reproduce a normal import of the same package. Absent when this partner
+   * has no IDML importer.
+   */
+  idmlImportEditions?: () => Promise<readonly PartnerImportEdition[]>
+  idmlTargetHtmlNormalizers?: readonly IdmlTargetHtmlNormalizer[]
+  /**
+   * Extra controls on the export dialog for files this partner imported, and
+   * an optional rewrite of the finished IDML. The panel is a lazy import so
+   * the partner's export tooling stays out of the app's initial bundle.
+   * Generic code never names the option — it offers whatever matches the
+   * file's profile id.
+   */
+  idmlExportOptions?: readonly PartnerIdmlExportOption[]
+  /**
+   * True for a cell that holds the partner's published Bible text rather than
+   * apparatus about it (AQU-1285), so the editor can mark verse rows. Must be
+   * synchronous and cheap — it runs once per rendered row.
+   */
+  isScriptureCell?: (cellMetadata: unknown) => boolean
+  /**
+   * Profile ids this partner's importer stamps on `parserVersion`. Generic
+   * re-import uses them to reopen this partner's panel instead of the general
+   * file upload. Absent on a partner that has no import of its own.
+   */
+  importProfileIds?: readonly string[]
+  /**
+   * Sidebar folder names this partner stamps at import. Used only when the
+   * file's profile id has not been loaded yet. A renamed folder does not match.
+   */
+  importCorpusMarkers?: readonly string[]
+  /**
+   * Formats this partner puts on the shared format contract (AQU-2384). This
+   * is the ONLY route a partner filter reaches the format registry by: the
+   * registry derives its partner entries from `partnerIntegrations()`, so
+   * nothing outside `partner-integrations/` ever names a partner module, and
+   * deleting the folders empties the list instead of breaking the build.
+   *
+   * The filter itself hangs off a thunk, like `importScreen.panel`, so a
+   * partner's parser stays code-split and out of the bundle that merely asks
+   * which extensions are importable.
+   */
+  formatFilters?: readonly PartnerFormatFilterRegistration[]
+}

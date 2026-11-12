@@ -3,6 +3,7 @@ import { renderHook } from "@testing-library/react"
 import { useRules } from "./useRules"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { Concept } from "@/lib/terminology/types"
+import { mapSubscribedConceptLanes } from "@/lib/terminology/rendering-lane"
 
 /**
  * Verifies the concept-merge contract added for org termbase subscriptions:
@@ -86,5 +87,44 @@ describe("useRules — subscribed concept merge", () => {
     const local = [concept("loc1", "peace")]
     const { result } = renderHook(() => useRules(project(local), noop, undefined, undefined, undefined, undefined, local))
     expect(termRuleIds(result.current.rules)).toEqual(["term:loc1:approved"])
+  })
+})
+
+// AQU-1777: a subscribed rendering carries the TERMBASE's lane id. Route #8
+// maps it onto this project's lane of the same language before the hook sees
+// it, and from there the lane filter treats it exactly like a local one.
+describe("useRules — subscribed renderings follow the lane (AQU-1777)", () => {
+  const laneRow = (id: string, legacyTag: string, language: string) => ({
+    id,
+    role: "target" as const,
+    language,
+    name: null,
+    langCode: null,
+    legacyTag,
+    position: 1,
+    archivedAt: null,
+  })
+  // The subscriber: a Spanish `''` lane and a French lane.
+  const lanes = [laneRow("50000e5a", "", "Spanish"), laneRow("50000f7a", "fr", "French")]
+  // The termbase: one `''` lane, Spanish spelled as a code.
+  const termbaseLanes = [laneRow("t0000e5a", "", "es")]
+
+  it("compiles a subscribed rendering in the matching lane and in no other", () => {
+    const subscribed = mapSubscribedConceptLanes([concept("sub1", "grace")], termbaseLanes, lanes)
+    const subscriber = { ...project([]), lanes }
+    const spanish = renderHook(() => useRules(subscriber, noop, undefined, undefined, subscribed, ""))
+    const french = renderHook(() => useRules(subscriber, noop, undefined, undefined, subscribed, "fr"))
+    expect(termRuleIds(spanish.result.current.rules)).toEqual(["term:sub1:approved"])
+    expect(termRuleIds(french.result.current.rules)).toEqual([])
+  })
+
+  it("keeps the project's own renderings on today's rule beside them", () => {
+    const subscribed = mapSubscribedConceptLanes([concept("sub1", "grace")], termbaseLanes, lanes)
+    const local = [concept("loc1", "peace")] // unstamped: this project's `''` lane
+    const subscriber = { ...project(local), lanes }
+    const spanish = renderHook(() => useRules(subscriber, noop, undefined, undefined, subscribed, "", local))
+    const french = renderHook(() => useRules(subscriber, noop, undefined, undefined, subscribed, "fr", local))
+    expect(termRuleIds(spanish.result.current.rules)).toEqual(["term:sub1:approved", "term:loc1:approved"])
+    expect(termRuleIds(french.result.current.rules)).toEqual([])
   })
 })

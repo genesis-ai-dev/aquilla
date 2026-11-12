@@ -11,23 +11,29 @@ import { AlertCircle, Pause, Volume2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote } from "@/components/ui/info-note"
 import { toast } from "@/components/ui/toast"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 import { synthesizeForCell, setTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
+import { withGroup } from "@/lib/history/history"
 import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
 import { useModelStatus } from "@/lib/audio/prefetch"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioMimeForExt } from "@/lib/audio/mime"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useOnline } from "@/hooks/useOnline"
+import { useConnectivity } from "@/lib/offline/connectivity"
+import { ttsOfflineGate } from "@/lib/audio/tts-offline"
 import type {
   CellTtsSettings, ProjectTtsSettings,
 } from "@/lib/parsers/types"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { resolveVoice, resolveCastVoice } from "@/lib/audio/voices"
-import { normalizeVoiceForProvider, resolveTtsProvider, providerInfo, isServerTtsProvider } from "@/lib/audio/tts-providers"
+import { normalizeVoiceForProvider, resolveTtsProvider, providerInfo, isServerTtsProvider, ttsProviderModel } from "@/lib/audio/tts-providers"
+import { categorizeAiError } from "@/lib/audio/ai-error"
 
 interface Props {
   cellId: string
@@ -48,7 +54,6 @@ interface Props {
   text: string
   original?: string
   context?: string
-  cellLabel?: string
   sourceLanguage?: string
   targetLanguage?: string
   projectTtsSettings?: ProjectTtsSettings
@@ -74,6 +79,15 @@ interface Props {
   projectId?: string
   /** Required for the sync-worker R2 audio key. */
   fileId?: string
+  /**
+   * AQU-1462: lane the member is working in. Omitted for the default lane.
+   *
+   * AQU-1978: the voice is a take IN THIS LANE. Without the tag the server
+   * reads the take as the `''` lane's, which a project made since AQU-1594
+   * does not have — the clip was stored with no lane, showed in none, and
+   * every press paid for another one.
+   */
+  targetLang?: string
   disabled?: boolean
   /** Play-only surfaces (e.g. the translate page) preview audio transiently
    *  and never durably attach — voice *production* lives in the Voice Studio.
@@ -82,16 +96,20 @@ interface Props {
 }
 
 const MAX_CACHE_ENTRIES = 64
-const cache = new Map<string, string>() // key = cellId+text+voice+attachId -> blob URL
+const cache = new Map<string, string>() // key = cellId+lane+text+voice+attachId -> blob URL
 
 function cacheKey(
   cellId: string,
+  lane: string,
   text: string,
   voiceSignature: string,
   provider: string,
   generatedAttachId: string | undefined,
 ): string {
-  return `${cellId}::${provider}::${voiceSignature}::${generatedAttachId ?? ""}::${text}`
+  // AQU-1978: the lane too. Two lanes may hold the same words (two lanes of
+  // one language), and a clip generated in one must not be replayed in the
+  // other in place of generating that lane's own take.
+  return `${cellId}::${lane}::${provider}::${voiceSignature}::${generatedAttachId ?? ""}::${text}`
 }
 
 function voiceSignature(voice: ReturnType<typeof resolveVoice>): string {
@@ -125,7 +143,6 @@ export function CellTtsButton({
   text,
   original,
   context,
-  cellLabel,
   sourceLanguage,
   targetLanguage,
   projectTtsSettings,
@@ -135,6 +152,7 @@ export function CellTtsButton({
   alsoAttachTo,
   projectId,
   fileId,
+  targetLang,
   disabled,
   playOnly,
 }: Props) {
@@ -152,6 +170,16 @@ export function CellTtsButton({
   const provider = baseVoice.provider ?? resolveTtsProvider(projectTtsSettings)
   const voice = normalizeVoiceForProvider(baseVoice, provider, { targetLanguage })
   const modelStatus = useModelStatus("mms")
+  // Desktop/web offline: refuse hosted engines up front, preview-only for
+  // the on-device voice (src/lib/audio/tts-offline.ts).
+  const browserOnline = useOnline()
+  const backendReachable = useConnectivity()
+  const offlineGate = ttsOfflineGate({
+    offline: !browserOnline || backendReachable === false,
+    usesLocalModel: ttsProviderModel(provider) === "mms",
+    localModelReady: modelStatus.kind === "ready",
+  })
+  const previewOnly = playOnly || offlineGate.kind === "previewOnly"
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const { session } = useFrontierSession()
   const [isPlaying, setIsPlaying] = useState(false)
@@ -196,7 +224,7 @@ export function CellTtsButton({
       }
       return
     }
-    const key = cacheKey(cellId, trimmed, voiceSignature(voice), provider, playableAttachId)
+    const key = cacheKey(cellId, targetLang ?? "", trimmed, voiceSignature(voice), provider, playableAttachId)
     let url = cache.get(key)
     if (!url) {
       try {
@@ -215,10 +243,12 @@ export function CellTtsButton({
         } else {
           // No attached generated voice — synthesize on demand. With project/
           // file/session context we generate DURABLY (upload + cell.audio.attach,
-          // and for clone voices re-voice the TTS through Seed-VC); otherwise we
+          // and for library voices re-voice the TTS through the voice forge); otherwise we
           // fall back to a transient preview synth.
           setTtsStatus(statusKey, { kind: "loading", loaded: 0, total: 0, file: "" })
-          const geminiContext = { sourceLanguage, targetLanguage, original, context, cellLabel }
+          // AQU-2408: no cellLabel — a typed label is a note on the line, not
+          // voice direction (docs/decisions/0007). The placeholder renders empty.
+          const geminiContext = { sourceLanguage, targetLanguage, original, context }
           const onProgress: Parameters<typeof synthesizeForCell>[1]["onProgress"] = (p) => {
             setTtsStatus(statusKey, { kind: "loading", loaded: p.loaded, total: p.total, file: p.file })
             if (p.status === "ready" || (p.total > 0 && p.loaded >= p.total)) {
@@ -226,55 +256,69 @@ export function CellTtsButton({
             }
           }
           let blob: Blob
-          if (!playOnly && projectId && fileId && session?.jwt) {
-            const gen = await generateAndAttachCellVoice({
-              projectId,
-              fileId,
-              cellId,
-              text: trimmed,
-              projectTtsSettings,
-              cellVoiceId: baseVoice.id,
-              geminiContext,
-              session,
-              username: session.username,
-              onProgress,
-            })
-            blob = gen.blob
-            // The other heard lines performing this same subtitle. Sequential,
-            // not parallel: they share one synth backend and one progress slot,
-            // and a second concurrent run would fight the first for both.
-            //
-            // AFTER the blob is in hand, and each one guarded — the clip the
-            // user asked to hear must not be lost because a sibling failed.
+          if (!previewOnly && projectId && fileId && session?.jwt) {
+            // Decision 11: one press, one Undo step, however many heard lines
+            // it voiced. Nothing played here before: this path runs only when
+            // the line has no generated voice yet.
             let alsoWritten = 0
             let alsoFailed = 0
-            for (const also of alsoAttachTo ?? []) {
-              try {
-                await generateAndAttachCellVoice({
-                  projectId,
-                  fileId: also.fileId,
-                  cellId: also.cellId,
-                  text: trimmed,
-                  projectTtsSettings,
-                  cellVoiceId: baseVoice.id,
-                  geminiContext,
-                  session,
-                  username: session.username,
-                })
-                alsoWritten += 1
-              } catch (e) {
-                // Still swallowed on purpose — the clip the user asked to hear
-                // must not be lost because a sibling failed — but no longer
-                // SILENT. Until 2026-08-27 this was the whole handler, and
-                // because the success toast below counts only what landed, a
-                // run where every sibling failed produced no toast at all:
-                // indistinguishable from an ordinary one-clip success, with
-                // the other heard lines left silent in the dub and nothing on
-                // screen saying so.
-                alsoFailed += 1
-                console.error("[tts] sibling attach failed", also.cellId, e)
+            const gen = await withGroup({ labelKey: "editor.history.stepGenerateVoice", fileId }, async () => {
+              const made = await generateAndAttachCellVoice({
+                projectId,
+                fileId,
+                cellId,
+                text: trimmed,
+                projectTtsSettings,
+                cellVoiceId: baseVoice.id,
+                geminiContext,
+                session,
+                username: session.username,
+                onProgress,
+                ...(targetLang ? { targetLang } : {}),
+                surface: "cell", // AQU-1572
+                history: { selectedBefore: null },
+              })
+              // The other heard lines performing this same subtitle. Sequential,
+              // not parallel: they share one synth backend and one progress slot,
+              // and a second concurrent run would fight the first for both.
+              //
+              // AFTER the blob is in hand, and each one guarded — the clip the
+              // user asked to hear must not be lost because a sibling failed.
+              for (const also of alsoAttachTo ?? []) {
+                try {
+                  await generateAndAttachCellVoice({
+                    projectId,
+                    fileId: also.fileId,
+                    cellId: also.cellId,
+                    text: trimmed,
+                    projectTtsSettings,
+                    cellVoiceId: baseVoice.id,
+                    geminiContext,
+                    session,
+                    username: session.username,
+                    // The same lane as the clip above: every heard line voices
+                    // the one translation, in the one language.
+                    ...(targetLang ? { targetLang } : {}),
+                    surface: "cell", // AQU-1572: one event per line it voiced
+                    history: { selectedBefore: null },
+                  })
+                  alsoWritten += 1
+                } catch (e) {
+                  // Still swallowed on purpose — the clip the user asked to hear
+                  // must not be lost because a sibling failed — but no longer
+                  // SILENT. Until 2026-08-27 this was the whole handler, and
+                  // because the success toast below counts only what landed, a
+                  // run where every sibling failed produced no toast at all:
+                  // indistinguishable from an ordinary one-clip success, with
+                  // the other heard lines left silent in the dub and nothing on
+                  // screen saying so.
+                  alsoFailed += 1
+                  console.error("[tts] sibling attach failed", also.cellId, e)
+                }
               }
-            }
+              return made
+            }, { owns: { cells: [cellId, ...(alsoAttachTo ?? []).map((a) => a.cellId)], kinds: ["take."] } })
+            blob = gen.blob
             // AQU-646 stage 3g: ONE PRESS, MORE THAN ONE CLIP — say so.
             //
             // A subtitle performed by several heard lines gets voiced onto each
@@ -307,7 +351,11 @@ export function CellTtsButton({
             // instead of surfacing the internal server-only guard error.
             setTtsStatus(statusKey, {
               kind: "error",
-              message: "Generate audio on this line first to hear Inworld TTS.",
+              // AQU-510: named the engine in English prose before; now a
+              // localized sentence with the product name interpolated.
+              message: t("audio.tts.serverOnlyNeedsGenerate", {
+                engine: providerInfo(provider).shortTitle,
+              }),
             })
             return
           } else {
@@ -326,7 +374,12 @@ export function CellTtsButton({
           setTtsStatus(statusKey, { kind: "idle" })
           return
         }
-        setTtsStatus(statusKey, { kind: "error", message: e instanceof Error ? e.message : String(e) })
+        // AQU-510: AQU-891's categoriser turns a raw provider payload into a
+        // localized, actionable sentence.
+        setTtsStatus(statusKey, {
+          kind: "error",
+          message: categorizeAiError(e instanceof Error ? e.message : String(e)).body,
+        })
         return
       }
     }
@@ -336,7 +389,7 @@ export function CellTtsButton({
     audio.onended = () => { setIsPlaying(false); setTtsStatus(statusKey, { kind: "idle" }) }
     audio.onerror = () => {
       setIsPlaying(false)
-      setTtsStatus(statusKey, { kind: "error", message: "Audio failed to load" })
+      setTtsStatus(statusKey, { kind: "error", message: t("audio.tts.playbackFailed") })
     }
     audioRef.current = audio
     try { await audio.play() } catch (e) {
@@ -356,6 +409,7 @@ export function CellTtsButton({
     generatedAttachmentUrl,
     projectId,
     fileId,
+    targetLang,
     session,
     projectTtsSettings,
     cellTtsSettings?.voiceId,
@@ -363,8 +417,7 @@ export function CellTtsButton({
     targetLanguage,
     original,
     context,
-    cellLabel,
-    playOnly,
+    previewOnly,
     alsoAttachTo,
     t,
   ])
@@ -391,19 +444,32 @@ export function CellTtsButton({
   // resolution generateAndAttachCellVoice/synthesizeForCell use, so the label
   // can't drift from the real synthesis path.
   const engineName = providerInfo(provider).shortTitle
+  // Playing an attached clip may still work offline (on-device cache).
+  const offlineBlocked = offlineGate.kind === "blocked" && !playableAttachId
+  // What the button does — the only thing its hover says (AQU-2260).
+  const name = isPlaying
+    ? "Pause"
+    : playableAttachId
+      ? `Play generated voice (${voice.name})`
+      : `Generate & play (${voice.name} — ${engineName})`
+  // Why it is greyed out: opens on a click on the greyed-out button.
   const tooltip = noText
     ? "Translate this line first to generate voice"
-    : isError
-      ? `TTS failed — ${status.message}`
+    : offlineBlocked
+      ? offlineGate.suggestLocal
+        ? t("audio.tts.offlineSuggestLocal", { engine: engineName })
+        : t("audio.tts.offlineBlocked", { engine: engineName })
       : isLoadingModel
         ? pct != null ? `Downloading voice model (${pct}%)…` : "Loading voice model…"
         : isSynthesizing
           ? "Synthesizing speech…"
-          : isPlaying
-            ? "Pause"
-            : playableAttachId
-              ? `Play generated voice (${voice.name})`
-              : `Generate & play (${voice.name} — ${engineName})`
+          : name
+  // An explanation of an enabled button: behind an (i) beside it, on a click.
+  const note = isError
+    ? t("audio.tts.failedTooltip", { reason: status.kind === "error" ? status.message : "" })
+    : offlineGate.kind === "previewOnly" && !playableAttachId && !isLoadingModel && !isSynthesizing && !isPlaying
+      ? t("audio.tts.offlinePreviewOnly")
+      : null
 
   const button = (
     <Button
@@ -411,7 +477,7 @@ export function CellTtsButton({
       variant="ghost"
       size={isLoadingModel ? "xs" : "icon-xs"}
       onClick={onClick}
-      disabled={disabled || noText || isLoadingModel || isSynthesizing}
+      disabled={disabled || noText || offlineBlocked || isLoadingModel || isSynthesizing}
       aria-label={tooltip}
       className={cn(
         isError
@@ -420,7 +486,7 @@ export function CellTtsButton({
             ? "text-primary"
             : isLoadingModel
               ? "text-amber-600 dark:text-amber-400"
-              : noText || disabled
+              : noText || disabled || offlineBlocked
                 // SUB-35: can't-run state stays washed out…
                 ? "text-muted-foreground/40"
                 // …but READY must look ready — the old muted/50 idle tint made a
@@ -439,10 +505,26 @@ export function CellTtsButton({
     </Button>
   )
 
+  if (!note) {
+    return (
+      <AppTooltip content={tooltip}>
+        {button}
+      </AppTooltip>
+    )
+  }
   return (
-    <AppTooltip content={tooltip}>
-      {button}
-    </AppTooltip>
+    <span className="inline-flex items-center">
+      <AppTooltip content={tooltip}>
+        {button}
+      </AppTooltip>
+      <InfoNote
+        label={t("common.aboutAria", { name })}
+        className={isError ? "text-destructive/70 hover:text-destructive" : undefined}
+        iconClassName="h-3 w-3"
+      >
+        {note}
+      </InfoNote>
+    </span>
   )
 }
 

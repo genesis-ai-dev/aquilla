@@ -623,6 +623,10 @@ export async function transcribeCellOutcome(args: TranscribeCellArgs): Promise<T
     // them. start/end must be char offsets into the cell's plain text — the
     // karaoke decoration maps them against the TipTap doc, so align against
     // cell.translated (transcript offsets as fallback when counts mismatch).
+    // Sam, Nov 12 (question 44): why the save was refused, when it was. A row
+    // whose transcript could not be saved has not been transcribed for anyone
+    // to see: it fails, and a run's Retry offers it again.
+    let saveRefused = null as { message: string } | null
     const transcriptText = result.text.trim()
     let storedTimings: WordTiming[] = []
     if (result.chunks.length > 0 || (isSourceSegment && transcriptText)) {
@@ -635,9 +639,9 @@ export async function transcribeCellOutcome(args: TranscribeCellArgs): Promise<T
         : aligned
       storedTimings = timings
       // Signed-out transcribes (cache hit) have no session — the emit queues
-      // to the local outbox and can throw a role-gate error, so swallow it:
-      // transcription itself succeeded, and the timings re-emit on a manual
-      // re-transcribe. author falls back to "local".
+      // to the local outbox and can throw a role-gate error. That is caught:
+      // the row fails with the error (`saveRefused`), and transcribing it
+      // again, or a run's Retry, re-emits it. author falls back to "local".
       //
       // AQU-783: AWAIT the attach so the event is durably in the outbox before
       // transcribeCell resolves. The per-cell / timeline / batch completion
@@ -693,11 +697,16 @@ export async function transcribeCellOutcome(args: TranscribeCellArgs): Promise<T
         author: session?.username ?? "local",
       }).catch((err) => {
         console.warn("[transcribe] emitCellAudioAttach failed (timings not persisted):", err)
+        saveRefused = { message: err instanceof Error ? err.message : String(err) }
       })
     }
 
     args.onTranscribed?.({ heard: raw.text.trim(), transcript: transcriptText, model: raw.model ?? "unknown", timings: storedTimings })
 
+    if (saveRefused) {
+      setTranscribeStatus(audioId, { kind: "error", message: saveRefused.message })
+      return { kind: "failed", message: saveRefused.message }
+    }
     setTranscribeStatus(audioId, {
       kind: "done",
       wordCount,

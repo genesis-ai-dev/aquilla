@@ -147,6 +147,20 @@ describe("transcribeCellOutcome", () => {
     expect(outcome.kind).toBe("failed")
   })
 
+  // Sam, Nov 12 (question 44): a row transcribed but whose save was then
+  // refused counted as done, so the one closing message said it landed. It is
+  // a failed row now, with the refusal as its reason, so the run's message
+  // counts it as not transcribed and its Retry offers it again.
+  it("says failed, with why, when the transcript could not be saved", async () => {
+    fetchCellAudio.mockResolvedValue(new Uint8Array([9, 9, 9]))
+    __setTranscribeAudioForTests(fakeTranscribe(["hola", "mundo"]))
+    emitCellAudioAttach.mockRejectedValueOnce(new Error("Reviewers cannot perform this action"))
+    expect(await transcribeCellOutcome({ cell: makeCell(), session, projectId: "proj-1" }))
+      .toEqual({ kind: "failed", message: "Reviewers cannot perform this action" })
+    const status = getTranscribeStatus(FULL_ID)
+    expect(status.kind === "error" && status.message).toBe("Reviewers cannot perform this action")
+  })
+
   it("says skipped for a row with no recording", async () => {
     expect(await transcribeCellOutcome({ cell: { ...makeCell(), selectedAudioId: undefined }, session, projectId: "proj-1" }))
       .toEqual({ kind: "skipped" })

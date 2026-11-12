@@ -1351,8 +1351,8 @@ export const importExport = defineNamespace({
       "by their source. With none of these, rows match lines in order.",
     "importExport.columnMapping.typeColumnLabel": "Content type",
     "importExport.errors.failedToParseFile": "Failed to parse file",
-    "importExport.fileTarget.acceptedFormats": "TXT, DOCX, MD, HTML, PPTX, IDML, USFM, PO, XLIFF, TMX, CSV, TSV, " +
-      "XLSX, VTT, SRT, or SBV",
+    "importExport.fileTarget.acceptedFormats": "TXT, DOCX, MD, HTML, PPTX, IDML, USFM, USX, PO, XLIFF, TMX, Java " +
+      "properties, CSV, TSV, XLSX, VTT, SRT, or SBV",
     "importExport.fileTarget.backToColumnMapping": "Back to column mapping",
     "importExport.fileTarget.backToSheetList": "Back to sheet list",
     "importExport.fileTarget.description": "Fills this file's target column from a translation: a text or Word " +
@@ -1367,8 +1367,8 @@ export const importExport = defineNamespace({
     "importExport.fileTarget.noCuesInSubtitle": "No subtitle cues found in this file.",
     "importExport.fileTarget.noCuesInVtt": "No cues found in this VTT file.",
     "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
-    "importExport.fileTarget.renameToReadAs": "This file holds {format}. Rename it to end in .{extension}, then " +
-      "import it again.",
+    "importExport.fileTarget.versesNeedReferences": "This file's lines are verses, which a translation fills by " +
+      "reference. Import it as USFM, or as a spreadsheet with a reference column.",
     "importExport.fileTarget.title": "Import target translations into \"{fileName}\"",
     // AQU-1673 — "Import as proposals": the same mapping/review flow, but the
     // values land as staged proposals behind the approval gate.
@@ -1513,6 +1513,8 @@ export const importExport = defineNamespace({
       "added or left out, every row after it is on the wrong line.",
     "importExport.review.countMismatchCues": "Cues in this file: {rows}. Lines in the open file: {lines}. If a cue was " +
       "added or left out, every cue after it is on the wrong line.",
+    "importExport.review.countMismatchParagraphs": "Paragraphs in this file: {rows}. Paragraphs in the open file: " +
+      "{lines}. If a paragraph was added or left out, every paragraph after it is on the wrong lines.",
     "importExport.review.reasonBackwardsTimecode": "Timecode ends before it starts",
     "importExport.review.reasonLostItsLine": "Lost its line to another cue",
     "importExport.review.reasonNoLineInReach": "No line within reach",
@@ -1536,6 +1538,11 @@ export const importExport = defineNamespace({
     "importExport.review.rowBridged": "The uploaded file joins verses {first}-{last} into one translation, " +
       "but this file keeps them as separate lines. The whole text goes on verse {first}; " +
       "the rest of the range gets no text of its own",
+    "importExport.review.rowSharedOutPill": "Shared out",
+    "importExport.review.rowSharedOut": "Shared out over this paragraph's lines: check where the sentences fall",
+    "importExport.review.rowSharedOutShort": "Shared out over this paragraph's lines, but it has fewer words than " +
+      "lines, so its last lines stay empty: check it",
+    "importExport.review.rowSameAsSource": "Same as the source",
     "importExport.review.rowIncomingSource": "Source in this row: {text}",
     "importExport.review.rowWrittenAs": "as written: {ref}",
     "importExport.review.sourceAligned": "Paired with lines by source text. Rows whose source doesn't match their " +
@@ -3839,18 +3846,14 @@ export const importExport = defineNamespace({
           "read successfully but contained no verses, so there is nothing to fill " +
           "in. Single short statement of fact.",
       },
-      "importExport.fileTarget.renameToReadAs": {
+      "importExport.fileTarget.versesNeedReferences": {
         description:
-          "Error shown in red under the drop area when a file named like plain text " +
-          "(for example a .txt) turns out to hold scripture markup or subtitles. " +
-          "Those are read by their own reader, picked by the file's ending, so the " +
-          "message tells the person to rename the file and import it again. A " +
-          "statement of what the file holds, then one instruction.",
-        placeholders: {
-          format: "Name of the format the file holds, such as 'USFM' or 'SRT' — do not translate.",
-          extension: "The file ending to use, without its dot, such as 'usfm' or 'srt' — do not translate; " +
-            "keep the dot written before it.",
-        },
+          "Error shown in red under the drop area when a document (a text or Word " +
+          "file, for example) is chosen as the translation of a scripture file. " +
+          "Scripture lines are verses, matched by their reference (book, chapter " +
+          "and verse), which such a document doesn't carry. The second sentence " +
+          "names the two kinds of file that do. 'USFM' is a scripture format name; " +
+          "keep it as it is.",
       },
       "importExport.fileTarget.title": {
         description:
@@ -4406,6 +4409,18 @@ export const importExport = defineNamespace({
           lines: "Number of lines in the open file.",
         },
       },
+      "importExport.review.countMismatchParagraphs": {
+        description:
+          "Amber note above the match-review list when a translated document was " +
+          "paired with the open file paragraph by paragraph and the two have a " +
+          "different number of paragraphs: one paragraph added or left out puts " +
+          "every later paragraph onto the wrong lines. Figures are written as " +
+          "'label: number' so no plural agreement is needed.",
+        placeholders: {
+          rows: "Number of paragraphs in the uploaded file.",
+          lines: "Number of paragraphs in the open file.",
+        },
+      },
       "importExport.review.reasonBackwardsTimecode": {
         description:
           "Reason shown next to one entry in the list of uploaded cues that were not " +
@@ -4542,6 +4557,33 @@ export const importExport = defineNamespace({
           first: "The first verse number of the bridged range, such as '27'.",
           last: "The last verse number of the bridged range, such as '28'.",
         },
+      },
+      "importExport.review.rowSharedOutPill": {
+        description:
+          "Small amber pill in the top-right corner of one row of the match-review " +
+          "list. A paragraph of the uploaded translation came in a different number " +
+          "of pieces than the open file's paragraph has lines, so its text was " +
+          "divided among those lines; this row holds one part. The row stays " +
+          "ticked. One or two words, no closing full stop.",
+      },
+      "importExport.review.rowSharedOut": {
+        description:
+          "Note that opens on a click of the 'Shared out' pill: the paragraph's " +
+          "translation was divided among the paragraph's lines, so where one line " +
+          "ends and the next begins may need moving. One sentence, no closing full stop.",
+      },
+      "importExport.review.rowSharedOutShort": {
+        description:
+          "The same note as for 'Shared out', when the paragraph's translation has " +
+          "fewer words than the paragraph has lines, so the paragraph's last lines " +
+          "get no text. One sentence, no closing full stop.",
+      },
+      "importExport.review.rowSameAsSource": {
+        description:
+          "Small amber pill in the top-right corner of one row of the match-review " +
+          "list: the uploaded text for this line is exactly the line's original " +
+          "(source) text, so it is probably not a translation. The row starts " +
+          "unticked. A few words, no closing full stop.",
       },
       "importExport.review.rowWrittenAs": {
         description:

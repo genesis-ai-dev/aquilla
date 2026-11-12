@@ -369,16 +369,24 @@ describe("AQU-1365: importing a translation", () => {
 
   // AQU-2544: "txt is not supported as import into target" (Sam). A dropped
   // .txt reaches the review and fills the chosen file's lines in order.
-  it("takes a .txt, one translation per line, into the chosen file's lines", async () => {
+  it("takes a .txt, one translation per line, into the chosen file's lines, cut as the project cuts", async () => {
     const actual = await vi.importActual<typeof import("@/lib/import")>("@/lib/import")
     vi.mocked(prepareImportFile).mockImplementation(actual.prepareImportFile)
-    renderDialog()
+    // A story imported on the Paragraph setting: one paragraph per line.
+    const story = ["The boat", "The storm"].map((original, i) => ({
+      cellId: `story-${i + 1}`, fileId: "story", sourceEventId: `se-story-${i + 1}`, targetEventId: undefined,
+      translated: "", original, paragraphStart: true,
+    }))
+    renderDialog({
+      cellUnit: "paragraph",
+      translation: host({ files: [...FILES, { id: "story", name: "Story", type: "txt" }], activeFileId: "story", activeFileCells: story }),
+    })
     await chooseTranslation()
-    await dropFiles([new File(["Йона бер\nЙона ике\n"], "jonah-tatar.txt")])
+    await dropFiles([new File(["Кораб\nДавыл\n"], "story-tatar.txt")])
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
     expect(screen.getByText("2 matched")).toBeInTheDocument()
-    const row = screen.getByText("Йона ике").closest("[data-review-cell]")
-    expect(row).toHaveAttribute("data-review-cell", "jonah-2")
+    const row = screen.getByText("Давыл").closest("[data-review-cell]")
+    expect(row).toHaveAttribute("data-review-cell", "story-2")
     expect(screen.getByRole("button", { name: /import 2 cells/i })).toBeInTheDocument()
   })
 

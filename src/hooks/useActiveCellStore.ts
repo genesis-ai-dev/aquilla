@@ -169,6 +169,9 @@ export interface CellSummary {
   audioApproved?: boolean
   /** Media redesign slice 2: mirrors `CellData.laneStatus`. */
   laneStatus?: CellData["status"]
+  /** AQU-2544: mirrors `CellData.paragraphStart`, so a translation import
+   *  can pair paragraph by paragraph. Absent on a continuation line. */
+  paragraphStart?: boolean
 }
 
 /**
@@ -1216,6 +1219,7 @@ export class CellStore {
       // chapter health builder's `isExcluded`, and batch drafting's target list —
       // can apply the same predicate without reaching back into the store's rows.
       hidden: view.hidden,
+      paragraphStart: view.paragraphStart,
       ...summaryCastName(view.metadata),
     }
     const entry = {

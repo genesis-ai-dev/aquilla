@@ -475,7 +475,10 @@ function hasStructuralHeader(row: string[]): boolean {
   return row.some((value) => STRUCTURAL_HEADER_NAMES.has(value.trim().toLowerCase()))
 }
 
-function consistentDelimitedRecords(text: string, delimiter: "\t" | ";" | "|"): boolean {
+/** True when a text's first rows split on `delimiter` into the same number of
+ *  fields (two or more) — records, not prose. Exported for the translation
+ *  import's reading of a .txt (AQU-2544). */
+export function consistentDelimitedRecords(text: string, delimiter: "\t" | ";" | "|" | ","): boolean {
   const rows = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 25)
   if (rows.length < 3) return false
   const widths = rows.map((row) => parseDelimited(row, delimiter)[0]?.length ?? 0)

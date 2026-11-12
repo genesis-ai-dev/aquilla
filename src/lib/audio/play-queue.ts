@@ -506,11 +506,11 @@ export function useProgrammeFilm(): ProgrammeFilm | null {
 }
 
 /**
- * Sam, Nov 12 (question 44): the film is behind a run of chosen lines too
- * ("Play selected", a `snapshot` context): a line of it nobody has recorded
- * is a line, played, not skipped, as Play and Play all play it. Such a run
- * still ends with its lines (no run on to the film's end), and the film is
- * never its clock (`progFilmFollowsRun`).
+ * Sam, Nov 12 (question 44): the film is behind every run of the film's
+ * lines: a line of it nobody has recorded is a line, played, not skipped, as
+ * Play and Play all play it. A run of lines on their own (`snapshot`) or of
+ * chosen lines (`only`) still ends with its lines: no run on to the film's
+ * end.
  */
 function progFilmResolve(): void {
   const ctx = activeContext
@@ -518,20 +518,21 @@ function progFilmResolve(): void {
   const over = timingMode === "audioFirst" && ctx && prog && prog.slots.length > 0
     ? filmOverRun(progFilm, ctx.cells.map((c) => c.id))
     : null
-  progFilmEndSec = ctx?.snapshot ? 0 : over?.runsOnToSec ?? 0
+  progFilmEndSec = ctx?.snapshot || ctx?.only ? 0 : over?.runsOnToSec ?? 0
   progFilmCoverSec = over?.coverSec ?? 0
 }
 
 /**
- * Does the film follow this run's clock? Only a run on the file's own clock
- * (`progOwnsProgressClock`). A run of chosen lines starts its clock at 0:00
- * wherever its lines are, so the film panel leaves the film still under it
- * (MediaVideoPane: not the file's clock). There a line only the film plays is
- * crossed on the queue's own timer: waiting for the film's word would wait
- * for a film that is not playing.
+ * May the film be this run's clock where only the film plays? Only on a run
+ * of the file's lines played through (Play, Play all, Space, a click). Never
+ * on a run of lines on their own (`snapshot`): its clock starts at 0:00
+ * wherever its lines are, so the film panel leaves the film still under it.
+ * Nor on a run of chosen lines (`only`): the film follows its clock, the
+ * file's, as under a recorded line. On those a line only the film plays is
+ * crossed on the queue's own timer.
  */
-function progFilmFollowsRun(): boolean {
-  return activeContext?.snapshot !== true
+function progFilmMayBeClock(): boolean {
+  return activeContext?.snapshot !== true && !activeContext?.only
 }
 
 /** Is this programme second past the last line, on a run with a film to run
@@ -557,7 +558,7 @@ function progFilmPlaysUnder(slot: ProgrammeSlot): boolean {
  *  after the last line once no take on another track still plays out there.
  *  Not in the film's last moment, a still frame (`progArmFilmClock`). */
 function progFilmIsClockAt(sec: number): boolean {
-  if (!progFilmFollowsRun()) return false
+  if (!progFilmMayBeClock()) return false
   if (progFilmCoverSec - sec <= FILM_END_GUARD_SEC) return false
   if (progOverFilmTail(sec)) return !layersSoundIn(progLayers, sec + HOLD_MIN_SEC, Infinity)
   // AQU-2253 (review 2, Nov 9): a film that went quiet as a line's clock is
@@ -571,7 +572,7 @@ function progFilmIsClockAt(sec: number): boolean {
  *  second: its picture runs there (not its last moment), and it has not gone
  *  quiet. */
 function progFilmCanCarryLineAt(sec: number): boolean {
-  return progFilmFollowsRun() && !progFilmQuiet && progFilmCoverSec - sec > FILM_END_GUARD_SEC
+  return progFilmMayBeClock() && !progFilmQuiet && progFilmCoverSec - sec > FILM_END_GUARD_SEC
 }
 
 /** How long the run is: the programme, or a linked film that outlasts it. */
@@ -1340,14 +1341,26 @@ function progPlaysThroughSilence(slot: ProgrammeSlot): boolean {
   }
 }
 
-/** The next verse playback goes to, from `from` onward: one with anything to
- *  play, or — the setting off — any verse at all. -1 when done. Next/previous
- *  line, seeks past the end and the hand-on at a verse's end all ask this. */
+/** Sam, Nov 12: is this verse one of the run's? Every verse, except in a run
+ *  of chosen lines over its file's list (`PlayContext.only`). */
+function progSlotInRun(slot: ProgrammeSlot): boolean {
+  return activeContext?.only?.has(slot.cellId) ?? true
+}
+
+/** A verse playback goes to: one of the run's with anything to play, or — the
+ *  setting off — any of the run's at all. AQU-2252: a line a layer sounds in
+ *  is played, even with nothing of its own. */
+function progSlotPlayable(slot: ProgrammeSlot): boolean {
+  return progSlotInRun(slot) && (progSlotHasSound(slot) || progSlotHolds(slot, slot.startSec) || progPlaysThroughSilence(slot))
+}
+
+/** The next verse playback goes to, from `from` onward (`progSlotPlayable`).
+ *  -1 when done. Next/previous line, seeks past the end and the hand-on at a
+ *  verse's end all ask this. */
 function progNextPlayable(from: number): number {
   const slots = programme?.slots ?? []
   for (let i = Math.max(0, from); i < slots.length; i++) {
-    // AQU-2252: a line a layer sounds in is played, even with nothing of its own.
-    if (progSlotHasSound(slots[i]) || progSlotHolds(slots[i], slots[i].startSec) || progPlaysThroughSilence(slots[i])) return i
+    if (progSlotPlayable(slots[i])) return i
   }
   return -1
 }
@@ -1355,7 +1368,7 @@ function progNextPlayable(from: number): number {
 function progPrevPlayable(from: number): number {
   const slots = programme?.slots ?? []
   for (let i = Math.min(from, slots.length - 1); i >= 0; i--) {
-    if (progSlotHasSound(slots[i]) || progSlotHolds(slots[i], slots[i].startSec) || progPlaysThroughSilence(slots[i])) return i
+    if (progSlotPlayable(slots[i])) return i
   }
   return -1
 }
@@ -1365,7 +1378,7 @@ function progPrevPlayable(from: number): number {
 function progNextWithSound(from: number): number {
   const slots = programme?.slots ?? []
   for (let i = Math.max(0, from); i < slots.length; i++) {
-    if (progSlotHasSound(slots[i])) return i
+    if (progSlotInRun(slots[i]) && progSlotHasSound(slots[i])) return i
   }
   return -1
 }
@@ -1677,6 +1690,8 @@ function progLineEnded(atSec: number): void {
  * players sound there (but a layer still playing out).
  */
 function progEnterTail(atSec: number, autoplay: boolean, explicit: boolean): boolean {
+  // Sam, Nov 12: a run of chosen lines stops at the end of its last one.
+  if (activeContext?.only) return false
   const prog = programme
   const lastIndex = (prog?.slots.length ?? 0) - 1
   const last = prog?.slots[lastIndex]
@@ -2985,6 +3000,17 @@ export interface PlayContext {
    *  bar's keep-cells-fresh effect must NOT swap the full file list in, or
    *  single-line play marches on through the file. */
   snapshot?: boolean
+  /**
+   * Sam, Nov 12 (question 44): a run of chosen lines over their file's list,
+   * following the recordings ("Play selected" on a file with a linked film).
+   * `cells` is the file's list as Play plays it, so the run's clock is the
+   * file's and the film follows it, shown and heard, as under Play all. It
+   * plays only these lines, stepping over the others (the playhead and the
+   * film jump between chosen lines that are not next to each other), and
+   * stops at the end of the last one: no run on to the film's end, and Play
+   * all does not go on into the next chapter.
+   */
+  only?: ReadonlySet<string>
 }
 
 let activeContext: PlayContext | null = null

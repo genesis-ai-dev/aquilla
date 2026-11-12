@@ -1317,6 +1317,43 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     act(() => setProgrammeFilm(null))
   })
 
+  // Sam, Nov 12 (question 44): …and runs the film. The chosen lines are played
+  // as a run of the lines Play plays (`only`), on the file's clock, so the film
+  // follows it (play-queue.film-tail.test.ts); with no film, a run of the
+  // chosen lines on their own, as before (the tests above).
+  it("on a file with a linked film, plays the chosen lines as a run of the file's lines, so the film follows it", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-3", "cell-1"]))
+    const lines = THREE.map((c) => ({ ...c }))
+    act(() => setProgrammeFilm({ endSec: 60, cellIds: new Set(THREE.map((c) => c.id)) }, "file-1"))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audioMapFor(["cell-1"]), playbackLines: lines,
+    })
+
+    await userEvent.setup().click(playButton())
+
+    const [ctx, fromIndex, explicit] = vi.mocked(startQueue).mock.calls[0]
+    expect(ctx.cells).toBe(lines)
+    expect(ctx.snapshot).toBeUndefined()
+    expect([...(ctx.only ?? [])].sort()).toEqual(["cell-1", "cell-3"])
+    expect(fromIndex).toBe(0)
+    expect(explicit).toBe(true)
+    act(() => setProgrammeFilm(null))
+  })
+
+  it("with no film, Play selected is still a run of the chosen lines on their own", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-3"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audioMapFor(["cell-1", "cell-3"]), playbackLines: THREE,
+    })
+
+    await userEvent.setup().click(playButton())
+
+    const [ctx] = vi.mocked(startQueue).mock.calls[0]
+    expect(ctx.snapshot).toBe(true)
+    expect(ctx.only).toBeUndefined()
+    expect(ctx.cells.map((c) => c.id)).toEqual(["cell-1", "cell-3"])
+  })
+
   it("on a file with a linked film and nothing recorded, Play selected is offered for the film", () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
     act(() => setProgrammeFilm({ endSec: 60, cellIds: new Set(THREE.map((c) => c.id)) }, "file-1"))

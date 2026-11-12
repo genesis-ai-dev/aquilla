@@ -51,6 +51,7 @@ import {
 } from "./play-queue"
 import { resetSkipSilentLinesPrefCacheForTests, setSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import { nextChapterForPlayAll } from "@/lib/timeline/chapter-pick"
+import { videoSyncAction } from "@/components/timeline/video-sync"
 import { chapterOfCell, scopeCells, type TimelineChapter } from "@/lib/timeline/sequence-timeline"
 import type { CellData } from "@/hooks/useCells"
 
@@ -2129,51 +2130,99 @@ describe("a line under the film whose take gives up is crossed with the film, ne
 // nobody has recorded has something to play, the film, so "Play selected" and
 // Next and Previous treat it as a line, as Play and Play all already do. The
 // browser pass on the joined copy saw "Play selected" count and play lines 1
-// and 3 of three, skipping line 2 under the film. "Play selected" runs the
-// chosen lines on their own (a `snapshot` context) and the film stays still
-// under such a run, so a line only the film plays is crossed on the queue's
-// own timer, and the run still ends with its lines.
+// and 3 of three, skipping line 2 under the film. "Play selected" there is a
+// run of chosen lines over the file's list (`only`): on the file's clock, so
+// the film follows it, shown and heard, as under a recorded line; it steps
+// over the lines not chosen and stops at the end of the last chosen one.
 describe("an unrecorded line under the film is a line: Play selected, and the question asked line by line", () => {
   // b1 recorded 2 s [0, 2); b2 a stand-in [2, 3.5); b3 recorded 1 s [3.5, 4.5).
   const chosen = () => [line("b1", 2_000), line("b2"), line("b3", 1_000)]
+  const only = (...ids: string[]) => ({ only: new Set(ids) })
+  /** What the film panel does with the queue's word (video-sync.ts): it
+   *  follows the run when its clock is the file's, and is held still when not. */
+  const panel = () => {
+    const p = getQueueProgress()
+    return videoSyncAction({
+      kind: getQueueState().kind, clockIsFileTime: p.programmeClock, tickSec: p.currentTime, videoSec: 0,
+      prevTickSec: null, prevTickAt: null, now: 0, rate: 1, duration: 600, lastSeekAt: null, filmIsClock: p.filmClock,
+    }).kind
+  }
 
-  it("Play selected plays the unrecorded line, crossed on the queue's own timer, then the next one", async () => {
+  it("Play selected plays the unrecorded line with the film following the run, then the next one", async () => {
     const cells = chosen()
     linkFilm(10, cells)
-    startQueue(ctxFor(cells, { snapshot: true }), 0, true)
+    startQueue(ctxFor(cells, only("b1", "b2", "b3")), 0, true)
     await wait()
+    expect(panel()).not.toBe("pause")
     el("b1")!.tick(2)
     await wait()
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
-    // The film is not this run's clock: nothing waits for its word.
-    expect(film.reports).toBe(0)
+    // The file's clock: the film follows it (not held still), on the queue's
+    // own timer, the film never the run's clock.
+    expect(getQueueProgress()).toMatchObject({ programmeClock: true, filmClock: false })
+    expect(panel()).not.toBe("pause")
     await wait(1_000)
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(3, 1)
+    expect(film.sec).toBeCloseTo(3, 0)
     await wait(750)
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
     expect(el("b3")!.paused).toBe(false)
   })
 
-  it("Play selected still ends with its lines, even when they are every line of the film's file", async () => {
-    const cells = [line("b1", 2_000), line("b2")]
-    linkFilm(10, cells)
-    startQueue(ctxFor(cells, { snapshot: true }), 0, true)
+  it("between chosen lines that are not next to each other the run, and the film with it, jump", async () => {
+    // b1 [0, 2); b2 recorded 3 s [2, 5), not chosen; b3 a stand-in [5, 6.5).
+    const cells = [line("b1", 2_000), line("b2", 3_000), line("b3")]
+    linkFilm(20, cells)
+    startQueue(ctxFor(cells, only("b1", "b3")), 0, true)
+    await wait()
+    el("b1")!.tick(2)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(5, 1)
+    expect(el("b2")).toBeUndefined()
+    await wait(500)
+    expect(film.sec).toBeCloseTo(5.5, 0)
+  })
+
+  it("stops at the end of the last chosen line: no run on to the film's end, and the panel lets go", async () => {
+    const cells = [line("b1", 2_000), line("b2"), line("b3", 1_000)]
+    linkFilm(20, cells)
+    startQueue(ctxFor(cells, only("b1", "b2")), 0, true)
     await wait()
     el("b1")!.tick(2)
     await wait()
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
     await wait(1_600)
     expect(getQueueState().kind).toBe("idle")
+    expect(el("b3")).toBeUndefined()
+    expect(panel()).toBe("pause")
   })
 
-  it("Next inside Play selected steps onto the unrecorded line", async () => {
-    const cells = chosen()
+  it("Next inside Play selected steps onto the unrecorded line, and never onto one not chosen", async () => {
+    const cells = [...chosen(), line("b4", 1_000)]
     linkFilm(10, cells)
-    startQueue(ctxFor(cells, { snapshot: true }), 0, true)
+    startQueue(ctxFor(cells, only("b1", "b2", "b4")), 0, true)
     await wait()
     skipForward()
     await wait()
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    skipForward()
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b4" })
+  })
+
+  it("a run of lines on their own (no film follows it) still crosses the unrecorded line, on the queue's own timer", async () => {
+    const cells = chosen()
+    linkFilm(10, cells)
+    startQueue(ctxFor(cells, { snapshot: true }), 0, true)
+    await wait()
+    el("b1")!.tick(2)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(film.reports).toBe(0)
+    await wait(1_750)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
   })
 
   it("asked of one line (what Play selected counts, and Next and Previous ask line by line), the film counts", () => {

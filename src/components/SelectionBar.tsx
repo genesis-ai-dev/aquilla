@@ -30,6 +30,7 @@ import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import { isBulkAudioValidatableByMe, isBulkAudioUnvalidatableByMe } from "@/lib/review/bulk-audio-validation"
 import { fileHasAudio as fileHasAnyAudio } from "@/lib/audio/file-has-audio"
 import { linesHaveAnythingToPlayCountingFilm, startQueue, useProgrammeFilm } from "@/lib/audio/play-queue"
+import { filmOverRun } from "@/lib/timeline/programme"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { BatchVoiceDialog } from "@/components/voice/BatchVoiceDialog"
 import { audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
@@ -102,6 +103,12 @@ interface Props {
   /** Audio mode surfaces "Voice together" instead of Translate/Validate. */
   audioMode?: boolean
   /**
+   * What Play, Play all and Space play on this file (the workspace's
+   * `playbackCells`). Sam, Nov 12: on a file with a linked film, "Play
+   * selected" plays its lines as a run of these, so the film follows it.
+   */
+  playbackLines?: CellData[]
+  /**
    * Media redesign slice 2 (P2.3): the language delivers Audio and no text, so
    * the text actions (AI translate, validate text, harmonize) and the voices
    * generated FROM text ("Voice together", "Generate voice") leave the bar,
@@ -158,7 +165,7 @@ type Running =
   | { kind: "voice" }
   | { kind: "validate-audio" }
 
-export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, audioOnlyLane = false, orderedBy, mediaLayer = false, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted, prepareBulkRepetitions, reportBulkRepetitions }: Props) {
+export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, playbackLines, audioOnlyLane = false, orderedBy, mediaLayer = false, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted, prepareBulkRepetitions, reportBulkRepetitions }: Props) {
   const analytics = useAccountAnalytics()
   const t = useT()
   // AQU-1503: skip clauses join the way a list is written in the reader's
@@ -382,10 +389,23 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
    * (`progOwnsProgressClock`). This is the same contract a single line's own
    * play button already uses; a range is just a longer deliberate subset.
    */
+  //
+  // Sam, Nov 12 (question 44): on a file with a linked film behind the lines
+  // Play plays, the chosen lines are played as a run of those lines
+  // (`PlayContext.only`): on the file's clock, so the film follows it, shown
+  // and heard, stepping over the lines not chosen and stopping at the end of
+  // the last one. Anywhere else, as before.
   const onPlaySelected = useCallback(() => {
     if (!session?.jwt) return
+    const ids = playbackRange.map((c) => c.id)
+    const from = playbackLines?.findIndex((c) => c.id === ids[0]) ?? -1
+    if (playbackLines && from >= 0 && ids.every((id) => playbackLines.some((c) => c.id === id))
+      && filmOverRun(film, playbackLines.map((c) => c.id)).coverSec > 0) {
+      startQueue({ cells: playbackLines, projectId: project.id, session, only: new Set(ids) }, from, true)
+      return
+    }
     startQueue({ cells: playbackRange, projectId: project.id, session, snapshot: true }, 0, true)
-  }, [playbackRange, project.id, session])
+  }, [playbackRange, playbackLines, film, project.id, session])
 
   // AQU-1722: a line's name the way the reader sees it — its reference, else
   // the table's # column, else nothing. The same rule the partial-validate

@@ -15423,7 +15423,8 @@ export function ProjectWorkspace() {
   })
   useEffect(() => onQueueRanOut((ctx) => {
     const run = chapterRunRef.current
-    if (!run || ctx.snapshot) return
+    // Sam, Nov 12: nor a run of chosen lines ("Play selected").
+    if (!run || ctx.snapshot || ctx.only) return
     const played = chapterOfCell(run.chapters, ctx.cells[0]?.id)
     if (!played) return
     const linesOf = (chapter: TimelineChapter) => scopeCells(run.cells, chapter)
@@ -18583,6 +18584,7 @@ export function ProjectWorkspace() {
                   prepareBulkRepetitions={prepareBulkRepetitions}
                   reportBulkRepetitions={reportBulkRepetitions}
                   audioMode={lens === "audio"}
+                  playbackLines={playbackCells}
                   audioOnlyLane={activeLaneDelivers === "audio"}
                   orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
                   onVoiceTogether={async (sel) => {

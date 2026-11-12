@@ -767,3 +767,66 @@ describe("exportDocx — repeated words, joined stretches, short words, base loo
     expect(xml).toContain(`<w:r>${W2}<w:t xml:space="preserve">mots</w:t></w:r>`)
   })
 })
+
+describe("exportDocx — an old import's cell for the paragraph holding a text box (AQU-2539)", () => {
+  // w:p[1] holds the box and a picture (no words of its own); w:p[2] is the
+  // caption in the box (Choice), w:p[3] its old-reader copy (Fallback).
+  const caption = "Figure 1: Screenshot of the tool"
+  const french = "Figure 1 : Capture d’écran de l’outil"
+  const body = para(textBoxRun(para(run(caption), "Caption")) + pictureRun, "Caption") + para(run("Next"))
+  const captionsIn = (xml: string) => xml.match(/>Figure 1 : Capture d’écran de l’outil</g)?.length ?? 0
+
+  it("writes the holder's cell to the text-box caption when its words are the caption repeated", async () => {
+    // As dev's importer made it: the caption four times, cut into two segments.
+    const cells = [
+      cellAt(1, `${french}${french}${french.slice(0, 11)}`, { original: `${caption}${caption}${caption.slice(0, 10)}` }, 1),
+      cellAt(1, `${french.slice(11).trim()}${french}`, { original: `${caption.slice(10)}${caption}` }, 2),
+      cellAt(2, "", { original: caption }),
+      cellAt(3, "Copie ignorée", { original: caption }),
+      cellAt(4, "Suivant", { original: "Next" }),
+    ]
+    const { xml, result } = await exportedXml(body, cells)
+    expect(captionsIn(xml)).toBe(2) // the caption and its Fallback copy
+    expect(xml).not.toContain("Copie ignorée")
+    expect(result.fidelity.textBoxCellsAdopted).toBe(1)
+    expect(result.warnings).toEqual([])
+  })
+
+  it("leaves the holder's cell alone when the caption has a translation of its own", async () => {
+    const cells = [cellAt(1, `${french}${french}`, { original: `${caption}${caption}` }), cellAt(2, "Figure 1 : Sa propre traduction", { original: caption })]
+    const { xml, result } = await exportedXml(body, cells)
+    expect(xml.match(/Sa propre traduction/g)).toHaveLength(2)
+    expect(result.fidelity.textBoxCellsAdopted).toBe(0)
+    expect(result.warnings).toEqual([])
+  })
+
+  it("takes nothing from a translation that is not a clean repetition, and says so", async () => {
+    const cells = [cellAt(1, `${french} et encore autre chose`, { original: `${caption}${caption}` })]
+    const { xml, result } = await exportedXml(body, cells)
+    expect(captionsIn(xml)).toBe(0)
+    expect(result.warnings[0]).toEqual({
+      segment: "Figure 1: Screenshot of the tool",
+      detail: expect.stringContaining("re-import the file to translate it"),
+    })
+  })
+
+  it("names every text-box paragraph an old cell held together with others", async () => {
+    const two = para(textBoxRun(para(run("Bucket (English)")) + para(run("seau (French)"))), "Caption")
+    const cells = [cellAt(1, "Seau (anglais)seau (français)", { original: "Bucket (English)seau (French)Bucket (English)seau (French)" })]
+    const { result } = await exportedXml(two, cells)
+    expect(result.warnings.map((w) => w.segment)).toEqual(["Bucket (English)", "seau (French)"])
+    expect(result.fidelity.textBoxCellsNotSplit).toBe(2)
+  })
+})
+
+describe("exportDocx — a fresh import's caption in a text box (AQU-2539)", () => {
+  it("writes the caption's translation into the box and its copy, field kept in both", async () => {
+    const seq = complexField("SEQ Figure \\\\* ARABIC", "1")
+    const body = para(textBoxRun(para(run("Figure ") + seq + run(": Screenshot of the tool"), "Caption")) + pictureRun, "Caption")
+    const strings = docxPartsToStrings({ documentXml: documentXml(body) })
+    expect(strings.map((s) => [s.sourceLocation?.blockPath, s.context])).toEqual([["w:p[2]", "Caption"]])
+    const { xml } = await exportedXml(body, importedCells(strings, () => "Figure 1 : Capture d’écran de l’outil"))
+    const box = `<w:t xml:space="preserve">Figure </w:t></w:r>${seq}<w:r><w:t xml:space="preserve"> : Capture d’écran de l’outil</w:t></w:r>`
+    expect(xml.split(box)).toHaveLength(3) // in the Choice and in the Fallback
+  })
+})

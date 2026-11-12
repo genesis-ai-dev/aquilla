@@ -151,6 +151,12 @@ export interface DocxExportFidelity {
   /** Paragraphs holding a text box whose cell (from before AQU-2539) also
    *  holds the box's words: left as they are, with a warning to re-import. */
   staleTextBoxHolders: number
+  /** Old cells of a paragraph holding a text box whose words were one text-box
+   *  paragraph's repeated: written to that text-box paragraph. */
+  textBoxCellsAdopted: number
+  /** Text-box paragraphs left without a translation because an old cell held
+   *  their words with others' (each named in a warning). */
+  textBoxCellsNotSplit: number
   /** Footnote markers the translation added where the source had no
    *  footnote: not written (the marker text never reaches the body). */
   unplacedFootnoteMarkers: number
@@ -309,7 +315,7 @@ export async function exportDocx(
   const warnings: { segment: string; detail: string }[] = []
   const fidelity: DocxExportFidelity = {
     keptLooks: 0, keptFields: 0, keptLinks: 0, emptiedFields: 0, droppedLinks: 0, notesWritten: 0, notesLeft: 0,
-    staleTextBoxHolders: 0, unplacedFootnoteMarkers: 0,
+    staleTextBoxHolders: 0, textBoxCellsAdopted: 0, textBoxCellsNotSplit: 0, unplacedFootnoteMarkers: 0,
   }
 
   /** Index into `spans` of the first paragraph starting at or after `offset`. */
@@ -417,6 +423,16 @@ export async function exportDocx(
     nestedIn.set(s.parent, list)
   }
 
+  const squash = (text: string) => text.replace(/\s+/g, "")
+  /** A paragraph's line, as the importer reads it today. */
+  const lineTextOf = (s: DocxParagraphSpan): string => {
+    if (s.selfClosing) return ""
+    const p = parseXmlLite(xml!.slice(s.start, s.end)).children.find(isElement)
+    return p ? docxLine(walkDocxParagraph(p, walkContext)).text : ""
+  }
+  /** Warnings that ask for a re-import come first: the dialog shows six. */
+  const reimportWarnings: { segment: string; detail: string }[] = []
+
   /** Does this translation's source hold the words of a text box inside the
    *  paragraph (see rebuildParagraph)? Every segment's source counts, and the
    *  box's words must occur more often in it than in the paragraph's own line
@@ -424,21 +440,60 @@ export async function exportDocx(
   function sourceSwallowedTextBox(span: DocxParagraphSpan, translation: ParagraphTranslation): boolean {
     const nested = nestedIn.get(span.index)
     if (!nested) return false
-    const squash = (text: string) => text.replace(/\s+/g, "")
-    const lineOf = (s: DocxParagraphSpan) => {
-      const p = parseXmlLite(xml!.slice(s.start, s.end)).children.find(isElement)
-      return p ? squash(docxLine(walkDocxParagraph(p, walkContext)).text) : ""
-    }
     const source = squash(translation.source)
-    const own = lineOf(span)
+    const own = squash(lineTextOf(span))
     // A paragraph with no words of its own is never written anyway; a cell made
     // by today's importer holds exactly the paragraph's own line.
     if (!source || !own || source === own) return false
     const occurrences = (hay: string, needle: string) => hay.split(needle).length - 1
     return nested.some((inner) => {
-      const words = lineOf(inner)
+      const words = squash(lineTextOf(inner))
       return words.length > 0 && occurrences(source, words) > occurrences(own, words)
     })
+  }
+
+  // AQU-2539, OLD IMPORTS ONLY: before text boxes were read separately, the
+  // paragraph that holds a text box got a cell of its own with the box's words
+  // in it — several times over, from the box's two stored copies. When that
+  // paragraph has no words of its own and the cell's source is ONE text-box
+  // paragraph's words repeated (whitespace ignored), the cell belongs to that
+  // text-box paragraph: its translation, the same repetition taken out, is
+  // written there if the text-box paragraph has no translation of its own (its
+  // Fallback copy mirrors it as always). A translation that is not a clean
+  // repetition, or a cell holding several text-box paragraphs' words, cannot
+  // be split: the export says so, naming the text-box paragraphs left without
+  // a translation, instead of leaving them in English silently.
+  if (hasLocatedTranslations) {
+    const hasOwn = (index: number) => translations.get(index)?.parts.some((part) => part.plain || part.html) === true
+    for (const holder of spans) {
+      const translation = translations.get(holder.index)
+      if (holder.isCopy || !translation || !nestedIn.has(holder.index)) continue
+      const source = squash(translation.source)
+      if (!source || squash(lineTextOf(holder))) continue
+      const boxes = spans
+        .filter((s) => s.start > holder.start && s.end <= holder.end && !s.isCopy && !s.selfClosing)
+        .map((s) => ({ span: s, text: lineTextOf(s) }))
+        .filter((box) => squash(box.text))
+      const untranslated = boxes.filter((box) => !hasOwn(box.span.index))
+      if (untranslated.length === 0) continue
+      const one = untranslated.find((box) => {
+        const words = squash(box.text)
+        return source.length % words.length === 0 && words.repeat(source.length / words.length) === source
+      })
+      const derived = one ? withoutRepetition(translation.parts.map((part) => part.plain).join(" "), source.length / squash(one.text).length) : null
+      if (one && derived) {
+        translations.set(one.span.index, { parts: [{ plain: derived, html: "" }], label: translation.label, source: one.text })
+        fidelity.textBoxCellsAdopted++
+        continue
+      }
+      for (const box of untranslated) {
+        fidelity.textBoxCellsNotSplit++
+        reimportWarnings.push({
+          segment: firstWords(box.text),
+          detail: "this text box was imported before text boxes were read separately and its words cannot be told apart in the old translation; re-import the file to translate it",
+        })
+      }
+    }
   }
   const noteTranslations = new Map<string, string>()
 
@@ -452,8 +507,8 @@ export async function exportDocx(
     if (sourceSwallowedTextBox(span, translation)) {
       if (!counted) return null
       fidelity.staleTextBoxHolders++
-      warnings.push({
-        segment: translation.label,
+      reimportWarnings.push({
+        segment: firstWords(lineTextOf(span)),
         detail: "imported before text boxes were read separately; re-import the file to translate this paragraph",
       })
       return null
@@ -493,6 +548,7 @@ export async function exportDocx(
   // otherwise come back as a different file than the upload — which is the
   // whole complaint behind the untouched-export rule. The counts are already
   // final here, so the result still reports the walk honestly.
+  const allWarnings = [...reimportWarnings, ...warnings]
   if (rebuilt === xml && rebuiltFootnotes === null) {
     return {
       blob: new Blob([rawDocxBytes], { type: DOCX_MIME }),
@@ -500,7 +556,7 @@ export async function exportDocx(
       untouched,
       removed,
       inserted,
-      warnings,
+      warnings: allWarnings,
       fidelity,
     }
   }
@@ -545,7 +601,28 @@ export async function exportDocx(
     compression: "DEFLATE",
     compressionOptions: { level: 6 },
   })
-  return { blob, injected, untouched, removed, inserted, warnings, fidelity }
+  return { blob, injected, untouched, removed, inserted, warnings: allWarnings, fidelity }
+}
+
+/** A paragraph's first words, to name it in a warning. */
+function firstWords(text: string): string {
+  const words = text.replace(/\s+/g, " ").trim().split(" ")
+  return words.length > 8 ? `${words.slice(0, 8).join(" ")}…` : words.join(" ")
+}
+
+/**
+ * `text` with a repetition taken out: when its characters other than
+ * whitespace are one stretch repeated `times` times, that stretch as it is
+ * written the first time; otherwise null (not a clean repetition).
+ */
+function withoutRepetition(text: string, times: number): string | null {
+  const trimmed = text.trim()
+  const marks: number[] = []
+  for (let k = 0; k < trimmed.length; k++) if (!/\s/.test(trimmed[k])) marks.push(k)
+  if (times < 1 || marks.length === 0 || marks.length % times !== 0) return null
+  const unit = marks.length / times
+  for (let k = unit; k < marks.length; k++) if (trimmed[marks[k]] !== trimmed[marks[k - unit]]) return null
+  return trimmed.slice(0, marks[unit - 1] + 1).trim()
 }
 
 /** One XML part being rendered: what a paragraph rebuild needs from it. */

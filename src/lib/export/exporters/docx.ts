@@ -73,13 +73,12 @@ import {
   htmlToSpans,
   rPrWithLanguage,
   rPrWithMarks,
-  setRprChild,
   textRunXml,
   type Mark,
   type Span,
 } from "./docx-runs"
 import { frenchSpacing, isFrenchLanguage } from "./french-spacing"
-import { anchorCounts, markKey, rebuildParagraphInner, type RebuildIo, type RebuildResult } from "./docx-rebuild"
+import { anchorCounts, rebuildParagraphInner, type RebuildIo, type RebuildResult } from "./docx-rebuild"
 import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import {
@@ -644,7 +643,6 @@ function rebuildParagraphIn(
     marks,
     translatedLook: part.translatedLook,
     baseRpr: base ?? "",
-    markLooks: markLooksOf(line.chunks, runRprXml, base ?? ""),
     io,
   })
   const before = part.renderRange(span.start, at(target.el.openEnd), span)
@@ -890,47 +888,6 @@ function isRightToLeft(rPrXml: string): boolean {
   if (rtl === null) return false
   const val = /\sw:val="([^"]*)"/.exec(rtl)?.[1]
   return val === undefined || !/^(0|false|off)$/i.test(val)
-}
-
-/**
- * For each set of marks the source's text carries, the run look it carries
- * them in — when that is ONE look. A translated stretch with the same marks
- * (the translator's bold over "Terme :") then takes the source's own look for
- * them, font and size included, instead of base-plus-a-bold-toggle.
- */
-function markLooksOf(
-  chunks: ReturnType<typeof docxLine>["chunks"],
-  runRprXml: (run: XmlElement) => string,
-  baseRprXml: string,
-): Map<string, string> {
-  // A source look qualifies only when, its marks taken away, it IS the base
-  // look: the source's bold "Term:" does, a bold Hebrew word (its own font,
-  // right-to-left) does not.
-  const plainBase = withoutMarks(baseRprXml)
-  const byKey = new Map<string, Set<string>>()
-  for (const chunk of chunks) {
-    if (chunk.piece.kind !== "text" || chunk.piece.source !== "t" || !chunk.text.trim()) continue
-    const key = markKey(chunk.marks as ReadonlySet<Mark>)
-    if (key === "") continue
-    const look = runRprXml(chunk.piece.run)
-    if (withoutMarks(look) !== plainBase) continue
-    const set = byKey.get(key) ?? new Set<string>()
-    set.add(look)
-    byKey.set(key, set)
-  }
-  const out = new Map<string, string>()
-  for (const [key, set] of byKey) if (set.size === 1) out.set(key, [...set][0])
-  return out
-}
-
-/** A run look with its bold/italic/underline/strike/super-sub toggles taken
- *  out, for comparing looks; "" and an empty rPr are the same look. */
-function withoutMarks(rPrXml: string): string {
-  let rPr = rPrXml
-  for (const name of ["b", "bCs", "i", "iCs", "u", "strike", "dstrike", "vertAlign"]) {
-    if (rPr) rPr = setRprChild(rPr, name, null)
-  }
-  return rPr.replace(/<w:rPr\b[^>]*>\s*<\/w:rPr>|<w:rPr\b[^>]*\/>/, "")
 }
 
 function runsForSpans(

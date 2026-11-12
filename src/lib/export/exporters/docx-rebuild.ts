@@ -73,8 +73,6 @@ export interface RebuildInput {
   writtenText?: string
   /** The base run look, "" for none. */
   baseRpr: string
-  /** A translated stretch with exactly these marks takes this source look. */
-  markLooks: ReadonlyMap<string, string>
   /** Applied to every run look of TRANSLATED text (not to unchanged stretches). */
   translatedLook?: (rPr: string) => string
   io: RebuildIo
@@ -233,7 +231,7 @@ function lookFor(input: RebuildInput, marks: ReadonlySet<Mark>): string {
   const key = markKey(marks)
   const look = key === ""
     ? input.baseRpr
-    : input.markLooks.get(key) ?? rPrWithMarks(input.baseRpr || null, marks)
+    : rPrWithMarks(input.baseRpr || null, marks)
   return input.translatedLook ? input.translatedLook(look) : look
 }
 

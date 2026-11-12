@@ -8,7 +8,7 @@ import { safeLoginNext } from "@/lib/navigation/login-path"
 
 export function GoogleLoginButton({ next, signup = false }: { next?: string; signup?: boolean }) {
   const t = useT()
-  const [enabled, setEnabled] = useState(false)
+  const [enabled, setEnabled] = useState<boolean | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState(false)
   const [configFailed, setConfigFailed] = useState(false)
@@ -28,7 +28,11 @@ export function GoogleLoginButton({ next, signup = false }: { next?: string; sig
     window.addEventListener("online", retry)
     return () => window.removeEventListener("online", retry)
   }, [])
-  if (configFailed) return <div className="flex flex-col gap-2">
+  if (configFailed || enabled === false) return <div className="flex flex-col gap-2">
+    <Button className="google-login-button" type="button" variant="outline" disabled>
+      <img src={googleLogo} width={20} height={20} alt="" aria-hidden="true" />
+      {t("auth.google.continue")}
+    </Button>
     <p role="alert" className="text-sm text-muted-foreground">{t("auth.google.unavailable")}</p>
     <Button type="button" variant="outline" onClick={() => setCheck(value => value + 1)}>{t("auth.google.retryAvailability")}</Button>
   </div>

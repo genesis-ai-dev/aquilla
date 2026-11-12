@@ -20,8 +20,8 @@ it.each([true, false, "unavailable"])("only explicit activation can start Google
     expect(mocks.start).toHaveBeenCalledExactlyOnceWith("/join/invitation", true)
     expect(button).toBeEnabled()
   } else {
-    if (enabled === false) expect(screen.queryByRole("button")).toBeNull()
-    else expect(await screen.findByRole("button",{name:"Retry Google login availability"})).toBeEnabled()
+    expect(await screen.findByRole("button",{name:"Retry Google login availability"})).toBeEnabled()
+    expect(screen.getByRole("button", {name:"Continue with Google"})).toBeDisabled()
     expect(screen.queryByText("or")).toBeNull()
   }
 })

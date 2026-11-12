@@ -101,7 +101,7 @@ export function EmailChangeForm({
       <div className="flex flex-col gap-3">
         <p role="status">{t("auth.emailChange.success")}</p>
         <Link className="underline" to="/login?add=1">
-          {t("auth.emailChange.login")}
+          {t("common.logIn")}
         </Link>
       </div>
     )

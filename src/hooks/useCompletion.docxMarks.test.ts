@@ -5,6 +5,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { useCompletion } from "./useCompletion"
+import { encodeParagraphCells } from "@/lib/completion/paragraph-protocol"
 
 vi.mock("@/lib/posthog", () => ({
   default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn(), captureException: vi.fn() },
@@ -117,6 +118,57 @@ describe("useCompletion — Word lines with inline marks (AQU-2539)", () => {
     expect(committed).toHaveLength(1)
     expect(committed[0]).not.toMatch(/<\/?[bi]>/)
     expect(committed[0]).toContain("déf")
+  })
+})
+
+describe("useCompletion — marked Word lines among others (AQU-2539)", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+    localStorage.clear()
+  })
+  const wordCell = (id: string, original: string, originalHtml?: string, paragraphStart?: boolean) => ({
+    id,
+    fileId: "file-docx",
+    original,
+    ...(originalHtml ? { originalHtml } : {}),
+    translated: "",
+    status: "empty",
+    ...(paragraphStart ? { paragraphStart: true } : {}),
+    metadata: {
+      aquillaImport: {
+        sourceLocator: { kind: "package-block", memberPath: "word/document.xml", blockPath: `w:p[${id.slice(1)}]`, segment: 1 },
+      },
+    },
+  })
+
+  it("a mixed batch: marked lines get their HTML, plain lines exactly what they got before", async () => {
+    const cells = [
+      wordCell("c1", "Term: rule", "<b>Term:</b> rule"),
+      wordCell("c2", "Plain line"),
+      wordCell("c3", "Use <Ctrl> + C"),
+    ]
+    const bodies: string[] = []
+    mockCompletion("<v1><b>Terme :</b> règle</v1>\n<v2>Ligne simple</v2>\n<v3>Utilisez <Ctrl> + C</v3>", bodies)
+    const commit = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderCompletion(cells, commit)
+    await act(async () => {
+      await result.current.completeBatch(cells as never)
+    })
+    const prompt = JSON.parse(bodies[0]!).messages.at(-1).content as string
+    expect(prompt).toMatch(/<v1>(<b>|\[#[^\]]+#\])Term:/)
+    expect(prompt).toContain("<v2>Plain line</v2>")
+    expect(commit.mock.calls.map((call) => call[1])).toEqual(["<b>Terme :</b> règle", "Ligne simple", "Utilisez <Ctrl> + C"])
+  })
+
+  it("the paragraph path carries the marks too", async () => {
+    const cells = [wordCell("c1", "Term: rule", "<b>Term:</b> rule", true), wordCell("c2", "Plain follow-up")]
+    mockCompletion(encodeParagraphCells([{ cellId: "c1", text: "<b>Terme :</b> règle" }, { cellId: "c2", text: "Suite simple" }]), [])
+    const commit = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderCompletion(cells, commit)
+    await act(async () => {
+      await result.current.completeParagraph("c1")
+    })
+    expect(commit.mock.calls.map((call) => call[1]).sort()).toEqual(["<b>Terme :</b> règle", "Suite simple"])
   })
 })
 

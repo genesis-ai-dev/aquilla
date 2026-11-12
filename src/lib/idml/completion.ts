@@ -134,6 +134,12 @@ export interface IdmlStitchOptions {
    * punctuation or a name the translation already kept is discarded.
    */
   readonly preserveWording?: string
+  /**
+   * AQU-2539: the cell as it was when the prompt was built, for a commit that
+   * passes the live cell. A Word line's marked answer is read by what its
+   * prompt was given, even if the source was edited while it generated.
+   */
+  readonly promptCell?: IdmlCompletionCell
 }
 
 /**
@@ -149,7 +155,7 @@ export function normalizeProtectedCompletion(
   const metadata = idmlMetadata(cell)
   // AQU-2539: a Word line given its marked HTML gets its answer validated as
   // marks-only HTML; every other cell passes through exactly as before.
-  if (!metadata) return normalizeMarkedReply(cell, generated)
+  if (!metadata) return normalizeMarkedReply(options?.promptCell ?? cell, generated)
   if (!cell.originalHtml) {
     throw new IdmlCompletionError(
       `Cell ${cell.id} is missing protected source HTML. Re-import the original IDML before using AI drafting.`,

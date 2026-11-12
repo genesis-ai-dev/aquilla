@@ -10,9 +10,10 @@
 //   - the model's answer is accepted as HTML only when it uses nothing but
 //     those marks, properly nested, with no attributes. Then the plain
 //     translation is the answer's text and `translatedHtml` is the answer.
-//     Otherwise the answer's text, tags removed, is the plain translation and
-//     `translatedHtml` is just that text, escaped — nothing of the translation
-//     is lost, and no mark is invented.
+//     Otherwise the answer's text with its mark tags removed (any other `<…>`
+//     is text and stays) is the plain translation and `translatedHtml` is
+//     just that text, escaped — nothing of the translation is lost, and no
+//     mark is invented. The streamed preview shows the words, not the tags.
 //
 // Every other cell — any other format, a Word line with no marks, a Word line
 // whose source was edited after import — is untouched: same prompt source, the
@@ -117,7 +118,22 @@ export function markedPromptSource(cell: MarkedCompletionCell, fallbackSource: s
   return markedSource(cell, fallbackSource) ?? fallbackSource
 }
 
-/** The saved draft for the model's answer: see the header. */
+/** The mark tags (with or without attributes) and line breaks an answer may
+ *  carry: the only tags the fallback removes. */
+const MARK_TAG_RE = /<\/?(?:b|i|u|s|strong|em|strike)\b[^<>]*>|<br\s*\/?>/gi
+
+/** An answer's words with its mark tags removed (a `<br>` is a line break);
+ *  any other `<…>` is text and stays. */
+function withoutMarkTags(answer: string): string {
+  return decodeEntities(answer.replace(MARK_TAG_RE, (tag) => (/^<br/i.test(tag) ? "\n" : ""))).trim()
+}
+
+/**
+ * The saved draft for the model's answer: see the header. `cell` is the cell
+ * the PROMPT was built from — the commit passes it, so a source edited while
+ * the draft generated cannot turn a marked answer into plain text with its
+ * tags in it.
+ */
 export function normalizeMarkedReply(
   cell: MarkedCompletionCell,
   generated: string,
@@ -128,6 +144,16 @@ export function normalizeMarkedReply(
   // there is one): HTML reads back to the same text, decoded text would not.
   const parsed = parseMarkedHtml(generated.trim())
   if (parsed) return { value: parsed.text, valueHtml: parsed.html }
-  const plain = decodeEntities(generated.replace(/<[^<>]*>/g, "")).trim()
+  const plain = withoutMarkTags(generated)
   return { value: plain, valueHtml: escapeHtml(plain) }
+}
+
+/** What the streamed preview shows for a cell: for a marked Word line, the
+ *  answer's words without its mark tags; anything else as it is. */
+export function markedPreviewText(
+  cell: MarkedCompletionCell | null | undefined,
+  preview: string | undefined,
+): string | undefined {
+  if (preview === undefined || !cell || markedSource(cell, cell.original ?? "") === null) return preview
+  return withoutMarkTags(preview)
 }

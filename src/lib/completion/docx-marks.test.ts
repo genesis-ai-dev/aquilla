@@ -1,6 +1,6 @@
 // AQU-2539 — a Word line's inline marks through AI translation.
 import { describe, it, expect } from "vitest"
-import { markedPromptSource, normalizeMarkedReply, parseMarkedHtml } from "./docx-marks"
+import { markedPreviewText, markedPromptSource, normalizeMarkedReply, parseMarkedHtml } from "./docx-marks"
 import { idmlCompletionPromptSource, normalizeProtectedCompletion } from "@/lib/idml/completion"
 
 const wordLocator = {
@@ -64,7 +64,9 @@ describe("normalizeMarkedReply", () => {
   it("falls back to the plain translation, losing no words, when the answer is not valid", () => {
     const plain = { value: "Terme : la définition", valueHtml: "Terme : la définition" }
     expect(normalizeMarkedReply(cell, "<b>Terme :</i> la définition")).toEqual(plain)
-    expect(normalizeMarkedReply(cell, '<span class="x">Terme :</span> la définition')).toEqual(plain)
+    // Only mark tags are removed; anything else in angle brackets is text.
+    expect(normalizeMarkedReply(cell, '<span class="x">Terme :</span> la définition').value)
+      .toBe('<span class="x">Terme :</span> la définition')
   })
 
   it("saves an answer without marks as its plain text", () => {
@@ -97,5 +99,34 @@ describe("the two hooks in the shared completion path", () => {
     const marked = wordLine("Term: def", "<b>Term:</b> def")
     expect(normalizeProtectedCompletion(marked, "<b>Terme :</b> déf")).toEqual({ value: "Terme : déf", valueHtml: "<b>Terme :</b> déf" })
     expect(normalizeProtectedCompletion({ id: "x", metadata: null }, "<b>whatever</b>")).toEqual({ value: "<b>whatever</b>" })
+  })
+})
+
+describe("review findings (AQU-2539)", () => {
+  const cell = wordLine("Term: the definition", "<b>Term:</b> the definition")
+
+  it("keeps any non-mark <…> text of an answer, removing only mark tags", () => {
+    expect(normalizeMarkedReply(cell, "<b>Terme</b> utilise <Ctrl> + C")).toEqual({
+      value: "Terme utilise <Ctrl> + C",
+      valueHtml: "Terme utilise &lt;Ctrl&gt; + C",
+    })
+  })
+
+  it("reads a committed answer by the cell its prompt was built from, even after a source edit", () => {
+    const edited = { ...cell, original: "Term: an edited definition" }
+    // The live cell no longer matches its HTML: without the prompt's cell the
+    // answer would pass through, tags and all, into the plain translation.
+    expect(normalizeProtectedCompletion(edited, "<b>Terme :</b> la règle")).toEqual({ value: "<b>Terme :</b> la règle" })
+    expect(normalizeProtectedCompletion(edited, "<b>Terme :</b> la règle", { promptCell: cell })).toEqual({
+      value: "Terme : la règle",
+      valueHtml: "<b>Terme :</b> la règle",
+    })
+  })
+
+  it("shows a marked Word line's preview without its tags, anything else as it is", () => {
+    expect(markedPreviewText(cell, "<b>Terme :</b> la déf")).toBe("Terme : la déf")
+    expect(markedPreviewText(wordLine("Plain"), "<b>Ligne</b>")).toBe("<b>Ligne</b>")
+    expect(markedPreviewText(cell, undefined)).toBeUndefined()
+    expect(markedPreviewText(null, "x")).toBe("x")
   })
 })

@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
 import { recordStep } from "@/lib/history/history"
+import { markedPreviewText } from "@/lib/completion/docx-marks"
 import { settleSourceStep, type SourceSession } from "@/lib/history/source-steps"
 import { createPortal } from "react-dom"
 import {
@@ -3287,7 +3288,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           exampleOriginFor={exampleOriginFor}
           completingState={completing.get(cell.id)}
           cellError={errors.get(cell.id)}
-          previewText={previews.get(cell.id)}
+          previewText={markedPreviewText(cell, previews.get(cell.id))}
           healthRibbonPoint={healthRibbonByCellId.get(cell.id) ?? HEALTH_DISABLED_POINT}
           infractions={infractions}
           ruleMap={ruleMap}

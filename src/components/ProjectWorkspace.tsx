@@ -6849,7 +6849,7 @@ export function ProjectWorkspace() {
     // IDML v2 model output is protected HTML, not plain text. Validate the
     // exact slot/token sequence before any optimistic mutation or event is
     // created; ordinary formats pass through unchanged.
-    const completed = normalizeProtectedCompletion(commitCell, text)
+    const completed = normalizeProtectedCompletion(commitCell, text, { promptCell: cell })
     // Optimistic local patch BEFORE the outbox enqueue. Mirrors what
     // handleEditorCommit in EditorTable does for hand-typed edits, and
     // collapses the race window where `cells.translated` would otherwise
@@ -7047,7 +7047,7 @@ export function ProjectWorkspace() {
           continue
         }
         const liveCell = live ?? draft.cell
-        const completed = normalizeProtectedCompletion(liveCell, draft.text)
+        const completed = normalizeProtectedCompletion(liveCell, draft.text, { promptCell: draft.cell })
         const parentId = resolveTargetCommitParentId(liveCell)
         prepared.push({ index, draft, liveCell, completed, parentId })
         results[index] = { status: "fulfilled", value: undefined }

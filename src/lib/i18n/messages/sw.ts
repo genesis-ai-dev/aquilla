@@ -4537,7 +4537,6 @@ export const sw: Catalog = {
   "importExport.format.txt.description": "Matini ghafi ya kwenda na kurudi: muundo wa vifungu unahifadhiwa; vifungu ambavyo havijatafsiriwa hubaki na chanzo (mistari ya midia hutumia andikisho lake).",
   "importExport.format.md.description": "Markdown ya kwenda na kurudi: vichwa, orodha zenye mpangilio na zisizo na mpangilio, na nukuu hujengwa upya; vitalu ambavyo havijatafsiriwa hubaki na chanzo (mistari ya midia hutumia andikisho lake).",
   "importExport.format.html.label": "Ukurasa wa wavuti",
-  "importExport.format.html.description": "Ukurasa unaosomeka wa kitabu katika faili moja inayojitegemea: faharasa ya sura, aya zenye nambari na vichwa vya sehemu, kwa wakaguzi na uchapishaji. Mistari ambayo haijatafsiriwa huonyesha matini yake ya chanzo, ikiwa na alama. Si ya kuingizwa tena; mpangilio wa vifungu na madokezo bado hauhifadhiwi.",
   "importExport.format.tsv.label": "TSV ya lugha mbili",
   "importExport.format.tsv.description": "id/chanzo/lengo yaliyotenganishwa kwa kichupo, safu mlalo moja kwa kila sehemu.",
   "importExport.format.csv.label": "CSV ya lugha mbili",

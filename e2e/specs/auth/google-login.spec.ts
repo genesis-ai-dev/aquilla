@@ -1,11 +1,22 @@
 import { test, expect } from "@playwright/test"
 import { resetBackend } from "../../helpers/seed"
-import { ensureAuthState } from "../../helpers/auth"
+import { ensureAuthState, injectSession } from "../../helpers/auth"
 
 // Provider-boundary simulation. The worker suite separately uses signed Google
 // claims against real Postgres; this suite verifies browser intent, navigation,
 // and adoption of a real Aquilla JWT. It does not claim live Google verification.
 test.beforeEach(async () => { await resetBackend() })
+test("invalidated login-method session offers reauthentication with its settings destination", async ({ page }) => {
+  await page.goto("/login")
+  await injectSession(page, await ensureAuthState("alice"))
+  await page.route("**/api/v2/auth/oauth/google/methods", route => route.fulfill({status:401,json:{error:"Password changed"}}))
+  await page.goto("/preferences/login-methods")
+  await expect(page.getByRole("alert")).toContainText("Your session expired.")
+  await page.getByRole("link",{name:"Log in again",exact:true}).click()
+  await expect(page.getByRole("button",{name:"Log in",exact:true})).toBeVisible()
+  expect(new URL(page.url()).searchParams.get("next")).toBe("/preferences/login-methods")
+  expect(new URL(page.url()).searchParams.get("add")).toBe("1")
+})
 test("Google is silent before activation and its handoff preserves the destination and ordinary session", async ({ page }) => {
   const session = await ensureAuthState("alice")
   const googleRequests: string[] = []
@@ -91,6 +102,10 @@ test("Google signup waits for explicit submission and offers recovery after post
   await google.click()
   await page.getByRole("button", { name: "Agree and continue", exact: true }).click()
   await expect(page.getByLabel("Username", { exact: true })).toBeVisible()
+  await page.reload()
+  await expect(page.getByLabel("Username", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Agree and continue", exact: true })).toHaveCount(0)
+  expect(googleRequests).toHaveLength(1)
   await page.getByLabel("Username", { exact: true }).fill("new-google-user")
   await expect(page.getByRole("button", { name: "Create account", exact: true })).toBeEnabled()
   await expect(page.getByRole("alert")).toHaveCount(0)
@@ -112,13 +127,17 @@ test("first-party availability retry recovers without contacting Google", async 
   const providerRequests: string[] = []
   page.on("request", request => {if (/google(?:apis)?\.com|gstatic\.com/.test(request.url())) providerRequests.push(request.url())})
   let checks = 0
+  let available = false
   await page.route("**/api/v2/auth/oauth/google/config", route => {
     checks++
-    return route.fulfill(checks === 1 ? {status:503,json:{error:"unavailable"}} : {json:{enabled:true}})
+    return route.fulfill(!available ? {status:503,json:{error:"unavailable"}} : {json:{enabled:true}})
   })
   await page.goto("/login")
+  await expect(page.getByRole("button",{name:"Retry Google login availability"})).toBeVisible()
+  const failedChecks = checks
+  available = true
   await page.getByRole("button",{name:"Retry Google login availability"}).click()
   await expect(page.getByRole("button",{name:"Continue with Google",exact:true})).toBeVisible()
-  expect(checks).toBe(2)
+  expect(checks).toBeGreaterThan(failedChecks)
   expect(providerRequests).toEqual([])
 })

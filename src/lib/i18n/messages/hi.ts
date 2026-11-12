@@ -4990,8 +4990,6 @@ export const hi: Catalog = {
   "projectSettings.permission.reconnectToEdit": "साझा सेटिंग संपादित करने के लिए फिर जुड़ें।",
   "projectSettings.permission.onlyRoleCanModify": "केवल {role} बदल सकते हैं",
   "projectSettings.permission.viewPrivilegedMembers": "{role} देखें",
-  "projectSettings.permission.privilegedDialogTitle": "परियोजना {role}",
-  "projectSettings.permission.privilegedDialogDescription": "{role} साझा सेटिंग, सदस्य और अन्य परियोजना कॉन्फ़िगरेशन बदल सकते हैं।",
   "projectSettings.permission.privilegedDialogEmpty": "इस परियोजना पर कोई {role} नहीं।",
   "projectSettings.permission.privilegedDialogError": "{role} लोड नहीं हो सके।",
   "projectSettings.create.trigger": "नई परियोजना",

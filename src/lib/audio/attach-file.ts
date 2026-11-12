@@ -16,7 +16,8 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { buildAudioId, deleteCellAudio, uploadCellAudio } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
 import { RECORDING_SLOT } from "@/lib/timeline/track-slots"
-import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioGain } from "@/lib/sync/events-emit"
+import type { PieceLevel } from "@/lib/audio/cut-take"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
@@ -227,6 +228,9 @@ export interface AttachUploadedTakeArgs {
   slot: string
   mimeType: string | undefined
   durationMs: number | undefined
+  /** AQU-2494 (browser pass, Nov 12): the take's volume and fades, written
+   *  right after the attach (a joined take is given its pieces' back). */
+  level?: PieceLevel | null
   label?: string
   targetLang?: string
   surface: TelemetrySurface
@@ -245,6 +249,7 @@ export interface AttachUploadedTakeArgs {
 export async function attachUploadedTake(args: AttachUploadedTakeArgs): Promise<string> {
   const { projectId, fileId, cellId, audioId, url, slot, mimeType, durationMs, label, username } = args
   let attachEventId: string
+  const level = args.level
   try {
     attachEventId = await emitCellAudioAttach({
       projectId,
@@ -262,6 +267,16 @@ export async function attachUploadedTake(args: AttachUploadedTakeArgs): Promise<
       surface: args.surface,
       author: username,
     })
+    // AQU-2494 (browser pass, Nov 12): its volume and fades, when it is made
+    // with any (a joined take). The paint below waits for this event, the
+    // later one, to be read back.
+    if (level && (level.gainDb != null || level.fadeInMs != null || level.fadeOutMs != null)) {
+      attachEventId = await emitCellAudioGain({
+        projectId, fileId, cellId, audioId, ...level,
+        ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+        author: username,
+      })
+    }
   } catch (emitErr) {
     args.onEmitFailed?.()
     throw emitErr
@@ -285,6 +300,9 @@ export async function attachUploadedTake(args: AttachUploadedTakeArgs): Promise<
     voiceId: null,
     referenceAudioId: null,
     durationMs: durationMs ?? null,
+    ...(level?.gainDb != null ? { gainDb: level.gainDb } : {}),
+    ...(level?.fadeInMs != null ? { fadeInMs: level.fadeInMs } : {}),
+    ...(level?.fadeOutMs != null ? { fadeOutMs: level.fadeOutMs } : {}),
     label,
     trimStartMs: null,
     trimEndMs: null,

@@ -1,3 +1,6 @@
+import { EmptyState } from "@/components/ui/empty"
+import { Spinner } from "@/components/ui/spinner"
+import { loginPath } from "@/lib/navigation/login-path"
 import { LoginMethodsSection } from "@/components/settings/LoginMethodsSection"
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
@@ -570,9 +573,27 @@ function sectionDescription(section: PreferenceSection, description: string): Re
 function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: boolean }) {
   const { t } = useI18n()
   const navigate = useNavigate()
+  const location = useLocation()
+  const { session, loading, sessionLoadError, retrySessionLoad } = useFrontierSession()
   if (INLINE_PREFERENCE_SLUGS.has(slug)) return <Navigate to="/preferences" replace />
   const section = PREFERENCE_SECTIONS.find((s) => s.slug === slug)
   if (!section || (section.tauriOnly && !isTauriRuntime())) return <Navigate to="/preferences" replace />
+  // Account settings have no useful signed-out preview. Keep local preferences
+  // available, and wait for session hydration before asking anyone to log in.
+  if (section.group === "Account" && !session) {
+    const content = <div className={modal ? "flex min-h-[60dvh] items-center justify-center p-6" : "flex min-h-[calc(100dvh-4rem)] items-center justify-center p-6"}>
+      {loading ? <Spinner /> : sessionLoadError ? <EmptyState variant="inline" title={t("auth.login.sessionLoadFailed")}
+        action={<Button onClick={() => { void retrySessionLoad() }}>{t("common.retry")}</Button>} /> :
+        <EmptyState variant="inline" icon={UserRound}
+          title={t("auth.settings.loginRequired")}
+          description={t("auth.settings.loginDescription")}
+          action={<Button onClick={() => navigate(loginPath({ next: location.pathname + location.search }))}>{t("common.logIn")}</Button>}
+        />}
+    </div>
+    return modal ? content : <AppShell sidebar={<OrgSidebar />}
+      header={<OrgBreadcrumb parent={{ label: "Preferences", to: "/preferences" }} section={t(section.titleKey)} />}
+      statusBar={null} main={content} />
+  }
   if (modal) {
     // In the route-modal there is no breadcrumb, so the BackLink is the way
     // back to the index; it pops history to keep the dialog's depth intact.

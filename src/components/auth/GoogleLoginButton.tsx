@@ -33,8 +33,8 @@ export function GoogleLoginButton({ next, signup = false }: { next?: string; sig
       <img src={googleLogo} width={20} height={20} alt="" aria-hidden="true" />
       {t("auth.google.continue")}
     </Button>
-    <p role="alert" className="text-sm text-muted-foreground">{t("auth.google.unavailable")}</p>
-    <Button type="button" variant="outline" onClick={() => setCheck(value => value + 1)}>{t("auth.google.retryAvailability")}</Button>
+    <p role="alert" className="text-sm text-muted-foreground">{t(configFailed ? "auth.google.unavailable" : "auth.google.notConfigured")}</p>
+    {configFailed && <Button className="self-start" type="button" variant="link" size="sm" onClick={() => setCheck(value => value + 1)}>{t("auth.google.retryAvailability")}</Button>}
   </div>
   if (!enabled) return null
   const current = window.location.pathname + window.location.search

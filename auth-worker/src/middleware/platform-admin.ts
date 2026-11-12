@@ -1,3 +1,4 @@
+import { deployment, factor } from "../lib/admin-totp"
 // Platform-operator (site-wide admin) gate.
 //
 // A SEPARATE authorization axis from the org-scoped role ladder: the
@@ -174,13 +175,14 @@ export const requirePlatformAdmin = async (
  * would re-open OPS-35 on exactly the paths that skip the middleware.
  */
 export const hasActiveElevation = async (c: Context<AuthHonoEnv>): Promise<boolean> => {
-  if (!adminElevationRequired(c.env)) return true
+  if (!adminElevationRequired(c.env) && !(await factor(c))?.enabled) return true
   const user = c.get("user")
   const row = await c.env.AQUILLA_PG.prepare(
     `SELECT 1 AS ok FROM admin_elevations
-      WHERE user_id = ? AND session_key = ? AND elevated_until > now()`,
+      WHERE user_id = ? AND session_key = ? AND elevated_until > now()
+      AND factor_generation IS NOT DISTINCT FROM (SELECT generation FROM admin_totp WHERE user_id=admin_elevations.user_id AND deployment=? AND enabled)`,
   )
-    .bind(user.id, c.get("sessionKey"))
+    .bind(user.id, c.get("sessionKey"), deployment(c))
     .first<{ ok: number }>()
   return row != null
 }

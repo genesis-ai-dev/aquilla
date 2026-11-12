@@ -9,6 +9,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/re
 import { AdminElevationGate } from "./AdminElevationGate"
 
 vi.mock("@/lib/frontier/admin", () => ({
+  adminTotp: vi.fn().mockResolvedValue({ enabled: false }),
   requestAdminElevation: vi.fn(),
   verifyAdminElevation: vi.fn(),
 }))
@@ -34,7 +35,7 @@ describe("AdminElevationGate", () => {
 
     render(<AdminElevationGate jwt="jwt" email="admin@example.com" onElevated={onElevated} />)
 
-    fireEvent.click(screen.getByRole("button", { name: /email me a code/i }))
+    fireEvent.click(await screen.findByRole("button", { name: /email me a code/i }))
 
     const input = await screen.findByLabelText(/verification code/i)
     expect(mockRequest).toHaveBeenCalledWith("jwt")
@@ -52,11 +53,26 @@ describe("AdminElevationGate", () => {
     const onElevated = vi.fn()
 
     render(<AdminElevationGate jwt="jwt" email={null} onElevated={onElevated} />)
-    fireEvent.click(screen.getByRole("button", { name: /email me a code/i }))
+    fireEvent.click(await screen.findByRole("button", { name: /email me a code/i }))
     const input = await screen.findByLabelText(/verification code/i)
     fireEvent.input(input, { target: { value: "999999" } })
 
     expect(await screen.findByText(/invalid or has expired/i)).toBeInTheDocument()
     expect(onElevated).not.toHaveBeenCalled()
   })
+})
+
+it("offers TOTP and recovery instead of email for enrolled admins", async () => {
+  const { adminTotp } = await import("@/lib/frontier/admin")
+  vi.mocked(adminTotp).mockResolvedValue({ enabled: true })
+  const done = vi.fn()
+  render(<AdminElevationGate jwt="enrolled" email="admin@example.com" onElevated={done} />)
+  await screen.findByLabelText("Verification code")
+  expect(screen.queryByRole("button", {name: /email me a code/i})).toBeNull()
+  fireEvent.click(screen.getByRole("button", {name: "Use a recovery code"}))
+  fireEvent.change(screen.getByLabelText("Recovery code"), {target:{value:"RECOVERY"}})
+  fireEvent.click(screen.getByRole("button", {name:"Verify recovery code"}))
+  await waitFor(()=>expect(adminTotp).toHaveBeenCalledWith("enrolled","verify",{code:"RECOVERY",recovery:true}))
+  expect(mockRequest).not.toHaveBeenCalled()
+  await waitFor(()=>expect(done).toHaveBeenCalled())
 })

@@ -46,10 +46,10 @@ it("offers email password reset even when a password is already set", async () =
   expect(mocks.start).not.toHaveBeenCalled()
 })
 
-it("offers logged-out users a login route back to these settings without requesting account data", () => {
+it("does not duplicate the sidebar login action or request account data while logged out", () => {
   mocks.active = null
   render(<MemoryRouter><LoginMethodsSection /></MemoryRouter>)
-  expect(screen.getByRole("link", { name: "common.logIn" })).toHaveAttribute("href", "/login?next=%2Fpreferences%2Flogin-methods")
+  expect(screen.queryByRole("link")).toBeNull()
   expect(mocks.request).not.toHaveBeenCalled()
   expect(mocks.start).not.toHaveBeenCalled()
 })

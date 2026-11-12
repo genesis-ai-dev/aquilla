@@ -14,10 +14,7 @@ import { googleRequest, startGoogleLogin } from "@/lib/frontier/google-login"
 
 export function LoginMethodsSection() {
   const { active } = useAccounts()
-  const t = useT()
-  return active ? <AccountLoginMethods key={active.username} jwt={active.jwt} username={active.username} /> : <SettingsGroup><SettingsBlock>
-    <Link className="underline" to={loginPath({ next: "/preferences/login-methods" })}>{t("common.logIn")}</Link>
-  </SettingsBlock></SettingsGroup>
+  return active ? <AccountLoginMethods key={active.username} jwt={active.jwt} username={active.username} /> : null
 }
 function AccountLoginMethods({ jwt, username }: { jwt: string; username: string }) {
   const t = useT()

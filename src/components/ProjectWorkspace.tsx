@@ -8124,12 +8124,13 @@ export function ProjectWorkspace() {
     persistGloss(cell, glossText)
   }, [persistGloss])
 
-  // AQU-2408: the cell's own label, typed in the expansion panel's Label row.
+  // AQU-2408: the cell's own label, typed in the cell's corner label slot.
   // One non-chain event (`cell.label.set`, metadata on the source row — never
-  // cast_name, never a voice) and one undo step. The row shows the saved value
-  // once the projection comes back: metadata rides the cell row, so there is
-  // no local cache to keep in step. The tier that decides who sees the field
-  // is enforced in the row (src/lib/cell-label-gate.ts); this handler trusts it.
+  // cast_name, never a voice) and one undo step. The stored value moves once
+  // the projection comes back: metadata rides the cell row, so there is no
+  // local cache to keep in step (the row itself shows what was typed in the
+  // meantime). The tier that decides who may open the field is enforced in the
+  // row (src/lib/cell-label-gate.ts); this handler trusts it.
   const saveCellLabel = useCallback((cell: CellData, label: string | null) => {
     if (!project?.id || !cell.fileId) return
     const before = cell.cellLabel ?? null

@@ -19,6 +19,7 @@
 // endorsement makes the load profile a real concern.)
 
 import { verifyTokenForProject } from "../auth"
+import { canReadRequestedLane, visibleLanesForRead } from "./lane-read-wall"
 import { branchingSearch } from "../lib/branching-search/algorithm"
 import { loadCorpus } from "../lib/branching-search/corpus"
 import {
@@ -30,6 +31,7 @@ import { expandToPassages, type Passage } from "../lib/branching-search/passages
 export interface BranchingSearchPassagesEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  LANE_READ_WALL?: string
 }
 
 const PATH_RE =
@@ -102,6 +104,18 @@ export async function handleBranchingSearchPassagesRequest(
   const validatedOnly = url.searchParams.get("validatedOnly") === "true"
   const excludeCellId = url.searchParams.get("excludeCellId") ?? undefined
   const targetLang = url.searchParams.get("targetLang") ?? ""
+
+  // AQU-730 read wall: same rule as the branching-search route.
+  const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
+  if (!(await canReadRequestedLane(env.AQUILLA_PG, projectId, visibleLanes, targetLang))) {
+    const empty: BranchingSearchPassagesResponse = {
+      passages: [],
+      upstreamProjectId: null,
+      corpusEventMax: null,
+      corpusSize: 0,
+    }
+    return Response.json(empty)
+  }
 
   let corpus
   try {

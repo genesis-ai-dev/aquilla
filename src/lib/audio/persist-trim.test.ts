@@ -46,10 +46,7 @@ describe("persistTakeTrim", () => {
       ...base,
       att: { ...base.att, slot: "track-music", label: "Music bed", targetOffsetMs: -8_000, recordingsOffsetMs: 250, gainDb: -6, fadeInMs: 100, fadeOutMs: 800, pieceOf: "rec-cue-4-0.wav", role: "dub", recordedBy: "ana" },
     })
-    const [, , att, , opts] = injectOptimisticAudioTrim.mock.calls[0] as unknown as [string, string, Record<string, unknown>, unknown, unknown]
-    // AQU-2495 (review, Nov 12): it holds the window alone over the take as
-    // read; the whole take is what it paints while no read has it.
-    expect(opts).toEqual({ ownFields: true })
+    const att = (injectOptimisticAudioTrim.mock.calls[0] as unknown as [string, string, Record<string, unknown>])[2]
     expect(att).toMatchObject({
       audioId: "rec-cue-4-a.wav", slot: "track-music", label: "Music bed",
       targetOffsetMs: -8_000, recordingsOffsetMs: 250, gainDb: -6, fadeInMs: 100, fadeOutMs: 800,

@@ -123,20 +123,14 @@ function applyShadow(
     return withProjections({ ...base, attachments, selectedBySlot })
   }
   const att = shadow.att
-  // AQU-2495 (review, Nov 12): an overlay of its own fields only paints them
-  // over the take as it reads; the rest is the read's.
-  const row = shadow.only ? base.attachments[att.audioId] : undefined
-  const painted: AudioAttachmentOut = row && shadow.only
-    ? { ...row, ...Object.fromEntries(shadow.only.map((f) => [f, att[f]])) }
-    : att
   // The flag rides the APPLIED copy only — the stored overlay stays pristine so
   // confirmation comparisons never trip over it.
   const applied: AudioAttachmentOut =
     sync === "saving"
-      ? { ...painted, pendingSync: true }
+      ? { ...att, pendingSync: true }
       : sync === "failed"
-        ? { ...painted, syncFailed: true }
-        : painted
+        ? { ...att, syncFailed: true }
+        : att
   // AQU-924: a FAILED overlay keeps its attachment but surrenders its selection
   // claim. Those two halves of "this clip is here and it's the active one" fail
   // differently: the attachment is the only surviving record that the clip
@@ -178,9 +172,6 @@ function shadowConfirmed(entry: CellAudioEntry | undefined, shadow: OptimisticSh
   if (shadow.claimsSelection) {
     if (slotSelections(entry)[att.slot] !== att.audioId) return false
   }
-  // AQU-2495 (review, Nov 12): an overlay of its own fields only has caught
-  // up once the read carries those; what else the take holds is the read's.
-  if (shadow.only) return shadow.only.every((f) => (server[f] ?? null) === (att[f] ?? null))
   if ((server.trimStartMs ?? null) !== (att.trimStartMs ?? null)) return false
   if ((server.trimEndMs ?? null) !== (att.trimEndMs ?? null)) return false
   // A duration-bearing overlay (a fresh take, or the heal re-attach) is NOT

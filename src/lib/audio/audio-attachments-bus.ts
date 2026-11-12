@@ -108,15 +108,6 @@ export type OptimisticShadow = ShadowCore &
          *  older select superseded by a later one keeps its attachment visible
          *  but must never resurrect its selection once the newer one lands. */
         claimsSelection: boolean
-        /**
-         * AQU-2495 (review, Nov 12): the fields this overlay's own write
-         * changes. Set, the overlay paints just these over the take as the
-         * server's read has it, and has caught up once the read carries them,
-         * so a name, place or level changed meanwhile (by anyone) shows at
-         * once; `att` is painted whole only while no read has the take. Unset,
-         * the overlay stands in for the whole take, as every one did before.
-         */
-        only?: readonly (keyof AudioAttachmentOut)[]
       }
     | { kind: "remove"; audioId: string; slot: AudioSlot }
     /** The slot is left with nothing selected (2026-09-28). The takes stay;
@@ -335,9 +326,6 @@ export function injectOptimisticAudioTrim(
   cellId: string,
   base: AudioAttachmentOut,
   eventId?: string | Promise<string>,
-  /** AQU-2495 (review, Nov 12): `ownFields`, the overlay holds the window
-   *  alone, painted over the take as it reads (see the shadow's `only`). */
-  opts?: { ownFields?: boolean },
 ): void {
   const attachment = withoutViewFlags(base)
   const byCell = cellMap(fileId)
@@ -349,11 +337,9 @@ export function injectOptimisticAudioTrim(
 
   // A live intent for this clip keeps its own values and its claim; only the
   // window this call exists to deliver is stamped on. (Mirrors the merge in
-  // the non-claiming attach path above.) An overlay of its own fields only
-  // takes in nothing but a window: any other write gets an overlay of its own
-  // after it, so neither hides the other.
+  // the non-claiming attach path above.)
   const live = list.find((s) => s.kind === "attach" && s.att.audioId === attachment.audioId)
-  if (live && live.kind === "attach" && (opts?.ownFields || !live.only)) {
+  if (live && live.kind === "attach") {
     live.att = {
       ...live.att,
       trimStartMs: attachment.trimStartMs,
@@ -372,7 +358,6 @@ export function injectOptimisticAudioTrim(
     kind: "attach",
     att: attachment,
     claimsSelection: false,
-    ...(opts?.ownFields ? { only: ["trimStartMs", "trimEndMs"] as const } : {}),
   }
   byCell.set(cellId, [...list, shadow])
   attachEventBinding(fileId, shadow, eventId)
@@ -404,9 +389,7 @@ export function injectOptimisticAudioPlace(
   if (list.some((s) => s.kind === "remove" && s.audioId === attachment.audioId)) return
 
   const live = list.find((s) => s.kind === "attach" && s.att.audioId === attachment.audioId)
-  // AQU-2495 (review, Nov 12): never into an overlay of its own fields only
-  // (a trim's): the move gets an overlay of its own after it.
-  if (live && live.kind === "attach" && !live.only) {
+  if (live && live.kind === "attach") {
     // AQU-2267: both places — a move states the take's place in each timing.
     live.att = {
       ...live.att,

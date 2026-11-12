@@ -421,7 +421,7 @@ export async function exportDocx(
     if (looks.size > 1) {
       warnings.push({
         segment: translation.label,
-        detail: "paragraph had mixed inline formatting; translation keeps only the first run's styling",
+        detail: "paragraph had mixed inline formatting; translation takes the look of most of its plain text",
       })
     }
     const { runs, unusedFootnotes } = translationRuns(spans, base, footnoteRuns)
@@ -512,18 +512,39 @@ function translationSpans(parts: readonly { plain: string; html: string }[]): Sp
 }
 
 /**
- * The run look the translation is written in: the `w:rPr` of the paragraph's
- * first word-bearing run (the AQU-233 rule), or null.
+ * The run look the translation is written in (AQU-2539): the `w:rPr` that
+ * covers the most characters of the paragraph's text WITHOUT bold, italic,
+ * underline or strikethrough, so a paragraph that opens with a bold term is
+ * not translated all in bold. When every character carries one of those marks
+ * (a heading set in bold), it is the look covering most of all the text. Ties
+ * go to the look met first. Null when that look is no rPr at all.
  */
 function baseRunLook(
   chunks: ReturnType<typeof docxLine>["chunks"],
   runRprXml: (run: XmlElement) => string,
 ): string | null {
-  for (const chunk of chunks) {
-    if (chunk.piece.kind !== "text" || chunk.piece.source !== "t" || !chunk.text.trim()) continue
-    return runRprXml(chunk.piece.run) || null
+  const tally = (unmarkedOnly: boolean): string | null => {
+    const counts = new Map<string, number>()
+    for (const chunk of chunks) {
+      if (chunk.piece.kind !== "text" || chunk.piece.source !== "t") continue
+      if (unmarkedOnly && chunk.marks.size > 0) continue
+      const chars = chunk.text.replace(/\s+/g, "").length
+      if (chars === 0) continue
+      const look = runRprXml(chunk.piece.run)
+      counts.set(look, (counts.get(look) ?? 0) + chars)
+    }
+    let best: string | null = null
+    let bestCount = 0
+    for (const [look, n] of counts) {
+      if (n > bestCount) {
+        best = look
+        bestCount = n
+      }
+    }
+    return best
   }
-  return null
+  const look = tally(true) ?? tally(false)
+  return look ? look : null
 }
 
 function runsForSpans(spans: readonly Span[], baseRprXml: string | null): string {

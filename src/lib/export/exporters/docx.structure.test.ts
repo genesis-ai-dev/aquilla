@@ -232,3 +232,28 @@ describe("exportDocx — translation text (AQU-2539)", () => {
     expect(xml).toContain(untouched)
   })
 })
+
+describe("exportDocx — the look of a translated paragraph (AQU-2539)", () => {
+  const B = "<w:rPr><w:b/></w:rPr>"
+  const SZ = '<w:rPr><w:sz w:val="22"/></w:rPr>'
+
+  it("takes the look of most of the plain text, not of a bold first word", async () => {
+    const body = para(run("Term:", '<w:rPr><w:b/><w:sz w:val="22"/></w:rPr>') + run(" the definition of the term", SZ))
+    const { xml } = await exportedXml(body, [cellAt(1, "Terme : la définition du terme")])
+    expect(xml).toContain(`<w:r>${SZ}<w:t xml:space="preserve">Terme : la définition du terme</w:t></w:r>`)
+    expect(xml).not.toContain("<w:b/>")
+  })
+
+  it("keeps the translator's own bold on top of that look", async () => {
+    const body = para(run("Term:", '<w:rPr><w:b/><w:sz w:val="22"/></w:rPr>') + run(" the definition", SZ))
+    const html = "<p><strong>Terme :</strong> la définition</p>"
+    const { xml } = await exportedXml(body, [cellAt(1, "Terme : la définition", { translatedHtml: html })])
+    expect(xml).toContain('<w:r><w:rPr><w:b/><w:sz w:val="22"/></w:rPr><w:t xml:space="preserve">Terme :</w:t></w:r>')
+    expect(xml).toContain(`<w:r>${SZ}<w:t xml:space="preserve"> la définition</w:t></w:r>`)
+  })
+
+  it("stays bold when every word of the source is bold", async () => {
+    const { xml } = await exportedXml(para(run("ALL", B) + run(" BOLD", B), "Heading1"), [cellAt(1, "TOUT GRAS")])
+    expect(xml).toContain(`<w:r>${B}<w:t xml:space="preserve">TOUT GRAS</w:t></w:r>`)
+  })
+})

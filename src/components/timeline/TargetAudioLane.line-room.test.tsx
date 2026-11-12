@@ -139,6 +139,23 @@ describe("dragging a take against a line nobody has recorded (AQU-2432, Nov 9)",
     fireEvent.pointerUp(window, { clientX: 400 - 2 * PX })
     expect(onRetimeTarget).not.toHaveBeenCalled()
   })
+
+  // AQU-2432 (browser pass, Nov 11): a viewer's timeline is `editable` (that
+  // is the project's and the lane's), and the workspace passes no move
+  // callback to someone who cannot save a move. Without one the take never
+  // follows the pointer: no room is drawn smaller, nothing is handed up.
+  it("with no move callback (someone who cannot save a move), the take does not follow the pointer", () => {
+    const onMoveTakeRooms = vi.fn()
+    renderLane(book(), { onMoveTakeRooms })
+    const c = screen.getByTestId("tl-target-c")
+    const before = c.getAttribute("data-span-start")
+    fireEvent.pointerDown(c, { clientX: 400, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 400 - 2 * PX })
+    expect(c).toHaveAttribute("data-span-start", before!)
+    fireEvent.pointerUp(window, { clientX: 400 - 2 * PX })
+    expect(onMoveTakeRooms).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("tl-line-marker-b")).toBeNull()
+  })
 })
 
 describe("the marker for a line with too little room (AQU-2432, Nov 9, rule 8)", () => {

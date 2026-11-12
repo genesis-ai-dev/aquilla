@@ -18425,10 +18425,16 @@ export function ProjectWorkspace() {
                     // rule, which lets maintainers through so an import's
                     // retimes are not caught by the lock.
                     timingLocked={timingLocked}
-                    onRetimeTarget={handleRetimeTarget}
-                    onMoveTakeRooms={handleMoveTakeRooms}
+                    // AQU-2432 (browser pass, Nov 11): a take is moved or
+                    // trimmed only by someone who can save it. `editable` is
+                    // the project's and the lane's, not the person's role, so
+                    // a viewer could drag a take (and a line's room) that was
+                    // never saved and stayed drawn moved. The gate is "don't
+                    // pass the callback", asked as every other write here asks.
+                    onRetimeTarget={canPerform("cell.audio.place", project?.syncRole?.level ?? null) ? handleRetimeTarget : undefined}
+                    onMoveTakeRooms={canPerform("cell.lane.retime", project?.syncRole?.level ?? null) ? handleMoveTakeRooms : undefined}
                     onRetimeCue={handleRetimeAudioCue}
-                    onTrimTarget={handleTrimTarget}
+                    onTrimTarget={canPerform("cell.audio.trim", project?.syncRole?.level ?? null) ? handleTrimTarget : undefined}
                     onCutTargets={handleCutTargets}
                     onRegenerateVoice={handleRegenerateTimelineVoice}
                     onChangeVoice={handleChangeTimelineVoice}

@@ -2,15 +2,16 @@
  * AQU-2408 — a cell's own label in the editor table. The row side of the
  * contract: `metadata.cellLabel` on the source row reaches the corner label slot
  * (beneath an assigned voice or cast name, obeying "Show cell labels"), and the
- * expansion panel's Label row is editable, read-only or absent by the project's
- * `cellLabelFloor` tier and the viewer's role. The save callback receives the
- * cell and the new label; the parent emits `cell.label.set`.
+ * label is typed in that same slot — opened by the Label button in the row's
+ * `⋯` menu or by a click on the label — by the project's `cellLabelFloor` tier
+ * and the viewer's role. It is never in the details panel. The save callback
+ * receives the cell and the new label; the parent emits `cell.label.set`.
  *
  * happy-dom has no layout engine, so this asserts structure, not geometry.
  */
 
 import { describe, it, expect, afterEach, vi, type Mock } from "vitest"
-import { render, cleanup, within, fireEvent } from "@testing-library/react"
+import { render, cleanup, within, fireEvent, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
@@ -155,55 +156,126 @@ describe("cell label — corner slot (AQU-2408)", () => {
   })
 })
 
-describe("cell label — the Label row by tier (AQU-2408)", () => {
-  it("a maintainer may type it, and saving hands the cell and the new label to the parent", () => {
+// The label is typed where it is read. The row's `⋯` menu has a Label button
+// that turns the source corner's slot into a field with the caret in it. The
+// popup portals to the document body, so its buttons are read off `screen`.
+describe("cell label — typed in the corner slot (AQU-2408)", () => {
+  function openOverflow(cellId: string) {
+    fireEvent.click(within(row(cellId)).getByRole("button", { name: /^More actions · / }))
+  }
+
+  function contextLine(cellId: string): HTMLElement {
+    return within(row(cellId)).getByTestId("source-context-line")
+  }
+
+  it("'Add label' puts a field in the corner of an unlabelled cell, and saving hands the cell and label to the parent", async () => {
     const onSaveCellLabel = vi.fn<SaveCellLabel>()
     renderTable({ onSaveCellLabel })
-    const r = expand("labelled")
-    const input = within(r).getByTestId("cell-label-input")
-    expect(input).toHaveValue("Pericope")
-    fireEvent.focus(input)
+    openOverflow("plain")
+    fireEvent.click(await screen.findByRole("button", { name: "Add label" }))
+
+    const input = within(contextLine("plain")).getByTestId("cell-label-input")
+    expect(document.activeElement).toBe(input)
+    // The details panel stays shut: the label is not typed there.
+    expect(within(row("plain")).queryByRole("button", { name: "Close cell details" })).toBeNull()
+
     fireEvent.change(input, { target: { value: "Needs consultant" } })
     fireEvent.keyDown(input, { key: "Enter" })
-    fireEvent.blur(input)
     expect(onSaveCellLabel).toHaveBeenCalledTimes(1)
     const [cell, label] = onSaveCellLabel.mock.calls[0]
-    expect(cell.id).toBe("labelled")
+    expect(cell.id).toBe("plain")
     expect(label).toBe("Needs consultant")
+    // The field is gone once the edit is over.
+    expect(within(row("plain")).queryByTestId("cell-label-input")).toBeNull()
+    // …and the corner shows what was typed at once, ahead of the projection.
+    expect(within(row("plain")).getByTestId("source-cell-label")).toHaveTextContent("Needs consultant")
   })
 
-  it("a project lead reads it as plain text while the tier is maintainer, and types it once the project opens the tier", () => {
+  it("'Edit label' opens the field over the existing label, pre-filled", async () => {
+    renderTable({ onSaveCellLabel: vi.fn<SaveCellLabel>() })
+    openOverflow("labelled")
+    fireEvent.click(await screen.findByRole("button", { name: "Edit label" }))
+    const line = contextLine("labelled")
+    expect(within(line).getByTestId("cell-label-input")).toHaveValue("Pericope")
+    expect(within(line).queryByTestId("source-cell-label")).toBeNull()
+  })
+
+  it("a click on the label itself opens the field, and Escape puts the label back unsaved", () => {
+    const onSaveCellLabel = vi.fn<SaveCellLabel>()
+    renderTable({ onSaveCellLabel })
+    fireEvent.click(within(row("labelled")).getByRole("button", { name: "Edit label: Pericope" }))
+    const input = within(contextLine("labelled")).getByTestId("cell-label-input")
+    fireEvent.change(input, { target: { value: "Half-typed" } })
+    fireEvent.keyDown(input, { key: "Escape" })
+    expect(onSaveCellLabel).not.toHaveBeenCalled()
+    expect(within(row("labelled")).queryByTestId("cell-label-input")).toBeNull()
+    expect(within(row("labelled")).getByTestId("source-cell-label")).toHaveTextContent("Pericope")
+  })
+
+  it("a cast name in the corner is not a label: it is plain text, never a way into the field", () => {
+    renderTable({ onSaveCellLabel: vi.fn<SaveCellLabel>() })
+    const corner = within(row("cast")).getByTestId("source-cell-label")
+    expect(corner).toHaveTextContent("Mary")
+    expect(corner.tagName).toBe("SPAN")
+  })
+
+  it("opens from the button even with 'Show cell labels' off", async () => {
+    renderTable({ onSaveCellLabel: vi.fn<SaveCellLabel>(), cellLabelsEnabled: false })
+    openOverflow("labelled")
+    fireEvent.click(await screen.findByRole("button", { name: "Edit label" }))
+    expect(within(contextLine("labelled")).getByTestId("cell-label-input")).toHaveValue("Pericope")
+  })
+
+  it("the details panel has no label field or row any more", () => {
+    renderTable({ onSaveCellLabel: vi.fn<SaveCellLabel>() })
+    const r = expand("labelled")
+    expect(within(r).queryByTestId("cell-label-input")).toBeNull()
+    expect(within(r).queryByTestId("cell-label-row")).toBeNull()
+  })
+})
+
+describe("cell label — who may type it, by tier (AQU-2408)", () => {
+  async function overflowButtons(cellId: string): Promise<string[]> {
+    fireEvent.click(within(row(cellId)).getByRole("button", { name: /^More actions · / }))
+    const popup = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('[data-slot="popover-content"]')
+      if (!el) throw new Error("overflow popup not open")
+      return el
+    })
+    const names = within(popup).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? "")
+    expect(names.length).toBeGreaterThan(0)
+    return names
+  }
+
+  it("a project lead only reads the corner while the tier is maintainer, and may type once the project opens the tier", async () => {
     const onSaveCellLabel = vi.fn<SaveCellLabel>()
     renderTable({ onSaveCellLabel, project: makeProject({ syncRole: role(500) }) })
-    let r = expand("labelled")
-    expect(within(r).getByTestId("cell-label-text")).toHaveTextContent("Pericope")
-    expect(within(r).queryByTestId("cell-label-input")).toBeNull()
+    expect(within(row("labelled")).getByTestId("source-cell-label").tagName).toBe("SPAN")
+    expect(await overflowButtons("labelled")).not.toContain("Edit label")
     cleanup()
 
     renderTable({
       onSaveCellLabel,
       project: makeProject({ syncRole: role(500), cellLabelFloor: "project_lead" }),
     })
-    r = expand("labelled")
-    expect(within(r).getByTestId("cell-label-input")).toHaveValue("Pericope")
+    expect(within(row("labelled")).getByTestId("source-cell-label").tagName).toBe("BUTTON")
+    expect(await overflowButtons("labelled")).toContain("Edit label")
   })
 
-  it("a contributor never gets the field, and sees no row at all on an unlabelled cell", () => {
+  it("a contributor never gets the button or a clickable label, whatever the tier", async () => {
     renderTable({
       onSaveCellLabel: vi.fn<SaveCellLabel>(),
       project: makeProject({ syncRole: role(400), cellLabelFloor: "project_lead" }),
     })
-    const labelled = expand("labelled")
-    expect(within(labelled).getByTestId("cell-label-text")).toHaveTextContent("Pericope")
-    expect(within(labelled).queryByTestId("cell-label-input")).toBeNull()
-    const plain = expand("plain")
-    expect(within(plain).queryByTestId("cell-label-row")).toBeNull()
+    expect(within(row("labelled")).getByTestId("source-cell-label").tagName).toBe("SPAN")
+    const names = await overflowButtons("plain")
+    expect(names).not.toContain("Add label")
+    expect(names).not.toContain("Edit label")
   })
 
-  it("without a save handler the row is read-only even for a maintainer", () => {
+  it("without a save handler there is no way in, even for a maintainer", async () => {
     renderTable()
-    const r = expand("labelled")
-    expect(within(r).getByTestId("cell-label-text")).toHaveTextContent("Pericope")
-    expect(within(r).queryByTestId("cell-label-input")).toBeNull()
+    expect(within(row("labelled")).getByTestId("source-cell-label").tagName).toBe("SPAN")
+    expect(await overflowButtons("labelled")).not.toContain("Edit label")
   })
 })

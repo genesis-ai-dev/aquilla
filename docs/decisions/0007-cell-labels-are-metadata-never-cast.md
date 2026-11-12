@@ -57,10 +57,20 @@ populated it any more. Only migrated Codex notebooks carried
    (client copy `src/lib/sync/project-settings.ts::resolveCellLabelFloor`,
    server copy `db/shared/cell-label-floor.ts::cellLabelFloorFromSettings`,
    kept in lock-step). An unknown tier value reads as maintainer, never lower.
-5. **Where it is typed.** A Label row at the top of the cell's expansion panel
-   (`src/components/CellLabelRow.tsx::CellLabelRow`): editable at or above the
-   tier, read-only text below it, absent when there is no label and the viewer
-   cannot set one. Each change is one undo step
+5. **Where it is typed: where it is read.** *(Revised 2026-11-12, Matt. The
+   first version put a Label row at the top of the cell's expansion panel;
+   behind the chevron nobody found it, and a label is not a detail of the
+   cell — it is on the cell.)* The source corner's label slot turns into a
+   single-line field (`src/components/CellLabelField.tsx::CellLabelField`):
+   Enter or blur saves, Escape cancels, a blank value clears. Two ways in, both
+   only for people at or above the tier: an "Add label" / "Edit label" button
+   in the cell rail's `⋯` menu, and a click on the label itself when what the
+   corner shows is the cell's own label (a voice or cast name in the slot is
+   plain text). The field opens from the button whatever "Show cell labels"
+   says. Everyone below the tier reads the corner and has no way in. The
+   expansion panel carries no label at all. The corner shows what was typed at
+   once, ahead of the projection, and drops that the moment the stored label
+   moves. Each change is one undo step
    (`src/lib/history/label-steps.ts::cellLabelStepHandlers`), a plain re-write
    guarded by the label's current value rather than a chain head.
 

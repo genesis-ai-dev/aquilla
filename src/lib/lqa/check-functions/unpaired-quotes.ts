@@ -25,6 +25,16 @@ function doubleMarks(text: string): RegExpMatchArray[] {
   return [...text.matchAll(DOUBLE_RE)]
 }
 
+/**
+ * Does `text` carry any of the marks this check reads? A source that carries
+ * none says nothing about where a quotation ends — Greek and Hebrew never do —
+ * while one that carries them, balanced, says it ends in this cell. The file
+ * pass asks before withdrawing a finding it cannot confirm (AQU-1733).
+ */
+export function hasQuotationMarks(text: string): boolean {
+  return doubleMarks(text).length > 0 || CJK_PAIRS.some((pair) => pair.some((mark) => text.includes(mark)))
+}
+
 function balance(text: string, open: string, close: string): number {
   let n = 0
   for (const ch of text) {

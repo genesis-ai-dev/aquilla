@@ -100,6 +100,12 @@ describe("planRelease", () => {
     expect(unknown.held.map((p) => p.number)).toEqual([1])
   })
 
+  it("holds on a partial walk (a PASS at test level only) and says so", () => {
+    const plan = planRelease({ openReleases: [], prs: [pr(1, recent, { walk: "partial" }), pr(2, recent)], now: NOW })
+    expect(plan.prs.map((p) => p.number)).toEqual([2])
+    expect(plan.held.map((p) => p.why)).toEqual(["walk partial"])
+  })
+
   it("a person's release:approved label puts a held PR back on the line", () => {
     const prs = [{ ...migration(1, recent), approved: true }, { ...pr(2, recent, { walk: "fail" }), approved: true }]
     const plan = planRelease({ openReleases: [], prs, now: NOW })

@@ -20,9 +20,13 @@
 //   dropped (its words stay), and a field keeps its code with an empty result
 //   that Word fills in on "Update field".
 //
-// A stretch counts when it holds a letter or digit and is at least 3
-// characters long, or has no Latin letters at all (so "a" or "th" in another
-// look never grab a word of the translation, while "א" or "66" do).
+// A look stretch is one look only; one whose edge falls inside a word grows to
+// the whole word, so "4QSamᵃ" or a Hebrew word whose points sit in their own
+// runs is looked for as that word, each character written back in its own
+// look. A stretch of several words that is not found is opened up into its
+// words, each looked for in turn, as a link or field that is not found is
+// opened up. A stretch counts when it holds a letter or digit and is not a
+// lone Latin letter or digit (an italic "a" alone would grab the French "a").
 
 import { isElement, type XmlElement } from "@/lib/parsers/xml-lite"
 import type { DocxPiece } from "@/lib/parsers/docx-structure"
@@ -376,20 +380,36 @@ interface Match {
   looks?: string[]
 }
 
+interface LookAnchor {
+  order: number
+  needle: string
+  /** The source look of each character of `needle`. */
+  looks: string[]
+}
+
 interface Anchor {
   node: RNode
   order: number
   needle: string
+  /** For a look stretch: the source look of each character. */
   looks?: string[]
+  /** For a look stretch: its words without their edge punctuation, looked
+   *  for in order when the whole stretch is not in the translation (it is
+   *  opened up, like a link or field that is not found). */
+  words?: LookAnchor[]
 }
 
 const WORD_CHAR = /[\p{L}\p{N}\p{M}]/u
 const HAS_LETTER_OR_DIGIT = /[\p{L}\p{N}]/u
-const LATIN_LETTER = /[A-Za-z]/
+/** One Latin letter or digit and nothing else: in its own look (an italic
+ *  "a", a superscript "3") it is a different word in the translation more
+ *  often than not, so it is only ever kept as part of its word. */
+const LONE_LATIN = /^[A-Za-z0-9]$/
 
-/** The guard against silly matches (see the header). */
+/** The guard against silly matches (see the header): a look stretch counts
+ *  when it holds a letter or digit and is not a lone Latin letter or digit. */
 export function anchorCounts(needle: string): boolean {
-  return HAS_LETTER_OR_DIGIT.test(needle) && (needle.length >= 3 || !LATIN_LETTER.test(needle))
+  return HAS_LETTER_OR_DIGIT.test(needle) && !LONE_LATIN.test(needle)
 }
 
 function trimmed(text: string): { lead: number; text: string } {
@@ -400,40 +420,68 @@ function trimmed(text: string): { lead: number; text: string } {
 function anchorsOf(nodes: readonly RNode[], baseRpr: string, io: RebuildIo): Anchor[] {
   const anchors: Anchor[] = []
   let offset = 0
-  // Look stretches: characters of the line's own text whose look is not the
-  // base look, joined across spaces; a frame or a footnote ends a stretch.
+  // Look stretches: runs of the line's own characters in ONE look other than
+  // the base look. A stretch whose edge falls inside a word grows to that whole
+  // word (stretches meeting in one word become one), so a superscript letter
+  // or a Hebrew vowel point is only ever looked for as part of its word. A
+  // frame or a footnote ends a stretch.
   let chars: { ch: string; look: string; special: boolean; at: number }[] = []
   let owner: RNode[] = []
   const flushStretches = () => {
-    let k = 0
-    while (k < chars.length) {
+    const isWordAt = (i: number) => i >= 0 && i < chars.length && WORD_CHAR.test(chars[i].ch)
+    const units: { start: number; end: number }[] = []
+    for (let k = 0; k < chars.length;) {
       if (!chars[k].special) {
         k++
         continue
       }
       let end = k + 1
-      for (;;) {
-        while (end < chars.length && chars[end].special) end++
-        let gap = end
-        while (gap < chars.length && !chars[gap].special && /\s/.test(chars[gap].ch)) gap++
-        if (gap > end && gap < chars.length && chars[gap].special) {
-          end = gap
+      while (end < chars.length && chars[end].special && chars[end].look === chars[k].look) end++
+      let start = k
+      while (isWordAt(start - 1) && isWordAt(start)) start--
+      let grown = end
+      while (isWordAt(grown) && isWordAt(grown - 1)) grown++
+      const last = units[units.length - 1]
+      if (last && start < last.end) last.end = Math.max(last.end, grown)
+      else units.push({ start, end: grown })
+      k = end
+    }
+    for (const unit of units) {
+      const slice = chars.slice(unit.start, unit.end)
+      const part = (from: number, to: number): LookAnchor | null => {
+        const raw = slice.slice(from, to).map((c) => c.ch).join("")
+        const { lead, text } = trimmed(raw)
+        if (!anchorCounts(text)) return null
+        return {
+          order: slice[from + lead].at,
+          needle: text,
+          looks: slice.slice(from + lead, from + lead + text.length).map((c) => c.look),
+        }
+      }
+      // Its words, for when the whole unit is not in the translation: each
+      // without the punctuation at its edges (the French «⍽mot⍽» for “word”,
+      // "mot⍽:" for "word:"); punctuation inside a word stays ("6.3.3").
+      const words: LookAnchor[] = []
+      const isWordChar = (k: number) => WORD_CHAR.test(slice[k].ch)
+      for (let k = 0; k < slice.length;) {
+        if (/\s/.test(slice[k].ch)) {
+          k++
           continue
         }
-        break
+        let end = k
+        while (end < slice.length && !/\s/.test(slice[end].ch)) end++
+        let from = k
+        let to = end
+        while (from < to && !isWordChar(from)) from++
+        while (to > from && !isWordChar(to - 1)) to--
+        const word = part(from, to)
+        if (word) words.push(word)
+        k = end
       }
-      const slice = chars.slice(k, end)
-      const raw = slice.map((c) => c.ch).join("")
-      const { lead, text } = trimmed(raw)
-      if (anchorCounts(text)) {
-        anchors.push({
-          node: owner[k],
-          order: slice[lead].at,
-          needle: text,
-          looks: slice.slice(lead, lead + text.length).map((c) => c.look),
-        })
-      }
-      k = end
+      const whole = part(0, slice.length)
+      const openedUp = words.length === 1 && whole?.needle === words[0].needle ? [] : words
+      if (whole) anchors.push({ node: owner[unit.start], ...whole, words: openedUp })
+      else for (const word of words) anchors.push({ node: owner[unit.start], ...word, words: [] })
     }
     chars = []
     owner = []
@@ -455,7 +503,9 @@ function anchorsOf(nodes: readonly RNode[], baseRpr: string, io: RebuildIo): Anc
     const text = textOf(node)
     if (node.kind === "wrapper" || node.kind === "field") {
       const { lead, text: needle } = trimmed(text)
-      if (anchorCounts(needle) && !needle.includes(SOURCE_FOOTNOTE)) {
+      // A field or link is found by its whole visible text, however short
+      // (a caption's number "1"): its own structure is the anchor.
+      if (HAS_LETTER_OR_DIGIT.test(needle) && !needle.includes(SOURCE_FOOTNOTE)) {
         anchors.push({ node, order: offset + lead, needle })
       }
     }
@@ -473,11 +523,20 @@ function matchAnchors(nodes: readonly RNode[], masked: string, baseRpr: string, 
     // A look stretch's node may carry several stretches; frames carry one.
     if (anchor.looks === undefined && out.has(anchor.node)) continue
     const at = findWhole(masked, anchor.needle, cursor)
-    if (at === -1) continue
-    const match = { start: at, end: at + anchor.needle.length, ...(anchor.looks ? { looks: anchor.looks } : {}) }
-    if (anchor.looks) lookMatches.push(match)
-    else out.set(anchor.node, match)
-    cursor = match.end
+    if (at !== -1) {
+      const match = { start: at, end: at + anchor.needle.length, ...(anchor.looks ? { looks: anchor.looks } : {}) }
+      if (anchor.looks) lookMatches.push(match)
+      else out.set(anchor.node, match)
+      cursor = match.end
+      continue
+    }
+    // Not found whole: open it up into its words.
+    for (const word of anchor.words ?? []) {
+      const wordAt = findWhole(masked, word.needle, cursor)
+      if (wordAt === -1) continue
+      lookMatches.push({ start: wordAt, end: wordAt + word.needle.length, looks: word.looks })
+      cursor = wordAt + word.needle.length
+    }
   }
   // Look stretches are keyed by synthetic nodes so one text node may hold several.
   for (const match of lookMatches) out.set({ kind: "keep", piece: { kind: "keep", el: LOOK_MARK } } as RNode, match)

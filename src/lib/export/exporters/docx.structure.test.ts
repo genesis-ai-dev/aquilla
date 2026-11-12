@@ -529,3 +529,35 @@ describe("exportDocx — review findings (AQU-2539)", () => {
     expect(result.fidelity.notesWritten).toBe(0)
   })
 })
+
+describe("exportDocx — kept looks on a translation that differs from the source (AQU-2539)", () => {
+  const I = "<w:rPr><w:i/></w:rPr>"
+  const HL = '<w:rPr><w:highlight w:val="cyan"/></w:rPr>'
+  const SUP = '<w:rPr><w:vertAlign w:val="superscript"/></w:rPr>'
+  const A = '<w:rPr><w:sz w:val="22"/></w:rPr>'
+  const B = '<w:rPr><w:sz w:val="24"/></w:rPr>'
+
+  it("keeps an italic phrase the French kept, in a paragraph that mixes two plain looks", async () => {
+    // Half the paragraph in one plain look, half in another: the italic words
+    // are still found on their own.
+    const body = para(run("The text of the Greek New Testament, ", A) + run("known as the ", B) + run("Textus Receptus", I) + run(" for centuries.", B))
+    const { xml } = await exportedXml(body, [cellAt(1, "Le texte du Nouveau Testament grec, appelé Textus Receptus pendant des siècles.")])
+    expect(xml).toContain(`<w:r>${I}<w:t xml:space="preserve">Textus Receptus</w:t></w:r>`)
+  })
+
+  it("opens a stretch the French did not keep into its words, without their edge punctuation", async () => {
+    const body = para(run("Long ago the text was written without spaces between the words. For example, ") + run("when we read in English “godisnowhere”,", HL) + run(" is the meaning clear?"))
+    const { xml } = await exportedXml(body, [cellAt(1, "Autrefois le texte était écrit sans espaces. Par exemple, lorsque nous lisons en anglais « godisnowhere », le sens est-il clair ?")])
+    expect(xml).toContain(`<w:r>${HL}<w:t xml:space="preserve">godisnowhere</w:t></w:r>`)
+    expect(xml).not.toContain(`${HL}<w:t xml:space="preserve">Par`)
+  })
+
+  it("keeps a word made of several looks as that word: the superscript of 4QSamᵃ", async () => {
+    const body = para(run("The LXX, supported by 4QSam") + run("a", SUP) + run(", adds a word."))
+    const { xml } = await exportedXml(body, [cellAt(1, "La LXX, soutenue par 4QSama, ajoute un mot.")])
+    expect(xml).toContain(`4QSam</w:t></w:r><w:r>${SUP}<w:t xml:space="preserve">a</w:t></w:r>`)
+    // The French "a" of "il a" is never given the superscript.
+    const other = await exportedXml(para(run("Codex ") + run("a", SUP) + run(" reads it.")), [cellAt(1, "Le codex a la leçon.")])
+    expect(other.xml).not.toContain("superscript")
+  })
+})

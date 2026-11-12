@@ -35,7 +35,7 @@ export function GoogleLoginButton({ next, signup = false }: { next?: string; sig
   if (!enabled) return null
   const current = window.location.pathname + window.location.search
   const destination = next ?? new URLSearchParams(window.location.search).get("next") ?? current
-  return <div className="flex flex-col gap-2">
+  return <div className="flex flex-col gap-4">
     <Button className="google-login-button" type="button" variant="outline" disabled={pending} onClick={() => {
       setPending(true); setError(false)
       void startGoogleLogin(safeLoginNext(destination), signup).catch(() => { setError(true); setPending(false) })
@@ -43,7 +43,11 @@ export function GoogleLoginButton({ next, signup = false }: { next?: string; sig
       <img src={googleLogo} width={20} height={20} alt="" aria-hidden="true" />
       {t(pending ? "auth.google.redirecting" : "auth.google.continue")}
     </Button>
-    <p className="text-xs text-muted-foreground">{t("auth.google.privacy")}</p>
     {error && <p role="alert" className="text-sm text-destructive">{t("auth.google.startFailed")}</p>}
+    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+      <span aria-hidden="true" className="h-px flex-1 bg-border" />
+      <span>{t("auth.google.or")}</span>
+      <span aria-hidden="true" className="h-px flex-1 bg-border" />
+    </div>
   </div>
 }

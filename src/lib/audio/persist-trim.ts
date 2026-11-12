@@ -47,21 +47,39 @@ export function persistTakeTrim(input: PersistTakeTrimInput): Promise<string> {
     projectId, fileId, cellId, audioId, trimStartMs, trimEndMs, author,
     ...(input.targetLang ? { targetLang: input.targetLang } : {}),
   })
-  // AQU-2495 (review, Nov 12): the overlay holds the new window alone,
-  // painted over the take as the read has it, and yields as soon as the read
-  // carries the window. A copy of the whole take stood in for it before: a
-  // hand-picked one left out the name and place (a Recording-tab trim renamed
-  // "Music bed" to "Take 1", and the next trim's floor read no place), and a
-  // full one (Nov 11) hid a rename, move or level change made meanwhile for
-  // up to 12 s. The whole take (`attachmentOutFrom`) is painted only while no
-  // read has it yet.
-  injectOptimisticAudioTrim(fileId, cellId, {
-    ...attachmentOutFrom(audioId, { type: "audio", ...att }, slot),
-    trimStartMs,
-    trimEndMs,
-  }, trimP, { ownFields: true })
+  paintTakeTrim(fileId, cellId, audioId, att, slot, { trimStartMs, trimEndMs }, trimP)
   notifyAudioAttachmentsChanged(fileId)
   return trimP
+}
+
+/**
+ * Paint a trim at once, while its event saves — every trim, from anywhere
+ * (the Recording tab here; the timeline's handles and the Station through
+ * the workspace's `applyTakeTrim`).
+ *
+ * AQU-2495 (review, Nov 12): the overlay holds the new window alone, painted
+ * over the take as the read has it, and yields as soon as the read carries
+ * the window; any other write made while it lives gets an overlay of its own.
+ * A copy of the whole take stood in for it before: a hand-picked one left out
+ * the name and place (a Recording-tab trim renamed "Music bed" to "Take 1",
+ * and the next trim's floor read no place), and a full one hid a rename, move
+ * or level change made meanwhile for up to 12 s. The whole take
+ * (`attachmentOutFrom`) is painted only while no read has it yet.
+ */
+export function paintTakeTrim(
+  fileId: string,
+  cellId: string,
+  audioId: string,
+  att: Omit<CodexCellAttachment, "type">,
+  slot: string,
+  trims: { trimStartMs: number | null; trimEndMs: number | null },
+  eventId: string | Promise<string>,
+): void {
+  injectOptimisticAudioTrim(fileId, cellId, {
+    ...attachmentOutFrom(audioId, { type: "audio", ...att }, slot),
+    trimStartMs: trims.trimStartMs,
+    trimEndMs: trims.trimEndMs,
+  }, eventId, { ownFields: true })
 }
 
 /** Seconds (null = edge) to the event's whole milliseconds. */

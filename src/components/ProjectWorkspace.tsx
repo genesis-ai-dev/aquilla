@@ -273,6 +273,7 @@ import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynth
 import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake } from "@/lib/audio/change-voice"
 import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
 import { getTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
+import { paintTakeTrim } from "@/lib/audio/persist-trim"
 import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove, injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
@@ -4204,15 +4205,9 @@ export function ProjectWorkspace() {
         ...(activeLane ? { targetLang: activeLane } : {}),
         author: currentUsername,
       })
-      // The overlay REPLACES the attachment, so it is the whole take with the
-      // new window (AQU-1767): a hand-listed copy dropped `pieceOf`, `label`
-      // and the placement, and a cut piece vanished from the timeline while
-      // its trim saved. Votes ride along too (AQU-490: trim keeps them).
-      injectOptimisticAudioTrim(takeFileId, cellId, {
-        ...attachmentOutFrom(audioId, att, slot),
-        trimStartMs: trims.trimStartMs ?? null,
-        trimEndMs: trims.trimEndMs ?? null,
-      }, trimP)
+      // AQU-2495 (review, round 2): painted as every trim is (persist-trim's
+      // `paintTakeTrim`): the new window alone, over the take as it reads.
+      paintTakeTrim(takeFileId, cellId, audioId, att, slot, { trimStartMs: trims.trimStartMs ?? null, trimEndMs: trims.trimEndMs ?? null }, trimP)
       await trimP
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       notifyAudioAttachmentsChanged(takeFileId)

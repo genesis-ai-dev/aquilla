@@ -253,6 +253,50 @@ describe("a .txt translation", () => {
     expect(result.matched.some((m) => m.flag)).toBe(false)
   })
 
+  // Question 51, finished (review round 3): a blank line anywhere used to put
+  // the whole file back on the old joining rule.
+  it("lines up 1:1 on Sentence with an extra Enter at the end, and under a title with a blank line", async () => {
+    const lines = await sourceLines(file("In the beginning\nAnd the earth\nAnd God said\n", "a.txt"), SENTENCE)
+    const trailing = await translate(file("Au commencement\nEt la terre\nEt Dieu dit\n\n", "a-fr.txt"), lines, SENTENCE)
+    expect(filled(trailing)).toEqual({ "line-1": "Au commencement", "line-2": "Et la terre", "line-3": "Et Dieu dit" })
+
+    const titled = await sourceLines(file("Genesis\n\nIn the beginning\nAnd the earth\n", "b.txt"), SENTENCE)
+    expect(titled).toHaveLength(3)
+    const result = await translate(file("Genèse\n\nAu commencement\nEt la terre\n", "b-fr.txt"), titled, SENTENCE)
+    expect(Object.values(filled(result))).toEqual(["Genèse", "Au commencement", "Et la terre"])
+    expect(result.matched.some((m) => m.flag)).toBe(false)
+  })
+
+  it("lines up 300 sentences under a title 1:1 on Sentence, nothing shared out", async () => {
+    const words = (n: number, tag: string) => Array.from({ length: n }, (_, i) => `${tag}${i}`).join(" ")
+    const en = ["The book"]
+    const es = ["El libro"]
+    for (let i = 0; i < 300; i++) {
+      en.push(`S${i} ${words(5 + (i * 7) % 12, "e")}.`)
+      es.push(`S${i} ${words(Math.max(2, Math.round((5 + (i * 7) % 12) * (i < 150 ? 0.8 : 1.5))), "s")}.`)
+    }
+    const asFile = (title: string, body: string[], name: string) => file(`${title}\n\n${body.join("\n")}\n`, name)
+    const lines = await sourceLines(asFile(en[0], en.slice(1), "long.txt"), SENTENCE)
+    expect(lines).toHaveLength(301)
+    const result = await translate(asFile(es[0], es.slice(1), "long-es.txt"), lines, SENTENCE)
+    expect(Object.values(filled(result))).toEqual(es)
+    expect(result.matched.some((m) => m.flag)).toBe(false)
+  })
+
+  it("lines up 1:1 on Paragraph with an extra Enter at the end", async () => {
+    const lines = await sourceLines(file("In the beginning\nAnd the earth\nAnd God said\n", "a.txt"), "paragraph")
+    const result = await translate(file("Au commencement\nEt la terre\nEt Dieu dit\n\n", "a-fr.txt"), lines, "paragraph")
+    expect(filled(result)).toEqual({ "line-1": "Au commencement", "line-2": "Et la terre", "line-3": "Et Dieu dit" })
+    expect(result.countMismatch).toBeUndefined()
+  })
+
+  it("still pairs real blank-line paragraphs of wrapped lines on Paragraph, rejoined", async () => {
+    const lines = await sourceLines(file("In the beginning God\ncreated the heavens.\n\nAnd the earth\nwas formless.\n", "a.txt"), "paragraph")
+    expect(lines.map((line) => line.original)).toEqual(["In the beginning God created the heavens.", "And the earth was formless."])
+    const result = await translate(file("Au commencement Dieu\ncréa les cieux.\n\nEt la terre\nétait informe.\n\n", "a-fr.txt"), lines, "paragraph")
+    expect(filled(result)).toEqual({ "line-1": "Au commencement Dieu créa les cieux.", "line-2": "Et la terre était informe." })
+  })
+
   it("fills line 1, 2, 3 from one translation per line on the Paragraph setting", async () => {
     const lines = await sourceLines(file("In the beginning\nAnd the earth\nAnd God said\n", "a.txt"), "paragraph")
     const result = await translate(file("Au commencement\r\nEt la terre\r\nEt Dieu dit\r\n", "a-fr.txt"), lines, "paragraph")

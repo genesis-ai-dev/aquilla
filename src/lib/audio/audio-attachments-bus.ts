@@ -282,10 +282,6 @@ export function injectOptimisticAudioAttachment(
       // Merge onto the live intent: keep ITS values (a mid-batch trim/select),
       // take only the measured duration this inject exists to deliver.
       live.att = { ...live.att, durationMs: attachment.durationMs }
-      // AQU-2495 (review, round 2): an overlay of its own fields only (a
-      // trim's) paints the measured length too, and waits for the read to
-      // carry it, as a duration-bearing overlay does.
-      if (live.only && !live.only.includes("durationMs")) live.only = [...live.only, "durationMs"]
       attachEventBinding(fileId, live, eventId)
       broadcast(fileId, cellId, live)
       return

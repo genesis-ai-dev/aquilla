@@ -70,7 +70,8 @@ import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
 import { htmlToSpans, rPrWithLanguage, rPrWithMarks, textRunXml, type Mark, type Span } from "./docx-runs"
 import { frenchSpacing, isFrenchLanguage } from "./french-spacing"
-import { markKey, rebuildParagraphInner, type RebuildIo } from "./docx-rebuild"
+import { markKey, rebuildParagraphInner, type RebuildIo, type RebuildResult } from "./docx-rebuild"
+import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
 import {
   packageBlockKey,
   translationsByPackageBlock,
@@ -92,7 +93,14 @@ import {
   type DocxWalkContext,
 } from "@/lib/parsers/docx-structure"
 import { loadFootnotes } from "@/lib/parsers/docx"
-import { assertWellFormedXml, isElement, parseXmlLite, type XmlElement } from "@/lib/parsers/xml-lite"
+import {
+  assertWellFormedXml,
+  elementsByTagName,
+  getAttribute,
+  isElement,
+  parseXmlLite,
+  type XmlElement,
+} from "@/lib/parsers/xml-lite"
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 const DOCUMENT_PART = "word/document.xml"
@@ -127,6 +135,10 @@ export interface DocxExportFidelity {
   /** Fields written with an empty result; links dropped (their words stay). */
   emptiedFields: number
   droppedLinks: number
+  /** Footnotes whose translated text was written into word/footnotes.xml, and
+   *  translated notes left in the source language (several paragraphs). */
+  notesWritten: number
+  notesLeft: number
 }
 
 /** One paragraph's translation: its segments in order. */
@@ -270,7 +282,9 @@ export async function exportDocx(
   let removed = 0
   let inserted = 0
   const warnings: { segment: string; detail: string }[] = []
-  const fidelity: DocxExportFidelity = { keptLooks: 0, keptFields: 0, keptLinks: 0, emptiedFields: 0, droppedLinks: 0 }
+  const fidelity: DocxExportFidelity = {
+    keptLooks: 0, keptFields: 0, keptLinks: 0, emptiedFields: 0, droppedLinks: 0, notesWritten: 0, notesLeft: 0,
+  }
 
   /** Index into `spans` of the first paragraph starting at or after `offset`. */
   const firstSpanAtOrAfter = (offset: number): number => {
@@ -355,93 +369,35 @@ export async function exportDocx(
     return out
   }
 
-  /**
-   * Rebuild a translated paragraph, or return null to leave it as it is: a
-   * paragraph with no visible words makes no line on import, so it receives
-   * no translation on export either (an old import may still hold a cell for
-   * one, from when a text box's words were read into the paragraph around it).
-   */
+  const part: PartContext = { xml, walkContext, renderRange, writeText, translatedLook }
+  const noteTranslations = new Map<string, string>()
+
   function rebuildParagraph(span: DocxParagraphSpan, translation: ParagraphTranslation): string | null {
-    if (span.selfClosing) return null
-    const spans = translationSpans(translation.parts)
-    if (spans.length === 0) return null
-
-    const doc = parseXmlLite(xml!.slice(span.start, span.end), { offsets: true })
-    const p = doc.children.find(isElement)
-    if (!p) return null
-    const at = (offset: number | undefined) => span.start + (offset ?? 0)
-    const items = walkDocxParagraph(p, walkContext)
-    const line = docxLine(items)
-    if (!line.hasWords) return null
-
-    const flat = flattenPieces(items)
-    const inLine = linePieceFlags(flat)
-    const lineSet = new Set<DocxPiece>(flat.filter((_, k) => inLine[k]))
-
-    // The innermost wrapper holding all of the line: the paragraph itself, or
-    // a hyperlink / content control / … that holds every word.
-    let target: { el: XmlElement; items: DocxPiece[] } = { el: p, items }
-    for (;;) {
-      const holders = target.items.filter((item) => holdsLine(item, lineSet))
-      const only = holders.length === 1 ? holders[0] : null
-      if (only === null || only.kind !== "container") break
-      target = { el: only.el, items: only.items }
-    }
-
-    const runRprXml = (run: XmlElement): string => {
-      const rPr = run.children.find((c) => isElement(c) && c.tagName === "w:rPr") as XmlElement | undefined
-      return rPr ? xml!.slice(at(rPr.start), at(rPr.end)) : ""
-    }
-
-    const base = baseRunLook(line.chunks, runRprXml)
+    const rebuilt = rebuildParagraphIn(part, span, translationSpans(translation.parts))
+    if (rebuilt === null) return null
     // Fidelity report: the source paragraph carried more than one run look
     // and some of it may come back in the base look (the export dialog says so).
-    const looks = new Set(
-      line.chunks
-        .filter((c) => c.piece.kind === "text" && c.piece.source === "t" && c.text.trim())
-        .map((c) => runRprXml((c.piece as Extract<DocxPiece, { kind: "text" }>).run)),
-    )
-    if (looks.size > 1) {
+    if (rebuilt.mixedLooks) {
       warnings.push({
         segment: translation.label,
         detail: "paragraph had mixed inline formatting; translation takes the look of most of its plain text",
       })
     }
-
-    const text = spans.map((s) => s.text).join("")
-    const marks: ReadonlySet<Mark>[] = []
-    for (const s of spans) for (let i = 0; i < s.text.length; i++) marks.push(s.marks)
-    const io: RebuildIo = {
-      elementXml: (el) => renderRange(at(el.start), at(el.end), span),
-      openTag: (el) => xml!.slice(at(el.start), at(el.openEnd)),
-      closeTag: (el) => xml!.slice(at(el.closeStart), at(el.end)),
-      rPrXml: runRprXml,
-    }
-    const rebuilt = rebuildParagraphInner({
-      items: target.items,
-      lineSet,
-      text,
-      writtenText: writeText(text),
-      marks,
-      translatedLook,
-      baseRpr: base ?? "",
-      markLooks: markLooksOf(line.chunks, runRprXml),
-      io,
-    })
-    const inner = rebuilt.xml
-    fidelity.keptLooks += rebuilt.keptLooks
-    fidelity.keptFields += rebuilt.keptFields
-    fidelity.keptLinks += rebuilt.keptLinks
-    fidelity.emptiedFields += rebuilt.emptiedFields
-    fidelity.droppedLinks += rebuilt.droppedLinks
-    const before = renderRange(span.start, at(target.el.openEnd), span)
-    const after = renderRange(at(target.el.closeStart), span.end, span)
-    return before + inner + after
+    addFidelity(fidelity, rebuilt.stats)
+    for (const note of rebuilt.stats.footnotes) noteTranslations.set(note.id, note.marker)
+    return rebuilt.xml
   }
 
   // Rendering starts at the top of the document; the walk is driven by the
   // INPUT scan, so neither a removal nor an insertion can shift a locator.
   const rebuilt = renderRange(0, xml.length)
+
+  // AQU-2539: a footnote whose translated note text differs from its source
+  // gets that text written into word/footnotes.xml, in its own paragraph, by
+  // the same rules as the body (its number and everything not text kept).
+  const rebuiltFootnotes = footnotesXml
+    ? rebuildFootnotes(footnotesXml, noteTranslations, walkContext, writeText, translatedLook, fidelity)
+    : null
 
   // AQU-2383: the surgical scan spliced nothing, so `word/document.xml` is
   // the one the client uploaded and no other part was ever written. Hand back
@@ -450,7 +406,7 @@ export async function exportDocx(
   // otherwise come back as a different file than the upload — which is the
   // whole complaint behind the untouched-export rule. The counts are already
   // final here, so the result still reports the walk honestly.
-  if (rebuilt === xml) {
+  if (rebuilt === xml && rebuiltFootnotes === null) {
     return {
       blob: new Blob([rawDocxBytes], { type: DOCX_MIME }),
       injected,
@@ -476,8 +432,21 @@ export async function exportDocx(
     )
   }
 
-  // Write modified XML back — only word/document.xml changes; all other parts untouched.
+  // Write modified XML back — only word/document.xml (and, when a note was
+  // translated, word/footnotes.xml) changes; all other parts untouched.
   zip.file(DOCUMENT_PART, rebuilt, { createFolders: false })
+  if (rebuiltFootnotes !== null) {
+    try {
+      assertWellFormedXml(rebuiltFootnotes)
+    } catch (err) {
+      throw new Error(
+        `Word export stopped: the rebuilt word/footnotes.xml is not well-formed (${(err as Error).message}). ` +
+          "No file was produced, so no damaged document reaches the client.",
+        { cause: err },
+      )
+    }
+    zip.file(FOOTNOTES_PART, rebuiltFootnotes, { createFolders: false })
+  }
 
   // AQU-889: DEFLATE, not JSZip's default STORE. A re-zipped package that
   // stores every part uncompressed balloons an ~10KB Word document to ~200KB
@@ -490,6 +459,162 @@ export async function exportDocx(
     compressionOptions: { level: 6 },
   })
   return { blob, injected, untouched, removed, inserted, warnings, fidelity }
+}
+
+/** One XML part being rendered: what a paragraph rebuild needs from it. */
+interface PartContext {
+  xml: string
+  walkContext: DocxWalkContext
+  /** The part's bytes [from, to) with nested paragraphs rendered. */
+  renderRange(from: number, to: number, self?: DocxParagraphSpan): string
+  writeText(text: string): string
+  translatedLook(rPr: string): string
+}
+
+interface RebuiltParagraph {
+  xml: string
+  stats: RebuildResult
+  mixedLooks: boolean
+}
+
+function addFidelity(total: DocxExportFidelity, stats: RebuildResult): void {
+  total.keptLooks += stats.keptLooks
+  total.keptFields += stats.keptFields
+  total.keptLinks += stats.keptLinks
+  total.emptiedFields += stats.emptiedFields
+  total.droppedLinks += stats.droppedLinks
+}
+
+/**
+ * Rebuild one translated paragraph of a part, or return null to leave it as it
+ * is: a paragraph with no visible words makes no line on import, so it
+ * receives no translation on export either (an old import may still hold a
+ * cell for one, from when a text box's words were read into the paragraph
+ * around it). `leadingSpace` keeps the source line's leading whitespace in
+ * front of the translation (a footnote's space after its number).
+ */
+function rebuildParagraphIn(
+  part: PartContext,
+  span: DocxParagraphSpan,
+  spans: Span[],
+  leadingSpace = false,
+): RebuiltParagraph | null {
+  if (span.selfClosing || spans.length === 0) return null
+  const { xml } = part
+  const doc = parseXmlLite(xml.slice(span.start, span.end), { offsets: true })
+  const p = doc.children.find(isElement)
+  if (!p) return null
+  const at = (offset: number | undefined) => span.start + (offset ?? 0)
+  const items = walkDocxParagraph(p, part.walkContext)
+  const line = docxLine(items)
+  if (!line.hasWords) return null
+
+  const flat = flattenPieces(items)
+  const inLine = linePieceFlags(flat)
+  const lineSet = new Set<DocxPiece>(flat.filter((_, k) => inLine[k]))
+
+  // The innermost wrapper holding all of the line: the paragraph itself, or
+  // a hyperlink / content control / … that holds every word.
+  let target: { el: XmlElement; items: DocxPiece[] } = { el: p, items }
+  for (;;) {
+    const holders = target.items.filter((item) => holdsLine(item, lineSet))
+    const only = holders.length === 1 ? holders[0] : null
+    if (only === null || only.kind !== "container") break
+    target = { el: only.el, items: only.items }
+  }
+
+  const runRprXml = (run: XmlElement): string => {
+    const rPr = run.children.find((c) => isElement(c) && c.tagName === "w:rPr") as XmlElement | undefined
+    return rPr ? xml.slice(at(rPr.start), at(rPr.end)) : ""
+  }
+  const base = baseRunLook(line.chunks, runRprXml)
+  const looks = new Set(
+    line.chunks
+      .filter((c) => c.piece.kind === "text" && c.piece.source === "t" && c.text.trim())
+      .map((c) => runRprXml((c.piece as Extract<DocxPiece, { kind: "text" }>).run)),
+  )
+
+  const lead = leadingSpace ? /^\s*/.exec(line.text)![0] : ""
+  const all = lead ? [{ text: lead, marks: new Set<Mark>() }, ...spans] : spans
+  const text = all.map((s) => s.text).join("")
+  const marks: ReadonlySet<Mark>[] = []
+  for (const s of all) for (let i = 0; i < s.text.length; i++) marks.push(s.marks)
+  const io: RebuildIo = {
+    elementXml: (el) => part.renderRange(at(el.start), at(el.end), span),
+    openTag: (el) => xml.slice(at(el.start), at(el.openEnd)),
+    closeTag: (el) => xml.slice(at(el.closeStart), at(el.end)),
+    rPrXml: runRprXml,
+  }
+  const stats = rebuildParagraphInner({
+    items: target.items,
+    lineSet,
+    text,
+    writtenText: part.writeText(text),
+    marks,
+    translatedLook: part.translatedLook,
+    baseRpr: base ?? "",
+    markLooks: markLooksOf(line.chunks, runRprXml),
+    io,
+  })
+  const before = part.renderRange(span.start, at(target.el.openEnd), span)
+  const after = part.renderRange(at(target.el.closeStart), span.end, span)
+  return { xml: before + stats.xml + after, stats, mixedLooks: looks.size > 1 }
+}
+
+/**
+ * word/footnotes.xml with translated notes written in, or null when no note
+ * changed. A note's translation is the text of its USFM marker in the body's
+ * translation. It is written only into a note with exactly one paragraph of
+ * words (a note of several paragraphs was imported as one line and cannot be
+ * split back) and only when it differs from the source note.
+ */
+function rebuildFootnotes(
+  footnotesXml: string,
+  noteTranslations: ReadonlyMap<string, string>,
+  walkContext: DocxWalkContext,
+  writeText: (text: string) => string,
+  translatedLook: (rPr: string) => string,
+  fidelity: DocxExportFidelity,
+): string | null {
+  if (noteTranslations.size === 0) return null
+  const doc = parseXmlLite(footnotesXml, { offsets: true })
+  const spans = scanDocxParagraphs(footnotesXml)
+  const part: PartContext = {
+    xml: footnotesXml,
+    walkContext,
+    renderRange: (from, to) => footnotesXml.slice(from, to),
+    writeText,
+    translatedLook,
+  }
+  const edits: { start: number; end: number; xml: string }[] = []
+  for (const note of elementsByTagName(doc, "w:footnote")) {
+    const id = getAttribute(note, "w:id")
+    const marker = id === null ? undefined : noteTranslations.get(id)
+    if (marker === undefined) continue
+    const translated = extractUsfmFootnotes(marker)[0]?.text.replace(/\\(?:bd|it|ul)\*?\s?/g, "").trim() ?? ""
+    if (!translated || translated === walkContext.footnotes.get(id!)) continue
+    const inside = spans.filter((s) => s.start >= note.start! && s.end <= note.end!)
+    const withWords = inside.filter((s) => {
+      const p = parseXmlLite(footnotesXml.slice(s.start, s.end)).children.find(isElement)
+      return p !== undefined && docxLine(walkDocxParagraph(p, walkContext)).hasWords
+    })
+    if (withWords.length !== 1) {
+      fidelity.notesLeft++
+      continue
+    }
+    const rebuilt = rebuildParagraphIn(part, withWords[0], [{ text: translated, marks: new Set() }], true)
+    if (rebuilt === null) continue
+    edits.push({ start: withWords[0].start, end: withWords[0].end, xml: rebuilt.xml })
+    fidelity.notesWritten++
+  }
+  if (edits.length === 0) return null
+  let out = ""
+  let cursor = 0
+  for (const edit of edits.sort((a, b) => a.start - b.start)) {
+    out += footnotesXml.slice(cursor, edit.start) + edit.xml
+    cursor = edit.end
+  }
+  return out + footnotesXml.slice(cursor)
 }
 
 /** Does this piece hold any of the line (directly, or inside a wrapper)? */

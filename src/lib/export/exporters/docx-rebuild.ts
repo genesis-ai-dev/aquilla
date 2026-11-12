@@ -80,6 +80,8 @@ export interface RebuildResult {
   /** Fields written with an empty result, links dropped. */
   emptiedFields: number
   droppedLinks: number
+  /** Each footnote reference written at a marker, with that marker's text. */
+  footnotes: { id: string; marker: string }[]
 }
 
 const FOOTNOTE_SPAN_RE = /\\f\s+[^\s\\]+[\s\S]*?\\f\*/g
@@ -93,7 +95,9 @@ export const markKey = (marks: ReadonlySet<Mark>): string =>
 
 export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   const { io } = input
-  const result: RebuildResult = { xml: "", keptLooks: 0, keptFields: 0, keptLinks: 0, emptiedFields: 0, droppedLinks: 0 }
+  const result: RebuildResult = {
+    xml: "", keptLooks: 0, keptFields: 0, keptLinks: 0, emptiedFields: 0, droppedLinks: 0, footnotes: [],
+  }
 
   // Footnote markers in the translation, and the reference runs they take.
   const markers = [...input.text.matchAll(FOOTNOTE_SPAN_RE)].map((m) => ({ start: m.index!, end: m.index! + m[0].length }))
@@ -105,7 +109,11 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
 
   let nodes = buildNodes(input.items, input.lineSet)
   const refRuns: string[] = []
-  collectMarkers(nodes, (piece) => refRuns.push(io.elementXml(piece.run)))
+  const refIds: string[] = []
+  collectMarkers(nodes, (piece) => {
+    refRuns.push(io.elementXml(piece.run))
+    refIds.push(piece.id)
+  })
 
   // Match, then open up what did not match, until nothing changes.
   let matches: Map<RNode, Match>
@@ -158,7 +166,10 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
     while (k < to) {
       const marker = markers.find((m) => m.start === k)
       if (marker) {
-        if (usedRefs < refRuns.length) stream += refRuns[usedRefs++]
+        if (usedRefs < refRuns.length) {
+          result.footnotes.push({ id: refIds[usedRefs], marker: input.text.slice(marker.start, marker.end) })
+          stream += refRuns[usedRefs++]
+        }
         k = marker.end
         continue
       }

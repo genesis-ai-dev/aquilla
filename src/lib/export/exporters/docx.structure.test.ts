@@ -385,3 +385,36 @@ describe("exportDocx — the target language (AQU-2539)", () => {
     expect(xml).toContain('<w:rPr><w:b/><w:sz w:val="20"/><w:rtl/><w:lang w:val="fr"/></w:rPr>')
   })
 })
+
+describe("exportDocx — translated footnote text (AQU-2539)", () => {
+  async function exportNotes(body: string, notes: string, translated: string, targetLanguage?: string) {
+    const result = await exportDocx(await makeDocx(body, notes), [cellAt(1, translated)], { targetLanguage })
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
+    const doc = await zip.file("word/document.xml")!.async("string")
+    const fn = await zip.file("word/footnotes.xml")!.async("string")
+    expectWellFormed(doc)
+    expectWellFormed(fn)
+    return { doc, fn, result }
+  }
+  const body = para(run("Text") + footnoteRefRun(1) + run(" more."))
+
+  it("writes the marker's translated note into its footnote, number and space kept", async () => {
+    const { fn, result } = await exportNotes(body, footnotesXml({ 1: "A note: here." }), "Texte\\f + \\ft Une note : ici.\\f* encore.", "fr-FR")
+    expect(fn).toContain('<w:footnote w:id="1"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:rPr><w:lang w:val="fr-FR"/></w:rPr><w:t xml:space="preserve"> Une note : ici.</w:t></w:r></w:p></w:footnote>')
+    expect(fn).not.toContain("A note")
+    expect(result.fidelity.notesWritten).toBe(1)
+  })
+
+  it("leaves footnotes.xml byte-identical when the note's text did not change", async () => {
+    const notes = footnotesXml({ 1: "A note." })
+    const { fn } = await exportNotes(body, notes, "Texte\\f + \\ft A note.\\f* encore.")
+    expect(fn).toBe(notes)
+  })
+
+  it("leaves a note of several paragraphs in its own words, and says so", async () => {
+    const notes = footnotesXml({ 1: "First." }).replace("</w:p></w:footnote></w:footnotes>", `</w:p>${para(run("Second."))}</w:footnote></w:footnotes>`)
+    const { fn, result } = await exportNotes(body, notes, "Texte\\f + \\ft Premier. Second.\\f* encore.")
+    expect(fn).toBe(notes)
+    expect(result.fidelity.notesLeft).toBe(1)
+  })
+})

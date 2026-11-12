@@ -6,6 +6,7 @@ import {
   register,
   redeemAccessLink,
   requestPasswordReset,
+  requestAccountPasswordReset,
   verifyResetToken,
   verifyEmail,
   resetPassword,
@@ -460,3 +461,25 @@ it.each(["unavailable", "malformed"])("preserves legacy credentials when ownersh
     expect((await loadSession())?.jwt).toBe("old-proof")
   } finally { fetchSpy.mockRestore() }
 })
+
+
+describe("bounded password recovery", () => {
+  it.each([
+    ["request", () => requestPasswordReset("alice@example.com")],
+    ["account request", () => requestAccountPasswordReset("account-jwt")],
+    ["verify", () => verifyResetToken("reset-token", "alice")],
+    ["reset", () => resetPassword("reset-token", "alice", "new-password-123")],
+  ])("releases a stalled %s request and allows retry", async (_name, action) => {
+    vi.useFakeTimers();
+    const fetcher = vi.spyOn(globalThis,"fetch").mockImplementationOnce((_url, init) => new Promise((_resolve,reject) => {
+      init!.signal!.addEventListener("abort", () => reject(new DOMException("Aborted","AbortError")), {once:true});
+    }));
+    try {
+      const result = action().catch((error:unknown) => error);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(await result).toMatchObject({status:0});
+      fetcher.mockResolvedValueOnce(new Response("{}",{status:200}));
+      await expect(action()).resolves.toBeUndefined();
+    } finally { vi.useRealTimers(); fetcher.mockRestore(); }
+  });
+});

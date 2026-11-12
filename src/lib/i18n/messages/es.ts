@@ -4964,8 +4964,6 @@ export const es: Catalog = {
   "projectSettings.permission.reconnectToEdit": "Reconéctate para editar la configuración compartida.",
   "projectSettings.permission.onlyRoleCanModify": "Solo los {role} pueden modificar",
   "projectSettings.permission.viewPrivilegedMembers": "Ver los {role}",
-  "projectSettings.permission.privilegedDialogTitle": "{role} del proyecto",
-  "projectSettings.permission.privilegedDialogDescription": "Los {role} pueden cambiar la configuración compartida, los miembros y el resto de la configuración del proyecto.",
   "projectSettings.permission.privilegedDialogEmpty": "No hay {role} en este proyecto.",
   "projectSettings.permission.privilegedDialogError": "No se pudieron cargar los {role}.",
   "projectSettings.create.trigger": "Nuevo proyecto",

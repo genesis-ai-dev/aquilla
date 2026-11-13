@@ -31,15 +31,14 @@ export function GoogleLoginButton({ next, signup = false }: { next?: string; sig
     window.addEventListener("online", retry)
     return () => window.removeEventListener("online", retry)
   }, [])
-  if (preview || configFailed || enabled === false) return <div className="flex flex-col gap-2">
+  if (preview || configFailed || enabled !== true) return <div className="flex flex-col gap-2">
     <Button className="google-login-button" type="button" variant="outline" disabled>
       <img src={googleLogo} width={20} height={20} alt="" aria-hidden="true" />
       {t("auth.google.continue")}
     </Button>
-    <p role="alert" className="text-sm text-muted-foreground">{t(preview ? "auth.google.previewDisabled" : configFailed ? "auth.google.unavailable" : "auth.google.notConfigured")}</p>
+    <p role={preview || enabled === null && !configFailed ? "status" : "alert"} className="text-sm text-muted-foreground">{t(preview ? "auth.google.previewDisabled" : configFailed ? "auth.google.unavailable" : enabled === null ? "auth.google.checkingAvailability" : "auth.google.notConfigured")}</p>
     {!preview && configFailed && <Button className="self-start" type="button" variant="link" size="sm" onClick={() => setCheck(value => value + 1)}>{t("auth.google.retryAvailability")}</Button>}
   </div>
-  if (!enabled) return null
   const current = window.location.pathname + window.location.search
   const destination = next ?? new URLSearchParams(window.location.search).get("next") ?? current
   return <div className="flex flex-col gap-4">

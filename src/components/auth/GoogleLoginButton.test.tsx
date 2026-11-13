@@ -54,3 +54,15 @@ it("keeps Google visible but disabled in CI without requesting availability or c
   expect(mocks.request).not.toHaveBeenCalled()
   expect(mocks.start).not.toHaveBeenCalled()
 })
+
+it("renders a disabled button immediately while availability is pending", async () => {
+  let resolve!: (value: { enabled: boolean }) => void
+  mocks.request.mockReturnValue(new Promise(r => { resolve = r }))
+  render(<GoogleLoginButton />)
+  expect(screen.getByRole("button", { name: "Continue with Google" })).toBeDisabled()
+  expect(screen.getByRole("status")).toHaveTextContent("Checking Google login availability")
+  expect(mocks.start).not.toHaveBeenCalled()
+  resolve({ enabled: true })
+  await waitFor(() => expect(screen.getByRole("button", { name: "Continue with Google" })).toBeEnabled())
+  expect(mocks.start).not.toHaveBeenCalled()
+})

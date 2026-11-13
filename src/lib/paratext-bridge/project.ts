@@ -8,6 +8,19 @@ import { BOOK_CODES_BY_NUMBER } from "./book-codes"
 export { parseParatextSettings }
 export type { ParatextSettings }
 
+/**
+ * What the bridge's saved state (pending edits, last-seen units, holds, the
+ * mirror link) is keyed by: one project folder. Not the GUID alone, because
+ * the same project can sit in two folders on one computer (Paratext 10 and
+ * Paratext Lite each keep their own copy, as does a Wine prefix) and each copy
+ * has its own files, so an edit pending for one must never reach the other.
+ */
+export type BridgeStateId = string & { readonly __brand: "BridgeStateId" }
+
+export function bridgeStateId(guid: string, projectPath: string): BridgeStateId {
+  return `${guid}@${projectPath}` as BridgeStateId
+}
+
 export const UTF8_CODEPAGE = "65001"
 
 export function isUtf8Project(s: ParatextSettings): boolean {

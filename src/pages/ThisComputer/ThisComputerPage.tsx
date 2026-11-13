@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { BookOpen, Folder, FolderPlus, FolderSearch, Laptop, RefreshCw, ShieldCheck, X } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
-import { ParatextProjectRow, useLinkedGuids } from "@/components/paratext/ParatextProjectRow"
+import { ParatextProjectRow, useLinkedProjects } from "@/components/paratext/ParatextProjectRow"
 import { ThisComputerSidebar } from "@/components/this-computer/ThisComputerSidebar"
 import { PARATEXT_PATH } from "@/components/this-computer/routes"
 import { ThisComputerBreadcrumb } from "@/components/this-computer/ThisComputerBreadcrumb"
@@ -75,7 +75,7 @@ export function ThisComputerPage() {
   const scanReady = useParatextScanReady()
   const d = useParatextDiscovery({ autoStart: supported && scanReady })
   const linked = useLinkedFolders(supported)
-  const linkedGuids = useLinkedGuids(d.projects)
+  const linkedProjects = useLinkedProjects(d.projects)
   const [picking, setPicking] = useState(false)
 
   // A scan that completed without error means any OS access prompt has been
@@ -110,7 +110,7 @@ export function ThisComputerPage() {
   }
 
   const projectRow = (p: BridgeProject) => (
-    <ParatextProjectRow key={p.path} project={p} linked={linkedGuids.has(p.guid)} testId="paratext-found-project" />
+    <ParatextProjectRow key={p.path} project={p} linked={linkedProjects.has(p.stateId)} testId="paratext-found-project" />
   )
 
   return (

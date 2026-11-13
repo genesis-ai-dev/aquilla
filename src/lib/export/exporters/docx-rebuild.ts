@@ -387,9 +387,9 @@ function buildNodes(items: readonly DocxPiece[], lineSet: ReadonlySet<DocxPiece>
 /**
  * AQU-2552 (review r6): the nodes without what a hidden or deleted line held
  * (`lost`, see docx.ts placeInLines). Its text, footnote references and runs
- * go. A field or a wrapper (a link, a content control…) goes whole when all
- * the text it holds is lost, or, holding none, when all its runs are; what of
- * it is no run (a bookmark) stays, unwrapped. One that lost only some of its
+ * go. A field or a wrapper (a link, a content control…) goes whole, its own
+ * properties included, when all the text it holds is lost, or, holding none,
+ * when all its runs are; a bookmark or comment mark it held stays, unwrapped. One that lost only some of its
  * pieces stays, without them. A field character outside a whole field (a
  * field running over several paragraphs) always stays.
  */
@@ -413,7 +413,10 @@ function withoutLost(nodes: readonly RNode[], lost: ReadonlySet<DocxPiece>): RNo
         const judged = text.length > 0 ? text : runs
         const gone = judged.filter((leaf) => lost.has(leaf.piece)).length
         if (judged.length > 0 && gone === judged.length) {
-          out.push(...withoutLost(inner.filter((n) => !(n.kind === "keep" && isRunPiece(n.piece))), lost))
+          // AQU-2552 (review r8): its own properties (a content control's
+          // w:sdtPr, a smart tag's w:smartTagPr…) go with it; left loose in
+          // the paragraph they make a file Word calls damaged.
+          out.push(...withoutLost(inner.filter((n) => !(n.kind === "keep" && (isRunPiece(n.piece) || isWrapperProperties(n.piece)))), lost))
         } else if (leaves.some((leaf) => lost.has(leaf.piece))) {
           out.push(node.kind === "wrapper"
             ? { ...node, children: withoutLost(node.children, lost), partial: true }
@@ -448,6 +451,12 @@ function leavesOf(nodes: readonly RNode[]): LeafNode[] {
         return leavesOf(node.nodes)
     }
   })
+}
+
+/** AQU-2552 (review r8): a wrapper's own properties, valid only inside it. */
+const WRAPPER_PROPERTIES = new Set(["w:sdtPr", "w:sdtEndPr", "w:smartTagPr", "w:customXmlPr", "w:fldData"])
+function isWrapperProperties(piece: Leaf): boolean {
+  return piece.kind === "keep" && WRAPPER_PROPERTIES.has(piece.el.tagName)
 }
 
 /** A run of the source, or part of one: what a field is made of. */

@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react"
+import { getExpiredSessionJwt, onSessionExpired } from "@/lib/errors/session-expired-signal"
+import { SessionRecoveryButton } from "@/components/auth/SessionRecoveryButton"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { ChevronDown, LogIn, LogOut, UserPlus, Check, Settings2 } from "lucide-react"
 import { useAccounts } from "@/hooks/useAccounts"
@@ -112,6 +114,8 @@ export function AccountSwitcher({
   const t = useT()
   const { active, sessions, activate, remove, removeAll } = useAccounts()
   const location = useLocation()
+  const rejectedJwt = useSyncExternalStore(onSessionExpired, getExpiredSessionJwt)
+  const needsLogin = !!active && rejectedJwt === active.jwt
   const [open, setOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
   const [pendingLogout, setPendingLogout] = useState<{ count: number; scope: LogoutScope } | null>(null)
@@ -226,6 +230,7 @@ export function AccountSwitcher({
 
   return (
     <>
+      {needsLogin && <div className="px-1.5 text-xs text-amber-700 dark:text-amber-300"><SessionRecoveryButton username={active.username} className="underline underline-offset-2" /></div>}
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger
           render={
@@ -239,7 +244,7 @@ export function AccountSwitcher({
                     ? "h-8 w-8 justify-center rounded-md p-0 hover:bg-accent/40"
                     : "w-full rounded-md px-1.5 py-1.5 hover:bg-accent/40",
               )}
-              aria-label={t("nav.account.menuLabel", { username: active.username })}
+              aria-label={t("nav.account.menuLabel", { username: active.username }) + (needsLogin ? ` — ${t("auth.sessionExpired.signInAgain")}` : "")}
               data-account-switcher-surface={variant}
             />
           }

@@ -46,7 +46,7 @@ export const auth = defineNamespace({
     "auth.emailChange.rate_limited": "Too many attempts. Please wait before trying again.",
     "auth.emailChange.restart": "Start again",
     "auth.emailChange.failed": "We could not complete the change. Check your connection and try again.",
-    "auth.emailChange.password_required": "Set an Aquilla password in Login methods before changing your email. You will need it to log in after Google is disconnected.",
+    "auth.emailChange.password_required": "Set an Aquilla password first. You’ll use it with your new email after Google is disconnected. Your email and Google login stay unchanged until you verify the new email.",
     "auth.emailChange.unlinkWarning": "Changing your email will disconnect Google login from this account. Afterward, log in with your new email and Aquilla password. Your projects and permissions will stay the same.",
     "auth.emailChange.success": "Your email has been changed. You have been logged out of this account. Log in with your new email and Aquilla password.",
     "auth.emailChange.intro": "Verify your account, then enter the code sent to your new email. Your current email stays in place until you confirm. You will need to log in again afterward.",

@@ -15,7 +15,10 @@ import { SessionExpiredBanner } from "./SessionExpiredBanner"
 import {
   clearSessionExpired,
   notifySessionExpired,
+  isSessionExpired,
 } from "@/lib/errors/session-expired-signal"
+
+vi.mock("@/components/auth/SessionRecoveryButton", () => ({ SessionRecoveryButton: () => <button>Log in again</button> }))
 
 let activeJwt: string | null = "jwt-active"
 vi.mock("@/hooks/useAccounts", () => ({
@@ -65,10 +68,7 @@ describe("SessionExpiredBanner", () => {
     renderApp("/orgs/all")
     act(() => notifySessionExpired("jwt-active"))
     expect(banner()).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /log in again/i })).toHaveAttribute(
-      "href",
-      "/login?next=%2Forgs%2Fall&reauth=1",
-    )
+    expect(screen.getByRole("button", { name: /log in again/i })).toBeVisible()
   })
 
   it("survives the boot redirect from / to /orgs/all", () => {
@@ -102,6 +102,7 @@ describe("SessionExpiredBanner", () => {
     const dismiss = screen.getByRole("button", { name: /dismiss/i })
     await act(async () => dismiss.click())
     expect(banner()).toBeNull()
+    expect(isSessionExpired("jwt-active")).toBe(true)
   })
 
   it("disappears when the user re-authenticates", () => {

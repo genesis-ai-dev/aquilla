@@ -1,16 +1,35 @@
 // Decision 11 (P13.5): linking a film, pairing heard lines and assigning
 // characters can be undone — and someone else's change since is left alone.
-import { describe, it, expect, vi } from "vitest"
+import { beforeEach, describe, it, expect, vi } from "vitest"
 import {
   CastStepBuilder,
   filmNow,
+  fileMayFollowTiming,
   mediaStepHandlers,
+  recordTimingSwitch,
+  timingNow,
+  timingStepHandlers,
   voiceEntryChanges,
   voiceSettingsPatch,
   type CastValue,
+  type FileTiming,
   type MediaStepContext,
+  type TimingStepContext,
 } from "./media-steps"
-import type { StepHandler } from "./history"
+import {
+  historyReady,
+  historyView,
+  recordStep,
+  redoLast,
+  registerStepKinds,
+  resetHistoryForTests,
+  setHistoryScope,
+  undoLast,
+  type StepHandler,
+} from "./history"
+import { clearHistoryStoreForTests } from "./history-store"
+import { resolveFileTimingMode } from "@/lib/parsers/types"
+import { stepLane } from "./step-lane"
 
 function ctxFor(state: {
   film?: Record<string, string | null>
@@ -202,5 +221,191 @@ describe("voice settings entries", () => {
     const { patch: undo, applied } = voiceSettingsPatch(now, changes, "undo")
     expect(applied).toBe(1)
     expect(undo).toEqual({ laneCastAssignments: { sw: { a: "v9" } } })
+  })
+})
+
+// AQU-2492 (review, Nov 9; Sam's call the same day): switching a file's timing
+// is an Undo step. Undo puts the file back on the timing it had, Redo switches
+// it again; the switch's own role rule applies, and a switch someone else made
+// in between is left alone.
+describe("file.timing", () => {
+  function timingCtx(state: { timing: Record<string, FileTiming>; may?: boolean; filmTimed?: boolean }) {
+    const ctx: TimingStepContext = {
+      readTiming: (fileId) => state.timing[fileId],
+      mayChangeTiming: () => state.may ?? true,
+      offersTiming: (_fileId, mode) => !(mode === "audioFirst" && state.filmTimed),
+      writeTiming: vi.fn(async (fileId, mode) => {
+        state.timing[fileId] = mode
+        return true
+      }),
+    }
+    return { ctx, handlers: timingStepHandlers(ctx) as Record<string, StepHandler<unknown>> }
+  }
+  const step = { fileId: "f1", before: "dubbing" as const, after: "audioFirst" as const }
+
+  it("undo puts the file back on the timing it had, and redo switches it again", async () => {
+    const state = { timing: { f1: "audioFirst" as FileTiming } }
+    const { ctx, handlers } = timingCtx(state)
+    expect(await handlers["file.timing"].undo(step)).toEqual({ kind: "done" })
+    expect(state.timing.f1).toBe("dubbing")
+    expect(await handlers["file.timing"].redo(step)).toEqual({ kind: "done" })
+    expect(state.timing.f1).toBe("audioFirst")
+    expect(ctx.writeTiming).toHaveBeenCalledTimes(2)
+  })
+
+  it("is skipped as changed when someone else switched the file's timing in between", async () => {
+    const state = { timing: { f1: "dubbing" as FileTiming } }
+    const { ctx, handlers } = timingCtx(state)
+    expect(await handlers["file.timing"].undo(step)).toEqual({ kind: "skipped", reason: "changed" })
+    expect(ctx.writeTiming).not.toHaveBeenCalled()
+  })
+
+  it("is skipped as not allowed when the person may no longer switch timing", async () => {
+    const state = { timing: { f1: "audioFirst" as FileTiming }, may: false }
+    const { ctx, handlers } = timingCtx(state)
+    expect(await handlers["file.timing"].undo(step)).toEqual({ kind: "skipped", reason: "notAllowed" })
+    expect(ctx.writeTiming).not.toHaveBeenCalled()
+  })
+
+  it("redo is skipped as changed when the file can no longer follow its recordings (a film was linked since)", async () => {
+    const state = { timing: { f1: "dubbing" as FileTiming }, filmTimed: true }
+    const { ctx, handlers } = timingCtx(state)
+    expect(await handlers["file.timing"].redo(step)).toEqual({ kind: "skipped", reason: "changed" })
+    expect(ctx.writeTiming).not.toHaveBeenCalled()
+  })
+
+  it("is skipped as gone when the file can't be read", async () => {
+    const { handlers } = timingCtx({ timing: {} })
+    expect(await handlers["file.timing"].undo(step)).toEqual({ kind: "skipped", reason: "gone" })
+  })
+
+  it("belongs to every language", () => {
+    expect(stepLane("file.timing", step, "fr")).toBeUndefined()
+  })
+})
+
+describe("timingNow", () => {
+  it("reads the switch written here until the project read answers, then the read", () => {
+    const pending = { mode: "audioFirst" as const, readBefore: "dubbing" as const }
+    expect(timingNow("dubbing", pending)).toEqual({ mode: "audioFirst", settled: false })
+    expect(timingNow("audioFirst", pending)).toEqual({ mode: "audioFirst", settled: true })
+    expect(timingNow("dubbing", undefined)).toEqual({ mode: "dubbing", settled: true })
+  })
+})
+
+// AQU-2492 (review, Nov 9), finding 5: the switch's step is recorded when the
+// switch STARTS, waiting on its write. ⌘Z pressed while it saves waits for it
+// and undoes the switch — never an older, unrelated step, whose Redo the
+// switch's late step would then have cleared. And offline, an Undo or Redo of
+// a switch is refused the way the switch itself is, and kept for later.
+describe("file.timing while the switch saves, and offline (AQU-2492)", () => {
+  beforeEach(async () => {
+    resetHistoryForTests()
+    await clearHistoryStoreForTests()
+    setHistoryScope("p1", "sam")
+    await historyReady()
+  })
+
+  function register(state: { timing: Record<string, FileTiming>; online?: boolean }, log: string[]) {
+    registerStepKinds({
+      "test.move": {
+        undo: async () => { log.push("undo move"); return { kind: "done" } },
+        redo: async () => { log.push("redo move"); return { kind: "done" } },
+      } as StepHandler<never>,
+      ...timingStepHandlers({
+        readTiming: (fileId) => state.timing[fileId],
+        mayChangeTiming: () => true,
+        offersTiming: () => true,
+        online: () => state.online ?? true,
+        writeTiming: async (fileId, mode) => {
+          log.push(`write ${mode}`)
+          state.timing[fileId] = mode
+          return true
+        },
+      }),
+    })
+  }
+
+  it("⌘Z pressed while the switch is saving waits for it and undoes the switch, and the older step keeps its place", async () => {
+    const state = { timing: { f1: "dubbing" as FileTiming } }
+    const log: string[] = []
+    register(state, log)
+    recordStep({ kind: "test.move", data: {}, labelKey: "move" })
+    let land: (ok: boolean) => void = () => {}
+    const write = new Promise<boolean>((r) => { land = r })
+    recordTimingSwitch({ fileId: "f1", before: "dubbing", after: "audioFirst" }, { fileName: "Ch 1" }, write)
+    const press = undoLast()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(log).toEqual([]) // waiting on the switch, not reaching past it
+    state.timing.f1 = "audioFirst"
+    land(true)
+    expect((await press)?.step.labelKey).toBe("editor.history.stepTimingFollowsRecordings")
+    expect(log).toEqual(["write dubbing"])
+    expect(historyView().nextUndo?.labelKey).toBe("move")
+    expect(historyView().nextRedo?.labelKey).toBe("editor.history.stepTimingFollowsRecordings")
+  })
+
+  it("a refused switch leaves no step: ⌘Z then undoes the older one", async () => {
+    const state = { timing: { f1: "dubbing" as FileTiming } }
+    const log: string[] = []
+    register(state, log)
+    recordStep({ kind: "test.move", data: {}, labelKey: "move" })
+    recordTimingSwitch({ fileId: "f1", before: "dubbing", after: "audioFirst" }, {}, Promise.resolve(false))
+    await new Promise((r) => setTimeout(r, 0))
+    expect((await undoLast())?.step.labelKey).toBe("move")
+    expect(log).toEqual(["undo move"])
+  })
+
+  it("offline, Undo and Redo of a switch are refused and the step is kept", async () => {
+    const state = { timing: { f1: "audioFirst" as FileTiming }, online: false }
+    const log: string[] = []
+    register(state, log)
+    recordTimingSwitch({ fileId: "f1", before: "dubbing", after: "audioFirst" }, {}, Promise.resolve(true))
+    await new Promise((r) => setTimeout(r, 0))
+    expect((await undoLast())?.outcome).toEqual({ kind: "blocked", reason: "offline" })
+    expect(log).toEqual([])
+    expect(historyView().nextUndo?.labelKey).toBe("editor.history.stepTimingFollowsRecordings")
+    state.online = true
+    expect((await undoLast())?.outcome).toEqual({ kind: "done" })
+    state.online = false
+    expect((await redoLast())?.outcome).toEqual({ kind: "blocked", reason: "offline" })
+    expect(historyView().nextRedo?.labelKey).toBe("editor.history.stepTimingFollowsRecordings")
+  })
+})
+
+// AQU-2492 (review, Nov 9), finding 11: "may this file follow that timing?"
+// is asked of THE resolver the file's timing is resolved by, with the file's
+// choice set to it. The switch and its Undo both ask it, so the rule (here: a
+// film-timed file always follows its source; a file with nothing to follow,
+// its recordings) lives in one place, and a branch that changes the resolver
+// changes both.
+describe("fileMayFollowTiming (AQU-2492)", () => {
+  const plain = { type: "source", timingMode: null, coreMediaUrl: undefined } as const
+  const film = { type: "source", timingMode: null, coreMediaUrl: "https://media.invalid/film.m3u8" } as const
+
+  it("a plain file may follow either", () => {
+    expect(fileMayFollowTiming(plain, undefined, {}, "audioFirst")).toBe(true)
+    expect(fileMayFollowTiming(plain, undefined, {}, "dubbing")).toBe(true)
+  })
+
+  it("asks the resolver: a mode is offered when choosing it is what the file would follow", () => {
+    for (const file of [plain, film]) {
+      for (const opts of [{}, { hasAudioCues: true }, { nothingToFollow: true }]) {
+        for (const mode of ["audioFirst", "dubbing"] as const) {
+          expect(fileMayFollowTiming(file, undefined, opts, mode)).toBe(
+            resolveFileTimingMode({ ...file, timingMode: mode }, undefined, opts) === mode,
+          )
+        }
+      }
+    }
+  })
+
+  it("a file with nothing to follow may not follow its source", () => {
+    expect(fileMayFollowTiming(plain, undefined, { nothingToFollow: true }, "dubbing")).toBe(false)
+  })
+
+  it("under this resolver, a film-timed file may not follow its recordings", () => {
+    expect(fileMayFollowTiming(film, undefined, {}, "audioFirst")).toBe(false)
+    expect(fileMayFollowTiming(plain, undefined, { hasAudioCues: true }, "audioFirst")).toBe(false)
   })
 })

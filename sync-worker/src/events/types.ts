@@ -100,6 +100,9 @@ export type EventKind =
   // AQU-1767: cut one dub piece in two at a point in its own audio. Both
   // pieces share the bytes, stay on the same row, and start unvalidated.
   | 'cell.audio.cut'
+  // AQU-2492: undo a cut — join the two pieces back into the take, and give
+  // it back the approvals it had before the cut. See the payload doc below.
+  | 'cell.audio.uncut'
   // Backfill a measured duration onto a take that predates duration capture.
   // Fills only a NULL duration_ms — never selects, never touches url/slot/
   // trims (a re-attach would re-select the clip and plain-assign trims).
@@ -789,6 +792,16 @@ export interface EventPayloads {
    * known end, and `atMs` lies at least CUT_MIN_PIECE_MS inside its window.
    * `newAudioId` is minted by the client so the step can be undone (remove it)
    * and a replay lands on the same row (ON CONFLICT DO NOTHING).
+   *
+   * AQU-2492 (review, Nov 9; Sam's call the same day): the approvals the
+   * piece had are no longer thrown away. They are ARCHIVED with the cut
+   * (`cell_audio_cut_votes`, kind 'whole') and come back when the cut is
+   * undone (`cell.audio.uncut`). And a cut naming as `newAudioId` the piece
+   * an undo of this very cut removed REDOES it: that piece comes back as it
+   * was, with its own approvals (a removed take keeps its votes), and the
+   * first piece gets back the approvals it had when the cut was undone. Only
+   * the history's Redo sends that; a cut by hand mints a new piece and gets
+   * nothing back.
    */
   'cell.audio.cut': {
     audioId: string
@@ -798,6 +811,38 @@ export interface EventPayloads {
     newLabel?: string
     /** Optional rename of the first piece in the same step ("Take 3 · 1"). */
     firstLabel?: string
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
+  /**
+   * AQU-2492 (review, Nov 9; Sam's call the same day): UNDO a cut, as one
+   * event (it used to be a remove, a trim and a rename, which could not
+   * carry the approvals). `pieceAudioId` — the piece the cut made — is
+   * removed (soft: its approvals stay on it, for a Redo); `audioId` — the
+   * piece the cut was made in — gets its whole window back (both ends stated,
+   * null = the clip's edge) and, with `rename`, its old name. Its approvals
+   * as the first piece are archived (kind 'first'), and the approvals the
+   * take had before the cut come back from the cut's archive — the voters'
+   * own rows, as they were, and only while it still plays the audio they
+   * were given to. Finding 3 (same review): the approvals move whenever the
+   * window does, also when `pieceAudioId` was removed since (by anyone): the
+   * joined take never keeps an approval given to its first half.
+   *
+   * AQU-2492 (review, Nov 9), finding 16: nothing at all happens unless the
+   * two are the halves of one recorded cut of one take — a `cell.audio.cut`
+   * in the log naming exactly this `audioId` and `pieceAudioId`, the take
+   * live, the piece still in its group, on the same track and in the same
+   * language. Any other pair is refused (no statement changes a row).
+   */
+  'cell.audio.uncut': {
+    audioId: string
+    pieceAudioId: string
+    trimStartMs: number | null
+    trimEndMs: number | null
+    /** Present when the cut renamed the first piece: its old name (null = none). */
+    rename?: { label: string | null }
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

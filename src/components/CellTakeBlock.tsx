@@ -43,6 +43,7 @@ import { keptWindowSec, piecesWindowSec, type KeptWindow } from "@/lib/audio/kep
 import { takeTrackVars } from "@/lib/timeline/take-colors"
 import { TRACK_DOT_CLASS } from "@/lib/timeline/track-colors"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
+import { pieceStretchOf, playingInSlot, recordTakeWindowRun } from "@/lib/history/take-steps"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeTake } from "@/lib/audio/transcribe-take"
 import { isGeneratedTake } from "@/lib/audio/track-audio"
@@ -272,6 +273,16 @@ function CellTakeBlockView({
   // that HOLDS the take — a linked heard-line take writes to its cue.
   const commitTrim = useCallback((start: number | null, end: number | null) => {
     if (!selectedAudioId || !attachment) return
+    // AQU-2492 (review, Nov 9): the same trim on the timeline is an Undo step,
+    // and here it was none, so ⌘Z straight after it undid something else
+    // (possibly on another line). The step and its guard are the timeline's.
+    const before = { trimStartMs: attachment.trimStartMs ?? undefined, trimEndMs: attachment.trimEndMs ?? undefined }
+    const after = { trimStartMs: trimMs(start) ?? undefined, trimEndMs: trimMs(end) ?? undefined }
+    // Finding 14 (same review): a held arrow key saves on every repeat; a run
+    // of them close together is one step.
+    if (before.trimStartMs !== after.trimStartMs || before.trimEndMs !== after.trimEndMs) {
+      recordTakeWindowRun({ cellId: owner.id, audioId: selectedAudioId, before, after }, { fileId: owner.fileId })
+    }
     void persistTakeTrim({
       projectId: project.id,
       fileId: owner.fileId,
@@ -330,6 +341,9 @@ function CellTakeBlockView({
     const trackTakes = Object.entries(owner.attachments ?? {})
       .filter(([id, a]) => !a.isDeleted && ownSlots.has(a.slot ?? RECORDING_SLOT) && !audioIdSeededWith(id, owner.fileId))
       .map(([audioId, a]) => ({ audioId, label: a.label ?? null, pieceOf: a.pieceOf ?? null, trimStartMs: a.trimStartMs ?? null }))
+    // AQU-2492 (review, Nov 9): an Undo step, naming what played in the slot
+    // before (the take in pieces), read outside the try for the compiler.
+    const history = { selectedBefore: playingInSlot(owner, slot) }
     try {
       await joinTakePieces({
         session,
@@ -341,6 +355,7 @@ function CellTakeBlockView({
         label: nextTakeLabel(trackTakes),
         ...(targetLang ? { targetLang } : {}),
         username,
+        history,
       })
     } catch (e) {
       failed = toUserFacingError(e).message
@@ -362,9 +377,12 @@ function CellTakeBlockView({
     setDeleting(true)
     const slot = attachment.slot ?? (selectedAudioId === owner.selectedGeneratedVoiceAudioId ? GENERATED_VOICE_SLOT : RECORDING_SLOT)
     const lane = targetLang ? { targetLang } : {}
-    const removal = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, slot, ...lane, author: username, history: { wasSelected: true } }
+    // AQU-2492 (review, Nov 9), finding 8: with who had approved it (each
+    // piece of a split take), so only an approval given after its Undo stops
+    // the Redo.
+    const removal = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, slot, ...lane, author: username, history: { wasSelected: true, approvedBy: attachment.validators ?? [], stretch: pieceStretchOf(selectedAudioId, attachment) } }
     // A split take goes whole, every piece in one step (Sam, 2026-10-14).
-    const removing = split ? split.map((piece) => ({ audioId: piece.audioId, slot: piece.slot ?? slot })) : null
+    const removing = split ? split.map((piece) => ({ audioId: piece.audioId, slot: piece.slot ?? slot, validators: piece.validators ?? [] })) : null
     const remove = removing
       ? () => removeWholeTake({ ...removal, pieces: removing })
       : () => removeTake(removal)

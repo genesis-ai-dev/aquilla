@@ -62,6 +62,8 @@ export type OutboxEventKind =
   | "cell.audio.place"
   // AQU-1767: cut one dub piece in two (contributor, like trim).
   | "cell.audio.cut"
+  // AQU-2492: undo a cut, keeping the approvals (contributor, like the cut).
+  | "cell.audio.uncut"
   | "cell.audio.measure"
   // AQU-777: per-cell file attachments (screenshots / reference images).
   // Contributor-level, non-chain-mutating. The bytes are already in R2 by the
@@ -574,6 +576,25 @@ export interface OutboxEventPayloads {
     newAudioId: string
     newLabel?: string
     firstLabel?: string
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
+  /**
+   * AQU-2492 (review, Nov 9): UNDO a cut, as one event. The server removes
+   * `pieceAudioId` (the piece the cut made; it keeps its approvals, for a
+   * Redo), gives `audioId` its whole window and, with `rename`, its old name
+   * back, keeps the first piece's approvals with this undo, and gives the take
+   * back the approvals it had before the cut. A Redo is a `cell.audio.cut`
+   * naming the same `pieceAudioId` again. See sync-worker/src/events/types.ts.
+   */
+  "cell.audio.uncut": {
+    audioId: string
+    pieceAudioId: string
+    trimStartMs: number | null
+    trimEndMs: number | null
+    rename?: { label: string | null }
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

@@ -19,6 +19,7 @@ import { attachUploadedTake, OFFLINE_MESSAGE } from "@/lib/audio/attach-file"
 import { keptTakePlace } from "@/lib/audio/new-take-place"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { recordTakeAdded } from "@/lib/history/take-steps"
 
 export interface JoinPiece {
   audioId: string
@@ -70,6 +71,28 @@ export interface JoinPiecesArgs {
    *  new take — the caller works it out with `nextTakeLabel` over the line's
    *  takes on this track. */
   label?: string
+  /** AQU-2492 (review, Nov 9): record an Undo step for the joined take,
+   *  naming the take that played in its slot before (the take in pieces). */
+  history?: { selectedBefore: string | null }
+}
+
+/**
+ * The joined take is an added take: Undo takes it away and plays the pieces
+ * again. AQU-2492 (review, Nov 9), finding 15: recorded as the join STARTS,
+ * waiting on it (`landed`), so ⌘Z pressed while it decodes and uploads waits
+ * for it and undoes the join, never an older step. A failed join drops it.
+ */
+function recordJoined(args: JoinPiecesArgs, audioId: string): (ok: boolean) => void {
+  if (!args.history) return () => {}
+  let landed: (ok: boolean) => void = () => {}
+  const pending = new Promise<boolean>((resolve) => { landed = resolve })
+  recordTakeAdded(
+    "join",
+    { cellId: args.cellId, audioId, slot: args.slot, selectedBefore: args.history.selectedBefore },
+    { fileId: args.fileId },
+    { pending },
+  )
+  return landed
 }
 
 async function bytesOf(url: string, args: JoinPiecesArgs, getSyncToken: ReturnType<typeof audioSyncTokenFetcherForSession>): Promise<Uint8Array> {
@@ -102,10 +125,32 @@ export async function joinTakePieces(args: JoinPiecesArgs): Promise<string> {
   }
 
   const whole = wholeRecordingOf(args.pieces)
+  // AQU-2492 (review, Nov 9), finding 15: the joined take's id, minted before
+  // any work, so its Undo step can be recorded as the join starts.
+  const baseId = buildAudioId(args.cellId)
+  const ext = whole ? (parseFrontierAudioUrl(whole)?.ext ?? "wav") : "wav"
+  const audioId = `${baseId}.${ext}`
+  const landed = recordJoined(args, audioId)
+  try {
+    await joinAs(args, getSyncToken, common, whole, baseId, audioId)
+  } catch (e) {
+    landed(false)
+    throw e
+  }
+  notifyAudioAttachmentsChanged(args.fileId)
+  landed(true)
+  return audioId
+}
+
+async function joinAs(
+  args: JoinPiecesArgs,
+  getSyncToken: ReturnType<typeof audioSyncTokenFetcherForSession>,
+  common: Omit<Parameters<typeof attachUploadedTake>[0], "audioId" | "url" | "mimeType" | "durationMs">,
+  whole: string | null,
+  baseId: string,
+  audioId: string,
+): Promise<void> {
   if (whole) {
-    const parsed = parseFrontierAudioUrl(whole)
-    const ext = parsed?.ext ?? "wav"
-    const audioId = `${buildAudioId(args.cellId)}.${ext}`
     const last = [...args.pieces].sort((a, b) => (b.trimEndMs ?? Infinity) - (a.trimEndMs ?? Infinity))[0]
     await attachUploadedTake({
       ...common,
@@ -114,8 +159,7 @@ export async function joinTakePieces(args: JoinPiecesArgs): Promise<string> {
       mimeType: args.pieces[0].mimeType ?? undefined,
       durationMs: last.durationMs ?? last.trimEndMs ?? undefined,
     })
-    notifyAudioAttachmentsChanged(args.fileId)
-    return audioId
+    return
   }
 
   const { decodeToMono48k, concatPcm, TARGET_RATE } = await import("@/lib/audio/decode-mono")
@@ -134,15 +178,13 @@ export async function joinTakePieces(args: JoinPiecesArgs): Promise<string> {
   }
   const joined = concatPcm(parts)
   const blob = encodeWavPcm16(joined, TARGET_RATE)
-  const result = await uploadCellAudio({ projectId: args.projectId, fileId: args.fileId, audioId: buildAudioId(args.cellId), ext: "wav", blob, getSyncToken })
-  const audioId = `${result.audioId}.${result.ext}`
+  const result = await uploadCellAudio({ projectId: args.projectId, fileId: args.fileId, audioId: baseId, ext: "wav", blob, getSyncToken })
   await attachUploadedTake({
     ...common,
+    // The id the step names: the upload stores the bytes under it.
     audioId,
     url: result.url,
     mimeType: "audio/wav",
     durationMs: Math.round((joined.length / TARGET_RATE) * 1000),
   })
-  notifyAudioAttachmentsChanged(args.fileId)
-  return audioId
 }

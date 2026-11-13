@@ -152,6 +152,8 @@ export const AUDIO_COUNTING_EVENT_KINDS = [
   'cell.audio.select',
   'cell.audio.remove',
   'cell.audio.cut',
+  // AQU-2492: removes the cut's piece and moves the take's votes.
+  'cell.audio.uncut',
   'cell.audio.validate',
   'cell.audio.unvalidate',
 ] as const

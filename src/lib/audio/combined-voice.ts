@@ -29,6 +29,9 @@ import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { bornTakePlace, placeNewTake } from "./new-take-place"
 import { notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
+import { completeStep, recordGroup, type StepRecord } from "@/lib/history/history"
+import { playingInSlot, TAKE_ADD_LABELS, type TakeAddData } from "@/lib/history/take-steps"
+import { GENERATED_VOICE_SLOT } from "@/lib/timeline/track-slots"
 import { synthesizeServerTts } from "./server-tts"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { laneLanguageForTag, sourceLaneLanguage } from "@/lib/lanes/lane-language"
@@ -111,6 +114,36 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
   // project-level pair (AQU-1594/1595), which is empty on a new project.
   const targetLanguage = laneLanguageForTag(args.targetLang ?? "", project.lanes) ?? undefined
   const sourceLanguage = sourceLaneLanguage(project.lanes) ?? undefined
+
+  // AQU-2492 (review, Nov 9): voicing lines together left no Undo step, so
+  // ⌘Z after it undid something else. It is ONE step: on every line the
+  // clip is an added voice, and Undo takes it away again and gives the line
+  // back the voice that played before it, with the added-voice rules (a
+  // line whose voice someone has approved or worked on since keeps it).
+  // Finding 15 (same review): recorded as it STARTS, waiting on it, so ⌘Z
+  // pressed during the seconds it takes waits for it and undoes it, never an
+  // older step (whose Redo it would then have cleared). The clip's id is
+  // filled in when it lands; a failed run drops the step.
+  let landed: (ok: boolean) => void = () => {}
+  const stepId = recordGroup(
+    { labelKey: "editor.history.stepVoiceTogether", fileId },
+    chosen.map((c) => ({
+      kind: "take.add",
+      data: {
+        cellId: c.id,
+        audioId: "",
+        slot: GENERATED_VOICE_SLOT,
+        selectedBefore: playingInSlot(c, GENERATED_VOICE_SLOT),
+        // Finding 13: attached whole. Once the divider editor (or anyone)
+        // sets the line's slice, the Undo is skipped as "changed since" —
+        // never applied over the slices.
+        window: {},
+      } satisfies TakeAddData,
+      labelKey: TAKE_ADD_LABELS.generate,
+      fileId,
+    })),
+    { pending: new Promise<boolean>((resolve) => { landed = resolve }) },
+  )
 
   setAll({ kind: "synthesizing" })
   try {
@@ -229,6 +262,13 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
       })
     }
     notifyAudioAttachmentsChanged(fileId)
+    // AQU-2492: the step names the clip now that it exists.
+    if (stepId) {
+      completeStep(stepId, (data) => ({
+        steps: (data as { steps: StepRecord<TakeAddData>[] }).steps.map((part) => ({ ...part, data: { ...part.data, audioId: objectName } })),
+      }))
+    }
+    landed(true)
     setAll({ kind: "idle" })
     return {
       audioId: objectName,
@@ -238,6 +278,7 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
       truncated,
     }
   } catch (e) {
+    landed(false)
     setAll({ kind: "error", message: e instanceof Error ? e.message : String(e) })
     throw e
   }

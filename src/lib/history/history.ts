@@ -57,7 +57,9 @@ export type StepOutcome =
   | { kind: "done"; partial?: { skipped: number } }
   | { kind: "skipped"; reason: SkipReason; by?: string }
   // `elsewhere`: its file is not open. `language`: its language could not be opened.
-  | { kind: "blocked"; reason: "elsewhere" | "language" }
+  // `offline` (AQU-2492, review Nov 9): it can only be written online, like the
+  // change itself (a file's timing).
+  | { kind: "blocked"; reason: "elsewhere" | "language" | "offline" }
   // Another device of the same person undid or redid it first (decision 11):
   // nothing was written here, and the history now shows where it stands.
   | { kind: "moved" }
@@ -731,30 +733,63 @@ function toRecord<D>(input: StepInput<D>, key: string, now = stampFor(stacksFor(
  * it was refused) to record it the moment the action starts: an Undo pressed
  * while the action is still saving must undo THAT action, not the step before
  * it (slow-network pass, 2026-10-13).
+ *
+ * Returns the step's id (null when there is no history to record into).
+ * AQU-2492 (review, Nov 9), findings 5 and 15: an action that learns what it
+ * made only when it ends (a generated clip's id) records its step at the
+ * start with `pending`, and fills it in with {@link completeStep} before
+ * resolving it.
  */
 export function recordStep<D>(
   input: StepInput<D>,
   scope?: { projectId: string; username: string },
   opts?: { pending?: Promise<boolean> },
-): void {
+): string | null {
   const key = scope ? scopeKey(scope.projectId, scope.username) : activeScope
-  if (!key) return
+  if (!key) return null
   const record = toRecord(input, key)
   recordedHere.set(record.id, input.at ?? Date.now())
   if (opts?.pending) {
     const pending = opts.pending.catch(() => false)
     pendingWrites.set(record.id, pending)
+    pendingScopes.set(record.id, key)
     void pending.then((ok) => {
       pendingWrites.delete(record.id)
+      pendingScopes.delete(record.id)
       if (!ok) dropRecord(key, record.id)
     })
   }
   const group = key === activeScope ? groupFor(record as StepRecord) : undefined
   if (group) {
     group.buffer.push(record as StepRecord)
-    return
+    return record.id
   }
   pushRecord(record as StepRecord, key)
+  return record.id
+}
+
+/** Which history a step still waiting on its action was recorded into. */
+const pendingScopes = new Map<string, string>()
+
+/**
+ * AQU-2492 (review, Nov 9): fill in a step recorded at its action's start
+ * (`recordStep(…, { pending })`) once the action knows what it made — before
+ * resolving `pending`, so an Undo waiting on it runs with the filled data.
+ * Looked up by id wherever it sits now (a merge from another device may have
+ * replaced the record), and saved. A step no longer held is left alone.
+ */
+export function completeStep(id: string, update: (data: unknown) => unknown): void {
+  const key = pendingScopes.get(id) ?? activeScope
+  const s = key ? stacks.get(key) : undefined
+  if (!key || !s) return
+  for (const list of [s.undo, s.redo]) {
+    const record = list.find((r) => r.id === id)
+    if (!record) continue
+    record.data = update(record.data)
+    scheduleSave(key)
+    emit()
+    return
+  }
 }
 
 /** A recorded step whose action was refused: take it off whichever stack holds it. */
@@ -869,19 +904,22 @@ export async function withGroup<T>(
 export function recordGroup(
   label: { labelKey: string; labelParams?: Record<string, string | number>; fileId?: string | null; fileName?: string | null },
   parts: ReadonlyArray<StepInput>,
-): void {
-  if (parts.length === 0 || !activeScope) return
+  /** AQU-2492 (review, Nov 9): as {@link recordStep}'s — the group recorded
+   *  at its action's start, waited on by an Undo, dropped if it fails. */
+  opts?: { pending?: Promise<boolean> },
+): string | null {
+  if (parts.length === 0 || !activeScope) return null
   const key = activeScope
   const now = stampFor(stacksFor(key))
   const steps: StepRecord[] = parts.map((p) => toRecord(p, key, now))
-  recordStep({
+  return recordStep({
     kind: GROUP_KIND,
     data: { steps },
     labelKey: label.labelKey,
     labelParams: label.labelParams,
     fileId: label.fileId ?? steps[0].fileId ?? null,
     fileName: label.fileName ?? steps[0].fileName ?? null,
-  })
+  }, undefined, opts)
 }
 
 // ── Running ─────────────────────────────────────────────────────────────────
@@ -1222,6 +1260,7 @@ export function resetHistoryForTests(): void {
   busy = false
   queue = Promise.resolve()
   pendingWrites.clear()
+  pendingScopes.clear()
   recordedHere.clear()
   openFileProbe = null
   laneSwitcher = null

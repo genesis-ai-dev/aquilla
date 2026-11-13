@@ -59,6 +59,7 @@ const NAMED_LANE_KINDS = new Set<string>([
   "cell.audio.gain",
   "cell.audio.place",
   "cell.audio.cut",
+  "cell.audio.uncut",
   "cell.audio.measure",
   "cell.audio.validate",
   "cell.audio.unvalidate",

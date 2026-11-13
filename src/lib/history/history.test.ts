@@ -2,6 +2,7 @@
 // steps as data, groups, "undo to here", blocked steps and persistence.
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import {
+  completeStep,
   flushHistorySaveForTests,
   historyReady,
   historyView,
@@ -119,6 +120,63 @@ describe("edit history", () => {
     refused(false)
     await new Promise((r) => setTimeout(r, 0))
     expect(historyView().nextUndo?.labelKey).toBe("a")
+  })
+
+  // AQU-2492 (review, Nov 9), findings 5 and 15: an action that names what it
+  // made only when it ends (a generated clip's id) is recorded when it STARTS,
+  // and fills its step in when it lands. An Undo pressed meanwhile waits for
+  // it and undoes THAT action, never the step before it.
+  it("a step recorded at an action's start is filled in when it lands, and the undo waiting for it sees the filled data", async () => {
+    const seen: unknown[] = []
+    registerStepKinds({
+      "test.made": {
+        undo: async (d: unknown) => { seen.push(d); return { kind: "done" } },
+        redo: async () => ({ kind: "done" }),
+      } as StepHandler<never>,
+    })
+    recordStep(step("older"))
+    let landed: (ok: boolean) => void = () => {}
+    const id = recordStep(
+      { kind: "test.made", data: { made: "" }, labelKey: "made" },
+      undefined,
+      { pending: new Promise<boolean>((r) => { landed = r }) },
+    )
+    expect(typeof id).toBe("string")
+    const press = undoLast()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(seen).toEqual([])
+    completeStep(id!, () => ({ made: "clip-7.wav" }))
+    landed(true)
+    expect((await press)?.step.labelKey).toBe("made")
+    expect(seen).toEqual([{ made: "clip-7.wav" }])
+    expect(historyView().nextUndo?.labelKey).toBe("older")
+    // Saved filled in: a reload has it.
+    await flushHistorySaveForTests()
+    resetHistoryForTests()
+    setHistoryScope("p1", "sam")
+    await historyReady()
+    expect(historyView().nextRedo?.labelKey).toBe("made")
+  })
+
+  it("a group recorded at its action's start waits the same way, and is dropped if the action fails", async () => {
+    const log: string[] = []
+    registerStepKinds({ "test.log": logKind(log) })
+    recordStep(step("older"))
+    let landed: (ok: boolean) => void = () => {}
+    const id = recordGroup({ labelKey: "together" }, [step("x"), step("y")], { pending: new Promise<boolean>((r) => { landed = r }) })
+    const press = undoLast()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(log).toEqual([])
+    completeStep(id!, (d) => ({ steps: (d as { steps: Array<{ data: { name: string } }> }).steps.map((s) => ({ ...s, data: { name: `${s.data.name}!` } })) }))
+    landed(true)
+    expect((await press)?.step.labelKey).toBe("together")
+    expect(log).toEqual(["undo y!", "undo x!"])
+
+    let failed: (ok: boolean) => void = () => {}
+    recordGroup({ labelKey: "again" }, [step("z")], { pending: new Promise<boolean>((r) => { failed = r }) })
+    failed(false)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(historyView().nextUndo?.labelKey).toBe("older")
   })
 
   it("a step being undone is saved as undone already, so a reload doesn't offer it again", async () => {

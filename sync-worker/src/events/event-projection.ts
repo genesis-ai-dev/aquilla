@@ -48,6 +48,15 @@ import { visibleCellIdSql, visibleSourceSql } from './hidden-cells-scope'
 import { liveCellIdSql, liveSourceSql } from './tombstoned-cells-scope'
 import { coerceExternalIds } from '../../../src/lib/terminology/external-ids'
 import { buildRemovedCellArchiveStmt, buildRemovedCellRestoreStmts } from './removed-cell-archive'
+import {
+  CUT_LEVEL_UNCHANGED_SQL,
+  cutLevelRestoreStmt,
+  cutLevelUnchangedBinds,
+  cutVoteArchiveStmt,
+  cutVoteRestoreStmt,
+  RECORDED_CUT_PAIR_SQL,
+  recordedCutPairBinds,
+} from './cut-vote-archive'
 
 export { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
 import { buildFileRevisionIndexStmts } from './file-revision-sql'
@@ -733,6 +742,13 @@ export function buildEventProjectionStmts(
      * current-head validators. Default 1 (N=1 projects: byte-identical behavior).
      */
     validationCount?: number
+    /**
+     * AQU-2492 (review, Nov 9), finding 12: this is a projection rebuild's
+     * replay (rebuild.ts) — the event happened live already, over the rows as
+     * they were then. What only its live write may keep (a cut's vote archive,
+     * cut-vote-archive.ts) is not written again from today's rows.
+     */
+    rebuild?: boolean
   },
 ): ProjectionTouches[] {
   // AQU-927: one un-rounded ms value would otherwise reject the whole batch.
@@ -2468,6 +2484,10 @@ case 'cell.audio.attach': {
       //   2-4. ONLY IF step 1's row exists with THIS event's id: shorten the
       //      original to [old start, atMs], drop its votes, recount them.
       //      Gating on the new row means a refused cut changes nothing at all.
+      // AQU-2492 (review, Nov 9): the votes are ARCHIVED, not thrown away
+      // (cut-vote-archive.ts), and a cut naming the piece an undo of it
+      // removed is that cut's Redo: the piece comes back (step 0) and the
+      // first piece gets back the votes it had when the cut was undone.
       const p = event.payload as EventPayloads['cell.audio.cut']
       if (!event.fileId || !event.cellId) {
         throw new Error(`cell.audio.cut event ${event.id} is missing fileId or cellId`)
@@ -2483,6 +2503,36 @@ case 'cell.audio.attach': {
         throw new Error(`cell.audio.cut event ${event.id} has a malformed payload`)
       }
       const atMs = Math.round(p.atMs)
+      const cutEvent = { id: event.id, projectId: event.projectId, fileId: event.fileId, cellId: event.cellId, serverTs: event.serverTs, serverSeq: event.serverSeq }
+      // 0. AQU-2492: the Redo. The piece is a removed piece of this take,
+      //    over the same bytes, starting at the cut and running to the take's
+      //    end — exactly as the undo left it — and the cut is one this take
+      //    can take now. It comes back as it was (name, places, level, its
+      //    own votes), chosen as the take is, and owned by this event, so
+      //    the gate below reads it as landed.
+      //    Finding 7 (review, Nov 9): and the take still has the volume and
+      //    fades the Undo gave it back. A level changed on the joined take
+      //    since is work the Redo would split wrongly (the second piece would
+      //    come back at the old level), so the Redo changes nothing.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio b SET deleted = 0, selected = a.selected, event_id = ?
+               FROM cell_audio a
+              WHERE b.project_id = ? AND b.file_id = ? AND b.cell_id = ? AND b.audio_id = ?
+                AND b.deleted = 1
+                AND a.project_id = b.project_id AND a.file_id = b.file_id AND a.cell_id = b.cell_id
+                AND a.audio_id = ? AND a.deleted = 0 AND a.role = 'dub'
+                AND b.piece_of = COALESCE(a.piece_of, a.audio_id)
+                AND b.url = a.url
+                AND b.trim_start_ms = ?
+                AND b.trim_end_ms IS NOT DISTINCT FROM a.trim_end_ms
+                AND ? >= COALESCE(a.trim_start_ms, 0) + ${CUT_MIN_PIECE_MS}
+                AND ? <= COALESCE(a.trim_end_ms, a.duration_ms) - ${CUT_MIN_PIECE_MS}
+                AND ${CUT_LEVEL_UNCHANGED_SQL}`,
+          )
+          .bind(event.id, event.projectId, event.fileId, event.cellId, p.newAudioId, p.audioId, atMs, atMs, atMs, ...cutLevelUnchangedBinds(cutEvent)),
+      )
       stmts.push(
         db
           .prepare(
@@ -2522,6 +2572,18 @@ case 'cell.audio.attach': {
                           WHERE n.project_id = ? AND n.file_id = ? AND n.cell_id = ?
                             AND n.audio_id = ? AND n.event_id = ?)`
       const cutLandedBinds = [event.projectId, event.fileId, event.cellId, p.newAudioId, event.id]
+      // AQU-2492: the take's votes are kept with the cut, for its Undo, and
+      // (finding 7) its volume and fades with them — read here, before any
+      // statement below changes the take (AQU-2494 moves its fade-out to the
+      // second piece in the next one).
+      // Finding 12 (same review): never on a rebuild. A cut the live write
+      // archived has its row already; a cut made before this worker archived
+      // nothing, and archiving it now would keep TODAY's votes on the first
+      // piece (its first half's among them) as the take's from before the
+      // cut. Its Undo then gives back nothing, which is what was kept.
+      if (!opts?.rebuild) {
+        stmts.push(cutVoteArchiveStmt(db, cutEvent, { pieceId: p.newAudioId, audioId: p.audioId, kind: 'whole', gate: cutLanded, gateBinds: cutLandedBinds }))
+      }
       stmts.push(
         db
           .prepare(
@@ -2541,6 +2603,7 @@ case 'cell.audio.attach': {
       )
       // Both halves start unvalidated (Sam, 2026-10-12): what a reviewer
       // approved was the whole take, and neither half is that any more.
+      // AQU-2492: kept with the cut (above), for its Undo — then taken off.
       stmts.push(
         db
           .prepare(
@@ -2550,6 +2613,98 @@ case 'cell.audio.attach': {
           )
           .bind(event.projectId, event.fileId, event.cellId, p.audioId, ...cutLandedBinds),
       )
+      // AQU-2492: a Redo gives the first piece the votes it had when the cut
+      // was undone. A new cut has no such archive, so its halves start bare.
+      stmts.push(cutVoteRestoreStmt(db, cutEvent, { pieceId: p.newAudioId, audioId: p.audioId, kind: 'first', gate: cutLanded, gateBinds: cutLandedBinds }))
+      stmts.push(audioValidatorCountRecomputeStmt(db, event.projectId, event.fileId, event.cellId, p.audioId))
+      return ['cell_audio', 'cell_audio_validators']
+    }
+
+    case 'cell.audio.uncut': {
+      // AQU-2492 (review, Nov 9; Sam's call the same day): undo a cut, as ONE
+      // event. See the payload doc in types.ts and cut-vote-archive.ts.
+      //   1-3. Keep the first piece's votes with this undo (for a Redo), take
+      //        them off, and give the take back the votes the cut archived.
+      //   4.   Remove the piece (soft: its votes stay on it, for a Redo).
+      //   5-6. Give the first piece its whole window (and name) back.
+      // AQU-2492 (review, Nov 9), finding 16: all of it only when the two are
+      // the halves of one recorded cut of this take (RECORDED_CUT_PAIR_SQL);
+      // any other pair changes nothing.
+      const p = event.payload as EventPayloads['cell.audio.uncut']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.audio.uncut event ${event.id} is missing fileId or cellId`)
+      }
+      if (
+        typeof p.audioId !== 'string' ||
+        typeof p.pieceAudioId !== 'string' ||
+        p.pieceAudioId === '' ||
+        p.pieceAudioId === p.audioId
+      ) {
+        throw new Error(`cell.audio.uncut event ${event.id} has a malformed payload`)
+      }
+      const uncutEvent = { id: event.id, projectId: event.projectId, fileId: event.fileId, cellId: event.cellId, serverTs: event.serverTs, serverSeq: event.serverSeq }
+      // AQU-2492 (review, Nov 9), finding 16: every statement below runs only
+      // when the two are the halves of one recorded cut of this take. Checked
+      // afresh by each statement; none of them changes what it reads (the
+      // piece may be removed, and the take stays live).
+      // Finding 3: and the approvals move whenever the window does. They used
+      // to move only while the piece was live, so a colleague's delete of it
+      // just before the Undo landed joined the take with its FIRST HALF's
+      // approval on it and none of its own back. The joined take is the audio
+      // the whole take's reviewers heard: it gets their approvals back, and
+      // the first half's are kept with this undo, for a Redo.
+      const cutPair = RECORDED_CUT_PAIR_SQL
+      const cutPairBinds = recordedCutPairBinds(uncutEvent, p.audioId, p.pieceAudioId)
+      const votesGate = cutPair
+      const votesGateBinds = cutPairBinds
+      // Finding 12: the live write's archive only, never a rebuild's (see the cut).
+      if (!opts?.rebuild) {
+        stmts.push(cutVoteArchiveStmt(db, uncutEvent, { pieceId: p.pieceAudioId, audioId: p.audioId, kind: 'first', gate: votesGate, gateBinds: votesGateBinds }))
+      }
+      stmts.push(
+        db
+          .prepare(
+            `DELETE FROM cell_audio_validators
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+                AND ${votesGate}`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId, p.audioId, ...votesGateBinds),
+      )
+      stmts.push(cutVoteRestoreStmt(db, uncutEvent, { pieceId: p.pieceAudioId, audioId: p.audioId, kind: 'whole', gate: votesGate, gateBinds: votesGateBinds }))
+      // Finding 7 (same review): and the volume and fades it had before the
+      // cut, kept with the same archive (AQU-2494 moves the fade-out to the
+      // second piece, so the first piece's level is not the take's). A cut
+      // that kept none leaves the level as it is.
+      stmts.push(cutLevelRestoreStmt(db, uncutEvent, { pieceId: p.pieceAudioId, audioId: p.audioId, kind: 'whole', gate: cutPair, gateBinds: cutPairBinds }))
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET deleted = 1, selected = 0
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+                AND ${cutPair}`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId, p.pieceAudioId, ...cutPairBinds),
+      )
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET trim_start_ms = ?, trim_end_ms = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+                AND ${cutPair}`,
+          )
+          .bind(p.trimStartMs ?? null, p.trimEndMs ?? null, event.projectId, event.fileId, event.cellId, p.audioId, ...cutPairBinds),
+      )
+      if (p.rename) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_audio SET label = ?
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+                  AND ${cutPair}`,
+            )
+            .bind(p.rename.label ?? null, event.projectId, event.fileId, event.cellId, p.audioId, ...cutPairBinds),
+        )
+      }
       stmts.push(audioValidatorCountRecomputeStmt(db, event.projectId, event.fileId, event.cellId, p.audioId))
       return ['cell_audio', 'cell_audio_validators']
     }

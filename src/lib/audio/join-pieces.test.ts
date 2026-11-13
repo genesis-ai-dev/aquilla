@@ -21,6 +21,17 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioPlace: vi.fn(async (input: Record<string, unknown>) => { places.push(input); return "ev-place" }),
 }))
 vi.mock("@/lib/audio/audio-attachments-bus", () => ({ injectOptimisticAudioAttachment: vi.fn(), notifyAudioAttachmentsChanged: vi.fn() }))
+// AQU-2492 (review, Nov 9): the Undo steps a join records.
+const steps = vi.hoisted(() => [] as Array<Record<string, unknown>>)
+const pendings = vi.hoisted(() => [] as Array<Promise<boolean> | undefined>)
+vi.mock("@/lib/history/history", async (orig) => ({
+  ...(await orig<typeof import("@/lib/history/history")>()),
+  recordStep: (step: Record<string, unknown>, _scope?: unknown, opts?: { pending?: Promise<boolean> }) => {
+    steps.push(step)
+    pendings.push(opts?.pending)
+    return "step-id"
+  },
+}))
 vi.mock("@/lib/audio/sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "token" }))
 vi.mock("@/lib/audio/decode-mono", () => ({
   TARGET_RATE: 1000,
@@ -46,6 +57,8 @@ beforeEach(() => {
   places.length = 0
   uploads.length = 0
   attaches.length = 0
+  steps.length = 0
+  pendings.length = 0
 })
 
 describe("wholeRecordingOf", () => {
@@ -99,6 +112,66 @@ describe("joinTakePieces", () => {
     // 200 ms + 400 ms of a 1 kHz "recording".
     expect(uploads).toEqual([expect.objectContaining({ ext: "wav", size: 600 })])
     expect(attaches).toEqual([expect.objectContaining({ durationMs: 600, mimeType: "audio/wav", url: expect.stringMatching(/^frontier-audio:\/\/audio-c1-/) })])
+  })
+
+  // AQU-2492 (review, Nov 9): joining left no Undo step, so ⌘Z after it undid
+  // something else. Both ways of joining record the joined take as added:
+  // Undo takes it away and the take in pieces plays again.
+  it("records the joined take as an Undo step, on both ways of joining", async () => {
+    const history = { selectedBefore: "a.wav" }
+    const tiled = await joinTakePieces({ ...args, history, pieces: [
+      { audioId: "a.wav", url: URL_A, trimStartMs: null, trimEndMs: 300, durationMs: 1200 },
+      { audioId: "b.wav", url: URL_A, trimStartMs: 300, trimEndMs: null, durationMs: 1200 },
+    ] })
+    const uploaded = await joinTakePieces({ ...args, history, pieces: [
+      { audioId: "a.wav", url: URL_A, trimStartMs: 100, trimEndMs: 300 },
+      { audioId: "b.wav", url: URL_A, trimStartMs: 500, trimEndMs: 900 },
+    ] })
+    expect(steps).toEqual([tiled, uploaded].map((audioId) => expect.objectContaining({
+      kind: "take.add",
+      labelKey: "editor.history.stepJoinTake",
+      fileId: "f1",
+      data: { cellId: "c1", audioId, slot: "recording", selectedBefore: "a.wav" },
+    })))
+  })
+
+  // AQU-2492 (review, Nov 9), finding 15: recorded when the join STARTS,
+  // waiting on it — ⌘Z pressed while it decodes and uploads waits for it and
+  // undoes the join, never an older step. A failed join leaves no step.
+  it("records its step as it starts, before the upload, waiting on the join", async () => {
+    const { uploadCellAudio } = await import("@/lib/audio/upload")
+    let stepsAtUpload = -1
+    vi.mocked(uploadCellAudio).mockImplementationOnce(async (a: { audioId: string; ext: string; blob: Blob }) => {
+      stepsAtUpload = steps.length
+      return { audioId: a.audioId, ext: a.ext, url: `frontier-audio://${a.audioId}.${a.ext}`, sizeBytes: a.blob.size }
+    })
+    const id = await joinTakePieces({ ...args, history: { selectedBefore: "a.wav" }, pieces: [
+      { audioId: "a.wav", url: URL_A, trimStartMs: 100, trimEndMs: 300 },
+      { audioId: "b.wav", url: URL_A, trimStartMs: 500, trimEndMs: 900 },
+    ] })
+    expect(stepsAtUpload).toBe(1)
+    expect(steps[0]).toMatchObject({ kind: "take.add", data: { audioId: id } })
+    expect(attaches[0]).toMatchObject({ audioId: id })
+    expect(await pendings[0]).toBe(true)
+  })
+
+  it("a join that fails leaves its step to be dropped", async () => {
+    const { uploadCellAudio } = await import("@/lib/audio/upload")
+    vi.mocked(uploadCellAudio).mockRejectedValueOnce(new Error("audio upload failed (500)"))
+    await expect(joinTakePieces({ ...args, history: { selectedBefore: "a.wav" }, pieces: [
+      { audioId: "a.wav", url: URL_A, trimStartMs: 100, trimEndMs: 300 },
+      { audioId: "b.wav", url: URL_A, trimStartMs: 500, trimEndMs: 900 },
+    ] })).rejects.toThrow(/upload failed/)
+    expect(steps).toHaveLength(1)
+    expect(await pendings[0]).toBe(false)
+  })
+
+  it("records nothing when no step is asked for", async () => {
+    await joinTakePieces({ ...args, pieces: [
+      { audioId: "a.wav", url: URL_A, trimStartMs: null, trimEndMs: 300, durationMs: 1200 },
+      { audioId: "b.wav", url: URL_A, trimStartMs: 300, trimEndMs: null, durationMs: 1200 },
+    ] })
+    expect(steps).toEqual([])
   })
 })
 

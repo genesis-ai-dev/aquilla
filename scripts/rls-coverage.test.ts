@@ -142,6 +142,10 @@ const UNCOVERED: Record<string, string> = {
   // undone. Written and read only by the sync-worker's projection of
   // source.cell.delete / source.cell.restore; no app read path touches it.
   removed_cell_archive: "never granted to app_runtime",
+  // AQU-2492 (0199): the approvals a cut or its undo took off a take, kept so
+  // the cut can be undone and redone with them. Written and read only by the
+  // sync-worker's projection of cell.audio.cut / cell.audio.uncut.
+  cell_audio_cut_votes: "never granted to app_runtime",
   // Decision 11 (0191): each person's undo history for a project, read and
   // written only by auth-worker's /edit-history route for the caller's own row.
   edit_histories: "never granted to app_runtime",

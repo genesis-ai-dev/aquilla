@@ -601,7 +601,11 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     if (isBusy || !onVoiceTogether) return
     setRunning({ kind: "voice" })
     try {
-      await onVoiceTogether(selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()))
+      // AQU-2492 (review, Nov 9), finding 2: with their audio merged in. Its
+      // Undo gives each line back the voice it played before, read off these
+      // cells, and store cells carry no audio: a line with its own AI voice
+      // was left silent.
+      await onVoiceTogether(selectedCellsWithAudio.filter((c) => c.type !== "paratext" && c.translated.trim()))
     } catch (err) {
       // A failed "Voice together" used to end here as an unhandled rejection
       // with nothing on screen. The rows keep their own error badge with "Try
@@ -632,7 +636,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, onVoiceTogether, isBusy, t, project.id, analytics])
+  }, [selectedCellsWithAudio, onVoiceTogether, isBusy, t, project.id, analytics])
 
   const onValidate = useCallback(async () => {
     if (isBusy) return

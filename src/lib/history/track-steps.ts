@@ -77,6 +77,104 @@ function patchFor(from: TrackFields | null, to: TrackFields | null): TrackFields
   return patch
 }
 
+// ── What a track is NOW, before the project read has caught up ─────────────
+//
+// AQU-2492 (review, Nov 9): the "changed since?" guard read the last SETTLED
+// track list. A change is written first and read back later (seconds on a
+// hotspot), so an Undo pressed straight after deleting a track still saw the
+// track there, called it "changed since", and threw the step away — and with
+// it the only way back to the track's recordings. The same lost the Undo of a
+// quick rename, reorder, colour or "Sets line lengths" change. Films already
+// keep "written here, not read back yet" (`filmNow`); this is that, per track.
+
+/** Changes written to one track from here that the project read has not shown yet. */
+export interface PendingTrack {
+  /** What the read said when the oldest of them was written. */
+  readBefore: TrackFields | null
+  /** What the track is after each write, oldest first (null = deleted). */
+  states: Array<TrackFields | null>
+}
+
+/** The same track, field for field (a missing field and null are the same). */
+function sameTrack(a: TrackFields | null, b: TrackFields | null): boolean {
+  if (a === null || b === null) return a === b
+  for (const f of FIELDS) {
+    // Only `false` is ever stored for "sets line lengths"; anything else is the default.
+    const norm = (v: unknown) => (f === "setsLineLengths" ? (v === false ? false : null) : (v ?? null))
+    if (norm(a[f]) !== norm(b[f])) return false
+  }
+  return true
+}
+
+/** Note a write (`patch` null deletes): the track's pending changes after it. */
+export function noteTrackWrite(
+  read: TrackFields | null,
+  pending: PendingTrack | undefined,
+  patch: TrackFields | null,
+): PendingTrack {
+  const now = trackNow(read, pending)
+  const next = patch === null ? null : { ...(now.track ?? {}), ...patch }
+  return now.pending
+    ? { readBefore: now.pending.readBefore, states: [...now.pending.states, next] }
+    : { readBefore: read, states: [next] }
+}
+
+/**
+ * The track as far as this tab knows: what was last written here, until the
+ * project read shows it. A read that shows an EARLIER write of ours keeps the
+ * later ones pending. Any other new answer settles it (a collaborator's
+ * change, or the server tidying a value): the read is then the truth, so an
+ * Undo checked against ours never writes over theirs. `pending` undefined:
+ * forget it.
+ */
+export function trackNow(
+  read: TrackFields | null,
+  pending: PendingTrack | undefined,
+): { track: TrackFields | null; pending: PendingTrack | undefined } {
+  if (!pending || pending.states.length === 0) return { track: read, pending: undefined }
+  const last = pending.states[pending.states.length - 1] ?? null
+  let shown = -1
+  for (let i = pending.states.length - 1; i >= 0; i--) {
+    if (sameTrack(read, pending.states[i] ?? null)) { shown = i; break }
+  }
+  if (shown === pending.states.length - 1) return { track: read, pending: undefined }
+  if (shown >= 0) return { track: last, pending: { readBefore: read, states: pending.states.slice(shown + 1) } }
+  if (sameTrack(read, pending.readBefore)) return { track: last, pending }
+  return { track: read, pending: undefined }
+}
+
+/**
+ * AQU-2492 (review, Nov 9), finding 10: the notes above, kept PER FILE. The
+ * built-in rows (the main Recordings row and its kin) have the same ids in
+ * every file, and the workspace stays open across files, so notes keyed by
+ * the track alone carried a change made in one chapter into the Undo of the
+ * same row in another. A step belongs to the file it was made in; so does
+ * what it reads.
+ */
+export class TrackWriteNotes {
+  private readonly notes = new Map<string, PendingTrack>()
+  private key(fileId: string, trackId: string): string {
+    return `${fileId}\u0000${trackId}`
+  }
+  /** The track in `fileId` as far as this tab knows, given its settled read. */
+  read(fileId: string, trackId: string, settled: TrackFields | null): TrackFields | null {
+    const key = this.key(fileId, trackId)
+    const now = trackNow(settled, this.notes.get(key))
+    if (now.pending) this.notes.set(key, now.pending)
+    else this.notes.delete(key)
+    return now.track
+  }
+  /** A write to the track in `fileId` (`patch` null deletes it). */
+  note(fileId: string, trackId: string, settled: TrackFields | null, patch: TrackFields | null): void {
+    const key = this.key(fileId, trackId)
+    this.notes.set(key, noteTrackWrite(settled, this.notes.get(key), patch))
+  }
+  /** Writes that were refused never show in a read: stop expecting them. */
+  forget(fileId: string, trackIds: readonly string[]): void {
+    for (const id of trackIds) this.notes.delete(this.key(fileId, id))
+  }
+}
+
 export function trackStepHandlers(ctx: TrackStepContext): Record<string, StepHandler<never>> {
   const flip = async (d: TrackStepData, which: "undo" | "redo"): Promise<StepOutcome> => {
     for (const c of d.changes) {

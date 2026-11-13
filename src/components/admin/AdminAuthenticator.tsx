@@ -228,7 +228,7 @@ function Authenticator({ jwt }: { jwt: string }) {
                 alt="Authenticator setup QR code"
                 className="size-48"
               />
-              <code className="block break-all select-text">
+              <code className="block break-all select-none">
                 {setup.secret}
               </code>
               <CopySecurityCode value={setup.secret} label="Copy setup key" />
@@ -262,7 +262,7 @@ function Authenticator({ jwt }: { jwt: string }) {
                 will not be shown again. Email still works until you select
                 Enable authenticator app.
               </p>
-              <pre className="select-text whitespace-pre-wrap rounded border p-4">
+              <pre className="select-none whitespace-pre-wrap rounded border p-4">
                 {codes.join("\n")}
               </pre>
               <CopySecurityCode

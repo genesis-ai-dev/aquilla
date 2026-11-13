@@ -665,10 +665,12 @@ export function MediaVideoPane({
       // AQU-2253 (review, Nov 9): a seek is the network's business unless it
       // is stuck: five seconds over film that has loaded, no `seeked`, no
       // newer seek asked for.
+      // Loaded a second past where it stands: what a seek and a stall both ask.
+      const loaded = seekTargetLoaded(video)
       const seek = watchSeek(seekWatchRef.current, {
         seeking: video.seeking,
         sec: video.currentTime,
-        loaded: seekTargetLoaded(video),
+        loaded,
         now: Date.now(),
         askedAt: Math.max(lastSeekAtRef.current ?? 0, seekAskedAtRef.current ?? 0) || null,
       })
@@ -682,6 +684,9 @@ export function MediaVideoPane({
         ended: video.ended,
         seeking: video.seeking && !seek.stuck,
         seekStuck: seek.stuck,
+        // AQU-2253 (browser pass, Nov 11): a film that has played out what it
+        // loaded is waiting on the network, and is waited on (video-stall.ts).
+        loadedAhead: loaded,
         // AQU-2253 (review, Nov 9): …or, where the film is the clock (no
         // readiness wait there), a film still opening: the same patience.
         pendingPlay: pendingPlayRef.current != null
@@ -709,6 +714,7 @@ export function MediaVideoPane({
 
       // A rung. Whatever we are about to try, stop claiming playback first.
       report(true, false)
+      if (action.kind === "wait") return
       const stream = streamRef.current
       const at = video.currentTime
 

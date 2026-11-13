@@ -58,6 +58,9 @@ export type StallAction =
   | { kind: "giveUp" }
   /** Moving again after a stall: take the spinner down and say so. */
   | { kind: "recovered" }
+  /** AQU-2253 (browser pass, Nov 11): believed stalled, but the film has played
+   *  out what it loaded: say so (the spinner) and wait for the network. */
+  | { kind: "wait" }
 
 export interface StallState {
   /** Where the clock was at the previous sample. Null means "no baseline" —
@@ -98,6 +101,11 @@ export interface StallSample {
    *  second seek in flight is what wedges the streaming player
    *  (video-seek-coalesce.ts). */
   seekStuck?: boolean
+  /** AQU-2253 (browser pass, Nov 11): has the film loaded past where it stands
+   *  (`seekTargetLoaded`)? False: it is waiting on the network, and only the
+   *  nudge is tried; the rungs that throw away what has loaded (reopening,
+   *  rebuilding) are kept for loaded film that stops. Left out: loaded. */
+  loadedAhead?: boolean
 }
 
 /** AQU-2253 (browser pass, Nov 9): how far past a seek's target the film must
@@ -269,6 +277,10 @@ export function stallStep(
   // AQU-2253 (review, Nov 9): never a re-seek on top of a seek in flight.
   const spent = sample.seekStuck && RUNGS[state.spent] === "nudge" ? state.spent + 1 : state.spent
   const rung = RUNGS[spent]
+  // AQU-2253 (browser pass, Nov 11): a film waiting on the network is waited
+  // on, as a seek into film that has not loaded is: asked to fetch again once
+  // (the nudge), never emptied to reopen or rebuild it, never given up on.
+  if (sample.loadedAhead === false && rung !== "nudge") return { state: next, action: { kind: "wait" } }
   if (rung) return { state: { ...next, spent: spent + 1 }, action: { kind: "recover", rung } }
   return { state: { ...next, gaveUp: true }, action: { kind: "giveUp" } }
 }

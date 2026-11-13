@@ -679,9 +679,11 @@ describe("MediaVideoPane", () => {
         beforeEach(() => vi.useFakeTimers())
         afterEach(() => vi.useRealTimers())
         const tick = (n = 1) => act(() => { vi.advanceTimersByTime(1000 * n) })
-        /** A film that claims to be running and whose clock does not move. */
+        /** A film that claims to be running and whose clock does not move,
+         *  over film it has loaded. */
         const wedge = (video: HTMLVideoElement) => {
           Object.defineProperty(video, "duration", { value: 27, configurable: true })
+          Object.defineProperty(video, "buffered", { value: { length: 1, start: () => 0, end: () => 27 }, configurable: true })
           Object.defineProperty(video, "readyState", { value: 4, configurable: true })
           Object.defineProperty(video, "seeking", { value: false, configurable: true })
           Object.defineProperty(video, "paused", { value: false, configurable: true })
@@ -1482,9 +1484,10 @@ describe("a stalled picture is noticed, and gets out of it", () => {
       onVideoPlaying,
     }
     const view = render(<MediaVideoPane {...props} />)
-    /** Make an element look like one that is running. */
+    /** Make an element look like one that is running, over film it has loaded. */
     const equip = (video: HTMLVideoElement, at = 12) => {
       Object.defineProperty(video, "readyState", { value: 4, configurable: true })
+      Object.defineProperty(video, "buffered", { value: { length: 1, start: () => 0, end: () => 60 }, configurable: true })
       Object.defineProperty(video, "seeking", { value: false, configurable: true, writable: true })
       Object.defineProperty(video, "paused", { value: false, configurable: true, writable: true })
       Object.defineProperty(video, "ended", { value: false, configurable: true, writable: true })
@@ -1534,6 +1537,29 @@ describe("a stalled picture is noticed, and gets out of it", () => {
     expect(video.currentTime).toBe(12)
   })
 
+  // AQU-2253 (browser pass, Nov 11: 4-hls-stream in WebKit): a film that has
+  // played out what it loaded is waiting on the network. It shows the spinner
+  // and is nudged (asked to fetch again where it is), but what it has loaded is
+  // never thrown away to reopen or rebuild it, and it carries on when the
+  // network does.
+  it("waits with the spinner, nudged once, for a film that has played out what it loaded", () => {
+    const { video, press } = mount()
+    Object.defineProperty(video, "buffered", { value: { length: 1, start: () => 0, end: () => 12 }, configurable: true })
+    press(1)
+    const before = (video.play as ReturnType<typeof vi.fn>).mock.calls.length
+    tick(STALL_TICKS)
+    expect(getVideoBuffering()).toBe(true)
+    expect((video.play as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(before)
+    tick(30)
+    expect(video.load).not.toHaveBeenCalled()
+    expect(screen.getByTestId("video-pane-media")).toBe(video)
+    expect(screen.queryByTestId("video-pane-play-gesture")).toBeNull()
+    expect(getVideoBuffering()).toBe(true)
+    video.currentTime = 13
+    tick(1)
+    expect(getVideoBuffering()).toBe(false)
+  })
+
   it("says nothing about a film the user paused", () => {
     const { video, press } = mount()
     press(1)
@@ -1547,7 +1573,9 @@ describe("a stalled picture is noticed, and gets out of it", () => {
     const { video, press } = mount()
     press(1)
     Object.defineProperty(video, "seeking", { value: true, configurable: true })
-    tick(10)
+    // Over film it has loaded (the mount's), a seek has SEEK_STUCK_MS to land
+    // before it counts as stuck: the next tests.
+    tick(4)
     expect(getVideoBuffering()).toBe(false)
   })
 

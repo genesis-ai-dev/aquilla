@@ -82,6 +82,44 @@ describe("a frozen clock while the element claims to be playing", () => {
   })
 })
 
+// AQU-2253 (browser pass, Nov 11: 4-hls-stream in WebKit): with every segment
+// held, the film ran out of what it had loaded. The ladder could not tell that
+// from a wedged decoder, so it reopened the stream (throwing away what had
+// loaded) and then moved it to WebKit's own player, which started cold: the
+// spinner stayed 10–11 s after the network came back. A film waiting on the
+// network now gets what a seek into unloaded film gets: it is waited on.
+describe("a film that has run out of what it loaded", () => {
+  const starved = (n: number, at = 76) => Array.from({ length: n }, () => running(at, { loadedAhead: false }))
+
+  it("says so and nudges once, and never reopens, rebuilds or gives up however long it waits", () => {
+    const { state, actions } = run(starved(60))
+    expect(actions[0]).toEqual({ kind: "recover", rung: "nudge" })
+    expect(actions.slice(1).every((a) => a.kind === "wait")).toBe(true)
+    expect(actions.some((a) => a.kind === "recover" && a.rung !== "nudge")).toBe(false)
+    expect(actions.some((a) => a.kind === "giveUp")).toBe(false)
+    expect(state.stalled).toBe(true)
+    expect(state.gaveUp).toBe(false)
+  })
+
+  it("carries on with no rung spent past the nudge once the film moves", () => {
+    const { actions } = run([...starved(10), ...moving(1, 76)])
+    expect(actions.at(-1)).toEqual({ kind: "recovered" })
+  })
+
+  it("climbs from where it was once the film has loaded but still does not move", () => {
+    // Loaded film that stops is the wedge the ladder is for: every step.
+    const { actions } = run([...starved(8), ...frozen(12, 76)])
+    expect(actions.filter((a) => a.kind === "recover").map((a) => (a.kind === "recover" ? a.rung : ""))).toEqual(["nudge", "recover", "rebuild"])
+    expect(actions.at(-1)).toEqual({ kind: "giveUp" })
+  })
+
+  it("a nudge already spent on loaded film leaves only the spinner when the film then runs dry", () => {
+    const { actions } = run([...frozen(3, 76), ...starved(20)])
+    expect(actions[0]).toEqual({ kind: "recover", rung: "nudge" })
+    expect(actions.slice(1).every((a) => a.kind === "wait")).toBe(true)
+  })
+})
+
 describe("what is not a stall", () => {
   const cases: [string, Partial<StallSample>][] = [
     ["the transport does not want playback", { wantPlay: false }],

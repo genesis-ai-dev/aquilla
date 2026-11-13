@@ -169,3 +169,50 @@ describe("Word export — a text box in a hidden or deleted line stays (AQU-2552
     expect(out.body).toContain("Box text here.")
   })
 })
+
+describe("Word export — a footnote the translator moved into a neighbouring line keeps its note (AQU-2552, review r7 N5)", () => {
+  const L = ["First line here" + PAD, "Second line here" + PAD, "Third line here" + PAD]
+  // Lines 1 and 2 each hold their note after "line"; line 3 none.
+  const noted = para(L.map((l, k) => k < 2
+    ? run(`${k > 0 ? " " : ""}${l.slice(0, l.indexOf(" here"))}`) + ref(k + 1) + run(l.slice(l.indexOf(" here")))
+    : run(` ${l}`)).join("")) + NEXT
+  const notes = ["Note one.", "Note two."]
+
+  it("line 1's translation carries both notes, line 2's none: both notes are translated, each where its marker is", async () => {
+    const bytes = await docxBytes(noted, notes)
+    const [a, b, c, n] = await importCells(bytes)
+    const out = await wordOut(bytes, [typed(a, `Un${M("Note un.")} et deux${M("Note deux.")}.`), typed(b, "Suite."), typed(c, "Trois."), n])
+    expect(paras(out.body)).toEqual(["Un[^1] et deux[^2]. Suite. Trois.", "Next paragraph."])
+    expect([noteText(out.notes, 1), noteText(out.notes, 2)]).toEqual(["Note un.", "Note deux."])
+    expect(out.result.fidelity.unplacedFootnoteMarkers).toBe(0)
+  })
+
+  it("line 2's translation carries both notes, line 1's none: line 1's note goes to the marker that moved", async () => {
+    const bytes = await docxBytes(noted, notes)
+    const [a, b, c, n] = await importCells(bytes)
+    const out = await wordOut(bytes, [typed(a, "Un."), typed(b, `Deux${M("Note un.")} et suite${M("Note deux.")}.`), typed(c, "Trois."), n])
+    // Line 2's own reference takes its first marker, line 1's the second: each
+    // place shows the note its marker carries.
+    expect(paras(out.body)).toEqual(["Un. Deux[^2] et suite[^1]. Trois.", "Next paragraph."])
+    expect([noteText(out.notes, 2), noteText(out.notes, 1)]).toEqual(["Note un.", "Note deux."])
+    expect(out.result.fidelity.unplacedFootnoteMarkers).toBe(0)
+  })
+
+  it("an untranslated line keeps its own note, so a translation with one marker too many leaves it alone", async () => {
+    const bytes = await docxBytes(noted, notes)
+    const [a, b, c, n] = await importCells(bytes)
+    const out = await wordOut(bytes, [typed(a, `Un${M("Note un.")} et deux${M("Note deux.")}.`), b, typed(c, "Trois."), n])
+    expect(paras(out.body)).toEqual(["Un[^1] et deux. Second line[^2] here … Trois.", "Next paragraph."])
+    expect([noteText(out.notes, 1), noteText(out.notes, 2)]).toEqual(["Note un.", "Note two."])
+    expect(out.result.fidelity.unplacedFootnoteMarkers).toBe(1)
+  })
+
+  it("a translated line that places its own note lends it to no other line", async () => {
+    const bytes = await docxBytes(noted, notes)
+    const [a, b, c, n] = await importCells(bytes)
+    const out = await wordOut(bytes, [typed(a, `Un${M("Note un.")} et plus${M("Note ajoutée.")}.`), typed(b, `Deux${M("Note deux.")}.`), typed(c, "Trois."), n])
+    expect(paras(out.body)).toEqual(["Un[^1] et plus. Deux[^2]. Trois.", "Next paragraph."])
+    expect([noteText(out.notes, 1), noteText(out.notes, 2)]).toEqual(["Note un.", "Note deux."])
+    expect(out.result.fidelity.unplacedFootnoteMarkers).toBe(1)
+  })
+})

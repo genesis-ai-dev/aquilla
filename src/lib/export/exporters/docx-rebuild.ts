@@ -85,7 +85,8 @@ export interface RebuildInput {
    *  character of `text` belongs to (undefined between lines), and the line
    *  whose stretch of the source holds each footnote reference. A line's
    *  markers take that line's own references, in order; a reference its
-   *  translation does not place follows that line's text. A reference no line
+   *  translation does not place follows that line's text, unless another
+   *  line's marker has none of its own to take (review r7). A reference no line
    *  holds, or a paragraph with no lines given, is placed in order as before. */
   lineOf?: readonly (number | undefined)[]
   footnoteLines?: ReadonlyMap<DocxPiece, number>
@@ -226,15 +227,35 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   const ordered = [...matches.entries()].sort((a, b) => a[1].start - b[1].start)
   let stream = ""
   let cursor = 0
-  // AQU-2552 (review r6): footnote references by line (see `lineOf`): a
-  // marker takes its own line's next reference, else the next one no line
-  // holds; a line's references left over follow its text.
+  // AQU-2552 (review r6): footnote references by line (see `lineOf`); a
+  // line's references left over follow its text.
   const used = new Set<number>()
-  const takeRef = (line: number | undefined) => {
-    let k = line === undefined ? -1 : refs.findIndex((ref, i) => !used.has(i) && ref.line === line)
-    if (k === -1) k = refs.findIndex((ref, i) => !used.has(i) && ref.line === undefined)
-    if (k !== -1) used.add(k)
-    return k === -1 ? null : refs[k]
+  // AQU-2552 (review r7): which reference each marker takes, decided before
+  // anything is written. First every marker takes its own line's next one.
+  // A marker left without one then takes a reference of another line whose
+  // translation does not place it (the translator moved the note into this
+  // line), in order, and only then one no line holds.
+  const taken = new Map<number, number>()
+  const claimed = new Set<number>()
+  const claim = (m: number, test: (ref: (typeof refs)[number]) => boolean) => {
+    const k = refs.findIndex((ref, i) => !claimed.has(i) && test(ref))
+    if (k === -1) return
+    claimed.add(k)
+    taken.set(m, k)
+  }
+  markers.forEach((marker, m) => {
+    const line = input.lineOf?.[marker.start]
+    if (line !== undefined) claim(m, (ref) => ref.line === line)
+  })
+  markers.forEach((_, m) => { if (!taken.has(m)) claim(m, (ref) => ref.line !== undefined) })
+  markers.forEach((_, m) => { if (!taken.has(m)) claim(m, (ref) => ref.line === undefined) })
+  // A claimed reference is written at its marker, never at its line's end.
+  for (const k of claimed) used.add(k)
+  const placed = new Set<number>()
+  const takeRef = (m: number) => {
+    const k = taken.get(m)
+    if (k !== undefined) placed.add(k)
+    return k === undefined ? null : refs[k]
   }
   // Where each line that holds a reference ends (after its last character).
   const holding = new Set(refs.map((ref) => ref.line))
@@ -258,9 +279,10 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
     let k = from
     while (k < to) {
       endLinesTo(k)
-      const marker = markers.find((m) => m.start === k)
+      const m = markers.findIndex((marker) => marker.start === k)
+      const marker = m === -1 ? undefined : markers[m]
       if (marker) {
-        const ref = takeRef(input.lineOf?.[k])
+        const ref = takeRef(m)
         if (ref) {
           result.footnotes.push({ id: ref.id, marker: input.text.slice(marker.start, marker.end) })
           stream += ref.xml
@@ -303,7 +325,8 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   }
   plain(cursor, input.text.length)
   endLinesTo(Infinity)
-  const leftover = refs.filter((_, i) => !used.has(i)).map((ref) => ref.xml).join("")
+  // (A claimed reference whose marker was never reached is not lost.)
+  const leftover = refs.filter((_, i) => !used.has(i) || (claimed.has(i) && !placed.has(i))).map((ref) => ref.xml).join("")
 
   result.xml = renderLeaves(front, io) + stream + leftover + renderLeaves(back, io)
   return result

@@ -231,7 +231,7 @@ export function ClipInspector({
   const otherVoices = voices.filter((v) => v.id !== lineVoice.id)
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto" data-testid="clip-inspector" data-showcase="voice.inspector">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto overflow-x-hidden" data-testid="clip-inspector" data-showcase="voice.inspector">
       <div className="space-y-2.5 border-b p-3">
         <BackRow onBack={onBack} label={t("audio.inspector.title")} />
         <div className="flex items-center gap-2.5">
@@ -354,16 +354,16 @@ export function ClipInspector({
               )}
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-2">
               <Button
-                type="button" className="flex-1" disabled={busy || !text}
+                type="button" className="w-full" disabled={busy || !text}
                 onClick={() => { void flush().then(onRegenerate) }}
                 data-testid="clip-inspector-regenerate"
               >
                 {busy ? <Spinner className="size-3" /> : <RefreshCw data-icon="inline-start" />}
                 {t("audio.inspector.regenerate")}
               </Button>
-              <Button type="button" variant="outline" disabled={!text || !session} onClick={hearItFirst}>
+              <Button type="button" variant="outline" className="w-full" disabled={!text || !session} onClick={hearItFirst}>
                 {loading === "preview" ? <Spinner className="size-3" /> : playing === "preview" ? <Pause /> : <Play />}
                 {playing === "preview" ? t("audio.elevenLabs.stopPreview") : t("audio.inspector.hearItFirst")}
               </Button>

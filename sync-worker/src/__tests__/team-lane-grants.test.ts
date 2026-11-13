@@ -172,12 +172,17 @@ describe('POST /migrate/groups — team membership writes lane access (AQU-1800)
       { lane: 'tgt00099', level: CONTRIBUTOR },
     ])
 
-    await t.pg.query(
-      `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
-       VALUES ('tgt00002', $1, 'target', 'sw', 'sw', 1)`,
-      [PROJECT],
-    )
-    await grantNewLaneStmt(t.db, PROJECT, { laneId: 'tgt00002' }, 1).run()
+    // The lane and its grant in one batch, as every writer sends them: the
+    // grant only counts a lane its own transaction created (AQU-2557).
+    await t.db.batch([
+      t.db
+        .prepare(
+          `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+           VALUES ('tgt00002', ?, 'target', 'sw', 'sw', 1)`,
+        )
+        .bind(PROJECT),
+      grantNewLaneStmt(t.db, PROJECT, { laneId: 'tgt00002' }, 1),
+    ])
 
     expect((await grantedLanes(7)).map((g) => g.lane)).toEqual(['tgt00001', 'tgt00002', 'tgt00099'])
   })
@@ -300,13 +305,15 @@ describe('lane creation reaches team members too (AQU-1800)', () => {
     // at all, and the content sweep creates the first target lane afterwards.
     await seedAttachedProject(teamId, orgId)
     await addTeamMember(teamId, 7)
-    await t.pg.query(
-      `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
-       VALUES ('tgt00001', $1, 'target', 'sw', 'sw', 0)`,
-      [PROJECT],
-    )
-
-    await grantNewLaneStmt(t.db, PROJECT, { laneId: 'tgt00001' }, 1).run()
+    await t.db.batch([
+      t.db
+        .prepare(
+          `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+           VALUES ('tgt00001', ?, 'target', 'sw', 'sw', 0)`,
+        )
+        .bind(PROJECT),
+      grantNewLaneStmt(t.db, PROJECT, { laneId: 'tgt00001' }, 1),
+    ])
 
     expect(await grantedLanes(7)).toEqual([{ lane: 'tgt00001', level: CONTRIBUTOR }])
   })

@@ -465,8 +465,9 @@ export function ensureProjectLaneStmts(
     // AQU-1781: a target lane nobody is granted is invisible to every member
     // below Maintainer under the read wall. The grant rides the same batch, so
     // the lane and the grants that make it readable commit together. Keyed by
-    // the tag because the INSERT above upserts: the row the batch ends up with
-    // may be one an earlier writer created.
+    // the tag because the INSERT above upserts and its id may not be the row's.
+    // When the upsert finds a row an earlier write created, the grant gives
+    // that lane to nobody (AQU-2557): only a lane this batch creates is new.
     stmts.push(grantNewLaneStmt(db, projectId, { legacyTag }, null))
   }
   return stmts
@@ -701,6 +702,9 @@ export async function renameTargetLane(
  * The id is the caller's. A collision on uq_lanes_id throws;
  * {@link createTargetLane} mints a new id and replans, because that id may
  * also be the legacy tag.
+ *
+ * `grantedBy` is who the AQU-1781 grant rows name: the person adding the
+ * language, or null for a writer with no person behind it.
  */
 export async function insertTargetLane(
   db: AquillaDb,
@@ -717,12 +721,16 @@ export async function insertTargetLane(
     /** Media redesign slice 1: what it delivers. Omitted, the column's default (Text). */
     delivers?: LaneDelivers
   },
+  grantedBy: number | null = null,
 ): Promise<void> {
   const existing = await listProjectLanes(db, projectId)
   const position = existing.reduce((max, row) => Math.max(max, row.position), -1) + 1
   const delivers = lane.delivers ?? "text"
   // The new language owes every file from now on: its progress rows land with
   // it, or each reader would count it short until every file was next edited.
+  // AQU-1781: and the members who read every other language read this one, in
+  // the same batch, so a failure can never leave the language created but
+  // granted to nobody (AQU-2557: the grant only counts a lane this batch made).
   await db.batch([
     db
       .prepare(
@@ -735,6 +743,7 @@ export async function insertTargetLane(
         delivers, deliversRecordsAudio(delivers),
       ),
     seedLaneProgressStmt(db, projectId),
+    grantNewLaneStmt(db, projectId, { laneId: lane.id }, grantedBy),
   ])
 }
 
@@ -758,6 +767,8 @@ export async function createTargetLane(
     allowDuplicateName?: boolean
     /** Media redesign slice 1: what the new language delivers. Omitted, Text. */
     delivers?: LaneDelivers
+    /** Who the new language's grant rows name ({@link insertTargetLane}). */
+    grantedBy?: number | null
   },
 ): Promise<
   | { ok: true; laneId: string; language: string; name: string | null; legacyTag: string; langCode: string | null }
@@ -782,7 +793,7 @@ export async function createTargetLane(
       langCode: plan.langCode,
       legacyTag: plan.legacyTag,
       delivers: input.delivers,
-    })
+    }, input.grantedBy ?? null)
     return {
       inserted: true as const,
       laneId,

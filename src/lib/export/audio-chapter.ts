@@ -122,7 +122,9 @@ function bestAudioId(cell: CellData): string | null {
   return defaultTrackTakeId(cell)
 }
 
-function canonicalOf(cell: CellData) {
+/** The verse a cell names for itself. Exported so the by-line export reads a
+ *  line's reference off the same three fields (AQU-2560). */
+export function canonicalOf(cell: CellData) {
   return parseCanonicalRef(cell.group) ?? parseCanonicalRef(cell.context) ?? parseCanonicalRef(cell.section)
 }
 

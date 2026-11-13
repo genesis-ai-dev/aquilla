@@ -427,6 +427,12 @@ async function applyImportStep(
     step.confirmationId,
     step.channel,
     step.ctx,
+    // AQU-2504: `false` is correct here, not a stub. This path imports into a
+    // project THIS changeset is creating, so the caller is its creator and
+    // resolveProjectRoleShared gives them the AD-12 `creator` path — a role
+    // always resolves, so support access is never the thing that opened it and
+    // there is nothing to attribute to platform power.
+    false,
   )
   if (outcome.error) return { ok: false, error: `import "${current.fileName}" could not be applied` }
   if (!outcome.ok) {

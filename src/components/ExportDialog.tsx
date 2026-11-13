@@ -53,7 +53,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { downloadBlob as downloadExportBlob } from "@/lib/export/export-service"
 import { collectInlineStyleWarnings, type ExportFidelityWarning } from "@/lib/export/fidelity"
-import { chapterFilenameSuffix, filterCellsByChapter, listChapterLabels } from "@/lib/export/chapter-scope"
+import { chapterFilenameSuffix, chapterNumbersByLabel, filterCellsByChapter, listChapterLabels } from "@/lib/export/chapter-scope"
 import {
   DEFAULT_EXPORT_CONTENT_MODE,
   dropHiddenCells,
@@ -445,6 +445,30 @@ interface ExportDialogProps {
     onProgress?: (label: string) => void
   }) => Promise<{ name: string; unmatched: number }>
   /**
+   * Places the file's translations into its IDML style runs — the pass a
+   * re-import runs (`alignReimportedIdmlFile`). Offered when an InDesign export
+   * stops on translations that are not in the runs yet: a file a source link
+   * mirrored before it carried the IDML contract was translated as plain text.
+   */
+  onPlaceIdmlTranslations?: (args: {
+    fileId: string
+    fileName: string
+    onProgress?: (done: number, total: number) => void
+  }) => Promise<{
+    /** Validated lines placed as markup only: still validated. */
+    keptValidated: number
+    /** Lines saved as commits: drafts to check. */
+    drafts: number
+    /** Lines left for the editor's Align styles action. */
+    manual: number
+  }>
+  /**
+   * `onPlaceIdmlTranslations` will keep validated lines validated (a project
+   * lead, on the default lane). False: every placed line becomes a draft, and
+   * the dialog says so before the button is pressed.
+   */
+  idmlPlacementKeepsValidation?: boolean
+  /**
    * AQU-654: count of outstanding (non-waived) LQA/validation "health"
    * infractions on the active file. Export NEVER hard-blocks on these — the
    * only export gate is org policy (`canExport`). When there are outstanding
@@ -549,6 +573,8 @@ export function ExportDialog({
   getToken,
   orgId,
   onRepairIdmlCopy,
+  onPlaceIdmlTranslations,
+  idmlPlacementKeepsValidation = false,
   outstandingInfractionCount = 0,
   audioValidationRequirement = 1,
   onJumpToAudioLine,
@@ -867,6 +893,27 @@ export function ExportDialog({
     () => audioPreview.reduce((n, c) => n + c.clipCount, 0),
     [audioPreview],
   )
+  /**
+   * The same rows for the BY-LINE deliverable, which does not need a timeline.
+   *
+   * `audioPreview` counts only takes the by-character mix can place, so a line
+   * with no start time is not in it. A Bible book is nothing but such lines —
+   * a verse has no second it belongs at — and one preview serving both shapes
+   * told a Luke with a recording on every verse that "nothing is recorded
+   * yet". By line copies an untimed take across as it is, so here it counts.
+   */
+  const linePreview = useMemo(
+    () =>
+      previewAudioByCharacter(audioSourceCells, ttsSettings, resolveCharacterName, {
+        needsTiming: false,
+      }),
+    [audioSourceCells, ttsSettings, resolveCharacterName],
+  )
+  /** Takes on the default row, with or without a start time. */
+  const recordedTakes = useMemo(
+    () => linePreview.reduce((n, c) => n + c.clipCount, 0),
+    [linePreview],
+  )
   const chapterPreview = useMemo(
     () => previewAudioByChapter(audioSourceCells, { includeChapterHeadings }),
     [audioSourceCells, includeChapterHeadings],
@@ -1035,11 +1082,15 @@ export function ExportDialog({
    * AQU-465: the formats a chapter can be sliced out of.
    *
    * Exactly the formats built from the in-memory cell array (the `filteredCells`
-   * branch of handleExport). The round-trip formats are deliberately absent:
-   * USFM/DOCX/PPTX/IDML/JSON reinject translations into the ORIGINAL document —
-   * USFM server-side — so there is no cell array to filter, and handing back a
+   * branch of handleExport). The package round-trip formats are deliberately
+   * absent: DOCX/PPTX/IDML/JSON reinject translations into the ORIGINAL
+   * document, so there is no cell array to filter, and handing back a
    * one-chapter .docx would mean rebuilding the document rather than exporting
    * it. Those stay whole-file.
+   *
+   * USFM is not in this list and is sliceable all the same (AQU-2561): its
+   * original is plain text, so the worker cuts the chapter out of it. That is
+   * a different mechanism with its own condition — see `canScopeToChapter`.
    */
   const chapterScopeFormats = ["txt", "md", "html", "tsv", "csv", "xlf", "tmx", "vtt", "srt", "plain-text-dump", "metadata-csv"] as const
   const supportsChapterScope = (fmt: ExportFormat): boolean =>
@@ -1142,6 +1193,57 @@ export function ExportDialog({
     downloadName: string
   } | null>(null)
   const [repairingCopy, setRepairingCopy] = useState(false)
+  // Translations the failed InDesign export found outside the file's style
+  // runs. Non-zero offers the placement beside the error.
+  const [idmlUnplacedCount, setIdmlUnplacedCount] = useState(0)
+  const [placingTranslations, setPlacingTranslations] = useState(false)
+
+  const placeTranslations = async () => {
+    if (!activeFileId || !activeFileName || !onPlaceIdmlTranslations || placingTranslations) return
+    const fileName = activeFileName
+    setPlacingTranslations(true)
+    setStatus({ kind: "busy", msg: t("importExport.dialog.placingIdmlTranslations", { fileName }) })
+    try {
+      const result = await onPlaceIdmlTranslations({
+        fileId: activeFileId,
+        fileName,
+        onProgress: (done, total) => setStatus({
+          kind: "busy",
+          msg: t("importExport.upload.aligningIdmlStyles", {
+            fileName,
+            count: done.toLocaleString(),
+            total: total.toLocaleString(),
+          }),
+        }),
+      })
+      setIdmlRecovery(null)
+      setIdmlUnplacedCount(0)
+      setStatus({
+        kind: "ok",
+        msg: result.manual > 0
+          ? t("importExport.dialog.placedIdmlTranslationsManual", { fileName, count: result.manual })
+          : result.drafts === 0
+            ? t("importExport.dialog.placedIdmlTranslationsKept", { fileName, count: result.keptValidated })
+            : result.keptValidated === 0
+              ? t("importExport.dialog.placedIdmlTranslations", { fileName, count: result.drafts })
+              : t("importExport.dialog.placedIdmlTranslationsMixed", {
+                  fileName,
+                  kept: result.keptValidated.toLocaleString(),
+                  drafts: result.drafts.toLocaleString(),
+                }),
+      })
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        msg: t("importExport.dialog.placeIdmlTranslationsFailed", {
+          fileName,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      })
+    } finally {
+      setPlacingTranslations(false)
+    }
+  }
 
   const repairCopy = async () => {
     if (!activeFileId || !activeFileName || !onRepairIdmlCopy || repairingCopy) return
@@ -1307,10 +1409,17 @@ export function ExportDialog({
     [chapterLabels, t],
   )
 
+  /** AQU-2561: USFM asks the worker for a chapter by number, so it needs the
+   *  labels to map onto distinct numbers. Null on a several-books-in-one file. */
+  const usfmChapterNumbers = useMemo(() => chapterNumbersByLabel(chapterLabels), [chapterLabels])
+
   /** Only offered where it means something: a file with more than one chapter,
-   *  exporting itself (not the project) through a cell-array format. */
+   *  exporting itself (not the project) through a cell-array format — or as
+   *  USFM, when the worker can find the chapter by its number. */
   const canScopeToChapter =
-    effectiveScope === "file" && supportsChapterScope(format) && chapterLabels.length > 1
+    effectiveScope === "file" &&
+    chapterLabels.length > 1 &&
+    (supportsChapterScope(format) || (format === "usfm" && usfmChapterNumbers !== null))
   const activeChapter = canScopeToChapter ? chapterFilter : ""
 
   // Drop the chapter on close, on a file switch, and whenever the remembered
@@ -1396,6 +1505,7 @@ export function ExportDialog({
     setStatus({ kind: "busy", msg: t("importExport.status.exporting") })
     setFidelityWarnings([])
     setIdmlRecovery(null)
+    setIdmlUnplacedCount(0)
     let recoverableIdmlOriginal: { bytes: ArrayBuffer; downloadName: string } | null = null
     let idmlTelemetryStartedAt: number | null = null
     try {
@@ -1420,11 +1530,27 @@ export function ExportDialog({
             : `${t("importExport.status.exportedFilesCount", { count: result.exported })}; ${t("importExport.status.skippedOlderImports", { count: result.skipped.length })}`
           setStatus({ kind: "ok", msg })
         } else {
+          // AQU-2561: one chapter, cut out of the original by the worker. As
+          // in the cell-array branch below, the primary "Download <file>"
+          // action (`overrideFormat`) always hands back the whole file,
+          // whatever chapter the fold is showing. The label and the number
+          // travel together: a label with no number is exported whole AND
+          // named whole, never as a whole book under a one-chapter name.
+          const chapterNumber = overrideFormat || !activeChapter ? undefined : usfmChapterNumbers?.get(activeChapter)
+          const chapterLabel = chapterNumber === undefined ? "" : activeChapter
           // AQU-437: use user-chosen stem with .SFM extension.
           const stem = buildExportStem(false)
-          const downloadName = `${stem}.SFM`
+          const downloadName = `${stem}${chapterFilenameSuffix(chapterLabel)}.SFM`
           // AQU-276: read lossy-verse count from response header.
-          const result = await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken, targetLang, validatedOnly })
+          const result = await downloadSourceFile({
+            projectId,
+            fileId: activeFileId,
+            downloadName,
+            getToken,
+            targetLang,
+            validatedOnly,
+            ...(chapterNumber !== undefined ? { chapter: chapterNumber } : {}),
+          })
           const lossyCount = result.lossyVerseCount
           if (lossyCount !== null && lossyCount > 0) {
             setStatus({
@@ -1638,10 +1764,15 @@ export function ExportDialog({
         // REFUSE RATHER THAN DOWNLOAD NOTHING. A zip with no entries is still
         // a valid archive, and handing one over reads as success.
         if (result.characters === 0) {
+          // Not "could not be read" when nothing was even attempted: takes
+          // with no start time were left out because this shape cannot place
+          // them, and the fix is another shape rather than another try.
           const msg =
             result.clips === 0
               ? "No recordings found in this file, so there is nothing to export."
-              : `None of the ${result.clips} recordings could be read, so the export would be empty.`
+              : result.untimed === result.clips
+                ? t("importExport.dialog.nothingTimedToPlace", { count: result.untimed })
+                : `None of the ${result.clips} recordings could be read, so the export would be empty.`
           setStatus({ kind: "error", msg })
           if (exportToastRef.current != null) {
             toast.update(exportToastRef.current, { type: "error", title: msg })
@@ -1703,6 +1834,11 @@ export function ExportDialog({
           projectId,
           langCode: targetLanguage || "und",
           fileBase: defaultBaseName,
+          // AQU-2560: a Bible file's takes are named by verse, not by a cast it
+          // does not have. The exporter decides "is this scripture" from the
+          // cells; a dubbing file is never offered the choice, so a cue whose
+          // text happens to read like a reference cannot rename an episode.
+          scriptureNaming: isDubbingFile ? undefined : { projectName },
           fetchBytes: ({ projectId: pid, fileId, audioId, ext }) =>
             fetchCellAudio({ projectId: pid, fileId, audioId, ext, getSyncToken }),
           format: lineAudioFormat,
@@ -2077,6 +2213,19 @@ export function ExportDialog({
       }
     } catch (e) {
       if (recoverableIdmlOriginal) setIdmlRecovery(recoverableIdmlOriginal)
+      // An InDesign export that stopped may have stopped on translations that
+      // are not in the file's style runs yet. Counted here, over the same cells
+      // the export read, so the error can offer the placement.
+      let unplaced = 0
+      if (recoverableIdmlOriginal && onPlaceIdmlTranslations) {
+        try {
+          const { unplacedIdmlTranslationCount } = await import("@/lib/idml/align-reimported-targets")
+          unplaced = unplacedIdmlTranslationCount(scopeRoundTripCells(cells, contentMode))
+        } catch {
+          unplaced = 0
+        }
+      }
+      setIdmlUnplacedCount(unplaced)
       if (idmlTelemetryStartedAt !== null) {
         analytics.capture("idml export blocked", idmlTelemetryProperties({
           cells,
@@ -2088,7 +2237,14 @@ export function ExportDialog({
           durationMs: performance.now() - idmlTelemetryStartedAt,
         }))
       }
-      const msg = (e as Error).message || t("importExport.status.exportFailed")
+      const msg = unplaced > 0
+        ? t(
+            idmlPlacementKeepsValidation
+              ? "importExport.dialog.idmlTranslationsNotPlacedKeep"
+              : "importExport.dialog.idmlTranslationsNotPlaced",
+            { count: unplaced },
+          )
+        : (e as Error).message || t("importExport.status.exportFailed")
       setStatus({ kind: "error", msg })
       // Never leave a spinning toast behind: this catch covers the whole run,
       // including the long audio export, and an orphaned loading toast sits
@@ -2105,6 +2261,7 @@ export function ExportDialog({
       setStatus({ kind: "idle" })
       setFidelityWarnings([])
       setIdmlRecovery(null)
+      setIdmlUnplacedCount(0)
     }
     onOpenChange(next)
   }
@@ -2258,14 +2415,21 @@ export function ExportDialog({
    * list everywhere else.
    */
   const renderCharacterPreview = () => {
-          const preview = audioPreview
+          // WHICH DELIVERABLE THIS DESCRIBES. A dubbing file picks the shape on
+          // the Audio card, everything else in the format list.
+          const byLine = (isDubbingFile ? audioMode : format) === "audio-by-line"
+          const preview = byLine ? linePreview : audioPreview
           // WHO IS MISSING, not just who is included (codex-editor's lesson,
           // 2026-08-18). The list used to describe only what would be written,
           // so a character with nothing recorded simply was not in it — you
           // found out by opening the zip and noticing an absence.
           const recorded = preview.filter((p) => p.clipCount > 0)
           const unrecorded = preview.filter((p) => p.clipCount === 0)
-          const untimedTotal = preview.reduce((n, p) => n + p.untimedCount, 0)
+          // By line writes an untimed take anyway (it just carries no
+          // timestamp), so "cannot be placed" is only true of the mix.
+          const untimedTotal = byLine ? 0 : preview.reduce((n, p) => n + p.untimedCount, 0)
+          // Recordings exist, and not one of them has a second to sit at.
+          const nothingPlaceable = recorded.length === 0 && untimedTotal > 0
           return (
           <div className="flex flex-col gap-1 text-xs" data-testid="export-character-preview">
             <p className="font-medium text-muted-foreground text-[10px]">{t("importExport.dialog.characterPreviewHeading")}</p>
@@ -2293,7 +2457,7 @@ export function ExportDialog({
                         <> · {Math.floor(p.totalDurationMs / 60000)}:{String(Math.floor((p.totalDurationMs % 60000) / 1000)).padStart(2, "0")}</>
                       )}
                       {p.missingCount > 0 && <> · {t("importExport.dialog.stillToRecordCount", { count: p.missingCount })}</>}
-                      {p.untimedCount > 0 && <> · {t("importExport.dialog.untimedClipCount", { count: p.untimedCount })}</>}
+                      {!byLine && p.untimedCount > 0 && <> · {t("importExport.dialog.untimedClipCount", { count: p.untimedCount })}</>}
                     </span>
                   </div>
                 ))}
@@ -2302,11 +2466,18 @@ export function ExportDialog({
                     on added tracks "nothing is recorded" is false, and sat one
                     line away from a button that had just refused for the same
                     reason (2026-08-27). Say what is actually true. */}
+                {/* …and on a file whose lines have no start time — a Bible book,
+                    where every verse can be recorded and none of them sits at
+                    a second — "nothing is recorded" is just as false. The
+                    takes are there; this shape has nowhere to put them, and
+                    the two beside it do. */}
                 {recorded.length === 0 && (
-                  <p className="text-muted-foreground">
-                    {addedTrackTakes > 0
-                      ? t("importExport.dialog.nothingOnMainTrack", { count: addedTrackTakes })
-                      : t("importExport.dialog.nothingRecordedYet")}
+                  <p className="text-muted-foreground" data-testid="export-nothing-to-preview">
+                    {nothingPlaceable
+                      ? t("importExport.dialog.nothingTimedToPlace", { count: untimedTotal })
+                      : addedTrackTakes > 0
+                        ? t("importExport.dialog.nothingOnMainTrack", { count: addedTrackTakes })
+                        : t("importExport.dialog.nothingRecordedYet")}
                   </p>
                 )}
                 {/* The rest, folded away — still countable at a glance, still
@@ -2329,7 +2500,7 @@ export function ExportDialog({
                     </div>
                   </details>
                 )}
-                {untimedTotal > 0 && (
+                {untimedTotal > 0 && !nothingPlaceable && (
                   <p className="text-muted-foreground">
                     {t("importExport.dialog.untimedRecordingsNote", { count: untimedTotal })}
                   </p>
@@ -2554,7 +2725,9 @@ export function ExportDialog({
                 onClick={() => handleExport(audioMode)}
                 // Nothing recorded means nothing to write. Better to say so on a
                 // dead button than to hand someone a refusal after they press it.
-                disabled={!activeFileId || isBusy || (recordedLines === 0 && addedTrackTakes === 0)}
+                // `recordedTakes`, not `recordedLines`: a take with no start
+                // time is still a recording, and by line writes it.
+                disabled={!activeFileId || isBusy || (recordedTakes === 0 && addedTrackTakes === 0)}
                 aria-busy={isBusy}
               >
                 {isBusy ? <Spinner aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
@@ -3178,6 +3351,15 @@ export function ExportDialog({
               {/* i18n-exempt "error" is an export-status kind tag, not copy */}
               {status.kind === "error" && idmlRecovery && (
                 <span className="flex flex-wrap items-center gap-2 pt-1">
+                  {idmlUnplacedCount > 0 && onPlaceIdmlTranslations && (
+                    <Button
+                      type="button"
+                      onClick={() => { void placeTranslations() }}
+                      disabled={placingTranslations}
+                    >
+                      {t("importExport.dialog.placeIdmlTranslations")}
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     variant="outline"

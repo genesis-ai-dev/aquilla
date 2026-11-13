@@ -537,10 +537,9 @@ export async function buildPromptPreview(
     limit: topK * 2,
   })
 
-  const examples = selectApprovedExamples(retrieved, fallback, topK, [
-    ...precedingContext,
-    { source: sourceText },
-  ])
+  // The cell is kept out by id (as the editor does), never by source text: an
+  // identical line elsewhere in the project is an exact match, not a duplicate.
+  const examples = selectApprovedExamples(retrieved, fallback, topK, precedingContext, [cellId])
 
   // ── style rules: the Rules page's Style rules library (AQU-2195) ──────────
   // The same selection the editor makes (ProjectWorkspace styleInstructionsFor):

@@ -39,7 +39,7 @@ attempt; the initially checked toggle is never sufficient by itself.
 
 ## Configuration and rollout
 
-The feature stays hidden unless all four worker variables are configured:
+The button remains visible, but login is enabled only when all four worker variables are configured:
 
 - GOOGLE_LOGIN_CLIENT_ID: web OAuth client ID, dedicated to sign-in.
 - GOOGLE_LOGIN_CLIENT_SECRET: worker secret, never a VITE variable or committed.
@@ -52,7 +52,7 @@ Register the appropriate callback in Google Cloud:
 - development: https://api.dev.aquilla.app/identity/api/v2/auth/oauth/google/callback
 - local: the local identity-worker origin followed by /api/v2/auth/oauth/google/callback
 
-Previews require their own exact callback registration and SPA origin allowlist.
+CI previews intentionally disable Google login and show that environment-specific reason. They use the same Aquilla dev access list and password login; do not register new preview callbacks.
 Do not reuse Google Drive scopes, wildcard preview origins or expose a secret in
 browser configuration. Apply migration 0199 before deploying the worker/client.
 Configure Google branding/consent-screen publication and test users as appropriate.
@@ -68,8 +68,9 @@ Development uses the dedicated `aquilla-login-development` Google Cloud project.
 The public development client configuration is in `auth-worker/wrangler.toml`;
 the secret is stored on `aquilla-dev-identity`, not in the repository. These
 settings take effect on the normal development deployment, not merely on push.
-PR #1838 has independently configured preview bindings and an exact registered
-preview callback. No Google configuration is added to production.
+PR #1838 historically used independent preview bindings for provider testing. Current CI previews keep Google disabled.
+
+Production uses the separate `Aquilla Production Login` client in the same business-owned Google Cloud project. Its public client ID, exact production callback, and SPA origin are in the production Wrangler configuration. The deployment manifest requires both `GOOGLE_LOGIN_CLIENT_SECRET` and `ADMIN_TOTP_KEY` on dev and production so a release cannot silently omit them. A staged Cloudflare secret version is not live configuration: promote only through the verified release process after database migrations and provider configuration are ready. Google branding/publication and the live signup/linking/authenticator walkthrough remain release prerequisites; committing these settings is not evidence that those checks passed.
 
 ## Live-provider verification (2026-11-05)
 

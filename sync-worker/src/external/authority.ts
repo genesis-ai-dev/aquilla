@@ -27,6 +27,7 @@ import { errorResponse } from './errors'
 import type { StoredChangeset } from './types'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
+import { resolveCallerProjectRoleForGate } from './support-access'
 import {
   DEFAULT_ASSIGNMENT_MIN_ROLE,
   resolveAssignmentAuthority,
@@ -74,7 +75,15 @@ export async function changesetAuthorityDenied(
     ? (await resolveAssignmentAuthority(db, cs.projectId)).minRole
     : DEFAULT_ASSIGNMENT_MIN_ROLE
   const floor = requiredFloorForChangeset(cs.commands, assignmentMinRole)
-  const role = await resolveProjectRoleShared(db, { id: cred.userId }, cs.projectId)
+  // AQU-2504: support access tried last, recorded as a cross-tenant read — this
+  // check exposes a stored changeset and its role floors, not a write.
+  const role = await resolveCallerProjectRoleForGate(
+    db,
+    cred,
+    cs.projectId,
+    'changeset authority',
+    resolveProjectRoleShared,
+  )
   if (!role || role.level < floor) {
     return errorResponse('permission_denied', 'insufficient project role for this changeset', {
       requiredRole: floor,

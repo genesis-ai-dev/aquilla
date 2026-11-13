@@ -24,7 +24,11 @@ function git(args: string[]): string {
     return ""
   }
 }
-const pkgVersion = JSON.parse(readFileSync("./package.json", "utf8")).version as string
+// One version number for the product: the desktop shell's, in tauri.conf.json.
+// package.json and Cargo.toml carry copies (scripts/app-version.test.ts keeps
+// them equal). Inside the desktop shell the footer swaps this baked value for
+// the installed shell's own version (src/components/VersionBadge.tsx).
+const appVersion = JSON.parse(readFileSync("./src-tauri/tauri.conf.json", "utf8")).version as string
 const buildBranch = resolveBuildBranch(process.env, git(["rev-parse", "--abbrev-ref", "HEAD"]))
 const buildSha = resolveBuildSha(process.env, git(["rev-parse", "HEAD"]))
 const buildDate = resolveBuildDate(git(["log", "-1", "--format=%cI"]))
@@ -52,7 +56,7 @@ export default defineConfig(({ mode }) => ({
   define: {
     "import.meta.env.VITE_BRAND": JSON.stringify(brandId),
     "import.meta.env.VITE_BETA_FLAG": JSON.stringify(process.env.VITE_BETA_FLAG ?? "1"),
-    __APP_VERSION__: JSON.stringify(pkgVersion),
+    __APP_VERSION__: JSON.stringify(appVersion),
     __APP_BRANCH__: JSON.stringify(buildBranch),
     __APP_SHA__: JSON.stringify(buildSha),
     __APP_BUILT_AT__: JSON.stringify(buildDate),

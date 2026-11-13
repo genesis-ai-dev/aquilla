@@ -251,6 +251,11 @@ export async function commitCellFields(
   channel: ProvenanceChannel,
   wasStaged: boolean,
   ctx: Pick<ExecutionContext, 'waitUntil'> | undefined,
+  /** AQU-2504: did this commit's project resolve ONLY on the caller's connector
+   *  support access? Carried from commit.ts's role gate into the provenance
+   *  envelope, so a platform admin's support write is visible as one to the
+   *  org's own members. */
+  viaSupportAccess: boolean,
 ): Promise<Response> {
   const projectId = cs.projectId
   // Re-derived from the STORED commands by the same pure normalizer prepare
@@ -401,7 +406,7 @@ export async function commitCellFields(
     )
   }
 
-  const provenance = buildProvenance(request, cs, confirmationId, channel)
+  const provenance = buildProvenance(request, cs, confirmationId, channel, viaSupportAccess)
   const appliedIds = allEventIds.filter((eid) => acceptedIds.has(eid))
   await stampProvenance(db, provenance, appliedIds)
 

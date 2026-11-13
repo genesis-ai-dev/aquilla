@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { BookOpen, Folder, FolderPlus, FolderSearch, Laptop, RefreshCw, ShieldCheck, X } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
+import { ParatextProjectRow, useLinkedProjects } from "@/components/paratext/ParatextProjectRow"
 import { ThisComputerSidebar } from "@/components/this-computer/ThisComputerSidebar"
 import { PARATEXT_PATH } from "@/components/this-computer/routes"
 import { ThisComputerBreadcrumb } from "@/components/this-computer/ThisComputerBreadcrumb"
@@ -74,6 +75,7 @@ export function ThisComputerPage() {
   const scanReady = useParatextScanReady()
   const d = useParatextDiscovery({ autoStart: supported && scanReady })
   const linked = useLinkedFolders(supported)
+  const linkedProjects = useLinkedProjects(d.projects)
   const [picking, setPicking] = useState(false)
 
   // A scan that completed without error means any OS access prompt has been
@@ -108,19 +110,7 @@ export function ThisComputerPage() {
   }
 
   const projectRow = (p: BridgeProject) => (
-    <li key={p.path} className="flex items-center gap-3 py-1.5 text-sm" data-testid="paratext-found-project">
-      <BookOpen className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="truncate font-medium">{p.settings.fullName}</span>
-          <Badge variant="outline">{p.settings.name}</Badge>
-        </div>
-        <div className="truncate text-xs text-muted-foreground">{t("paratextBridge.booksCount", { count: p.books.length })}</div>
-      </div>
-      <Button variant="outline" size="sm" nativeButton={false} render={<Link to={PARATEXT_PATH} />}>
-        {t("org.overviewLaneTable.openAction")}
-      </Button>
-    </li>
+    <ParatextProjectRow key={p.path} project={p} linked={linkedProjects.has(p.stateId)} testId="paratext-found-project" />
   )
 
   return (

@@ -7,11 +7,13 @@
 // a sync-token scoped to this project, viewer or above.
 
 import { verifyTokenForProject } from "../auth"
+import { canReadRequestedLane, visibleLanesForRead } from "./lane-read-wall"
 import { loadConceptForOccurrences, queryConceptOccurrences } from "./concept-occurrences"
 
 export interface ConceptOccurrencesEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  LANE_READ_WALL?: string
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/concepts\/([^/]+)\/occurrences$/
@@ -63,6 +65,13 @@ export async function handleConceptOccurrencesRequest(
 
   const paging = parsePaging(url)
   if ("error" in paging) return paging.error
+
+  // AQU-730 read wall: each occurrence carries `lane`'s target text, and the
+  // lane is the caller's choice.
+  const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
+  if (!(await canReadRequestedLane(env.AQUILLA_PG, projectId, visibleLanes, paging.lane))) {
+    return new Response("lane not readable", { status: 403 })
+  }
 
   try {
     const loaded = await loadConceptForOccurrences(env.AQUILLA_PG, projectId, conceptId)

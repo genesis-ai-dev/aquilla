@@ -48,6 +48,21 @@ function renderModal(voice: Voice | null = null) {
   return { onSave }
 }
 
+/** A silent PCM WAV of the given length, with a real header. */
+function pcmWav(seconds: number, sampleRate: number, channels: number): File {
+  const blockAlign = channels * 2
+  const dataBytes = seconds * sampleRate * blockAlign
+  const header = new Uint8Array(44)
+  const view = new DataView(header.buffer)
+  const tag = (at: number, text: string) => { for (let i = 0; i < 4; i++) header[at + i] = text.charCodeAt(i) }
+  tag(0, "RIFF"); view.setUint32(4, 36 + dataBytes, true); tag(8, "WAVE")
+  tag(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, channels, true)
+  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * blockAlign, true)
+  view.setUint16(32, blockAlign, true); view.setUint16(34, 16, true)
+  tag(36, "data"); view.setUint32(40, dataBytes, true)
+  return new File([header, new Uint8Array(dataBytes)], "chip-booth.wav", { type: "audio/wav" })
+}
+
 const pick = (n: number) => {
   const files = Array.from({ length: n }, (_, i) => new File([new Uint8Array([1])], `take-${i}.wav`, { type: "audio/wav" }))
   fireEvent.change(screen.getByLabelText("Add recordings of the speaker"), { target: { files } })
@@ -90,6 +105,42 @@ describe("NewVoiceModal Train voice tab", () => {
     expect(onSave.mock.calls[0][0]).toMatchObject({
       name: "Ana", libraryVoiceId: "c-0123456789abcdef", customVoice: { consentAttestedBy: "dev" },
     })
+  })
+
+  // AQU-2573: uncompressed audio passes the 20 MB upload cap in about two
+  // minutes, so a WAV could never reach the 5-minute minimum. It now goes up in
+  // pieces. Joel's case: a 6-minute 44.1 kHz 16-bit stereo WAV (about 60 MB).
+  it("takes a 6-minute studio WAV by uploading it in pieces under the cap", async () => {
+    const { onSave } = renderModal()
+    fireEvent.click(screen.getByRole("tab", { name: /Train voice/ }))
+    fireEvent.change(screen.getByLabelText("Voice name"), { target: { value: "Chip" } })
+    const wav = pcmWav(6 * 60, 44_100, 2)
+    expect(wav.size).toBeGreaterThan(60 * 1024 * 1024)
+    fireEvent.change(screen.getByLabelText("Add recordings of the speaker"), { target: { files: [wav] } })
+
+    await screen.findByText("6.0 min")
+    expect(screen.getByText("6:00")).toBeInTheDocument()
+    expect(screen.queryByText(/Over 20 MB/)).toBeNull()
+    fireEvent.click(screen.getByRole("checkbox"))
+    fireEvent.click(screen.getByRole("button", { name: "Start training" }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+
+    const [args] = startCustomVoiceTraining.mock.calls.at(-1) as unknown as [{ recordings: File[] }]
+    const sent = args.recordings
+    expect(sent).toHaveLength(4)
+    expect(sent.every((f) => f.size <= 20 * 1024 * 1024 && f.name.endsWith(".wav"))).toBe(true)
+    expect(sent.reduce((sum, f) => sum + f.size - 44, 0)).toBe(wav.size - 44)
+  })
+
+  it("refuses a compressed file over the cap, and says a WAV is the way to send one this long", async () => {
+    renderModal()
+    fireEvent.click(screen.getByRole("tab", { name: /Train voice/ }))
+    fireEvent.change(screen.getByLabelText("Voice name"), { target: { value: "Chip" } })
+    const mp3 = new File([new Uint8Array(21 * 1024 * 1024)], "sermon.mp3", { type: "audio/mpeg" })
+    fireEvent.change(screen.getByLabelText("Add recordings of the speaker"), { target: { files: [mp3] } })
+    expect(await screen.findByText("Over 20 MB — use a WAV for a recording this long")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("checkbox"))
+    expect(screen.getByRole("button", { name: "Start training" })).toBeDisabled()
   })
 
   it("opened from a line's take, starts with that take as the first recording (AQU-2291)", async () => {

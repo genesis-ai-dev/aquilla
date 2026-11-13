@@ -147,4 +147,37 @@ describe("hashQueryParams lane (AQU-1025)", () => {
     const empty = await hashQueryParams({ ...base, targetLang: "" })
     expect(omitted).toBe(empty)
   })
+
+  // AQU-730: the lane is the caller's choice, so the wall has to check it.
+  it("answers a walled member with an empty corpus for a lane they are not granted", async () => {
+    const { results: lanes } = await t.db
+      .prepare(`SELECT id, legacy_tag FROM lanes WHERE project_id = ? AND role = 'target'`)
+      .bind(PROJECT)
+      .all<{ id: string; legacy_tag: string | null }>()
+    const french = lanes.find((lane) => lane.legacy_tag === "French")!.id
+    const token = await makeTestToken(SECRET, {
+      projectId: PROJECT,
+      fileId: FILE,
+      role: 400,
+      laneGrants: [{ lane: french, level: 400 }],
+    })
+    const walled = { ...env(), LANE_READ_WALL: "1" }
+    const call = async (route: "search" | "passages", targetLang: string) => {
+      const qs = `q=${encodeURIComponent(QUERY)}&validatedOnly=true&targetLang=${targetLang}`
+      const base = `https://w/api/v1/projects/${PROJECT}/branching-search`
+      const headers = { Authorization: `Bearer ${token}` }
+      const res =
+        route === "search"
+          ? (await handleBranchingSearchRequest(new Request(`${base}?${qs}`, { headers }), walled))!
+          : (await handleBranchingSearchPassagesRequest(new Request(`${base}/passages?${qs}`, { headers }), walled))!
+      expect(res.status).toBe(200)
+      return JSON.stringify(await res.json())
+    }
+    for (const route of ["search", "passages"] as const) {
+      expect(await call(route, "French")).toContain("Dieu")
+      const refused = await call(route, "")
+      expect(refused).not.toContain("Dios")
+      expect(refused).toContain('"corpusSize":0')
+    }
+  })
 })

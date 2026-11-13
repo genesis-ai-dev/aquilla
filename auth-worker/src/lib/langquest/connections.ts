@@ -77,8 +77,6 @@ export function connectionOut(row: ConnectionRow, linkedProjects = 0) {
   }
 }
 
-export type ConnectionOut = ReturnType<typeof connectionOut>
-
 export async function listConnections(env: Env, userId: number): Promise<ConnectionRow[]> {
   const { results } = await env.AQUILLA_PG.prepare(
     "SELECT * FROM langquest_connections WHERE user_id = ? ORDER BY lq_org_name, created_at",

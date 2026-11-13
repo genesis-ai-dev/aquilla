@@ -63,6 +63,21 @@ export function jevDecision(comments, trustedLogins = DEFAULT_JEV_TRUSTED_LOGINS
   return decision
 }
 
+// The only producer the `release-verify` check is accepted from. Any other
+// GitHub App with checks:write on the repo could post a check run of that
+// name on the release HEAD; same rule as GATE_PRODUCER in
+// release-plan-walk.mjs.
+export const VERIFY_PRODUCER = "github-actions"
+
+// The state of the newest `release-verify` run GitHub Actions produced, or
+// undefined when it has produced none. A run from any other app is not a
+// result at all, so it can neither pass the HEAD nor mask a real failure.
+export function verifyState(checkRuns) {
+  const runs = (Array.isArray(checkRuns) ? checkRuns : []).filter((run) => run?.name === VERIFY_CHECK_NAME && run.app?.slug === VERIFY_PRODUCER)
+  const newest = runs.sort((a, b) => String(b.started_at).localeCompare(String(a.started_at)))[0]
+  return newest ? (newest.status === "completed" ? newest.conclusion : newest.status) : undefined
+}
+
 export function decide({ verify, jev }) {
   if (verify !== "success") return { deploy: false, reason: `${VERIFY_CHECK_NAME} is ${verify ?? "missing"}` }
   if (jev === null) return { deploy: false, reason: "Jev has not reported on this HEAD yet" }
@@ -93,6 +108,25 @@ async function githubApi(path, token) {
   return response.json()
 }
 
+// Every comment on the commit, oldest first. Anyone can comment on a commit
+// in a public repository, and one page is 100: read past it, or a hundred
+// comments posted after a PASS would push a later FAIL from the trusted
+// reporter out of sight and the HEAD would deploy over it.
+const COMMENT_PAGES = 30
+
+export async function commitComments(sha, token, api = githubApi) {
+  const comments = []
+  for (let page = 1; page <= COMMENT_PAGES; page++) {
+    const rows = await api(`/commits/${sha}/comments?per_page=100&page=${page}`, token)
+    if (!Array.isArray(rows)) break
+    comments.push(...rows)
+    if (rows.length < 100) return comments
+  }
+  // More than the cap is a flood, not a release: do not decide on a
+  // truncated list.
+  throw new Error(`more than ${COMMENT_PAGES * 100} comments on ${sha}; refusing to decide on a truncated list`)
+}
+
 async function main() {
   const token = process.env.GITHUB_TOKEN
   if (!token) throw new Error("GITHUB_TOKEN is required")
@@ -103,13 +137,11 @@ async function main() {
   }
   const [branch] = open
   const sha = git(["rev-parse", `origin/${branch}`])
-  const checks = await githubApi(`/commits/${sha}/check-runs?check_name=${VERIFY_CHECK_NAME}&per_page=50`, token)
-  const runs = Array.isArray(checks?.check_runs) ? checks.check_runs : []
-  const newest = runs.sort((a, b) => String(b.started_at).localeCompare(String(a.started_at)))[0]
-  const verify = newest ? (newest.status === "completed" ? newest.conclusion : newest.status) : undefined
-  const comments = await githubApi(`/commits/${sha}/comments?per_page=100`, token)
+  const checks = await githubApi(`/commits/${sha}/check-runs?check_name=${VERIFY_CHECK_NAME}&per_page=100`, token)
+  const verify = verifyState(checks?.check_runs)
+  const comments = await commitComments(sha, token)
   const jev = jevDecision(
-    (Array.isArray(comments) ? comments : []).map((comment) => ({ body: comment.body, login: comment.user?.login })),
+    comments.map((comment) => ({ body: comment.body, login: comment.user?.login })),
     jevTrustedLogins(),
   )
   console.log(JSON.stringify({ branch, sha, ...decide({ verify, jev }) }))

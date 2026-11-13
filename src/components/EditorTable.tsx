@@ -559,6 +559,12 @@ export function applyRowOverlays(
         ...(attachment.recordedBy != null ? { recordedBy: attachment.recordedBy } : {}),
         // AQU-1767: see mergeCellsWithAudio — the same list, the same rule.
         ...(attachment.pieceOf ? { pieceOf: attachment.pieceOf } : {}),
+        // AQU-2495 (browser pass, Nov 11): and its volume and fades, so a
+        // write made from this copy (a Recording-tab trim's overlay) keeps
+        // the whole take.
+        ...(attachment.gainDb != null ? { gainDb: attachment.gainDb } : {}),
+        ...(attachment.fadeInMs != null ? { fadeInMs: attachment.fadeInMs } : {}),
+        ...(attachment.fadeOutMs != null ? { fadeOutMs: attachment.fadeOutMs } : {}),
       }
     }
     next = {

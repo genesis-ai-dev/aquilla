@@ -281,28 +281,34 @@ describe("a layer moved following the source (AQU-2267)", () => {
     const moved = drag(source, recordings, layerTrack(cells), { cell: cells[1], audioId: trackId("l2") }, -5)!
     // Following the source its end must reach into its line: it sounds from 0.995 s.
     expect(moved.place.targetOffsetMs).toBe(Math.round((minAudibleEndSec({ start: 3, end: 6 }) - 2.055 - 0.841 - 3) * 1000))
-    // Following the recordings its clip may start no earlier than the file:
-    // l2 starts at 2 s there, so 2 s before its line.
-    expect(moved.place.recordingsOffsetMs).toBe(-2_000)
+    // Following the recordings its SOUND may start no earlier than the file:
+    // l2 starts at 2 s there, so it sounds from 2 s before its line — its
+    // clip's start a 0.841 s head trim before that. (AQU-2495, review, Nov 9:
+    // the limit was on the clip's start, which held the sound 0.841 s in.)
+    expect(moved.place.recordingsOffsetMs).toBe(-2_841)
+    const after = withLayers(undefined, { ...L2, ...moved.place })
+    expect(layouts(after, opts).recordings.targetGeom(after[1], after[1].attachments?.[trackId("l2")], trackId("l2"))!.start).toBe(0)
   })
 })
 
 describe("clampMoveStart — the lane's move clamp (AQU-2267)", () => {
   const section = { start: 3, end: 6 }
   it("free (a voice take following the recordings): only its line's start", () => {
-    expect(clampMoveStart(1, { free: true, lineStartSec: 2, section, lenSec: 1, prevChipStartSec: 2.5, nextChipStartSec: 2.6, trimStartSec: 0 })).toBe(2)
-    expect(clampMoveStart(40, { free: true, lineStartSec: 2, section, lenSec: 1, prevChipStartSec: null, nextChipStartSec: 3, trimStartSec: 0 })).toBe(40)
+    expect(clampMoveStart(1, { free: true, lineStartSec: 2, section, lenSec: 1, prevChipStartSec: 2.5, nextChipStartSec: 2.6 })).toBe(2)
+    expect(clampMoveStart(40, { free: true, lineStartSec: 2, section, lenSec: 1, prevChipStartSec: null, nextChipStartSec: 3 })).toBe(40)
   })
   it("not free: touching its line, between its neighbours' starts, never before the start of the file", () => {
-    const c = { free: false, lineStartSec: null, section, lenSec: 1, prevChipStartSec: null, nextChipStartSec: null, trimStartSec: 0 }
+    const c = { free: false, lineStartSec: null, section, lenSec: 1, prevChipStartSec: null, nextChipStartSec: null }
     expect(clampMoveStart(9, c)).toBeCloseTo(maxAudibleStartSec(section), 5)
     expect(clampMoveStart(0, c)).toBeCloseTo(minAudibleEndSec(section) - 1, 5)
     expect(clampMoveStart(5, { ...c, nextChipStartSec: 4 })).toBe(4)
     expect(clampMoveStart(2.2, { ...c, prevChipStartSec: 2.5 })).toBe(2.5)
-    expect(clampMoveStart(2.1, { ...c, lenSec: 3, trimStartSec: 2.3 })).toBe(2.3)
+    // AQU-2495 (review, Nov 9): the start of the file floors its SOUND; a
+    // head trim no longer holds it later (take-place.head-trim.test.ts).
+    expect(clampMoveStart(-1, { ...c, lenSec: 30 })).toBe(0)
   })
   it("not free, a later piece of a take: its ceiling moves out by how far into the take its sound starts", () => {
-    const c = { free: false, lineStartSec: null, section, lenSec: 1, prevChipStartSec: null, nextChipStartSec: null, trimStartSec: 0 }
+    const c = { free: false, lineStartSec: null, section, lenSec: 1, prevChipStartSec: null, nextChipStartSec: null }
     expect(clampMoveStart(9, { ...c, leadInTakeSec: 2.5 })).toBeCloseTo(maxAudibleStartSec(section) + 2.5, 5)
     expect(clampMoveStart(7, { ...c, leadInTakeSec: 2.5 })).toBe(7)
   })

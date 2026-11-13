@@ -30,6 +30,7 @@ import { audioColumnFor, fileHasAudio, fileLastSeenWithAudio } from "@/lib/audio
 import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { takeTrackName } from "@/lib/timeline/take-colors"
 import { keptWindowSec } from "@/lib/audio/kept-window"
+import { minHeadTrimSec } from "@/lib/timeline/lane-timing"
 import { loadPeaksFor, type SyncTokenFetcher } from "@/lib/audio/peaks-loader"
 import { persistTakeTrim } from "@/lib/audio/persist-trim"
 import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
@@ -275,9 +276,12 @@ export function useExtensionEditorRev4(args: ExtensionEditorRev4Args): Extension
         const att = cell.attachments?.[audioId]
         if (!att) return false
         if (keptWindowSec(cell, audioId, att).kind === "section") return false
+        // AQU-2495 (review, Nov 9): never so little trimmed off that the take's
+        // sound starts before the file (`minHeadTrimSec`).
+        const from = Math.max(startMs, Math.round(minHeadTrimSec(cell, att) * 1000))
         await persistTakeTrim({
           projectId: args_.project!.id, fileId: cell.fileId, cellId: cell.id, audioId, att, selectedAudioId: cell.selectedAudioId,
-          trimStartMs: startMs > 0 ? startMs : null, trimEndMs: endMs, ...(args_.lane ? { targetLang: args_.lane } : {}), author: args_.username,
+          trimStartMs: from > 0 ? from : null, trimEndMs: endMs, ...(args_.lane ? { targetLang: args_.lane } : {}), author: args_.username,
         })
         return true
       },

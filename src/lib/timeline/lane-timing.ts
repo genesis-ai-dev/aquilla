@@ -219,12 +219,24 @@ function cellAnchorSec(cell: CellData, section: SpanSec): number {
  * head-trimmed take on an added track, dragged to the very start of its line,
  * puts its sample zero a head trim BEFORE that start, and clamping it would
  * spring the take a head trim to the right of where it was dropped.
+ *
+ * AQU-2495 (review, Nov 9): the floor is on the take's SOUND, not its clip.
+ * `unheardStartSec` is the take's head trim, the part of the clip nobody
+ * hears: that much of it may sit before file zero, so a take with 45 s
+ * trimmed off its start can still sound from 0:12. A caller that names none
+ * keeps the clip itself at or after file zero (a fresh take's pre-roll).
+ * Null is a place with no file clock under it: following the recordings a
+ * take is placed from its line's start on the laid-out timeline, wherever
+ * that line sits in the source file, and that layout's own move clamp is
+ * what keeps its sound from starting before the timeline does.
  */
-export function targetOffsetMsFor(cell: CellData, anchorSec: number): number {
+export function targetOffsetMsFor(cell: CellData, anchorSec: number, unheardStartSec: number | null = 0): number {
   const timed = typeof cell.startTime === "number" && Number.isFinite(cell.startTime)
   const startMs = timed ? Math.round(cell.startTime! * 1000) : 0
   const asked = Math.round(anchorSec * 1000) - startMs
-  const floored = timed ? Math.max(-startMs, asked) : asked
+  const floored = timed && unheardStartSec != null
+    ? Math.max(-startMs - Math.max(0, Math.round(unheardStartSec * 1000)), asked)
+    : asked
   // A cell starting at 0 clamps to -0, which is only ever confusing downstream.
   return floored === 0 ? 0 : floored
 }
@@ -276,6 +288,35 @@ export function targetChipGeom(
     anchor, start, end: anchor + audibleEndOnClip,
     trimStartSec, trimEndSec, durationSec, usingFallback: false,
   }
+}
+
+/**
+ * AQU-2495 (review, Nov 9): A TAKE'S SOUND NEVER STARTS BEFORE THE FILE.
+ *
+ * Its clip may start before 0:00 now (a head-trimmed take dragged there, see
+ * `targetOffsetMsFor`), but what it sounds may not: playback skips whatever
+ * would sound before the file, and every audio export by time pulls it to
+ * 0:00, later than the app plays it. The earliest a take's sound may start,
+ * for a clip whose sample zero sits at `anchorSec`: the timeline's left trim
+ * handle holds to it, and every other way of un-trimming a take's start does
+ * too (`minHeadTrimSec`).
+ */
+export function earliestSoundSec(anchorSec: number): number {
+  return Math.max(anchorSec, 0)
+}
+
+/**
+ * The same rule as a head trim, in the take's own seconds: how much of its
+ * clip must stay trimmed off so its sound starts no earlier than the file
+ * (rounded up to the ms a trim is stored in). 0 for a clip that starts inside
+ * the file, and on a line with no times. Read from its place following the
+ * source, the one the audio exports place it by.
+ */
+export function minHeadTrimSec(cell: CellData, att: ChipAtt | undefined): number {
+  const geom = targetChipGeom(cell, att)
+  if (!geom) return 0
+  const ms = Math.ceil((earliestSoundSec(geom.anchor) - geom.anchor) * 1000 - 1e-6)
+  return ms > 0 ? ms / 1000 : 0
 }
 
 /** When (file seconds) a section's dub is due to fire = its AUDIBLE start. */

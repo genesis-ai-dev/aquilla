@@ -37,6 +37,24 @@ describe("persistTakeTrim", () => {
     expect(notifyAudioAttachmentsChanged).toHaveBeenCalledWith("cues")
   })
 
+  // AQU-2495 (browser pass, Nov 11): the overlay replaces the take while it
+  // lives, so all of the take rides it. Without its name the takes list named
+  // it "Take 1" for good; without its place a Recording-tab trim's floor read
+  // the clip as sitting on its line's start.
+  it("paints the whole take: its name, place, level and piece link ride along", () => {
+    void persistTakeTrim({
+      ...base,
+      att: { ...base.att, slot: "track-music", label: "Music bed", targetOffsetMs: -8_000, recordingsOffsetMs: 250, gainDb: -6, fadeInMs: 100, fadeOutMs: 800, pieceOf: "rec-cue-4-0.wav", role: "dub", recordedBy: "ana" },
+    })
+    const att = (injectOptimisticAudioTrim.mock.calls[0] as unknown as [string, string, Record<string, unknown>])[2]
+    expect(att).toMatchObject({
+      audioId: "rec-cue-4-a.wav", slot: "track-music", label: "Music bed",
+      targetOffsetMs: -8_000, recordingsOffsetMs: 250, gainDb: -6, fadeInMs: 100, fadeOutMs: 800,
+      pieceOf: "rec-cue-4-0.wav", role: "dub", recordedBy: "ana",
+      trimStartMs: 300, trimEndMs: null, validators: ["sam"],
+    })
+  })
+
   it("keeps a clip's own slot", () => {
     void persistTakeTrim({ ...base, att: { ...base.att, slot: "track-2" } })
     expect((injectOptimisticAudioTrim.mock.calls[0] as unknown as [string, string, { slot: string }])[2].slot).toBe("track-2")

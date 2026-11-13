@@ -47,13 +47,14 @@ import {
   chipOverlaps,
   chipTrespass,
   dualFaultMeetSec,
+  earliestSoundSec,
   maxAudibleStartSec,
   minAudibleEndSec,
   MIN_TARGET_LEN_SEC,
   type TargetChipGeom,
 } from "@/lib/timeline/lane-timing"
 import { clampMoveStart, movedTakePlace, pieceLeadInTakeSec, type TakePlace } from "@/lib/timeline/take-place"
-import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
+import { missingTakeKey, sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { canCutAt } from "@/lib/audio/cut-take"
 import { pieceTrimLimitsMs } from "@/lib/sync/cell-audio-read-types"
 import { pieceNameIn, takeBaseLabel } from "@/lib/audio/take-groups"
@@ -125,9 +126,11 @@ export interface TargetAudioLaneProps {
   /** The verse the transport is WAITING ON (queue state "loading") — its chip
    *  shows a small spinner while the readiness gate parks. */
   loadingCellId?: string | null
-  /** Cells whose dub audio definitively 404'd — their chips carry a missing
-   *  badge (decision 2026-08-05). */
-  missingCellIds?: ReadonlySet<string>
+  /** The takes whose dub audio definitively 404'd — their chips carry a
+   *  missing badge (decision 2026-08-05). AQU-2495 (review, Nov 9): each a
+   *  `missingTakeKey(cellId, audioId)`. It was the line's id, which marked
+   *  every take of the line, on every track. */
+  missingTakeKeys?: ReadonlySet<string>
   editable: boolean
   /**
    * DOES THE THING DRIVING PLAYBACK HONOUR A DUB'S TRIMS?
@@ -548,8 +551,9 @@ function TargetAudioChip({
       // stack and can never be intentional. The rule is symmetric: the floor
       // stops a backward drag at the previous chip's start, the ceiling stops
       // a forward drag at the next chip's start. Hard floor last: audible
-      // start ≥ trimStart ⇔ stored anchor ≥ 0, so nothing renders or persists
-      // before file time zero.
+      // start ≥ 0, so nothing sounds before file time zero. (AQU-2495, review,
+      // Nov 9: it was "≥ trimStart", which held a head-trimmed take's unheard
+      // start inside the file and kept its sound from any earlier line.)
       // `maxAudibleStartSec` / `minAudibleEndSec` ARE these two expressions,
       // extracted (see lane-timing) so the trim arms below can enforce the same
       // bound. Identical arithmetic — the second reads "this chip's END may not
@@ -576,7 +580,6 @@ function TargetAudioChip({
         lenSec: len,
         prevChipStartSec: prevChip?.start ?? null,
         nextChipStartSec,
-        trimStartSec: geom.trimStartSec,
         leadInTakeSec: pieceLead,
       })
       return { start, end: start + len }
@@ -603,8 +606,11 @@ function TargetAudioChip({
       // span the layout measures the chip against. That IS `geom.anchor` for a
       // line's main take; a layer's sample zero can sit before its line, and
       // its head trim comes back off only as far as the line's start.
+      // AQU-2495 (review, Nov 9): …nor back past the start of the file — the
+      // clip's start can sit before it now, and its sound must not. The
+      // Station's Start and the Recording tab hold to the same rule.
       const lo = Math.max(
-        geom.anchor,
+        earliestSoundSec(geom.anchor),
         freeRules ? section.start : -Infinity,
         prevChip?.start ?? -Infinity,
         pieceLimits?.minStartMs != null ? geom.anchor + pieceLimits.minStartMs / 1000 : -Infinity,
@@ -1962,7 +1968,7 @@ export function TargetAudioLane({
   selectedId,
   selectedTakeCellId = null,
   loadingCellId,
-  missingCellIds,
+  missingTakeKeys,
   editable,
   masterHonorsTrims,
   snapEnabled,
@@ -2291,7 +2297,7 @@ export function TargetAudioLane({
               selectedTakeCellId === chip.item.cell.id ? "take" : selectedId === chip.item.cell.id ? "line" : false
             }
             loading={loadingCellId === chip.item.cell.id}
-            missing={missingCellIds?.has(chip.item.cell.id) ?? false}
+            missing={missingTakeKeys?.has(missingTakeKey(chip.item.cell.id, chip.item.audioId)) ?? false}
             editable={editable}
             snap={{ enabled: Boolean(snapEnabled), candidates: candidatesFor(chip.item.audioId, chip.section) }}
             onSelect={onSelect}

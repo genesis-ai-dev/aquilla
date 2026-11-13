@@ -71,6 +71,23 @@ describe("applyRowOverlays — trim window (AQU-782)", () => {
   })
 })
 
+// AQU-2495 (browser pass, Nov 11): a Recording-tab trim paints the take from
+// this copy, whole; its volume and fades must be here for that.
+describe("applyRowOverlays — the take's volume and fades (AQU-2495)", () => {
+  it("forwards them, keeping a 0 dB volume", () => {
+    const out = applyRowOverlays(mediaCell(), {
+      audioEntry: {
+        attachments: { "take-1": { audioId: "take-1", url: "frontier-audio://take-1", slot: "recording", mimeType: null, voiceId: null, referenceAudioId: null, durationMs: null, trimStartMs: null, trimEndMs: null, gainDb: 0, fadeInMs: 300, fadeOutMs: 500 } },
+        selectedBySlot: { recording: "take-1" },
+        selectedAudioId: "take-1",
+        selectedGeneratedVoiceAudioId: null,
+        audioTimings: {},
+      } as unknown as CellAudioEntry,
+    })
+    expect(out.attachments?.["take-1"]).toMatchObject({ gainDb: 0, fadeInMs: 300, fadeOutMs: 500 })
+  })
+})
+
 /**
  * AQU-490 fell into the SAME gap this file was created for, which is why the
  * tests live here rather than in a new one.

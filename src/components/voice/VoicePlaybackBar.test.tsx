@@ -220,6 +220,50 @@ describe("VoicePlaybackBar", () => {
   })
 })
 
+// AQU-2495 (review, Nov 9): after a run has ended the queue still holds the
+// run's lines, which may be a chapter the person has since left, and Next
+// played its first line whatever was now selected or showing; Previous did
+// nothing. With nothing playing, both now step from where the person is: the
+// selected line, else the chapter showing.
+describe("VoicePlaybackBar — Next and Previous with nothing playing (AQU-2495)", () => {
+  const session = { jwt: "t" } as unknown as FrontierSession
+  const voiced = (id: string): CellData =>
+    cell({ id, selectedAudioId: `${id}-a`, attachments: { [`${id}-a`]: { url: `blob:${id}`, type: "audio/mpeg" } } })
+  const silent = (id: string): CellData => cell({ id })
+  // The chapter now showing: Ruth 1.
+  const ruth1 = [voiced("r1v1"), silent("r1v2"), voiced("r1v3"), voiced("r1v4")]
+  const bar = (startCellId: string | null) => (
+    <VoicePlaybackBar cells={ruth1} projectId="p" session={session} settings={undefined} startCellId={startCellId} />
+  )
+  const started = () => vi.mocked(startQueue).mock.calls.map(([ctx, from]) => [ctx.cells[from as number]?.id, ctx.cells === ruth1])
+
+  beforeEach(() => { vi.mocked(startQueue).mockClear() })
+
+  it("with a line selected, Next starts the line after it and Previous the one before with anything to play", () => {
+    const { unmount } = render(bar("r1v3"))
+    fireEvent.click(screen.getByLabelText("Next line"))
+    fireEvent.click(screen.getByLabelText("Previous line"))
+    expect(started()).toEqual([["r1v4", true], ["r1v1", true]])
+    unmount()
+  })
+
+  it("with nothing selected, Next starts the chapter's first line and Previous its last", () => {
+    render(bar(null))
+    fireEvent.click(screen.getByLabelText("Next line"))
+    fireEvent.click(screen.getByLabelText("Previous line"))
+    expect(started()).toEqual([["r1v1", true], ["r1v4", true]])
+  })
+
+  it("past either end of the chapter there is nothing to step to, and nothing starts", () => {
+    const { unmount } = render(bar("r1v4"))
+    fireEvent.click(screen.getByLabelText("Next line"))
+    unmount()
+    render(bar("r1v1"))
+    fireEvent.click(screen.getByLabelText("Previous line"))
+    expect(startQueue).not.toHaveBeenCalled()
+  })
+})
+
 // ── Speed reaches the takes, not just whoever owns the clock ────────────────
 //
 // The dubs always fire through the queue's overlay pool no matter which engine

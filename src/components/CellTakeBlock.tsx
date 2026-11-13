@@ -42,6 +42,7 @@ import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { keptWindowSec, piecesWindowSec, type KeptWindow } from "@/lib/audio/kept-window"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
 import { TRACK_DOT_CLASS } from "@/lib/timeline/track-colors"
+import { minHeadTrimSec } from "@/lib/timeline/lane-timing"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
 import { pieceStretchOf, playingInSlot, recordTakeWindowRun } from "@/lib/history/take-steps"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
@@ -269,6 +270,9 @@ function CellTakeBlockView({
   // AQU-2235: the one rule the timeline and the takes list ask too — an added
   // track's AI voice sits in its single slot, known by its `voiceId`.
   const isGenerated = isGeneratedTake(owner, selectedAudioId, attachment)
+  // AQU-2495 (review, Nov 9): a take's clip may start before 0:00; its sound
+  // may not (`minHeadTrimSec`).
+  const startFloorSec = attachment ? minHeadTrimSec(owner, attachment) : 0
   // Trimmed where it is shown (Sam, 2026-09-25): the edit lands on the cell
   // that HOLDS the take — a linked heard-line take writes to its cue.
   const commitTrim = useCallback((start: number | null, end: number | null) => {
@@ -770,6 +774,9 @@ function CellTakeBlockView({
         strategy={project.audioMediaStrategy ?? "lazy"}
         {...(piecesWindow ? { pieces: piecesWindow } : {})}
         trimEditable={editable && !split}
+        // AQU-2495 (review, Nov 9): its start comes back only as far as keeps
+        // its sound inside the file, as the timeline's left trim handle does.
+        {...(startFloorSec > 0 ? { trimLimits: { minStart: startFloorSec, maxEnd: null } } : {})}
         onCommitTrim={commitTrim}
         testId="cell-take-waveform"
       >

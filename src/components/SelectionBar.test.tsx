@@ -31,7 +31,7 @@ import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
 import { ROLE } from "@/lib/frontier/roles"
 import type { MemberScope } from "@/lib/sync/member-scopes"
 import * as selectionModule from "@/lib/audio/selection"
-import { startQueue } from "@/lib/audio/play-queue"
+import { setQueueTargetSlots, setQueueTimingMode, startQueue } from "@/lib/audio/play-queue"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { toast } from "@/components/ui/toast"
 import posthog from "@/lib/posthog"
@@ -1334,6 +1334,34 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
 
     await expectDisabledNote(playButton(), "None of the selected lines has audio yet")
     expect(startQueue).not.toHaveBeenCalled()
+  })
+
+  // AQU-2495 (review, Nov 9): following the recordings, a take on an added
+  // track plays too, so lines recorded only on added tracks have something to
+  // play. The button counted the main track's takes alone and was greyed with
+  // "no audio" over lines the run would play.
+  it("following the recordings, counts lines recorded only on an added track, and plays them", async () => {
+    const TRACK = "trk-1"
+    const trackOnly = (id: string): CellAudioEntry => {
+      const take = { ...audioMap().get("cell-1")!.attachments["take-1"], audioId: `voice-${id}`, slot: TRACK }
+      return { attachments: { [take.audioId]: take }, selectedBySlot: { [TRACK]: take.audioId }, selectedAudioId: null, selectedGeneratedVoiceAudioId: null, audioTimings: {} }
+    }
+    setQueueTimingMode("audioFirst")
+    setQueueTargetSlots(["recording", TRACK])
+    try {
+      vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
+      renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+        audioMode: true, session: SESSION, audioByCellId: new Map([["cell-1", trackOnly("cell-1")], ["cell-2", trackOnly("cell-2")]]),
+      })
+      const btn = playButton()
+      expect(btn).not.toBeDisabled()
+      expect(btn.textContent).toContain("2")
+      await userEvent.setup().click(btn)
+      expect(startQueue).toHaveBeenCalledTimes(1)
+    } finally {
+      setQueueTimingMode("dubbing")
+      setQueueTargetSlots(["recording"])
+    }
   })
 
   it("stays out of the text lens — a selection there offers Translate, not playback", () => {

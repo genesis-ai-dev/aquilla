@@ -31,7 +31,8 @@
 // in, from where the take was drawn there to where it was dropped (after that
 // timing's own clamp). Then each place moves by it:
 //   - following the source: the end-based bounds against its line, its
-//     neighbours on the track, never before the start of the file;
+//     neighbours on the track, its sound never before the start of the file
+//     (AQU-2495: its trimmed-off start may be);
 //   - following the recordings, on the main track or a voice track: never
 //     before its line's start (a pause cannot be negative);
 //   - following the recordings, on a layer: its lead-in limit, the takes either
@@ -85,9 +86,6 @@ export interface MoveClamp {
   /** The audible starts of the chips either side of it on its track. */
   prevChipStartSec: number | null
   nextChipStartSec: number | null
-  /** Its head trim: an audible start below it would put its clip's start
-   *  before the start of the file. */
-  trimStartSec: number
   /** How far into its take a piece's sound starts (`pieceLeadInTakeSec`);
    *  0 or absent for a whole take or its first piece. */
   leadInTakeSec?: number
@@ -127,11 +125,17 @@ export function pieceLeadInTakeSec(cell: CellData, audioId: string): number {
  * line's space, but its end may not pass its line's start, nor its take's
  * start its line's end), neither neighbour's start, and never before file zero — the
  * floors applied last, so they win when the bounds cross.
+ *
+ * AQU-2495 (review, Nov 9): "never before file zero" is the take's SOUND. The
+ * floor used to be the take's head trim, which kept its clip's start at file
+ * zero and so kept a take with 45 s trimmed off its start from sounding
+ * anywhere before 0:45. The trimmed-off part is never heard; it may sit
+ * before the start.
  */
 export function clampMoveStart(start: number, c: MoveClamp): number {
   if (c.free) return Math.max(start, c.lineStartSec ?? start)
   const capped = Math.min(start, maxAudibleStartSec(c.section) + (c.leadInTakeSec ?? 0), c.nextChipStartSec ?? Infinity)
-  return Math.max(capped, minAudibleEndSec(c.section) - c.lenSec, c.prevChipStartSec ?? -Infinity, c.trimStartSec)
+  return Math.max(capped, minAudibleEndSec(c.section) - c.lenSec, c.prevChipStartSec ?? -Infinity, 0)
 }
 
 /** Follows source's layout, for a lane drawn without one (its own tests). */
@@ -174,12 +178,12 @@ export function movedStartSec(
   if (!layout.canRetimeTarget(cell, cell.attachments?.[audioId], audioId)) return null
   const isTake = (t: PlacedTake) => t.cell.id === cell.id && t.audioId === audioId
   // The track as that layout draws it, left to right — the lane's own order.
-  const chips: { take: PlacedTake; start: number; end: number; trimStartSec: number; section: SpanSec }[] = []
+  const chips: { take: PlacedTake; start: number; end: number; section: SpanSec }[] = []
   for (const t of track.some(isTake) ? track : [...track, take]) {
     const a = t.cell.attachments?.[t.audioId]
     const geom = layout.targetGeom(t.cell, a, t.audioId)
     const section = layout.chipSection(t.cell, a, t.audioId)
-    if (geom && section) chips.push({ take: t, start: geom.start, end: geom.end, trimStartSec: geom.trimStartSec, section })
+    if (geom && section) chips.push({ take: t, start: geom.start, end: geom.end, section })
   }
   chips.sort((x, y) => x.start - y.start)
   const i = chips.findIndex((c) => isTake(c.take))
@@ -192,7 +196,6 @@ export function movedStartSec(
     lenSec: chip.end - chip.start,
     prevChipStartSec: chips[i - 1]?.start ?? null,
     nextChipStartSec: chips[i + 1]?.start ?? null,
-    trimStartSec: chip.trimStartSec,
     leadInTakeSec: pieceLeadInTakeSec(cell, audioId),
   })
 }
@@ -211,7 +214,20 @@ export function placeAfterMoveMs(
   const start = movedStartSec(layout, track, take, deltaSec)
   if (start == null) return null
   const anchor = layout.retimeAnchorSec(take.cell, take.cell.attachments?.[take.audioId], start, take.audioId)
-  return anchor == null ? null : targetOffsetMsFor(take.cell, anchor)
+  return anchor == null ? null : targetOffsetMsFor(take.cell, anchor, unheardStartSec(layout, take))
+}
+
+/**
+ * AQU-2495 (review, Nov 9): how much of the take's clip may sit before file
+ * zero when its place is stored (`targetOffsetMsFor`): its head trim following
+ * the source, where only its sound must stay inside the file. Null following
+ * the recordings, where the place is measured on the laid-out timeline and
+ * the file's clock holds nothing.
+ */
+function unheardStartSec(layout: TimelineLayout, take: PlacedTake): number | null {
+  if (timingOf(layout) === "recordings") return null
+  const ms = take.cell.attachments?.[take.audioId]?.trimStartMs
+  return typeof ms === "number" && Number.isFinite(ms) && ms > 0 ? ms / 1000 : 0
 }
 
 export interface MovedTake {
@@ -246,8 +262,9 @@ export function movedTakePlace(args: {
   const to = here.retimeAnchorSec(cell, att, args.toStartSec, audioId)
   const from = here.retimeAnchorSec(cell, att, args.fromStartSec, audioId)
   if (to == null || from == null) return null
-  const hereMs = targetOffsetMsFor(cell, to)
-  const deltaMs = hereMs - targetOffsetMsFor(cell, from)
+  const unheard = unheardStartSec(here, args.take)
+  const hereMs = targetOffsetMsFor(cell, to, unheard)
+  const deltaMs = hereMs - targetOffsetMsFor(cell, from, unheard)
   if (deltaMs === 0) return null
   const otherTiming: Timing = timingOf(here) === "source" ? "recordings" : "source"
   const other = args.other && timingOf(args.other) === otherTiming ? args.other : null

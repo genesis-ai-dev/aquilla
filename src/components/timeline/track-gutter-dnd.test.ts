@@ -140,8 +140,8 @@ describe("commitTrackReorder", () => {
     }
     const below = adjustTrackDrop(folded, overLast, { y: 30, overTop: 0, overHeight: 40 })
     const above = adjustTrackDrop(folded, overLast, { y: 10, overTop: 0, overHeight: 40 })
-    expect(below.toPosition).toBe(2)
-    expect(above.toPosition).toBe(1)
+    expect(below).toMatchObject({ kind: "regroup", toPosition: 2 })
+    expect(above).toMatchObject({ kind: "regroup", toPosition: 1 })
 
     // …and the lower half of any OTHER member as the slot after it, so a
     // track still outside the folder can be aimed between two of its

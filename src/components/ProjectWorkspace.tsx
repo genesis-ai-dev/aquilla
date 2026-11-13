@@ -368,7 +368,7 @@ import { contentFileIdsOfShownTracks, folderIdsOf, folderMembers, orderForScopeA
 import { loadHiddenTracks } from "@/lib/timeline/track-collapse"
 import { GENERATED_VOICE_SLOT, programmeTrackSlots, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
-import { TimelineEditor } from "@/components/timeline/TimelineEditor"
+import { TimelineEditor, type TimelineActivateRequest } from "@/components/timeline/TimelineEditor"
 import { createVideoSeekStore } from "@/components/timeline/video-seek-store"
 import { createPlayingCueStore, type PlayingCueStore } from "@/components/editor-playing-cue"
 import type { ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
@@ -2761,7 +2761,7 @@ export function ProjectWorkspace() {
   // 2026-08-07 (wire b): a text-table row click points the timeline at that
   // cell. Nonce'd so repeat clicks on the same row re-center; the callback is
   // identity-stable (mirror ref) because it rides in editorActionsValue.
-  const [timelineActivateRequest, setTimelineActivateRequest] = useState<{ cellId: string; nonce: number; play?: boolean } | null>(null)
+  const [timelineActivateRequest, setTimelineActivateRequest] = useState<TimelineActivateRequest | null>(null)
   const timelineStackedRef = useRef(timelineStacked)
   timelineStackedRef.current = timelineStacked
   const activateNonceRef = useRef(0)

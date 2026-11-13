@@ -238,6 +238,18 @@ import { Button } from "@/components/ui/button"
 import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
+/** A text-table row click or chapter pick, consumed once per `nonce`. */
+export type TimelineActivateRequest = {
+  cellId: string
+  nonce: number
+  /** Roll playback from this line. Absent keeps the cue-only row-click rule. */
+  play?: boolean
+  /** Ease the scroll. A chapter pick uses this; a row click jumps. */
+  smooth?: boolean
+  /** Where the line sits in the view. A chapter pick uses `"start"`. */
+  align?: "start" | "center"
+}
+
 export interface TimelineEditorProps {
   cells: CellData[]
   coreMediaUrl: string | null
@@ -575,13 +587,7 @@ export interface TimelineEditorProps {
    *  A chapter pick passes `smooth` and `align: "start"`: the same move the
    *  chapter navigator makes in the text, eased, with the chapter's first
    *  line at the start of the view. */
-  activateRequest?: {
-    cellId: string
-    nonce: number
-    play?: boolean
-    smooth?: boolean
-    align?: "start" | "center"
-  } | null
+  activateRequest?: TimelineActivateRequest | null
   /** SUB-53: which job this FILE is for (pre-merge round: per-file, resolved
    *  via resolveFileTimingMode). "dubbing" (the default) draws the track
    *  against the imported recording's clock; "audioFirst" lays the verses out

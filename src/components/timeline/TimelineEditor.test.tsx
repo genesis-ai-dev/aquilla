@@ -1381,9 +1381,9 @@ describe("TimelineEditor", () => {
         else orig.set!.call(this, v)
       },
     }))
-    const scrollTo = vi.spyOn(HTMLElement.prototype, "scrollTo").mockImplementation(function (this: HTMLElement, arg) {
-      const opts = typeof arg === "object" && arg ? arg : null
-      if (isColumn(this) && opts && "left" in opts && typeof opts.left === "number") this.scrollLeft = opts.left
+    const scrollTo = vi.spyOn(HTMLElement.prototype, "scrollTo").mockImplementation(function (this: HTMLElement, arg: unknown) {
+      const opts = typeof arg === "object" && arg ? arg as ScrollToOptions : null
+      if (isColumn(this) && typeof opts?.left === "number") this.scrollLeft = opts.left
     })
     try {
       const { rerender } = render(

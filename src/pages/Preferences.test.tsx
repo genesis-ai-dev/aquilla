@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
@@ -17,8 +17,9 @@ vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
   fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true as const, projects: [] })),
 }))
 
+const authState = vi.hoisted(() => ({ signedIn: true, loading: false }))
 vi.mock("@/hooks/useFrontierSession", () => ({
-  useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }),
+  useFrontierSession: () => ({ session: authState.signedIn ? { jwt: "jwt", username: "wendi", createdAt: "x" } : null, loading: authState.loading }),
 }))
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: vi.fn(async () => []) }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
@@ -33,6 +34,8 @@ vi.mock("@/components/settings/PersonalProviderSection", () => ({
 }))
 
 afterEach(() => {
+  authState.signedIn = true
+  authState.loading = false
   vi.clearAllMocks()
   window.localStorage.clear()
   document.documentElement.classList.remove("dark")
@@ -254,6 +257,14 @@ describe("PreferencesDialog", () => {
     expect(screen.getByRole("combobox", { name: "Theme" })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "App font size" })).toHaveTextContent("Default")
 
+    const scroller = screen.getByTestId("preferences-index-scroll")
+    scroller.scrollTop = 640
+    fireEvent.scroll(scroller)
+    await userEvent.click(screen.getByRole("link", { name: /Translator profile/i }))
+    expect(screen.queryByTestId("preferences-index-scroll")).toBeNull()
+    await userEvent.click(screen.getByRole("button", { name: "Preferences" }))
+    expect(screen.getByTestId("preferences-index-scroll").scrollTop).toBe(640)
+
     await userEvent.click(screen.getByRole("button", { name: /close/i }))
     expect(screen.getByTestId("editor-background")).toBeInTheDocument()
     expect(screen.queryByTestId("preferences-dialog")).not.toBeInTheDocument()
@@ -321,5 +332,28 @@ describe("Preferences — Recording (AQU-2264)", () => {
     expect(screen.getByRole("switch", { name: "Countdown beep" })).toBeInTheDocument()
     expect(screen.getByRole("switch", { name: "Follow playhead" })).toBeInTheDocument()
     expect(screen.getByRole("switch", { name: "Snap to neighboring edges" })).toBeInTheDocument()
+  })
+})
+
+
+describe("signed-out account preferences", () => {
+  it.each(["login-methods", "notifications", "usage", "connected-orgs", "api-tokens"])("replaces %s with guidance", slug => {
+    authState.signedIn = false
+    renderAt(`/preferences/${slug}`)
+    expect(screen.getByText("Log in to manage your account")).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Log in" })).not.toBeInTheDocument()
+    expect(screen.queryByText("Manage how you log in to your Aquilla account.")).not.toBeInTheDocument()
+  })
+  it("does not show a login prompt before session hydration finishes", () => {
+    authState.signedIn = false
+    authState.loading = true
+    renderAt("/preferences/login-methods")
+    expect(screen.queryByText("Log in to manage your account")).not.toBeInTheDocument()
+  })
+  it("keeps local preferences usable while signed out", () => {
+    authState.signedIn = false
+    renderAt("/preferences/profile")
+    expect(screen.queryByText("Log in to manage your account")).not.toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Translator profile" })).toBeVisible()
   })
 })

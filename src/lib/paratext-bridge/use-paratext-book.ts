@@ -47,7 +47,7 @@ export function useParatextBook(project: BridgeProject | null, fileName: string 
   const [state, setState] = useState<BookState>({
     loading: true, error: null, units: null, edits: new Map(), conflicts: [], refusals: [], onHold: false, writing: false, theirsCount: 0, denial: null,
   })
-  const guid = project?.guid ?? null
+  const stateId = project?.stateId ?? null
   const bookRef = useRef<string | null>(null)
   const unitsRef = useRef<UnitSet | null>(null)
   const editsRef = useRef<Map<string, PendingEdit>>(new Map())
@@ -61,15 +61,16 @@ export function useParatextBook(project: BridgeProject | null, fileName: string 
 
   // Load + derive, and reconcile with what Aquilla last saw.
   const load = useCallback(async () => {
-    if (!project || !fileName || !guid) return
+    if (!project || !fileName || !stateId) return
     setState((s) => ({ ...s, loading: true, error: null }))
     try {
-      const r = await reconcileBook({ projectPath: project.path, fileName, guid })
+      await bridgeStore.adoptLegacyState(project.guid, stateId)
+      const r = await reconcileBook({ projectPath: project.path, fileName, stateId })
       const book = r.units.book
       bookRef.current = book
       // The textarea page has no cells of its own: Paratext's changes become
       // the new base the moment they are seen.
-      await bridgeStore.setLastSeen(guid, book, r.units)
+      await bridgeStore.setLastSeen(stateId, book, r.units)
       const edits = new Map(r.pending.map((p) => [p.unitId, p]))
       unitsRef.current = r.units
       editsRef.current = edits
@@ -80,7 +81,7 @@ export function useParatextBook(project: BridgeProject | null, fileName: string 
     } catch (e) {
       setState((s) => ({ ...s, loading: false, error: e instanceof Error ? e.message : String(e) }))
     }
-  }, [project, fileName, guid, computeDenial])
+  }, [project, fileName, stateId, computeDenial])
 
   useEffect(() => { void load() }, [load])
 
@@ -99,7 +100,7 @@ export function useParatextBook(project: BridgeProject | null, fileName: string 
   }, [project, fileName, load])
 
   const setEditText = useCallback(async (unit: Unit, text: string) => {
-    if (!guid || !bookRef.current) return
+    if (!stateId || !bookRef.current) return
     const book = bookRef.current
     const next = new Map(editsRef.current)
     // Keep the text exactly as typed: trimming here would eat a trailing space
@@ -114,24 +115,24 @@ export function useParatextBook(project: BridgeProject | null, fileName: string 
     // write resets the caret to the end of the field.
     editsRef.current = next
     setState((s) => ({ ...s, edits: next }))
-    if (reverted) await bridgeStore.deletePendingEdits(guid, [unit.id])
-    else await bridgeStore.putPendingEdit(guid, book, edit)
-  }, [guid])
+    if (reverted) await bridgeStore.deletePendingEdits(stateId, [unit.id])
+    else await bridgeStore.putPendingEdit(stateId, book, edit)
+  }, [stateId])
 
   const discardEdits = useCallback(async () => {
-    if (!guid || !bookRef.current) return
-    await bridgeStore.clearPendingEdits(guid, bookRef.current)
+    if (!stateId || !bookRef.current) return
+    await bridgeStore.clearPendingEdits(stateId, bookRef.current)
     editsRef.current = new Map()
     setState((s) => ({ ...s, edits: new Map(), refusals: [] }))
-  }, [guid])
+  }, [stateId])
 
   const write = useCallback(async (opts?: { allowMarkerChanges?: Set<string> }) => {
     const units = unitsRef.current
-    if (!project || !fileName || !guid || !units) return { refused: "not-loaded" }
+    if (!project || !fileName || !stateId || !units) return { refused: "not-loaded" }
     const edits = [...editsRef.current.values()]
     if (edits.length === 0) return { written: 0, file: fileName }
     setState((s) => ({ ...s, writing: true }))
-    const r = await writeBookEdits({ projectPath: project.path, fileName, guid }, edits, { allowMarkerChanges: opts?.allowMarkerChanges })
+    const r = await writeBookEdits({ projectPath: project.path, fileName, stateId }, edits, { allowMarkerChanges: opts?.allowMarkerChanges })
     if (r.kind === "refused") {
       setState((s) => ({ ...s, writing: false }))
       if (r.reason === "hash") void load()
@@ -145,20 +146,20 @@ export function useParatextBook(project: BridgeProject | null, fileName: string 
     // base-mismatch conflicts mean the file moved under us: reload to classify.
     if (r.conflicts.some((c) => c.reason === "base-mismatch")) void load()
     return { written: r.applied.length, file: fileName }
-  }, [project, fileName, guid, load])
+  }, [project, fileName, stateId, load])
 
   const resolveOne = useCallback(async (c: ClassifiedUnit, choice: "mine" | "theirs") => {
-    if (!guid || !bookRef.current) return
+    if (!stateId || !bookRef.current) return
     const next = new Map(editsRef.current)
     if (choice === "mine") {
       const edit = keepMine(c)
-      if (edit) { next.set(c.unitId, edit); await bridgeStore.putPendingEdit(guid, bookRef.current, edit) }
+      if (edit) { next.set(c.unitId, edit); await bridgeStore.putPendingEdit(stateId, bookRef.current, edit) }
     } else {
       next.delete(c.unitId)
-      await bridgeStore.deletePendingEdits(guid, [c.unitId])
+      await bridgeStore.deletePendingEdits(stateId, [c.unitId])
     }
     editsRef.current = next
-  }, [guid])
+  }, [stateId])
 
   const resolve = useCallback(async (unitId: string, choice: "mine" | "theirs") => {
     const c = state.conflicts.find((x) => x.unitId === unitId)
@@ -173,10 +174,10 @@ export function useParatextBook(project: BridgeProject | null, fileName: string 
   }, [state.conflicts, resolveOne])
 
   const releaseHold = useCallback(async () => {
-    if (!guid || !bookRef.current) return
-    await bridgeStore.setHold(guid, bookRef.current, false)
+    if (!stateId || !bookRef.current) return
+    await bridgeStore.setHold(stateId, bookRef.current, false)
     setState((s) => ({ ...s, onHold: false }))
-  }, [guid])
+  }, [stateId])
 
   const dismissRefusals = useCallback(() => setState((s) => ({ ...s, refusals: [] })), [])
 

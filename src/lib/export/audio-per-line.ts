@@ -50,6 +50,7 @@ import { readWavFormat, trimWav, withBwfTimestamp } from "./audio-bwf"
 import { targetChipGeom } from "@/lib/timeline/lane-timing"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { stripInternalIds } from "./internal-id-names"
+import { scriptureLabel, scriptureLines, scriptureSegment, type ScriptureLine } from "./scripture-line-names"
 import { defaultTrackTakeId, isSilencedForExport } from "./audio-validation-scope"
 import {
   characterFileKey,
@@ -258,12 +259,23 @@ export function trackFolderNames(tracks: readonly { id: string; name: string }[]
 }
 
 /** `episode_es_L047_JESUS.wav` — the line number BEFORE the character, so the
- *  folder sorts into playing order rather than into alphabetical clumps. */
+ *  folder sorts into playing order rather than into alphabetical clumps.
+ *
+ *  AQU-2560: with `scripture`, `Project_lang_LUK_001_054.wav` instead — see
+ *  `ScriptureLine`. Without it the name is the classic one, unchanged. */
 export function perLineFileName(
   clip: PerLineClip,
   ext: string,
-  opts: { fileBase?: string; langCode: string },
+  opts: { fileBase?: string; langCode: string; projectName?: string; scripture?: ScriptureLine },
 ): string {
+  if (opts.scripture) {
+    const project = opts.projectName ? stripInternalIds(opts.projectName) : ""
+    const stem = project.trim() ? `${characterKey(project)}_` : ""
+    const piece = clip.piece != null ? `_p${clip.piece}` : ""
+    // The language is sanitised here. The classic name below carries it as
+    // given, and changing that would rename every file it already ships.
+    return `${stem}${characterKey(opts.langCode)}_${scriptureSegment(opts.scripture)}${piece}.${ext}`
+  }
   // AQU-1461: same guard as the character export — the stem is the file's
   // display name, and an id in it rides into every entry of the zip.
   const fileStem = opts.fileBase ? stripInternalIds(opts.fileBase) : ""
@@ -360,6 +372,13 @@ export interface ExportPerLineArgs {
   tracks?: readonly TimelineTrack[]
   /** AQU-1575. Absent ⇒ "original", the export as it has always been. */
   format?: PerLineFormat
+  /**
+   * AQU-2560: name a scripture file's takes by project, language, book,
+   * chapter and verse (`ScriptureLine`). Applies only when the file's cells
+   * carry verse references; any other file keeps the classic name. Absent ⇒
+   * the classic name for every file, as it has always been.
+   */
+  scriptureNaming?: { projectName: string }
   /** Decode bytes → mono PCM at 48 kHz (production: decodeToMono48k).
    *  Needed only for the "wav" format. */
   decode?: (bytes: Uint8Array) => Promise<Float32Array>
@@ -378,6 +397,7 @@ export async function exportAudioPerLine(
   const zip = new JSZip()
   const manifest: { name: string; clip: PerLineClip }[] = []
   const cellById = new Map(args.cells.map((c) => [c.id, c]))
+  const scripture = args.scriptureNaming ? scriptureLines(args.cells) : null
   const used = new Set<string>()
   // ONE FOLDER PER TRACK (Sam, 2026-08-26), and only when a track actually
   // contributed a take. A file with added tracks that nobody has recorded onto
@@ -543,11 +563,14 @@ export async function exportAudioPerLine(
         // those at 48,000 a second put them into a DAW at about twice their
         // real time.
         const rate = readWavFormat(bytes)?.sampleRate ?? BWF_RATE
+        // AQU-2560: a scripture line is described by its reference, for the
+        // reason it is named by it.
+        const at = scripture?.get(clip.cellId)
         bytes = withBwfTimestamp(bytes, {
           // A hyphen, not an em dash: the bext fields are Latin-1 and the
           // writer turns anything above 0xFF into "?", so the pretty dash came
           // out as "NICODEMUS ? line 117" in the delivered files.
-          description: `${clip.character} - line ${clip.lineNumber}`,
+          description: `${at ? scriptureLabel(at) : clip.character} - line ${clip.lineNumber}`,
           originator: "Aquilla",
           originatorRef: clip.cellId,
           timeReferenceSamples: placeSec * rate,
@@ -555,7 +578,12 @@ export async function exportAudioPerLine(
       }
 
       const folder = clip.trackId ? folders.get(clip.trackId) : undefined
-      let name = perLineFileName(clip, ext, { fileBase: args.fileBase, langCode: args.langCode })
+      let name = perLineFileName(clip, ext, {
+        fileBase: args.fileBase,
+        langCode: args.langCode,
+        projectName: args.scriptureNaming?.projectName,
+        scripture: scripture?.get(clip.cellId),
+      })
       // Prefixed BEFORE the collision check, so `used` keys on the full path:
       // two tracks may legitimately hold the same line's take under the same
       // file name, and those are different files rather than a collision.

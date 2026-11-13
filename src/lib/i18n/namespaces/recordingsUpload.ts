@@ -102,7 +102,7 @@ const KEYS = {
     "recordingsUpload.rules.order":
       "By order: when no file in a folder has a verse or line number in its name (phone recordings such as “IMG_4521”, or no numbers at all), the files go onto the lines in folder order, sorted so that 2 comes before 10. A folder named for a chapter starts at that chapter.",
     "recordingsUpload.rules.existing":
-      "A line that already has a recording keeps it in its take list, and the new recording becomes the one that plays. Several files for one line that aren't its parts all upload as takes, and the one modified most recently plays. Files numbered “take 1”, “take 2” go in that order, and the highest plays.",
+      "A line that already has a recording keeps it in its take list, and the new recording plays. Several files for one line that aren't its parts all upload as takes, and the one modified most recently plays. Files numbered “take 1”, “take 2” go in that order, and the highest plays.",
     "recordingsUpload.rules.unmatched": "A file that can't be placed is listed with the reason, and it is not uploaded.",
     // Loading
     "recordingsUpload.loading.reading": plural({

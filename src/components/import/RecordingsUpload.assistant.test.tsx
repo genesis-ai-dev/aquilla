@@ -773,6 +773,18 @@ describe("the can't-be-undone note is true for every kind of upload", () => {
     expect(screen.queryByTestId("recordings-recorded-note")).toBeNull()
   })
 
+  // AQU-2496 (review of the browser pass, Nov 12): the (i) said the new
+  // recording "becomes the one that plays", untrue where the earlier one plays
+  // on an added track and goes on playing there.
+  it("says in the (i) that the new recording plays, true on any track", async () => {
+    withLines({ "mat:19:2": { hasRecording: true, mainTake: false } })
+    review(["Matthew 19-1.ogg", "Matthew 19-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    fireEvent.click(screen.getByRole("button", { name: "How each recording finds its line" }))
+    const rule = await screen.findByText(/A line that already has a recording keeps it in its take list/)
+    expect(rule.textContent).toMatch(/^A line that already has a recording keeps it in its take list, and the new recording plays\. Several files/)
+  })
+
   it("says where the new recordings take over from earlier ones, one line or several", async () => {
     withLines({ "mat:19:1": { hasRecording: true, mainTake: true }, "mat:19:2": { hasRecording: true, mainTake: true } })
     review(["Matthew 19-1.ogg", "Matthew 19-2.ogg"])

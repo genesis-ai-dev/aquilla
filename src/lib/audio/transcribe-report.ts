@@ -15,6 +15,7 @@ import { t } from "@/lib/i18n/standalone"
 import type { TranscribeRunReport } from "./batch-audio"
 import type { TranscribeRunKind } from "./transcribe-runs"
 import type { LineWordsReport } from "./line-words-run"
+import type { CellData } from "@/hooks/useCells"
 
 export interface TranscribeRunToast {
   type: "success" | "error" | "info"
@@ -87,6 +88,59 @@ export function transcribeRunToast(
     ...(reasons ? { description: reasons } : {}),
     ...(retryLabel ? { retryLabel } : {}),
   }
+}
+
+/** What the end of a run shows, in the app's toast's terms. */
+export interface TranscribeRunEndContent {
+  type: TranscribeRunToast["type"]
+  title: string
+  /** Always given, undefined to clear what the progress toast said (the
+   *  hosted limit's wait). */
+  description: string | undefined
+  actionProps: { children: string; onClick: () => void } | undefined
+}
+
+/** The toast functions the end of a run uses: the app's `toast`. */
+export interface TranscribeRunEndToasts {
+  add(content: TranscribeRunEndContent): unknown
+  update(id: string, content: TranscribeRunEndContent): void
+  close(id: string): void
+}
+
+/**
+ * AQU-2375: a run's last word (`transcribeRunToast`), said in the run's
+ * progress toast when it has one, with a Retry for the rows that failed (a
+ * row that failed before a reload has only its id, and is left out of it).
+ * With nothing to say, a quiet run that went well, its progress toast is
+ * closed (the check of the q44 fixes, Nov 12: a run carried on after a reload
+ * has one, and it was left spinning for good).
+ */
+export function endTranscribeRunToast(
+  report: TranscribeRunReport,
+  opts: { kind: TranscribeRunKind; fileName?: string; quiet?: boolean; progressToastId: string | null },
+  toasts: TranscribeRunEndToasts,
+  retry: (cells: CellData[]) => void,
+): void {
+  const said = transcribeRunToast(report, {
+    kind: opts.kind,
+    ...(opts.fileName !== undefined ? { fileName: opts.fileName } : {}),
+    ...(opts.quiet ? { quiet: true } : {}),
+  })
+  if (!said) {
+    if (opts.progressToastId !== null) toasts.close(opts.progressToastId)
+    return
+  }
+  const retryCells = report.failed.flatMap((f) => (f.cell ? [f.cell] : []))
+  const content: TranscribeRunEndContent = {
+    type: said.type,
+    title: said.title,
+    description: said.description,
+    actionProps: said.retryLabel && retryCells.length > 0
+      ? { children: said.retryLabel, onClick: () => retry(retryCells) }
+      : undefined,
+  }
+  if (opts.progressToastId !== null) toasts.update(opts.progressToastId, content)
+  else toasts.add(content)
 }
 
 /** The progress toast's title while a run goes on. */

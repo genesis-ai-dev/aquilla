@@ -274,7 +274,7 @@ import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { sessionKey } from "@/lib/frontier/session-store"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget, type TranscribeRunReport } from "@/lib/audio/batch-audio"
-import { lineWordsToast, transcribeRunProgressTitle, transcribeRunToast } from "@/lib/audio/transcribe-report"
+import { endTranscribeRunToast, lineWordsToast, transcribeRunProgressTitle } from "@/lib/audio/transcribe-report"
 import { runLineWords, wordsOf, type LineWordsIdentity } from "@/lib/audio/line-words-run"
 import type { StoredTranscribeRun, TranscribeRunHandle, TranscribeRunKind } from "@/lib/audio/transcribe-runs"
 import { findLineWordsRun, pageIsLeaving } from "@/lib/audio/transcribe-runs"
@@ -3651,24 +3651,19 @@ export function ProjectWorkspace() {
     report: TranscribeRunReport,
     opts: { kind: TranscribeRunKind; fileId: string; fileName: string; toastId: string | null; quiet?: boolean },
   ) => {
-    const said = transcribeRunToast(report, {
-      kind: opts.kind,
-      ...(opts.kind === "import" ? { fileName: opts.fileName } : {}),
-      ...(opts.quiet ? { quiet: true } : {}),
-    })
-    if (!said) return
-    // A failed row from before a reload has only its id; the Retry finds it
-    // again in the file it is on.
-    const retryCells = report.failed.flatMap((f) => (f.cell ? [f.cell] : []))
-    const actionProps = said.retryLabel && retryCells.length > 0
-      ? {
-          children: said.retryLabel,
-          onClick: () => retryTranscribeRowsRef.current(retryCells, opts.kind, opts.fileId, opts.fileName),
-        }
-      : undefined
-    const content = { type: said.type, title: said.title, description: said.description, actionProps }
-    if (opts.toastId !== null) toast.update(opts.toastId, content)
-    else toast.add(content)
+    // With nothing to say (a quiet run that went well), its progress toast,
+    // which a run carried on after a reload has, is closed.
+    endTranscribeRunToast(
+      report,
+      {
+        kind: opts.kind,
+        ...(opts.kind === "import" ? { fileName: opts.fileName } : {}),
+        ...(opts.quiet ? { quiet: true } : {}),
+        progressToastId: opts.toastId,
+      },
+      toast,
+      (cells) => retryTranscribeRowsRef.current(cells, opts.kind, opts.fileId, opts.fileName),
+    )
   }, [])
 
   /**

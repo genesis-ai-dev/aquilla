@@ -1,8 +1,9 @@
 // AQU-2375: a run where some rows failed never ends on a flat success.
 
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import type { CellData } from "@/hooks/useCells"
 import type { TranscribeRunReport } from "./batch-audio"
-import { transcribeRunProgressTitle, transcribeRunToast } from "./transcribe-report"
+import { endTranscribeRunToast, transcribeRunProgressTitle, transcribeRunToast } from "./transcribe-report"
 
 const report = (over: Partial<TranscribeRunReport>): TranscribeRunReport => ({
   total: 45, transcribed: 45, failed: [], notRun: 0, cancelled: false, started: true, ...over,
@@ -114,5 +115,44 @@ describe("transcribeRunProgressTitle", () => {
   it("says a run was carried on after a reload, and how far it had got", () => {
     expect(transcribeRunProgressTitle({ kind: "import", fileName: "a.mp3", done: 120, total: 300, first: true, carriedOn: true }))
       .toBe('Carrying on transcribing "a.mp3" after the page reloaded — 120 of 300 done…')
+  })
+})
+
+// The check of the q44 fixes (Nov 12), NOTE D: the end of a run says its last
+// word in the run's progress toast, or, with nothing to say (a quiet run that
+// went well, carried on after a reload so it had a progress toast), closes
+// that toast. It was left spinning for good.
+describe("endTranscribeRunToast", () => {
+  const toasts = () => ({ add: vi.fn(() => "new"), update: vi.fn(), close: vi.fn() })
+
+  it("a quiet run with nothing to say closes its progress toast", () => {
+    const t = toasts()
+    endTranscribeRunToast(report({ total: 3, transcribed: 3 }), { kind: "sections", quiet: true, progressToastId: "p1" }, t, () => {})
+    expect(t.close).toHaveBeenCalledWith("p1")
+    expect(t.update).not.toHaveBeenCalled()
+    expect(t.add).not.toHaveBeenCalled()
+  })
+
+  it("says its last word in the progress toast, with a Retry for the rows that failed", () => {
+    const t = toasts()
+    const retry = vi.fn()
+    const failed = [{ cellId: "c0", message: "HTTP 500", cell: { id: "c0" } as CellData }]
+    endTranscribeRunToast(report({ total: 3, transcribed: 2, failed }), { kind: "all", progressToastId: "p1" }, t, retry)
+    expect(t.close).not.toHaveBeenCalled()
+    const [id, content] = t.update.mock.calls[0] as unknown as [string, { title: string; actionProps?: { children: string; onClick(): void } }]
+    expect(id).toBe("p1")
+    expect(content.title).toBe("Transcribed 2 of 3 recordings.")
+    content.actionProps!.onClick()
+    expect(retry).toHaveBeenCalledWith([failed[0]!.cell])
+  })
+
+  it("with no progress toast, a run that has something to say adds one, and one with nothing says nothing", () => {
+    const t = toasts()
+    endTranscribeRunToast(report({}), { kind: "all", progressToastId: null }, t, () => {})
+    expect(t.add).toHaveBeenCalledOnce()
+    const quiet = toasts()
+    endTranscribeRunToast(report({}), { kind: "sections", quiet: true, progressToastId: null }, quiet, () => {})
+    expect(quiet.add).not.toHaveBeenCalled()
+    expect(quiet.close).not.toHaveBeenCalled()
   })
 })

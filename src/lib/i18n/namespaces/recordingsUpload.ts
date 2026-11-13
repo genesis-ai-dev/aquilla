@@ -3,7 +3,7 @@ import { defineNamespace, plural, type ContextEntry, type MessageValue } from ".
 /** What each placeholder holds, for the translator. */
 const PLACEHOLDERS: Record<string, string> = {
   count: "A number, already formatted for the locale.",
-  fileName: "The name of a file in the project: a Bible book (Genesis), or any other file's own name in quotes (“Welcome letter”).",
+  fileName: "The name of a file in the project, such as a Bible book (Genesis) or a document.",
   name: "A file name: either an audio file's name or a project file's name.",
   language: "The name of the language the recordings are for.",
   lane: "The name of a target language of the project.",

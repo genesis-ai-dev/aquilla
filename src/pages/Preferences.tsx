@@ -505,10 +505,18 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
 /** Nested nav groups after the inline General card. */
 const PREFERENCE_GROUPS = ["AI & personalization", "Account"] as const
 
+const preferenceIndexScroll = new Map<string, number>()
+
 /** The index: inline General card + grouped navigation rows for nested sections. */
 function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boolean; backgroundLocation?: Location }) {
   const { t } = useI18n()
   const { position } = useDockRailPosition()
+  const scrollContainer = useRef<HTMLDivElement>(null)
+  const scrollKey = modal ? `modal:${backgroundLocation?.key ?? "preferences"}` : "page"
+  useLayoutEffect(() => {
+    if (scrollContainer.current) scrollContainer.current.scrollTop = preferenceIndexScroll.get(scrollKey) ?? 0
+  }, [scrollKey])
+
 
   const profile = getTranslatorProfile()
   const profileFilled = PROFILE_KEYS.filter((k) => (profile[k] ?? "").trim().length > 0).length
@@ -527,7 +535,8 @@ function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boole
   }
 
   const content = (
-    <Page>
+    <Page ref={scrollContainer} data-testid="preferences-index-scroll"
+      onScroll={(event) => preferenceIndexScroll.set(scrollKey, event.currentTarget.scrollTop)}>
       <PageHeader
         title={t("nav.account.preferences")}
         description={t("onboarding.preferences.pageDescription")}
@@ -648,15 +657,6 @@ export function PreferencesDialog() {
   } | null
   const backgroundLocation = modalState?.backgroundLocation
   const modalDepth = modalState?.preferencesModalDepth ?? 1
-  const scrollContainer = useRef<HTMLDivElement>(null)
-  const scrollPositions = useRef(new Map<string, number>())
-  const scrollKey = section ?? "index"
-  useLayoutEffect(() => {
-    const container = scrollContainer.current
-    if (container) container.scrollTop = scrollPositions.current.get(scrollKey) ?? 0
-  }, [scrollKey])
-
-
   return (
     <Dialog open onOpenChange={(open) => { if (!open) navigate(-modalDepth) }}>
       <DialogContent
@@ -667,9 +667,7 @@ export function PreferencesDialog() {
           <DialogTitle>{t("nav.account.preferences")}</DialogTitle>
           <DialogDescription>{t("onboarding.preferences.dialogDescription")}</DialogDescription>
         </DialogHeader>
-        <div ref={scrollContainer}
-          onScroll={(event) => scrollPositions.current.set(scrollKey, event.currentTarget.scrollTop)}
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <SaveStatusProvider>
             {section
               ? <PreferencesDetail slug={section} modal />

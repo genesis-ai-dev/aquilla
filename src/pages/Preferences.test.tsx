@@ -257,13 +257,13 @@ describe("PreferencesDialog", () => {
     expect(screen.getByRole("combobox", { name: "Theme" })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "App font size" })).toHaveTextContent("Default")
 
-    const scroller = dialog.querySelector<HTMLElement>(".overflow-y-auto")!
+    const scroller = screen.getByTestId("preferences-index-scroll")
     scroller.scrollTop = 640
     fireEvent.scroll(scroller)
     await userEvent.click(screen.getByRole("link", { name: /Translator profile/i }))
-    expect(scroller.scrollTop).toBe(0)
+    expect(screen.queryByTestId("preferences-index-scroll")).toBeNull()
     await userEvent.click(screen.getByRole("button", { name: "Preferences" }))
-    expect(scroller.scrollTop).toBe(640)
+    expect(screen.getByTestId("preferences-index-scroll").scrollTop).toBe(640)
 
     await userEvent.click(screen.getByRole("button", { name: /close/i }))
     expect(screen.getByTestId("editor-background")).toBeInTheDocument()

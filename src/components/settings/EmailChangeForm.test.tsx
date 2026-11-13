@@ -31,7 +31,7 @@ afterEach(() => {
 function renderForm(passwordAvailable = true) {
   return render(
     <MemoryRouter>
-      <EmailChangeForm
+      <EmailChangeForm onSetPassword={() => {}}
         jwt="alice-token"
         passwordAvailable={passwordAvailable}
         googleLinked

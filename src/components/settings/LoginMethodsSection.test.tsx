@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
-const mocks = vi.hoisted(() => ({ active: { username: "alice", jwt: "alice-token" } as { username: string; jwt: string } | null, request: vi.fn(), start: vi.fn() }))
+const mocks = vi.hoisted(() => ({ active: { username: "alice", jwt: "alice-token" } as { username: string; jwt: string } | null, request: vi.fn(), start: vi.fn(), rejected: vi.fn() }))
+vi.mock("@/lib/frontier/session-expiry", () => ({ notifySessionExpiredIfCurrent: mocks.rejected }))
 vi.mock("@/hooks/useAccounts", () => ({ useAccounts: () => ({ active: mocks.active }) }))
 vi.mock("@/lib/i18n/I18nProvider", () => ({ useT: () => (key: string) => key }))
 vi.mock("@/lib/frontier/google-login", () => ({ googleRequest: mocks.request, startGoogleLogin: mocks.start }))
@@ -52,4 +53,41 @@ it("does not duplicate the sidebar login action or request account data while lo
   expect(screen.queryByRole("link")).toBeNull()
   expect(mocks.request).not.toHaveBeenCalled()
   expect(mocks.start).not.toHaveBeenCalled()
+})
+
+it("opens password setup directly from the email-change prerequisite", async () => {
+  mocks.request.mockResolvedValue({ email: "alice@example.com", password: false, google: true, google_available: true })
+  render(<MemoryRouter><LoginMethodsSection /></MemoryRouter>)
+  fireEvent.click(await screen.findByRole("button", { name: "auth.emailChange.action" }))
+  expect(screen.queryByRole("button", { name: "auth.emailChange.back" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "auth.methods.setPassword" }))
+  expect(screen.getByText("email-reset")).toBeVisible()
+  expect(screen.queryByText("auth.emailChange.password_required")).toBeNull()
+  expect(mocks.start).not.toHaveBeenCalled()
+})
+
+it("uses shared recovery for a rejected credential without a duplicate login link", async () => {
+  mocks.request.mockRejectedValueOnce(new Error("session_expired"))
+  render(<LoginMethodsSection />)
+  await waitFor(() => expect(mocks.rejected).toHaveBeenCalledWith("alice-token"))
+  expect(screen.queryByRole("link")).toBeNull()
+  expect(screen.queryByRole("alert")).toBeNull()
+})
+it.each(["unavailable", "dev_access_restricted", "Forbidden"])("does not mark login expired for %s", async reason => {
+  mocks.request.mockRejectedValueOnce(new Error(reason))
+  render(<LoginMethodsSection />)
+  expect(await screen.findByRole("button", { name: "auth.methods.refresh" })).toBeVisible()
+  expect(mocks.rejected).not.toHaveBeenCalled()
+})
+it("ignores a late methods rejection after the account token is replaced", async () => {
+  let reject!: (error: Error) => void
+  mocks.request.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail }))
+    .mockResolvedValueOnce({ password: true, google: false, google_available: true })
+  const view = render(<LoginMethodsSection />)
+  mocks.active = { username: "alice", jwt: "renewed-token" }
+  view.rerender(<LoginMethodsSection />)
+  await screen.findByRole("button", { name: "auth.methods.connect" })
+  reject(new Error("session_expired"))
+  await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(2))
+  expect(mocks.rejected).not.toHaveBeenCalled()
 })

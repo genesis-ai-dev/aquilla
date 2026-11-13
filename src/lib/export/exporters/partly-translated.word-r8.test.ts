@@ -315,3 +315,22 @@ describe("Word export — a bookmark or comment is placed among the words only w
     expect(firstPara(out.body)).toContain(`Second</w:t></w:r>${START}<w:r><w:t xml:space="preserve"> line</w:t></w:r>${END}`)
   })
 })
+
+describe("Word export — a picture in a wrapper stays beside an untranslated line's words (AQU-2552, review r8 F3)", () => {
+  const PICTURE_SDT = SDT(IMG, `<w:id w:val="5"/><w:picture/>`)
+  const INSERTED = `<w:ins w:id="8" w:author="A" w:date="2026-01-01T00:00:00Z">${IMG}</w:ins>`
+  it.each([["a picture content control", PICTURE_SDT], ["a tracked insertion of a picture", INSERTED]])("%s in the middle of an untranslated line", async (_name, wrapped) => {
+    const bytes = await docxBytes(para(run(L1 + " ") + run("Second line") + wrapped + run(" here" + PAD + " ") + run(L3)) + NEXT)
+    const [a, b, c, n] = await importCells(bytes)
+    const out = await wordOut(bytes, [typed(a, "Un."), b, typed(c, "Trois."), n])
+    expect(paras(out.body)[0]).toBe("Un. Second line[IMG] here … Trois.")
+    expect(out.body).toContain(`Second line</w:t></w:r>${wrapped}<w:r>`)
+  })
+
+  it("in a translated line it still follows the paragraph's words", async () => {
+    const bytes = await docxBytes(para(run(L1 + " ") + run("Second line") + PICTURE_SDT + run(" here" + PAD + " ") + run(L3)) + NEXT)
+    const [a, b, c, n] = await importCells(bytes)
+    const out = await wordOut(bytes, [a, typed(b, "Deux."), typed(c, "Trois."), n])
+    expect(paras(out.body)[0]).toBe("First line here … Deux. Trois.[IMG]")
+  })
+})

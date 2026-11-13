@@ -167,6 +167,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   }
   const written = input.writtenText ?? input.text
 
+  const inlineAt = new Map(input.inlineAt ?? [])
   let nodes = buildNodes(input.items, input.lineSet)
   if (input.lost && input.lost.size > 0) nodes = withoutLost(nodes, input.lost)
   const refs: { xml: string; id: string; line: number | undefined }[] = []
@@ -197,7 +198,12 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
         } else if (!holdsText(node)) {
           // Nothing of it is translated (a picture content control, an
           // insertion around a picture): kept as it is.
-          next.push({ kind: "keep", piece: { kind: "keep", el: node.piece.el } })
+          const kept: Leaf = { kind: "keep", el: node.piece.el }
+          // AQU-2552 (review r8): among an untranslated line's words, where
+          // what it holds sits.
+          const at = leavesOf(node.children).map((leaf) => inlineAt.get(leaf.piece)).find((i) => i !== undefined)
+          if (at !== undefined) inlineAt.set(kept, at)
+          next.push({ kind: "keep", piece: kept })
         } else if (tag === "w:hyperlink") {
           // A link whose words changed: the link goes, its words stay.
           result.droppedLinks++
@@ -224,7 +230,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   const back: RNode[] = []
   const inline: { at: number; node: RNode }[] = []
   const inlineOf = (node: RNode, k: number) =>
-    firstWord !== -1 && k > firstWord && node.kind === "keep" ? input.inlineAt?.get(node.piece) : undefined
+    firstWord !== -1 && k > firstWord && node.kind === "keep" ? inlineAt.get(node.piece) : undefined
   // AQU-2552 (review r8): a bookmark or comment mark is placed among the words
   // only when every other mark of its pair is placed there too; otherwise
   // they all follow the translation, in order, so none ends before it starts.

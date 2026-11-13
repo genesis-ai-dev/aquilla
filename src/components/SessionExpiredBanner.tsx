@@ -3,29 +3,27 @@
  *
  * Subscribes to the session-expired signal (src/lib/errors/session-expired-signal.ts).
  * When the active credential is rejected, shows a fixed top banner with a
- * direct credential-scoped re-auth link. It is suppressed on /login itself.
+ * credential-scoped, in-place login dialog. It is suppressed on /login itself.
  *
  * AQU-884: the banner persists across navigation. It used to clear itself on
  * every `location.pathname` change, which meant the boot redirect (`/` →
  * `/orgs/all`) wiped it in the same tick it appeared — a user reloading with an
  * expired session landed on an empty dashboard with no explanation. It now
- * mirrors the latched flag in the signal module: visible from the first 401
- * until the user dismisses it or re-authenticates. It is still a banner, not a
- * full-page takeover.
+ * mirrors the rejected credential. Dismissal hides only the banner; the
+ * account menu continues to show that login is required.
  */
 
-import { useSyncExternalStore } from "react"
-import { Link, useLocation } from "react-router-dom"
+import { useState, useSyncExternalStore } from "react"
+import { useLocation } from "react-router-dom"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
-  clearSessionExpired,
   getExpiredSessionJwt,
   onSessionExpired,
 } from "@/lib/errors/session-expired-signal"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useAccounts } from "@/hooks/useAccounts"
-import { loginPath } from "@/lib/navigation/login-path"
+import { SessionRecoveryButton } from "@/components/auth/SessionRecoveryButton"
 
 export function SessionExpiredBanner() {
   const t = useT()
@@ -35,11 +33,10 @@ export function SessionExpiredBanner() {
   const expiredJwt = useSyncExternalStore(onSessionExpired, getExpiredSessionJwt)
   const { active } = useAccounts()
   const location = useLocation()
+  const [dismissedJwt, setDismissedJwt] = useState<string | null>(null)
 
-  const visible = expiredJwt !== null && active?.jwt === expiredJwt
+  const visible = expiredJwt !== null && active?.jwt === expiredJwt && dismissedJwt !== expiredJwt
   if (!visible || location.pathname === "/login") return null
-
-  const signInPath = loginPath({ next: location.pathname + location.search, reauth: true })
 
   return (
     <div
@@ -49,19 +46,15 @@ export function SessionExpiredBanner() {
     >
       <span>
         {t("auth.sessionExpired.message")}{" "}
-        <Link
-          to={signInPath}
-          className="font-medium underline underline-offset-2 hover:text-amber-700 dark:hover:text-amber-300"
-        >
-          {t("auth.sessionExpired.signInAgain")}
-        </Link>{" "}
+        <SessionRecoveryButton username={active?.username}
+          className="font-medium underline underline-offset-2 hover:text-amber-700 dark:hover:text-amber-300" />{" "}
         {t("auth.sessionExpired.continueSuffix")}
       </span>
       <Button
         type="button"
         variant="ghost"
         size="icon-xs"
-        onClick={() => clearSessionExpired()}
+        onClick={() => setDismissedJwt(expiredJwt)}
         aria-label={t("common.dismiss")}
         className="shrink-0 text-amber-700 hover:text-amber-900 dark:text-amber-400 dark:hover:text-amber-100"
       >

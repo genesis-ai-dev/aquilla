@@ -12,10 +12,12 @@ test("invalidated login-method session offers reauthentication with its settings
   await page.route("**/api/v2/auth/oauth/google/methods", route => route.fulfill({status:401,json:{error:"Password changed"}}))
   await page.goto("/preferences/login-methods")
   await expect(page.getByRole("alert")).toContainText("Your session expired.")
-  await page.getByRole("link",{name:"Log in again",exact:true}).click()
-  await expect(page.getByRole("button",{name:"Log in",exact:true})).toBeVisible()
-  expect(new URL(page.url()).searchParams.get("next")).toBe("/preferences/login-methods")
-  expect(new URL(page.url()).searchParams.get("add")).toBe("1")
+  const destination = page.url()
+  await page.getByRole("alert").getByRole("button", { name: "Log in again", exact: true }).click()
+  await expect(page.getByRole("dialog")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Log in", exact: true })).toBeVisible()
+  expect(page.url()).toBe(destination)
+
 })
 test("Google is silent before activation and its handoff preserves the destination and ordinary session", async ({ page }) => {
   const session = await ensureAuthState("alice")
@@ -140,4 +142,21 @@ test("first-party availability retry recovers without contacting Google", async 
   await expect(page.getByRole("button",{name:"Continue with Google",exact:true})).toBeVisible()
   expect(checks).toBeGreaterThan(failedChecks)
   expect(providerRequests).toEqual([])
+})
+
+test("Google-only email change opens password setup directly without provider contact", async ({ page }) => {
+  await page.goto("/login")
+  await injectSession(page, await ensureAuthState("alice"))
+  const googleRequests: string[] = []
+  page.on("request", request => { if (/^https:\/\/[^/]*google\./.test(request.url())) googleRequests.push(request.url()) })
+  await page.route("**/api/v2/auth/oauth/google/methods", route => route.fulfill({ json: { email: "alice@example.com", password: false, google: true, google_available: true } }))
+  await page.goto("/preferences/login-methods")
+  await page.getByRole("button", { name: "Change email", exact: true }).click()
+  await expect(page.getByRole("status")).toContainText("Set an Aquilla password first")
+  await expect(page.getByRole("button", { name: "Back to login methods", exact: true })).toHaveCount(0)
+  await page.getByRole("button", { name: "Set an Aquilla password", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Send reset link", exact: true })).toBeVisible()
+  await expect(page.getByText("Set an Aquilla password first", { exact: false })).toHaveCount(0)
+  await expect(page).toHaveURL(/preferences\/login-methods$/)
+  expect(googleRequests).toEqual([])
 })

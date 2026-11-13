@@ -107,7 +107,7 @@ import {
   type TrackKind,
 } from "@/lib/timeline/tracks"
 import { computeFollowScroll } from "@/lib/timeline/follow"
-import { secToPx, pxToSec, clampScrollLeft, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
+import { secToPx, pxToSec, clampScrollLeft, zoomCeiling, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
 import { cellIdNearestStart, resumeScrollLeft } from "@/lib/timeline/resume-place"
 import { timeSlices } from "@/lib/timeline/horizontal-slices"
 import {
@@ -2946,6 +2946,8 @@ export function TimelineEditor({
   }
 
   const durationSec = Math.max(layout.totalSec, independentTextLayout.totalSec)
+  const maxPxPerSec = zoomCeiling(durationSec)
+  const pxPerSec = Math.min(chosenPxPerSec, maxPxPerSec)
   const trackWidthPx = secToPx(durationSec, pxPerSec)
   // A short file's timeline still runs to the edge of the view — the ruler and
   // every row's ground — rather than stopping where the file ends (Sam, Oct
@@ -3479,6 +3481,8 @@ export function TimelineEditor({
   //    detach/re-attach gaps.
   const pxPerSecRef = useRef(pxPerSec)
   pxPerSecRef.current = pxPerSec
+  const maxPxPerSecRef = useRef(maxPxPerSec)
+  maxPxPerSecRef.current = maxPxPerSec
   /**
    * The row height a ⌘-pinch is steering toward, advanced SYNCHRONOUSLY on
    * every wheel event.
@@ -3582,7 +3586,7 @@ export function TimelineEditor({
       const speed = mag >= 90 ? mag * 0.0022 : Math.min(mag * 0.019, 0.55)
       const target = Math.max(
         ZOOM_MIN,
-        Math.min(ZOOM_MAX, zoomTargetRef.current * Math.exp(e.deltaY < 0 ? speed : -speed)),
+        Math.min(maxPxPerSecRef.current, zoomTargetRef.current * Math.exp(e.deltaY < 0 ? speed : -speed)),
       )
       if (target === zoomTargetRef.current && target === pxPerSecRef.current) return
       zoomTargetRef.current = target

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { secToPx, pxToSec, clampRange, isVisible, chipRadiusPx, clampScrollLeft } from "./scale"
+import { secToPx, pxToSec, clampRange, isVisible, chipRadiusPx, clampScrollLeft, zoomCeiling, MAX_SCROLL_PX, ZOOM_MAX, ZOOM_MIN } from "./scale"
 
 describe("clampScrollLeft", () => {
   it("is 0 whatever is asked for when the timeline is shorter than the view", () => {
@@ -116,5 +116,23 @@ describe("chipRadiusPx", () => {
     expect(chipRadiusPx(-40)).toBe(0)
     expect(chipRadiusPx(NaN)).toBe(0)
     expect(chipRadiusPx(Infinity)).toBe(0)
+  })
+})
+
+// Chrome stops laying a box out past ~16.7M px, so a 73-hour Bible at full zoom
+// ended at hour 66 with no way to scroll further.
+describe("zoomCeiling", () => {
+  it.each([
+    ["a short file keeps full zoom", 600, ZOOM_MAX],
+    ["no duration yet keeps full zoom", 0, ZOOM_MAX],
+    ["a 73-hour file caps so its end fits", 73 * 3600, MAX_SCROLL_PX / (73 * 3600)],
+    ["a file too long for the floor stays at the floor", 1e7, ZOOM_MIN],
+  ])("%s", (_name, durationSec, expected) => {
+    expect(zoomCeiling(durationSec)).toBeCloseTo(expected)
+  })
+
+  it("keeps the end of a 73-hour file inside the scroll limit", () => {
+    const sec = 73 * 3600
+    expect(secToPx(sec, zoomCeiling(sec))).toBeLessThanOrEqual(MAX_SCROLL_PX)
   })
 })

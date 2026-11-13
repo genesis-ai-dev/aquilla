@@ -3,6 +3,20 @@ export const ZOOM_MIN = 8
 export const ZOOM_MAX = 240
 export const ZOOM_DEFAULT = 38
 
+/**
+ * The widest scroll length the track column may have. Chrome lays no box out
+ * wider than 16,777,214px; past it the canvas silently stops and the end of a
+ * long file cannot be scrolled to (a 73-hour Bible, zoomed to ~71px/s, ended
+ * at 66 hours). Kept under that with room for the viewport.
+ */
+export const MAX_SCROLL_PX = 16_000_000
+
+/** The most px/sec a timeline this long can be drawn at and still reach its end. */
+export function zoomCeiling(durationSec: number): number {
+  if (!(durationSec > 0)) return ZOOM_MAX
+  return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, MAX_SCROLL_PX / durationSec))
+}
+
 export const secToPx = (sec: number, pxPerSec: number) => sec * pxPerSec
 export const pxToSec = (px: number, pxPerSec: number) => px / pxPerSec
 

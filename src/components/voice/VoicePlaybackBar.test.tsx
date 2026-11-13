@@ -399,6 +399,14 @@ describe("VoicePlaybackBar — the strip's length (AQU-1758)", () => {
     __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 })
   })
 
+  it("writes hours once the length passes an hour", () => {
+    // 278794 s is what the strip used to print as 4646:34.
+    act(() => __setQueuePlaybackForTests({ cellId: "v1", currentTime: 3661, playing: true, duration: 278794 }))
+    render(strip())
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("1:01:01 / 77:26:34")
+    act(() => __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 }))
+  })
+
   it("shows the book's laid-out length before anything plays", () => {
     expect(layOutProgramme(BOOK).programme.totalSec).toBeCloseTo(87.94, 2)
     render(strip())

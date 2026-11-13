@@ -29,6 +29,7 @@ import { isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/
 import { resolveCastVoice } from "@/lib/audio/voices"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { layOutProgramme, playedProgramme, type BuildProgrammeOptions } from "@/lib/timeline/programme"
+import { fmtClock } from "@/components/timeline/format"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -81,23 +82,20 @@ interface Props {
   variant?: "bar" | "strip"
 }
 
-/** A running clock: the whole seconds gone by. */
+/** A running clock: the whole seconds gone by. Past an hour, `h:mm:ss`. */
 function fmtTime(s: number): string {
-  if (!Number.isFinite(s) || s <= 0) return "0:00"
-  const m = Math.floor(s / 60)
-  const sec = Math.floor(s % 60)
-  return `${m}:${sec.toString().padStart(2, "0")}`
+  return fmtClock(s)
 }
 
 /**
  * AQU-1758: a LENGTH, to the nearest second — the rounding the Timing control
  * states it with ("1 min 28 s long"). Floored like the clock, an 87.6 s
- * chapter read "1:27" here beside "1 min 28 s" there.
+ * chapter read "1:27" here beside "1 min 28 s" there. Past an hour the same
+ * clock the ruler uses, so `4646:34` reads `77:26:34`.
  */
 function fmtLength(s: number): string {
   if (!Number.isFinite(s) || s <= 0) return "0:00"
-  const whole = Math.round(s)
-  return `${Math.floor(whole / 60)}:${(whole % 60).toString().padStart(2, "0")}`
+  return fmtClock(Math.round(s))
 }
 
 export function VoicePlaybackBar({

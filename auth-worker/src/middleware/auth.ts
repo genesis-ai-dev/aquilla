@@ -21,7 +21,7 @@ import { getCachedSession, sessionCacheKey, setCachedSession } from "../lib/sess
 import {
   checkDevAccess,
   DEV_ACCESS_RESTRICTED,
-  DEV_ACCESS_RESTRICTED_MESSAGE,
+  devAccessRestrictedMessage,
 } from "../services/dev-access"
 
 export type AuthHonoEnv = { Bindings: Env; Variables: Variables }
@@ -237,8 +237,8 @@ export const authMiddleware = async (
   c: Context<AuthHonoEnv>,
   next: Next,
 ): Promise<Response | void> => {
-  // Renewal must never extend a credential using a stale isolate cache.
-  const resolved = await resolveSession(c.env, c.req.header("Authorization"), { fresh: c.req.path.endsWith("/auth/refresh") })
+  // Renewal and identity changes must never accept a stale isolate cache.
+  const resolved = await resolveSession(c.env, c.req.header("Authorization"), { fresh: c.req.path.endsWith("/auth/refresh") || c.req.path.includes("/auth/email-change/") })
 
   if (!resolved.ok) {
     switch (resolved.reason) {
@@ -273,7 +273,7 @@ export const authMiddleware = async (
           401,
         )
       case "dev_access_restricted":
-        return c.json({ error: DEV_ACCESS_RESTRICTED_MESSAGE, code: DEV_ACCESS_RESTRICTED }, 403)
+        return c.json({ error: devAccessRestrictedMessage(c.env), code: DEV_ACCESS_RESTRICTED }, 403)
       case "dev_access_unavailable":
         return c.json(
           { error: "Unable to check dev access right now. Please retry.", code: DEV_ACCESS_RESTRICTED },

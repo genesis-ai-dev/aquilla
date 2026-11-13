@@ -396,6 +396,17 @@ export async function removeSession(key: string): Promise<void> {
   })
 }
 
+/** Remove only the credential revoked by an email change, never a newer login. */
+export async function removeSessionByJwt(jwt: string): Promise<void> {
+  suspendAnalytics()
+  return mutateEnvelope((env) => {
+    const keys = Object.keys(env.sessions).filter(key => env.sessions[key].jwt === jwt)
+    if (!keys.length) return false
+    for (const key of keys) delete env.sessions[key]
+    if (env.active && keys.includes(env.active)) env.active = Object.keys(env.sessions)[0] ?? null
+  })
+}
+
 export async function loadActiveSession(): Promise<FrontierSession | null> {
   const env = await readEnvelope()
   if (!env.active) return null

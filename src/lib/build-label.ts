@@ -7,6 +7,11 @@ export type BuildIdentity = {
   sha: string
   /** ISO-8601 instant of the build's commit; "" when unresolved. */
   builtAt: string
+  /**
+   * Desktop only: the web bundle the shell is serving (a release calver once a
+   * hot bundle has downloaded). Absent on the web, where the sha is the build.
+   */
+  bundle?: string
 }
 
 /**
@@ -54,5 +59,9 @@ export function formatBuildRailLabel({ version, sha, builtAt }: BuildIdentity): 
 export function formatBuildInfo(identity: BuildIdentity): string {
   const lines = [formatBuildLabel(identity), `build: ${identity.branch}@${identity.sha}`]
   if (identity.builtAt) lines.push(`date: ${identity.builtAt}`)
+  // A shell still on its embedded assets reports its own version as the bundle;
+  // repeating the number on a second line would read as two different things.
+  const { bundle, version } = identity
+  if (bundle && bundle !== version && bundle !== `v${version}`) lines.push(`bundle: ${bundle}`)
   return lines.join("\n")
 }

@@ -65,6 +65,17 @@ updates:
       - dependency-name: "@livestore/*"
         update-types:
           - "version-update:semver-minor"
+      # postgres.js 4 is a rewrite that pipelines a query on a busy connection
+      # instead of queueing it. Through Hyperdrive that left the unprepared
+      # queries db/shim/postgres.ts sends half-sent: Postgres sat in ClientRead
+      # holding a pooled connection until Hyperdrive dropped the client ten
+      # minutes later, and production ran out of pool slots (2026-11-13, release
+      # 2026.11.12.02). The driver is pinned to exactly 3.4.9 in all three
+      # manifests; db/shim/postgres.ts resolves it from THIS (root) one. Remove
+      # all three entries together, once 4.x has been proven through Hyperdrive.
+      - dependency-name: "postgres"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: npm
     directory: "/auth-worker"
@@ -77,6 +88,11 @@ updates:
       auth-worker-deps:
         patterns:
           - "*"
+    ignore:
+      # Pinned to 3.4.9 with the root manifest; see the note on the root entry.
+      - dependency-name: "postgres"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: npm
     directory: "/sync-worker"
@@ -89,6 +105,11 @@ updates:
       sync-worker-deps:
         patterns:
           - "*"
+    ignore:
+      # Pinned to 3.4.9 with the root manifest; see the note on the root entry.
+      - dependency-name: "postgres"
+        update-types:
+          - "version-update:semver-major"
 
   # agent-worker has its own package-lock.json and was the one Worker no
   # ecosystem entry covered, so a CVE in its dependencies — it shares hono with

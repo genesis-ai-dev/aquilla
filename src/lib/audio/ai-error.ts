@@ -40,7 +40,7 @@ import {
   VOICE_CONVERT_FAILED_BODY,
   VOICE_CONVERT_NOT_CONFIGURED_BODY,
 } from "./tts-engine-error"
-import { ELEVENLABS_ERROR_RE, type ElevenLabsFailure } from "./elevenlabs/errors"
+import { ELEVENLABS_ERROR_RE, elevenLabsMissingPermission, type ElevenLabsFailure } from "./elevenlabs/errors"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
 /** Shown when hosted drafting has no OpenRouter key. Names the setting to
@@ -64,6 +64,7 @@ export type ErrorCategory =
   | "voice-convert-failed"
   | "elevenlabs-key-missing"
   | "elevenlabs-invalid-key"
+  | "elevenlabs-missing-permission"
   | "elevenlabs-quota"
   | "elevenlabs-clone-not-allowed"
   | "elevenlabs-rate-limited"
@@ -115,6 +116,7 @@ function extractStatus(lowered: string): number | null {
 const ELEVENLABS_CATEGORIES: Record<ElevenLabsFailure, { category: ErrorCategory; titleKey: MessageKey; bodyKey: MessageKey }> = {
   "no key": { category: "elevenlabs-key-missing", titleKey: "audio.aiError.elevenLabsNoKeyTitle", bodyKey: "audio.aiError.elevenLabsNoKeyBody" },
   "invalid key": { category: "elevenlabs-invalid-key", titleKey: "audio.aiError.elevenLabsInvalidKeyTitle", bodyKey: "audio.aiError.elevenLabsInvalidKeyBody" },
+  "missing permission": { category: "elevenlabs-missing-permission", titleKey: "audio.aiError.elevenLabsMissingPermissionTitle", bodyKey: "audio.aiError.elevenLabsMissingPermissionUnnamedBody" },
   "out of characters": { category: "elevenlabs-quota", titleKey: "audio.aiError.elevenLabsQuotaTitle", bodyKey: "audio.aiError.elevenLabsQuotaBody" },
   "cloning not allowed": { category: "elevenlabs-clone-not-allowed", titleKey: "audio.aiError.elevenLabsCloneNotAllowedTitle", bodyKey: "audio.aiError.elevenLabsCloneNotAllowedBody" },
   "rate limited": { category: "elevenlabs-rate-limited", titleKey: "audio.aiError.elevenLabsRateLimitedTitle", bodyKey: "audio.aiError.elevenLabsRateLimitedBody" },
@@ -154,7 +156,10 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   const elevenLabs = raw.match(ELEVENLABS_ERROR_RE)
   if (elevenLabs) {
     const entry = ELEVENLABS_CATEGORIES[elevenLabs[1].toLowerCase() as ElevenLabsFailure]
-    return { category: entry.category, title: t(entry.titleKey), body: t(entry.bodyKey), raw }
+    // A restricted key: say which permission to turn on, when ElevenLabs named it.
+    const permission = elevenLabsMissingPermission(raw)
+    const body = permission ? t("audio.aiError.elevenLabsMissingPermissionBody", { permission }) : t(entry.bodyKey)
+    return { category: entry.category, title: t(entry.titleKey), body, raw }
   }
 
   // Platform daily SPEND ceiling (AQU-1869): a 503 from any paid AI path once

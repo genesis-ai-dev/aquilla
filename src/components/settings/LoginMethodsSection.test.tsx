@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
-const mocks = vi.hoisted(() => ({ active: { username: "alice", jwt: "alice-token" }, request: vi.fn(), start: vi.fn() }))
+const mocks = vi.hoisted(() => ({ active: { username: "alice", jwt: "alice-token" } as { username: string; jwt: string } | null, request: vi.fn(), start: vi.fn() }))
 vi.mock("@/hooks/useAccounts", () => ({ useAccounts: () => ({ active: mocks.active }) }))
 vi.mock("@/lib/i18n/I18nProvider", () => ({ useT: () => (key: string) => key }))
 vi.mock("@/lib/frontier/google-login", () => ({ googleRequest: mocks.request, startGoogleLogin: mocks.start }))
 vi.mock("@/components/git-import/FrontierForgotPasswordForm", () => ({ FrontierForgotPasswordForm: () => <div>email-reset</div> }))
+import { MemoryRouter } from "react-router-dom"
 import { LoginMethodsSection } from "./LoginMethodsSection"
 beforeEach(() => { vi.clearAllMocks(); mocks.active = { username: "alice", jwt: "alice-token" }; mocks.start.mockResolvedValue(undefined) })
 afterEach(cleanup)
@@ -42,5 +43,13 @@ it("offers email password reset even when a password is already set", async () =
   render(<LoginMethodsSection />)
   fireEvent.click(await screen.findByRole("button", { name: "auth.methods.resetPassword" }))
   expect(screen.getByText("email-reset")).toBeVisible()
+  expect(mocks.start).not.toHaveBeenCalled()
+})
+
+it("does not duplicate the sidebar login action or request account data while logged out", () => {
+  mocks.active = null
+  render(<MemoryRouter><LoginMethodsSection /></MemoryRouter>)
+  expect(screen.queryByRole("link")).toBeNull()
+  expect(mocks.request).not.toHaveBeenCalled()
   expect(mocks.start).not.toHaveBeenCalled()
 })

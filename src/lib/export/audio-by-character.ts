@@ -84,13 +84,16 @@ export interface CharacterPreview {
   key: string
   name: string
   color?: string
-  /** Lines that have a recording AND a place to put it. */
+  /** Lines this export will write: a recording AND, where the deliverable
+   *  lays takes on a timeline, a place to put it. See `PreviewAudioOptions`. */
   clipCount: number
   /** Lines belonging to this character with NOTHING recorded yet. The reason
    *  this preview exists: a character who is entirely unrecorded should be
    *  visible BEFORE the export, not discovered by opening the zip. */
   missingCount: number
-  /** Lines with a recording that cannot be placed, having no start time. */
+  /** Lines with a recording but no start time. The timeline mix cannot place
+   *  these, so there they are NOT in `clipCount`; a by-line export writes them
+   *  anyway (without a timestamp), so there they are in both. */
   untimedCount: number
   /** Sum of known attachment durations; null when any clip lacks durationMs. */
   totalDurationMs: number | null
@@ -279,11 +282,27 @@ export function groupAudioByCharacter(
  * character with nothing recorded appears with a count of zero, before the
  * export runs.
  */
+export interface PreviewAudioOptions {
+  /**
+   * Does the deliverable being previewed need every take to sit on a timeline?
+   *
+   * True (the default) for the by-character mix, which lays each take on
+   * silence at its own second and so has nowhere to put a line with no start
+   * time. False for the by-line export, which copies an untimed take across
+   * as it is — the same preview used to tell a Bible book with a recording on
+   * every verse that "nothing is recorded yet", because no verse has a start
+   * time and so no take counted.
+   */
+  needsTiming?: boolean
+}
+
 export function previewAudioByCharacter(
   cells: CellData[],
   settings: ProjectTtsSettings | undefined,
   resolveName?: ResolveCharacterName,
+  options: PreviewAudioOptions = {},
 ): CharacterPreview[] {
+  const needsTiming = options.needsTiming ?? true
   const order: string[] = []
   const byKey = new Map<string, CharacterPreview>()
   const durationsKnown = new Map<string, boolean>()
@@ -325,7 +344,7 @@ export function previewAudioByCharacter(
 
     if (cell.startTime == null) {
       row.untimedCount += 1
-      continue
+      if (needsTiming) continue
     }
     row.clipCount += 1
     const dur = attachment.durationMs
@@ -490,6 +509,17 @@ export async function exportAudioByCharacter(
   for (const group of groups) {
     const placed: { pcm: Float32Array; startSec: number; endSec: number | null; raised?: boolean }[] = []
     for (const clip of group.clips) {
+      // An untimed line cannot be placed, so it is counted and reported — the
+      // old export glued it on the end, which put words somewhere they were
+      // never spoken. Decided BEFORE the fetch: a Bible book is a thousand
+      // takes with no start time between them, and downloading and decoding
+      // every one only to leave it out was minutes of work for a refusal.
+      if (clip.startSec == null) {
+        untimed++
+        done++
+        args.onProgress?.(done, totalClips)
+        continue
+      }
       const cell = args.cells.find((c) => c.id === clip.cellId)!
       const parsed = parseFrontierAudioUrl(clip.url)
       if (!parsed) { done++; args.onProgress?.(done, totalClips); continue }
@@ -520,11 +550,7 @@ export async function exportAudioByCharacter(
       }
       try {
         const pcm = await pcmPromise
-        // An untimed line cannot be placed. Counted and reported — the old
-        // export glued it on the end, which put words somewhere they were
-        // never spoken.
-        if (pcm && clip.startSec == null) untimed++
-        else if (pcm) {
+        if (pcm) {
           // WHAT THE TIMELINE PLAYS, not everything that was recorded. The
           // decode cache is keyed on the audio id, so one decode serves every
           // cell sharing the clip and each takes its own window out of it —
@@ -540,7 +566,7 @@ export async function exportAudioByCharacter(
           const kept = win.isFull ? pcm : pcm.subarray(win.start, win.end)
           // AQU-2327: its volume and fades, as the timeline plays them.
           const audible = applyClipLevelPcm(kept, TARGET_RATE, clip)
-          placed.push({ pcm: audible, startSec: clip.startSec!, endSec: clip.endSec, ...((clip.gainDb ?? 0) > 0 ? { raised: true } : {}) })
+          placed.push({ pcm: audible, startSec: clip.startSec, endSec: clip.endSec, ...((clip.gainDb ?? 0) > 0 ? { raised: true } : {}) })
         }
       } catch (err) {
         console.warn(`[audio-by-character] skipping clip ${clip.audioId} (${clip.cellId}):`, err)

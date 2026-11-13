@@ -1,3 +1,4 @@
+import { EmailChangeForm } from "./EmailChangeForm"
 import { Spinner } from "@/components/ui/spinner"
 import { Link } from "react-router-dom"
 import { loginPath } from "@/lib/navigation/login-path"
@@ -17,6 +18,7 @@ export function LoginMethodsSection() {
 }
 function AccountLoginMethods({ jwt, username }: { jwt: string; username: string }) {
   const t = useT()
+  const [changingEmail, setChangingEmail] = useState(false)
   const [methods, setMethods] = useState<{ email: string; password: boolean; google: boolean; google_available: boolean } | null>(null)
   const [error, setError] = useState(false), [busy, setBusy] = useState(false)
   const [sessionExpired, setSessionExpired] = useState(false)
@@ -38,6 +40,8 @@ function AccountLoginMethods({ jwt, username }: { jwt: string; username: string 
         : <Button size="sm" variant="outline" onClick={() => setRevision(n => n + 1)}>{t("auth.methods.refresh")}</Button>
       }</SettingsBlock>}
       {methods && <>
+        <SettingsRow label={methods.email} description={t("auth.emailChange.accountEmail")} control={<Button size="sm" variant="outline" onClick={() => setChangingEmail(true)}>{t("auth.emailChange.action")}</Button>} />
+        {changingEmail && <SettingsBlock><EmailChangeForm jwt={jwt} passwordAvailable={methods.password} googleLinked={methods.google} onBack={() => setChangingEmail(false)} /></SettingsBlock>}
         <SettingsRow
           className="flex-wrap items-center"
           label={t(methods.password ? "auth.methods.passwordSet" : "auth.methods.passwordMissing")}

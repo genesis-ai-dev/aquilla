@@ -369,6 +369,7 @@ import {
 import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
 import { isFlagEnabled } from "@/lib/features/flags"
 import { SmartEditsProvider, useSmartEditsForCell, useSmartEditsPassage } from "@/hooks/useSmartEdits"
+import { readLanguageProfile } from "../../db/shared/language-profile"
 import {
   useCellPresence,
   type CellPresencePeer,
@@ -6567,6 +6568,12 @@ function EditorRow({
     () => laneLanguageCodeForTag(activeLane, project.lanes) ?? undefined,
     [activeLane, project],
   )
+  // Smart quotes type the marks the project recorded, which are also the
+  // marks its quotation checks expect.
+  const targetQuoteMarks = useMemo(
+    () => readLanguageProfile(project.languageProfile).quoteMarks,
+    [project.languageProfile],
+  )
   const hasTargetFootnoteMarker = (visibleTranslated ?? "").includes("\\f")
   const mayHaveFootnotes = hasSourceFootnoteMarker || hasTargetFootnoteMarker
   const showFootnotesInExpansion = footnoteViewMode === "off" && mayHaveFootnotes
@@ -9409,7 +9416,9 @@ function EditorRow({
                     textDirection={targetCellDirection}
                     directionMode={targetDirectionMode}
                     lang={targetLanguageCode}
-                    smartQuotes={project.smartQuotes}
+                    // On unless the project turned it off.
+                    smartQuotes={project.smartQuotes !== false}
+                    quoteMarks={targetQuoteMarks}
                     className={cn(
                       "w-full",
                       showCompletionOverlay && "opacity-30 transition-opacity",

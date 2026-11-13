@@ -1,6 +1,6 @@
 // AQU-465: chapter scope — the middle ground between "current file" and
 // "whole project". WHY these guards: the picker must not appear where it means
-// nothing (a one-chapter file, a round-trip format that reinjects into the
+// nothing (a one-chapter file, a package format that reinjects into the
 // original document), a chapter left over from another file must not silently
 // export an empty document, and the primary "Download <file>" action must keep
 // handing back the WHOLE file whatever the fold is showing.
@@ -16,11 +16,19 @@ vi.mock("@/lib/export/export-service", () => ({
 vi.mock("@/hooks/useProjectCells", () => ({
   useProjectCells: vi.fn(),
 }))
+// AQU-2561: USFM is exported by the worker, so what the dialog contributes is
+// the request. Only that one call is replaced; the rest of the module is real.
+vi.mock("@/lib/sync/source-export", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sync/source-export")>()),
+  downloadSourceFile: vi.fn(async () => ({ lossyVerseCount: 0 })),
+}))
 
 import { downloadBlob } from "@/lib/export/export-service"
 import { useProjectCells } from "@/hooks/useProjectCells"
+import { downloadSourceFile } from "@/lib/sync/source-export"
 
 const mockDownload = vi.mocked(downloadBlob)
+const mockSourceDownload = vi.mocked(downloadSourceFile)
 const mockProjectCells = vi.mocked(useProjectCells)
 
 function cell(id: string, group: string, translated: string): CellData {
@@ -45,6 +53,7 @@ const PROJECT_FILES = [
   { id: "f-txt", name: "notes.txt", type: "txt" },
   { id: "f-other", name: "other.txt", type: "txt" },
   { id: "f-usfm", name: "gen.usfm", type: "usfm" },
+  { id: "f-docx", name: "gen.docx", type: "docx" },
 ]
 
 const BASE_PROPS = {
@@ -148,10 +157,53 @@ describe("ExportDialog — chapter scope (AQU-465)", () => {
     expect(screen.queryByRole("combobox", { name: /filter export by chapter/i })).toBeNull()
   })
 
-  it("offers no chapter picker for a round-trip format that reinjects the original", () => {
+  it("offers no chapter picker for a package format that reinjects the original", () => {
+    render(<ExportDialog {...BASE_PROPS} activeFileId="f-docx" activeFileName="gen.docx" activeFileType="docx" />)
+    fireEvent.click(screen.getByText("Export to another format"))
+    // DOCX is preselected for a DOCX file; a one-chapter .docx would mean
+    // rebuilding the package rather than exporting it.
+    expect(screen.getByRole("radio", { name: /DOCX|Word/i })).toBeChecked()
+    expect(screen.queryByRole("combobox", { name: /filter export by chapter/i })).toBeNull()
+  })
+
+  // AQU-2561. USFM reinjects into the original too, but that original is plain
+  // text, so the worker can cut a chapter out of it. The dialog's part is to
+  // ask for the right chapter NUMBER, name the file after it, and never let
+  // the primary action hand back less than the whole file.
+  it("asks the worker for the chosen chapter of a USFM file and names the file after it", async () => {
     render(<ExportDialog {...BASE_PROPS} activeFileId="f-usfm" activeFileName="gen.usfm" activeFileType="usfm" />)
     fireEvent.click(screen.getByText("Export to another format"))
-    // USFM is preselected for a USFM file and goes through the server side-car.
+    expect(screen.getByRole("radio", { name: /USFM/i })).toBeChecked()
+    await pickChapter("GEN 2")
+
+    fireEvent.click(screen.getByRole("button", { name: /^Export$/i }))
+    await waitFor(() => expect(mockSourceDownload).toHaveBeenCalledTimes(1))
+    expect(mockSourceDownload.mock.calls[0][0]).toMatchObject({
+      fileId: "f-usfm",
+      chapter: 2,
+      downloadName: "gen_GEN-2.SFM",
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: /^Download gen\.SFM$/i }))
+    await waitFor(() => expect(mockSourceDownload).toHaveBeenCalledTimes(2))
+    const whole = mockSourceDownload.mock.calls[1][0]
+    expect(whole.downloadName).toBe("gen.SFM")
+    expect(whole).not.toHaveProperty("chapter")
+  })
+
+  it("offers no USFM chapter picker when a chapter number names more than one chapter", () => {
+    // Several books in one file: "chapter 1" is both GEN 1 and EXO 1, and the
+    // worker addresses a chapter by number alone.
+    render(
+      <ExportDialog
+        {...BASE_PROPS}
+        activeFileId="f-usfm"
+        activeFileName="gen.usfm"
+        activeFileType="usfm"
+        cells={[cell("c1", "GEN 1:1", "in the beginning"), cell("c2", "EXO 1:1", "these are the names")]}
+      />,
+    )
+    fireEvent.click(screen.getByText("Export to another format"))
     expect(screen.getByRole("radio", { name: /USFM/i })).toBeChecked()
     expect(screen.queryByRole("combobox", { name: /filter export by chapter/i })).toBeNull()
   })

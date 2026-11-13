@@ -9,11 +9,13 @@ import { planWriteBack, type PendingEdit, type WriteBackConflict } from "./write
 import { classifyChanges, type ClassifiedUnit } from "./classify"
 import { bridgeStore } from "./store"
 import { paratextTauri } from "./tauri"
+import type { BridgeStateId } from "./project"
 
 export interface BookLocation {
   projectPath: string
   fileName: string
-  guid: string
+  /** The folder's state key (`bridgeStateId`), never the bare GUID. */
+  stateId: BridgeStateId
 }
 
 export interface BookReconcile {
@@ -43,11 +45,11 @@ export async function reconcileBook(loc: BookLocation, opts: { pending?: Pending
   const units = await deriveUnits(bytes)
   const book = units.book
   const [storedPending, written, lastSeen, own, hold] = await Promise.all([
-    opts.pending ? Promise.resolve(opts.pending) : bridgeStore.pendingEdits(loc.guid, book),
-    bridgeStore.writeLog(loc.guid, book),
-    bridgeStore.lastSeen(loc.guid, book),
-    bridgeStore.ownBlobHashes(loc.guid, book),
-    bridgeStore.hold(loc.guid, book),
+    opts.pending ? Promise.resolve(opts.pending) : bridgeStore.pendingEdits(loc.stateId, book),
+    bridgeStore.writeLog(loc.stateId, book),
+    bridgeStore.lastSeen(loc.stateId, book),
+    bridgeStore.ownBlobHashes(loc.stateId, book),
+    bridgeStore.hold(loc.stateId, book),
   ])
   let conflicts: ClassifiedUnit[] = []
   let theirs: ClassifiedUnit[] = []
@@ -57,7 +59,7 @@ export async function reconcileBook(loc: BookLocation, opts: { pending?: Pending
     if (!r.echo) {
       conflicts = r.units.filter((u) => u.case === "stale-revert" || u.case === "both-changed")
       theirs = r.units.filter((u) => u.case === "theirs-only")
-      if (r.clobbers > 0 && !onHold) { onHold = true; await bridgeStore.setHold(loc.guid, book, true) }
+      if (r.clobbers > 0 && !onHold) { onHold = true; await bridgeStore.setHold(loc.stateId, book, true) }
     }
   }
   return { units, lastSeen, pending: storedPending, conflicts, theirs, onHold }
@@ -67,17 +69,17 @@ export async function reconcileBook(loc: BookLocation, opts: { pending?: Pending
  * A mirror was just created from these book bytes: make them the base. The
  * cells hold exactly this text, so the first sync must compare the file with
  * it, not with a unit set an earlier session (the per-book page, or a mirror
- * since removed) left under the same project GUID. Against such a stale base
+ * since removed) left for the same project folder. Against such a stale base
  * every verse Paratext changed in between reads as edited on both sides, and
  * the user is asked to pick between two identical texts.
  *
  * A book whose units cannot be derived keeps whatever base it had.
  */
-export async function setMirrorBase(guid: string, books: readonly Uint8Array[]): Promise<void> {
+export async function setMirrorBase(stateId: BridgeStateId, books: readonly Uint8Array[]): Promise<void> {
   for (const bytes of books) {
     try {
       const units = await deriveUnits(bytes)
-      await bridgeStore.setLastSeen(guid, units.book, units)
+      await bridgeStore.setLastSeen(stateId, units.book, units)
     } catch {
       /* first sync falls back to its own first-contact rule */
     }
@@ -103,7 +105,7 @@ export async function writeBookEdits(
   const current = await paratextTauri.readFile(loc.projectPath, loc.fileName)
   const before = await deriveUnits(current)
   const book = before.book
-  if (await bridgeStore.hold(loc.guid, book)) return { kind: "refused", reason: "hold" }
+  if (await bridgeStore.hold(loc.stateId, book)) return { kind: "refused", reason: "hold" }
   if (edits.length === 0) return { kind: "written", after: null, applied: [], conflicts: [] }
   const plan = await planWriteBack(current, edits, { allowMarkerChanges: opts.allowMarkerChanges })
   if (plan.proofFailures.length > 0) return { kind: "refused", reason: `proof:${plan.proofFailures.join("; ")}` }
@@ -114,9 +116,9 @@ export async function writeBookEdits(
     const msg = e instanceof Error ? e.message : String(e)
     return { kind: "refused", reason: msg.startsWith("EHASH") ? "hash" : msg }
   }
-  await bridgeStore.recordOwnBlob(loc.guid, book, plan.after.blobHash)
-  await bridgeStore.recordWrites(loc.guid, book, plan.applied)
-  await bridgeStore.deletePendingEdits(loc.guid, plan.applied.map((a) => a.unitId))
-  await bridgeStore.setLastSeen(loc.guid, book, plan.after)
+  await bridgeStore.recordOwnBlob(loc.stateId, book, plan.after.blobHash)
+  await bridgeStore.recordWrites(loc.stateId, book, plan.applied)
+  await bridgeStore.deletePendingEdits(loc.stateId, plan.applied.map((a) => a.unitId))
+  await bridgeStore.setLastSeen(loc.stateId, book, plan.after)
   return { kind: "written", after: plan.after, applied: plan.applied.map((a) => a.unitId), conflicts: plan.conflicts }
 }

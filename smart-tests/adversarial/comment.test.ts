@@ -44,6 +44,14 @@ describe("PR comment", () => {
     expect(text).not.toContain("attacked")
   })
 
+  it("gives a failed setup's own reason instead of a canary that never ran", () => {
+    const setupFailure = "Sign-in was refused: adv-bot-1 is not on the dev access list (HTTP 403, dev_access_restricted)."
+    const text = renderComment({ ...base, tests: [], setupFailure })
+    expect(text).toContain(`**HARNESS UNAVAILABLE.** ${setupFailure}`)
+    expect(text).not.toContain("canary health check did not run")
+    expect(runStatus({ ...base, tests: [], setupFailure })).toEqual({ status: "harness_unavailable", reason: setupFailure })
+  })
+
   it("shows the agent's stop reason, so a provider flake is not mistaken for an app miss", () => {
     const tests = [...canary, { ...attack("x", "inconclusive"), evidence: evidence("inconclusive", { attackId: "x",
       agents: [{ status: "driver_error", errors: [{ reason: "Text helper returned no valid field value; nothing typed." }] }, null] }) },

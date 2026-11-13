@@ -71,6 +71,31 @@ export function filterCellsByChapter<T extends Pick<CellData, "group">>(
 }
 
 /**
+ * AQU-2561: the chapter NUMBER behind each label, for the one export that
+ * addresses a chapter by number rather than by filtering cells — USFM, where
+ * the worker cuts `\c <n>` out of the original file.
+ *
+ * Null when the numbers cannot tell this file's chapters apart. A file that
+ * concatenates several books has a "GEN 1" and an "EXO 1"; asking the worker
+ * for chapter 1 of that would return whichever comes first, under the other
+ * one's name. No answer is better than a wrong one, so the picker is simply
+ * not offered there.
+ */
+export function chapterNumbersByLabel(labels: readonly string[]): ReadonlyMap<string, number> | null {
+  const byLabel = new Map<string, number>()
+  const seen = new Set<number>()
+  for (const label of labels) {
+    const digits = /(\d{1,3})$/.exec(label)?.[1]
+    if (!digits) return null
+    const n = Number(digits)
+    if (seen.has(n)) return null
+    seen.add(n)
+    byLabel.set(label, n)
+  }
+  return byLabel
+}
+
+/**
  * The filename fragment for a chapter, sanitised the way `buildExportStem`
  * sanitises a project name. Without it two chapters of the same file would
  * both download as `<file>.tsv` and the second would land as `(1)`.

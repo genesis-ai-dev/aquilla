@@ -347,3 +347,96 @@ describe("custom source preservation (AQU-635)", () => {
     expect(res?.headers.get("X-Export-Mode")).toBe("raw-original")
   })
 })
+
+// ---------------------------------------------------------------------------
+// AQU-2561: ?chapter=N — one chapter of a USFM file
+// ---------------------------------------------------------------------------
+
+// Chapter 1 has a section heading of its own so chapter 2's is `s1:2`: heading
+// refs count across the whole file, and a slice that re-parsed its own text
+// would restart at 1 and lose the heading's translation. Chapter 2's last
+// verse runs straight into `\c 3`, which is where the serializer has to add
+// the newline a translation does not end with. Chapter 3 carries the footnote.
+const THREE_CHAPTERS = `\\id GEN Test
+\\h Genesis
+\\mt1 Genesis
+\\c 1
+\\s1 The beginning
+\\p
+\\v 1 In the beginning.
+\\v 2 The earth was without form.
+\\c 2
+\\s1 The seventh day
+\\p
+\\v 1 Thus the heavens were finished.
+\\v 2 And on the seventh day.
+\\c 3
+\\p
+\\v 1 Now the serpent\\f + \\fr 3:1 \\ft note\\f* was crafty.
+`
+
+describe("?chapter=N — one chapter of a USFM file (AQU-2561)", () => {
+  const cells = [
+    { canonical_ref: "GEN:mt1:1", value: "Genèse" },
+    { canonical_ref: "GEN 2:s1:2", value: "Le septième jour" },
+    { canonical_ref: "GEN 2:2", value: "Et le septième jour." },
+    { canonical_ref: "GEN 3:1", value: "Le serpent." },
+  ]
+  const env = (): ExportRouteEnv => ({
+    SYNC_SECRET_KEY: SECRET,
+    AQUILLA_PG: makeStubDb({ blob: { format: "usfm", raw_source: THREE_CHAPTERS }, cells }),
+    SNAPSHOTS: makeStubBucket(),
+  })
+  const get = async (query: string) =>
+    handleExportSourceRequest(
+      new Request(`https://w/api/v1/projects/p1/files/f1/source${query}`, {
+        headers: { Authorization: `Bearer ${await makeToken(600)}` },
+      }),
+      env(),
+    )
+
+  it("returns the front matter and that chapter, exactly as the whole-file export writes them", async () => {
+    const whole = await (await get(""))!.text()
+    const at = (marker: string) => whole.indexOf(marker)
+    // The claim under test: a chapter file is the matching characters of the
+    // whole-file export, not a second rendering that could drift from it.
+    const expected = {
+      "1": whole.slice(0, at("\\c 2")),
+      "2": whole.slice(0, at("\\c 1")) + whole.slice(at("\\c 2"), at("\\c 3")),
+      "3": whole.slice(0, at("\\c 1")) + whole.slice(at("\\c 3")),
+    }
+    for (const [chapter, text] of Object.entries(expected)) {
+      const res = await get(`?chapter=${chapter}`)
+      expect(res?.status, `chapter ${chapter}`).toBe(200)
+      expect(await res!.text(), `chapter ${chapter}`).toBe(text)
+    }
+    // Chapter 2 on its own terms: its translations are in, with the newline
+    // the last verse needs, and chapter 3's are not.
+    expect(expected["2"]).toContain("\\mt1 Genèse\n")
+    expect(expected["2"]).toContain("\\s1 Le septième jour\n")
+    expect(expected["2"].endsWith("\\v 2 Et le septième jour.\n")).toBe(true)
+    expect(expected["2"]).not.toContain("In the beginning.")
+    expect(expected["2"]).not.toContain("Le serpent.")
+  })
+
+  it("counts lossy verses only in the chapter that was exported", async () => {
+    const counts: Record<string, string | null | undefined> = {}
+    for (const query of ["", "?chapter=2", "?chapter=3"]) {
+      counts[query] = (await get(query))?.headers.get("X-Usfm-Lossy-Verse-Count")
+    }
+    expect(counts).toEqual({ "": "1", "?chapter=2": "0", "?chapter=3": "1" })
+  })
+
+  it("refuses a chapter it cannot honour instead of returning the whole book", async () => {
+    const statuses: Record<string, number | undefined> = {}
+    for (const query of ["?chapter=9", "?chapter=abc", "?chapter=", "?chapter=2-3"]) {
+      statuses[query] = (await get(query))?.status
+    }
+    expect(statuses).toEqual({ "?chapter=9": 404, "?chapter=abc": 400, "?chapter=": 400, "?chapter=2-3": 400 })
+  })
+
+  it("leaves ?mode=raw alone: the original upload is whole whatever chapter is named", async () => {
+    const res = await get("?mode=raw&chapter=2")
+    expect(await res?.text()).toBe(THREE_CHAPTERS)
+  })
+})

@@ -177,7 +177,7 @@ function ElevationGate({
       ) : (
         <div className={cn("flex flex-col gap-4", !compact && "mt-6")}>
           {notice && (
-            <p className="select-text text-xs text-muted-foreground">
+            <p className="select-none text-xs text-muted-foreground">
               {notice}
             </p>
           )}

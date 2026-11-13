@@ -1,3 +1,4 @@
+import { EmailChangeForm } from "@/components/settings/EmailChangeForm"
 import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { AuthPage, AuthPanel } from "@/components/auth/AuthPage"
@@ -109,6 +110,7 @@ function GoogleConnectReturn({ username, verifier }: { username: string; verifie
     if (code) { try { saveGoogleProgress(verifier, { connectCode: code }) } catch { setError(true) } }
   }, [code, verifier])
   const matching = active?.username === username
+  if (saved?.emailChange && !loading && matching && code && active) return <AuthPage><AuthPanel><CardHeader><CardTitle>{t("auth.emailChange.title")}</CardTitle></CardHeader><CardContent><EmailChangeForm jwt={active.jwt} passwordAvailable={false} onBack={() => { clearGoogleAttempt(); navigate("/preferences/login-methods") }} /></CardContent></AuthPanel></AuthPage>
   return <AuthPage><AuthPanel><CardHeader><CardTitle>{t("auth.google.linkTitle")}</CardTitle></CardHeader>
     <CardContent className="flex flex-col gap-4">
       {loading ? <Spinner /> : !matching ? <p role="alert">{t("auth.methods.accountChanged")}</p> : !code ? <p role="alert">{t("auth.google.cancelled")}</p> : <form className="flex flex-col gap-4" onSubmit={event => {

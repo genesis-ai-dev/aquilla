@@ -38,7 +38,7 @@ export function CopySecurityCode({
         {result === "copied"
           ? "Copied"
           : result === "failed"
-            ? "Could not copy. Select the code and copy it manually."
+            ? "Could not copy. Please try the copy button again."
             : null}
       </span>
     </div>

@@ -85,7 +85,7 @@ export function rollupBody(summary: RunSummary): string {
 
 type Fetch = typeof fetch
 
-interface Resolved { teamId: string; triageId: string; bugLabelId: string | null; projectId: string | null; parentId: string; rollupId: string }
+export interface Resolved { teamId: string; triageId: string; bugLabelId: string | null; projectId: string | null; parentId: string; rollupId: string }
 
 /** Minimal Linear GraphQL client. Everything it needs is resolved by name at run time. */
 export class LinearClient {
@@ -102,7 +102,7 @@ export class LinearClient {
     this.rollup = rollup
   }
 
-  private async request<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+  protected async request<T>(query: string, variables: Record<string, unknown>): Promise<T> {
     const response = await this.fetchImpl("https://api.linear.app/graphql", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: this.apiKey },
@@ -115,7 +115,7 @@ export class LinearClient {
     return body.data
   }
 
-  private resolve(): Promise<Resolved> {
+  protected resolve(): Promise<Resolved> {
     this.resolved ??= this.request<{
       parent: { id: string; team: { id: string; states: { nodes: { id: string; name: string }[] } } }
       rollup: { id: string }

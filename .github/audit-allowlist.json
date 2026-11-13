@@ -13,68 +13,60 @@
   ],
   "accepted": [
     {
-      "ghsa": "GHSA-23hp-3jrh-7fpw",
-      "module": "tar",
-      "severity": "critical",
-      "reason": "Node-only transitive dep. Reaches the tree solely via @huggingface/transformers -> onnxruntime-node, and that package is imported only from browser Web Workers (src/lib/audio/whisper-worker.ts, mms-worker.ts). Vite resolves the browser target (onnxruntime-web); the Node target is never bundled, never deployed to a Cloudflare Worker, and never parses an archive at runtime. Exposure is limited to a developer's node_modules at install time.",
-      "addedOn": "2026-08-11",
-      "reviewBy": "2026-11-11"
-    },
-    {
-      "ghsa": "GHSA-8x88-c5mf-7j5w",
-      "module": "tar",
+      "ghsa": "GHSA-82x6-q7mm-w9cf",
+      "module": "toml",
       "severity": "high",
-      "reason": "Same path and same reasoning as GHSA-23hp-3jrh-7fpw.",
-      "addedOn": "2026-08-11",
-      "reviewBy": "2026-11-11"
+      "reason": "Not in any shipped bundle. toml@3.0.0 comes only from @effect/cli, which @livestore/utils imports solely in its Node entry (@livestore/utils/node); the SPA and the Workers import @livestore/utils/effect and never load it. It sits in node_modules as a livestore peer dependency.",
+      "addedOn": "2026-11-13",
+      "reviewBy": "2026-12-13"
     },
     {
-      "ghsa": "GHSA-vmf3-w455-68vh",
-      "module": "tar",
-      "severity": "moderate",
-      "reason": "Same path and same reasoning as GHSA-23hp-3jrh-7fpw.",
-      "addedOn": "2026-08-11",
-      "reviewBy": "2026-11-11"
-    },
-    {
-      "ghsa": "GHSA-w8wr-v893-vjvp",
-      "module": "tar",
-      "severity": "moderate",
-      "reason": "Same path and same reasoning as GHSA-23hp-3jrh-7fpw.",
-      "addedOn": "2026-08-11",
-      "reviewBy": "2026-11-11"
-    },
-    {
-      "ghsa": "GHSA-gvwx-54wh-qm9j",
-      "module": "tar",
-      "severity": "moderate",
-      "reason": "Same path and same reasoning as GHSA-23hp-3jrh-7fpw.",
-      "addedOn": "2026-08-11",
-      "reviewBy": "2026-11-11"
-    },
-    {
-      "ghsa": "GHSA-r292-9mhp-454m",
-      "module": "tar",
-      "severity": "moderate",
-      "reason": "Same path and same reasoning as GHSA-23hp-3jrh-7fpw.",
-      "addedOn": "2026-08-11",
-      "reviewBy": "2026-11-11"
-    },
-    {
-      "ghsa": "GHSA-xcpc-8h2w-3j85",
-      "module": "adm-zip",
+      "ghsa": "GHSA-v5mp-jgw5-2x6j",
+      "module": "toml",
       "severity": "high",
-      "reason": "Node-only transitive dep of onnxruntime-node, reached only through @huggingface/transformers. Same browser-worker reasoning as the tar entries: the Node target is not part of any deployed artifact, and nothing in the product hands it a ZIP.",
-      "addedOn": "2026-08-11",
-      "reviewBy": "2026-11-11"
+      "reason": "Same path and same reasoning as GHSA-82x6-q7mm-w9cf.",
+      "addedOn": "2026-11-13",
+      "reviewBy": "2026-12-13"
     },
     {
-      "ghsa": "GHSA-f88m-g3jw-g9cj",
-      "module": "sharp",
+      "ghsa": "GHSA-4qx8-w7c3-pj3p",
+      "module": "toml",
       "severity": "high",
-      "reason": "libvips image-decoding CVEs inherited by sharp, which is an optional Node-side dependency of @huggingface/transformers. The SPA runs transformers in a browser Worker where image decoding goes through the platform, not sharp; no Cloudflare Worker installs or invokes it. Upgrade blocked upstream until transformers moves its floor to sharp >=0.35.0.",
-      "addedOn": "2026-08-11",
-      "reviewBy": "2026-11-11"
+      "reason": "Same path and same reasoning as GHSA-82x6-q7mm-w9cf.",
+      "addedOn": "2026-11-13",
+      "reviewBy": "2026-12-13"
+    },
+    {
+      "ghsa": "GHSA-9j65-hcg3-gc64",
+      "module": "toml",
+      "severity": "high",
+      "reason": "Same path and same reasoning as GHSA-82x6-q7mm-w9cf.",
+      "addedOn": "2026-11-13",
+      "reviewBy": "2026-12-13"
+    },
+    {
+      "ghsa": "GHSA-9qmh-m7c6-f92p",
+      "module": "toml",
+      "severity": "high",
+      "reason": "Same path and same reasoning as GHSA-82x6-q7mm-w9cf.",
+      "addedOn": "2026-11-13",
+      "reviewBy": "2026-12-13"
+    },
+    {
+      "ghsa": "GHSA-h895-cgqg-jf52",
+      "module": "toml",
+      "severity": "high",
+      "reason": "Same path and same reasoning as GHSA-82x6-q7mm-w9cf.",
+      "addedOn": "2026-11-13",
+      "reviewBy": "2026-12-13"
+    },
+    {
+      "ghsa": "GHSA-8988-4f7v-96qf",
+      "module": "@opentelemetry/core",
+      "severity": "moderate",
+      "reason": "The flagged copy (2.2.0) is reached only through @livestore/peer-deps, a convenience package that exists to satisfy peer dependencies; no source file imports it. The OpenTelemetry code livestore actually loads resolves @opentelemetry/core 2.11.0, which the audit does not flag.",
+      "addedOn": "2026-11-13",
+      "reviewBy": "2026-12-13"
     }
   ]
 }

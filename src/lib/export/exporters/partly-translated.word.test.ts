@@ -200,6 +200,15 @@ describe("Word export — a hidden or deleted line's pictures, fields and tabs l
     expect(out.xml).not.toMatch(/SEQ Figure|w:drawing/)
   })
 
+  it("never names a hidden line's words among those that lost their look, though a run holds them and the next line's", async () => {
+    const body = para(run(`${S1}. ${S2.replace(/ sentences$/, "")}`) + run(" sentences. The third", italic) + run(` line${PAD}.`)) + next
+    const cells = importedCells(body, undefined, translate).map((cell) => (cell.id === "c1-2" ? { ...cell, hidden: true } : cell))
+    expect(cells.filter((cell) => cell.id.startsWith("c1-")).map((cell) => cell.original)).toEqual([`${S1}.`, `${S2}.`, `${S3}.`])
+    const out = await exportAsDialog(body, undefined, cells)
+    expect(firstParagraph(out.xml)).toBe(`${T1} ${T3}`)
+    expect(out.result.lostLooks.flatMap((l) => l.words)).toEqual(["The third"])
+  })
+
   it("keeps what a remaining line holds: its picture, its field", async () => {
     const body = para(run(`${S1}. ${S2}. The third line shows figure `) + complexField("SEQ Figure \\* ARABIC", "1") + run(` and${PAD}`) + pictureRun + run(".")) + next
     const cells = importedCells(body, undefined, () => "").map((cell) => (cell.id === "c1-2" ? { ...cell, hidden: true } : cell))

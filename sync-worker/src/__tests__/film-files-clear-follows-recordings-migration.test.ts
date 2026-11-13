@@ -1,4 +1,4 @@
-// AQU-2227 — migration 0194 clears a stored Follows recordings choice on files
+// AQU-2227 — migration 0202 clears a stored Follows recordings choice on files
 // with a film linked.
 //
 // WHY: before this release a file timed to a film (footage linked, or an audio
@@ -19,12 +19,12 @@ import { handleFilesReadRequest } from "../events/files-read-route"
 const MIGRATION = readFileSync(
   path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
-    "../../../db/postgres/migrations/0198_film_files_clear_follows_recordings.sql",
+    "../../../db/postgres/migrations/0202_film_files_clear_follows_recordings.sql",
   ),
   "utf8",
 )
 
-const PROJECT = "proj-0194"
+const PROJECT = "proj-0202"
 const FILM = "https://cdn.example.test/videos/ep1/master.m3u8"
 
 let t: TestDb | undefined
@@ -72,7 +72,7 @@ async function snapshot(td: TestDb): Promise<Record<string, { meta: string; even
   return Object.fromEntries(rows.map(({ id, ...rest }) => [id, rest]))
 }
 
-describe("migration 0194", () => {
+describe("migration 0202", () => {
   it("clears Follows recordings only on files with a film or a live audio cue file, keeps their other keys, and is safe to re-run", async () => {
     const td = (t = await makeTestDb())
     await seed(td)
@@ -105,7 +105,7 @@ describe("migration 0194", () => {
 // (schema_migrations, scripts/neon-migrate.ts) runs it once, by name. After
 // it, choosing Follows recordings on a film file is a choice like any other:
 // stored, and read back with the film after a reload.
-describe("after migration 0198, a film file switched to Follows recordings stays switched", () => {
+describe("after migration 0202, a film file switched to Follows recordings stays switched", () => {
   const SECRET = "film-follows-recordings-secret"
 
   it("the switch is stored beside the film and the file read (a reload) returns it", async () => {

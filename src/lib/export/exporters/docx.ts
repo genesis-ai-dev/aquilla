@@ -549,12 +549,14 @@ export async function exportDocx(
     if (staleHolders.has(span.isCopy ? span.copyOf : span.index)) return null
     const lines = linesOfBlock.get(blockKeyOf(span.isCopy ? span.copyOf : span.index))
     const rebuilt = rebuildParagraphIn(part, span, (line) => {
-      const stretches = lines && lines.filter((l) => l.kept).length === translation.parts.length
+      const inOrder = lines && lines.filter((l) => l.kept).length === translation.parts.length
         ? locateInSegmentOrder(lines, translation.parts, line)
-        : locateLines(translation.parts, line)
+        : null
+      const stretches = inOrder?.stretches ?? locateLines(translation.parts, line)
+      const lost = !translation.lostLines ? [] : inOrder && inOrder.lost.length > 0 ? inOrder.lost : lostStretches(stretches, line)
       return {
         spans: restoreLineSeparators(translationSpans(translation.parts, line, stretches), line, translation.source),
-        layout: { stretches, lost: translation.lostLines ? lostStretches(stretches, line) : [] },
+        layout: { stretches, lost },
       }
     })
     if (rebuilt === null) return null
@@ -691,7 +693,10 @@ interface LineLayout {
   /** Per line (part), its own stretch, or null where its source is not found. */
   stretches: readonly (LineStretch | null)[]
   /** What hidden or deleted lines held: each stretch between two remaining
-   *  lines (or the paragraph's edge) that holds more than whitespace. */
+   *  lines (or the paragraph's edge) that holds more than whitespace.
+   *  AQU-2552 (review r7): only its words, never the space around them, and
+   *  each hidden line's own stretch where it is found. What sits between two
+   *  lines (a page break at the boundary) stays. */
   lost: readonly LineStretch[]
 }
 
@@ -1028,14 +1033,18 @@ function paragraphLines(cells: readonly CellData[], removed: readonly RemovedCel
  * paragraph's line text, found with every line of the paragraph in segment
  * order: a hidden line is found by its own words, so a remaining line with
  * the same words never takes its place; a deleted line, whose words are not
- * known, holds at least some words before the next line found.
+ * known, holds at least some words before the next line found. And what the
+ * lost lines held (see LineLayout): a hidden line's own stretch; for lines
+ * not found (a deleted line), the words between the lines found around them.
+ * Nothing is lost when a remaining line is not found.
  */
 function locateInSegmentOrder(
   lines: readonly ParagraphLine[],
   parts: readonly { source?: string }[],
   lineText: string,
-): (LineStretch | null)[] {
-  const out: (LineStretch | null)[] = []
+): { stretches: (LineStretch | null)[]; lost: LineStretch[] } {
+  const stretches: (LineStretch | null)[] = []
+  const at: (LineStretch | null)[] = []
   let cursor = 0
   let unknownBefore = false
   let kept = 0
@@ -1045,8 +1054,9 @@ function locateInSegmentOrder(
     while (found && unknownBefore && !/\S/.test(lineText.slice(cursor, found.start))) {
       found = findInLine(lineText, source, found.start + 1)
     }
+    at.push(found)
     if (line.kept) {
-      out.push(found)
+      stretches.push(found)
       kept++
     }
     if (found) {
@@ -1056,7 +1066,35 @@ function locateInSegmentOrder(
       unknownBefore = true
     }
   }
-  return out
+  if (stretches.some((s) => s === null)) return { stretches, lost: [] }
+  const lost: LineStretch[] = []
+  let previous = 0
+  let unknown = false
+  const closeUnknown = (end: number) => {
+    const words = trimmedStretch(lineText, previous, end)
+    if (unknown && words) lost.push(words)
+    unknown = false
+  }
+  lines.forEach((line, k) => {
+    const found = at[k]
+    if (!found) {
+      unknown = true
+      return
+    }
+    closeUnknown(found.start)
+    if (!line.kept) lost.push(found)
+    previous = found.end
+  })
+  closeUnknown(lineText.length)
+  return { stretches, lost }
+}
+
+/** The stretch [from, to) of `text` without whitespace at its edges, or null
+ *  when it holds none but whitespace. */
+function trimmedStretch(text: string, from: number, to: number): LineStretch | null {
+  const slice = text.slice(from, to)
+  if (!/\S/.test(slice)) return null
+  return { start: from + (slice.length - slice.trimStart().length), end: to - (slice.length - slice.trimEnd().length) }
 }
 
 function findInLine(lineText: string, source: string, from: number): LineStretch | null {
@@ -1081,7 +1119,9 @@ function lostStretches(stretches: readonly (LineStretch | null)[], lineText: str
   const out: LineStretch[] = []
   let previous = 0
   for (const s of [...found, { start: lineText.length, end: lineText.length }]) {
-    if (/\S/.test(lineText.slice(previous, s.start))) out.push({ start: previous, end: s.start })
+    // AQU-2552 (review r7): the lost words only, not the space around them.
+    const words = trimmedStretch(lineText, previous, s.start)
+    if (words) out.push(words)
     previous = s.end
   }
   return out
@@ -1115,8 +1155,12 @@ function placeInLines(
       const line = layout.stretches.findIndex((s) => s !== null && s.start <= start && start < s.end)
       if (line !== -1) footnoteLines.set(piece, line)
     }
+    // AQU-2552 (review r7): text whose words are all a lost line's goes, though
+    // the space after them (between two lines) is in the same run.
     const gone = isLine
-      ? layout.lost.some((s) => s.start <= start && end <= s.end)
+      ? piece.kind === "text" && /\S/.test(piece.text)
+        ? [...piece.text.matchAll(/\S/g)].every((m) => inLost(start + m.index!))
+        : layout.lost.some((s) => s.start <= start && end <= s.end)
       : givenUpWithLine(piece) && layout.lost.some((s) => s.start < start && start < s.end)
     if (gone) lost.add(piece)
   })

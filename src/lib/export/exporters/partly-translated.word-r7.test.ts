@@ -253,3 +253,37 @@ describe("Word export — a line is found in its paragraph in segment order (AQU
     expect(paras(deleted.body)).toEqual(["Refrain line … Trois.", "Next paragraph."])
   })
 })
+
+describe("Word export — what sits between two lines stays when one of them is lost (AQU-2552, review r7 N6)", () => {
+  const L1 = "End of chapter one" + PAD
+  const L2 = "Chapter two begins" + PAD
+  const shapes: [string, string][] = [
+    ["before the space", run(L1) + PAGE_BREAK + run(" " + L2)],
+    ["after the space", run(L1 + " ") + PAGE_BREAK + run(L2)],
+  ]
+
+  it.each(shapes)("a page break %s stays when the line before it is hidden or deleted", async (_name, inner) => {
+    const bytes = await docxBytes(para(inner) + NEXT)
+    const [a, b, n] = await importCells(bytes)
+    const hidden = await wordOut(bytes, [hide(typed(a, "Fin.")), typed(b, "Chapitre deux."), n])
+    expect(paras(hidden.body)).toEqual(["[PAGE]Chapitre deux.", "Next paragraph."])
+    const deleted = await wordOut(bytes, [typed(b, "Chapitre deux."), n], [a])
+    expect(paras(deleted.body)).toEqual(["[PAGE]Chapitre deux.", "Next paragraph."])
+  })
+
+  it.each(shapes)("a page break %s stays when the line after it is hidden or deleted", async (_name, inner) => {
+    const bytes = await docxBytes(para(inner) + NEXT)
+    const [a, b, n] = await importCells(bytes)
+    const hidden = await wordOut(bytes, [typed(a, "Fin."), hide(typed(b, "Chapitre deux.")), n])
+    expect(paras(hidden.body)).toEqual(["Fin.[PAGE]", "Next paragraph."])
+    const deleted = await wordOut(bytes, [typed(a, "Fin."), n], [b])
+    expect(paras(deleted.body)).toEqual(["Fin.[PAGE]", "Next paragraph."])
+  })
+
+  it("a page break inside a hidden line still leaves with it", async () => {
+    const bytes = await docxBytes(para(run("End of chapter") + PAGE_BREAK + run(" one" + PAD + " ") + run(L2)) + NEXT)
+    const [a, b, n] = await importCells(bytes)
+    const hidden = await wordOut(bytes, [hide(typed(a, "Fin.")), typed(b, "Chapitre deux."), n])
+    expect(paras(hidden.body)).toEqual(["Chapitre deux.", "Next paragraph."])
+  })
+})

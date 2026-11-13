@@ -458,6 +458,8 @@ import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
 import { LangQuestLinkBadge } from "@/components/langquest/LangQuestLinkBadge"
 import { ParatextBridgeBadge } from "@/components/paratext/ParatextBridgeBadge"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
+import { EditorLayoutSwitch } from "@/components/bible-document/EditorLayoutSwitch"
+import { setBibleDocumentViewForFile, useBibleDocumentViewPref } from "@/lib/store/bible-document-view-pref"
 import type { EditorLens } from "@/components/EditorModeToggle"
 import { TranscribeEditor, type TranscribeEditorHandle } from "@/components/transcribe/TranscribeEditor"
 import { createViewScrollMemory, viewSwitchRebuilds } from "@/lib/editor/view-scroll-memory"
@@ -689,6 +691,10 @@ const ImportDialog = lazy(() =>
   import("./ImportDialog").then((mod) => ({ default: mod.ImportDialog })),
 )
 
+// AQU-2559: a Bible book as one continuous document.
+const BibleDocumentView = lazy(() =>
+  import("@/components/bible-document/BibleDocumentView").then((m) => ({ default: m.BibleDocumentView })),
+)
 const ExportDialog = lazy(() =>
   import("./ExportDialog").then((mod) => ({ default: mod.ExportDialog })),
 )
@@ -2752,6 +2758,11 @@ export function ProjectWorkspace() {
     if (next >= 0) editorRef.current?.focusCellEditorIndex(next)
   }, [findNextUnfinished])
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
+  // AQU-2559: a USFM book can open as one continuous document instead of the
+  // table. Chosen per file on this device; only the Text view has it.
+  const bibleDocumentPref = useBibleDocumentViewPref()
+  const documentLayoutOffered = activeFile?.type === "usfm" && lens === "text" && !extensionEditorActive
+  const documentLayoutActive = documentLayoutOffered && Boolean(activeFileId && bibleDocumentPref.files[activeFileId])
   // AQU-1767 phase 2: history steps carry the file's name so a step made in
   // another file can say which one to open. Read through a ref by the many
   // callbacks that record steps, so none of them re-creates on a rename.
@@ -17308,6 +17319,12 @@ export function ProjectWorkspace() {
   const fileChapterToolbar = activeFileId ? (
     <FileChapterToolbar
       historyControl={<HistoryPanel onResult={reportHistory} laneName={historyLaneName} />}
+      layoutSwitch={documentLayoutOffered ? (
+        <EditorLayoutSwitch
+          document={documentLayoutActive}
+          onChange={(document) => { if (activeFileId) setBibleDocumentViewForFile(activeFileId, document) }}
+        />
+      ) : undefined}
       lens={lens}
       onLensChange={(l) => {
         switchLens(l)
@@ -18588,6 +18605,30 @@ export function ProjectWorkspace() {
                 />
                 {extensionEditorRev4.overlay}
                 </>
+              ) : documentLayoutActive && activeFileId && project ? (
+                <Suspense fallback={<LoadingPanel label={t("common.loading")} />}>
+                  <BibleDocumentView
+                    key={`${activeFileId}:${activeLane ?? ""}`}
+                    projectId={project.id}
+                    fileId={activeFileId}
+                    lane={activeLane}
+                    store={cellStore}
+                    loading={cellsLoading}
+                    editable={!laneWriteFrozen && canPerform("target.cell.commit", project.syncRole?.level ?? null)}
+                    lockedBy={checkLockHolder}
+                    lockVersion={cellLockHolders}
+                    onClaimCell={handleClaimCell}
+                    onReleaseCell={handleReleaseCell}
+                    commitTarget={handleAgentTargetCommit}
+                    getToken={getTokenForFile}
+                    toolbar={fileChapterToolbar}
+                    sourceDir={fileMeta.sourceTextDirection}
+                    targetDir={fileMeta.targetTextDirection}
+                    sourceFontSize={fontSizes.source}
+                    targetFontSize={fontSizes.target}
+                    handleRef={editorRef}
+                  />
+                </Suspense>
               ) : (
               <EditorTable
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}

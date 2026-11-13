@@ -100,7 +100,9 @@ export function MakeSpeechPanel({
 
   const byId = useMemo(() => new Map(lines.map((l) => [l.cellId, l])), [lines])
   const missing = useMemo(() => lines.filter((l) => !l.hasSpeech).map((l) => l.cellId), [lines])
-  const pickedIds = useMemo(() => (picked ?? []).filter((id) => byId.has(id)), [picked, byId])
+  // A picked line that has its speech now has no ghost left: it drops out of
+  // the pick, while the panel (and the run's progress) stays where it is.
+  const pickedIds = useMemo(() => (picked ?? []).filter((id) => byId.get(id)?.hasSpeech === false), [picked, byId])
   const hasPicked = pickedIds.length > 0
   const [target, setTarget] = useState<Target>(selectedCellId ? "line" : "missing")
   const targetIds = useMemo(

@@ -13772,8 +13772,6 @@ export function ProjectWorkspace() {
       else next.delete(cellId)
       return next
     })
-    // A line that now has speech has no ghost left to stay picked.
-    if (state.kind === "done") setPickedGhostIds((cur) => cur.filter((id) => id !== cellId))
   }, [])
 
   // The inspected clip as the rail needs it. A take on an audio-cue sibling is

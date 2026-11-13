@@ -909,6 +909,20 @@ describe("exportDocx — an old import's cell for the paragraph holding a text b
     expect(result.warnings.map((w) => w.segment)).toEqual(["Figure 4: Map"])
   })
 
+  it("keeps a holder with words of its own as it was when its box has hidden words the old cell held; names both (core check)", async () => {
+    // The old cell read the hidden word, so the box's visible words are not
+    // in it. It still held more than the holder's own words: it is stale, the
+    // holder keeps its own words, and the caption is named, not written into
+    // the holder's body.
+    const own = "See the map below. "
+    const withOwn = para(run(own) + textBoxRun(para(run("Figure 4: ") + run("SECRET ", "<w:rPr><w:vanish/></w:rPr>") + run("Map"), "Caption")))
+    const cells = [cellAt(1, "Voir la carte ci-dessous. Figure 4 : SECRET CarteFigure 4 : SECRET Carte", { original: `${own}Figure 4: SECRET MapFigure 4: SECRET Map` })]
+    const { xml, result } = await exportedXml(withOwn, cells)
+    expect(xml).not.toContain("Carte")
+    expect(result.fidelity.staleTextBoxHolders).toBe(1)
+    expect(result.warnings.map((w) => w.segment)).toEqual(["See the map below.", "Figure 4: Map"])
+  })
+
   it("names a text-box paragraph once, however many old cells held its words", async () => {
     // w:p[1] holder; w:p[2] the outer box ("Outer", holding the inner box
     // w:p[3], copy w:p[4]); w:p[5]..[7] the outer box's copy.
@@ -991,6 +1005,15 @@ describe("exportDocx — which paragraphs lost a look (AQU-2539)", () => {
   it("names a paragraph whose ordinal lost its superscript", async () => {
     // "12th" is looked for as its whole word, which starts in the main look.
     const body = para(run("In the 12") + run("th", '<w:rPr><w:vertAlign w:val="superscript"/></w:rPr>') + run(" century."))
+    const { result } = await exportedXml(body, [cellAt(1, "Au XIIe siècle.", { original: "In the 12th century." })])
+    expect(result.lostLooks).toEqual([{ segment: "In the 12th century.", words: ["12th"] }])
+  })
+
+  it("names a paragraph whose ordinal lost its superscript when the digits carry a look the reader cannot see (core check)", async () => {
+    // "12" carries a proofing language only: the stretch's look is the first
+    // one a reader sees differently from the main look, the superscript.
+    const lang = '<w:rPr><w:lang w:val="en-GB"/></w:rPr>'
+    const body = para(run("In the ") + run("12", lang) + run("th", '<w:rPr><w:lang w:val="en-GB"/><w:vertAlign w:val="superscript"/></w:rPr>') + run(" century."))
     const { result } = await exportedXml(body, [cellAt(1, "Au XIIe siècle.", { original: "In the 12th century." })])
     expect(result.lostLooks).toEqual([{ segment: "In the 12th century.", words: ["12th"] }])
   })

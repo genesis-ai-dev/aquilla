@@ -451,11 +451,13 @@ export async function exportDocx(
 
   const squash = (text: string) => text.replace(/\s+/g, "")
   /** A paragraph's line, as the importer reads it today. */
-  const lineTextOf = (s: DocxParagraphSpan): string => {
+  const lineTextOf = (s: DocxParagraphSpan, context: DocxWalkContext = walkContext): string => {
     if (s.selfClosing) return ""
     const p = parseXmlLite(xml!.slice(s.start, s.end)).children.find(isElement)
-    return p ? docxLine(walkDocxParagraph(p, walkContext)).text : ""
+    return p ? docxLine(walkDocxParagraph(p, context)).text : ""
   }
+  /** The same, hidden words included, as dev's importer read it (old cells). */
+  const withHidden: DocxWalkContext = { ...walkContext, isHiddenRun: () => false }
   /** The result's warnings: each asks for a re-import of the file. */
   const reimportWarnings: { segment: string; detail: string }[] = []
 
@@ -466,7 +468,7 @@ export async function exportDocx(
       .filter((s) => s.start > holder.start && s.end <= holder.end && !s.isCopy && !s.selfClosing)
       .map((s) => {
         const text = lineTextOf(s)
-        return { span: s, text, words: squash(text) }
+        return { span: s, text, words: squash(text), wordsWithHidden: squash(lineTextOf(s, withHidden)) }
       })
       .filter((box) => box.words.length > 0)
 
@@ -515,8 +517,14 @@ export async function exportDocx(
     // an old one held the words of the boxes inside too.
     if (!source || source === own) continue
     // With no words of its own, everything its cell held was its boxes' (even
-    // words hidden there now, which today's lines leave out).
-    const held = boxLinesIn(holder).filter((box) => !own || occurrences(source, box.words) > occurrences(own, box.words))
+    // words hidden there now, which today's lines leave out). With words of
+    // its own, the boxes whose words the cell holds more often, read with
+    // their hidden words too, as the old importer read them (AQU-2539 core
+    // check): a hidden word in a box must not keep the box out of the count.
+    const held = boxLinesIn(holder).filter((box) =>
+      !own
+      || occurrences(source, box.words) > occurrences(own, box.words)
+      || occurrences(source, box.wordsWithHidden) > occurrences(own, box.wordsWithHidden))
     if (held.length === 0) continue
     const untranslated = held.filter((box) => !translations.has(box.span.index))
     if (own) {

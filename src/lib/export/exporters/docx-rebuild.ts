@@ -837,8 +837,9 @@ function matchAnchors(
   let cursor = 0
   const { anchors, text: sourceText, unsought } = anchorsOf(nodes, baseRpr, io, lostChar)
   // A stretch grown to its whole word ("12th" from a superscript "th") starts
-  // in the main look: its own look is the first one that is not.
-  const ownLook = (looks: readonly string[]) => looks.find((look) => look !== baseRpr) ?? looks[0]
+  // in the main look: its own look is the first one a reader sees differently
+  // from it (core check: not one that differs only in, say, proofing language).
+  const ownLook = (looks: readonly string[]) => looks.find((look) => seenDifferently(look, baseRpr)) ?? looks[0]
   lost.push(...unsought)
   // In source order; when the translation holds the text as often as the
   // source paragraph does, the source's n-th occurrence takes the n-th.

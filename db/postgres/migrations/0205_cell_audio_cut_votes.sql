@@ -38,8 +38,7 @@
 -- sync-worker's projection; no app read path touches it.
 -- Idempotent; a database loaded from schema.sql already has it.
 --
--- Numbered 0205: dev took 0198–0203 (0202 and 0203 are the email-change
--- tables), and 0204 is the film bundle's on an unlanded branch.
+-- Numbered 0205 for now; at its PR step it takes the next free number on dev.
 
 CREATE TABLE IF NOT EXISTS cell_audio_cut_votes (
     event_id      TEXT PRIMARY KEY,

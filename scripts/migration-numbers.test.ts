@@ -13,6 +13,9 @@
 import { describe, expect, it } from "vitest"
 import { readdirSync } from "node:fs"
 import path from "node:path"
+// The real Node process: the app project gives every test a browser shim
+// whose `process.env` is empty, so CI and MIGRATION_NUMBERS would never be seen.
+import process from "node:process"
 
 const migrationsDir = path.resolve(import.meta.dirname, "..", "db/postgres/migrations")
 
@@ -42,7 +45,8 @@ describe("Postgres migration numbers", () => {
     if (STRICT) {
       expect(clashes, RULE).toEqual([])
     } else if (clashes.length > 0) {
-      console.warn(`${RULE} (run with MIGRATION_NUMBERS=strict to enforce)\n  ${clashes.join("\n  ")}`)
+      // stderr, not console.warn: vitest hides a passing test's console output.
+      process.stderr.write(`${RULE} (run with MIGRATION_NUMBERS=strict to enforce)\n  ${clashes.join("\n  ")}\n`)
     }
   })
 })

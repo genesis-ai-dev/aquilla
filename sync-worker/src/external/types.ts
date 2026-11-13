@@ -20,6 +20,8 @@ export type ExternalEnv = EventsRouteEnv & IdentityTransport & {
   LANE_READ_WALL?: string
   /** Base URL for the ask-mode approval deep link. */
   BASE_URL?: string
+  /** AQU-2581: public help site the get_help tool reads. Unset = https://help.aquilla.app. */
+  HELP_SITE_URL?: string
   /** R2 media/original-import blob bucket (artifact bytes). */
   SNAPSHOTS?: R2Bucket
   /** Optional R2 key prefix for PR/staging isolation (mirrors audio.ts). */

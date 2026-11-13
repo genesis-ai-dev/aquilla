@@ -9,6 +9,9 @@ export interface Span {
    *  as its source: where it starts in the paragraph's line, or -1 when it is
    *  not found there. It keeps the source's own looks and characters. */
   fromLine?: number
+  /** AQU-2552 (review r6): which line of a paragraph cut into several this
+   *  text is (its place among the paragraph's lines); none between lines. */
+  line?: number
 }
 
 const TAG_TO_MARK: Record<string, Mark> = {

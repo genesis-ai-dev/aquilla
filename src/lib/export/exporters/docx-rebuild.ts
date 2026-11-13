@@ -79,6 +79,17 @@ export interface RebuildInput {
    *  translation written as its source (AQU-2539); undefined for translated
    *  text. */
   sourceLooks?: readonly (string | undefined)[]
+  /** AQU-2552 (review r6): for a paragraph cut into lines, the line each
+   *  character of `text` belongs to (undefined between lines), and the line
+   *  whose stretch of the source holds each footnote reference. A line's
+   *  markers take that line's own references, in order; a reference its
+   *  translation does not place follows that line's text. A reference no line
+   *  holds, or a paragraph with no lines given, is placed in order as before. */
+  lineOf?: readonly (number | undefined)[]
+  footnoteLines?: ReadonlyMap<DocxPiece, number>
+  /** AQU-2552 (review r6): what a hidden or deleted line held in the source
+   *  paragraph. It contributes nothing: its footnote references are left out. */
+  lost?: ReadonlySet<DocxPiece>
   io: RebuildIo
 }
 
@@ -145,12 +156,10 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   }
   const written = input.writtenText ?? input.text
 
-  let nodes = buildNodes(input.items, input.lineSet)
-  const refRuns: string[] = []
-  const refIds: string[] = []
+  let nodes = buildNodes(input.items, input.lineSet, input.lost)
+  const refs: { xml: string; id: string; line: number | undefined }[] = []
   collectMarkers(nodes, (piece) => {
-    refRuns.push(io.elementXml(piece.run))
-    refIds.push(piece.id)
+    refs.push({ xml: io.elementXml(piece.run), id: piece.id, line: input.footnoteLines?.get(piece) })
   })
 
   // Match, then open up what did not match, until nothing changes.
@@ -206,20 +215,48 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   const ordered = [...matches.entries()].sort((a, b) => a[1].start - b[1].start)
   let stream = ""
   let cursor = 0
-  let usedRefs = 0
+  // AQU-2552 (review r6): footnote references by line (see `lineOf`): a
+  // marker takes its own line's next reference, else the next one no line
+  // holds; a line's references left over follow its text.
+  const used = new Set<number>()
+  const takeRef = (line: number | undefined) => {
+    let k = line === undefined ? -1 : refs.findIndex((ref, i) => !used.has(i) && ref.line === line)
+    if (k === -1) k = refs.findIndex((ref, i) => !used.has(i) && ref.line === undefined)
+    if (k !== -1) used.add(k)
+    return k === -1 ? null : refs[k]
+  }
+  const lineEnds: { at: number; line: number }[] = []
+  input.lineOf?.forEach((line, i) => {
+    if (line !== undefined && input.lineOf![i + 1] !== line) lineEnds.push({ at: i + 1, line })
+  })
+  let nextEnd = 0
+  const endLinesTo = (k: number) => {
+    while (nextEnd < lineEnds.length && lineEnds[nextEnd].at <= k) {
+      const { line } = lineEnds[nextEnd++]
+      refs.forEach((ref, i) => {
+        if (ref.line !== line || used.has(i)) return
+        used.add(i)
+        stream += ref.xml
+      })
+    }
+  }
   const plain = (from: number, to: number) => {
     let k = from
     while (k < to) {
+      endLinesTo(k)
       const marker = markers.find((m) => m.start === k)
       if (marker) {
-        if (usedRefs < refRuns.length) {
-          result.footnotes.push({ id: refIds[usedRefs], marker: input.text.slice(marker.start, marker.end) })
-          stream += refRuns[usedRefs++]
+        const ref = takeRef(input.lineOf?.[k])
+        if (ref) {
+          result.footnotes.push({ id: ref.id, marker: input.text.slice(marker.start, marker.end) })
+          stream += ref.xml
+        } else {
+          result.unplacedMarkers++
         }
         k = marker.end
         continue
       }
-      const next = Math.min(to, markers.find((m) => m.start > k)?.start ?? to)
+      const next = Math.min(to, markers.find((m) => m.start > k)?.start ?? to, lineEnds[nextEnd]?.at ?? to)
       stream += runsByLook(written, k, next, (i) => input.sourceLooks?.[i] ?? lookFor(input, input.marks[i] ?? new Set()))
       k = next
     }
@@ -237,6 +274,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
       for (let n = 0; n < trail && end < input.text.length && /\s/.test(input.text[end]); n++) end++
     }
     plain(cursor, start)
+    endLinesTo(start)
     if (node.kind === "wrapper" || node.kind === "field") {
       stream += renderVerbatim(node.kind === "wrapper" ? [node] : [...node.open, ...node.result, node.close], io)
       if (node.kind === "field") result.keptFields++
@@ -250,9 +288,10 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
     cursor = end
   }
   plain(cursor, input.text.length)
-  result.unplacedMarkers = Math.max(0, markers.length - refRuns.length)
+  endLinesTo(Infinity)
+  const leftover = refs.filter((_, i) => !used.has(i)).map((ref) => ref.xml).join("")
 
-  result.xml = renderLeaves(front, io) + stream + refRuns.slice(usedRefs).join("") + renderLeaves(back, io)
+  result.xml = renderLeaves(front, io) + stream + leftover + renderLeaves(back, io)
   return result
 }
 
@@ -279,15 +318,21 @@ function runsByLook(text: string, from: number, to: number, lookAt: (i: number) 
 
 // ── Nodes ───────────────────────────────────────────────────────────────────
 
-function buildNodes(items: readonly DocxPiece[], lineSet: ReadonlySet<DocxPiece>): RNode[] {
-  const nodes = items.map((item): RNode => {
-    if (item.kind === "container") return { kind: "wrapper", piece: item, children: buildNodes(item.items, lineSet) }
-    if (lineSet.has(item)) {
-      if (item.kind === "footnote") return { kind: "marker", piece: item }
-      if (item.kind === "text") return { kind: "text", piece: item }
+function buildNodes(items: readonly DocxPiece[], lineSet: ReadonlySet<DocxPiece>, lost?: ReadonlySet<DocxPiece>): RNode[] {
+  const nodes: RNode[] = []
+  for (const item of items) {
+    if (item.kind === "container") {
+      nodes.push({ kind: "wrapper", piece: item, children: buildNodes(item.items, lineSet, lost) })
+      continue
     }
-    return { kind: "keep", piece: item }
-  })
+    if (lineSet.has(item) && item.kind === "footnote") {
+      // AQU-2552 (review r6): a hidden or deleted line's footnote reference
+      // is not written.
+      if (!lost?.has(item)) nodes.push({ kind: "marker", piece: item })
+      continue
+    }
+    nodes.push(lineSet.has(item) && item.kind === "text" ? { kind: "text", piece: item } : { kind: "keep", piece: item })
+  }
   return foldFields(nodes)
 }
 

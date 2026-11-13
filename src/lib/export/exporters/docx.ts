@@ -178,6 +178,9 @@ interface ParagraphTranslation {
   label: string
   /** Every segment's source, translated or not. */
   source: string
+  /** AQU-2552 (review r6): the paragraph lost a line, hidden or deleted. What
+   *  of its text no remaining line holds was that line's, and is left out. */
+  lostLines?: true
 }
 
 interface LegacyGroup {
@@ -282,6 +285,11 @@ export async function exportDocx(
   // into the wrong paragraphs of the client's document.
   const removedKeys = removedPackageBlockKeys(options.removedCells ?? [], cells)
   const insertions = insertionsAfterPackageBlock(cells, isUserAddedLine)
+  // AQU-2552 (review r6): the paragraphs that lost a line, hidden or deleted.
+  const lostLineKeys = removedPackageBlockKeys([
+    ...(options.removedCells ?? []),
+    ...cells.filter((cell) => cell.hidden === true).map((cell) => ({ metadata: cell.metadata ?? null })),
+  ])
 
   // AQU-2539: the two things the target language changes in what is written.
   const targetLanguage = options.targetLanguage?.trim() || null
@@ -301,7 +309,14 @@ export async function exportDocx(
   if (hasLocatedTranslations) {
     for (const span of spans) {
       const located = locatedTranslations.get(blockKeyOf(span.index))
-      if (located && located.parts.length > 0) translations.set(span.index, { parts: located.parts, label: located.label, source: located.source })
+      if (located && located.parts.length > 0) {
+        translations.set(span.index, {
+          parts: located.parts,
+          label: located.label,
+          source: located.source,
+          ...(lostLineKeys.has(blockKeyOf(span.index)) ? { lostLines: true as const } : {}),
+        })
+      }
     }
   } else {
     // Positional fallback for cells imported before locators: the k-th group
@@ -533,8 +548,13 @@ export async function exportDocx(
     // A holder whose old cell held its text boxes' words keeps its own words
     // (see above), and so does its copy.
     if (staleHolders.has(span.isCopy ? span.copyOf : span.index)) return null
-    const rebuilt = rebuildParagraphIn(part, span, (line) =>
-      restoreLineSeparators(translationSpans(translation.parts, line), line, translation.source))
+    const rebuilt = rebuildParagraphIn(part, span, (line) => {
+      const stretches = locateLines(translation.parts, line)
+      return {
+        spans: restoreLineSeparators(translationSpans(translation.parts, line, stretches), line, translation.source),
+        layout: { stretches, lost: translation.lostLines ? lostStretches(stretches, line) : [] },
+      }
+    })
     if (rebuilt === null) return null
     if (!counted) return rebuilt.xml
     // Fidelity report: words with a look of their own that the translation
@@ -657,6 +677,28 @@ interface RebuiltParagraph {
   stats: RebuildResult
 }
 
+/** A stretch [start, end) of a paragraph's line text. */
+interface LineStretch {
+  start: number
+  end: number
+}
+
+/** AQU-2552 (review r6): where the lines of a paragraph cut into several sit
+ *  in its line text. */
+interface LineLayout {
+  /** Per line (part), its own stretch, or null where its source is not found. */
+  stretches: readonly (LineStretch | null)[]
+  /** What hidden or deleted lines held: each stretch between two remaining
+   *  lines (or the paragraph's edge) that holds more than whitespace. */
+  lost: readonly LineStretch[]
+}
+
+/** What a paragraph's translation is written from (see rebuildParagraphIn). */
+interface ParagraphText {
+  spans: Span[]
+  layout?: LineLayout
+}
+
 function addFidelity(total: DocxExportFidelity, stats: RebuildResult): void {
   total.keptLooks += stats.keptLooks
   total.keptFields += stats.keptFields
@@ -677,7 +719,7 @@ function addFidelity(total: DocxExportFidelity, stats: RebuildResult): void {
 function rebuildParagraphIn(
   part: PartContext,
   span: DocxParagraphSpan,
-  spansFor: (lineText: string) => Span[],
+  textFor: (lineText: string) => ParagraphText,
   leadingSpace = false,
 ): RebuiltParagraph | null {
   if (span.selfClosing) return null
@@ -689,12 +731,13 @@ function rebuildParagraphIn(
   const items = walkDocxParagraph(p, part.walkContext)
   const line = docxLine(items)
   if (!line.hasWords) return null
-  const spans = spansFor(line.text)
+  const { spans, layout } = textFor(line.text)
   if (spans.length === 0) return null
 
   const flat = flattenPieces(items)
   const inLine = linePieceFlags(flat)
   const lineSet = new Set<DocxPiece>(flat.filter((_, k) => inLine[k]))
+  const placed = layout ? placeInLines(flat, inLine, layout) : null
 
   // The innermost wrapper holding all of the line: the paragraph itself, or
   // a hyperlink / content control / … that holds every word.
@@ -716,7 +759,13 @@ function rebuildParagraphIn(
   const all = lead ? [{ text: lead, marks: new Set<Mark>() }, ...spans] : spans
   const text = all.map((s) => s.text).join("")
   const marks: ReadonlySet<Mark>[] = []
-  for (const s of all) for (let i = 0; i < s.text.length; i++) marks.push(s.marks)
+  const lineOf: (number | undefined)[] = []
+  for (const s of all) {
+    for (let i = 0; i < s.text.length; i++) {
+      marks.push(s.marks)
+      lineOf.push(s.line)
+    }
+  }
   // A line with no translation is written as its source (AQU-2539): each of
   // its characters in its own look and as the source has it, with neither the
   // translation's language nor its language's spacing rules.
@@ -749,6 +798,7 @@ function rebuildParagraphIn(
     writtenText,
     marks,
     sourceLooks,
+    ...(placed ? { lineOf, footnoteLines: placed.footnoteLines, lost: placed.lost } : {}),
     translatedLook: part.translatedLook,
     baseRpr: base ?? "",
     io,
@@ -804,7 +854,7 @@ function rebuildFootnotes(
       fidelity.notesLeft++
       continue
     }
-    const rebuilt = rebuildParagraphIn(part, withWords[0], () => [{ text: translated, marks: new Set() }], true)
+    const rebuilt = rebuildParagraphIn(part, withWords[0], () => ({ spans: [{ text: translated, marks: new Set() }] }), true)
     if (rebuilt === null) continue
     edits.push({ start: withWords[0].start, end: withWords[0].end, xml: rebuilt.xml })
     fidelity.notesWritten++
@@ -846,31 +896,97 @@ function plainSpans(text: string): Span[] {
 function translationSpans(
   parts: readonly { plain: string; html: string; source?: string; untranslated?: true }[],
   lineText = "",
+  stretches: readonly (LineStretch | null)[] = locateLines(parts, lineText),
 ): Span[] {
   const out: Span[] = []
-  let cursor = 0
-  let previousEnd = -1
-  for (const part of parts) {
+  let previous: LineStretch | null = null
+  parts.forEach((part, line) => {
     // Where this segment's source sits in the paragraph's line, if it does.
-    const source = (part.source ?? "").trim()
-    const at = source ? lineText.indexOf(source, cursor) : -1
-    const gap = at >= 0 && previousEnd >= 0 ? lineText.slice(previousEnd, at) : ""
-    if (at >= 0) {
-      previousEnd = at + source.length
-      cursor = previousEnd
-    } else {
-      previousEnd = -1
-    }
+    const at = stretches[line]
+    const gap = at && previous ? lineText.slice(previous.end, at.start) : ""
+    previous = at
     const spans = part.html ? htmlToSpans(part.html) : []
-    // A line with no translation is its source, from where it sits in the line.
+    // A line with no translation is its source, as it sits in the line.
     const segment = part.untranslated
-      ? plainSpans(part.plain).map((span) => ({ ...span, fromLine: at }))
+      ? plainSpans(at ? lineText.slice(at.start, at.end) : part.plain).map((span) => ({ ...span, fromLine: at ? at.start : -1 }))
       : spans.length > 0 ? spans : plainSpans(part.plain)
-    if (segment.length === 0) continue
+    if (segment.length === 0) return
     if (out.length > 0) out.push({ text: gap.replace(/[^\t\n]/g, "") || " ", marks: new Set(NO_MARKS) })
-    out.push(...segment)
+    // AQU-2552 (review r6): each line's text knows its line (its footnotes).
+    out.push(...segment.map((span) => ({ ...span, line })))
+  })
+  return out
+}
+
+/**
+ * AQU-2552 (review r6): where each line's source sits in the paragraph's line
+ * text, in order, or null where it is not found there. The importer keeps a
+ * line's words as the paragraph has them, but joins sentences it keeps on one
+ * line with one space, so there a run of whitespace matches any run.
+ */
+function locateLines(
+  parts: readonly { source?: string }[],
+  lineText: string,
+): (LineStretch | null)[] {
+  let cursor = 0
+  return parts.map((part) => {
+    const source = (part.source ?? "").trim()
+    const found = source ? findInLine(lineText, source, cursor) : null
+    if (found) cursor = found.end
+    return found
+  })
+}
+
+function findInLine(lineText: string, source: string, from: number): LineStretch | null {
+  const exact = lineText.indexOf(source, from)
+  if (exact !== -1) return { start: exact, end: exact + source.length }
+  const loose = new RegExp(source.split(/\s+/).map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"), "g")
+  loose.lastIndex = from
+  const m = loose.exec(lineText)
+  return m ? { start: m.index, end: m.index + m[0].length } : null
+}
+
+/**
+ * AQU-2552 (review r6): what hidden or deleted lines held of a paragraph: each
+ * stretch between two remaining lines, or between a line and the paragraph's
+ * edge, that holds more than whitespace. Only when every remaining line is
+ * found in the paragraph; otherwise whose words are whose cannot be told, and
+ * nothing is left out.
+ */
+function lostStretches(stretches: readonly (LineStretch | null)[], lineText: string): LineStretch[] {
+  const found = stretches.filter((s): s is LineStretch => s !== null)
+  if (found.length !== stretches.length) return []
+  const out: LineStretch[] = []
+  let previous = 0
+  for (const s of [...found, { start: lineText.length, end: lineText.length }]) {
+    if (/\S/.test(lineText.slice(previous, s.start))) out.push({ start: previous, end: s.start })
+    previous = s.end
   }
   return out
+}
+
+/**
+ * AQU-2552 (review r6): the line whose stretch of the paragraph holds each
+ * footnote reference (where its marker sits in the line text), and the
+ * references a hidden or deleted line held.
+ */
+function placeInLines(
+  flat: readonly DocxPiece[],
+  inLine: readonly boolean[],
+  layout: LineLayout,
+): { footnoteLines: Map<DocxPiece, number>; lost: Set<DocxPiece> } {
+  const footnoteLines = new Map<DocxPiece, number>()
+  const lost = new Set<DocxPiece>()
+  let end = 0
+  flat.forEach((piece, k) => {
+    const start = end
+    if (inLine[k]) end += piece.kind === "text" ? piece.text.length : piece.kind === "footnote" ? (piece.marker ?? "").length : 0
+    if (piece.kind !== "footnote" || !inLine[k]) return
+    const line = layout.stretches.findIndex((s) => s !== null && s.start <= start && start < s.end)
+    if (line !== -1) footnoteLines.set(piece, line)
+    if (layout.lost.some((s) => s.start <= start && end <= s.end)) lost.add(piece)
+  })
+  return { footnoteLines, lost }
 }
 
 const WORD_CHAR_RE = /[\p{L}\p{N}\p{M}]/u

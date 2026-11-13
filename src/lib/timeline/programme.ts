@@ -364,16 +364,6 @@ function layerTrackLayers(slot: string, cell: CellData, untimed: boolean, lineSt
   return out
 }
 
-/**
- * AQU-2252: whether anything of the line's own sounds in it — its original,
- * its take on the main track, or a take on any other track. A line with none
- * of these has nothing to play of its own (a layer running on over it from the
- * line before is not its own).
- */
-export function slotHasOwnSound(slot: ProgrammeSlot): boolean {
-  return Boolean(slot.sourceWindow || slot.targetWindow || slot.layers?.some((l) => l.window))
-}
-
 export interface Programme {
   slots: ProgrammeSlot[]
   /** Total assembled length — what the ruler and the transport show. AQU-2252:

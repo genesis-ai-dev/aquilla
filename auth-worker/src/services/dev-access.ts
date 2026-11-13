@@ -45,7 +45,7 @@ export const DEV_ACCESS_RESTRICTED = "dev_access_restricted"
 
 /** What a refused person reads. Plain words: who to ask, not how it works. */
 export const DEV_ACCESS_RESTRICTED_MESSAGE =
-  "Access to dev.aquilla.app is restricted. Ask the Aquilla team to add you to the dev access list."
+  "This account doesn’t have access to Aquilla’s development site or CI previews yet. Ask an Aquilla admin to grant access to your account’s email address."
 
 /** Longest email RFC 5321 allows; also caps the KV key length. */
 export const DEV_ACCESS_EMAIL_MAX = 254

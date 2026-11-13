@@ -124,7 +124,7 @@ export const auth = defineNamespace({
     "auth.login.invalidCredentials": "Invalid username or password",
     "auth.login.failed": "Couldn't sign you in. Please try again.",
     "auth.login.devAccessRestricted":
-      "Access to dev.aquilla.app is restricted. Ask the Aquilla team to add you to the dev access list.",
+      "This account doesn’t have access to Aquilla’s development site or CI previews yet. Ask an Aquilla admin to grant access to your account’s email address.",
     "auth.login.accountTransitionFailed":
       "We signed you in, but couldn't safely finish switching accounts. Your previous account's data is still isolated. Retry to finish the switch.",
     "auth.login.onboardingMigrationFailed":

@@ -1068,15 +1068,16 @@ function takesOnOneVerse(out: Map<number, Assignment>): void {
 
 /**
  * How a line reads in the preview ("Genesis 1:3", "“chapter one” 1:3", "line
- * 12" for a document's line, the file's name for a heading), in its row and in
- * the line picker alike: the picker had its own copy, which named a file that
- * isn't a book without its quotes (AQU-2487, review, Nov 12). `position` is
- * the line's place among the lines that aren't headings, or -1 for a heading.
+ * 12" for a document's line, the file's label for a heading: "Ruth",
+ * "“chapter one”"), in its row and in the line picker alike: the picker had
+ * its own copy, which named a file that isn't a book without its quotes
+ * (AQU-2487, review, Nov 12). `position` is the line's place among the lines
+ * that aren't headings, or -1 for a heading.
  */
 export function lineLabel(file: TargetFile, line: TargetLine, position: number): string {
   const m = line.ref ? VERSE_REF.exec(line.ref) : null
   if (m) return `${bookLabel({ file })} ${m[2]}:${m[3]}${m[4] ?? ""}${m[5] ? `-${m[5]}${m[6] ?? ""}` : ""}`
-  return position >= 0 ? `line ${position + 1}` : file.name
+  return position >= 0 ? `line ${position + 1}` : bookLabel({ file })
 }
 
 /**

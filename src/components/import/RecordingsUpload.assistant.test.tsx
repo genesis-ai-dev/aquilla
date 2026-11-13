@@ -525,6 +525,55 @@ describe("a contributor, and a saved rule set aside (review, Oct 30)", () => {
 // picker offered "chapter one 1:2", from its own copy of the label. Both use
 // match.ts's one label, so a line reads the same in the row and the picker.
 describe("a file that isn't a Bible book, named in the row and in the line picker", () => {
+  const JONAH_1: TargetLine[] = Array.from({ length: 17 }, (_, i) => ({ cellId: `s:${i + 1}`, ref: `JON 1:${i + 1}`, text: `Jonah 1:${i + 1} text`, structural: false, hasRecording: false }))
+  /** Upload recordings… from one file's own ⋯ menu. */
+  const into = (target: TargetFile, names: string[]) => {
+    vi.mocked(loadTargetFile).mockResolvedValueOnce(target)
+    render(
+      <RecordingsReview
+        projectId="p1"
+        canAskAssistant
+        file={{ id: target.fileId, name: target.name }}
+        projectFiles={[{ id: target.fileId, name: target.name, bookCode: target.bookCode } as never]}
+        getToken={async () => "file-jwt"}
+        lane=""
+        languageLabel={null}
+        username="lee"
+        chosen={chosen(names)}
+        onStarted={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+  }
+  /** What the open line picker offers for a search: "label  line text". */
+  const offered = async (q: string) => {
+    const search = await screen.findByRole("combobox", { name: "Search lines" })
+    fireEvent.change(search, { target: { value: q } })
+    await settle(50)
+    return screen.queryAllByTestId("recordings-line-option").map((o) => o.textContent?.trim() ?? "").filter((t) => t !== "Don't upload")
+  }
+
+  // AQU-2487 (review, Nov 12): a heading was named by the file's raw name, so
+  // the sheet's heading read "chapter one", unquoted, and a book whose file is
+  // named "রূত" showed "রূত" for its heading beside "Ruth 1:2" for its verses.
+  // A heading is named by its file's label, the way a verse names its book.
+  it("names a heading by its file's label, in the picker and in its row once chosen", async () => {
+    const heading = (cellId: string, text: string): TargetLine => ({ cellId, ref: null, text, structural: true, hasRecording: false })
+    into({ fileId: "sheet", name: "chapter one", bookCode: null, lines: [heading("s:h", "Jonah, chapter one"), ...JONAH_1] }, ["Jonah 1-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
+    fireEvent.click(screen.getByTestId("recordings-change"))
+    expect(await offered("Jonah, chapter")).toEqual(["“chapter one”  Jonah, chapter one"])
+    fireEvent.click(screen.getAllByTestId("recordings-line-option").find((o) => o.textContent?.includes("Jonah, chapter"))!)
+    await waitFor(() => expect(screen.getByTestId("recordings-row")).toHaveAttribute("data-target", "“chapter one”"))
+    cleanup()
+    const verses = Array.from({ length: 22 }, (_, i): TargetLine => ({ cellId: `rut:1:${i + 1}`, ref: `RUT 1:${i + 1}`, text: `Ruth 1:${i + 1}`, structural: false, hasRecording: false }))
+    into({ fileId: "rut", name: "রূত", bookCode: "RUT", lines: [heading("rut:title", "The Book of Ruth"), ...verses] }, ["Ruth 1-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
+    fireEvent.click(screen.getByTestId("recordings-change"))
+    expect(await offered("The Book of Ruth")).toEqual(["Ruth  The Book of Ruth"])
+    expect(await offered("Ruth 1:2")).toContain("Ruth 1:2  Ruth 1:2")
+  })
+
   it("names a line the same way in the row and in the picker, and after it is chosen", async () => {
     const lines: TargetLine[] = Array.from({ length: 17 }, (_, i) => ({ cellId: `s:${i + 1}`, ref: `JON 1:${i + 1}`, text: `Jonah 1:${i + 1} text`, structural: false, hasRecording: false }))
     vi.mocked(loadTargetFile).mockResolvedValueOnce({ fileId: "sheet", name: "chapter one", bookCode: null, lines })

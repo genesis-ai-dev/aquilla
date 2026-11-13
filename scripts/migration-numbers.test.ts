@@ -4,8 +4,11 @@
 // files sharing a number both apply and nothing complains — which is how a branch
 // cut before dev took 0198–0201 ended up with 0201_cell_audio_cut_votes beside
 // dev's 0201_admin_totp, and a merge showed no conflict. The numbers below were
-// shared before this guard existed and are left as they are; any other number
-// used twice fails here, so the branch that lands second renumbers.
+// shared before this guard existed and are left as they are.
+//
+// WHEN IT FAILS. An unlanded branch takes the next free number on dev only as the
+// last step before its PR, so until then a clash with dev is expected: locally a
+// clash is only a warning. It fails in CI, or with MIGRATION_NUMBERS=strict.
 
 import { describe, expect, it } from "vitest"
 import { readdirSync } from "node:fs"
@@ -20,6 +23,11 @@ const SHARED_BEFORE_THE_GUARD = new Set([
   "0094", "0095", "0096", "0097", "0098", "0126", "0130", "0158",
 ])
 
+const STRICT = Boolean(process.env.CI) || process.env.MIGRATION_NUMBERS === "strict"
+
+const RULE =
+  "Two migrations share a number: an unlanded branch renumbers at the PR step, to the next free number on dev."
+
 describe("Postgres migration numbers", () => {
   it("no number is used by two migrations, apart from the ones shared before this guard", () => {
     const byNumber = new Map<string, string[]>()
@@ -31,6 +39,10 @@ describe("Postgres migration numbers", () => {
     const clashes = [...byNumber.entries()]
       .filter(([n, names]) => names.length > 1 && !SHARED_BEFORE_THE_GUARD.has(n))
       .map(([n, names]) => `${n}: ${names.sort().join(", ")}`)
-    expect(clashes).toEqual([])
+    if (STRICT) {
+      expect(clashes, RULE).toEqual([])
+    } else if (clashes.length > 0) {
+      console.warn(`${RULE} (run with MIGRATION_NUMBERS=strict to enforce)\n  ${clashes.join("\n  ")}`)
+    }
   })
 })

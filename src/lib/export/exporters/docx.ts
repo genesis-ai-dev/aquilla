@@ -91,7 +91,7 @@ import {
   insertionsAfterPackageBlock,
   type RemovedCellLocatorSource,
 } from "../import-locators"
-import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
+import { isUserAddedLine, splitFromCellId } from "@/lib/timeline/user-line-origin"
 import {
   docxLine,
   flattenPieces,
@@ -285,6 +285,10 @@ export async function exportDocx(
     ...(options.removedCells ?? []),
     ...cells.filter((cell) => cell.hidden === true).map((cell) => ({ metadata: cell.metadata ?? null })),
   ])
+
+  // AQU-2552 (review r7): every line of each paragraph, kept, hidden or
+  // deleted, in segment order, to find each in the paragraph.
+  const linesOfBlock = paragraphLines(cells, options.removedCells ?? [])
 
   // AQU-2539: the two things the target language changes in what is written.
   const targetLanguage = options.targetLanguage?.trim() || null
@@ -543,8 +547,11 @@ export async function exportDocx(
     // A holder whose old cell held its text boxes' words keeps its own words
     // (see above), and so does its copy.
     if (staleHolders.has(span.isCopy ? span.copyOf : span.index)) return null
+    const lines = linesOfBlock.get(blockKeyOf(span.isCopy ? span.copyOf : span.index))
     const rebuilt = rebuildParagraphIn(part, span, (line) => {
-      const stretches = locateLines(translation.parts, line)
+      const stretches = lines && lines.filter((l) => l.kept).length === translation.parts.length
+        ? locateInSegmentOrder(lines, translation.parts, line)
+        : locateLines(translation.parts, line)
       return {
         spans: restoreLineSeparators(translationSpans(translation.parts, line, stretches), line, translation.source),
         layout: { stretches, lost: translation.lostLines ? lostStretches(stretches, line) : [] },
@@ -935,6 +942,121 @@ function locateLines(
     if (found) cursor = found.end
     return found
   })
+}
+
+/** AQU-2552 (review r7): one line of a paragraph as the cells and the
+ *  server's removed records know it. A deleted line's words are not known. */
+interface ParagraphLine {
+  source: string | null
+  kept: boolean
+}
+
+/** A cell's or removed record's package locator (see import-locators.ts). */
+function lineLocator(metadata: Record<string, unknown> | null | undefined): { key: string; segment: number; order: number } | null {
+  const envelope = metadata?.aquillaImport as Record<string, unknown> | undefined
+  const locator = envelope?.sourceLocator as Record<string, unknown> | undefined
+  if (!locator || locator.kind !== "package-block" || typeof locator.memberPath !== "string" || typeof locator.blockPath !== "string") return null
+  return {
+    key: packageBlockKey(locator.memberPath, locator.blockPath),
+    segment: typeof locator.segment === "number" && Number.isInteger(locator.segment) ? locator.segment : 0,
+    order: typeof envelope!.physicalOrder === "number" && Number.isFinite(envelope!.physicalOrder) ? envelope!.physicalOrder : Number.MAX_SAFE_INTEGER,
+  }
+}
+
+/**
+ * AQU-2552 (review r7): every line of each paragraph, in the order
+ * `translationsByPackageBlock` puts them (segment, then import order, a split
+ * piece after the line it was cut from), hidden lines and the server's
+ * removed records included. A removed record that is a hidden cell's own
+ * (the dialog hands both), or that shares a segment with a cell, adds none.
+ */
+function paragraphLines(cells: readonly CellData[], removed: readonly RemovedCellLocatorSource[]): Map<string, ParagraphLine[]> {
+  const byId = new Map(cells.map((cell) => [cell.id, cell] as const))
+  const homeOf = (cell: { metadata?: Record<string, unknown> | null }) => {
+    const seen = new Set<string>()
+    let from = splitFromCellId(cell)
+    while (from !== null && !seen.has(from)) {
+      seen.add(from)
+      const parent = byId.get(from)
+      if (!parent) return null
+      if (!isUserAddedLine(parent)) return lineLocator(parent.metadata)
+      from = splitFromCellId(parent)
+    }
+    return null
+  }
+  const lists = new Map<string, { line: ParagraphLine; segment: number; order: number; rank: number }[]>()
+  const add = (at: { key: string; segment: number; order: number }, line: ParagraphLine, rank: number) => {
+    const list = lists.get(at.key) ?? []
+    list.push({ line, segment: at.segment, order: at.order, rank })
+    lists.set(at.key, list)
+  }
+  const segmentsHeld = new Set<string>()
+  const hiddenRecords = new Map<string, number>()
+  cells.forEach((cell, index) => {
+    const own = lineLocator(cell.metadata)
+    const at = own ?? homeOf(cell)
+    if (!at) return
+    if (own) segmentsHeld.add(`${own.key}\u0000${own.segment}`)
+    if (cell.hidden === true) {
+      const record = JSON.stringify(cell.metadata ?? null)
+      hiddenRecords.set(record, (hiddenRecords.get(record) ?? 0) + 1)
+    }
+    add(at, { source: cell.original ?? "", kept: cell.hidden !== true }, own ? 0 : index + 1)
+  })
+  for (const entry of removed) {
+    const record = JSON.stringify(entry.metadata ?? null)
+    const twins = hiddenRecords.get(record) ?? 0
+    if (twins > 0) {
+      hiddenRecords.set(record, twins - 1)
+      continue
+    }
+    const own = lineLocator(entry.metadata)
+    if (own && segmentsHeld.has(`${own.key}\u0000${own.segment}`)) continue
+    const at = own ?? homeOf({ metadata: entry.metadata })
+    if (at) add(at, { source: null, kept: false }, own ? 0 : Number.MAX_SAFE_INTEGER)
+  }
+  const out = new Map<string, ParagraphLine[]>()
+  for (const [key, list] of lists) {
+    list.sort((a, b) => a.segment - b.segment || a.order - b.order || a.rank - b.rank)
+    out.set(key, list.map((entry) => entry.line))
+  }
+  return out
+}
+
+/**
+ * AQU-2552 (review r7): where each remaining line (part) sits in the
+ * paragraph's line text, found with every line of the paragraph in segment
+ * order: a hidden line is found by its own words, so a remaining line with
+ * the same words never takes its place; a deleted line, whose words are not
+ * known, holds at least some words before the next line found.
+ */
+function locateInSegmentOrder(
+  lines: readonly ParagraphLine[],
+  parts: readonly { source?: string }[],
+  lineText: string,
+): (LineStretch | null)[] {
+  const out: (LineStretch | null)[] = []
+  let cursor = 0
+  let unknownBefore = false
+  let kept = 0
+  for (const line of lines) {
+    const source = ((line.kept ? parts[kept].source : line.source) ?? "").trim()
+    let found = source ? findInLine(lineText, source, cursor) : null
+    while (found && unknownBefore && !/\S/.test(lineText.slice(cursor, found.start))) {
+      found = findInLine(lineText, source, found.start + 1)
+    }
+    if (line.kept) {
+      out.push(found)
+      kept++
+    }
+    if (found) {
+      cursor = found.end
+      unknownBefore = false
+    } else if (!line.kept) {
+      unknownBefore = true
+    }
+  }
+  return out
 }
 
 function findInLine(lineText: string, source: string, from: number): LineStretch | null {

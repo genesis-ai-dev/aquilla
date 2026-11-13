@@ -216,3 +216,40 @@ describe("Word export — a footnote the translator moved into a neighbouring li
     expect(out.result.fidelity.unplacedFootnoteMarkers).toBe(1)
   })
 })
+
+describe("Word export — a line is found in its paragraph in segment order (AQU-2552, review r7 N3)", () => {
+  const S = "Refrain line" + PAD
+
+  it("a hidden first copy with an italic word: the remaining copy is written plain", async () => {
+    const bytes = await docxBytes(para(run("Refrain ") + run("line", "<w:i/>") + run(PAD + " ") + run(S + " ") + run("Third line" + PAD)) + NEXT)
+    const [a, b, c, n] = await importCells(bytes)
+    expect([a, b].map((x) => x.original)).toEqual([S, S])
+    const out = await wordOut(bytes, [hide(typed(a, "Refrain.")), b, typed(c, "Trois."), n])
+    expect(paras(out.body)).toEqual(["Refrain line … Trois.", "Next paragraph."])
+    expect(out.body).not.toContain("<w:i/>")
+    expect(out.result.lostLooks).toEqual([])
+  })
+
+  it("a hidden first copy: the remaining copy keeps its own picture", async () => {
+    const bytes = await docxBytes(para(run(S + " ") + run("Refrain line") + IMG + run(PAD + " ") + run("Third line" + PAD)) + NEXT)
+    const [a, b, c, n] = await importCells(bytes)
+    const out = await wordOut(bytes, [hide(typed(a, "Refrain.")), b, typed(c, "Trois."), n])
+    expect(paras(out.body)[0]).toContain("[IMG]")
+  })
+
+  it("a hidden second copy takes its picture with it", async () => {
+    const bytes = await docxBytes(para(run(S + " ") + run("Refrain line") + IMG + run(PAD + " ") + run("Third line" + PAD)) + NEXT)
+    const [a, b, c, n] = await importCells(bytes)
+    const out = await wordOut(bytes, [a, hide(typed(b, "Refrain.")), typed(c, "Trois."), n])
+    expect(paras(out.body)).toEqual(["Refrain line … Trois.", "Next paragraph."])
+  })
+
+  it("a hidden or deleted first copy takes its picture with it, though the remaining copy has the same words", async () => {
+    const bytes = await docxBytes(para(run("Refrain line") + IMG + run(PAD + " ") + run(S + " ") + run("Third line" + PAD)) + NEXT)
+    const [a, b, c, n] = await importCells(bytes)
+    const hidden = await wordOut(bytes, [hide(typed(a, "Refrain.")), b, typed(c, "Trois."), n])
+    expect(paras(hidden.body)).toEqual(["Refrain line … Trois.", "Next paragraph."])
+    const deleted = await wordOut(bytes, [b, typed(c, "Trois."), n], [a])
+    expect(paras(deleted.body)).toEqual(["Refrain line … Trois.", "Next paragraph."])
+  })
+})

@@ -890,8 +890,11 @@ function plainSpans(text: string): Span[] {
  * A paragraph's translation as marked spans. Each segment uses its own HTML
  * when the editor wrote one, else its plain text. Segments are joined by the
  * whitespace the SOURCE had between them (AQU-2539): a line break or tab where
- * the paragraph was cut into lines stays a line break or tab, anything else is
- * one space — every translation is trimmed, so the break is not in it.
+ * the paragraph was cut into lines stays a line break or tab — every
+ * translation is trimmed, so the break is not in it. AQU-2552 (review r6): so
+ * is any other gap, as it is (two spaces stay two, none after a dash the
+ * importer cut at stays none); one space only where a line is not found in
+ * the paragraph, so its gap is not known.
  */
 function translationSpans(
   parts: readonly { plain: string; html: string; source?: string; untranslated?: true }[],
@@ -905,7 +908,7 @@ function translationSpans(
     const at = stretches[line]
     // AQU-2552 (review r6): where hidden or deleted lines sat between the
     // two, the gap is the one before them; theirs went with them.
-    const gap = at && previous ? /^\s*/.exec(lineText.slice(previous.end, at.start))![0] : ""
+    const gap = at && previous ? /^\s*/.exec(lineText.slice(previous.end, at.start))![0] : null
     previous = at
     const spans = part.html ? htmlToSpans(part.html) : []
     // A line with no translation is its source, as it sits in the line.
@@ -913,7 +916,7 @@ function translationSpans(
       ? plainSpans(at ? lineText.slice(at.start, at.end) : part.plain).map((span) => ({ ...span, fromLine: at ? at.start : -1 }))
       : spans.length > 0 ? spans : plainSpans(part.plain)
     if (segment.length === 0) return
-    if (out.length > 0) out.push({ text: gap.replace(/[^\t\n]/g, "") || " ", marks: new Set(NO_MARKS) })
+    if (out.length > 0 && gap !== "") out.push({ text: gap ?? " ", marks: new Set(NO_MARKS) })
     // AQU-2552 (review r6): each line's text knows its line (its footnotes).
     out.push(...segment.map((span) => ({ ...span, line })))
   })

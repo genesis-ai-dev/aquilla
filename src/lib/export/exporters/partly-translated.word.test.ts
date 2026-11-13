@@ -207,3 +207,24 @@ describe("Word export — a hidden or deleted line's pictures, fields and tabs l
     expect(firstParagraph(out.xml)).toBe(`${S1}. The third line shows figure {field}1 and${PAD}.[picture]`)
   })
 })
+
+describe("Word export — lines are joined by the gap the source had between them (AQU-2552, review r6)", () => {
+  const next = para(run("Next paragraph."))
+  const lines = (body: string) => importedCells(body, undefined, () => "").filter((cell) => cell.id.startsWith("c1-")).map((cell) => cell.original)
+
+  it("no space where the importer cut at a dash with none", async () => {
+    const left = "This half of the line runs on and on without a single stop or comma for longer than anyone would like it to—"
+    const right = "and this half picks up straight after the dash and runs on for just as long before it comes to its end."
+    const body = para(run(left + right)) + next
+    expect(lines(body)).toEqual([left, right])
+    const out = await exportAsDialog(body, undefined, importedCells(body, undefined, (k) => ["Cette moitié court—", "et celle-ci reprend."][k]))
+    expect(firstParagraph(out.xml)).toBe("Cette moitié court—et celle-ci reprend.")
+  })
+
+  it("two spaces where the source had two", async () => {
+    const body = para(run(`${S1}.  ${S2}.`)) + next
+    expect(lines(body)).toEqual([`${S1}.`, `${S2}.`])
+    const out = await exportAsDialog(body, undefined, importedCells(body, undefined, (k) => [T1, ""][k]))
+    expect(firstParagraph(out.xml)).toBe(`${T1}  ${S2}.`)
+  })
+})

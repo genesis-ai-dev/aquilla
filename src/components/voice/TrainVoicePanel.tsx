@@ -29,6 +29,7 @@ import {
   voiceFromCustomTraining,
 } from "@/lib/audio/custom-voice"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
+import { splitWav } from "@/lib/audio/wav-split"
 import { VoiceConsentBox } from "@/components/voice/VoiceConsentBox"
 import type { Voice } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -37,7 +38,16 @@ interface Recording {
   file: File
   /** null while probing, or when the browser can't decode it. */
   seconds: number | null
+  /**
+   * What goes up for this recording: the file itself, or, for a WAV over the
+   * per-upload cap, the pieces it was cut into. Null when it is over the cap
+   * and can't be cut (a compressed file).
+   */
+  uploads: File[] | null
 }
+
+const MB = 1024 * 1024
+const CUSTOM_VOICE_MAX_TOTAL_MB = (CUSTOM_VOICE_MAX_CLIPS * CUSTOM_VOICE_MAX_CLIP_BYTES) / MB
 
 export interface TrainVoicePanelProps {
   /** The draft voice: its id, color and (user-typed) name become the cast voice. */
@@ -86,11 +96,22 @@ function TrainVoiceForm({
   const addFiles = useCallback((files: ArrayLike<File> | null) => {
     if (!files) return
     const added = Array.from(files).slice(0, CUSTOM_VOICE_MAX_CLIPS)
-    setRecordings((cur) => [...cur, ...added.map((file) => ({ file, seconds: null }))].slice(0, CUSTOM_VOICE_MAX_CLIPS))
+    setRecordings((cur) => [
+      ...cur,
+      ...added.map((file) => ({ file, seconds: null, uploads: file.size > CUSTOM_VOICE_MAX_CLIP_BYTES ? null : [file] })),
+    ].slice(0, CUSTOM_VOICE_MAX_CLIPS))
+    const settle = (file: File, patch: Partial<Recording>) =>
+      setRecordings((cur) => cur.map((r) => (r.file === file ? { ...r, ...patch } : r)))
     for (const file of added) {
-      void probeDurationMsSafe(file).then((ms) => {
-        setRecordings((cur) => cur.map((r) => (r.file === file ? { ...r, seconds: ms == null ? 0 : ms / 1000 } : r)))
-      })
+      if (file.size > CUSTOM_VOICE_MAX_CLIP_BYTES) {
+        // Uncompressed audio passes the cap long before the minimum length: a
+        // WAV goes up in pieces, and its header gives the length without a decode.
+        void splitWav(file, CUSTOM_VOICE_MAX_CLIP_BYTES)
+          .catch(() => null)
+          .then((split) => settle(file, split ? { seconds: split.seconds, uploads: split.parts } : { seconds: 0 }))
+        continue
+      }
+      void probeDurationMsSafe(file).then((ms) => settle(file, { seconds: ms == null ? 0 : ms / 1000 }))
     }
   }, [])
 
@@ -110,24 +131,27 @@ function TrainVoiceForm({
 
   const totalSeconds = recordings.reduce((sum, r) => sum + (r.seconds ?? 0), 0)
   const minutes = totalSeconds / 60
-  const oversized = recordings.filter((r) => r.file.size > CUSTOM_VOICE_MAX_CLIP_BYTES)
   const probing = seeding || recordings.some((r) => r.seconds == null)
+  // Over the per-upload cap and not a WAV that could be cut into pieces.
+  const oversized = recordings.filter((r) => r.seconds != null && r.uploads == null)
+  const uploads = recordings.flatMap((r) => r.uploads ?? [])
+  const tooManyUploads = uploads.length > CUSTOM_VOICE_MAX_CLIPS
   const enough = minutes >= CUSTOM_VOICE_MIN_MINUTES
   const tooMuch = minutes > CUSTOM_VOICE_MAX_MINUTES
   const name = draft.name.trim()
-  const canStart = Boolean(name) && enough && !tooMuch && !probing && oversized.length === 0 && consent
+  const canStart = Boolean(name) && enough && !tooMuch && !tooManyUploads && !probing && oversized.length === 0 && consent
     && progress == null && Boolean(projectId && fileId && session)
 
   const start = useCallback(async () => {
     if (!canStart || !projectId || !fileId || !session) return
     setError(null)
-    setProgress({ done: 0, total: recordings.length })
+    setProgress({ done: 0, total: uploads.length })
     try {
       const started = await startCustomVoiceTraining({
         projectId,
         fileId,
         speakerName: name,
-        recordings: recordings.map((r) => r.file),
+        recordings: uploads,
         consentConfirmed: consent,
         getSyncToken: audioSyncTokenFetcherForSession(session),
         onProgress: (done, total) => setProgress({ done, total }),
@@ -139,7 +163,7 @@ function TrainVoiceForm({
       setError(e instanceof Error ? e.message : String(e))
       setProgress(null)
     }
-  }, [canStart, projectId, fileId, session, recordings, name, consent, onStarted, draft.id, draft.color])
+  }, [canStart, projectId, fileId, session, uploads, name, consent, onStarted, draft.id, draft.color])
 
   const meterPct = Math.min(100, (minutes / CUSTOM_VOICE_RECOMMENDED_MINUTES) * 100)
   const [dragging, setDragging] = useState(false)
@@ -181,8 +205,8 @@ function TrainVoiceForm({
               <li key={`${r.file.name}-${i}`} className="flex items-center gap-2 px-2.5 py-1 text-xs">
                 <FileAudio className="size-3.5 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1 truncate">{r.file.name}</span>
-                {r.file.size > CUSTOM_VOICE_MAX_CLIP_BYTES ? (
-                  <span className="text-destructive">{t("audio.train.fileTooLarge")}</span>
+                {r.seconds != null && r.uploads == null ? (
+                  <span className="text-destructive">{t("audio.train.fileTooLargeUseWav", { mb: CUSTOM_VOICE_MAX_CLIP_BYTES / MB })}</span>
                 ) : (
                   <span className="tabular-nums text-muted-foreground">{r.seconds == null ? "…" : fmt(r.seconds)}</span>
                 )}
@@ -202,12 +226,14 @@ function TrainVoiceForm({
         {recordings.length > 0 && (
           <div className="space-y-1">
             <div className="flex items-baseline justify-between text-[11px]">
-              <span className={cn("tabular-nums font-medium", tooMuch ? "text-destructive" : enough ? "text-foreground" : "text-amber-600 dark:text-amber-400")}>
+              <span className={cn("tabular-nums font-medium", tooMuch || tooManyUploads ? "text-destructive" : enough ? "text-foreground" : "text-amber-600 dark:text-amber-400")}>
                 {t("audio.train.audioMeter", { minutes: minutes.toFixed(1) })}
               </span>
               <span className="text-muted-foreground">
                 {tooMuch
                   ? t("audio.train.tooMuchAudio", { max: CUSTOM_VOICE_MAX_MINUTES })
+                  : tooManyUploads
+                    ? t("audio.train.tooMuchData", { mb: CUSTOM_VOICE_MAX_TOTAL_MB, max: CUSTOM_VOICE_MAX_MINUTES })
                   : enough
                     ? t("audio.train.recommendedHint", { recommended: CUSTOM_VOICE_RECOMMENDED_MINUTES })
                     : t("audio.train.minimumHint", { min: CUSTOM_VOICE_MIN_MINUTES })}

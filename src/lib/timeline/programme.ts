@@ -617,9 +617,9 @@ export function playsHeardLines(
  * row's own Play, Space and the strip's Play with it selected. Where the file
  * plays its heard lines (`playsHeardLines`), a subtitle row has no place in
  * what plays, so it starts from the first heard line that performs it (the
- * one the mic records on, `primaryAudioHome`), or with none, from the first
- * heard line at or after the row's start. Null when no heard line is left
- * from there. Every other file plays its own lines, so a row starts from
+ * one the mic records on, `primaryAudioHome`), or with none, from the heard
+ * line sounding at the row's start, or else the next one after it. Null when
+ * no heard line is left from there. Every other file plays its own lines, so a row starts from
  * itself.
  */
 export function playStartLineId(
@@ -636,7 +636,10 @@ export function playStartLineId(
   if (from == null) return null
   let first: CellData | null = null
   for (const line of lines) {
-    if (line.startTime == null || line.startTime < from) continue
+    if (line.startTime == null) continue
+    // Only a heard line already over by the row's start is passed by; one
+    // still sounding there counts (review, Nov 13).
+    if (line.startTime < from && (line.endTime ?? line.startTime) <= from) continue
     if (!first || line.startTime < (first.startTime as number)) first = line
   }
   return first?.id ?? null

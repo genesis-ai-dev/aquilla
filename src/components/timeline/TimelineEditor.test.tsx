@@ -4625,7 +4625,7 @@ describe("TimelineEditor — an added track finds its takes where they actually 
     // AQU-2253 (Nov 13): following the recordings only the heard lines play,
     // so a subtitle row has no place in what plays and its own Play did
     // nothing. It plays from the first heard line that performs it, or with
-    // none, from the first heard line at or after the row's start.
+    // none, from the heard line sounding at the row's start, or the next one.
     describe("a subtitle row's own Play", () => {
       const heard3 = [...heard, cell({ id: "cue3", fileId: "f1-cues", original: "Line three.", startTime: 9, endTime: 10, ...take("cue3", 1_000) } as Partial<CellData>)]
       const raw3 = heard3.map(({ attachments: _a, selectedAudioId: _s, ...c }) => c as CellData)
@@ -4693,6 +4693,31 @@ describe("TimelineEditor — an added track finds its takes where they actually 
 
       it("following the source, a click on its card seeks to the row's own time", () => {
         expect(clickCard("sC", "dubbing")).toHaveBeenCalledWith(5.5)
+      })
+
+      // AQU-2253 (review, Nov 13): a take on a heard line is found among the
+      // heard lines, so double-clicking it jumps to its line. It was looked
+      // for among the subtitle lines only, and did nothing.
+      const doubleClickTake = (cellId: string, timingMode: "audioFirst" | "dubbing") => {
+        const onSeekToTime = vi.fn()
+        render(
+          <TimelineEditor
+            fileId="f1" coreMediaUrl={null} editable cells={carded}
+            audioCues={raw3} targetCells={heard3} cueLinks={cardLinks} timingMode={timingMode}
+            onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime}
+          />,
+        )
+        fireEvent.doubleClick(screen.getByTestId(`tl-target-${cellId}`))
+        return onSeekToTime
+      }
+
+      it("double-clicking a heard line's take seeks to that heard line", () => {
+        // cue1's 6 s take, then cue2: cue2 starts at 6 s.
+        expect(doubleClickTake("cue2", "audioFirst")).toHaveBeenCalledWith(6)
+      })
+
+      it("following the source, double-clicking a heard line's take seeks to its film time", () => {
+        expect(doubleClickTake("cue2", "dubbing")).toHaveBeenCalledWith(5)
       })
     })
   })

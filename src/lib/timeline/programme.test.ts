@@ -657,6 +657,13 @@ describe("playStartLineId", () => {
     expect(playStartLineId(verse("s6", 5, 6, undefined, { medium: "text" }), heard, true, cuesForText)).toBe("cue2")
   })
 
+  // AQU-2253 (review, Nov 13): with no link to go on (links still loading,
+  // failed, or the row unlinked by hand), a heard line still sounding at the
+  // row's start is where it starts, not the next one.
+  it("a row no heard line performs, inside a heard line, starts from that heard line", () => {
+    expect(playStartLineId(verse("s7", 5.2, 5.4, undefined, { medium: "text" }), heard, true, cuesForText)).toBe("cue2")
+  })
+
   it("a row after the last heard line has nowhere to start", () => {
     expect(playStartLineId(late, heard, true, cuesForText)).toBeNull()
   })

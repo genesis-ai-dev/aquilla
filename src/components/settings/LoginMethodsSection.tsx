@@ -1,7 +1,7 @@
 import { EmailChangeForm } from "./EmailChangeForm"
 import { Spinner } from "@/components/ui/spinner"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useAccounts } from "@/hooks/useAccounts"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
@@ -20,6 +20,7 @@ function AccountLoginMethods({ jwt, username }: { jwt: string; username: string 
   const [changingEmail, setChangingEmail] = useState(false)
   const [methods, setMethods] = useState<{ email: string; password: boolean; google: boolean; google_available: boolean } | null>(null)
   const [error, setError] = useState(false), [busy, setBusy] = useState(false)
+  const previousPassword = useRef<boolean | null>(null)
   const [sessionExpired, setSessionExpired] = useState(false)
   const [refreshing, setRefreshing] = useState(true)
   const [disconnecting, setDisconnecting] = useState(false), [password, setPassword] = useState("")
@@ -28,7 +29,12 @@ function AccountLoginMethods({ jwt, username }: { jwt: string; username: string 
     let current = true
     setRefreshing(true); setError(false); setSessionExpired(false)
     void googleRequest<NonNullable<typeof methods>>("methods", undefined, jwt)
-      .then(value => { if (current) setMethods(value) })
+      .then(value => {
+        if (!current) return
+        if (previousPassword.current === false && value.password) setRecovering(false)
+        previousPassword.current = value.password
+        setMethods(value)
+      })
       .catch(reason => {
         if (!current) return
         const rejected = reason instanceof Error && reason.message === "session_expired"

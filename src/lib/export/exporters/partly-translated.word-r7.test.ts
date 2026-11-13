@@ -319,3 +319,55 @@ describe("Word export — an untranslated line keeps its pieces where they are (
     expect(paras(out.body)).toEqual([`${F[0]} Second line here … ${F[2]}[IMG]{field}`, "Next paragraph."])
   })
 })
+
+describe("Word export — a hidden or deleted split piece is a lost line of its paragraph (AQU-2552, review r7 N2)", () => {
+  const F = ["Première ligne ici.", "Deuxième ligne ici.", "Troisième ligne ici."]
+  // Line 1 is cut in the editor after "First line"; the piece holds a
+  // picture, a figure-number field, a tab and an italic word.
+  const s1 = run("First line here,") + IMG + run(" Figure ") + FIELD + run(",") + `<w:r><w:tab/></w:r>` + run("an ") + run("italic", "<w:i/>") + run(PAD + " ")
+  const body = para(s1 + run("Second line here" + PAD + " ") + run("Third line here" + PAD)) + NEXT
+  const cut = async (bytes: ArrayBuffer) => {
+    const [a, b, c, n] = await importCells(bytes)
+    const at = a.original.indexOf(" here")
+    const parent = { ...typed(a, "Première ligne"), original: a.original.slice(0, at) } as CellData
+    return { parent, pc: piece(a, "p1", a.original.slice(at + 1)), b, c, n }
+  }
+
+  it("a hidden piece takes its picture, field and tab with it, and no word of it is said to have lost its look", async () => {
+    const bytes = await docxBytes(body)
+    const { parent, pc, b, c, n } = await cut(bytes)
+    const out = await wordOut(bytes, [parent, hide(typed(pc, "ici, avec la suite.")), b, typed(c, F[2]), n])
+    expect(paras(out.body)).toEqual([`Première ligne Second line here … ${F[2]}`, "Next paragraph."])
+    expect(out.body).not.toMatch(/SEQ Figure|w:drawing|<w:tab\/>|<w:i\/>/)
+    expect(out.result.lostLooks).toEqual([])
+  })
+
+  it("so does a deleted piece", async () => {
+    const bytes = await docxBytes(body)
+    const { parent, pc, b, c, n } = await cut(bytes)
+    const out = await wordOut(bytes, [parent, b, typed(c, F[2]), n], [pc])
+    expect(paras(out.body)).toEqual([`Première ligne Second line here … ${F[2]}`, "Next paragraph."])
+    expect(out.result.lostLooks).toEqual([])
+  })
+
+  it("a live piece keeps them", async () => {
+    const bytes = await docxBytes(body)
+    const { parent, pc, b, c, n } = await cut(bytes)
+    const out = await wordOut(bytes, [parent, typed(pc, "ici, avec la suite."), b, typed(c, F[2]), n])
+    expect(paras(out.body)).toEqual([`Première ligne ici, avec la suite. Second line here … ${F[2]}[IMG]{field}`, "Next paragraph."])
+  })
+
+  it("a hidden or deleted piece takes its footnote with it", async () => {
+    const fn = para(run("First line here and") + ref(1) + run(PAD.slice(4) + " ") + run("Second line here" + PAD + " ") + run("Third line here" + PAD)) + NEXT
+    const bytes = await docxBytes(fn, ["Note one."])
+    const [a, b, c, n] = await importCells(bytes)
+    const at = a.original.indexOf(" and")
+    const parent = { ...typed(a, "Première ligne ici"), original: a.original.slice(0, at) } as CellData
+    const pc = piece(a, "p1", a.original.slice(at + 1))
+    expect(pc.original.startsWith(`and${M("Note one.")} it goes on`)).toBe(true)
+    const hidden = await wordOut(bytes, [parent, hide(typed(pc, "et la suite.")), b, typed(c, F[2]), n])
+    expect(paras(hidden.body)).toEqual([`Première ligne ici Second line here … ${F[2]}`, "Next paragraph."])
+    const deleted = await wordOut(bytes, [parent, typed(b, F[1]), typed(c, F[2]), n], [pc])
+    expect(paras(deleted.body)).toEqual([`Première ligne ici ${F[1]} ${F[2]}`, "Next paragraph."])
+  })
+})

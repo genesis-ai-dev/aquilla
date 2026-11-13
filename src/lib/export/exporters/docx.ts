@@ -281,10 +281,14 @@ export async function exportDocx(
   const removedKeys = removedPackageBlockKeys(options.removedCells ?? [], cells)
   const insertions = insertionsAfterPackageBlock(cells, isUserAddedLine)
   // AQU-2552 (review r6): the paragraphs that lost a line, hidden or deleted.
+  // AQU-2552 (review r7): with the cells, so a lost split piece marks its
+  // line's paragraph. Every cell is handed over as hidden: the helper only
+  // follows them to a piece's home here, and keeps every block it finds (a
+  // live line would otherwise take its paragraph off the list).
   const lostLineKeys = removedPackageBlockKeys([
     ...(options.removedCells ?? []),
     ...cells.filter((cell) => cell.hidden === true).map((cell) => ({ metadata: cell.metadata ?? null })),
-  ])
+  ], cells.map((cell) => ({ ...cell, hidden: true })))
 
   // AQU-2552 (review r7): every line of each paragraph, kept, hidden or
   // deleted, in segment order, to find each in the paragraph.

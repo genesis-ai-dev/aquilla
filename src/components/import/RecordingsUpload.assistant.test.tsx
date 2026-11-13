@@ -749,23 +749,28 @@ describe("the can't-be-undone note is true for every kind of upload", () => {
     )
   })
 
-  // AQU-2496 (browser pass, Nov 12): "already has a recording … the new one
-  // will play" counts lines by the same rule as "takes over from an earlier
-  // one", so the two notes agree: a take on an added track keeps playing there.
-  it("leaves out choosing again, and the already-recorded note, where the earlier recording plays on another track and never stopped", async () => {
+  // AQU-2496 (browser pass and its review, Nov 12): a separate "N of those
+  // lines already has a recording" note counted differently from the rows'
+  // "already recorded" marks, which are true per row (a take on any track).
+  // It is gone: the one sentence that counts lines, "takes over from an
+  // earlier one", says the earlier recording stays in its take list.
+  const marked = () => screen.getAllByTestId("recordings-how").filter((el) => el.textContent?.includes("already recorded")).length
+  it("leaves out choosing again where the earlier recording plays on another track and never stopped; the row still says already recorded", async () => {
     withLines({ "mat:19:2": { hasRecording: true, mainTake: false } })
     review(["Matthew 19-1.ogg", "Matthew 19-2.ogg"])
     await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
-    expect(screen.queryByTestId("recordings-recorded-note")).toBeNull()
+    expect(marked()).toBe(1)
     expect(note()).not.toHaveTextContent("earlier")
+    expect(screen.queryByTestId("recordings-recorded-note")).toBeNull()
     cleanup()
     withLines({ "mat:19:1": { hasRecording: true, mainTake: true }, "mat:19:2": { hasRecording: true, mainTake: false } })
     review(["Matthew 19-1.ogg", "Matthew 19-2.ogg"])
     await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
-    expect(screen.getByTestId("recordings-recorded-note")).toHaveTextContent(
-      /^1 of those lines already has a recording\. The new one will play, and the old one stays in the take list\.$/,
+    expect(marked()).toBe(2)
+    expect(note()).toHaveTextContent(
+      "On 1 line the new recording takes over from an earlier one, which stays in its take list; after deleting the new one, choose the earlier recording again there.",
     )
-    expect(note()).toHaveTextContent("On 1 line the new recording takes over from an earlier one;")
+    expect(screen.queryByTestId("recordings-recorded-note")).toBeNull()
   })
 
   it("says where the new recordings take over from earlier ones, one line or several", async () => {
@@ -773,13 +778,13 @@ describe("the can't-be-undone note is true for every kind of upload", () => {
     review(["Matthew 19-1.ogg", "Matthew 19-2.ogg"])
     await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
     expect(note()).toHaveTextContent(
-      "This can't be undone with Undo. To take it back, delete the recordings it adds. On 2 lines the new recordings take over from earlier ones; after deleting them, choose the earlier recording again on each.",
+      "This can't be undone with Undo. To take it back, delete the recordings it adds. On 2 lines the new recordings take over from earlier ones, which stay in their take lists; after deleting the new ones, choose the earlier recording again on each.",
     )
     cleanup()
     withLines({ "mat:19:1": { hasRecording: true, mainTake: true } })
     review(["Matthew 19-1.ogg"])
     await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
-    expect(note()).toHaveTextContent("On 1 line the new recording takes over from an earlier one; after deleting it, choose the earlier recording again there.")
+    expect(note()).toHaveTextContent("On 1 line the new recording takes over from an earlier one, which stays in its take list; after deleting the new one, choose the earlier recording again there.")
   })
 })
 
@@ -929,9 +934,9 @@ describe("the preview says a bulk upload can't be undone", () => {
     vi.mocked(loadTargetFile).mockResolvedValueOnce(recorded)
     review(PLACED)
     await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
-    expect(screen.getByTestId("recordings-recorded-note")).toBeInTheDocument()
+    expect(screen.queryByTestId("recordings-recorded-note")).toBeNull()
     expect(screen.getByTestId("recordings-no-undo-note")).toHaveTextContent(
-      "This can't be undone with Undo. To take it back, delete the recordings it adds. On 1 line the new recording takes over from an earlier one; after deleting it, choose the earlier recording again there.",
+      "This can't be undone with Undo. To take it back, delete the recordings it adds. On 1 line the new recording takes over from an earlier one, which stays in its take list; after deleting the new one, choose the earlier recording again there.",
     )
   })
 

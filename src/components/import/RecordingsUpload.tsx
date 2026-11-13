@@ -820,8 +820,9 @@ function ReviewBody({
   }, [targets])
   // AQU-2496 (review, Nov 9): what the "can't be undone" note says: files over
   // several lines, and lines whose main-track take the upload replaces.
-  // AQU-2496 (browser pass, Nov 12): the "already has a recording" note counts
-  // the same lines, so the two agree; a take on an added track keeps playing.
+  // AQU-2496 (browser pass, Nov 12): that sentence is also the only one that
+  // says the earlier recording stays in its take list; the rows' own
+  // "already recorded" marks say which lines have a recording on any track.
   const rangeCount = matched.filter((a) => a.cellIds!.length > 1).length
   const replacedCount = [...lineIds].filter((id) => lineById.get(id)?.line.mainTake).length
 
@@ -943,11 +944,6 @@ function ReviewBody({
             {takesSentence(t, locale, takes.lines)}
             {takes.byDate && <> {t("recordingsUpload.preview.takesNewest")}</>}
             {takes.byNumber && <> {t("recordingsUpload.preview.takesHighest")}</>}
-          </p>
-        )}
-        {replacedCount > 0 && (
-          <p className="text-xs text-muted-foreground" data-testid="recordings-recorded-note">
-            {t("recordingsUpload.preview.recordedCount", { count: fmt(replacedCount) })}
           </p>
         )}
         {/* AQU-2496 (review, Nov 9; Sam's call: say it, no grouped Undo): a

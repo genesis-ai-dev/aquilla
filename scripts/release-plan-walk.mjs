@@ -91,6 +91,29 @@ export function parseWalkComment(body) {
   return { prNumber, sha, verdict: verdict[1] ?? "PASS", ...(qualifier ? { qualifier } : {}) }
 }
 
+// Who may post a walk the planner believes. Anyone with a GitHub account can
+// comment on a pull request in a public repository, so the marker or the
+// heading alone must never ship a PR (a stranger's "**PASS**" on a head the
+// bot failed) or hold one (a stranger's "**FAIL**"). The walk is posted by a
+// person's own agent under that person's identity (e2e/journeys/PR-BOT.md),
+// so the rule is the author's standing in this repository as GitHub reports
+// it on the comment: an organization member, the owner, or an invited
+// collaborator. WALK_TRUSTED_LOGINS (a repository variable, comma separated)
+// adds exact logins on top, for a GitHub App or a reporter GitHub does not
+// report as a member. Same idea as JEV_TRUSTED_LOGINS in
+// release-deploy-check.mjs.
+export const WALK_TRUSTED_ASSOCIATIONS = ["OWNER", "MEMBER", "COLLABORATOR"]
+
+export function walkTrustedLogins(env = process.env) {
+  return (env.WALK_TRUSTED_LOGINS ?? "").split(",").map((login) => login.trim()).filter(Boolean)
+}
+
+export function isTrustedWalkAuthor(comment, trustedLogins = []) {
+  if (WALK_TRUSTED_ASSOCIATIONS.includes(comment?.author_association)) return true
+  const login = comment?.user?.login
+  return typeof login === "string" && trustedLogins.includes(login)
+}
+
 async function githubApi(path, { repo, token, fetchImpl }) {
   const response = await fetchImpl(`https://api.github.com/repos/${repo}${path}`, {
     redirect: "error",
@@ -117,12 +140,13 @@ async function listComments(prNumber, opts) {
 // `unknown` in every case where a verdict isn't possible yet: no associated
 // PR, no matching comment, or a comment whose sha is stale because the walk
 // ran before a later push. When several walks name the head sha (a re-walk
-// after a fixture change, say), the newest one wins. `partial` is a PASS the
+// after a fixture change, say), the newest one wins. Only a trusted author's
+// comments are walks at all (isTrustedWalkAuthor). `partial` is a PASS the
 // bot qualified ("test level only") with no plain verdict on that head; it
 // holds like `unknown`. `approved` is the
 // `release:approved` label (release-risk.mjs): the manual QA path's
 // sign-off, read off the same /pulls response so it costs no extra call.
-export async function lookupPr({ mergeSha, repo = REPO, token, fetchImpl = fetch }) {
+export async function lookupPr({ mergeSha, repo = REPO, token, fetchImpl = fetch, trustedLogins = walkTrustedLogins() }) {
   const opts = { repo, token, fetchImpl }
   // The commit subject often carries the PR number too, but not reliably for
   // a squash merge; this endpoint is what actually resolves it, along with
@@ -136,6 +160,8 @@ export async function lookupPr({ mergeSha, repo = REPO, token, fetchImpl = fetch
 
   let latest = null
   for (const comment of await listComments(pr.number, opts)) {
+    // Read nothing from an author who may not decide: not a PASS, not a FAIL.
+    if (!isTrustedWalkAuthor(comment, trustedLogins)) continue
     const parsed = parseWalkComment(comment.body)
     if (!parsed || !pr.head.sha.startsWith(parsed.sha)) continue
     if (parsed.prNumber !== null && parsed.prNumber !== pr.number) continue

@@ -34,7 +34,19 @@ export interface LookupWalkOptions {
   repo?: string
   token: string
   fetchImpl?: FetchImpl
+  /** Extra exact logins whose walk comments count; defaults to WALK_TRUSTED_LOGINS. */
+  trustedLogins?: string[]
 }
+
+/** The `author_association` values whose walk comments the planner reads. */
+export const WALK_TRUSTED_ASSOCIATIONS: string[]
+/** Extra trusted logins from WALK_TRUSTED_LOGINS (comma separated); empty when unset. */
+export function walkTrustedLogins(env?: Record<string, string | undefined>): string[]
+/** Whether a PR comment's author may post a walk: a trusted association, or a listed login. */
+export function isTrustedWalkAuthor(
+  comment: { author_association?: string; user?: { login?: string } | null } | null | undefined,
+  trustedLogins?: string[],
+): boolean
 
 /** The walk verdict, `release:approved` label and passed gate areas of the PR a dev merge closed. */
 export function lookupPr(

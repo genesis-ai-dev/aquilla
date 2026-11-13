@@ -68,6 +68,13 @@ export function TimelinePlayhead({ currentSec, pxPerSec, playing = false, rate =
   // caught). While paused, monotonicSec passes currentSec through exactly.
   useLayoutEffect(() => {
     renderedSecRef.current = monotonicSec(renderedSecRef.current, currentSec, playing, rate)
+    // AQU-2253 (browser pass, Nov 11): and paint it. The rAF writes `left`
+    // behind React's back, so a render whose `left` React thinks unchanged (a
+    // spinner over a clock whose second has not moved) wrote nothing: the head
+    // stayed where the rAF ran it on to, while the floor went back to the
+    // clock, and playback then drew it backward from there.
+    const el = elRef.current
+    if (el) el.style.left = `${secToPx(renderedSecRef.current, pxPerSec)}px`
   })
 
   useEffect(() => {

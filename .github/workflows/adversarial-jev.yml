@@ -12,7 +12,8 @@
 # preview auth worker.
 #
 # Repository secrets: ADVERSARIAL_USER_1..3 (username:password on dev
-# storage), TYPESAFE_API_KEY, TEXT_MODEL_API_KEY. LINEAR_API_KEY lives only
+# storage; each account's email must be on the dev access list, see
+# docs/security/preview-access.md), TYPESAFE_API_KEY, TEXT_MODEL_API_KEY. LINEAR_API_KEY lives only
 # in the `adversarial-nightly` environment, restricted to the dev branch,
 # so no pull-request workflow can read it.
 

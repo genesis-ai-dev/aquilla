@@ -655,7 +655,8 @@ export const audio = defineNamespace({
     "audio.elevenLabs.selectVoiceAriaLabel": "Use {name}",
     "audio.elevenLabs.modelLabel": "Model",
     "audio.elevenLabs.modelMultilingualV2": "Most natural; best for long narration",
-    "audio.elevenLabs.modelV3": "Most expressive delivery, in the most languages",
+    "audio.elevenLabs.modelV4": "Most emotive; reads tags like [whispers]",
+    "audio.elevenLabs.modelV3": "Expressive delivery; reads tags like [whispers]",
     "audio.elevenLabs.modelFlash": "Fastest and cheapest; good for drafts",
     "audio.elevenLabs.stability": "Stability",
     "audio.elevenLabs.speed": "Speed",
@@ -3073,6 +3074,9 @@ export const audio = defineNamespace({
       },
       "audio.elevenLabs.modelMultilingualV2": {
         description: "One-line description under the 'Multilingual v2' model option (product name, not translated).",
+      },
+      "audio.elevenLabs.modelV4": {
+        description: "One-line description of ElevenLabs' 'Eleven v4' speech model in the model picker. 'Tags' are bracketed delivery directions in the text, such as [whispers]; keep the bracketed example untranslated.",
       },
       "audio.elevenLabs.modelV3": {
         description: "One-line description under the 'Eleven v3' model option (product name, not translated).",

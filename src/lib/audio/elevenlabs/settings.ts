@@ -33,6 +33,7 @@ export interface ElevenLabsModelOption {
 /** Curated TTS models, in picker order. Mirrors ELEVENLABS_TTS_MODELS in
  *  sync-worker/src/elevenlabs-api.ts, which filters them to the account. */
 export const ELEVENLABS_MODELS: readonly ElevenLabsModelOption[] = [
+  { id: "eleven_v4", name: "Eleven v4", descriptionKey: "audio.elevenLabs.modelV4" },
   { id: "eleven_multilingual_v2", name: "Multilingual v2", descriptionKey: "audio.elevenLabs.modelMultilingualV2" },
   { id: "eleven_v3", name: "Eleven v3", descriptionKey: "audio.elevenLabs.modelV3" },
   { id: "eleven_flash_v2_5", name: "Flash v2.5", descriptionKey: "audio.elevenLabs.modelFlash" },
@@ -68,4 +69,15 @@ export function elevenLabsSettingsOf(voice: Pick<Voice, "elevenLabs">): ElevenLa
 export function elevenLabsLanguageCode(language: string | undefined): string | undefined {
   const base = language?.trim().toLowerCase().split(/[-_]/)[0]
   return base && /^[a-z]{2}$/.test(base) ? base : undefined
+}
+
+/**
+ * Models that read audio tags such as `[whispers]` in the text (AQU-2577).
+ * ElevenLabs documents tags for v4 and v3 only; Multilingual v2 and Flash
+ * would speak a tag aloud, so tags are left out of the text for them.
+ */
+export const ELEVENLABS_TAG_MODELS: ReadonlySet<string> = new Set(["eleven_v4", "eleven_v3"])
+
+export function elevenLabsModelReadsTags(modelId: string | undefined): boolean {
+  return ELEVENLABS_TAG_MODELS.has(modelId ?? DEFAULT_ELEVENLABS_MODEL)
 }

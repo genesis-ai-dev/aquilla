@@ -12,8 +12,21 @@ const REPO = "genesis-ai-dev/aquilla"
 // the dev merge commit. The bot writes it full or abbreviated (7+ hex),
 // sometimes in backticks, and a re-walk adds a note in parentheses after it
 // ("@ <sha> (rewalk)"); all of those are the same walk heading.
-const WALK_HEADING = /^## Bot walk — PR #?(\d+) @ `?([0-9a-f]{7,40})`?(?: \([^)\n]*\))?\s*$/m
-const VERDICT_LINE = /^\*\*(PASS|FAIL|FLAKY|BLOCKED|NOT CHECKED)\*\*/
+//
+// From 2026-11-06 the bot's comments open with a machine marker instead,
+// "<!-- aquilla-qa-walk <sha> -->" (also "sha=<sha>", or no sha at all), and
+// the heading, when there is one, reads "## QA walk — #<n> @ <sha>". Both
+// are read here. For six days the planner read neither, so every walked PR
+// held as "walk unknown" (release cut of 2026-11-12: 58 of 82 PRs).
+const WALK_MARKER = /^<!-- aquilla-qa-walk(?: (?:sha=)?([0-9a-f]{7,40}))? -->\s*$/m
+const WALK_HEADING = /^## (?:Bot|QA) walk — (?:PR )?#?(\d+) @ `?([0-9a-f]{7,40})`?(?: \([^)\n]*\))?\s*$/m
+
+// A PASS can carry a qualifier, inside the bold or right after it:
+// "**PASS (test level only)**", "**PASS** (test level only)". That is the
+// bot saying it passed what it ran without walking a live preview. It is
+// captured, never read as a plain PASS (see `walkOf`). The other verdicts
+// take no qualifier: one written with a qualifier stays unread, as before.
+const VERDICT_LINE = /^\*\*(FAIL|FLAKY|BLOCKED|NOT CHECKED)\*\*|^\*\*PASS(?: \(([^)*\n]+)\))?\*\*(?: \(([^)\n]+)\))?/
 
 // FLAKY and BLOCKED both mean the bot could not prove the outcome; the
 // release planner holds on either exactly like a FAIL. NOT CHECKED means the
@@ -27,17 +40,78 @@ export function normalizeVerdict(verdict) {
   return "fail"
 }
 
+// The planner's walk value for one parsed comment. A qualified PASS is
+// "partial": the PR had a UI claim and nobody saw it in a browser, so it
+// holds (prHolds passes only PASS and none) with a reason that says why,
+// instead of "unknown", which reads as "the bot never came".
+export function walkOf(parsed) {
+  return parsed.qualifier ? "partial" : normalizeVerdict(parsed.verdict)
+}
+
+function nonBlankLinesAfter(body, match) {
+  return body.slice(match.index + match[0].length).split("\n").map((line) => line.trim()).filter(Boolean)
+}
+
 // Parses one comment body. Returns null for a comment that isn't a bot-walk
 // comment, or whose verdict line doesn't parse, rather than guessing.
+//
+// With a marker, the walk is what follows the marker: an optional heading
+// on the next line (the PR number, and the sha when the marker has none),
+// then the verdict line. A marker names no PR, so `prNumber` is null unless
+// a heading gives one; the head-sha match in lookupPr is what ties the
+// comment to the PR either way. A marker and a heading that name different
+// commits are not a walk of either. Without a marker it is the heading
+// anywhere in the body, then the verdict line, as it always was.
 export function parseWalkComment(body) {
   if (typeof body !== "string") return null
-  const heading = WALK_HEADING.exec(body)
-  if (!heading) return null
-  const afterHeading = body.slice(heading.index + heading[0].length)
-  const verdictLine = afterHeading.split("\n").find((line) => line.trim().length > 0)
-  const verdict = verdictLine && VERDICT_LINE.exec(verdictLine.trim())
+  const marker = WALK_MARKER.exec(body)
+  let prNumber = null
+  let sha = marker?.[1] ?? null
+  let lines
+  if (marker) {
+    lines = nonBlankLinesAfter(body, marker)
+    const heading = lines.length ? WALK_HEADING.exec(lines[0]) : null
+    if (heading) {
+      if (sha && !sha.startsWith(heading[2]) && !heading[2].startsWith(sha)) return null
+      prNumber = Number(heading[1])
+      sha ??= heading[2]
+      lines = lines.slice(1)
+    }
+  } else {
+    const heading = WALK_HEADING.exec(body)
+    if (!heading) return null
+    prNumber = Number(heading[1])
+    sha = heading[2]
+    lines = nonBlankLinesAfter(body, heading)
+  }
+  if (!sha) return null
+  const verdict = lines.length ? VERDICT_LINE.exec(lines[0]) : null
   if (!verdict) return null
-  return { prNumber: Number(heading[1]), sha: heading[2], verdict: verdict[1] }
+  const qualifier = verdict[2] ?? verdict[3]
+  return { prNumber, sha, verdict: verdict[1] ?? "PASS", ...(qualifier ? { qualifier } : {}) }
+}
+
+// Who may post a walk the planner believes. Anyone with a GitHub account can
+// comment on a pull request in a public repository, so the marker or the
+// heading alone must never ship a PR (a stranger's "**PASS**" on a head the
+// bot failed) or hold one (a stranger's "**FAIL**"). The walk is posted by a
+// person's own agent under that person's identity (e2e/journeys/PR-BOT.md),
+// so the rule is the author's standing in this repository as GitHub reports
+// it on the comment: an organization member, the owner, or an invited
+// collaborator. WALK_TRUSTED_LOGINS (a repository variable, comma separated)
+// adds exact logins on top, for a GitHub App or a reporter GitHub does not
+// report as a member. Same idea as JEV_TRUSTED_LOGINS in
+// release-deploy-check.mjs.
+export const WALK_TRUSTED_ASSOCIATIONS = ["OWNER", "MEMBER", "COLLABORATOR"]
+
+export function walkTrustedLogins(env = process.env) {
+  return (env.WALK_TRUSTED_LOGINS ?? "").split(",").map((login) => login.trim()).filter(Boolean)
+}
+
+export function isTrustedWalkAuthor(comment, trustedLogins = []) {
+  if (WALK_TRUSTED_ASSOCIATIONS.includes(comment?.author_association)) return true
+  const login = comment?.user?.login
+  return typeof login === "string" && trustedLogins.includes(login)
 }
 
 async function githubApi(path, { repo, token, fetchImpl }) {
@@ -66,10 +140,13 @@ async function listComments(prNumber, opts) {
 // `unknown` in every case where a verdict isn't possible yet: no associated
 // PR, no matching comment, or a comment whose sha is stale because the walk
 // ran before a later push. When several walks name the head sha (a re-walk
-// after a fixture change, say), the newest one wins. `approved` is the
+// after a fixture change, say), the newest one wins. Only a trusted author's
+// comments are walks at all (isTrustedWalkAuthor). `partial` is a PASS the
+// bot qualified ("test level only") with no plain verdict on that head; it
+// holds like `unknown`. `approved` is the
 // `release:approved` label (release-risk.mjs): the manual QA path's
 // sign-off, read off the same /pulls response so it costs no extra call.
-export async function lookupPr({ mergeSha, repo = REPO, token, fetchImpl = fetch }) {
+export async function lookupPr({ mergeSha, repo = REPO, token, fetchImpl = fetch, trustedLogins = walkTrustedLogins() }) {
   const opts = { repo, token, fetchImpl }
   // The commit subject often carries the PR number too, but not reliably for
   // a squash merge; this endpoint is what actually resolves it, along with
@@ -83,11 +160,19 @@ export async function lookupPr({ mergeSha, repo = REPO, token, fetchImpl = fetch
 
   let latest = null
   for (const comment of await listComments(pr.number, opts)) {
+    // Read nothing from an author who may not decide: not a PASS, not a FAIL.
+    if (!isTrustedWalkAuthor(comment, trustedLogins)) continue
     const parsed = parseWalkComment(comment.body)
-    if (parsed && parsed.prNumber === pr.number && pr.head.sha.startsWith(parsed.sha)) latest = parsed
+    if (!parsed || !pr.head.sha.startsWith(parsed.sha)) continue
+    if (parsed.prNumber !== null && parsed.prNumber !== pr.number) continue
+    // A qualified PASS saw no browser, so it says nothing a plain verdict on
+    // the same head did not: a later test-only pass never undoes a live
+    // PASS, and never softens a FAIL.
+    if (parsed.qualifier && latest && !latest.qualifier) continue
+    latest = parsed
   }
   const gates = await passedGates(pr.head.sha, opts)
-  return { walk: latest ? normalizeVerdict(latest.verdict) : "unknown", approved, gates }
+  return { walk: latest ? walkOf(latest) : "unknown", approved, gates }
 }
 
 // The areas whose gate check (release-risk.mjs AREA_GATES) concluded

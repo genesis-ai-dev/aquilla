@@ -1,0 +1,103 @@
+--- a/scripts/migrate-daemon/http.ts
++++ b/scripts/migrate-daemon/http.ts
+@@ -106,6 +106,17 @@
+     const res = await retryingFetch(`${this.base}${path}`, { ...init, headers: this.headers() }, this.retry)
+     return (await res.json()) as T
+   }
++  async archiveStatus(p: { gitlab_id: number; aquilla_id: string; org_id: number | null; team_id: number | null; project_upserted: number }): Promise<boolean> {
++    if (p.org_id === null) throw new Error("Project has no organization")
++    const query = new URLSearchParams({ gitlabId: String(p.gitlab_id), projectId: p.aquilla_id,
++      orgId: String(p.org_id), mustExist: String(!!p.project_upserted), archiveStatus: "true" })
++    if (p.team_id !== null) query.set("teamId", String(p.team_id))
++    const result = await this.json<{ safetyVersion: number; projectId: string; archived: boolean }>(`/migrate/project?${query}`)
++    if (result.safetyVersion !== 1 || result.projectId !== p.aquilla_id || typeof result.archived !== "boolean") {
++      throw new Error("Archive status contract unavailable; refusing transfer")
++    }
++    return result.archived
++  }
+   async verifyProject(p:{gitlab_id:number;aquilla_id:string;org_id:number|null;team_id:number|null;project_upserted:number}):Promise<{safetyVersion:number;projectId:string;exists:boolean;name:string|null}>{
+     if(p.org_id===null)throw Error('Project has no organization')
+     const q=new URLSearchParams({gitlabId:String(p.gitlab_id),projectId:p.aquilla_id,orgId:String(p.org_id),mustExist:String(!!p.project_upserted)})
+--- a/scripts/migrate-daemon/db.ts
++++ b/scripts/migrate-daemon/db.ts
+@@ -6,7 +6,7 @@
+ import {retryPolicy} from "./retry-policy"
+ 
+ export type JobKind = "content" | "audio"
+-export type JobStage = "detected" | "fetched" | "planned" | "pushing" | "done" | "failed"
++export type JobStage = "detected" | "fetched" | "planned" | "pushing" | "done" | "failed" | "skipped_archived"
+ export interface JobRow {
+   id: number; project_id: number; kind: JobKind; sha: string; stage: JobStage
+   attempts: number; next_run_at: number; created_at: number; updated_at: number
+@@ -88,7 +88,7 @@
+    * jobs that another live process is currently executing. */
+   recoverJobs():void {
+     if(this.claimed.size)throw new Error('Cannot recover jobs while stages are active')
+-    this.d.exec("UPDATE jobs SET sha=pending_sha,pending_sha=NULL,stage='detected',attempts=0,next_run_at=0,error=NULL,plan_path=NULL WHERE pending_sha IS NOT NULL")
++    this.d.exec("UPDATE jobs SET sha=pending_sha,pending_sha=NULL,stage=CASE WHEN stage='skipped_archived' THEN 'skipped_archived' ELSE 'detected' END,attempts=0,next_run_at=0,error=CASE WHEN stage='skipped_archived' THEN error ELSE NULL END,plan_path=NULL WHERE pending_sha IS NOT NULL")
+     // Plans are rebuilt from acknowledged events after verifying the cached SHA.
+     this.d.exec("UPDATE jobs SET stage='detected',plan_path=NULL WHERE stage IN ('fetched','planned','pushing','failed')")
+   }
+@@ -126,10 +126,11 @@
+         if (open.sha !== sha) this.d.prepare("UPDATE jobs SET pending_sha=? WHERE id=?").run(sha,open.id)
+         return this.getJob(open.id)!
+       }
+-      if (open.sha !== sha) this.d.prepare(`UPDATE jobs SET sha=?, stage='detected', attempts=0, next_run_at=0, error=NULL, plan_path=NULL, updated_at=? WHERE id=?`).run(sha, now, open.id)
++      if (open.sha !== sha) this.d.prepare(`UPDATE jobs SET sha=?, stage=CASE WHEN stage='skipped_archived' THEN 'skipped_archived' ELSE 'detected' END, attempts=0, next_run_at=0, error=CASE WHEN stage='skipped_archived' THEN error ELSE NULL END, plan_path=NULL, updated_at=? WHERE id=?`).run(sha, now, open.id)
+       return this.getJob(open.id)!
+     }
+     const r = this.d.prepare(`INSERT INTO jobs (project_id, kind, sha, stage, created_at, updated_at) VALUES (?,?,?,'detected',?,?)`).run(projectId, kind, sha, now, now)
++    if (this.kvGet(`archived:${projectId}`) === "true") this.advance(Number(r.lastInsertRowid), "skipped_archived")
+     return this.getJob(Number(r.lastInsertRowid))!
+   }
+   claim(id: number, sha: string): boolean {
+@@ -138,7 +139,7 @@
+   }
+   release(id: number): boolean {
+     this.claimed.delete(id)
+-    return this.d.prepare("UPDATE jobs SET sha=pending_sha,pending_sha=NULL,stage='detected',attempts=0,next_run_at=0,error=NULL,plan_path=NULL WHERE id=? AND pending_sha IS NOT NULL").run(id).changes > 0
++    return this.d.prepare("UPDATE jobs SET sha=pending_sha,pending_sha=NULL,stage=CASE WHEN stage='skipped_archived' THEN 'skipped_archived' ELSE 'detected' END,attempts=0,next_run_at=0,error=CASE WHEN stage='skipped_archived' THEN error ELSE NULL END,plan_path=NULL WHERE id=? AND pending_sha IS NOT NULL").run(id).changes > 0
+   }
+   audioRecord(destination: string): AudioRecord | undefined { return this.audioQuery.get(destination) as AudioRecord | undefined }
+   recordAudio(r: Omit<AudioRecord,'verified_at'>): void {
+@@ -182,6 +183,17 @@
+     // Failed jobs retry from 'detected' so fetch/materialize re-run on a clean slate.
+     this.d.prepare(`UPDATE jobs SET stage='detected', attempts=?, next_run_at=?, error=?, plan_path=NULL, updated_at=? WHERE id=?`)
+       .run(attempts, now + delay, error.slice(0, 2000), now, jobId)
++  }
++  parkArchived(projectId: number): void {
++    this.d.prepare("UPDATE jobs SET stage='skipped_archived',error=NULL,plan_path=NULL,updated_at=? WHERE project_id=? AND stage!='done'").run(Date.now(), projectId)
++    this.kvSet(`archived:${projectId}`, "true")
++  }
++  resumeArchived(projectId: number): void {
++    this.d.prepare("UPDATE jobs SET stage='detected',error=NULL,attempts=0,next_run_at=0,plan_path=NULL,updated_at=? WHERE project_id=? AND stage='skipped_archived'").run(Date.now(), projectId)
++    this.kvSet(`archived:${projectId}`, "false")
++  }
++  archiveCheckError(projectId: number, message: string): void {
++    this.d.prepare("UPDATE jobs SET error=? WHERE project_id=? AND stage='skipped_archived'").run(message.slice(0,2000), projectId)
+   }
+   getJob(id: number): JobRow | undefined {
+     return this.d.prepare(`SELECT * FROM jobs WHERE id=?`).get(id) as JobRow | undefined
+--- a/scripts/migrate-daemon/loop.ts
++++ b/scripts/migrate-daemon/loop.ts
+@@ -1,3 +1,4 @@
++import { admitProject, checkArchived } from "./archive"
+ import {loadHistoricalPolicy} from "./historical-policy"
+ import {ProjectSnapshots} from "./project-snapshots"
+ import {snapshotManifestReader} from "./project-snapshot-source"
+@@ -249,6 +250,7 @@
+       const project = this.ctx.db.getProject(job.project_id)
+       if (!project) throw new Error(`no project row for gitlab id ${job.project_id}`)
+       if(project.status!=='ok'||project.org_id===null)throw Error(`project ${job.project_id}: placement is unresolved; refusing queued work`)
++      if (!this.ctx.config.dryRun && !await admitProject(this.ctx.db, this.ctx.sync, project)) return
+       if (stage === "detected") await this.stageFetch(job, project)
+       else if (stage === "fetched" && job.kind === "audio") await this.stageAudio(job, project)
+       else if (stage === "fetched") await this.stageMaterialize(job, project, force)
+@@ -529,6 +531,7 @@
+     while(!signal.aborted){
+       if(Date.now()>=nextReconcile){
+         nextReconcile=Date.now()+this.ctx.config.reconcileMs
++        await this.guard('archive status',()=>checkArchived(this.ctx.db,this.ctx.sync))
+         await this.guard('reconcile',async()=>this.ctx.log(`reconcile: ${await reconcile(await this.detectDeps())} enqueued`))
+       }
+       if(signal.aborted)break

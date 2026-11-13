@@ -353,6 +353,53 @@ export async function getAdminProjects(jwt: string): Promise<AdminProject[]> {
   return ((await res.json()) as { projects: AdminProject[] }).projects
 }
 
+export interface AdminOrgMember {
+  userId: number
+  username: string
+  displayName: string | null
+  email: string
+  /** Org role level; label it with `roleDisplayLabel`. */
+  roleLevel: number
+  joinedAt: string | null
+  lastActiveAt: string | null
+}
+
+export async function getAdminOrgMembers(jwt: string, orgId: number): Promise<AdminOrgMember[]> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/orgs/${orgId}/members`, {
+    headers: authHeaders(jwt),
+  })
+  if (!res.ok) throw new UserError(res.status, "")
+  return ((await res.json()) as { members: AdminOrgMember[] }).members
+}
+
+export interface AdminUserDetail {
+  user: { id: number; username: string; email: string; displayName: string | null; createdAt: string }
+  orgs: Array<{
+    orgId: number
+    name: string | null
+    roleLevel: number
+    joinedAt: string | null
+    lastActiveAt: string | null
+  }>
+  /** Direct project memberships only; access through an org role or a team is not listed. */
+  projects: Array<{
+    projectId: string
+    name: string
+    orgId: number | null
+    orgName: string | null
+    archived: boolean
+    roleLevel: number
+  }>
+}
+
+export async function getAdminUser(jwt: string, userId: number): Promise<AdminUserDetail> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/users/${userId}`, {
+    headers: authHeaders(jwt),
+  })
+  if (!res.ok) throw new UserError(res.status, "")
+  return (await res.json()) as AdminUserDetail
+}
+
 export interface AdminFieldPlan {
   freeWeeklyAllowance?: number
   freeWeeklyRawUsd?: number
@@ -755,4 +802,117 @@ export async function getAdminWouldBlock(jwt: string): Promise<{ meterMode: Bill
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/billing/would-block`, { headers: authHeaders(jwt) })
   if (!res.ok) throw new UserError(res.status, await readError(res))
   return (await res.json()) as { meterMode: BillingMeterMode; orgs: WouldBlockOrg[] }
+}
+
+// --- Feedback routes: who is emailed when a user sends "Report a problem" ---
+
+export interface AdminFeedbackRoute {
+  id: number
+  orgId: number
+  orgName: string | null
+  /** Empty = the whole org. */
+  projectIds: string[]
+  projects: { id: string; name: string }[]
+  emails: string[]
+  label: string | null
+  enabled: boolean
+  createdAt: string | null
+}
+
+export interface FeedbackRouteInput {
+  orgId: number
+  projectIds: string[]
+  emails: string[]
+  label: string | null
+  enabled: boolean
+}
+
+export async function getAdminFeedbackRoutes(jwt: string): Promise<AdminFeedbackRoute[]> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/feedback-routes`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return ((await res.json()) as { routes: AdminFeedbackRoute[] }).routes
+}
+
+export async function createAdminFeedbackRoute(jwt: string, input: FeedbackRouteInput): Promise<AdminFeedbackRoute> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/feedback-routes`, {
+    method: "POST",
+    headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return ((await res.json()) as { route: AdminFeedbackRoute }).route
+}
+
+export async function updateAdminFeedbackRoute(
+  jwt: string,
+  id: number,
+  patch: Partial<Omit<FeedbackRouteInput, "orgId">>,
+): Promise<AdminFeedbackRoute> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/feedback-routes/${id}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return ((await res.json()) as { route: AdminFeedbackRoute }).route
+}
+
+export async function deleteAdminFeedbackRoute(jwt: string, id: number): Promise<void> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/feedback-routes/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(jwt),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+}
+
+// --- Dev access (AQU-2469): who may use dev.aquilla.app ---
+
+export interface AdminDevAccessEntry {
+  email: string
+  /** Email of the admin who added it; null for keys written from the command line. */
+  addedBy: string | null
+  addedAt: string | null
+}
+
+export interface AdminDevAccessList {
+  /** False everywhere but dev, where the list does nothing. */
+  enabled: boolean
+  entries: AdminDevAccessEntry[]
+}
+
+export async function getAdminDevAccess(jwt: string): Promise<AdminDevAccessList> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/dev-access`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as AdminDevAccessList
+}
+
+export async function addAdminDevAccess(jwt: string, email: string): Promise<AdminDevAccessEntry> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/dev-access`, {
+    method: "POST",
+    headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return ((await res.json()) as { entry: AdminDevAccessEntry }).entry
+}
+
+export async function removeAdminDevAccess(jwt: string, email: string): Promise<void> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/dev-access/${encodeURIComponent(email)}`, {
+    method: "DELETE",
+    headers: authHeaders(jwt),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+}
+
+/** Admin-only authenticator endpoints. Never persist returned enrollment secrets. */
+export async function adminTotp<T>(jwt: string, path = "", body?: object): Promise<T> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/totp${path ? `/${path}` : ""}`, {
+    method: body ? "POST" : "GET",
+    headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  const result = await res.json() as T
+  if (path === "verify" && !(body as {disable?: boolean})?.disable) notifyElevationGranted()
+  return result
 }

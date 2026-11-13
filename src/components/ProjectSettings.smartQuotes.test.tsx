@@ -1,9 +1,11 @@
 // Smart quotes, in Project Settings › General under the target language.
 //
-// What these tests hold: a project that never set it shows the switch OFF —
-// curly quotes rewrite what translators type, so nobody gets them without
-// asking; a stored `true` reads back ON; and flipping the switch patches
+// What these tests hold: a project that never set it shows the switch ON,
+// because the editor types curly quotes by default and the switch must say
+// what the editor does; a stored `false` reads back OFF, so a project that
+// turned them off keeps straight quotes; and flipping the switch patches
 // `smartQuotes` and nothing else, so saving it cannot disturb another setting.
+// The switch saves as it flips (AQU-2262).
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { screen } from "@testing-library/react"
@@ -148,29 +150,29 @@ beforeEach(() => {
 })
 
 describe("ProjectSettings — smart quotes", () => {
-  it("is off for a project that never set it", () => {
+  it("is on for a project that never set it", () => {
     renderSettings(PANE)
-    expect(screen.getByRole("switch", { name: "Smart quotes" })).not.toBeChecked()
+    expect(screen.getByRole("switch", { name: "Smart quotes" })).toBeChecked()
   })
 
   // This page loads the project without the settings overlay, so the stored
   // value exists only in the settings blob. Reading `project.smartQuotes`
-  // alone showed a saved ON as OFF after every reload.
-  it("reads back a stored true from the settings blob", () => {
-    currentSettings = { smartQuotes: true }
+  // alone showed the default instead of the saved choice after every reload.
+  it("reads back a stored false from the settings blob", () => {
+    currentSettings = { smartQuotes: false }
     renderSettings(PANE)
-    expect(screen.getByRole("switch", { name: "Smart quotes" })).toBeChecked()
+    expect(screen.getByRole("switch", { name: "Smart quotes" })).not.toBeChecked()
   })
 
   it("saves the switch as smartQuotes, and touches nothing else", async () => {
     const user = userEvent.setup()
     renderSettings(PANE)
 
+    // The switch saves the moment it flips; there is no Save bar (AQU-2262).
     await user.click(screen.getByRole("switch", { name: "Smart quotes" }))
-    await user.click(screen.getByRole("button", { name: /save changes/i }))
 
     expect(patchSpy).toHaveBeenCalledTimes(1)
     const sent = patchSpy.mock.calls[0][0] as Record<string, unknown>
-    expect(sent).toEqual({ smartQuotes: true })
+    expect(sent).toEqual({ smartQuotes: false })
   })
 })

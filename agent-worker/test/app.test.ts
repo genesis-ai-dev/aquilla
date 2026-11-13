@@ -2,11 +2,13 @@ import { describe, it, expect, beforeEach } from "vitest"
 import { createApp } from "../src/app"
 import { alwaysAdmit, noSleep } from "./fake-pool"
 import type { Env } from "../src/types"
-import type {
-  SandboxLike,
-  SandboxRunResult,
-  SandboxReadResult,
-  SandboxWriteResult,
+import {
+  FILE_READ_MAX_BYTES,
+  SandboxFileTooLargeError,
+  type SandboxLike,
+  type SandboxRunResult,
+  type SandboxReadResult,
+  type SandboxWriteResult,
 } from "../src/sandbox"
 
 // ---------------------------------------------------------------------------
@@ -373,6 +375,15 @@ describe("GET /sessions/:id/files", () => {
       new Request("http://x/sessions/s1/files?path=missing.txt", { headers: AUTH }),
     )
     expect(res.status).toBe(404)
+  })
+
+  it("413s when the file is over the read cap", async () => {
+    sandbox.readResult = new SandboxFileTooLargeError(FILE_READ_MAX_BYTES)
+    const res = await harness(sandbox)(
+      new Request("http://x/sessions/s1/files?path=huge.bin", { headers: AUTH }),
+    )
+    expect(res.status).toBe(413)
+    expect((await readJson(res)).error?.code).toBe("too_large")
   })
 
   it("400s on path traversal", async () => {

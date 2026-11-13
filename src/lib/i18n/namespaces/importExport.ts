@@ -449,7 +449,7 @@ export const importExport = defineNamespace({
       "This project already reads its source from another project, and it can only follow one. " +
       "Manage or detach that link in Project settings → Source & sync.",
     "importExport.landing.linkProject.roleTooltip":
-      "Project lead or above required to link a source project.",
+      "Project Lead or above required to link a source project.",
 
     // — Re-import collision panel —
     "importExport.collision.intro": plural({
@@ -673,10 +673,15 @@ export const importExport = defineNamespace({
       "Round-trip markdown: headings, ordered/unordered lists and quotes reconstructed; untranslated " +
       "blocks keep source (media lines use their transcription).",
     "importExport.format.html.label": "Web page",
+    // AQU-2224: AQU-2184 taught the page the book's layout, so the description no
+    // longer says it is dropped. Wording approved by Ryder on the ticket
+    // (2026-11-03). The format is offered for a Bible book only (ExportDialog's
+    // `offersHtmlPage`), so there is no sentence for non-scripture files.
     "importExport.format.html.description":
       "A readable page of the book in one self-contained file: chapter index, numbered verses and " +
-      "section headings, for reviewers and printing. Untranslated lines show their source text, " +
-      "marked. Not for re-import; paragraph layout and footnotes are not kept yet.",
+      "section headings, with paragraphs and poetry lines as the book lays them out and each " +
+      "chapter's footnotes listed at its end. For reviewers and printing. Untranslated lines show " +
+      "their source text, marked. Not for re-import.",
     "importExport.format.tsv.label": "Bilingual TSV",
     "importExport.format.tsv.description": "id/source/target tab-separated, one row per segment.",
     "importExport.format.csv.label": "Bilingual CSV",
@@ -934,6 +939,59 @@ export const importExport = defineNamespace({
       other: "Created {fileName}. {count} translations could not be paired and stayed on the original file.",
     }),
     "importExport.dialog.repairIdmlCopyNeedsOriginal": "This file has no original IDML package to repair from.",
+    // An InDesign export that stopped on translations typed as plain text (a
+    // linked file translated before it carried the IDML contract). The progress
+    // line while the placement runs is importExport.upload.aligningIdmlStyles.
+    "importExport.dialog.idmlTranslationsNotPlaced": plural({
+      one:
+        "{count} translation in this file is not in the InDesign style runs yet, so the " +
+        "translated file cannot be built. Placing it saves it as a draft: if it was validated, " +
+        "it will need validating again.",
+      other:
+        "{count} translations in this file are not in the InDesign style runs yet, so the " +
+        "translated file cannot be built. Placing them saves each one as a draft: validated " +
+        "lines will need validating again.",
+    }),
+    "importExport.dialog.idmlTranslationsNotPlacedKeep": plural({
+      one:
+        "{count} translation in this file is not in the InDesign style runs yet, so the " +
+        "translated file cannot be built. Placing it moves the same words into the runs: " +
+        "a validated line stays validated.",
+      other:
+        "{count} translations in this file are not in the InDesign style runs yet, so the " +
+        "translated file cannot be built. Placing them moves the same words into the runs: " +
+        "validated lines stay validated.",
+    }),
+    "importExport.dialog.placeIdmlTranslations": "Place translations",
+    "importExport.dialog.placingIdmlTranslations": "Checking the translations in {fileName}…",
+    "importExport.dialog.placedIdmlTranslations": plural({
+      one:
+        "{count} translation in {fileName} was placed into the style runs and is a draft to " +
+        "check again. Download the file again.",
+      other:
+        "{count} translations in {fileName} were placed into the style runs and are drafts to " +
+        "check again. Download the file again.",
+    }),
+    "importExport.dialog.placedIdmlTranslationsKept": plural({
+      one:
+        "{count} translation in {fileName} was placed into the style runs. Its validation is " +
+        "unchanged. Download the file again.",
+      other:
+        "{count} translations in {fileName} were placed into the style runs. Their validation " +
+        "is unchanged. Download the file again.",
+    }),
+    "importExport.dialog.placedIdmlTranslationsMixed":
+      "The translations in {fileName} were placed into the style runs: {kept} stay validated, " +
+      "and {drafts} were saved as drafts to check. Download the file again.",
+    "importExport.dialog.placedIdmlTranslationsManual": plural({
+      one:
+        "{count} translation in {fileName} could not be placed automatically and is marked " +
+        "for Align styles. Align it, then download again.",
+      other:
+        "{count} translations in {fileName} could not be placed automatically and are marked " +
+        "for Align styles. Align them, then download again.",
+    }),
+    "importExport.dialog.placeIdmlTranslationsFailed": "Could not place the translations in {fileName}: {message}",
     "importExport.dialog.lossyVerseCount": plural({
       one: "{count} verse contained footnotes, poetry, or character markers in the source USFM — its structure is replaced by plain translated text.",
       other: "{count} verses contained footnotes, poetry, or character markers in the source USFM — their structure is replaced by plain translated text.",
@@ -966,6 +1024,12 @@ export const importExport = defineNamespace({
     }),
     "importExport.status.validatingProtectedTranslations": "Validating protected translations…",
     "importExport.status.downloadedIdmlUnchanged": "Downloaded {fileName} (no translations — original bytes returned unchanged)",
+    // A file whose source a link replaced keeps the lines only it had; their
+    // paragraphs are not in the linked package, so the export leaves them out.
+    "importExport.status.idmlLinesLeftOut": plural({
+      one: "{count} translated line is not part of this IDML package and was left out: {labels}",
+      other: "{count} translated lines are not part of this IDML package and were left out: {labels}",
+    }),
     "importExport.status.decodingAudio": "Decoding audio…",
     "importExport.status.decodingCount": "Decoding {done}/{total}…",
     "importExport.status.exportedAudioByCharacter": "Exported audio by character",
@@ -1106,8 +1170,10 @@ export const importExport = defineNamespace({
     "importExport.errors.sourceUploadTooLarge": "Source upload failed: the original file exceeds the {maxSize} limit.",
     "importExport.errors.couldNotGetUploadToken": "Couldn't get an upload token — sign in and try again.",
     "importExport.errors.sourceUploadNetworkFailed": "Source upload failed: {detail}",
+    "importExport.errors.sourceUploadRefused": "Source upload failed: {reason}",
     "importExport.errors.sourceUploadFailed": "Source upload failed",
     "importExport.errors.artifactBindingNetworkFailed": "Artifact binding failed: {detail}",
+    "importExport.errors.artifactBindingRefused": "Artifact binding failed: {reason}",
     "importExport.errors.artifactBindingFailed": "Artifact binding failed",
 
     // — Thrown-error triage: src/lib/import.ts target-import apply (AQU-1669) —
@@ -1212,6 +1278,20 @@ export const importExport = defineNamespace({
     "importExport.dcs.resyncHint": "Scans the source at the pinned version for cells that were imported " +
       "incorrectly. Nothing is changed until you confirm.",
     "importExport.dcs.resyncNoChanges": "Everything already matches the pinned source.",
+    // AQU-1896: a scan that resolved or read none of the project's files checked
+    // NOTHING — it must never render as the reassuring "everything matches".
+    "importExport.dcs.resyncNoFilesResolved": plural({
+      one: "Nothing was checked: this project's {count} source file was not found at the pinned version. It may " +
+        "have been renamed or removed upstream, or the source link needs re-importing.",
+      other: "Nothing was checked: none of this project's {count} source files were found at the pinned version. " +
+        "They may have been renamed or removed upstream, or the source link needs re-importing.",
+    }),
+    "importExport.dcs.resyncNoFilesRead": plural({
+      one: "Nothing was checked: the pinned version lists this project's {count} source file but no longer " +
+        "serves it.",
+      other: "Nothing was checked: the pinned version lists this project's {count} source files but no longer " +
+        "serves any of them.",
+    }),
     "importExport.dcs.resyncRemovalWarning": plural({
       one: "{count} cell will be removed — translations attached to them will be hidden.",
       other: "{count} cells will be removed — translations attached to them will be hidden.",
@@ -1454,6 +1534,10 @@ export const importExport = defineNamespace({
     "importExport.review.rowTimingDiffers": "Timing differs",
     "importExport.review.rowSourceDiffersPill": "Source differs",
     "importExport.review.rowSourceDiffers": "This row's source text doesn't match the line it was paired with",
+    "importExport.review.rowBridgedPill": "Bridged verses",
+    "importExport.review.rowBridged": "The uploaded file joins verses {first}-{last} into one translation, " +
+      "but this file keeps them as separate lines. The whole text goes on verse {first}; " +
+      "the rest of the range gets no text of its own",
     "importExport.review.rowIncomingSource": "Source in this row: {text}",
     "importExport.review.rowWrittenAs": "as written: {ref}",
     "importExport.review.sourceAligned": "Paired with lines by source text. Rows whose source doesn't match their " +
@@ -2334,6 +2418,67 @@ export const importExport = defineNamespace({
       "importExport.dialog.repairIdmlCopyNeedsOriginal": {
         description: "Error when the file being repaired has no stored IDML package to re-parse.",
       },
+      "importExport.dialog.idmlTranslationsNotPlaced": {
+        description:
+          "Error in the Export dialog when an InDesign (IDML) download stops because translations " +
+          "were typed as plain text and are not inside the file's style runs. A 'Place translations' button follows; " +
+          "the second sentence says what pressing it costs (the lines lose their validated state).",
+        placeholders: { count: "Number of translations that are not in the style runs, already locale-formatted." },
+      },
+      "importExport.dialog.idmlTranslationsNotPlacedKeep": {
+        description:
+          "Same error as importExport.dialog.idmlTranslationsNotPlaced, shown to a project lead, " +
+          "for whom pressing 'Place translations' keeps each line's validated state.",
+        placeholders: { count: "Number of translations that are not in the style runs, already locale-formatted." },
+      },
+      "importExport.dialog.placedIdmlTranslationsKept": {
+        description: "Success message after 'Place translations' when every placed line kept its validated state.",
+        placeholders: {
+          fileName: "Display name of the IDML file — not translated.",
+          count: "Number of translations placed, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.placedIdmlTranslationsMixed": {
+        description:
+          "Success message after 'Place translations' when validated lines kept their state and the rest " +
+          "(lines nobody had validated, or whose words the placement had to change) were saved as drafts.",
+        placeholders: {
+          fileName: "Display name of the IDML file — not translated.",
+          kept: "Number of lines that stay validated, already locale-formatted.",
+          drafts: "Number of lines saved as drafts, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.placeIdmlTranslations": {
+        description:
+          "Button beside that error. Moves each translation's words into the InDesign style runs of its paragraph.",
+      },
+      "importExport.dialog.placingIdmlTranslations": {
+        description: "Progress label in the Export dialog when the 'Place translations' pass starts.",
+        placeholders: { fileName: "Display name of the IDML file — not translated." },
+      },
+      "importExport.dialog.placedIdmlTranslations": {
+        description:
+          "Success message after 'Place translations' when the placed lines were saved as drafts (none of them kept a validated state).",
+        placeholders: {
+          fileName: "Display name of the IDML file — not translated.",
+          count: "Number of translations placed, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.placedIdmlTranslationsManual": {
+        description:
+          "Message after 'Place translations' when some lines need the editor's Align styles action before the file can be downloaded.",
+        placeholders: {
+          fileName: "Display name of the IDML file — not translated.",
+          count: "Number of translations left for a manual Align styles pass, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.placeIdmlTranslationsFailed": {
+        description: "Error when the 'Place translations' pass could not run.",
+        placeholders: {
+          fileName: "Display name of the IDML file — not translated.",
+          message: "The technical reason, as reported by the app — not translated.",
+        },
+      },
       "importExport.upload.cellsProgress": {
         description: "Upload progress detail line on the main Upload files panel.",
         placeholders: {
@@ -2593,6 +2738,17 @@ export const importExport = defineNamespace({
         description: "Success-status message after an IDML export with no translations — the original bytes were returned unchanged.",
         placeholders: { fileName: "Name of the downloaded file — not translated." },
       },
+      "importExport.status.idmlLinesLeftOut": {
+        description:
+          "Second sentence of the success status after an IDML export, shown only when some " +
+          "translated lines belong to paragraphs the InDesign package does not have (a file " +
+          "whose source a link replaced keeps the lines only it had) and so were left out of " +
+          "the download. Ends with the list of those lines' labels.",
+        placeholders: {
+          count: "How many translated lines were left out; governs the plural form.",
+          labels: "Comma-separated cell labels of the lines left out, as the editor shows them — not translated.",
+        },
+      },
       "importExport.status.decodingPercent": {
         description:
           "Progress line in the toast that runs while the per-character audio " +
@@ -2813,6 +2969,32 @@ export const importExport = defineNamespace({
         description:
           "Thrown when binding an already-uploaded artifact to another file fails at the network level. {detail} is the raw underlying error, interpolated as data.",
         placeholders: { detail: "Raw network-error message — not translated." },
+      },
+      "importExport.errors.sourceUploadRefused": {
+        description:
+          "Thrown when the server answers the source-upload request with an error " +
+          "status, shown in red in the import dialog. {reason} is a complete sentence " +
+          "that is already in the user's language — the app's own wording for that " +
+          "status, such as \"Your session expired — sign in again.\" or \"You are " +
+          "Contributor here. Project Lead is required.\" — or, for a validation " +
+          "refusal, the server's short raw reason.",
+        placeholders: {
+          reason:
+            "A sentence already translated elsewhere, or raw server text — not " +
+            "translated here.",
+        },
+      },
+      "importExport.errors.artifactBindingRefused": {
+        description:
+          "Thrown when the server answers the request to bind an already-uploaded " +
+          "artifact to another file with an error status. Same shape as " +
+          "importExport.errors.sourceUploadRefused: {reason} is a complete sentence " +
+          "already in the user's language, or a validation refusal's short raw reason.",
+        placeholders: {
+          reason:
+            "A sentence already translated elsewhere, or raw server text — not " +
+            "translated here.",
+        },
       },
       "importExport.manifestWarnings.duplicateCanonicalRef": {
         description:
@@ -3192,6 +3374,27 @@ export const importExport = defineNamespace({
           "Small green line shown after a re-sync scan that found nothing to fix. A " +
           "complete sentence reporting that this project's source lines already " +
           "agree with the upstream version it is fixed to.",
+      },
+      "importExport.dcs.resyncNoFilesRead": {
+        description:
+          "Small amber line shown after a re-sync scan that found this project's " +
+          "source lines listed in the upstream version it is fixed to, but could " +
+          "no longer read them there. A complete sentence reporting that nothing " +
+          "was compared, and why. Must not read as reassurance.",
+        placeholders: {
+          count: "Number of this project's source files the scan tried to read.",
+        },
+      },
+      "importExport.dcs.resyncNoFilesResolved": {
+        description:
+          "Small amber line shown after a re-sync scan that could not find any of " +
+          "this project's source files in the upstream version it is fixed to, so " +
+          "nothing was compared. A complete sentence reporting that, the likely " +
+          "reasons, and the number of files it was looking for. Must not read as " +
+          "reassurance: the reader's source was never checked.",
+        placeholders: {
+          count: "Number of source files this project holds, none of which were found.",
+        },
       },
       "importExport.dcs.resyncRemovalWarning": {
         description:
@@ -4307,6 +4510,26 @@ export const importExport = defineNamespace({
           "Tooltip on the 'Source differs' pill of one row of the match-review list: " +
           "the uploaded row's original (source) text doesn't match the source text of " +
           "the line it was paired with. One sentence, no closing full stop.",
+      },
+      "importExport.review.rowBridgedPill": {
+        description:
+          "Small amber pill in the top-right corner of one row of the match-review " +
+          "list, shown when the uploaded Scripture file bridged two or more verses " +
+          "into one combined translation (Paratext writes that as '\\v 27-28') while " +
+          "the open file keeps those verses as separate lines. The row is left " +
+          "unticked. Two words, no closing full stop.",
+      },
+      "importExport.review.rowBridged": {
+        description:
+          "Tooltip on the 'Bridged verses' pill of one row of the match-review list: " +
+          "the uploaded file translated a range of verses as one piece of text, the " +
+          "open file keeps those verses apart, so the combined text is put on the " +
+          "first verse of the range and the later verses of the range are left " +
+          "without text of their own. Two or three sentences, no closing full stop.",
+        placeholders: {
+          first: "The first verse number of the bridged range, such as '27'.",
+          last: "The last verse number of the bridged range, such as '28'.",
+        },
       },
       "importExport.review.rowWrittenAs": {
         description:

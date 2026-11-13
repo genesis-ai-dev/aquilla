@@ -1,4 +1,5 @@
-import { orgInviteReturnTo } from "../../../shared/org-invite-return-to"
+import { sessionClaims as jwtClaims } from "./session-claims"
+import { passwordResetReturnTo } from "../../../shared/password-reset-return-to"
 // Workspace auth module — wraps the aquilla-identity (/api/v2/auth/*).
 //
 // History: this file previously fetched /api/v1/auth/* against the legacy
@@ -21,6 +22,7 @@ export const FRONTIER_BASE = AUTH_BASE;
 
 import type { FrontierSession } from "./types";
 import {
+  listStoredSessions,
   listSessionsNeedingEmail,
   patchSessionEmails,
   saveSession,
@@ -61,6 +63,17 @@ function requestLogin(args: LoginArgs, continueMigration = false): Promise<Respo
   });
 }
 
+/** The `code` field of an error body, or null. Reads a clone, so the caller
+ *  can still read the body. */
+async function readErrorCode(res: Response): Promise<string | null> {
+  try {
+    const body = (await res.clone().json()) as { code?: unknown };
+    return typeof body.code === "string" ? body.code : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function login(
   args: LoginArgs,
   options: LoginOptions = {},
@@ -76,6 +89,10 @@ export async function login(
   }
   if (res.status === 401) {
     throw new FrontierAuthError(t("auth.login.invalidCredentials"), 401);
+  }
+  // AQU-2469: dev.aquilla.app admits only platform admins and its access list.
+  if (res.status === 403 && (await readErrorCode(res)) === "dev_access_restricted") {
+    throw new FrontierAuthError(t("auth.login.devAccessRestricted"), 403);
   }
   if (!res.ok) {
     // The status stays on the error object for diagnostics; it isn't in the
@@ -238,11 +255,20 @@ export async function redeemAccessLink(token: string, pin: string): Promise<Acce
   return { session, projectId: data.project_id };
 }
 
+/** Recovery must settle even when the connection never answers. */
+async function recoveryFetch(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try { return await fetch(url, { ...init, signal: controller.signal }); }
+  catch { throw new FrontierAuthError(t("auth.resetPassword.networkRetry"), 0); }
+  finally { clearTimeout(timer); }
+}
+
 export async function requestPasswordReset(email: string, returnTo?: string): Promise<void> {
-  const res = await fetch(`${AUTH_BASE}/api/v2/auth/password-reset/request`, {
+  const res = await recoveryFetch(`${AUTH_BASE}/api/v2/auth/password-reset/request`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, return_to: orgInviteReturnTo(returnTo) }),
+    body: JSON.stringify({ email, return_to: passwordResetReturnTo(returnTo) }),
   });
   if (!res.ok) {
     // AQU-820: dropped body.detail/body.error — showing it here would both
@@ -250,6 +276,15 @@ export async function requestPasswordReset(email: string, returnTo?: string): Pr
     // response that varies by whether the address has an account).
     throw new FrontierAuthError(t("auth.resetPassword.failedToSend"), res.status);
   }
+}
+
+/** Send a reset only to the authenticated account's server-stored address. */
+export async function requestAccountPasswordReset(jwt: string): Promise<void> {
+  const res = await recoveryFetch(`${AUTH_BASE}/api/v2/auth/me/password-reset/request`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${jwt}` },
+  });
+  if (!res.ok) throw new FrontierAuthError(t("auth.resetPassword.failedToSend"), res.status);
 }
 
 /**
@@ -261,7 +296,7 @@ export async function requestPasswordReset(email: string, returnTo?: string): Pr
  *   400 → { error: "Invalid token" | "Token expired" }
  */
 export async function verifyResetToken(token: string, username: string): Promise<void> {
-  const res = await fetch(`${AUTH_BASE}/api/v2/auth/password-reset/verify`, {
+  const res = await recoveryFetch(`${AUTH_BASE}/api/v2/auth/password-reset/verify`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token, username }),
@@ -308,7 +343,7 @@ export async function resetPassword(
   username: string,
   newPassword: string,
 ): Promise<void> {
-  const res = await fetch(`${AUTH_BASE}/api/v2/auth/password-reset/reset`, {
+  const res = await recoveryFetch(`${AUTH_BASE}/api/v2/auth/password-reset/reset`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token, username, new_password: newPassword }),
@@ -324,28 +359,6 @@ export async function resetPassword(
         ? t("auth.resetPassword.tokenNoLongerValid")
         : t("auth.resetPassword.failedToReset");
     throw new FrontierAuthError(message, res.status);
-  }
-}
-
-/**
- * Decode the `sub` claim from a JWT (base64url payload, no signature
- * verification needed here — the server already verified the password before
- * issuing it). Returns null if the token is malformed.
- */
-function jwtClaims(token: string): { sub?: string; email?: string } {
-  try {
-    const parts = token.split(".");
-    if (parts.length !== 3) return {};
-    // atob requires standard base64; JWT uses base64url — swap - and _
-    const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const json = atob(padded);
-    const payload = JSON.parse(json) as { sub?: unknown; email?: unknown };
-    return {
-      sub: typeof payload.sub === "string" ? payload.sub : undefined,
-      email: typeof payload.email === "string" ? payload.email : undefined,
-    };
-  } catch {
-    return {};
   }
 }
 
@@ -423,7 +436,7 @@ export async function hydrateSessionEmails(): Promise<void> {
   await patchSessionEmails(updates);
 }
 
-async function finalizeSession(
+export async function finalizeSession(
   loginIdentifier: string,
   data: AuthResponse,
   emailHint?: string,
@@ -442,9 +455,27 @@ async function finalizeSession(
     jwt: data.access_token,
     username: resolvedUsername,
     createdAt: new Date().toISOString(),
+    ...(claims.uid ? { accountId: claims.uid } : {}),
     ...(email ? { email } : {}),
   };
-  await saveSession(session);
+  let legacyOwner: { key: string; jwt: string } | undefined;
+  if (claims.uid) {
+    const previous = (await listStoredSessions()).find(({ session: old }) => old.username === resolvedUsername && !old.accountId);
+    if (previous) {
+      // Even an expired historical credential can prove which account owns
+      // existing local work. It grants no access: the new JWT authenticates.
+      const response = await fetch(`${AUTH_BASE}/api/v2/auth/me/local-data-owner`, {
+        method: "POST", cache: "no-store", signal: AbortSignal.timeout(15_000),
+        headers: { Authorization: `Bearer ${session.jwt}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ previousToken: previous.session.jwt }),
+      });
+      if (!response.ok) throw new FrontierAuthError(t("auth.login.failed"), response.status);
+      const proof = await response.json() as { sameAccount: boolean };
+      if (typeof proof?.sameAccount !== "boolean") throw new FrontierAuthError(t("auth.login.failed"), 502);
+      if (proof.sameAccount === true) legacyOwner = { key: previous.key, jwt: previous.session.jwt };
+    }
+  }
+  await saveSession(session, legacyOwner);
   // AQU-884: every successful auth path funnels through here, so this is the
   // one place that has to lower the session-expired flag — otherwise the
   // banner (which no longer clears on navigation) would outlive the re-login.

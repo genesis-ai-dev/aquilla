@@ -45,22 +45,31 @@ export const workspace = defineNamespace({
     "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Restart the app to fix this — changes made since it started may be lost.",
     "workspace.offline.leaderStalledRestart": "Restart app",
     "workspace.offline.slowBootToast": "Your offline projects are taking a while to open. This can take a few minutes after an update. If it doesn't finish, restart the app.",
+    // Tauri: the offline store is rebuilding after an update (src/lib/offline/boot-progress.ts).
+    "workspace.offline.preparingToast": "Preparing your offline projects… {percent}%",
+    "workspace.offline.preparingToastDescription": "This usually happens after an update and only takes a moment. Your offline projects will open when it's done.",
+    "workspace.offline.preparingToastSlowDescription": "This is taking longer than usual, but it's still working. Restarting the app would start it over.",
+    "workspace.offline.preparingToastStuckDescription": "This hasn't moved for several minutes and may be stuck. Restart the app to try again — it will start over from the beginning.",
     // Tauri: a newer build owns the offline data (src/lib/offline/generation-guard.ts).
     "workspace.offline.newerDataToast": "Your offline projects were saved by a newer version of Aquilla. Update the app to use them — until then, changes save only while you're online.",
     // Desktop update prompt (DesktopUpdatePrompt.tsx).
     "workspace.update.readyToast": "Aquilla {version} is ready to install.",
     "workspace.update.restartToUpdate": "Restart to update",
-    "workspace.update.stuckToast": plural({
-      one: "Aquilla {version} is ready, but {count} change hasn't reached the server yet. If you update now, it stays saved on this device and sends after the restart.",
-      other: "Aquilla {version} is ready, but {count} changes haven't reached the server yet. If you update now, they stay saved on this device and send after the restart.",
+    // Calm headline (readyToast) on top; the caveat is a secondary line so it reads
+    // as an explanation, not an alarm (2026-11-05 desktop hot-bundle review).
+    "workspace.update.stuckDetail": plural({
+      one: "{count} change hasn't reached the server yet. It stays saved on this device and sends after the restart.",
+      other: "{count} changes haven't reached the server yet. They stay saved on this device and send after the restart.",
     }),
     // Refused rows never resend, so don't promise they will.
-    "workspace.update.refusedToast": plural({
-      one: "Aquilla {version} is ready, but {count} change hasn't reached the server — it was refused, so it won't send on its own. If you update now, it stays saved on this device.",
-      other: "Aquilla {version} is ready, but {count} changes haven't reached the server, and some were refused and won't send on their own. If you update now, they all stay saved on this device.",
+    "workspace.update.refusedDetail": plural({
+      one: "{count} change hasn't reached the server — it was refused, so it won't send on its own. It stays saved on this device.",
+      other: "{count} changes haven't reached the server, and some were refused and won't send on their own. They all stay saved on this device.",
     }),
-    "workspace.update.unknownToast": "Aquilla {version} is ready, but this device couldn't check whether all your changes have reached the server. If you update now, anything unsent stays saved on this device.",
+    "workspace.update.unknownDetail": "This device couldn't confirm that every change has reached the server. Anything not yet sent stays saved on this device.",
     "workspace.update.updateAnyway": "Update anyway",
+    // Hot web bundle (src/lib/offline/bundle-update.ts): the shell rolled back a bundle that never booted.
+    "workspace.update.rolledBackToast": "Aquilla reverted to the previous version after an update failed to start.",
     // Tauri offline mode: the server refuses to sync a downloaded project —
     // deleted, access removed, archived or frozen (src/lib/offline/project-access.ts).
     "workspace.offline.projectUnavailableToast": "“{name}” is no longer available to you on the server, so this device has stopped syncing it.",
@@ -90,9 +99,13 @@ export const workspace = defineNamespace({
     "workspace.offline.connectivityTooltipOnline": "Connected to the server.",
     "workspace.offline.connectivityTooltipOffline": "No connection — working offline. Changes sync once you're back online.",
     "workspace.status.unreachable": "Can't reach the server — your project may still be available.",
-    "workspace.status.forbidden":
-      "You no longer have access to this project. Ask a project maintainer to re-invite you if this is unexpected. {backLink}.",
-    "workspace.status.notFound": "Project not found, or you don't have access. {backLink}.",
+    // AQU-2452: ONE message for every project access rejection — a project that
+    // does not exist, an org member with no grant, a non-member, a removed
+    // member. Telling those apart told the caller whether a project exists,
+    // and "You no longer have access" was simply wrong for someone who never
+    // had any.
+    "workspace.status.noAccess":
+      "Either this project does not exist, or you do not have access. Ask a project manager to invite or re-invite you if this is unexpected. {backLink}.",
     "workspace.backToDashboard": "Back to dashboard",
 
     // -- hooks/useProjectSettings: patch() error fallback when called with no
@@ -135,11 +148,16 @@ export const workspace = defineNamespace({
     "workspace.moveToCorpus.createOption": "Create a corpus",
     "workspace.moveToCorpus.corpusNameField": "Corpus name",
 
-    // -- ProjectWorkspace: TrashedProjectScreen --
-    "workspace.trashedProject.title": "This project is in Trash",
-    "workspace.trashedProject.movedMessage": "\"{name}\" was moved to Trash. Restore it to continue editing.",
-    "workspace.trashedProject.movedByMessage":
-      "\"{name}\" was moved to Trash by {deletedBy}. Restore it to continue editing.",
+    // -- ProjectWorkspace: ArchivedProjectScreen --
+    // AQU-2453: archiving is the only way into this state, so the screen says
+    // "archived" rather than "Trash", and the action sentence is split out so
+    // a reader who cannot restore is pointed at someone who can.
+    "workspace.archivedProject.title": "This project is archived",
+    "workspace.archivedProject.archivedMessage": "\"{name}\" was archived. Nothing has been deleted.",
+    "workspace.archivedProject.archivedByMessage":
+      "\"{name}\" was archived by {deletedBy}. Nothing has been deleted.",
+    "workspace.archivedProject.restoreHint": "Restore it to continue editing.",
+    "workspace.archivedProject.askHint": "Ask a maintainer to restore it.",
 
     // -- ProjectCreateDialog: the only two strings here without an exact-text
     // twin already sitting unused in projectSettings.create.* (everything else
@@ -304,6 +322,9 @@ export const workspace = defineNamespace({
 
     // -- ErrorBoundary --
     "workspace.errorBoundary.reload": "Reload",
+    "workspace.errorBoundary.offlineTitle": "Connect to load this screen",
+    "workspace.errorBoundary.offlineDescription": "This screen needs files that are not available offline yet. Reconnect, then reload to try again.",
+    "workspace.errorBoundary.reconnectedDescription": "Your browser is back online. Reload to try loading this screen again.",
     // AQU-1405. Painted over the page for the moment between a stale-chunk
     // failure and the automatic reload that recovers from it.
     "workspace.updateNotice.reloading": "Updating {app}…",
@@ -611,6 +632,40 @@ export const workspace = defineNamespace({
           "(workspace.offline.leaderStalledRestart). Three short sentences with " +
           "periods. Plain language — no 'worker', 'store' or 'sync' jargon.",
       },
+      "workspace.offline.preparingToast": {
+        description:
+          "Title of a progress toast in the Tauri desktop app while the on-device " +
+          "copy of the user's offline projects is being rebuilt, usually after " +
+          "an app update (seconds, longer on a very large project). {percent} is a whole " +
+          "number 0–100 that ticks up; keep the % sign after it. Plain language " +
+          "— no 'worker', 'store', 'database' or 'sync' jargon.",
+        placeholders: {
+          percent: "How far along the rebuild is, a whole number from 0 to 100.",
+        },
+      },
+      "workspace.offline.preparingToastDescription": {
+        description:
+          "Body of the 'Preparing your offline projects… N%' toast " +
+          "(workspace.offline.preparingToast). Reassures the user it's a " +
+          "short step that usually follows an update and that their downloaded " +
+          "projects open once it finishes. Two short sentences with periods.",
+      },
+      "workspace.offline.preparingToastSlowDescription": {
+        description:
+          "Replaces the body of the 'Preparing your offline projects… N%' toast " +
+          "(workspace.offline.preparingToast) when the percentage hasn't moved " +
+          "for a minute. Reassures the user it isn't stuck and warns that " +
+          "restarting would only make it start again from the beginning. Two " +
+          "short sentences with periods.",
+      },
+      "workspace.offline.preparingToastStuckDescription": {
+        description:
+          "Replaces the body of the 'Preparing your offline projects… N%' toast " +
+          "(workspace.offline.preparingToast) when the percentage hasn't moved " +
+          "for five minutes. Says it may be stuck and pairs with a 'Restart app' " +
+          "button (workspace.offline.leaderStalledRestart); warns the restart " +
+          "begins again from the start. Two short sentences with periods.",
+      },
       "workspace.offline.newerDataToast": {
         description:
           "Title of a persistent warning toast in the Tauri desktop app when an " +
@@ -634,47 +689,48 @@ export const workspace = defineNamespace({
           "Action button on the 'update ready' toast; quits the desktop app, " +
           "installs the update and relaunches. Short imperative.",
       },
-      "workspace.update.stuckToast": {
+      "workspace.update.stuckDetail": {
         description:
-          "Title of a persistent warning toast in the Tauri desktop app when a " +
-          "new app version is downloaded but some changes made on this device " +
-          "still haven't been sent to the server. Reassures that updating keeps " +
-          "them. Paired with an 'Update anyway' action " +
-          "(workspace.update.updateAnyway). Plain language — no 'queue' or " +
-          "'sync' jargon.",
+          "Secondary line under the 'update ready' toast title in the Tauri " +
+          "desktop app when some changes made on this device still haven't " +
+          "been sent to the server. Reassures that updating keeps them. Paired " +
+          "with an 'Update anyway' action (workspace.update.updateAnyway). " +
+          "Plain language — no 'queue' or 'sync' jargon.",
         placeholders: {
-          version: "The new app version number, e.g. 1.4.0.",
           count: "How many changes haven't been sent yet.",
         },
       },
-      "workspace.update.refusedToast": {
+      "workspace.update.refusedDetail": {
         description:
-          "Title of a persistent warning toast in the Tauri desktop app when a " +
-          "new app version is downloaded but some unsent changes were refused " +
-          "by the server and won't send on their own. Must not promise they'll " +
-          "send after the update. Paired with an 'Update anyway' action " +
+          "Secondary line under the 'update ready' toast title in the Tauri " +
+          "desktop app when some unsent changes were refused by the server and " +
+          "won't send on their own. Must not promise they'll send after the " +
+          "update. Paired with an 'Update anyway' action " +
           "(workspace.update.updateAnyway). Plain language — no 'queue' or " +
           "'sync' jargon.",
         placeholders: {
-          version: "The new app version number, e.g. 1.4.0.",
           count: "How many changes haven't been sent yet.",
         },
       },
-      "workspace.update.unknownToast": {
+      "workspace.update.unknownDetail": {
         description:
-          "Title of a persistent warning toast in the Tauri desktop app when a " +
-          "new app version is downloaded but the app couldn't open its local " +
-          "storage to check for unsent changes. Paired with an 'Update anyway' " +
-          "action (workspace.update.updateAnyway). Plain language — no 'queue', " +
+          "Secondary line under the 'update ready' toast title in the Tauri " +
+          "desktop app when the app couldn't open its local storage to check " +
+          "for unsent changes. Paired with an 'Update anyway' action " +
+          "(workspace.update.updateAnyway). Plain language — no 'queue', " +
           "'store' or 'sync' jargon.",
-        placeholders: {
-          version: "The new app version number, e.g. 1.4.0.",
-        },
       },
       "workspace.update.updateAnyway": {
         description:
           "Action button on the 'changes not sent yet' update toast; installs " +
           "the update and relaunches without waiting. Short imperative.",
+      },
+      "workspace.update.rolledBackToast": {
+        description:
+          "Title of a one-time warning toast in the Tauri desktop app after the " +
+          "shell discarded a downloaded web update that never finished starting " +
+          "and went back to the version that worked. Full sentence with a " +
+          "period. Plain language — no 'bundle' or 'rollback' jargon.",
       },
       "workspace.offline.projectUnavailableToast": {
         description:
@@ -759,27 +815,24 @@ export const workspace = defineNamespace({
           "server/network error (as opposed to a genuine 404) — the project may still " +
           "exist. Paired with a 'Retry' button (common.retry).",
       },
-      "workspace.status.forbidden": {
+      "workspace.status.noAccess": {
         description:
-          "Shown instead of the editor when the signed-in user's access to this " +
-          "project was revoked or never granted. {backLink} is a translated 'Back to " +
-          "dashboard' link (workspace.backToDashboard) rendered inline right before " +
-          "the final period — keep it part of the same sentence.",
-        placeholders: { backLink: "The 'Back to dashboard' link, already translated and rendered as a link." },
-      },
-      "workspace.status.notFound": {
-        description:
-          "Shown instead of the editor when no project with this id exists at all. " +
-          "{backLink} is the same translated 'Back to dashboard' link as " +
-          "workspace.status.forbidden, rendered inline right before the final period.",
+          "The one message shown instead of the project (editor or overview) for " +
+          "every refusal: no project with this id, an org member with no grant, a " +
+          "non-member, a member whose access was removed. Deliberately does not " +
+          "say which, so it never reveals whether a project exists — keep both " +
+          "halves of the 'either … or …' and do not split it into two messages. " +
+          "{backLink} is a translated 'Back to dashboard' link " +
+          "(workspace.backToDashboard) rendered inline right before the final " +
+          "period — keep it part of the same sentence.",
         placeholders: { backLink: "The 'Back to dashboard' link, already translated and rendered as a link." },
       },
       "workspace.backToDashboard": {
         description:
           "Link/button text that navigates away from a project error/access screen " +
-          "back to the project list. Reused by the not-on-device, forbidden, not-" +
-          "found and trashed-project screens so every 'return to safety' exit reads " +
-          "identically.",
+          "back to the caller's current org dashboard. Reused by the not-on-device, " +
+          "no-access and trashed-project screens so every 'return to safety' exit " +
+          "reads identically.",
       },
       "workspace.projectSettingsHook.noSessionError": {
         description:
@@ -888,29 +941,41 @@ export const workspace = defineNamespace({
           "Placeholder and accessible name for the free-text input that appears " +
           "when creating a brand-new corpus from the move-to-corpus dialog.",
       },
-      "workspace.trashedProject.title": {
+      "workspace.archivedProject.title": {
         description:
           "Full-screen heading shown instead of the editor when the whole open " +
-          "project itself has been soft-deleted (moved to Trash), not just a file " +
-          "inside it.",
+          "project itself has been archived, not just a file inside it.",
         screenshot: "confirm-dialog",
       },
-      "workspace.trashedProject.movedMessage": {
+      "workspace.archivedProject.archivedMessage": {
         description:
-          "Body text on the trashed-project screen when no record exists of who " +
-          "deleted the project. {name} is the project's own name, already quoted " +
-          "by the template.",
-        placeholders: { name: "The trashed project's display name, already quoted by the template." },
+          "Body text on the archived-project screen when no record exists of who " +
+          "archived the project. Says nothing is lost; the sentence telling the " +
+          "reader what to do next follows it (restoreHint or askHint). {name} is " +
+          "the project's own name, already quoted by the template.",
+        placeholders: { name: "The archived project's display name, already quoted by the template." },
       },
-      "workspace.trashedProject.movedByMessage": {
+      "workspace.archivedProject.archivedByMessage": {
         description:
-          "Body text on the trashed-project screen when the deleting user is " +
-          "known — same sentence as workspace.trashedProject.movedMessage plus " +
-          "who did it. {name} is already quoted by the template.",
+          "Body text on the archived-project screen when the archiving user is " +
+          "known — same sentence as workspace.archivedProject.archivedMessage " +
+          "plus who did it. {name} is already quoted by the template.",
         placeholders: {
-          name: "The trashed project's display name, already quoted by the template.",
-          deletedBy: "The username of whoever moved the project to Trash.",
+          name: "The archived project's display name, already quoted by the template.",
+          deletedBy: "The username of whoever archived the project.",
         },
+      },
+      "workspace.archivedProject.restoreHint": {
+        description:
+          "Second sentence of the archived-project screen for a reader who may " +
+          "restore it (Maintainer or above), beside whom the Restore button is " +
+          "drawn.",
+      },
+      "workspace.archivedProject.askHint": {
+        description:
+          "Second sentence of the archived-project screen for a reader who may " +
+          "NOT restore it, who gets no Restore button — so it names who can " +
+          "instead of asking them to do it themselves.",
       },
       "workspace.createDialog.targetChipsHint": {
         description:

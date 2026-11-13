@@ -180,7 +180,7 @@ describe("GlossaryEditor", () => {
 
     const status = screen.getByRole("status", { name: "Loading terminology" })
     expect(status).toHaveAttribute("aria-busy", "true")
-    expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
+    expect(status.querySelector("[data-slot='loading-cursor']")).not.toBeNull()
     expect(screen.getByTestId("loading-panel-template")).toBeInTheDocument()
     expect(screen.queryByText("grace")).not.toBeInTheDocument()
   })
@@ -563,8 +563,8 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
   })
 
   it.each([
-    [100, "viewer", /Viewers cannot perform this action — you need at least Project lead access/],
-    [400, "contributor", /Contributors cannot perform this action — you need at least Project lead access/],
+    [100, "viewer", /Viewers cannot perform this action — you need at least Project Lead access/],
+    [400, "contributor", /Contributors cannot perform this action — you need at least Project Lead access/],
   ])("keeps the MANAGEMENT controls visible but disabled for level %i, with the reason once under the toolbar", async (level, name, tip) => {
     renderAs(hydrated(level, name))
 
@@ -640,7 +640,7 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
     const merge = screen.getByRole("button", { name: "Merge duplicates" })
     expect(merge).toBeDisabled()
     expect(screen.getByTestId("terminology-locked")).toHaveTextContent(
-      /Contributors cannot perform this action — you need at least Project lead access/,
+      /Contributors cannot perform this action — you need at least Project Lead access/,
     )
     fireEvent.click(merge)
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
@@ -663,7 +663,7 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
     renderAs(hydrated(500, "project_lead", 600))
 
     expect(screen.getByTestId("terminology-locked")).toHaveTextContent(
-      /Project leads cannot perform this action — you need at least Maintainer access/,
+      /Project Leads cannot perform this action — you need at least Maintainer access/,
     )
   })
 

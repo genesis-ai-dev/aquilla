@@ -5,7 +5,7 @@ import { ChevronLeft } from "lucide-react"
 import { VersionBadge } from "@/components/VersionBadge"
 import { WelcomeStep } from "@/components/onboarding/steps/WelcomeStep"
 import { PrivacyStep } from "@/components/onboarding/steps/PrivacyStep"
-import { hasAnalyticsConsentBeenSet } from "@/lib/analytics-consent"
+import { readSignupAnalyticsChoice } from "@/lib/signup-analytics-choice"
 
 import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
 import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
@@ -51,7 +51,7 @@ export function Signup() {
   const [mode, setMode] = useState<"signup" | "login" | "forgot">("signup")
   const [step, setStep] = useState<1 | 2 | 3>(() =>
     hasStartedSignup()
-      ? hasAnalyticsConsentBeenSet() ? 3 : 2
+      ? readSignupAnalyticsChoice() !== null ? 3 : 2
       : 1,
   )
   const [visitedSignup, setVisitedSignup] = useState(step === 3)
@@ -72,7 +72,7 @@ export function Signup() {
     <div className="mb-8 flex justify-center gap-2" aria-label={t("onboarding.wizard.stepProgress", { step, total: 3 })}>
       {[1, 2, 3].map(n => <span key={n} className={`size-2 rounded-full ${n <= step ? "bg-primary" : "bg-muted"}`} />)}
     </div>
-    {step === 1 && <><WelcomeStep onNext={() => { markSignupStarted(); if (hasAnalyticsConsentBeenSet()) openSignup(); else setStep(2) }} /><p className="mt-6 text-center text-sm"><Link to={loginPath({ next })}>{t("auth.join.alreadyHaveAccount")} {t("common.logIn")}</Link></p></>}
+    {step === 1 && <><WelcomeStep onNext={() => { markSignupStarted(); if (readSignupAnalyticsChoice() !== null) openSignup(); else setStep(2) }} /><p className="mt-6 text-center text-sm"><Link to={loginPath({ next })}>{t("auth.join.alreadyHaveAccount")} {t("common.logIn")}</Link></p></>}
     {step === 2 && <PrivacyStep onNext={openSignup} onBack={() => setStep(1)} />}
     {visitedSignup && <div hidden={step !== 3}>
     <h1 className="mb-6 text-center text-2xl font-semibold">
@@ -80,7 +80,7 @@ export function Signup() {
     </h1>
     <div className="flex flex-col gap-6">
       {billing.kind === "invalid" && <p role="alert">{t("onboarding.wizard.billingInvalid")}</p>}
-      {mode === "signup" && <FrontierSignupForm onSuccess={complete} onSwitchToLogin={(value) => {
+      {mode === "signup" && <FrontierSignupForm returnTo={next} onSuccess={complete} onSwitchToLogin={(value) => {
         setIdentifier(value)
         setMode("login")
       }} />}

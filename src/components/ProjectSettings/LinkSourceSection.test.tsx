@@ -29,6 +29,10 @@ import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { UserError } from "@/lib/errors/user-error"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { isLinkSeedFailed, resetLinkSeedStatusForTests } from "@/lib/sync/link-seed-status"
+import {
+  adoptedFilesAwaitingIdmlAlignment,
+  resetAdoptedIdmlAlignmentForTests,
+} from "@/lib/idml/link-adopted-align"
 import { pickSelectOption } from "@/test-utils/select"
 import { INHERIT_DEFAULTS } from "@/lib/sync/inherited-settings"
 import { LinkSourceSection } from "./LinkSourceSection"
@@ -173,6 +177,7 @@ beforeEach(() => {
   linkProjectSource.mockReset()
   triggerLinkSync.mockReset()
   resetLinkSeedStatusForTests()
+  resetAdoptedIdmlAlignmentForTests()
   loadLinkSourcePreview.mockReset()
   loadLinkSourcePreview.mockResolvedValue(previewOf("English Source", UPSTREAM_FILES))
   loadUpstreamLaneChoices.mockReset()
@@ -271,7 +276,7 @@ describe("LinkSourceSection", () => {
     renderSection(300)
 
     expect(
-      screen.getByText("Project lead or above required to link a source project."),
+      screen.getByText("Project Lead or above required to link a source project."),
     ).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Review what will be added" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Link source project" })).toBeNull()
@@ -1088,6 +1093,7 @@ describe("LinkSourceSection — replacing the source of a file already here (AQU
       inherit,
     })
     expect(fetchLinkFileMatches).not.toHaveBeenCalled()
+    expect(adoptedFilesAwaitingIdmlAlignment(PROJECT_ID)).toEqual([])
   })
 
   // WHY: the whole feature. Turning it on has to say what will happen first,
@@ -1131,6 +1137,9 @@ describe("LinkSourceSection — replacing the source of a file already here (AQU
       replaceFiles: [{ upstreamFileId: "up-MRK", fileId: "own-mrk" }],
       inherit,
     })
+    // The file now takes its source from the link; the workspace places an IDML
+    // file's kept translations into that source (useAdoptedIdmlAlignment).
+    expect(adoptedFilesAwaitingIdmlAlignment(PROJECT_ID)).toEqual(["own-mrk"])
   })
 
   // WHY: sharing a name is not sharing content. A replace the server says makes

@@ -129,12 +129,10 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "audio.recordingModal.recordingStatus is the present participle shown beside a " +
     "pulsing dot while the microphone is live. Noun vs progressive verb: English " +
     "spells both 'Recording', almost nothing else does.",
-  "projectSettings.gitSync.autoSyncSwitch":
-    "The label of the Git sync card's on/off switch, a standalone noun phrase at the " +
-    "start of a row ('Auto-sync'). projectSettings.field.autoSync is the lower-case " +
-    "name of the same setting read inside the 'Saved …' sentence that lists what " +
-    "changed. A capitalized label and a mid-sentence list item differ in case and, " +
-    "in many languages, in grammatical form.",
+  "auth.login.title":
+    "Names the authentication form as a heading, while common.logIn is an " +
+    "imperative action. Locales may nominalize this heading (for example " +
+    "German Anmeldung) while retaining a verb on the action (Anmelden).",
   "auth.login.submitDefault":
     "The submit button of the sign-in form. auth.login.title is the heading naming " +
     "the whole form. Languages that nominalize headings ('Anmeldung') while keeping " +
@@ -142,7 +140,7 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   "search.mode.replace":
     "Names the find-and-replace mode, a term of art paired with 'Find' and usually " +
     "fixed by local software convention. audio.clone.replaceButton is an everyday " +
-    "imperative that swaps an attached reference clip for another file.",
+    "imperative that swaps something already set (existing audio, a saved key) for a new one.",
   "editor.milestone.vocab.startLabel":
     "Names the synthetic first division in the milestone navigator — a noun for " +
     "'the beginning of the file'. audio.recordingModal.startButton is the " +
@@ -235,13 +233,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "translator render this column with interface-language wording, which is " +
     "wrong for a content column, and several languages distinguish the two " +
     "senses lexically rather than by context.",
-  "org.addLanguagePopover.triggerLabel":
-    "Visible text of a small chip BUTTON beside a project row that opens the " +
-    "add-a-language-lane popover; it names an action's object, not a heading. " +
-    "org.orgHome.table.languageHeader is the noun heading of a table column, and " +
-    "language.label names the interface-language switcher. Button object, column " +
-    "heading, and interface-chrome name take different forms in languages that " +
-    "inflect for grammatical role, so one shared string cannot serve all three.",
 
   // -- AQU-511/AQU-832 org-namespace dedupe (WS-11) --------------------------
   // The org.ts sweep left 41+ keys re-minting English another namespace (or
@@ -368,9 +359,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   "projectSettings.sourceLink.modeClone":
     "Badge naming the AD-9 link-mode ('Clone' vs 'Live') on a linked project's " +
     "Source Link card, and reused for the same radio option in the create-project " +
-    "dialog. audio.library.cloneEngineLabel names a voice-cloning TTS engine in " +
-    "the voice library's engine picker. A project-linking term of art and an " +
-    "audio-engine brand-ish label that happen to share the English word 'Clone'.",
+    "dialog. audio.library.cloneEngineLabel labels a quick-cloned voice (a copy of " +
+    "a real person's voice) in the Voices panel. A project-linking term of art and " +
+    "a kind-of-voice label that happen to share the English word 'Clone'.",
+  "audio.newVoice.tabClone":
+    "Tab label naming a kind of voice in the New voice dialog (a quick clone, " +
+    "next to TTS voice / Characters / Train voice) — a noun phrase in most " +
+    "languages. audio.elevenLabs.cloneButton is the imperative action button that " +
+    "starts an ElevenLabs clone. A tab name and a command.",
   "projectSettings.section.experimental":
     "Section/nav-group heading for this project's device-local experimental " +
     "feature flags. autopilot.settings.experimentalTitle is the same heading for " +
@@ -525,6 +521,17 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "or not set}'), never read on its own. A standalone Title-Case hint and an " +
     "inline lower-case template fragment take different forms in languages " +
     "that case- or register-mark that distinction.",
+  "rules.checkDrawer.approveSpelling":
+    "Imperative button on a spelling card in the file-check panel (AQU-1737) " +
+    "that accepts a suspected word form as this project's own spelling, " +
+    "clearing every occurrence of it at once. rules.surface.approveButton " +
+    "promotes a project-level translation rule up to org scope, agent.approve " +
+    "accepts an agent's staged proposal, and editor.station.approve casts an " +
+    "audio-validation vote — four independent human-gate acts on four " +
+    "different kinds of object, already split from each other at " +
+    "agent.approve above. They share only the English verb 'Approve', and a " +
+    "language that inflects the act by what is being approved cannot borrow " +
+    "one translation for the others.",
   "rules.editor.mode.forbidden":
     "One value of the fixed three-option RULE MODE enum (Forbidden/Required/" +
     "Must match) selected in RuleEditor's Mode field, describing how a " +
@@ -592,14 +599,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "'Approve'.",
   "agent.memory.tabApproved":
     "Tab-trigger heading over the list of already-approved agent-authored " +
-    "memories, in the translation-agent's Memory tab (paired with sibling tabs " +
-    "'Proposed' / 'Project brief') — the counterpart split to agent.memory." +
+    "memories, in the translation-agent's Memory tab (paired with the sibling " +
+    "tab 'Proposed') — the counterpart split to agent.memory." +
     "tabProposed just below, against the same unrelated autopilot evidence-" +
     "status enum documented at org.projectOverview.columnApproved above.",
   "agent.memory.tabProposed":
     "Tab-trigger heading over the queue of agent-authored memories awaiting human " +
-    "review, in the translation-agent's Memory tab (paired with sibling tabs " +
-    "'Approved' / 'Project brief'). autopilot.evidence.status.proposed is one " +
+    "review, in the translation-agent's Memory tab (paired with the sibling " +
+    "tab 'Approved'). autopilot.evidence.status.proposed is one " +
     "value of the fixed, unrelated evidence-review lifecycle enum (Proposed/" +
     "Applied/Rejected/Superseded/Approved/Archived/Unknown) in the autopilot " +
     "readiness inspector, the same kind of split already documented for " +
@@ -786,6 +793,53 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "same operation-name-vs-imperative-button split already documented for " +
     "nav.outbox.eventEdit above — a different feature (the outbox diagnostics feed) " +
     "with the identical register distinction.",
+  "editor.station.helpEditTerm":
+    "Term heading (a <dt>) in the Station's (i) explanation, naming the group of " +
+    "cut-and-insert controls (Keep this, Delete this, Insert audio here) beside its " +
+    "sibling headings 'Select', 'Trim', 'Volume', 'Fades', 'Saving' and 'Keys' — a " +
+    "nominalized glossary label, not an action. common.edit is the imperative " +
+    "button that opens editing. The same heading-against-imperative split " +
+    "documented for nav.outbox.eventEdit and agent.proposal.kind.edit above: a " +
+    "language that nominalizes the heading writes it differently from the button.",
+  "editor.station.start":
+    "Noun label in the Station's transport, before the kept part's start time and " +
+    "paired with 'End' — 'the start' of the kept part, clicked to type a time. " +
+    "audio.recordingModal.startButton is the imperative button that begins " +
+    "recording. The same noun-against-verb split documented for " +
+    "editor.milestone.vocab.startLabel above; languages that spell the noun and " +
+    "the imperative differently need the two apart.",
+  "editor.station.approved":
+    "State adjective in the Station's heading after a check mark ('✓ Approved', " +
+    "beside 'Waiting' and 'Waiting · 1 of 2'): the open recording has the approvals " +
+    "the project asks for, a term of the audio-validation vote. " +
+    "autopilot.evidence.status.approved is one member of an AI agent's evidence-" +
+    "review enum — the unrelated review pipeline documented at " +
+    "org.projectOverview.columnApproved above; a recording's validation state and " +
+    "an evidence item's review state are different referents.",
+  "editor.station.hApproved":
+    "History row in the Station naming an EVENT — someone approved the recording — " +
+    "read with who and when ('Approved · Ana · Oct 30'), a past-tense act beside " +
+    "sibling rows 'Recorded', 'Trimmed', 'Deleted'. editor.station.approved " +
+    "is the current STATE in the heading; autopilot.evidence.status.approved is an " +
+    "AI evidence-review status. Languages that inflect an act done by someone " +
+    "differently from a state label (and from a review-pipeline enum) write the " +
+    "three apart, so none can borrow another's translation.",
+  "editor.station.approve":
+    "Imperative button in the Station's heading that casts this person's approval " +
+    "vote on the open recording — the audio-validation act the project counts " +
+    "('Waiting · 1 of 2' → '✓ Approved'), the same act as the take's vote on the " +
+    "timeline. rules.surface.approveButton promotes a project-level translation " +
+    "rule up to org scope and agent.approve accepts an agent's staged proposal: " +
+    "the three independent human-gate actions already split at agent.approve " +
+    "above, sharing only the English verb.",
+  "editor.station.hDeleted":
+    "Title-case History row in the Station naming what happened to the recording " +
+    "— it was deleted — read with who and when beside 'Trimmed'/'Approved' rows. " +
+    "comments.file.deletedBadge is lower-case 'deleted', a small inline status " +
+    "badge on a file reference inside a comment thread. A past-tense event line " +
+    "and a lower-case inline badge take different forms in languages that case- " +
+    "or register-mark that distinction, the split already documented for " +
+    "org.archivedProjects.deletedColumnLabel above.",
   "agent.proposal.kind.validate":
     "Badge naming the KIND of a staged agent-authored proposal row ('cell.validate') " +
     "in ProposalCard, the same noun-phrase operation-name register as its sibling " +
@@ -802,51 +856,19 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "has already arrived at. Same English words, different grammatical role — " +
     "the same navigate-vs-heading split already documented for the language " +
     "switcher in namespaces/language.ts.",
-  "terminology.livingMemory.section.brief.title":
-    "Index-row title naming the translation brief — the skopos document, a " +
-    "translation-studies term of art that several languages render with a " +
-    "loanword or fixed phrase. autopilot.graph.node.summarize shows 'Brief' as " +
-    "the caption of the summarize STAGE in the autopilot pipeline graph — a " +
-    "process-step label, not the document, and free to translate as 'summary'.",
   "org.projectOverview.plan.statusNotStarted":
     "Status of a PLANNING UNIT on the project dashboard's plan board \u2014 a " +
     "book, episode or document nobody has put any content into yet. " +
     "autopilot.status.notStarted is a value of the run-status enum for a " +
-    "background PROCESS that has not run; terminology.livingMemory.section." +
-    "brief.statusNone is the authoring state of one document. All three are " +
-    "'not started' in English and routinely take different verbs, participles " +
-    "or genders elsewhere \u2014 a unit of planned work, a job that has not " +
-    "fired, and an unwritten document are three different subjects.",
-  "terminology.livingMemory.section.brief.statusNone":
-    "Hint on the Living Memory index saying the brief document has not been " +
-    "begun — an authoring state of a document. autopilot.status.notStarted is a " +
-    "value of the run-status enum for a background PROCESS that has not run " +
-    "yet; document-authoring and process-lifecycle states often take different " +
-    "verbs or participles.",
-  "terminology.livingMemory.section.brief.statusDraft":
-    "Hint on the Living Memory index saying the brief document is partially " +
-    "filled in — a document maturity state ('a draft'). " +
-    "autopilot.graph.node.draft labels the autopilot DRAFTING step and its " +
-    "produced draft translations (the pipeline-graph caption and the review " +
-    "inspector's card title) — the activity of machine-drafting text, a " +
-    "different sense languages split from 'unfinished document'.",
-  "terminology.livingMemory.section.brief.statusComplete":
-    "Hint on the Living Memory index saying every brief field is filled in — " +
-    "'complete' as document completeness. autopilot.status.complete is the " +
-    "terminal value of the run-status enum — a PROCESS that finished; " +
-    "'filled-in' vs 'finished' are commonly different words outside English.",
-  "terminology.livingMemory.prompt.defaultBadge":
-    "Badge on the prediction-prompt block stating the prompt is the unmodified " +
-    "built-in one — 'default' as a setting state, paired with the sibling " +
-    "Custom badge. org.projectOverview.laneDefaultFallback names the unnamed " +
-    "target LANE shown when a project has no named lanes — a placeholder noun " +
-    "('the default one'), a different grammatical role.",
+    "background PROCESS that has not run. Both are 'not started' in English " +
+    "and routinely take different verbs, participles or genders elsewhere " +
+    "\u2014 a unit of planned work and a job that has not fired are different " +
+    "subjects.",
   "onboarding.preferences.fontSize.default":
     "Option in the app-wide font-size select for the baseline UI scale (root " +
-    "unset, today's sizes). Distinct from terminology.livingMemory.prompt.defaultBadge " +
-    "(a status badge on a built-in prompt) and org.projectOverview.laneDefaultFallback " +
-    "(placeholder name of an unnamed workflow lane). A scale choice, a badge, and a " +
-    "lane noun take different words outside English.",
+    "unset, today's sizes). Distinct from org.projectOverview.laneDefaultFallback " +
+    "(placeholder name of an unnamed workflow lane). A scale choice and a lane noun " +
+    "take different words outside English.",
   "terminology.livingMemory.section.examples.title":
     "Index-row title for the validated-example-pairs section of Living Memory " +
     "— a plain plural noun heading. agent.run.tool.examples is the display " +

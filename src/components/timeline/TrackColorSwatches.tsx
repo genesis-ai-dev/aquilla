@@ -5,10 +5,15 @@
 // each caller). No names on screen, so nothing to translate there; each swatch
 // keeps its colour's name as its accessible name, and the menu's own radio
 // items supply the arrow keys, Enter and the checked state.
+//
+// AQU-2235: each swatch is the colour its track will then SHOW — the strip at
+// the track's far left, its dot and its name bar (chroma 0.14 at the colour's
+// own lightness) — drawn from the same variables, not the raw palette hex.
 
 import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { TRACK_HUES } from "@/lib/timeline/track-colors"
+import { TRACK_DOT_CLASS, TRACK_HUES, trackHueVars } from "@/lib/timeline/track-colors"
+import { cn } from "@/lib/utils"
 
 export function TrackColorSwatches({ onPick }: { onPick: (hueId: string) => void }) {
   const t = useT()
@@ -24,8 +29,11 @@ export function TrackColorSwatches({ onPick }: { onPick: (hueId: string) => void
         >
           <span
             aria-hidden
-            className="size-3.5 rounded-full ring-1 ring-foreground/15 group-data-checked/swatch:ring-2 group-data-checked/swatch:ring-foreground/70 group-data-checked/swatch:ring-offset-1 group-data-checked/swatch:ring-offset-popover"
-            style={{ backgroundColor: hue.hex }}
+            className={cn(
+              "size-3.5 rounded-full ring-1 ring-foreground/15 group-data-checked/swatch:ring-2 group-data-checked/swatch:ring-foreground/70 group-data-checked/swatch:ring-offset-1 group-data-checked/swatch:ring-offset-popover",
+              TRACK_DOT_CLASS,
+            )}
+            style={trackHueVars(hue.id)}
           />
         </MenuPrimitive.RadioItem>
       ))}

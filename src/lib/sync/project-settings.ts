@@ -1,5 +1,5 @@
 import { FRONTIER_API_URL } from "./sync-token"
-import type { ProjectOrgPolicy, ProjectVisibilityFloors } from "./project-org-policy"
+import type { ProjectOrgPolicy, ProjectVisibilityFloors, VisibilityFloorView } from "./project-org-policy"
 import { RETIRED_LANE_SETTINGS_KEYS } from "../../../db/shared/retired-lane-settings"
 import { t } from "@/lib/i18n/standalone"
 import { ROLE, type RoleLevel } from "@/lib/frontier/roles"
@@ -47,6 +47,14 @@ export type CellEditingTier =
   | "maintainer"
 
 /**
+ * AQU-2408: the stored `cellLabelFloor` vocabulary — who may type a label on a
+ * cell. Two rungs by decision (Matt, 2026-11-05); an absent key reads as
+ * maintainer. Same two-copy arrangement as `CellEditingTier`: the server's
+ * copy is `db/shared/cell-label-floor.ts`.
+ */
+export type CellLabelTier = "maintainer" | "project_lead"
+
+/**
  * The synced subset of project-wide fields. Mirrors the server's settings
  * JSON. Top-level keys only — replacing `rules` replaces the whole array.
  *
@@ -70,6 +78,12 @@ export interface ProjectWideSettings {
    */
   sourceTextDirection?: DirectionMode
   targetTextDirection?: DirectionMode
+  /** AQU-2342: THE project instructions every AI draft reads (copilot,
+   *  Autopilot, the agent). Absent → composed on read from the legacy sources
+   *  (db/shared/translation-instructions.ts resolveTranslationInstructions). */
+  translationInstructions?: string
+  /** Legacy (AQU-2342): no prompt reads it except as a migrate-on-read source
+   *  for `translationInstructions`. */
   systemPrompt?: string
   /**
    * AQU-2259: the team's AI drafting settings — the "AI Instructions" card
@@ -130,6 +144,14 @@ export interface ProjectWideSettings {
    */
   rosterViewMinRole?: number
   memberProgressViewMinRole?: number
+  /**
+   * AQU-2305: this project's own floor for importing a NEW source file — a
+   * role level, stricter-only over its org's `importMinRole` (AQU-2304). The
+   * project enforces the higher of the two, so a value at or below the org's
+   * means nothing. ABSENT means "follow the organization"; choosing the org's
+   * floor deletes the key.
+   */
+  importMinRole?: number
   validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
@@ -177,6 +199,14 @@ export interface ProjectWideSettings {
    * they want the affordance back (Sam, 2026-08-29).
    */
   cellEditingFloor?: CellEditingTier
+  /**
+   * AQU-2408: who may type a label on a cell (the Label row in the cell's
+   * expansion panel). Absent = maintainer. A product rule enforced where the
+   * field is drawn (`src/lib/cell-label-gate.ts`); the sync perimeter applies
+   * only the event's static floor, project lead. See
+   * docs/decisions/0007-cell-labels-are-metadata-never-cast.md.
+   */
+  cellLabelFloor?: CellLabelTier
   /**
    * AQU-646 stage 2: may this project's timelines be RESTRUCTURED — tracks
    * added and deleted, grouped into folders, recoloured?
@@ -301,6 +331,14 @@ export interface ProjectWideSettings {
    * See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
    */
   bibleResourcesEnabled?: boolean
+  /**
+   * The team's default Parallel Bibles versions (helloao translation ids, in
+   * panel order). A translator with no pins of their own for this project sees
+   * these. Project lead (500)+ may set them — a patch that changes only this
+   * key is a carve-out below the maintainer floor, validated and re-checked by
+   * the server (db/shared/parallel-bible-versions.ts).
+   */
+  parallelBibleVersions?: string[]
   /**
    * AQU-1686: one explicit switch per Bible data enrichment
    * (db/shared/bible-enrichments.ts). A missing id means that enrichment's
@@ -472,6 +510,18 @@ export function resolveTimingLocked(
 }
 
 /**
+ * The role level `cellLabelFloor` admits. Never null: an absent key, and any
+ * value this build does not recognise, read as MAINTAINER — the highest rung
+ * offered, so a tier a newer client invents can never LOWER the floor here.
+ * Keep in lock-step with `db/shared/cell-label-floor.ts`.
+ */
+export function resolveCellLabelFloor(
+  settings: Pick<ProjectWideSettings, "cellLabelFloor"> | null | undefined,
+): RoleLevel {
+  return settings?.cellLabelFloor === "project_lead" ? ROLE.PROJECT_LEAD : ROLE.MAINTAINER
+}
+
+/**
  * The role level `cellEditingFloor` admits, or `null` for "nobody".
  *
  * `null` is the answer for "none", for an absent key, and for any value this
@@ -522,6 +572,13 @@ export function settingsEditorName(editor: ProjectSettingsEditor | undefined): s
 }
 
 export interface ProjectSettingsResponse {
+  /**
+   * AQU-2342: the agent's legacy free-text brief (`project_briefs`), sent while
+   * the project has stored no `translationInstructions`, so the copilot
+   * migrates on read from exactly the sources the server paths do. "" or
+   * absent otherwise (and on a server that predates it).
+   */
+  legacyProjectBriefText?: string
   version: number
   updatedAt: string
   updatedBy: ProjectSettingsEditor
@@ -560,6 +617,8 @@ export interface ProjectSettingsResponse {
   orgPolicy?: ProjectOrgPolicy
   /** AQU-1771: each visibility floor as the org sets it, as this project sets it, and as enforced. */
   visibilityFloors?: ProjectVisibilityFloors
+  /** AQU-2305: the import floor as the org sets it, as this project sets it, and as enforced. */
+  importFloor?: VisibilityFloorView
   /** Lane rows. Optional: a server that predates AQU-1418 omits them. */
   lanes?: ProjectLaneView[]
 }

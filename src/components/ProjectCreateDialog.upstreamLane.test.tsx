@@ -89,7 +89,7 @@ vi.mock("@/lib/sync/archive", async (importOriginal) => {
   }
 })
 vi.mock("@/lib/store/project-index", () => ({ createProject: vi.fn().mockResolvedValue(undefined) }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 
 import { loadUpstreamLaneChoices } from "@/lib/sync/link-source-preview"
 import { linkProjectSource } from "@/lib/sync/archive"
@@ -104,6 +104,8 @@ const LANES_TWO = [
 
 function fillBasics(): void {
   fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+  // The wizard asks where the project comes from first (AQU-2105).
+  fireEvent.click(screen.getByTestId("project-source-scratch"))
   fireEvent.change(screen.getByPlaceholderText("My translation project"), {
     target: { value: "Chaluba NT" },
   })

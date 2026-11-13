@@ -53,6 +53,7 @@ import {
   bulkUploadMorphRows,
   publishStagedImport,
   reconcileSourceImport,
+  reviseSourceImport,
   type MorphRow,
   type TargetCommit,
 } from "./sync/bulk-import"
@@ -67,6 +68,7 @@ import type { PartnerImportEdition, PartnerImportProgress } from "./partners/typ
 import { extractHtmlStrings } from "./parsers/html"
 import { extractEpubImport, type EpubSpineMember } from "./parsers/epub"
 import { bulkUploadSource, BULK_IMPORT_CHUNK, type BulkImportCell } from "./sync/bulk-import"
+import { canImportAsRevision, revisionUnitsFromCells } from "./sync/revision-import"
 import { importCellEventId, releaseImportSession, resolveImportSession } from "./sync/import-session"
 import {
   assertSourceUploadByteLength,
@@ -560,8 +562,9 @@ export interface ImportContext {
   /** Existing files selected for safe unit-identity reconciliation. Keys use
    * the same normalized book-code/name vocabulary as skipKeys. */
   reimportFileIds?: ReadonlyMap<string, string>
-  /** IDML Update Existing: after reconcile, place each kept translation into
-   *  the new style runs. Absent when AI completion is not configured. */
+  /** IDML re-import that keeps translations (update, or an updated copy):
+   *  after reconcile, place each kept translation into the new style runs.
+   *  Absent when AI completion is not configured. */
   alignReimportedIdml?: IdmlReimportAlignHost
   /** Replaces the upload phase label, for example while styles are aligning. */
   onPhase?: (label: string) => void
@@ -1892,7 +1895,30 @@ export async function emitParsedFile(
     onProgress: ctx.onCellEnqueued,
     signal: ctx.signal,
   }
-  if (existingFileId) {
+  // AQU-2459: a fresh import of a filter-backed format travels as one
+  // revision; everything else keeps the N-row path until its format is
+  // wrapped onto the contract.
+  const reimport = !existingFileId
+    ? false
+    : sidebar?.fork && sidebar.sourceFileId
+      ? "fork" as const
+      : sidebar?.reviewChangedSource
+        ? "review" as const
+        : "update" as const
+  const revision = canImportAsRevision({
+    fileType,
+    reimport,
+    hasTargets: targets.length > 0,
+    hasOriginalBytes: result.rawBytes !== undefined || result.rawSource !== undefined,
+    cells,
+  })
+    ? { stamp: shared.file.parserVersion, units: revisionUnitsFromCells(cells) }
+    : undefined
+
+  if (existingFileId && revision) {
+    // AQU-2459: "Update existing" aligns by content as one revision.
+    await reviseSourceImport({ ...shared, revision })
+  } else if (existingFileId) {
     await reconcileSourceImport({
       ...shared,
       ...(sidebar?.reviewChangedSource ? { reviewChangedSource: true as const } : {}),
@@ -1903,10 +1929,13 @@ export async function emitParsedFile(
   } else {
     await bulkUploadSource({
       ...shared,
+      ...(revision ? { revision } : {}),
       ...(!existingFileId && ctx.deferPublication ? { deferPublication: true } : {}),
     })
   }
 
+  // Update and "Make updated copy" both keep the translations. A blank copy
+  // has no existing file here, so it does not try to place styles.
   if (existingFileId && fileType === "idml" && ctx.alignReimportedIdml) {
     try {
       await alignReimportedIdmlFile({

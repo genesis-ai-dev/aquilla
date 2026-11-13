@@ -19,6 +19,7 @@ import type { Env } from "../types"
 import { seedUser, jwtFor } from "./helpers/db"
 import { FEEDBACK_MAX_PER_USER } from "../utils/rate-limit"
 import { MAX_FEEDBACK_DESCRIPTION_CHARS } from "../routes/feedback"
+import { buildFeedbackRouteEmail } from "../services/email"
 
 const WEBHOOK = "https://discord.example/api/webhooks/1/secret-token"
 
@@ -82,6 +83,9 @@ const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
 
 interface SubmitOptions {
   description?: string
+  whatHappened?: string
+  tryingTo?: string
+  expected?: string
   route?: string
   projectId?: string
   fileId?: string
@@ -94,6 +98,9 @@ interface SubmitOptions {
 async function submit(opts: SubmitOptions = {}): Promise<Response> {
   const form = new FormData()
   if (opts.description !== undefined) form.set("description", opts.description)
+  if (opts.whatHappened !== undefined) form.set("whatHappened", opts.whatHappened)
+  if (opts.tryingTo !== undefined) form.set("tryingTo", opts.tryingTo)
+  if (opts.expected !== undefined) form.set("expected", opts.expected)
   if (opts.route !== undefined) form.set("route", opts.route)
   if (opts.projectId !== undefined) form.set("projectId", opts.projectId)
   if (opts.fileId !== undefined) form.set("fileId", opts.fileId)
@@ -150,12 +157,57 @@ describe("POST /api/v2/feedback", () => {
     expect(post.url).toBe(WEBHOOK)
     const embed = post.payload.embeds[0]
     expect(embed.title).toContain("fb-basic")
-    expect(embed.description).toBe("The editor eats my first keystroke.")
+    // Legacy `description` (older clients) is read as "What happened?".
+    expect(embed.description).toBe("**What happened?**\nThe editor eats my first keystroke.")
     expect(fieldValue(post, "User")).toMatch(/fb-basic \(id \d+\)/)
     expect(fieldValue(post, "User")).toContain("fb-basic@example.com")
-    expect(fieldValue(post, "Route")).toBe("/project/p1/file/f1")
+    // p1 is not a project this user can read, so there is no name to show:
+    // the link text is the path, and the file falls back to the id they sent.
+    expect(fieldValue(post, "Page")).toBe("[/project/p1/file/f1](https://aquilla.app/project/p1/file/f1)")
     expect(fieldValue(post, "File")).toBe("f1")
     expect(fieldValue(post, "Session replay")).toBe("https://posthog.example/replay/abc")
+  })
+
+  it("shows each of the three answers under its own heading on the card", async () => {
+    const jwt = await signedInUser("fb-three")
+    const discord = mockDiscord()
+
+    const res = await submit({
+      whatHappened: "The page went blank.",
+      tryingTo: "Export my project.",
+      expected: "A download.",
+      jwt,
+      overrides: withWebhook,
+    })
+
+    expect(res.status).toBe(201)
+    expect(discord.posted[0].payload.embeds[0].description).toBe(
+      "**What happened?**\nThe page went blank.\n\n" +
+        "**What were you trying to do?**\nExport my project.\n\n" +
+        "**What did you expect to happen?**\nA download.",
+    )
+  })
+
+  it("sends with only What happened filled, and prefers it over a legacy description", async () => {
+    const jwt = await signedInUser("fb-only")
+    const discord = mockDiscord()
+
+    const res = await submit({ whatHappened: "Only this.", description: "ignored", jwt, overrides: withWebhook })
+
+    expect(res.status).toBe(201)
+    const text = discord.posted[0].payload.embeds[0].description
+    expect(text).toBe("**What happened?**\nOnly this.")
+    expect(text).not.toContain("trying to do")
+  })
+
+  it("rejects an over-long optional answer", async () => {
+    const jwt = await signedInUser("fb-longopt")
+    const res = await submit({
+      whatHappened: "ok",
+      expected: "x".repeat(MAX_FEEDBACK_DESCRIPTION_CHARS + 1),
+      jwt,
+    })
+    expect(res.status).toBe(400)
   })
 
   it("names the org and project when the reporter can read the project", async () => {
@@ -187,6 +239,102 @@ describe("POST /api/v2/feedback", () => {
     expect(fieldValue(post, "Org")).toBe("Wycliffe Test Org (id 9101)")
     expect(fieldValue(post, "Project")).toBe("Burmese NT (fb-ctx-proj)")
     expect(fieldValue(post, "User")).toContain(`(id ${userId})`)
+  })
+
+  it("names the file and links the page to the project on aquilla.app (AQU-2466)", async () => {
+    const jwt = await signedInUser("fb-file")
+    const userId = nextUserId - 1
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id, billing_scope) VALUES (?, ?, ?, 'team')",
+    )
+      .bind(9105, "File Org", userId)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, ?, ?)",
+    )
+      .bind("fb-file-proj", "Burmese NT", 9105, userId)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO files (id, project_id, name, event_id) VALUES (?, ?, ?, ?)",
+    )
+      .bind("fb-file-1", "fb-file-proj", "MAT - Matthew", "ev-fb-file-1")
+      .run()
+    const discord = mockDiscord()
+
+    const res = await submit({
+      description: "Verse 3 will not save.",
+      route: "/project/fb-file-proj/file/fb-file-1",
+      projectId: "fb-file-proj",
+      fileId: "fb-file-1",
+      jwt,
+      overrides: withWebhook,
+    })
+
+    expect(res.status).toBe(201)
+    const post = discord.posted[0]
+    expect(fieldValue(post, "File")).toBe("MAT - Matthew")
+    expect(fieldValue(post, "Page")).toBe(
+      "[Burmese NT](https://aquilla.app/project/fb-file-proj/file/fb-file-1)",
+    )
+    expect(JSON.stringify(post.payload)).not.toContain('"Route"')
+  })
+
+  it("does not name a file from another project, even when the reporter can read this one", async () => {
+    const jwt = await signedInUser("fb-file-other")
+    const userId = nextUserId - 1
+    await seedUser(nextUserId++, "fb-file-other-owner")
+    const ownerId = nextUserId - 1
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, ?)",
+    )
+      .bind("fb-mine", "Mine", userId)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, ?)",
+    )
+      .bind("fb-theirs", "Theirs", ownerId)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO files (id, project_id, name, event_id) VALUES (?, ?, ?, ?)",
+    )
+      .bind("fb-theirs-file", "fb-theirs", "Hidden File Name", "ev-fb-theirs-file")
+      .run()
+    const discord = mockDiscord()
+
+    await submit({
+      description: "Probing files.",
+      route: "/project/fb-mine",
+      projectId: "fb-mine",
+      fileId: "fb-theirs-file",
+      jwt,
+      overrides: withWebhook,
+    })
+
+    const card = JSON.stringify(discord.posted[0].payload)
+    expect(card).not.toContain("Hidden File Name")
+    expect(fieldValue(discord.posted[0], "File")).toBe("fb-theirs-file")
+  })
+
+  it("leaves the File field out, and still links the page, when there is no file", async () => {
+    const jwt = await signedInUser("fb-nofile")
+    const discord = mockDiscord()
+
+    const res = await submit({ description: "Dashboard is blank.", route: "/projects", jwt, overrides: withWebhook })
+
+    expect(res.status).toBe(201)
+    expect(fieldValue(discord.posted[0], "File")).toBeUndefined()
+    expect(fieldValue(discord.posted[0], "Page")).toBe("[/projects](https://aquilla.app/projects)")
+  })
+
+  it("shows an off-site route as plain text, never as a link", async () => {
+    const jwt = await signedInUser("fb-offsite")
+    const discord = mockDiscord()
+
+    await submit({ description: "Hmm.", route: "//evil.example/phish", jwt, overrides: withWebhook })
+
+    const page = fieldValue(discord.posted[0], "Page")
+    expect(page).toBe("//evil.example/phish")
+    expect(page).not.toContain("](")
   })
 
   it("does not reveal the org or project name of a project the reporter cannot read", async () => {
@@ -239,7 +387,7 @@ describe("POST /api/v2/feedback", () => {
 
     expect(fieldValue(discord.posted[0], "Org")).toBe("Member Org (id 9103)")
     expect(fieldValue(discord.posted[0], "Project")).toBeUndefined()
-    expect(fieldValue(discord.posted[0], "Route")).toBe("/orgs/9103/members")
+    expect(fieldValue(discord.posted[0], "Page")).toBe("[/orgs/9103/members](https://aquilla.app/orgs/9103/members)")
   })
 
   it("does not name an org the reporter does not belong to", async () => {
@@ -342,7 +490,7 @@ describe("POST /api/v2/feedback", () => {
     const post = discord.posted[0]
     expect(post.payload.embeds[0].description.length).toBeLessThanOrEqual(4096)
     expect(post.payload.embeds[0].description).toContain("description.txt")
-    expect(await post.files["files[0]"].text()).toBe(text)
+    expect(await post.files["files[0]"].text()).toBe(`What happened?\n${text}`)
   })
 
   it("does not let a description ping @everyone", async () => {
@@ -417,5 +565,50 @@ describe("POST /api/v2/feedback", () => {
     }
     const blocked = await submit({ description: "one too many", jwt })
     expect(blocked.status).toBe(429)
+  })
+})
+
+describe("buildFeedbackRouteEmail page and file rows (AQU-2466)", () => {
+  const base = {
+    answers: { whatHappened: "Verse 3 will not save." },
+    username: "reporter",
+    userEmail: "reporter@example.com",
+    orgName: "File Org",
+    sentAt: "2026-11-09T17:00:00.000Z",
+  }
+
+  it("links the Page row to aquilla.app behind the project name and shows the file name", () => {
+    const { html, text } = buildFeedbackRouteEmail({
+      ...base,
+      projectName: "Burmese NT",
+      route: "/project/p1/file/f1",
+      fileId: "f1",
+      fileName: "MAT - Matthew",
+    })
+
+    expect(html).toContain('<a href="https://aquilla.app/project/p1/file/f1" style="color: #2563eb;">Burmese NT</a>')
+    expect(html).toContain("MAT - Matthew")
+    expect(html).not.toContain(">f1<")
+    expect(text).toContain("Page: Burmese NT <https://aquilla.app/project/p1/file/f1>")
+    expect(text).toContain("File: MAT - Matthew")
+  })
+
+  it("leaves the File row out when the report has no file, and links the path itself", () => {
+    const { html, text } = buildFeedbackRouteEmail({ ...base, route: "/orgs/7/members" })
+
+    expect(text).not.toMatch(/^File:/m)
+    expect(html).not.toContain(">File<")
+    expect(html).toContain('<a href="https://aquilla.app/orgs/7/members" style="color: #2563eb;">/orgs/7/members</a>')
+  })
+
+  it("falls back to the file id when no name was found", () => {
+    const { text } = buildFeedbackRouteEmail({ ...base, route: "/project/p1/file/f1", fileId: "f1" })
+    expect(text).toContain("File: f1")
+  })
+
+  it("does not link an off-site route", () => {
+    const { html, text } = buildFeedbackRouteEmail({ ...base, route: "https://evil.example/x" })
+    expect(html).not.toContain("<a ")
+    expect(text).toContain("Page: https://evil.example/x")
   })
 })

@@ -146,11 +146,9 @@ export const agent = defineNamespace({
     "agent.card.tool.lintRules.description":
       "Runs this project's own rules over every draft before it is staged.",
 
-    "agent.card.read.brief.label": "Translation brief",
-    "agent.card.read.brief.description": "The project's purpose, audience, and standards.",
-    "agent.card.read.styleGuide.label": "Style guide",
-    "agent.card.read.styleGuide.description":
-      "The standing instructions for how this project should read.",
+    "agent.card.read.instructions.label": "Project instructions",
+    "agent.card.read.instructions.description":
+      "How the team wants this project translated — the text every AI draft follows.",
     "agent.card.read.termbase.label": "Terminology",
     "agent.card.read.termbase.description": "The agreed renderings for this project's key terms.",
     "agent.card.read.livingMemory.label": "Living memory",
@@ -362,7 +360,9 @@ export const agent = defineNamespace({
     "agent.aquifer.publishing": "Publishing…",
 
     // ── Run cost-cap meter (BudgetMeter) ────────────────────────────────
-    "agent.budget.exhausted": "Run stopped at its {capCredits} credit cap ({spentCredits} spent).",
+    "agent.budget.exhausted":
+      "Run stopped at this run's own spending limit of {capCredits} ({spentCredits} spent). " +
+      "It limits one run, not your workspace's credit allowance — send a new message to continue.",
     "agent.budget.weeklyExhausted":
       "Run stopped: this workspace has used its weekly AI allowance. Work already staged is kept. " +
       "Usage resets weekly; see Billing.",
@@ -474,19 +474,20 @@ export const agent = defineNamespace({
     "agent.code.outputTruncated": "Output truncated — the sandbox caps stdout/stderr at 64KB each.",
     "agent.code.runningEllipsis": "Running…",
 
-    // ── Memory + brief: chat notices (MemoryProposalNotice), the Memory
-    //    tab shell (AgentMemoryTab), the approved list (ApprovedMemoryList),
-    //    the project brief panel (BriefPanel), and the proposed queue
-    //    (ProposedMemoryList). ──────────────────────────────────────────
+    // ── Memory: chat notices (MemoryProposalNotice), the Memory tab shell
+    //    (AgentMemoryTab), the approved list (ApprovedMemoryList), and the
+    //    proposed queue (ProposedMemoryList). ────────────────────────────
     "agent.memory.reviewInMemoryTab": "Review in Memory tab",
     "agent.memory.reviewed": "Reviewed",
     "agent.memory.proposedNotice": "Proposed memory {path} — {preview}",
     "agent.memory.briefProposedNotice": "Proposed brief update — {preview}",
     "agent.memory.signInNotice": "Sign in to view agent memory.",
+    "agent.memory.scopeNote":
+      "The agent's working notes, read in agent chat only. Approving a decision (decisions/…) also " +
+      "adds it to the project instructions, which every AI draft reads.",
     "agent.memory.loading": "Loading agent memory…",
     "agent.memory.tabProposed": "Proposed",
     "agent.memory.tabApproved": "Approved",
-    "agent.memory.projectBriefTitle": "Project brief",
     "agent.memory.supersedeTitle": "Replace the human-edited memory?",
     "agent.memory.supersedeBody":
       "Approving will replace the human-edited memory at {path}. The existing human-authored content will be archived.",
@@ -495,22 +496,9 @@ export const agent = defineNamespace({
     "agent.memory.protectedTooltip": "Protected: the agent cannot modify this; it can only ask.",
     "agent.memory.humanEditedBadge": "Human-edited",
     "agent.memory.contentAriaLabel": "Memory content",
-    "agent.memory.loadingBrief": "Loading project brief…",
-    "agent.memory.leadOnly": "Project lead only",
-    "agent.memory.noBriefYet": "No brief written yet.",
-    "agent.memory.proposalsHeading": "Brief proposals — high-oversight: human approval only.",
-    "agent.memory.noPendingProposals": "No pending brief proposals.",
     "agent.memory.rationaleLabel": "Rationale:",
-    "agent.memory.staleNotice": "Stale — brief changed since this was proposed",
     "agent.memory.requiresLeadNotice": "Requires project lead or higher to review",
-    "agent.memory.editBriefTitle": "Edit project brief",
     "agent.memory.editMemoryTitle": "Edit {path}",
-    "agent.memory.briefContentAriaLabel": "Brief content",
-    "agent.memory.reloadLatestBrief": "Reload latest brief",
-    "agent.memory.overwriteTitle": "Overwrite the project brief?",
-    "agent.memory.overwriteBody":
-      "This replaces the brief every agent run reads as ground truth. Continue?",
-    "agent.memory.overwriteConfirm": "Overwrite",
     "agent.memory.noneProposed": "No proposed memories awaiting review.",
     "agent.memory.provenanceRun": "run {runId}",
     "agent.memory.provenanceSession": "session {sessionId}",
@@ -561,6 +549,27 @@ export const agent = defineNamespace({
     "agent.passage.loadingChapterAriaLabel": "Loading chapter",
     "agent.passage.moreShowAll": "{count} more — show all",
 
+    // ── Alternative wordings of one cell (AlternativesCard, AQU-2398). The
+    //    translator compares several AI wordings of ONE line and picks one;
+    //    the rest are thrown away unwritten. Wording must keep that
+    //    throw-away plain, and must never suggest the line was validated —
+    //    the chosen wording lands as an unreviewed AI draft. ──────────────
+    "agent.alternatives.title": plural({
+      one: "{count} wording to choose from",
+      other: "{count} wordings to choose from",
+    }),
+    "agent.alternatives.pickOneNotice":
+      "Pick one wording. It is written to the cell as an AI draft, and the rest are thrown away.",
+    "agent.alternatives.currentText": "In the cell now",
+    "agent.alternatives.option": "Option {number}",
+    "agent.alternatives.use": "Use this",
+    "agent.alternatives.useAriaLabel": "Use option {number}",
+    "agent.alternatives.chosen": "Used",
+    "agent.alternatives.notUsed": "Not used",
+    "agent.alternatives.othersDiscarded": "The wordings you did not pick were thrown away.",
+    "agent.alternatives.discardAll": "Keep none",
+    "agent.alternatives.discarded": "No wording was used — all of them were thrown away.",
+
     // ── Validation queue (ValidationQueueCard) ───────────────────────────
     "agent.validation.preparedCount": plural({
       one: "{count} validation prepared",
@@ -583,22 +592,16 @@ export const agent = defineNamespace({
     "agent.slashCommands.findDescription": "Search the project and summarize usage",
     "agent.slashCommands.statusDescription": "Progress summary for the open file",
 
-    // ── Translation-brief interview + summary card (BriefBuilder,
-    //    BriefSection) ───────────────────────────────────────────────────
+    // ── Translation-brief interview (BriefBuilder, opened by "Help me write
+    //    this" on Living Memory → Instructions) ──────────────────────────
     "agent.brief.helpMeWrite": "Help me write this",
     "agent.brief.notesPrompt": "Anything else the AI should know?",
+    "agent.brief.notesStepLabel": "Other notes",
+    "agent.brief.sectionsNavAriaLabel": "Brief sections",
     "agent.brief.saveDraft": "Save draft",
-    "agent.brief.saveAndGenerate": "Save & generate summary",
     "agent.brief.pasteToPrefill": "Optional: paste an existing brief to pre-fill",
     "agent.brief.pastePlaceholder": "Paste notes or an existing brief…",
     "agent.brief.prefillFromText": "Pre-fill from text",
-    "agent.brief.summaryOutOfDate": "Summary out of date",
-    "agent.brief.capturePurpose":
-      "Capture this project's purpose, audience, and standards so the AI drafts to " +
-      "your brief — or skip it and start translating without one.",
-    "agent.brief.createBrief": "Create brief",
-    "agent.brief.noSummaryYet": "No summary generated yet.",
-    "agent.brief.editBrief": "Edit brief",
 
     // ── Interview field schema (src/lib/brief/schema.ts's BRIEF_FIELDS) —
     //    field labels + helper text rendered by BriefBuilder, one interview
@@ -864,11 +867,14 @@ export const agent = defineNamespace({
       },
       "agent.budget.exhausted": {
         description:
-          "Alert shown once an agent run is stopped because it hit its org credit cap. " +
+          "Alert shown once an agent run is stopped because it reached the spending " +
+          "limit on ONE run (AQU-2313 — never the workspace's credit allowance, which " +
+          "has its own message; an Enterprise workspace has no allowance at all yet " +
+          "still has this per-run limit, so the sentence must not call it a credit cap). " +
           "Both values are already-formatted credit amounts including their unit " +
           "('500 cr') — do not add a second currency/unit word around them.",
         placeholders: {
-          capCredits: "The run's credit cap, already formatted with its unit (e.g. '500 cr').",
+          capCredits: "The spending limit for one run, already formatted with its unit (e.g. '500 cr').",
           spentCredits: "Credits spent when the run stopped, already formatted with its unit.",
         },
       },
@@ -1012,6 +1018,12 @@ export const agent = defineNamespace({
           "Accessible name for the spinner shown while a sandboxed code-execution step " +
           "is still running, before it has settled with a duration.",
       },
+      "agent.memory.scopeNote": {
+        description:
+          "One line above the agent memory lists: memory entries are the agent's own notes and reach only " +
+          "the agent chat, except that an approved decision entry (its path starts with 'decisions/', not " +
+          "translated) is appended to the project instructions that every AI draft uses.",
+      },
       "agent.memory.proposedNotice": {
         description:
           "Inline read-only chat notice for an agent-proposed memory entry, naming the " +
@@ -1047,9 +1059,6 @@ export const agent = defineNamespace({
         placeholders: {
           path: "File path of the memory being edited, e.g. 'glossary/terms.md'. A literal path — never translate the substituted value.",
         },
-      },
-      "agent.memory.briefContentAriaLabel": {
-        description: "Accessible name for the textarea editing the project brief's raw content.",
       },
       "agent.memory.provenanceRun": {
         description:
@@ -1109,6 +1118,13 @@ export const agent = defineNamespace({
           "Live counter badge on a proposal receipt: how many rule-lint findings exist " +
           "across its still-undecided drafts.",
         placeholders: { count: "Number of rule-lint findings on undecided drafts." },
+      },
+      "agent.brief.sectionsNavAriaLabel": {
+        description:
+          "Accessible landmark name (aria-label) for the list of the translation " +
+          "brief's sections down the left of the brief dialog. Each item jumps to " +
+          "one section of the brief; the list itself has no visible heading, so a " +
+          "screen-reader user only hears this string.",
       },
       "agent.workingSet.title": {
         description:
@@ -1175,6 +1191,67 @@ export const agent = defineNamespace({
           "its rows, stating how many more rows are hidden. Preceded in the UI by a " +
           "literal ellipsis character that is not part of this key.",
         placeholders: { count: "Number of additional rows hidden below the cap." },
+      },
+      "agent.alternatives.title": {
+        description:
+          "Headline of the card that offers several AI wordings of ONE cell for the "
+          + "translator to compare and choose between. It is a choice, not a list of "
+          + "changes: exactly one wording is written.",
+        placeholders: { count: "How many alternative wordings are offered." },
+      },
+      "agent.alternatives.pickOneNotice": {
+        description:
+          "The rule of the card, stated where the decision is made: choosing a wording "
+          + "writes that one to the cell as an unreviewed AI draft, and the wordings not "
+          + "chosen are never written anywhere. Nothing here validates the cell.",
+      },
+      "agent.alternatives.currentText": {
+        description:
+          "Small label above the cell's existing translation, shown for comparison "
+          + "above the alternative wordings. Not a heading for the options themselves.",
+      },
+      "agent.alternatives.option": {
+        description:
+          "Label of one alternative wording in the list, numbered from 1 in the order "
+          + "the AI offered them (best first, as far as it could judge).",
+        placeholders: { number: "This wording's position in the list, counting from 1." },
+      },
+      "agent.alternatives.use": {
+        description:
+          "Button on one alternative wording that writes THAT wording to the cell and "
+          + "throws the others away. One click commits the choice.",
+      },
+      "agent.alternatives.useAriaLabel": {
+        description:
+          "Accessible name for the button that chooses one alternative wording, naming "
+          + "which numbered option it would use.",
+        placeholders: { number: "This wording's position in the list, counting from 1." },
+      },
+      "agent.alternatives.chosen": {
+        description:
+          "Marker on the one alternative wording the translator chose, after it has "
+          + "been written to the cell. It says the wording was used, NOT that the "
+          + "translation was approved or validated.",
+      },
+      "agent.alternatives.notUsed": {
+        description:
+          "Marker on each alternative wording the translator did not choose, after the "
+          + "choice was made. These were never written anywhere.",
+      },
+      "agent.alternatives.othersDiscarded": {
+        description:
+          "Note below the list after a wording was chosen, confirming that the wordings "
+          + "not chosen were thrown away rather than saved somewhere.",
+      },
+      "agent.alternatives.discardAll": {
+        description:
+          "Button that rejects every offered wording at once, writing nothing. It "
+          + "dismisses the card; it does not change the cell.",
+      },
+      "agent.alternatives.discarded": {
+        description:
+          "What the card is replaced by once the translator rejected every offered "
+          + "wording: nothing was written to the cell.",
       },
       "agent.validation.preparedCount": {
         description:

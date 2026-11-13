@@ -8,6 +8,8 @@
 // re-validates role on every staged event regardless (emit-stage.ts).
 
 import { catalogIndexLines } from "../../../../db/shared/command-catalog"
+import { instructionsPromptBlock } from "../../../../db/shared/translation-instructions"
+import { assemblePromptSections } from "../../../../db/shared/prompt-blocks"
 
 // ── Role table ──────────────────────────────────────────────────────────────
 // Mirrored as data from sync-worker/src/events/role-policy.ts (REQUIRED_ROLE).
@@ -141,7 +143,7 @@ All tables carry project_id; ALWAYS filter with :project.
 // three short calls.
 const DRAFTING_RECIPE = `## Canonical drafting recipe (the 80% case — use this, do not re-derive it)
 1. read({ref:"<BOOK> 4", filter:"untranslated"}) — see what needs work (or skip straight to 2 when the user named the scope).
-2. draft({ref:"<BOOK> 4"}) — the drafting pipeline runs a separate evidence-research pass, then translates from that record with the project's validated exemplars, discourse context, brief, and rules, and STAGES a proposal. Its verdict reports lint violations and how many cells remain; call draft again with instructions to fix violations, or again on the same scope to continue a big job.
+2. draft({ref:"<BOOK> 4"}) — the drafting pipeline runs a separate evidence-research pass, then translates from that record with the project's validated exemplars, discourse context, and project instructions, and STAGES a proposal (the project's rules lint it at staging). Its verdict reports lint violations and how many cells remain; call draft again with instructions to fix violations, or again on the same scope to continue a big job.
 3. Summarise for the user: what you staged, anything NEEDS REVIEW, what remains.
 Do NOT hand-write translations with propose unless the user asks for a specific wording — draft uses the project's own patterns.`
 
@@ -149,7 +151,7 @@ const TOOLS_CONTRACT = `## Your tools
 - read({fileId?|ref?, filter?, limit?, offset?}) — aligned source/target rows in display order with per-cell status (untranslated | drafted | stale | validated | translated). Scope by ref ("<BOOK> 4", "<BOOK> 4:1-20") or file (id, alias, :file, or the name the user gave). <BOOK> must be a code this project's files contain. With a file and no ref, rows come in the file's own sequence order. START HERE for most tasks.
 - examples({text?|cellIds?, n?}) — approved human translation pairs to imitate, ranked by source similarity. Unreviewed drafts are excluded. Use before writing any translation yourself.
 - search({q, side?, fileId?, limit?}) — full-text search; side: cells (default) | source | target | comments | terms.
-- draft({fileId?|ref?, cellIds?, limit?, instructions?}) — the drafting pipeline: drafts untranslated cells with exemplars + discourse context, lints, and STAGES a proposal. Preferred over writing translations yourself.
+- draft({fileId?|ref?, cellIds?, limit?, instructions?, alternatives?}) — the drafting pipeline: drafts untranslated cells with exemplars + discourse context, lints, and STAGES a proposal. Preferred over writing translations yourself. alternatives:2-5 with ONE cell in cellIds stages that many wordings of that cell for the user to choose between, instead of drafting a batch.
 - propose({events:[{kind, fileId?, cellId?, payload}]}) — STAGE any other events for user approval (validations, comments, renames, back-translations, hand-written commits). Nothing is written until the user clicks Apply. The result says, per event: staged / rejected (reason) / stale (re-read and redraft).
 - sql({query}) — ESCAPE HATCH: one read-only SELECT (CTEs allowed) when no tool above fits (counts, history, assignments). 4s timeout; 200 rows max. Bind :project (required), :user, :file, :cell.
 - docs({topic}) — cookbook: checking | terminology | validation | history | assignments | files-and-refs | brief.
@@ -237,8 +239,11 @@ export interface AgentPromptContext {
   }
   /** Language the agent should reply in (driven by the profile). */
   responseLanguage?: string
-  /** project_settings.translationBrief.l1Summary — the brief's resident summary. */
-  briefSummary?: string
+  /** AQU-2342: the project's resolved translation instructions
+   *  (db/shared/translation-instructions.ts) — the ONE instructions block. */
+  translationInstructions?: string
+  /** AQU-2342: the shared checks hint (db/shared/prompt-blocks.ts), "" when none. */
+  checksHint?: string
 }
 
 // MIRROR of src/lib/translator-profile.ts translatorProfilePromptBlock — the
@@ -281,10 +286,18 @@ function translatorProfileBlock(ctx: AgentPromptContext): string {
   return block
 }
 
-function briefBlock(ctx: AgentPromptContext): string {
-  const s = (ctx.briefSummary ?? "").trim()
-  if (!s) return ""
-  return `\n\n## Project translation brief (purpose & standards — honour it)\n${s}\nFor the full brief (sources, key terms, constraints) fetch docs('brief').`
+// AQU-2342: the same block every drafting path carries, right after the fixed
+// role text. It replaces the brief summary here AND the verbatim legacy brief
+// the augmentation message used to add, so the agent reads one text, once.
+// Phase 2: then the Checks hint, in the one section order. Terminology and
+// examples are per line, so the chat carries neither — its draft tool adds the
+// terms and examples matching the cells it drafts.
+function instructionsBlock(ctx: AgentPromptContext): string {
+  const block = assemblePromptSections({
+    instructions: instructionsPromptBlock(ctx.translationInstructions),
+    checks: ctx.checksHint ?? "",
+  })
+  return block ? `\n\n${block}` : ""
 }
 
 /** Event kinds the given role may stage (drives both prompt + emit-stage). */
@@ -328,7 +341,7 @@ ${kinds.map((k) => `- ${EVENT_LINES[k]}`).join("\n")}${
     ? ` The project translates ${ctx.sourceLanguage ? `from ${ctx.sourceLanguage} ` : ""}into ${ctx.targetLanguage} — never ask the user what language to translate into.`
     : ` The project has no target language configured — infer it from the project's existing target text and say which you inferred; do not stall the run to ask.`
 
-  return `You are the Aquilla translation agent for project :project, acting on behalf of user "${ctx.username}" (role: ${roleName}). You help translate, check, and manage a translation project whose entire state lives in an append-only event log and SQL projections.${languagePair} You act ONLY through your tools; every write is an event, staged for the user's approval.${translatorProfileBlock(ctx)}${briefBlock(ctx)}
+  return `You are the Aquilla translation agent for project :project, acting on behalf of user "${ctx.username}" (role: ${roleName}). You help translate, check, and manage a translation project whose entire state lives in an append-only event log and SQL projections.${languagePair} You act ONLY through your tools; every write is an event, staged for the user's approval.${instructionsBlock(ctx)}${translatorProfileBlock(ctx)}
 
 ${TOOLS_CONTRACT}${commandIndexBlock(ctx.roleLevel)}
 ${ctx.bibleResourcesEnabled ? `\n${AQUIFER_CONTRACT}\n` : ""}

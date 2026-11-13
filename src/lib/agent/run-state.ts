@@ -138,15 +138,30 @@ export interface AgentBudget {
   capCredits: number
   /** Set once a `budget.exhausted` frame lands — the run halted at its cap. */
   exhausted: boolean
-  /** Why it stopped: the workspace's weekly AI allowance (AQU-837) rather
-   *  than this run's own cost cap. Absent for the per-run cap. */
-  reason?: 'weekly_allowance'
+  /** Which limit stopped the run (AQU-2313): the workspace's weekly AI
+   *  allowance (AQU-837) or this run's own cost cap. Absent from a
+   *  pre-AQU-2313 server, which tagged only the weekly stop — read as
+   *  `run_cost_cap`, the only stop those servers sent untagged. */
+  reason?: 'weekly_allowance' | 'run_cost_cap'
 }
 
 export interface AgentProgress {
   label: string
-  done: number
-  total: number
+  /** AQU-1536: omitted by a producer that cannot count finished work items. */
+  done?: number
+  total?: number
+}
+
+/**
+ * The dock's live stage line. AQU-1536: when the producer sends no counter the
+ * label stands alone. A fabricated `0/N` that can only jump to `N/N` tells the
+ * translator nothing — it reads as a stalled run — so the stage text is the
+ * progress signal and the counter is shown only when it is real.
+ */
+export function formatProgress(progress: AgentProgress): string {
+  return progress.done === undefined || progress.total === undefined
+    ? progress.label
+    : `${progress.label} — ${progress.done}/${progress.total}`
 }
 
 export interface AgentRunUi {
@@ -232,6 +247,11 @@ export function reduceRunFrame(run: AgentRunUi, frame: AgentFrame): AgentRunUi {
         summary: frame.summary,
       })
     case "code_result": {
+      // AQU-1536: the tool that owned the stage line has ended — succeeded or
+      // failed — so the line goes. Leaving it set stranded the dock on
+      // "Researching N cells" after a draft gave up partway, which is exactly
+      // the frozen-progress lie this frame disproves.
+      const settled = { ...run, progress: undefined }
       // Attach to the LAST tool item with this step (steps are unique per run,
       // but scanning from the end is the honest contract).
       for (let i = run.items.length - 1; i >= 0; i--) {
@@ -243,10 +263,10 @@ export function reduceRunFrame(run: AgentRunUi, frame: AgentFrame): AgentRunUi {
             resultSummary: frame.summary,
             ...(frame.data ? { data: frame.data } : {}),
           }
-          return { ...run, items: [...run.items.slice(0, i), updated, ...run.items.slice(i + 1)] }
+          return { ...settled, items: [...run.items.slice(0, i), updated, ...run.items.slice(i + 1)] }
         }
       }
-      return run
+      return settled
     }
     case "proposal":
       return appendItem(run, { id: nextId(run), kind: "proposal", proposal: frame.proposal })
@@ -315,7 +335,14 @@ export function reduceRunFrame(run: AgentRunUi, frame: AgentFrame): AgentRunUi {
       return { ...run, budget: { spentCredits: frame.spentCredits, capCredits: frame.capCredits, exhausted: true,
         ...(frame.reason ? { reason: frame.reason } : {}) } }
     case "progress":
-      return { ...run, progress: { label: frame.label, done: frame.done, total: frame.total } }
+      return {
+        ...run,
+        progress: {
+          label: frame.label,
+          ...(frame.done === undefined ? {} : { done: frame.done }),
+          ...(frame.total === undefined ? {} : { total: frame.total }),
+        },
+      }
     case "usage":
       return {
         ...run,
@@ -335,8 +362,10 @@ export function reduceRunFrame(run: AgentRunUi, frame: AgentFrame): AgentRunUi {
       }
     case "error":
       // An error frame may be followed by done {status:'error'} — either
-      // order leaves status 'error' with the message retained.
-      return { ...run, status: "error", errorMessage: frame.message }
+      // order leaves status 'error' with the message retained. AQU-1536: the
+      // stage line goes too, so a failed run never keeps claiming it is
+      // researching.
+      return { ...run, status: "error", errorMessage: frame.message, progress: undefined }
   }
 }
 

@@ -50,7 +50,7 @@ export const terminology = defineNamespace({
     "terminology.editor.loadingGlossary": "Loading terminology",
     "terminology.editor.loadingTermDetails": "Loading term details",
     "terminology.editor.errorRequiresProjectLead":
-      "Requires the Project lead role or higher to manage the terminology.",
+      "Requires the Project Lead role or higher to manage the terminology.",
     "terminology.editor.errorConflict":
       "The terminology changed elsewhere. Review the latest terms and try again.",
     "terminology.editor.errorOffline": "Terminology changes will sync when you reconnect.",
@@ -129,21 +129,13 @@ export const terminology = defineNamespace({
     "terminology.livingMemory.referenceAria": "Reference: {reference}",
     "terminology.livingMemory.translationAria": "Translation",
     "terminology.livingMemory.validatedByAria": "Validated by: {validators}",
-    "terminology.livingMemory.enterTextPlaceholder": "Enter text…",
     "terminology.livingMemory.offlineTooltip": "You are offline. Reconnect to edit.",
     "terminology.livingMemory.maintainerRequiredTooltip":
       "Editing requires the Maintainer role or above.",
     "terminology.livingMemory.contributorRequiredTooltip":
       "This requires the Contributor role or above.",
     "terminology.livingMemory.projectLeadRequiredTooltip":
-      "This requires the Project lead role or above.",
-    "terminology.livingMemory.addEntryAria": "Add {section} entry",
-    "terminology.livingMemory.exampleLabel": "Example:",
-    "terminology.livingMemory.editEntryAria": "Edit entry",
-    "terminology.livingMemory.deleteEntryAria": "Delete entry",
-    "terminology.livingMemory.deleteEntryConfirmTitle": "Delete entry?",
-    "terminology.livingMemory.deleteEntryConfirmDescription":
-      "This will permanently remove the entry. This action cannot be undone.",
+      "This requires the Project Lead role or above.",
     "terminology.livingMemory.loadingCountAria": "Loading count",
     "terminology.livingMemory.validatedCount": plural({
       one: "{count} validated",
@@ -152,21 +144,6 @@ export const terminology = defineNamespace({
     "terminology.livingMemory.goToTerminologyAria": "Go to Terminology page",
     "terminology.livingMemory.loadErrorPrefix": "Couldn't load the complete project memory: {message}",
     "terminology.livingMemory.instructionsTitle": "Instructions",
-    "terminology.livingMemory.instructionsDescription":
-      "Tell the AI what this project is about — audience, tone, formality, special " +
-      "handling. These appear in every draft prompt.",
-    "terminology.livingMemory.instructionsPlaceholder": "No instructions yet.",
-    "terminology.livingMemory.instructionsExample":
-      '"Translate into formal Swahili for an adult literacy audience. Avoid theological ' +
-      'jargon unless the source uses it."',
-    "terminology.livingMemory.standardsTitle": "Standards",
-    "terminology.livingMemory.standardsDescription":
-      "Project-wide quality rules the AI checks its drafts against. Capture decisions " +
-      "your team keeps revisiting.",
-    "terminology.livingMemory.standardsPlaceholder": "No standards yet.",
-    "terminology.livingMemory.standardsExample":
-      '"Always preserve proper nouns untranslated. Numbers in source must appear as ' +
-      'numerals in target."',
     "terminology.livingMemory.recentExamplesTitle": "Recent examples",
     "terminology.livingMemory.recentExamplesDescription":
       "Human-validated source→target pairs the AI uses as in-context examples. These " +
@@ -175,47 +152,44 @@ export const terminology = defineNamespace({
     // keys (no duplicates added): the instructions section title is
     // instructionsTitle above, `knowledge` reuses knowledgeBase.title/
     // .description, `examples` reuses recentExamplesDescription, the quality
-    // rule-count hint reuses rules.checkDrawer.scopeRules, and the prompt
-    // reset button reuses onboarding.checklist.aiInstructions.resetToDefault.
-    "terminology.livingMemory.section.brief.title": "Brief",
-    "terminology.livingMemory.section.brief.description":
-      "Optional — who this translation is for and what it must achieve. The AI " +
-      "reads it as context, not as its instructions.",
-    "terminology.livingMemory.section.brief.statusNone": "Not started",
-    "terminology.livingMemory.section.brief.statusDraft": "Draft",
-    "terminology.livingMemory.section.brief.statusComplete": "Complete",
-    // AQU-1672: the status is DERIVED (briefStatus()) and there is nothing to
-    // approve — a user who had just generated a summary read the permanent
-    // "Draft" badge as an unfinished step blocking the AI. Each status says
-    // what it means for the draft prompts, so the badge stops reading as a
-    // pending action.
-    "terminology.livingMemory.section.brief.statusNoneExplainer":
-      "Optional for translating by hand. Autopilot will not start until at least " +
-      "one question is answered.",
-    "terminology.livingMemory.section.brief.statusDraftExplainer":
-      "Already in force — the AI drafts from every answer saved here, and this " +
-      "brief satisfies Autopilot’s start check. “Draft” only means some " +
-      "questions are unanswered or the summary predates your latest edit; there " +
-      "is nothing to approve.",
-    "terminology.livingMemory.section.brief.statusCompleteExplainer":
-      "Every question is answered and the summary matches your latest edit. The " +
-      "AI drafts from this brief.",
+    // rule-count hint reuses rules.checkDrawer.scopeRules, the save status
+    // reuses common.saving / common.saved, and the instructions pane's
+    // interview button reuses agent.brief.helpMeWrite.
+    // AQU-2342: the ONE place the team writes how the AI should translate the
+    // project — every drafting path reads it. The sentence is both the index
+    // row's description and the pane's lead sentence under its heading.
     "terminology.livingMemory.section.instructions.description":
-      "How the AI should behave when drafting, and the default prediction prompt",
-    "terminology.livingMemory.section.instructions.entryCount": plural({
-      one: "{count} entry",
-      other: "{count} entries",
-    }),
-    "terminology.livingMemory.section.instructions.customPromptHint": "Custom prompt",
-    "terminology.livingMemory.section.quality.title": "Translation quality",
-    "terminology.livingMemory.section.quality.description":
-      "Standards, style rules, and checks that guard the translation",
-    "terminology.livingMemory.section.knowledge.hintOn": "On",
-    "terminology.livingMemory.section.knowledge.hintOff": "Off",
+      "How the AI should translate this project. Every AI draft reads this — the " +
+      "editor, Autopilot and the agent.",
+    "terminology.livingMemory.instructions.placeholder":
+      "For example: Plain, everyday language for young adults. Keep names as they " +
+      "appear in the 1999 Bible. Prefer short sentences.",
+    "terminology.livingMemory.instructions.charCount": "{count} / {max} characters",
+    "terminology.livingMemory.instructions.saveFailed":
+      "Couldn't save. Your text is kept here — keep typing to try again.",
+    "terminology.livingMemory.instructions.notWritten": "Not written yet",
+    "terminology.livingMemory.instructions.conflict":
+      "Someone else changed the instructions while you were editing — for example, an answer to an " +
+      "Autopilot question was added. Your text is still here and has not been saved.",
+    "terminology.livingMemory.instructions.loadLatest": "Load latest",
+    "terminology.livingMemory.instructions.overwrite": "Save mine anyway",
+    "terminology.livingMemory.instructions.notSavedOnLeave":
+      "Your last change to the instructions was not saved: someone else changed them first.",
+    "terminology.livingMemory.instructions.helpTitle": "Help writing the instructions",
+    "terminology.livingMemory.instructions.helpFinish": "Add to instructions",
+    // AQU-2342: the index is the four things the AI is given, plus the
+    // team's source documents (which no drafting prompt reads).
+    "terminology.livingMemory.section.terminology.description":
+      "Key terms and their agreed renderings. Each AI draft is given the terms that appear in " +
+      "the line it translates.",
+    "terminology.livingMemory.section.checks.title": "Checks",
+    "terminology.livingMemory.section.checks.description":
+      "What every AI draft is checked against after it is written. The drafting prompt names them too.",
+    "terminology.livingMemory.section.knowledge.title": "Source documents",
+    "terminology.livingMemory.section.knowledge.description":
+      "Style guides, background and other reference documents. The agent can read them, and " +
+      "style rules can be drawn from them; they are not added to drafting prompts.",
     "terminology.livingMemory.section.examples.title": "Examples",
-    // Default-prediction-prompt block (instructions pane, collapsed by default).
-    "terminology.livingMemory.prompt.defaultBadge": "Default",
-    "terminology.livingMemory.prompt.customBadge": "Custom",
 
     // ── Style-rule library + applicability (quality pane, AQU-934) ───────────
     // Reused keys (no duplicates added): agent.approve / agent.reject for the
@@ -224,11 +198,6 @@ export const terminology = defineNamespace({
     // common.close for generic actions, common.file for the `file` target type,
     // rules.editor.severityLabel + rules.severity.major/minor for severity, and
     // rules.surface.enabledLabel for the enabled toggle.
-    "terminology.livingMemory.styleRules.title": "Style rules",
-    "terminology.livingMemory.styleRules.description":
-      "Rules extracted from your knowledge base or written by hand. Approved rules steer " +
-      "every AI draft, and each one can be narrowed to the books, sections, or passages " +
-      "it governs.",
     "terminology.livingMemory.styleRules.loadError":
       "Couldn't load the style-rule library: {message}",
     "terminology.livingMemory.styleRules.candidates.heading": "Proposed rules",
@@ -237,6 +206,17 @@ export const terminology = defineNamespace({
       other: "{count} awaiting review",
     }),
     "terminology.livingMemory.styleRules.candidates.empty": "Nothing is waiting for review.",
+    // AQU-2366: the batched review queue. "Show {count} more" reuses the shared
+    // common.listShowMore of the capped-list trio rather than adding a twin.
+    "terminology.livingMemory.styleRules.candidates.dismissRest": plural({
+      one: "Dismiss the remaining {count}",
+      other: "Dismiss the remaining {count}",
+    }),
+    "terminology.livingMemory.styleRules.candidates.dismissedNotice": plural({
+      one: "{count} proposed rule dismissed",
+      other: "{count} proposed rules dismissed",
+    }),
+    "terminology.livingMemory.styleRules.candidates.undoDismiss": "Undo",
     "terminology.livingMemory.styleRules.candidates.citation": "Extracted from {doc}",
     "terminology.livingMemory.styleRules.candidates.editTitle": "Edit proposed rule",
     "terminology.livingMemory.styleRules.candidates.editDescription":
@@ -269,10 +249,6 @@ export const terminology = defineNamespace({
     "terminology.livingMemory.styleRules.assignedBy.human": "Set by a person",
     "terminology.livingMemory.styleRules.assignedBy.model": "Suggested by AI",
     "terminology.livingMemory.styleRules.assignedBy.inherited": "Inherited",
-    "terminology.livingMemory.styleRules.library.heading": "Approved rules",
-    "terminology.livingMemory.styleRules.library.empty":
-      "No approved style rules yet. Extract them from a knowledge-base document, or " +
-      "approve one that is waiting for review.",
     "terminology.livingMemory.styleRules.library.applicability": "Where it applies",
     "terminology.livingMemory.styleRules.applicability.title": "Where this rule applies",
     "terminology.livingMemory.styleRules.applicability.empty":
@@ -293,7 +269,6 @@ export const terminology = defineNamespace({
       "A verse range inside one chapter, for example: LUK 1:1-4",
     "terminology.livingMemory.styleRules.applicability.hint.segment":
       "A single segment (cell) id",
-    "terminology.livingMemory.styleRules.extract.button": "Extract from knowledge base",
     "terminology.livingMemory.styleRules.extract.title": "Extract style rules",
     "terminology.livingMemory.styleRules.extract.description":
       "Read one knowledge-base document section by section and propose the rules it " +
@@ -439,20 +414,6 @@ export const terminology = defineNamespace({
     "terminology.mergeDialog.conceptsToRemoveLabel": "Concepts to remove",
     "terminology.mergeDialog.merging": "Merging…",
     "terminology.mergeDialog.confirmMerge": "Confirm merge",
-
-    // ── TerminologyReviewQueue.tsx ───────────────────────────────────────────
-    "terminology.reviewQueue.approveAria": "Approve concept {term}",
-    "terminology.reviewQueue.rejectAria": "Reject concept {term}",
-    // "Read-only" permission badge → common.readOnly (identical text)
-    "terminology.reviewQueue.readOnlyTooltip":
-      "Requires the Project lead role or higher to approve/reject concepts.",
-    "terminology.reviewQueue.emptyTitle": "No concepts awaiting review.",
-    "terminology.reviewQueue.emptyDescription":
-      "Draft concepts promoted from candidates will appear here.",
-    "terminology.reviewQueue.awaitingReviewCount": plural({
-      one: "concept awaiting review",
-      other: "concepts awaiting review",
-    }),
 
     // ── EquivalentsPanel.tsx ─────────────────────────────────────────────────
     "terminology.equivalents.promoteButton": "Add",
@@ -743,21 +704,6 @@ export const terminology = defineNamespace({
       "terminology.livingMemory.loadingCountAria": {
         description: "Accessible label on the skeleton shown while the validated-cell count loads.",
       },
-      "terminology.livingMemory.addEntryAria": {
-        description:
-          "Accessible name for the 'Add' button in an Instructions/Standards section, " +
-          "and the matching add-dialog's title; {section} is that section's own already-" +
-          "translated lowercase name ('instructions' or 'standards').",
-        placeholders: {
-          section: "The section's translated name, lowercased ('instructions' or 'standards').",
-        },
-      },
-      "terminology.livingMemory.editEntryAria": {
-        description: "Accessible name for the pencil button editing one authored entry.",
-      },
-      "terminology.livingMemory.deleteEntryAria": {
-        description: "Accessible name for the trash button deleting one authored entry.",
-      },
       "terminology.livingMemory.validatedCount": {
         description:
           "Header badge showing how many cells have reached the validation threshold; " +
@@ -773,46 +719,80 @@ export const terminology = defineNamespace({
           "{message} is the underlying error's own text (not translated).",
         placeholders: { message: "The underlying fetch error's message, verbatim." },
       },
-      "terminology.livingMemory.section.brief.statusNone": {
+      "terminology.livingMemory.instructions.charCount": {
         description:
-          "Right-aligned hint on the Living Memory index's Brief row when no translation " +
-          "brief has been authored yet. Sibling values: 'Draft', 'Complete'.",
+          "Counter under the project-instructions text box in Living Memory → " +
+          "Instructions: how long the text is against its limit.",
+        placeholders: {
+          count: "Characters currently in the instructions, already locale-formatted.",
+          max: "The maximum number of characters allowed, already locale-formatted.",
+        },
       },
-      "terminology.livingMemory.section.instructions.entryCount": {
+      "terminology.livingMemory.instructions.notWritten": {
         description:
-          "Right-aligned hint on the Living Memory index's Instructions row: how many " +
-          "authored instruction entries exist; {count} is that count, already " +
-          "locale-formatted.",
-        placeholders: { count: "The instruction-entry count, already locale-formatted." },
+          "Short status shown where the project instructions would be previewed " +
+          "(the Living Memory index row, the Instructions row in Project settings → " +
+          "AI) when the team has not written any instructions yet.",
+        maxLength: 32,
       },
-      "terminology.livingMemory.section.instructions.customPromptHint": {
+      "terminology.livingMemory.instructions.conflict": {
         description:
-          "Appended to the Instructions row hint when the project overrides the default " +
-          "AI prediction prompt (e.g. '2 entries · Custom prompt').",
+          "Notice above the Instructions buttons when a save was refused because the stored " +
+          "instructions changed meanwhile (a teammate, or an answer added by Autopilot). The person's " +
+          "unsaved text stays in the box until they choose 'Load latest' or 'Save mine anyway'.",
       },
-      "terminology.livingMemory.section.knowledge.hintOn": {
+      "terminology.livingMemory.instructions.loadLatest": {
         description:
-          "Right-aligned hint on the Living Memory index's Knowledge base row when the " +
-          "knowledge base is used in drafting. Paired with the 'Off' hint.",
-        maxLength: 12,
+          "Button in that notice: replace the unsaved text in the box with the instructions as now " +
+          "stored (the unsaved text is dropped).",
+        maxLength: 24,
       },
-      "terminology.livingMemory.section.knowledge.hintOff": {
+      "terminology.livingMemory.instructions.overwrite": {
         description:
-          "Right-aligned hint on the Living Memory index's Knowledge base row when the " +
-          "knowledge base is not used in drafting. Paired with the 'On' hint.",
-        maxLength: 12,
+          "Button in that notice: save the person's text anyway, replacing the newer stored " +
+          "instructions (the other change is lost).",
+        maxLength: 24,
       },
-      "terminology.livingMemory.prompt.defaultBadge": {
+      "terminology.livingMemory.instructions.notSavedOnLeave": {
         description:
-          "Badge on the collapsed prediction-prompt row: the project uses the built-in " +
-          "default prompt (adjective, one word). Paired with the 'Custom' badge.",
-        maxLength: 16,
+          "Warning toast after leaving the Instructions page: the last edit was not saved because " +
+          "someone else changed the instructions first.",
       },
-      "terminology.livingMemory.prompt.customBadge": {
+      "terminology.livingMemory.instructions.helpTitle": {
         description:
-          "Badge on the collapsed prediction-prompt row: the project overrides the " +
-          "default prompt (adjective, one word). Paired with the 'Default' badge.",
-        maxLength: 16,
+          "Title of the dialog opened by 'Help me write this' on the Instructions " +
+          "pane: a short interview whose answers the AI turns into instructions.",
+      },
+      "terminology.livingMemory.instructions.helpFinish": {
+        description:
+          "Button on the last step of that interview: the AI summarizes the answers " +
+          "and adds the summary to the project instructions text.",
+        maxLength: 32,
+      },
+      "terminology.livingMemory.section.terminology.description": {
+        description:
+          "Living Memory index row for Terminology (opens the terminology page): what the termbase " +
+          "is and how drafts use it — only the terms found in the line being translated are given.",
+      },
+      "terminology.livingMemory.section.checks.title": {
+        description:
+          "Name of the Living Memory section listing every check (project, organization, style and " +
+          "built-in rules). Also its row in Project settings → AI.",
+        maxLength: 24,
+      },
+      "terminology.livingMemory.section.checks.description": {
+        description: "One sentence under that section's name: what a check is and that prompts mention it.",
+      },
+      "terminology.livingMemory.section.knowledge.title": {
+        description:
+          "Name of the Living Memory section holding the team's reference documents (style guides, " +
+          "background). Called source documents because they inform people and the agent, not drafts.",
+        maxLength: 24,
+      },
+      "terminology.livingMemory.section.knowledge.description": {
+        description:
+          "One sentence under that name. Must say truthfully that drafting prompts do not include " +
+          "these documents; the agent can read them and style rules can be drawn from them.",
       },
       "terminology.livingMemory.styleRules.loadError": {
         description:
@@ -825,6 +805,24 @@ export const terminology = defineNamespace({
           "Badge beside the 'Proposed rules' heading counting the extracted style rules " +
           "still awaiting a human verdict; {count} is that count.",
         placeholders: { count: "Number of proposed style rules awaiting review." },
+      },
+      "terminology.livingMemory.styleRules.candidates.dismissRest": {
+        description:
+          "Button under the visible batch of proposed style rules that rejects every " +
+          "proposal past that batch in one action; {count} is how many would go.",
+        placeholders: { count: "Number of proposals past the visible batch." },
+      },
+      "terminology.livingMemory.styleRules.candidates.dismissedNotice": {
+        description:
+          "Line in the bar that replaces the dismissed proposals, reporting how many " +
+          "were dismissed; {count} is that number. The bar carries the Undo button, " +
+          "and the dismissal is only sent once the bar goes away.",
+        placeholders: { count: "Number of proposals just dismissed." },
+      },
+      "terminology.livingMemory.styleRules.candidates.undoDismiss": {
+        description:
+          "Button in that bar which takes the dismissal back, returning those " +
+          "proposals to the review queue. One or two words.",
       },
       "terminology.livingMemory.styleRules.candidates.citation": {
         description:
@@ -978,24 +976,6 @@ export const terminology = defineNamespace({
           "count when the server scan stopped before the end of the project; {count} is " +
           "the occurrences found so far, so the real total is that or more.",
         placeholders: { count: "Occurrences found before the scan stopped — a lower bound." },
-      },
-      "terminology.reviewQueue.approveAria": {
-        description:
-          "Accessible name for the checkmark button approving a draft concept; {term} " +
-          "is the concept's own source headword (not translated).",
-        placeholders: { term: "The concept's source headword, verbatim (not translated)." },
-      },
-      "terminology.reviewQueue.rejectAria": {
-        description:
-          "Accessible name for the X button rejecting (deleting) a draft concept; {term} " +
-          "is the concept's own source headword (not translated).",
-        placeholders: { term: "The concept's source headword, verbatim (not translated)." },
-      },
-      "terminology.reviewQueue.awaitingReviewCount": {
-        description:
-          "Collapsible header phrase for the review queue, following a separate numeral " +
-          "badge; no {count} placeholder appears in the text itself, but the locale's " +
-          "CLDR category still must be selected from the same count.",
       },
       "terminology.equivalents.noManagedRenderings": {
         description:

@@ -5,6 +5,7 @@ import {
   isGeneratedDownloadStem,
   originalDownloadName,
   sourceArtifactDescriptor,
+  safeZipEntryName,
   uniqueZipEntryName,
 } from "./import-contract"
 
@@ -114,5 +115,38 @@ describe("uniqueZipEntryName (AQU-656)", () => {
     expect(uniqueZipEntryName("Matthew.docx", used)).toBe("Matthew.docx")
     expect(uniqueZipEntryName("Matthew.docx", used)).toBe("Matthew (2).docx")
     expect(uniqueZipEntryName("Matthew.docx", used)).toBe("Matthew (3).docx")
+  })
+})
+
+// A file's display name is contributor-controlled free text; a zip entry name
+// is a path an extractor will follow.
+describe("safeZipEntryName", () => {
+  it("leaves an ordinary file name alone", () => {
+    expect(safeZipEntryName("41 Matthew (draft).SFM")).toBe("41 Matthew (draft).SFM")
+    expect(safeZipEntryName("Матфей.txt")).toBe("Матфей.txt")
+    expect(safeZipEntryName(".hidden.txt")).toBe(".hidden.txt")
+  })
+
+  it("flattens traversal and absolute paths to one segment", () => {
+    expect(safeZipEntryName("../../etc/cron.d/x")).toBe(".._.._etc_cron.d_x")
+    expect(safeZipEntryName("..\\..\\Startup\\x.bat")).toBe(".._.._Startup_x.bat")
+    expect(safeZipEntryName("/abs/x.txt")).toBe("_abs_x.txt")
+    expect(safeZipEntryName("C:\\x.txt")).toBe("C__x.txt")
+  })
+
+  it("never emits a bare dot segment or an empty name", () => {
+    expect(safeZipEntryName("..")).toBe("_..")
+    expect(safeZipEntryName(".")).toBe("_.")
+    expect(safeZipEntryName("")).toBe("_")
+  })
+
+  it("replaces control characters", () => {
+    expect(safeZipEntryName("a\u0000b\nc.txt")).toBe("a_b_c.txt")
+  })
+
+  it("is applied by uniqueZipEntryName, and colliding results still dedupe", () => {
+    const used = new Set<string>()
+    expect(uniqueZipEntryName("a/b.txt", used)).toBe("a_b.txt")
+    expect(uniqueZipEntryName("a\\b.txt", used)).toBe("a_b (2).txt")
   })
 })

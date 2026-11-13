@@ -19,6 +19,8 @@ const deploymentManifest = JSON.parse(
       apiHost?: string
       routes: string[]
       requiredSecrets?: string[]
+      /** Bindings only this environment must have (AQU-2469). */
+      requiredBindings?: Record<string, string>
       plainText: Record<string, string>
       hyperdrives: Record<string, string>
       r2Buckets: Record<string, string>
@@ -192,6 +194,56 @@ describe("worker deployment environment contract", () => {
       }
     },
   )
+
+  // release-deploy.yml runs on a schedule, so GitHub reports the default branch
+  // (`dev`) while its deploy job checks out the release branch the check job
+  // chose. The job names that branch in DEPLOY_REF_NAME, and the guard checks
+  // it against the checkout exactly as it checks GITHUB_REF_NAME, so a checkout
+  // that drifted from the chosen ref still aborts.
+  describe("DEPLOY_REF_NAME names the ref a scheduled workflow chose at run time", () => {
+    const guard = path.join(REPO_ROOT, "scripts", "verify-deploy-branch.sh")
+    const release = "release/2026/11/02-02"
+
+    function runGuard(gitBranch: string, env: Record<string, string>) {
+      const tempRepo = mkdtempSync(path.join(tmpdir(), "aquilla-deploy-guard-"))
+      try {
+        expect(spawnSync("git", ["init", "-b", gitBranch], { cwd: tempRepo }).status).toBe(0)
+        return spawnSync("bash", [guard, "release"], {
+          cwd: tempRepo,
+          encoding: "utf8",
+          env: { GITHUB_ACTIONS: "true", ...env },
+        })
+      } finally {
+        rmSync(tempRepo, { recursive: true, force: true })
+      }
+    }
+
+    it("accepts the release checkout when GitHub reports dev", () => {
+      const result = runGuard(release, { GITHUB_REF_NAME: "dev", DEPLOY_REF_NAME: release })
+      expect(result.stderr).toBe("")
+      expect(result.status).toBe(0)
+      expect(result.stdout).toContain(`OK: branch '${release}'`)
+    })
+
+    it("still aborts when the checkout is not the named ref", () => {
+      const result = runGuard("release/2026/11/02-01", { GITHUB_REF_NAME: "dev", DEPLOY_REF_NAME: release })
+      expect(result.status).not.toBe(0)
+      expect(result.stderr).toContain(`CI reports branch '${release}'`)
+    })
+
+    it("without it, a scheduled run's dev ref aborts against a release checkout", () => {
+      const result = runGuard(release, { GITHUB_REF_NAME: "dev" })
+      expect(result.status).not.toBe(0)
+      expect(result.stderr).toContain("CI reports branch 'dev'")
+    })
+
+    it("is set by release-deploy.yml's deploy job from the branch the check job chose", () => {
+      const workflow = readRepoFile(".github", "workflows", "release-deploy.yml")
+      const deploy = workflowJobs(workflow).find((job) => job.name === "deploy")
+      expect(deploy?.body).toContain("DEPLOY_REF_NAME: ${{ needs.check.outputs.branch }}")
+      expect(deploy?.body).toContain("ref: ${{ needs.check.outputs.branch }}")
+    })
+  })
 
   // The Release cut workflow cuts release/YYYY/MM/DD-NN for the Nth slice cut on a given
   // day. Four checkers each decide whether a branch name counts as a release
@@ -511,7 +563,11 @@ describe("worker deployment environment contract", () => {
           expect(section).toContain(`binding = "${name}"`)
           expect(section).toContain(`bucket_name = "${bucket}"`)
         }
-        for (const [name, type] of Object.entries(surfaceConfig.requiredBindings)) {
+        const requiredBindings: Record<string, string> = {
+          ...surfaceConfig.requiredBindings,
+          ...(expected.requiredBindings ?? {}),
+        }
+        for (const [name, type] of Object.entries(requiredBindings)) {
           const declaration = type === "send_email" || type === "durable_object_namespace"
             ? `name = "${name}"`
             : `binding = "${name}"`
@@ -519,6 +575,16 @@ describe("worker deployment environment contract", () => {
         }
       }
     }
+  })
+
+  it("binds the dev access list on the development identity Worker only (AQU-2469)", () => {
+    const config = readRepoFile("auth-worker", "wrangler.toml")
+    expect(environmentSection(config, "development")).toContain('binding = "DEV_ACCESS_LIST"')
+    expect(environmentSection(config, "production")).not.toContain("DEV_ACCESS_LIST")
+    const identity = deploymentManifest.surfaces.identity
+    expect(identity.requiredBindings).not.toHaveProperty("DEV_ACCESS_LIST")
+    expect(identity.environments.production).not.toHaveProperty("requiredBindings")
+    expect(identity.environments.development.requiredBindings).toEqual({ DEV_ACCESS_LIST: "kv_namespace" })
   })
 
   it("keeps retired staging outside the executable deployment contract", () => {

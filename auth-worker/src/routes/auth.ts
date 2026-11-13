@@ -1,3 +1,4 @@
+import { ANALYTICS_CONSENT_KEY, ANALYTICS_DISCLOSURE_VERSION, parseAnalyticsDecision } from "../../../shared/analytics-consent"
 // Auth routes ported from frontier-server/cloudflare/src/routes/auth.ts.
 //
 // All routes are mounted under `/api/v2/auth/*` by src/index.ts so the
@@ -7,14 +8,14 @@
 // Neon is authoritative. AQU-713 adds a one-way, read-only bridge for a legacy
 // identity only when no case-insensitive Neon identity exists.
 
-import { Hono } from "hono"
+import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import type {
   AuthHonoEnv,
 } from "../middleware/auth"
 import { authMiddleware } from "../middleware/auth"
-import { JWTService, isPastHalfLife } from "../auth/jwt"
+import { JWTService, SessionInvalidatedError, isPastHalfLife } from "../auth/jwt"
 import { sendPasswordResetEmail, sendWelcomeEmail } from "../services/email"
 import {
   absorbPasswordVerificationCost,
@@ -26,7 +27,7 @@ import {
 // email-verification tokens are bearer credentials of the same kind and had
 // no reason to be the only ones kept in plaintext at rest.
 import { sha256Hex } from "../../../db/shared/api-credentials"
-import { orgInviteReturnTo } from "../../../shared/org-invite-return-to"
+import { passwordResetReturnTo } from "../../../shared/password-reset-return-to"
 import {
   countRecentEvents,
   ipIdentifier,
@@ -40,7 +41,13 @@ import {
 } from "../utils/rate-limit"
 import { revokeSessionFamily, revokeToken } from "../utils/token-revocation"
 import { parseAdminEmails } from "../middleware/platform-admin"
+import {
+  checkDevAccess,
+  DEV_ACCESS_RESTRICTED,
+  DEV_ACCESS_RESTRICTED_MESSAGE,
+} from "../services/dev-access"
 import { evictUserSessions } from "../lib/session-cache"
+import { withPostResponseDb } from "../lib/post-response-db"
 import {
   LegacyUserMigrationError,
   migrateLegacyUserCandidate,
@@ -83,8 +90,23 @@ const auth = new Hono<AuthHonoEnv>()
 
 const MAX_PASSWORD_LENGTH = 1024
 
+// [Pen test] Auth & session mgmt (2026-11-09): usernames were free-form, so a
+// new account could carry zero-width / bidi-override / control characters.
+// Those render identically to a real collaborator's name in presence, @mentions
+// and "<inviter> invited you" emails (and `LOWER()` uniqueness treats "admin"
+// and "admin\u200b" as different accounts). Reject Unicode control/format/
+// separator code points other than the plain space and surrounding whitespace
+// — ordinary names (including non-Latin scripts and inner spaces) are untouched,
+// and the signup form already trims.
+const INVISIBLE_USERNAME_CHARS = /[\p{Cc}\p{Cf}\p{Co}\p{Cs}\p{Zl}\p{Zp}\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/u
+export function isAcceptableUsername(value: string): boolean {
+  return value === value.trim() && !INVISIBLE_USERNAME_CHARS.test(value)
+}
+
 const registerSchema = z.object({
-  username: z.string().min(3).max(50),
+  username: z.string().min(3).max(50).refine(isAcceptableUsername, {
+    message: "Username contains invisible or control characters",
+  }),
   email: z.string().email(),
   // Upper bound caps scrypt/bcrypt CPU cost from absurdly long inputs.
   password: z.string().min(8).max(MAX_PASSWORD_LENGTH),
@@ -125,7 +147,7 @@ interface ResetTokenRow {
   expires_at: string
 }
 
-function legacyD1Config(
+export function legacyD1Config(
   env: AuthHonoEnv["Bindings"],
 ): FrontierD1Config | null {
   if (String(env.LEGACY_USER_MIGRATION_ENABLED).toLowerCase() !== "true") {
@@ -164,6 +186,22 @@ function legacyMigrationRuntime(env: AuthHonoEnv["Bindings"]): LegacyMigrationRu
     d1,
     gitlab: { gitlabUrl, gitlabToken, accessToken: "" },
   }
+}
+
+/** AQU-2469: the sign-in / sign-up answer for an account dev does not admit.
+ *  `detail` as well as `error`, because the SPA's sign-up path reads `detail`. */
+export function devAccessRefusal(
+  c: Context<AuthHonoEnv>,
+  reason: "not_listed" | "unavailable",
+): Response {
+  if (reason === "unavailable") {
+    const message = "Unable to check dev access right now. Please retry."
+    return c.json({ error: message, detail: message, code: DEV_ACCESS_RESTRICTED }, 503)
+  }
+  return c.json(
+    { error: DEV_ACCESS_RESTRICTED_MESSAGE, detail: DEV_ACCESS_RESTRICTED_MESSAGE, code: DEV_ACCESS_RESTRICTED },
+    403,
+  )
 }
 
 auth.post("/register", zValidator("json", registerSchema), async (c) => {
@@ -212,6 +250,13 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
       if (reserved.has(email.trim().toLowerCase()) || reserved.has(username.trim().toLowerCase())) {
         return c.json({ detail: "User already exists", error: "Registration failed" }, 409)
       }
+    }
+
+    // AQU-2469: on dev, only listed emails may create an account. Without
+    // this the account would be created and then refused on its first request.
+    const devAccess = await checkDevAccess(c.env, email)
+    if (!devAccess.allowed) {
+      return devAccessRefusal(c, devAccess.reason)
     }
 
     // Uniqueness is case-insensitive (AQU-340): reject `ryan` when `Ryan`
@@ -269,11 +314,11 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
 
     const result = await c.env.AQUILLA_PG.prepare(
       `INSERT INTO users (username, email, password_hash)
-       VALUES (?, ?, ?)`,
+       VALUES (?, ?, ?) RETURNING id`,
     )
       .bind(username, email, passwordHash)
-      .run()
-    if (!result.success) {
+      .first<{ id: number }>()
+    if (!result) {
       throw new Error("Failed to create user in database")
     }
 
@@ -324,7 +369,7 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
     }
 
     const jwtService = new JWTService(c.env)
-    const accessToken = await jwtService.createAccessToken(username)
+    const accessToken = await jwtService.createAccessToken(username, undefined, result.id)
     return c.json({
       access_token: accessToken,
       token_type: "bearer",
@@ -552,9 +597,9 @@ auth.post("/token", async (c) => {
         try {
           const newHash = await hashPasswordWerkzeugScrypt(password)
           await c.env.AQUILLA_PG.prepare(
-            "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND password_hash = ?",
           )
-            .bind(newHash, user.id)
+            .bind(newHash, user.id, user.password_hash)
             .run()
           user.password_hash = newHash
         } catch (rehashError) {
@@ -575,18 +620,28 @@ auth.post("/token", async (c) => {
       return c.json({ error: "Incorrect username/email or password" }, 401)
     }
 
+    // AQU-2469: on dev, refuse a correct password from an account that is
+    // neither a platform admin nor on the dev access list. Checked only after
+    // the password, so the answer never tells a stranger who is on the list.
+    // resolveSession enforces the same rule on every later request.
+    const devAccess = await checkDevAccess(c.env, user.email)
+    if (!devAccess.allowed) {
+      return devAccessRefusal(c, devAccess.reason)
+    }
+
     await Promise.all([
       recordAuthEvent(c.env.AQUILLA_PG, "login", identifier, true),
       recordAuthEvent(c.env.AQUILLA_PG, "login", ipIdent, true),
       logActivity(c.env.AQUILLA_PG, user.id, "login", "Signed in"),
     ])
 
-    const accessToken = await jwtService.createAccessToken(user.username)
+    const accessToken = await jwtService.createAccessToken(user.username, undefined, user.id, user.session_version ?? 0)
     return c.json({
       access_token: accessToken,
       token_type: "bearer",
     })
   } catch (error) {
+    if (error instanceof SessionInvalidatedError) return c.json({ error: "Session invalidated. Please log in again." }, 401)
     console.error("Login error:", error)
     return c.json({ error: "Login failed" }, 500)
   }
@@ -649,17 +704,24 @@ auth.post("/refresh", authMiddleware, async (c) => {
 
   // user.username (not payload.sub) is the canonical record — sub may differ in
   // case, since login resolves the user case-insensitively.
-  const { token, payload: minted } = await jwtService.createAccessTokenWithPayload(
-    user.username,
-    typeof payload.sst === "number" ? payload.sst : payload.iat,
-    typeof payload.sid === "string" ? payload.sid : undefined,
-  )
-  return c.json({
-    access_token: token,
-    token_type: "bearer",
-    refreshed: true,
-    expires_at: minted.exp,
-  })
+  try {
+    const { token, payload: minted } = await jwtService.createAccessTokenWithPayload(
+      user.username,
+      typeof payload.sst === "number" ? payload.sst : payload.iat,
+      typeof payload.sid === "string" ? payload.sid : undefined,
+      user.id,
+      user.session_version ?? 0,
+    )
+    return c.json({
+      access_token: token,
+      token_type: "bearer",
+      refreshed: true,
+      expires_at: minted.exp,
+    })
+  } catch (error) {
+    if (error instanceof SessionInvalidatedError) return c.json({ error: "Session invalidated. Please log in again." }, 401)
+    throw error
+  }
 })
 
 // [Pen test] Auth & session mgmt (2026-08-03): there was previously no
@@ -804,6 +866,7 @@ auth.patch("/me", authMiddleware, zValidator("json", patchMeSchema), async (c) =
     evictUserSessions(user.id)
   }
   if (body.preferences !== undefined) {
+    if (Object.hasOwn(body.preferences, ANALYTICS_CONSENT_KEY)) return c.json({ error: "use the analytics-consent endpoint" }, 400)
     const preferencesJson = JSON.stringify(body.preferences)
     // [Pen test] Auth & session mgmt (2026-11-02): this replace-style write had
     // no size bound, unlike PATCH /auth/me/preferences. The blob is read back
@@ -814,7 +877,11 @@ auth.patch("/me", authMiddleware, zValidator("json", patchMeSchema), async (c) =
       return c.json({ error: "preferences too large" }, 413)
     }
     await c.env.AQUILLA_PG.prepare(
-      "UPDATE users SET preferences = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      `UPDATE users SET preferences = (?::text::jsonb || CASE
+        WHEN NOT pg_input_is_valid(preferences, 'jsonb') THEN '{}'::jsonb
+        WHEN jsonb_typeof(preferences::jsonb) <> 'object' THEN '{}'::jsonb
+        WHEN jsonb_exists(preferences::jsonb, 'privacy.analytics.v1') THEN jsonb_build_object('privacy.analytics.v1', preferences::jsonb -> 'privacy.analytics.v1')
+        ELSE '{}'::jsonb END)::text, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
     )
       .bind(preferencesJson, user.id)
       .run()
@@ -910,6 +977,7 @@ auth.patch(
   zValidator("json", patchPreferencesSchema),
   async (c) => {
     const { set = {}, setIfAbsent = {} } = c.req.valid("json")
+    if (Object.hasOwn(set, ANALYTICS_CONSENT_KEY) || Object.hasOwn(setIfAbsent, ANALYTICS_CONSENT_KEY)) return c.json({ error: "use the analytics-consent endpoint" }, 400)
     const keyCount = Object.keys(set).length + Object.keys(setIfAbsent).length
     if (keyCount === 0) return c.json({ error: "nothing to save" }, 400)
     if (keyCount > PREFERENCES_PATCH_MAX_KEYS) {
@@ -950,6 +1018,60 @@ auth.patch(
     return c.json({ preferences: parseStoredPreferences(row.preferences) })
   },
 )
+
+// AQU-2381: only the authenticated user owns this preference. Never accept an
+// account id from the client. Server timestamps and revisions record confirmation.
+const analyticsChoiceSchema = z.object({
+  allowed: z.boolean(),
+  disclosureVersion: z.literal(ANALYTICS_DISCLOSURE_VERSION),
+  source: z.enum(["signup", "settings"]),
+  expectedRevision: z.string().nullable(),
+}).strict()
+
+// AQU-2534: historical proof can only associate local data with this already
+// authenticated account. It never issues a token or enables expired sessions.
+auth.post("/me/local-data-owner", authMiddleware, zValidator("json", z.object({ previousToken: z.string().min(1).max(8192) }).strict()), async c => {
+  c.header("Cache-Control", "no-store")
+  return c.json({ sameAccount: await new JWTService(c.env).ownsHistoricalToken(c.req.valid("json").previousToken, c.get("user")) })
+})
+
+auth.get("/me/analytics-consent", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const row = await c.env.AQUILLA_PG.prepare("SELECT preferences FROM users WHERE id = ?")
+    .bind(user.id).first<{ preferences: string }>()
+  if (!row) return c.json({ error: "user not found" }, 404)
+  c.header("Cache-Control", "no-store")
+  return c.json({ accountId: String(user.id), decision: parseAnalyticsDecision(parseStoredPreferences(row.preferences)[ANALYTICS_CONSENT_KEY]) })
+})
+
+auth.put("/me/analytics-consent", authMiddleware, zValidator("json", analyticsChoiceSchema), async (c) => {
+  const user = c.get("user")
+  const choice = c.req.valid("json")
+  const decision = {
+    allowed: choice.allowed, disclosureVersion: ANALYTICS_DISCLOSURE_VERSION,
+    source: choice.source, decidedAt: new Date().toISOString(), revision: crypto.randomUUID(),
+  }
+  // Retry unrelated preference writes, but never overwrite a newer consent
+  // decision. Every attempt compares both the consent revision and full blob.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const row = await c.env.AQUILLA_PG.prepare("SELECT preferences FROM users WHERE id = ?")
+      .bind(user.id).first<{ preferences: string }>()
+    if (!row) return c.json({ error: "user not found" }, 404)
+    const stored = parseStoredPreferences(row.preferences)
+    const current = parseAnalyticsDecision(stored[ANALYTICS_CONSENT_KEY])
+    if ((current?.revision ?? null) !== choice.expectedRevision) return c.json({ error: "choice changed; reload before confirming" }, 409)
+    const nextPreferences = JSON.stringify({ ...stored, [ANALYTICS_CONSENT_KEY]: decision })
+    if (new TextEncoder().encode(nextPreferences).length > PREFERENCES_STORED_MAX_BYTES) return c.json({ error: "preferences are full" }, 413)
+    const updated = await c.env.AQUILLA_PG.prepare(
+      "UPDATE users SET preferences = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND preferences = ? RETURNING id",
+    ).bind(nextPreferences, user.id, row.preferences).first<{ id: number }>()
+    if (!updated) continue
+    evictUserSessions(user.id)
+    c.header("Cache-Control", "no-store")
+    return c.json({ accountId: String(user.id), decision })
+  }
+  return c.json({ error: "preferences changed; reload before confirming" }, 409)
+})
 
 const verifyEmailSchema = z.object({ token: z.string().min(8) })
 
@@ -1037,11 +1159,21 @@ function safeParseJson(raw: string): unknown {
   }
 }
 
-auth.post(
-  "/password-reset/request",
-  zValidator("json", passwordResetRequestSchema),
-  async (c) => {
-    const { email, return_to } = c.req.valid("json")
+auth.post("/password-reset/request", zValidator("json", passwordResetRequestSchema), async c => {
+  const { email, return_to } = c.req.valid("json")
+  return deliverPasswordReset(c, email, return_to)
+})
+
+// Settings never accepts a destination email from the client. Resolve the
+// selected authenticated account afresh, rather than trusting a JWT email claim.
+auth.post("/me/password-reset/request", authMiddleware, async c => {
+  const user = await c.env.AQUILLA_PG.prepare("SELECT email FROM users WHERE id=?")
+    .bind(c.get("user").id).first<{ email: string }>()
+  if (!user) return c.json({ error: "Unauthorized" }, 401)
+  return deliverPasswordReset(c, user.email, "/preferences/login-methods")
+})
+
+async function deliverPasswordReset(c: Context<AuthHonoEnv>, email: string, return_to?: string) {
     // The one response every outcome below returns. Whether the address is
     // registered, whether it was throttled, and whether the token mint or the
     // send failed must all be indistinguishable from here — see the
@@ -1113,49 +1245,62 @@ auth.post(
     // response-time gap of hundreds of ms — a reliable "is this email
     // registered" oracle. It now runs after the response is sent
     // (executionCtx.waitUntil), so both paths answer in the same time.
+    //
+    // Post-response work must own its Postgres connection. index.ts closes
+    // the request-scoped AQUILLA_PG shim in its `finally` the moment the
+    // Response returns, so when this block first moved off the response its
+    // writes landed on a dead connection (`write CONNECTION_ENDED`): no token
+    // was minted, no mail went out, and "Forgot password" silently did
+    // nothing (caught by e2e/specs/projects/share-invite.smoke.spec.ts,
+    // 2026-11-02). withPostResponseDb opens its own handle from
+    // PG_CONNECTION_STRING and releases it once the work settles; without one
+    // (tests, which run this inline) it uses AQUILLA_PG, which the harness
+    // keeps alive.
     const deliverResetEmail = async (): Promise<void> => {
       try {
-        // [Pen test] Auth & session mgmt (2026-08-24): the token is stored as a
-        // SHA-256 digest, never in plaintext. Anyone holding a read-only copy
-        // of this table (a snapshot, a replica, a support query, a backup)
-        // previously held a 24-hour account-takeover credential for every
-        // pending reset.
-        const token = crypto.randomUUID()
-        const tokenHash = await sha256Hex(token)
-        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
-        // [Pen test] Auth & session mgmt (2026-10-12): a fresh request supersedes
-        // earlier links, so a stale/leaked older email can't be redeemed.
-        await c.env.AQUILLA_PG.prepare(`DELETE FROM password_reset_tokens WHERE user_id = ?`)
-          .bind(user.id)
-          .run()
-        await c.env.AQUILLA_PG.prepare(
-          `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
-           VALUES (?, ?, ?)
-           ON CONFLICT (token_hash) DO UPDATE SET user_id = excluded.user_id, expires_at = excluded.expires_at`,
-        )
-          .bind(user.id, tokenHash, expiresAt.toISOString())
-          .run()
+        await withPostResponseDb(c.env, async (db) => {
+          // [Pen test] Auth & session mgmt (2026-08-24): the token is stored as a
+          // SHA-256 digest, never in plaintext. Anyone holding a read-only copy
+          // of this table (a snapshot, a replica, a support query, a backup)
+          // previously held a 24-hour account-takeover credential for every
+          // pending reset.
+          const token = crypto.randomUUID()
+          const tokenHash = await sha256Hex(token)
+          const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
+          // [Pen test] Auth & session mgmt (2026-10-12): a fresh request supersedes
+          // earlier links, so a stale/leaked older email can't be redeemed.
+          await db.prepare(`DELETE FROM password_reset_tokens WHERE user_id = ?`)
+            .bind(user.id)
+            .run()
+          await db.prepare(
+            `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT (token_hash) DO UPDATE SET user_id = excluded.user_id, expires_at = excluded.expires_at`,
+          )
+            .bind(user.id, tokenHash, expiresAt.toISOString())
+            .run()
 
-        const encodedUsername = encodeURIComponent(user.username)
-        const baseUrl = c.env.BASE_URL || "https://aquilla.app"
-        const returnTo = orgInviteReturnTo(return_to)
-        const resetUrl = `${baseUrl}/reset-password?token=${token}&username=${encodedUsername}`
-          + (returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : "")
-        // [Pen test] Auth & session mgmt (2026-07-20): a delivery failure here
-        // used to fall through to the catch below and return a 500 with an
-        // error message — distinguishable from the generic 200 an unregistered
-        // address gets, i.e. a secondary user-enumeration oracle (observable
-        // whenever the email provider hiccups). The token is already minted and
-        // usable via the emailed link regardless of whether the SEND itself
-        // succeeds, so a delivery failure shouldn't change the response.
-        try {
-          // Send to the address of record (user.email), not the requester-typed
-          // casing, so the mail always targets the account's canonical email.
-          await sendPasswordResetEmail(c.env, user.email, resetUrl)
-        } catch (err) {
-          console.warn("[password-reset] email send failed (non-fatal):", err)
-        }
-        await logActivity(c.env.AQUILLA_PG, user.id, "password_reset_requested", "Password reset email sent")
+          const encodedUsername = encodeURIComponent(user.username)
+          const baseUrl = c.env.BASE_URL || "https://aquilla.app"
+          const returnTo = passwordResetReturnTo(return_to)
+          const resetUrl = `${baseUrl}/reset-password?token=${token}&username=${encodedUsername}`
+            + (returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : "")
+          // [Pen test] Auth & session mgmt (2026-07-20): a delivery failure here
+          // used to fall through to the catch below and return a 500 with an
+          // error message — distinguishable from the generic 200 an unregistered
+          // address gets, i.e. a secondary user-enumeration oracle (observable
+          // whenever the email provider hiccups). The token is already minted and
+          // usable via the emailed link regardless of whether the SEND itself
+          // succeeds, so a delivery failure shouldn't change the response.
+          try {
+            // Send to the address of record (user.email), not the requester-typed
+            // casing, so the mail always targets the account's canonical email.
+            await sendPasswordResetEmail(c.env, user.email, resetUrl)
+          } catch (err) {
+            console.warn("[password-reset] email send failed (non-fatal):", err)
+          }
+          await logActivity(db, user.id, "password_reset_requested", "Password reset email sent")
+        })
       } catch (error) {
         console.error("Password reset request error (post-lookup, response unchanged):", error)
       }
@@ -1168,8 +1313,7 @@ auth.post(
     }
 
     return c.json(genericResponse)
-  },
-)
+}
 
 auth.post(
   "/password-reset/verify",
@@ -1237,7 +1381,7 @@ auth.post(
       return c.json({ message: "Token is valid" })
     } catch (error) {
       console.error("Token verification error:", error)
-      return c.json({ error: "Invalid token" }, 400)
+      return c.json({ error: "Verification temporarily unavailable" }, 503)
     }
   },
 )
@@ -1303,32 +1447,30 @@ auth.post(
       await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_attempt", identifier, true)
 
       const passwordHash = await hashPasswordWerkzeugScrypt(new_password)
-      // [Pen test] Auth & session mgmt (2026-07-20): stamp password_changed_at
-      // alongside the hash. authMiddleware rejects any access token whose
-      // `iat` predates this timestamp, so every access token issued before
-      // this reset — including one an attacker stole — stops working
-      // immediately instead of remaining valid for up to 30 more days.
-      await c.env.AQUILLA_PG.prepare(
-        "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP, password_changed_at = CURRENT_TIMESTAMP WHERE id = ?",
-      )
-        .bind(passwordHash, user.id)
-        .run()
-      // Same-isolate eviction so the password_changed_at cutoff bites at once.
+      // AQU-2536: claim once and commit all recovery effects together. A
+      // competing request waits on the same token rows, then claims nothing.
+      // Failure in any CTE rolls back the password, generation and token claim.
+      const changed = await c.env.AQUILLA_PG.prepare(`WITH claimed AS (
+        DELETE FROM password_reset_tokens
+        WHERE user_id=? AND EXISTS (
+          SELECT 1 FROM password_reset_tokens proof
+          WHERE proof.user_id=? AND proof.token_hash=? AND proof.expires_at>now()
+        ) RETURNING user_id
+      ), changed AS (
+        UPDATE users SET password_hash=?, updated_at=now(),
+          password_changed_at=now(), session_version=session_version+1
+        WHERE id IN (SELECT user_id FROM claimed) RETURNING id
+      ), revoked AS (
+        UPDATE api_credentials SET revoked_at=COALESCE(revoked_at,now())
+        WHERE user_id IN (SELECT id::text FROM changed) RETURNING id
+      ), logged AS (
+        INSERT INTO activity_logs(user_id,activity_type,description)
+        SELECT id,'password_reset_completed','Password changed via reset link' FROM changed
+      ) SELECT id FROM changed`)
+        .bind(user.id, user.id, await sha256Hex(token), passwordHash)
+        .first<{ id: number }>()
+      if (!changed) return c.json({ error: "Invalid or expired token" }, 400)
       evictUserSessions(user.id)
-      // [Pen test] Account recovery must also kill long-lived Agent API / MCP
-      // tokens (PATs default to no expiry); otherwise a stolen aqk_ token
-      // survives the reset. Owners can mint new ones with the new password.
-      await c.env.AQUILLA_PG.prepare(
-        "UPDATE api_credentials SET revoked_at = COALESCE(revoked_at, now()) WHERE user_id = ?",
-      )
-        .bind(String(user.id))
-        .run()
-      await c.env.AQUILLA_PG.prepare(
-        "DELETE FROM password_reset_tokens WHERE user_id = ?",
-      )
-        .bind(user.id)
-        .run()
-      await logActivity(c.env.AQUILLA_PG, user.id, "password_reset_completed", "Password changed via reset link")
 
       return c.json({ message: "Password reset successful" })
     } catch (error) {

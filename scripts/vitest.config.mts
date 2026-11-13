@@ -30,6 +30,8 @@ export default defineConfig({
       "lib/spawn-command.test.ts",
       "lib/playwright-loader-env.test.ts",
       "lib/listening-pids.test.ts",
+      // node:crypto generateKeyPairSync (ed25519) — the browser shim has none.
+      "lib/desktop-bundle.test.ts",
     ],
     passWithNoTests: false,
   },

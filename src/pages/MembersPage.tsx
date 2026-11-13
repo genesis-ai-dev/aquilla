@@ -146,11 +146,14 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
   const canGovern = (activeOrg?.role.level ?? 0) >= ROLE.MAINTAINER
   const { members, isLoading: membersLoading, error: membersError, rosterHidden, add, addMany, remove, listMemberProjects, refresh } =
     useOrgMembers(orgId)
+  // AQU-2256: scoped to the org whose roster is open — the add-to-projects
+  // picker must never offer a project from another org the caller happens to
+  // maintain.
   const {
     projects: accessibleProjects,
     error: accessibleProjectsError,
     refresh: refreshProjects,
-  } = useAccessibleProjects()
+  } = useAccessibleProjects(orgId)
   const [removeTarget, setRemoveTarget] = useState<{ userId: number; username: string } | null>(null)
   const [multiInviteOpen, setMultiInviteOpen] = useState(false)
 

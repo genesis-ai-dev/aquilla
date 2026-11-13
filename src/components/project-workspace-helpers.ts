@@ -19,22 +19,8 @@ import { isLinkSeedFailed, markLinkSeedFailed } from "@/lib/sync/link-seed-statu
 import type { CellData } from "@/hooks/useCells"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
-
-/**
- * Returns true iff the completion-settings save should actually patch
- * systemPrompt on the server. Guards against two failure modes:
- *   1. Empty-prompt clobber: buildCompletionSettings() materialises "" by
- *      default, so provider-only saves would erase the server prompt.
- *   2. Under-MAINTAINER write: sub-600 callers 403 server-side; skipping
- *      avoids IDB/server divergence (same floor as handleImported).
- */
-export function shouldPatchSystemPrompt(
-  systemPrompt: string | null | undefined,
-  roleLevel: number,
-): boolean {
-  if (!systemPrompt || systemPrompt.trim().length === 0) return false
-  return roleLevel >= ROLE.MAINTAINER
-}
+import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
+import type { SyncTokenCallbacks } from "@/lib/sync/sync-token"
 
 /**
  * Returns true iff the zero-file self-heal should fire a `/link/sync`
@@ -639,6 +625,41 @@ export function resolveTakeLine(args: {
 }
 
 /**
+ * AQU-2079: the sync-token fetcher a project-scoped read mints through when it
+ * must not wait for the project-details response.
+ *
+ * The terminology page took ~3.9 s to show its first term row on prod though
+ * the `/concepts` request itself takes ~200 ms, because the read was wired to
+ * the LOADED project (`project?.id`) and so could not even start minting until
+ * `useProject` had answered — details, then token, then terms, three requests
+ * end to end.
+ *
+ * Nothing in a mint needs the loaded record. `POST /api/v2/sync-token` takes a
+ * `projectId` and a `fileId`; the `ProjectBootstrap` payload the workspace
+ * fetcher also carries (`projectName`, `gitlabProjectId`) is the only part that
+ * comes off the project record, and it has been accepted-and-ignored
+ * server-side since AQU-299 / SEC-9 — minting a token is an authorization step,
+ * never a project-creation step. So a read can mint against the id the ROUTE
+ * already carries and run in parallel with the details request.
+ *
+ * `build` is injectable so the rule can be tested without a network.
+ */
+export function buildRouteScopedTokenFetcher(args: {
+  /** `/project/:id` — available on the first render, unlike `project?.id`. */
+  routeProjectId: string | null | undefined
+  getJwt: () => string | null
+  callbacks?: SyncTokenCallbacks
+  build?: typeof buildFileScopedTokenFetcher
+}): (fileId: string) => Promise<string | null> {
+  const { routeProjectId, getJwt, callbacks, build = buildFileScopedTokenFetcher } = args
+  // No route id yet: no scope to mint for. Returning a null fetcher (rather
+  // than minting against a guessed id) keeps the read's fail-closed branch —
+  // AQU-1340: an unmintable token is an error, never an empty termbase.
+  if (!routeProjectId) return async (_fileId: string) => null
+  return build(getJwt, routeProjectId, {}, undefined, callbacks ?? {})
+}
+
+/**
  * The name a history step gives its file (slice 13): the file a person opens.
  * A hidden timeline companion (the audio cues, a caption track) is opened
  * through the file it belongs to, so it is named by that one; a file this
@@ -652,4 +673,54 @@ export function historyFileName(
   if (!file) return null
   if (!isHiddenTimelineFile(file)) return file.name
   return file.anchorFileId ? files.find((f) => f.id === file.anchorFileId)?.name ?? null : null
+}
+
+/** What the archived-project screen says and offers, for one reader. */
+export interface ArchivedProjectNotice {
+  /** True when this reader may restore the project themselves. */
+  canRestore: boolean
+  /** The sentence naming the state — with who archived it, when that is known. */
+  bodyKey:
+    | "workspace.archivedProject.archivedMessage"
+    | "workspace.archivedProject.archivedByMessage"
+  /** The follow-on sentence: restore it yourself, or ask someone who can. */
+  hintKey: "workspace.archivedProject.restoreHint" | "workspace.archivedProject.askHint"
+}
+
+/**
+ * AQU-2453: what a reader who opens an archived project is told.
+ *
+ * Two rules the old screen broke. It called the state "Trash" although the
+ * only action that reaches it is Project settings → Archive project, and it
+ * told every reader to "restore it to continue editing" — including the
+ * Contributor who has no Restore button, because restoring is Maintainer+.
+ * So the hint is chosen by the same predicate that draws the button: whoever
+ * cannot restore is pointed at someone who can instead of at an action they
+ * do not have.
+ *
+ * `ROLE.MAINTAINER` is the floor auth-worker itself enforces on
+ * `DELETE /api/v2/projects/:id/archive` (AQU-1070), not the owner-only one
+ * this screen used to guess — a Maintainer was shown "ask someone else" for
+ * a call that would have succeeded. The two escape hatches stay: a purely
+ * local project (no server row, so no role to read) and a session-less
+ * local-first runtime both restore from IDB alone.
+ */
+export function archivedProjectNotice(args: {
+  project: Pick<ProjectRecord, "syncRole" | "origin" | "deletedBy">
+  hasSession: boolean
+}): ArchivedProjectNotice {
+  const { project, hasSession } = args
+  const canRestore =
+    (project.syncRole?.level ?? 0) >= ROLE.MAINTAINER ||
+    (!project.origin && !project.syncRole) ||
+    !hasSession
+  return {
+    canRestore,
+    bodyKey: project.deletedBy
+      ? "workspace.archivedProject.archivedByMessage"
+      : "workspace.archivedProject.archivedMessage",
+    hintKey: canRestore
+      ? "workspace.archivedProject.restoreHint"
+      : "workspace.archivedProject.askHint",
+  }
 }

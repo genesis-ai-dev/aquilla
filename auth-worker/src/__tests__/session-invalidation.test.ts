@@ -1,5 +1,9 @@
+import * as passwordUtil from "../utils/password"
 import { env } from "cloudflare:test"
-import { describe, it, expect } from "vitest"
+import { sign } from "hono/jwt"
+import { JWTService } from "../auth/jwt"
+import { seedUser } from "./helpers/db"
+import { describe, it, expect, vi } from "vitest"
 import app from "../index"
 import { sha256Hex } from "../../../db/shared/api-credentials"
 import { jwtFor, authHeader } from "./helpers/db"
@@ -113,4 +117,96 @@ describe("password-reset/reset end to end", () => {
     const afterFresh = await app.request("/api/v2/auth/me", { headers: authHeader(freshToken) }, env)
     expect(afterFresh.status).toBe(200)
   })
+})
+
+// AQU-2530: real issuer → middleware → refresh, not a claims-only unit check.
+it("never transfers old credentials to a recreated username, including legacy timestamps and refresh", async () => {
+  await seedUser(71001, "reused")
+  await env.AQUILLA_PG.prepare("UPDATE users SET created_at=now()-interval '1 day' WHERE id=71001").run()
+  const jwt = new JWTService(env)
+  const {token} = await jwt.createAccessTokenWithPayload("reused")
+  const now = Math.floor(Date.now()/1000)
+  const legacy = await sign({sub:"reused",iat:now,exp:now+3600}, env.SECRET_KEY,"HS256")
+  for (const credential of [token, legacy]) {
+    expect((await app.request("/api/v2/auth/me",{headers:authHeader(credential)},env)).status).toBe(200)
+  }
+  await env.AQUILLA_PG.prepare("DELETE FROM users WHERE id=71001").run()
+  await seedUser(71002,"reused")
+  // Force same-second replacement: rounding must not let a legacy token in.
+  await env.AQUILLA_PG.prepare("UPDATE users SET created_at=? WHERE id=71002").bind(new Date(now*1000).toISOString()).run()
+  await expect(jwt.createAccessTokenWithPayload("reused",undefined,undefined,71001)).rejects.toThrow("identity changed")
+  clearSessionCache()
+  for (const credential of [token, legacy]) {
+    for (const path of ["me","refresh"]) {
+      expect((await app.request(`/api/v2/auth/${path}`,{method:path==="refresh"?"POST":"GET",headers:authHeader(credential)},env)).status).toBe(401)
+    }
+  }
+  const fresh = await jwt.createAccessToken("reused",undefined,71002)
+  expect((await app.request("/api/v2/auth/me",{headers:authHeader(fresh)},env)).status).toBe(200)
+  expect((await jwt.verifyToken(fresh))?.uid).toBe("71002")
+})
+
+it("uses expired credentials only as local ownership proof for an authenticated matching account", async () => {
+  await seedUser(72001,"ownerproof")
+  const service = new JWTService(env)
+  const current = await service.createAccessToken("ownerproof")
+  const old = {sub:"ownerproof",iat:1609459200,exp:1640995200}
+  const endpoint = "/api/v2/auth/me/local-data-owner"
+  expect((await app.request(endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({previousToken:"x"})},env)).status).toBe(401)
+  for (const [claims, secret, expected] of [
+    [old,env.SECRET_KEY,true], [{...old,uid:"72001"},env.SECRET_KEY,true],
+    [{...old,uid:"72002"},env.SECRET_KEY,false], [old,"not-the-secret",false],
+    [{...old,sub:"another-user"},env.SECRET_KEY,false],
+  ] as const) {
+    const previousToken = await sign(claims,secret,"HS256")
+    const res = await app.request(endpoint,{method:"POST",headers:authHeader(current),body:JSON.stringify({previousToken})},env)
+    expect(await res.json()).toEqual({sameAccount:expected})
+    expect((await app.request("/api/v2/auth/me",{headers:authHeader(previousToken)},env)).status).toBe(401)
+  }
+  await env.AQUILLA_PG.prepare("UPDATE users SET created_at=now() WHERE id=72001").run()
+  clearSessionCache()
+  const res = await app.request(endpoint,{method:"POST",headers:authHeader(current),body:JSON.stringify({previousToken:await sign(old,env.SECRET_KEY,"HS256")})},env)
+  expect(await res.json()).toEqual({sameAccount:false})
+})
+
+
+it("rejects same-second legacy tokens and permits fresh versioned logins after reset", async () => {
+  await seedUser(81801, "auditsecond")
+  const iat = Math.floor(Date.now()/1000)-5
+  const old = await jwtFor("auditsecond", iat)
+  await env.AQUILLA_PG.prepare("UPDATE users SET password_changed_at=?, session_version=1 WHERE id=81801").bind(new Date(iat*1000+900).toISOString()).run()
+  clearSessionCache()
+  for (const path of ["me", "refresh"]) expect((await app.request(`/api/v2/auth/${path}`, { method:path==="refresh"?"POST":"GET", headers:authHeader(old) }, env)).status).toBe(401)
+  const fresh = await new JWTService(env).createAccessToken("auditsecond")
+  expect((await app.request("/api/v2/auth/me", {headers:authHeader(fresh)}, env)).status).toBe(200)
+})
+
+it("never renews a cached pre-reset session and fences a reset between validation and mint", async () => {
+  await seedUser(81803,"auditcache")
+  const now=Math.floor(Date.now()/1000)
+  const token=await sign({sub:"auditcache",uid:"81803",sv:0,iat:now-7200,sst:now-7200,exp:now+60,jti:"cache-test"},env.SECRET_KEY,"HS256")
+  expect((await app.request("/api/v2/auth/me",{headers:authHeader(token)},env)).status).toBe(200)
+  // A different isolate cannot evict this instance's cache.
+  await env.AQUILLA_PG.prepare("UPDATE users SET password_changed_at=now(), session_version=1 WHERE id=81803").run()
+  expect((await app.request("/api/v2/auth/refresh",{method:"POST",headers:authHeader(token)},env)).status).toBe(401)
+  await expect(new JWTService(env).createAccessTokenWithPayload("auditcache",now-7200,undefined,81803,0)).rejects.toThrow("Session invalidated")
+  clearSessionCache()
+  expect((await app.request("/api/v2/auth/me",{headers:authHeader(token)},env)).status).toBe(401)
+  const fresh=await new JWTService(env).createAccessToken("auditcache")
+  expect((await app.request("/api/v2/auth/me",{headers:authHeader(fresh)},env)).status).toBe(200)
+})
+
+
+it("does not overwrite a concurrent reset during legacy password rehash", async () => {
+  await seedUser(81804,"rehashrace")
+  const newHash=await passwordUtil.hashPasswordWerkzeugScrypt("new-password-123")
+  const verify=vi.spyOn(passwordUtil,"verifyPassword").mockResolvedValueOnce({isValid:true,shouldRehashToWerkzeugScrypt:true})
+  const rehash=vi.spyOn(passwordUtil,"hashPasswordWerkzeugScrypt").mockImplementationOnce(async () => {
+    await env.AQUILLA_PG.prepare("UPDATE users SET password_hash=?,password_changed_at=now(),session_version=1 WHERE id=81804").bind(newHash).run()
+    return "obsolete-rehash"
+  })
+  try {
+    expect((await reqJson("/api/v2/auth/token",{username:"rehashrace",password:"old-password-123"})).status).toBe(401)
+    expect(await env.AQUILLA_PG.prepare("SELECT password_hash,session_version FROM users WHERE id=81804").first()).toEqual({password_hash:newHash,session_version:1})
+  } finally { verify.mockRestore();rehash.mockRestore() }
 })

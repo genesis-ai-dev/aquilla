@@ -347,7 +347,7 @@ describe("applyEBibleTargetImport — commit shape", () => {
 
   // AQU-1365: the Import button now opens a translation import for
   // Contributors (400), while the artifact routes refuse anyone below
-  // Project lead (500). That refusal must not cost them the import itself.
+  // Project Lead (500). That refusal must not cost them the import itself.
   it("still imports a Contributor's text when the server refuses the preserved copy for their role", async () => {
     const requests: string[] = []
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {

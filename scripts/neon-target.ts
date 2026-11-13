@@ -4,7 +4,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import process from "node:process"
-import { childArgs, type NeonTargetCommand } from "./neon-target-args"
+import { childArgs, isNeonTargetCommand, NEON_TARGET_COMMANDS, type NeonTargetCommand } from "./neon-target-args"
 import { decideApplyGuard, MIGRATION_COMMANDS, NO_SNAPSHOT_FLAG, SNAPSHOT_FLAG } from "./neon-apply-guard"
 
 type RemoteTarget = "production" | "dev"
@@ -41,7 +41,9 @@ const DEFAULTS: Partial<Record<PgKey, string>> = {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 function usage(): never {
-  console.error("usage: tsx scripts/neon-target.ts <production|dev|local> <status|apply|baseline|prepare-comments-key|backfill-progress|backfill-activity|backfill-book-codes|backfill-lanes|backfill-lane-batch|prune-phantom-voices|fold-cast-by-character|verify-lanes|seed-extract|scrub-integrations|copy-dev-audio|copy-dev-audio-all>")
+  // Read off NEON_TARGET_COMMANDS so the usage text cannot advertise a
+  // different set from the one parseCommand accepts (AQU-1946).
+  console.error(`usage: tsx scripts/neon-target.ts <production|dev|local> <${NEON_TARGET_COMMANDS.join("|")}>`)
   console.error(`       production apply requires ${SNAPSHOT_FLAG} (take a Neon snapshot branch first) or ${NO_SNAPSHOT_FLAG}`)
   process.exit(1)
 }
@@ -54,7 +56,9 @@ function parseTarget(value: string | undefined): Target {
 }
 
 function parseCommand(value: string | undefined): Command {
-  if (value === "prepare-comments-key" || value === "status" || value === "apply" || value === "baseline" || value === "backfill-progress" || value === "backfill-activity" || value === "backfill-book-codes" || value === "backfill-lanes" || value === "backfill-lane-batch" || value === "prune-phantom-voices" || value === "fold-cast-by-character" || value === "verify-lanes" || value === "seed-extract" || value === "scrub-integrations" || value === "copy-dev-audio" || value === "copy-dev-audio-all") return value
+  // AQU-1946: membership of the one list, not a hand-written chain. The chain
+  // was missing `repair-lane-grants`, so both of its package scripts exited 1.
+  if (isNeonTargetCommand(value)) return value
   usage()
 }
 
@@ -283,7 +287,7 @@ async function main() {
   // AQU-1941: which database the child is actually pointed at. A script holding
   // raw NEON_PG_* credentials cannot tell, so a child that gates its own writes
   // on "is this production?" reads this instead of guessing
-  // (scripts/phantom-voice-prune-gate.ts).
+  // (scripts/phantom-voice-prune.ts).
   env.AQUILLA_NEON_TARGET = target
   const args = childArgs(command, passthrough)
   console.log(`neon-target ${target} ${command}${passthrough.length ? " " + passthrough.join(" ") : ""} -> ${target === "local" ? "local Postgres" : env.NEON_PG_HOST}`)

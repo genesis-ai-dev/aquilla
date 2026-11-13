@@ -315,7 +315,7 @@ describe("JoinPage preview error states (signed-out)", () => {
     renderJoin()
     expect(await screen.findByText("This link has already been used")).toBeInTheDocument()
     // Must explain it's single-use and tell the user to ask for a new one
-    expect(screen.getByText(/single-use/i)).toBeInTheDocument()
+    expect(screen.getByText(/This invite link is single-use/i)).toBeInTheDocument()
     expect(screen.getByText(/ask the project owner/i)).toBeInTheDocument()
     expect(screen.queryByText("do-login")).not.toBeInTheDocument()
     expect(screen.queryByText("do-signup")).not.toBeInTheDocument()
@@ -388,7 +388,7 @@ describe("InviteSummary (AQU-337 singular/plural copy)", () => {
         roleName="project_lead"
       />,
     )
-    expect(screen.getByText("Project lead")).toBeInTheDocument()
+    expect(screen.getByText("Project Lead")).toBeInTheDocument()
   })
 
   it("renders the bound email suffix when present", () => {

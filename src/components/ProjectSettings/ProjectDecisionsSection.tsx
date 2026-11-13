@@ -1,8 +1,11 @@
 // "Project decisions" card (AQU-1691), under the Language profile card in
-// Settings → General → Languages.
+// Living Memory → Checks (AQU-2342; mounted by living-memory/CheckDataCards).
 //
-// The decision log: the answers a team gave to Autopilot's questions, which
-// every later draft follows (db/shared/project-facts.ts). Each row shows the
+// The decision log: the answers a team gave to Autopilot's questions
+// (db/shared/project-facts.ts). Since AQU-2342 an answer is also appended to
+// the project instructions, which is what drafts read once they are written;
+// the log stays the record Autopilot checks so it never asks twice, and the
+// Bible data checks read their agreed names from it. Each row shows the
 // key, the value, where it applies, who decided it and when. Maintainers can
 // edit a decision's value, scope and note, or remove it; an edit is a new
 // decision, so it takes the editor's name and today's date.
@@ -16,6 +19,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { SettingsBlock, SettingsGroup } from "@/components/ui/page"
+import { SaveStatus } from "@/lib/settings/save-status"
 import type { PatchOutcome } from "@/hooks/useProjectSettings"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
@@ -173,7 +177,15 @@ export function ProjectDecisionsSection({ value, canEdit, disabledTooltip, usern
   }
 
   return (
-    <SettingsGroup label={t("projectDecisions.title")} description={t("projectDecisions.description")} locked={canEdit ? null : disabledTooltip}>
+    <SettingsGroup
+      label={
+        // AQU-2262: the card is one setting; its quiet "Saved" sits by its name.
+        <span className="flex items-center justify-between gap-4 pr-4">
+          {t("projectDecisions.title")}
+          <SaveStatus id="projectFacts" className="font-normal" />
+        </span>
+      }
+      description={t("projectDecisions.description")} locked={canEdit ? null : disabledTooltip}>
       {facts.length === 0 ? (
         <SettingsBlock>
           <p className="text-sm text-muted-foreground">{t("projectDecisions.empty")}</p>

@@ -1,3 +1,4 @@
+import "./lib/frontier/google-return"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { BrowserRouter } from "react-router-dom"
@@ -14,7 +15,14 @@ import { I18nProvider } from "./lib/i18n/I18nProvider"
 import { loadCatalog } from "./lib/i18n/messages"
 import { detectInitialLocale, readStoredLocale } from "./lib/i18n/store"
 import { AccountsProvider } from "./hooks/useAccounts"
+import { migrateLegacyCodexLocalStorageKeys } from "./lib/store/legacy-codex-keys"
 // Buffer/crypto/etc. provided by vite-plugin-node-polyfills (see vite.config.ts)
+
+// AQU-1555: the browser-local preference keys were renamed off the old
+// "codex" app name without a migration, so a browser that predates that
+// upgrade still holds them. Rename them before anything reads a preference
+// (ThemeModeProvider, FontSizeProvider) or claims one for an account.
+migrateLegacyCodexLocalStorageKeys()
 
 applyTheme(brand)
 document.title = brand.app.htmlTitle

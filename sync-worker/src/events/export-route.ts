@@ -14,6 +14,12 @@
 // text need the branch — binary sidecar formats and unserialized formats
 // already return their stored bytes as-is.
 //
+// `?chapter=N` (AQU-2561, USFM only) returns the book's front matter followed
+// by that one chapter instead of the whole file — see `lib/usfm-chapter.ts`.
+// Every other format ignores it, and so does `?mode=raw`: the original upload
+// is the original upload. The external Agent API route builds its own query
+// string and never forwards this parameter.
+//
 // Auth: sync-token JWT scoped to projectId; role floor = max(MAINTAINER, org
 // exportMinRole setting). Default org floor = MAINTAINER (600) per spec Q32.
 // Org owners can RAISE the floor (e.g., OWNER only) or LOWER it (e.g.,
@@ -32,8 +38,11 @@ import {
   serializeUsfmLossless,
   countLossyVerses,
 } from "../lib/usfm-lossless"
+import { findUsfmChapter, serializeUsfmChapter } from "../lib/usfm-chapter"
 import { buildUsfmExportPlan } from "./usfm-export-plan"
 import { buildPlainTextExport } from "./plaintext-export"
+import { readOriginalSourceBytes } from "./original-source"
+import { detectTextFidelity } from "../../../src/lib/export/text-fidelity"
 
 export interface ExportRouteEnv {
   AQUILLA_PG?: AquillaDb
@@ -70,6 +79,10 @@ export async function handleExportSourceRequest(
   // validation threshold. Unvalidated drafts keep the client's original words
   // rather than shipping as approved text. Absent/0 preserves today's contract.
   const validatedOnly = url.searchParams.get("validated") === "1"
+  // AQU-2561: ?chapter=N — one chapter of a USFM file. Read here, refused
+  // below only where it means something, so a caller that sends it for another
+  // format gets that format's whole file rather than an error.
+  const chapterParam = url.searchParams.get("chapter")
   const db = env.AQUILLA_PG
 
   const authHeader = request.headers.get("Authorization") ?? ""
@@ -212,8 +225,49 @@ export async function handleExportSourceRequest(
   // the in-app export, built from the projection. `?mode=raw` skips it and
   // falls through to the stored upload below, which is what the project
   // export's "source documents" folder asks for.
+  //
+  // AQU-2383: the serializer rebuilds the file from cells, so it returns the
+  // parser's normalized form — segments rejoined by the paragraph rules, LF
+  // terminators, no byte-order mark. That is the right answer for a target
+  // somebody has translated and the WRONG answer for one nobody has touched,
+  // where the only honest export is the upload itself. So resolve the stored
+  // blob first and let it decide:
+  //
+  //   - the rebuild says nothing the upload does not (no translation went in
+  //     and no cell was hidden or filtered out) → return the stored bytes
+  //     verbatim (`raw-original`), which is byte-identical by construction;
+  //   - otherwise → rebuild, but put the source's mark and line terminator
+  //     back around the new text.
+  //
+  // A file with no stored blob (imported before blobs were kept, or swept)
+  // keeps the old behavior rather than failing: a normalized export beats no
+  // export at all.
   if (blob.format === "txt" && !rawMode) {
-    const body = await buildPlainTextExport(db, projectId, fileId, lane, { validatedOnly })
+    const stored = await readOriginalSourceBytes(blob, env.SNAPSHOTS)
+    // `ignoreBOM: true` KEEPS the mark in the decoded string (the flag name
+    // reads backwards): the default strips it, which would hide the very thing
+    // the envelope detection is looking for. `fatal: false` is the default,
+    // spelled out because workers-types declares both fields required.
+    const storedText = stored.ok
+      ? new TextDecoder("utf-8", { ignoreBOM: true, fatal: false }).decode(stored.bytes)
+      : null
+    const { body, untouched } = await buildPlainTextExport(db, projectId, fileId, lane, {
+      validatedOnly,
+      ...(storedText != null ? { fidelity: detectTextFidelity(storedText) } : {}),
+    })
+    if (untouched && stored.ok) {
+      return withCors(
+        new Response(stored.bytes, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Content-Disposition": attachmentDisposition(fileName),
+            "X-Export-Mode": "raw-original",
+          },
+        }),
+        request,
+      )
+    }
     return withCors(
       new Response(body, {
         status: 200,
@@ -255,6 +309,14 @@ export async function handleExportSourceRequest(
     : fileName.toLowerCase().endsWith(".usfm")
       ? fileName
       : `${fileName}.SFM`
+
+  // Refused before any cell is read: a malformed chapter must never fall
+  // through to the whole file, which would hand somebody who asked for one
+  // chapter a whole book under a one-chapter filename.
+  const wantsChapter = chapterParam !== null && !rawMode
+  if (wantsChapter && !/^\d{1,3}$/.test(chapterParam)) {
+    return withCors(new Response("chapter must be a chapter number", { status: 400 }), request)
+  }
 
   if (rawMode) {
     // Byte-exact original upload: resolve the stored bytes (inline column or
@@ -318,8 +380,24 @@ export async function handleExportSourceRequest(
     )
   }
   const doc = parseUsfmLossless(rawSource)
-  const lossyVerseCount = countLossyVerses(doc, overrides)
-  const out = serializeUsfmLossless(doc, overrides, edits)
+  let lossyVerseCount: number
+  let out: string
+  if (wantsChapter) {
+    const chapter = Number(chapterParam)
+    const range = findUsfmChapter(rawSource, chapter)
+    if (!range) {
+      return withCors(
+        new Response(`chapter ${chapter} is not in this file`, { status: 404 }),
+        request,
+      )
+    }
+    const sliced = serializeUsfmChapter(doc, range, overrides, edits)
+    out = sliced.text
+    lossyVerseCount = sliced.lossyVerseCount
+  } else {
+    lossyVerseCount = countLossyVerses(doc, overrides)
+    out = serializeUsfmLossless(doc, overrides, edits)
+  }
 
   return withCors(
     new Response(out, {

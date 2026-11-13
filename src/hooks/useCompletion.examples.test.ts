@@ -22,7 +22,7 @@ interface MinimalCell {
   status: string
 }
 
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn(), captureException: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn(), captureException: vi.fn() } }))
 vi.mock("@/lib/completion/frontier-health", () => ({
   useFrontierHealth: () => ({ available: true }),
 }))
@@ -180,5 +180,104 @@ describe("example evidence requires a real source→target pair (AQU-153)", () =
     })
 
     expect((result.current.examples.get("cell-1") ?? []).map((e) => e.cellId)).toEqual(["p-paired"])
+  })
+})
+
+// A line the project has already translated elsewhere is the best example the
+// model can be given — the Examples panel calls it a 100% match. The drafted
+// cell used to be kept out of the prompt by its source TEXT, which silently
+// dropped every such match too, so the draft picked its own word.
+describe("an exact match from another cell reaches the model", () => {
+  const SOURCE = "Mercy: Exodus 32:1–35."
+  const sentUserMessage = (): string => {
+    const [, init] = (vi.mocked(fetch).mock.calls as [string, RequestInit][])[0]
+    const body = JSON.parse(String(init.body)) as { messages: { role: string; content: string }[] }
+    return body.messages.find((m) => m.role === "user")?.content ?? ""
+  }
+  // The drafted cell already carries an approved translation (a regenerate):
+  // the local fallback would offer it back as its own example.
+  const DRAFTED: MinimalCell = {
+    id: "cell-1", fileId: "file-a", original: SOURCE, translated: "ITS OWN OLD ANSWER", status: "validated",
+  }
+
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+    searchMock.mockReset()
+    searchMock.mockResolvedValue([])
+    searchPassagesMock.mockReset()
+    searchPassagesMock.mockResolvedValue([])
+  })
+
+  it("single: sends the identical line's translation, never the cell's own", async () => {
+    mockFetchReturning("Милосердие: Исход 32:1–35.")
+    searchMock.mockResolvedValue([
+      hit("other-1", SOURCE, "Милосердие: Исход 32:1–35."),
+      hit("other-2", SOURCE, "Милосердие: Исход 32:1–35."),
+    ])
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderCompletion(commitMock, [DRAFTED])
+
+    await act(async () => {
+      await result.current.completeSingle(DRAFTED as never)
+    })
+
+    const user = sentUserMessage()
+    expect(user).toContain(`Source: ${SOURCE}\nTranslation: Милосердие: Исход 32:1–35.`)
+    expect(user).not.toContain("ITS OWN OLD ANSWER")
+    expect(commitMock.mock.calls[0][3]).toMatchObject({ exampleIds: ["other-1"] })
+  })
+
+  it("batch: sends the identical line's translation, never the cell's own", async () => {
+    mockFetchReturning("<v1>Милосердие: Исход 32:1–35.</v1>")
+    searchPassagesMock.mockResolvedValue([
+      {
+        fileId: "file-b",
+        cells: [{ cellId: "other-1", source: SOURCE, target: "Милосердие: Исход 32:1–35.", hit: true }],
+      },
+    ])
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderCompletion(commitMock, [DRAFTED])
+
+    await act(async () => {
+      await result.current.completeBatch([DRAFTED] as never)
+    })
+
+    const user = sentUserMessage()
+    expect(user).toContain("Милосердие: Исход 32:1–35.")
+    expect(user).not.toContain("ITS OWN OLD ANSWER")
+  })
+})
+
+// AQU-2342: the copilot sends the fixed role text plus the ONE project
+// instructions text. A device's stored `completionSettings.systemPrompt` is a
+// legacy migrate-on-read source only — it must never reach the request itself.
+describe("project instructions reach every copilot request (AQU-2342)", () => {
+  const sentSystemMessages = (): string[] =>
+    (vi.mocked(fetch).mock.calls as [string, RequestInit][]).map(([, init]) => {
+      const body = JSON.parse(String(init.body)) as { messages: { role: string; content: string }[] }
+      return body.messages.find((m) => m.role === "system")?.content ?? ""
+    })
+
+  it.each(["single", "batch"] as const)("%s: instructions after the default role text; the legacy prompt is not sent", async (path) => {
+    mockFetchReturning(path === "batch" ? "<v1>Au commencement</v1>" : "Au commencement")
+    searchMock.mockResolvedValue([])
+    searchPassagesMock.mockResolvedValue([])
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderHook(() =>
+      useCompletion(
+        { ...SETTINGS, systemPrompt: "LEGACY DEVICE PROMPT" }, "English", "French",
+        searchMock, searchPassagesMock,
+        SESSION, commitMock as never, [],
+        [CELL] as never, "Use the formal register.", DEFAULT_DRAFT_CONTEXT,
+      ),
+    )
+    await act(async () => {
+      if (path === "batch") await result.current.completeBatch([CELL] as never)
+      else await result.current.completeSingle(CELL as never)
+    })
+    const [sys] = sentSystemMessages()
+    expect(sys).toContain("Project instructions (follow these):\nUse the formal register.")
+    expect(sys.indexOf("Project instructions")).toBeGreaterThan(sys.indexOf("You are a translation assistant"))
+    expect(sys).not.toContain("LEGACY DEVICE PROMPT")
   })
 })

@@ -16,6 +16,15 @@ import { toUserFacingError } from "@/lib/errors/user-error";
  * AQU-321: scoped to minRole=600 (maintainer) so the picker doesn't enumerate
  * every project on the instance. The server enforces the same threshold.
  *
+ * AQU-2256: ALSO scoped to one org. The add-to-projects picker hangs off a
+ * single org's Members page, so offering every project the caller maintains
+ * anywhere let an org-A admin grant an org-A member access to an org-C
+ * project — and leaked org-C project names onto org-A's page. `orgId` is the
+ * org whose roster is open; the server filters on it (`?orgId=`) and still
+ * returns nothing from an org the caller isn't a member of. Until the page
+ * knows its org (`orgId == null`) the picker stays empty rather than falling
+ * back to every org.
+ *
  * Failures stay distinct from a genuinely empty list. In particular, 401
  * raises credential-scoped re-auth rather than making the picker look empty.
  */
@@ -26,9 +35,10 @@ export interface UseAccessibleProjects {
   refresh: () => Promise<void>;
 }
 
-export function useAccessibleProjects(): UseAccessibleProjects {
+export function useAccessibleProjects(orgId?: number | null): UseAccessibleProjects {
   const { session } = useFrontierSession();
   const jwt = session?.jwt ?? null;
+  const org = orgId ?? null;
   const [projects, setProjects] = useState<CloudProjectSummary[]>([]);
   const [isLoading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +46,8 @@ export function useAccessibleProjects(): UseAccessibleProjects {
   const requestRef = useRef(0);
   const jwtRef = useRef(jwt);
   jwtRef.current = jwt;
+  const orgRef = useRef(org);
+  orgRef.current = org;
 
   // Reset aliveRef on each effect run — see useOrg for the StrictMode
   // rationale (cleanup-only would permanently flip it false in dev).
@@ -46,8 +58,10 @@ export function useAccessibleProjects(): UseAccessibleProjects {
 
   const refresh = useCallback(async () => {
     const request = ++requestRef.current;
-    if (!jwt) {
-      if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt) {
+    // AQU-2256: no org in hand ⇒ no picker. Never fall back to the
+    // cross-org list, which is the leak this scoping exists to close.
+    if (!jwt || org == null) {
+      if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt && orgRef.current === org) {
         setProjects([]);
         setError(null);
         setLoading(false);
@@ -56,25 +70,26 @@ export function useAccessibleProjects(): UseAccessibleProjects {
     }
     setLoading(true);
     try {
-      // AQU-321: only fetch projects where caller >= maintainer (600)
-      const result = await fetchAccessibleProjectsResult(jwt, undefined, undefined, 600);
+      // AQU-321: only fetch projects where caller >= maintainer (600).
+      // AQU-2256: and only within `org`.
+      const result = await fetchAccessibleProjectsResult(jwt, org, undefined, 600);
       if (!result.ok) {
         if (result.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt);
         throw projectsResultError(result);
       }
-      if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt) {
+      if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt && orgRef.current === org) {
         setProjects(result.projects);
         setError(null);
       }
     } catch (caught) {
-      if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt) {
+      if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt && orgRef.current === org) {
         setProjects([]);
         setError(toUserFacingError(caught, "project").message);
       }
     } finally {
-      if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt) setLoading(false);
+      if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt && orgRef.current === org) setLoading(false);
     }
-  }, [jwt]);
+  }, [jwt, org]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 

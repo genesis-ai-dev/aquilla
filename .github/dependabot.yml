@@ -13,16 +13,17 @@ version: 2
 # PR-volume control — the cooldown is a floor on a release's age, not a cap on
 # how late a bump may land. Don't conflate the two when tuning either.
 
-# agent-worker's npm deps and its Dockerfile base image ride ONE pull request.
-# The Sandbox SDK client (@cloudflare/sandbox) and the container it drives
-# (docker.io/cloudflare/sandbox:<version>-python) must be the exact same
-# version: the SDK logs `version_mismatch` on startup otherwise, and
-# agent-worker/test/runtime-policy.test.ts fails. An npm-only group bumped the
-# SDK twice (0.7.0 -> 0.12.5, 0.12.5 -> 0.12.9) and left the Dockerfile behind
-# both times, because a single-ecosystem PR cannot touch a Dockerfile.
-# Cloudflare publishes both artifacts together and both entries share the same
-# 7-day cooldown, so they resolve to the same release; if a PR ever pairs
-# different versions, align them by hand before merging.
+# agent-worker's npm deps and its Dockerfile images ride ONE pull request.
+# The Sandbox SDK client (@cloudflare/sandbox) and the `sandbox-shim` helper it
+# runs inside the container (the `FROM docker.io/cloudflare/sandbox:<version>
+# AS sandbox-shim` donor stage in agent-worker/Dockerfile) speak a versioned
+# protocol and must be the exact same release; agent-worker/test/
+# runtime-policy.test.ts fails otherwise. An npm-only group bumped the SDK
+# twice (0.7.0 -> 0.12.5, 0.12.5 -> 0.12.9) and left the Dockerfile behind both
+# times, because a single-ecosystem PR cannot touch a Dockerfile. Cloudflare
+# publishes both artifacts together and both entries share the same 7-day
+# cooldown, so they resolve to the same release; if a PR ever pairs different
+# versions, align them by hand before merging.
 multi-ecosystem-groups:
   agent-worker:
     schedule:
@@ -53,6 +54,28 @@ updates:
       - dependency-name: "@tanstack/react-table"
         update-types:
           - "version-update:semver-major"
+      # LiveStore is pre-1.0 and ships breaking changes in MINOR versions (its
+      # changelog says so), so a minor bump does not belong in this group.
+      # 0.4 -> 0.5 is the Effect 3 -> Effect 4 migration: Schema.Literal became
+      # single-valued (13 call sites in src/lib/offline/schema.ts), the pnpm
+      # patch on @livestore/common@0.4.0 is silently dropped, the offline data
+      # generation and its eventlog fixture must be bumped, and every existing
+      # client store rebuilds once. PR #1759 went red on all four checks from
+      # that one bump. Remove once a deliberate migration lands.
+      - dependency-name: "@livestore/*"
+        update-types:
+          - "version-update:semver-minor"
+      # postgres.js 4 is a rewrite that pipelines a query on a busy connection
+      # instead of queueing it. Through Hyperdrive that left the unprepared
+      # queries db/shim/postgres.ts sends half-sent: Postgres sat in ClientRead
+      # holding a pooled connection until Hyperdrive dropped the client ten
+      # minutes later, and production ran out of pool slots (2026-11-13, release
+      # 2026.11.12.02). The driver is pinned to exactly 3.4.9 in all three
+      # manifests; db/shim/postgres.ts resolves it from THIS (root) one. Remove
+      # all three entries together, once 4.x has been proven through Hyperdrive.
+      - dependency-name: "postgres"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: npm
     directory: "/auth-worker"
@@ -65,6 +88,11 @@ updates:
       auth-worker-deps:
         patterns:
           - "*"
+    ignore:
+      # Pinned to 3.4.9 with the root manifest; see the note on the root entry.
+      - dependency-name: "postgres"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: npm
     directory: "/sync-worker"
@@ -77,6 +105,11 @@ updates:
       sync-worker-deps:
         patterns:
           - "*"
+    ignore:
+      # Pinned to 3.4.9 with the root manifest; see the note on the root entry.
+      - dependency-name: "postgres"
+        update-types:
+          - "version-update:semver-major"
 
   # agent-worker has its own package-lock.json and was the one Worker no
   # ecosystem entry covered, so a CVE in its dependencies — it shares hono with
@@ -93,8 +126,10 @@ updates:
     cooldown:
       default-days: 7
 
-  # The Dockerfile's FROM tag. Dependabot keeps the `-python` suffix when it
-  # picks a newer tag.
+  # The Dockerfile's FROM lines: the python runtime base and the
+  # cloudflare/sandbox donor stage that carries sandbox-shim. Dependabot reads
+  # FROM lines only, which is why the shim is a named stage rather than a bare
+  # `COPY --from=docker.io/...`.
   - package-ecosystem: docker
     directory: "/agent-worker"
     multi-ecosystem-group: agent-worker
@@ -102,6 +137,14 @@ updates:
       - "*"
     cooldown:
       default-days: 7
+    ignore:
+      # The Python minor is a deliberate choice: every wheel pinned in the
+      # Dockerfile is built per interpreter minor, so 3.13 -> 3.14 is a tested
+      # change, not a tag bump.
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
 
   - package-ecosystem: cargo
     directory: "/src-tauri"

@@ -1,11 +1,10 @@
 import { Plus, Sparkles, Download, CheckSquare, Mic, Wand2, AudioLines, Quote } from "lucide-react"
-import { CHANGE_VOICE_QUALITY_LABEL, getChangeVoiceQuality } from "@/lib/store/change-voice-quality"
 import type {
   WorkspaceAction, WorkspaceActionContext,
 } from "./types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { canPerform } from "@/lib/sync/role-policy"
-import { batchValidateConfirmDescription } from "@/lib/review/batch-validate-summary"
+import { batchValidateChunkSize, batchValidateConfirmDescription } from "@/lib/review/batch-validate-summary"
 
 // AQU-365: viewers (and any role below the action's server floor) must not
 // see these buttons at all — clicking them either persists a write server
@@ -142,12 +141,13 @@ export const workspaceActions: WorkspaceAction[] = [
         if (!c.activeFileId) return ""
         const summary = c.batchValidateSummary?.()
         if (!summary) return t("editor.batchValidate.noTarget")
-        // AQU-586: a project may cap how many eligible cells one batch-validate
-        // processes. 0/undefined keeps the "all eligible" behavior. The cap is
-        // already applied inside the summary; it is passed again so the note
-        // explaining "run again to continue" survives a run it did not trim.
+        // AQU-586 set a per-run cap here; AQU-2507 turns it into the run's
+        // CHUNK size. The summary is no longer trimmed by it, so this number
+        // promises the whole file and the note says the run keeps going until
+        // it is done rather than asking for another click.
         return batchValidateConfirmDescription(
-          summary, t, joinList, c.project.completionSettings?.validationBatchSize,
+          summary, t, joinList,
+          batchValidateChunkSize(c.project.completionSettings?.validationBatchSize),
         )
       },
       // Same imperative as the selection toolbar's button — reuse it rather
@@ -239,8 +239,7 @@ export const workspaceActions: WorkspaceAction[] = [
       titleKey: "nav.workspaceActions.changeVoiceAll.title",
       description: (c, t) => {
         const n = c.audioCounts?.voiceChangeable ?? 0
-        const quality = t(CHANGE_VOICE_QUALITY_LABEL[getChangeVoiceQuality()])
-        return t("nav.workspaceActions.changeVoiceAll.description", { n, quality })
+        return t("nav.workspaceActions.changeVoiceAll.description", { n })
       },
       confirmLabelKey: "nav.workspaceActions.changeVoiceAll.confirmLabel",
     },

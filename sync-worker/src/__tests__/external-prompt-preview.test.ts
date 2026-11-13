@@ -20,12 +20,10 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { handleExternalReadRequest } from "../external/read-routes"
 import { mintApiToken } from "../../../db/shared/api-credentials"
+import { loadTranslationInstructions } from "../../../db/shared/load-translation-instructions"
+import { instructionsPromptBlock } from "../../../db/shared/translation-instructions"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
-import {
-  buildPrompt,
-  DEFAULT_SYSTEM_PROMPT,
-  type ChatMessage,
-} from "../../../src/lib/completion/prompt-build"
+import { buildPrompt, DEFAULT_SYSTEM_PROMPT, type ChatMessage } from "../../../src/lib/completion/prompt-build"
 import { compileConceptsToRulesCore } from "../../../src/lib/terminology/compile-core"
 
 const SECRET = "test-secret"
@@ -44,9 +42,9 @@ interface PreviewBody {
   messages: ChatMessage[]
   parts: {
     base: string
-    brief: string
-    rules: string
-    styleRules: string
+    instructions: string
+    checks: string
+    terminology: string
     injectedTerms: {
       conceptId: string
       sourceTerm: string
@@ -55,6 +53,10 @@ interface PreviewBody {
     }[]
     examples: { cellId?: string; source: string; target: string }[]
     precedingContext: { source: string; target: string }[]
+    /** Deprecated AQU-2342 aliases, kept for one release. */
+    brief: string
+    rules: string
+    styleRules: string
   }
   generation: {
     provider: string
@@ -242,8 +244,9 @@ describe("external prompt preview", () => {
 
       // Parts are labeled and, with nothing configured, empty rather than absent.
       expect(body.parts.base).toContain("English")
-      expect(body.parts.brief).toBe("")
-      expect(body.parts.rules).toBe("")
+      expect(body.parts.instructions).toBe("")
+      expect(body.parts.checks).toBe("")
+      expect(body.parts.terminology).toBe("")
       expect(body.parts.injectedTerms).toEqual([])
       expect(body.retrieval.primitive).toBe("branching-search")
     })
@@ -297,44 +300,115 @@ describe("external prompt preview", () => {
       expect(body.retrieval.topK).toBe(3)
     })
 
-    it("injects a custom system prompt and the translation brief", async () => {
+    // AQU-2342: the role text is fixed; the project's guidance is the ONE
+    // instructions block, exactly as the editor assembles it.
+    it("injects the stored instructions once, right after the fixed role text", async () => {
       await putSettings(testDb, "proj-a", {
         sourceLanguage: "English",
         targetLanguage: "French",
-        completionSettings: { systemPrompt: "Translate {sourceLanguage}→{targetLanguage} tersely." },
+        translationInstructions: "Aimed at oral communities in {targetLanguage}.",
+        systemPrompt: "LEGACY PROMPT",
+        translationBrief: { l1Summary: "LEGACY BRIEF" },
+      })
+      const { body } = await preview(testDb, token)
+      const sys = body.messages[0].content
+      expect(body.parts.base).toContain("You are a translation assistant completing a project that translates from English into French.")
+      expect(body.parts.instructions).toBe("Project instructions (follow these):\nAimed at oral communities in French.")
+      expect(sys.startsWith(`${body.parts.base}\n\n${body.parts.instructions}`)).toBe(true)
+      expect(sys).not.toContain("LEGACY")
+    })
+
+    it("migrates the legacy prompt and brief into the block when no instructions are stored", async () => {
+      await putSettings(testDb, "proj-a", {
+        sourceLanguage: "English",
+        targetLanguage: "French",
+        completionSettings: { systemPrompt: "Translate tersely." },
         translationBrief: { l1Summary: "Aimed at oral communities." },
       })
       const { body } = await preview(testDb, token)
-      expect(body.parts.base).toBe("Translate English→French tersely.")
-      expect(body.parts.brief).toContain("Aimed at oral communities.")
-      expect(body.messages[0].content).toContain("Translate English→French tersely.")
-      expect(body.messages[0].content).toContain("Aimed at oral communities.")
+      expect(body.parts.base).not.toContain("tersely")
+      expect(body.parts.instructions).toBe(
+        "Project instructions (follow these):\nAimed at oral communities.\n\nTranslate tersely.",
+      )
+      expect(body.messages[0].content.split("Translate tersely.").length - 1).toBe(1)
     })
 
-    // AQU-1283: PatchSettings writes the TOP-LEVEL `systemPrompt` key (the SPA
-    // syncs it into completionSettings.systemPrompt on its next load); the
-    // preview must read it from there or an agent's edit is invisible.
-    it("reads the top-level systemPrompt key PatchSettings writes", async () => {
+    // AQU-2422: the preview must not resolve a `systemPrompt` from a source
+    // the real draft call cannot see. It used to decide the top-level/nested
+    // fallback itself and hand `loadTranslationInstructions` a pre-chewed
+    // blob; the live drafting paths pass the blob raw, so the two could
+    // disagree. Both now go through `legacySystemPromptSetting` inside the
+    // loader — this pins the preview side of that (the draft side is pinned in
+    // auth-worker/src/__tests__/project-settings-drafting.test.ts).
+    it("resolves the same instructions as the draft path for a nested-only prompt", async () => {
       await putSettings(testDb, "proj-a", {
         sourceLanguage: "English",
         targetLanguage: "French",
-        systemPrompt: "Top-level {sourceLanguage}→{targetLanguage} prompt.",
+        completionSettings: { systemPrompt: "Keep divine names as in the 1999 Bible." },
       })
+      // Exactly what POST /api/v1/ai/agent/internal/draft-cells loads.
+      const draft = await loadTranslationInstructions(testDb.db, "proj-a")
+      expect(draft.stored).toBe(false)
+      expect(draft.text).toBe("Keep divine names as in the 1999 Bible.")
+
       const { body } = await preview(testDb, token)
-      expect(body.parts.base).toBe("Top-level English→French prompt.")
-      expect(body.messages[0].content).toContain("Top-level English→French prompt.")
+      expect(body.parts.instructions).toBe(instructionsPromptBlock(draft.text))
+      expect(body.messages[0].content).toContain("Keep divine names as in the 1999 Bible.")
     })
 
-    it("top-level systemPrompt wins over the nested completionSettings copy", async () => {
+    // AQU-2404: the role text is fixed, so a stored `systemPrompt` changes no
+    // prompt. Showing the default `parts.base` is correct; showing it SILENTLY
+    // is the bug — the preview is what proves a setting landed.
+    it("warns that a stored systemPrompt reaches no prompt once instructions are stored", async () => {
       await putSettings(testDb, "proj-a", {
         sourceLanguage: "English",
         targetLanguage: "French",
-        systemPrompt: "Top-level wins.",
-        completionSettings: { systemPrompt: "Nested loses." },
+        translationInstructions: "Aimed at oral communities.",
+        systemPrompt: `${DEFAULT_SYSTEM_PROMPT}\nNever transliterate divine names.`,
       })
       const { body } = await preview(testDb, token)
-      expect(body.parts.base).toBe("Top-level wins.")
-      expect(body.messages[0].content).not.toContain("Nested loses.")
+      expect(body.parts.base).not.toContain("transliterate")
+      expect(body.messages[0].content).not.toContain("transliterate")
+      const warning = body.warnings.find((w) => w.code === "system_prompt_ignored")
+      expect(warning).toBeDefined()
+      expect(warning?.message).toContain("translationInstructions")
+    })
+
+    it("warns that a legacy systemPrompt was migrated into the instructions block", async () => {
+      await putSettings(testDb, "proj-a", {
+        sourceLanguage: "English",
+        targetLanguage: "French",
+        systemPrompt: `${DEFAULT_SYSTEM_PROMPT}\nNever transliterate divine names.`,
+      })
+      const { body } = await preview(testDb, token)
+      expect(body.parts.base).not.toContain("transliterate")
+      expect(body.parts.instructions).toContain("Never transliterate divine names.")
+      expect(body.warnings.map((w) => w.code)).toContain("system_prompt_in_instructions")
+      expect(body.warnings.map((w) => w.code)).not.toContain("system_prompt_ignored")
+    })
+
+    it("stays quiet when the stored prompt is only the default template", async () => {
+      await putSettings(testDb, "proj-a", {
+        sourceLanguage: "English",
+        targetLanguage: "French",
+        translationInstructions: "Aimed at oral communities.",
+        systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      })
+      const { body } = await preview(testDb, token)
+      expect(body.warnings.map((w) => w.code)).not.toContain("system_prompt_ignored")
+      expect(body.warnings.map((w) => w.code)).not.toContain("system_prompt_in_instructions")
+    })
+
+    it("migrates the agent's legacy project brief exactly as the server paths do", async () => {
+      await putSettings(testDb, "proj-a", { sourceLanguage: "English", targetLanguage: "French" })
+      await testDb.pg.query(
+        `INSERT INTO project_briefs (project_id, content, updated_by, version, updated_at)
+         VALUES ('proj-a', 'Keep divine names as in the 1999 Bible.', NULL, 1, now())`,
+      )
+      const { body } = await preview(testDb, token)
+      expect(body.parts.instructions).toBe(
+        "Project instructions (follow these):\nKeep divine names as in the 1999 Bible.",
+      )
     })
 
     it("404s a cell with no source row in this project", async () => {
@@ -386,8 +460,8 @@ describe("external prompt preview", () => {
       await styleRule("sr-4", "approved", "DISABLED wording.", false)
 
       const { body } = await preview(testDb, token)
-      expect(body.parts.styleRules).toBe(
-        "Style rules that apply to this passage (MUST follow):\n- Use short sentences.",
+      expect(body.parts.checks).toBe(
+        "Checks (verified automatically after drafting — the draft must pass each one):\n- Use short sentences.",
       )
       const system = body.messages[0].content
       expect(system).toContain("Use short sentences.")
@@ -396,9 +470,26 @@ describe("external prompt preview", () => {
       expect(system).not.toContain("DISABLED wording")
     })
 
+    it("keeps the pre-AQU-2342 part names as deprecated aliases for one release", async () => {
+      await putSettings(testDb, "proj-a", {
+        sourceLanguage: "English",
+        targetLanguage: "French",
+        translationInstructions: "Plain register.",
+        rules: [{ id: "r1", enabled: true, scope: "project", check: { type: "target-forbids", targetPattern: "thingy" } }],
+      })
+      await styleRule("sr-1", "approved", "Use short sentences.")
+      const { body } = await preview(testDb, token)
+      expect(body.parts.brief).toBe(body.parts.instructions)
+      expect(body.parts.styleRules).toContain("- Use short sentences.")
+      expect(body.parts.styleRules).not.toContain("thingy")
+      expect(body.parts.rules).toContain("thingy")
+      expect(body.parts.rules).not.toContain("Use short sentences.")
+      expect(body.parts.checks).toContain("- Use short sentences.")
+    })
+
     it("leaves the block empty when the project has no style rules", async () => {
       const { body } = await preview(testDb, token)
-      expect(body.parts.styleRules).toBe("")
+      expect(body.parts.checks).toBe("")
     })
   })
 
@@ -409,7 +500,7 @@ describe("external prompt preview", () => {
 
     it("a term added via the terminology path appears in the preview", async () => {
       const before = await preview(testDb, token)
-      expect(before.body.parts.rules).toBe("")
+      expect(before.body.parts.terminology).toBe("")
       expect(before.body.parts.injectedTerms).toEqual([])
 
       await testDb.pg.query(
@@ -419,8 +510,8 @@ describe("external prompt preview", () => {
       )
 
       const after = await preview(testDb, token)
-      expect(after.body.parts.rules).toContain("covenant")
-      expect(after.body.parts.rules).toContain("alliance")
+      expect(after.body.parts.terminology).toContain("covenant")
+      expect(after.body.parts.terminology).toContain("alliance")
       expect(after.body.messages[0].content).toContain("alliance")
       expect(after.body.parts.injectedTerms).toEqual([
         {
@@ -439,8 +530,8 @@ describe("external prompt preview", () => {
         [JSON.stringify([{ rendering: "contrat", status: "forbidden" }])],
       )
       const { body } = await preview(testDb, token)
-      expect(body.parts.rules).toContain("Do NOT use")
-      expect(body.parts.rules).toContain("contrat")
+      expect(body.parts.terminology).toContain("Do NOT use")
+      expect(body.parts.terminology).toContain("contrat")
     })
 
     it("a draft concept injects nothing (only active concepts compile)", async () => {
@@ -450,7 +541,7 @@ describe("external prompt preview", () => {
         [JSON.stringify([{ rendering: "alliance", status: "preferred" }])],
       )
       const { body } = await preview(testDb, token)
-      expect(body.parts.rules).toBe("")
+      expect(body.parts.terminology).toBe("")
       expect(body.parts.injectedTerms).toEqual([])
     })
 
@@ -461,7 +552,7 @@ describe("external prompt preview", () => {
         [JSON.stringify([{ rendering: "alliance", status: "preferred" }])],
       )
       const { body } = await preview(testDb, token)
-      expect(body.parts.rules).toBe("")
+      expect(body.parts.terminology).toBe("")
     })
 
     // AQU-1721: the editor compiles subscribed termbases ahead of the project's
@@ -493,9 +584,9 @@ describe("external prompt preview", () => {
       const { body } = await preview(testDb, token)
       // Subscribed first, each termbase oldest first; a draft compiles to nothing.
       expect(body.parts.injectedTerms.map((t) => t.conceptId)).toEqual(["up-first", "up-later", "own"])
-      expect(body.parts.rules).toContain("accord")
-      expect(body.parts.rules).toContain("alliance")
-      expect(body.parts.rules).not.toContain("contrat")
+      expect(body.parts.terminology).toContain("accord")
+      expect(body.parts.terminology).toContain("alliance")
+      expect(body.parts.terminology).not.toContain("contrat")
     })
 
     it("leaves out an unpublished, trashed, deleted or other-org termbase (AQU-1721)", async () => {
@@ -514,7 +605,7 @@ describe("external prompt preview", () => {
 
       const { body } = await preview(testDb, token)
       expect(body.parts.injectedTerms).toEqual([])
-      expect(body.parts.rules).toBe("")
+      expect(body.parts.terminology).toBe("")
     })
 
     // AQU-1777: a termbase's renderings carry ITS lane ids. The preview maps
@@ -557,9 +648,9 @@ describe("external prompt preview", () => {
         ["up-cov", ["alliance"]],
         ["own", ["testament"]],
       ])
-      expect(french.body.parts.rules).toContain("alliance")
-      expect(french.body.parts.rules).not.toContain("pacto")
-      expect(french.body.parts.rules).not.toContain("patto")
+      expect(french.body.parts.terminology).toContain("alliance")
+      expect(french.body.parts.terminology).not.toContain("pacto")
+      expect(french.body.parts.terminology).not.toContain("patto")
 
       const spanish = await preview(testDb, token, "cell-live", "?targetLang=c0ffee01")
       // The project's own unstamped rendering belongs to its `''` lane, so in
@@ -569,8 +660,8 @@ describe("external prompt preview", () => {
       expect(spanish.body.parts.injectedTerms.map((t) => [t.conceptId, t.approvedRenderings])).toEqual([
         ["up-cov", ["pacto"]],
       ])
-      expect(spanish.body.parts.rules).toContain("pacto")
-      expect(spanish.body.parts.rules).not.toContain("alliance")
+      expect(spanish.body.parts.terminology).toContain("pacto")
+      expect(spanish.body.parts.terminology).not.toContain("alliance")
     })
 
     // AQU-2209 — the termbase is scoped to the cell, not dumped wholesale.
@@ -582,7 +673,7 @@ describe("external prompt preview", () => {
       )
       const { body } = await preview(testDb, token)
       expect(body.sourceText).toBe("the covenant endures")
-      expect(body.parts.rules).toBe("")
+      expect(body.parts.terminology).toBe("")
       expect(body.parts.injectedTerms).toEqual([])
       expect(body.messages[0].content).not.toContain("Melchisédech")
     })
@@ -602,10 +693,10 @@ describe("external prompt preview", () => {
       )
       const { body } = await preview(testDb, token)
       expect(body.parts.injectedTerms.map((t) => t.conceptId)).toEqual(["c-cov"])
-      expect(body.parts.rules).toContain("alliance")
-      expect(body.parts.rules).not.toContain("relleno")
+      expect(body.parts.terminology).toContain("alliance")
+      expect(body.parts.terminology).not.toContain("relleno")
       // The rules block stays a couple of lines, not one per concept.
-      expect(body.parts.rules.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(1)
+      expect(body.parts.terminology.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(1)
     })
 
     it("renders the term as plain guidance, not as the match pattern", async () => {
@@ -615,10 +706,19 @@ describe("external prompt preview", () => {
         [JSON.stringify([{ rendering: "alliance", status: "preferred" }])],
       )
       const { body } = await preview(testDb, token)
-      expect(body.parts.rules).toContain('"covenant" → "alliance"')
+      expect(body.parts.terminology).toContain('"covenant" → "alliance"')
       // The matcher's boundary wrappers are internals, not project content.
       expect(body.messages[0].content).not.toContain("\\p{L}")
       expect(body.messages[0].content).not.toContain("(?<!")
+    })
+
+    it("carries the term note and the Language profile in the shared blocks (AQU-2342)", async () => {
+      const row = [JSON.stringify([{ rendering: "alliance", status: "preferred" }])]
+      await testDb.pg.query(`INSERT INTO concepts (concept_id, project_id, source_term, renderings, notes, status, case_sensitive, created_at, updated_at) VALUES ('c-note', 'proj-a', 'covenant', $1, 'Treaty sense.', 'active', 0, 1, 1)`, row)
+      await putSettings(testDb, "proj-a", { sourceLanguage: "English", targetLanguage: "French", languageProfile: { measures: "convert" } })
+      const { body } = await preview(testDb, token)
+      expect(body.parts.terminology).toContain('"covenant" → "alliance". Note: Treaty sense.')
+      expect(body.parts.checks).toContain('- Measures (convert, transliterate or mixed): "convert"')
     })
 
     it("warns when a term-dense source exceeds the injection cap", async () => {
@@ -638,7 +738,7 @@ describe("external prompt preview", () => {
       expect(body.parts.injectedTerms).toHaveLength(40)
       expect(body.warnings.map((w) => w.code)).toContain("terms_capped")
       expect(body.warnings.find((w) => w.code === "terms_capped")!.message).toContain("45")
-      expect(body.parts.rules.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(40)
+      expect(body.parts.terminology.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(40)
     })
 
     it("injects project rules from settings", async () => {
@@ -655,7 +755,7 @@ describe("external prompt preview", () => {
         ],
       })
       const { body } = await preview(testDb, token)
-      expect(body.parts.rules).toContain("thingy")
+      expect(body.parts.checks).toContain("thingy")
     })
 
     it("drops a lane-scoped rule belonging to another lane", async () => {
@@ -680,8 +780,8 @@ describe("external prompt preview", () => {
         ],
       })
       const { body } = await preview(testDb, token)
-      expect(body.parts.rules).toContain("defaultlane")
-      expect(body.parts.rules).not.toContain("otherlane")
+      expect(body.parts.checks).toContain("defaultlane")
+      expect(body.parts.checks).not.toContain("otherlane")
     })
   })
 
@@ -707,6 +807,23 @@ describe("external prompt preview", () => {
       expect(after.body.parts.examples.map((e) => e.target)).toContain("Dieu vit les ténèbres")
       expect(after.body.messages[1].content).toContain("Dieu vit les ténèbres")
       expect(after.body.retrieval.corpusSize).toBeGreaterThan(0)
+    })
+
+    // The cell is kept out by id, not by source text: another cell carrying
+    // the very same line is an exact match and must be shown as an example.
+    it("an identical line in another cell is used as an example", async () => {
+      await insertCell(testDb, { cellId: "cell-live", seq: 5, source: "God saw the light" })
+      await insertCell(testDb, {
+        cellId: "cell-same-line",
+        seq: 9,
+        source: "God saw the light",
+        target: "Dieu vit la lumière",
+        validated: true,
+      })
+
+      const { body } = await preview(testDb, token)
+      expect(body.parts.examples.map((e) => e.target)).toEqual(["Dieu vit la lumière"])
+      expect(body.messages[1].content).toContain("Translation: Dieu vit la lumière")
     })
 
     it("an unvalidated translation is never used as an example", async () => {
@@ -835,7 +952,7 @@ describe("external prompt preview", () => {
         ),
         validatedPairs: body.parts.examples,
         exampleFormat: "source-and-target",
-        briefSummary: "Plain register.",
+        instructions: "Plain register.",
         precedingContext: body.parts.precedingContext,
       })
 

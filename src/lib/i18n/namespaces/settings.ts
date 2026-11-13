@@ -24,6 +24,13 @@ import { defineNamespace, plural } from "./types"
  */
 export const settings = defineNamespace({
   keys: {
+    // ── AQU-2262: settings save as you change them ──
+    "settings.save.saved": "Saved",
+    "settings.save.saving": "Saving…",
+    "settings.save.theirsKept": "{name} changed this first, so their change is kept.",
+    "settings.save.theirsKeptNoName": "Someone else changed this first, so their change is kept.",
+    "settings.save.offline": "Not saved: you're offline.",
+    "settings.save.failed": "Couldn't save. Try again.",
     // ── AQU-2265: the temporary note left where a setting used to live ──
     "settings.moved.note": "This setting moved to {where}.",
     "settings.moved.goThere": "Go to it",
@@ -223,8 +230,21 @@ export const settings = defineNamespace({
       "Whether imported timings are locked against dragging. Projects use this unless they set their own.",
     "settings.mediaDefaults.allowTrackEditingDescription":
       "Whether maintainers may add, group and recolour timeline tracks. On unless you turn it off. Projects use this unless they set their own.",
+    // AQU-1967: this row names CELLS — its label always did, and so does the
+    // project page's copy of it — and it carries the one rule that decides
+    // whether the rung picked here means what an org admin reads into it:
+    // removing an IMPORTED cell needs a maintainer whatever this says
+    // (cell-editing-gate.ts `canRemoveImportedCells`, mirrored at the
+    // perimeter in sync-worker authorize.ts). Biblica ETT set the tier to
+    // Project Lead expecting their leads to be able to delete cells; every
+    // cell in a project imported from USFM is an imported cell, so each lead's
+    // Remove entry stayed disabled and the setting read as broken. The project
+    // page said so already (projectSettings.cellEditing.description) and this
+    // one did not, which is the whole of that surprise.
     "settings.mediaDefaults.cellEditingFloorDescription":
-      "Who may add and remove lines. Projects use this unless they set their own.",
+      "Who may add and remove cells. Removing a cell also removes its translations, recordings and "
+      + "comments; removing an imported cell always needs a maintainer, whatever this is set to. "
+      + "Projects use this unless they set their own.",
     "settings.mediaDefaults.allowSelfValidationAudioDescription":
       "Whether people may validate their own recordings. Projects use this unless they set their own.",
     "settings.mediaDefaults.validationRoleFloorAudioDescription":
@@ -251,7 +271,7 @@ export const settings = defineNamespace({
     "settings.assignmentAuthority.floorSummary": "The lowest project role that can assign work to other people.",
     "settings.assignmentAuthority.floorInfo":
       "That covers assigning, reassigning and unassigning files, chapters, language lanes and " +
-      "AI review. Project lead by default.",
+      "AI review. Project Lead by default.",
     "settings.assignmentAuthority.label": "Allow self-assignment",
     "settings.assignmentAuthority.summary": "Contributors can take work for themselves, but not give it to others.",
     "settings.assignmentAuthority.info":
@@ -357,7 +377,7 @@ export const settings = defineNamespace({
     // treatment as settings.termbase.option* below.
     "settings.rosterProgress.optionViewer": "Viewer — anyone with access",
     "settings.rosterProgress.optionContributor": "Contributor",
-    "settings.rosterProgress.optionProjectLead": "Project lead",
+    "settings.rosterProgress.optionProjectLead": "Project Lead",
     "settings.rosterProgress.optionMaintainer": "Maintainer — default",
     "settings.rosterProgress.optionOwner": "Owner — most restrictive",
 
@@ -370,7 +390,7 @@ export const settings = defineNamespace({
     // Open-dropdown option text for the termbase-edit floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.termbase.optionContributor": "Contributor — translators manage terms",
-    "settings.termbase.optionProjectLead": "Project lead — default",
+    "settings.termbase.optionProjectLead": "Project Lead — default",
     "settings.termbase.optionMaintainer": "Maintainer — most restrictive",
 
     // ── LanguageEditSection (org settings → security) — AQU-1086 ──
@@ -382,7 +402,7 @@ export const settings = defineNamespace({
     // Open-dropdown option text for the language-edit floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.languageEdit.optionProjectLead":
-      "Project lead — default. Project managers fix their own languages",
+      "Project Lead — default. Project managers fix their own languages",
     "settings.languageEdit.optionMaintainer": "Maintainer — only maintainers change languages",
     "settings.languageEdit.ownerOnlyError":
       "Only org owners can change the language permission policy.",
@@ -396,7 +416,7 @@ export const settings = defineNamespace({
     // Open-dropdown option text for the import floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.importPermissions.optionProjectLead":
-      "Project lead — default. Project managers import their own files",
+      "Project Lead — default. Project managers import their own files",
     "settings.importPermissions.optionMaintainer": "Maintainer — only maintainers add or replace source files",
     "settings.importPermissions.ownerOnlyError":
       "Only org owners can change the import permission policy.",
@@ -420,12 +440,12 @@ export const settings = defineNamespace({
     "settings.commentPermissions.createOptionCommenter": "Commenter — default",
     "settings.commentPermissions.createOptionReviewer": "Reviewer — reviewers and above",
     "settings.commentPermissions.createOptionContributor": "Contributor — translators and above",
-    "settings.commentPermissions.createOptionProjectLead": "Project lead — leads and above",
+    "settings.commentPermissions.createOptionProjectLead": "Project Lead — leads and above",
     "settings.commentPermissions.createOptionMaintainer": "Maintainer — most restrictive",
     "settings.commentPermissions.resolveOptionCommenter": "Commenter — anyone who can comment",
     "settings.commentPermissions.resolveOptionReviewer": "Reviewer — reviewers and above",
     "settings.commentPermissions.resolveOptionContributor": "Contributor — default",
-    "settings.commentPermissions.resolveOptionProjectLead": "Project lead — leads and above",
+    "settings.commentPermissions.resolveOptionProjectLead": "Project Lead — leads and above",
     "settings.commentPermissions.resolveOptionMaintainer": "Maintainer — most restrictive",
 
     // ── UsageSection (Preferences → Usage) ──
@@ -460,6 +480,20 @@ export const settings = defineNamespace({
     "settings.orgIdentity.deleteBlockedProjects":
       "This organization still has projects. Remove them before deleting the organization.",
     "settings.orgIdentity.deleteFailed": "Couldn't delete this organization.",
+    // ── AQU-1993: leaving an organization (self-service, not moderation) ──
+    "settings.orgIdentity.leaveOrganization": "Leave organization",
+    "settings.orgIdentity.leaveRowDescription":
+      "Give up your own access to this organization. Projects you were added to individually stay with you until you leave each of those too.",
+    "settings.orgIdentity.leaveConfirmTitle": "Leave {name}?",
+    "settings.orgIdentity.leaveConfirmBody":
+      "You will lose your organization-wide access to {name} and your place on its teams. An owner has to invite you back.",
+    "settings.orgIdentity.leavingButton": "Leaving…",
+    "settings.orgIdentity.leftToast": "You left {name}.",
+    "settings.orgIdentity.leaveFailed": "Couldn't leave this organization.",
+    "settings.orgIdentity.leaveBlockedLastOwner":
+      "You are the only owner of this organization. Make someone else an owner, or delete the organization, before you leave.",
+    "settings.orgIdentity.leaveBlockedPersonal":
+      "This is your personal workspace. Delete it instead of leaving it.",
     // "Organization name" (label, sr-only FieldLabel, placeholder) →
     // org.createDialog.nameLabel (identical text)
     // "Danger zone" → settings.teamSettings.dangerZoneLabel (identical text)
@@ -612,7 +646,7 @@ export const settings = defineNamespace({
           "Shown once for the whole card, instead of a note on every greyed-out control in it. " +
           "A sentence, with its period.",
         placeholders: {
-          role: "Plural role name, already translated, e.g. 'Maintainers' or 'Project leads'.",
+          role: "Plural role name, already translated, e.g. 'Maintainers' or 'Project Leads'.",
         },
       },
       "settings.locked.control": {
@@ -620,7 +654,7 @@ export const settings = defineNamespace({
           "One short line beneath a single greyed-out setting the reader cannot change, saying " +
           "who can. 'this' is that one setting. A sentence, with its period.",
         placeholders: {
-          role: "Plural role name, already translated, e.g. 'Maintainers' or 'Project leads'.",
+          role: "Plural role name, already translated, e.g. 'Maintainers' or 'Project Leads'.",
         },
       },
       "settings.locked.page": {
@@ -679,6 +713,31 @@ export const settings = defineNamespace({
         description:
           "Opens under 'Recording format' when its (i) is clicked. 'WAV / COMPRESSED' names the " +
           "button in the recorder that shows the same setting; keep it as it is shown there.",
+      },
+      "settings.save.saved": {
+        description:
+          "A quiet word shown for a moment beside a setting just after it saved by itself. " +
+          "Settings save the moment they are changed; there is no Save button. Past participle.",
+        maxLength: 16,
+      },
+      "settings.save.saving": {
+        description: "Shown beside a setting while a slow save is still going. Settings save the moment they are changed.",
+        maxLength: 16,
+      },
+      "settings.save.theirsKept": {
+        description:
+          "Shown beside a setting whose change was NOT saved because another person changed the same " +
+          "setting a moment earlier; the setting now shows that person's value. One plain sentence.",
+        placeholders: { name: "The other person's name or username." },
+      },
+      "settings.save.theirsKeptNoName": {
+        description: "Same as settings.save.theirsKept, when the other person's name is not known.",
+      },
+      "settings.save.offline": {
+        description: "Shown beside a setting that could not be saved for the team because there is no internet connection.",
+      },
+      "settings.save.failed": {
+        description: "Shown beside a setting whose save failed for a reason with no message of its own.",
       },
       "settings.moved.note": {
         description:
@@ -838,7 +897,7 @@ export const settings = defineNamespace({
       "settings.mediaDefaults.groupLabel": {
         description:
           "Heading of a group on the organization's Project defaults page holding the timeline and recording defaults " +
-          "(timing lock, track editing, who may add and remove lines, recording validation).",
+          "(timing lock, track editing, who may add and remove cells, recording validation).",
       },
       "settings.mediaDefaults.timingLockedDescription": {
         description: "Help text under the timing-lock row in that group. An on/off switch sits beside it.",
@@ -889,6 +948,28 @@ export const settings = defineNamespace({
           link:
             "A <Link> element whose visible text is the 'Preferences' string " +
             "(reused from nav.account.preferences) — not a plain value.",
+        },
+      },
+      "settings.orgIdentity.leaveConfirmTitle": {
+        description:
+          "Title of the confirm dialog that a person opens to leave an organization "
+          + "themselves (AQU-1993), not to remove someone else.",
+        placeholders: {
+          name: "The organization's name — not translated.",
+        },
+      },
+      "settings.orgIdentity.leaveConfirmBody": {
+        description:
+          "Body of the confirm dialog for leaving an organization. States what the "
+          + "person gives up and that an owner must invite them back.",
+        placeholders: {
+          name: "The organization's name — not translated.",
+        },
+      },
+      "settings.orgIdentity.leftToast": {
+        description: "Success toast after the person left an organization.",
+        placeholders: {
+          name: "The organization's name — not translated.",
         },
       },
       "settings.orgIdentity.deleteConfirmBody": {

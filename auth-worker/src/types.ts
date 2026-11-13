@@ -23,6 +23,13 @@ export interface EmailService {
      *  to a routed inbox (support@…) or a reply lands nowhere. Workers-binding
      *  field is camelCase `replyTo` (REST is `reply_to`). */
     replyTo?: string
+    /** Files sent with the message. The whole message may not pass 5 MiB. */
+    attachments?: {
+      content: string | ArrayBuffer | ArrayBufferView
+      filename: string
+      type: string
+      disposition: "attachment" | "inline"
+    }[]
   }): Promise<{ messageId: string }>
 }
 
@@ -157,6 +164,8 @@ export interface Env {
    * Set it "true" in production/staging.
    */
   ADMIN_REQUIRE_ELEVATION?: string
+  /** Dedicated random encryption secret for admin TOTP seeds; distinct per deployment. */
+  ADMIN_TOTP_KEY?: string
   /** Minutes a step-up code is valid for entry. Default: 10. */
   ELEVATION_TTL_MINUTES?: string
   /** Hours an elevated admin session lasts after a successful verify. Default: 6. */
@@ -220,6 +229,13 @@ export interface Env {
   /** Injected by index.ts (never configured): raw Postgres connection string
    *  so streaming routes can open a connection that outlives the Response. */
   PG_CONNECTION_STRING?: string
+
+  // Google login: optional, disabled until all four values are configured.
+  GOOGLE_LOGIN_CLIENT_ID?: string
+  GOOGLE_LOGIN_CLIENT_SECRET?: string
+  GOOGLE_LOGIN_REDIRECT_URI?: string
+  /** Exact SPA origins permitted to receive OAuth handoffs, comma separated. */
+  GOOGLE_LOGIN_APP_ORIGINS?: string
 
   // ── Monday.com integration (routes/monday.ts, lib/monday/*) ──────────────
   /** Monday OAuth app client id (plain var, [vars] in wrangler.toml). */
@@ -342,6 +358,10 @@ export interface Env {
   /** R2 key prefix, mirroring sync-worker/agent-worker. Unset in every current
    *  env (→ empty prefix), so artifact keys are `artifacts/{projectId}/{id}`. */
   R2_KEY_PREFIX?: string
+  /** AQU-2469: the dev access list (services/dev-access.ts). KV, one key per
+   *  lower-cased email. Bound on the development Worker only; absent there
+   *  means nobody but platform admins gets in (fail closed). */
+  DEV_ACCESS_LIST?: KVNamespace
 
   // AI budget + allowlist controls (AQU-265).
   // AI_ALLOWED_MODELS: comma-separated list of permitted OpenRouter model IDs.
@@ -464,11 +484,12 @@ export interface UserRow {
   id: number
   username: string
   email: string
-  password_hash: string
+  password_hash: string | null
   preferences: string
   created_at: string
   updated_at: string
   /** Stamped on a successful password-reset; null if never reset. See authMiddleware. */
+  session_version?: number
   password_changed_at: string | null
 }
 
@@ -477,10 +498,11 @@ export interface AuthUser {
   id: number
   username: string
   email: string
-  password_hash: string
+  password_hash: string | null
   preferences: Record<string, unknown>
   created_at: string
   updated_at: string
+  session_version?: number
   password_changed_at: string | null
 }
 
@@ -499,6 +521,10 @@ export interface AuthResponse {
 export interface JWTPayload {
   /** Username — sub claim. */
   sub: string
+  /** Immutable database account ID. Absent only on legacy credentials. */
+  uid?: string
+  /** Password-reset generation; absent on legacy tokens. */
+  sv?: number
   exp: number
   iat: number
   /** Unique token id, checked against revoked_tokens on logout (migration

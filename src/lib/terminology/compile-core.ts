@@ -20,8 +20,11 @@
 //     (instance counts add up 1:1: each sourceTerm hit needs a counterpart
 //      approved rendering, and extra renderings in the target are also a miss)
 //   each forbidden rendering → one `target-forbids` rule per rendering
-//     (target contains the forbidden text ⇒ violation; the rule has no source
-//      condition yet, see AQU-1712 — lintTerminology applies one itself)
+//     (the source bears the concept AND the target contains the forbidden
+//      text ⇒ violation. The source condition rides on the check as
+//      `sourcePattern` — AQU-1712; before it the editor flagged the rendering
+//      in every cell, while lintTerminology and the worker's project scan
+//      already required the source to bear the concept)
 //
 // draft / deprecated concepts are skipped entirely.
 //
@@ -50,6 +53,9 @@ export interface CompiledConcept {
   status: string
   caseSensitive?: boolean
   match?: TermMatchOptions
+  /** The termbase entry's note. Carried into prompts (clipped) with the
+   *  renderings — AQU-2342: every drafting path shows term notes. */
+  notes?: string
 }
 
 /** Structural echo of `TranslationRule` (../parsers/types) for the two check
@@ -65,7 +71,7 @@ export interface CompiledTermRule {
   createdAt: string
   check:
     | { type: "source-requires-target"; sourcePattern: string; targetPattern: string; caseSensitive?: boolean }
-    | { type: "target-forbids"; targetPattern: string; caseSensitive?: boolean }
+    | { type: "target-forbids"; targetPattern: string; sourcePattern: string; caseSensitive?: boolean }
   /** Regex-free data for prompt injection (AQU-2209) — the plain source term
    *  and renderings, plus the source pattern injection narrows on. Derived on
    *  read with the rest of the rule; nothing persists it. */
@@ -139,6 +145,7 @@ export function compileConceptsToRulesCore(
       sourceTerm: concept.sourceTerm,
       sourcePattern,
       ...(concept.caseSensitive ? { caseSensitive: true } : {}),
+      ...(concept.notes?.trim() ? { notes: concept.notes.trim() } : {}),
     }
 
     // source-requires-target: each source instance needs a counterpart rendering.
@@ -179,12 +186,14 @@ export function compileConceptsToRulesCore(
     // target-forbids: source has the term AND target contains a forbidden rendering.
     // One rule per forbidden rendering so the violation message names the exact form.
     for (const f of forbidden) {
-      // The target-forbids check fires regardless of source, but per the spec:
-      // "forbidden rendering in the target when the source bears the concept".
-      // The existing `target-forbids` check type does NOT have a source guard.
-      // We model it as target-forbids unconditionally (matching spec intent for
-      // string-match path). When a source guard is needed it can be upgraded to
-      // source-requires-target with an inverted target pattern; deferred.
+      // AQU-1712: "forbidden rendering in the target when the source bears the
+      // concept". The source condition rides on the check as `sourcePattern` —
+      // the SAME pattern the concept's approved rule matches its source side
+      // with, so both rules of a concept apply to exactly the same cells.
+      // Without it the editor flagged every cell whose translation contained
+      // the rendering, including cells whose source never mentions the
+      // concept: a forbidden rendering is usually an ordinary word that is
+      // wrong only as a rendering of this one concept.
       const forbiddenPattern = termToRegexSource(f.rendering)
       if (forbiddenPattern === null) continue
       rules.push({
@@ -200,6 +209,7 @@ export function compileConceptsToRulesCore(
         check: {
           type: "target-forbids",
           targetPattern: forbiddenPattern,
+          sourcePattern,
           ...(concept.caseSensitive ? { caseSensitive: true } : {}),
         },
         term: { ...term, forbidden: f.rendering },

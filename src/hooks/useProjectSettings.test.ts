@@ -13,7 +13,7 @@ import {
 import * as restClient from "@/lib/sync/project-settings"
 import posthog from "@/lib/posthog"
 
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn(), captureException: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn(), captureException: vi.fn() } }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "test-jwt", username: "ryder" } }),
@@ -632,6 +632,30 @@ describe("useProjectSettings — write path", () => {
       expect(otherKey.kind).toBe("blocked")
       expect(bundled.kind).toBe("blocked")
       expect(patchSpy).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("parallelBibleVersions-only carve-out (project default Bibles)", () => {
+    it.each([
+      [500, "ok"],
+      [400, "blocked"],
+    ] as const)("role %s setting the project defaults → %s", async (role, kind) => {
+      mockSettingsFetch({ version: 1, updatedAt: "x", updatedBy: null, settings: {} })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+        kind: "ok",
+        value: { version: 2, updatedAt: "y", updatedBy: null, settings: { parallelBibleVersions: ["BSB"] } },
+      })
+      const { result } = renderHook(() => useProjectSettings("p1", role))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      let bundled!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ parallelBibleVersions: ["BSB"] })
+        bundled = await result.current.patch({ parallelBibleVersions: ["BSB"], validationCount: 3 })
+      })
+      expect(got.kind).toBe(kind)
+      expect(bundled.kind).toBe("blocked")
+      expect(patchSpy).toHaveBeenCalledTimes(kind === "ok" ? 1 : 0)
     })
   })
 

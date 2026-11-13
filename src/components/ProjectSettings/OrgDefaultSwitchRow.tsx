@@ -62,6 +62,7 @@ export function OrgDefaultSwitchRow({
   const locked = Boolean(disabled) && disabledTooltip != null
   return (
     <SettingsRow
+      saveId={settingKey}
       label={<label htmlFor={id}>{label}</label>}
       description={description}
       control={

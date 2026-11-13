@@ -21,10 +21,10 @@
 //   6. Living Memory extraction: the `memory`, `rules`, and `system-prompt`
 //      sections are gone from settings, and their legacy URLs redirect
 //      (page AND route-modal) to the standalone /project/:id/memory surface —
-//      memory → /memory, rules → /memory/quality, system-prompt →
+//      memory → /memory, rules → /memory/checks, system-prompt →
 //      /memory/instructions — preserving the query string.
-//   7. The AI pane keeps a cross-link NavRow to Living Memory (instructions)
-//      with the old Custom/Default system-prompt hint semantics.
+//   7. The AI pane keeps one NavRow to the project instructions
+//      (memory/instructions) with a preview of the text (AQU-2342).
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, cleanup } from "@testing-library/react"
@@ -155,10 +155,18 @@ vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
   }
 })
 
-vi.mock("@/lib/store/project-index", () => ({
-  getProject: vi.fn().mockResolvedValue(null),
-  updateProject: vi.fn().mockResolvedValue(undefined),
+const projectIndex = vi.hoisted(() => ({
+  getProject: vi.fn(async () => null),
+  updateProject: vi.fn(async () => undefined),
+  patchProject: vi.fn(async () => null),
 }))
+// AQU-2262: a name typed and left (or closed) saves, through the rename.
+vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/sync/cloud-projects")>()
+  return { ...actual, renameProject: vi.fn(async (_jwt: string, id: string, name: string) => ({ id, name })) }
+})
+
+vi.mock("@/lib/store/project-index", () => projectIndex)
 
 vi.mock("@/lib/progress/read-validation-count", () => ({
   readValidationCount: vi.fn(() => 1),
@@ -318,13 +326,15 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(dialog).toHaveClass("max-w-[min(42rem,calc(100%-2rem))]")
     fireEvent.click(screen.getByText("General"))
     fireEvent.change(screen.getByLabelText(/project name/i), {
-      target: { value: "Unsaved modal title" },
+      target: { value: "Typed modal title" },
     })
 
+    // AQU-2262: nothing is left unsaved, so closing asks nothing: what was
+    // being typed saves as the page closes.
     fireEvent.click(screen.getByRole("button", { name: /close/i }))
-    expect(screen.getByRole("heading", { name: "Discard changes?" })).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "Discard" }))
+    expect(screen.queryByRole("heading", { name: "Discard changes?" })).toBeNull()
     expect(screen.getByTestId("project-overview-background")).toBeTruthy()
+    expect(projectIndex.getProject).toHaveBeenCalled()
   })
 
   it("only expands the modal beyond the content width for wide settings panes", () => {
@@ -524,10 +534,10 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.queryByText("Source link")).toBeNull()
 
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
-    // The system prompt moved to Living Memory (memory/instructions) — the AI
-    // pane cross-links there instead of nesting a settings pane, and no
+    // The project instructions live in Living Memory (memory/instructions) —
+    // the AI pane links there instead of nesting a settings pane, and no
     // system-prompt textarea exists anywhere in settings anymore.
-    expect(screen.getByRole("link", { name: /living memory/i })).toBeTruthy()
+    expect(screen.getByRole("link", { name: /^instructions/i })).toBeTruthy()
     expect(screen.queryByLabelText(/^system prompt$/i)).toBeNull()
     expect(screen.getByLabelText(/examples retrieved/i)).toBeTruthy()
     expect(screen.getByLabelText(/preceding committed-target cells/i)).toBeTruthy()
@@ -574,10 +584,10 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     )
   })
 
-  it("redirects the legacy settings/rules URL to memory/quality, preserving search", () => {
+  it("redirects the legacy settings/rules URL to memory/checks, preserving search", () => {
     renderAt(`/project/${PROJECT_ID}/settings/rules?q=x`)
     expect(screen.getByTestId("landing-path").textContent).toBe(
-      `/project/${PROJECT_ID}/memory/quality?q=x`,
+      `/project/${PROJECT_ID}/memory/checks?q=x`,
     )
   })
 
@@ -595,15 +605,14 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.queryByTestId("project-settings-dialog")).toBeNull()
   })
 
-  // Entry point kept alive: the AI pane cross-links to Living Memory where
-  // the system prompt now lives, reusing the old Custom/Default hint. It is a
+  // AQU-2342: the AI pane's one entry to the project instructions. It is a
   // plain navigation (no modal state) since it leaves settings entirely.
-  it("the AI pane shows a Living Memory cross-link with a Default hint by default", () => {
+  it("the AI pane links to the instructions, saying when none are written", () => {
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
 
-    const link = screen.getByRole("link", { name: /living memory/i })
+    const link = screen.getByRole("link", { name: /^instructions/i })
     expect(link).toHaveAttribute("href", `/project/${PROJECT_ID}/memory/instructions`)
-    expect(link).toHaveTextContent("Default")
+    expect(link).toHaveTextContent("Not written yet")
   })
 
   // The hidden termbase-sharing section (SHOW_TERMBASE_SHARING_IN_SETTINGS

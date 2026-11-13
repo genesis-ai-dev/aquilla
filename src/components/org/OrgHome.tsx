@@ -4,7 +4,7 @@ import { Link, Navigate, useLocation, useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
 import { AppShell } from "@/components/AppShell"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -44,90 +44,37 @@ import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 const PANEL_MAX_H =
   "h-[clamp(14rem,calc(100dvh-22rem),28rem)]"
 
-function DashboardRowTemplate() {
-  return (
-    <div className="flex items-center gap-4 px-2 py-2">
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <Skeleton className="h-4 w-2/5" />
-        <Skeleton className="h-3 w-3/5" />
-      </div>
-      <Skeleton className="h-4 w-16 shrink-0" />
-    </div>
-  )
-}
-
-function DashboardPanelTemplate({ rows }: { rows: number }) {
-  return (
-    <section className="overflow-hidden rounded-lg border bg-card">
-      <div className="flex items-start justify-between gap-4 px-5 pt-5 pb-0">
-        <div className="flex flex-col gap-2">
-          <Skeleton className="h-5 w-28" />
-          <Skeleton className="h-3 w-40" />
-        </div>
-        <Skeleton className="h-8 w-40" />
-      </div>
-      <div className="space-y-1 px-5 pt-2 pb-3">
-        {Array.from({ length: rows }).map((_, index) => (
-          <DashboardRowTemplate key={index} />
-        ))}
-      </div>
-    </section>
-  )
-}
-
 /**
- * A stable, value-free preview of the dashboard's eventual geometry. This
- * never reads partially hydrated org/project state, so startup has exactly one
- * visual transition: template → resolved dashboard.
+ * The real chrome with one cursor per region: the sidebar prints its entries
+ * as each permission lands, the breadcrumb holds the org's place, and the
+ * body shows one cursor where the dashboard will start.
  */
+// The sidebar and breadcrumb (which hold the org picker) stay live while the
+// dashboard data loads: only the page body is the inert loading template, so
+// the user can jump straight into one org without waiting on the all-orgs
+// rollup.
 function OrgHomeLoadingTemplate() {
   return (
     <div data-testid="org-home-loading-template" className="h-full">
-      <AppShell
-        sidebar={
-          <div className="flex h-full flex-col gap-4 p-2">
-            <Skeleton className="h-9 w-full" />
-            <div className="flex flex-col gap-2">
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-3/4" />
-              <Skeleton className="h-8 w-2/3" />
-            </div>
-            <div className="mt-auto flex flex-col gap-2">
-              <Skeleton className="h-8 w-4/5" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          </div>
-        }
-        header={
-          <div className="flex items-center gap-4 px-4">
-            <Skeleton className="h-5 w-40" />
-          </div>
-        }
-        statusBar={null}
-        main={
-          <Page size="wide">
-            <Skeleton className="mb-8 h-7 w-48" />
-            <div className="flex flex-col gap-6">
-              <div className={STAT_TILE_GRID}>
-                {Array.from({ length: 6 }).map((_, index) => (
-                  <div
-                    key={index}
-                    className="flex h-[88px] items-center justify-between rounded-lg border bg-card px-5 py-4 min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-2"
-                  >
-                    <Skeleton className="order-last h-6 w-12 min-[480px]:order-none" />
-                    <Skeleton className="h-3 w-20" />
-                  </div>
-                ))}
-              </div>
-              <div className="flex flex-col gap-6">
-                <DashboardPanelTemplate rows={4} />
-                <DashboardPanelTemplate rows={3} />
-              </div>
-            </div>
-          </Page>
-        }
-      />
+      <Page size="wide">
+        <LoadingCursor className="text-xl" />
+      </Page>
     </div>
+  )
+}
+
+function OrgHomeLoadingShell({ label }: { label: string }) {
+  return (
+    <AppShell
+      sidebar={<OrgSidebar />}
+      header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
+      statusBar={null}
+      main={
+        <LoadingOverlay label={label} data-testid="org-home-loading">
+          <OrgHomeLoadingTemplate />
+        </LoadingOverlay>
+      }
+    />
   )
 }
 
@@ -357,11 +304,7 @@ export function OrgHome() {
   // The template is intentionally disconnected from partial org/project state:
   // unknown values remain skeletons and startup has one visual transition.
   if (orgShellLoading) {
-    return (
-      <LoadingOverlay label={t("org.orgHome.loadingDashboard")} data-testid="org-home-loading">
-        <OrgHomeLoadingTemplate />
-      </LoadingOverlay>
-    )
+    return <OrgHomeLoadingShell label={t("org.orgHome.loadingDashboard")} />
   }
 
   // AQU-864: `/orgs/all` has something to aggregate at 2+ memberships, a
@@ -439,11 +382,7 @@ export function OrgHome() {
   }
 
   if (portfolioScopeKey != null && resolvedPortfolioScopeKey !== portfolioScopeKey) {
-    return (
-      <LoadingOverlay label={t("org.orgHome.loadingDashboard")} data-testid="org-home-loading">
-        <OrgHomeLoadingTemplate />
-      </LoadingOverlay>
-    )
+    return <OrgHomeLoadingShell label={t("org.orgHome.loadingDashboard")} />
   }
 
   // Rollup stats. Computed on the server from the same visible projects the

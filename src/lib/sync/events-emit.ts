@@ -24,8 +24,13 @@ import {
   type OutboxEventKind,
   type OutboxPayloadFor,
   type OutboxRawEvent,
+  type VersionChanges,
   isGenesisKind,
 } from "./outbox-types"
+import {
+  isValidMilestoneId,
+  normalizeMilestoneName,
+} from "../../../db/shared/file-milestones"
 import posthog from "@/lib/posthog"
 import { FIRST_CELL_COMMIT, FIRST_CELL_VALIDATE } from "@/lib/event-names"
 // AQU-1572: per-gesture validation / audio telemetry. Instrumented here, at
@@ -80,6 +85,9 @@ export interface BuildEventInput<K extends OutboxEventKind> {
   clientTs?: number
   /** Pre-generated UUIDv7. Defaults to a fresh one. Exposed for tests + idempotency. */
   id?: string
+  /** Envelope version, for the kinds whose projection requires another than
+   *  OUTBOX_SCHEMA_VERSION (`source.cell.metadata.patch` is version 2). */
+  schemaVersion?: number
 }
 
 /**
@@ -111,7 +119,7 @@ export function buildRawEvent<K extends OutboxEventKind>(
 
   const envelope: OutboxRawEvent<K> = {
     id,
-    schemaVersion: OUTBOX_SCHEMA_VERSION,
+    schemaVersion: input.schemaVersion ?? OUTBOX_SCHEMA_VERSION,
     kind: input.kind,
     projectId: input.projectId,
     ...(input.fileId ? { fileId: input.fileId } : {}),
@@ -368,7 +376,7 @@ function noteTargetCellCommit(input: CellCommitInput): void {
   // AQU-267: once-per-session first-commit funnel event.
   if (!_firstCommitFired) {
     _firstCommitFired = true
-    posthog.capture(FIRST_CELL_COMMIT, {
+    posthog.scope(undefined, input.author).capture(FIRST_CELL_COMMIT, {
       project_id: input.projectId,
       file_id: input.fileId,
       ai_suggestion: input.aiSuggestion ?? false,
@@ -453,6 +461,46 @@ export async function emitTargetCellCommits(
   return events.map(({ eventId }) => eventId)
 }
 
+export interface IdmlTargetMarkupInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The translation's words inside the source's protected style runs. */
+  targetHtml: string
+  author: string
+  clientTs?: number
+}
+
+/** `source.cell.metadata.patch` is projected only at envelope version 2. */
+const METADATA_PATCH_SCHEMA_VERSION = 2
+
+/**
+ * Replace the HTML of translations on the project's DEFAULT lane without
+ * committing them: the words, the history, the chain head and every validation
+ * stay as they were. For one job — an IDML translation typed as plain text
+ * whose words are being placed, unchanged, into the paragraph's style runs
+ * (`alignReimportedIdmlFile`, `keepValidated`). A `target.cell.commit` would
+ * save the same HTML and reset the line to unvalidated, which is right when
+ * the words changed and a pure loss when they did not.
+ *
+ * Project lead and above (the role gate throws below that), and the default
+ * lane only: the projection addresses the lane whose tag is `''`.
+ */
+export async function emitIdmlTargetMarkup(inputs: IdmlTargetMarkupInput[]): Promise<string[]> {
+  const events = await enqueueEvents(inputs.map((input) => ({
+    kind: "source.cell.metadata.patch" as const,
+    schemaVersion: METADATA_PATCH_SCHEMA_VERSION,
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { version: 1 as const, metadata: {}, targetHtml: input.targetHtml },
+    ...(input.clientTs !== undefined ? { clientTs: input.clientTs } : {}),
+  })))
+  return events.map(({ eventId }) => eventId)
+}
+
 export interface CellValidateInput {
   projectId: string
   fileId: string
@@ -492,10 +540,11 @@ export interface CellValidateInput {
  * `cell_validators`), so parentId is omitted.
  */
 export async function emitCellValidate(input: CellValidateInput): Promise<string> {
+  const analytics = posthog.scope(undefined, input.author)
   // AQU-267: once-per-session first-validate funnel event.
   if (!_firstValidateFired) {
     _firstValidateFired = true
-    posthog.capture(FIRST_CELL_VALIDATE, {
+    analytics.capture(FIRST_CELL_VALIDATE, {
       project_id: input.projectId,
       file_id: input.fileId,
     })
@@ -531,12 +580,13 @@ export async function emitCellValidate(input: CellValidateInput): Promise<string
     source: input.source,
     auto: input.auto,
     surface: input.surface,
-  })
+  }, analytics)
   return eventId
 }
 
 /** Mirror of `emitCellValidate` for the un-validate gesture. */
 export async function emitCellUnvalidate(input: CellValidateInput): Promise<string> {
+  const analytics = posthog.scope(undefined, input.author)
   const { eventId } = await enqueueEvent({
     kind: "cell.unvalidate",
     projectId: input.projectId,
@@ -561,7 +611,7 @@ export async function emitCellUnvalidate(input: CellValidateInput): Promise<stri
     source: input.source,
     auto: input.auto,
     surface: input.surface,
-  })
+  }, analytics)
   return eventId
 }
 
@@ -690,6 +740,8 @@ export interface CellAudioAttachInput {
   asr?: { text: string; model: string }
   /** Provenance of an AI cleanup. New timings without it clear the server's mark. */
   transcriptAi?: { model: string; at: number; changes: number }
+  /** AQU-2327: a Station version's changes and lines, for its History row. */
+  versionChanges?: VersionChanges
   /**
    * AQU-1572: which gesture produced this clip — telemetry only, never on the
    * wire. ONLY the originating gesture passes one (an upload or LinkMedia
@@ -731,6 +783,7 @@ function playedDuration(input: CellAudioAttachInput): { durationMs?: number } {
 }
 
 export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<string> {
+  const analytics = posthog.scope(undefined, input.author)
   // AQU-1565 follow-up: the server refuses `role: "source"` below Project Lead
   // (authorize.ts). Refuse it here too, before the outbox, so a certain 403
   // never sits in the durable queue.
@@ -762,6 +815,7 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.pieceOf !== undefined ? { pieceOf: input.pieceOf } : {}),
       ...(input.asr !== undefined ? { asr: input.asr } : {}),
       ...(input.transcriptAi !== undefined ? { transcriptAi: input.transcriptAi } : {}),
+      ...(input.versionChanges !== undefined ? { versionChanges: input.versionChanges } : {}),
       ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
@@ -782,7 +836,7 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.voiceId !== undefined ? { voiceId: input.voiceId } : {}),
       ...(input.ttsProvider !== undefined ? { provider: input.ttsProvider } : {}),
       ...playedDuration(input),
-    })
+    }, analytics)
   }
   return eventId
 }
@@ -856,6 +910,48 @@ export async function emitCellAudioTrim(input: CellAudioTrimInput): Promise<stri
       audioId: input.audioId,
       trimStartMs: input.trimStartMs,
       trimEndMs: input.trimEndMs,
+      ...targetLaneFields(input),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface CellAudioGainInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  /** Volume in dB; null = as recorded. */
+  gainDb: number | null
+  /** Fade lengths in ms; null = none. */
+  fadeInMs: number | null
+  fadeOutMs: number | null
+  /** AQU-1462: lane the member was working in. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.audio.gain` (AQU-2327) — the clip's volume and fades ONLY,
+ * all three stated (null clears). Never selection, trims or the recording.
+ */
+export async function emitCellAudioGain(input: CellAudioGainInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.gain",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      audioId: input.audioId,
+      gainDb: input.gainDb,
+      fadeInMs: input.fadeInMs,
+      fadeOutMs: input.fadeOutMs,
       ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
@@ -1398,6 +1494,7 @@ export interface CellAudioValidateInput {
 
 /** Emit a `cell.audio.validate` — one person's vote on one take. */
 export async function emitCellAudioValidate(input: CellAudioValidateInput): Promise<string> {
+  const analytics = posthog.scope(undefined, input.author)
   const { eventId } = await enqueueEvent({
     kind: "cell.audio.validate",
     projectId: input.projectId,
@@ -1417,7 +1514,7 @@ export async function emitCellAudioValidate(input: CellAudioValidateInput): Prom
     source: input.source,
     auto: input.auto,
     surface: input.surface,
-  })
+  }, analytics)
   return eventId
 }
 
@@ -1433,6 +1530,7 @@ export interface CellAudioUnvalidateInput extends CellAudioValidateInput {
 
 /** Mirror of `emitCellAudioValidate` for withdrawing a vote. */
 export async function emitCellAudioUnvalidate(input: CellAudioUnvalidateInput): Promise<string> {
+  const analytics = posthog.scope(undefined, input.author)
   const { eventId } = await enqueueEvent({
     kind: "cell.audio.unvalidate",
     projectId: input.projectId,
@@ -1456,7 +1554,7 @@ export async function emitCellAudioUnvalidate(input: CellAudioUnvalidateInput): 
     source: input.source,
     auto: input.auto,
     surface: input.surface,
-  })
+  }, analytics)
   return eventId
 }
 
@@ -2069,6 +2167,41 @@ export async function emitCastAssign(input: CastAssignInput): Promise<string> {
   return eventId
 }
 
+// ── Cell label (AQU-2408) ────────────────────────────────────────────────
+// Non-chain-mutating (parentId omitted), exactly like cast.assign: writes one
+// metadata key on the source-side row and never touches text or cells.event_id.
+// A label is a note on a line — metadata, never a character and never a voice
+// (docs/decisions/0007-cell-labels-are-metadata-never-cast.md).
+
+export interface CellLabelSetInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The label to show on the cell. Null clears it. Trimmed before it leaves. */
+  label: string | null
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.label.set` event — sets or clears the cell's own label in
+ * `metadata.cellLabel` WITHOUT writing to text. A blank label clears.
+ */
+export async function emitCellLabelSet(input: CellLabelSetInput): Promise<string> {
+  const trimmed = input.label?.trim() ?? ""
+  const { eventId } = await enqueueEvent({
+    kind: "cell.label.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { label: trimmed === "" ? null : trimmed },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface FileRenameInput {
   projectId: string
   fileId: string
@@ -2104,6 +2237,88 @@ export async function emitFileCorpusSet(input: FileCorpusSetInput): Promise<stri
     parentId: null,
     author: input.author,
     payload: { corpusMarker: trimmed || null },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+/**
+ * AQU-2308: set (or re-set) one hand-set milestone on a file.
+ *
+ * Upsert by `milestoneId`: the same id with a new name or new anchors is an
+ * edit, a fresh id is a new division. The covered cells are not sent — the
+ * navigator walks the file's live cell order between the anchors — so moving
+ * an edge is one event, not a re-write of a span.
+ *
+ * `parentId: null` and no `cellId`: this is file-scoped and
+ * non-chain-mutating, which is what keeps setting a division from marking any
+ * lane's translation stale.
+ *
+ * The name is normalized (and refused if blank) by the SHARED rule in
+ * db/shared/file-milestones.ts — the same module the server's handler calls,
+ * so the dialog and the perimeter cannot disagree about what is storable.
+ */
+export interface FileMilestoneSetInput {
+  projectId: string
+  fileId: string
+  /** Stable id; re-using one edits that milestone in place. */
+  milestoneId: string
+  /** Shown exactly as typed. Blank or whitespace-only throws. */
+  name: string
+  startCellId: string
+  endCellId: string
+  author: string
+  clientTs?: number
+}
+
+export async function emitFileMilestoneSet(input: FileMilestoneSetInput): Promise<string> {
+  if (!isValidMilestoneId(input.milestoneId)) {
+    throw new Error(`file.milestone.set: unusable milestoneId ${JSON.stringify(input.milestoneId)}`)
+  }
+  const name = normalizeMilestoneName(input.name)
+  if (name === null) {
+    throw new Error("file.milestone.set: a milestone name cannot be blank")
+  }
+  if (!input.startCellId || !input.endCellId) {
+    throw new Error("file.milestone.set: both a start cell and an end cell are required")
+  }
+  const { eventId } = await enqueueEvent({
+    kind: "file.milestone.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      milestoneId: input.milestoneId,
+      name,
+      startCellId: input.startCellId,
+      endCellId: input.endCellId,
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface FileMilestoneRemoveInput {
+  projectId: string
+  fileId: string
+  milestoneId: string
+  author: string
+  clientTs?: number
+}
+
+/** AQU-2308: drop one hand-set milestone. Idempotent on the server. */
+export async function emitFileMilestoneRemove(input: FileMilestoneRemoveInput): Promise<string> {
+  if (!isValidMilestoneId(input.milestoneId)) {
+    throw new Error(`file.milestone.remove: unusable milestoneId ${JSON.stringify(input.milestoneId)}`)
+  }
+  const { eventId } = await enqueueEvent({
+    kind: "file.milestone.remove",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: { milestoneId: input.milestoneId },
     clientTs: input.clientTs,
   })
   return eventId

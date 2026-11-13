@@ -33,6 +33,13 @@ export type OutboxEventKind =
   | "source.cell.visibility.set"
   // AQU-1767 phase 2: undo a removal — restore the cell as the removal found it.
   | "source.cell.restore"
+  // Markup-only repair of one cell: merges into the source row's metadata and
+  // may replace the protected source and/or target HTML. Never moves an
+  // `event_id`, so no translation goes stale and no validation is dropped. The
+  // server has emitted it since the IDML v2 upgrade; the client sends it for
+  // one thing only — placing a validated IDML translation into its style runs
+  // (`emitIdmlTargetMarkup`).
+  | "source.cell.metadata.patch"
   // Target-side cell events (translator).
   | "target.cell.create"
   | "target.cell.commit"
@@ -50,6 +57,8 @@ export type OutboxEventKind =
   | "cell.audio.remove"
   | "cell.audio.rename"
   | "cell.audio.trim"
+  // AQU-2327: a take's volume and fades — data on the clip, like the trim.
+  | "cell.audio.gain"
   | "cell.audio.place"
   // AQU-1767: cut one dub piece in two (contributor, like trim).
   | "cell.audio.cut"
@@ -87,6 +96,14 @@ export type OutboxEventKind =
   | "file.delete"
   // Restore a soft-deleted file (project_lead+; non-chain-mutating).
   | "file.restore"
+  // AQU-2308: a hand-set milestone — a named start->end range of cells in one
+  // file — upserted by id, and removed by id. File-scoped and
+  // non-chain-mutating: no parentId, and the projection touches only
+  // `file_milestones`, so setting a division marks no lane's translation stale
+  // and advances no cell's head. Maintainer floor (file.track.set's, not
+  // file.rename's — a division relayouts the navigator for everyone).
+  | "file.milestone.set"
+  | "file.milestone.remove"
   // Comments (non-chain-mutating; contributor-level).
   | "comment.create"
   | "comment.edit"
@@ -114,6 +131,10 @@ export type OutboxEventKind =
   // AQU-438: Cast/character label assignment (non-chain-mutating; contributor+).
   // Writes cast_name into cells.metadata JSONB without touching target text.
   | "cast.assign"
+  // AQU-2408: a hand-typed label on a cell (non-chain-mutating; project lead+
+  // by static floor, the project's `cellLabelFloor` tier on top). Writes
+  // `cellLabel` into the source row's metadata JSONB. Metadata, never a voice.
+  | "cell.label.set"
   // Timeline editor: retime a cell (move/stretch). Non-chain-mutating — updates
   // start_ms/end_ms on both sides without moving cells.event_id.
   | "cell.retime"
@@ -157,6 +178,10 @@ export interface AiDraftProvenance {
   /** AQU-1656: the ai_interventions row holding this draft's prompt and raw
    *  output. A row is current while the cell's draft still carries its id. */
   interventionId?: string
+  /** AQU-2398: set when the agent offered several wordings of this cell and a
+   *  person chose this one — which option it was, out of how many. Absent on
+   *  an ordinary single draft. */
+  alternative?: { index: number; of: number }
   projectState: {
     sourceLanguage: string
     targetLanguage: string
@@ -218,6 +243,17 @@ export interface OutboxEventPayloads {
   "source.cell.restore": {
     /** The removal to undo; absent = the cell's newest unrestored removal. */
     deleteEventId?: string
+  }
+  "source.cell.metadata.patch": {
+    /** Payload contract version; 1 is the only one the server projects. */
+    version: 1
+    /** Shallow merge into `cells.metadata`. `{}` changes nothing. */
+    metadata: Record<string, unknown>
+    /** Protected source HTML, when it is being replaced too. */
+    valueHtml?: string
+    /** The default lane's target HTML. Its text, history, chain head and
+     *  validation stay exactly as they were. */
+    targetHtml?: string
   }
 
   "target.cell.create": {
@@ -388,6 +424,10 @@ export interface OutboxEventPayloads {
   // Audio attachments. Bytes already live in R2 before these are emitted.
   "cell.audio.attach": {
     audioId: string
+    /** Immutable legacy history: insert unselected; leave an existing take untouched. */
+    historyOnly?: boolean
+    /** Audited missing-row repair; retain the original attach's creation time. */
+    restoreProjectionOf?: string
     url: string
     /** AQU-646: an OPEN string. `cell_audio.slot` is unconstrained TEXT, and an
      *  extra target-audio track addresses its takes by its own track id. The
@@ -418,6 +458,11 @@ export interface OutboxEventPayloads {
     asr?: { text: string; model: string }
     /** Provenance of an AI cleanup; new timings without it clear the mark. */
     transcriptAi?: { model: string; at: number; changes: number }
+    /** AQU-2327: a version saved from the Station (or made by its Remove
+     *  noise) — what changed and the lines (cell ids) it went on, which the
+     *  Station's History reads back ("Version 2 saved: a part deleted, audio
+     *  inserted · used on line 331"). History only: nothing is projected. */
+    versionChanges?: VersionChanges
   }
   "cell.audio.select": {
     /** null: leave the slot with nothing selected (2026-09-28) — how a line
@@ -455,6 +500,21 @@ export interface OutboxEventPayloads {
    * indistinguishable, so a re-attach carrying word timings wiped the window a
    * take had just been given. Sets nothing else.
    */
+  /**
+   * AQU-2327: the clip's COMPLETE level settings — volume in dB, fades in ms —
+   * all three always stated, null meaning none, for the reason the trim states
+   * both ends. They never change the recording and keep the take's approvals.
+   */
+  "cell.audio.gain": {
+    audioId: string
+    gainDb: number | null
+    fadeInMs: number | null
+    fadeOutMs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
   "cell.audio.trim": {
     audioId: string
     trimStartMs: number | null
@@ -662,6 +722,23 @@ export interface OutboxEventPayloads {
   // All cells and audio remain intact. Non-chain-mutating (parentId omitted).
   "file.restore": Record<string, never>
 
+  // AQU-2308: upsert one hand-set milestone by id. The covered cells are NOT
+  // in the payload — only the two anchors are, and the navigator resolves the
+  // run between them from the file's live cell order, so a cell inserted
+  // inside the range is covered without a second write. Non-chain-mutating
+  // (parentId omitted).
+  "file.milestone.set": {
+    milestoneId: string
+    name: string
+    startCellId: string
+    endCellId: string
+  }
+  // AQU-2308: drop one hand-set milestone by id. Idempotent, so a retried
+  // outbox entry never wedges behind a record that is already gone.
+  "file.milestone.remove": {
+    milestoneId: string
+  }
+
   // ── Comments (non-chain-mutating) ────────────────────────────────────────
   "comment.create": {
     commentId: string // client-generated ulid
@@ -769,6 +846,15 @@ export interface OutboxEventPayloads {
      * such column.
      */
     lineNumber?: string | null
+  }
+
+  // AQU-2408: a hand-typed label on a cell — docs/decisions/0007. The
+  // projection merges `cellLabel` into cells.metadata on the SOURCE row (the
+  // key legacy Codex notebooks already carry); null removes it. Never
+  // cast_name, never a voice.
+  "cell.label.set": {
+    /** The label to show on the cell. Null removes it. */
+    label: string | null
   }
 
   // Timeline editor: retime a cell (move/stretch). cellId is on the envelope.
@@ -926,4 +1012,15 @@ export function isChainMutatingKind(kind: OutboxEventKind): boolean {
 /** True iff the event kind is a genesis event (parentId must be null). */
 export function isGenesisKind(kind: OutboxEventKind): boolean {
   return GENESIS_KINDS.has(kind)
+}
+
+/** AQU-2327: what a version saved from the Station changed, for its History row. */
+export interface VersionChanges {
+  /** Each kind once, in the order they happened. */
+  kinds: Array<"deleted" | "inserted" | "noise">
+  /** The lines (cell ids) the version went on. */
+  usedOn: string[]
+  /** Saved over the take (Station "Save"): the take it replaced was removed in
+   *  the same step, and keeps its name. Absent: saved as a new version. */
+  over?: boolean
 }

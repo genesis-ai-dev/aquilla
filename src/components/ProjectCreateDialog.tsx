@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react"
 import { useForm, useStore } from "@tanstack/react-form"
 import { z } from "zod"
 import { v4 as uuid } from "uuid"
-import { X } from "lucide-react"
+import { ArrowLeft, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -58,9 +59,10 @@ import { useSubmitError } from "@/lib/forms/submit-error"
 import { ROLE } from "@/lib/frontier/roles"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
-import posthog from "@/lib/posthog"
 import { LangQuestCreatePanel } from "@/components/langquest/LangQuestCreatePanel"
-import { LangQuestLogo } from "@/components/langquest/LangQuestLogo"
+import { ProjectSourceStep } from "@/components/ProjectSourceStep"
+import { fetchLangQuestConnections } from "@/lib/langquest/api"
+import { INITIAL_WIZARD_STATE, wizardReducer, type ProjectSource } from "@/lib/langquest/wizard"
 
 interface ProjectCreateDialogProps {
   onCreated: (project: ProjectRecord) => void
@@ -250,6 +252,7 @@ const projectSchema = z
   })
 
 export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppliedProjects }: ProjectCreateDialogProps) {
+  const analytics = useAccountAnalytics()
   const t = useT()
   const { session } = useFrontierSession()
   const {
@@ -286,8 +289,15 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   // close, or page-org change). Submit is disabled while it is null, so a
   // stale or unresolved choice can never pick the org (review finding).
   const [destination, setDestination] = useState<Destination | null>(null)
-  // AQU-2105: the "Import from LangQuest" path replaces the form while chosen.
-  const [langquestMode, setLangquestMode] = useState(false)
+  // AQU-2105: the dialog is a wizard — where the project comes from first,
+  // then that path's own steps (lib/langquest/wizard.ts). "scratch" and
+  // "linked" land on the form below with the shape preselected; "langquest"
+  // hands the body to LangQuestCreatePanel.
+  const [wizard, dispatch] = useReducer(wizardReducer, INITIAL_WIZARD_STATE)
+  const step = wizard.step
+  const onForm = step.kind === "form"
+  const onLangQuest =
+    step.kind === "loading" || step.kind === "org" || step.kind === "connect" || step.kind === "language" || step.kind === "details"
   // AQU-1352 P2: teams to create into; reset whenever the destination changes.
   const [teamIds, setTeamIds] = useState<number[]>([])
   const [teamsError, setTeamsError] = useState(false)
@@ -474,7 +484,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
         }
 
         await createProject(project)
-        posthog.capture("project created", {
+        analytics.capture("project created", {
           project_id: project.id,
           project_shape: value.shape,
           source_language: project.sourceLanguage,
@@ -596,10 +606,32 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   // guessing). Both are stated on screen beside the control they disable.
   const fileSelectionBlocks = !!chosenUpstreamId && (nothingSelected || filesFailed)
 
+  // The user's saved LangQuest connections decide whether the LangQuest path
+  // starts by picking an org or by connecting one. Asked only once that path
+  // is picked (the scratch and linked paths make no LangQuest request), and
+  // again per open so a connection made in Preferences shows up unreloaded.
+  useEffect(() => {
+    if (step.kind !== "loading" || !session?.jwt) return
+    let cancelled = false
+    fetchLangQuestConnections(session.jwt)
+      .then((connections) => {
+        if (!cancelled) dispatch({ type: "connectionsLoaded", connections })
+      })
+      .catch(() => {
+        // Not knowing is the same as having none: the connect step still works.
+        if (!cancelled) dispatch({ type: "connectionsLoaded", connections: [] })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [step.kind, session?.jwt])
+
   useEffect(() => {
     if (open) return
     setDestination(null)
-    setLangquestMode(false)
+    dispatch({ type: "reset" })
+    // Re-ask for connections next time the LangQuest path is picked.
+    dispatch({ type: "forgetConnections" })
     setTeamIds([])
     setTeamsError(false)
     form.reset()
@@ -636,6 +668,13 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
     form.setFieldValue("linkConsumes", "")
   }
 
+  function pickSource(source: ProjectSource) {
+    if (source === "scratch") pickShape("self-contained")
+    if (source === "linked") pickShape("linked-target")
+    dispatch({ type: "pickSource", source })
+    analytics.capture("project create source picked", { source })
+  }
+
   return (
     <Dialog
       open={open}
@@ -651,25 +690,46 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
         {t("projectSettings.create.trigger")}
       </DialogTrigger>
       <DialogContent closeDisabled={!canClose}>
-        <DialogHeader>
+        <DialogHeader className="flex-row items-center gap-2">
+          {step.kind !== "source" && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="-ml-1 shrink-0"
+              aria-label={t("common.back")}
+              onClick={() => dispatch({ type: "back" })}
+              disabled={locked}
+              data-testid="project-create-back"
+            >
+              <ArrowLeft className="size-4" />
+            </Button>
+          )}
           <DialogTitle>
-            {langquestMode ? t("langquest.create.title") : t("projectSettings.create.dialogTitle")}
+            {onLangQuest ? t("langquest.create.title") : t("projectSettings.create.dialogTitle")}
           </DialogTitle>
         </DialogHeader>
-        {langquestMode ? (
+        {step.kind === "source" && (
+          <DialogBody>
+            <ProjectSourceStep onPick={pickSource} disabled={locked} />
+          </DialogBody>
+        )}
+        {onLangQuest && (
           <LangQuestCreatePanel
             jwt={session?.jwt}
             username={session?.username}
             getProjectId={() => draftProjectId.current}
             pageOrgId={orgId}
-            onBack={() => setLangquestMode(false)}
+            state={wizard}
+            dispatch={dispatch}
             onCreated={(project) => {
               onCreated(project)
               toast.add({ type: "success", title: t("langquest.create.createdToast", { name: project.name }) })
               setOpen(false)
             }}
           />
-        ) : (
+        )}
+        {onForm && (
         <form
           id="project-create-form"
           autoComplete="off"
@@ -685,22 +745,6 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
           className="contents"
         >
           <DialogBody>
-            <Button
-              type="button"
-              variant="outline"
-              className="h-auto w-full justify-start gap-3 py-2 text-left"
-              onClick={() => setLangquestMode(true)}
-              disabled={locked}
-              data-testid="project-create-langquest"
-            >
-              <LangQuestLogo className="size-6" />
-              <span className="flex min-w-0 flex-col">
-                <span className="font-medium">{t("langquest.create.entry")}</span>
-                <span className="text-xs font-normal whitespace-normal text-muted-foreground">
-                  {t("langquest.create.entryHint")}
-                </span>
-              </span>
-            </Button>
             {/* AQU-1519: one disabled fieldset backs the whole lock — it takes
                 every input, radio, select trigger and button inside it out of
                 play at once, so a control added to this dialog later (the
@@ -1299,6 +1343,7 @@ function AddAsLaneRecommendation({
    *  flight, or this panel's own lane add. */
   disabled?: boolean
 }) {
+  const analytics = useAccountAnalytics()
   const t = useT()
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle")
   const [message, setMessage] = useState<string | null>(null)
@@ -1387,7 +1432,7 @@ function AddAsLaneRecommendation({
       if (result.kind === "ok") {
         setStatus("success")
         setMessage(t("projectSettings.create.laneRecommendationSuccess", { lane: trimmed, projectName: project.name }))
-        posthog.capture("sibling lane added from create dialog", {
+        analytics.capture("sibling lane added from create dialog", {
           upstream_project_id: project.id,
           lane: trimmed,
         })

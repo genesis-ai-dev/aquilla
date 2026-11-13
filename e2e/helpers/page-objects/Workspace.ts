@@ -134,6 +134,21 @@ export class Workspace {
     await this.waitForImportSettled()
   }
 
+  /**
+   * Import media and wait only for the authoritative sidebar row.
+   *
+   * `importMediaFile` additionally waits for the import dialog's overlay to
+   * go, which AQU-1917's specs cannot use: they hold a transcription request
+   * open on purpose, and the resulting long-lived progress toast keeps that
+   * overlay check busy. Those specs assert the "no modal over the workspace"
+   * rule themselves, against `modalDialogs()`, so the settle heuristic here
+   * would only add a second, flakier copy of it.
+   */
+  async startMediaImport(filePath: string, fileName: string): Promise<void> {
+    await this.chooseImportFiles(filePath)
+    await this.waitForFileInSidebar(fileName)
+  }
+
   /** Review companion captions before publishing the media file. */
   async previewMediaWithCaptions(
     media: FilePayload,
@@ -624,10 +639,13 @@ export class Workspace {
 
   /**
    * AQU-200: the rail keeps only the AI-generate group as direct buttons —
-   * comments, history, record, play, TTS and footnote live behind a single
-   * `⋯`. Reveal the row's rail, open that overflow, and return the named
-   * action. The popup is portalled to the body, so the returned locator is
-   * page-scoped, NOT row-scoped: only one row's overflow is ever open.
+   * comments, history, TTS and footnote live behind a single `⋯`. (Record was
+   * promoted back out by AQU-2287; Play for the line's recording by AQU-2401,
+   * which put it in the left validation gutter beside the audio check — reach
+   * it by its own `cell-audio-play-button` testid, not through here.) Reveal
+   * the row's rail, open that overflow, and return the named action. The popup
+   * is portalled to the body, so the returned locator is page-scoped, NOT
+   * row-scoped: only one row's overflow is ever open.
    */
   async openRowAction(row: Locator, ariaLabel: string): Promise<Locator> {
     await row.scrollIntoViewIfNeeded()

@@ -1,3 +1,5 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
+import posthog from "@/lib/posthog"
 // Phase 2c-gamma → AQU-174 → AQU-211: useCompletion drives the LLM stream and
 // reports per-cell completion status. Both single-cell and batch completions
 // auto-commit the generated text as an *unvalidated* cell; review happens
@@ -72,6 +74,16 @@ type SearchFn = (
   excludeId?: string,
 ) => Promise<ScoredPair[]>
 import type { CellData } from "./useCells"
+import {
+  createTagMask,
+  describeTagFailure,
+  isTagsOnlyText,
+  protectPromptSource,
+  restoreProtectedPreview,
+  settleProtectedReply,
+  type TagLadderResult,
+  type TagProtection,
+} from "@/lib/completion/tag-protection"
 import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, DEFAULT_COMPLETION_SETTINGS, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, normalizeCompletionMaxTokens, retainTranslationPairs, selectApprovedExamples, type ValidatedPair } from "@/lib/completion/completion-service"
 import { buildFootnoteInstruction, prepareFootnotesForPrompt } from "@/lib/footnotes/completion"
 import { reintegrateFootnotes } from "@/lib/footnotes/reintegrate"
@@ -94,7 +106,6 @@ import {
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { PassageHit } from "./useSearchIndex"
 import { useFrontierHealth, checkFrontierHealth } from "@/lib/completion/frontier-health"
-import posthog from "@/lib/posthog"
 import { memMark } from "@/lib/perf-log"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { noteAbAssignment } from "@/lib/ab/feedback"
@@ -265,12 +276,13 @@ function unionStyleInstructions(
  * along here.
  */
 function captureIdmlDraftRejection(
+  analytics: ReturnType<typeof useAccountAnalytics>,
   cells: readonly { metadata?: Record<string, unknown> | null }[],
   error: unknown,
   mode: string,
 ): void {
   if (!(error instanceof IdmlCompletionError)) return
-  posthog.capture(
+  analytics.capture(
     "idml draft rejected for protected anchor",
     idmlDraftRejectionProperties({
       cells,
@@ -279,6 +291,33 @@ function captureIdmlDraftRejection(
       repairAttempted: error.repairAttempted,
     }),
   )
+}
+
+/**
+ * AQU-2385: report what the inline-tag ladder did to one reply. A clean reply
+ * is silent. A repair and a quarantine both get a log line and an analytics
+ * event — the quarantine rate is how a bad model is told apart from a bad
+ * sentinel grammar, and the quarantined draft itself still lands (unvalidated,
+ * and flagged by the export fidelity report) so a human reviews it.
+ */
+function reportTagLadder(
+  where: string,
+  cellId: string,
+  ladder: TagLadderResult,
+  meta: { mode: string; model: string; provider: string },
+): void {
+  if (ladder.status === "clean" || !ladder.reason) return
+  console.warn(
+    `[${where}] inline tags ${ladder.status} for cell ${cellId}: ` +
+    describeTagFailure(ladder.reason, ladder.detail),
+  )
+  posthog.capture("ai draft inline tags", {
+    outcome: ladder.status,
+    reason: ladder.reason,
+    mode: meta.mode,
+    model: meta.model,
+    provider: meta.provider,
+  })
 }
 
 export function useCompletion(
@@ -296,8 +335,9 @@ export function useCompletion(
   // e.g.:  useCompletion(...existingArgs, frontierSession, commitCompletedCell, rules, fileCells)
   rules?: TranslationRule[],
   allCells?: CellData[] | (() => CellData[]),
-  /** The project brief's L1 summary — injected into every prompt (Task 6). */
-  briefSummary?: string,
+  /** The project instructions (AQU-2342, resolveTranslationInstructions) —
+   *  injected right after the fixed role text of every prompt. */
+  instructions?: string,
   draftContext: DraftContextSettings = DEFAULT_DRAFT_CONTEXT,
   /** Active target lane tag (`activeLane`). Default `""`. */
   lane = "",
@@ -309,7 +349,11 @@ export function useCompletion(
   /** AQU-1656: audit trail for each model call that committed a draft.
    *  Fire-and-forget — never awaited, never fails a draft. */
   recordModelCall?: RecordModelCall,
+  /** AQU-2342: the Language profile — its filled slots join every prompt's
+   *  checks hint (db/shared/prompt-blocks.ts). */
+  languageProfile?: import("../../db/shared/language-profile").LanguageProfile,
 ) {
+  const analytics = useAccountAnalytics()
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
   const [examples, setExamples] = useState<Map<string, ScoredPair[]>>(new Map())
   const [errors, setErrors] = useState<Map<string, string>>(new Map())
@@ -405,7 +449,10 @@ export function useCompletion(
       found,
       collectValidatedPairs(corpusCells, sourceText, topK * 2),
       topK,
-      [...precedingContext, { source: sourceText }],
+      precedingContext,
+      // By id, not by source text: an identical line elsewhere in the project
+      // is an exact match and must reach the model.
+      [cell.id],
     )
     return {
       found,
@@ -424,7 +471,7 @@ export function useCompletion(
     ...(interventionId ? { interventionId } : {}),
     model: modelName,
     provider,
-    promptVersion: `${PROMPT_VERSION}:${promptFingerprint(effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT)}`,
+    promptVersion: `${PROMPT_VERSION}:${promptFingerprint(instructions ? `${DEFAULT_SYSTEM_PROMPT}\n\n${instructions}` : DEFAULT_SYSTEM_PROMPT)}`,
     exampleIds: uniqueExampleIds(approvedExamples.map((example) => example.cellId)),
     exampleTexts: approvedExamples.map((example, index) => ({
       cellId: example.cellId ?? `example-${index}`,
@@ -442,7 +489,7 @@ export function useCompletion(
         evidenceWeight: evidence.weight,
       } : {}),
     },
-  }), [effectiveSettings.systemPrompt, modelName, provider, sourceLanguage, targetLanguage])
+  }), [instructions, modelName, provider, sourceLanguage, targetLanguage])
 
   // AQU-670: resolves `true` only when the draft actually committed (the outbox
   // enqueue succeeded), and `false` on any failure — commit/enqueue rejection,
@@ -463,6 +510,35 @@ export function useCompletion(
       putLaneEntry(setErrors, lk(cell.id), "No source text yet — transcribe this section first.")
       putLaneEntry(setCompleting, lk(cell.id), "error")
       return false
+    }
+    // AQU-2385, rung 0 of the inline-tag ladder: a cell that is nothing but
+    // inline markup (plus at most one placeholder) has no words to translate.
+    // Copy the source across instead of spending a model call on it — no model
+    // call means no reply that could drop, duplicate or reorder its tags. It
+    // lands as an ordinary unvalidated draft, exactly like a generated one.
+    // Protected-markup (IDML) cells keep their own path.
+    if (!idmlCompletionSystemAddendum([cell]) && isTagsOnlyText(sourceText)) {
+      dropLaneEntryIfPresent(setErrors, lk(cell.id))
+      try {
+        await commitCompletedCell?.(
+          cell,
+          sourceText,
+          modelName,
+          draftProvenance(opts?.mode ?? "single", [], undefined, crypto.randomUUID()),
+        )
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          dropLaneEntry(setCompleting, lk(cell.id))
+          return false
+        }
+        posthog.captureException(err instanceof Error ? err : new Error(String(err)))
+        putLaneEntry(setCompleting, lk(cell.id), "error")
+        putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
+        return false
+      }
+      dropLaneEntry(setPreviews, lk(cell.id))
+      dropLaneEntry(setCompleting, lk(cell.id))
+      return true
     }
     // AQU-620: raise the temperature for an explicit regenerate so the second
     // request varies; leave first-draft generation on the configured value.
@@ -497,16 +573,26 @@ export function useCompletion(
           ? buildFootnoteInstruction(prepared.footnoteCount)
           : undefined)
 
+      // AQU-2385: inline tags go to the model as opaque sentinels, so it has
+      // nothing to "translate", reflow or reformat. Masking sits ONLY around
+      // the call: nothing below writes `originalHtml`/`translatedHtml`, and a
+      // protected-markup (IDML) cell opts out because its anchor contract is
+      // already a masking scheme of its own.
+      const tagProtection = protectPromptSource(
+        idmlCompletionPromptSource(cell, prepared.promptSource),
+        { protectedMarkup: Boolean(idmlAddendum) },
+      )
       const messages = buildPrompt({
         sourceLanguage, targetLanguage,
-        systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-        sourceText: idmlCompletionPromptSource(cell, prepared.promptSource),
+        systemPrompt: DEFAULT_SYSTEM_PROMPT,
+        sourceText: tagProtection.promptSource,
         examples: [],
         rules,
         ...(styleInstructionsFor && { styleInstructions: styleInstructionsFor(cell) }),
+        ...(languageProfile && { languageProfile }),
         validatedPairs: approvedExamples,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
-        briefSummary,
+        instructions,
         precedingContext,
         ...(systemAddendum && { systemAddendum }),
         ...(!idmlAddendum && prepared.footnoteCount > 0 && {
@@ -521,13 +607,14 @@ export function useCompletion(
         stream: !idmlAddendum,
         ...(!idmlAddendum && {
           onChunk: (text: string) => {
-            putLaneEntry(setPreviews, lk(cell.id), text)
+            // A translator must never see a sentinel, not even mid-stream.
+            putLaneEntry(setPreviews, lk(cell.id), restoreProtectedPreview(tagProtection, text))
           },
         }),
         signal,
         // Model A/B: remember which experiment request drafted this cell so the
         // user's validate/edit gesture can be attributed to the served model.
-        onAbAssignment: (ab) => noteAbAssignment(cell.fileId, cell.id, ab),
+        onAbAssignment: (ab) => noteAbAssignment(cell.fileId, cell.id, ab, analytics),
       })
       // AQU-685: a successful HTTP call can still yield an empty completion —
       // the model produced no content, or a streamed 200 carried only an
@@ -548,7 +635,7 @@ export function useCompletion(
       // target is untouched, and the cell shows the error badge instead.
       if (isRefusalReply(result)) {
         console.warn(`[completeSingle] model refused (not committed): ${cell.id}`)
-        posthog.capture("ai translation refused", {
+        analytics.capture("ai translation refused", {
           provider,
           model: modelName,
           mode: opts?.mode ?? "single",
@@ -561,7 +648,7 @@ export function useCompletion(
         putLaneEntry(setErrors, lk(cell.id), REFUSAL_ERROR_MESSAGE)
         return false
       }
-      posthog.capture("ai translation completed", {
+      analytics.capture("ai translation completed", {
         provider,
         model: modelName,
         source_language: sourceLanguage,
@@ -585,6 +672,15 @@ export function useCompletion(
         }
         finalText = rein.text ?? ""
       }
+      // AQU-2385, rungs 2-4: put the real tags back, then detect → repair →
+      // quarantine. A quarantined draft is NOT dropped — it commits
+      // unvalidated and the export fidelity report flags it, so the defect is
+      // reviewed rather than silently shipped.
+      const singleLadder = settleProtectedReply(tagProtection, finalText)
+      finalText = singleLadder.value
+      reportTagLadder("completeSingle", cell.id, singleLadder, {
+        mode: opts?.mode ?? "single", model: modelName, provider,
+      })
       // D11 trust-killer guard, single-cell edition (mirrors completeParagraph):
       // an empty draft — the model returned nothing, or the footnote reply had
       // no translated base — is flagged and NEVER committed, and we resolve
@@ -660,14 +756,14 @@ export function useCompletion(
       // AQU-670: a commit/enqueue failure lands here (commitCompletedCell
       // rethrows after reverting its optimistic patch). Record the error and
       // report failure so the caller does not show a "Saved" confirmation.
-      posthog.captureException(err instanceof Error ? err : new Error(String(err)))
-      captureIdmlDraftRejection([cell], err, opts?.mode ?? "single")
+      analytics.captureException(err instanceof Error ? err : new Error(String(err)))
+      captureIdmlDraftRejection(analytics, [cell], err, opts?.mode ?? "single")
       dropLaneEntry(setPreviews, lk(cell.id))
       putLaneEntry(setCompleting, lk(cell.id), "error")
       putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
       return false
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, briefSummary, draftProvenance, prepareSingleEvidence, lk, recordModelCall])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, instructions, draftProvenance, prepareSingleEvidence, lk, recordModelCall, languageProfile, analytics])
 
   // Move an existing translation into the source cell's style runs. The model
   // does not rewrite the words; a placement that would change them is refused.
@@ -734,7 +830,7 @@ export function useCompletion(
         putLaneEntry(setErrors, lk(cell.id), t("editor.idml.alignStylesUnchanged"))
         return false
       }
-      posthog.capture("ai styles aligned", {
+      analytics.capture("ai styles aligned", {
         provider,
         model: modelName,
         source_language: sourceLanguage,
@@ -787,12 +883,12 @@ export function useCompletion(
         dropLaneEntry(setCompleting, lk(cell.id))
         return false
       }
-      posthog.captureException(err instanceof Error ? err : new Error(String(err)))
+      analytics.captureException(err instanceof Error ? err : new Error(String(err)))
       putLaneEntry(setCompleting, lk(cell.id), "error")
       putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
       return false
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, lk, recordModelCall])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, lk, recordModelCall, analytics])
 
   const askAlignStyles = useCallback(async (
     messages: readonly IdmlRepairMessage[],
@@ -837,7 +933,48 @@ export function useCompletion(
     // SUB-28: untranscribed media sections have NO source text (the filename
     // doesn't count) — skip them instead of asking the model to "translate"
     // an empty source line.
-    const cells = allRequested.filter((c) => effectiveSourceText(c).trim() !== "")
+    const withSource = allRequested.filter((c) => effectiveSourceText(c).trim() !== "")
+
+    // AQU-2385, rung 0: cells that are nothing but inline markup (plus at most
+    // one placeholder) are copied straight across. No model call is spent on
+    // them, and no reply exists that could drop, duplicate or reorder their
+    // tags. They never enter the run, so the banner counts only the cells the
+    // model is actually asked to draft. Protected-markup (IDML) cells keep
+    // their own path.
+    const forModel: CellData[] = []
+    const tagsOnlyCells: CellData[] = []
+    for (const c of withSource) {
+      if (!idmlCompletionSystemAddendum([c]) && isTagsOnlyText(effectiveSourceText(c))) {
+        tagsOnlyCells.push(c)
+      } else {
+        forModel.push(c)
+      }
+    }
+    if (tagsOnlyCells.length > 0) {
+      const copies: CompletedCellDraft[] = tagsOnlyCells.map((c) => ({
+        cell: c,
+        text: effectiveSourceText(c),
+        author: modelName,
+        provenance: draftProvenance("batch", [], undefined, crypto.randomUUID()),
+      }))
+      try {
+        if (commitCompletedCells) {
+          await commitCompletedCells(copies)
+        } else {
+          for (const draft of copies) {
+            await commitCompletedCell?.(draft.cell, draft.text, draft.author, draft.provenance)
+          }
+        }
+      } catch (err) {
+        // A failed copy is reported and skipped; it must not abandon the cells
+        // the model still has to draft.
+        if (!(err instanceof DOMException && err.name === "AbortError")) {
+          posthog.captureException(err instanceof Error ? err : new Error(String(err)))
+        }
+      }
+    }
+
+    const cells = forModel
     if (cells.length === 0) return
 
     // AQU-1386: pack whole drafting units into calls instead of slicing every
@@ -863,7 +1000,7 @@ export function useCompletion(
         .filter((chunk) => chunk.length > 0)
       : fixedSlices(cells, MAX_CELLS_PER_CALL)
 
-    posthog.capture("ai batch translation started", {
+    analytics.capture("ai batch translation started", {
       provider,
       model: modelName,
       source_language: sourceLanguage,
@@ -935,6 +1072,19 @@ export function useCompletion(
           putLaneEntry(setCompleting, lk(c.id), "generating")
         }
 
+        // AQU-2385: one mask per CALL — a single nonce and one ordinal
+        // sequence across every cell in the chunk, so no two cells can mint
+        // the same sentinel and a sentinel cannot be carried over from an
+        // earlier call. Protected-markup (IDML) cells opt out, as in the
+        // single path.
+        const batchMask = createTagMask()
+        const protections: TagProtection[] = chunk.map((c) =>
+          protectPromptSource(idmlCompletionPromptSource(c, effectiveSourceText(c)), {
+            mask: batchMask,
+            protectedMarkup: Boolean(idmlCompletionSystemAddendum([c])),
+          }),
+        )
+
         const filledText = new Map<number, string>()
         const completedRe = /<v(\d+)>([\s\S]*?)<\/v\1>/g
         const consumeFull = (full: string) => {
@@ -945,7 +1095,9 @@ export function useCompletion(
             if (filledText.has(idx)) continue
             const cell = chunk[idx - 1]
             if (!cell) continue
-            const text = m[2].trim()
+            // Sentinels are put back before anything reads the text — the
+            // preview a translator watches, and the value committed below.
+            const text = restoreProtectedPreview(protections[idx - 1], m[2].trim())
             if (!idmlCompletionSystemAddendum([cell])) {
               putLaneEntry(setPreviews, lk(cell.id), text)
             }
@@ -986,25 +1138,22 @@ export function useCompletion(
           passageCandidates(passages),
           collectValidatedPairs(corpusCells, concatenated, batchTopK * 2),
           batchTopK,
-          [
-            ...precedingContext,
-            ...chunk.map((cell) => ({ source: effectiveSourceText(cell) })),
-          ],
+          precedingContext,
+          chunk.map((cell) => cell.id),
         )
         const messages = buildBatchPrompt({
           sourceLanguage, targetLanguage,
-          systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-          cells: chunk.map((c) => ({
-            source: idmlCompletionPromptSource(c, effectiveSourceText(c)),
-          })),
+          systemPrompt: DEFAULT_SYSTEM_PROMPT,
+          cells: protections.map((p) => ({ source: p.promptSource })),
           examples: [],
           rules,
+          ...(languageProfile && { languageProfile }),
           ...(styleInstructionsFor && {
             styleInstructions: unionStyleInstructions(chunk, styleInstructionsFor),
           }),
           validatedPairs: batchApprovedExamples,
           exampleFormat: effectiveSettings.fewShotExampleFormat,
-          briefSummary,
+          instructions,
           precedingContext,
           systemAddendum: idmlCompletionSystemAddendum(chunk),
         })
@@ -1028,7 +1177,7 @@ export function useCompletion(
               // Model A/B: one batch request drafts every cell in the chunk; the
               // first gesture on any of them reports (server keeps one outcome).
               onAbAssignment: (ab) => {
-                for (const c of chunk) noteAbAssignment(c.fileId, c.id, ab)
+                for (const c of chunk) noteAbAssignment(c.fileId, c.id, ab, analytics)
               },
             })
             lastErr = undefined
@@ -1071,7 +1220,7 @@ export function useCompletion(
             skippedCount += 1
           }
           if (skippedCount > 0) incrementBatchCompletionFailed(runId, skippedCount)
-          posthog.captureException(lastErr instanceof Error ? lastErr : new Error(String(lastErr)))
+          analytics.captureException(lastErr instanceof Error ? lastErr : new Error(String(lastErr)))
           chunkFailed = true
         }
 
@@ -1100,9 +1249,14 @@ export function useCompletion(
           // committing an empty draft.
           if (text !== undefined && text.trim()) {
             try {
+              // AQU-2385: detect → repair → quarantine for this cell's reply.
+              const ladder = settleProtectedReply(protections[i], text)
+              reportTagLadder("completeBatch", cell.id, ladder, {
+                mode: "batch", model: modelName, provider,
+              })
               const completed = await normalizeProtectedCompletionWithRepair(
                 cell,
-                text,
+                ladder.value,
                 async (messages) => complete({
                   settings: effectiveSettings,
                   session,
@@ -1124,8 +1278,8 @@ export function useCompletion(
               })
             } catch (err) {
               if (err instanceof DOMException && err.name === "AbortError") throw err
-              posthog.captureException(err instanceof Error ? err : new Error(String(err)))
-              captureIdmlDraftRejection([cell], err, "batch")
+              analytics.captureException(err instanceof Error ? err : new Error(String(err)))
+              captureIdmlDraftRejection(analytics, [cell], err, "batch")
               dropLaneEntry(setPreviews, lk(cell.id))
               putLaneEntry(setCompleting, lk(cell.id), "error")
               putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
@@ -1212,8 +1366,8 @@ export function useCompletion(
             continue
           }
           const err = outcome.reason
-          posthog.captureException(err instanceof Error ? err : new Error(String(err)))
-          captureIdmlDraftRejection([cell], err, "batch")
+          analytics.captureException(err instanceof Error ? err : new Error(String(err)))
+          captureIdmlDraftRejection(analytics, [cell], err, "batch")
           putLaneEntry(setCompleting, lk(cell.id), "error")
           putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
           incrementBatchCompletionFailed(runId, 1)
@@ -1245,7 +1399,7 @@ export function useCompletion(
         // If we broke out of the inner loop due to supersession, stop chunks.
         if (isBatchCompletionCancelled(runId)) break
 
-        posthog.capture("ai batch translation chunk completed", {
+        analytics.capture("ai batch translation chunk completed", {
           provider,
           model: modelName,
           cell_count: chunk.length,
@@ -1286,7 +1440,7 @@ export function useCompletion(
       clearBatchCompletionProgress(runId)
       memMark(`completeBatch.end(${cells.length}c)`)
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk, recordModelCall])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, instructions, draftContext, draftProvenance, lk, recordModelCall, languageProfile, analytics])
 
   // completeParagraph: draft a whole paragraph group as ONE model call, fan results
   // out to per-cell commits via the existing commitCompletedCell path (D3, D11).
@@ -1357,35 +1511,58 @@ export function useCompletion(
         passageCandidates(passages),
         collectValidatedPairs(cells, concatenated, topK * 2),
         topK,
-        [
-          ...precedingContext,
-          ...groupCells.map((cell) => ({ source: effectiveSourceText(cell) })),
-        ],
+        precedingContext,
+        groupCells.map((cell) => cell.id),
+      )
+
+      // AQU-2385: one mask per CALL covers the whole paragraph group — the
+      // requested cells and the locked reference segments alike, so the model
+      // sees one consistent sentinel vocabulary. Protected-markup (IDML) cells
+      // opt out and keep their own anchor contract.
+      const paragraphMask = createTagMask()
+      const paragraphProtections = new Map<string, TagProtection>(
+        groupCells.map((c) => [
+          c.id,
+          protectPromptSource(idmlCompletionPromptSource(c, effectiveSourceText(c)), {
+            mask: paragraphMask,
+            protectedMarkup: Boolean(idmlCompletionSystemAddendum([c])),
+          }),
+        ]),
       )
 
       // 3. Build the paragraph prompt.
       const messages = buildParagraphPrompt({
         sourceLanguage,
         targetLanguage,
-        systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+        systemPrompt: DEFAULT_SYSTEM_PROMPT,
         // Full group, IN POSITION (coordinator adjudication): a validated
         // cell mid-group must not leave a silent gap that makes its drafted
         // neighbors read as artificially adjacent. Locked (validated) cells
         // carry `lockedTarget` so buildParagraphPrompt renders them as a
         // reference segment instead of a `<c id>` tag — they are never
         // requested from the model.
-        cells: groupCells.map((c) => ({
-          cellId: c.id,
-          source: idmlCompletionPromptSource(c, effectiveSourceText(c)),
-          ...(c.status === "validated" ? { lockedTarget: c.translated } : {}),
-        })),
+        cells: groupCells.map((c) => {
+          const protection = paragraphProtections.get(c.id)
+          return {
+            cellId: c.id,
+            source: protection?.promptSource ?? idmlCompletionPromptSource(c, effectiveSourceText(c)),
+            ...(c.status === "validated"
+              // The reference target is masked with the SAME mask, so a locked
+              // segment does not show the model real markup beside sentinels.
+              ? { lockedTarget: protection && c.translated
+                  ? protectPromptSource(c.translated, { mask: paragraphMask }).promptSource
+                  : c.translated }
+              : {}),
+          }
+        }),
         examples: [],
         validatedPairs: approvedExamples,
         rules,
+        ...(languageProfile && { languageProfile }),
         ...(styleInstructionsFor && {
           styleInstructions: unionStyleInstructions(groupCells, styleInstructionsFor),
         }),
-        briefSummary,
+        instructions,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
         precedingContext,
         // Following-source context (right side of discourse window, D4): the
@@ -1411,7 +1588,7 @@ export function useCompletion(
         signal,
         // Model A/B: the paragraph request drafts the whole group.
         onAbAssignment: (ab) => {
-          for (const c of draftCells) noteAbAssignment(c.fileId, c.id, ab)
+          for (const c of draftCells) noteAbAssignment(c.fileId, c.id, ab, analytics)
         },
       })
 
@@ -1463,7 +1640,7 @@ export function useCompletion(
         // like an empty one — flag it and NEVER commit the boilerplate.
         if (isRefusalReply(text)) {
           console.warn(`[completeParagraph] model refused for cell (not committed): ${cellId}`)
-          posthog.capture("ai translation refused", {
+          analytics.capture("ai translation refused", {
             provider,
             model: modelName,
             mode: "paragraph",
@@ -1475,12 +1652,25 @@ export function useCompletion(
           dropLaneEntry(setCompleting, lk(cellId))
           continue
         }
+        // AQU-2385, rungs 2-4: restore this cell's tags, then detect →
+        // repair → quarantine. An unverifiable draft still commits
+        // unvalidated and is flagged by the export fidelity report.
+        const paragraphProtection = paragraphProtections.get(cellId)
+        const settledText = paragraphProtection
+          ? (() => {
+              const ladder = settleProtectedReply(paragraphProtection, text)
+              reportTagLadder("completeParagraph", cellId, ladder, {
+                mode: "paragraph", model: modelName, provider,
+              })
+              return ladder.value
+            })()
+          : text
         if (!idmlCompletionSystemAddendum([cell])) {
-          putLaneEntry(setPreviews, lk(cellId), text)
+          putLaneEntry(setPreviews, lk(cellId), settledText)
         }
         const completed = await normalizeProtectedCompletionWithRepair(
           cell,
-          text,
+          settledText,
           async (messages) => complete({
             settings: effectiveSettings,
             session,
@@ -1523,7 +1713,7 @@ export function useCompletion(
         })
       }
 
-      posthog.capture("ai paragraph translation completed", {
+      analytics.capture("ai paragraph translation completed", {
         provider,
         model: modelName,
         source_language: sourceLanguage,
@@ -1544,8 +1734,8 @@ export function useCompletion(
         }
         return
       }
-      posthog.captureException(err instanceof Error ? err : new Error(String(err)))
-      captureIdmlDraftRejection(draftCells, err, "paragraph")
+      analytics.captureException(err instanceof Error ? err : new Error(String(err)))
+      captureIdmlDraftRejection(analytics, draftCells, err, "paragraph")
       const msg = err instanceof Error ? err.message : "Failed"
       for (const c of draftCells) {
         // Don't relabel a cell that was already committed before the failure —
@@ -1558,7 +1748,7 @@ export function useCompletion(
         putLaneEntry(setErrors, lk(c.id), msg)
       }
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk, recordModelCall])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, instructions, draftContext, draftProvenance, lk, recordModelCall, languageProfile, analytics])
 
   /**
    * AQU-913: forget a cell's failure entirely — the visible message AND the

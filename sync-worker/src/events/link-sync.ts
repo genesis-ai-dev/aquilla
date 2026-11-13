@@ -82,7 +82,14 @@ import {
   type SourceLinkBackfill,
 } from '../../../db/shared/source-link-backfill'
 import { parseSourceLinkAdoption } from '../../../db/shared/source-link-adopt'
+import {
+  applyProjectLinkedFileProvenance,
+  planLinkedFileProvenanceFor,
+  type LinkedFilePair,
+} from '../../../db/shared/link-file-provenance'
 import { loadAdoptedCellIds, runAdoption } from './link-adopt'
+import { repairMirroredCellEnvelopes } from './link-envelope'
+import type { StoredRevisionManifest } from './file-revision-apply'
 import { selectByCellKeys, type CellKey } from '../lib/cell-key-lookup'
 
 const BATCH_LIMIT = 100
@@ -131,6 +138,9 @@ const LANE_KINDS_SOURCE = [
   // NOOP) and the delta never pulls the file id in, so the downstream copy
   // keeps the old name forever.
   'file.rename',
+  // AQU-2459: one event carries a whole revision of a file's source side; the
+  // fold expands it from its manifest (see foldRevision).
+  'file.revision',
 ] as const
 
 /** AQU-477: additional lane-relevant kinds for `consumes: 'target'` links —
@@ -615,6 +625,115 @@ interface FoldedCell {
   transcription?: string | null
   cameraState?: string | null
   metadata?: Record<string, unknown> | null
+  /**
+   * AQU-2459: set for cells expanded from a `file.revision`. One revision event
+   * carries every changed cell, so its id cannot name each mirror event; the
+   * mirror id derives from this per-cell key instead of `eventId`.
+   */
+  mirrorKey?: string
+  /**
+   * AQU-2459: the revision moved this cell's anchor (an insert or delete next
+   * to it, or a move) without changing its text. The hash-equal skip would
+   * drop it and leave two cells on one anchor downstream, so it always emits.
+   */
+  reanchor?: boolean
+}
+
+/** AQU-2459: reads a revision manifest from R2 by key; null when missing. */
+export type RevisionManifestReader = (r2Key: string) => Promise<StoredRevisionManifest | null>
+
+/** AQU-2459: the reader over the SNAPSHOTS bucket, or undefined when unbound. */
+export function r2RevisionManifestReader(bucket: R2Bucket | undefined): RevisionManifestReader | undefined {
+  if (!bucket) return undefined
+  return async (key) => {
+    const obj = await bucket.get(key)
+    return obj ? (JSON.parse(await obj.text()) as StoredRevisionManifest) : null
+  }
+}
+
+/**
+ * AQU-2459: a `file.revision` folded as the per-cell changes it made, relative
+ * to its parent revision's manifest:
+ *   - units whose source row took this revision's event (changed/inserted),
+ *   - units whose anchor differs from the parent's (text equal, place moved),
+ *   - parent units this revision no longer carries (deletes).
+ * Unchanged units in place are left out: earlier events already mirrored them.
+ * A revision whose manifest cannot be read throws: the cursor must not move
+ * past cells the downstream never received.
+ */
+async function foldRevision(
+  db: AquillaDb,
+  upstreamProjectId: string,
+  row: UpstreamDeltaRow,
+  revisions: RevisionManifestReader | undefined,
+): Promise<FoldedCell[]> {
+  const fileId = row.file_id as string
+  let payload: { manifestR2Key?: unknown; parentRevisionN?: unknown }
+  try {
+    payload = JSON.parse(row.payload) as typeof payload
+  } catch {
+    throw new Error(`file.revision ${row.id} has an unreadable payload`)
+  }
+  if (!revisions) throw new Error(`file.revision ${row.id}: link sync has no revision manifest reader`)
+  if (typeof payload.manifestR2Key !== 'string') throw new Error(`file.revision ${row.id} names no manifest`)
+  const manifest = await revisions(payload.manifestR2Key)
+  if (!manifest) throw new Error(`file.revision ${row.id}: manifest ${payload.manifestR2Key} is not readable`)
+  let parentUnits: StoredRevisionManifest['units'] = []
+  if (typeof payload.parentRevisionN === 'number') {
+    const parentRow = await db
+      .prepare('SELECT manifest_r2_key FROM file_revisions WHERE project_id = ? AND file_id = ? AND revision_n = ?')
+      .bind(upstreamProjectId, fileId, payload.parentRevisionN)
+      .first<{ manifest_r2_key: string }>()
+    const parent = parentRow ? await revisions(parentRow.manifest_r2_key) : null
+    if (!parent) throw new Error(`file.revision ${row.id}: parent revision ${payload.parentRevisionN} manifest is not readable`)
+    parentUnits = parent.units
+  }
+  const parentAnchor = new Map(parentUnits.map((u, i) => [u.cellId, i === 0 ? null : parentUnits[i - 1].cellId]))
+  const current = new Set(manifest.units.map((u) => u.cellId))
+  const out: FoldedCell[] = []
+  manifest.units.forEach((unit, i) => {
+    const anchor = i === 0 ? null : manifest.units[i - 1].cellId
+    const textChanged = unit.eventId === row.id
+    const reanchor = !textChanged && parentAnchor.get(unit.cellId) !== anchor
+    if (!textChanged && !reanchor) return
+    out.push({
+      fileId,
+      cellId: unit.cellId,
+      eventId: unit.eventId,
+      seq: row.server_seq,
+      deleted: false,
+      value: unit.text,
+      valueHtml: unit.html ?? null,
+      type: unit.type ?? null,
+      canonicalRef: unit.canonicalRef ?? null,
+      anchorCellId: anchor,
+      startMs: null,
+      endMs: null,
+      metadata: unit.metadata ?? null,
+      mirrorKey: `${row.id}\0${unit.cellId}`,
+      ...(reanchor ? { reanchor: true } : {}),
+    })
+  })
+  for (const unit of parentUnits) {
+    if (current.has(unit.cellId)) continue
+    out.push({
+      fileId,
+      cellId: unit.cellId,
+      eventId: row.id,
+      seq: row.server_seq,
+      deleted: true,
+      value: '',
+      valueHtml: null,
+      type: unit.type ?? null,
+      canonicalRef: unit.canonicalRef ?? null,
+      anchorCellId: parentAnchor.get(unit.cellId) ?? null,
+      startMs: null,
+      endMs: null,
+      metadata: null,
+      mirrorKey: `${row.id}\0${unit.cellId}`,
+    })
+  }
+  return out
 }
 
 /**
@@ -687,7 +806,7 @@ export function deterministicDownstreamFileId(downstreamProjectId: string, upstr
 /** `files.meta` as a plain object. TEXT column, so a malformed or non-object
  *  legacy blob degrades to `{}` rather than throwing mid-sync and failing the
  *  whole mirror batch over one bad row (AQU-1547). */
-function parseMetaObject(meta: string | null): Record<string, unknown> {
+export function parseMetaObject(meta: string | null): Record<string, unknown> {
   if (!meta) return {}
   try {
     const parsed = JSON.parse(meta) as unknown
@@ -709,6 +828,8 @@ async function loadDelta(
   untilSeq: number,
   /** AQU-1560: restrict the read to these upstream files (a backfill). */
   onlyFileIds?: readonly string[],
+  /** AQU-2459: reads `file.revision` manifests (see foldRevision). */
+  revisions?: RevisionManifestReader,
 ): Promise<{ cells: Map<string, FoldedCell>; fileIds: Set<string> }> {
   const kindList = LANE_KINDS_SOURCE.map((k) => `'${k}'`).join(', ')
   const fileFilter = fileFilterSql(onlyFileIds)
@@ -760,6 +881,14 @@ async function loadDelta(
   for (const row of results) {
     if (!row.file_id) continue
     fileIds.add(row.file_id)
+    if (row.kind === 'file.revision') {
+      // AQU-2459: later per-cell events in the window still override these,
+      // exactly as they would a create.
+      for (const cell of await foldRevision(db, upstreamProjectId, row, revisions)) {
+        cells.set(`${cell.fileId}\0${cell.cellId}`, cell)
+      }
+      continue
+    }
     if (!row.cell_id || stale.has(row.id)) continue
     const key = `${row.file_id}\0${row.cell_id}`
     if (row.kind === 'source.cell.restore') {
@@ -1332,10 +1461,11 @@ async function loadDeltaTargetConsumption(
   laneTag: string,
   /** AQU-1560: restrict both lane reads to these upstream files (a backfill). */
   onlyFileIds?: readonly string[],
+  revisions?: RevisionManifestReader,
 ): Promise<{ cells: Map<string, FoldedCell>; fileIds: Set<string> }> {
   // 1. Structural-lane delta (reuses the source-consumption fold verbatim —
   //    it already extracts file ids + per-cell source-side fields/deletes).
-  const structuralDelta = await loadDelta(db, upstreamProjectId, sinceSeq, untilSeq, onlyFileIds)
+  const structuralDelta = await loadDelta(db, upstreamProjectId, sinceSeq, untilSeq, onlyFileIds, revisions)
 
   // 2. Target-lane delta: which cells had a target commit or validation
   //    change in this window.
@@ -1384,6 +1514,7 @@ async function loadDeltaTargetConsumption(
         fileId,
         cellId,
         eventId: structuralFold.eventId,
+        ...(structuralFold.mirrorKey ? { mirrorKey: structuralFold.mirrorKey } : {}),
         seq: structuralFold.seq,
         deleted: true,
         value: '',
@@ -1478,6 +1609,8 @@ async function loadDeltaTargetConsumption(
       fileId,
       cellId,
       eventId,
+      // AQU-2459: the structural event won, and it is a revision.
+      ...(structuralFold?.mirrorKey && eventId === structuralFold.eventId ? { mirrorKey: structuralFold.mirrorKey } : {}),
       seq,
       deleted: false,
       value: value ?? '',
@@ -1635,8 +1768,13 @@ export interface MirrorSyncResult {
   /** AQU-1563: windows this run folded and committed. */
   windows: number
   /** AQU-1563: the run stopped at its work budget with the link still behind
-   *  `toSeq`'s upstream head — call again to continue from the saved cursor. */
+   *  `toSeq`'s upstream head — call again to continue from the saved cursor.
+   *  Also set while copies made before AQU-1520 still wait for their import
+   *  envelope (link-envelope.ts): the same answer, call again. */
   more: boolean
+  /** Cells given the upstream's import envelope by this run — copies mirrored
+   *  before the link carried one (link-envelope.ts). Absent when none. */
+  envelopesRepaired?: number
 }
 
 const NOOP_RESULT: MirrorSyncResult = {
@@ -1699,6 +1837,9 @@ export interface MirrorSyncOptions {
   budgetMs?: number
   /** Clock for the budget (tests). */
   now?: () => number
+  /** AQU-2459: reads `file.revision` manifests from R2. An upstream revision
+   *  with no reader fails the sync rather than skipping its cells. */
+  readRevisionManifest?: RevisionManifestReader
 }
 
 /**
@@ -1718,6 +1859,60 @@ export async function mirrorSync(
   db: AquillaDb,
   downstreamProjectId: string,
   opts: MirrorSyncOptions = {},
+): Promise<MirrorSyncResult> {
+  const linked: LinkedCopies = { upstreamProjectId: null, consumes: 'source', cursor: 0, pairs: [] }
+  const result = await foldMirrorSync(db, downstreamProjectId, opts, linked)
+  // Copies mirrored before the link carried the import envelope (AQU-1520) get
+  // it here — see link-envelope.ts. Only once the fold has caught up: the
+  // envelope describes the upstream's current paragraph, and a copy still
+  // behind on its text would be handed one for a paragraph it does not hold.
+  // `consumes: 'source'` only — a target-consuming link's source text is the
+  // upstream's translation, which the upstream's envelope does not describe.
+  if (result.more || !linked.upstreamProjectId || linked.consumes !== 'source' || linked.pairs.length === 0) {
+    return result
+  }
+  try {
+    const envelopes = await repairMirroredCellEnvelopes(db, {
+      upstreamProjectId: linked.upstreamProjectId,
+      downstreamProjectId,
+      pairs: linked.pairs,
+      eventId: (key) => deterministicMirrorEventId(downstreamProjectId, key),
+      author: MIRROR_AUTHOR,
+      now: (opts.now ?? Date.now)(),
+    })
+    if (envelopes.repaired === 0) return result
+    return {
+      ...result,
+      // A run whose fold had nothing to do reports the no-op's zeroes; it did
+      // run now, at the link's cursor.
+      ...(result.ranSync ? {} : { fromSeq: linked.cursor, toSeq: linked.cursor }),
+      ranSync: true,
+      envelopesRepaired: envelopes.repaired,
+      more: envelopes.more,
+    }
+  } catch (err) {
+    // Like the provenance sweep: not worth failing a sync over. The next sync
+    // reads the same cells again.
+    console.warn(`[link-sync] ${downstreamProjectId}: import-envelope repair failed:`, err)
+    return result
+  }
+}
+
+/** What a run learned about the link's copies, for the envelope repair that
+ *  follows the fold. Filled by the provenance sweep, which already pairs every
+ *  copy with its upstream file. */
+interface LinkedCopies {
+  upstreamProjectId: string | null
+  consumes: 'source' | 'target'
+  cursor: number
+  pairs: LinkedFilePair[]
+}
+
+async function foldMirrorSync(
+  db: AquillaDb,
+  downstreamProjectId: string,
+  opts: MirrorSyncOptions,
+  linked: LinkedCopies,
 ): Promise<MirrorSyncResult> {
   const link = await loadLink(db, downstreamProjectId)
   if (!link || !link.source_project_id) return NOOP_RESULT
@@ -1785,6 +1980,39 @@ export async function mirrorSync(
   // that consumes the upstream's SOURCE has any — see link-adopt.ts.
   let adoption = consumes === 'source' ? parseSourceLinkAdoption(link.source_link_adopt) : null
   const adoptionPending = adoption != null && adoption.pending.length > 0
+  // AQU-2345/AQU-2438: give every linked file the upstream's type and a
+  // pointer at the upstream's original artifact, BEFORE the "nothing to
+  // mirror" return below — that is the path a project whose link already ran
+  // takes, so this is also what backfills one. Whole-project on purpose
+  // (AQU-2438): the window pass further down repairs only the files that
+  // window touched, which never comes round for a copy whose upstream is
+  // finished — every EBL language project and every linked BSB batch, left
+  // reading `fileType: codex` with no IDML download. It writes nothing but
+  // NULL type columns and missing/stale `file_source_blobs` rows, so it is
+  // safe and a no-op on every sync once a project is repaired.
+  const sweepFileProvenance = async (): Promise<void> => {
+    try {
+      const swept = await applyProjectLinkedFileProvenance(db, {
+        upstreamProjectId,
+        downstreamProjectId,
+        downstreamFileIdOf: (upstreamFileId) =>
+          deterministicDownstreamFileId(downstreamProjectId, upstreamFileId),
+        // Read at call time: after the join below runs, the record's pending
+        // list is empty and the adopted files take the pointer rule too.
+        adoption,
+        now: Date.now(),
+      })
+      linked.upstreamProjectId = upstreamProjectId
+      linked.consumes = consumes
+      linked.cursor = cursor
+      linked.pairs = swept.pairs
+    } catch (err) {
+      // Export provenance is not worth failing a sync over: the next sweep
+      // retries, and the mirror itself is unaffected either way.
+      console.warn(`[link-sync] ${downstreamProjectId}: file-provenance sweep failed:`, err)
+    }
+  }
+  await sweepFileProvenance()
   // AQU-1560: a pending backfill is work even when the link is not behind —
   // the files being added have their history BELOW the cursor. AQU-1679: so is
   // a file still waiting to be joined to its upstream.
@@ -1836,6 +2064,10 @@ export async function mirrorSync(
       total.more = true
       return total
     }
+    // The join just addressed the adopted files' cells to the upstream's
+    // package; point their originals at it in this same sync, so an export
+    // right after linking reads the package the cells describe.
+    await sweepFileProvenance()
   }
   const adopted: ReadonlyMap<string, string> | null = adoption
     ? new Map(Object.entries(adoption.files))
@@ -1860,6 +2092,7 @@ export async function mirrorSync(
       windowBytes,
       outOfBudget: () => total.windows > 0 && now() >= deadline,
       onWindow: addWindow,
+      revisions: opts.readRevisionManifest,
     })
     if (outcome.status !== 'done') {
       // Out of budget, or the pending set changed under this run (a lead added
@@ -1873,7 +2106,11 @@ export async function mirrorSync(
     followedFileIds = outcome.followedFileIds
     total.ranSync = true
   }
-  if (head <= cursor) return total
+  if (head <= cursor) {
+    // AQU-2345: a backfill-only run mirrored its files above and stops here.
+    if (total.filesMirrored > 0) await sweepFileProvenance()
+    return total
+  }
 
   total.ranSync = true
   let sinceSeq = cursor
@@ -1895,15 +2132,22 @@ export async function mirrorSync(
       sinceSeq,
       untilSeq,
       head,
+      revisions: opts.readRevisionManifest,
     })
     addWindow(window)
     total.toSeq = untilSeq
     sinceSeq = untilSeq
   }
+  // AQU-2345: again now that this run's own files exist — a first sync's files
+  // are mirrored in above, after the sweep at the top of the run saw nothing,
+  // and a file linked today must export today without manual intervention.
+  if (total.filesMirrored > 0) await sweepFileProvenance()
   return total
 }
 
 interface RunBackfillArgs {
+  /** AQU-2459: see MirrorSyncOptions.readRevisionManifest. */
+  revisions?: RevisionManifestReader
   downstreamProjectId: string
   upstreamProjectId: string
   consumes: LinkConsumes
@@ -1986,6 +2230,7 @@ async function runBackfill(db: AquillaDb, args: RunBackfillArgs): Promise<RunBac
       untilSeq,
       head: args.head,
       backfill: { fileIds, final: untilSeq >= cursor },
+      revisions: args.revisions,
     })
     args.onWindow(window)
     const next = serializeSourceLinkBackfill({ fileIds, doneSeq: untilSeq })
@@ -2086,6 +2331,8 @@ async function windowEndSeq(
 }
 
 interface MirrorWindowArgs {
+  /** AQU-2459: see MirrorSyncOptions.readRevisionManifest. */
+  revisions?: RevisionManifestReader
   downstreamProjectId: string
   upstreamProjectId: string
   consumes: LinkConsumes
@@ -2201,8 +2448,8 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
   const onlyFileIds = backfill?.fileIds
   const { cells: folded, fileIds: deltaFileIds } =
     consumes === 'target'
-      ? await loadDeltaTargetConsumption(db, upstreamProjectId, sinceSeq, untilSeq, gate, laneTag, onlyFileIds)
-      : await loadDelta(db, upstreamProjectId, sinceSeq, untilSeq, onlyFileIds)
+      ? await loadDeltaTargetConsumption(db, upstreamProjectId, sinceSeq, untilSeq, gate, laneTag, onlyFileIds, args.revisions)
+      : await loadDelta(db, upstreamProjectId, sinceSeq, untilSeq, onlyFileIds, args.revisions)
 
   // AQU-1559: a link that follows a fixed list of upstream files drops the rest
   // of the delta here, at the single point both folds converge, so neither the
@@ -2346,16 +2593,21 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
   // replay's last window adds every file being added to the list, including
   // one the upstream no longer has a row for, which gets no event.
   let fileMirrorsEmitted = 0
+  // AQU-2345: every file this window touched, with its copy — adopted files
+  // aside, since those are the project's own (see link-file-provenance.ts).
+  const provenancePairs: LinkedFilePair[] = []
   if (deltaFileIdList.length > 0) {
     const filePlaceholders = deltaFileIdList.map(() => '?').join(', ')
     const upstreamFiles = await db
-      .prepare(`SELECT id, name, meta FROM files WHERE project_id = ? AND id IN (${filePlaceholders})`)
+      .prepare(`SELECT id, name, role, kind, book_code, meta FROM files WHERE project_id = ? AND id IN (${filePlaceholders})`)
       .bind(upstreamProjectId, ...deltaFileIdList)
-      .all<{ id: string; name: string; meta: string | null }>()
+      .all<{ id: string; name: string; role: string | null; kind: string | null; book_code: string | null; meta: string | null }>()
     for (const f of upstreamFiles.results) {
       const downstreamFileId = downstreamFileOf(f.id)
       const isNew = !existingDownstreamFileIdSet.has(downstreamFileId)
       if (isNew && holdNewFiles) continue
+      const isAdopted = adopted?.has(f.id) === true
+      if (!isAdopted) provenancePairs.push({ upstreamFileId: f.id, downstreamFileId })
       const renamed = !isNew && downstreamNameOf.get(downstreamFileId) !== f.name
       // Already mirrored under the same name — nothing to say. Most delta
       // files land here (they were only dragged in by their cells' events),
@@ -2390,6 +2642,11 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
         fileId: downstreamFileId,
         name: f.name,
         meta: { ...upstreamMeta, upstreamFileId: f.id },
+        // AQU-2345: the copy is the upstream file's material, so it is the
+        // upstream's type too — without this every mirrored file projected
+        // with a NULL `kind` and read as `codex`. Not for an adopted file: a
+        // rename re-mirrors it, and its type is its own import's.
+        ...(isAdopted ? {} : { role: f.role, kind: f.kind, bookCode: f.book_code }),
         upstream: { projectId: upstreamProjectId, eventId: f.id, seq: untilSeq },
       }
       eventRows.push({
@@ -2422,6 +2679,19 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
       fileMirrorsEmitted++
     }
   }
+
+  // AQU-2345: the type and the original of every file this window touched —
+  // a new copy's pointer row at the upstream's original, a copy mirrored
+  // before this slice its missing type and pointer, and a copy whose upstream
+  // was re-imported the new object. Planned against the rows as they are and
+  // written with the window's batch below (or on their own when the fold has
+  // nothing else to say), so one sync of a file is enough to repair it.
+  const provenance = await planLinkedFileProvenanceFor(db, {
+    upstreamProjectId,
+    downstreamProjectId,
+    pairs: provenancePairs,
+    now,
+  })
 
   // 2. source.cell.mirror per folded cell — hash-equal skips entirely.
   // `fileId` on the emitted event is the DOWNSTREAM's deterministic file id
@@ -2463,7 +2733,7 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
       if (!local || local.tombstoned) continue
       // Otherwise always emit (idempotent via deterministic id + monotonic
       // guard); hash suppression doesn't apply to deletes.
-      const eventId = deterministicMirrorEventId(downstreamProjectId, cell.eventId)
+      const eventId = deterministicMirrorEventId(downstreamProjectId, cell.mirrorKey ?? cell.eventId)
       const payload: EventPayloads['source.cell.mirror'] = {
         value: '',
         deleted: true,
@@ -2499,7 +2769,7 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
     // about visibility, which is "unchanged" and leaves the old rule intact.
     const visibilityUnchanged =
       cell.hidden === undefined || cell.hidden === (local?.hidden ?? false)
-    if (local && !local.tombstoned && local.contentHash === newHash && visibilityUnchanged) {
+    if (local && !local.tombstoned && local.contentHash === newHash && visibilityUnchanged && !cell.reanchor) {
       // No-op suppression (§5): content unchanged (e.g. whitespace-normalized
       // re-import). upstream_event_id is allowed to lag on unchanged content
       // — §6 staleness is hash-aware, so this is harmless. Never for a
@@ -2509,7 +2779,7 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
       continue
     }
 
-    const eventId = deterministicMirrorEventId(downstreamProjectId, cell.eventId)
+    const eventId = deterministicMirrorEventId(downstreamProjectId, cell.mirrorKey ?? cell.eventId)
     const payload: EventPayloads['source.cell.mirror'] = {
       value: cell.value,
       valueHtml: cell.valueHtml ?? undefined,
@@ -2570,6 +2840,11 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
     // advance the cursor directly, no link.cursor.advance event (§4: "no log
     // spam from unmirrored upstream noise"). AQU-1560: a backfill window is
     // below the cursor and never moves it; runBackfill saves its progress.
+    //
+    // AQU-2345: a window that mirrors nothing can still owe a file its type
+    // or its original — a copy mirrored before this slice whose upstream made
+    // a hash-equal edit. Its own batch: there is no event for it to ride.
+    if (provenance.stmts.length > 0) await runMirrorBatch(db, provenance.stmts)
     if (!backfill) await advanceCursor(db, downstreamProjectId, untilSeq)
     return { cellsMirrored: 0, filesMirrored: 0, skippedHashEqual }
   }
@@ -2593,6 +2868,9 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
   for (const event of persistedForProjection) {
     buildEventProjectionStmts(db, event, allStmts, { deferFileCounters: true })
   }
+  // AQU-2345: after the projection — a type fill addresses a row this batch
+  // may be creating — and the pointer rows beside it.
+  allStmts.push(...provenance.stmts)
 
   // link.cursor.advance — audit record, no cells projection, emitted only
   // because the fold was non-empty. It also closes the batch "Upstream

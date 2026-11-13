@@ -18,6 +18,7 @@ import { loadTranscriptCorrections } from "@/lib/store/transcript-corrections-st
 import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
 import { keepSpans, resolvePcmWindow, type KeepSpan, type PcmTrimWindow } from "./pcm-window"
 import { hasSharedClipPcm, sharedClipWindow } from "./shared-clip-pcm"
+import { decodeSharedClipPcm } from "./shared-clip-decode"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import type { WordTiming } from "@/lib/codex-editor/types"
 import { wasTakeUndone } from "./undone-takes"
@@ -255,7 +256,9 @@ export async function transcribeAudio(
         opts.sharedClipKey,
         opts.trim,
         () => (bytes.byteLength > 0 || !opts.loadClipBytes ? bytes : opts.loadClipBytes()),
-        (whole) => audioBytesToWhisperPcm(whole),
+        // AQU-1886: a long recording is decoded a minute at a time, so the
+        // one decode a batch does is itself bounded.
+        (whole) => decodeSharedClipPcm(whole, (clip) => audioBytesToWhisperPcm(clip)),
       )
     : audioBytesToWhisperPcm(bytes, opts.trim)
   if (usesHostedTranscription(opts.session, opts.projectId)) {

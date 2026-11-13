@@ -26,14 +26,27 @@ const BROWSER_RENDERABLE_CONTENT_TYPES = new Set([
   "application/x-javascript",
 ])
 
-/** Content-Type safe to store/echo back for an audio object. Falls back to a
- *  generic, non-executable type for anything on the deny-list above — audio
- *  playback (`<audio src>`) doesn't care about the exact declared subtype, so
- *  this costs no real functionality while closing the render-as-HTML vector. */
+// [Pen test] API security & data exposure (2026-11-05): the deny-list above
+// missed active/odd types (text/xsl, application/xslt+xml, application/rdf+xml,
+// application/mathml+xml, multipart/x-mixed-replace, application/pdf). Switch
+// to an allow-list: only audio/*, video/* and the generic/ogg container types
+// are echoed back; everything else is stored and served as octet-stream.
+const ALLOWED_EXACT_TYPES = new Set(["application/octet-stream", "application/ogg"])
+
+/** Content-Type safe to store/echo back for an audio object. Anything that is
+ *  not audio/*, video/* or a generic container type falls back to a
+ *  non-executable type — `<audio src>` playback doesn't care about the exact
+ *  declared subtype, so this costs no real functionality. */
 export function safeAudioContentType(raw: string | null | undefined): string {
   const normalized = (raw ?? "").split(";")[0].trim().toLowerCase()
   if (!normalized || BROWSER_RENDERABLE_CONTENT_TYPES.has(normalized)) {
     return "application/octet-stream"
   }
-  return raw as string
+  if (
+    ALLOWED_EXACT_TYPES.has(normalized) ||
+    /^(audio|video)\/[a-z0-9][a-z0-9.+-]*$/.test(normalized)
+  ) {
+    return raw as string
+  }
+  return "application/octet-stream"
 }

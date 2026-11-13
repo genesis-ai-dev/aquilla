@@ -173,6 +173,18 @@ describe("role-policy (client mirror)", () => {
     expect(canPerform("cast.assign", ROLE.MAINTAINER)).toBe(true)
   })
 
+  it("lets a project lead label a cell, but not a contributor (AQU-2408)", () => {
+    // A label is metadata on the line, not a character: it sits a rung below
+    // cast.assign. Project lead is the static floor — the lowest rung the
+    // project's cellLabelFloor tier can admit; the tier itself (maintainer
+    // unless opened) is enforced by src/lib/cell-label-gate.ts.
+    expect(requiredRoleFor("cell.label.set")).toBe(ROLE.PROJECT_LEAD)
+    expect(canPerform("cell.label.set", ROLE.CONTRIBUTOR)).toBe(false)
+    expect(canPerform("cell.label.set", ROLE.PROJECT_LEAD)).toBe(true)
+    expect(canPerform("cell.label.set", ROLE.MAINTAINER)).toBe(true)
+    expect(requiredRoleFor("cell.label.set")!).toBeLessThan(requiredRoleFor("cast.assign")!)
+  })
+
   it("knows about cast.assign at all", () => {
     // It was absent from this mirror until 2026-08-18. `canPerform` fails open
     // on an unknown kind, so the character-import button's own permission check
@@ -448,7 +460,7 @@ describe("resolveImportFloor", () => {
     expect(resolveImportFloor(ROLE.PROJECT_LEAD)).toBe(500)
   })
 
-  it("falls back to Project lead when the org set nothing or set nonsense", () => {
+  it("falls back to Project Lead when the org set nothing or set nonsense", () => {
     // Mirrors the server's resolveImportMinRole: a misconfigured floor is a
     // no-op, never a lockout.
     expect(resolveImportFloor(undefined)).toBe(DEFAULT_IMPORT_MIN_ROLE)
@@ -460,7 +472,7 @@ describe("resolveImportFloor", () => {
 })
 
 describe("canImportSourceFiles", () => {
-  it("is Project lead and up when the org set nothing — today's behaviour", () => {
+  it("is Project Lead and up when the org set nothing — today's behaviour", () => {
     expect(canImportSourceFiles(ROLE.CONTRIBUTOR)).toBe(false)
     expect(canImportSourceFiles(ROLE.PROJECT_LEAD)).toBe(true)
     expect(canImportSourceFiles(ROLE.MAINTAINER)).toBe(true)

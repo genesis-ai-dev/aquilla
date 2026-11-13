@@ -62,7 +62,8 @@ export function overlaySettings(
   // AQU-2259: the team's drafting settings replace this browser's copy of
   // them. Validated on the way in, so a malformed field reads as its default.
   // The record keeps only what the blob never carries: this device's project
-  // AI key, and the instructions (overlaid from `systemPrompt` just below).
+  // AI key, and the legacy `systemPrompt` (overlaid just below). AQU-2342: no
+  // prompt reads that copy — it only feeds translationInstructions on read.
   let completion = record.completionSettings
   const drafting = readDraftingSettings(settings.draftingSettings)
   if (drafting) completion = applyDraftingSettings(completion, drafting)
@@ -86,6 +87,7 @@ export function overlaySettings(
   // rendered as decided, and the next PATCH replaced the array instead of
   // extending it (the panel's dedupe reads this same field).
   assign("alignmentSeeds", settings.alignmentSeeds)
+  assign("translationInstructions", settings.translationInstructions)
   assign("livingMemoryEntries", settings.livingMemoryEntries)
   assign("translationBrief", settings.translationBrief)
   assign("validationCount", settings.validationCount ?? orgDefaults?.validationCount)
@@ -100,6 +102,8 @@ export function overlaySettings(
   assign("validationNamedUsersAudio", settings.validationNamedUsersAudio)
   assign("allowSelfValidationAudio", settings.allowSelfValidationAudio ?? orgDefaults?.media?.allowSelfValidationAudio)
   assign("cellEditingFloor", settings.cellEditingFloor ?? orgDefaults?.media?.cellEditingFloor)
+  // AQU-2408: who may type a cell's label. No org default: absent = maintainer.
+  assign("cellLabelFloor", settings.cellLabelFloor)
   // AQU-646 stage 2: the second gate on track editing. Must reach the workspace
   // or the add-track button and the colour menu would be invisible everywhere,
   // since they render only when this is on.

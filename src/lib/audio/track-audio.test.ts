@@ -3,7 +3,7 @@
 // master/overlay playback elements rely on.
 
 import { describe, expect, it } from "vitest"
-import { activeTargetForCell, resolveTargetAudio, sourceClipAudioForCell } from "./track-audio"
+import { activeTargetForCell, isGeneratedTake, resolveTargetAudio, sourceClipAudioForCell } from "./track-audio"
 import type { CellData } from "@/hooks/useCells"
 
 const SOURCE_ID = "audio-file-9-1700000000-src1.mp3"
@@ -136,6 +136,34 @@ describe("activeTargetForCell", () => {
 // slot it sits in. These cases pin both halves of that, plus the thing that
 // must NOT change: the default track's resolution is byte-for-byte what it was.
 
+// AQU-2235: an AI voice's only mark is its sparkle, so the timeline, the
+// recording window, the takes list and the Recording tab ask ONE question.
+describe("isGeneratedTake", () => {
+  it("is true for any take a TTS path stamped with a voice, in any slot", () => {
+    const c = cell({})
+    expect(isGeneratedTake(c, TAKE_ID, { voiceId: "v1", slot: "recording" })).toBe(true)
+    expect(isGeneratedTake(c, TAKE_ID, { voiceId: "v1", slot: "trk-es" })).toBe(true)
+  })
+
+  it("is true for an older generated take known only by its slot or by the line's pick", () => {
+    expect(isGeneratedTake(cell({}), GEN_ID, { slot: "generatedVoice" })).toBe(true)
+    expect(isGeneratedTake(cell({ selectedGeneratedVoiceAudioId: GEN_ID }), GEN_ID, {})).toBe(true)
+  })
+
+  it("is false for a recording, and for nothing", () => {
+    expect(isGeneratedTake(cell({}), TAKE_ID, { slot: "recording" })).toBe(false)
+    expect(isGeneratedTake(cell({}), null, { voiceId: "v1" })).toBe(false)
+  })
+
+  it("is what the timeline draws: a voice regenerated into the recording slot is generated", () => {
+    const c = cell({
+      selectedAudioId: TAKE_ID,
+      attachments: { [TAKE_ID]: { ...att("frontier-audio://take"), slot: "recording", voiceId: "v1" } },
+    })
+    expect(activeTargetForCell(c)?.kind).toBe("generated")
+  })
+})
+
 describe("resolveTargetAudio — an added track's own slot", () => {
   const TRK = "019fd21a-a5a4-75d1-b8c4-3b60072a4fc2"
   const TRK_TAKE = "audio-sec-1-1700000003-t2.webm"
@@ -212,5 +240,39 @@ describe("resolveTargetAudio — an added track's own slot", () => {
     const expected = { audioId: TAKE_ID, url: "frontier-audio://tk", kind: "take" }
     expect(resolveTargetAudio(c)).toEqual(expected)
     expect(resolveTargetAudio(c, "recording")).toEqual(expected)
+  })
+})
+
+// ── AQU-2411: takes migrated from Codex ─────────────────────────────────────
+//
+// The migration keeps Codex's file name as the take's id, and Codex tagged
+// takes with no line id (or its own spelling of the verse) until Dec 2025. On
+// a text line that untagged take IS the line's take: Xiang's Genesis showed it
+// in the Recording tab and nowhere on the timeline.
+describe("resolveTargetAudio — a take migrated from Codex", () => {
+  const CODEX = "audio-1719100000000-k3j9x2m1p.webm"
+  const CODEX_VERSE = "audio-gen-1:1-1730000000000-q8w7e6r5t.webm"
+
+  it("is a verse's take on the default track", () => {
+    for (const id of [CODEX, CODEX_VERSE]) {
+      const c = cell({ medium: undefined, selectedAudioId: id, attachments: { [id]: att("frontier-audio://legacy") } })
+      expect(resolveTargetAudio(c)).toEqual({ audioId: id, url: "frontier-audio://legacy", kind: "take" })
+    }
+  })
+
+  it("stays the source recording on a section of an imported recording", () => {
+    const c = cell({ medium: "media", selectedAudioId: CODEX, attachments: { [CODEX]: att("frontier-audio://legacy") } })
+    expect(resolveTargetAudio(c)).toBeNull()
+  })
+
+  it("never turns the file's own recording into a verse's take", () => {
+    const c = cell({ medium: "text", selectedAudioId: SOURCE_ID, attachments: { [SOURCE_ID]: att("frontier-audio://src") } })
+    expect(resolveTargetAudio(c)).toBeNull()
+    const marked = cell({
+      medium: "text",
+      selectedAudioId: CODEX,
+      attachments: { [CODEX]: { ...att("frontier-audio://src"), role: "source" as const } },
+    })
+    expect(resolveTargetAudio(marked)).toBeNull()
   })
 })

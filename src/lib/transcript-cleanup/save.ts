@@ -1,7 +1,8 @@
 // Saving a transcript: a human correction, or an AI cleanup.
 //
 // One path for both, so the rules that keep a transcript usable hold for each:
-// word timings are remapped onto the new words (remapTranscriptTimings), the
+// word timings are remapped onto the new words (remapTranscriptTimings) and
+// re-offset against the cell's text when this save is what writes it, the
 // partial cell.audio.attach echoes the clip's own fields back, and a source
 // segment's text also lands on the cell's `transcription`. The differences:
 //   - a human correction teaches the project's learned word fixes (AQU-463);
@@ -41,7 +42,15 @@ export interface TranscriptSaveArgs {
 export async function saveTranscript(args: TranscriptSaveArgs): Promise<boolean> {
   const { owner, attachment, timings, text } = args
   if (timings.length === 0 || !attachment.url) return false
-  const nextTimings = remapTranscriptTimings(timings as WordTiming[], text)
+  // AQU-2254: when this save also lands `text` on the cell (a source
+  // segment's `transcription`, below), the word offsets must describe THAT
+  // text — carrying the pre-correction offsets over would leave the karaoke
+  // highlight pointing at wording the cleanup deleted. A target cell keeps
+  // its own text, so its offsets are carried over as before.
+  const textBecomesCellText = isSourceSegmentSelected(owner)
+  const nextTimings = remapTranscriptTimings(timings as WordTiming[], text, {
+    reindexOffsets: textBecomesCellText,
+  })
   if (nextTimings.length === 0) return false
 
   if (!args.ai && args.learn !== false) {
@@ -57,7 +66,7 @@ export async function saveTranscript(args: TranscriptSaveArgs): Promise<boolean>
   await emitCellAudioAttach({
     ...clipFields(args),
     timings: nextTimings,
-    ...(isSourceSegmentSelected(owner) ? { transcription: text } : {}),
+    ...(textBecomesCellText ? { transcription: text } : {}),
     ...(args.ai ? { transcriptAi: args.ai } : {}),
   })
   return true

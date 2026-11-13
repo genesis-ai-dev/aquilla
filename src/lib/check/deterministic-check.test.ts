@@ -26,6 +26,7 @@ import { checkRulesForCell } from "@/lib/rules/rule-engine"
 import {
   scanTermConsistency,
   scanCapitalization,
+  scanSpelling,
   checkableRules,
   groupInfractionsByRule,
   runDeterministicCheck,
@@ -275,6 +276,98 @@ describe("scanCapitalization", () => {
 // ---------------------------------------------------------------------------
 // Rule pass helpers
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// scanSpelling (AQU-1737)
+// ---------------------------------------------------------------------------
+
+describe("scanSpelling", () => {
+  /** Writes "Yesu" four times and "Yeesu" once, with English sources. */
+  function yesuCells(): CellData[] {
+    return [
+      cell("Jesus said", "Yesu akasema", { cellLabel: "MRK 1:1" }),
+      cell("Jesus answered", "Yesu alijibu", { cellLabel: "MRK 1:2" }),
+      cell("Jesus went", "Yesu akaenda", { cellLabel: "MRK 1:3" }),
+      cell("Jesus called them", "Yesu akawaita", { cellLabel: "MRK 1:4" }),
+      cell("Jesus said again", "Yeesu akasema tena", { cellLabel: "MRK 1:5" }),
+    ]
+  }
+
+  it("flags a one-off variant of a frequent form and suggests that form", () => {
+    const cells = yesuCells()
+    const { findings, wordlistSize } = scanSpelling(cells, { minCommonOccurrences: 3 })
+    expect(findings).toHaveLength(1)
+    expect(findings[0]).toMatchObject({
+      form: "Yeesu",
+      suggestion: "Yesu",
+      suggestionOccurrences: 4,
+      reason: "sound-alike",
+    })
+    expect(findings[0].cells).toEqual([{ cellId: cells[4].id, cellLabel: "MRK 1:5" }])
+    expect(wordlistSize).toBeGreaterThan(0)
+  })
+
+  it("builds the wordlist from the target text, not the source", () => {
+    // "Jesus" is written five times in the source and never in the target, so
+    // it must not be in the project's wordlist — nor its source-only
+    // neighbours be offered as corrections of target words.
+    const { wordlistSize } = scanSpelling(
+      [cell("Jesus Jesus Jesus", "Yesu", { cellLabel: "MRK 1:1" })],
+      { minCommonOccurrences: 1 },
+    )
+    expect(wordlistSize).toBe(1)
+  })
+
+  it("never flags a form the source text already writes that way", () => {
+    // A name carried over from the source is not the translator's spelling.
+    const cells = [
+      cell("Paul wrote", "Paulo aliandika"),
+      cell("Paul said", "Paulo alisema"),
+      cell("Paul went", "Paulo alienda"),
+      cell("Paolo greeted", "Paolo alisalimu"),
+    ]
+    const { findings } = scanSpelling(cells, { minCommonOccurrences: 3 })
+    expect(findings.map((f) => f.form)).not.toContain("Paolo")
+  })
+
+  it("reports what frequency let through instead of passing silently", () => {
+    const cells = Array.from({ length: 100 }, (_, i) =>
+      cell(`verse ${i}`, "Yesu", { id: `y${i}` }),
+    )
+    const { approved, findings } = scanSpelling(cells)
+    expect(approved).toEqual([{ form: "Yesu", occurrences: 100 }])
+    expect(findings).toEqual([])
+  })
+
+  it("has nothing to say about a scope with no translated cells", () => {
+    expect(scanSpelling([cell("Jesus said", "")])).toEqual({
+      findings: [],
+      approved: [],
+      wordlistSize: 0,
+    })
+  })
+
+  it("stays quiet about a form the reviewer approved", () => {
+    const { findings } = scanSpelling(yesuCells(), {
+      minCommonOccurrences: 3,
+      approved: new Set(["Yeesu"]),
+    })
+    expect(findings).toEqual([])
+  })
+
+  it("rides runDeterministicCheck and counts toward its total", async () => {
+    const result = await runDeterministicCheck({
+      fileId: "file-1",
+      cells: yesuCells(),
+      rules: [],
+      concepts: [],
+      spelling: { minCommonOccurrences: 3 },
+    })
+    expect(result.spellingFindings.map((f) => f.form)).toEqual(["Yeesu"])
+    expect(result.wordlistSize).toBeGreaterThan(0)
+    expect(result.totalFindingCount).toBe(1)
+  })
+})
 
 describe("checkableRules", () => {
   it("excludes disabled rules and term-compiled rules (no double report)", () => {
@@ -549,5 +642,197 @@ describe("runDeterministicCheck with the check-pack-B scans", () => {
     const undecided = { ...bibleScan, readiness: { ...names.readiness, agreedNames: false } }
     const result = await runDeterministicCheck({ fileId: "file-1", cells, rules: bibleRules, concepts: [], bibleScan: undecided })
     expect(result.ruleFindings.find((group) => group.rule.id === "builtin:bkp:P2")).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Cross-cell quotation continuity (AQU-1733)
+// ---------------------------------------------------------------------------
+
+describe("Quotation left open across cells (AQU-1733)", () => {
+  const quoteRules = resolveBuiltinRules(undefined).filter((r) => r.id === "builtin:unpaired-quotes")
+
+  it("is on by default as a minor check", () => {
+    expect(quoteRules).toHaveLength(1)
+    expect(quoteRules[0].enabled).toBe(true)
+    expect(quoteRules[0].severity).toBe("minor")
+  })
+
+  // The case no per-cell check can reach: the SOURCE carries the same
+  // imbalance (here, and always for a source that marks no quotations at all),
+  // so `unpaired-quotes` deliberately goes quiet on each cell in turn.
+  const opened = cell("And he said, “Follow me,", "Et il dit : « Suivez-moi,", { id: "opens" })
+  const continued = cell("and I will make you fishers of men.", "et je vous ferai pêcheurs d’hommes.", { id: "continues" })
+
+  it("the per-cell check alone says nothing about it", () => {
+    for (const c of [opened, continued]) {
+      expect(checkRulesForCell(c, "file-1", quoteRules)).toEqual([])
+    }
+  })
+
+  it("Check file flags it, on the cell that opened the quotation", async () => {
+    const result = await runDeterministicCheck({
+      fileId: "file-1",
+      cells: [opened, continued],
+      rules: quoteRules,
+      concepts: [],
+    })
+    expect(result.ruleFindings).toHaveLength(1)
+    expect(result.ruleFindings[0].infractions).toEqual([
+      expect.objectContaining({
+        cellId: "opens",
+        reason: "builtin:unpaired-quotes",
+        spans: [{ side: "target", start: 12, end: 13, matchedText: "«" }],
+      }),
+    ])
+    expect(result.totalFindingCount).toBe(1)
+  })
+
+  it("needs no configuration — nothing is passed but the project's own cells", async () => {
+    // The marks are read off the text itself (`inferQuoteMarks`), so a project
+    // that never filled the Language profile's quotation slot still gets the
+    // check. A recorded profile overrides it: under English marks the same
+    // French text has no quotation marks at all.
+    const result = await runDeterministicCheck({
+      fileId: "file-1",
+      cells: [opened, continued],
+      rules: quoteRules,
+      concepts: [],
+      languageProfile: { quoteMarks: { levels: [{ open: "“", close: "”" }], continuation: "reopen-each-paragraph" } },
+    })
+    expect(result.ruleFindings).toEqual([])
+  })
+
+  it("stays quiet once the quotation is closed, withdrawing the per-cell false alarm", async () => {
+    // The closing verse holds one quotation mark and nothing in its own text
+    // to pair it with, and its source marks no quotations at all, so the
+    // per-cell check reports it. The file pairs it with the « two cells back,
+    // so Check file must not.
+    const closed = cell("and I will make you fishers of men.", "et je vous ferai pêcheurs d’hommes. »", { id: "closes" })
+    expect(checkRulesForCell(closed, "file-1", quoteRules)).toEqual([
+      expect.objectContaining({ cellId: "closes", reason: "builtin:unpaired-quotes" }),
+    ])
+    const result = await runDeterministicCheck({
+      fileId: "file-1",
+      cells: [opened, closed],
+      rules: quoteRules,
+      concepts: [],
+    })
+    expect(result.ruleFindings).toEqual([])
+    expect(result.totalFindingCount).toBe(0)
+  })
+
+  it("stays quiet where the translation simply stops", async () => {
+    // The closing mark may be in the verse nobody has translated yet; a
+    // half-translated book must not report its whole quoted discourse.
+    const untranslated = cell("and I will make you fishers of men.", "", { id: "untranslated" })
+    const later = cell("Immediately they left their nets.", "Aussitôt ils laissèrent leurs filets.", { id: "later" })
+    const result = await runDeterministicCheck({
+      fileId: "file-1",
+      cells: [opened, untranslated, later],
+      rules: quoteRules,
+      concepts: [],
+    })
+    expect(result.ruleFindings).toEqual([])
+  })
+
+  describe("where the translation stops and the source marks no quotations", () => {
+    // The case above is quiet for the wrong reason: its source carries the
+    // same odd mark count, so the per-cell check never fires. A Greek or
+    // Hebrew source carries none, the per-cell check DOES fire on the opening
+    // cell, and the walk has to withdraw it — the quotation is still pending,
+    // not broken. This is the shape the PR #1885 QA walk failed on.
+    const opens = cell("And he said, Follow me,", "Et il dit : « Suivez-moi,", { id: "opens-bare" })
+    const untranslated = cell("and I will make you fishers of men.", "", { id: "untranslated-bare" })
+    const later = cell("Immediately they left their nets.", "Aussitôt ils laissèrent leurs filets.", { id: "later-bare" })
+    const french = { quoteMarks: { levels: [{ open: "«", close: "»" }], continuation: "reopen-each-paragraph" as const } }
+
+    it("the per-cell check does fire on the opening cell", () => {
+      expect(checkRulesForCell(opens, "file-1", quoteRules)).toEqual([
+        expect.objectContaining({ cellId: "opens-bare", reason: "builtin:unpaired-quotes" }),
+      ])
+    })
+
+    it.each([
+      ["the next cell is untranslated", [opens, untranslated]],
+      ["a later cell is translated again", [opens, untranslated, later]],
+    ])("Check file stays quiet when %s", async (_name, cells) => {
+      const result = await runDeterministicCheck({
+        fileId: "file-1",
+        cells,
+        rules: quoteRules,
+        concepts: [],
+        languageProfile: french,
+      })
+      expect(result.ruleFindings).toEqual([])
+      expect(result.totalFindingCount).toBe(0)
+    })
+
+    it("Check file stays quiet with the marks read off the text, not a recorded profile", async () => {
+      const closedElsewhere = cell("He said, Come.", "Il dit : « Venez. »", { id: "paired-bare" })
+      const result = await runDeterministicCheck({
+        fileId: "file-1",
+        cells: [closedElsewhere, opens, untranslated],
+        rules: quoteRules,
+        concepts: [],
+      })
+      expect(result.ruleFindings).toEqual([])
+    })
+
+    it("still flags it when the source closes the quotation in that same cell", async () => {
+      // A source that marks quotations IS evidence: it ends this one here, so
+      // the missing mark is missing now, whatever the next verse will say.
+      const sourceCloses = cell("And he said, “Follow me.”", "Et il dit : « Suivez-moi.", { id: "source-closes" })
+      const result = await runDeterministicCheck({
+        fileId: "file-1",
+        cells: [sourceCloses, untranslated],
+        rules: quoteRules,
+        concepts: [],
+        languageProfile: french,
+      })
+      expect(result.ruleFindings[0].infractions).toEqual([
+        expect.objectContaining({ cellId: "source-closes", spans: [expect.objectContaining({ matchedText: "«" })] }),
+      ])
+      expect(result.totalFindingCount).toBe(1)
+    })
+
+    it("still flags it once the following cell is translated without the closing mark", async () => {
+      const continues = cell("and I will make you fishers of men.", "et je vous ferai pêcheurs d’hommes.", { id: "continues-bare" })
+      const result = await runDeterministicCheck({
+        fileId: "file-1",
+        cells: [opens, continues],
+        rules: quoteRules,
+        concepts: [],
+        languageProfile: french,
+      })
+      expect(result.ruleFindings[0].infractions).toEqual([
+        expect.objectContaining({ cellId: "opens-bare", spans: [expect.objectContaining({ matchedText: "«" })] }),
+      ])
+    })
+  })
+
+  it("reports one row when both passes see the same missing partner", async () => {
+    // Inside one cell the per-cell check fires too (the source is balanced
+    // here). The reviewer gets one finding, not two.
+    const inCell = cell("He said come with me.", "He said, “Come with me.", { id: "in-cell" })
+    expect(checkRulesForCell(inCell, "file-1", quoteRules)).toHaveLength(1)
+    const result = await runDeterministicCheck({
+      fileId: "file-1",
+      cells: [inCell],
+      rules: quoteRules,
+      concepts: [],
+    })
+    expect(result.ruleFindings[0].infractions).toHaveLength(1)
+  })
+
+  it("reports nothing when the project turned the check off", async () => {
+    const off = quoteRules.map((r) => ({ ...r, enabled: false }))
+    const result = await runDeterministicCheck({
+      fileId: "file-1",
+      cells: [opened, continued],
+      rules: off,
+      concepts: [],
+    })
+    expect(result.ruleFindings).toEqual([])
   })
 })

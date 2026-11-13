@@ -32,7 +32,19 @@ export const CHIP_VALIDATED_BADGE_CLASS =
 export const WAVE_OVERLAY_CLASS =
   "transition-opacity data-[stepped-aside=true]:pointer-events-none data-[stepped-aside=true]:opacity-15!"
 
-/** The preview's white hairline. The faint dark halo is what keeps a white line
- *  visible over a light body. */
+/**
+ * The play line over a playing take (AQU-2235; Sam, Oct 25, board 51): no
+ * longer a white hairline with a halo but the track's own colour, darkened
+ * with its hue held (`--tl-track-line`), 1.5px wide — and 1px on anything
+ * under 30px tall, where 1.5px is a smear. Starts hidden: the caller shows it
+ * once there is a position to draw.
+ */
 export const CHIP_PLAYLINE_CLASS =
-  "pointer-events-none absolute inset-y-0 left-0 z-10 w-px bg-white opacity-0 shadow-[0_0_2px_rgba(0,0,0,0.5)]"
+  "pointer-events-none absolute inset-y-0 left-0 z-10 w-[1.5px] bg-[color:var(--tl-track-line)] opacity-0"
+export const CHIP_PLAYLINE_THIN_CLASS =
+  "pointer-events-none absolute inset-y-0 left-0 z-10 w-px bg-[color:var(--tl-track-line)] opacity-0"
+/** Under this height a play line is 1px rather than 1.5px. */
+export const PLAYLINE_THIN_UNDER_PX = 30
+export function chipPlaylineClass(heightPx: number): string {
+  return heightPx < PLAYLINE_THIN_UNDER_PX ? CHIP_PLAYLINE_THIN_CLASS : CHIP_PLAYLINE_CLASS
+}

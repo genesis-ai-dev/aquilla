@@ -7,7 +7,7 @@
 // unaffected.
 
 import type { CellData } from "@/hooks/useCells"
-import { audioIdSeededWith } from "@/lib/audio/upload"
+import { isOwnTake } from "@/lib/audio/own-take"
 
 export { userLineOrigin, isUserAddedLine, type AquillaOrigin } from "./user-line-origin"
 
@@ -28,11 +28,12 @@ export function isLineEmpty(cell: CellData): boolean {
   if (cell.original?.trim()) return false
   if (cell.translated?.trim()) return false
   if (cell.transcription?.trim()) return false
-  // Any take of its own. The imported source clip is file-seeded, so it is not
-  // this cell's to lose — but a line added over a silence never has one anyway.
+  // Any take of its own (own-take.ts). The imported source clip is
+  // file-seeded, so it is not this cell's to lose — but a line added over a
+  // silence never has one anyway.
   for (const [audioId, att] of Object.entries(cell.attachments ?? {})) {
     if (att.isDeleted) continue
-    if (audioIdSeededWith(audioId, cell.id)) return false
+    if (isOwnTake(cell, audioId, att)) return false
   }
   return true
 }

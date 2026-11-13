@@ -1499,15 +1499,27 @@ projects.get("/:projectId/files/:fileId/chapters", authMiddleware, async (c) => 
 })
 
 /**
- * Parse `?minRole=` for the privileged-members bypass. Only a settings-write
- * floor (Maintainer+) is accepted — a lower floor would leak the full roster
- * to callers the org has hidden it from. Invalid / absent → unfiltered list
- * under the normal AQU-485 roster gate.
+ * Lowest `?minRole=` that bypasses the AQU-485 roster hide. A settings-write
+ * floor still, but Project Lead rather than Maintainer (AQU-2457): project
+ * settings do not share one floor — Languages gates on the org's
+ * `languageEditMinRole` (Project Lead by default) and "Count headings" on
+ * Project Lead — and the lock line already names that role to the caller, so
+ * the "view admins" list it opens has to be able to name the same people.
+ * Below this, `?minRole=` filters but grants nothing: a lower floor would
+ * leak the roster to callers the org has hidden it from.
+ */
+const PRIVILEGED_MIN_ROLE_BYPASS_FLOOR = ROLE.PROJECT_LEAD
+
+/**
+ * Parse `?minRole=` for the privileged-members list. Any point on the role
+ * ladder filters the list; only a settings-write floor
+ * (`PRIVILEGED_MIN_ROLE_BYPASS_FLOOR`+) also bypasses the roster hide.
+ * Invalid / absent → unfiltered list under the normal AQU-485 roster gate.
  */
 function parsePrivilegedMinRole(raw: string | undefined): number | null {
   if (raw == null || raw === "") return null
   const n = Number.parseInt(raw, 10)
-  if (!Number.isInteger(n) || n < ROLE.MAINTAINER || n > ROLE.OWNER) return null
+  if (!Number.isInteger(n) || n < ROLE.VIEWER || n > ROLE.OWNER) return null
   return n
 }
 
@@ -1519,10 +1531,11 @@ function parsePrivilegedMinRole(raw: string | undefined): number | null {
  * 403 rather than the member list — the response must not leak the roster
  * or its size.
  *
- * Exception: `?minRole=` at Maintainer or Owner returns only members at that
- * floor or above, even when the full roster is hidden. That is the GitHub
- * "view admins" contract — a contributor still needs to see who can change
- * settings, without learning who else is on the project.
+ * Exception: `?minRole=` at a settings-write floor (Project Lead and above,
+ * AQU-2457) returns only members at that floor or above, even when the full
+ * roster is hidden. That is the GitHub "view admins" contract — a contributor
+ * still needs to see who can change a setting they cannot, without learning
+ * who else is on the project.
  *
  * AQU-1308: the floor applied here is `getProjectRosterViewMinRole` — the
  * lower of the org's `rosterViewMinRole` and its `assignmentMinRole` — so a
@@ -1550,7 +1563,7 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
 
   const privilegedMinRole = parsePrivilegedMinRole(c.req.query("minRole"))
 
-  if (privilegedMinRole == null) {
+  if (privilegedMinRole == null || privilegedMinRole < PRIVILEGED_MIN_ROLE_BYPASS_FLOOR) {
     const rosterMinRole = await getProjectRosterListFloor(c.env, projectId, project.org_id)
     if (rosterMinRole != null && !canViewRoster(role.level, rosterMinRole)) {
       return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
@@ -1595,7 +1608,14 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
     }
   }
 
-  const hideEmails = privilegedMinRole != null && role.level < ROLE.MAINTAINER
+  // Emails are withheld on the bypass path only: there the caller is being
+  // served a list the org's roster policy would otherwise have denied them.
+  // A `?minRole=` below the bypass floor is a plain filter over a roster the
+  // caller may already read, so it hides nothing it did not hide before.
+  const hideEmails =
+    privilegedMinRole != null &&
+    privilegedMinRole >= PRIVILEGED_MIN_ROLE_BYPASS_FLOOR &&
+    role.level < ROLE.MAINTAINER
 
   return c.json({
     members: members.map((m) => ({
@@ -1669,7 +1689,10 @@ const projectMemberSingle = z.object({
   role: roleLevelSchema,
   /** AQU-1808: explicit "every current target lane". Omitted is not that choice. */
   allCurrentLanes: z.literal(true).optional(),
-  /** AQU-1808: the lanes this person may use. Absent is not "every lane". */
+  /**
+   * AQU-1808: the lanes this person may use. Absent is not "every lane".
+   * AQU-2358: the reserved value `__no_lanes__`, alone, means no lanes at all.
+   */
   scopeLanes: z
     .array(z.string().max(MAX_LANE_VALUE_LENGTH))
     .max(MAX_INVITE_SCOPE_LANES)
@@ -1909,6 +1932,83 @@ projects.post(
 )
 
 // ──────────────────────────────────────────────────────────────────────────
+// DELETE /api/v2/projects/:projectId/members/me — leave the project
+// AQU-1993: self-service, so it carries none of the gates the maintainer+
+// moderation route below does (no role floor, no target-level cap, no admin
+// step-up). A contributor invited to a project they no longer want to be in
+// had no way out before this: the route below parses "me" as NaN, and its
+// role floor locked out everyone under maintainer anyway.
+//
+// Registered BEFORE `/:projectId/members/:userId` so that path cannot
+// capture "me" as a userId.
+//
+// Only a direct `project_members` row can be given up. Access that arrives
+// through the org, a team, or being the project's creator is not the
+// caller's to drop (AD-12 paths are additive), so the response reports
+// whether any access survived rather than pretending the project is gone.
+// ──────────────────────────────────────────────────────────────────────────
+
+projects.delete("/:projectId/members/me", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+
+  const existing = await c.env.AQUILLA_PG.prepare(
+    "SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?",
+  )
+    .bind(projectId, user.id)
+    .first<{ role_level: number }>()
+  if (!existing) {
+    return c.json(
+      {
+        error: "no_direct_membership",
+        message:
+          "You have no individual membership on this project. Your access comes from your organization or a team — leave the organization or ask an owner to remove you.",
+      },
+      409,
+    )
+  }
+
+  await c.env.AQUILLA_PG.prepare(
+    "DELETE FROM project_members WHERE project_id = ? AND user_id = ?",
+  )
+    .bind(projectId, user.id)
+    .run()
+  // AQU-1818: a dropped direct membership must not leave lane rows behind.
+  forgetProjectRole(c.env, projectId, user.id)
+  await reconcileMemberProjectLanes(c.env.AQUILLA_PG, projectId, user.id, user.id)
+  await auditMembershipChange(c.env, user, {
+    action: "project.member.remove",
+    where: { scope: "project", projectId },
+    target: { id: user.id, username: user.username },
+    roleBefore: Number(existing.role_level),
+    roleAfter: null,
+  })
+  // The per-request memo still holds the pre-delete role resolved above.
+  forgetProjectRole(c.env, projectId, user.id)
+
+  // AQU-346: when no grant path survives, eject the caller's live WS sessions
+  // and denylist their still-valid sync tokens. Best-effort.
+  const surviving = await resolveProjectRole(c.env, user, projectId)
+  if (!surviving) {
+    const notifyPromise = notifySyncWorkerOfMemberRemoval(c.env, projectId, {
+      userId: user.id,
+      username: user.username,
+    })
+    try {
+      c.executionCtx.waitUntil(notifyPromise)
+    } catch {
+      void notifyPromise
+    }
+  }
+
+  return c.json({
+    left: true,
+    stillHasAccess: Boolean(surviving),
+    remainingSource: surviving ? surviving.source : null,
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
 // DELETE /api/v2/projects/:projectId/members/:userId — maintainer+
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -2095,6 +2195,7 @@ const createInviteSchema = z.object({
    * AQU-528 / AQU-1808: lanes to auto-grant on join. Naming lanes limits the
    * joiner to those. Omitting them is not "every lane" — send allCurrentLanes
    * for that. A value is a lane id or a legacy tag that names exactly one lane.
+   * AQU-2358: the reserved value `__no_lanes__`, alone, grants no lanes at all.
    */
   scopeLanes: z
     .array(z.string().max(MAX_LANE_VALUE_LENGTH))

@@ -1,4 +1,4 @@
-import { defineNamespace } from "./types"
+import { defineNamespace, plural } from "./types"
 
 export const langquest = defineNamespace({
   keys: {
@@ -23,6 +23,54 @@ export const langquest = defineNamespace({
     "langquest.create.creating": "Creating project",
     "langquest.create.retryLink": "Try linking again",
     "langquest.create.createdToast": "{name} is linked to LangQuest. Its recordings are importing now.",
+    // New-project wizard (one choice per step)
+    "langquest.wizard.sourceTitle": "Where does this project come from?",
+    "langquest.wizard.sourceScratch": "Start from scratch",
+    "langquest.wizard.sourceScratchHint": "A new project with its own source and target languages.",
+    "langquest.wizard.sourceLinked": "From another Aquilla project",
+    "langquest.wizard.sourceLinkedHint": "Read the source text from a project you already have, and keep it in step.",
+    "langquest.wizard.connectionsLoading": "Looking up your LangQuest organizations…",
+    "langquest.wizard.orgTitle": "Which LangQuest organization?",
+    "langquest.wizard.orgHint": "Organizations your account is connected to. Pick one, or connect another.",
+    "langquest.wizard.connectAnother": "Connect another organization",
+    "langquest.wizard.connectTitle": "Connect a LangQuest organization",
+    "langquest.wizard.connectIntro":
+      "Open LangQuest Connect in a new tab, make a token for Aquilla, then paste it here. Aquilla keeps the token with your account and never shows it again.",
+    "langquest.wizard.connect": "Connect",
+    "langquest.wizard.connecting": "Connecting",
+    "langquest.wizard.languageTitle": "Which language should this project follow?",
+    "langquest.wizard.languageHint": "Its recordings come in and stay up to date.",
+    "langquest.wizard.languageLoading": "Asking LangQuest what {org} shares…",
+    "langquest.wizard.detailsTitle": "Name the project",
+    "langquest.wizard.linkedProjects": plural({ one: "{count} linked project", other: "{count} linked projects" }, "count"),
+    "langquest.wizard.reconnect": "Reconnect",
+    "langquest.wizard.needsReconnect": "LangQuest no longer accepts this organization's token. Reconnect it to continue.",
+    // Projects list: a linked project's badge next to its name
+    "langquest.list.ariaLabel": "Follows {language} on LangQuest: {state}",
+    "langquest.list.synced": "Synced",
+    "langquest.list.stalled": "Sync stalled",
+    "langquest.list.broken": "Sync broken, reconnect LangQuest",
+    // Connection health (one word the UI acts on)
+    "langquest.health.ok": "Connected",
+    "langquest.health.needs_reauth": "Needs reconnecting",
+    "langquest.health.expired": "Token expired",
+    "langquest.health.unreachable": "Couldn't reach LangQuest",
+    // Preferences → Connected organizations
+    "langquest.settings.title": "Connected organizations",
+    "langquest.settings.description": "LangQuest organizations your account can import from. Tokens stay on the server.",
+    "langquest.settings.groupLabel": "LangQuest",
+    "langquest.settings.none": "No LangQuest organization is connected yet.",
+    "langquest.settings.connectedOn": "Connected {date}",
+    "langquest.settings.lastChecked": "Checked {when}",
+    "langquest.settings.scopes": "Scopes: {scopes}",
+    "langquest.settings.check": "Check now",
+    "langquest.settings.checking": "Checking",
+    "langquest.settings.disconnect": "Disconnect",
+    "langquest.settings.disconnectConfirmTitle": "Disconnect {org}?",
+    "langquest.settings.disconnectConfirmBody":
+      "Aquilla forgets this token and revokes it at LangQuest. Projects already linked keep their recordings, but stop importing once the token is gone.",
+    "langquest.settings.connectNew": "Connect an organization",
+    "langquest.settings.loadFailed": "Couldn't load your LangQuest connections.",
     // Access summary and capabilities
     "langquest.access.none": "No access",
     "langquest.access.published": "Approved recordings only",
@@ -53,7 +101,7 @@ export const langquest = defineNamespace({
     "langquest.panel.syncing": "Syncing: {passages} passages read, {takes} recordings added",
     "langquest.panel.synced": "Up to date: {cells} new passages, {takes} new recordings",
     "langquest.panel.syncFailed": "Sync failed: {reason}",
-    "langquest.panel.leadOnly": "Project leads can sync this project.",
+    "langquest.panel.leadOnly": "Project Leads can sync this project.",
     "langquest.panel.needsToken": "LangQuest no longer accepts this link's token. Paste a new one.",
     "langquest.panel.saveToken": "Save token",
     "langquest.panel.publishTitle": "Publish approved versions",
@@ -120,6 +168,16 @@ export const langquest = defineNamespace({
         },
       },
       "langquest.panel.channelPlaceholder": { description: "Example channel name in the empty Channel field; a listening app's name. Can stay untranslated." },
+      "langquest.wizard.languageLoading": { description: "Loading line while the wizard asks LangQuest for an organization's languages.", placeholders: { org: "LangQuest organization name." } },
+      "langquest.wizard.linkedProjects": { description: "Under an organization in the wizard's org list: how many Aquilla projects import from it.", placeholders: { count: "Number of linked projects." } },
+      "langquest.list.ariaLabel": {
+        description: "Screen-reader name of the LangQuest mark beside a linked project's name in the projects list.",
+        placeholders: { language: "LangQuest language name.", state: "One of the langquest.list.* states, already translated." },
+      },
+      "langquest.settings.connectedOn": { description: "When the token was saved.", placeholders: { date: "A formatted date." } },
+      "langquest.settings.lastChecked": { description: "When LangQuest last confirmed the token.", placeholders: { when: "A formatted date and time." } },
+      "langquest.settings.scopes": { description: "The token's LangQuest scopes, shown as-is.", placeholders: { scopes: "Comma-joined scope ids such as read, release." } },
+      "langquest.settings.disconnectConfirmTitle": { description: "Title of the confirm dialog before forgetting a connection.", placeholders: { org: "LangQuest organization name." } },
     },
   },
   surfaces: [],

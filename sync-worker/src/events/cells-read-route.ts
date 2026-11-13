@@ -85,6 +85,7 @@ import { PENDING_ALLOC_TTL_MS } from "./event-insert"
 import { sourceOrTargetLaneSql, targetLaneDualReadBinds } from "./lane-id-sql"
 import { cellMetadataWireSql } from "../../../db/shared/cell-metadata-sql"
 import { grantedLaneIds, scopeReadClause, targetVisibilityClause, visibilityCacheToken, visibleLanesForRead } from "./lane-read-wall"
+import { coloOrderCache, setColoOrderCacheForTests } from "./cells-order-cache"
 
 export interface CellsReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -466,10 +467,17 @@ function pinnedEtag(fileId: string, pin: CursorPin, visibility: string): string 
 // `cellIds=` fast path (unpaginated, order is the caller's request order) or
 // the `since=` delta path (unordered by design).
 //
-// Isolate-local only (no DO/KV): correctness never depends on a hit, so a
-// cold isolate or eviction falls back to a narrow ordering read and full walk — see the
-// SWARM-TODO for the isolate-hit-rate caveat this implies for the very first
-// page of a newly-opened file.
+// AQU-1885: two tiers, both keyed by the same string. The isolate-local `Map`
+// below, and behind it the colo-shared Workers Cache API
+// (`./cells-order-cache.ts`), so a later page of the same stream landing on a
+// DIFFERENT isolate still finds the ordering its first page built instead of
+// re-walking the file and tearing the snapshot. Still not durable: a page
+// served by another colo walks once, and an entry is evictable at any time.
+// Correctness never depends on a hit — a miss is a narrow ordering read plus
+// the full walk, which is the tested oracle. The remaining caveat is the very
+// first page of a newly-opened file, which has no ordering to find in either
+// tier; closing that needs the materialized `cells.position` column
+// `03-data-model.md` already specifies (AQU-1885 records the costing).
 /** The page lookup's lane predicate. Exported so the plan test explains the
  *  same shape the route runs (AQU-1611). */
 export const CELLS_PAGE_LANE_PREDICATE = "(side = ? AND lane_id = ? AND cell_id = ANY(?::text[]))"
@@ -562,10 +570,17 @@ let chainCacheTotalItems = 0
 
 /** Test-only: isolated test databases in one process all use the same
  *  project/file ids with identical zero watermarks, so their ETags collide;
- *  reset between tests to keep them independent. */
-export function resetChainCacheForTests(): void {
+ *  reset between tests to keep them independent.
+ *
+ *  AQU-1885: clears BOTH tiers by default, so "the ordering is gone" in a test
+ *  still means gone — not merely evicted from this isolate while the
+ *  colo-shared copy answers. Pass `keepColo` to model the one case AQU-1885
+ *  exists for: the same stream's next page served by a DIFFERENT isolate of
+ *  the same colo. */
+export function resetChainCacheForTests(opts?: { keepColo?: boolean }): void {
   chainCache.clear()
   chainCacheTotalItems = 0
+  if (!opts?.keepColo) setColoOrderCacheForTests(null)
 }
 
 function chainCacheKey(
@@ -771,9 +786,16 @@ function cacheHeaders(etag: string): HeadersInit {
   return { ETag: etag, "Cache-Control": "private, no-cache" }
 }
 
+/** Just the slice of `ExecutionContext` this route uses (AQU-1885): the
+ *  colo-cache write is off the response's critical path. */
+interface CellsReadCtx {
+  waitUntil(promise: Promise<unknown>): void
+}
+
 export async function handleCellsReadRequest(
   request: Request,
   env: CellsReadEnv,
+  ctx?: CellsReadCtx,
 ): Promise<Response | null> {
   const url = new URL(request.url)
   const match = url.pathname.match(PATH_RE)
@@ -967,6 +989,20 @@ export async function handleCellsReadRequest(
           { headers: cacheHeaders(etag) },
         )
       }
+      // AQU-2459: a `file.revision` rewrites many source rows under ONE event
+      // with no cell_id, so the per-cell probe below cannot see it. A revision
+      // past the cursor is a full resync.
+      const revisionPast = await env.AQUILLA_PG.prepare(
+        "SELECT 1 AS present FROM events WHERE project_id = ? AND file_id = ? AND server_seq > ? AND kind = 'file.revision' LIMIT 1",
+      )
+        .bind(projectId, fileId, since)
+        .first<{ present: number }>()
+      if (revisionPast) {
+        return Response.json(
+          { resync: true, maxServerSeq, projectEpoch },
+          { headers: cacheHeaders(etag) },
+        )
+      }
       // Cells touched by any event past the cursor. cell_id IS NULL events
       // (file.rename, project-scoped) bump the watermark but change no rows.
       // idx_events_project_seq makes the seq-range scan cheap when `since`
@@ -1087,9 +1123,16 @@ export async function handleCellsReadRequest(
   // page watermark change is how the client learns the stream may be torn and
   // declines to mint a `?since=` cursor from it (audit B2).
   let servedPin: CursorPin | null = null
+  // AQU-1885: which tier answered, for the hit log. "colo" is the whole point
+  // of the second tier — a page of this stream served by an isolate that never
+  // walked the file.
+  let cachedTier: "isolate" | "colo" = "isolate"
   if (useChainCache) {
-    if (pinLive) {
-      const pinnedKey = chainCacheKey(projectId, pinnedEtag(fileId, pin!, visibility), sideFilter, laneFilter, paired)
+    const pinnedKey = pinLive
+      ? chainCacheKey(projectId, pinnedEtag(fileId, pin!, visibility), sideFilter, laneFilter, paired)
+      : null
+    const liveKey = chainCacheKey(projectId, etag!, sideFilter, laneFilter, paired)
+    if (pinnedKey) {
       const pinnedEntry = chainCacheGet(pinnedKey)
       if (pinnedEntry) {
         cacheKey = pinnedKey
@@ -1098,8 +1141,36 @@ export async function handleCellsReadRequest(
       }
     }
     if (!cached) {
-      cacheKey = chainCacheKey(projectId, etag!, sideFilter, laneFilter, paired)
-      cached = chainCacheGet(cacheKey)
+      cacheKey = liveKey
+      cached = chainCacheGet(liveKey)
+    }
+    // AQU-1885: the colo-shared tier. Tried in the same order and under the
+    // same keys as the isolate-local one above, so a cross-isolate page keeps
+    // the stream's pinned ordering instead of re-walking the file and
+    // re-advertising the live watermark. A hit is promoted into this isolate's
+    // map, so only the FIRST page on this isolate pays the Cache API read.
+    if (!cached) {
+      const colo = coloOrderCache()
+      if (colo) {
+        for (const key of pinnedKey ? [pinnedKey, liveKey] : [liveKey]) {
+          let items: ChainCacheItem[] | null
+          try {
+            items = await colo.get(key)
+          } catch (err) {
+            // A cache the runtime refuses is a miss, never a failed read.
+            console.error("[cells-read] colo order-cache read failed:", err)
+            break
+          }
+          if (!items) continue
+          const entry: ChainCacheEntry = { items, cachedAt: Date.now() }
+          chainCacheSet(key, entry)
+          cacheKey = key
+          cached = entry
+          cachedTier = "colo"
+          if (key === pinnedKey) servedPin = pin
+          break
+        }
+      }
     }
   }
   if (servedPin === null) servedPin = livePin
@@ -1125,7 +1196,7 @@ export async function handleCellsReadRequest(
       // idx_cells_file_scan (project_id, file_id, side, lane_id, cell_id)
       // — independent of file size (AQU-1160 AC1).
       cells = await readPageValues(env.AQUILLA_PG, columns, projectId, fileId, pageItems)
-      console.log(`[cells-read] chain-cache hit file=${fileId} rows=${cells.length} page=${pageItems.length} totalOrdered=${cached.items.length} pinned=${servedPin === pin ? 1 : 0}`)
+      console.log(`[cells-read] chain-cache hit file=${fileId} rows=${cells.length} page=${pageItems.length} totalOrdered=${cached.items.length} pinned=${servedPin === pin ? 1 : 0} tier=${cachedTier}`)
     }
 
     return Response.json(
@@ -1256,10 +1327,26 @@ export async function handleCellsReadRequest(
   }
 
   if (cacheKey) {
-    chainCacheSet(cacheKey, {
-      items: ordered.map((r) => ({ cellId: r.cell_id, side: r.side, laneId: r.lane_id ?? "" })),
-      cachedAt: Date.now(),
-    })
+    const items: ChainCacheItem[] = ordered.map((r) => ({ cellId: r.cell_id, side: r.side, laneId: r.lane_id ?? "" }))
+    chainCacheSet(cacheKey, { items, cachedAt: Date.now() })
+    // AQU-1885: publish the ordering this walk just paid for to the whole
+    // colo, so the stream's later pages do not pay it again on another
+    // isolate. Same cap as the isolate-local tier: a file past it is simply
+    // not cached (the pre-cache full walk, never wrong).
+    const colo = items.length > 0 && items.length <= CHAIN_CACHE_MAX_TOTAL_ITEMS ? coloOrderCache() : null
+    if (colo) {
+      const write = colo
+        .put(cacheKey, items, Math.floor(CHAIN_CACHE_TTL_MS / 1000))
+        .catch((err: unknown) => {
+          // Never fail a read because the cache would not take the entry.
+          console.error("[cells-read] colo order-cache write failed:", err)
+        })
+      // Off the response's critical path in production; awaited when there is
+      // no ExecutionContext to hold it open (tests, and any caller that does
+      // not pass one) so the entry is never dropped mid-flight.
+      if (ctx) ctx.waitUntil(write)
+      else await write
+    }
   }
 
   const offset = completePageStart(ordered, cursor?.offset ?? 0, paired, (r) => r.cell_id)

@@ -33,7 +33,7 @@ vi.mock("@/lib/sync/project-settings", () => ({
   PROJECT_SETTINGS_VERSION_INITIAL: 0,
 }))
 vi.mock("@/lib/store/project-index", () => ({ createProject: vi.fn().mockResolvedValue(undefined) }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 vi.mock("@/lib/sync/create-targets", () => ({ fetchCreateTargets: vi.fn() }))
 vi.mock("@/context/OrgContext", () => ({
   useActiveOrgOptional: () => ({
@@ -55,6 +55,8 @@ const MAINT_ORG: CreateTarget = { ...TIM_ORG, role: 600, teams: [TEAM, { teamId:
 async function openAndFill() {
   render(<ProjectCreateDialog onCreated={vi.fn()} orgId={10} />)
   fireEvent.click(screen.getByRole("button", { name: "New project" }))
+  // The wizard asks where the project comes from first (AQU-2105).
+  fireEvent.click(screen.getByTestId("project-source-scratch"))
   await screen.findByTestId("project-create-teams")
   fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "Pattani" } })
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })

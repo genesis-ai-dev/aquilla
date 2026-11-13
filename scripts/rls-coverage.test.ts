@@ -100,6 +100,21 @@ const UNCOVERED: Record<string, string> = {
   chain_claims: "never granted to app_runtime",
   concepts: "never granted to app_runtime",
   file_segmentation: "never granted to app_runtime",
+  // AQU-2308 (0194): hand-set navigator milestones — a name and two cell
+  // anchors per file, written and read only through the sync-worker perimeter
+  // (the two file.milestone.* events and the per-file read route). Listed here
+  // rather than given a policy for the blanket reason above, and the same one
+  // cell_glosses carries: a new table is not granted to app_runtime, so a
+  // policy written `TO app_runtime` would be inert — it would flip this ledger
+  // to "covered" while enforcing nothing, which is the one outcome the header
+  // of this file argues against.
+  file_milestones: "never granted to app_runtime",
+  // AQU-2459 (0197): the index row per revision of a file's source side
+  // (artifact sha, filter stamp, R2 manifest key, counts). Written and read
+  // only through the sync-worker perimeter — the revisions route and rebuild —
+  // so, as with file_milestones, it is not granted to app_runtime and a policy
+  // `TO app_runtime` would be inert.
+  file_revisions: "never granted to app_runtime",
   // AQU-1813 (0172): the lanes a team attachment covers. Unlike
   // group_project_grants, app_user_can_access_project() never reads it.
   group_project_lanes: "never granted to app_runtime",
@@ -130,6 +145,8 @@ const UNCOVERED: Record<string, string> = {
   // Decision 11 (0191): each person's undo history for a project, read and
   // written only by auth-worker's /edit-history route for the caller's own row.
   edit_histories: "never granted to app_runtime",
+  // 0195: admin-defined email routes for feedback; admin console and feedback route only.
+  feedback_routes: "never granted to app_runtime",
   style_rules: "never granted to app_runtime",
   workspace_usage_requests: "never granted to app_runtime",
   project_tools: "never granted to app_runtime (tools prototype)",

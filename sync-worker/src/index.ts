@@ -16,6 +16,7 @@ import { handleCellAttachmentRequest } from "./cell-attachments"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
 import { handleCustomVoiceRequest } from "./custom-voice"
 import { handleTtsRequest } from "./tts"
+import { handleElevenLabsRequest } from "./elevenlabs"
 import { handleDiarizationRequest } from "./diarization"
 import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
@@ -69,6 +70,7 @@ import { handleMigrateGroupsRequest } from "./events/migrate-groups-route"
 import { handleMigrateUsersReadRequest } from "./events/migrate-users-read-route"
 import { handleMigrateWebhookRequest } from "./events/migrate-webhook-route"
 import { handleSourceUploadRequest } from "./events/source-upload-route"
+import { handleRevisionsRequest } from "./events/revisions-route"
 import { handleExportSourceRequest } from "./events/export-route"
 import { handleExportBundleRequest } from "./events/export-bundle-route"
 import { handleOriginalDownloadRequest } from "./events/original-download-route"
@@ -98,6 +100,7 @@ import { handleConceptOccurrencesRequest } from "./events/concept-occurrences-ro
 import { handleTerminologyScanRequest } from "./events/terminology-scan-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleCellGlossesReadRequest } from "./events/cell-glosses-read-route"
+import { handleFileMilestonesReadRequest } from "./events/file-milestones-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
 import { handleExternalCommentsRequest } from "./external/comments-route"
 import { handleExternalMemoryReadRequest } from "./external/memory-read-routes"
@@ -189,11 +192,8 @@ declare global {
       ALLOW_UNAUTHENTICATED?: string
       /** Optional R2 key prefix for PR/staging isolation. */
       R2_KEY_PREFIX?: string
-      /** Seed-VC voice-clone Modal endpoint (infra/modal/seed_vc.py). */
-      SEED_VC_URL?: string
-      /** Shared secret for the Seed-VC endpoint (matches its SEED_VC_TOKEN). */
-      SEED_VC_TOKEN?: string
-      /** Voice-forge library-voice endpoint (infra/modal/voice_forge.py `web`). */
+      /** Voice-forge endpoint (infra/modal/voice_forge.py `web`): the only
+       *  speech-to-speech path — library and custom voices (AQU-2291). */
       VOICE_FORGE_URL?: string
       /** Shared secret for the voice-forge endpoint (matches its VOICE_FORGE_TOKEN). */
       VOICE_FORGE_TOKEN?: string
@@ -205,6 +205,10 @@ declare global {
       INWORLD_API_BASE?: string
       INWORLD_TTS_MODEL?: string
       INWORLD_DEFAULT_VOICE?: string
+      /** ElevenLabs upstream origin (AQU-2299). Unset → https://api.elevenlabs.io.
+       *  ElevenLabs is BYOK: there is no house key — each user's own key arrives
+       *  per request in X-ElevenLabs-Key. `pnpm dev` points this at the mock. */
+      ELEVENLABS_BASE_URL?: string
       /** Per-user daily TTS audio-seconds cap (default 36000 = 10 h while sizing). */
       TTS_USER_DAILY_SECONDS_LIMIT?: string
       /** "true" → enforce TTS cap with 429; anything else → log-only. */
@@ -469,6 +473,9 @@ const worker = {
     if (customVoiceResponse) return withCors(customVoiceResponse, request)
     const ttsResponse = await handleTtsRequest(request, env)
     if (ttsResponse) return withCors(ttsResponse, request)
+    // AQU-2299: ElevenLabs, bring-your-own-key (the key rides each request).
+    const elevenLabsResponse = await handleElevenLabsRequest(request, env)
+    if (elevenLabsResponse) return withCors(elevenLabsResponse, request)
     const diarizationResponse = await handleDiarizationRequest(request, env)
     if (diarizationResponse) return withCors(diarizationResponse, request)
     const eventsReadResponse = await handleEventsReadRequest(request, env)
@@ -488,7 +495,9 @@ const worker = {
     // AQU-1092…1098: the project's plan board (units + target dates + Done).
     const planResponse = await handlePlanRequest(request, env)
     if (planResponse) return withCors(planResponse, request)
-    const cellsReadResponse = await handleCellsReadRequest(request, env)
+    // AQU-1885: `ctx` lets the colo-shared ordering-cache write run off the
+    // response's critical path.
+    const cellsReadResponse = await handleCellsReadRequest(request, env, ctx)
     if (cellsReadResponse) return withCors(cellsReadResponse, request)
     const cellConfidenceResponse = await handleCellConfidenceRequest(request, env)
     if (cellConfidenceResponse) return withCors(cellConfidenceResponse, request)
@@ -536,6 +545,11 @@ const worker = {
     if (btReadResponse) return withCors(btReadResponse, request)
     const glossReadResponse = await handleCellGlossesReadRequest(request, env)
     if (glossReadResponse) return withCors(glossReadResponse, request)
+    // AQU-2308: every hand-set milestone on one file. Anchors only — the
+    // covered cells are resolved in the browser against the file's live cell
+    // order, so there is no second source of truth to disagree with.
+    const fileMilestonesReadResponse = await handleFileMilestonesReadRequest(request, env)
+    if (fileMilestonesReadResponse) return withCors(fileMilestonesReadResponse, request)
     const externalReadResponse = await handleExternalReadRequest(request, env)
     if (externalReadResponse) return withCors(externalReadResponse, request)
     // AQU-1233: agent-facing comment reads. Its own module (rather than another
@@ -619,6 +633,9 @@ const worker = {
     if (migrateWebhookInbox) return migrateWebhookInbox
     const sourceUploadResponse = await handleSourceUploadRequest(request, env)
     if (sourceUploadResponse) return sourceUploadResponse
+    // AQU-2459: one revision of a file's source side (handler adds CORS).
+    const revisionsResponse = await handleRevisionsRequest(request, env, routeCtx)
+    if (revisionsResponse) return revisionsResponse
     const exportSourceResponse = await handleExportSourceRequest(request, env)
     if (exportSourceResponse) return exportSourceResponse
     const exportBundleResponse = await handleExportBundleRequest(request, env)

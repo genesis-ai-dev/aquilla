@@ -33,13 +33,56 @@ const INVITE_COUNT_PLACEHOLDER =
 
 export const auth = defineNamespace({
   keys: {
+    "auth.methods.title": "Login methods",
+    "auth.methods.description": "Manage how you log in to your Aquilla account.",
+    "auth.methods.passwordSet": "Aquilla password: set",
+    "auth.methods.passwordMissing": "Aquilla password: not set",
+    "auth.methods.connected": "Google: connected",
+    "auth.methods.notConnected": "Google: not connected",
+    "auth.methods.connect": "Connect Google",
+    "auth.methods.disconnect": "Disconnect Google",
+    "auth.resetPassword.networkRetry": "We could not reach Aquilla. Check your connection and try again.",
+    "auth.methods.disconnectNote": "Enter your Aquilla password to disconnect Google. You will use your Aquilla password to log in afterwards. Existing Aquilla sessions stay signed in. This does not remove permissions in your Google account.",
+    "auth.methods.lastMethod": "Google is your only login method. Set an Aquilla password through the email reset link before disconnecting Google.",
+    "auth.methods.resetPassword": "Reset Aquilla password",
+    "auth.methods.setPassword": "Set an Aquilla password",
+    "auth.methods.refresh": "Refresh login methods",
+    "auth.methods.failed": "Unable to update login methods. Check your Aquilla password and connection, then try again.",
+    "auth.methods.unavailable": "Google login is not available on this deployment.",
+    "auth.methods.accountChanged": "Your selected Aquilla account has changed. Return to login methods and start again.",
+    "auth.methods.connectNote": "Confirm your Aquilla password to connect Google to this account. Use the Google account with the same email as your Aquilla account.",
+    "auth.methods.connectFailed": "Google could not be connected. Check your Aquilla password and use the matching Google email. No account was switched or created.",
+    "auth.methods.back": "Back to login methods",
+    "auth.google.continue": "Continue with Google",
+    "auth.google.or": "or",
+    "auth.google.redirecting": "Opening Google…",
+    "auth.google.privacy": "Google is contacted only when you continue. Analytics sharing is a separate choice.",
+    "auth.google.startFailed": "Google login could not start. Check your connection and browser storage, or use your password.",
+    "auth.google.chooseUsername": "Create an Aquilla Account",
+    "auth.google.linkTitle": "Connect Google to your account",
+    "auth.google.usernameNote": "Choose your permanent Aquilla username. Your Google account will be used to log in.",
+    "auth.google.linkNote": "An Aquilla account already uses this email. Enter your existing Aquilla password to connect Google.",
+    "auth.google.passwordLabel": "Aquilla password",
+    "auth.google.linkSubmit": "Connect Google and log in",
+    "auth.google.cancelled": "Google login was cancelled. You can try again or use your password.",
+    "auth.google.invalidPassword": "That password did not match. Nothing has been linked.",
+    "auth.google.identityTaken": "That username or email is already reserved. Use your existing account or choose another username.",
+    "auth.google.unavailable": "Google login is temporarily unavailable. Check your connection and try again.",
+    "auth.google.retryAvailability": "Retry Google login availability",
+    "auth.google.rateLimited": "Too many attempts. Wait a few minutes before trying again.",
+    "auth.google.sessionFailed": "Your Google connection was saved, but login could not finish. Return to login and choose Google again.",
+    "auth.google.expired": "This login request has expired or was already used. Return to login and choose Google again.",
+    "auth.google.unavailableRestart": "We could not confirm whether login finished. Check your connection, return to login and choose Google again.",
+    "auth.google.failed": "Google login could not finish. Try again from the login screen.",
+    "auth.google.back": "Back to login",
+
     // --- Login (/login) ---------------------------------------------------
-    "auth.login.title": "Sign in",
+    "auth.login.title": "Log in",
     "auth.login.usernameLabel": "Username or email",
     "auth.login.passwordLabel": "Password",
     "auth.login.forgotPasswordLink": "Forgot password?",
-    "auth.login.submitDefault": "Sign in",
-    "auth.login.submitSigningIn": "Signing in…",
+    "auth.login.submitDefault": "Log in",
+    "auth.login.submitSigningIn": "Logging in…",
     "auth.login.submitMigrating": "Setting up your account and permissions…",
     "auth.login.migratingNote":
       "First-time sign-in may take a moment while we securely migrate your account.",
@@ -47,12 +90,14 @@ export const auth = defineNamespace({
     "auth.login.createAccountLink": "Create an account",
     "auth.login.invalidCredentials": "Invalid username or password",
     "auth.login.failed": "Couldn't sign you in. Please try again.",
+    "auth.login.devAccessRestricted":
+      "Access to dev.aquilla.app is restricted. Ask the Aquilla team to add you to the dev access list.",
     "auth.login.accountTransitionFailed":
       "We signed you in, but couldn't safely finish switching accounts. Your previous account's data is still isolated. Retry to finish the switch.",
     "auth.login.onboardingMigrationFailed":
       "We couldn't check this browser's existing local workspace. Retry to continue without risking your local projects.",
     "auth.login.aquillaUsernameLabel": "Aquilla username or email",
-    "auth.login.offlineNotice": "You're offline — connect to sign in",
+    "auth.login.offlineNotice": "You're offline — connect to log in",
     "auth.login.submitLoggingIn": "Logging in…",
     "auth.login.sessionLoadFailed":
       "We couldn't read this browser's saved session. Your accounts are still stored; try loading them again.",
@@ -192,7 +237,7 @@ export const auth = defineNamespace({
 
     // --- Session-expired banner (global) ------------------------------------
     "auth.sessionExpired.message": "Your session expired.",
-    "auth.sessionExpired.signInAgain": "Sign in again",
+    "auth.sessionExpired.signInAgain": "Log in again",
     "auth.sessionExpired.continueSuffix": "to continue.",
   },
   context: {
@@ -206,6 +251,54 @@ export const auth = defineNamespace({
       screenshot: "auth",
     },
     keys: {
+      "auth.methods.title": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.methods.description": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.methods.passwordSet": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.methods.passwordMissing": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.methods.connected": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.methods.notConnected": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.methods.connect": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.methods.disconnect": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.resetPassword.networkRetry": { description: "Retryable connection failure during password recovery; does not imply the reset link is invalid." },
+      "auth.methods.disconnectNote": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.methods.lastMethod": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.methods.resetPassword": { description: "Action to send an email reset link for an existing Aquilla password from account settings." },
+      "auth.methods.setPassword": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.methods.refresh": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.methods.failed": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.methods.unavailable": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.methods.accountChanged": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.methods.connectNote": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.methods.connectFailed": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.methods.back": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
+      "auth.google.continue": { description: "Google OAuth continue text. First-party login UI; no automatic provider contact." },
+      "auth.google.or": { description: "Divider between Google login and the username/password form. Indicates alternative login methods, not a sequence of required steps." },
+      "auth.google.redirecting": { description: "Google OAuth redirecting text. First-party login UI; no automatic provider contact." },
+      "auth.google.privacy": { description: "Google OAuth privacy text. First-party login UI; no automatic provider contact." },
+      "auth.google.startFailed": { description: "Google OAuth startFailed text. First-party login UI; no automatic provider contact." },
+      "auth.google.chooseUsername": { description: "Google OAuth chooseUsername text. First-party login UI; no automatic provider contact." },
+      "auth.google.linkTitle": { description: "Google OAuth linkTitle text. First-party login UI; no automatic provider contact." },
+      "auth.google.usernameNote": { description: "Google OAuth usernameNote text. First-party login UI; no automatic provider contact." },
+      "auth.google.linkNote": { description: "Google OAuth linkNote text. First-party login UI; no automatic provider contact." },
+      "auth.google.passwordLabel": { description: "Password of the existing Aquilla account, requested to link Google login. Aquilla is the product name; do not translate it." },
+      "auth.google.linkSubmit": { description: "Google OAuth linkSubmit text. First-party login UI; no automatic provider contact." },
+      "auth.google.cancelled": { description: "Google OAuth cancelled text. First-party login UI; no automatic provider contact." },
+      "auth.google.invalidPassword": { description: "Google OAuth invalidPassword text. First-party login UI; no automatic provider contact." },
+      "auth.google.identityTaken": { description: "Google OAuth identityTaken text. First-party login UI; no automatic provider contact." },
+      "auth.google.unavailable": { description: "First-party Google login recovery message; retry never contacts Google automatically." },
+      "auth.google.retryAvailability": { description: "First-party Google login recovery message; retry never contacts Google automatically." },
+      "auth.google.rateLimited": { description: "First-party Google login recovery message; retry never contacts Google automatically." },
+      "auth.google.sessionFailed": { description: "First-party Google login recovery message; retry never contacts Google automatically." },
+      "auth.google.expired": { description: "First-party Google login recovery message; retry never contacts Google automatically." },
+      "auth.google.unavailableRestart": { description: "First-party Google login recovery message; retry never contacts Google automatically." },
+      "auth.google.failed": { description: "Google OAuth failed text. First-party login UI; no automatic provider contact." },
+      "auth.google.back": { description: "Google OAuth back text. First-party login UI; no automatic provider contact." },
+      "auth.login.devAccessRestricted": {
+        description:
+          "Shown under the sign-in form when the password was right but the account " +
+          "may not use the team's internal test site. 'dev.aquilla.app' is a web " +
+          "address: never translate it. 'The Aquilla team' means the people who run Aquilla.",
+      },
       "auth.login.title": {
         description:
           "Heading of the sign-in form. Short imperative/label phrase naming the " +
@@ -487,10 +580,7 @@ export const auth = defineNamespace({
         description:
           "Submit button label on the import flow's sign-in form while the " +
           "credentials are being checked. Present continuous, ends with an ellipsis " +
-          "glyph (…). This form says 'Log in' where the main sign-in page says " +
-          "'Sign in' (common.logIn vs auth.login.submitDefault), and this label is " +
-          "the progress form of the former — keep it consistent with whichever word " +
-          "you chose for common.logIn.",
+          "glyph (…). Keep it consistent with common.logIn and auth.login.submitDefault.",
       },
       "auth.login.sessionLoadFailed": {
         description:
@@ -883,7 +973,7 @@ export const auth = defineNamespace({
   surfaces: [
     {
       id: "auth",
-      title: "Sign in",
+      title: "Log in",
       route: "/login",
       notes:
         "Pre-authentication sign-in screen — the first screen a new translator sees, " +

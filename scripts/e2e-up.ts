@@ -464,8 +464,9 @@ function resetE2ePostgres(): string {
   if (!hasLocalPsql()) {
     console.error(
       `${TAG}[e2e-up] no Docker container 'aquilla-dev-pg' and no local 'psql' on PATH.\n` +
-        "  Start Docker (with the aquilla-dev-pg container) or install a local\n" +
-        "  Postgres reachable at 127.0.0.1:5432 with role 'aquilla'. See e2e/README.md.",
+        "  Start Docker (with the aquilla-dev-pg container), or bring up a native\n" +
+        "  Postgres with:  eval \"$(bash scripts/e2e-pg-native.sh)\"\n" +
+        "  (AQU-1820: Docker is not required — see e2e/README.md → Prerequisites).",
     )
     process.exit(1)
   }
@@ -636,6 +637,7 @@ async function main(): Promise<void> {
       "--var", "WRANGLER_LOCAL:1",
       "--var", `BASE_URL:http://127.0.0.1:${VITE_PORT}`,
       "--var", "ADMIN_REQUIRE_ELEVATION:false",
+      "--var", "ADMIN_TOTP_KEY:e2e-only-authenticator-encryption-key-not-for-hosted-use",
       "--var", "ADMIN_EMAILS:alice@example.test",
       "--var", `OPENROUTER_BASE_URL:http://127.0.0.1:${OPENROUTER_MOCK_PORT}/api/v1`,
       "--var", "OPENROUTER_API_KEY:mock",
@@ -717,7 +719,17 @@ async function main(): Promise<void> {
   // The build cost (~15-30s) pays for itself after the second spec. The backend
   // URLs are passed via env so each shard bakes its own (VITE_* process env is
   // inlined by Vite at build time and takes priority over .env files).
-  if (VITE_MODE === "preview") {
+  //
+  // E2E_PREBUILT_DIST=1 means the caller already ran this exact build before
+  // starting the workers (the Hetzner QA bootstrap does, so the build never
+  // shares its memory cap with two wrangler dev servers). An absent dist is
+  // still a hard error, never a silent dev-mode fallback.
+  if (VITE_MODE === "preview" && process.env.E2E_PREBUILT_DIST === "1") {
+    if (!existsSync(path.join(REPO_ROOT, DIST_DIR, "index.html"))) {
+      throw new Error(`E2E_PREBUILT_DIST=1 but ${DIST_DIR}/index.html is missing`)
+    }
+    console.log(`${TAG}[boot 7/8] serving prebuilt ${DIST_DIR} (E2E_PREBUILT_DIST=1)`)
+  } else if (VITE_MODE === "preview") {
     console.log(`${TAG}[boot 7/8] building app for test mode (one-time, ~30s)…`)
     await runOnce("npx", ["vite", "build", "--mode", "test", "--outDir", DIST_DIR], REPO_ROOT, "build", browserEnv)
   } else {

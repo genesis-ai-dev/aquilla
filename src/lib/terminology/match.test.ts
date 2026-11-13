@@ -121,6 +121,91 @@ describe("mark folding (foldMarks)", () => {
   })
 })
 
+describe("mark folding across precomposed accents (AQU-1936)", () => {
+  // Greek stores its accent composed INTO the vowel, so none of these strings
+  // contains a combining mark at all: καί is κ α U+03AF and καὶ is κ α U+1F76.
+  const acute = "καί"
+  const grave = "καὶ"
+
+  // WHY: the bug. A term added with the acute form — the one a keyboard types
+  // — saw no violation on the grave form the text actually uses, and the user
+  // had to add every accent as a separate form by hand.
+  it("a Greek term matches the same word under another accent, either direction", () => {
+    expect(matchesTerm("ὁ λόγος καὶ τὸ φῶς", acute, { foldMarks: true })).toBe(true)
+    expect(matchesTerm("ὁ λόγος καί τὸ φῶς", grave, { foldMarks: true })).toBe(true)
+    // circumflex and bare, too — Greek accent is prosodic, not lexical
+    expect(matchesTerm("οὖτος και ἐκεῖνος", acute, { foldMarks: true })).toBe(true)
+  })
+
+  // WHY: before the fix, folding stripped the term's accent and interleaved
+  // `\p{M}*`, which can only find a SEPARATE combining mark. A precomposed
+  // haystack has none, so a folded Greek term did not even match its own
+  // spelling — turning folding on made matching worse, not better.
+  it("a folded Greek term still matches its own spelling", () => {
+    expect(matchesTerm(acute, acute, { foldMarks: true })).toBe(true)
+    expect(matchesTerm(grave, grave, { foldMarks: true })).toBe(true)
+  })
+
+  // WHY: AC — turning folding off restores exact-accent matching, so a project
+  // that wants accent-sensitive terminology keeps it.
+  it("without foldMarks the accents stay distinct", () => {
+    expect(matchesTerm("ὁ λόγος καὶ τὸ φῶς", acute)).toBe(false)
+    expect(matchesTerm("ὁ λόγος καὶ τὸ φῶς", grave)).toBe(true)
+  })
+
+  // WHY: editor decorations and the per-form breakdown both read match offsets
+  // and the matched surface. The accent variant must be reported at its own
+  // offsets with its own spelling, not normalised to the term's spelling.
+  it("reports the variant's own offsets and surface", () => {
+    const hay = "ὁ λόγος καὶ τὸ φῶς"
+    const matches = findConceptMatches(hay, { sourceTerm: acute, match: { foldMarks: true } })
+    expect(matches).toHaveLength(1)
+    expect(hay.slice(matches[0].start, matches[0].end)).toBe("καὶ")
+    expect(matches[0].surface).toBe("καὶ")
+  })
+
+  // WHY: folding must not dissolve the word. καί is a whole word; the longer
+  // καίτοι and the unrelated κόσμος must stay out, or every Greek term
+  // becomes a substring search the moment it is folded.
+  it("still respects word boundaries and does not match unrelated words", () => {
+    expect(matchesTerm("καίτοι γὰρ", acute, { foldMarks: true })).toBe(false)
+    expect(matchesTerm("ὁ κόσμος", acute, { foldMarks: true })).toBe(false)
+    expect(matchesTerm("ἐκάλεσεν", acute, { foldMarks: true })).toBe(false)
+  })
+
+  // WHY: no new false negatives for the pointed scripts folding was built for.
+  // Hebrew keeps its separate combining marks, which the `\p{M}*` arm still
+  // handles; the new character class must not displace it.
+  it("Hebrew pointing still folds as before", () => {
+    const haaretz = "הָאָ֗רֶץ"
+    expect(matchesTerm("הָאָ֑רֶץ", haaretz, { foldMarks: true })).toBe(true)
+    expect(matchesTerm("הָאָרֶץ", haaretz, { foldMarks: true })).toBe(true)
+    expect(matchesTerm("הארץ", haaretz, { foldMarks: true })).toBe(true)
+  })
+
+  // WHY: folding is diacritic-WIDE once it is on, which is the trade the
+  // feature has always made — Hebrew vowel-point folding already merges
+  // homographs that differ only in pointing. Greek now sits under the same
+  // rule, so a pair distinguished only by breathing (ἐν "in" / ἕν "one")
+  // matches together. Pinned deliberately: the escape hatch is per-term
+  // (foldMarks: false, or an excluded form), and any future narrowing to
+  // accent-only folding should change this test on purpose, not by accident.
+  it("folds breathings too, so a breathing-only Greek pair matches together", () => {
+    expect(matchesTerm("ἕν σῶμα", "ἐν", { foldMarks: true })).toBe(true)
+    // and the per-term opt-out restores the distinction
+    expect(matchesTerm("ἕν σῶμα", "ἐν", { foldMarks: false })).toBe(false)
+  })
+
+  // WHY: Latin folding is opt-in, but when it IS on it must behave — the same
+  // precomposed blindness made a folded `café` miss "café" itself.
+  it("explicitly folded Latin spans its precomposed diacritics", () => {
+    expect(matchesTerm("a café in town", "cafe", { foldMarks: true })).toBe(true)
+    expect(matchesTerm("a cafe in town", "café", { foldMarks: true })).toBe(true)
+    // and stays exact when folding is off, which is the Latin default
+    expect(matchesTerm("a cafe in town", "café")).toBe(false)
+  })
+})
+
 describe("wildcard spans marks", () => {
   // WHY: `*` used to expand to letters only, so `הָאָ*` stopped at the first
   // vowel point. A wildcard is "the rest of the word", marks included.

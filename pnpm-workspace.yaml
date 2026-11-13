@@ -1,11 +1,30 @@
 packages:
   - packages/*
 
+# Allowlist: only these packages may run install scripts (pnpm 10 blocks every
+# other package's scripts by default).
 onlyBuiltDependencies:
   - core-js
   - esbuild
   - msw
-  - onnxruntime-node
   - protobufjs
   - sharp
   - workerd
+
+# AQU-2161. onnxruntime-node is transitive only — it arrives via
+# @huggingface/transformers, and nothing in src/, scripts/ or the workers
+# imports it (package.json depends on onnxruntime-web, which carries its own
+# wasm). Its postinstall downloads a native .node binary from api.nuget.org,
+# and where egress is proxied (Claude Code cloud sessions, sandboxed CI
+# runners) that transfer is reset: the script exits non-zero and pnpm aborts
+# the WHOLE install, so node_modules/.bin is never linked and husky's `prepare`
+# never runs — leaving every git hook silently dead. The same download held a
+# production release for 11 hours of hourly checks on 2026-11-06 (see
+# scripts/release-stall.mjs -> INFRA_PATTERNS).
+#
+# Listing it here, rather than only dropping it from the allowlist above,
+# records the decision and keeps pnpm from warning about an ignored build on
+# every install. If a server-side path ever needs the native runtime, depend on
+# onnxruntime-node directly and move it back to onlyBuiltDependencies.
+ignoredBuiltDependencies:
+  - onnxruntime-node

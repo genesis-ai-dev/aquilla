@@ -50,6 +50,7 @@ import { coerceExternalIds } from '../../../src/lib/terminology/external-ids'
 import { buildRemovedCellArchiveStmt, buildRemovedCellRestoreStmts } from './removed-cell-archive'
 
 export { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
+import { buildFileRevisionIndexStmts } from './file-revision-sql'
 
 // AQU-1693: a concept's Bible entity link. Nothing upstream validates an
 // app-pushed term.* payload, so the projector coerces it: a malformed value
@@ -630,7 +631,7 @@ export function buildBulkSourceCellCreateStmt(
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'cell_audio_validators' | 'cell_attachments' | 'comments' | 'cell_backtranslations' | 'cell_glosses' | 'cell_links' | 'cell_word_morph' | 'concepts'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'cell_audio_validators' | 'cell_attachments' | 'comments' | 'cell_backtranslations' | 'cell_glosses' | 'cell_links' | 'cell_word_morph' | 'concepts' | 'file_milestones'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -1945,6 +1946,77 @@ case 'cell.audio.attach': {
       // lane the event names (`targetLang`, carried since AQU-1462).
       const audioRole = p.role === 'source' ? 'source' : 'dub'
       const audioLane = laneOfAudioEvent(event.payload)
+      const restoreProjection = p.restoreProjectionOf !== undefined
+      if ((p.historyOnly || restoreProjection) && (p.pieceOf || p.transcription != null
+        || p.asr != null || p.transcriptAi != null || p.voiceId != null || p.referenceAudioId != null
+        || p.label != null || p.trimStartMs != null || p.trimEndMs != null || p.timings != null)) {
+        throw new Error('Historical audio recovery only supports original legacy recordings')
+      }
+      if (restoreProjection && (typeof p.restoreProjectionOf !== 'string' || !p.restoreProjectionOf
+        || p.restoreProjectionOf === event.id || p.historyOnly || audioRole !== 'dub' || audioLane)) throw new Error('Invalid audio projection repair')
+      if (restoreProjection) {
+        // Repair a missing legacy projection from its ORIGINAL logged event.
+        // A new repair ID gets past replay filtering, but the reconstructed row
+        // keeps its original provenance, timestamp and surviving votes. Never
+        // overwrite a live/deleted row or deselect a concurrent app recording.
+        stmts.push(db.prepare(`INSERT INTO cell_audio (
+          project_id, file_id, cell_id, audio_id, slot, url, mime_type, duration_ms,
+          selected, deleted, event_id, created_ts, role, created_by, lane_id, validator_count
+        ) SELECT original.project_id, original.file_id, original.cell_id, ?, ?, ?, ?, ?,
+          CASE WHEN EXISTS (SELECT 1 FROM cell_audio a WHERE a.project_id = original.project_id
+            AND a.file_id = original.file_id AND a.cell_id = original.cell_id
+            AND a.slot = ? AND a.selected = 1 AND a.deleted = 0)
+            OR EXISTS (SELECT 1 FROM (SELECT choice.payload FROM events choice
+              WHERE choice.project_id = original.project_id AND choice.file_id = original.file_id
+                AND choice.cell_id = original.cell_id AND choice.kind = 'cell.audio.select'
+                AND choice.payload::jsonb->>'slot' = ?
+              ORDER BY choice.server_seq DESC LIMIT 1) latest
+              WHERE latest.payload::jsonb->>'audioId' IS DISTINCT FROM ?) THEN 0 ELSE 1 END,
+          0, original.id, original.server_ts, ?, original.author, ${audioLaneResolveSql()},
+          (SELECT COUNT(*) FROM cell_audio_validators v WHERE v.project_id = original.project_id
+            AND v.file_id = original.file_id AND v.cell_id = original.cell_id AND v.audio_id = ?)
+        FROM events original
+        WHERE original.id = ? AND original.project_id = ? AND original.file_id = ? AND original.cell_id = ?
+          AND original.kind = 'cell.audio.attach'
+          AND original.payload::jsonb->>'audioId' = ? AND original.payload::jsonb->>'url' = ?
+          AND original.payload::jsonb->>'slot' = ?
+          AND (original.payload::jsonb->>'mimeType') IS NOT DISTINCT FROM ?
+          AND (original.payload::jsonb->>'durationMs')::bigint IS NOT DISTINCT FROM ?::bigint
+          AND original.payload::jsonb - ARRAY['audioId','url','slot','mimeType','durationMs'] = '{}'::jsonb
+          AND NOT EXISTS (SELECT 1 FROM events removed WHERE removed.project_id = original.project_id
+            AND removed.file_id = original.file_id AND removed.cell_id = original.cell_id
+            AND removed.kind = 'cell.audio.remove' AND removed.payload::jsonb->>'audioId' = ?)
+        ON CONFLICT(project_id, file_id, cell_id, audio_id) DO NOTHING`).bind(
+          p.audioId, p.slot, p.url, p.mimeType ?? null, p.durationMs ?? null, p.slot, p.slot, p.audioId,
+          audioRole, ...audioLaneResolveBinds(event.projectId, audioRole, audioLane), p.audioId,
+          p.restoreProjectionOf, event.projectId, event.fileId, event.cellId, p.audioId, p.url,
+          p.slot, p.mimeType ?? null, p.durationMs ?? null, p.audioId,
+        ))
+        return ['cell_audio']
+      }
+      // AQU-2218: recovering an old take must not select it, undo an app
+      // deletion, replace its bytes, or disturb another lane. Persist this
+      // behavior in the event payload so projection rebuilds agree with ingest.
+      // ON CONFLICT also protects an app write that races this import.
+      if (p.historyOnly === true) {
+        stmts.push(db.prepare(
+          `INSERT INTO cell_audio (
+            project_id, file_id, cell_id, audio_id, slot, url, mime_type,
+            duration_ms, selected, deleted, event_id, created_ts, role, created_by, lane_id
+          ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ${audioLaneResolveSql()}
+          WHERE NOT EXISTS (SELECT 1 FROM events removed
+            WHERE removed.project_id = ? AND removed.file_id = ? AND removed.cell_id = ?
+              AND removed.kind = 'cell.audio.remove' AND removed.payload::jsonb->>'audioId' = ?
+              AND removed.server_seq < (SELECT server_seq FROM events WHERE id = ? AND project_id = ?))
+          ON CONFLICT(project_id, file_id, cell_id, audio_id) DO NOTHING`,
+        ).bind(
+          event.projectId, event.fileId, event.cellId, p.audioId, p.slot, p.url,
+          p.mimeType ?? null, p.durationMs ?? null, event.id, event.clientTs,
+          audioRole, event.author, ...audioLaneResolveBinds(event.projectId, audioRole, audioLane),
+          event.projectId, event.fileId, event.cellId, p.audioId, event.id, event.projectId,
+        ))
+        return ['cell_audio']
+      }
       // Deselect any other clip in the same slot, then upsert this one as the
       // selected, live clip. `audio_id != ?` so the deselect never touches the
       // row we're about to (re)insert as selected.
@@ -2299,6 +2371,34 @@ case 'cell.audio.attach': {
       // zeroing validator_count with no progress recompute behind it, so the
       // board went on reporting a trimmed line as validated. Now that is true
       // rather than merely unnoticed.
+      return ['cell_audio']
+    }
+
+    case 'cell.audio.gain': {
+      // AQU-2327: the clip's volume and fades, and nothing else — the trim's
+      // sibling and the same discipline: all three always stated, null meaning
+      // none. Like a trim it keeps the take's votes: the same take, the
+      // samples untouched; only how this clip plays changes.
+      const p = event.payload as EventPayloads['cell.audio.gain']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.audio.gain event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET gain_db = ?, fade_in_ms = ?, fade_out_ms = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(
+            p.gainDb ?? null,
+            p.fadeInMs ?? null,
+            p.fadeOutMs ?? null,
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.audioId,
+          ),
+      )
       return ['cell_audio']
     }
 
@@ -2735,7 +2835,8 @@ case 'cell.audio.attach': {
               anchor_file_id = excluded.anchor_file_id,
               event_id = excluded.event_id,
               meta = excluded.meta,
-              updated_at = (extract(epoch from now()) * 1000)::bigint`,
+              updated_at = (extract(epoch from now()) * 1000)::bigint
+            WHERE files.project_id = excluded.project_id`,
           )
           .bind(
             event.fileId,
@@ -3302,6 +3403,46 @@ case 'cell.audio.attach': {
       return ['cells']
     }
 
+    case 'cell.label.set': {
+      // AQU-2408: a hand-typed label on a cell — docs/decisions/0007. The same
+      // per-key JSONB merge discipline as cast.assign: writes ONE key
+      // (`cellLabel`) on the SOURCE row, touches neither value nor event_id nor
+      // validated, and commutes with every other metadata write. Null or a
+      // blank string removes the key. The key is the one legacy Codex
+      // notebooks already carry, so the editor's corner label and scoped
+      // search read a typed label and a migrated one the same way.
+      const p = event.payload as EventPayloads['cell.label.set']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.label.set event ${event.id} is missing fileId or cellId`)
+      }
+      const label = typeof p.label === 'string' ? p.label.trim() : ''
+      if (label !== '') {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells
+               SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('cellLabel', ?::text)
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+            )
+            .bind(label, event.projectId, event.fileId, event.cellId),
+        )
+      } else {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells
+               SET metadata = CASE
+                 WHEN metadata IS NULL THEN NULL
+                 ELSE metadata - 'cellLabel'
+               END
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+            )
+            .bind(event.projectId, event.fileId, event.cellId),
+        )
+      }
+      return ['cells']
+    }
+
     case 'cell.lane.retime': {
       // AQU-646 round 6: per-LANE presentation timing, stored as metadata keys
       // on the source-side row (same JSONB merge discipline as cast.assign —
@@ -3449,6 +3590,58 @@ case 'cell.audio.attach': {
         ),
       )
       return ['files']
+    }
+
+    case 'file.milestone.set': {
+      // AQU-2308 — rebuild path; the dispatch path
+      // (handlers/file-milestone-events.ts) calls the same shared builder.
+      //
+      // PERMISSIVE, like the file.track.set case above and for the same
+      // reason: rebuild.ts replays already-accepted history through here, so
+      // history the live handler once accepted must never start being
+      // rejected. The name rule lives in the handler, which only ever sees
+      // new writes; here a stored name is taken as given and only a
+      // structurally impossible row is skipped.
+      const p = event.payload as EventPayloads['file.milestone.set']
+      if (!event.fileId) {
+        throw new Error(`file.milestone.set event ${event.id} is missing fileId`)
+      }
+      stmts.push(
+        buildFileMilestoneSetStmt(db, event.projectId, event.fileId, event.id, {
+          milestoneId: p.milestoneId,
+          name: p.name,
+          startCellId: p.startCellId,
+          endCellId: p.endCellId,
+          author: event.author,
+          serverTs: event.serverTs,
+          serverSeq: event.serverSeq ?? 0,
+        }),
+      )
+      return ['file_milestones']
+    }
+
+    case 'file.revision': {
+      // AQU-2459: the index row + the file head. Replay-safe (upsert). The
+      // cells projection for a revision is set-based from the R2 manifest in
+      // revisions-route.ts / file-revision-sql.ts and is NOT reproduced here:
+      // rebuild.ts has no manifest in hand (see decision 0008, not covered).
+      const p = event.payload as EventPayloads['file.revision']
+      if (!event.fileId) {
+        throw new Error(`file.revision event ${event.id} is missing fileId`)
+      }
+      stmts.push(...buildFileRevisionIndexStmts(db, event.projectId, event.fileId, event.id, event.author, event.serverTs, p))
+      return ['files']
+    }
+
+    case 'file.milestone.remove': {
+      const p = event.payload as EventPayloads['file.milestone.remove']
+      if (!event.fileId) {
+        throw new Error(`file.milestone.remove event ${event.id} is missing fileId`)
+      }
+      stmts.push(
+        buildFileMilestoneRemoveStmt(db, event.projectId, event.fileId, p.milestoneId),
+      )
+      return ['file_milestones']
     }
 
     case 'source.cell.mirror': {
@@ -3637,6 +3830,13 @@ case 'cell.audio.attach': {
       if (!event.fileId) {
         throw new Error(`file.mirror event ${event.id} is missing fileId`)
       }
+      // AQU-2345: the copy is the upstream file's material, so it carries the
+      // upstream's `role`/`kind`/`book_code` — the read side derives
+      // `fileType` from them, and a NULL `kind` read every mirrored file as
+      // `codex`, which hid the IDML/DOCX/PPTX export for it. On conflict (a
+      // rename, or a replay over a row mirrored before this slice) a NULL
+      // column is filled and a set one is kept: the mirror names a file's
+      // type once and never argues with a row that already has one.
       stmts.push(
         db
           .prepare(
@@ -3649,7 +3849,7 @@ case 'cell.audio.attach': {
               meta
             ) VALUES (
               ?, ?, ?,
-              NULL, NULL, NULL, NULL, NULL,
+              ?, ?, ?, NULL, NULL,
               ?,
               0, 0, 0, NULL,
               ?, (extract(epoch from now()) * 1000)::bigint, (extract(epoch from now()) * 1000)::bigint,
@@ -3657,6 +3857,9 @@ case 'cell.audio.attach': {
             )
             ON CONFLICT (id) DO UPDATE SET
               name = excluded.name,
+              role = COALESCE(files.role, excluded.role),
+              kind = COALESCE(files.kind, excluded.kind),
+              book_code = COALESCE(files.book_code, excluded.book_code),
               event_id = excluded.event_id,
               updated_at = (extract(epoch from now()) * 1000)::bigint`,
           )
@@ -3664,6 +3867,9 @@ case 'cell.audio.attach': {
             event.fileId,
             event.projectId,
             p.name,
+            p.role ?? null,
+            p.kind ?? null,
+            p.bookCode ?? null,
             event.id,
             event.author,
             JSON.stringify(p.meta ?? {}),
@@ -3798,6 +4004,90 @@ export function buildFileCorpusSetStmt(
         WHERE id = ? AND project_id = ?`,
     )
     .bind(usable, eventId, fileId, projectId)
+}
+
+/**
+ * AQU-2308: upsert one hand-set milestone.
+ *
+ * Shared by the live handler and the rebuild/replay arm below, so replaying
+ * the log reproduces exactly the rows the live writes produced.
+ *
+ * Upsert on the record's own id, so re-setting a milestone (a rename, or an
+ * edge moved) is one event rather than a delete and a re-create — the
+ * navigator keeps the same row and nothing flickers. `created_at` is
+ * preserved on conflict: the record's identity does not restart because
+ * someone fixed a typo in its name.
+ *
+ * `server_seq` is the ordering guard. Replay walks the log in order, but two
+ * writers racing on one id can reach here out of order, and the LAST writer
+ * must win rather than whoever's statement lands second. Postgres evaluates
+ * the WHERE on the conflicting row, so an older event is simply dropped.
+ */
+export function buildFileMilestoneSetStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  eventId: string,
+  record: {
+    milestoneId: string
+    name: string
+    startCellId: string
+    endCellId: string
+    author: string
+    serverTs: number
+    serverSeq: number
+  },
+): AquillaStatement {
+  return db
+    .prepare(
+      `INSERT INTO file_milestones (
+          project_id, file_id, milestone_id, name, start_cell_id, end_cell_id,
+          author, event_id, server_seq, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(project_id, file_id, milestone_id) DO UPDATE SET
+          name          = EXCLUDED.name,
+          start_cell_id = EXCLUDED.start_cell_id,
+          end_cell_id   = EXCLUDED.end_cell_id,
+          author        = EXCLUDED.author,
+          event_id      = EXCLUDED.event_id,
+          server_seq    = EXCLUDED.server_seq,
+          updated_at    = EXCLUDED.updated_at
+        WHERE COALESCE(file_milestones.server_seq, 0) <= COALESCE(EXCLUDED.server_seq, 0)`,
+    )
+    .bind(
+      projectId,
+      fileId,
+      record.milestoneId,
+      record.name,
+      record.startCellId,
+      record.endCellId,
+      record.author,
+      eventId,
+      record.serverSeq,
+      record.serverTs,
+      record.serverTs,
+    )
+}
+
+/**
+ * AQU-2308: drop one hand-set milestone by id.
+ *
+ * A plain DELETE rather than a tombstone: a removed division leaves nothing a
+ * reader could want, and the event log is already the history. A no-op when
+ * the row has gone, which is what makes a retried outbox entry harmless.
+ */
+export function buildFileMilestoneRemoveStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  milestoneId: string,
+): AquillaStatement {
+  return db
+    .prepare(
+      `DELETE FROM file_milestones
+        WHERE project_id = ? AND file_id = ? AND milestone_id = ?`,
+    )
+    .bind(projectId, fileId, milestoneId)
 }
 
 /**

@@ -120,6 +120,63 @@ describe("LanguageProfileSection", () => {
 // row saves its own slot merged over the stored profile, so neither the
 // quotation marks nor a slot this version does not know is ever wiped; and a
 // value the slot's validator rejects is refused, not stored.
+describe("LanguageProfileSection — marks read off the project's own text (AQU-1733)", () => {
+  // WHY: Paratext makes the user fill a quotation-rules form in before any
+  // quotation check runs. A project that has translated anything has already
+  // shown which marks it uses, so the card offers them and the lead confirms.
+  const english = [
+    "Jesus said, \u201cWhy do you call me good?\u201d",
+    "He answered, \u201cIt is written, \u2018Man shall not live by bread alone.\u2019\u201d",
+  ]
+
+  it("offers the marks the project's text uses, and saves them once confirmed", async () => {
+    const props = renderCard({ sampleTexts: english })
+    fireEvent.click(screen.getByRole("button", { name: "Use the marks found in this project's text" }))
+    expect([mark("Opening", "Quotation").value, mark("Closing", "Quotation").value]).toEqual(["\u201c", "\u201d"])
+    expect([mark("Opening", "Inside a quotation").value, mark("Closing", "Inside a quotation").value]).toEqual([
+      "\u2018",
+      "\u2019",
+    ])
+    fireEvent.click(screen.getByRole("button", { name: "Save quotation marks" }))
+    await waitFor(() => expect(props.patch).toHaveBeenCalledTimes(1))
+    expect(props.patch).toHaveBeenCalledWith({
+      languageProfile: {
+        quoteMarks: {
+          levels: [{ open: "\u201c", close: "\u201d" }, { open: "\u2018", close: "\u2019" }],
+          continuation: "reopen-each-paragraph",
+        },
+      },
+    })
+  })
+
+  it("offers nothing when the project has quoted nothing, rather than guessing", () => {
+    renderCard({ sampleTexts: ["In the beginning God created the heavens and the earth."] })
+    expect(screen.queryByRole("button", { name: "Use the marks found in this project's text" })).toBeNull()
+  })
+
+  it("offers nothing when the card has no sample at all", () => {
+    renderCard()
+    expect(screen.queryByRole("button", { name: "Use the marks found in this project's text" })).toBeNull()
+  })
+
+  it("leaves the lead free to edit what was detected before saving", async () => {
+    const props = renderCard({ sampleTexts: english })
+    fireEvent.click(screen.getByRole("button", { name: "Use the marks found in this project's text" }))
+    fireEvent.change(mark("Opening", "Quotation"), { target: { value: "\u00ab" } })
+    fireEvent.change(mark("Closing", "Quotation"), { target: { value: "\u00bb" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save quotation marks" }))
+    await waitFor(() => expect(props.patch).toHaveBeenCalledTimes(1))
+    expect(props.patch).toHaveBeenCalledWith({
+      languageProfile: {
+        quoteMarks: {
+          levels: [{ open: "\u00ab", close: "\u00bb" }, { open: "\u2018", close: "\u2019" }],
+          continuation: "reopen-each-paragraph",
+        },
+      },
+    })
+  })
+})
+
 describe("LanguageProfileSection — the slot rows", () => {
   const row = (slot: string) => screen.getByTestId(`profile-slot-${slot}`)
   const open = (slot: string) => fireEvent.click(within(row(slot)).getByRole("button", { expanded: false }))

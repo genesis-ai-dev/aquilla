@@ -9,11 +9,13 @@ import type { AdminOrg, AdminTeam } from "@/lib/frontier/admin"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
+import { adminOrgHref } from "@/lib/admin/drilldown-paths"
 
 /**
  * Tenants — flat cross-tenant list of organizations. Team nesting lives on the
- * Teams tab; this table only shows a per-org team count. Row click switches
- * into the org workspace (platform admins resolve owner-level everywhere). The
+ * Teams tab; this table only shows a per-org team count. Row click opens the
+ * admin page for that org (its projects and people); "Open in app" there
+ * switches into the org workspace. The
  * trailing actions column jumps straight to an org's Members page or its
  * People & access page (AQU-1322); those buttons stop the click so the row
  * handler does not also fire.
@@ -22,13 +24,14 @@ import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 export function AdminTenantsSection({
   orgs,
   teams,
-  onOpenOrg,
+  onSelectOrg,
   onOpenOrgPath,
   onOpenInvites,
 }: {
   orgs: AdminOrg[]
   teams: AdminTeam[]
-  onOpenOrg: (orgId: number) => void
+  /** Open the admin page for this org. */
+  onSelectOrg: (orgId: number) => void
   /** Open an org subpage such as "/members" or "/access". */
   onOpenOrgPath: (orgId: number, subpath: string) => void
   /** Open the admin invites tab with this org pre-selected. */
@@ -168,7 +171,8 @@ export function AdminTenantsSection({
       columns={columns}
       data={orgs}
       getRowId={(o) => String(o.id)}
-      onRowClick={(o) => onOpenOrg(o.id)}
+      onRowClick={(o) => onSelectOrg(o.id)}
+      rowLink={{ columnId: "organization", to: (o) => adminOrgHref(o.id) }}
       initialSorting={[{ id: "organization", desc: false }]}
       searchPlaceholder="Search organizations…"
       globalFilterFn={(row, _columnId, filterValue) => {

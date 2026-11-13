@@ -270,7 +270,7 @@ describe("POST /contextual/runs", () => {
   // courtesy, not a guarantee — the pill, the panel, and any API caller all
   // arrive on this one route. It must refuse BEFORE the run row exists and
   // before a single model call is billed.
-  it("refuses to start without the project's languages and any brief, naming what is missing", async () => {
+  it("refuses to start without the project's languages and any instructions, naming what is missing", async () => {
     const { contrib } = await seedWorld()
     await setSettings({ translationBrief: {} })
     // AQU-1595: languages live on the lane rows. Blank them there.
@@ -284,7 +284,7 @@ describe("POST /contextual/runs", () => {
       error: { code: string; details: { missing: string[] } }
     }
     expect(body.error.code).toBe("context_required")
-    expect(body.error.details.missing).toEqual(["languages", "brief"])
+    expect(body.error.details.missing).toEqual(["languages", "instructions"])
     // Nothing was started and no model was called — the point of gating early.
     expect(modelCallCount).toBe(0)
     expect(syncFrames).toEqual([])
@@ -309,14 +309,14 @@ describe("POST /contextual/runs", () => {
     _test.lastLoop = null
   })
 
-  it("blocks on the brief alone once the languages are set", async () => {
+  it("blocks on the instructions alone once the languages are set", async () => {
     const { contrib } = await seedWorld()
     await setSettings({ translationBrief: { parameters: { purpose: "   " } } })
 
     const blocked = await req("POST", "/runs", contrib, { fileId: FILE })
     expect(blocked.status).toBe(400)
     const body = (await blocked.json()) as { error: { details: { missing: string[] } } }
-    expect(body.error.details.missing).toEqual(["brief"])
+    expect(body.error.details.missing).toEqual(["instructions"])
   })
 
   it("refuses a second active run with 409 + the existing runId", async () => {

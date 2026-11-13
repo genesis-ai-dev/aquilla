@@ -202,7 +202,8 @@ Gotchas:
 - Checks and rules: \`rules\`, \`rulePenalties\`, \`algorithmicChecks\` and \`algorithmicChecksByLane\` are checked field by field; a wrong shape or an unknown field is \`validation_failed\` naming it. Read \`builtinChecks\` from GET .../settings to see what is on; \`settings\` alone shows only overrides.
 - Prefer this over UpdateProjectSettings (deprecated whole-blob replace).
 - RTL projects: set \`targetTextDirection: "rtl"\` ONCE here rather than per file (AQU-1471). It is the project's DEFAULT — resolution is per-file-row → this setting → the language — so it covers every file, present and future, and a file that really runs the other way keeps its own override. \`"auto"\`, and an absent key, mean "take it from the language", which already answers Arabic/Hebrew/Persian/Urdu/… by name or ISO code; set it explicitly when the language name is one Aquilla cannot read.
-Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "systemPrompt", "value": "Be concise." }], "ifMatchVersion": 7 }\``,
+- \`translationInstructions\` (string, ≤ 8000 chars) is THE text every drafting prompt reads — copilot, prompt-preview, the in-app agent and its draft tool, DraftCells, Autopilot — injected once, right after the fixed role text. Until it is written, prompts compose it on read from the brief, a customized \`systemPrompt\`, Living Memory instruction/standard entries, the decision log (\`projectFacts\`), the legacy agent brief and approved \`decisions/\` memories; once written, those are ignored by every prompt. Answering an Autopilot decision card and approving an AddDecision append a line to it. GET .../settings returns the resolved text as \`translationInstructions\`.
+Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "translationInstructions", "value": "Plain register for rural youth; keep divine names as in the 1999 Bible." }], "ifMatchVersion": 7 }\``,
   },
   {
     kind: 'SetBrief',
@@ -212,28 +213,28 @@ Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "syste
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### SetBrief
-Params: \`{ projectId, parameters?, freeformNotes?, ifMatchVersion }\` — sole command; at least one of \`parameters\`/\`freeformNotes\`.
+Params: \`{ projectId, parameters?, freeformNotes?, ifMatchVersion }\` — sole command; at least one of \`parameters\`/\`freeformNotes\`. Over MCP use the \`prepare_set_brief\` tool (AQU-2407), where \`ifMatchVersion\` is optional — omitted, the server pins the live settings version; \`prepare_translations\`'s \`commands\` argument does not accept this kind.
 \`parameters\` is a PARTIAL map of brief section id → answer text: named sections are replaced, every unnamed section keeps its live value. Section ids (interview order):
 - Purpose & audience: \`purpose\`, \`audience\`, \`useAndMedium\`, \`motiveSponsor\`
 - Standards: \`sourceTexts\`, \`targetVariety\`, \`registerNaturalness\`, \`literalness\`, \`keyTerms\`, \`constraints\`, \`qualityBar\`
-Writes the \`translationBrief\` key of the project settings blob — the same record the in-app brief builder reads, so an API-set brief satisfies the autopilot brief gate exactly like a hand-typed one.
+Writes the \`translationBrief\` key of the project settings blob — the same record the in-app brief builder reads. The brief is interview data: prompts never read it directly. \`translationInstructions\` is THE source every drafting prompt reads; until a maintainer writes it, the brief (its L1 summary, else its answered sections) is composed into the instructions on read — which is also how an API-set brief clears the Autopilot instructions gate. Once instructions are written, the brief no longer reaches any prompt.
 Gotchas:
 - An unknown section id is \`validation_failed\` (nothing is staged) — it is never silently dropped.
 - Section text caps at 4000 chars; \`freeformNotes\` at 8000.
 - \`ifMatchVersion\` is the SETTINGS version (not the brief's own \`version\`) and must match at prepare AND commit (plan_stale on drift) — read it first.
-- The copilot reads only the brief's rendered L1 summary (\`translationBrief.l1Summary\`), so on commit the summary is regenerated automatically when the drafting backend is reachable — the receipt's \`briefSummary\` says whether it rendered (and bumps the settings version once more). If it did not, the sections are still committed; run \`RegenerateBriefSummary\` to re-render.
+- On commit the brief's L1 summary is regenerated automatically when the drafting backend is reachable — the receipt's \`briefSummary\` says whether it rendered (and bumps the settings version once more). If it did not, the sections are still committed (and still feed un-written instructions as "Heading: answer" lines); run \`RegenerateBriefSummary\` to re-render.
 Example: \`{ "kind": "SetBrief", "projectId": "p1", "parameters": { "audience": "Rural youth, 15–25" }, "ifMatchVersion": 7 }\``,
   },
   {
     kind: 'RegenerateBriefSummary',
     title: 'Regenerate brief summary',
-    oneLiner: 'Re-render the brief’s L1 summary so the copilot sees the current sections.',
+    oneLiner: 'Re-render the brief’s L1 summary from its current sections.',
     minRoleLevel: MAINTAINER,
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### RegenerateBriefSummary
-Params: \`{ projectId, ifMatchVersion }\` — sole command; REST changesets only (like SetBrief, not offered through the MCP prepare tools).
-Renders \`translationBrief.l1Summary\` from the brief's CURRENT sections + notes with the same prompt and 1600-char cap the in-app "Regenerate summary" button uses, and writes \`l1Summary\` / \`l1GeneratedAt\` / \`l1ModelId\` back through the version-guarded settings write. The L1 is the ONLY part of the brief the copilot's prompt injects (see \`parts.brief\` in the prompt-preview read), so this is how a brief written by SetBrief — or edited in-app without regenerating — reaches the AI.
+Params: \`{ projectId, ifMatchVersion }\` — sole command; stage it with the \`regenerate_brief_summary\` MCP tool (AQU-2407, \`ifMatchVersion\` optional there) or a REST changeset. \`prepare_translations\`'s \`commands\` argument does not accept this kind.
+Renders \`translationBrief.l1Summary\` from the brief's CURRENT sections + notes with the same prompt and 1600-char cap the in-app "Regenerate summary" button uses, and writes \`l1Summary\` / \`l1GeneratedAt\` / \`l1ModelId\` back through the version-guarded settings write. Prompts read \`translationInstructions\`, not the brief: while a project has not written instructions, the L1 summary is what the brief contributes to them on read (see \`parts.instructions\` in the prompt-preview read), so this refreshes that contribution. Once \`translationInstructions\` is written, the summary no longer reaches any prompt.
 Gotchas:
 - Needs at least one filled section or \`freeformNotes\`; otherwise \`validation_failed\` "nothing to summarize" (nothing staged).
 - \`ifMatchVersion\` is the SETTINGS version and must match at prepare AND commit (plan_stale on drift). A successful commit bumps it by one.
@@ -249,11 +250,11 @@ Example: \`{ "kind": "RegenerateBriefSummary", "projectId": "p1", "ifMatchVersio
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### ProjectSetup
-Params: \`{ projectId, settings?, lanes?, brief?, members?, imports? }\` — sole command; at least one block. REST changesets only (like SetBrief, not offered through the MCP prepare tools). ALWAYS ask-mode: one changeset, one approval URL, one commit.
+Params: \`{ projectId, settings?, lanes?, brief?, members?, imports? }\` — sole command; at least one block. REST changesets only — it is not offered through the MCP prepare tools. ALWAYS ask-mode: one changeset, one approval URL, one commit.
 The server expands it into a fixed step order and chains the version guards ITSELF, which is why \`plan_stale\` cannot occur inside a plan:
 1. \`settings\` — non-policy keys, one write.
 2. \`settings\` — policy keys, restrictive direction only, re-checked against the LIVE blob at commit.
-3. \`brief\` — \`{ parameters?, freeformNotes? }\`, merged into the live brief exactly as SetBrief does, then the L1 summary is re-rendered so it reaches the copilot.
+3. \`brief\` — \`{ parameters?, freeformNotes? }\`, merged into the live brief exactly as SetBrief does, then the L1 summary is re-rendered. The brief reaches prompts only through \`translationInstructions\` composed on read — so it is ignored when the plan's \`settings\` (or the live blob) sets \`translationInstructions\`.
 4. \`members\` — \`[{ username, role }]\`, upsert (invite a new person, re-role a member) through the Membership gate.
 5. \`lanes\` — \`[{ role, language, name?, code? }]\`, created as lane rows before the settings write. \`settings.sourceLanguage\`, \`targetLanguage\`, \`targetLanes\`, and \`archivedLanes\` are rejected.
 6. \`imports\` — \`[{ artifactId, fileName, fileType?, resultIndex?, sourceLanguage?, targetLanguage?, sourceTextDirection?, targetTextDirection?, laneId? }]\`, in array order: each artifact is parsed server-side and applied as a PlanImport. \`laneId\` is required when the artifact already has translations, and it is a lane id.
@@ -477,15 +478,16 @@ Gotchas:
   {
     kind: 'AddExample',
     title: 'Add example',
-    oneLiner: 'Record a source-to-target example pair the copilot reuses on similar lines.',
+    oneLiner: 'Record a source-to-target example pair in the in-app agent\'s working memory.',
     minRoleLevel: CONTRIBUTOR,
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### AddExample
 Params: \`{ slug, source, target, note?, rationale? }\` — sole command. Writes the Living Memory entry \`examples/<slug>.md\`.
 \`slug\` is a lowercase dash-separated slug (max 64 chars); re-using a slug SUPERSEDES that entry (the previous version is archived, never erased).
+It is agent working memory: once approved, the in-app agent's chat sees it in its memory index. It does NOT reach the drafting prompts — their examples are the project's VALIDATED cells, picked per line automatically. To teach every draft a pair, validate a cell that uses it (or add the term to the termbase).
 Gotchas:
-- Landing state depends on who approved the changeset: an ask-mode approval by a PROJECT_LEAD(500)+ lands it \`approved\` (live in the copilot's next prompt); anything else lands it \`proposed\` and a lead must approve it in the in-app Memory surface first. The receipt's \`memoryStatus\` says which — don't assume.
+- Landing state depends on who approved the changeset: an ask-mode approval by a PROJECT_LEAD(500)+ lands it \`approved\`; anything else lands it \`proposed\` and a lead must approve it in the in-app Memory surface first. The receipt's \`memoryStatus\` says which — don't assume.
 - A path already held by a HUMAN-EDITED memory is refused (permission_denied) — a human owns that entry; edit it in-app.
 - source/target/note/rationale cap at 2000 chars; content matching a secret pattern is rejected.
 Example: \`{ "kind": "AddExample", "slug": "lord-as-hospod", "source": "the LORD", "target": "Господь" }\``,
@@ -493,16 +495,17 @@ Example: \`{ "kind": "AddExample", "slug": "lord-as-hospod", "source": "the LORD
   {
     kind: 'AddDecision',
     title: 'Add decision',
-    oneLiner: 'Record a standing rendering decision that binds future copilot drafts.',
+    oneLiner: 'Record a standing translation decision; once approved it is appended to the project instructions.',
     minRoleLevel: CONTRIBUTOR,
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### AddDecision
 Params: \`{ slug, decision, rationale? }\` — sole command. Writes the Living Memory entry \`decisions/<slug>.md\`.
-State a decision as a standing instruction ("render X as Y, never Z"), not as a report of one edit — it is injected into every subsequent copilot prompt.
+State a decision as a standing instruction ("render X as Y, never Z"), not as a report of one edit. When it is APPROVED its text is appended to the project instructions (settings.translationInstructions) — the one text every drafting prompt reads (copilot, prompt preview, agent chat, draft tool, DraftCells, Autopilot). The \`decisions/<slug>.md\` entry stays as the record.
 Gotchas:
 - Same approval rule as AddExample: \`approved\` only on an ask-mode approval by PROJECT_LEAD(500)+, else \`proposed\`. Read \`memoryStatus\` on the receipt.
-- Re-using a slug supersedes the prior decision (archived, not erased). A human-edited holder is refused.
+- Re-using a slug supersedes the prior decision (archived, not erased) and appends the new text; the old line stays in the instructions until a maintainer edits them. A human-edited holder is refused.
+- Refused (\`conflict\`) when the instructions are full (8000 characters) — shorten them first.
 Example: \`{ "kind": "AddDecision", "slug": "divine-name", "decision": "Render Lord as Господь, never Пан." }\``,
   },
   {
@@ -524,15 +527,15 @@ Example: \`{ "kind": "AddNote", "fileId": "f1", "cellId": "GEN 1:1", "note": "Ke
   {
     kind: 'RetireExample',
     title: 'Retire example',
-    oneLiner: 'Drop an example from copilot retrieval without erasing its history.',
+    oneLiner: 'Archive an agent example memory without erasing its history.',
     minRoleLevel: PROJECT_LEAD,
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### RetireExample
 Params: \`{ slug, rationale? }\` — sole command. Archives the APPROVED memory at \`examples/<slug>.md\`.
-Retirement is a retrieval change, not a delete: the row keeps its content and history, and the copilot simply stops receiving it. The in-app Memory surface shows it as archived.
+Retirement is an archive, not a delete: the row keeps its content and history, and the in-app agent's memory index stops listing it. The in-app Memory surface shows it as archived.
 Gotchas:
-- PROJECT_LEAD(500)+ — un-publishing memory the whole project's copilot reads is a review-tier act, unlike adding.
+- PROJECT_LEAD(500)+ — un-publishing approved memory is a review-tier act, unlike adding.
 - Rejected with \`not_found\` when nothing is currently APPROVED at that slug (a \`proposed\` entry is rejected in-app instead, not retired here).
 - A human-edited entry is refused (permission_denied) — retire it from the in-app Memory surface.
 Example: \`{ "kind": "RetireExample", "slug": "lord-as-hospod", "rationale": "Superseded by the divine-name decision." }\``,
@@ -654,7 +657,7 @@ Example: \`{ "kind": "SplitCell", "fileId": "f1", "cellId": "c3", "offset": 42, 
     agentReachable: true,
     paramsDoc: `### DraftCells
 Params: \`{ fileId, cellIds: [...], laneId, instructions? }\` — sole command in its changeset. \`laneId\` is required.
-Asks the APP to draft instead of writing the text yourself, so the output carries this project's terminology, few-shot pairs and translation brief. Drafting runs once, at prepare; the generated text is materialized into \`target.cell.commit\` events marked \`ai_drafted\`, exactly like an in-app draft — so a human reviews it as AI work, and \`aiDraft\` is visible in cell reads until they edit or validate it.
+Asks the APP to draft instead of writing the text yourself, so the output carries this project's few-shot pairs, preceding validated context and project instructions (\`translationInstructions\`, resolved — see GET .../settings). Key terms are NOT in the drafting prompt: name a term choice in \`instructions\`, which reaches the model as "Directions for this run". Drafting runs once, at prepare; the generated text is materialized into \`target.cell.commit\` events marked \`ai_drafted\`, exactly like an in-app draft — so a human reviews it as AI work, and \`aiDraft\` is visible in cell reads until they edit or validate it.
 Gotchas:
 - \`cellIds\` is EXPLICIT and non-empty. Wildcards ("*", "all") are rejected — there is no "draft everything".
 - Cap per changeset = the project's configured completion batch size (default 10, max 50). Over-cap requests are rejected naming the cap; split the work across changesets.

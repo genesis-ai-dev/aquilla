@@ -509,7 +509,10 @@ export function TimelineCard({
           <span className="h-4 w-0.5 rounded bg-foreground/30" />
         </span>
       )}
-      {showsLabel && <div className="truncate pl-1 text-[11px] leading-tight">{label}</div>}
+      {/* `dir="auto"` (AQU-2340): the timeline is pinned left to right, and
+          the line's words are not. An Arabic line reads right to left on its
+          chip, an English one left to right, whatever the interface language. */}
+      {showsLabel && <div dir="auto" className="truncate pl-1 text-[11px] leading-tight">{label}</div>}
       {showsMeta && (
       // min-w-0 + truncate: the clock now shrinks to an ellipsis like the label
       // above it instead of wrapping onto extra lines and being sliced
@@ -524,7 +527,7 @@ export function TimelineCard({
             the header above the dialogue table, which describes ONE selected
             line at a fixed height, and the recording modal, where "on camera"
             is the fact that changes how a take is performed. */}
-        {castName && <span className="font-medium text-foreground/80">{castName}</span>}
+        {castName && <span dir="auto" className="font-medium text-foreground/80">{castName}</span>}
         {/* AQU-2204: no time on a card whose times aren't shown (a source row
             while the file follows its recordings) or aren't real (a stand-in). */}
         {(drag || (!hideTime && !standIn)) && (

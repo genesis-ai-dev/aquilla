@@ -213,7 +213,6 @@ import { TimelineHorizontalList, TimelineScrollingRuler } from "./TimelineHorizo
 import { TimelineOrigin } from "./timeline-origin"
 import { createTimelineScrollBus, TimelineScrollBusContext, type TimelineScrollBus } from "./timeline-scroll-bus"
 import { TimelineLane } from "./TimelineLane"
-import type { ChangeVoiceQuality } from "@/lib/audio/change-voice"
 import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions, type TargetAudioItem } from "./TargetAudioLane"
 import type { TakeVoiceNote } from "@/lib/audio/take-voice"
 import { TimelineTransportClock } from "./TimelineTransportClock"
@@ -324,16 +323,11 @@ export interface TimelineEditorProps {
   /** AQU-2026: re-voice one line's existing take into its cast voice. Both
    *  halves are needed for the item to appear — the run and the state that
    *  says what it may do (see `TakeMenuActions`). */
-  onChangeVoice?(cellId: string, quality: ChangeVoiceQuality): void
+  onChangeVoice?(cellId: string): void
   changeVoiceStateFor?(cellId: string): ChangeVoiceMenuState | null
-  /** AQU-1758: "Make a character from this voice" on a take's menu. Absent
-   *  leaves it out (someone who may not make voices). */
-  onMakeCharacter?(cellId: string): void
-  /** AQU-1758 / AQU-2212: …in one step (name it, Add to cast) at the clip;
-   *  `onMakeCharacter` is its More options. */
-  onCloneTake?(cellId: string, audioId: string, name: string): Promise<void>
-  /** The name that clone suggests (who recorded the take). */
-  cloneNameFor?(cellId: string): string
+  /** AQU-1758 / AQU-2291: "Train a voice from this recording" on a take's
+   *  menu. Absent leaves it out (someone who may not make voices). */
+  onTrainFromTake?(cellId: string, audioId: string): void
   /** AQU-2212: "Change to …" / "Generate · …" when a line's voice and its
    *  take disagree, first in its take's menu (lib/audio/line-voice). */
   lineVoiceFor?(cellId: string): { action: "change" | "generate"; voiceName: string } | null
@@ -343,6 +337,10 @@ export interface TimelineEditorProps {
   onRenameTake?(cellId: string, audioId: string, label: string): void
   onRemoveTake?(cellId: string, audioId: string): void
   onVoteTake?(cellId: string, audioId: string, validated: boolean): void
+  /** AQU-2327: open a take in the Station (its ⋯ menu's first item). */
+  onEditInStation?(cellId: string, audioId: string): void
+  /** AQU-2327: a plain click chose a take (the Station follows it while it shows). */
+  onTakeChosen?(cellId: string, audioId: string): void
   voteStateFor?(cellId: string, audioId: string): { canVote: boolean; voted: boolean }
   /** AQU-1767: what Undo/Redo from the toolbar did, so the workspace can say
    *  so (the same report the keyboard shortcut gives). Absent = no buttons. */
@@ -1205,17 +1203,20 @@ function LaneLabel({
               // typed name to a stray click is the worse mistake — Escape is
               // right there and says "throw it away" unambiguously.
               onBlur={(e) => { if (renameFocused.current) renaming.onCommit(e.currentTarget.value) }}
+              // A name keeps its own direction inside the left-to-right grid
+              // (AQU-2340): an Arabic name is typed and read right to left.
+              dir="auto"
               className="min-w-0 flex-1 rounded-sm border border-input bg-background px-1 py-0 text-xs font-semibold outline-none focus:ring-1 focus:ring-sky-500"
             />
           ) : (
-            <span className="truncate">{name}</span>
+            <span dir="auto" className="truncate">{name}</span>
           )}
         </span>
         {/* The sublabel is the first thing to go as the row shrinks — see
             MIN_LABEL_SUB_H_PX — and it is gone outright when the gutter is a
             strip, where even the NAME does not fit. */}
         {!collapsed && ownRowH >= MIN_LABEL_SUB_H_PX && (
-          subSlot ?? <span className="truncate text-[10px] text-muted-foreground">{sub}</span>
+          subSlot ?? <span dir="auto" className="truncate text-[10px] text-muted-foreground">{sub}</span>
         )}
       </div>
       {/* ONE FLEX CHILD, NOT A FRAGMENT'S WORTH.
@@ -1308,15 +1309,15 @@ export function TimelineEditor({
   onRegenerateVoice,
   onChangeVoice,
   changeVoiceStateFor,
-  onMakeCharacter,
-  onCloneTake,
-  cloneNameFor,
+  onTrainFromTake,
   lineVoiceFor,
   onApplyLineVoice,
   takeVoiceFor,
   onRenameTake,
   onRemoveTake,
   onVoteTake,
+  onEditInStation,
+  onTakeChosen,
   voteStateFor,
   onHistoryResult,
   onTogglePlay,
@@ -2752,7 +2753,8 @@ export function TimelineEditor({
   // gate was guarding a case that can no longer arise.
   const resolveTarget = resolveTargetAudio
   // AQU-1767: ONE CHIP PER PIECE. A take cut in two is two selected pieces of
-  // one group; each is drawn, moved, trimmed and approved on its own.
+  // one group; each is drawn, moved, trimmed, approved and renamed on its own
+  // (approving and renaming since decision 7), and chosen with its whole take.
   const targetAudioHidden = hiddenTrackIds.has("target-audio")
   const targetItems = useMemo<TargetAudioItem[]>(
     () => targetAudioHidden ? [] : targetSource.flatMap((c) => piecesAsItems(c, resolveTargetPieces(c))),
@@ -2908,10 +2910,7 @@ export function TimelineEditor({
           ...(onChangeVoice && changeVoiceStateFor
             ? { changeVoice: onChangeVoice, changeVoiceState: changeVoiceStateFor }
             : {}),
-          ...(onMakeCharacter ? { makeCharacter: onMakeCharacter } : {}),
-          ...(onMakeCharacter && onCloneTake
-            ? { cloneTake: onCloneTake, ...(cloneNameFor ? { cloneName: cloneNameFor } : {}) }
-            : {}),
+          ...(onTrainFromTake ? { trainFromTake: onTrainFromTake } : {}),
           // The line's own voice and its take: the line's own track only.
           ...(slot === RECORDING_SLOT && lineVoiceFor && onApplyLineVoice
             ? { lineVoice: lineVoiceFor, applyLineVoice: onApplyLineVoice }
@@ -2920,6 +2919,7 @@ export function TimelineEditor({
             ? { rename: (cellId: string, audioId: string, current: string | null) => setRenamingTake({ cellId, audioId, label: current ?? "" }) }
             : {}),
           ...(onRemoveTake ? { remove: onRemoveTake } : {}),
+          ...(onEditInStation ? { editInStation: onEditInStation } : {}),
           ...(onVoteTake && voteStateFor ? { vote: onVoteTake, voteState: voteStateFor } : {}),
         }
       : undefined
@@ -4659,7 +4659,10 @@ export function TimelineEditor({
             masterHonorsTrims={masterHonorsTrims}
             snapEnabled={snapOn && !audioFirst}
             onSelect={selectFromChip}
-            onSelectTake={(cellId) => setSelectedTake({ cellId, slot: RECORDING_SLOT })}
+            onSelectTake={(cellId, audioId) => {
+              setSelectedTake({ cellId, slot: RECORDING_SLOT })
+              if (audioId) onTakeChosen?.(cellId, audioId)
+            }}
             onSeek={laneProps.onSeek}
             // AQU-2215 (Sam, Oct 27): dragging a take is NOT withheld when the
             // file follows its recordings any more. A chip's position is still
@@ -4696,6 +4699,8 @@ export function TimelineEditor({
             // single vote, on a project asking for two.
             validationRequirementAudio={project ? readValidationCountAudio(project) : 1}
             color={track.color}
+            // AQU-2235: a muted dub row's takes at half strength.
+            muted={!trackAudible(audibility, "target")}
           />
         )
       // ── The two kinds a USER makes (stage 2) ────────────────────────────
@@ -4742,7 +4747,10 @@ export function TimelineEditor({
             // AQU-2252: a layer's takes snap as they do following the source.
             snapEnabled={snapOn && (!audioFirst || track.setsLineLengths === false)}
             onSelect={selectFromChip}
-            onSelectTake={(cellId) => setSelectedTake({ cellId, slot: slotForTrack(track.id) })}
+            onSelectTake={(cellId, audioId) => {
+              setSelectedTake({ cellId, slot: slotForTrack(track.id) })
+              if (audioId) onTakeChosen?.(cellId, audioId)
+            }}
             onSeek={laneProps.onSeek}
             onRetimeTarget={onRetimeTarget}
             onTrimTarget={onTrimTarget}
@@ -4763,6 +4771,8 @@ export function TimelineEditor({
             validationRequirementAudio={project ? readValidationCountAudio(project) : 1}
             color={track.color}
             laneTestId={`tl-target-lane-${track.id}`}
+            // AQU-2235: …and an added track's, by its own slot's flag.
+            muted={!trackAudible(audibility, slotForTrack(track.id))}
           />
         )
       }
@@ -5531,8 +5541,27 @@ export function TimelineEditor({
             no CSS at all and the column would silently fall back to auto width.
             The two literal alternatives (`grid-cols-[44px_1fr]` /
             `grid-cols-[240px_1fr]`) would work, but then the widths live in two
-            places and the module that names them is no longer the authority. */}
+            places and the module that names them is no longer the authority.
+
+            `dir="ltr"` (AQU-2340): TIME RUNS LEFT TO RIGHT IN EVERY LANGUAGE,
+            as it does in every audio and video editor. In an Arabic or Urdu
+            interface `<html dir="rtl">` used to reach in here and flip the
+            grid: the track names went to the right, the corner's controls
+            reversed, and the track column, now a right-to-left scroller,
+            opened at its far END with 0:00 and the playhead off to the left.
+            The ruler, the chips and the playhead never flipped (they are
+            placed with `left:`), so the two halves disagreed — and worse,
+            a right-to-left scroller reports a NEGATIVE scrollLeft, which the
+            windowing below reads as a time before zero: zoomed in, the ruler
+            and every chip on screen simply were not drawn. Everything in here
+            is time-shaped, so the whole grid is pinned. Words keep their own
+            direction where they are written — the track names and the line
+            text on the chips carry `dir="auto"` — and the menus and tooltips
+            opened from in here render in a portal, under `<html>`, so they
+            still follow the interface. */}
         <div
+          dir="ltr"
+          data-testid="tl-grid"
           className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)]"
           style={{ gridTemplateColumns: `${gutterWidthPx(gutterCollapsed)}px minmax(0, 1fr)` }}
         >
@@ -5588,11 +5617,11 @@ export function TimelineEditor({
                 the ruler. Above the divider rule too, so the header draws that
                 pixel itself (`border-e`, on the rule's own column).
 
-                LOGICAL SIDES, here and on the rule: Arabic and
-                Urdu flip `<html dir>`, the grid puts this column on the RIGHT,
-                and the edge it shares with the lanes is then its left one.
-                `border-e` and `end-0` follow that edge; `border-r` and
-                `right-0` would draw the divider on the column's outer edge. */}
+                LOGICAL SIDES, here and on the rule: `border-e` and `end-0`
+                name the edge this column shares with the lanes. The grid is
+                pinned left to right (AQU-2340), so that is always the right
+                edge today; the logical names keep it true if that ever
+                changes. */}
             <div ref={gutterHeaderRef} className="relative z-40 h-7 border-b border-e border-border bg-background">
               <div className="absolute inset-0 bg-muted/20" />
               {/* THE CORNER CELL (media redesign, layout): "Tracks", and the
@@ -5610,7 +5639,7 @@ export function TimelineEditor({
                   those out by that much. Absolute contributes no layout. */}
               <div data-testid="tl-corner" className="absolute inset-0 flex items-center gap-1 ps-3 pe-1">
                 {!gutterCollapsed && (
-                  <span className="truncate text-xs text-muted-foreground">{t("editor.dock.tracks")}</span>
+                  <span dir="auto" className="truncate text-xs text-muted-foreground">{t("editor.dock.tracks")}</span>
                 )}
                 {layoutControls ? (
                   <PanelControlButtons
@@ -5959,6 +5988,8 @@ export function TimelineEditor({
                       key={c.id}
                       type="button"
                       data-testid={`tl-untimed-${c.id}`}
+                      // The line's own words, in their own direction (AQU-2340).
+                      dir="auto"
                       onClick={() => selectLine(c.id)}
                       className={cn(
                         "shrink-0 rounded-md border border-dashed border-zinc-400 bg-background px-2 py-1 text-[10px] text-foreground/80 hover:bg-muted dark:border-zinc-600",

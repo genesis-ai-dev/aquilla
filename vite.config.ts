@@ -24,7 +24,11 @@ function git(args: string[]): string {
     return ""
   }
 }
-const pkgVersion = JSON.parse(readFileSync("./package.json", "utf8")).version as string
+// One version number for the product: the desktop shell's, in tauri.conf.json.
+// package.json and Cargo.toml carry copies (scripts/app-version.test.ts keeps
+// them equal). Inside the desktop shell the footer swaps this baked value for
+// the installed shell's own version (src/components/VersionBadge.tsx).
+const appVersion = JSON.parse(readFileSync("./src-tauri/tauri.conf.json", "utf8")).version as string
 const buildBranch = resolveBuildBranch(process.env, git(["rev-parse", "--abbrev-ref", "HEAD"]))
 const buildSha = resolveBuildSha(process.env, git(["rev-parse", "HEAD"]))
 const buildDate = resolveBuildDate(git(["log", "-1", "--format=%cI"]))
@@ -52,7 +56,7 @@ export default defineConfig(({ mode }) => ({
   define: {
     "import.meta.env.VITE_BRAND": JSON.stringify(brandId),
     "import.meta.env.VITE_BETA_FLAG": JSON.stringify(process.env.VITE_BETA_FLAG ?? "1"),
-    __APP_VERSION__: JSON.stringify(pkgVersion),
+    __APP_VERSION__: JSON.stringify(appVersion),
     __APP_BRANCH__: JSON.stringify(buildBranch),
     __APP_SHA__: JSON.stringify(buildSha),
     __APP_BUILT_AT__: JSON.stringify(buildDate),
@@ -86,7 +90,9 @@ export default defineConfig(({ mode }) => ({
       // Worktrees contain their own copies of tsconfig.json; any touch there
       // triggers Vite's "changed tsconfig" path which clears the cache and
       // forces a full reload — that's the white-screen on project click.
-      ignored: ["**/src-tauri/**", "**/.worktrees/**", "**/.claude/worktrees/**"],
+      // Worker mock emails and bundles are runtime output, not SPA source.
+      // Watching their HTML reloads the page in the middle of signup.
+      ignored: ["**/src-tauri/**", "**/.worktrees/**", "**/.claude/worktrees/**", "**/.wrangler/**"],
     },
   },
   plugins: [
@@ -180,6 +186,16 @@ export default defineConfig(({ mode }) => ({
     ],
   },
   build: {
+    // AQU-2377: WebKit can retain failed modulepreload responses across a
+    // document reload after an offline navigation. Let dynamic imports load
+    // their JS graph normally; retain initial HTML preloads and Vite's CSS
+    // loading/error helper (including vite:preloadError).
+    // https://bugs.webkit.org/show_bug.cgi?id=270357
+    // Tradeoff: cold lazy routes discover JS dependencies through imports,
+    // rather than fetching the whole dependency graph in parallel up front.
+    modulePreload: {
+      resolveDependencies: (_filename, deps, { hostType }) => hostType === "html" ? deps : [],
+    },
     // hls.js (~508kB), dash.js (~961kB), and web-worker AI bundles (whisper,
     // mms) are intentionally large and non-initial (lazy route or
     // worker). Raise the threshold so vite doesn't warn about things we
@@ -269,6 +285,10 @@ export default defineConfig(({ mode }) => ({
             "scripts/lib/spawn-command.test.ts",
             "scripts/lib/playwright-loader-env.test.ts",
             "scripts/lib/listening-pids.test.ts",
+            "scripts/lib/desktop-bundle.test.ts",
+            // Owned by the "qa-biblica-python" project below: a Node-env test
+            // that shells out to the QA runner's Python suite (AQU-2365).
+            "agents/**",
           ],
         },
       },
@@ -279,6 +299,9 @@ export default defineConfig(({ mode }) => ({
       // vite-plugin-node-polyfills' browser shims reached it regardless of what
       // the inline entry declared (AQU-1431; AQU-1273 had it inline).
       "./scripts/vitest.config.mts",
+      // Runs agents/qa-biblica's stdlib `unittest` suite, so the Biblica QA
+      // runner is covered by `pnpm test` like everything else (AQU-2365).
+      "./agents/qa-biblica/vitest.config.mts",
     ],
   },
 }))

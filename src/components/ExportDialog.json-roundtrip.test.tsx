@@ -26,7 +26,7 @@ vi.mock("@/lib/sync/source-export", () => ({
   fetchRemovedCells: vi.fn(async () => []),
 }))
 vi.mock("@/lib/posthog", () => ({
-  default: { capture: vi.fn() },
+  default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() },
 }))
 
 import { downloadBlob } from "@/lib/export/export-service"

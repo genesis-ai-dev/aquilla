@@ -34,7 +34,7 @@ vi.mock("@/lib/sync/project-settings", () => ({
   PROJECT_SETTINGS_VERSION_INITIAL: 0,
 }))
 vi.mock("@/lib/store/project-index", () => ({ createProject: vi.fn().mockResolvedValue(undefined) }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 vi.mock("@/components/ui/toast", () => ({ toast: { add: vi.fn() } }))
 vi.mock("@/lib/sync/create-targets", () => ({ fetchCreateTargets: vi.fn() }))
 vi.mock("@/context/OrgContext", () => ({
@@ -63,6 +63,8 @@ function fill() {
 async function openAndFill(orgId?: number) {
   const view = render(<ProjectCreateDialog onCreated={vi.fn()} orgId={orgId} />)
   fireEvent.click(screen.getByRole("button", { name: "New project" }))
+  // The wizard asks where the project comes from first (AQU-2105).
+  fireEvent.click(screen.getByTestId("project-source-scratch"))
   await screen.findByTestId("project-create-destination")
   fill()
   return view
@@ -123,6 +125,8 @@ describe("ProjectCreateDialog — destination picker (AQU-1352)", () => {
     await waitFor(() => expect(screen.queryByTestId("project-create-destination")).toBeNull())
     mockTargets.mockReturnValueOnce(new Promise(() => {}))
     fireEvent.click(screen.getByRole("button", { name: "New project" }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fill()
     expect(submitButton()).toBeDisabled()
   })
@@ -131,6 +135,8 @@ describe("ProjectCreateDialog — destination picker (AQU-1352)", () => {
     mockTargets.mockRejectedValue(new Error("boom"))
     render(<ProjectCreateDialog onCreated={vi.fn()} orgId={10} />)
     fireEvent.click(screen.getByRole("button", { name: "New project" }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     await screen.findByTestId("project-create-destination-error")
     fill()
     expect(submitButton()).toBeDisabled()

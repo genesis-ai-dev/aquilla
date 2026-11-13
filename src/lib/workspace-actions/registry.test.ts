@@ -9,7 +9,6 @@ import { formatList } from "@/lib/i18n/format"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import type { BatchValidateCandidate } from "@/lib/review/batch-validate-summary"
 import { summarizeBatchValidate } from "@/lib/review/batch-validate-summary"
-import { resetChangeVoiceQualityCacheForTests } from "@/lib/store/change-voice-quality"
 
 // English-only `t`, standing in for the real I18nProvider hook — description()
 // is resolved outside React (registry.ts has no component tree), so tests
@@ -310,16 +309,21 @@ describe("completionBatchSizeFor", () => {
     expect(desc).toContain("7 more after this")
   })
 
-  it("the batch-validate confirmation notes the per-run cap when set", () => {
+  // AQU-2507 (was AQU-1507/586): `validationBatchSize` is the run's CHUNK size
+  // now, not a per-click ceiling, so the confirmation promises every eligible
+  // cell in the file and says the one click finishes it. The AQU-1507
+  // invariant is untouched — the number still comes from the summary the run
+  // consumes — but the run no longer stops short, so neither does the promise.
+  it("the batch-validate confirmation promises the whole file and says the run finishes it", () => {
     const p: ProjectRecord = { ...project, completionSettings: { endpoint: "", model: "", maxTokens: 512, temperature: 0.3, systemPrompt: "", validationBatchSize: 5 } }
     const desc = batchValidateDescription(
       eligibleCells(20),
-      { project: p, cap: 5 },
+      { project: p },
     )
-    // AQU-1507: the cap trims the promise as well as the run — 20 eligible
-    // cells behind a cap of 5 must not be announced as 20.
-    expect(desc).toContain("validates 5 eligible cells")
-    expect(desc).toContain("At most 5 eligible cells are validated per run")
+    expect(desc).toContain("validates 20 eligible cells")
+    expect(desc).toContain("saves in batches of 5 cells and keeps going until the file is done")
+    expect(desc).not.toContain("At most")
+    expect(desc).not.toContain("run again to continue")
   })
 })
 
@@ -481,7 +485,6 @@ describe("the audio actions are gated on their counts", () => {
 
   // AQU-1109: Change voice converts existing takes; it never generates from text.
   it("offers Change voice only when a take can be re-voiced, and says so", () => {
-    resetChangeVoiceQualityCacheForTests()
     const change = find("change-voice-all")
     const counts = (voiceChangeable: number) =>
       ctx({ activeFileId: "f1", audioCounts: { untranscribed: 0, unsynthesized: 9, voiceChangeable } })
@@ -491,7 +494,8 @@ describe("the audio actions are gated on their counts", () => {
     expect(change.isAvailable!(counts(3))).toBe(true)
     const body = change.requiresConfirmation!.description(counts(3), t, joinList)
     expect(body).toContain("3 cells")
-    expect(body).toContain("Standard quality")
+    // AQU-2291: no quality knob any more — one voice-forge pass.
+    expect(body).not.toMatch(/quality/i)
     expect(body).toContain("Nothing is generated from text.")
   })
 })

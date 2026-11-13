@@ -1,3 +1,4 @@
+import { deployment, factor } from "../lib/admin-totp"
 // Platform-operator (site-wide admin) gate.
 //
 // A SEPARATE authorization axis from the org-scoped role ladder: the
@@ -27,6 +28,10 @@ import type { Context, Next } from "hono"
 import type { Env } from "../types"
 import type { AuthHonoEnv } from "./auth"
 import { memoize } from "../lib/request-memo"
+// Circular with services/dev-access.ts (which imports isPlatformAdminEmail from
+// here). Safe: neither module calls the other at load time, only inside
+// functions.
+import { devAccessGateActive } from "../services/dev-access"
 
 /** Parse the optional `ADMIN_EMAILS` bootstrap var into trimmed, lowercased emails. */
 export const parseAdminEmails = (env: Env): Set<string> => {
@@ -66,10 +71,12 @@ export const loadPlatformAdminEmails = (env: Env): Promise<Set<string>> =>
  * access on every org/project — see resolveProjectRole / getEffectiveOrgRole.
  * One primary-key lookup, plus the env bootstrap.
  */
-export const isPlatformAdminEmail = async (env: Env, email: string): Promise<boolean> => {
+export const isPlatformAdminEmail = async (
+  env: Env, email: string, options: { includeBootstrap?: boolean } = {},
+): Promise<boolean> => {
   const normalized = email.trim().toLowerCase()
   if (!normalized) return false
-  if (parseAdminEmails(env).has(normalized)) return true
+  if (options.includeBootstrap !== false && parseAdminEmails(env).has(normalized)) return true
   return memoize(env.requestMemo, `platform-admin:${normalized}`, async () => {
     try {
       const row = await env.AQUILLA_PG.prepare(
@@ -108,9 +115,22 @@ export const platformAdminEmailsParam = async (env: Env): Promise<string> =>
  * the prod-shaped top-level [vars] turn elevation on. Separate from WHO is an
  * admin (`platform_admins`): identity is always enforced; this only governs the
  * extra step-up.
+ *
+ * AQU-2470: also off on the dev identity Worker (aquilla-dev-identity), where
+ * the AQU-2469 access list already keeps out everyone the team has not let in.
+ * The skip keys on the same test as that list (devAccessGateActive: the
+ * Worker's DEPLOYMENT_WORKER_NAME matches the manifest's development identity
+ * Worker), so the code comes off exactly where the list is enforced and
+ * nowhere else. Production, the per-branch previews (aquilla-auth-preview),
+ * and any Worker whose name is unset or unknown still ask for the code: an
+ * unrecognised environment fails closed. The environment guard refuses any
+ * request on api.dev.aquilla.app that carries another Worker's name, and on
+ * api.aquilla.app that carries this one.
  */
 export const adminElevationRequired = (env: Env): boolean =>
-  env.ADMIN_REQUIRE_ELEVATION === "true" && env.WRANGLER_LOCAL !== "1"
+  env.ADMIN_REQUIRE_ELEVATION === "true" &&
+  env.WRANGLER_LOCAL !== "1" &&
+  !devAccessGateActive(env)
 
 /**
  * Reject any caller whose account email is not a platform admin (see header).
@@ -157,13 +177,14 @@ export const requirePlatformAdmin = async (
  * would re-open OPS-35 on exactly the paths that skip the middleware.
  */
 export const hasActiveElevation = async (c: Context<AuthHonoEnv>): Promise<boolean> => {
-  if (!adminElevationRequired(c.env)) return true
+  if (!adminElevationRequired(c.env) && !(await factor(c))?.enabled) return true
   const user = c.get("user")
   const row = await c.env.AQUILLA_PG.prepare(
     `SELECT 1 AS ok FROM admin_elevations
-      WHERE user_id = ? AND session_key = ? AND elevated_until > now()`,
+      WHERE user_id = ? AND session_key = ? AND elevated_until > now()
+      AND factor_generation IS NOT DISTINCT FROM (SELECT generation FROM admin_totp WHERE user_id=admin_elevations.user_id AND deployment=? AND enabled)`,
   )
-    .bind(user.id, c.get("sessionKey"))
+    .bind(user.id, c.get("sessionKey"), deployment(c))
     .first<{ ok: number }>()
   return row != null
 }

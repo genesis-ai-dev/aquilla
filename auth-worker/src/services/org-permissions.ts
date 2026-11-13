@@ -1,6 +1,7 @@
 // Organization-permission helpers for the codex-web identity/project backend.
 
 import type { Env, AuthUser } from "../types"
+import { langquestStateByProject, type ProjectLangQuestState } from "../lib/langquest/connections"
 import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole, resolveProjectRoles } from "./project-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
@@ -51,6 +52,10 @@ import {
   type ProjectVisibilityOverrides,
   type VisibilityFloorKey,
 } from "../../../db/shared/visibility-floors"
+import {
+  loadOrgProjectImportFloors,
+  stricterProjectImportFloor,
+} from "../../../db/shared/import-floor"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -1374,7 +1379,7 @@ export interface PortfolioLane {
   bothValidatedCells: number
 }
 
-export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioTotalCells: number; recordsAudio: boolean; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
+export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioTotalCells: number; recordsAudio: boolean; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number; /** AQU-2105: set on a LangQuest-linked project — the followed language and whether its sync is healthy. */ langquest?: ProjectLangQuestState | null }
 export interface OrgPortfolioRow extends PortfolioRow { orgId: number }
 
 /** Soft-deleted file in an org the caller can see (Archived → Recently deleted). */
@@ -2569,9 +2574,13 @@ export async function listOrgPortfolioPage(
   // is keyed by cell, not by lane). Plan-unit counts stay (a unit is a file
   // section, not a lane). Wall off is the query as written.
   const visibleText = await visiblePortfolioText(env, viewer, pageRows, lanesByProject)
+  // AQU-2105: the list marks LangQuest-linked projects and says whether their
+  // sync is healthy. One small read beside the rollup, not a join into it.
+  const langquest = await langquestStateByProject(env, pageRows.map((row) => row.id), now)
   return {
     projects: pageRows.map((row) => ({
       ...mapPortfolioRow(row, lanesByProject, visibleText?.get(row.id), sourceActivity.get(row.id) ?? null),
+      langquest: langquest.get(row.id) ?? null,
       orgId: row.org_id,
     })),
     nextCursor: hasMore && last ? encodeProjectDirectoryCursor(last.id, last.name) : null,
@@ -3321,6 +3330,40 @@ export async function listStricterVisibilityProjects(
     }
   }
   return lists
+}
+
+/**
+ * AQU-2306: how many of the org's live projects require MORE than the org does
+ * to import a file — the "N projects are stricter than this" line under "Who
+ * can import files" — and which ones, so the line can name them.
+ *
+ * Deliberately the same shape and the same rules as the two visibility floors
+ * above, because the Security page shows all three the same way: any org
+ * member may read the count, only the names the caller may already see come
+ * back, and the total still covers the rest. It reads the org's floor fresh
+ * rather than taking it from the caller, so a project that was stricter stops
+ * counting the moment the ORG rises past it — with no write to the project.
+ */
+export async function listStricterImportProjects(
+  env: Env,
+  orgId: number,
+  viewer: ProjectNameViewer,
+): Promise<OverrideProjectList> {
+  const [settings, rows] = await Promise.all([
+    loadOrgSettingsBlob(env, orgId),
+    loadOrgProjectImportFloors(env.AQUILLA_PG, orgId, projectNameVisibleSql(viewer)),
+  ])
+  const orgFloor = extractRoleFloor(settings, "importMinRole", DEFAULT_IMPORT_MIN_ROLE)
+  const list: OverrideProjectList = { total: 0, projects: [] }
+  // Rows arrive in name order, so the list is too.
+  for (const row of rows) {
+    if (stricterProjectImportFloor(orgFloor, row.importMinRole) == null) continue
+    list.total += 1
+    if (row.nameVisible && list.projects.length < OVERRIDE_PROJECT_LIST_CAP) {
+      list.projects.push({ id: row.projectId, name: row.name })
+    }
+  }
+  return list
 }
 
 /**

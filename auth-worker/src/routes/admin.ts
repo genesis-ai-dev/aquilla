@@ -1,3 +1,5 @@
+import totpRoutes from "./admin-totp"
+import { factor, deployment } from "../lib/admin-totp"
 // Platform-operator (site-wide admin) surface — read-only, cross-tenant.
 //
 // Every route here bypasses the org-scoped 403 guards used elsewhere, so the
@@ -12,12 +14,18 @@
 //   GET /overview              — top-line counts (orgs, users, projects, active-7d)
 //   GET /orgs                  — every org + owner + member/project counts
 //   GET /users                 — every user
+//   GET /users/:userId         — one user + org and direct project memberships
+//   GET /orgs/:orgId/members   — one org's members with role, joined, last active
 //   GET /projects              — every project + org/creator + cell/word rollup + shared flag
 //   GET /activity              — cross-tenant activity_logs feed (?limit, ?since)
 //   GET /retention             — DAU/WAU/MAU, Day-N + weekly cohort retention (?days, ?asOf)
 //   POST /retention/report     — email the weekly|monthly recap to the caller now
 //   GET /credits/orgs          — all orgs with day/week credit spend + caps
 //   PATCH /credits/org/:orgId  — update per-org credit config (org_settings.credits)
+//   GET|POST /feedback-routes, PATCH|DELETE /feedback-routes/:id
+//                              — email routes for "Report a problem"
+//   GET|POST /dev-access, DELETE /dev-access/:email
+//                              — who may use dev.aquilla.app (admin-dev-access.ts)
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -30,7 +38,9 @@ import { loadPlatformSettings, savePlatformSettings } from "../lib/platform-sett
 import { getAllowedModels } from "../lib/ai-budget"
 import { aggregateAbResults } from "../lib/model-ab"
 import adminBillingRoutes from "./admin-billing"
+import adminDevAccessRoutes from "./admin-dev-access"
 import { sendAdminElevationCodeEmail, sendRetentionReportEmail } from "../services/email"
+import { FEEDBACK_ROUTE_MAX_EMAILS, rowToRoute, type FeedbackRoute } from "../services/feedback-routes"
 import { hashPasswordWerkzeugScrypt, verifyPasswordWerkzeugScrypt } from "../utils/password"
 import { loadRetentionMetrics } from "../lib/retention-load"
 import { buildRetentionReport, reportWindow } from "../lib/retention-report"
@@ -76,7 +86,8 @@ admin.use("*", requirePlatformAdmin)
  */
 admin.get("/me", async (c) => {
   const user = c.get("user")
-  const hardened = adminElevationRequired(c.env)
+  const totpEnabled = (await factor(c))?.enabled === true
+  const hardened = adminElevationRequired(c.env) || totpEnabled
   // OPS-35: scoped to this session's own grant, matching requireAdminElevation
   // — otherwise the SPA would report `elevated: true` on a session that the
   // gate below then 403s, which is exactly the account-vs-session confusion
@@ -84,9 +95,10 @@ admin.get("/me", async (c) => {
   const row = hardened
     ? await c.env.AQUILLA_PG.prepare(
         `SELECT elevated_until FROM admin_elevations
-          WHERE user_id = ? AND session_key = ? AND elevated_until > now()`,
+          WHERE user_id = ? AND session_key = ? AND elevated_until > now()
+          AND factor_generation IS NOT DISTINCT FROM (SELECT generation FROM admin_totp WHERE user_id=admin_elevations.user_id AND deployment=? AND enabled)`,
       )
-        .bind(user.id, c.get("sessionKey"))
+        .bind(user.id, c.get("sessionKey"), deployment(c))
         .first<{ elevated_until: string }>()
     : null
   return c.json({
@@ -94,11 +106,14 @@ admin.get("/me", async (c) => {
     username: user.username,
     email: user.email,
     hardened,
+    totpEnabled,
     // When the console isn't hardened, it's open (no step-up needed).
     elevated: hardened ? Boolean(row) : true,
     elevatedUntil: row?.elevated_until ?? null,
   })
 })
+
+admin.route("/totp", totpRoutes)
 
 // ── Step-up elevation (NOT behind requireAdminElevation — they establish it) ──
 
@@ -113,6 +128,7 @@ admin.get("/me", async (c) => {
  */
 admin.post("/elevation/request", async (c) => {
   const user = c.get("user")
+  if ((await factor(c))?.enabled) return c.json({ error: "totp_required" }, 409)
 
   const recent = await c.env.AQUILLA_PG.prepare(
     `SELECT COUNT(*) AS n FROM admin_elevation_codes
@@ -175,6 +191,7 @@ const elevationVerifySchema = z.object({ code: z.string().min(4).max(12) })
 admin.post("/elevation/verify", zValidator("json", elevationVerifySchema), async (c) => {
   const user = c.get("user")
   const { code } = c.req.valid("json")
+  if ((await factor(c))?.enabled) return c.json({ error: "totp_required" }, 409)
 
   // [Pen test] Auth & session mgmt (2026-07-27): this endpoint had no attempt
   // limiting — a caller already holding a valid (e.g. stolen) non-elevated
@@ -259,7 +276,7 @@ admin.post("/elevation/verify", zValidator("json", elevationVerifySchema), async
     `INSERT INTO admin_elevations (user_id, session_key, elevated_until, updated_at)
      VALUES (?, ?, ?, now())
      ON CONFLICT (user_id, session_key)
-       DO UPDATE SET elevated_until = EXCLUDED.elevated_until, updated_at = now()`,
+       DO UPDATE SET elevated_until = EXCLUDED.elevated_until, updated_at = now(), factor_generation = NULL`,
   )
     .bind(user.id, sessionKey, until)
     .run()
@@ -410,6 +427,54 @@ admin.get("/orgs", async (c) => {
   })
 })
 
+/** A path id that must be a positive whole number, else null (the route 404s). */
+function parseNumericId(raw: string): number | null {
+  return /^\d+$/.test(raw) ? Number(raw) : null
+}
+
+/**
+ * GET /api/v2/admin/orgs/:orgId/members — everyone in one org with their org
+ * role (`roleLevel`; the client labels it), join date, and last activity.
+ * 404 when the org does not exist.
+ */
+admin.get("/orgs/:orgId/members", async (c) => {
+  const orgId = parseNumericId(c.req.param("orgId"))
+  if (orgId === null) return c.json({ error: "Org not found" }, 404)
+  const org = await c.env.AQUILLA_PG.prepare("SELECT id FROM organizations WHERE id = ?")
+    .bind(orgId)
+    .first<{ id: number }>()
+  if (!org) return c.json({ error: "Org not found" }, 404)
+  const { results } = await c.env.AQUILLA_PG.prepare(
+    `SELECT u.id AS user_id, u.username, u.display_name, u.email,
+            m.role_level, m.granted_at, m.last_active_at
+       FROM org_members m
+       JOIN users u ON u.id = m.user_id
+      WHERE m.org_id = ?
+      ORDER BY m.role_level DESC, LOWER(u.username)`,
+  )
+    .bind(orgId)
+    .all<{
+      user_id: number
+      username: string
+      display_name: string | null
+      email: string
+      role_level: number
+      granted_at: string | null
+      last_active_at: string | null
+    }>()
+  return c.json({
+    members: results.map((r) => ({
+      userId: r.user_id,
+      username: r.username,
+      displayName: r.display_name,
+      email: r.email,
+      roleLevel: r.role_level,
+      joinedAt: r.granted_at,
+      lastActiveAt: r.last_active_at,
+    })),
+  })
+})
+
 /** GET /api/v2/admin/teams — every group ("team") with org + member/grant counts. */
 admin.get("/teams", async (c) => {
   const { results } = await c.env.AQUILLA_PG.prepare(
@@ -481,6 +546,86 @@ admin.get("/users", async (c) => {
       createdAt: r.created_at,
       orgCount: r.org_count,
       lastActiveAt: r.last_active_at,
+    })),
+  })
+})
+
+/**
+ * GET /api/v2/admin/users/:userId — one user plus their org memberships and
+ * their direct project memberships (`project_members` rows). Access a person
+ * gets only through an org role or a team grant is not listed as a project
+ * here. 404 when the user does not exist.
+ */
+admin.get("/users/:userId", async (c) => {
+  const userId = parseNumericId(c.req.param("userId"))
+  if (userId === null) return c.json({ error: "User not found" }, 404)
+  const user = await c.env.AQUILLA_PG.prepare(
+    "SELECT id, username, email, display_name, created_at FROM users WHERE id = ?",
+  )
+    .bind(userId)
+    .first<{
+      id: number
+      username: string
+      email: string
+      display_name: string | null
+      created_at: string
+    }>()
+  if (!user) return c.json({ error: "User not found" }, 404)
+  const orgs = await c.env.AQUILLA_PG.prepare(
+    `SELECT o.id AS org_id, o.name, m.role_level, m.granted_at, m.last_active_at
+       FROM org_members m
+       JOIN organizations o ON o.id = m.org_id
+      WHERE m.user_id = ?
+      ORDER BY LOWER(COALESCE(o.name, ''))`,
+  )
+    .bind(userId)
+    .all<{
+      org_id: number
+      name: string | null
+      role_level: number
+      granted_at: string | null
+      last_active_at: string | null
+    }>()
+  const projects = await c.env.AQUILLA_PG.prepare(
+    `SELECT p.id AS project_id, p.name, p.org_id, o.name AS org_name,
+            p.archived_at, pm.role_level
+       FROM project_members pm
+       JOIN projects p ON p.id = pm.project_id
+       LEFT JOIN organizations o ON o.id = p.org_id
+      WHERE pm.user_id = ?
+      ORDER BY LOWER(p.name)`,
+  )
+    .bind(userId)
+    .all<{
+      project_id: string
+      name: string
+      org_id: number | null
+      org_name: string | null
+      archived_at: string | null
+      role_level: number
+    }>()
+  return c.json({
+    user: {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      displayName: user.display_name,
+      createdAt: user.created_at,
+    },
+    orgs: orgs.results.map((r) => ({
+      orgId: r.org_id,
+      name: r.name,
+      roleLevel: r.role_level,
+      joinedAt: r.granted_at,
+      lastActiveAt: r.last_active_at,
+    })),
+    projects: projects.results.map((r) => ({
+      projectId: r.project_id,
+      name: r.name,
+      orgId: r.org_id,
+      orgName: r.org_name,
+      archived: r.archived_at != null,
+      roleLevel: r.role_level,
     })),
   })
 })
@@ -1102,6 +1247,8 @@ admin.get("/ab-results", async (c) => {
 })
 
 admin.route("/", adminBillingRoutes)
+// AQU-2469: the dev.aquilla.app access list (routes/admin-dev-access.ts).
+admin.route("/", adminDevAccessRoutes)
 
 /**
  * GET /api/v2/admin/retention — active-user + retention metrics computed from
@@ -1148,6 +1295,201 @@ admin.post("/retention/report", zValidator("json", retentionReportSchema), async
     return c.json({ error: "email_unavailable", message: "Email is not configured in this environment." }, 503)
   }
   return c.json({ ok: true, subject: report.subject, asOf: current.asOf })
+})
+
+// ---------------------------------------------------------------------------
+// Feedback routes: who gets emailed when a user sends "Report a problem".
+// ---------------------------------------------------------------------------
+
+const feedbackRouteEmailsSchema = z
+  .array(z.string().trim().toLowerCase().email().max(254))
+  .min(1)
+  .max(FEEDBACK_ROUTE_MAX_EMAILS)
+  .transform((list) => [...new Set(list)])
+
+const feedbackRouteBodySchema = z.object({
+  orgId: z.number().int().positive(),
+  // Empty = the whole org.
+  projectIds: z.array(z.string().min(1)).max(500).default([]),
+  emails: feedbackRouteEmailsSchema,
+  label: z.string().trim().max(80).nullish(),
+  enabled: z.boolean().default(true),
+})
+
+const feedbackRoutePatchSchema = z.object({
+  projectIds: z.array(z.string().min(1)).max(500).optional(),
+  emails: feedbackRouteEmailsSchema.optional(),
+  label: z.string().trim().max(80).nullish(),
+  enabled: z.boolean().optional(),
+})
+
+/** The ids in `projectIds` that are not projects of `orgId`. */
+async function projectsOutsideOrg(
+  env: AuthHonoEnv["Bindings"],
+  orgId: number,
+  projectIds: string[],
+): Promise<string[]> {
+  if (projectIds.length === 0) return []
+  const { results } = await env.AQUILLA_PG.prepare(
+    `SELECT id FROM projects WHERE org_id = ? AND id IN (${projectIds.map(() => "?").join(", ")})`,
+  )
+    .bind(orgId, ...projectIds)
+    .all<{ id: string }>()
+  const inOrg = new Set((results ?? []).map((r) => r.id))
+  return projectIds.filter((id) => !inOrg.has(id))
+}
+
+async function listFeedbackRoutes(env: AuthHonoEnv["Bindings"], id?: number) {
+  const { results } = await env.AQUILLA_PG.prepare(
+    `SELECT r.id, r.org_id, r.project_ids, r.emails, r.label, r.enabled, r.created_at,
+            o.name AS org_name
+       FROM feedback_routes r LEFT JOIN organizations o ON o.id = r.org_id
+      ${id === undefined ? "" : "WHERE r.id = ?"}
+      ORDER BY r.id`,
+  )
+    .bind(...(id === undefined ? [] : [id]))
+    .all<{
+      id: number | string
+      org_id: number | string
+      project_ids: string | null
+      emails: string
+      label: string | null
+      enabled: boolean
+      created_at: string | null
+      org_name: string | null
+    }>()
+  const rows = results ?? []
+  const routes = rows.map((row) => ({ ...rowToRoute(row), orgName: row.org_name, createdAt: row.created_at }))
+  const wanted = [...new Set(routes.flatMap((r) => r.projectIds))]
+  const names = new Map<string, string>()
+  if (wanted.length > 0) {
+    const named = await env.AQUILLA_PG.prepare(
+      `SELECT id, name FROM projects WHERE id IN (${wanted.map(() => "?").join(", ")})`,
+    )
+      .bind(...wanted)
+      .all<{ id: string; name: string | null }>()
+    for (const p of named.results ?? []) names.set(p.id, p.name ?? p.id)
+  }
+  return routes.map((r) => ({
+    ...r,
+    projects: r.projectIds.map((pid) => ({ id: pid, name: names.get(pid) ?? pid })),
+  }))
+}
+
+async function auditFeedbackRoute(
+  env: AuthHonoEnv["Bindings"],
+  userId: number,
+  action: string,
+  detail: Record<string, unknown>,
+) {
+  await env.AQUILLA_PG.prepare(`INSERT INTO admin_audit_log (user_id, action, detail) VALUES (?, ?, ?)`)
+    .bind(userId, action, JSON.stringify(detail))
+    .run()
+}
+
+/** GET /api/v2/admin/feedback-routes — every route with its org and project names. */
+admin.get("/feedback-routes", async (c) => {
+  return c.json({ routes: await listFeedbackRoutes(c.env) })
+})
+
+/** POST /api/v2/admin/feedback-routes — add a route. 400 if a project is not in the org. */
+admin.post("/feedback-routes", zValidator("json", feedbackRouteBodySchema), async (c) => {
+  const user = c.get("user")
+  const body = c.req.valid("json")
+  const org = await c.env.AQUILLA_PG.prepare("SELECT id FROM organizations WHERE id = ?")
+    .bind(body.orgId)
+    .first<{ id: number }>()
+  if (!org) return c.json({ error: "org_not_found", message: "That org does not exist." }, 404)
+  const projectIds = [...new Set(body.projectIds)]
+  const stray = await projectsOutsideOrg(c.env, body.orgId, projectIds)
+  if (stray.length > 0) {
+    return c.json(
+      { error: "project_not_in_org", message: `These projects are not in that org: ${stray.join(", ")}`, projectIds: stray },
+      400,
+    )
+  }
+  const row = await c.env.AQUILLA_PG.prepare(
+    `INSERT INTO feedback_routes (org_id, project_ids, emails, label, enabled, created_by)
+     VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+  )
+    .bind(
+      body.orgId,
+      projectIds.length > 0 ? JSON.stringify(projectIds) : null,
+      JSON.stringify(body.emails),
+      body.label || null,
+      body.enabled,
+      user.id,
+    )
+    .first<{ id: number | string }>()
+  const id = Number(row?.id)
+  await auditFeedbackRoute(c.env, user.id, "feedback_route.create", {
+    id,
+    orgId: body.orgId,
+    projectCount: projectIds.length,
+    emailCount: body.emails.length,
+  })
+  const [created] = await listFeedbackRoutes(c.env, id)
+  return c.json({ route: created }, 201)
+})
+
+/** PATCH /api/v2/admin/feedback-routes/:id — change projects, emails, label or enabled. */
+admin.patch("/feedback-routes/:id", zValidator("json", feedbackRoutePatchSchema), async (c) => {
+  const user = c.get("user")
+  const id = parseInt(c.req.param("id"), 10)
+  if (!Number.isSafeInteger(id)) return c.json({ error: "bad_id" }, 400)
+  const patch = c.req.valid("json")
+  const existing = await c.env.AQUILLA_PG.prepare(
+    "SELECT id, org_id, project_ids, emails, label, enabled FROM feedback_routes WHERE id = ?",
+  )
+    .bind(id)
+    .first<Parameters<typeof rowToRoute>[0]>()
+  if (!existing) return c.json({ error: "not_found" }, 404)
+  const current: FeedbackRoute = rowToRoute(existing)
+
+  const projectIds = patch.projectIds ? [...new Set(patch.projectIds)] : current.projectIds
+  if (patch.projectIds) {
+    const stray = await projectsOutsideOrg(c.env, current.orgId, projectIds)
+    if (stray.length > 0) {
+      return c.json(
+        { error: "project_not_in_org", message: `These projects are not in that org: ${stray.join(", ")}`, projectIds: stray },
+        400,
+      )
+    }
+  }
+  await c.env.AQUILLA_PG.prepare(
+    `UPDATE feedback_routes
+        SET project_ids = ?, emails = ?, label = ?, enabled = ?, updated_at = now()
+      WHERE id = ?`,
+  )
+    .bind(
+      projectIds.length > 0 ? JSON.stringify(projectIds) : null,
+      JSON.stringify(patch.emails ?? current.emails),
+      patch.label === undefined ? current.label : patch.label || null,
+      patch.enabled ?? current.enabled,
+      id,
+    )
+    .run()
+  await auditFeedbackRoute(c.env, user.id, "feedback_route.update", {
+    id,
+    orgId: current.orgId,
+    changed: Object.keys(patch),
+  })
+  const [updated] = await listFeedbackRoutes(c.env, id)
+  return c.json({ route: updated })
+})
+
+/** DELETE /api/v2/admin/feedback-routes/:id */
+admin.delete("/feedback-routes/:id", async (c) => {
+  const user = c.get("user")
+  const id = parseInt(c.req.param("id"), 10)
+  if (!Number.isSafeInteger(id)) return c.json({ error: "bad_id" }, 400)
+  const existing = await c.env.AQUILLA_PG.prepare("SELECT org_id FROM feedback_routes WHERE id = ?")
+    .bind(id)
+    .first<{ org_id: number | string }>()
+  if (!existing) return c.json({ error: "not_found" }, 404)
+  await c.env.AQUILLA_PG.prepare("DELETE FROM feedback_routes WHERE id = ?").bind(id).run()
+  await auditFeedbackRoute(c.env, user.id, "feedback_route.delete", { id, orgId: Number(existing.org_id) })
+  return c.json({ ok: true })
 })
 
 export default admin

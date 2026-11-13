@@ -55,6 +55,10 @@ export const rules = defineNamespace({
     "rules.infraction.builtin.unpairedQuotes": "Unpaired quotation mark in translation",
     "rules.infraction.builtin.untranslatedFragment": "Source word left untranslated",
     "rules.infraction.builtin.lengthRatio": "Translation is much shorter or longer than the source",
+    "rules.infraction.builtin.scriptureReference":
+      "Scripture reference does not match the project's book names or the canon",
+    "rules.infraction.builtin.numberFormat":
+      "Number is not written the way the target language writes numbers",
     "rules.infraction.builtin.placeholderIntegrity": plural({
       one: "Placeholder {tokens} missing in translation",
       other: "Placeholders {tokens} missing in translation",
@@ -114,6 +118,12 @@ export const rules = defineNamespace({
     "rules.builtin.lengthRatio.name": "Length mismatch",
     "rules.builtin.lengthRatio.description":
       "Translation is under 40% or over 250% of the source's length — a sign of a dropped or added clause. Off by default: normal length varies by language pair.",
+    "rules.builtin.scriptureReference.name": "Scripture references",
+    "rules.builtin.scriptureReference.description":
+      "Scripture references in the translation use the project's book names and name a chapter the canon has, with one separator throughout. Off by default: it needs the project's book names.",
+    "rules.builtin.numberFormat.name": "Number format",
+    "rules.builtin.numberFormat.description":
+      "Numbers in the translation are written the way the target language writes them — its digits, its thousands separator, its decimal mark. Off by default: it needs the target language, or the project's own answer for it.",
 
     // ── Shared vocabulary ───────────────────────────────────────────────────
     "rules.severity.major": "Major",
@@ -164,6 +174,28 @@ export const rules = defineNamespace({
     }),
     "rules.checkDrawer.caseExceptionsLearned":
       "Not flagged — recurring in this text, so treated as the project's own spelling: {forms}",
+    // ── Spelling / project wordlist (AQU-1737) ──
+    "rules.checkDrawer.spelling": "Spelling ({count})",
+    "rules.checkDrawer.spellingSoundsLike": plural({
+      one: 'Sounds like "{suggestion}", which this text writes {suggestionCount} time.',
+      other: 'Sounds like "{suggestion}", which this text writes {suggestionCount} times.',
+    }),
+    "rules.checkDrawer.spellingCloseTo": plural({
+      one: 'Almost "{suggestion}", which this text writes {suggestionCount} time.',
+      other: 'Almost "{suggestion}", which this text writes {suggestionCount} times.',
+    }),
+    "rules.checkDrawer.approveSpelling": "Approve",
+    "rules.checkDrawer.approveSpellingAriaLabel": 'Approve the spelling "{form}" everywhere it occurs',
+    "rules.checkDrawer.spellingApproved": plural({
+      one: "{count} spelling approved — every occurrence cleared.",
+      other: "{count} spellings approved — every occurrence cleared.",
+    }),
+    "rules.checkDrawer.spellingAutoApproved":
+      "Not flagged — written often enough in this text to be treated as correct: {forms}",
+    "rules.checkDrawer.wordlistSize": plural({
+      one: "Wordlist: {count} word form.",
+      other: "Wordlist: {count} word forms.",
+    }),
     "rules.checkDrawer.otherTermsClean": plural({
       one: "{count} other term checked with no issues.",
       other: "{count} other terms checked with no issues.",
@@ -198,14 +230,13 @@ export const rules = defineNamespace({
     "rules.orgSettings.title": "Rules",
     "rules.orgSettings.navHint": "Org-wide translation rules",
     "rules.orgSettings.description":
-      "Rules every project in this organization is checked against. Project leads can promote a project rule up to here.",
+      "Rules every project in this organization is checked against. Project Leads can promote a project rule up to here.",
 
     // ── RulesSurface (the /project/:id/rules view) ──────────────────────────
     "rules.usageSummary": "{fixes} fixes applied · {calls} LLM calls this project",
     "rules.promotion.requested": "Requested ✓",
     "rules.promotion.alreadyRequested": "Already requested",
     "rules.promotion.requestFailed": "Failed — try again",
-    "rules.surface.addRuleButton": "Add rule",
     "rules.surface.createRuleDialog.title": "Create translation rule",
     "rules.surface.createRuleDialog.description": "Create a project translation rule.",
     "rules.surface.createOrgRuleDialog.title": "Create org rule",
@@ -229,7 +260,6 @@ export const rules = defineNamespace({
       other: "Show {count} rules from other language lanes",
     }),
     "rules.surface.laneScope.hideOtherLanes": "Hide rules from other language lanes",
-    "rules.surface.laneScope.noRulesInLane": "No project rules apply in {lane}.",
     "rules.surface.orgRulesCardTitle": "Org rules ({count})",
     "rules.surface.addOrgRuleButton": "Add org rule",
     // "Read-only" permission badge → common.readOnly (identical text)
@@ -248,11 +278,6 @@ export const rules = defineNamespace({
     "rules.surface.promoteDialog.body":
       "A copy of {name} will be added to the org's rule library. The project copy is kept.",
     "rules.surface.promoteDialog.promoting": "Promoting…",
-    "rules.surface.projectRulesCardTitle": "Project rules ({count})",
-    "rules.surface.noProjectRules.title": "No project rules yet",
-    "rules.surface.noProjectRules.description":
-      "Add a rule or import a style guide using the buttons above, or suggest rules from your edits below.",
-    "rules.surface.noProjectRules.orgRulesNote": "Org rules above also apply to this project.",
     "rules.surface.autofixBadge": "autofix",
     "rules.surface.tryToFixAllButton": "Try to fix all",
     "rules.surface.promoteToOrgButton": "Promote to org",
@@ -447,6 +472,37 @@ export const rules = defineNamespace({
     "rules.fixReview.irreversibleConfirmSuffix": "to confirm.",
     "rules.fixReview.confirmInputAriaLabel": "Type the rule name to confirm",
     "rules.fixReview.applyButton": "Apply {count} selected",
+
+    // ── AQU-2342: the ONE Checks list (Living Memory → Checks) ─────────────
+    "rules.checks.listTitle": "Checks",
+    "rules.checks.intro":
+      "Every AI draft is checked against these after it is written, and the drafting prompt " +
+      "names them so the AI aims for them. Where two checks overlap, the narrower one wins.",
+    "rules.checks.addButton": "Add check",
+    "rules.checks.empty.title": "No checks of your own yet",
+    "rules.checks.empty.description":
+      "The built-in checks below always run. Add a check to hold drafts to your own conventions.",
+    "rules.checks.scope.project": "Project",
+    "rules.checks.scope.builtin": "Built-in",
+    "rules.checks.scope.book": "Book {name}",
+    "rules.checks.scope.genre": "Genre: {name}",
+    "rules.checks.scope.file": "File: {name}",
+    "rules.checks.scope.section": "Section {name}",
+    "rules.checks.scope.passage": "Passage {name}",
+    "rules.checks.scope.segment": "Line {name}",
+    "rules.checks.scope.more": "+{count}",
+    "rules.checks.add.title": "Add a check",
+    "rules.checks.add.description": "Choose how to start. Every check ends up in the same list.",
+    "rules.checks.add.pattern.title": "Write a check",
+    "rules.checks.add.pattern.description":
+      "Words the translation must or must not contain, for the whole project or one language.",
+    "rules.checks.add.import.title": "Import from a style guide",
+    "rules.checks.add.import.description": "Upload a document. The AI suggests checks for you to review.",
+    "rules.checks.add.extract.title": "Draw style rules from source documents",
+    "rules.checks.add.extract.description":
+      "The AI reads your source documents and suggests style rules for you to review.",
+    "rules.checks.add.org.title": "Write an organization check",
+    "rules.checks.add.org.description": "Applies to every project in your organization.",
   },
   context: {
     _context: {
@@ -454,6 +510,94 @@ export const rules = defineNamespace({
         "Translation rules, quality checks and health — the rule list and editor, the file-check pass and its findings drawer, and completion/health readouts. Note the user's OWN rule names and descriptions are content and are never keyed; only the chrome around them is.",
     },
     keys: {
+      "rules.checks.listTitle": {
+        description:
+          "Heading of the one list of every check a project runs (its own rules, organization rules, " +
+          "style rules and the built-in checks) on the Living Memory → Checks page.",
+        maxLength: 24,
+      },
+      "rules.checks.intro": {
+        description:
+          "Lead sentence of the Checks page: what a check does (drafts are checked after they are " +
+          "written; the drafting prompt also names the checks) and which wins when two overlap.",
+      },
+      "rules.checks.addButton": {
+        description: "The one button that starts adding any kind of check. Opens a short choice of how.",
+        maxLength: 20,
+      },
+      "rules.checks.empty.title": {
+        description: "Shown in the Checks list while the project has no checks besides the built-in ones.",
+      },
+      "rules.checks.empty.description": {
+        description: "Sentence under that empty-state title.",
+      },
+      "rules.checks.scope.project": {
+        description: "Chip on a check that applies to the whole project. Short, like a tag.",
+        maxLength: 16,
+      },
+      "rules.checks.scope.builtin": {
+        description: "Chip on a check that ships with the app (not written by the team). Short, like a tag.",
+        maxLength: 16,
+      },
+      "rules.checks.scope.book": {
+        description: "Chip on a style rule that applies to one Bible book.",
+        placeholders: { name: "The book code, e.g. PSA. Not translated." },
+        maxLength: 24,
+      },
+      "rules.checks.scope.genre": {
+        description: "Chip on a style rule that applies to documents of one genre.",
+        placeholders: { name: "The genre name as the team entered it, e.g. poetry." },
+        maxLength: 32,
+      },
+      "rules.checks.scope.file": {
+        description: "Chip on a style rule that applies to one file.",
+        placeholders: { name: "The file's name." },
+        maxLength: 40,
+      },
+      "rules.checks.scope.section": {
+        description: "Chip on a style rule that applies to one section (a chapter).",
+        placeholders: { name: "The section label, e.g. PSA 23. Not translated." },
+        maxLength: 24,
+      },
+      "rules.checks.scope.passage": {
+        description: "Chip on a style rule that applies to a range of verses.",
+        placeholders: { name: "The verse range, e.g. LUK 1:1-4. Not translated." },
+        maxLength: 32,
+      },
+      "rules.checks.scope.segment": {
+        description: "Chip on a style rule that applies to one line (cell).",
+        placeholders: { name: "The line's id. Not translated." },
+        maxLength: 32,
+      },
+      "rules.checks.scope.more": {
+        description: "Chip after the first few scope chips: how many more places the check applies to.",
+        placeholders: { count: "How many more scope chips are hidden." },
+        maxLength: 8,
+      },
+      "rules.checks.add.title": { description: "Title of the dialog that asks how to start a new check." },
+      "rules.checks.add.description": { description: "Sentence under that dialog's title." },
+      "rules.checks.add.pattern.title": {
+        description: "Choice in that dialog: write a check by hand (opens the rule editor).",
+        maxLength: 40,
+      },
+      "rules.checks.add.pattern.description": { description: "One line under that choice." },
+      "rules.checks.add.import.title": {
+        description: "Choice in that dialog: import checks from an uploaded style-guide document.",
+        maxLength: 40,
+      },
+      "rules.checks.add.import.description": { description: "One line under that choice." },
+      "rules.checks.add.extract.title": {
+        description:
+          "Choice in that dialog: the AI reads the project's source documents (its knowledge base) " +
+          "and suggests style rules.",
+        maxLength: 48,
+      },
+      "rules.checks.add.extract.description": { description: "One line under that choice." },
+      "rules.checks.add.org.title": {
+        description: "Choice in that dialog, for organization maintainers: a check for every project in the organization.",
+        maxLength: 40,
+      },
+      "rules.checks.add.org.description": { description: "One line under that choice." },
       "rules.builtin.corruptedCharacters.name": {
         description:
           "Name of a built-in quality check in the built-in checks list on the Rules page. It flags " +
@@ -512,6 +656,42 @@ export const rules = defineNamespace({
         description:
           "Finding shown on a row when the translation is far shorter or longer than the source, which " +
           "can mean part of the text was dropped or added.",
+      },
+      "rules.builtin.scriptureReference.name": {
+        description:
+          "Name of a built-in quality check in the built-in checks list. It flags a scripture " +
+          "reference (like \"John 3:16\") written with a book name the project does not use, or " +
+          "naming a chapter that does not exist. Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.scriptureReference.description": {
+        description:
+          "One-line description under that check's name in the built-in checks list. The check is " +
+          "off by default because it needs the project's own book names.",
+      },
+      "rules.infraction.builtin.scriptureReference": {
+        description:
+          "Finding shown on a row when a scripture reference in the translation uses a book name the " +
+          "project does not use, names a chapter the Bible does not have, or separates chapter and " +
+          "verse differently from the other references in the same row.",
+      },
+      "rules.builtin.numberFormat.name": {
+        description:
+          "Name of a built-in quality check in the built-in checks list. It flags a number written " +
+          "the way another language writes numbers — the wrong thousands separator or decimal mark, " +
+          "or digits from a script the language does not use. Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.numberFormat.description": {
+        description:
+          "One-line description under that check's name in the built-in checks list. The check is " +
+          "off by default because it needs the target language to be known.",
+      },
+      "rules.infraction.builtin.numberFormat": {
+        description:
+          "Finding shown on a row when a number in the translation is written the way another " +
+          "language writes numbers: \"3,5\" where this language would write \"3.5\", or digits from " +
+          "a script this language does not use.",
       },
       "rules.builtin.numberIntegrityExtra.name": {
         description:
@@ -665,6 +845,50 @@ export const rules = defineNamespace({
           "Footnote under the mixed-capitalization section naming the word forms the check learned to allow because they recur in the project's own text (a noun-class prefix like 'kiSwahili', a brand name). Lets a reviewer confirm or reject what was let through.",
         placeholders: { forms: "The excepted word forms, comma-joined — raw cell content, never translated." },
       },
+      "rules.checkDrawer.spelling": {
+        description:
+          "Section heading in the check-file findings drawer, counting suspected misspellings — rare word forms that look or sound like a form the project writes often.",
+        placeholders: { count: "Number of suspected misspellings." },
+      },
+      "rules.checkDrawer.spellingSoundsLike": {
+        description:
+          "Headline of one spelling card, under the suspected word form itself (raw cell content, never translated). Says which spelling the project usually writes, because the two forms fold to the same sound.",
+        placeholders: {
+          suggestion: "The spelling the project usually writes — raw cell content, never translated.",
+          suggestionCount: "How many times the project writes that spelling.",
+        },
+      },
+      "rules.checkDrawer.spellingCloseTo": {
+        description:
+          "Same as rules.checkDrawer.spellingSoundsLike, but for a form that is only a character or two away from the usual spelling rather than a sound-alike of it.",
+        placeholders: {
+          suggestion: "The spelling the project usually writes — raw cell content, never translated.",
+          suggestionCount: "How many times the project writes that spelling.",
+        },
+      },
+      "rules.checkDrawer.approveSpelling": {
+        description:
+          "Button on a spelling card that accepts the suspected form as correct, clearing every occurrence of it at once. Keep it short — it sits inside a narrow card.",
+      },
+      "rules.checkDrawer.approveSpellingAriaLabel": {
+        description: "Accessible label for the spelling card's Approve button.",
+        placeholders: { form: "The word form being approved — raw cell content, never translated." },
+      },
+      "rules.checkDrawer.spellingApproved": {
+        description:
+          "Footnote under the spelling section counting the spellings the reviewer approved during this check, each of which cleared all of its occurrences.",
+        placeholders: { count: "How many spellings the reviewer approved." },
+      },
+      "rules.checkDrawer.spellingAutoApproved": {
+        description:
+          "Footnote under the spelling section naming the word forms the check treated as correct because the text writes them often. Lets a reviewer see what was let through instead of trusting a silent pass.",
+        placeholders: { forms: "The approved word forms, comma-joined — raw cell content, never translated." },
+      },
+      "rules.checkDrawer.wordlistSize": {
+        description:
+          "Footnote under the spelling section stating how many distinct word forms the project wordlist the check built holds.",
+        placeholders: { count: "Number of distinct word forms." },
+      },
       "rules.checkDrawer.otherTermsClean": {
         description:
           "Footnote under the term-consistency section listing how many checked terms had no issues.",
@@ -744,10 +968,6 @@ export const rules = defineNamespace({
         description: "Button on the Project Rules card that reveals rules belonging to lanes other than the one being viewed.",
         placeholders: { count: "How many rules belong to other lanes." },
       },
-      "rules.surface.laneScope.noRulesInLane": {
-        description: "Shown in the Project Rules card when no project rule applies in the lane being viewed.",
-        placeholders: { lane: "The name of the lane being viewed." },
-      },
       "rules.editor.lane.summaryOne": {
         description: "Line beside the Save button of the rule editor when the rule is limited to one lane.",
         placeholders: { lane: "The name of the lane the rule will apply in." },
@@ -793,10 +1013,6 @@ export const rules = defineNamespace({
         description:
           "Confirmation body in the 'Promote rule to org?' dialog, naming the rule about to be copied to the org library.",
         placeholders: { name: "The rule's own name, rendered bold via RichMessage — content, never translated." },
-      },
-      "rules.surface.projectRulesCardTitle": {
-        description: "Card heading for the project-scoped (user-authored) rules list.",
-        placeholders: { count: "Number of project rules." },
       },
       "rules.surface.disableRuleAriaLabel": {
         description: "Accessible label for the enable/disable switch on a project rule row, when currently enabled.",

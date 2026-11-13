@@ -41,7 +41,7 @@ describe("MediaPanelsMenu", () => {
     expect(screen.queryByText("Panels on this file")).toBeNull()
     expect(screen.queryByText(/Live|Synced|lines · 0 done/)).toBeNull()
     const rows = screen.getAllByRole("menuitemcheckbox")
-    expect(rows.map((b) => b.dataset.testid)).toEqual(["panels-row-timeline", "panels-row-film", "panels-row-text"])
+    expect(rows.map((b) => b.dataset.testid)).toEqual(["panels-row-timeline", "panels-row-film", "panels-row-text", "panels-row-station"])
     const timeline = screen.getByTestId("panels-row-timeline")
     expect(timeline).toHaveAttribute("aria-checked", "true")
     expect(timeline).toHaveTextContent(/^Timeline\s*(⌥1|Alt\+1)$/)
@@ -49,6 +49,9 @@ describe("MediaPanelsMenu", () => {
     expect(film).toHaveAttribute("aria-checked", "true")
     expect(film).toHaveTextContent(/^Film\s*(⌥2|Alt\+2)$/)
     expect(screen.getByTestId("panels-row-text")).toHaveTextContent(/^Text\s*(⌥3|Alt\+3)$/)
+    // AQU-2327: the Station, a tab behind the text, with ⌥4.
+    expect(screen.getByTestId("panels-row-station")).toHaveTextContent(/^Station\s*(⌥4|Alt\+4)$/)
+    expect(screen.getByTestId("panels-row-station")).toHaveAttribute("aria-checked", "false")
     // Opening leaves every row plain. A tab stop on the (i) would focus Reset layout.
     expect(document.querySelector("[data-highlighted]")).toBeNull()
     expect(screen.getByTestId("panels-reset-info-toggle")).toHaveAttribute("tabindex", "-1")
@@ -83,7 +86,7 @@ describe("MediaPanelsMenu", () => {
   it("hides a showing panel, shows one out of sight, and names a tab behind another", async () => {
     const layout: DockLayout = {
       ...startDockLayout(),
-      areas: { ll: ["film", "text"], lr: [] },
+      areas: { ll: ["film", "text", "station"], lr: [] },
       active: { ll: "film", lr: null },
     }
     const dock = fakeDock(layout)

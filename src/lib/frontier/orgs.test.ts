@@ -8,6 +8,8 @@ import {
   listOrgMemberProjects,
   listMyOrgs,
   listOrgsPage,
+  leaveOrg,
+  LeaveOrgBlockedError,
 } from "./orgs";
 
 const ORIG = global.fetch;
@@ -135,4 +137,44 @@ describe("listOrgsPage", () => {
       nextCursor: "9:Foreign",
     })
   })
+});
+
+// AQU-1993: the self-service route. Separate from removeOrgMember, which is
+// the owner-only moderation route and refuses self-removal.
+describe("leaveOrg", () => {
+  it("DELETEs /orgs/:id/members/me", async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      new Response(JSON.stringify({ left: true }), { status: 200 })
+    );
+    await leaveOrg("jwt", 7);
+    const [url, init] = (global.fetch as any).mock.calls[0];
+    expect(String(url)).toMatch(/\/api\/v2\/orgs\/7\/members\/me$/);
+    expect(init.method).toBe("DELETE");
+  });
+
+  it("surfaces the last-owner refusal as an actionable reason", async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "last_owner" }), { status: 409 })
+    );
+    await expect(leaveOrg("jwt", 7)).rejects.toSatisfy(
+      (err: unknown) =>
+        err instanceof LeaveOrgBlockedError && err.reason === "last_owner"
+    );
+  });
+
+  it("surfaces the personal-workspace refusal as its own reason", async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "cannot_leave_personal_org" }), { status: 409 })
+    );
+    await expect(leaveOrg("jwt", 7)).rejects.toSatisfy(
+      (err: unknown) =>
+        err instanceof LeaveOrgBlockedError &&
+        err.reason === "cannot_leave_personal_org"
+    );
+  });
+
+  it("throws on any other failure", async () => {
+    (global.fetch as any).mockResolvedValueOnce(new Response("nope", { status: 500 }));
+    await expect(leaveOrg("jwt", 7)).rejects.toThrow();
+  });
 });

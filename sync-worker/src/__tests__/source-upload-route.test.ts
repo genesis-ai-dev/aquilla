@@ -623,5 +623,45 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
     )
     const res = await handleSourceUploadRequest(req, env)
     expect(res?.status).toBe(403)
+    // AQU-1352 §3.9 shape: the client names the caller's role and the one
+    // required instead of a bare "Source upload failed". `error` keeps the
+    // legacy plain-text reason for older clients and logs.
+    expect(await res?.json()).toEqual({
+      error: "role too low for source upload",
+      code: "role_required",
+      required: { roleLevel: 500 },
+      actual: { roleLevel: 400, source: null },
+    })
+  })
+
+  it("names the token's role-resolution path in a binding role refusal", async () => {
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
+      files: [{ id: "f1", project_id: "p1", name: "test.docx", event_id: "ev1" }],
+    })
+    const lowRoleToken = await makeTestToken(SECRET, {
+      projectId: "p1",
+      fileId: "f1",
+      role: 300, // REVIEWER
+      src: "group",
+    })
+    const env = { SNAPSHOTS: makeStubBucket(), AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET } as any
+
+    const req = new Request(
+      "https://x/api/v1/projects/p1/files/f1/source-bindings",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${lowRoleToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ artifactId: "01900000-0000-7000-8000-000000000006", bindingRole: "support" }),
+      },
+    )
+    const res = await handleSourceUploadRequest(req, env)
+    expect(res?.status).toBe(403)
+    expect(await res?.json()).toEqual({
+      error: "role too low for artifact binding",
+      code: "role_required",
+      required: { roleLevel: 500 },
+      actual: { roleLevel: 300, source: "group" },
+    })
   })
 })

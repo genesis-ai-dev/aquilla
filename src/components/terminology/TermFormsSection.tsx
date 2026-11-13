@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input"
 import { DiscoveredFormsChips } from "@/components/terminology/DiscoveredFormsChips"
 import { MatchOptionsFields } from "@/components/terminology/MatchOptionsFields"
 import { discoverForms } from "@/lib/terminology/discover-forms"
-import { hasCombiningMarks, pruneMatch, resolveMatchOptions } from "@/lib/terminology/match-options"
+import { hasFoldableDiacritics, pruneMatch, resolveMatchOptions } from "@/lib/terminology/match-options"
 import type { Concept, TermMatchingSettings, TermMatchOptions } from "@/lib/terminology/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -105,7 +105,8 @@ export function TermFormsSection({
         value={concept.match ?? {}}
         resolved={resolved}
         showFoldMarks={
-          hasCombiningMarks(concept.sourceTerm) || discovered.some((f) => hasCombiningMarks(f.surface))
+          hasFoldableDiacritics(concept.sourceTerm) ||
+          discovered.some((f) => hasFoldableDiacritics(f.surface))
         }
         hasAffixInventory={resolved.prefixes.length + resolved.suffixes.length > 0}
         caseSensitive={concept.caseSensitive === true}

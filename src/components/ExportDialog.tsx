@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 // ExportDialog: the headline action is "download your file back" — the active
 // file's ORIGINAL format with current translations injected (USFM/DOCX/PPTX
 // via the server side-car, structured re-serialization for md/txt/subtitles/
@@ -47,12 +48,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { SegmentTabs } from "@/components/ui/tabs"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
-import { downloadBlob } from "@/lib/export/export-service"
+import { downloadBlob as downloadExportBlob } from "@/lib/export/export-service"
 import { collectInlineStyleWarnings, type ExportFidelityWarning } from "@/lib/export/fidelity"
-import { chapterFilenameSuffix, filterCellsByChapter, listChapterLabels } from "@/lib/export/chapter-scope"
+import { chapterFilenameSuffix, chapterNumbersByLabel, filterCellsByChapter, listChapterLabels } from "@/lib/export/chapter-scope"
 import {
   DEFAULT_EXPORT_CONTENT_MODE,
   dropHiddenCells,
@@ -108,7 +109,6 @@ import { isDefaultTrackSlot } from "@/lib/timeline/track-slots"
 import type { TimelineTrack } from "@/lib/timeline/tracks"
 import { isSubtitleImportFile } from "@/lib/parsers/types"
 import type { CharacterResolution, ProjectTtsSettings } from "@/lib/parsers/types"
-import posthog from "@/lib/posthog"
 import {
   CURRENT_IDML_FORMAT_COPY,
   idmlFormatCopy,
@@ -328,6 +328,17 @@ const NATIVE_EXPORT_BY_FILE_TYPE: Partial<Record<string, ExportFormat>> = {
   tsv: "tsv",
 }
 
+/** The formats that write the translation into the client's own uploaded
+ *  package (`fetchSourceSidecar`) rather than building a file from the cells.
+ *  Without that upload they cannot run. AQU-2211. */
+const ROUND_TRIP_EXPORT_FORMATS: ReadonlySet<ExportFormat> = new Set<ExportFormat>([
+  "usfm",
+  "docx",
+  "pptx",
+  "idml",
+  "json",
+])
+
 interface ExportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -377,6 +388,16 @@ interface ExportDialogProps {
    * and open the format list instead.
    */
   activeFileType?: string | null
+  /**
+   * AQU-2211: whether the active file's original upload is on the server
+   * (`hasOriginalSource` on the file record — a `file_source_blobs` row). The
+   * round-trip formats (USFM, Word, PowerPoint, IDML, JSON) write the
+   * translation INTO that upload, so without it they cannot work and are not
+   * offered: a file migrated from Codex now carries its real type ("docx",
+   * "usfm") but no original (AQU-991). `undefined` means not known — the
+   * formats are offered as before.
+   */
+  activeFileHasOriginalSource?: boolean
   /** All project files — used only for project-scope USFM zip. */
   projectFiles: { id: string; name: string; type: string }[]
   /**
@@ -424,6 +445,30 @@ interface ExportDialogProps {
     onProgress?: (label: string) => void
   }) => Promise<{ name: string; unmatched: number }>
   /**
+   * Places the file's translations into its IDML style runs — the pass a
+   * re-import runs (`alignReimportedIdmlFile`). Offered when an InDesign export
+   * stops on translations that are not in the runs yet: a file a source link
+   * mirrored before it carried the IDML contract was translated as plain text.
+   */
+  onPlaceIdmlTranslations?: (args: {
+    fileId: string
+    fileName: string
+    onProgress?: (done: number, total: number) => void
+  }) => Promise<{
+    /** Validated lines placed as markup only: still validated. */
+    keptValidated: number
+    /** Lines saved as commits: drafts to check. */
+    drafts: number
+    /** Lines left for the editor's Align styles action. */
+    manual: number
+  }>
+  /**
+   * `onPlaceIdmlTranslations` will keep validated lines validated (a project
+   * lead, on the default lane). False: every placed line becomes a draft, and
+   * the dialog says so before the button is pressed.
+   */
+  idmlPlacementKeepsValidation?: boolean
+  /**
    * AQU-654: count of outstanding (non-waived) LQA/validation "health"
    * infractions on the active file. Export NEVER hard-blocks on these — the
    * only export gate is org policy (`canExport`). When there are outstanding
@@ -466,6 +511,19 @@ function profileIdFromCells(cells: readonly CellData[]): string | null {
   return null
 }
 
+/**
+ * AQU-2437: the primary "Download <name>.<ext>" button carries the file name,
+ * which can run to sixty characters. The shared button style forbids wrapping
+ * (`whitespace-nowrap`), so a long name made the button wider than its card
+ * and handed the dialog body a horizontal scrollbar. The label wraps on its
+ * own and the button grows taller instead: `py-1.75` keeps a one-line label at
+ * the same 36px as `size="lg"`, and `items-start` + `mt-0.5` on the icon keep
+ * it on the first line rather than floating between two.
+ */
+const WRAPPING_DOWNLOAD_BUTTON = "h-auto w-full items-start justify-center py-1.75"
+/** `wrap-anywhere`, so a name with no spaces still breaks instead of overflowing. */
+const WRAPPING_DOWNLOAD_LABEL = "min-w-0 whitespace-normal wrap-anywhere"
+
 function idmlBlob(bytes: Uint8Array, type: string): Blob {
   return new Blob(
     [bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer],
@@ -504,6 +562,7 @@ export function ExportDialog({
   activeFileId,
   activeFileName,
   activeFileType = null,
+  activeFileHasOriginalSource,
   projectFiles,
   reportFiles,
   characterResolutions,
@@ -516,16 +575,28 @@ export function ExportDialog({
   getToken,
   orgId,
   onRepairIdmlCopy,
+  onPlaceIdmlTranslations,
+  idmlPlacementKeepsValidation = false,
   outstandingInfractionCount = 0,
   audioValidationRequirement = 1,
   onJumpToAudioLine,
 }: ExportDialogProps) {
+  const analytics = useAccountAnalytics()
+  const downloadBlob = useCallback((blob: Blob, filename: string) => downloadExportBlob(blob, filename, analytics), [analytics])
   const { locale } = useI18n()
   const t = useT()
   // The file's own format is the default export — "give me my file back".
   // Types without a 1:1 native exporter (ebible, obs, audio, video, sdbh, …)
   // have no primary download; the format list opens instead.
-  const nativeFormatId = activeFileType ? NATIVE_EXPORT_BY_FILE_TYPE[activeFileType] ?? null : null
+  // AQU-2211: a round-trip format needs the original upload. When the server
+  // says this file has none (a file migrated from Codex), there is no primary
+  // download either, and the format list opens instead.
+  const roundTripAvailable = activeFileHasOriginalSource !== false
+  const nativeFormatCandidate = activeFileType ? NATIVE_EXPORT_BY_FILE_TYPE[activeFileType] ?? null : null
+  const nativeFormatId =
+    nativeFormatCandidate && ROUND_TRIP_EXPORT_FORMATS.has(nativeFormatCandidate) && !roundTripAvailable
+      ? null
+      : nativeFormatCandidate
   const effectiveIdmlCopy = idmlOrgEligible(orgId, import.meta.env)
     ? CURRENT_IDML_FORMAT_COPY
     : idmlFormatCopy({})
@@ -993,11 +1064,15 @@ export function ExportDialog({
    * AQU-465: the formats a chapter can be sliced out of.
    *
    * Exactly the formats built from the in-memory cell array (the `filteredCells`
-   * branch of handleExport). The round-trip formats are deliberately absent:
-   * USFM/DOCX/PPTX/IDML/JSON reinject translations into the ORIGINAL document —
-   * USFM server-side — so there is no cell array to filter, and handing back a
+   * branch of handleExport). The package round-trip formats are deliberately
+   * absent: DOCX/PPTX/IDML/JSON reinject translations into the ORIGINAL
+   * document, so there is no cell array to filter, and handing back a
    * one-chapter .docx would mean rebuilding the document rather than exporting
    * it. Those stay whole-file.
+   *
+   * USFM is not in this list and is sliceable all the same (AQU-2561): its
+   * original is plain text, so the worker cuts the chapter out of it. That is
+   * a different mechanism with its own condition — see `canScopeToChapter`.
    */
   const chapterScopeFormats = ["txt", "md", "html", "tsv", "csv", "xlf", "tmx", "vtt", "srt", "plain-text-dump", "metadata-csv"] as const
   const supportsChapterScope = (fmt: ExportFormat): boolean =>
@@ -1008,13 +1083,17 @@ export function ExportDialog({
   const hasSdbhFiles = projectFiles.some((f) => f.type === "sdbh")
 
   /**
-   * AQU-2182/AQU-2210: the Web page lays out one Bible book. A USFM file is one
-   * by definition; a `codex` file only when its lines carry Bible verse
-   * references — migrated Codex projects also store dubbing episodes, Pilgrim's
-   * Progress and commentaries as `codex`, and only the lines tell them apart.
+   * AQU-2182/AQU-2210: the Web page lays out one Bible book. A USFM or eBible
+   * file is one by definition (AQU-2211: a migrated book now lands as either);
+   * a `codex` file only when its lines carry Bible verse references — migrated
+   * Codex projects also store dubbing episodes, Pilgrim's Progress and
+   * commentaries as `codex`, and only the lines tell them apart.
    */
   const offersHtmlPage = useMemo(
-    () => activeFileType === "usfm" || (activeFileType === "codex" && hasBibleVerses(cells)),
+    () =>
+      activeFileType === "usfm"
+      || activeFileType === "ebible"
+      || (activeFileType === "codex" && hasBibleVerses(cells)),
     [activeFileType, cells],
   )
 
@@ -1031,11 +1110,12 @@ export function ExportDialog({
    */
   const foldFormats = useMemo(() => {
     const visible = formatOptions.filter((f) => {
-      if (f.id === "usfm") return activeFileType === "usfm"
-      if (f.id === "docx") return activeFileType === "docx" // AQU-233: only for docx imports
-      if (f.id === "pptx") return activeFileType === "pptx" // AQU-152a: only for pptx imports
-      if (f.id === "idml") return activeFileType === "idml" // only for idml imports
-      if (f.id === "json") return activeFileType === "json" // AQU-525: only for json imports
+      // AQU-2211: the round-trip formats also need the file's original upload.
+      if (f.id === "usfm") return activeFileType === "usfm" && roundTripAvailable
+      if (f.id === "docx") return activeFileType === "docx" && roundTripAvailable // AQU-233: only for docx imports
+      if (f.id === "pptx") return activeFileType === "pptx" && roundTripAvailable // AQU-152a: only for pptx imports
+      if (f.id === "idml") return activeFileType === "idml" && roundTripAvailable // only for idml imports
+      if (f.id === "json") return activeFileType === "json" && roundTripAvailable // AQU-525: only for json imports
       if (f.id === "html") return offersHtmlPage // AQU-2182/AQU-2210: a Bible book only
       if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
       if (f.id === "plain-text-dump") return false // shown in Advanced section only
@@ -1057,7 +1137,7 @@ export function ExportDialog({
       return at === -1 ? first.length : at
     }
     return [...rest].sort((a, b) => rank(a.id) - rank(b.id))
-  }, [activeFileType, formatOptions, hasSdbhFiles, isDubbingFile, nativeFormatId, offersHtmlPage])
+  }, [activeFileType, formatOptions, hasSdbhFiles, isDubbingFile, nativeFormatId, offersHtmlPage, roundTripAvailable])
 
 
   // A selected format can also vanish without a file switch (sdbh-xml is
@@ -1095,6 +1175,57 @@ export function ExportDialog({
     downloadName: string
   } | null>(null)
   const [repairingCopy, setRepairingCopy] = useState(false)
+  // Translations the failed InDesign export found outside the file's style
+  // runs. Non-zero offers the placement beside the error.
+  const [idmlUnplacedCount, setIdmlUnplacedCount] = useState(0)
+  const [placingTranslations, setPlacingTranslations] = useState(false)
+
+  const placeTranslations = async () => {
+    if (!activeFileId || !activeFileName || !onPlaceIdmlTranslations || placingTranslations) return
+    const fileName = activeFileName
+    setPlacingTranslations(true)
+    setStatus({ kind: "busy", msg: t("importExport.dialog.placingIdmlTranslations", { fileName }) })
+    try {
+      const result = await onPlaceIdmlTranslations({
+        fileId: activeFileId,
+        fileName,
+        onProgress: (done, total) => setStatus({
+          kind: "busy",
+          msg: t("importExport.upload.aligningIdmlStyles", {
+            fileName,
+            count: done.toLocaleString(),
+            total: total.toLocaleString(),
+          }),
+        }),
+      })
+      setIdmlRecovery(null)
+      setIdmlUnplacedCount(0)
+      setStatus({
+        kind: "ok",
+        msg: result.manual > 0
+          ? t("importExport.dialog.placedIdmlTranslationsManual", { fileName, count: result.manual })
+          : result.drafts === 0
+            ? t("importExport.dialog.placedIdmlTranslationsKept", { fileName, count: result.keptValidated })
+            : result.keptValidated === 0
+              ? t("importExport.dialog.placedIdmlTranslations", { fileName, count: result.drafts })
+              : t("importExport.dialog.placedIdmlTranslationsMixed", {
+                  fileName,
+                  kept: result.keptValidated.toLocaleString(),
+                  drafts: result.drafts.toLocaleString(),
+                }),
+      })
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        msg: t("importExport.dialog.placeIdmlTranslationsFailed", {
+          fileName,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      })
+    } finally {
+      setPlacingTranslations(false)
+    }
+  }
 
   const repairCopy = async () => {
     if (!activeFileId || !activeFileName || !onRepairIdmlCopy || repairingCopy) return
@@ -1261,10 +1392,17 @@ export function ExportDialog({
     [chapterLabels, t],
   )
 
+  /** AQU-2561: USFM asks the worker for a chapter by number, so it needs the
+   *  labels to map onto distinct numbers. Null on a several-books-in-one file. */
+  const usfmChapterNumbers = useMemo(() => chapterNumbersByLabel(chapterLabels), [chapterLabels])
+
   /** Only offered where it means something: a file with more than one chapter,
-   *  exporting itself (not the project) through a cell-array format. */
+   *  exporting itself (not the project) through a cell-array format — or as
+   *  USFM, when the worker can find the chapter by its number. */
   const canScopeToChapter =
-    effectiveScope === "file" && supportsChapterScope(format) && chapterLabels.length > 1
+    effectiveScope === "file" &&
+    chapterLabels.length > 1 &&
+    (supportsChapterScope(format) || (format === "usfm" && usfmChapterNumbers !== null))
   const activeChapter = canScopeToChapter ? chapterFilter : ""
 
   // Drop the chapter on close, on a file switch, and whenever the remembered
@@ -1350,6 +1488,7 @@ export function ExportDialog({
     setStatus({ kind: "busy", msg: t("importExport.status.exporting") })
     setFidelityWarnings([])
     setIdmlRecovery(null)
+    setIdmlUnplacedCount(0)
     let recoverableIdmlOriginal: { bytes: ArrayBuffer; downloadName: string } | null = null
     let idmlTelemetryStartedAt: number | null = null
     try {
@@ -1374,11 +1513,27 @@ export function ExportDialog({
             : `${t("importExport.status.exportedFilesCount", { count: result.exported })}; ${t("importExport.status.skippedOlderImports", { count: result.skipped.length })}`
           setStatus({ kind: "ok", msg })
         } else {
+          // AQU-2561: one chapter, cut out of the original by the worker. As
+          // in the cell-array branch below, the primary "Download <file>"
+          // action (`overrideFormat`) always hands back the whole file,
+          // whatever chapter the fold is showing. The label and the number
+          // travel together: a label with no number is exported whole AND
+          // named whole, never as a whole book under a one-chapter name.
+          const chapterNumber = overrideFormat || !activeChapter ? undefined : usfmChapterNumbers?.get(activeChapter)
+          const chapterLabel = chapterNumber === undefined ? "" : activeChapter
           // AQU-437: use user-chosen stem with .SFM extension.
           const stem = buildExportStem(false)
-          const downloadName = `${stem}.SFM`
+          const downloadName = `${stem}${chapterFilenameSuffix(chapterLabel)}.SFM`
           // AQU-276: read lossy-verse count from response header.
-          const result = await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken, targetLang, validatedOnly })
+          const result = await downloadSourceFile({
+            projectId,
+            fileId: activeFileId,
+            downloadName,
+            getToken,
+            targetLang,
+            validatedOnly,
+            ...(chapterNumber !== undefined ? { chapter: chapterNumber } : {}),
+          })
           const lossyCount = result.lossyVerseCount
           if (lossyCount !== null && lossyCount > 0) {
             setStatus({
@@ -1474,7 +1629,7 @@ export function ExportDialog({
         const { exportIdml } = await import("@/lib/export/exporters/idml")
         // AQU-1148: see the docx branch above.
         const result = await exportIdml(rawBytes, scopeRoundTripCells(cells, contentMode))
-        posthog.capture("idml export completed", idmlTelemetryProperties({
+        analytics.capture("idml export completed", idmlTelemetryProperties({
           cells,
           report: result.report,
           diagnostics: result.diagnostics,
@@ -1485,6 +1640,15 @@ export function ExportDialog({
         let msg = result.report.translated === 0
           ? t("importExport.status.downloadedIdmlUnchanged", { fileName })
           : t("importExport.status.downloadedParagraphsTranslated", { fileName, count: result.report.translated })
+        // Lines only this file has, after a link replaced its source: their
+        // paragraphs are not in the linked package, so they stayed out — said
+        // beside the download rather than silently.
+        if (result.omitted.length > 0) {
+          msg = `${msg} ${t("importExport.status.idmlLinesLeftOut", {
+            count: result.omitted.length,
+            labels: result.omitted.slice(0, 8).map((line) => line.cellLabel).join(", "),
+          })}`
+        }
         if (idmlTransform) {
           setStatus({ kind: "busy", msg: idmlTransform.busyMessage })
           try {
@@ -1631,7 +1795,11 @@ export function ExportDialog({
         setStatus({ kind: "busy", msg: lineWav ? t("importExport.status.decodingAudio") : "Collecting recordings…" })
         const { exportAudioPerLine } = await import("@/lib/export/audio-per-line")
         const { fetchCellAudio } = await import("@/lib/audio/upload")
-        const decode = lineWav ? (await import("@/lib/audio/decode-mono")).decodeToMono48k : undefined
+        // AQU-2327: the decoder goes along either way — a take at its own
+        // volume or fades is decoded and written as WAV even when the rest
+        // are copied as stored (an export contains what you hear). Without
+        // the WAV box nothing else is decoded.
+        const decode = (await import("@/lib/audio/decode-mono")).decodeToMono48k
         const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
         const result = await exportAudioPerLine({
           cells: audioExportCells,
@@ -1644,6 +1812,11 @@ export function ExportDialog({
           projectId,
           langCode: targetLanguage || "und",
           fileBase: defaultBaseName,
+          // AQU-2560: a Bible file's takes are named by verse, not by a cast it
+          // does not have. The exporter decides "is this scripture" from the
+          // cells; a dubbing file is never offered the choice, so a cue whose
+          // text happens to read like a reference cannot rename an episode.
+          scriptureNaming: isDubbingFile ? undefined : { projectName },
           fetchBytes: ({ projectId: pid, fileId, audioId, ext }) =>
             fetchCellAudio({ projectId: pid, fileId, audioId, ext, getSyncToken }),
           format: lineAudioFormat,
@@ -2018,8 +2191,21 @@ export function ExportDialog({
       }
     } catch (e) {
       if (recoverableIdmlOriginal) setIdmlRecovery(recoverableIdmlOriginal)
+      // An InDesign export that stopped may have stopped on translations that
+      // are not in the file's style runs yet. Counted here, over the same cells
+      // the export read, so the error can offer the placement.
+      let unplaced = 0
+      if (recoverableIdmlOriginal && onPlaceIdmlTranslations) {
+        try {
+          const { unplacedIdmlTranslationCount } = await import("@/lib/idml/align-reimported-targets")
+          unplaced = unplacedIdmlTranslationCount(scopeRoundTripCells(cells, contentMode))
+        } catch {
+          unplaced = 0
+        }
+      }
+      setIdmlUnplacedCount(unplaced)
       if (idmlTelemetryStartedAt !== null) {
-        posthog.capture("idml export blocked", idmlTelemetryProperties({
+        analytics.capture("idml export blocked", idmlTelemetryProperties({
           cells,
           diagnostics: (
             e && typeof e === "object" && Array.isArray((e as { diagnostics?: unknown }).diagnostics)
@@ -2029,7 +2215,14 @@ export function ExportDialog({
           durationMs: performance.now() - idmlTelemetryStartedAt,
         }))
       }
-      const msg = (e as Error).message || t("importExport.status.exportFailed")
+      const msg = unplaced > 0
+        ? t(
+            idmlPlacementKeepsValidation
+              ? "importExport.dialog.idmlTranslationsNotPlacedKeep"
+              : "importExport.dialog.idmlTranslationsNotPlaced",
+            { count: unplaced },
+          )
+        : (e as Error).message || t("importExport.status.exportFailed")
       setStatus({ kind: "error", msg })
       // Never leave a spinning toast behind: this catch covers the whole run,
       // including the long audio export, and an orphaned loading toast sits
@@ -2046,6 +2239,7 @@ export function ExportDialog({
       setStatus({ kind: "idle" })
       setFidelityWarnings([])
       setIdmlRecovery(null)
+      setIdmlUnplacedCount(0)
     }
     onOpenChange(next)
   }
@@ -2587,7 +2781,7 @@ export function ExportDialog({
                     renderVttOptions({ showSource: effectiveSubtitleTarget === "subtitle" })}
                   <Button
                     size="lg"
-                    className="w-full justify-center"
+                    className={WRAPPING_DOWNLOAD_BUTTON}
                     onClick={() =>
                       handleExport(nativeOption.id, {
                         audioCues: effectiveSubtitleTarget === "audio",
@@ -2596,10 +2790,16 @@ export function ExportDialog({
                     disabled={!activeFileId || isBusy}
                     aria-busy={isBusy}
                   >
-                    {isBusy ? <Spinner aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
-                    {t("importExport.dialog.downloadFile", {
-                      fileName: `${buildExportStem(false)}${effectiveSubtitleTarget === "audio" ? "_audio" : ""}${nativeOption.ext}`,
-                    })}
+                    {isBusy ? (
+                      <Spinner className="mt-0.5" aria-hidden="true" />
+                    ) : (
+                      <Download className="mt-0.5 h-4 w-4" aria-hidden="true" />
+                    )}
+                    <span className={WRAPPING_DOWNLOAD_LABEL}>
+                      {t("importExport.dialog.downloadFile", {
+                        fileName: `${buildExportStem(false)}${effectiveSubtitleTarget === "audio" ? "_audio" : ""}${nativeOption.ext}`,
+                      })}
+                    </span>
                   </Button>
                 </div>
               </details>
@@ -2612,17 +2812,19 @@ export function ExportDialog({
           <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-accent/30 px-3 py-3">
             <Button
               size="lg"
-              className="w-full justify-center"
+              className={WRAPPING_DOWNLOAD_BUTTON}
               onClick={() => handleExport(nativeOption.id)}
               disabled={!activeFileId || isBusy}
               aria-busy={isBusy}
             >
               {isBusy ? (
-                <Spinner aria-hidden="true" />
+                <Spinner className="mt-0.5" aria-hidden="true" />
               ) : (
-                <Download className="h-4 w-4" aria-hidden="true" />
+                <Download className="mt-0.5 h-4 w-4" aria-hidden="true" />
               )}
-              {t("importExport.dialog.downloadFile", { fileName: `${buildExportStem(false)}${nativeOption.ext}` })}
+              <span className={WRAPPING_DOWNLOAD_LABEL}>
+                {t("importExport.dialog.downloadFile", { fileName: `${buildExportStem(false)}${nativeOption.ext}` })}
+              </span>
             </Button>
             <p className="text-xs text-muted-foreground text-center leading-relaxed">
               {t("importExport.dialog.nativeFormatHint", { label: t(nativeOption.labelKey) })}
@@ -2779,9 +2981,8 @@ export function ExportDialog({
           {/* Project-scope notices */}
           {/* i18n-exempt "project" is an ExportScope tag, not copy */}
           {effectiveScope === "project" && format !== "usfm" && projectCellsLoading && (
-            <div className="flex items-center gap-1.5 mt-1">
-              <Skeleton className="h-2 w-2 rounded-full shrink-0" />
-              <Skeleton className="h-3 w-40" />
+            <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <LoadingCursor />
             </div>
           )}
         </fieldset>
@@ -3114,6 +3315,15 @@ export function ExportDialog({
               {/* i18n-exempt "error" is an export-status kind tag, not copy */}
               {status.kind === "error" && idmlRecovery && (
                 <span className="flex flex-wrap items-center gap-2 pt-1">
+                  {idmlUnplacedCount > 0 && onPlaceIdmlTranslations && (
+                    <Button
+                      type="button"
+                      onClick={() => { void placeTranslations() }}
+                      disabled={placingTranslations}
+                    >
+                      {t("importExport.dialog.placeIdmlTranslations")}
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     variant="outline"

@@ -1,4 +1,4 @@
-// Contract tests for the FROZEN Batch API v1 (BATCH_ENDPOINT_CONTRACT.md),
+// Contract tests for the FROZEN Batch API v1 (docs/BATCH_ENDPOINT_CONTRACT.md),
 // run against the reference stub. The real endpoint must pass this exact
 // suite through an HTTP transport adapter (parity/batch/contract.test.ts
 // re-exports it for that purpose).

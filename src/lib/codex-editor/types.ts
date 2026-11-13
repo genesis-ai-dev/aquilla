@@ -111,6 +111,10 @@ export interface CodexCellAttachment {
    * timing reads `targetOffsetMs` as it always has (every take before AQU-2267).
    */
   recordingsOffsetMs?: number | null;
+  /** AQU-2327: the clip's volume (dB) and fades (ms) — how it plays, never the recording. */
+  gainDb?: number | null;
+  fadeInMs?: number | null;
+  fadeOutMs?: number | null;
   /** SUB-48: this clip's event is still queued locally (saved on this device,
    *  not yet at the server). Drives the "saving…" hint on chips/rows. */
   pendingSync?: true;
@@ -215,6 +219,16 @@ export interface CodexNotebookMetadata {
   lineNumbersEnabled?: boolean;
   textDirection?: "ltr" | "rtl";
   videoUrl?: string;
+  /** Which Codex importer produced the notebook (codex-editor's
+   *  `FileImporterType`: "usfm", "subtitles", "docx", "ebibleCorpus", …).
+   *  Absent on older notebooks. Typed as `string` because notebooks in the
+   *  wild carry values outside the current union. AQU-2211. */
+  importerType?: string;
+  /** The uploaded file's name ("MAT.idml", "mydoc.docx"). Rarely set in
+   *  practice — `originalName` usually carries the extension. AQU-2211. */
+  originalFileName?: string;
+  /** True for an audio import with no source text. AQU-2211. */
+  audioOnly?: boolean;
   sourceCreatedAt?: string;
   codexLastModified?: string;
   navigation?: unknown[];

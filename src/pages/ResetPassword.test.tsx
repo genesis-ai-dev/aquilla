@@ -97,6 +97,7 @@ describe("ResetPassword — success path", () => {
     ["//example.com/join-org/invite-token", "/"],
     ["/join-org/../settings", "/"],
     ["/join-org/invite-token?next=https://example.com", "/"],
+    ["/preferences/login-methods", "/preferences/login-methods"],
   ])("resets and signs in before navigating safely from %s to %s", async (returnTo, destination) => {
     mockVerifyResetToken.mockResolvedValue(undefined)
     mockResetPassword.mockResolvedValue(undefined)
@@ -163,7 +164,7 @@ describe("ResetPassword — success path", () => {
 })
 
 describe("ResetPassword — recovery (TokenExpiredView) form", () => {
-  it.each([undefined, "/join-org/invite-token"])("preserves %s when reissuing an expired reset link", async (returnTo) => {
+  it.each([undefined, "/join-org/invite-token", "/preferences/login-methods"])("preserves %s when reissuing an expired reset link", async (returnTo) => {
     const { FrontierAuthError } = await import("@/lib/frontier/auth")
     mockVerifyResetToken.mockRejectedValue(new FrontierAuthError("Invalid token", 400))
     mockRequestPasswordReset.mockResolvedValue(undefined)
@@ -185,4 +186,19 @@ describe("ResetPassword — recovery (TokenExpiredView) form", () => {
     expect(screen.getByText(/new reset link has been sent/i)).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /back to app/i })).toHaveAttribute("href", returnTo ?? "/")
   })
+})
+
+// Recovery imports the shared signup validators, not the optional Google flow.
+vi.mock("@/lib/frontier/google-login", () => ({
+  googleRequest: async () => ({ enabled: false }),
+  startGoogleLogin: vi.fn(),
+}))
+
+it("retries an unavailable verification without claiming the link expired", async () => {
+  mockVerifyResetToken.mockRejectedValueOnce(new Error("network unavailable")).mockResolvedValueOnce(undefined)
+  renderReset()
+  expect(await screen.findByRole("alert")).toHaveTextContent("Check your connection")
+  fireEvent.click(screen.getByRole("button",{name:"Retry"}))
+  await waitFor(()=>expect(mockVerifyResetToken).toHaveBeenCalledTimes(2))
+  expect(await screen.findByLabelText(/New password/i)).toBeVisible()
 })

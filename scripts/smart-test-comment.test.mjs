@@ -32,6 +32,31 @@ describe("truthful outcome report", () => {
     expect(report).toContain("No outcome has passed yet")
     expect(report).not.toContain("VERIFIED PASS")
   })
+  it("shows live progress per finished step and journey without claiming an outcome", () => {
+    const progress = { stage: "tests", elapsedS: 212.4,
+      steps: [{ name: "dependencies", seconds: 2.1, detail: "reused" }, { name: "build", seconds: 20.7, detail: "test-mode dist" },
+        { name: "stack", seconds: 31, detail: "workers and preview up" }],
+      total: 12,
+      journeys: [{ title: "DOM audit: surfaces", state: "finished" }, { title: "Jev edit | durability", state: "failed" },
+        { title: "Jev project outcome: rename", state: "running" }] }
+    const report = renderReport({ sha, phase: "running", progress })
+    expect(report).toContain("**Running.** No outcome has passed yet. 212 s elapsed.")
+    expect(report).toContain("- Dependencies: 2.1 s (reused)")
+    expect(report).toContain("- App build: 20.7 s (test-mode dist)")
+    expect(report).toContain("- Journeys: 2 of 12 finished, 1 failed so far")
+    expect(report).toContain("| Jev edit &#124; durability | FAILED |")
+    expect(report).toContain("| Jev project outcome: rename | running… |")
+    expect(report).toContain("| DOM audit: surfaces | finished — outcome pending |")
+    expect(report).not.toContain("VERIFIED PASS")
+    expect(report).not.toContain("PASS —")
+  })
+  it("falls back to the starting line when progress is missing or malformed", () => {
+    for (const progress of [undefined, null, "x", { steps: "no", journeys: 3 }]) {
+      const report = renderReport({ sha, phase: "running", progress })
+      expect(report).toContain("No outcome has passed yet")
+      expect(report).not.toContain("| Journey | Progress |")
+    }
+  })
   it("reports elapsed parallel time rather than adding overlapping test durations", () => {
     const value = { ...suite(), parallel: { shards: 4, wallMs: 51000, longestShardTestMs: 30000 } }
     expect(render(value)).toContain("4 isolated stacks; 51.0 s including setup; 30.0 s for the slowest test shard")
@@ -292,5 +317,27 @@ describe("release HEAD publication", () => {
       return { ok: true, json: async () => ({ sha: "b".repeat(40) }) }
     }
     expect(await publishReport({ ref: releaseRef, sha, body, token: "fake", author: "qa", fetchImpl: moved })).toBe("superseded")
+  })
+
+  it("updates the existing commit comment at GitHub's /comments/{id} route", async () => {
+    // The runner posts "Starting" first, then rewrites that same comment with
+    // the verdict. GitHub updates a commit comment at /repos/{o}/{r}/comments/{id};
+    // a /commits/comments/{id} path is read as a commit lookup and fails, so the
+    // verdict never lands and the deploy check waits forever.
+    const writes = []
+    const fetchImpl = async (url, options) => {
+      if (options.method !== "GET") {
+        writes.push({ url, method: options.method })
+        return { ok: true, json: async () => ({ id: 207830084 }) }
+      }
+      if (url.includes("/comments")) {
+        return { ok: true, json: async () => [{ id: 207830084, user: { login: "qa" }, body: `${renderReport({ sha, phase: "running", releaseRef })}` }] }
+      }
+      return { ok: true, json: async () => ({ sha }) }
+    }
+    const body = renderReport({ sha, phase: "finished", releaseRef })
+    expect(await publishReport({ ref: releaseRef, sha, body, token: "fake", author: "qa", fetchImpl })).toBe("updated")
+    expect(writes[0].method).toBe("PATCH")
+    expect(writes[0].url).toMatch(/\/repos\/genesis-ai-dev\/aquilla\/comments\/207830084$/)
   })
 })

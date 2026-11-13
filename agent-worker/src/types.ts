@@ -1,11 +1,11 @@
 import type { DurableObjectNamespace, R2Bucket } from "@cloudflare/workers-types"
-import type { Sandbox } from "@cloudflare/sandbox"
+import type { Sandbox } from "./sandbox-do"
 import type { SandboxPool } from "./pool-do"
 
 /**
  * Worker bindings. `Sandbox` is the container-backed Durable Object namespace
- * declared in wrangler.toml (the egress-disabled `Sandbox` subclass exported
- * from index.ts).
+ * declared in wrangler.toml (our own `Sandbox` class in sandbox-do.ts, which
+ * starts its container with egress disabled).
  * `SNAPSHOTS` is the R2 bucket (`aquilla-snapshots`) that the sync-worker also
  * binds — the source of agent artifacts pulled into the container.
  */

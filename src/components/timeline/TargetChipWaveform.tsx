@@ -24,7 +24,10 @@
 // Everything below is a primitive or one stable Float32Array.
 
 import { memo, useMemo } from "react"
+import type { CSSProperties } from "react"
+import { cn } from "@/lib/utils"
 import { waveformPathD } from "@/lib/timeline/chip-waveform"
+import { TRACK_WAVE_FILL_CLASS, WAVE_LOOK } from "@/lib/timeline/track-colors"
 
 export interface TargetChipWaveformProps {
   /** Peaks for the whole clip, normalised so the loudest bin is 1. */
@@ -35,16 +38,70 @@ export interface TargetChipWaveformProps {
   /** The chip's height in CSS px — also the viewBox's height, so the path's y
    *  units are pixels and the 1px floor on a silent bin is exact. */
   chipH: number
+  /**
+   * AQU-2235: the name bar's height. The waveform is drawn in the height
+   * UNDER it — `drawH` px tall, starting `topPx` down — and never behind it.
+   * Absent (no bar: a short row, or this lane's own tests) it fills the chip.
+   */
+  topPx?: number
+  drawH?: number
+  /** The take's own preview is playing: the part played is drawn at full
+   *  strength and the rest at 30%, split at the chip's `--tl-play-x`. */
+  playing?: boolean
+  /** The chip is the red one at fault in an overlap: the waveform keeps the
+   *  alarm's colour (the chip's own text colour), as it always has. */
+  fault?: boolean
 }
 
-function TargetChipWaveformImpl({ peaks, x0, x1, chipH }: TargetChipWaveformProps) {
+function TargetChipWaveformImpl({ peaks, x0, x1, chipH, topPx = 0, drawH, playing = false, fault = false }: TargetChipWaveformProps) {
   // No zoom term in these deps, and that is the envelope's whole advantage over
   // the bars it replaced: the shape is stretched by the viewBox, so it is
   // rebuilt only when the audio or the row height changes — never during a
   // zoom glide.
-  const d = useMemo(() => waveformPathD(peaks, chipH), [peaks, chipH])
+  const h = drawH ?? chipH
+  const d = useMemo(() => waveformPathD(peaks, h), [peaks, h])
   const width = x1 - x0
-  if (!d || !(width > 0) || !(chipH > 0)) return null
+  if (!d || !(width > 0) || !(h > 0)) return null
+
+  // AQU-2235 (Sam, Oct 25, board 51): the track's deep shade at 90%, steady —
+  // the old 40% ink lifted to 70% on hover; this needs no lift. Under a bar it
+  // sits below the bar; with none it fills the chip as it always did.
+  const box: CSSProperties = drawH != null ? { top: topPx, height: drawH } : {}
+  const fill = fault ? "fill-current" : TRACK_WAVE_FILL_CLASS
+  const base = cn(
+    "pointer-events-none absolute w-full",
+    drawH != null ? "left-0" : "inset-0 h-full",
+    fill,
+  )
+  const view = `${x0} 0 ${width} ${h}`
+  const opacity = fault ? 0.4 : WAVE_LOOK.wave
+  if (playing && !fault) {
+    return (
+      <>
+        <svg
+          aria-hidden
+          data-testid="tl-chip-waveform"
+          data-played=""
+          className={base}
+          style={{ ...box, opacity, clipPath: "inset(0 calc(100% - var(--tl-play-x, 0px)) 0 0)" }}
+          viewBox={view}
+          preserveAspectRatio="none"
+        >
+          <path d={d} />
+        </svg>
+        <svg
+          aria-hidden
+          data-testid="tl-chip-waveform-unplayed"
+          className={base}
+          style={{ ...box, opacity: WAVE_LOOK.unplayed, clipPath: "inset(0 0 0 var(--tl-play-x, 0px))" }}
+          viewBox={view}
+          preserveAspectRatio="none"
+        >
+          <path d={d} />
+        </svg>
+      </>
+    )
+  }
 
   return (
     <svg
@@ -56,8 +113,9 @@ function TargetChipWaveformImpl({ peaks, x0, x1, chipH }: TargetChipWaveformProp
       // that runs past an edge is clipped rather than painting a neighbour.
       // pointer-events-none keeps the body drag and both trim handles reachable
       // through it.
-      className="pointer-events-none absolute inset-0 h-full w-full fill-current opacity-40 group-hover/chip:opacity-70"
-      viewBox={`${x0} 0 ${width} ${chipH}`}
+      className={base}
+      style={{ ...box, opacity }}
+      viewBox={view}
       // The whole point: bin-space horizontally, pixels vertically, stretched
       // independently. Without this the bars would letterbox instead of filling.
       preserveAspectRatio="none"

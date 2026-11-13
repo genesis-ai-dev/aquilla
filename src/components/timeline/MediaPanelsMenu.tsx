@@ -167,6 +167,7 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
           {row("timeline", 1)}
           {(v.present.includes("film") || filmHiddenByTiming) && row("film", 2)}
           {row("text", 3)}
+          {v.present.includes("station") && row("station", 4)}
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <ResetRow

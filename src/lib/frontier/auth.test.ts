@@ -6,6 +6,7 @@ import {
   register,
   redeemAccessLink,
   requestPasswordReset,
+  requestAccountPasswordReset,
   verifyResetToken,
   verifyEmail,
   resetPassword,
@@ -37,6 +38,23 @@ describe("login", () => {
     );
     expect(s.jwt).toBe("jwt-1");
     expect((await loadSession())?.jwt).toBe("jwt-1");
+  });
+
+  it("explains a dev access refusal instead of the generic failure (AQU-2469)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "restricted", code: "dev_access_restricted" }), { status: 403 }),
+    );
+    const err = await login({ username: "wendi", password: "pw" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(FrontierAuthError);
+    expect((err as FrontierAuthError).status).toBe(403);
+    expect((err as Error).message).toMatch(/dev\.aquilla\.app is restricted/);
+    expect(await loadSession()).toBeNull();
+  });
+
+  it("keeps the generic failure for any other 403", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 403 }));
+    const err = await login({ username: "wendi", password: "pw" }).catch((e: unknown) => e);
+    expect((err as Error).message).not.toMatch(/dev\.aquilla\.app/);
   });
 
   it("announces a confirmed migration before continuing login", async () => {
@@ -405,5 +423,63 @@ describe("logout deadline", () => {
       expect(fetchSpy.mock.calls[0][1]?.signal?.aborted).toBe(true);
       expect(vi.getTimerCount()).toBe(0);
     } finally { vi.useRealTimers(); vi.restoreAllMocks(); }
+  });
+});
+
+it.each([true, false])("uses the authenticated ownership proof before claiming legacy local data: %s", async sameAccount => {
+  const { saveSession, _resetDbForTesting } = await import("./session-store")
+  await _resetDbForTesting()
+  await saveSession({username:"reuse",jwt:"expired-old-proof",createdAt:"2020-01-01T00:00:00Z"})
+  const token = `e30.${btoa(JSON.stringify({sub:"reuse",uid:"902",email:"reuse@example.com"}))}.signature`
+  const fetchSpy = vi.spyOn(globalThis,"fetch").mockImplementation(async (input, init) => {
+    if (String(input).endsWith("/auth/token")) return Response.json({access_token:token,token_type:"bearer"})
+    expect(String(input)).toBe(`${AUTH_BASE}/api/v2/auth/me/local-data-owner`)
+    expect(init?.headers).toMatchObject({Authorization:`Bearer ${token}`})
+    expect(JSON.parse(String(init?.body))).toEqual({previousToken:"expired-old-proof"})
+    return Response.json({sameAccount})
+  })
+  try {
+    const session = await login({username:"reuse",password:"unused-test-password"})
+    if (sameAccount) expect(session.storageKey).toBe("reuse")
+    else expect(session.storageKey).toMatch(/^account:902:/)
+    expect((await loadSession())?.accountId).toBe("902")
+  } finally { fetchSpy.mockRestore() }
+})
+
+
+it.each(["unavailable", "malformed"])("preserves legacy credentials when ownership proof is %s", async failure => {
+  const { saveSession, _resetDbForTesting } = await import("./session-store")
+  await _resetDbForTesting()
+  await saveSession({username:"reuse",jwt:"old-proof",createdAt:"2020-01-01"})
+  const token = `e30.${btoa(JSON.stringify({sub:"reuse",uid:"902",email:"reuse@example.com"}))}.signature`
+  const fetchSpy = vi.spyOn(globalThis,"fetch").mockImplementation(async input => {
+    if (String(input).endsWith("/auth/token")) return Response.json({access_token:token,token_type:"bearer"})
+    return failure === "unavailable" ? new Response(null,{status:503}) : Response.json({})
+  })
+  try {
+    await expect(login({username:"reuse",password:"unused-test-password"})).rejects.toThrow()
+    expect((await loadSession())?.jwt).toBe("old-proof")
+  } finally { fetchSpy.mockRestore() }
+})
+
+
+describe("bounded password recovery", () => {
+  it.each([
+    ["request", () => requestPasswordReset("alice@example.com")],
+    ["account request", () => requestAccountPasswordReset("account-jwt")],
+    ["verify", () => verifyResetToken("reset-token", "alice")],
+    ["reset", () => resetPassword("reset-token", "alice", "new-password-123")],
+  ])("releases a stalled %s request and allows retry", async (_name, action) => {
+    vi.useFakeTimers();
+    const fetcher = vi.spyOn(globalThis,"fetch").mockImplementationOnce((_url, init) => new Promise((_resolve,reject) => {
+      init!.signal!.addEventListener("abort", () => reject(new DOMException("Aborted","AbortError")), {once:true});
+    }));
+    try {
+      const result = action().catch((error:unknown) => error);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(await result).toMatchObject({status:0});
+      fetcher.mockResolvedValueOnce(new Response("{}",{status:200}));
+      await expect(action()).resolves.toBeUndefined();
+    } finally { vi.useRealTimers(); fetcher.mockRestore(); }
   });
 });

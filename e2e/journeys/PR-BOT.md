@@ -261,6 +261,21 @@ replay) and pass the step-up gate, which on a preview prints its own code.
 `/admin` claim is now a statement that the fixture is missing or broken on that
 target — say which, so it gets fixed rather than re-explained next PR.
 
+**An AI control is walkable on a preview too (AQU-1436), so "no AI key here"
+is not a reason to skip one.** Hosted drafting works on every preview: the
+stack refuses to deploy an auth preview without the platform
+`OPENROUTER_API_KEY` (AQU-1500). What a fresh browser profile lacks is the
+one-time **Set up AI** answer, which is device-local and cannot be seeded on
+the project, so the per-cell sparkle starts out tooltipped **"Set up AI to
+enable"** on *every* project. Answer the chooser before walking the claim —
+click the sparkle, leave **Aquilla AI** selected, click **Continue**
+(`README.md` § "Fixtures on development storage"). A sparkle still not ready
+after that, or a draft that returns "OpenRouter API key required", is the
+profile or the preview's secret and not the diff: that item is per-item
+**NOT CHECKED**, naming which of the two was missing — never **FAIL**. FAIL on
+an AI control means the chooser was answered, a draft landed somewhere in the
+same walk, and the control still missed its claim.
+
 If the PR says a surface is *absent* (not disabled), assert absence: the
 heading, button, or test-id is not in the snapshot. A greyed-out control
 is a fail against an absence claim.
@@ -341,6 +356,18 @@ release. A dev re-walk writes `## Bot walk — PR <n> @ <sha> (dev re-walk)`:
 the same PR head sha, and that parenthetical is the only thing allowed
 after it; the planner takes the newest walk naming the head sha, so it
 replaces the BLOCKED comment before it.
+
+The planner also reads a comment that opens with the marker
+`<!-- aquilla-qa-walk <sha> -->`, with or without a
+`## QA walk — #<n> @ <sha>` heading on the next line, and the status line
+after that. Either way the status line is the first line under the heading
+or marker; a status anywhere else is not read.
+
+A status with a qualifier, `**PASS (test level only)**` or
+`**PASS** (test level only)`, is not a PASS to the planner. It reads as
+`partial` and the PR holds: the change had a screen and nobody saw it. If
+there was no preview to walk, that is **BLOCKED**; if the diff has no
+screen, that is **NOT CHECKED**.
 
 Short. A reviewer reads the first line and knows whether to look. Status
 is exactly one of **PASS**, **FAIL**, **FLAKY**, **BLOCKED**,

@@ -9,6 +9,7 @@ import { t } from "../i18n/standalone"
 import { formatMB } from "../i18n/format"
 import { normalizeLocale } from "../i18n/locales"
 import { readStoredLocale } from "../i18n/store"
+import { messageForStatus } from "../errors/user-error"
 
 export interface UploadSourceArgs {
   projectId: string
@@ -65,19 +66,48 @@ export function isSourceUploadRoleRefusal(error: unknown): boolean {
 const IMPORT_ATTEMPTS = 3
 const IMPORT_RETRY_DELAYS_MS = [200, 800] as const
 
+function sourceUploadTooLargeMessage(): string {
+  const locale = normalizeLocale(readStoredLocale())
+  return t("importExport.errors.sourceUploadTooLarge", { maxSize: formatMB(MAX_SOURCE_ARTIFACT_BYTES, locale) })
+}
+
 export function assertSourceUploadByteLength(byteLength: number): void {
   if (byteLength === 0) throw new Error(t("importExport.errors.sourceUploadEmpty"))
-  if (byteLength > MAX_SOURCE_ARTIFACT_BYTES) {
-    const locale = normalizeLocale(readStoredLocale())
-    throw new Error(t("importExport.errors.sourceUploadTooLarge", { maxSize: formatMB(MAX_SOURCE_ARTIFACT_BYTES, locale) }))
-  }
+  if (byteLength > MAX_SOURCE_ARTIFACT_BYTES) throw new Error(sourceUploadTooLargeMessage())
+}
+
+/**
+ * The sentence a source-artifact route's error status becomes in the dialog.
+ *
+ * "Source upload failed" on its own sent a project member hunting for a cause
+ * that was only ever on `.cause` in DevTools. The network layer's mapper
+ * (AQU-281, src/lib/errors/user-error.ts) already turns every status into a
+ * localized, actionable sentence — a 401 says to sign in again, a 5xx says to
+ * retry — and reads the AQU-1352 `role_required` body the worker now sends on
+ * a role refusal, so a 403 names the caller's role and the one required
+ * ("You are Contributor here. Project Lead is required."). Two statuses are
+ * told apart from those generic frames: a 413 reuses the size-limit sentence,
+ * and a 400 carries the worker's own validation reason as data, because
+ * "check your input" would point at the wrong thing.
+ */
+export function sourceUploadRefusalMessage(
+  kind: "upload" | "binding",
+  status: number,
+  body: string,
+): string {
+  const detail = body.trim()
+  if (kind === "upload" && status === 413) return sourceUploadTooLargeMessage()
+  const reason = status === 400 && detail ? detail : messageForStatus(status, detail, "project").message
+  return kind === "upload"
+    ? t("importExport.errors.sourceUploadRefused", { reason })
+    : t("importExport.errors.artifactBindingRefused", { reason })
 }
 
 export function assertSourceUploadSize(bytes: ArrayBuffer): void {
   assertSourceUploadByteLength(bytes.byteLength)
 }
 
-async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
+export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes)
   return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("")
 }
@@ -157,9 +187,10 @@ export async function uploadSourceOriginal(args: UploadSourceArgs): Promise<Uplo
 
     if (res) {
       if (res.ok) return await res.json() as UploadSourceResult
-      // HTTP diagnostic — keyed frame; raw status/body kept on `.cause` for DevTools.
+      // HTTP diagnostic — keyed frame carrying the status's own sentence; the
+      // raw status/body is kept on `.cause` for DevTools.
       const detail = await res.text().catch(() => "")
-      lastError = new SourceUploadHttpError(t("importExport.errors.sourceUploadFailed"), res.status, {
+      lastError = new SourceUploadHttpError(sourceUploadRefusalMessage("upload", res.status, detail), res.status, {
         cause: `HTTP ${res.status}${detail ? `: ${detail}` : ""}`,
       })
 
@@ -243,9 +274,10 @@ export async function bindSourceArtifact(args: BindSourceArtifactArgs): Promise<
 
     if (response) {
       if (response.ok) return
-      // HTTP diagnostic — keyed frame; raw status/body kept on `.cause` for DevTools.
+      // HTTP diagnostic — keyed frame carrying the status's own sentence; the
+      // raw status/body is kept on `.cause` for DevTools.
       const detail = await response.text().catch(() => "")
-      lastError = new SourceUploadHttpError(t("importExport.errors.artifactBindingFailed"), response.status, {
+      lastError = new SourceUploadHttpError(sourceUploadRefusalMessage("binding", response.status, detail), response.status, {
         cause: `HTTP ${response.status}${detail ? `: ${detail}` : ""}`,
       })
       if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {

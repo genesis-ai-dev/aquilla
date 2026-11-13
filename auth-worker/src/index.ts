@@ -64,6 +64,7 @@
 import { Hono } from "hono"
 import type { Env, Variables } from "./types"
 import authRoutes from "./routes/auth"
+import googleLoginRoutes, { pruneSocialLoginFlows } from "./routes/oauth-google"
 import syncTokenRoutes from "./routes/sync-token"
 import projectsRoutes from "./routes/projects"
 import projectMembersRoutes from "./routes/project-members"
@@ -104,6 +105,7 @@ import { mcpOAuthPublicRoutes, mcpOAuthConsentRoutes } from "./routes/mcp-oauth"
 import changesetApprovalsRoutes from "./routes/changeset-approvals"
 import importClassifyRoutes from "./routes/import-classify"
 import importSandboxRoutes from "./routes/import-sandbox"
+import importRecordingNamesRoutes from "./routes/import-recording-names"
 import agentMemoryRoutes from "./routes/agent-memory"
 import aiInterventionRoutes from "./routes/ai-interventions"
 import sceneBriefRoutes from "./routes/scene-briefs"
@@ -122,6 +124,7 @@ import editHistoryRoutes from "./routes/edit-history"
 import mondayRoutes from "./routes/monday"
 import airtableRoutes from "./routes/airtable"
 import langquestRoutes from "./routes/langquest"
+import langquestConnectionRoutes from "./routes/langquest-connections"
 import contactRoutes from "./routes/contact"
 import feedbackRoutes from "./routes/feedback"
 import billingWorkspaceRoutes from "./routes/billing-workspace"
@@ -312,6 +315,7 @@ app.get("/healthz", (c) => c.json({ ok: true }))
 // /api/v2/health that the AI controls used to gate on).
 app.get("/api/v2/health", (c) => c.json({ ok: true, name: "aquilla-identity" }))
 
+app.route("/api/v2/auth/oauth/google", googleLoginRoutes)
 app.route("/api/v2/auth", authRoutes)
 // Legacy alias: old clients (and frontier-server-era tokens) still hit
 // /api/v1/auth/* — keep the auth surface mounted there too.
@@ -417,6 +421,9 @@ app.route("/api/v2/monday", mondayRoutes)
 // (lib/integrations/push.ts), including the sync-worker nudge above.
 app.route("/api/v2/airtable", airtableRoutes)
 app.route("/api/v2/langquest", langquestRoutes)
+// Account-level LangQuest connections (one token per user per LangQuest org),
+// which the project links above are made from.
+app.route("/api/v2/langquest", langquestConnectionRoutes)
 // External API credentials (PATs) for the Agent API (AQU-533 §2). Mint/list/
 // revoke; live role is re-resolved on every downstream API call.
 app.route("/api/v2/credentials", credentialsRoutes)
@@ -440,6 +447,9 @@ app.route("/api/v1/audio", transcriptionRoutes)
 // server owns the prompt and accepts only bounded file metadata + a sample.
 app.route("/api/v1/import", importClassifyRoutes)
 app.route("/api/v1/import", importSandboxRoutes)
+// AQU-2302: a recordings folder's naming, worked out once by the assistant from
+// a sample of file names, applied and checked in the browser, kept per org.
+app.route("/api/v1/import", importRecordingNamesRoutes)
 // Translation agent (SSE) — one-tool SQL agent, staged-write proposals.
 // Same auth + AI-guard path as chat; see routes/agent.ts and the 2026-06-12
 // translation-agent design/implementation-plan specs.
@@ -617,6 +627,7 @@ const scheduled = async (
     // this one cron covers both. Non-throwing.
     await pruneRateLimitCounters(runEnv.AQUILLA_PG)
     await pruneAuthRateLimitEvents(runEnv.AQUILLA_PG)
+    await pruneSocialLoginFlows(runEnv.AQUILLA_PG)
     // Autopilot prompt/reply traces expire after 30 days. Non-throwing.
     await pruneExpiredTraces(runEnv.AQUILLA_PG)
     // AQU-1845 — abandoned wave checkpoints. The driver clears its own after

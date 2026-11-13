@@ -1,12 +1,13 @@
+import { LoginMethodsSection } from "@/components/settings/LoginMethodsSection"
+import { Button } from "@/components/ui/button"
 import { useState } from "react"
 import { Navigate, useLocation, useNavigate, useParams, type Location } from "react-router-dom"
-import { Bell, Cpu, Gauge, KeyRound, Mic, PanelLeft, ServerCog, UserRound } from "lucide-react"
+import { Bell, Cpu, Gauge, KeyRound, Link2, Mic, PanelLeft, ServerCog, UserRound } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Switch } from "@/components/ui/switch"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
+import { CommitTextInput, CommitTextarea } from "@/components/settings/CommitInput"
 import { Page, PageHeader, SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { NavList, NavRow, BackLink } from "@/components/ui/nav-list"
 import {
@@ -20,6 +21,7 @@ import {
 import { SearchSelect } from "@/components/ui/search-select"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { SaveStatusProvider, useSaveTracker } from "@/lib/settings/save-status"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { useThemeMode, type ThemeMode } from "@/branding/ThemeMode"
 import {
@@ -37,6 +39,7 @@ import { UsageSection } from "@/components/settings/UsageSection"
 import { ShareUsageDataSetting } from "@/components/settings/ShareUsageDataSetting"
 import { ApiTokensSection } from "@/components/settings/ApiTokensSection"
 import { CommentNotificationsSection } from "@/components/settings/CommentNotificationsSection"
+import { LangQuestConnectionsSection } from "@/components/settings/LangQuestConnectionsSection"
 import {
   RecordingPreferencesScope,
   RecordingPreferencesSection,
@@ -189,8 +192,9 @@ function GeneralSection({
   const { mode, setMode } = useThemeMode()
   const { scale: fontSizeScale, setScale: setFontSizeScale } = useFontSizeScale()
   const { locale, locales, setLocale, t } = useI18n()
-  const { enabled, setEnabled } = useAnalyticsConsent()
+  const { enabled, setEnabled, disabled: sharingDisabled, error: sharingError, retry: retrySharing } = useAnalyticsConsent()
   const localAuthorName = useLocalAuthorName()
+  const track = useSaveTracker()
   const languageItems = locales.map((l) => ({
     value: l.code,
     label: l.nativeName,
@@ -284,13 +288,20 @@ function GeneralSection({
       {/* AQU-2259: moved here from each project's settings ("User → Username"). */}
       <div id={LOCAL_AUTHOR_NAME_SETTING_ID}>
         <SettingsRow
+          saveId="authorName"
           label={<label htmlFor="local-author-name">{t("settings.preferences.authorName.label")}</label>}
           description={t("settings.preferences.authorName.description")}
           control={
-            <Input
+            // AQU-2262: saves when you leave it or pause, never half-typed.
+            <CommitTextInput
               id="local-author-name"
               value={localAuthorName}
-              onChange={(e) => setLocalAuthorName(e.target.value)}
+              onCommit={(next) =>
+                void track("authorName", async () => {
+                  setLocalAuthorName(next)
+                  return { kind: "saved" }
+                })
+              }
               placeholder={t("projectSettings.user.usernamePlaceholder")}
               className="w-44 bg-background"
             />
@@ -298,7 +309,8 @@ function GeneralSection({
         />
       </div>
       {/* AQU-2263: the one Share usage data setting, as onboarding shows it. */}
-      <ShareUsageDataSetting enabled={enabled} onEnabledChange={setEnabled} />
+      <ShareUsageDataSetting enabled={enabled} onEnabledChange={setEnabled} disabled={sharingDisabled} />
+      {sharingError && <div role="alert"><p className="text-sm text-destructive">{t("onboarding.privacy.saveFailed")}</p><Button variant="outline" size="sm" onClick={() => void retrySharing()}>{t("common.retry")}</Button></div>}
       <NavRow
         to="/preferences/workspace"
         state={backgroundLocation ? { backgroundLocation, preferencesModalDepth: 2 } : undefined}
@@ -320,18 +332,21 @@ function GeneralSection({
 }
 
 /**
- * Translator profile editor. Local form state so editing (incl. trailing
- * spaces) is smooth; every change is persisted via setTranslatorProfile, which
+ * Translator profile editor. Each field saves as you change it (AQU-2262):
+ * when you leave it or pause typing, through setTranslatorProfile, which
  * sanitizes for storage and notifies the chat/agent hooks.
  */
 function TranslatorProfileSection() {
   const { t } = useI18n()
+  const track = useSaveTracker()
   const [form, setForm] = useState<TranslatorProfile>(() => getTranslatorProfile())
 
-  function update(key: keyof TranslatorProfile, value: string) {
-    const next = { ...form, [key]: value }
-    setForm(next)
-    setTranslatorProfile(next)
+  function save(key: keyof TranslatorProfile, value: string) {
+    void track(`profile-${key}`, async () => {
+      setTranslatorProfile({ ...getTranslatorProfile(), [key]: value })
+      setForm(getTranslatorProfile())
+      return { kind: "saved" }
+    })
   }
 
   return (
@@ -339,12 +354,13 @@ function TranslatorProfileSection() {
       {PROFILE_TEXT_FIELDS.map(({ key, labelKey, placeholderKey }) => (
         <SettingsRow
           key={key}
+          saveId={`profile-${key}`}
           label={<label htmlFor={`profile-${key}`}>{t(labelKey)}</label>}
           control={
-            <Input
+            <CommitTextInput
               id={`profile-${key}`}
               value={form[key] ?? ""}
-              onChange={(e) => update(key, e.target.value)}
+              onCommit={(next) => save(key, next)}
               placeholder={t(placeholderKey)}
               className="w-56 bg-background"
             />
@@ -357,11 +373,12 @@ function TranslatorProfileSection() {
         }
         description={t("settings.preferences.profile.otherInfoDescription")}
         block
+        saveId="profile-otherInfo"
       >
-        <Textarea
+        <CommitTextarea
           id="profile-otherInfo"
           value={form.otherInfo ?? ""}
-          onChange={(e) => update("otherInfo", e.target.value)}
+          onCommit={(next) => save("otherInfo", next)}
           placeholder={t("onboarding.preferences.profile.otherInfoPlaceholder")}
           rows={3}
           className="bg-background"
@@ -392,6 +409,7 @@ interface PreferenceSection {
 const INLINE_PREFERENCE_SLUGS = new Set(["appearance", "language", "privacy"])
 
 const PREFERENCE_SECTIONS: PreferenceSection[] = [
+  { slug: "login-methods", titleKey: "auth.methods.title", descriptionKey: "auth.methods.description", group: "Account", icon: KeyRound, render: () => <LoginMethodsSection /> },
   {
     slug: "workspace",
     // Title text is identical to onboarding.preferences.workspace.groupLabel
@@ -461,6 +479,16 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
     group: "Account",
     icon: Gauge,
     render: () => <UsageSection />,
+  },
+  {
+    // AQU-2105: the LangQuest organizations this account holds a token for,
+    // with each token's health. Made from the New-project wizard, managed here.
+    slug: "connected-orgs",
+    titleKey: "langquest.settings.title",
+    descriptionKey: "langquest.settings.description",
+    group: "Account",
+    icon: Link2,
+    render: () => <LangQuestConnectionsSection />,
   },
   {
     slug: "api-tokens",
@@ -581,7 +609,12 @@ function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: bool
 
 export function Preferences() {
   const { section } = useParams<{ section?: string }>()
-  return section ? <PreferencesDetail slug={section} /> : <PreferencesIndex />
+  // AQU-2262: preferences save as you change them, with "Saved" beside each.
+  return (
+    <SaveStatusProvider>
+      {section ? <PreferencesDetail slug={section} /> : <PreferencesIndex />}
+    </SaveStatusProvider>
+  )
 }
 
 /** Route-modal presentation used by in-app entry points. Direct URLs continue
@@ -609,9 +642,11 @@ export function PreferencesDialog() {
           <DialogDescription>{t("onboarding.preferences.dialogDescription")}</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          {section
-            ? <PreferencesDetail slug={section} modal />
-            : <PreferencesIndex modal backgroundLocation={backgroundLocation} />}
+          <SaveStatusProvider>
+            {section
+              ? <PreferencesDetail slug={section} modal />
+              : <PreferencesIndex modal backgroundLocation={backgroundLocation} />}
+          </SaveStatusProvider>
         </div>
       </DialogContent>
     </Dialog>

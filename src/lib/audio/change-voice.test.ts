@@ -4,10 +4,12 @@ import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { Voice } from "@/lib/parsers/types"
 
-const convertToCloneVoice = vi.fn()
+const convertToLibraryVoice = vi.fn()
 const emitCellAudioAttach = vi.fn()
 const injectOptimisticAudioAttachment = vi.fn()
-vi.mock("./voice-clone", () => ({ convertToCloneVoice: (...a: unknown[]) => convertToCloneVoice(...a) }))
+const convertElevenLabsSpeech = vi.fn()
+vi.mock("./voice-clone", () => ({ convertToLibraryVoice: (...a: unknown[]) => convertToLibraryVoice(...a) }))
+vi.mock("@/lib/sync/elevenlabs", () => ({ convertElevenLabsSpeech: (...a: unknown[]) => convertElevenLabsSpeech(...a) }))
 vi.mock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: (...a: unknown[]) => emitCellAudioAttach(...a) }))
 vi.mock("./audio-attachments-bus", () => ({
   injectOptimisticAudioAttachment: (...a: unknown[]) => injectOptimisticAudioAttachment(...a),
@@ -26,9 +28,9 @@ const {
   changeVoiceBlocker,
   changeVoiceForCell,
   changeVoiceLabel,
-  changeVoiceQualityForSteps,
   changeVoiceSourceTake,
   generateSlotOverVoiceChange,
+  isVoiceChangedAudioId,
   originalTakeId,
   voiceChangedWithReference,
   voiceConversionKey,
@@ -37,9 +39,12 @@ const {
 const { getTtsStatus, ttsStatusKey } = await import("./tts")
 
 const session = { jwt: "jwt", username: "dev", createdAt: "" } as FrontierSession
-const narrator: Voice = { id: "v-narr", name: "Narrator", referenceAudioId: "ref1.wav" } as Voice
 const stock: Voice = { id: "preset-narrator", name: "Stock" } as Voice
 const hearth: Voice = { id: "v-hearth", name: "Hearth", libraryVoiceId: "narrator-hearth" } as Voice
+/** A trained custom voice: its model id is `c-<hex>`. */
+const anna: Voice = { id: "v-anna", name: "Anna", libraryVoiceId: "c-0a1b2c3d" } as Voice
+/** What the worker stamps for `hearth` (`library:narrator-hearth`). */
+const HEARTH_FP = "78d70b3a"
 
 function att(over: Partial<CodexCellAttachment> = {}): CodexCellAttachment {
   return { url: "frontier-audio://x.webm", type: "audio", ...over }
@@ -58,7 +63,7 @@ function cell(over: Partial<CellData> = {}): CellData {
 }
 
 beforeEach(() => {
-  convertToCloneVoice.mockReset()
+  convertToLibraryVoice.mockReset()
   emitCellAudioAttach.mockReset().mockResolvedValue("evt-1")
   injectOptimisticAudioAttachment.mockReset()
 })
@@ -68,13 +73,20 @@ describe("reference fingerprint", () => {
   // the worker stamps this into the id and the client reads it back.
   it("matches the worker's FNV-1a", () => {
     expect(voiceReferenceFingerprint("ref1.wav")).toBe("a8dcd319")
-    expect(voiceReferenceFingerprint("ref-1700000000000-abc123def.webm")).toBe("4583a16c")
+    expect(voiceReferenceFingerprint("library:narrator-hearth")).toBe(HEARTH_FP)
   })
 
-  it("reads a worker-named conversion back to its reference clip", () => {
-    const workerId = "vc-a8dcd319-audio-GEN_1_1-1759460000000-1a2b3c4d.wav"
-    expect(voiceChangedWithReference(workerId, "ref1.wav")).toBe(true)
-    expect(voiceChangedWithReference(workerId, "ref2.wav")).toBe(false)
+  it("reads a worker-named conversion back to the library voice it was made with", () => {
+    const workerId = `vc-${HEARTH_FP}-audio-GEN_1_1-1759460000000-1a2b3c4d.wav`
+    expect(voiceChangedWithReference(workerId, "library:narrator-hearth")).toBe(true)
+    expect(voiceChangedWithReference(workerId, "library:c-0a1b2c3d")).toBe(false)
+  })
+
+  it("still reads legacy `-q<steps>-` conversions as voice-changed takes", () => {
+    const legacy = `vc-${HEARTH_FP}-q25-audio-GEN_1_1-1759460000000-1a2b3c4d.wav`
+    expect(isVoiceChangedAudioId(legacy)).toBe(true)
+    expect(voiceChangedWithReference(legacy, "library:narrator-hearth")).toBe(true)
+    expect(isVoiceChangedAudioId("audio-GEN_1_1-1-abc.webm")).toBe(false)
   })
 })
 
@@ -153,43 +165,39 @@ describe("originalTakeId", () => {
   })
 })
 
-describe("changeVoiceQualityForSteps", () => {
-  it("names the stamped steps, and treats an unstamped conversion as Fast", () => {
-    expect(changeVoiceQualityForSteps(10)).toBe("fast")
-    expect(changeVoiceQualityForSteps(25)).toBe("standard")
-    expect(changeVoiceQualityForSteps(40)).toBe("high")
-    expect(changeVoiceQualityForSteps(null)).toBeNull()
-  })
-})
-
 describe("changeVoiceBlocker", () => {
-  it("needs a take and a cloned voice", () => {
-    expect(changeVoiceBlocker(cell({ selectedAudioId: undefined, attachments: {} }), narrator)).toBe("no-take")
-    expect(changeVoiceBlocker(cell(), stock)).toBe("not-cloned")
-    expect(changeVoiceBlocker(cell(), narrator)).toBeNull()
+  it("needs a take, and a character or trained voice", () => {
+    expect(changeVoiceBlocker(cell({ selectedAudioId: undefined, attachments: {} }), hearth)).toBe("no-take")
+    expect(changeVoiceBlocker(cell(), stock)).toBe("not-trained")
+    expect(changeVoiceBlocker(cell(), hearth)).toBeNull()
+    expect(changeVoiceBlocker(cell(), anna)).toBeNull()
   })
 
-  it("is up to date only when the selected take came from the voice's CURRENT reference", () => {
-    const converted = "vc-a8dcd319-audio-GEN_1_1-2-z.wav"
+  it("blocks an Inworld quick clone: it reads text but cannot re-voice a take", () => {
+    // Instant clones synthesize from text (Inworld voices:clone); only character,
+    // trained and ElevenLabs voices convert speech to speech.
+    const quickClone = { ...stock, id: "v-clone", provider: "inworld", referenceAudioId: "ref1.wav" } as Voice
+    expect(changeVoiceBlocker(cell(), quickClone)).toBe("not-trained")
+    expect(voiceConversionKey(quickClone)).toBeNull()
+    // …and so is a pre-AQU-2291 Gemini clone, whose clip is now ignored.
+    const legacyClone = { ...stock, id: "v-old", provider: "gemini", referenceAudioId: "ref1.wav" } as Voice
+    expect(changeVoiceBlocker(cell(), legacyClone)).toBe("not-trained")
+  })
+
+  it("is up to date only when the selected take is already in THIS voice", () => {
+    const converted = `vc-${HEARTH_FP}-audio-GEN_1_1-2-z.wav`
     const c = cell({
       selectedAudioId: converted,
-      attachments: { [converted]: att({ slot: "recording", voiceId: "v-narr", referenceAudioId: "rec.webm" }) },
+      attachments: { [converted]: att({ slot: "recording", voiceId: "v-hearth", referenceAudioId: "rec.webm" }) },
     })
-    expect(changeVoiceBlocker(c, narrator)).toBe("up-to-date")
-    expect(changeVoiceBlocker(c, { ...narrator, referenceAudioId: "ref-new.wav" })).toBeNull()
-  })
-
-  it("treats a different quality as not done, and an unstamped conversion as Fast", () => {
-    const legacy = "vc-a8dcd319-audio-GEN_1_1-2-z.wav"
-    const high = "vc-a8dcd319-q40-audio-GEN_1_1-3-z.wav"
-    const at = (id: string) => cell({
-      selectedAudioId: id,
-      attachments: { [id]: att({ slot: "recording", voiceId: "v-narr", referenceAudioId: "rec.webm" }) },
-    })
-    expect(changeVoiceBlocker(at(legacy), narrator, 10)).toBe("up-to-date")
-    expect(changeVoiceBlocker(at(legacy), narrator, 25)).toBeNull()
-    expect(changeVoiceBlocker(at(high), narrator, 40)).toBe("up-to-date")
-    expect(changeVoiceBlocker(at(high), narrator, 25)).toBeNull()
+    expect(changeVoiceBlocker(c, hearth)).toBe("up-to-date")
+    expect(changeVoiceBlocker(c, anna)).toBeNull()
+    // A legacy `-q` id in the same voice is just as done.
+    const legacy = `vc-${HEARTH_FP}-q40-audio-GEN_1_1-3-z.wav`
+    expect(changeVoiceBlocker(cell({
+      selectedAudioId: legacy,
+      attachments: { [legacy]: att({ slot: "recording", voiceId: "v-hearth" }) },
+    }), hearth)).toBe("up-to-date")
   })
 })
 
@@ -202,7 +210,7 @@ describe("changeVoiceLabel", () => {
 
 describe("changeVoiceForCell", () => {
   it("converts the ORIGINAL take and attaches the result in the source take's slot", async () => {
-    convertToCloneVoice.mockResolvedValue({
+    convertToLibraryVoice.mockResolvedValue({
       audioId: "vc-a8dcd319-audio-GEN_1_1-9-q", ext: "wav", url: "frontier-audio://vc-a8dcd319-audio-GEN_1_1-9-q.wav", bytes: 3,
     })
     const prior = "vc-ffffffff-audio-GEN_1_1-5-p.wav"
@@ -214,74 +222,97 @@ describe("changeVoiceForCell", () => {
       },
     })
 
-    const res = await changeVoiceForCell({ projectId: "p1", cell: c, voice: narrator, session, author: "dev" })
+    const res = await changeVoiceForCell({ projectId: "p1", cell: c, voice: hearth, session, author: "dev" })
 
-    expect(convertToCloneVoice).toHaveBeenCalledWith(expect.objectContaining({
-      projectId: "p1", fileId: "f1", cellId: "GEN 1:1", referenceAudioId: "ref1.wav", sourceAudioId: "rec.webm",
+    expect(convertToLibraryVoice).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "p1", fileId: "f1", cellId: "GEN 1:1", libraryVoiceId: "narrator-hearth", sourceAudioId: "rec.webm",
     }))
-    expect(convertToCloneVoice.mock.calls[0][0]).not.toHaveProperty("source")
+    const sent = convertToLibraryVoice.mock.calls[0][0]
+    expect(sent).not.toHaveProperty("source")
+    // AQU-2291: the new contract has no clone clip and no quality knob.
+    expect(sent).not.toHaveProperty("referenceAudioId")
+    expect(sent).not.toHaveProperty("diffusionSteps")
     expect(emitCellAudioAttach).toHaveBeenCalledWith(expect.objectContaining({
       cellId: "GEN 1:1",
       audioId: "vc-a8dcd319-audio-GEN_1_1-9-q.wav",
       slot: "recording",
-      voiceId: "v-narr",
+      voiceId: "v-hearth",
       referenceAudioId: "rec.webm",
-      label: "Take 1 → Narrator",
+      label: "Take 1 → Hearth",
       durationMs: 2400,
     }))
     expect(injectOptimisticAudioAttachment).toHaveBeenCalledWith(
-      "f1", "GEN 1:1", expect.objectContaining({ slot: "recording", voiceId: "v-narr" }), "evt-1",
+      "f1", "GEN 1:1", expect.objectContaining({ slot: "recording", voiceId: "v-hearth" }), "evt-1",
     )
     expect(res.audioId).toBe("vc-a8dcd319-audio-GEN_1_1-9-q.wav")
   })
 
-  it("refuses a voice without a reference clip before calling the worker", async () => {
+  it("refuses a voice with no trained model before calling the worker", async () => {
     await expect(changeVoiceForCell({ projectId: "p1", cell: cell(), voice: stock, session, author: "dev" }))
-      .rejects.toThrow(/reference clip/)
-    expect(convertToCloneVoice).not.toHaveBeenCalled()
+      .rejects.toThrow("Stock can read text but can't re-voice recordings — Change voice works with character, trained and ElevenLabs voices.")
+    expect(convertToLibraryVoice).not.toHaveBeenCalled()
+  })
+})
+
+describe("ElevenLabs voices (AQU-2299)", () => {
+  const rachel: Voice = {
+    id: "v-rachel", name: "Rachel", provider: "elevenlabs",
+    elevenLabs: { voiceId: "el123", settings: { stability: 0.3, similarityBoost: 0.75, style: 0, speed: 1, speakerBoost: true } },
+  } as Voice
+
+  it("converts through ElevenLabs speech-to-speech and attaches the mp3 in the take's slot", async () => {
+    // The id the worker mints for `elevenlabs:el123` (sync-worker elevenlabs.ts).
+    const fp = voiceReferenceFingerprint("elevenlabs:el123")
+    convertElevenLabsSpeech.mockResolvedValue({
+      audioId: `vc-${fp}-audio-GEN_1_1-9-r`, ext: "mp3", url: `frontier-audio://vc-${fp}-audio-GEN_1_1-9-r.mp3`, bytes: 3,
+    })
+    expect(voiceConversionKey(rachel)).toBe("elevenlabs:el123")
+    expect(changeVoiceBlocker(cell(), rachel)).toBeNull()
+
+    await changeVoiceForCell({ projectId: "p1", cell: cell(), voice: rachel, session, author: "dev" })
+
+    expect(convertToLibraryVoice).not.toHaveBeenCalled()
+    expect(convertElevenLabsSpeech).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "p1", fileId: "f1", cellId: "GEN 1:1", voiceId: "el123",
+      sourceAudioId: "audio-GEN_1_1-1-abc.webm", modelId: "eleven_multilingual_sts_v2",
+      voiceSettings: expect.objectContaining({ stability: 0.3 }),
+    }), expect.any(Function))
+    const attached = emitCellAudioAttach.mock.calls[0][0] as { audioId: string; mimeType: string; slot: string }
+    expect(attached).toMatchObject({ audioId: `vc-${fp}-audio-GEN_1_1-9-r.mp3`, mimeType: "audio/mpeg", slot: "recording" })
+
+    // That take now reads as up to date for the same voice.
+    const after = cell({
+      selectedAudioId: attached.audioId,
+      attachments: { [attached.audioId]: att({ slot: "recording", voiceId: "v-rachel" }) },
+    })
+    expect(changeVoiceBlocker(after, rachel)).toBe("up-to-date")
   })
 })
 
 describe("changeCellVoice", () => {
   it("leaves the failure on the cell's tts badge", async () => {
-    convertToCloneVoice.mockRejectedValue(new Error("Voice cloning (Seed-VC) failed (502): boom"))
-    const ok = await changeCellVoice({ projectId: "p1", cell: cell(), voice: narrator, session, author: "dev" })
+    convertToLibraryVoice.mockRejectedValue(new Error("Voice conversion failed (502): boom"))
+    const ok = await changeCellVoice({ projectId: "p1", cell: cell(), voice: hearth, session, author: "dev" })
     expect(ok).toBe(false)
-    expect(getTtsStatus(ttsStatusKey("GEN 1:1"))).toEqual({ kind: "error", message: "Voice cloning (Seed-VC) failed (502): boom" })
+    expect(getTtsStatus(ttsStatusKey("GEN 1:1"))).toEqual({ kind: "error", message: "Voice conversion failed (502): boom" })
   })
 })
 
-describe("library (character) voices", () => {
-  it("pin conversions to a namespaced model key, never colliding with a reference clip", () => {
+describe("library voices", () => {
+  it("pin conversions to a namespaced model key", () => {
     expect(voiceConversionKey(hearth)).toBe("library:narrator-hearth")
-    expect(voiceConversionKey(narrator)).toBe("ref1.wav")
+    expect(voiceConversionKey(anna)).toBe("library:c-0a1b2c3d")
     expect(voiceConversionKey(stock)).toBeNull()
   })
 
-  it("can change a take without a reference clip, and ignore the quality knob once done", () => {
-    expect(changeVoiceBlocker(cell(), hearth, 25)).toBeNull()
-    const done = `vc-${voiceReferenceFingerprint("library:narrator-hearth")}-q10-audio-GEN_1_1-9-q.wav`
-    const c = cell({
-      selectedAudioId: done,
-      attachments: {
-        "rec.webm": att({ slot: "recording" }),
-        [done]: att({ slot: "recording", voiceId: "v-hearth", referenceAudioId: "rec.webm" }),
-      },
+  it("converts a trained custom voice through its c-<hex> model", async () => {
+    convertToLibraryVoice.mockResolvedValue({
+      audioId: "vc-1f0600da-audio-GEN_1_1-9-q", ext: "wav", url: "frontier-audio://vc-1f0600da-audio-GEN_1_1-9-q.wav", bytes: 3,
     })
-    // Same character, a different Seed-VC quality pick: still up to date.
-    expect(changeVoiceBlocker(c, hearth, 40)).toBe("up-to-date")
-  })
-
-  it("converts through the library voice, with no reference clip or diffusion steps", async () => {
-    convertToCloneVoice.mockResolvedValue({
-      audioId: "vc-1234abcd-q10-audio-GEN_1_1-9-q", ext: "wav", url: "frontier-audio://vc-1234abcd-q10-audio-GEN_1_1-9-q.wav", bytes: 3,
-    })
-    await changeVoiceForCell({ projectId: "p1", cell: cell(), voice: hearth, session, author: "dev", diffusionSteps: 25 })
-    const sent = convertToCloneVoice.mock.calls[0][0]
-    expect(sent).toMatchObject({ libraryVoiceId: "narrator-hearth", sourceAudioId: "audio-GEN_1_1-1-abc.webm" })
-    expect(sent).not.toHaveProperty("referenceAudioId")
+    await changeVoiceForCell({ projectId: "p1", cell: cell(), voice: anna, session, author: "dev" })
+    expect(convertToLibraryVoice.mock.calls[0][0]).toMatchObject({ libraryVoiceId: "c-0a1b2c3d", sourceAudioId: "audio-GEN_1_1-1-abc.webm" })
     expect(emitCellAudioAttach).toHaveBeenCalledWith(expect.objectContaining({
-      voiceId: "v-hearth", label: "Take 1 → Hearth",
+      voiceId: "v-anna", label: "Take 1 → Anna",
     }))
   })
 })

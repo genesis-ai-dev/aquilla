@@ -215,7 +215,8 @@ describe("its colour", () => {
 
   it("is the media view's default green where nobody picked one", () => {
     draw()
-    expect(hue()).toBe("#40c06e")
+    // AQU-2235: the new green (#23c179 since Oct 28; was #0cc187, #40c06e).
+    expect(hue()).toBe("#23c179")
   })
 
   it("is an added track's own colour for a take made on it", () => {
@@ -229,7 +230,27 @@ describe("its colour", () => {
     expect(hue()).toBe("#eba720")
   })
 
-  it("is the source row's lighter blue for a source-audio section", () => {
+  // AQU-2235: the sparkle is an AI voice's only mark, so every surface asks the
+  // same question. An added track keeps both kinds in its one slot; the TTS
+  // paths stamp `voiceId` on what they make.
+  it("marks an added track's AI voice as one, as the takes list does", () => {
+    const owner = cueOwner()
+    const id = owner.selectedAudioId!
+    const voiced = { ...owner, attachments: { [id]: { ...owner.attachments![id], slot: "trk-es", voiceId: "v-ana" } } } as unknown as CellData
+    draw({ owner: voiced, project: withFiles({ "trk-es": { kind: "audio", name: "Spanish", order: 4, color: "amber" } }) })
+    expect(screen.getByTestId("cell-take-waveform-generated")).toBeInTheDocument()
+  })
+
+  it("marks that AI voice with one star, the one in its waveform's corner", () => {
+    const owner = cueOwner()
+    const id = owner.selectedAudioId!
+    const voiced = { ...owner, attachments: { [id]: { ...owner.attachments![id], voiceId: "v-ana" } } } as unknown as CellData
+    draw({ owner: voiced })
+    expect(screen.getByTestId("cell-take-block").querySelectorAll(".lucide-sparkles")).toHaveLength(1)
+    expect(screen.getByTestId("cell-take-waveform-generated")).toBeInTheDocument()
+  })
+
+  it("is the source row's blue for a source-audio section, drawn as a take with no sparkle", () => {
     const source = "audio-mark-reading-1700000000-src.wav"
     const owner = {
       ...cueOwner(), startTime: 17.6, endTime: 23.1, selectedAudioId: source,
@@ -237,7 +258,10 @@ describe("its colour", () => {
     } as unknown as CellData
     draw({ owner, project: withFiles({ "target-audio": { color: "violet" } }) })
     expect(hue()).toBe("#0e9bd6")
-    expect(screen.getByTestId("cell-take-waveform").className).toContain("bg-[color:var(--tl-track-gen)]")
+    // AQU-2235: the two kinds share one body now; "generated" only adds the
+    // sparkle, and a section of the source recording is no AI voice.
+    expect(screen.getByTestId("cell-take-waveform").className).toContain("bg-[color:var(--tl-track-ground)]")
+    expect(screen.queryByTestId("cell-take-waveform-generated")).toBeNull()
   })
 })
 
@@ -364,24 +388,31 @@ describe("whose recording it acts on", () => {
   })
 })
 
-// AQU-1758: the Audio view's voice card turned a take into a character; the
-// take in the Recording tab does now.
-describe("make a character from this voice", () => {
-  it("offers it on the take and asks for it once", () => {
-    const onMakeCharacter = vi.fn()
-    draw({ onMakeCharacter })
-    fireEvent.click(screen.getByRole("button", { name: "Make a character from this voice" }))
-    expect(onMakeCharacter).toHaveBeenCalledTimes(1)
+// AQU-1758: the Audio view's voice card turned a take into a voice; the take
+// in the Recording tab does now. AQU-2291: by training, not cloning.
+describe("train a voice from this recording", () => {
+  it("offers it on a person's take and asks for it once", () => {
+    const onTrainFromTake = vi.fn()
+    draw({ onTrainFromTake })
+    fireEvent.click(screen.getByRole("button", { name: "Train a voice from this recording" }))
+    expect(onTrainFromTake).toHaveBeenCalledTimes(1)
   })
 
-  it("is not offered when nobody handed it in", () => {
+  it("is not offered when nobody handed it in, or on a generated take", () => {
     draw()
-    expect(screen.queryByTestId("cell-take-make-character")).toBeNull()
+    expect(screen.queryByTestId("cell-take-train-voice")).toBeNull()
+    const owner = cueOwner()
+    const audioId = owner.selectedAudioId!
+    draw({
+      onTrainFromTake: vi.fn(),
+      owner: { ...owner, attachments: { [audioId]: { ...owner.attachments![audioId]!, voiceId: "v-1" } } } as CellData,
+    })
+    expect(screen.queryByTestId("cell-take-train-voice")).toBeNull()
   })
 
   it("cannot be pressed by someone who cannot edit", () => {
-    draw({ onMakeCharacter: vi.fn(), editable: false })
-    expect(screen.getByTestId("cell-take-make-character")).toBeDisabled()
+    draw({ onTrainFromTake: vi.fn(), editable: false })
+    expect(screen.getByTestId("cell-take-train-voice")).toBeDisabled()
   })
 })
 

@@ -42,7 +42,8 @@ import { SmartEditPopover } from "@/components/SmartEditPopover"
 import { IntelligentProgress } from "@/components/IntelligentProgress"
 import type { AskLlmResult } from "@/hooks/useSmartEdits"
 import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
-import { createSmartQuotesExtension } from "@/lib/richtext/smart-quotes"
+import { createSmartQuotesExtension, smartQuoteMarks, type SmartQuoteMarks } from "@/lib/richtext/smart-quotes"
+import type { QuoteMarksProfile } from "../../db/shared/language-profile"
 import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/richtext/terminology-chip-plugin"
 import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
 import { acceptGhostText, createGhostTextExtension, getGhostText, handleGhostKeyDown } from "@/lib/richtext/ghost-text-plugin"
@@ -444,8 +445,10 @@ interface TranslatedEditorProps {
   textDirection?: TextDirection
   directionMode?: DirectionMode
   lang?: string
-  /** Curly quotes as you type, in `lang`'s style. Read when the editor mounts. */
+  /** Curly quotes as you type: in `quoteMarks`' style when the project recorded them, else in `lang`'s. */
   smartQuotes?: boolean
+  /** The project's recorded quotation marks (its Language profile slot), if any. */
+  quoteMarks?: QuoteMarksProfile | null
   /** Remote lock holder — when present, the editor is read-only. */
   heldByLabel?: string | null
   infractions?: RuleInfraction[]
@@ -560,6 +563,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   directionMode = "ltr",
   lang,
   smartQuotes = false,
+  quoteMarks,
   heldByLabel,
   infractions,
   ruleSeverity,
@@ -606,6 +610,13 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => { onSelectionChangeRef.current = onSelectionChange }, [onSelectionChange])
   const textDirectionRef = useRef<TextDirection>(textDirection)
   useEffect(() => { textDirectionRef.current = textDirection }, [textDirection])
+  // AQU-2181: the direction the text is actually rendered in. `dir` is set on
+  // the ProseMirror node, so the absolutely-positioned overlays below it (the
+  // Ask-AI button, the LLM note) do NOT inherit it and cannot use logical
+  // insets — they need the resolved value in React state to pick their side.
+  const [resolvedTextDirection, setResolvedTextDirection] = useState<TextDirection>(
+    directionMode === "auto" ? detectStrongTextDirection(initialPlain ?? "") ?? textDirection : textDirection,
+  )
   const directionModeRef = useRef<DirectionMode>(directionMode)
   useEffect(() => { directionModeRef.current = directionMode }, [directionMode])
   const footnoteNumberOffsetRef = useRef(footnoteNumberOffset)
@@ -660,6 +671,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
 
   const latestTerminologyConceptsRef = useRef<Concept[]>(terminologyConcepts ?? [])
   const latestTermMatchingRef = useRef<TermMatchingSettings | undefined>(termMatching)
+  // Null while smart quotes are off. Read by the typing rule on each keystroke.
+  const smartQuoteMarksRef = useRef<SmartQuoteMarks | null>(smartQuotes ? smartQuoteMarks(lang, quoteMarks) : null)
+  useEffect(() => {
+    smartQuoteMarksRef.current = smartQuotes ? smartQuoteMarks(lang, quoteMarks) : null
+  }, [smartQuotes, lang, quoteMarks])
 
   const preparedIdmlContent = useMemo(
     () => idmlConfiguration
@@ -821,6 +837,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       ? detectStrongTextDirection(editorInstance.getText()) ?? textDirectionRef.current
       : textDirectionRef.current
     editorInstance.view.dom.setAttribute("dir", next)
+    setResolvedTextDirection(next)
     if (lang) editorInstance.view.dom.setAttribute("lang", lang)
     else editorInstance.view.dom.removeAttribute("lang")
   }, [lang])
@@ -919,7 +936,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
             getClient: () => ghostClientRef.current,
             getCellId: () => ghostCellIdRef.current,
           })]),
-      ...(smartQuotes ? [createSmartQuotesExtension(lang)] : []),
+      createSmartQuotesExtension(() => smartQuoteMarksRef.current),
       ...(terminologyConcepts !== undefined
         ? [createTerminologyChipExtension(
             () => latestTerminologyConceptsRef.current,
@@ -2201,11 +2218,20 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           onClick={() => { void startLlmAsk() }}
           // Icon-only at rest so it can't cover text; the label slides out on hover/focus.
           aria-label={t("smartEdits.askAi")}
-          className="group/ask-ai absolute bottom-1 right-1 inline-flex items-center rounded-full p-1 text-[11px] text-violet-700 opacity-60 transition-all hover:bg-background hover:px-2 hover:opacity-100 hover:shadow-sm hover:ring-1 hover:ring-violet-500/30 focus-visible:bg-background focus-visible:px-2 focus-visible:opacity-100 dark:text-violet-300"
+          // AQU-2181: the button parks in the slack after the last line, so it
+          // has to sit on the side the text ENDS on — right in an LTR cell,
+          // left in an RTL one. `right-1` in both covered the text of every
+          // RTL cell. The overlays are siblings of the `dir`-carrying
+          // ProseMirror node, so logical insets would not mirror here.
+          dir={resolvedTextDirection}
+          className={cn(
+            "group/ask-ai absolute bottom-1 inline-flex items-center rounded-full p-1 text-[11px] text-violet-700 opacity-60 transition-all hover:bg-background hover:px-2 hover:opacity-100 hover:shadow-sm hover:ring-1 hover:ring-violet-500/30 focus-visible:bg-background focus-visible:px-2 focus-visible:opacity-100 dark:text-violet-300",
+            resolvedTextDirection === "rtl" ? "left-1" : "right-1",
+          )}
           data-testid="smart-edit-ask-ai"
         >
           <Sparkles className="size-3 shrink-0" aria-hidden />
-          <span className="max-w-0 overflow-hidden whitespace-nowrap transition-all group-hover/ask-ai:ml-1 group-hover/ask-ai:max-w-40 group-focus-visible/ask-ai:ml-1 group-focus-visible/ask-ai:max-w-40">
+          <span className="max-w-0 overflow-hidden whitespace-nowrap transition-all group-hover/ask-ai:ms-1 group-hover/ask-ai:max-w-40 group-focus-visible/ask-ai:ms-1 group-focus-visible/ask-ai:max-w-40">
             {t("smartEdits.askAi")}
           </span>
         </button>
@@ -2216,7 +2242,14 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         </div>
       )}
       {llmNote && (
-        <div role="status" className="absolute bottom-1 right-1 rounded-md bg-background/90 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+        <div
+          role="status"
+          // AQU-2181: same slot as the Ask-AI button, so it mirrors with it.
+          className={cn(
+            "absolute bottom-1 rounded-md bg-background/90 px-1.5 py-0.5 text-[11px] text-muted-foreground",
+            resolvedTextDirection === "rtl" ? "left-1" : "right-1",
+          )}
+        >
           {llmNote}
         </div>
       )}

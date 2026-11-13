@@ -99,7 +99,7 @@ vi.mock("@/lib/store/project-index", () => ({
   createProject: vi.fn().mockResolvedValue(undefined),
 }))
 
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 
 // AQU-1519: the partial-success warning now rides a toast (the dialog closes),
 // so the assertion is on what was handed to the toast manager.
@@ -130,6 +130,8 @@ function addLaneButton() {
 function openDialogWithBasics(opts?: { name?: string; source?: string; target?: string }) {
   render(<ProjectCreateDialog onCreated={vi.fn()} />)
   fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+  // The wizard asks where the project comes from first (AQU-2105).
+  fireEvent.click(screen.getByTestId("project-source-scratch"))
 
   fireEvent.change(screen.getByPlaceholderText("My translation project"), {
     target: { value: opts?.name ?? "Multilingual Episode 1" },
@@ -404,6 +406,8 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
   it("creates with only the primary box filled and no lanes added", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fireEvent.change(screen.getByPlaceholderText("My translation project"), {
       target: { value: "Draft Primary" },
     })
@@ -458,6 +462,8 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
   it("no longer offers the retired source-only shape", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fireEvent.click(screen.getByText("Advanced: project shape"))
 
     expect(screen.queryByText(/Source-only/i)).toBeNull()
@@ -466,6 +472,8 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
   it("offers the same multi-lane boxes on the linked-target shape", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
 
@@ -480,6 +488,8 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
   it("toggles between the two shapes from the project-shape radios", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fireEvent.click(screen.getByText("Advanced: project shape"))
 
     const selfContained = () => screen.getByTestId("create-shape-self-contained")
@@ -563,6 +573,8 @@ describe("ProjectCreateDialog — the language fields' (i) (AQU-2260)", () => {
   it("opens what you can enter, under the label, on click, and shuts it again", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     const [sourceInfo] = screen.getAllByRole("button", { name: "What can I enter here?" })
     await userEvent.setup().hover(sourceInfo!)
     expect(screen.queryByRole("tooltip")).toBeNull()

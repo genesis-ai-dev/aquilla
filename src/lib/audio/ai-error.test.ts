@@ -251,24 +251,33 @@ describe("categorizeAiError — names the TTS engine that failed", () => {
     expect(result.body).toMatch(/not a gemini key/i)
   })
 
-  it("names Seed-VC when clone conversion isn't wired", () => {
-    const result = categorizeAiError("voice convert failed (503): voice conversion not configured")
-    expect(result.category).toBe("seed-vc-not-configured")
-    expect(result.title).toBe("Voice cloning isn't configured")
-    expect(result.body).toMatch(/seed-vc/i)
-  })
-
-  it("reports a conversion failure without naming one engine (AQU-2212)", () => {
-    // Change voice runs on Seed-VC or the voice forge; the copy must fit both.
+  it("names voice conversion, engine-neutrally, when it isn't set up (AQU-2291)", () => {
     for (const raw of [
-      "Voice conversion failed (500): gpu OOM",
-      "Voice cloning (Seed-VC) failed (500): gpu OOM",
+      "voice convert failed (503): voice conversion not configured",
+      errorFromVoiceConvert(503, "voice conversion not configured").message,
     ]) {
       const result = categorizeAiError(raw)
-      expect(result.category).toBe("seed-vc-failed")
-      expect(result.title).toBe("Voice conversion failed")
-      expect(result.body).not.toMatch(/seed-vc/i)
+      expect(result.category).toBe("voice-convert-not-configured")
+      expect(result.title).toBe("Voice conversion isn't set up")
+      expect(result.body).not.toMatch(/seed-vc|clone/i)
     }
+  })
+
+  it("reports a conversion failure without naming one engine (AQU-2212, AQU-2291)", () => {
+    for (const raw of [
+      "Voice conversion failed (500): gpu OOM",
+      errorFromVoiceConvert(500, "gpu OOM").message,
+    ]) {
+      const result = categorizeAiError(raw)
+      expect(result.category).toBe("voice-convert-failed")
+      expect(result.title).toBe("Voice conversion failed")
+      expect(result.body).not.toMatch(/seed-vc|clone/i)
+    }
+  })
+
+  it("files a cold-start timeout under the same voice-convert category", () => {
+    const result = categorizeAiError(errorFromVoiceConvert(504, "upstream did not respond").message)
+    expect(result.category).toBe("voice-convert-failed")
   })
 
   it("explains a convert timeout as a cold start, and says to retry", () => {
@@ -325,5 +334,53 @@ describe("hosted transcription model failures", () => {
     expect(e.category).toBe("transcription-model-unavailable")
     expect(e.body).toMatch(/Preferences/)
     expect(e.body).toMatch(/on this device/)
+  })
+})
+
+// AQU-2299: the worker's ElevenLabs error body → errorFromElevenLabs (the real
+// producer of every thrown ElevenLabs message) → categorizeAiError. Each
+// failure gets its own ElevenLabs title, and no copy ever names another engine.
+describe("categorizeAiError — ElevenLabs (BYOK)", () => {
+  it("maps each worker error code to its ElevenLabs category", async () => {
+    const { errorFromElevenLabs, elevenLabsKeyMissingError } = await import("./elevenlabs/errors")
+    const body = (error: string) => JSON.stringify({ error, message: "x" })
+    const cases: [Error, string][] = [
+      [elevenLabsKeyMissingError(), "elevenlabs-key-missing"],
+      [errorFromElevenLabs(400, body("elevenlabs_key_missing")), "elevenlabs-key-missing"],
+      [errorFromElevenLabs(401, body("elevenlabs_invalid_key")), "elevenlabs-invalid-key"],
+      [errorFromElevenLabs(402, body("elevenlabs_quota_exceeded")), "elevenlabs-quota"],
+      [errorFromElevenLabs(403, body("elevenlabs_clone_not_allowed")), "elevenlabs-clone-not-allowed"],
+      [errorFromElevenLabs(429, body("elevenlabs_rate_limited")), "elevenlabs-rate-limited"],
+      [errorFromElevenLabs(429, JSON.stringify({ error: "rate_limited", message: "slow down" })), "elevenlabs-rate-limited"],
+      [errorFromElevenLabs(502, body("elevenlabs_failed")), "elevenlabs-failed"],
+      [errorFromElevenLabs(404, "voice not found"), "elevenlabs-failed"],
+    ]
+    for (const [err, category] of cases) {
+      const result = categorizeAiError(err.message)
+      expect(result.category, err.message).toBe(category)
+      expect(`${result.title} ${result.body}`).toMatch(/ElevenLabs/)
+      expect(`${result.title} ${result.body}`).not.toMatch(/Gemini|Inworld|OpenRouter/)
+    }
+  })
+
+  // A restricted key is a valid key: it must not be told "ElevenLabs rejected
+  // your key", and the fix is one permission, so the copy names it.
+  it("names the permission a restricted key is missing", async () => {
+    const { errorFromElevenLabs } = await import("./elevenlabs/errors")
+    const named = categorizeAiError(errorFromElevenLabs(403, JSON.stringify({
+      error: "elevenlabs_missing_permission",
+      message: "ElevenLabs API key is missing the permission text_to_speech",
+      permission: "text_to_speech",
+    })).message)
+    expect(named.category).toBe("elevenlabs-missing-permission")
+    expect(named.body).toContain("text_to_speech")
+    expect(named.title).not.toMatch(/rejected/i)
+
+    const unnamed = categorizeAiError(errorFromElevenLabs(403, JSON.stringify({
+      error: "elevenlabs_missing_permission",
+      message: "ElevenLabs API key is missing a permission",
+    })).message)
+    expect(unnamed.category).toBe("elevenlabs-missing-permission")
+    expect(unnamed.body).toMatch(/missing a permission/)
   })
 })

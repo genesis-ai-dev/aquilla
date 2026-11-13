@@ -9,14 +9,10 @@ import { CloudOff, FileText, FolderOpen, RefreshCw, Sparkles, Upload } from "luc
 import { Button } from "@/components/ui/button"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { EmptyState } from "@/components/ui/page"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import type { CellAreaState } from "@/lib/editor/cell-area-state"
 import { useT } from "@/lib/i18n/I18nProvider"
-
-/** Matches EditorTable's default gridCols (the Text lens shape — the stacked
- *  media lens widens the gutter, but this skeleton always precedes text
- *  mode). Keep in sync if the table's columns change. */
-const GRID_COLS = "grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
+import { roleNameKey } from "@/lib/frontier/roles"
 
 interface CellAreaPlaceholderProps {
   state: CellAreaState
@@ -31,6 +27,10 @@ interface CellAreaPlaceholderProps {
    *  spurious "Import" click on a project that already has files. */
   filesLoaded?: boolean
   onImportClick?: () => void
+  /** AQU-2475: role level of this project's resolved source-import floor. Used
+   *  only when `onImportClick` is absent, to name who may import instead of
+   *  leaving the reader an empty state that tells them to do it themselves. */
+  importFloorRole?: number
   onRetryClick?: () => void
 }
 
@@ -41,6 +41,7 @@ export function CellAreaPlaceholder({
   hasFiles,
   filesLoaded,
   onImportClick,
+  importFloorRole,
   onRetryClick,
 }: CellAreaPlaceholderProps) {
   if (state.kind === "ready") return null
@@ -49,6 +50,7 @@ export function CellAreaPlaceholder({
       hasFiles={hasFiles}
       filesLoaded={filesLoaded}
       onImportClick={onImportClick}
+      importFloorRole={importFloorRole}
     />
   )
   if (state.kind === "ready-empty") {
@@ -79,10 +81,8 @@ export function CellRowsLoadStatus({
     <div className="shrink-0 border-t" data-testid="cell-rows-load-status">
       {loading ? (
         <LoadingTemplate label={t("editor.file.loadingFromCloud")} statusDetail={<CellLoadingProgress progress={progress ?? null} />}>
-          <div className={`grid ${GRID_COLS} gap-3 px-4 py-3`}>
-            <Skeleton className="h-10 w-10" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
+          <div className="px-4 py-3">
+            <LoadingCursor />
           </div>
         </LoadingTemplate>
       ) : <LoadError onRetryClick={onRetryClick} compact />}
@@ -145,14 +145,9 @@ function SkeletonGrid() {
   return (
     <div className="flex h-full min-h-64 flex-col">
       <div className="flex flex-1 flex-col gap-2 overflow-hidden p-4">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className={`bg-card grid ${GRID_COLS} items-start gap-3 rounded-lg px-4 py-3`}>
-            <Skeleton className="h-6 w-10" />
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-6 w-10" />
-          </div>
-        ))}
+        <div className="px-4 py-3">
+          <LoadingCursor className="text-xl" />
+        </div>
       </div>
     </div>
   )
@@ -181,10 +176,12 @@ function NoFileEmpty({
   hasFiles,
   filesLoaded,
   onImportClick,
+  importFloorRole,
 }: {
   hasFiles?: boolean
   filesLoaded?: boolean
   onImportClick?: () => void
+  importFloorRole?: number
 }) {
   const t = useT()
   // AQU-149: while the file list hasn't loaded yet, show the neutral "No file
@@ -208,13 +205,28 @@ function NoFileEmpty({
   // When the project has no files at all the sidebar is empty, so "pick a
   // file from the sidebar" is wrong. Instead offer a direct import CTA.
   if (!hasFiles) {
+    // AQU-2475: below the import floor there is no CTA (AQU-481 already
+    // withholds it), and "Import a file to get started" was then an
+    // instruction the reader cannot act on, with nothing saying why — the
+    // state read as broken. Name the role that may import instead, from the
+    // floor the caller resolved (the org can raise it, so this is not a
+    // constant). The role noun comes from the catalog's plural form rather
+    // than a hand-built "s", like every other role sentence.
+    const floorKey =
+      onImportClick || importFloorRole == null
+        ? undefined
+        : roleNameKey(importFloorRole)
     return (
       <EmptyState
         variant="inline"
         className="h-full p-8"
         icon={Upload}
         title={t("editor.file.noFilesTitle")}
-        description={t("editor.file.noFilesBody")}
+        description={
+          floorKey
+            ? t("editor.file.noFilesImportFloor", { role: t(floorKey, { count: 2 }) })
+            : t("editor.file.noFilesBody")
+        }
         action={
           onImportClick ? (
             <Button onClick={onImportClick}>

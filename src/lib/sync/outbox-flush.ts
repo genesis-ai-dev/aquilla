@@ -461,6 +461,7 @@ export async function flushOutboxUntilSettled(
 }
 
 async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutboxResult> {
+  const analytics = posthog.scope(undefined, deps.ownerScope?.ownerKey ?? undefined, "storage")
   const ownerVersion = deps.ownerScope ? null : getActiveOutboxOwnerVersion()
   const outboxScope: OutboxOwnerScope | undefined = deps.ownerScope
     ? { ownerKey: deps.ownerScope.ownerKey }
@@ -531,7 +532,7 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
           batch,
           "no access to this change's project",
         ))
-        posthog.capture(OUTBOX_QUARANTINED, {
+        analytics.capture(OUTBOX_QUARANTINED, {
           count: batch.length,
           reason: "token-mint-403",
           project_id: projectId,
@@ -664,7 +665,7 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
         }
         if (shouldSurface()) {
           deps.onForbidden?.(forbiddenEntriesFor(batch, "HTTP 403"))
-          posthog.capture(OUTBOX_QUARANTINED, {
+          analytics.capture(OUTBOX_QUARANTINED, {
             count: batch.length,
             reason: "post-403",
             project_id: projectId,
@@ -837,7 +838,7 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
           fileId: record.event.fileId ?? null,
           cellId: record.event.cellId ?? null,
         })))
-        posthog.capture(OUTBOX_QUARANTINED, {
+        analytics.capture(OUTBOX_QUARANTINED, {
           count: forbiddenIds.length,
           reason: "server-rejected-403",
           project_id: projectId,

@@ -19,12 +19,14 @@ import {
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal } from "@/lib/agent/protocol"
+import { formatProgress } from "@/lib/agent/run-state"
 import { useAgentSession } from "@/lib/agent/session-store"
 import { fetchAgentSession, runsFromTurns } from "@/lib/agent/session-history"
 import { useAgentSessionHistory } from "@/hooks/useAgentSessionHistory"
 import { buildUndoEvents } from "@/lib/agent/undo"
 import type { TargetPresenceSelection } from "@/lib/sync/presence-store"
 import type { TranslatedEditorCommit } from "../TranslatedEditor"
+import { isAlternativesProposal } from "@/lib/agent/alternatives"
 import {
   deriveWorkingSet,
   pendingRows,
@@ -322,6 +324,12 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollap
   // ── Receipt rendering (chat shows counters, not a second diff) ──────────
   const renderProposalOverride = useCallback(
     (proposal: AgentProposal) => {
+      // AQU-2398: alternative wordings of ONE cell are not reviewable in the
+      // grid — its rows and its decisions are keyed by (proposalId, cellId),
+      // so N wordings of one cell collide on a single key and one "accept"
+      // would apply every one of them (applyStagedEvents chains commits to the
+      // same cell). They need the pick-one card, which the fall-through gives.
+      if (isAlternativesProposal(proposal)) return null
       const commits = proposal.events.filter((ev) => ev.kind === "target.cell.commit" && ev.cellId)
       // Mixed/non-commit proposals aren't reviewable in the grid — fall back
       // to the full card (returning null does that).
@@ -382,7 +390,7 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollap
           <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" role="status">
             <Spinner className="h-3 w-3 shrink-0" />
             <span className="truncate">
-              {progress ? `${progress.label} — ${progress.done}/${progress.total}` : t("agentWorkspace.working")}
+              {progress ? formatProgress(progress) : t("agentWorkspace.working")}
             </span>
           </span>
         )}

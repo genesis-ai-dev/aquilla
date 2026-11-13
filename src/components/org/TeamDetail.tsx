@@ -68,9 +68,9 @@ import {
   ALL_ROLE_LEVELS,
   ROLE,
   humanRoleName,
-  roleDisplayText,
+  resolveRoleName,
   roleHelpText,
-  roleName,
+  type RoleT,
 } from "@/lib/frontier/roles"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
@@ -81,11 +81,12 @@ type TeamTab = "overview" | "projects" | "members"
 type TeamMember = TeamDetailType["members"][number]
 type TeamProject = TeamDetailType["projects"][number]
 
-function roleLabel(roleLevel: number | null | undefined): string {
+/** The role as its chip shows it (AQU-2332): the catalog's name, for the chip's note label. */
+function roleLabel(t: RoleT, roleLevel: number | null | undefined): string {
   if (roleLevel == null) return "Unknown"
   // Fall back to the canonical humanized name — never a raw numeric (FRO-368).
   return ALL_ROLE_LEVELS.includes(roleLevel as (typeof ALL_ROLE_LEVELS)[number])
-    ? roleDisplayText(roleName(roleLevel))
+    ? resolveRoleName(t, roleLevel)
     : humanRoleName(roleLevel)
 }
 
@@ -255,7 +256,7 @@ export function TeamDetail() {
         void notifySessionExpiredIfCurrent(jwt)
       }
       setOrgMembers([])
-      setAddError(toUserFacingError(error, "organization members").message)
+      setAddError(toUserFacingError(error, "org").message)
     })
     return () => { cancelled = true }
   }, [isAdmin, jwt, activeOrgId, teamScopeKey])
@@ -557,7 +558,7 @@ export function TeamDetail() {
           return (
             <NoteOnClick
               note={lockedOrgRoleTooltip(m.roleLevel)}
-              label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(m.roleLevel) })}
+              label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(t, m.roleLevel) })}
             >
               {label}
             </NoteOnClick>

@@ -32,7 +32,7 @@ vi.mock("@/lib/export/exporters/idml", () => ({
   exportIdml: vi.fn(),
 }))
 vi.mock("@/lib/posthog", () => ({
-  default: { capture: vi.fn() },
+  default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() },
 }))
 
 import { downloadBlob } from "@/lib/export/export-service"
@@ -169,6 +169,115 @@ describe("ExportDialog — native download is the primary action", () => {
     ))
   })
 
+  it("idml stopped on translations typed as plain text: offers to place them, then asks for the download again", async () => {
+    // A file a source link mirrored before it carried the IDML contract was
+    // translated in the plain editor. Once its cells have their import
+    // envelope, the export stops on every such translation.
+    const plain = cell("c1", "Теория преподавания")
+    plain.originalHtml =
+      '<p data-idml-version="2"><span data-idml-slot="0" ' +
+      'data-idml-character-style="CharacterStyle/$ID/[No character style]" ' +
+      'data-idml-protected="slot">Education theory</span></p>'
+    plain.translatedHtml = "<p>Теория преподавания</p>"
+    plain.metadata = {
+      idml: {
+        version: 2,
+        slotCount: 1,
+        editableSlotIndexes: [0],
+        protectedTokenCount: 0,
+        anchorSequenceHash: "a".repeat(64),
+      },
+    }
+    const onPlaceIdmlTranslations = vi.fn().mockResolvedValue({ keptValidated: 0, drafts: 1, manual: 0 })
+    mockSidecar.mockResolvedValue(new Uint8Array([80, 75, 3, 4]).buffer)
+    mockExportIdml.mockRejectedValue(new Error("Cell c1 changed a protected IDML anchor."))
+
+    render(
+      <ExportDialog
+        {...BASE_PROPS}
+        cells={[plain, cell("c2", "")]}
+        activeFileName="guide.idml"
+        activeFileType="idml"
+        projectFiles={[{ id: "f1", name: "guide.idml", type: "idml" }]}
+        onPlaceIdmlTranslations={onPlaceIdmlTranslations}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Download guide\.idml/i }))
+
+    const status = await screen.findByRole("status")
+    await waitFor(() => expect(status).toHaveTextContent(/1 translation in this file is not in the InDesign style runs yet/i))
+    expect(mockDownload).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Place translations" }))
+
+    await waitFor(() => expect(onPlaceIdmlTranslations).toHaveBeenCalledWith(
+      expect.objectContaining({ fileId: "f1", fileName: "guide.idml" }),
+    ))
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(
+      /1 translation in guide\.idml was placed into the style runs and is a draft to check again\. Download the file again\./i,
+    ))
+    expect(screen.queryByRole("button", { name: "Place translations" })).not.toBeInTheDocument()
+  })
+
+  it("idml placement by a project lead: says validated lines stay validated, before and after", async () => {
+    const plain = cell("c1", "Теория преподавания")
+    plain.originalHtml =
+      '<p data-idml-version="2"><span data-idml-slot="0" ' +
+      'data-idml-character-style="CharacterStyle/$ID/[No character style]" ' +
+      'data-idml-protected="slot">Education theory</span></p>'
+    plain.translatedHtml = "<p>Теория преподавания</p>"
+    plain.metadata = {
+      idml: { version: 2, slotCount: 1, editableSlotIndexes: [0], protectedTokenCount: 0, anchorSequenceHash: "a".repeat(64) },
+    }
+    const onPlaceIdmlTranslations = vi.fn().mockResolvedValue({ keptValidated: 1, drafts: 0, manual: 0 })
+    mockSidecar.mockResolvedValue(new Uint8Array([80, 75, 3, 4]).buffer)
+    mockExportIdml.mockRejectedValue(new Error("Cell c1 changed a protected IDML anchor."))
+
+    render(
+      <ExportDialog
+        {...BASE_PROPS}
+        cells={[plain]}
+        activeFileName="guide.idml"
+        activeFileType="idml"
+        projectFiles={[{ id: "f1", name: "guide.idml", type: "idml" }]}
+        onPlaceIdmlTranslations={onPlaceIdmlTranslations}
+        idmlPlacementKeepsValidation
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Download guide\.idml/i }))
+    const status = await screen.findByRole("status")
+    await waitFor(() => expect(status).toHaveTextContent(/a validated line stays validated/i))
+
+    fireEvent.click(screen.getByRole("button", { name: "Place translations" }))
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(
+      /1 translation in guide\.idml was placed into the style runs\. Its validation is unchanged\. Download the file again\./i,
+    ))
+  })
+
+  it("idml stopped for another reason: no placement is offered", async () => {
+    const onPlaceIdmlTranslations = vi.fn()
+    mockSidecar.mockResolvedValue(new Uint8Array([80, 75, 3, 4]).buffer)
+    mockExportIdml.mockRejectedValue(new Error("Protected IDML anchor 2 was reordered."))
+
+    render(
+      <ExportDialog
+        {...BASE_PROPS}
+        activeFileName="layout.idml"
+        activeFileType="idml"
+        projectFiles={[{ id: "f1", name: "layout.idml", type: "idml" }]}
+        onPlaceIdmlTranslations={onPlaceIdmlTranslations}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Download layout\.idml/i }))
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/Protected IDML anchor 2 was reordered/i)
+    expect(screen.queryByRole("button", { name: "Place translations" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Download original unchanged/i })).toBeInTheDocument()
+  })
+
   it("idml success records aggregate-only release telemetry", async () => {
     const idmlCell = cell("c1", "translated")
     idmlCell.metadata = {
@@ -194,6 +303,7 @@ describe("ExportDialog — native download is the primary action", () => {
         warnings: [],
       },
       diagnostics: [],
+    omitted: [],
     })
 
     render(

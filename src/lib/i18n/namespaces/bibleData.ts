@@ -168,6 +168,7 @@ export const bibleData = defineNamespace({
     "bibleData.profile.continuation.continuationMark": "Start each new paragraph with the closing mark",
     "bibleData.profile.continuation.none": "No mark at a new paragraph",
     "bibleData.profile.useDefaults": "Use defaults for {language}",
+    "bibleData.profile.detect": "Use the marks found in this project's text",
     "bibleData.profile.save": "Save quotation marks",
     "bibleData.profile.clear": "Clear quotation marks",
     "bibleData.profile.notSet": "Not set. The quotation checks stay off until you save the marks your translation uses.",
@@ -806,6 +807,10 @@ export const bibleData = defineNamespace({
       "bibleData.profile.useDefaults": {
         description: "Button that fills in the usual quotation marks for the project's target language.",
         placeholders: { language: "The project's target language as stored, e.g. 'French' or 'fr'." },
+      },
+      "bibleData.profile.detect": {
+        description:
+          "Button that fills in the quotation marks read off the text the project has already translated, for the lead to confirm or edit.",
       },
       "bibleData.profile.save": {
         description: "Button that saves the quotation marks entered in the card.",

@@ -4,6 +4,7 @@
 // and "Generate all" flows so every cell synthesizes identically.
 
 import { generateAndAttachCellVoice } from "./generate-voice"
+import { laneVoiceSettings, withVoiceAvailable } from "./lane-voice-view"
 import { resolveCastVoice } from "./voices"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { laneLanguageForTag, sourceLaneLanguage } from "@/lib/lanes/lane-language"
@@ -30,7 +31,6 @@ export interface GenerateCellVoiceArgs {
   voiceId?: string
   /** Round 8c: the TTS take's permanent name (unset → backfilled later). */
   label?: string
-  diffusionSteps?: number
   /**
    * AQU-646 stage 3f: the words to speak, when they are not the cell's own.
    *
@@ -66,11 +66,23 @@ export interface GenerateCellVoiceArgs {
  * (status is surfaced via the per-cell tts badge, not thrown).
  */
 export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<boolean> {
-  const { project, cell, session, username, voiceId, label, diffusionSteps, slot } = args
+  const { project, cell, session, username, voiceId, label, slot } = args
   const text = (args.text ?? cell.translated)?.trim()
   // Not a failure — there is simply nothing to say. Every caller already gates
   // its control on the same emptiness, so this returns quietly, as before.
   if (!text) return false
+
+  // AQU-2511: the settings AS THE LANE SEES THEM — its voices, its cast, its
+  // default. Every caller used to hand over `project.ttsSettings` and this
+  // resolved against the project-wide blob, so a voice picked for one line
+  // (stored per lane) was invisible here and Generate spoke in the project
+  // default. Idempotent for the callers that already pass the lane view, and
+  // an explicitly named voice stays findable whichever lane it belongs to.
+  const ttsSettings = withVoiceAvailable(
+    laneVoiceSettings(project.ttsSettings, project.lanes, args.targetLang),
+    project.ttsSettings,
+    voiceId,
+  )
 
   const statusKey = ttsStatusKey(cell.id)
   // AQU-646 stage 4c: A FAILURE HAS TO LEAVE A MARK. This used to return a
@@ -102,14 +114,14 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
       fileId: cell.fileId,
       cellId: cell.id,
       text,
-      projectTtsSettings: project.ttsSettings,
+      projectTtsSettings: ttsSettings,
       // AQU-646: an explicit caller override wins; otherwise honor persisted
       // cast assignments (diarization's Speaker N → cell mapping) before the
       // cell's own voice, so batch + Voice Studio speak in the assigned voice.
       cellVoiceId:
         voiceId ??
         resolveCastVoice(
-          project.ttsSettings,
+          ttsSettings,
           // The linked subtitle's assignment when there is one — see
           // `voiceCellId`. Falls back to this cell's own, which is every
           // non-cue arrangement.
@@ -127,11 +139,11 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
         // SUB-28: media sections speak through their transcript, not the filename.
         original: effectiveSourceText(cell),
         context: cell.context,
-        cellLabel: cell.cellLabel,
+        // AQU-2408: no cellLabel — a typed label is a note on the line, not
+        // voice direction (docs/decisions/0007). The placeholder renders empty.
       },
       session,
       username,
-      diffusionSteps,
       ...(label ? { label } : {}),
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       onProgress,

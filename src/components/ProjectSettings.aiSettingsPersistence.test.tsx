@@ -5,15 +5,11 @@
 // fewShotExampleFormat entirely, so those 5 fields silently reset to their
 // factory defaults on every save no matter what the user set them to.
 //
-// These tests use the REAL `buildCompletionSettings` (not a naive-spread
-// mock, unlike the sibling ProjectSettings test files) so a regression in the
-// merge function itself is caught here, not just in useCompletionSettings.test.ts.
-//
-// Also covers the issue's other acceptance criteria:
-//   - success message reflects the actual delta saved (not a generic "Saved")
-//   - after a successful save the page/modal stays open with the new values
-//     as current state — the primary "Save changes" button no longer
-//     navigates away; only the explicit "Save and close" menu item does.
+// AQU-2262: settings save as you change them, so each field now goes to the
+// team's drafting settings on its own, MERGED into the stored ones: a field the
+// person did not touch is never sent, so it cannot be reset. These tests hold
+// that each field is written by itself, with the merge asked for, and that the
+// page stays open and says "Saved" beside the field.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
@@ -73,22 +69,12 @@ vi.mock("@/hooks/useProject", () => ({
 }))
 
 const patchSharedMock = vi.fn().mockResolvedValue({ kind: "ok" })
-vi.mock("@/hooks/useProjectSettings", () => ({
-  useProjectSettings: () => ({
-    canEdit: true,
-    reasonCannotEdit: null,
-    patch: patchSharedMock,
-    version: 1,
-    updatedAt: null,
-    updatedBy: null,
-    conflict: false,
-    dismissConflict: vi.fn(),
-    settings: {},
-    hasFetched: true,
-    isOnline: true,
-    refresh: vi.fn(),
-  }),
-}))
+// A write shows on the page, as the real hook's overlay does.
+vi.mock("@/hooks/useProjectSettings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/useProjectSettings")>()
+  const { useLiveProjectSettings } = await import("@/test-utils/live-project-settings")
+  return { ...actual, useProjectSettings: () => useLiveProjectSettings(() => ({ settings: {}, patch: patchSharedMock })) }
+})
 
 vi.mock("@/hooks/useOrg", () => ({
   useOrg: () => ({ org: null }),
@@ -120,6 +106,7 @@ vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn(async () => makeProject()),
   updateProject: vi.fn(async (_p: ProjectRecord) => {}),
+  patchProject: vi.fn(async (_id: string, fn: (p: ProjectRecord) => ProjectRecord) => fn(makeProject())),
 }))
 
 vi.mock("@/lib/progress/read-validation-count", () => ({
@@ -170,60 +157,55 @@ beforeEach(() => {
 })
 
 describe("ProjectSettings — AI Settings persistence (AQU-408)", () => {
-  it("persists Top K and context while locking retrieval to approved examples", async () => {
+  /** What each write sent to the team's drafting settings, in order. */
+  const draftingWrites = () =>
+    patchSharedMock.mock.calls.map((c) => (c[0] as { draftingSettings?: Partial<CompletionSettings> }).draftingSettings)
+
+  it("persists Top K and context, each by itself, while retrieval stays on approved examples", async () => {
     renderSettings()
 
-    fireEvent.change(screen.getByLabelText(/examples retrieved/i), { target: { value: "17" } })
+    const topK = screen.getByLabelText(/examples retrieved/i)
+    fireEvent.change(topK, { target: { value: "17" } })
+    fireEvent.blur(topK)
+    await waitFor(() => expect(draftingWrites()).toEqual([{ top_k: 17 }]))
     await pickSelectOption(/context window/i, /large — chapter/i)
+    await waitFor(() => expect(draftingWrites()).toEqual([{ top_k: 17 }, { contextSize: "large" }]))
+
     const approvedOnly = screen.getByRole("switch", { name: /approved examples only/i })
     // Base UI Switch: checked + locked via data-* (not the native disabled prop).
     expect(approvedOnly).toHaveAttribute("aria-checked", "true")
     expect(approvedOnly).toHaveAttribute("data-disabled")
     expect(approvedOnly).toHaveAttribute("data-checked")
 
-    const saveBtn = screen.getByRole("button", { name: /save changes/i })
-    fireEvent.click(saveBtn)
-
-    // AQU-2259: these are the team's settings, saved to the shared settings.
-    await waitFor(() => expect(patchSharedMock).toHaveBeenCalled())
-    const saved = patchSharedMock.mock.calls[0][0].draftingSettings as CompletionSettings
-    expect(saved.top_k).toBe(17)
-    expect(saved.contextSize).toBe("large")
-    expect(saved.useOnlyValidatedExamples).toBe(true)
-    // Fields the user did NOT touch must survive the merge, not reset.
-    expect(saved.fewShotExampleFormat).toBe("source-and-target")
-    // The instructions are a separate shared setting, never part of this one.
-    expect(saved.systemPrompt).toBeUndefined()
+    // AQU-2259: these are the team's settings, saved to the shared settings,
+    // each merged into what is stored, so a field not touched is never reset.
+    for (const call of patchSharedMock.mock.calls) {
+      expect(call[1]).toMatchObject({ mergeKeys: ["draftingSettings"] })
+      // The instructions are a separate shared setting, never part of this one.
+      expect(JSON.stringify(call[0])).not.toContain("systemPrompt")
+    }
   })
 
-  it("shows a success message reflecting the actual fields saved, and the page stays open", async () => {
+  it("says Saved beside the field, and the page stays open", async () => {
     renderSettings()
 
-    fireEvent.change(screen.getByLabelText(/examples retrieved/i), { target: { value: "17" } })
-    const saveBtn = screen.getByRole("button", { name: /save changes/i })
-    fireEvent.click(saveBtn)
+    const topK = screen.getByLabelText(/examples retrieved/i)
+    fireEvent.change(topK, { target: { value: "17" } })
+    fireEvent.blur(topK)
 
-    // The page must still be showing the settings form (no navigation away) —
-    // the same route continues to render its section heading.
-    await waitFor(() => expect(screen.getByRole("heading", { name: /^ai$/i })).toBeTruthy())
-
-    const status = await screen.findByRole("status")
-    expect(status.textContent?.toLowerCase()).toContain("examples retrieved")
-
-    // "Save changes" button hides once the diff against baseline is empty
-    // again (existing good behavior, preserved).
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull(),
-    )
+    expect(await screen.findByTestId("save-status-draftingSettings.top_k")).toHaveTextContent("Saved")
+    // The page must still be showing the settings form (no navigation away).
+    expect(screen.getByRole("heading", { name: /^ai$/i })).toBeTruthy()
+    expect(topK).toHaveValue(17)
   })
 
-  it("Save Changes button hides once the form is clean (no regression to existing diff behavior)", () => {
+  it("has no Save bar, and typing back to the stored value saves nothing", () => {
     renderSettings()
     expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
     const input = screen.getByLabelText(/examples retrieved/i)
     fireEvent.change(input, { target: { value: "17" } })
-    expect(screen.getByRole("button", { name: /save changes/i })).toBeTruthy()
     fireEvent.change(input, { target: { value: "15" } })
-    expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
+    fireEvent.blur(input)
+    expect(patchSharedMock).not.toHaveBeenCalled()
   })
 })

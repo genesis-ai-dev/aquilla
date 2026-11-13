@@ -174,6 +174,28 @@ describe("AgentRunView", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Run stopped")
   })
 
+  it("announces a spend stop once, naming only the limit that applied (AQU-2313)", () => {
+    // The ETT report: one run showed BOTH "hit its step/token cap" and a
+    // credit figure. A run stopped on its own spend ceiling never touched the
+    // step/token cap, so the generic marker must stay away and leave the
+    // budget alert to name the real limit.
+    const stopped = reduceRunFrame(
+      reduceRunFrame(createRun("Count this word"), {
+        type: "budget.exhausted", runId: "r1", spentCredits: 4, capCredits: 2500, reason: "run_cost_cap",
+      }),
+      { type: "done", runId: "r1", status: "capped" },
+    )
+    const spendStop = render(<AgentRunView run={stopped} />)
+    expect(screen.queryByText(/hit its step\/token cap/)).not.toBeInTheDocument()
+    expect(screen.getByRole("alert")).toHaveTextContent("this run's own spending limit")
+    spendStop.unmount()
+
+    // A capped run with no budget frame has nothing else to explain it, so the
+    // generic marker stays.
+    render(<AgentRunView run={makeRun({ status: "capped" })} />)
+    expect(screen.getByText(/hit its step\/token cap/)).toBeInTheDocument()
+  })
+
   it("renders error and capped states, and a running indicator with progress", () => {
     const { unmount } = render(
       <AgentRunView run={makeRun({ status: "error", errorMessage: "Out of credits." })} />,
@@ -202,12 +224,23 @@ describe("AgentRunView", () => {
     expect(screen.getByText("Agent working…")).toBeInTheDocument()
     third.unmount()
 
-    render(
+    const fourth = render(
       <AgentRunView
         run={makeRun({ status: "running", progress: { label: "Drafting MRK 4", done: 3, total: 12 } })}
       />,
     )
     expect(screen.getByText("Drafting MRK 4 — 3/12")).toBeInTheDocument()
+    fourth.unmount()
+
+    // AQU-1536: drafting reports the pass it is on and sends no counter —
+    // the label is shown verbatim, never padded out to a fake "— 0/7".
+    render(
+      <AgentRunView
+        run={makeRun({ status: "running", progress: { label: "Researching 7 cells (pass 1 of 2)" } })}
+      />,
+    )
+    expect(screen.getByText("Researching 7 cells (pass 1 of 2)")).toBeInTheDocument()
+    expect(screen.queryByText(/0\/7/)).not.toBeInTheDocument()
   })
 
   // The model closes with "NEXT:" lines in the user's voice. They are an

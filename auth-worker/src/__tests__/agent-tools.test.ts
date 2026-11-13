@@ -878,7 +878,7 @@ describe("executeDraft", () => {
       lane,
       aliases,
     }
-    const progress: { label: string; done: number; total: number }[] = []
+    const progress: { label: string; done?: number; total?: number }[] = []
     const usage: unknown[] = []
     return {
       ctx: {
@@ -889,15 +889,80 @@ describe("executeDraft", () => {
         stageCtx,
         sourceLanguage: "English",
         targetLanguage: "Spanish",
-        briefSummary: "A clear, natural Spanish translation.",
+        translationInstructions: "A clear, natural Spanish translation.",
         signal: new AbortController().signal,
-        sendProgress: (label: string, done: number, total: number) => progress.push({ label, done, total }),
+        sendProgress: (label: string, done?: number, total?: number) => progress.push({ label, done, total }),
         addUsage: (u: unknown) => usage.push(u),
       },
       progress,
       usage,
     }
   }
+
+  // AQU-2342 phase 2: the draft tool (and so DraftCells) carries the same
+  // checks hint and per-segment matching terms as the copilot and Autopilot —
+  // it used to get neither and could only be told about them by the lint.
+  it("carries the checks hint and the terms matching THIS work list, in the one section order", async () => {
+    await seedWorld()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES (?, ?)
+       ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+    )
+      .bind(
+        PROJECT,
+        JSON.stringify({
+          rules: [{ id: "r1", name: "No slang", description: "Never use slang.", enabled: true, check: { type: "target-forbids", targetPattern: "tío" } }],
+          languageProfile: { measures: "convert" },
+        }),
+      )
+      .run()
+    for (const [id, term, rendering, notes] of [
+      ["c-sower", "sower", "sembrador", "The farmer, not a seed drill."],
+      ["c-absent", "Pharisee", "fariseo", null],
+    ] as const) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO concepts (concept_id, project_id, source_term, renderings, notes, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?::text::jsonb, ?, 'active', 1, 1)`,
+      )
+        .bind(id, PROJECT, term, JSON.stringify([{ rendering, status: "preferred" }]), notes)
+        .run()
+    }
+    const draftRequests: { messages: { role: string; content: string }[] }[] = []
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      draftRequests.push(JSON.parse(String(init?.body)))
+      const content = draftRequests.length === 1 ? "evidence [E1]" : '[{"i":1,"t":"uno"},{"i":2,"t":"dos"}]'
+      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    })
+
+    const { ctx } = draftCtx()
+    await executeDraft(env.AQUILLA_PG, { ref: "MRK 4", instructions: "Use vosotros." }, ctx, {
+      model: "test/drafter",
+      apiKey: "k",
+      url: "https://mock/chat/completions",
+    })
+    expect(draftRequests).toHaveLength(2)
+    for (const req of draftRequests) {
+      const system = req.messages[0].content
+      const at = (needle: string) => {
+        const i = system.indexOf(needle)
+        expect(i, needle).toBeGreaterThanOrEqual(0)
+        return i
+      }
+      const order = [
+        at("You draft for a scripture translation project."),
+        at("Project instructions (follow these):"),
+        at("Checks (verified automatically after drafting — the draft must pass each one):\n- Never use slang.\n- Measures"),
+        at('Terminology for this text (use an approved rendering for each term; never a forbidden one):\n- "sower" → "sembrador". Note: The farmer, not a seed drill.'),
+        at("Translation pairs from this project"),
+        at("This run's directions"),
+      ]
+      expect([...order].sort((a, b) => a - b)).toEqual(order)
+      expect(system).not.toContain("Pharisee")
+    }
+  })
 
   it("drafts untranslated cells via the model and stages them through emit-stage", async () => {
     await seedWorld()
@@ -925,7 +990,7 @@ describe("executeDraft", () => {
     const { ctx, progress, usage } = draftCtx()
     const out = await executeDraft(
       env.AQUILLA_PG,
-      { ref: "MRK 4" },
+      { ref: "MRK 4", instructions: "Use vosotros." },
       ctx,
       { model: "test/drafter", apiKey: "k", url: "https://mock/chat/completions" },
     )
@@ -942,7 +1007,7 @@ describe("executeDraft", () => {
         ai_draft: {
           model: "test/drafter",
           provider: "platform",
-          promptVersion: "agent-draft-v3-staged-research",
+          promptVersion: "agent-draft-v5-guidance",
           mode: "agent",
           projectState: {
             sourceLanguage: "English",
@@ -956,11 +1021,12 @@ describe("executeDraft", () => {
     // in the working set (crossed-out new value above the identical proposal).
     expect(out.data?.cells?.map((c) => c.status)).toEqual(["untranslated", "untranslated"])
     expect(out.data?.cells?.every((c) => c.target === "")).toBe(true)
+    // AQU-1536: each pass is one batched model call, so no cell finishes
+    // before the pass returns. The frames are stage labels with NO counter —
+    // a `0/N` that can only jump to `N/N` reads as a stalled run in the dock.
     expect(progress).toEqual([
-      { label: "Researching 2 cells", done: 0, total: 2 },
-      { label: "Researching 2 cells", done: 2, total: 2 },
-      { label: "Drafting 2 cells", done: 0, total: 2 },
-      { label: "Drafting 2 cells", done: 2, total: 2 },
+      { label: "Researching 2 cells (pass 1 of 2)", done: undefined, total: undefined },
+      { label: "Drafting 2 cells (pass 2 of 2)", done: undefined, total: undefined },
     ])
     expect(usage).toHaveLength(2)
 
@@ -981,6 +1047,21 @@ describe("executeDraft", () => {
     expect(draftRequests[1].messages[1].content).toContain("Evidence record from the completed research pass")
     expect(draftRequests[1].messages[1].content).toContain("preserve command, sower")
     expect(draftRequests[1].messages[1].content).toContain("1. [MRK 4:3]")
+
+    // AQU-2342: both passes carry the ONE instructions block right after the
+    // role line (before the example pairs), no separate brief line, and the
+    // per-call argument is labelled as this run's directions.
+    const block = "Project instructions (follow these):\nA clear, natural Spanish translation."
+    for (const req of draftRequests) {
+      const system = req.messages[0].content
+      expect(system.indexOf("You draft for a scripture translation project.")).toBeLessThan(system.indexOf(block))
+      expect(system.indexOf(block)).toBeLessThan(system.indexOf("Translation pairs from this project"))
+      expect(system).not.toContain("Project brief")
+      // AQU-2342: this run's directions close the guidance, after the examples.
+      expect(system).toContain("This run's directions")
+      expect(system.indexOf("Translation pairs from this project")).toBeLessThan(system.indexOf("- Use vosotros."))
+      expect(req.messages[1].content).not.toContain("Use vosotros.")
+    }
   })
 
   it("strips trailing bare markers from prompt source and from the model reply (AQU-1465)", async () => {
@@ -1131,6 +1212,173 @@ describe("executeDraft", () => {
     expect(out.data?.candidates?.map((c) => c.name).sort()).toEqual(["Mark", "Mark (copy)"])
     expect(out.data?.candidates).toContainEqual({ id: FILE, name: "Mark" })
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  // AQU-2398: N wordings of ONE cell, for the translator to compare. A
+  // different shape of work from one wording of N cells, and it must not
+  // disturb that path.
+  describe("alternatives", () => {
+    /** Research reply, then whatever the generation pass should answer. */
+    function mockDraftModel(generation: string) {
+      const requests: { messages: { role: string; content: string }[] }[] = []
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+        requests.push(JSON.parse(String(init?.body)))
+        const content = requests.length === 1 ? "compact evidence [E1]" : generation
+        return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      })
+      return requests
+    }
+
+    it("stages N distinct wordings of the one named cell and flags the proposal as a choice", async () => {
+      await seedWorld()
+      const requests = mockDraftModel(
+        JSON.stringify([
+          { i: 1, t: "¡Escuchad! Un sembrador salió a sembrar" },
+          { i: 2, t: "¡Oíd! He aquí, el sembrador salió a sembrar" },
+          { i: 3, t: "Presten atención: un sembrador fue a sembrar" },
+        ]),
+      )
+      const { ctx } = draftCtx()
+      const out = await executeDraft(
+        env.AQUILLA_PG,
+        { cellIds: [cellId("c3")], alternatives: 3 },
+        ctx,
+        { model: "m", apiKey: "k", url: "https://mock/x" },
+      )
+
+      expect(out.ok).toBe(true)
+      expect(out.proposal!.alternatives).toBe(true)
+      // Three commits, all on the SAME cell: mutually exclusive by
+      // construction, since each pins the same current head.
+      expect(out.proposal!.events).toHaveLength(3)
+      expect(new Set(out.proposal!.events.map((e) => e.cellId))).toEqual(new Set([cellId("c3")]))
+      expect(out.proposal!.events.every((e) => e.kind === "target.cell.commit")).toBe(true)
+      expect(out.proposal!.events.map((e) => (e.payload as { value: string }).value)).toEqual([
+        "¡Escuchad! Un sembrador salió a sembrar",
+        "¡Oíd! He aquí, el sembrador salió a sembrar",
+        "Presten atención: un sembrador fue a sembrar",
+      ])
+      // Each option records which one it was, so the picked draft's
+      // provenance says it came out of a choice of three.
+      expect(
+        out.proposal!.events.map((e) => (e.payload as { ai_draft: { alternative?: unknown } }).ai_draft.alternative),
+      ).toEqual([{ index: 1, of: 3 }, { index: 2, of: 3 }, { index: 3, of: 3 }])
+      // Nothing is validated by drafting: a choice of wording asserts nothing.
+      expect(out.proposal!.events.some((e) => e.kind === "cell.validate")).toBe(false)
+      // The orchestrator must not report the cell as drafted — the user still
+      // has to pick.
+      expect(out.text).toContain("alternative wordings")
+      expect(out.text).toContain("discarded unwritten")
+      // The generation pass asked for a choice; the research pass is unchanged.
+      expect(requests).toHaveLength(2)
+      expect(requests[1].messages[0].content).toContain("exactly 3 alternative translations")
+      expect(requests[1].messages[1].content).toContain("Give exactly 3 alternative translations")
+    })
+
+    it("drops a repeated wording rather than offering the same text twice", async () => {
+      await seedWorld()
+      mockDraftModel(
+        JSON.stringify([
+          { i: 1, t: "Un sembrador salió a sembrar" },
+          { i: 2, t: "Un sembrador salió a sembrar" },
+          { i: 3, t: "Un labrador fue a sembrar" },
+        ]),
+      )
+      const { ctx } = draftCtx()
+      const out = await executeDraft(
+        env.AQUILLA_PG,
+        { cellIds: [cellId("c3")], alternatives: 3 },
+        ctx,
+        { model: "m", apiKey: "k", url: "https://mock/x" },
+      )
+      expect(out.proposal!.events.map((e) => (e.payload as { value: string }).value)).toEqual([
+        "Un sembrador salió a sembrar",
+        "Un labrador fue a sembrar",
+      ])
+      expect(
+        out.proposal!.events.map((e) => (e.payload as { ai_draft: { alternative?: unknown } }).ai_draft.alternative),
+      ).toEqual([{ index: 1, of: 2 }, { index: 2, of: 2 }])
+    })
+
+    it("one surviving wording is an ordinary draft, not a choice of one", async () => {
+      await seedWorld()
+      mockDraftModel(JSON.stringify([{ i: 1, t: "Un sembrador salió a sembrar" }, { i: 2, t: "   " }]))
+      const { ctx } = draftCtx()
+      const out = await executeDraft(
+        env.AQUILLA_PG,
+        { cellIds: [cellId("c3")], alternatives: 2 },
+        ctx,
+        { model: "m", apiKey: "k", url: "https://mock/x" },
+      )
+      expect(out.ok).toBe(true)
+      expect(out.proposal!.events).toHaveLength(1)
+      expect(out.proposal!.alternatives).toBeUndefined()
+      expect((out.proposal!.events[0].payload as { ai_draft: { alternative?: unknown } }).ai_draft.alternative).toBeUndefined()
+    })
+
+    it("refuses an ambiguous scope instead of offering wordings of a cell the user did not name", async () => {
+      await seedWorld()
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+      const { ctx } = draftCtx()
+      // MRK 4 has two untranslated cells (c3, c10) — which one is a choice
+      // only the user can make, and it must cost no model call to say so.
+      const out = await executeDraft(
+        env.AQUILLA_PG,
+        { ref: "MRK 4", alternatives: 3 },
+        ctx,
+        { model: "m", apiKey: "k", url: "https://mock/x" },
+      )
+      expect(out.ok).toBe(false)
+      expect(out.text).toContain("alternatives drafts several wordings of ONE cell")
+      expect(out.text).toContain("2 cells")
+      expect(fetchSpy).not.toHaveBeenCalled()
+    })
+
+    it("leaves the single-draft path alone for an absent, non-numeric or 1 alternatives arg", async () => {
+      await seedWorld()
+      for (const args of [
+        { ref: "MRK 4" },
+        { ref: "MRK 4", alternatives: 1 },
+        { ref: "MRK 4", alternatives: "three" },
+      ] as const) {
+        vi.restoreAllMocks()
+        const requests = mockDraftModel('[{"i":1,"t":"uno"},{"i":2,"t":"dos"}]')
+        const { ctx } = draftCtx()
+        const out = await executeDraft(
+          env.AQUILLA_PG,
+          args,
+          ctx,
+          { model: "m", apiKey: "k", url: "https://mock/x" },
+        )
+        expect(out.ok, JSON.stringify(args)).toBe(true)
+        expect(out.proposal!.alternatives, JSON.stringify(args)).toBeUndefined()
+        // Both untranslated cells drafted once each — the batch path.
+        expect(out.proposal!.events.map((e) => e.cellId), JSON.stringify(args)).toEqual([
+          cellId("c3"),
+          cellId("c10"),
+        ])
+        expect(requests[1].messages[1].content, JSON.stringify(args)).toContain("Translate these 2 segments")
+      }
+    })
+
+    it("caps the ask at 5 wordings", async () => {
+      await seedWorld()
+      const requests = mockDraftModel(
+        JSON.stringify([1, 2, 3, 4, 5, 6, 7].map((i) => ({ i, t: `wording ${i}` }))),
+      )
+      const { ctx } = draftCtx()
+      const out = await executeDraft(
+        env.AQUILLA_PG,
+        { cellIds: [cellId("c3")], alternatives: 12 },
+        ctx,
+        { model: "m", apiKey: "k", url: "https://mock/x" },
+      )
+      expect(requests[1].messages[0].content).toContain("exactly 5 alternative translations")
+      expect(out.proposal!.events).toHaveLength(5)
+    })
   })
 })
 

@@ -12,8 +12,11 @@ import {
   commitsForAlignedIdmlTargets,
   idmlReimportPlacement,
   pairedCellsForIdmlAlignment,
+  splitAlignedIdmlTargets,
+  unplacedIdmlTranslationCount,
   type IdmlReimportAlignCell,
 } from "./align-reimported-targets"
+import { emptyIdmlEditableHtml } from "./preview-segment"
 
 const IDML_MIME = "application/vnd.adobe.indesign-idml-package"
 const IDPKG = 'xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"'
@@ -101,6 +104,55 @@ describe("IDML re-import style alignment", () => {
     expect(outcome.unchanged).toBe(1)
   })
 
+  it("passes an unstyled preview into its style run without a model call", async () => {
+    const unit = await parsedUnit(["Hello WORLD"])
+    const cell: IdmlReimportAlignCell = {
+      ...legacyCell(unit, "preview", "Bonjour MONDE"),
+      translatedHtml: emptyIdmlEditableHtml(unit.sourceHtml, unit.metadata),
+    }
+    const ask = vi.fn()
+
+    const outcome = await alignReimportedIdmlTargets([cell], ask)
+
+    expect(idmlReimportPlacement(cell)).toBe("single")
+    expect(ask).not.toHaveBeenCalled()
+    expect(outcome.aligned).toHaveLength(1)
+    const checked = validateIdmlTranslation(
+      unit.sourceHtml,
+      outcome.aligned[0]!.completion.valueHtml!,
+      unit.metadata,
+    )
+    expect(checked.valid).toBe(true)
+    expect(checked.slots.join("")).toBe("Bonjour MONDE")
+  })
+
+  it("aligns an unstyled preview whose runs are not bold", async () => {
+    const unit = await parsedStyled([
+      ["CharacterStyle/Plain", "Hello "],
+      ["CharacterStyle/Plain", "WORLD"],
+    ])
+    const cell: IdmlReimportAlignCell = {
+      ...legacyCell(unit, "plain-preview", "Bonjour MONDE"),
+      translatedHtml: emptyIdmlEditableHtml(unit.sourceHtml, unit.metadata),
+    }
+    const ask = vi.fn().mockResolvedValue(JSON.stringify({
+      slots: [{ i: 0, t: "Bonjour " }, { i: 1, t: "MONDE" }],
+    }))
+
+    const outcome = await alignReimportedIdmlTargets([cell], ask)
+
+    expect(idmlReimportPlacement(cell)).toBe("align")
+    expect(outcome.aligned).toHaveLength(1)
+    const checked = validateIdmlTranslation(
+      unit.sourceHtml,
+      outcome.aligned[0]!.completion.valueHtml!,
+      unit.metadata,
+    )
+    expect(checked.valid).toBe(true)
+    expect(checked.slots[0]).toBe("Bonjour ")
+    expect(checked.slots[1]).toBe("MONDE")
+  })
+
   it("stitches a one-run translation without a model call", async () => {
     const unit = await parsedUnit(["Hello WORLD"])
     const cell = legacyCell(unit, "single", "Bonjour MONDE")
@@ -115,6 +167,63 @@ describe("IDML re-import style alignment", () => {
     const checked = validateIdmlTranslation(unit.sourceHtml, html, unit.metadata)
     expect(checked.valid).toBe(true)
     expect(checked.slots.join("")).toBe("Bonjour MONDE")
+  })
+
+  it("counts the translations a placement would move, for the export dialog", async () => {
+    const oneRun = await parsedUnit(["Hello WORLD"])
+    const twoRuns = await parsedUnit(["Hello", "WORLD"])
+    const placed: IdmlReimportAlignCell = {
+      ...legacyCell(twoRuns, "placed", "Bonjour MONDE"),
+      translatedHtml: renderIdmlUnitHtml({
+        ...twoRuns,
+        slots: twoRuns.slots.map((slot, index) => ({ ...slot, text: index === 0 ? "Bonjour " : "MONDE" })),
+      }),
+    }
+    const cells: IdmlReimportAlignCell[] = [
+      // Typed as plain text: one run, and two.
+      legacyCell(oneRun, "plain-one", "Bonjour MONDE"),
+      legacyCell(twoRuns, "plain-two", "Bonjour MONDE"),
+      // Already in the runs, untranslated, and a cell with no IDML contract.
+      placed,
+      { ...legacyCell(oneRun, "empty", ""), translatedHtml: undefined },
+      { ...legacyCell(oneRun, "no-contract", "Bonjour MONDE"), metadata: null },
+    ]
+
+    expect(unplacedIdmlTranslationCount(cells)).toBe(2)
+    expect(unplacedIdmlTranslationCount([placed])).toBe(0)
+  })
+
+  it("saves a validated line's placement as markup only, and everything else as a commit", async () => {
+    const unit = await parsedUnit(["Hello WORLD"])
+    const validated: IdmlReimportAlignCell = { ...legacyCell(unit, "validated", "Bonjour MONDE"), validated: true }
+    const draft: IdmlReimportAlignCell = { ...legacyCell(unit, "draft", "Bonjour MONDE"), validated: false }
+    const outcome = await alignReimportedIdmlTargets([validated, draft], vi.fn())
+    expect(outcome.aligned).toHaveLength(2)
+    const byId = (entries: readonly { cell: IdmlReimportAlignCell }[]) => entries.map((entry) => entry.cell.id)
+
+    const kept = splitAlignedIdmlTargets(outcome.aligned, { keepValidated: true, lane: "" })
+    expect(byId(kept.markupOnly)).toEqual(["validated"])
+    expect(byId(kept.commits)).toEqual(["draft"])
+
+    // Not asked for (below project lead), or a lane the markup event cannot
+    // address: every placement is a commit, as before.
+    expect(splitAlignedIdmlTargets(outcome.aligned, { keepValidated: false, lane: "" }).markupOnly).toEqual([])
+    expect(splitAlignedIdmlTargets(outcome.aligned, { keepValidated: true, lane: "fr" }).markupOnly).toEqual([])
+
+    // Bold typed in the plain editor is markup, not a different wording: the
+    // stored words are what was validated, and they are what is compared.
+    const bold = outcome.aligned.map((entry) => ({
+      ...entry,
+      cell: { ...entry.cell, translatedHtml: "<p><strong>Bonjour</strong> MONDE</p>" },
+    }))
+    expect(byId(splitAlignedIdmlTargets(bold, { keepValidated: true, lane: "" }).markupOnly)).toEqual(["validated"])
+
+    // A placement that changed a word is something new to review: a commit.
+    const reworded = outcome.aligned.map((entry) => ({
+      ...entry,
+      completion: { ...entry.completion, value: "Bonsoir MONDE" },
+    }))
+    expect(splitAlignedIdmlTargets(reworded, { keepValidated: true, lane: "" }).markupOnly).toEqual([])
   })
 
   it("places a long note into its runs without calling the model", async () => {

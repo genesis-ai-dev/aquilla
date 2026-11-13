@@ -10,6 +10,7 @@ import {
   worktreeSetupSteps,
   WORKTREE_NEW_USAGE,
 } from "./lib/worktree-new"
+import { assessHooks, probeHooks } from "./lib/hooks-armed"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
@@ -58,26 +59,15 @@ function upstream(dir: string): string | null {
 }
 
 function verifyHooks(dir: string): void {
-  const localHook = path.join(dir, ".husky", "_", "pre-push")
-  const hooksPathResult = spawnSync("git", ["config", "--get", "core.hooksPath"], {
-    cwd: dir,
-    encoding: "utf8",
-  })
-  const hooksPath = hooksPathResult.status === 0 ? hooksPathResult.stdout.trim() : ""
-  const resolvedHook = hooksPath ? path.join(path.resolve(dir, hooksPath), "pre-push") : ""
-  if (existsSync(localHook) && hooksPath && existsSync(resolvedHook)) {
-    console.log(`[worktree:new] hooks armed (core.hooksPath=${hooksPath})`)
+  // Same predicate as `pnpm check:hooks` (scripts/lib/hooks-armed.ts, AQU-2161)
+  // so the two entry points cannot drift apart.
+  const verdict = assessHooks(probeHooks(dir), dir)
+  if (verdict.armed) {
+    console.log(`[worktree:new] hooks armed (core.hooksPath=${verdict.hooksPath})`)
     return
   }
-  console.error(`[worktree:new] hooks are not armed in ${dir}.`)
-  console.error(`  .husky/_/pre-push: ${existsSync(localHook) ? "present" : "MISSING"}`)
-  console.error(`  core.hooksPath: ${hooksPath || "UNSET"}`)
-  if (hooksPath) {
-    console.error(`  resolved pre-push: ${resolvedHook} (${existsSync(resolvedHook) ? "present" : "MISSING"})`)
-  }
-  console.error("core.hooksPath is the relative .husky/_, which husky generates and git ignores.")
-  console.error("Without it, pre-commit, prepare-commit-msg, and pre-push do not run, and a push finishes with nothing tested.")
-  console.error("pnpm install should have run the prepare script (husky). Re-run it in this worktree.")
+  for (const line of verdict.lines) console.error(`[worktree:new] ${line}`)
+  console.error("[worktree:new] pnpm install should have run the prepare script (husky). Re-run it in this worktree.")
   process.exit(1)
 }
 

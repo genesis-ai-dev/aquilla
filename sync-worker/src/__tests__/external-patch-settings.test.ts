@@ -291,6 +291,49 @@ describe('PatchSettings — settings-key validation (AQU-1224)', () => {
     expect(await tdb.rows('changesets')).toHaveLength(0)
   })
 
+  // AQU-2402: the refusal has to be actionable on the surface where keys get
+  // guessed. The OAuth connector drops describe_command from its tool list, so
+  // "call describe_command" was a dead end; and returning only ops[0] made an
+  // agent pay one round trip per wrong key.
+  it('names the write key when the caller used the READ name — builtinChecks → algorithmicChecks', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(
+      env,
+      maintainer.token,
+      patchCmd([{ key: 'builtinChecks', value: { 'usfm-structure': { enabled: false } } }]),
+    )
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    const details = JSON.stringify(body.error.details)
+    expect(details).toContain('the key for that is \\"algorithmicChecks\\"')
+    // And the whole writable set, so no further tool call is needed.
+    expect(details).toContain('validationCount')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
+  it('reports EVERY bad op, not only ops[0]', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(
+      env,
+      maintainer.token,
+      patchCmd([
+        { key: 'builtinChecks', value: {} },
+        { key: 'validationCount', value: 2 },
+        { key: 'alsoNotAKey', value: 1 },
+      ]),
+    )
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    const messages = (body.error.details as { index: number; message: string }[]).map((i) => i.message)
+    expect(messages.some((m) => m.startsWith('PatchSettings.ops[0]'))).toBe(true)
+    expect(messages.some((m) => m.startsWith('PatchSettings.ops[2]'))).toBe(true)
+    // The one good op is not reported, and nothing is staged.
+    expect(messages.some((m) => m.includes('validationCount\\" expects'))).toBe(false)
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
   it('a near-miss typo of a real key is rejected too (no silent write of the typo)', async () => {
     const env = makeEnv(tdb.db)
     const maintainer = await memberToken(tdb, 600)
@@ -543,10 +586,16 @@ const POLICY_DIRECTION_CASES: {
   { key: 'allowSelfValidationAudio', tighten: { from: undefined, to: false }, loosen: { from: false, to: true } },
   { key: 'validationRoleFloorAudio', tighten: { from: 'reviewer', to: 'project_lead' }, loosen: { from: 'maintainer', to: null } },
   { key: 'validationNamedUsersAudio', tighten: { from: undefined, to: ['a'] }, loosen: { from: ['a'], to: [] } },
+  // AQU-2408: unset reads as Maintainer, so lowering to Project lead loosens.
+  { key: 'cellLabelFloor', tighten: { from: 'project_lead', to: 'maintainer' }, loosen: { from: 'maintainer', to: 'project_lead' } },
   // AQU-1771: the project's own visibility floors. The org sets none here, so
   // its floor is Maintainer; clearing a stricter value goes back to it.
   { key: 'rosterViewMinRole', tighten: { from: undefined, to: 700 }, loosen: { from: 700, to: null } },
   { key: 'memberProgressViewMinRole', tighten: { from: 600, to: 700 }, loosen: { from: 700, to: 600 } },
+  // AQU-2305: the project's own import floor. The org sets none here, so its
+  // floor is the Project lead default; clearing a stricter value goes back to
+  // it, which is a loosening an agent may not write.
+  { key: 'importMinRole', tighten: { from: undefined, to: 600 }, loosen: { from: 600, to: null } },
 ]
 
 describe('PatchSettings — policy keys, restrictive direction only (AQU-1282 §1)', () => {

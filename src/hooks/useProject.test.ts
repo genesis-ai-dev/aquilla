@@ -132,6 +132,8 @@ describe("useProject status distinction", () => {
     expect(result.current.isUnreachable).toBe(false)
     expect(result.current.project).not.toBeNull()
     expect(result.current.project?.id).toBe("p-3")
+    act(() => window.dispatchEvent(new Event("online")))
+    expect(mockResolve).toHaveBeenCalledTimes(1)
   })
 
   it("starts in loading state before the resolve resolves", () => {
@@ -172,3 +174,70 @@ describe("useProject status distinction", () => {
     expect(result.current.project?.id).toBe("p-retry")
   })
 })
+
+// AQU-2372: reconnect can race the request that failed during account switching.
+it.each(["unreachable", "forbidden", "not-found"] as const)(
+  "revalidates once on reconnect and preserves the server's %s outcome",
+  async (reason) => {
+    let settleOld!: (value: ResolveProjectResult) => void
+    mockResolve.mockImplementationOnce(() => new Promise((resolve) => { settleOld = resolve }))
+    const { result, unmount } = renderHook(() => useProject(`reconnect-${reason}`))
+    await waitFor(() => expect(mockResolve).toHaveBeenCalledTimes(1))
+    setResolveMock({ ok: false, reason })
+    act(() => window.dispatchEvent(new Event("online")))
+    await waitFor(() => expect(result.current.status).toBe(reason))
+    await act(async () => settleOld({ ok: false, reason: "not-found" }))
+    expect(result.current.status).toBe(reason)
+    expect(mockResolve).toHaveBeenCalledTimes(2)
+    unmount()
+    act(() => window.dispatchEvent(new Event("online")))
+    expect(mockResolve).toHaveBeenCalledTimes(2)
+  },
+)
+
+// All refresh entry points must share ordering, even when cached chrome is ready.
+it.each(["seeded", "manual", "record-change", "session-change"] as const)(
+  "keeps the latest project resolve for %s refreshes",
+  async (trigger) => {
+    const { rememberResolvedProject } = await import("@/lib/sync/project-record-seed")
+    const { announceProjectRecordChanged } = await import("@/lib/sync/project-record-changed")
+    const { useFrontierSession } = await import("@/hooks/useFrontierSession")
+    const id = `ordering-${trigger}`
+    const good: ResolveProjectResult = { ok: true, project: {
+      id, name: "Recovered", gitlabProjectId: null, archivedAt: null, archivedBy: null,
+      role: { level: 400, name: "contributor", source: "member" }, files: [],
+    } }
+    if (trigger === "seeded") {
+      const { minimalProjectRecord } = await import("@/lib/sync/cloud-projects")
+      rememberResolvedProject(minimalProjectRecord(good.project))
+    }
+    let settleOld!: (value: ResolveProjectResult) => void
+    mockResolve.mockImplementationOnce(() => new Promise(resolve => { settleOld = resolve }))
+    const { result, rerender, unmount } = renderHook(() => useProject(id))
+    expect(mockResolve).toHaveBeenCalledTimes(1)
+    if (trigger === "seeded") expect(result.current.status).toBe("ready")
+    if (trigger === "manual" || trigger === "record-change" || trigger === "session-change") {
+      mockResolve.mockImplementationOnce(() => new Promise(resolve => { settleOld = resolve }))
+      act(() => {
+        if (trigger === "record-change") announceProjectRecordChanged(id)
+        else result.current.refresh()
+      })
+    }
+    setResolveMock(good)
+    if (trigger === "session-change") {
+      const oldSession = vi.mocked(useFrontierSession).getMockImplementation()!
+      vi.mocked(useFrontierSession).mockImplementation(() => ({ ...oldSession(), session: { ...oldSession().session!, jwt: "bob-jwt" } }))
+      rerender()
+      await waitFor(() => expect(result.current.status).toBe("ready"))
+      vi.mocked(useFrontierSession).mockImplementation(oldSession)
+    } else {
+      act(() => window.dispatchEvent(new Event("online")))
+      await waitFor(() => expect(result.current.status).toBe("ready"))
+      expect(mockResolve).toHaveBeenCalledTimes(trigger === "seeded" ? 2 : 3)
+    }
+    await act(async () => settleOld({ ok: false, reason: "unreachable" }))
+    expect(result.current.status).toBe("ready")
+    expect(result.current.project?.name).toBe("Recovered")
+    unmount()
+  },
+)

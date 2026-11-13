@@ -98,6 +98,8 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.audio.remove': ROLE.CONTRIBUTOR,
   'cell.audio.rename': ROLE.CONTRIBUTOR,
   'cell.audio.trim': ROLE.CONTRIBUTOR,
+  // AQU-2327: a take's volume and fades need what trimming it needs.
+  'cell.audio.gain': ROLE.CONTRIBUTOR,
   'cell.audio.place': ROLE.CONTRIBUTOR,
   // AQU-1767: cutting a take needs exactly what trimming it needs (Sam, 2026-10-12).
   'cell.audio.cut': ROLE.CONTRIBUTOR,
@@ -152,6 +154,9 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // Require PROJECT_LEAD (500) — same as file.create and source.* imports.
   'file.delete': ROLE.PROJECT_LEAD,
   'file.restore': ROLE.PROJECT_LEAD,
+  // AQU-2459: server-emitted by the revisions route only (same floor as the
+  // route's own check); dispatch refuses it from POST /events regardless.
+  'file.revision': ROLE.PROJECT_LEAD,
 
   // Comments: any commenter+ can write, edit, delete, or resolve their own
   // comment. Server-side ownership enforcement (only the author can edit/delete
@@ -222,6 +227,12 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   //   than a crash, because the client mirror throws before anything reaches the
   //   durable outbox.
   'cast.assign': ROLE.MAINTAINER,
+  // AQU-2408: a hand-typed cell label is metadata, not casting. PROJECT_LEAD is
+  // the lowest rung the project's `cellLabelFloor` setting can admit; the
+  // setting itself (maintainer unless set otherwise) is enforced where the
+  // Label field is drawn, exactly like `cellEditingFloor`. See
+  // docs/decisions/0007-cell-labels-are-metadata-never-cast.md.
+  'cell.label.set': ROLE.PROJECT_LEAD,
 
   // Timeline editor: retiming a cell (move/stretch) is a translator-level edit.
   'cell.retime': ROLE.CONTRIBUTOR,
@@ -245,6 +256,19 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // NOT the floors file.rename (contributor) and file.video.set (project
   // lead) sit at; those are normal editing flow, this changes the shared layout.
   'file.track.set': ROLE.MAINTAINER,
+
+  // AQU-2308: setting, renaming or removing a hand-set milestone. The
+  // file.track.set floor and the file.track.set reason: a division relayouts
+  // the navigator for every collaborator who opens the file, so it is shared
+  // layout rather than normal editing flow. Deliberately NOT the contributor
+  // floor file.rename sits at — a rename changes one file's own label, this
+  // changes how everyone's work in it is divided and counted.
+  //
+  // The project setting that would let a project lead do this is its own slice
+  // (AQU-2309); until it lands the floor is fixed here at maintainer, which is
+  // that setting's default.
+  'file.milestone.set': ROLE.MAINTAINER,
+  'file.milestone.remove': ROLE.MAINTAINER,
 
   // AQU-476: mirror-engine kinds are server-emitted only (link-sync.ts calls
   // buildEventProjectionStmts directly in-process — never through the client

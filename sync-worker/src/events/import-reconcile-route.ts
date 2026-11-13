@@ -12,7 +12,7 @@
 // remain as stale siblings in history, matching the normal AD-2 contract.
 
 import { withLongOperationTimeout, type AquillaDb, type AquillaStatement } from '../../../db/shim/postgres'
-import { verifyTokenForDoc } from '../auth'
+import { verifyDocScope, verifySyncToken } from '../auth'
 import { withCors } from '../cors'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
 import {
@@ -41,6 +41,8 @@ import { buildForkClone, targetEventKey, type ForkTargetRow, type ForkValidatorR
 import { buildReviewEvents } from './import-reconcile-review'
 import { ROLE } from './role-policy'
 import type { EventPayloads } from './types'
+import { MAX_IMPORT_REQUEST_BODY_BYTES } from '../../../shared/import-contract'
+import { readTextBodyWithLimit } from '../../../shared/http-body-limit'
 
 const PATH = '/import/reconcile'
 const BULK_ROWS = 750
@@ -53,7 +55,7 @@ export interface ReconcileRouteEnv {
   ProjectSync?: DurableObjectNamespace
 }
 
-interface ReconcileFileMeta {
+export interface ReconcileFileMeta {
   id: string
   name: string
   fileType?: string
@@ -788,7 +790,7 @@ function buildGatedTargetInsert(
   ).bind(...binds)
 }
 
-function mergeFileMeta(existing: unknown, incoming: ReconcileFileMeta): Record<string, unknown> {
+export function mergeFileMeta(existing: unknown, incoming: ReconcileFileMeta): Record<string, unknown> {
   const meta = { ...objectRecord(existing) }
   // AQU-1596: a re-import's language claim is recorded as declared, next to
   // whatever legacy keys the existing blob already carries (left untouched —
@@ -825,9 +827,31 @@ export async function handleImportReconcileRequest(
   if (!env.SYNC_SECRET_KEY) return withCors(new Response('SYNC_SECRET_KEY not configured', { status: 500 }), request)
   if (!env.AQUILLA_PG) return withCors(new Response('AQUILLA_PG binding not configured', { status: 500 }), request)
 
+  // AQU-1882 (following AQU-1858 on POST /import): authenticate and size-gate
+  // BEFORE the body is materialized. Parsing first let an unauthenticated
+  // caller spend the isolate's shared ~128 MB on a body this route was always
+  // going to refuse, taking every other request on that isolate down with it.
+  // Signature, audience and the PROJECT_LEAD+ floor need nothing from the
+  // body; only the (project, file) scope comparison does, and it runs below on
+  // these same claims.
+  const authHeader = request.headers.get('Authorization') ?? ''
+  const auth = await verifySyncToken(
+    authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null,
+    env.SYNC_SECRET_KEY,
+  )
+  if (!auth.ok) return withCors(new Response(auth.reason, { status: auth.status }), request)
+  if (auth.claims.role < ROLE.PROJECT_LEAD) {
+    return withCors(new Response('role too low for source re-import', { status: 403 }), request)
+  }
+
+  const read = await readTextBodyWithLimit(request.headers, request.body, MAX_IMPORT_REQUEST_BODY_BYTES)
+  if (!read.ok) {
+    return withCors(Response.json({ error: read.error, maxBytes: read.maxBytes }, { status: read.status }), request)
+  }
+
   let unknownBody: unknown
   try {
-    unknownBody = await request.json()
+    unknownBody = JSON.parse(read.text)
   } catch {
     return withCors(new Response('invalid JSON body', { status: 400 }), request)
   }
@@ -835,23 +859,18 @@ export async function handleImportReconcileRequest(
     return withCors(new Response('invalid re-import body', { status: 400 }), request)
   }
   const body = unknownBody
+
+  // Auth, second half: the token must be scoped to the (project, file) the
+  // body names.
+  const scope = verifyDocScope(auth.claims, { projectId: body.projectId, fileId: body.fileId })
+  if (!scope.ok) return withCors(new Response(scope.reason, { status: scope.status }), request)
+
   if (body.cells.length > MAX_RECONCILE_CELLS) {
     return withCors(new Response(`re-import exceeds ${MAX_RECONCILE_CELLS} cells`, { status: 413 }), request)
   }
   const requestEventIds = [body.file.id, ...body.cells.map((cell) => cell.id), ...(body.targets ?? []).map((target) => target.id)]
   if (new Set(requestEventIds).size !== requestEventIds.length) {
     return withCors(new Response('re-import event ids must be unique', { status: 400 }), request)
-  }
-
-  const authHeader = request.headers.get('Authorization') ?? ''
-  const auth = await verifyTokenForDoc(
-    authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null,
-    { projectId: body.projectId, fileId: body.fileId },
-    env.SYNC_SECRET_KEY,
-  )
-  if (!auth.ok) return withCors(new Response(auth.reason, { status: auth.status }), request)
-  if (auth.claims.role < ROLE.PROJECT_LEAD) {
-    return withCors(new Response('role too low for source re-import', { status: 403 }), request)
   }
 
   const db = env.AQUILLA_PG
@@ -1257,7 +1276,8 @@ export async function handleImportReconcileRequest(
        SELECT ?, ?, ?, NULL, ?, ?, ? WHERE ${fileClaimGate()}
        ON CONFLICT (file_id) DO UPDATE SET
          project_id = EXCLUDED.project_id, format = EXCLUDED.format, raw_source = NULL,
-         r2_key = EXCLUDED.r2_key, size_bytes = EXCLUDED.size_bytes, created_at = EXCLUDED.created_at`,
+         r2_key = EXCLUDED.r2_key, size_bytes = EXCLUDED.size_bytes, created_at = EXCLUDED.created_at
+       WHERE file_source_blobs.project_id = EXCLUDED.project_id`,
     ).bind(
       body.fileId, body.projectId, body.rawSourceFormat, artifact.r2_key,
       Number(artifact.size_bytes), serverTs,

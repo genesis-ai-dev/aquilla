@@ -8,6 +8,14 @@
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Geist Variable', sans-serif;
+    /* AQU-2464: lighter weight scale, matching help.aquilla.app. The help site sets
+       nearly all text in the same Geist Variable at 400 with headings at 500-600,
+       while the app leans on font-medium (~960 uses) and font-semibold (~200),
+       which reads heavier. Lightening the tokens one step lightens every surface
+       at once without touching components. */
+    --font-weight-medium: 400;
+    --font-weight-semibold: 500;
+    --font-weight-bold: 600;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -80,7 +88,203 @@
 
     /* OTP fake-caret blink (shadcn input-otp). */
     --animate-caret-blink: caret-blink 1.2s ease-out infinite;
+    /* Loading cursor (ui/loading-cursor.tsx): a hard terminal-style blink. */
+    --animate-cursor-blink: cursor-blink 1s steps(1, end) infinite;
 }
+
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Content "types in" (ui/loading-cursor.tsx's counterpart): when a region
+   marked data-reveal mounts its children, they appear top to bottom in a
+   fast stagger — two levels deep, 20 ms per sibling, 160 ms each, so a full
+   page is in within about half a second. The keyframe has only a `from`, so
+   each element ends on its own styles (a hover-only opacity survives). */
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+[data-reveal] > *,
+[data-reveal] > * > * {
+  animation: reveal-in 160ms ease-out backwards;
+  animation-delay: var(--reveal-delay, 0ms);
+}
+[data-reveal] > * > * {
+  --reveal-delay: var(--reveal-parent-delay, 0ms);
+}
+[data-reveal] > :nth-child(2) {
+  --reveal-delay: 20ms;
+  --reveal-parent-delay: 20ms;
+}
+[data-reveal] > :nth-child(3) {
+  --reveal-delay: 40ms;
+  --reveal-parent-delay: 40ms;
+}
+[data-reveal] > :nth-child(4) {
+  --reveal-delay: 60ms;
+  --reveal-parent-delay: 60ms;
+}
+[data-reveal] > :nth-child(5) {
+  --reveal-delay: 80ms;
+  --reveal-parent-delay: 80ms;
+}
+[data-reveal] > :nth-child(6) {
+  --reveal-delay: 100ms;
+  --reveal-parent-delay: 100ms;
+}
+[data-reveal] > :nth-child(7) {
+  --reveal-delay: 120ms;
+  --reveal-parent-delay: 120ms;
+}
+[data-reveal] > :nth-child(8) {
+  --reveal-delay: 140ms;
+  --reveal-parent-delay: 140ms;
+}
+[data-reveal] > :nth-child(9) {
+  --reveal-delay: 160ms;
+  --reveal-parent-delay: 160ms;
+}
+[data-reveal] > :nth-child(10) {
+  --reveal-delay: 180ms;
+  --reveal-parent-delay: 180ms;
+}
+[data-reveal] > :nth-child(11) {
+  --reveal-delay: 200ms;
+  --reveal-parent-delay: 200ms;
+}
+[data-reveal] > :nth-child(12) {
+  --reveal-delay: 220ms;
+  --reveal-parent-delay: 220ms;
+}
+[data-reveal] > :nth-child(13) {
+  --reveal-delay: 240ms;
+  --reveal-parent-delay: 240ms;
+}
+[data-reveal] > :nth-child(14) {
+  --reveal-delay: 260ms;
+  --reveal-parent-delay: 260ms;
+}
+[data-reveal] > :nth-child(15) {
+  --reveal-delay: 280ms;
+  --reveal-parent-delay: 280ms;
+}
+[data-reveal] > :nth-child(16) {
+  --reveal-delay: 300ms;
+  --reveal-parent-delay: 300ms;
+}
+[data-reveal] > :nth-child(17) {
+  --reveal-delay: 320ms;
+  --reveal-parent-delay: 320ms;
+}
+[data-reveal] > :nth-child(18) {
+  --reveal-delay: 340ms;
+  --reveal-parent-delay: 340ms;
+}
+[data-reveal] > :nth-child(19) {
+  --reveal-delay: 360ms;
+  --reveal-parent-delay: 360ms;
+}
+[data-reveal] > :nth-child(20) {
+  --reveal-delay: 380ms;
+  --reveal-parent-delay: 380ms;
+}
+[data-reveal] > :nth-child(21) {
+  --reveal-delay: 400ms;
+  --reveal-parent-delay: 400ms;
+}
+[data-reveal] > :nth-child(22) {
+  --reveal-delay: 420ms;
+  --reveal-parent-delay: 420ms;
+}
+[data-reveal] > :nth-child(23) {
+  --reveal-delay: 440ms;
+  --reveal-parent-delay: 440ms;
+}
+[data-reveal] > :nth-child(24) {
+  --reveal-delay: 460ms;
+  --reveal-parent-delay: 460ms;
+}
+[data-reveal] > * > :nth-child(2) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 15ms);
+}
+[data-reveal] > * > :nth-child(3) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 30ms);
+}
+[data-reveal] > * > :nth-child(4) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 45ms);
+}
+[data-reveal] > * > :nth-child(5) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 60ms);
+}
+[data-reveal] > * > :nth-child(6) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 75ms);
+}
+[data-reveal] > * > :nth-child(7) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 90ms);
+}
+[data-reveal] > * > :nth-child(8) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 105ms);
+}
+[data-reveal] > * > :nth-child(9) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 120ms);
+}
+[data-reveal] > * > :nth-child(10) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 135ms);
+}
+[data-reveal] > * > :nth-child(11) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 150ms);
+}
+[data-reveal] > * > :nth-child(12) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 165ms);
+}
+[data-reveal] > * > :nth-child(13) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 180ms);
+}
+[data-reveal] > * > :nth-child(14) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 195ms);
+}
+[data-reveal] > * > :nth-child(15) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 210ms);
+}
+[data-reveal] > * > :nth-child(16) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 225ms);
+}
+[data-reveal] > * > :nth-child(17) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 240ms);
+}
+[data-reveal] > * > :nth-child(18) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 255ms);
+}
+[data-reveal] > * > :nth-child(19) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 270ms);
+}
+[data-reveal] > * > :nth-child(20) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 285ms);
+}
+[data-reveal] > * > :nth-child(21) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 300ms);
+}
+[data-reveal] > * > :nth-child(22) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 315ms);
+}
+[data-reveal] > * > :nth-child(23) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 330ms);
+}
+[data-reveal] > * > :nth-child(24) {
+  --reveal-delay: calc(var(--reveal-parent-delay, 0ms) + 345ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal] > *,
+  [data-reveal] > * > * {
+    animation: none;
+  }
+}
+
 
 @keyframes caret-blink {
   0%,
@@ -392,6 +596,10 @@
   }
   html {
     @apply font-sans;
+    /* AQU-2464: antialiased smoothing, as on help.aquilla.app. Without it macOS
+       Safari draws Geist with heavier strokes. */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     overscroll-behavior: none;
   }
   /* The frame's no-scroll rule, only while the frame is on screen. */
@@ -912,3 +1120,43 @@ textarea,
   --extension-accent-line: oklch(0.8 0.085 292 / 0.26);
   --extension-accent-glow: oklch(0.8 0.085 292 / 0.08);
 }
+
+/* AQU-2317 (AQU-1352 design board 2, "the role ladder"): the seven role levels
+   on one lightness scale derived from --primary — darker is more. Only chroma
+   and hue come from the brand token, so an achromatic brand stays achromatic;
+   the lightness of each rung is absolute, which is what lets a rung and its
+   ink carry the SAME contrast in light and dark theme instead of chasing
+   --background. Chroma is scaled per rung to stay inside sRGB at that
+   lightness — a clipped colour would move the lightness and with it the
+   contrast. The pairing and the 4.5:1 floor are machine-checked in
+   src/lib/access/role-scale.test.ts; RoleBadge is the only component that
+   paints these. */
+:root {
+  --role-ink-dark: oklch(from var(--primary) 0.2 calc(c * 0.6) h);
+  --role-ink-light: oklch(0.99 0 0);
+  --role-rung-1: oklch(from var(--primary) 0.96 calc(c * 0.3) h);
+  --role-rung-2: oklch(from var(--primary) 0.89 calc(c * 0.55) h);
+  --role-rung-3: oklch(from var(--primary) 0.82 calc(c * 0.8) h);
+  --role-rung-4: oklch(from var(--primary) 0.75 calc(c * 1.05) h);
+  --role-rung-5: oklch(from var(--primary) 0.68 calc(c * 1.3) h);
+  --role-rung-6: oklch(from var(--primary) 0.45 calc(c * 1.7) h);
+  --role-rung-7: oklch(from var(--primary) 0.32 calc(c * 1.5) h);
+}
+
+/* Fill + ink as one utility per rung, so a caller cannot pair rung 7's fill
+   with rung 1's ink. `-edge` is the dashed outline of an inherited pill, whose
+   ink stays --foreground. */
+@utility role-rung-1 { background-color: var(--role-rung-1); color: var(--role-ink-dark); }
+@utility role-rung-2 { background-color: var(--role-rung-2); color: var(--role-ink-dark); }
+@utility role-rung-3 { background-color: var(--role-rung-3); color: var(--role-ink-dark); }
+@utility role-rung-4 { background-color: var(--role-rung-4); color: var(--role-ink-dark); }
+@utility role-rung-5 { background-color: var(--role-rung-5); color: var(--role-ink-dark); }
+@utility role-rung-6 { background-color: var(--role-rung-6); color: var(--role-ink-light); }
+@utility role-rung-7 { background-color: var(--role-rung-7); color: var(--role-ink-light); }
+@utility role-rung-1-edge { border-color: var(--role-rung-1); }
+@utility role-rung-2-edge { border-color: var(--role-rung-2); }
+@utility role-rung-3-edge { border-color: var(--role-rung-3); }
+@utility role-rung-4-edge { border-color: var(--role-rung-4); }
+@utility role-rung-5-edge { border-color: var(--role-rung-5); }
+@utility role-rung-6-edge { border-color: var(--role-rung-6); }
+@utility role-rung-7-edge { border-color: var(--role-rung-7); }

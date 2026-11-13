@@ -22,8 +22,10 @@
 // `onUseAsCellText`, which fills the ROW's target text — that is the text
 // surface the reader is looking at.
 
-import { useCallback, useMemo, useRef, useState } from "react"
-import { Combine, CopyPlus, FileClock, Mic, Pencil, Sparkles, Trash2 } from "lucide-react"
+import { useCallback, useMemo, useRef, useState, type CSSProperties } from "react"
+import { AudioWaveform, Combine, FileClock, GraduationCap, Mic, Pencil, Trash2 } from "lucide-react"
+import { openInStation, useStationAvailable } from "@/lib/station/target"
+import { STATION_PICKS } from "@/lib/station/picks"
 
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -39,14 +41,12 @@ import { DenoiseButton } from "./audio/DenoiseButton"
 import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { keptWindowSec, piecesWindowSec, type KeptWindow } from "@/lib/audio/kept-window"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
+import { TRACK_DOT_CLASS } from "@/lib/timeline/track-colors"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
-import { transcribeCell } from "@/lib/audio/transcribe"
-import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
-import { laneLanguageForTag } from "@/lib/lanes/lane-language"
-import { laneLanguage } from "@/lib/lanes/lane-display"
+import { transcribeTake } from "@/lib/audio/transcribe-take"
+import { isGeneratedTake } from "@/lib/audio/track-audio"
 import { saveTranscript } from "@/lib/transcript-cleanup/save"
-import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { tokenizeWords } from "@/lib/audio/timings"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtShortCalendarDate } from "@/lib/format-date"
@@ -56,16 +56,17 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CodexCell, WordTiming } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
+import { PiecesApproved } from "./audio/PiecesApproved"
 import { useAudioValidation } from "@/hooks/useAudioValidation"
 import { hasOwnRecordingLeft, removeTake, removeWholeTake, renameTake, renameWholeTake } from "@/lib/audio/take-actions"
-import { takeBaseLabel } from "@/lib/audio/take-groups"
+import { splitTakeName } from "@/lib/audio/take-groups"
 import { pieceGroupOf, type AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { TakesStrip, nextTakeLabel } from "@/components/AudioRecorder/TakesStrip"
 import { attachmentOutFrom } from "@/lib/audio/cut-take"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT, slotsForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
 import { formatTakeSeconds, takePlayedMs } from "@/lib/audio/take-length"
 import { useInRouterContext, useNavigate } from "react-router-dom"
-import { CloneFromTakeButton } from "@/components/cell/CloneFromTakeButton"
+import { isVoiceChangedAudioId } from "@/lib/audio/change-voice"
 import { joinTakePieces } from "@/lib/audio/join-pieces"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import { toUserFacingError } from "@/lib/errors/user-error"
@@ -138,25 +139,20 @@ export interface CellTakeBlockProps {
    * AQU-1767 (Sam, 2026-10-14): the take that plays was SPLIT — its live
    * pieces, in clip order. It shows as one take ("Take 1 · split in 2"): one
    * waveform with the pieces lit and the cuts marked, Transcribe and Remove
-   * noise on the whole take, delete removing every piece, the approval
-   * covering every piece, and a row per piece under it (play, approve, rename,
-   * delete). Absent, or one piece: a take as before.
+   * noise on the whole take, delete removing every piece, and a row per piece
+   * under it (play, approve, rename, delete). Each piece is approved and named
+   * on its own there (decision 7), so the take itself takes no vote. Absent,
+   * or one piece: a take as before.
    */
   pieces?: readonly AudioAttachmentOut[]
   /** The line's take history, already read by the tab — for the piece rows. */
   takesHistory?: ReadonlyMap<string, RecordingTextDrift>
   /**
-   * AQU-1758: "Make a character from this voice" — opens the New voice
-   * dialog, cloning, seeded with this take's line. Absent hides it.
+   * AQU-1758 / AQU-2291: "Train a voice from this recording" — opens New
+   * voice on the Train voice tab with this take as its first recording.
+   * Offered on a person's take only. Absent hides it.
    */
-  onMakeCharacter?: () => void
-  /**
-   * AQU-1758 / AQU-2212: …in one step — name it, Add to cast — with
-   * `onMakeCharacter` as its More options (CloneFromTakeButton).
-   */
-  onCloneTake?: (name: string) => Promise<void>
-  /** The name that clone suggests (who recorded the take). */
-  cloneSuggestedName?: string
+  onTrainFromTake?: () => void
 }
 
 type BadgeProps = React.ComponentProps<typeof CellTranscribeBadge>
@@ -220,12 +216,12 @@ function CellTakeBlockView({
   trackFileId,
   pieces,
   takesHistory,
-  onMakeCharacter,
-  onCloneTake,
-  cloneSuggestedName,
+  onTrainFromTake,
 }: CellTakeBlockProps & { controller: UseCellAudioResult }) {
   const { t, locale } = useI18n()
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
+  // AQU-2327: the Station's way in from here shows while the Station exists.
+  const stationHere = useStationAvailable() && STATION_PICKS.wayIn.recordingTabButton
 
   const selectedAudioId = audioId ?? owner.selectedAudioId ?? undefined
   const attachment = selectedAudioId ? owner.attachments?.[selectedAudioId] : undefined
@@ -243,10 +239,17 @@ function CellTakeBlockView({
     surface: "recording-tab",
   })
   const split = pieces && pieces.length > 1 ? pieces : null
-  // A split take is approved as a whole from here: one press, every piece.
-  const validationTakes = split
-    ? split.flatMap((piece) => audioValidation.takeFor(owner, piece.audioId))
-    : audioValidation.takeFor(owner, selectedAudioId)
+  // A split take has no vote of its own: each piece is approved on its row
+  // below (decision 7, replacing Sam's 2026-10-15 ruling that the take was
+  // approved whole from here). It says how many of them are, read-only (Sam,
+  // 2026-10-22).
+  const validationTakes = split ? [] : audioValidation.takeFor(owner, selectedAudioId)
+  const pieceVotes = split
+    ? audioValidation.takesFor({
+        attachments: Object.fromEntries(split.map((p) => [p.audioId, p])),
+        selectedBySlot: { [split[0].slot]: split[0].audioId },
+      })
+    : []
 
   // AQU-1217: the part of the clip that plays for this line — the take's
   // stored trim, or, for an imported source-audio section, the section itself.
@@ -262,7 +265,9 @@ function CellTakeBlockView({
   const kept: KeptWindow = piecesWindow
     ? { start: piecesWindow.start, end: piecesWindow.end, kind: "trim" }
     : keptWindowSec(owner, selectedAudioId, attachment)
-  const isGenerated = Boolean(selectedAudioId && selectedAudioId === owner.selectedGeneratedVoiceAudioId)
+  // AQU-2235: the one rule the timeline and the takes list ask too — an added
+  // track's AI voice sits in its single slot, known by its `voiceId`.
+  const isGenerated = isGeneratedTake(owner, selectedAudioId, attachment)
   // Trimmed where it is shown (Sam, 2026-09-25): the edit lands on the cell
   // that HOLDS the take — a linked heard-line take writes to its cue.
   const commitTrim = useCallback((start: number | null, end: number | null) => {
@@ -287,36 +292,24 @@ function CellTakeBlockView({
 
   const handleTranscribe = useCallback(async () => {
     if (!selectedAudioId) return
-    // The ASR language follows the AUDIO, by provenance: an imported media
-    // segment is source speech, every take voices the target text.
-    const sourceLane = project.lanes?.find((lane) => lane.role === "source")
-    const language = isSourceSegmentSelected(owner)
-      ? laneLanguage(sourceLane ?? { role: "source" }, {
-          role: "source",
-          legacyTag: sourceLane?.legacyTag ?? null,
-        })
-      : laneLanguageForTag(targetLang ?? "", project.lanes) ?? undefined
-    // THIS take, on its own slot: the transcriber reads the cell's selected
-    // recording, which for a take on an added track is a different take —
-    // that block used to transcribe the default track's recording instead.
-    await transcribeCell({
-      cell: { ...owner, selectedAudioId },
+    // AQU-1619: the sequence (language by provenance, run, flush, poke the
+    // owner's attachment read) lives in `transcribe-take.ts`, because the
+    // source/target row's Retry runs exactly the same one. THIS take, on its
+    // own slot: the transcriber reads the cell's selected recording, which for
+    // a take on an added track is a different take — that block used to
+    // transcribe the default track's recording instead. A split take is
+    // transcribed whole (Sam, 2026-10-14). For a linked take the owner is the
+    // cue sibling, which is the read the row's linked takes are drawn from.
+    await transcribeTake({
+      project,
+      owner,
+      selectedAudioId,
       slot: attachment?.slot,
       session,
-      projectId: project.id,
-      language,
-      // AQU-1978: the timings are written in this lane, never the `''` one.
       ...(targetLang ? { targetLang } : {}),
-      askAgain: true,
-      // A split take is transcribed whole (Sam, 2026-10-14).
       ...(split ? { pieces: split } : {}),
+      ...(onCommitted ? { onCommitted } : {}),
     })
-    // The transcript rides a queued cell.audio.attach — flush it, then poke the
-    // OWNER's file so its attachment read picks the timings up. For a linked
-    // take that is the cue sibling, which is exactly the read the row's linked
-    // takes are drawn from.
-    await onCommitted?.(owner.id)
-    notifyAudioAttachmentsChanged(owner.fileId)
   }, [owner, selectedAudioId, attachment?.slot, session, project, targetLang, onCommitted, split])
 
   // AQU-981: "Join into one recording" — a split take (cut, or uploaded in
@@ -393,9 +386,10 @@ function CellTakeBlockView({
     if (!removed) return
     const gone = new Set(removing?.map((r) => r.audioId) ?? [selectedAudioId])
     const takes = Object.entries(owner.attachments ?? {}).map(([audioId, a]) => ({
-      audioId, voiceId: a.voiceId ?? null, isDeleted: a.isDeleted || (gone.has(audioId) && audioId !== selectedAudioId),
+      audioId, voiceId: a.voiceId ?? null, role: a.role ?? null,
+      isDeleted: a.isDeleted || (gone.has(audioId) && audioId !== selectedAudioId),
     }))
-    if (!hasOwnRecordingLeft(takes, selectedAudioId, owner.id)) onLastTakeRemoved?.(owner.id)
+    if (!hasOwnRecordingLeft(takes, selectedAudioId, owner)) onLastTakeRemoved?.(owner.id)
   }, [selectedAudioId, attachment, takePlaying, pauseTake, project.id, owner, username, onLastTakeRemoved, targetLang, split])
 
   // Renameable in place, as every take in the lists is (Sam, 2026-09-29).
@@ -408,8 +402,11 @@ function CellTakeBlockView({
   const renameCancelledRef = useRef(false)
   const [renamed, setRenamed] = useState<{ audioId: string; from: string | null; to: string } | null>(null)
   const storedLabel = attachment?.label ?? null
+  // A split take goes by the name its pieces share; a piece renamed on its own
+  // does not change it (decision 7).
+  const takeName = split ? splitTakeName(split) : storedLabel
   const shownLabel =
-    renamed && renamed.audioId === selectedAudioId && renamed.from === storedLabel ? renamed.to : storedLabel
+    renamed && renamed.audioId === selectedAudioId && renamed.from === takeName ? renamed.to : takeName
   const commitRename = useCallback(async () => {
     setRenaming(false)
     if (renameCancelledRef.current) { renameCancelledRef.current = false; return }
@@ -417,9 +414,9 @@ function CellTakeBlockView({
     // Against the name as SHOWN: an unnamed take shows "Take", and saving
     // that unchanged would turn the placeholder into a real name. A split
     // take is shown, and renamed, by its own name (AQU-1767, Sam 2026-10-15).
-    const shownName = (split ? takeBaseLabel(shownLabel) : shownLabel) ?? t("audio.takesStrip.takeFallback")
+    const shownName = shownLabel ?? t("audio.takesStrip.takeFallback")
     if (!selectedAudioId || !label || label === shownName) return
-    setRenamed({ audioId: selectedAudioId, from: storedLabel, to: label })
+    setRenamed({ audioId: selectedAudioId, from: takeName, to: label })
     // Worked out before the try: a conditional inside one makes the React
     // Compiler skip the whole component (see handleDelete).
     const lane = targetLang ? { targetLang } : {}
@@ -432,7 +429,7 @@ function CellTakeBlockView({
     } catch {
       setRenamed(null)
     }
-  }, [renameDraft, selectedAudioId, shownLabel, storedLabel, split, project.id, owner.fileId, owner.id, username, t, targetLang])
+  }, [renameDraft, selectedAudioId, shownLabel, storedLabel, takeName, split, project.id, owner.fileId, owner.id, username, t, targetLang])
 
   const handleCorrectTranscript = useCallback(
     (corrected: string) => {
@@ -464,7 +461,7 @@ function CellTakeBlockView({
   const showTranscript = Boolean(timings && timings.length > 0) && (isSection || verdict.kind !== "match")
   const label = isSection
     ? t("editor.recordingTab.sourceSection")
-    : (split ? takeBaseLabel(shownLabel) : shownLabel) ?? t("audio.takesStrip.takeFallback")
+    : shownLabel ?? t("audio.takesStrip.takeFallback")
   // The length that PLAYS (AQU-1217: a trimmed take shows its trimmed
   // length) — the head said the whole file's while the timer under it said
   // the kept part's.
@@ -486,12 +483,13 @@ function CellTakeBlockView({
       <div data-testid="cell-take-head" className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
         {trackName && !isSection && (
           <span data-testid="cell-take-track" className="flex items-center gap-1.5 font-medium">
-            <span aria-hidden className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: trackVars["--tl-track-hue"] }} />
+            <span aria-hidden className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${TRACK_DOT_CLASS}`} style={trackVars as CSSProperties} />
             {trackName}
             <span aria-hidden className="font-normal text-muted-foreground">·</span>
           </span>
         )}
-        {isGenerated && <Sparkles className="h-3 w-3 shrink-0 text-violet-600 dark:text-violet-400" />}
+        {/* AQU-2235: no star here — the one in the waveform's corner below
+            is an AI voice's only mark (Sam, Oct 25). */}
         {renaming ? (
           <input
             autoFocus
@@ -509,7 +507,9 @@ function CellTakeBlockView({
         ) : (
           <span data-testid="cell-take-label" className="font-medium">{label}</span>
         )}
-        {split && (
+        {/* Slice 3A (Sam, Oct 29): not beside the pieces count below, which
+            says how many pieces the take is in. */}
+        {split && pieceVotes.length === 0 && (
           <span data-testid="cell-take-split" className="text-muted-foreground">
             · {t("editor.recordingTab.splitInto", { count: split.length })}
           </span>
@@ -558,7 +558,8 @@ function CellTakeBlockView({
             testId="cell-take-verdict"
           />
         )}
-        {/* A split take is renamed whole, here; its pieces follow, numbered. */}
+        {/* A split take is renamed whole, here: the pieces that go by its
+            name follow, numbered; a piece renamed on its own keeps its name. */}
         {!isSection && selectedAudioId && !renaming && (
           <AppTooltip content={t("audio.takesStrip.renameTooltip")}>
             <Button
@@ -591,7 +592,16 @@ function CellTakeBlockView({
             else is said about the take — and the vote (Sam, 2026-09-30).
             This is the take that PLAYS, heard right here, so it can be
             validated here as from the line's audio check; the takes listed
-            under it show theirs read-only. */}
+            under it show theirs read-only. A split take's pieces carry theirs
+            on their own rows instead, and the take says how many are
+            approved. */}
+        {split && (
+          <PiecesApproved
+            pieces={pieceVotes}
+            requirement={audioValidation.validationRequirement}
+            testId="cell-take-pieces-approved"
+          />
+        )}
         {validationTakes.length > 0 && (
           <span data-testid="cell-take-validation" className="flex items-center">
             <AudioValidationControl
@@ -621,6 +631,23 @@ function CellTakeBlockView({
               </Button>
             </AppTooltip>
           )}
+          {/* AQU-2327 (Q1): open the take that plays in the Station, beside
+              Remove noise. A source section opens too, to listen only (Q10). */}
+          {stationHere && selectedAudioId && attachment && (
+            <AppTooltip content={t("editor.station.editIn")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                data-testid="cell-take-station"
+                aria-label={t("editor.station.editIn")}
+                onClick={() => openInStation({ fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId }, { show: true })}
+                className="rounded-md text-muted-foreground hover:text-foreground"
+              >
+                <AudioWaveform className="h-3.5 w-3.5" />
+              </Button>
+            </AppTooltip>
+          )}
           {!readOnlyTranscript && !isSection && selectedAudioId && attachment && (
             <DenoiseButton
               projectId={project.id}
@@ -632,6 +659,7 @@ function CellTakeBlockView({
               pieces={split ?? undefined}
               originalTake={originalTake}
               selectedUrl={attachment.url}
+              source={attachment}
               referenceAudioId={attachment.referenceAudioId ?? null}
               originalUrl={
                 attachment.referenceAudioId
@@ -650,29 +678,23 @@ function CellTakeBlockView({
             />
           )}
           {/* AQU-1758: the Audio view's voice card turned a take into a
-              character; this take does now (the timeline's take menu too),
-              in one step where it can (AQU-2212), the dialog under More
-              options. */}
-          {!isSection && selectedAudioId && attachment && onMakeCharacter && onCloneTake && editable && (
-            <CloneFromTakeButton
-              suggestedName={cloneSuggestedName}
-              onClone={onCloneTake}
-              onMoreOptions={onMakeCharacter}
-            />
-          )}
-          {!isSection && selectedAudioId && attachment && onMakeCharacter && !(onCloneTake && editable) && (
-            <AppTooltip content={t("editor.timeline.takeMenuMakeCharacter")}>
+              voice; this take does now (the timeline's take menu too).
+              AQU-2291: cloning means training — a person's take opens New
+              voice on the Train voice tab, seeded with it. */}
+          {!isSection && selectedAudioId && attachment && onTrainFromTake
+            && !attachment.voiceId && !isVoiceChangedAudioId(selectedAudioId) && (
+            <AppTooltip content={t("editor.voice.trainFromTake")}>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon-xs"
-                data-testid="cell-take-make-character"
-                aria-label={t("editor.timeline.takeMenuMakeCharacter")}
+                data-testid="cell-take-train-voice"
+                aria-label={t("editor.voice.trainFromTake")}
                 disabled={!editable}
-                onClick={onMakeCharacter}
+                onClick={onTrainFromTake}
                 className="rounded-md text-muted-foreground/60 hover:bg-background hover:text-foreground"
               >
-                <CopyPlus className="h-3.5 w-3.5" />
+                <GraduationCap className="h-3.5 w-3.5" />
               </Button>
             </AppTooltip>
           )}
@@ -722,8 +744,10 @@ function CellTakeBlockView({
         kept={kept}
         height={56}
         // In its track's colour (Sam, 2026-09-26): a source section in the
-        // source row's lighter blue, a take in its own track's.
-        kind={isGenerated || isSection ? "generated" : "take"}
+        // source row's blue, a take in its own track's. AQU-2235: "generated"
+        // now only adds the sparkle — the two kinds are drawn alike — so a
+        // source section, which is no AI voice, is drawn as a take.
+        kind={isGenerated ? "generated" : "take"}
         trackVars={trackVars}
         strategy={project.audioMediaStrategy ?? "lazy"}
         {...(piecesWindow ? { pieces: piecesWindow } : {})}
@@ -743,7 +767,8 @@ function CellTakeBlockView({
       </TakeWaveform>
       {split && (
         // A row per piece (Sam, 2026-10-14): play it, approve it, rename it,
-        // delete it.
+        // delete it. Approving and renaming are the piece's alone (decision 7);
+        // choosing stays with the whole take.
         <TakesStrip
           variant="pieces"
           projectId={project.id}

@@ -12,12 +12,15 @@
 // elements all resolve through these two helpers so "what is the source" and
 // "what is the dub" have exactly one definition. Provenance rides the audioId
 // seeding convention from buildAudioId (see audioIdSeededWith); ambiguous or
-// legacy ids default to SOURCE, matching isSourceSegmentSelected.
+// legacy ids default to SOURCE on a media section, matching
+// isSourceSegmentSelected, and are the line's own take anywhere else
+// (AQU-2411, own-take.ts).
 
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { audioIdSeededWith } from "./upload"
-import { isDefaultTrackSlot } from "@/lib/timeline/track-slots"
+import { isOwnTake } from "./own-take"
+import { GENERATED_VOICE_SLOT, isDefaultTrackSlot } from "@/lib/timeline/track-slots"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 
 export interface TrackAudioRef {
@@ -68,6 +71,24 @@ export function activeTargetForCell(cell: CellData): TargetAudioRef | null {
 }
 
 /**
+ * IS THIS TAKE AN AI VOICE? (AQU-2235) One answer for every surface that marks
+ * it — the timeline's clips, the recording window, its takes list and the
+ * Recording tab — because the sparkle is now the ONLY mark an AI voice
+ * carries: three slightly different tests drew the same take three ways. Every
+ * TTS path stamps `voiceId` on what it makes, in whatever slot; an older
+ * generated take is known by the slot it sits in, or by being the line's
+ * generated-voice pick.
+ */
+export function isGeneratedTake(
+  cell: { selectedGeneratedVoiceAudioId?: string | null },
+  audioId: string | null | undefined,
+  att: { voiceId?: string | null; slot?: string | null } | null | undefined,
+): boolean {
+  if (!audioId) return false
+  return Boolean(att?.voiceId) || att?.slot === GENERATED_VOICE_SLOT || audioId === cell.selectedGeneratedVoiceAudioId
+}
+
+/**
  * The same resolution WITHOUT the medium gate. (AQU-646)
  *
  * A subtitle file timed against footage carries takes on TEXT cells — there are
@@ -92,13 +113,15 @@ export function resolveTargetAudio(cell: CellData, slot?: string): TargetAudioRe
     if (!picked) return null
     const att = liveAttachment(cell, picked)
     if (!att) return null
-    return { audioId: picked, url: att.url, kind: att.voiceId ? "generated" : "take" }
+    return { audioId: picked, url: att.url, kind: isGeneratedTake(cell, picked, att) ? "generated" : "take" }
   }
 
+  // AQU-2411: the line's own take by the one rule (own-take.ts), so a take
+  // migrated from Codex under an untagged id sounds and draws here too.
   const sel = cell.selectedAudioId
-  if (sel && audioIdSeededWith(sel, cell.id)) {
-    const att = liveAttachment(cell, sel)
-    if (att) return { audioId: sel, url: att.url, kind: "take" }
+  const selAtt = liveAttachment(cell, sel ?? undefined)
+  if (sel && selAtt && isOwnTake(cell, sel, selAtt)) {
+    return { audioId: sel, url: selAtt.url, kind: isGeneratedTake(cell, sel, selAtt) ? "generated" : "take" }
   }
   const gen = cell.selectedGeneratedVoiceAudioId
   if (gen) {

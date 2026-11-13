@@ -15,6 +15,7 @@ import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { OrgSwitcher } from "./OrgSwitcher"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 
 const link = ({ isActive }: { isActive: boolean }) =>
   `flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-normal ${isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`
@@ -46,7 +47,7 @@ function OrgNavLink(props: ComponentProps<typeof NavLink>) {
 
 export function OrgSidebar() {
   const t = useT()
-  const { activeOrg, activeOrgId, activeGuestOrg, isAllOrgs } = useActiveOrg()
+  const { activeOrg, activeOrgId, activeGuestOrg, isAllOrgs, isLoading: orgsLoading } = useActiveOrg()
   // AQU-790: in a guest org the caller has project-level access only — no org
   // membership. Member-scoped nav (Teams, Assigned, Members, Archived,
   // Settings) is hidden so nothing links into an org they can't operate on
@@ -58,7 +59,7 @@ export function OrgSidebar() {
   // AQU-485: Members is a roster-visibility surface, not a generic admin
   // tool. Follow rosterViewMinRole so a below-floor maintainer does not see
   // the nav item, and a lowered floor can surface it for contributors.
-  const { canViewRoster, canEgress } = useOrgSettings(
+  const { canViewRoster, canEgress, hasFetched: settingsFetched } = useOrgSettings(
     isMemberOrg ? activeOrgId : null,
     activeOrg?.role?.level,
   )
@@ -68,7 +69,10 @@ export function OrgSidebar() {
   // a below-admin role the org opened the surface to still gets the entry.
   const showEgressNav = isMemberOrg && canEgress
   // Platform-operator (site-wide admin) — separate axis from the org role.
-  const { isAdmin: isPlatformAdmin } = usePlatformAdmin()
+  const { isAdmin: isPlatformAdmin, loading: platformAdminLoading } = usePlatformAdmin()
+  // The entries above appear as each permission check lands. While any is
+  // still pending, one cursor at the end of the list says more may follow.
+  const navPending = orgsLoading || platformAdminLoading || (isMemberOrg && !settingsFetched)
 
   const portfolioHomeTo = isAllOrgs
     ? orgHomePath(ALL_ORGS_PARAM)
@@ -81,7 +85,7 @@ export function OrgSidebar() {
       <div data-tour="org-switcher">
         <OrgSwitcher />
       </div>
-      <nav className="mt-2 flex flex-1 flex-col gap-0.5">
+      <nav className="mt-2 flex flex-1 flex-col gap-0.5" data-reveal="">
         {/* Guest org: Projects table only. Member: Overview + Projects. */}
         {isGuestOrg && activeOrgId != null ? (
           <OrgNavLink
@@ -126,25 +130,35 @@ export function OrgSidebar() {
             {t("editor.navTitle.overview")}
           </OrgNavLink>
         )}
-        {isMemberOrg && activeOrgId != null && <>
+        {isMemberOrg && activeOrgId != null && (
           <OrgNavLink to={orgPath(activeOrgId, "/teams")} className={link}>
             <NavIcon icon={NAV_PAGE_ICONS.teams} />
             {t("editor.navTitle.teams")}
           </OrgNavLink>
+        )}
+        {/* AQU-2458: "Assigned to me" lists only the caller's OWN open
+            assignments, so unlike the member-scoped nav above it is not a
+            window into an org the caller cannot operate on — it is the only
+            cross-project view of their own work. A project-only member (a
+            guest org, no org membership) is exactly the person who needs it:
+            without it a translator handed work in one shared project has no
+            list of what they owe anywhere. So this one entry is shown for a
+            guest org too, narrowing AQU-790's blanket hide. */}
+        {!isAllOrgs && activeOrgId != null && (
           <OrgNavLink to={orgPath(activeOrgId, "/assigned")} className={link} data-tour="nav-assigned">
             <NavIcon icon={NAV_PAGE_ICONS.assigned} />
             {t("editor.navTitle.assignedToMe")}
           </OrgNavLink>
-          {/* AQU-1958: comments across the org's projects. Maintainer+, the
-              same floor the page itself applies — editorial leads review
-              feedback across projects, contributors work inside one. */}
-          {isAdmin && (
-            <OrgNavLink to={orgPath(activeOrgId, "/comments")} className={link}>
-              <NavIcon icon={MessageSquare} />
-              {t("comments.org.title")}
-            </OrgNavLink>
-          )}
-        </>}
+        )}
+        {/* AQU-1958: comments across the org's projects. Maintainer+, the
+            same floor the page itself applies — editorial leads review
+            feedback across projects, contributors work inside one. */}
+        {isAdmin && activeOrgId != null && (
+          <OrgNavLink to={orgPath(activeOrgId, "/comments")} className={link}>
+            <NavIcon icon={MessageSquare} />
+            {t("comments.org.title")}
+          </OrgNavLink>
+        )}
         {isMemberOrg && activeOrgId != null && (showMembersNav || isAdmin) && (
           <div className="my-1 border-t" />
         )}
@@ -200,6 +214,11 @@ export function OrgSidebar() {
             {t("org.orgSidebar.admin")}
           </OrgNavLink>
         </>}
+        {navPending && (
+          <div className="flex h-8 items-center px-2" data-testid="org-sidebar-pending" aria-hidden="true">
+            <LoadingCursor plain />
+          </div>
+        )}
       </nav>
       <div className="mt-auto pt-2" data-tour="account-switcher">
         <div className="min-w-0">

@@ -74,6 +74,14 @@ export const onboarding = defineNamespace({
     "onboarding.oauth.accessWrite": "{client} can also add comments, translations, drafts and imports, subject to the mode below.",
     "onboarding.oauth.modeAsk": "each change {client} makes waits for a person to approve it.",
     "onboarding.oauth.modeAct": "changes apply immediately, within your current permissions.",
+    // AQU-2504 — platform-admin support access, offered only to an admin who
+    // has already stepped up in the admin console. The hint is the only place
+    // an admin is told what they are granting, so it names all three bounds
+    // (expiry, audit, attribution) and the fact that it includes WRITES.
+    "onboarding.oauth.supportAccessLegend": "Support access",
+    "onboarding.oauth.supportAccessLabel": "Connect for support work",
+    "onboarding.oauth.supportAccessHint": "Read and change any organization and project, including ones you are not a member of, so you can look at what a customer is asking about and fix it. It expires with your current admin session, every organization and project you open is recorded in the admin audit log, and anything you change is shown to that organization's own members as done by a platform admin.",
+    "onboarding.oauth.supportAccessReplacesOrgs": "Support access covers every organization, so there is nothing to select here.",
 
     // — Shared small words reused across this namespace's own surfaces ———————
     "onboarding.common.continue": "Continue",
@@ -84,6 +92,10 @@ export const onboarding = defineNamespace({
     // "Creating…" reuses `common.creating` (identical text)
 
     // — Shared privacy/analytics vocabulary (PrivacyStep + Preferences' Privacy row) —
+    "onboarding.privacy.agreeContinue": "Agree and continue",
+    "onboarding.privacy.continueWithoutSharing": "Continue without sharing",
+    "onboarding.privacy.collectionStarts": "Sharing starts only after you agree and create your account. Your choice applies only to that account.",
+    "onboarding.privacy.saveFailed": "Sharing is off because your preference could not be loaded or saved. Check your connection and try again in Preferences.",
     "onboarding.privacy.shareUsageData": "Share usage data",
     "onboarding.privacy.disabledWarning":
       "With analytics disabled, we may not be able to help diagnose problems you encounter.",
@@ -143,8 +155,8 @@ export const onboarding = defineNamespace({
       "AI translations, sync, and cloud import are available.",
     "onboarding.step.signIn.orgCheckFailed":
       "You're signed in, but we couldn't check whether this account has finished setup. Check your connection and try again.",
-    "onboarding.step.signIn.headingSignup": "Create your Aquilla account",
-    "onboarding.step.signIn.headingLogin": "Sign in to Aquilla",
+    "onboarding.step.signIn.headingSignup": "Create an Aquilla Account",
+    "onboarding.step.signIn.headingLogin": "Log in to Aquilla",
     // "Reset your password" reuses `auth.resetPassword.title`
     "onboarding.step.signIn.unlockBlurb":
       "Unlock AI-powered translations, sync across devices, and import projects from the cloud.",
@@ -237,18 +249,9 @@ export const onboarding = defineNamespace({
     // — AiInstructionsStep —
     "onboarding.checklist.aiInstructions.title": "Set translation instructions",
     "onboarding.checklist.aiInstructions.stepDescription":
-      "A short system prompt that shapes tone, formality, and style. Shared with everyone in this project.",
+      "Tell the AI how to translate this project — audience, tone, names, style. Every AI draft follows them.",
+    "onboarding.checklist.aiInstructions.openButton": "Open instructions",
     "onboarding.checklist.aiInstructions.actionLabel": "Editing translation instructions",
-    "onboarding.checklist.aiInstructions.introPrefix":
-      "Tell the AI how to translate. The starter prompt works for most projects; edit it to match your tone, formality, or domain (legal, scripture, marketing, etc.). Use",
-    "onboarding.checklist.aiInstructions.introAnd": "and",
-    "onboarding.checklist.aiInstructions.introSuffix": "as placeholders.",
-    "onboarding.checklist.aiInstructions.resetToDefault": "Reset to default",
-    "onboarding.checklist.aiInstructions.charCount": plural({
-      one: "{count} character",
-      other: "{count} characters",
-    }),
-    "onboarding.checklist.aiInstructions.saveButton": "Save instructions",
 
     // — AiProviderStep —
     "onboarding.checklist.aiProvider.description":
@@ -362,9 +365,9 @@ export const onboarding = defineNamespace({
     // System prompt nudge (editor banner)
     // ═══════════════════════════════════════════════════════════════════════
     "onboarding.systemPromptNudge.message":
-      "Your AI is still using the default translation instructions.",
+      "This project has no translation instructions yet.",
     "onboarding.systemPromptNudge.detail":
-      "Customize them to match your project's tone and domain — shared with everyone on the project.",
+      "Tell the AI your audience, tone and style — every AI draft on the project follows them.",
     // "Customize" button reuses `common.customize` (identical text)
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -656,11 +659,6 @@ export const onboarding = defineNamespace({
         description:
           "Confirmation line under the Import files checklist step, once at least one file has been imported.",
         placeholders: { count: "Number of files imported into the project so far." },
-      },
-      "onboarding.checklist.aiInstructions.charCount": {
-        description:
-          "Small counter under the system-prompt textarea in the AI instructions checklist step, showing its current length.",
-        placeholders: { count: "Number of characters currently typed in the prompt textarea." },
       },
       "onboarding.checklist.aiProvider.frontierSignedIn": {
         description:

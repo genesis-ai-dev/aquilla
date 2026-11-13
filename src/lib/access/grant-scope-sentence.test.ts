@@ -24,7 +24,7 @@ describe("describeGrant", () => {
       stays: true,
       scope: { kind: "project", projectName: "Mark", lanes: ["French"] },
     })
-    expect(copy.sentence).toBe("Maria stays a Project lead on Mark, French language lane only")
+    expect(copy.sentence).toBe("Maria stays a Project Lead on Mark, French language lane only")
     expect(copy.scopeEcho).toBe("French language lane only")
   })
 
@@ -63,6 +63,19 @@ describe("describeGrant", () => {
     })
     expect(copy.sentence).toBe("Maria will join as a Contributor on Mark — every language lane")
     expect(copy.scopeEcho).toBe("every language lane")
+  })
+
+  // ── AQU-2358 ──
+  it("names a project grant that includes no lane at all", () => {
+    const copy = describeGrant(t, {
+      names: ["Maria"],
+      roleLevel: ROLE.CONTRIBUTOR,
+      scope: { kind: "project", projectName: "Mark", lanes: "none" },
+    })
+    expect(copy.sentence).toBe("Maria will join as a Contributor on Mark — no language lanes")
+    expect(copy.scopeEcho).toBe("no language lanes")
+    // The point of the variant: it must not read like the every-lane grant.
+    expect(copy.sentence).not.toMatch(/every language lane/)
   })
 
   it("names an open link and an email", () => {

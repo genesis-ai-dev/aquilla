@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 // Project TTS settings (engine, voice library, Gemini key, cast assignments).
 //
 // Persistence lives in localStorage keyed by projectId (project-tts-store), NOT
@@ -31,7 +32,6 @@ import {
   omnivoiceMigrationProperties,
 } from "@/lib/audio/omnivoice-migrate"
 import { OMNIVOICE_VOICES_MIGRATED } from "@/lib/event-names"
-import posthog from "@/lib/posthog"
 import type { CastMemberStats } from "@/components/VoiceLibraryPanel"
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
@@ -148,6 +148,7 @@ export function useProjectTts(
   lane: string = "",
   castOptions: ProjectTtsCastOptions = NO_CAST_OPTIONS,
 ): ProjectTtsApi {
+  const analytics = useAccountAnalytics()
   // Read durable settings synchronously from localStorage on first render (lazy
   // init), so a reload sees the saved voice library immediately. Falls back to
   // the server copy when nothing is stored yet.
@@ -241,7 +242,7 @@ export function useProjectTts(
       const previous = pendingRef.current ?? localTts ?? serverSettings
       let patch: Partial<ProjectTtsSettings> = overrides
       // AQU-2037: the one place a voice is given its lane. Every mint site —
-      // New voice / Clone / voice design, an import with speaker labels,
+      // New voice / voice design / training, an import with speaker labels,
       // diarization, "Adopt voices as cast" — writes the full next library
       // through here, so stamping here covers all of them and nothing else has
       // to know about lanes. Only ids the stored library does not already hold
@@ -253,7 +254,7 @@ export function useProjectTts(
         }
       }
       // AQU-2038: starring a voice is a per-lane act. The Voices panel (and the
-      // clone host, and `upsertVoice` pinning the first voice) all say it with
+      // in-cell New voice host, and `upsertVoice` pinning the first voice) all say it with
       // a `defaultVoiceId` patch, so route that one key to this lane's default
       // and leave the project-wide one — the pre-lane fallback — alone.
       if ("defaultVoiceId" in patch) {
@@ -290,7 +291,7 @@ export function useProjectTts(
         ? "local"
         : "server"
     const before = rawNeedsWrite ? rawSettings : serverSettings
-    posthog.capture(OMNIVOICE_VOICES_MIGRATED, {
+    analytics.capture(OMNIVOICE_VOICES_MIGRATED, {
       project_id: projectId,
       source,
       ...omnivoiceMigrationProperties(before, { targetLanguage }),
@@ -300,7 +301,7 @@ export function useProjectTts(
     // lane's star (AQU-2038) — every voice in it is already stored, so there is
     // nothing for the lane stamping to do either (AQU-2037).
     void writeSettings(settings)
-  }, [projectId, rawSettings, serverSettings, settings, targetLanguage, writeSettings])
+  }, [projectId, rawSettings, serverSettings, settings, targetLanguage, writeSettings, analytics])
 
   const assignCells = useCallback(
     (cellIds: Iterable<string>, voiceId: string | null) => {

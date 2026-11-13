@@ -38,6 +38,27 @@ describe("MediaDefaultsSection", () => {
     expect(floorPicker().textContent).toContain("Reviewer")
   })
 
+  // AQU-1967: the rung picked here does NOT decide whether a lead can delete
+  // the cells the project imported — that needs a maintainer whatever the tier
+  // (cell-editing-gate.ts). An org admin who reads this row as "Project Lead
+  // lets leads delete cells" sets it, sees nothing change, and reports the
+  // feature as broken; Biblica ETT did exactly that. The project settings page
+  // always said so, so this row has to as well.
+  it("discloses that removing an imported cell still needs a maintainer", () => {
+    render(<MediaDefaultsSection orgSettings={orgSettings()} canEdit />)
+    expect(
+      screen.getByText(/removing an imported cell always needs a maintainer/i),
+    ).toBeTruthy()
+  })
+
+  // Same row, same reason: it governs CELLS, which is the word its label and
+  // the project page both use. "lines" sent an admin looking for this on the
+  // timeline settings instead.
+  it("describes what it governs as cells", () => {
+    render(<MediaDefaultsSection orgSettings={orgSettings()} canEdit />)
+    expect(screen.getByText(/^Who may add and remove cells\./)).toBeTruthy()
+  })
+
   it("shows the org's stored choices", () => {
     render(
       <MediaDefaultsSection
@@ -48,7 +69,7 @@ describe("MediaDefaultsSection", () => {
       />,
     )
     expect(isOn(lockSwitch())).toBe(false)
-    expect(tierPicker().textContent).toContain("Project lead")
+    expect(tierPicker().textContent).toContain("Project Lead")
     expect(floorPicker().textContent).toContain("Maintainer")
   })
 

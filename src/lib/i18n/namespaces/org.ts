@@ -19,6 +19,8 @@ export const org = defineNamespace({
     "org.access.origin.inherited": "Inherited",
     "org.access.origin.inheritedFrom": "Inherited · {path}",
     "org.access.origin.platform": "Platform admin",
+    "org.access.roleBadge.via": "{role} · via {path}",
+    "org.access.roleBadge.origin": "{role} · {origin}",
     "org.access.effective.direct": "{role} (direct)",
     "org.access.effective.via": "{role} (via {path})",
     "org.access.effective.creator": "{role} (creator)",
@@ -196,9 +198,9 @@ export const org = defineNamespace({
     "org.laneChips.recordedAriaLabel": "{label}: {pct} recorded",
 
     // -- OrgHome: org dashboard (org list, project portfolio, signed-out/empty states) --
-    "org.orgHome.signedOut.heading": "Sign in to see your workspace",
+    "org.orgHome.signedOut.heading": "Log in to see your workspace",
     "org.orgHome.signedOut.description":
-      "Your session has ended or you are not signed in. Sign in to access your projects and translation data.",
+      "Your session has ended or you are not logged in. Log in to access your projects and translation data.",
     "org.orgHome.loadingDashboard": "Loading dashboard",
 
     "org.orgHome.pendingInvitations.heading": "Pending invitations",
@@ -449,7 +451,7 @@ export const org = defineNamespace({
     "org.teamDetail.roleDescriptionContributor":
       "Contributor — can edit project content. Maximum level grantable via share link.",
     "org.teamDetail.roleDescriptionProjectLead":
-      "Project lead — can add members to projects, mint share-link invites, and lead project work.",
+      "Project Lead — can add members to projects, mint share-link invites, and lead project work.",
     "org.teamDetail.roleDescriptionMaintainer":
       "Maintainer — can create/manage teams, rename the org, set project deadlines, and remove " +
       "project members.",
@@ -514,6 +516,7 @@ export const org = defineNamespace({
     "org.memberActivityPanel.kindCommentResolve": "Resolved a comment",
     "org.memberActivityPanel.kindCellBacktranslationSet": "Set a back-translation",
     "org.memberActivityPanel.kindCellGlossSet": "Corrected a statistical gloss",
+    "org.memberActivityPanel.kindCellLabelSet": "Labelled a cell",
     "org.memberActivityPanel.kindCellAudioAttach": "Attached audio",
     "org.memberActivityPanel.kindCellAudioSelect": "Selected an audio take",
     "org.memberActivityPanel.kindCellRetime": "Retimed a cell",
@@ -632,7 +635,7 @@ export const org = defineNamespace({
     // heading) or is selected in the dialog. Hidden while the field is
     // Unassigned — clearing does not add a role.
     "org.projectOverview.pmGrantsProjectLead":
-      "Naming them project manager also adds them as a Project lead on this project. An existing higher role is kept. Clearing the project manager does not remove that membership.",
+      "Naming them project manager also adds them as a Project Lead on this project. An existing higher role is kept. Clearing the project manager does not remove that membership.",
     "org.projectOverview.pmGrantsProjectLeadAriaLabel": "What naming a project manager does",
     "org.projectOverview.selectMemberPlaceholder": "Select a member",
     "org.projectOverview.teamVisibilityDescription":
@@ -660,7 +663,14 @@ export const org = defineNamespace({
     "org.projectOverview.visibilitySaveOffline": "You're offline. Reconnect, then change it again.",
     "org.projectOverview.visibilitySaveForbidden":
       "Only people who can change this project's settings can change who sees this.",
+    // AQU-2479: the card's own title. NOT editor.navTitle.team ("Team") —
+    // that read like the project's roster, while the card only ever lists
+    // open assignments. The roster is the Members card below it.
+    "org.projectOverview.teamAssignmentsTitle": "Team assignments",
     "org.projectOverview.noOpenAssignments": "No open assignments in this project yet.",
+    // AQU-2479: under that empty state, so "no assignments" is never read as
+    // "no team". Opens the Members card, which is the actual roster.
+    "org.projectOverview.noOpenAssignmentsMembersLink": "See who has access under Members",
     "org.projectOverview.openAssignmentsStat": "{count} open · {percent}",
     "org.projectOverview.viewActivityAria": "View activity for {username}",
     "org.projectOverview.hide": "Hide",
@@ -745,16 +755,6 @@ export const org = defineNamespace({
     "org.egressSettings.roleOptionViewer": "{role} — anyone with project access",
     "org.egressSettings.roleOptionOwner": "{role} — default",
     "org.egressSettings.saveFailedFallback": "Couldn't save the egress permission.",
-
-    // -- AddLanguagePopover: "+ Language" quick action on an OrgHome project row --
-    "org.addLanguagePopover.triggerLabel": "Language",
-    // "e.g. Traditional Han" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
-    // "Enter a language name." → projectSettings.create.extraLanguagesEmptyError (identical text)
-    // too-long error → projectSettings.create.extraLanguagesTooLongError (identical text)
-    // already-default error → projectSettings.languages.alreadyDefaultError (identical text)
-    // lane-already-exists error → projectSettings.languages.alreadyExistsError (identical text)
-    "org.addLanguagePopover.conflictError": "Languages changed elsewhere. Reloaded — try adding again.",
-    // generic save-failed error → projectSettings.languages.savingFailedGeneric (identical text)
 
     // -- CreditsPanel: org credits/usage panel --
 
@@ -980,12 +980,12 @@ export const org = defineNamespace({
     // -- SectionVisibilityBadge: "who can see this section" affordance --
     "org.sectionVisibilityBadge.floorEveryone": "Everyone can see this",
     "org.sectionVisibilityBadge.floorContributor": "Contributors & up can see this",
-    "org.sectionVisibilityBadge.floorProjectLead": "Project leads & up can see this",
+    "org.sectionVisibilityBadge.floorProjectLead": "Project Leads & up can see this",
     "org.sectionVisibilityBadge.floorMaintainer": "Only maintainers & owners can see this",
     "org.sectionVisibilityBadge.floorOwner": "Only owners can see this",
     "org.sectionVisibilityBadge.rolePickerEveryone": "Everyone with access",
     "org.sectionVisibilityBadge.rolePickerContributor": "Contributors and up",
-    "org.sectionVisibilityBadge.rolePickerProjectLead": "Project leads and up",
+    "org.sectionVisibilityBadge.rolePickerProjectLead": "Project Leads and up",
     "org.sectionVisibilityBadge.rolePickerMaintainer": "Maintainers and owners",
     "org.sectionVisibilityBadge.rolePickerOwner": "Owners only",
     "org.sectionVisibilityBadge.changeVisibilityAriaLabel": "{label}. Change section visibility",
@@ -1279,12 +1279,14 @@ export const org = defineNamespace({
     // AQU-2289: an org role below Maintainer opens no project (AQU-1107).
     "org.grantScope.scope.organizationOnly": "of the organization — no projects until added to one",
     "org.grantScope.scope.projectAllLanes": "on {project} — every language lane",
+    "org.grantScope.scope.projectNoLanes": "on {project} — no language lanes",
     "org.grantScope.scope.project": "on {project}",
     "org.grantScope.scope.laneOnly": "on {project}, {lane} language lane only",
     "org.grantScope.scope.lanesOnly": "on {project}, {lanes} language lanes only",
     "org.grantScope.echo.organization": "every project",
     "org.grantScope.echo.organizationOnly": "organization only",
     "org.grantScope.echo.allLanes": "every language lane",
+    "org.grantScope.echo.noLanes": "no language lanes",
     "org.grantScope.echo.laneOnly": "{lane} language lane only",
     "org.grantScope.echo.lanesOnly": "{lanes} language lanes only",
     "org.grantScope.button": "{action} — {scope}",
@@ -1842,13 +1844,29 @@ export const org = defineNamespace({
         description: "Badge on a member row: the role comes from a grant at an ancestor scope.",
         placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
       },
+      "org.access.roleBadge.via": {
+        description:
+          "AQU-2317: the role pill for a grant inherited from an ancestor place — the role, then the place it is set at. The pill is a link to that place.",
+        placeholders: {
+          role: "Localized role label, e.g. \"Project Lead\".",
+          path: "Scope breadcrumb of the place the grant is set at, such as \"Biblica ETT › biblica/bsb\"; never translated.",
+        },
+      },
+      "org.access.roleBadge.origin": {
+        description:
+          "AQU-2317: the role pill when the grant comes from something that is not a place you can open — creator, platform admin, or an inherited grant whose source the viewer may not see.",
+        placeholders: {
+          role: "Localized role label, e.g. \"Project Lead\".",
+          origin: "Localized origin label from org.access.origin.* / org.accessModelLegend.*, already translated.",
+        },
+      },
       "org.access.effective.direct": {
         description: "Direct role shown beside a different effective role.",
-        placeholders: { role: "Localized role label, e.g. \"Project lead\"." },
+        placeholders: { role: "Localized role label, e.g. \"Project Lead\"." },
       },
       "org.access.effective.via": {
         description: "Effective role and the ancestor scope it is inherited through.",
-        placeholders: { role: "Localized role label, e.g. \"Project lead\".", path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+        placeholders: { role: "Localized role label, e.g. \"Project Lead\".", path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
       },
       "org.access.inspector.open": {
         description: "Accessible name of the button that opens the member-access inspector for a person.",
@@ -1856,7 +1874,7 @@ export const org = defineNamespace({
       },
       "org.access.page.chip": {
         description: "People & access person view: one grant chip, the role held at a scope.",
-        placeholders: { role: "Localized role label, e.g. \"Project lead\".", path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+        placeholders: { role: "Localized role label, e.g. \"Project Lead\".", path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
       },
       "org.accessAudit.generatedAt": {
         description: "Print header on the access audit: when this copy of the report was generated.",
@@ -1866,7 +1884,7 @@ export const org = defineNamespace({
         description: "One team in the access audit, with the role stored on that membership.",
         placeholders: {
           name: "The team's name. Not translated.",
-          role: "Localized role label, e.g. \"Project lead\".",
+          role: "Localized role label, e.g. \"Project Lead\".",
         },
       },
       "org.accessAudit.projectAccess": {
@@ -1886,11 +1904,11 @@ export const org = defineNamespace({
       },
       "org.access.effective.creator": {
         description: "Effective role held because the person created the scope.",
-        placeholders: { role: "Localized role label, e.g. \"Project lead\"." },
+        placeholders: { role: "Localized role label, e.g. \"Project Lead\"." },
       },
       "org.access.effective.platform": {
         description: "Effective role held as platform administrator.",
-        placeholders: { role: "Localized role label, e.g. \"Project lead\"." },
+        placeholders: { role: "Localized role label, e.g. \"Project Lead\"." },
       },
       "org.access.inherited.tooltip": {
         description: "Tooltip on a disabled role control for an inherited grant.",
@@ -2309,7 +2327,7 @@ export const org = defineNamespace({
       },
       "org.memberAccessPanel.orgRoleNoProjectAccessNote": {
         description:
-          "Trailing clause after 'Org role: Contributor' (or Viewer / Project lead) on the member access panel (AQU-1107). Explains that this org membership does not open projects; the next sentence tells the owner to add the person to a project or team.",
+          "Trailing clause after 'Org role: Contributor' (or Viewer / Project Lead) on the member access panel (AQU-1107). Explains that this org membership does not open projects; the next sentence tells the owner to add the person to a project or team.",
       },
       "org.memberAccessPanel.teamGrantLabel": {
         description:
@@ -2354,7 +2372,7 @@ export const org = defineNamespace({
       },
       "org.projectOverview.pmGrantsProjectLeadAriaLabel": {
         description:
-          "Accessible name for the small circled-i button beside the 'Project manager' heading on the project overview. It appears while a project manager is set, and clicking it expands a sentence explaining that naming a project manager also makes them a Project lead.",
+          "Accessible name for the small circled-i button beside the 'Project manager' heading on the project overview. It appears while a project manager is set, and clicking it expands a sentence explaining that naming a project manager also makes them a Project Lead.",
       },
       "org.projectOverview.fileListActionsAria": {
         description:
@@ -2831,7 +2849,7 @@ export const org = defineNamespace({
         description:
           "The full explanation opened from the circled-i beside the Team card's 'Visibility adjusted' note: a small line under the project overview's Team card visibility badge, shown right after a change to the Members card's visibility (or the org's member-list setting) moved who can see the Team card. 'Members' is the card of that name on the same page — use its localized name.",
         placeholders: {
-          level: "The Team card's new setting as its already-localized picker label, e.g. 'Project leads and up'.",
+          level: "The Team card's new setting as its already-localized picker label, e.g. 'Project Leads and up'.",
         },
       },
       "org.projectOverview.teamVisibilityRosterFloorHint": {
@@ -3263,7 +3281,7 @@ export const org = defineNamespace({
           "Variant of org.grantScope.sentence.person for someone who is already on the project at this role or higher and keeps it: the add only limits them to the lane in {scope}. Live sentence above the Staff popover's submit button, and its success message.",
         placeholders: {
           name: "The person's username or email — not translated.",
-          role: "The role label already translated (singular) — the role they already hold, e.g. Project lead.",
+          role: "The role label already translated (singular) — the role they already hold, e.g. Project Lead.",
           scope: "The scope phrase from org.grantScope.scope.*, already translated, including its leading 'on' or 'of'.",
         },
       },
@@ -3305,6 +3323,11 @@ export const org = defineNamespace({
           "Scope phrase for a project grant with no lane restriction. Begins with 'on'. The em dash clause says the grant is not limited to one lane.",
         placeholders: { project: "The project's display name — not translated." },
       },
+      "org.grantScope.scope.projectNoLanes": {
+        description:
+          "Scope phrase for a project grant that includes no language lane at all (AQU-2358): the person can see the project and its source text, and no translation. Begins with 'on'. The em dash clause says the grant covers no lane.",
+        placeholders: { project: "The project's display name — not translated." },
+      },
       "org.grantScope.scope.project": {
         description:
           "Scope phrase when the grant is on one project but the lane list is not known yet, so the sentence does not claim every lane or one lane.",
@@ -3335,6 +3358,10 @@ export const org = defineNamespace({
       },
       "org.grantScope.echo.allLanes": {
         description: "Short scope echo appended to a button that grants a whole project, every lane.",
+      },
+      "org.grantScope.echo.noLanes": {
+        description:
+          "Short scope echo appended to a button that grants a project with no language lane at all — the person sees the project and its source, no translation.",
       },
       "org.grantScope.echo.laneOnly": {
         description: "Short scope echo appended to a button that grants one lane.",

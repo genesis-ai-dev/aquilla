@@ -3596,14 +3596,19 @@ describe("TimelineEditor — rows come from the track model", () => {
     // become the row's firstElementChild, which the drop-indent test reads.
     const audio = named("Target audio") as HTMLElement
     expect(audio.className).toContain("border-l-4")
-    expect(audio.className).toContain("border-l-[color:var(--tl-track-hue)]")
-    expect(audio.style.getPropertyValue("--tl-track-hue")).toBe("#40c06e")
+    // AQU-2235: in the strip colour — the waveform's chroma at the track's own
+    // lightness — and the green is the new one (#23c179 since Oct 28; was #0cc187, and #40c06e before that).
+    expect(audio.className).toContain("border-l-[color:var(--tl-track-strip)]")
+    expect(audio.style.getPropertyValue("--tl-track-hue")).toBe("#23c179")
+    expect(audio.style.getPropertyValue("--tl-track-strip")).toBe("oklch(0.717 0.140 156.9)")
 
     // A source row is not PICKABLE, but it still has a colour of its own and
     // is now drawn the same way — that is the whole of this change.
     const source = named("Source text") as HTMLElement
     expect(source.className).toContain("border-l-4")
     expect(source.style.getPropertyValue("--tl-track-hue")).toBe("#8b93a3")
+    // …and keeps its own grey as its strip: a derived row's colour never moves.
+    expect(source.style.getPropertyValue("--tl-track-strip")).toBe("#8b93a3")
 
     // …and every row's hue is its own, not one shared default.
     const dubs = named("Dubs") as HTMLElement // the folder
@@ -3654,6 +3659,22 @@ describe("TimelineEditor — rows come from the track model", () => {
     fireEvent.contextMenu(named("Spanish"))
     expect(screen.queryByText(/^Delete/)).toBeNull()
     expect(screen.queryByText(/folder/i)).toBeNull()
+  })
+
+  // AQU-2235: a track shows its colour as the strip at its far left (and the
+  // dot, and the name bar): chroma 0.14 at the colour's own lightness. The
+  // swatch you pick must be that colour, not the raw palette hex beside it.
+  it("paints each swatch in the colour its track will then show", () => {
+    render(selectable({ onSetTrackColor: vi.fn(), tracks: foldedTracks() }))
+    const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
+    fireEvent.contextMenu(named("Target audio"))
+    fireEvent.click(screen.getByText("Color"))
+    for (const [name, strip] of [["Cyan", "oklch(0.744 0.140 201.3)"], ["Magenta", "oklch(0.596 0.140 350.5)"]] as const) {
+      const swatch = screen.getByRole("menuitemradio", { name }).querySelector("span")!
+      expect(swatch.style.getPropertyValue("--tl-track-strip"), name).toBe(strip)
+      expect(swatch.className, name).toContain("bg-[color:var(--tl-track-strip)]")
+      expect(swatch.style.backgroundColor, name).toBe("")
+    }
   })
 
   it("offers no colour without the clearance", () => {
@@ -6698,8 +6719,9 @@ describe("TimelineEditor — the track names pass under the Tracks header (AQU-2
     expect(screen.getByTestId("tl-gutter-rule").classList).toContain("z-20")
   })
 
-  // Arabic and Urdu flip `<html dir>`, and the grid with it: the column goes on
-  // the right, and the edge it shares with the lanes is its LEFT one.
+  // Logical sides name the edge the column shares with the lanes. The grid is
+  // pinned left to right (AQU-2340), so that edge is the right one in every
+  // language; the logical names keep it true if that ever changes.
   it("puts the divider and the rule on the lanes' edge in either direction", () => {
     render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
     expect(header().classList).toContain("border-e")

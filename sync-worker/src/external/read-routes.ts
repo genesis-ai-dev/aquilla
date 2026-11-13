@@ -61,7 +61,7 @@
 // alongside `data` when present). Errors: `{ error: { code, message } }`
 // with codes from external/errors.ts.
 
-import { externalError } from "./errors"
+import { errorResponse, externalError } from "./errors"
 import { resolveExternalLaneParam } from "./external-lane"
 import { listProjectsForCredential } from "./projects-list"
 import { assertOrgInCredentialScope, handleExternalOrgReadRequest } from "./org-read-routes"
@@ -69,7 +69,9 @@ import { handleExternalCrossProjectSearch, handleExternalSearch } from "./search
 import { handleFilesReadRequest } from "../events/files-read-route"
 import { handleCellsReadRequest } from "../events/cells-read-route"
 import { loadProjectSettings } from "../../../db/shared/projects"
-import { filterSettingsBlobForMember } from "../../../db/shared/lane-visibility"
+import { loadTranslationInstructions } from "../../../db/shared/load-translation-instructions"
+import { filterSettingsBlobForMember, visibleTagsForMember } from "../../../db/shared/lane-visibility"
+import { eventRowsForVisibleLanes } from "../events/lane-read-wall"
 import { paginate, parsePageParams } from "./pagination"
 import { recordAgentRead, resolveAuthorshipPolicy, scrubAuthorField } from "./pii"
 import { handleExternalSimilarRequest } from "./similar-route"
@@ -77,6 +79,7 @@ import { handleExternalActivityRequest } from "./activity-route"
 import { handleExternalPendingChangesetsRequest } from "./pending-changesets-route"
 import { handlePromptPreview } from "./prompt-preview"
 import { loadProjectDetail } from "./project-detail"
+import { listProjectMembers, MEMBERS_READ_FLOOR } from "./members-read"
 import { loadEffectiveChecks } from "./effective-checks"
 import {
   authenticateAndScope,
@@ -99,6 +102,7 @@ const FILES_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/files$/
 const CELL_HISTORY_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/cells\/([^/]+)\/history$/
 const SETTINGS_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/settings$/
 const PROMPT_PREVIEW_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/cells\/([^/]+)\/prompt-preview$/
+const MEMBERS_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/members$/
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/external/me — cold-start step 1: prove the token works, learn
@@ -186,7 +190,13 @@ async function handleExternalProjects(request: Request, env: ExternalReadsEnv): 
   const projects = await listProjectsForCredential(
     env.AQUILLA_PG,
     cred,
-    { ...(orgId !== null ? { orgId } : {}), ...(sort ? { sort } : {}) },
+    {
+      ...(orgId !== null ? { orgId } : {}),
+      ...(sort ? { sort } : {}),
+      // AQU-2504: name this route, not the MCP tool, in any support-access
+      // audit row — the trail should say which adapter the operator used.
+      tool: "GET /api/v1/external/projects",
+    },
   )
   return Response.json({ data: projects, nextCursor: null })
 }
@@ -487,7 +497,17 @@ async function handleExternalCellHistory(
     .bind(projectId, cellId, fetchLimit)
     .all<EventRowRaw>()
 
-  const page = paginate(result.results.map(mapHistoryRow), offset, limit)
+  // AQU-730 read wall: a PAT acts as its owner, so a member walled to some
+  // target lanes reads only those lanes' events here too — the same rule the
+  // in-app history route applies.
+  const { visible } = await visibleTagsForMember(
+    env.AQUILLA_PG as AquillaDb,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(authed.ctx.credential.userId),
+    authed.ctx.role,
+  )
+  const page = paginate(eventRowsForVisibleLanes(result.results, visible).map(mapHistoryRow), offset, limit)
 
   // AQU-1180: history is the densest identity surface on the API — one author
   // per event, ordered in time. Scrub the page the caller actually receives
@@ -549,6 +569,14 @@ async function handleExternalProjectSettings(
     authed.ctx.role,
     current.settings,
   )
+  // AQU-2342: the RESOLVED project instructions — what every drafting prompt
+  // actually carries — beside the raw blob, which holds the stored key only
+  // once someone wrote it. PatchSettings still patches `settings`.
+  const instructions = await loadTranslationInstructions(
+    env.AQUILLA_PG as AquillaDb,
+    projectId,
+    current.settings,
+  )
   return Response.json({
     projectId: current.projectId,
     settings,
@@ -556,6 +584,8 @@ async function handleExternalProjectSettings(
     builtinChecksByLane: checks.builtinChecksByLane,
     version: current.version,
     updatedAt: current.updatedAt,
+    translationInstructions: instructions.text,
+    translationInstructionsStored: instructions.stored,
   })
 }
 
@@ -600,6 +630,53 @@ async function handleExternalPromptPreview(
   if (!preview.ok) return preview
   const body = (await preview.json()) as Record<string, unknown>
   return Response.json({ ...body, laneId: targetLane.lane.id })
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/external/projects/:projectId/members — the governance roster
+// (AQU-2403): who is on the project, at what effective role, by which grant
+// path, and whether they hold a direct `project_members` row.
+//
+// MAINTAINER-floored, like the InviteMember / SetRole / RemoveMember commands
+// it feeds. Before this read, an agent could only discover the roster by
+// staging a membership command and reading the `conflict` code back.
+// ---------------------------------------------------------------------------
+
+async function handleExternalProjectMembers(
+  request: Request,
+  env: ExternalReadsEnv,
+  projectId: string,
+): Promise<Response> {
+  const authed = await authenticateAndScope(request, env, projectId)
+  if (!authed.ok) return authed.response
+  if (env.AQUILLA_PG) {
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential)
+    if (limited) return limited
+  }
+  if (authed.ctx.role < MEMBERS_READ_FLOOR) {
+    // Same envelope and the same `requiredRole` detail as
+    // commands-membership.ts's callerLevelOrDenial, so a caller that already
+    // handles the write half's refusal needs no new branch for the read.
+    return errorResponse(
+      "permission_denied",
+      "project role >= maintainer required to read the membership roster",
+      { requiredRole: MEMBERS_READ_FLOOR },
+    )
+  }
+
+  const roster = await listProjectMembers(env.AQUILLA_PG as AquillaDb, projectId)
+  // authenticateAndScope already 404s an unknown id; null here means the
+  // project was deleted between the two reads.
+  if (!roster) return externalError("not_found", "project not found", 404)
+  // `total` and `truncated` are always present, so a capped roster says so
+  // rather than reading as the whole list. nextCursor is null by design: this
+  // read does not page (see MEMBERS_MAX_ROWS).
+  return Response.json({
+    data: roster.members,
+    total: roster.total,
+    truncated: roster.truncated,
+    nextCursor: null,
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -665,6 +742,9 @@ export async function handleExternalReadRequest(
   if (match) {
     return handleExternalCellHistory(request, env, decodeURIComponent(match[1]), decodeURIComponent(match[2]))
   }
+
+  match = url.pathname.match(MEMBERS_RE)
+  if (match) return handleExternalProjectMembers(request, env, decodeURIComponent(match[1]))
 
   match = url.pathname.match(SETTINGS_RE)
   if (match) return handleExternalProjectSettings(request, env, decodeURIComponent(match[1]))

@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useOnline } from "@/hooks/useOnline"
@@ -17,14 +18,14 @@ import {
   settingsEditorName,
 } from "@/lib/sync/project-settings"
 import { readOfflineProjectSettings, rememberProjectSettingsOffline, whenOfflineStoreOpen } from "@/lib/sync/project-resolve"
-import type { ProjectOrgPolicy, ProjectVisibilityFloors } from "@/lib/sync/project-org-policy"
-import posthog from "@/lib/posthog"
+import type { ProjectOrgPolicy, ProjectVisibilityFloors, VisibilityFloorView } from "@/lib/sync/project-org-policy"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import { claimHydrationReport, retainProjectOpen } from "./project-settings-open"
 import { useDraftingSettingsUpload } from "./useDraftingSettingsUpload"
 import { registerSettingsAccessor } from "@/lib/history/settings-access"
 import type { CompletionSettings, ProjectRecord } from "@/lib/parsers/types"
 import type { MediaDefaults } from "../../db/shared/media-setting-defaults"
+import { readSettingAt } from "@/lib/settings/setting-at"
 
 /** AQU-1768: one stable empty value, so an org with no media defaults never re-renders. */
 const EMPTY_MEDIA_DEFAULTS: MediaDefaults = Object.freeze({})
@@ -208,6 +209,22 @@ export function isAlignmentSeedsOnlyPatch(partial: ProjectWideSettings): boolean
 }
 
 /**
+ * The team's default Parallel Bibles versions. A patch that touches only this
+ * key is admitted at project_lead(500)+ — a lead sets them from the panel's
+ * "Make these the project defaults". Mirrors the server carve-out in
+ * auth-worker/src/routes/project-settings.ts, which remains authoritative.
+ */
+export const PARALLEL_BIBLES_EDIT_ROLE_FLOOR = ROLE.PROJECT_LEAD
+
+const PARALLEL_BIBLES_KEY = "parallelBibleVersions"
+
+/** True when a patch changes the default Parallel Bibles versions and nothing else. */
+export function isParallelBiblesOnlyPatch(partial: ProjectWideSettings): boolean {
+  const keys = Object.keys(partial)
+  return keys.length > 0 && keys.every((key) => key === PARALLEL_BIBLES_KEY)
+}
+
+/**
  * AQU-979: the same-tab convergence channel for project-wide settings.
  *
  * Project settings are PATCHed through auth-worker's REST API, not the sync
@@ -322,6 +339,9 @@ export interface UseProjectSettings {
    * first response that carries them.
    */
   orgMediaDefaults: MediaDefaults
+  /** AQU-2342: the legacy agent brief text from the same response ("" when
+   *  none, or once the project stored its own instructions). */
+  legacyProjectBriefText: string
   /**
    * AQU-1771: the org policy this project's surfaces apply, and the
    * visibility floors it enforces, from the same response. Null before the
@@ -330,6 +350,10 @@ export interface UseProjectSettings {
    */
   orgPolicy: ProjectOrgPolicy | null
   visibilityFloors: ProjectVisibilityFloors | null
+  /** AQU-2305: the import floor this project enforces, split org / own /
+   *  effective. Null until a response carries it (and on a server that
+   *  predates it), where `resolveProjectPolicy` derives the same split. */
+  importFloor: VisibilityFloorView | null
   /** AQU-1418: the project's lane rows from the last settings response.
    *  Null before the first response that carries them, and on a server
    *  that predates lane rows. */
@@ -380,7 +404,64 @@ export interface UseProjectSettings {
    *  patch, gated by PROJECT_LEAD (AQU-1246). Server-forbidden writes are
    *  surfaced as blocked and the optimistic overlay is rolled back — no silent
    *  local divergence. */
-  patch: (partial: ProjectWideSettings) => Promise<PatchOutcome>
+  patch: (partial: ProjectWideSettings, opts?: PatchOptions) => Promise<PatchOutcome>
+}
+
+/**
+ * AQU-2262: what a one-setting write (Project settings save as you change
+ * them) tells the patch besides the new values.
+ */
+export interface PatchOptions {
+  /**
+   * The value of each setting (or one field of an object setting) as the
+   * person saw it when they changed it. The write is refused — a conflict,
+   * with the server's row — when the server holds something else there by
+   * the time it goes: someone else changed that same setting first, and
+   * their change is kept. Settings not named here are never compared, so a
+   * change to one setting goes ahead over someone's change to another.
+   */
+  expect?: SettingExpectation[]
+  /** Keys whose object value is merged into the server's object (one field
+   *  of the drafting settings) rather than replacing it. */
+  mergeKeys?: string[]
+}
+
+export interface SettingExpectation {
+  key: string
+  field?: string
+  value: unknown
+}
+
+const sameSettingValue = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+
+/** The first expectation the settings no longer meet, if any. */
+export function unmetExpectation(
+  settings: ProjectWideSettings | undefined,
+  expect: readonly SettingExpectation[] | undefined,
+): SettingExpectation | null {
+  for (const e of expect ?? []) {
+    if (!sameSettingValue(readSettingAt(settings, e.key, e.field), e.value)) return e
+  }
+  return null
+}
+
+/** `partial` laid over `base`, merging the objects under `mergeKeys`. */
+export function applySettingsPatch(
+  base: ProjectWideSettings | undefined,
+  partial: ProjectWideSettings,
+  mergeKeys: readonly string[] | undefined,
+): ProjectWideSettings {
+  const next: Record<string, unknown> = { ...(base ?? {}), ...partial }
+  for (const key of mergeKeys ?? []) {
+    const add = (partial as Record<string, unknown>)[key]
+    if (!add || typeof add !== "object") continue
+    const had = (base as Record<string, unknown> | undefined)?.[key]
+    const merged: Record<string, unknown> = { ...(had && typeof had === "object" ? (had as Record<string, unknown>) : {}), ...(add as Record<string, unknown>) }
+    // An undefined field means "unset": leave it out rather than send it.
+    for (const [field, value] of Object.entries(merged)) if (value === undefined) delete merged[field]
+    next[key] = merged
+  }
+  return next as ProjectWideSettings
 }
 
 export interface UseProjectSettingsOptions {
@@ -482,6 +563,8 @@ function localSettingsFrom(
     out.ttsSettings = ttsRest
   }
   if (record.terminology != null) out.terminology = record.terminology
+  if (record.translationInstructions != null)
+    out.translationInstructions = record.translationInstructions
   if (record.livingMemoryEntries != null) out.livingMemoryEntries = record.livingMemoryEntries
   if (record.translationBrief != null) out.translationBrief = record.translationBrief
   if (record.draftContext != null) out.draftContext = record.draftContext
@@ -493,6 +576,7 @@ export function useProjectSettings(
   roleLevel: number | null,
   options?: UseProjectSettingsOptions,
 ): UseProjectSettings {
+  const analytics = useAccountAnalytics()
   const termbaseEditMinRole = options?.termbaseEditMinRole
   const languageEditMinRole = options?.languageEditMinRole
   const { session } = useFrontierSession()
@@ -561,7 +645,9 @@ export function useProjectSettings(
   const [orgValidationCountAudio, setOrgValidationCountAudio] = useState<number | null>(null)
   const [orgPolicy, setOrgPolicy] = useState<ProjectOrgPolicy | null>(null)
   const [visibilityFloors, setVisibilityFloors] = useState<ProjectVisibilityFloors | null>(null)
+  const [importFloor, setImportFloor] = useState<VisibilityFloorView | null>(null)
   const [orgMediaDefaults, setOrgMediaDefaults] = useState<MediaDefaults>(EMPTY_MEDIA_DEFAULTS)
+  const [legacyProjectBriefText, setLegacyProjectBriefText] = useState("")
   const [lanes, setLanes] = useState<ProjectLaneView[] | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
     serverRef.current = next
@@ -573,7 +659,9 @@ export function useProjectSettings(
     if (next?.orgValidationCountAudio !== undefined) setOrgValidationCountAudio(next.orgValidationCountAudio)
     if (next?.orgPolicy !== undefined) setOrgPolicy(next.orgPolicy)
     if (next?.visibilityFloors !== undefined) setVisibilityFloors(next.visibilityFloors)
+    if (next?.importFloor !== undefined) setImportFloor(next.importFloor)
     if (next?.orgMediaDefaults !== undefined) setOrgMediaDefaults(next.orgMediaDefaults)
+    if (next?.legacyProjectBriefText !== undefined) setLegacyProjectBriefText(next.legacyProjectBriefText)
     if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
   // A response the server actually returned (never an optimistic guess): also
@@ -646,7 +734,7 @@ export function useProjectSettings(
       setHasFetched(true)
       const withinMs = got ? claimHydrationReport(projectId) : null
       if (got && withinMs !== null) {
-        posthog.capture("project settings hydrated", {
+        analytics.capture("project settings hydrated", {
           project_id: projectId,
           within_ms: withinMs,
           has_server_row: got.version > 0,
@@ -705,6 +793,9 @@ export function useProjectSettings(
             ...(got.settings.terminology != null
               ? { terminology: got.settings.terminology }
               : {}),
+            ...(got.settings.translationInstructions != null
+              ? { translationInstructions: got.settings.translationInstructions }
+              : {}),
             ...(got.settings.livingMemoryEntries != null
               ? { livingMemoryEntries: got.settings.livingMemoryEntries }
               : {}),
@@ -724,7 +815,7 @@ export function useProjectSettings(
     } finally {
       if (refreshInFlightRef.current === request) refreshInFlightRef.current = null
     }
-  }, [projectId, jwt, hydrateFromOfflineCopy, writeServerConfirmed])
+  }, [projectId, jwt, hydrateFromOfflineCopy, writeServerConfirmed, analytics])
 
   // AQU-1816: what a writer that bypasses `patch` calls instead of a bare
   // `refresh()`. The broadcast reaches the sibling instances (and the overview's
@@ -886,13 +977,13 @@ export function useProjectSettings(
       const nonEmptyCount = Object.values(local).filter((v) => v !== "" && v != null).length
       if (out.kind === "ok") {
         writeServerConfirmed(out.value)
-        posthog.capture("project settings migrated", {
+        analytics.capture("project settings migrated", {
           project_id: projectId,
           fields_count: nonEmptyCount,
         })
       } else if (out.kind === "conflict") {
         writeServerConfirmed(out.latest)
-        posthog.capture("project settings migration conflict", {
+        analytics.capture("project settings migration conflict", {
           project_id: projectId,
           fields_count: nonEmptyCount,
         })
@@ -900,7 +991,7 @@ export function useProjectSettings(
       // forbidden / error: leave server at version 0; display is still backed
       // by local cache. A fresh hook instance will retry on next mount.
     })()
-  }, [hasFetched, server, canEdit, local, jwt, projectId, writeServerConfirmed])
+  }, [hasFetched, server, canEdit, local, jwt, projectId, writeServerConfirmed, analytics])
 
   // AQU-2259: upload this browser's old drafting settings once, when the team
   // has none yet (src/hooks/useDraftingSettingsUpload.ts).
@@ -912,8 +1003,8 @@ export function useProjectSettings(
       version: response.version,
       origin: instanceIdRef.current,
     })
-    if (wrote) posthog.capture("project drafting settings uploaded", { project_id: projectId })
-  }, [projectId, writeServerConfirmed])
+    if (wrote) analytics.capture("project drafting settings uploaded", { project_id: projectId })
+  }, [projectId, writeServerConfirmed, analytics])
   useDraftingSettingsUpload({
     projectId,
     jwt,
@@ -924,7 +1015,9 @@ export function useProjectSettings(
     onServerResponse: onDraftingUploadResponse,
   })
 
-  const patch = useCallback(async (partial: ProjectWideSettings): Promise<PatchOutcome> => {
+  const patch = useCallback(async (partial: ProjectWideSettings, opts?: PatchOptions): Promise<PatchOutcome> => {
+    const mergeKeys = opts?.mergeKeys
+    const over = (base: ProjectWideSettings | undefined) => applySettingsPatch(base, partial, mergeKeys)
     // Gate logic for local apply vs. server write:
     //
     // 1. No jwt or no projectId → error immediately (no session/project).
@@ -943,16 +1036,16 @@ export function useProjectSettings(
     // single-scope carve-outs — a terminology-only one (org's configured
     // termbaseEditMinRole), a countStructuralCells-only one (project_lead), a
     // language-only one (org's configured languageEditMinRole), an
-    // autopilotEnabled-only one (project_lead), and an alignmentSeeds-only one
-    // (contributor). Deriving it per-patch (rather than loosening the
+    // autopilotEnabled-only one (project_lead), an alignmentSeeds-only one
+    // (contributor), and a parallelBibleVersions-only one (project_lead). Deriving it per-patch (rather than loosening the
     // hook-wide floor) keeps the AQU-255 guarantee intact for all other keys.
 
     if (!projectId || !jwt) return { kind: "error", message: t("workspace.projectSettingsHook.noSessionError") }
 
     if (!isOnlineRef.current) {
       // Offline — apply locally so work isn't lost; server will reconcile on reconnect.
-      setLocal((prev) => ({ ...prev, ...partial }))
-      void patchProject(projectId, (existing) => ({ ...existing, ...partial })).catch((err) => {
+      setLocal((prev) => over(prev))
+      void patchProject(projectId, (existing) => ({ ...existing, ...over(existing as ProjectWideSettings) })).catch((err) => {
         console.warn("[useProjectSettings] local IDB patch failed (offline)", err)
       })
       return { kind: "blocked", reason: "offline" }
@@ -960,8 +1053,8 @@ export function useProjectSettings(
 
     if (roleLevel == null) {
       // Unsynced project — only local storage exists; no server to write to.
-      setLocal((prev) => ({ ...prev, ...partial }))
-      void patchProject(projectId, (existing) => ({ ...existing, ...partial })).catch((err) => {
+      setLocal((prev) => over(prev))
+      void patchProject(projectId, (existing) => ({ ...existing, ...over(existing as ProjectWideSettings) })).catch((err) => {
         console.warn("[useProjectSettings] local IDB patch failed (unsynced)", err)
       })
       return { kind: "blocked", reason: "role" }
@@ -973,6 +1066,7 @@ export function useProjectSettings(
       : isLanguageOnlyPatch(partial) ? languageEditFloor
       : isAutopilotOnlyPatch(partial) ? AUTOPILOT_EDIT_ROLE_FLOOR
       : isAlignmentSeedsOnlyPatch(partial) ? ALIGNMENT_SEEDS_EDIT_ROLE_FLOOR
+      : isParallelBiblesOnlyPatch(partial) ? PARALLEL_BIBLES_EDIT_ROLE_FLOOR
       : isTtsSettingsOnlyPatch(partial) && serverRef.current?.settings.projectLeadsManageVoices === true
         ? ROLE.PROJECT_LEAD
       : SETTINGS_EDIT_ROLE_FLOOR
@@ -985,8 +1079,8 @@ export function useProjectSettings(
     // Optimistic local apply for synced+online+authorized path. We apply here
     // (after the role guard) rather than before it so a below-floor user never
     // writes stale data to IDB on a synced project.
-    setLocal((prev) => ({ ...prev, ...partial }))
-    void patchProject(projectId, (existing) => ({ ...existing, ...partial })).catch((err) => {
+    setLocal((prev) => over(prev))
+    void patchProject(projectId, (existing) => ({ ...existing, ...over(existing as ProjectWideSettings) })).catch((err) => {
       console.warn("[useProjectSettings] local IDB patch failed", err)
     })
 
@@ -1003,24 +1097,31 @@ export function useProjectSettings(
       // etc.). One extra GET per save eliminates the whole class of bug.
       const probe = await fetchProjectSettingsResult(jwt, projectId)
       const fresh = (probe.ok ? probe.value : null) ?? serverRef.current
+      // AQU-2262: someone else changed this same setting since the person
+      // saw it. Their change stands; nothing is written.
+      if (fresh && unmetExpectation(fresh.settings, opts?.expect)) {
+        writeServerConfirmed(fresh)
+        return { kind: "conflict", latest: fresh } satisfies PatchResult
+      }
       const baseVersion = fresh?.version ?? 0
       const optimistic: ProjectSettingsResponse = {
         version: baseVersion,
         updatedAt: fresh?.updatedAt ?? new Date().toISOString(),
         updatedBy: fresh?.updatedBy ?? null,
-        settings: { ...(fresh?.settings ?? {}), ...partial },
+        settings: over(fresh?.settings),
       }
       writeServer(optimistic)
 
       // Retry once for the (now rare) case that a concurrent writer slipped
-      // in between the GET above and our PATCH.
+      // in between the GET above and our PATCH — unless that writer changed
+      // the setting this write was about (AQU-2262).
       const first = await patchProjectSettings(jwt, projectId, optimistic.settings, baseVersion)
       const outcome =
-        first.kind === "conflict"
+        first.kind === "conflict" && !unmetExpectation(first.latest.settings, opts?.expect)
           ? await patchProjectSettings(
               jwt,
               projectId,
-              { ...first.latest.settings, ...partial },
+              over(first.latest.settings),
               first.latest.version,
             )
           : first
@@ -1064,7 +1165,7 @@ export function useProjectSettings(
         console.warn("[useProjectSettings] local IDB conflict-snap failed", err)
       })
       setConflict(true)
-      posthog.capture("project settings sync conflict", {
+      analytics.capture("project settings sync conflict", {
         project_id: projectId,
         conflicting_user: settingsEditorName(result.latest.updatedBy),
       })
@@ -1091,7 +1192,7 @@ export function useProjectSettings(
       }).catch((err) => {
         console.warn("[useProjectSettings] local IDB forbidden-rollback failed", err)
       })
-      posthog.capture("project settings write forbidden", {
+      analytics.capture("project settings write forbidden", {
         project_id: projectId,
         role_level: roleLevel,
       })
@@ -1108,7 +1209,7 @@ export function useProjectSettings(
       return rollbackRejectedKeys(prev, partial, snapTarget)
     })
     return { kind: "error", message: result.message, status: result.status }
-  }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t, writeServerConfirmed])
+  }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t, writeServerConfirmed, analytics])
 
   // AQU-1767 phase 2: let a history step read and write this project's
   // settings through this hook, wherever the person presses Undo.
@@ -1122,8 +1223,8 @@ export function useProjectSettings(
     if (!projectId) return
     return registerSettingsAccessor(projectId, {
       read: () => settingsForHistoryRef.current as Record<string, unknown>,
-      write: async (next) => {
-        const out = await patchForHistoryRef.current(next as ProjectWideSettings)
+      write: async (next, opts) => {
+        const out = await patchForHistoryRef.current(next as ProjectWideSettings, opts)
         if (out.kind !== "ok") throw new Error(`settings write ${out.kind}`)
       },
     })
@@ -1140,7 +1241,9 @@ export function useProjectSettings(
     orgValidationCountAudio,
     orgPolicy,
     visibilityFloors,
+    importFloor,
     orgMediaDefaults,
+    legacyProjectBriefText,
     lanes,
     isOnline,
     canEdit,

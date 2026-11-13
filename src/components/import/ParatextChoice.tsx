@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useEffect, useMemo, useState } from "react"
 import { Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -13,7 +14,6 @@ import { usfmDisplayText } from "@/lib/parsers/usfm-display"
 import type { SourceVerse } from "@/lib/parsers/paratext-pairing"
 import { fetchTranslationsList, fetchTranslationText, parseEBibleCorpus, type EBibleTranslation } from "@/lib/parsers/ebible"
 import { detectCollisions, type CollisionResult } from "@/lib/import-collision"
-import posthog from "@/lib/posthog"
 import { IMPORT_FAILED } from "@/lib/event-names"
 import { UsfmStructureFindings } from "./UsfmStructureFindings"
 import type { CollisionResolution } from "./import-dialog-types"
@@ -38,6 +38,9 @@ interface ParatextChoiceProps {
   /** AQU-634: per-project USFM front-matter opt-out (forwarded to
    *  prepareParatextProject). */
   excludeFrontMatter?: boolean
+  /** Start on the source-Bible picker (the Paratext bridge's "Open in Aquilla"
+   *  always imports as target). Default: the source-or-target choice. */
+  initialMode?: "choose" | "pickSource"
 }
 
 /** Preview + source-vs-target choice for a detected Paratext project (AQU-310:
@@ -47,11 +50,12 @@ interface ParatextChoiceProps {
  *  (aligned by verse ref). */
 export function ParatextChoice({
   entries, bookCount, projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, onImported, onCancel,
-  existingFiles, onCollision, excludeFrontMatter,
+  existingFiles, onCollision, excludeFrontMatter, initialMode = "choose",
 }: ParatextChoiceProps) {
+  const analytics = useAccountAnalytics()
   const { locale } = useI18n()
   const t = useT()
-  const [mode, setMode] = useState<"choose" | "pickSource" | "importing">("choose")
+  const [mode, setMode] = useState<"choose" | "pickSource" | "importing">(initialMode)
   const [plan, setPlan] = useState<ParatextPlan | null>(null)
   const [phase, setPhase] = useState("")
   const [progress, setProgress] = useState<{ count: number; total: number; bookLabel: string } | null>(null)
@@ -72,8 +76,8 @@ export function ParatextChoice({
       .then((p) => { if (!cancelled) setPlan(p) })
       .catch((err) => {
         if (cancelled) return
-        posthog.captureException(err, { import_stage: "paratext-parse", project_id: projectId })
-        posthog.capture(IMPORT_FAILED, {
+        analytics.captureException(err, { import_stage: "paratext-parse", project_id: projectId })
+        analytics.capture(IMPORT_FAILED, {
           import_stage: "paratext-parse",
           project_id: projectId,
           error_message: err instanceof Error ? err.message : String(err),
@@ -81,7 +85,18 @@ export function ParatextChoice({
         setError(err instanceof Error ? err.message : t("importExport.paratext.couldNotReadProject"))
       })
     return () => { cancelled = true }
-  }, [entries, projectId, excludeFrontMatter, t])
+  }, [entries, projectId, excludeFrontMatter, t, analytics])
+
+  // Starting on the picker needs the translation list that `startTarget`
+  // would otherwise fetch on the way in.
+  useEffect(() => {
+    if (initialMode !== "pickSource") return
+    let cancelled = false
+    fetchTranslationsList()
+      .then((list) => { if (!cancelled) setTranslations(list) })
+      .catch((err: unknown) => { if (!cancelled) setError(err instanceof Error ? err.message : t("importExport.paratext.couldNotLoadSourceList")) })
+    return () => { cancelled = true }
+  }, [initialMode, t])
 
   function onProgress(p: ParatextImportProgress) {
     const bookLabel = p.book
@@ -126,8 +141,8 @@ export function ParatextChoice({
       const inferredLang = settings.languageIsoCode || settings.language
       await onImported(refs, inferredLang ? { sourceLanguage: inferredLang } : undefined, skipped.length ? skipped : undefined)
     } catch (err) {
-      posthog.captureException(err, { import_stage: "paratext-upload", project_id: projectId })
-      posthog.capture(IMPORT_FAILED, {
+      analytics.captureException(err, { import_stage: "paratext-upload", project_id: projectId })
+      analytics.capture(IMPORT_FAILED, {
         import_stage: "paratext-upload",
         project_id: projectId,
         error_message: err instanceof Error ? err.message : String(err),

@@ -49,13 +49,15 @@ vi.mock("@/lib/sync/project-settings", () => ({
 vi.mock("@/lib/store/project-index", () => ({
   createProject: vi.fn().mockResolvedValue(undefined),
 }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 
 
 describe("New Project's submit button goes through translation (AQU-2259)", () => {
   it("labels the submit button from the catalog", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     screen.getAllByRole("button")[0].click()
+    // The wizard asks where the project comes from first (AQU-2105).
+    ;(await screen.findByTestId("project-source-scratch")).click()
     const submit = await screen.findByRole("button", { name: /Create project/ })
     expect(submit.textContent).toBe("⟦Create project⟧")
   })

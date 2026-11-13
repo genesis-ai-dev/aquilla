@@ -1,10 +1,10 @@
 import { ProjectMondayCard } from "./ProjectMondayCard"
+import { StatTile, StatBar } from "@/components/progress/StatTiles"
 import { useState, useEffect, useCallback, useMemo, useRef, useId } from "react"
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
 import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload, Headphones, ChevronDown, ChevronRight, Info } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { InfoNote } from "@/components/ui/info-note"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
 import { ShowMoreControls, useShowMore } from "@/components/ui/show-more-controls"
@@ -21,6 +21,7 @@ import { useProject } from "@/hooks/useProject"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrg } from "@/context/OrgContext"
+import { ProjectNoAccess } from "@/components/ProjectNoAccess"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
@@ -121,6 +122,7 @@ import {
 } from "./SectionVisibilityBadge"
 import { Badge } from "@/components/ui/badge"
 import { LangQuestLinkBadge } from "@/components/langquest/LangQuestLinkBadge"
+import { ParatextLinkBadge } from "@/components/paratext/ParatextLinkBadge"
 import { ProjectDeadlineStatuses, ProjectStatusChip } from "@/components/ProjectStatus"
 import {
   Dialog,
@@ -151,7 +153,7 @@ import {
 } from "@/lib/metrics/hidden-stats"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { SearchSelect } from "@/components/ui/search-select"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate } from "@/lib/i18n/format"
@@ -167,57 +169,13 @@ import {
 } from "@/hooks/useProjectSettings"
 import { toast } from "@/components/ui/toast"
 import { progressPercent, progressPercentOfFraction } from "@/lib/progress/progress-percent"
-import { PROGRESS_BG, type ProgressTone } from "@/lib/progress/progress-palette"
+import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 
 
 function ProjectOverviewSkeleton() {
   return (
-    <div className="max-w-5xl space-y-4">
-      <div className="rounded-lg border bg-card shadow-sm p-6 space-y-2">
-        <div className="flex items-center gap-2">
-          <Skeleton className="h-6 w-48" />
-          <Skeleton className="h-5 w-16 rounded-md" />
-        </div>
-        <Skeleton className="h-4 w-32" />
-        <Skeleton className="h-4 w-20" />
-        <div className="flex items-start gap-4 pt-2">
-          <div className="space-y-1.5">
-            <Skeleton className="h-3 w-24" />
-            <Skeleton className="h-8 w-48" />
-          </div>
-          <div className="space-y-1.5">
-            <Skeleton className="h-3 w-16" />
-            <Skeleton className="h-8 w-56" />
-          </div>
-        </div>
-      </div>
-      <div className="rounded-lg border bg-card shadow-sm p-5 space-y-4">
-        <Skeleton className="h-3 w-20" />
-        <div className="flex flex-wrap gap-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-14 w-24 rounded-lg" />
-          ))}
-        </div>
-        <div className="space-y-2.5">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-2.5 w-full rounded-full" />
-          ))}
-        </div>
-      </div>
-      <div className="rounded-lg border bg-card shadow-sm p-5 space-y-3">
-        <Skeleton className="h-3 w-16" />
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="flex items-center gap-3">
-            <Skeleton className="h-4 w-36" />
-            <Skeleton className="h-1.5 flex-1 rounded-full" />
-            <Skeleton className="h-3 w-24" />
-          </div>
-        ))}
-      </div>
-      <div className="rounded-lg border bg-card shadow-sm p-5 space-y-2">
-        <Skeleton className="h-3 w-20" />
-        <Skeleton className="h-4 w-40" />
-      </div>
+    <div className="max-w-5xl">
+      <LoadingCursor className="text-xl" />
     </div>
   )
 }
@@ -289,48 +247,6 @@ function MetaFieldEditButton({
   )
 }
 
-// ── Stat tiles (big %) ────────────────────────────────────────────────────────
-
-/**
- * AQU-1764 (Sam, 2026-10-13, "Layout A, softest"): the number is in the text
- * colour, and the colour lives in a small swatch before the label — the same
- * tone that measure's bar below is drawn in (AI drafted: the stripes). The
- * numbers used to be amber, violet, emerald and sky, four colours that meant
- * nothing anywhere else.
- */
-function StatTile({ label, pct, tone, muted = false, tooltip }: {
-  label: string
-  pct: number
-  tone: ProgressTone
-  /** A cross-language figure while one language is selected: greyed, swatch faded. */
-  muted?: boolean
-  /** What the figure measures. AQU-2260 (Sam, Oct 29): it opens on a click of
-   *  the (i) by the label, in a note anchored to it; the tile no longer
-   *  explains itself on hover. */
-  tooltip?: string
-}) {
-  const t = useT()
-  return (
-    <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
-      <p className={`text-2xl font-bold tabular-nums ${muted ? "text-muted-foreground/60" : "text-foreground"}`}>
-        {`${progressPercentOfFraction(pct)}%`}
-      </p>
-      <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <span
-          aria-hidden
-          data-progress-swatch={tone}
-          className={cn("h-1.5 w-3.5 shrink-0 rounded-full", PROGRESS_BG[tone], muted && "opacity-40")}
-        />
-        {label}
-        {tooltip ? (
-          <InfoNote label={t("common.aboutAria", { name: label })} iconClassName="h-3 w-3" align="center">
-            {tooltip}
-          </InfoNote>
-        ) : null}
-      </p>
-    </div>
-  )
-}
 
 // ── Lane filter tabs (AQU-538 §3.3) ───────────────────────────────────────────
 // SegmentTabs needs a non-empty string value; map null/"All" and the default
@@ -351,43 +267,6 @@ function tabToLaneTag(tab: string): string | null {
   return tab
 }
 
-// ── Stat bar ──────────────────────────────────────────────────────────────────
-
-/**
- * One measure, one bar, one colour, starting at zero (AQU-1764, "Layout A"):
- * the card keeps a separate bar per measure, so each reads by its length alone,
- * in that measure's tone from the shared progress palette.
- */
-function StatBar({ label, value, total, tone, suffix }: {
-  label: string
-  value: number
-  total: number
-  tone: ProgressTone
-  suffix?: string
-}) {
-  const pct = progressPercent(value, total)
-  return (
-    <div className="flex items-center gap-3" data-testid={`stat-bar-${tone}`}>
-      {/* w-28, not w-20: "Audio Validated" (AQU-1764 added its bar) is the
-          longest label and wrapped onto two lines at 80px. */}
-      <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
-      <div className="flex flex-1 items-center gap-2">
-        <span className="h-2 flex-1 rounded-full bg-muted overflow-hidden">
-          <span
-            className={`block h-full rounded-full transition-all ${PROGRESS_BG[tone]}`}
-            style={{ width: `${pct}%` }}
-          />
-        </span>
-        <span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">
-          {pct}%
-        </span>
-      </div>
-      <span className="w-28 shrink-0 text-end text-[11px] tabular-nums text-muted-foreground/70">
-        {value}/{total}{suffix ? ` ${suffix}` : ""}
-      </span>
-    </div>
-  )
-}
 
 // ── Per-file mini-bars ────────────────────────────────────────────────────────
 
@@ -639,6 +518,9 @@ export function ProjectOverview() {
   // AQU-1171: the Members card starts collapsed on every mount. The open
   // state lives only in this render — a reload always returns to the header.
   const [membersOpen, setMembersOpen] = useState(false)
+  // AQU-2479: the Team-assignments empty state points at the Members card
+  // (the actual roster), so it opens it and brings it into view.
+  const membersCardRef = useRef<HTMLDivElement>(null)
 
   // AQU-500: transient "copied" feedback for the CSV-export control, mirroring
   // the copy-affordance pattern used elsewhere (e.g. ChatMarkdown's code-block
@@ -686,6 +568,7 @@ export function ProjectOverview() {
   // read above is refused for them). See src/lib/sync/project-org-policy.ts.
   const carriedOrgPolicy = projectSettings?.orgPolicy
   const carriedVisibilityFloors = projectSettings?.visibilityFloors
+  const carriedImportFloor = projectSettings?.importFloor
   const projectSettingsBlob = projectSettings?.settings
   // The floors are not known until the project's own settings arrive: a
   // project may be stricter than its org, and only that response says so.
@@ -694,12 +577,13 @@ export function ProjectOverview() {
     () => resolveProjectPolicy({
       orgPolicy: carriedOrgPolicy,
       visibilityFloors: carriedVisibilityFloors,
+      importFloor: carriedImportFloor,
       projectSettings: projectSettingsBlob,
       org: orgSettings,
       roleLevel: projectRoleLevel,
       projectSettingsFetched,
     }),
-    [carriedOrgPolicy, carriedVisibilityFloors, projectSettingsBlob, orgSettings, projectRoleLevel, projectSettingsFetched],
+    [carriedOrgPolicy, carriedVisibilityFloors, carriedImportFloor, projectSettingsBlob, orgSettings, projectRoleLevel, projectSettingsFetched],
   )
   // Primitives, so the memos below depend on values rather than on the
   // policy object (a new one every render).
@@ -789,18 +673,17 @@ export function ProjectOverview() {
     void loadRow()
   }, [loadRow, archivedSince])
 
-  // Only redirect when the user genuinely has no access to this project.
-  // `useProject` is server-verified per-project (not org-scoped): a
-  // project-only invitee (no org membership, or org mismatch) still resolves
-  // to "ready" here when they hold a direct grant. Redirecting on org
-  // mismatch alone (pre-AQU-474 behavior) sent guests right back to "/".
-  useEffect(() => {
-    // AQU-346: "forbidden" (access revoked) leaves the overview the same way
-    // a missing project does — back to the dashboard.
-    if (status === "not-found" || status === "forbidden") {
-      navigate("/", { replace: true })
-    }
-  }, [status, navigate])
+  // AQU-2452: a refusal is SHOWN, never navigated away from. This used to
+  // replace the URL with "/" on 403/404, so an org member who opened a
+  // project they have no grant on watched the page start to load and then sit
+  // back on the dashboard with nothing said. The refusal now renders the same
+  // ProjectNoAccess screen the workspace shows (see `nonReadyContent`).
+  //
+  // A refusal is the only case that reaches it: `useProject` is
+  // server-verified per-project (not org-scoped), so a project-only invitee
+  // (no org membership, or an org mismatch) still resolves to "ready" when
+  // they hold a direct grant. Redirecting on org mismatch alone (pre-AQU-474
+  // behavior) sent guests right back to "/".
 
   // Load per-project assignment roster for the Team card (maintainer+)
   // AQU-495: extracted into a callback so a fresh assignment (onAssigned) can
@@ -1923,6 +1806,9 @@ export function ProjectOverview() {
           {t("common.retry")}
         </Button>
       </div>
+    ) : status === "forbidden" || status === "not-found" ? (
+      // AQU-2452: one message for every refusal, the workspace's screen.
+      <ProjectNoAccess />
     ) : null
 
   return (
@@ -2023,6 +1909,7 @@ export function ProjectOverview() {
                         roleLevel={project?.syncRole?.level ?? null}
                         onSynced={() => void refresh()}
                       />
+                      <ParatextLinkBadge projectId={id} />
                     </div>
                     {/* Language pair */}
                     {languagePair && (
@@ -2899,7 +2786,11 @@ export function ProjectOverview() {
                           {teamOpen
                             ? <ChevronDown className="size-3.5 shrink-0" aria-hidden />
                             : <ChevronRight className="size-3.5 shrink-0" aria-hidden />}
-                          {t("editor.navTitle.team")}
+                          {/* AQU-2479: "Team assignments", not "Team" — this card
+                              lists open assignments, never the project's roster.
+                              A project can have a full team through an attached
+                              team and still have nothing assigned. */}
+                          {t("org.projectOverview.teamAssignmentsTitle")}
                         </button>
                       </h2>
                       <SectionVisibilityBadge
@@ -2995,7 +2886,34 @@ export function ProjectOverview() {
                     {teamOpen && (
                       <div id="overview-team-panel">
                         {workload.length === 0 && validations.length === 0 ? (
-                          <p className="text-sm text-muted-foreground">{t("org.projectOverview.noOpenAssignments")}</p>
+                          /* AQU-2479: an empty assignment list must not read as
+                             "this project has no team" — access can come from an
+                             attached team with nothing assigned yet. So point at
+                             the Members card, which is the roster. The pointer is
+                             gated on canManage because that is what renders the
+                             Members card below. */
+                          <div className="space-y-1.5" data-testid="overview-team-empty">
+                            <p className="text-sm text-muted-foreground">{t("org.projectOverview.noOpenAssignments")}</p>
+                            {canManage && (
+                              <button
+                                type="button"
+                                data-testid="overview-team-empty-members"
+                                className="rounded-sm text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                                onClick={() => {
+                                  setMembersOpen(true)
+                                  // Same reduced-motion courtesy as the
+                                  // settings deep-link scroll (useSettingHighlight).
+                                  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+                                  membersCardRef.current?.scrollIntoView?.({
+                                    block: "nearest",
+                                    behavior: reduceMotion ? "auto" : "smooth",
+                                  })
+                                }}
+                              >
+                                {t("org.projectOverview.noOpenAssignmentsMembersLink")}
+                              </button>
+                            )}
+                          </div>
                         ) : workload.length === 0 ? null : (
                           <ul className="space-y-2">
                             {workload.map((w) => {
@@ -3109,6 +3027,7 @@ export function ProjectOverview() {
                   ready={projectPolicy.ready}
                 >
                   <div
+                    ref={membersCardRef}
                     className={cn(
                       "relative rounded-lg border bg-card px-5",
                       membersOpen ? "py-5" : "py-3",

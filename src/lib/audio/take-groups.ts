@@ -125,13 +125,41 @@ export function takeBaseLabel(label: string | null | undefined): string | null {
   return label.replace(/\s·\s\d+$/, "")
 }
 
+const NUMBERED = /\s·\s\d+$/
+
 /**
- * AQU-1767 (Sam, 2026-10-15): the name each take goes by, keyed by audioId. A
- * split take's pieces are its name numbered by where each sits in the
- * recording, 1, 2, 3…, worked out here every time and never read from the
- * number stored on a piece, so a split, a deleted piece or an undo renumbers
- * them at once. A take never split (or split down to one piece) keeps its own
- * name. Null where a piece's take has no name.
+ * The name a split take goes by: the name its numbered pieces share ("Take 3"
+ * from "Take 3 · 1" and "Take 3 · 2"). A piece renamed on its own (decision 7)
+ * does not change it, whichever piece that is. When pieces disagree the name
+ * most of them carry wins, then the earliest piece's. Null when no piece
+ * carries a numbered name.
+ */
+export function splitTakeName(pieces: readonly Pick<AudioAttachmentOut, "label">[]): string | null {
+  const counts = new Map<string, number>()
+  for (const p of pieces) {
+    if (!p.label || !NUMBERED.test(p.label)) continue
+    const base = takeBaseLabel(p.label)!
+    counts.set(base, (counts.get(base) ?? 0) + 1)
+  }
+  let best: string | null = null
+  for (const [base, n] of counts) if (best == null || n > counts.get(best)!) best = base
+  return best
+}
+
+/** Does this piece go by its take's name (numbered), rather than a name of its own? */
+function goesByTakeName(label: string | null | undefined, takeName: string | null): boolean {
+  if (!label) return true
+  return takeName != null && NUMBERED.test(label) && takeBaseLabel(label) === takeName
+}
+
+/**
+ * AQU-1767: the name each take goes by, keyed by audioId. A split take's pieces
+ * are its name numbered by where each sits in the recording, 1, 2, 3…, worked
+ * out here every time and never read from the number stored on a piece, so a
+ * split, a deleted piece or an undo renumbers them at once (Sam, 2026-10-15).
+ * Decision 7: a piece renamed on its own keeps that name, and the numbers of
+ * its siblings still count it. A take never split (or split down to one
+ * piece) keeps its own name. Null where a piece's take has no name.
  */
 export function pieceNames(
   takes: readonly Pick<AudioAttachmentOut, "audioId" | "label" | "pieceOf" | "trimStartMs">[],
@@ -142,10 +170,45 @@ export function pieceNames(
       names.set(row.pieces[0].audioId, row.pieces[0].label ?? null)
       continue
     }
-    const base = takeBaseLabel(row.pieces[0].label)
-    row.pieces.forEach((p, i) => names.set(p.audioId, base ? `${base} · ${i + 1}` : null))
+    const base = splitTakeName(row.pieces)
+    row.pieces.forEach((p, i) =>
+      names.set(p.audioId, goesByTakeName(p.label, base) ? (base ? `${base} · ${i + 1}` : null) : p.label!),
+    )
   }
   return names
+}
+
+/**
+ * The name one take or piece is shown by, read off a cell's attachments (either
+ * read shape). What a rename box opens holding.
+ */
+export function pieceNameIn(
+  attachments:
+    | Readonly<Record<string, { label?: string | null; pieceOf?: string | null; trimStartMs?: number | null; isDeleted?: boolean }>>
+    | null
+    | undefined,
+  audioId: string,
+): string | null {
+  const takes = Object.entries(attachments ?? {}).map(([id, a]) => ({ ...a, audioId: id }))
+  return pieceNames(takes as AudioAttachmentOut[]).get(audioId) ?? attachments?.[audioId]?.label ?? null
+}
+
+/**
+ * Renaming a split take as a whole: the pieces that go by its name take the
+ * new one, numbered by where they sit. A piece renamed on its own keeps its
+ * name (decision 7). When every piece has a name of its own, the take has none
+ * to change, so all of them are renamed. `pieces` in clip order.
+ */
+export function wholeTakeRenames(
+  pieces: readonly { audioId: string; label?: string | null }[],
+  name: string,
+): { audioId: string; label: string; labelBefore: string | null }[] {
+  const base = splitTakeName(pieces)
+  const follows = pieces.map((p) => goesByTakeName(p.label, base))
+  const all = !follows.some(Boolean)
+  return pieces.flatMap((p, i) =>
+    all || follows[i] ? [{ audioId: p.audioId, label: `${name} · ${i + 1}`, labelBefore: p.label ?? null }] : [],
+  )
 }
 
 /**

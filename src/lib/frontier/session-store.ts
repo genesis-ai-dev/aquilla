@@ -1,3 +1,5 @@
+import { sessionClaims } from "./session-claims"
+import { suspendAnalytics } from "@/lib/analytics-boundary"
 import { openDB } from "idb"
 import type { FrontierSession } from "./types"
 
@@ -12,6 +14,8 @@ interface Envelope {
   /** Last account whose client data boundary was fully prepared and published.
    * Undefined is the one-time pre-boundary upgrade state. */
   dataOwner?: string | null
+  /** Retained across logout; never reassign a namespace to another ID. */
+  accountScopes?: Record<string, string>
 }
 
 async function db() {
@@ -52,6 +56,7 @@ let crossTabChannel: BroadcastChannel | null = null
 let externalReconcileQueued = false
 
 function scheduleExternalReconcile(): void {
+  suspendAnalytics()
   if (externalReconcileQueued) return
   externalReconcileQueued = true
   queueMicrotask(() => {
@@ -123,7 +128,7 @@ export function subscribeSession(listener: Listener): () => void {
 }
 
 export function sessionKey(s: FrontierSession): string {
-  return s.username
+  return s.storageKey ?? s.username
 }
 
 async function readEnvelope(): Promise<Envelope> {
@@ -336,8 +341,35 @@ export async function patchSessionEmails(updates: Record<string, string>): Promi
   })
 }
 
+/** Assign a stable namespace without moving/deleting any cached or queued data. */
+function bindAccountScope(env: Envelope, session: FrontierSession, legacyOwner?: { key: string; jwt: string }): void {
+  if (!session.accountId) return
+  const id = session.accountId
+  if (!/^[1-9][0-9]*$/.test(id)) throw new Error("Invalid account identity")
+  const scopes = env.accountScopes ??= {}
+  let key = scopes[id]
+  if (!key && legacyOwner) {
+    const old = env.sessions[legacyOwner.key]
+    if (!old || old.jwt !== legacyOwner.jwt || old.username !== session.username) throw new Error("Local account changed during login; retry")
+    if (Object.entries(scopes).some(([owner, scope]) => owner !== id && scope === legacyOwner.key)) throw new Error("Local data belongs to another account")
+    key = legacyOwner.key
+  }
+  // A random suffix prevents collision with any historical username namespace.
+  key ??= `account:${id}:${crypto.randomUUID()}`
+  scopes[id] = key
+  session.storageKey = key
+  for (const [oldKey, old] of Object.entries(env.sessions)) {
+    if (old.username === session.username && oldKey !== key) {
+      delete env.sessions[oldKey] // retire credentials only; retain their data
+      if (env.active === oldKey) env.active = null
+    }
+  }
+}
+
 export async function addSession(s: FrontierSession): Promise<void> {
+  suspendAnalytics()
   return mutateEnvelope((env) => {
+    bindAccountScope(env, s)
     const key = sessionKey(s)
     env.sessions[key] = s
     if (!env.active) env.active = key
@@ -345,6 +377,7 @@ export async function addSession(s: FrontierSession): Promise<void> {
 }
 
 export async function activateSession(key: string): Promise<void> {
+  suspendAnalytics()
   return mutateEnvelope((env) => {
     if (!(key in env.sessions)) throw new Error(`Unknown session key: ${key}`)
     env.active = key
@@ -352,6 +385,7 @@ export async function activateSession(key: string): Promise<void> {
 }
 
 export async function removeSession(key: string): Promise<void> {
+  suspendAnalytics()
   return mutateEnvelope((env) => {
     if (!(key in env.sessions)) return false
     delete env.sessions[key]
@@ -386,10 +420,21 @@ export async function loadActiveSession(): Promise<FrontierSession | null> {
  * Unlike saveSession, renewal must never add or activate an account.
  */
 export async function replaceActiveSessionJwt(previousJwt: string, nextJwt: string): Promise<boolean> {
+  suspendAnalytics()
   let replaced = false
   await mutateEnvelope((env) => {
     const current = env.active ? env.sessions[env.active] : undefined
     if (!current || current.jwt !== previousJwt) return false
+    const claims = sessionClaims(nextJwt)
+    if (current.accountId && claims.uid !== current.accountId) return false
+    if (claims.uid) {
+      if (claims.sub !== current.username) return false
+      const scopes = env.accountScopes ??= {}
+      if (scopes[claims.uid] && scopes[claims.uid] !== env.active) return false
+      scopes[claims.uid] = env.active!
+      current.accountId = claims.uid
+      current.storageKey = env.active!
+    }
     current.jwt = nextJwt
     replaced = true
   })
@@ -397,8 +442,10 @@ export async function replaceActiveSessionJwt(previousJwt: string, nextJwt: stri
 }
 
 // Backward-compat: existing login path uses saveSession. It adds-and-activates.
-export async function saveSession(s: FrontierSession): Promise<void> {
+export async function saveSession(s: FrontierSession, legacyOwner?: { key: string; jwt: string }): Promise<void> {
+  suspendAnalytics()
   return mutateEnvelope((env) => {
+    bindAccountScope(env, s, legacyOwner)
     const key = sessionKey(s)
     env.sessions[key] = s
     env.active = key
@@ -410,6 +457,7 @@ export async function loadSession(): Promise<FrontierSession | null> {
 }
 
 export async function clearSession(): Promise<void> {
+  suspendAnalytics()
   return mutateEnvelope((env) => {
     env.active = null
     env.sessions = {}

@@ -63,6 +63,7 @@ function renderGate(initialEntry: string) {
           <Route index element={<div>ORG INDEX</div>} />
           <Route path="projects" element={<div>ORG PROJECTS</div>} />
           <Route path="settings" element={<div>ORG SETTINGS</div>} />
+          <Route path="assigned" element={<div>ORG ASSIGNED</div>} />
         </Route>
       </Routes>
       <LocationProbe />
@@ -109,6 +110,16 @@ describe("OrgRouteGate (AQU-790 guest orgs)", () => {
     expect(screen.getByText("ORG PROJECTS")).toBeInTheDocument()
   })
 
+  // AQU-2458: `/assigned` lists only the caller's own open assignments, so it
+  // is their work rather than the org's — and the only cross-project view of
+  // it a project-only member has. It is the one sub-route a guest keeps.
+  it("admits a guest org's assigned route", () => {
+    orgContext.guestOrgs = [{ id: 2, name: "Guest Org" }]
+    renderGate("/orgs/2/assigned")
+    expect(screen.getByText("ORG ASSIGNED")).toBeInTheDocument()
+    expect(screen.getByTestId("location")).toHaveTextContent("/orgs/2/assigned")
+  })
+
   it("keeps a member's own sub-routes reachable", () => {
     orgContext.orgs = [{ id: 7 }]
     renderGate("/orgs/7/settings")
@@ -153,7 +164,7 @@ describe("OrgRouteGate (AQU-1046 signed-out)", () => {
     sessionState.session = null
     renderGate("/orgs/1")
 
-    expect(screen.getByText("Sign in to see your workspace")).toBeInTheDocument()
+    expect(screen.getByText("Log in to see your workspace")).toBeInTheDocument()
     expect(screen.queryByText("Organization not found")).not.toBeInTheDocument()
     expect(screen.queryByText("ORG INDEX")).not.toBeInTheDocument()
     // The gate's not-found chrome (header account switcher) must not be used.
@@ -165,7 +176,7 @@ describe("OrgRouteGate (AQU-1046 signed-out)", () => {
     sessionState.session = null
     renderGate("/orgs/1")
 
-    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Log in" })).toHaveAttribute(
       "href",
       "/login?next=%2Forgs%2F1",
     )
@@ -175,7 +186,7 @@ describe("OrgRouteGate (AQU-1046 signed-out)", () => {
     sessionState.session = null
     renderGate("/orgs/1/settings?tab=members")
 
-    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Log in" })).toHaveAttribute(
       "href",
       "/login?next=%2Forgs%2F1%2Fsettings%3Ftab%3Dmembers",
     )
@@ -190,7 +201,7 @@ describe("OrgRouteGate (AQU-1046 signed-out)", () => {
     renderGate("/orgs/1")
 
     expect(screen.getByRole("status", { name: "Loading organization" })).toBeInTheDocument()
-    expect(screen.queryByText("Sign in to see your workspace")).not.toBeInTheDocument()
+    expect(screen.queryByText("Log in to see your workspace")).not.toBeInTheDocument()
     expect(screen.queryByText("Organization not found")).not.toBeInTheDocument()
   })
 
@@ -199,7 +210,7 @@ describe("OrgRouteGate (AQU-1046 signed-out)", () => {
     renderGate("/orgs/999")
 
     expect(screen.getByText("Organization not found")).toBeInTheDocument()
-    expect(screen.queryByText("Sign in to see your workspace")).not.toBeInTheDocument()
+    expect(screen.queryByText("Log in to see your workspace")).not.toBeInTheDocument()
   })
 })
 

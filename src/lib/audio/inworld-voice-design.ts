@@ -13,10 +13,6 @@ export const INWORLD_DESIGN_PROMPT_MODE_ASSISTED = "DESIGN_PROMPT_MODE_ASSISTED"
 /** Portal Structured — `designPrompt` is the profile, used verbatim. */
 export const INWORLD_DESIGN_PROMPT_MODE_VERBATIM = "DESIGN_PROMPT_MODE_VERBATIM"
 
-export type InworldDesignPromptMode =
-  | typeof INWORLD_DESIGN_PROMPT_MODE_ASSISTED
-  | typeof INWORLD_DESIGN_PROMPT_MODE_VERBATIM
-
 export type InworldDesignMode = "freeform" | "structured"
 
 /** Attribute order Inworld's Structured tab sends, one `key: value` line each. */

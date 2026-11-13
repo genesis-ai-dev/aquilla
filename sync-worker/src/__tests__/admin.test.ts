@@ -7,6 +7,8 @@
 
 import { describe, it, expect } from "vitest"
 import { handleAdminRequest } from "../admin"
+import { deterministicDownstreamFileId } from "../events/link-sync"
+import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
 
 interface StoredObject {
   key: string
@@ -305,5 +307,94 @@ describe("DELETE /admin/files/:projectId/:fileId", () => {
     const body = (await res.json()) as any
     expect(body.deleted).toBe(2)
     expect(env.SNAPSHOTS._size()).toBe(0)
+  })
+})
+
+// AQU-2345: the backfill for files a source link brought in before the mirror
+// carried their type and a pointer at the upstream's original. The repair
+// itself is pinned in link-provenance.test.ts; this pins the route: the admin
+// bearer, POST only, one project or all, and a dry run that writes nothing.
+describe("POST /admin/link-provenance", () => {
+  const UPSTREAM = "proj-admin-up"
+  const DOWNSTREAM = "proj-admin-down"
+  const UP_FG = "file-admin-up-fg"
+
+  async function seedLinked(t: TestDb): Promise<string> {
+    await t.pg.query(`INSERT INTO projects (id, name, created_by) VALUES ($1, 'Up', 1)`, [UPSTREAM])
+    await t.pg.query(
+      `INSERT INTO projects (id, name, created_by, source_project_id, source_link_mode, source_link_consumes, source_link_cursor)
+       VALUES ($1, 'Down', 1, $2, 'live', 'source', 0)`,
+      [DOWNSTREAM, UPSTREAM],
+    )
+    await t.pg.query(
+      `INSERT INTO files (id, project_id, name, kind, event_id, created_at, updated_at) VALUES ($1, $2, 'FG.idml', 'idml', 'e1', 1, 1)`,
+      [UP_FG, UPSTREAM],
+    )
+    await t.pg.query(
+      `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
+       VALUES ($1, $2, 'idml', NULL, 'artifacts/proj-admin-up/art/original.idml', 10, 1)`,
+      [UP_FG, UPSTREAM],
+    )
+    const copyId = deterministicDownstreamFileId(DOWNSTREAM, UP_FG)
+    await t.pg.query(
+      `INSERT INTO files (id, project_id, name, kind, event_id, created_at, updated_at) VALUES ($1, $2, 'FG.idml', NULL, 'e2', 1, 1)`,
+      [copyId, DOWNSTREAM],
+    )
+    return copyId
+  }
+
+  async function copyState(t: TestDb, copyId: string): Promise<{ kind: string | null; pointer: string | null }> {
+    const kind = await t.pg.query<{ kind: string | null }>(`SELECT kind FROM files WHERE id = $1`, [copyId])
+    const blob = await t.pg.query<{ r2_key: string | null }>(`SELECT r2_key FROM file_source_blobs WHERE file_id = $1`, [copyId])
+    return { kind: kind.rows[0]?.kind ?? null, pointer: blob.rows[0]?.r2_key ?? null }
+  }
+
+  function post(path: string, env: any, secret = "shared-secret") {
+    return handleAdminRequest(
+      new Request(`https://sync.example${path}`, { method: "POST", headers: { Authorization: `Bearer ${secret}` } }),
+      env,
+    )
+  }
+
+  it("requires the admin bearer and POST", async () => {
+    const env = makeEnv()
+    const noAuth = await handleAdminRequest(new Request("https://sync.example/admin/link-provenance", { method: "POST" }), env)
+    expect(noAuth?.status).toBe(401)
+    const get = await handleAdminRequest(
+      new Request("https://sync.example/admin/link-provenance", { headers: { Authorization: "Bearer shared-secret" } }),
+      env,
+    )
+    expect(get?.status).toBe(405)
+  })
+
+  it("dry-runs one project without writing, then repairs it; a project with no link is 404", async () => {
+    const t = await makeTestDb()
+    try {
+      const copyId = await seedLinked(t)
+      const env = { ...makeEnv(), AQUILLA_PG: t.db }
+
+      const dry = await post(`/admin/link-provenance?projectId=${DOWNSTREAM}&dryRun=1`, env)
+      expect(dry?.status).toBe(200)
+      const dryBody = (await dry!.json()) as { ok: boolean; report: { dryRun: boolean; projects: Array<Record<string, unknown>> }; summary: string }
+      expect(dryBody.ok).toBe(true)
+      expect(dryBody.report.dryRun).toBe(true)
+      expect(dryBody.report.projects[0]).toMatchObject({ projectId: DOWNSTREAM, typeRepaired: 1, blobPointersWritten: 1 })
+      expect(dryBody.summary).toContain("dry run")
+      expect(await copyState(t, copyId)).toEqual({ kind: null, pointer: null })
+
+      const real = await post(`/admin/link-provenance?projectId=${DOWNSTREAM}`, env)
+      expect(real?.status).toBe(200)
+      expect(await copyState(t, copyId)).toEqual({ kind: "idml", pointer: "artifacts/proj-admin-up/art/original.idml" })
+
+      const unlinked = await post(`/admin/link-provenance?projectId=${UPSTREAM}`, env)
+      expect(unlinked?.status).toBe(404)
+
+      // Without ?projectId= every linked project is walked.
+      const all = await post(`/admin/link-provenance?dryRun=1`, env)
+      const allBody = (await all!.json()) as { report: { projects: Array<{ projectId: string }> } }
+      expect(allBody.report.projects.map((p) => p.projectId)).toEqual([DOWNSTREAM])
+    } finally {
+      await t.close()
+    }
   })
 })

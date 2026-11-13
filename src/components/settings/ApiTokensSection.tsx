@@ -10,7 +10,7 @@ import { buildConnectionInstructions } from "@/lib/sync/agent-connect"
 // as a UX courtesy only — the server (auth-worker/src/routes/credentials.ts)
 // remains the authority and re-checks everything.
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react"
 import { Copy, ShieldAlert } from "lucide-react"
 import { buildAgentInstructions } from "@/lib/sync/agent-instructions"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -77,6 +77,29 @@ const EXPIRY_PRESETS = [
 ] as const satisfies readonly { id: string; labelKey: TokenMessageKey; days: number | null }[]
 type ExpiryPresetId = (typeof EXPIRY_PRESETS)[number]["id"]
 
+/**
+ * A flag that turns itself off after `ms`. The timer is cleared on unmount
+ * and on a repeat trigger, so a dialog closed mid-countdown never sets state
+ * on an unmounted component (in vitest that surfaced as an unhandled
+ * "window is not defined" after the test file had torn down its DOM).
+ */
+function useTransientFlag(ms: number): [boolean, () => void] {
+  const [on, setOn] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current)
+  }, [])
+  const trigger = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current)
+    setOn(true)
+    timer.current = setTimeout(() => {
+      timer.current = null
+      setOn(false)
+    }, ms)
+  }, [ms])
+  return [on, trigger]
+}
+
 function expiryToIso(preset: ExpiryPresetId): string | undefined {
   const days = EXPIRY_PRESETS.find((p) => p.id === preset)?.days
   if (!days) return undefined
@@ -128,7 +151,7 @@ function useOrgsAndProjects(jwt: string | null): {
         }
         setOrgs([])
         setProjects([])
-        setError(toUserFacingError(error, "token scopes").message)
+        setError(toUserFacingError(error).message)
       })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => {
@@ -387,13 +410,12 @@ function ShowOnceTokenDialog({
   onClose: () => void
 }) {
   const t = useT()
-  const [copied, setCopied] = useState(false)
-  const [copiedPrompt, setCopiedPrompt] = useState(false)
+  const [copied, markCopied] = useTransientFlag(1500)
+  const [copiedPrompt, markCopiedPrompt] = useTransientFlag(1500)
 
   function copy() {
     void navigator.clipboard.writeText(result.token)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    markCopied()
   }
 
   // Copies the token *inside* a ready-to-paste prompt. This is the only moment
@@ -408,8 +430,7 @@ function ShowOnceTokenDialog({
         scopeLabel,
       }),
     )
-    setCopiedPrompt(true)
-    setTimeout(() => setCopiedPrompt(false), 1500)
+    markCopiedPrompt()
   }
 
   return (
@@ -478,7 +499,7 @@ function AgentInstructionsDialog({
   onClose: () => void
 }) {
   const t = useT()
-  const [copied, setCopied] = useState(false)
+  const [copied, markCopied] = useTransientFlag(1500)
   const text = useMemo(
     () => buildAgentInstructions({ syncOrigin: syncWorkerHttpOrigin(), token, mode, access, scopeLabel }),
     [token, mode, access, scopeLabel],
@@ -486,8 +507,7 @@ function AgentInstructionsDialog({
 
   function copy() {
     void navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    markCopied()
   }
 
   return (

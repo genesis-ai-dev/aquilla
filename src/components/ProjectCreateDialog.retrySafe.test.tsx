@@ -81,7 +81,7 @@ vi.mock("@/lib/store/project-index", () => ({
   createProject: vi.fn().mockResolvedValue(undefined),
 }))
 
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 
 import { createCloudProject } from "@/lib/sync/cloud-projects"
 import { createProject } from "@/lib/store/project-index"
@@ -126,6 +126,8 @@ describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => 
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: "New project" }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillBasics()
 
@@ -157,6 +159,8 @@ describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => 
 
     // Session 1: create "Russian BSB" successfully → dialog closes.
     fireEvent.click(screen.getByRole("button", { name: "New project" }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillBasics("Russian BSB")
     clickCreate()
@@ -169,6 +173,8 @@ describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => 
 
     // Session 2: reopen and create a project with the SAME name.
     fireEvent.click(screen.getByRole("button", { name: "New project" }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillBasics("Russian BSB")
     clickCreate()

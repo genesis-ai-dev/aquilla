@@ -9,8 +9,10 @@ import type {
 } from "@/lib/parsers/types"
 import { patchProject } from "@/lib/store/project-index"
 import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
+import { projectBookNames } from "@/lib/lqa/project-book-names"
 import {
   laneCheckOverrides,
+  laneNumberFormat,
   lanePunctuation,
   withLaneOverride,
 } from "@/lib/lqa/lane-builtin-checks"
@@ -205,9 +207,30 @@ export function useRules(
           ).conventions,
     [projectLanes, projectTargetLanguage, projectLanguageProfile, lane],
   )
+  // AQU-1735: the project's own names for Bible books, for the
+  // scripture-reference check. Derived from the file list, which is where a
+  // Paratext BookNames.xml and a USFM file's \toc lines already land.
+  const projectFiles = project?.files
+  const bookNames = useMemo(() => projectBookNames(projectFiles), [projectFiles])
+  // AQU-2430: and the number-format check judges a number by the ACTIVE lane's
+  // own number format, resolved the same way and for the same reason.
+  const numberFormat = useMemo(
+    () =>
+      lane === undefined
+        ? null
+        : laneNumberFormat(
+            {
+              lanes: projectLanes,
+              targetLanguage: projectTargetLanguage ?? "",
+              languageProfile: projectLanguageProfile,
+            },
+            lane,
+          ).conventions,
+    [projectLanes, projectTargetLanguage, projectLanguageProfile, lane],
+  )
   const builtinRules = useMemo(
-    () => resolveBuiltinRules(algorithmicChecks, { bibleChecks, punctuation }),
-    [algorithmicChecks, bibleChecks, punctuation],
+    () => resolveBuiltinRules(algorithmicChecks, { bibleChecks, punctuation, bookNames, numberFormat }),
+    [algorithmicChecks, bibleChecks, punctuation, bookNames, numberFormat],
   )
 
   // Subscribed (org-managed) concepts union local terminology, subscribed

@@ -27,6 +27,7 @@ import { decodeToMono48k, TARGET_RATE } from "./decode-mono"
 import { audioCachePutBlob } from "./bytes-cache"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { bornTakePlace, placeNewTake } from "./new-take-place"
 import { notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
 import { synthesizeServerTts } from "./server-tts"
 import { effectiveSourceText } from "@/lib/cell-text"
@@ -217,6 +218,13 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
         // per-cell shape of every other audio event.
         audioOrigin: "generate",
         surface: "voice-together",
+        author: username,
+      })
+      // AQU-2491 (review, Nov 9): its own place, the line's start, so it never
+      // reads one an older recording left on the line.
+      await placeNewTake({
+        projectId: project.id, fileId, cellId: c.id, audioId: objectName, place: bornTakePlace(c),
+        ...(args.targetLang ? { targetLang: args.targetLang } : {}),
         author: username,
       })
     }

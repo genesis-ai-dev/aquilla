@@ -728,6 +728,14 @@ export interface CellAudioAttachInput {
    * recorded takes on target cells.
    */
   transcription?: string
+  /**
+   * AQU-2426 (review, Nov 9): this re-attach only carries a line's words to a
+   * clip already on it. The server then chooses nothing: every language's
+   * chosen take on the line stays chosen. Sent without `role` (the clip keeps
+   * the one it has), so a server that does not know the flag yet claims the
+   * slot in one lane at most, not all of them.
+   */
+  wordsOnly?: boolean
   /** AQU-1462: lane the member is working in. Omitted for a shared clip. */
   targetLang?: string
   /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
@@ -811,6 +819,7 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.trimEndMs !== undefined ? { trimEndMs: intMs(input.trimEndMs) } : {}),
       ...(input.timings !== undefined ? { timings: input.timings } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
+      ...(input.wordsOnly ? { wordsOnly: true } : {}),
       ...(input.role !== undefined ? { role: input.role } : {}),
       ...(input.pieceOf !== undefined ? { pieceOf: input.pieceOf } : {}),
       ...(input.asr !== undefined ? { asr: input.asr } : {}),

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const uploads: Array<{ audioId: string; ext: string; size: number }> = []
 const attaches: Array<Record<string, unknown>> = []
+const places: Array<Record<string, unknown>> = []
 
 vi.mock("@/lib/audio/upload", async (orig) => {
   const real = await orig<typeof import("@/lib/audio/upload")>()
@@ -17,6 +18,7 @@ vi.mock("@/lib/audio/upload", async (orig) => {
 vi.mock("@/lib/audio/bytes-cache", () => ({ audioCacheGet: vi.fn(async () => null) }))
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioAttach: vi.fn(async (input: Record<string, unknown>) => { attaches.push(input); return "ev" }),
+  emitCellAudioPlace: vi.fn(async (input: Record<string, unknown>) => { places.push(input); return "ev-place" }),
 }))
 vi.mock("@/lib/audio/audio-attachments-bus", () => ({ injectOptimisticAudioAttachment: vi.fn(), notifyAudioAttachmentsChanged: vi.fn() }))
 vi.mock("@/lib/audio/sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "token" }))
@@ -41,6 +43,7 @@ const session = { jwt: "jwt", username: "dev", createdAt: "" } as never
 const URL_A = "frontier-audio://audio-c1-1700000000000-a.wav"
 
 beforeEach(() => {
+  places.length = 0
   uploads.length = 0
   attaches.length = 0
 })
@@ -96,5 +99,37 @@ describe("joinTakePieces", () => {
     // 200 ms + 400 ms of a 1 kHz "recording".
     expect(uploads).toEqual([expect.objectContaining({ ext: "wav", size: 600 })])
     expect(attaches).toEqual([expect.objectContaining({ durationMs: 600, mimeType: "audio/wav", url: expect.stringMatching(/^frontier-audio:\/\/audio-c1-/) })])
+  })
+})
+
+// AQU-2491 (review, Nov 9): a line recorded before AQU-2491 holds the
+// recorder's pre-roll as its place, and a take with no place of its own reads
+// that one. A take recorded since has its own (-200, its pre-roll), and so do
+// its pieces. The joined take is made from them, so it keeps that place, in
+// both timings, instead of reading the line's and moving.
+describe("joinTakePieces: the joined take keeps its pieces' place (AQU-2491)", () => {
+  const args = { session, projectId: "p1", fileId: "f1", cellId: "c1", slot: "recording", targetLang: "za", username: "dev" }
+
+  it("on both ways of joining, the joined take is placed where its first piece is", async () => {
+    const a = await joinTakePieces({ ...args, pieces: [
+      { audioId: "a.wav", url: URL_A, trimStartMs: null, trimEndMs: 300, durationMs: 1200, targetOffsetMs: -200, recordingsOffsetMs: 40 },
+      { audioId: "b.wav", url: URL_A, trimStartMs: 300, trimEndMs: null, durationMs: 1200, targetOffsetMs: -200, recordingsOffsetMs: 40 },
+    ] })
+    const b = await joinTakePieces({ ...args, pieces: [
+      { audioId: "a.wav", url: URL_A, trimStartMs: 100, trimEndMs: 300, targetOffsetMs: -200 },
+      { audioId: "b.wav", url: URL_A, trimStartMs: 500, trimEndMs: 900, targetOffsetMs: -200 },
+    ] })
+    expect(places).toEqual([
+      expect.objectContaining({ audioId: a, targetOffsetMs: -200, recordingsOffsetMs: 40, targetLang: "za" }),
+      expect.objectContaining({ audioId: b, targetOffsetMs: -200, recordingsOffsetMs: null }),
+    ])
+  })
+
+  it("pieces with no place of their own: nothing is placed, and the joined take reads the line's, as they do", async () => {
+    await joinTakePieces({ ...args, pieces: [
+      { audioId: "a.wav", url: URL_A, trimStartMs: null, trimEndMs: 300, durationMs: 1200 },
+      { audioId: "b.wav", url: URL_A, trimStartMs: 300, trimEndMs: null, durationMs: 1200 },
+    ] })
+    expect(places).toEqual([])
   })
 })

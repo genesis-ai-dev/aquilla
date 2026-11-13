@@ -16,6 +16,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { buildAudioId, fetchCellAudio, parseFrontierAudioUrl, uploadCellAudio } from "@/lib/audio/upload"
 import { audioCacheGet } from "@/lib/audio/bytes-cache"
 import { attachUploadedTake, OFFLINE_MESSAGE } from "@/lib/audio/attach-file"
+import { keptTakePlace } from "@/lib/audio/new-take-place"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 
@@ -26,6 +27,9 @@ export interface JoinPiece {
   trimEndMs?: number | null
   durationMs?: number | null
   mimeType?: string | null
+  /** AQU-2491 (review, Nov 9): its own places, which the joined take keeps. */
+  targetOffsetMs?: number | null
+  recordingsOffsetMs?: number | null
 }
 
 /** Within this many ms, two edges are the same place (rounding at the cut). */
@@ -91,6 +95,10 @@ export async function joinTakePieces(args: JoinPiecesArgs): Promise<string> {
     label: args.label,
     surface: "recording-tab" as const,
     ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+    // AQU-2491 (review, Nov 9): made from the pieces, it keeps their place
+    // (the first piece's) rather than reading one an older recording left on
+    // the line. Pieces with none read the line's, and so does the joined take.
+    place: keptTakePlace(args.pieces[0]),
   }
 
   const whole = wholeRecordingOf(args.pieces)

@@ -400,6 +400,7 @@ import { useOnline } from "@/hooks/useOnline"
 import { useConnectivity } from "@/lib/offline/connectivity"
 import { clearLaneCast, setLaneCast } from "@/lib/audio/lane-cast"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
+import { bornTakePlace } from "@/lib/audio/new-take-place"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { TimeOrderedEmptyState } from "./TimeOrderedEmptyState"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline, type MadeLine } from "@/lib/timeline/attach-media"
@@ -16524,6 +16525,8 @@ export function ProjectWorkspace() {
       surface: "cell",
       // Decision 11: an Undo step, naming what played in that slot before.
       history: { selectedBefore: playingInSlot(workspaceAudioByCellIdRef.current.get(cell.id), GENERATED_VOICE_SLOT) },
+      // AQU-2491 (review, Nov 9): its own place, the line's start.
+      place: bornTakePlace(cell),
     }).catch((e: unknown) => {
       throw new Error(categorizeAiError(e instanceof Error ? e.message : String(e)).body, { cause: e })
     })

@@ -30,6 +30,11 @@ type Payload = {
   versionChanges?: { kinds?: string[]; usedOn?: string[]; over?: boolean }
 }
 
+/** AQU-2491 (review, Nov 9): a take's first place, written by the person who
+ *  attached it within this long of its attach, is the place it was born with
+ *  (lib/audio/new-take-place), never a move. */
+const BORN_PLACE_MS = 5_000
+
 /** How History words a version's changes and lines (the panel supplies it). */
 export interface VersionWording {
   kinds(kinds: readonly string[]): string
@@ -64,10 +69,16 @@ export function historyRowsFromEvents(
     const p = (ev.payload ?? {}) as Payload
     if (ev.kind === "cell.audio.attach" && p.versionChanges?.over && p.referenceAudioId) savedOver.add(p.referenceAudioId)
   }
+  // AQU-2491 (review, Nov 9): each take's first attach, and which takes have
+  // had a place: the place a take is given with its own attach is where it
+  // was born, not a move.
+  const born = new Map<string, { author: string; at: number }>()
+  const placed = new Set<string>()
   for (const ev of ordered) {
     const p = (ev.payload ?? {}) as Payload
     if (!p.audioId || !ids.has(p.audioId)) continue
     const who = { who: ev.author, at: ev.serverTs || ev.clientTs }
+    if (ev.kind === "cell.audio.attach" && !born.has(p.audioId)) born.set(p.audioId, { author: ev.author, at: ev.clientTs })
     switch (ev.kind) {
       case "cell.audio.attach":
         if (p.referenceAudioId && ids.has(p.referenceAudioId)) {
@@ -126,9 +137,14 @@ export function historyRowsFromEvents(
       case "cell.audio.rename":
         if (p.label) rows.push({ key: "editor.station.hRenamed", params: { name: p.label }, ...who })
         break
-      case "cell.audio.place":
+      case "cell.audio.place": {
+        const birth = born.get(p.audioId)
+        const first = !placed.has(p.audioId)
+        placed.add(p.audioId)
+        if (first && birth && birth.author === ev.author && ev.clientTs - birth.at >= 0 && ev.clientTs - birth.at < BORN_PLACE_MS) break
         rows.push({ key: "editor.station.hMoved", ...who })
         break
+      }
       case "cell.audio.cut":
         rows.push({ key: "editor.station.hSplit", params: { time: formatStationTime((p.atMs ?? 0) / 1000) }, ...who })
         break

@@ -9,7 +9,7 @@ vi.mock("@/lib/sync/cells-read", () => ({
 }))
 vi.mock("@/lib/sync/cell-audio-read", () => ({ fetchFileAudioAttachments: vi.fn(async () => ({ cells: {} })) }))
 
-import { loadTargetFile } from "./load-targets"
+import { loadTargetFile, takePlacesOf } from "./load-targets"
 
 const row = (cellId: string, extra: Partial<CellRow> = {}): Partial<CellRow> => ({ cellId, side: "source", type: "text", value: cellId, canonicalRef: null, ...extra })
 const info = { fileId: "f1", name: "Episode 1", bookCode: null }
@@ -32,5 +32,19 @@ describe("loadTargetFile: a timed file", () => {
   it("ignores hidden lines and headings when deciding", async () => {
     sourceRows = [row("h", { type: "paratext", startMs: 0 }), row("x", { hidden: true, startMs: 0 }), row("c1")]
     expect((await loadTargetFile("p1", info, "jwt", "")).timed).toBe(false)
+  })
+})
+
+// AQU-2491 (review, Nov 9): a line recorded before AQU-2491 holds the
+// recorder's pre-roll as its place. A take a bulk upload adds is given its own
+// place on its line's start, which the loader reads off each line.
+describe("takePlacesOf: each uploaded take's own place (AQU-2491)", () => {
+  it("a line with a start is placed on it; a line with none, and a line not loaded, get none", async () => {
+    sourceRows = [row("c1", { startMs: 4000, endMs: 5200 }), row("c2")]
+    const placeOf = takePlacesOf([await loadTargetFile("p1", info, "jwt", "")])
+    expect(placeOf("f1", "c1")).toEqual({ targetOffsetMs: 0, recordingsOffsetMs: null })
+    expect(placeOf("f1", "c2")).toBeNull()
+    expect(placeOf("f1", "other")).toBeNull()
+    expect(placeOf("f2", "c1")).toBeNull()
   })
 })

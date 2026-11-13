@@ -42,7 +42,8 @@ import { SmartEditPopover } from "@/components/SmartEditPopover"
 import { IntelligentProgress } from "@/components/IntelligentProgress"
 import type { AskLlmResult } from "@/hooks/useSmartEdits"
 import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
-import { createSmartQuotesExtension } from "@/lib/richtext/smart-quotes"
+import { createSmartQuotesExtension, smartQuoteMarks, type SmartQuoteMarks } from "@/lib/richtext/smart-quotes"
+import type { QuoteMarksProfile } from "../../db/shared/language-profile"
 import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/richtext/terminology-chip-plugin"
 import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
 import { acceptGhostText, createGhostTextExtension, getGhostText, handleGhostKeyDown } from "@/lib/richtext/ghost-text-plugin"
@@ -444,8 +445,10 @@ interface TranslatedEditorProps {
   textDirection?: TextDirection
   directionMode?: DirectionMode
   lang?: string
-  /** Curly quotes as you type, in `lang`'s style. Read when the editor mounts. */
+  /** Curly quotes as you type: in `quoteMarks`' style when the project recorded them, else in `lang`'s. */
   smartQuotes?: boolean
+  /** The project's recorded quotation marks (its Language profile slot), if any. */
+  quoteMarks?: QuoteMarksProfile | null
   /** Remote lock holder — when present, the editor is read-only. */
   heldByLabel?: string | null
   infractions?: RuleInfraction[]
@@ -560,6 +563,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   directionMode = "ltr",
   lang,
   smartQuotes = false,
+  quoteMarks,
   heldByLabel,
   infractions,
   ruleSeverity,
@@ -667,6 +671,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
 
   const latestTerminologyConceptsRef = useRef<Concept[]>(terminologyConcepts ?? [])
   const latestTermMatchingRef = useRef<TermMatchingSettings | undefined>(termMatching)
+  // Null while smart quotes are off. Read by the typing rule on each keystroke.
+  const smartQuoteMarksRef = useRef<SmartQuoteMarks | null>(smartQuotes ? smartQuoteMarks(lang, quoteMarks) : null)
+  useEffect(() => {
+    smartQuoteMarksRef.current = smartQuotes ? smartQuoteMarks(lang, quoteMarks) : null
+  }, [smartQuotes, lang, quoteMarks])
 
   const preparedIdmlContent = useMemo(
     () => idmlConfiguration
@@ -927,7 +936,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
             getClient: () => ghostClientRef.current,
             getCellId: () => ghostCellIdRef.current,
           })]),
-      ...(smartQuotes ? [createSmartQuotesExtension(lang)] : []),
+      createSmartQuotesExtension(() => smartQuoteMarksRef.current),
       ...(terminologyConcepts !== undefined
         ? [createTerminologyChipExtension(
             () => latestTerminologyConceptsRef.current,

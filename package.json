@@ -219,7 +219,6 @@
     "@tauri-apps/plugin-dialog": "^2.8.4",
     "@tiptap/core": "^3.32.2",
     "@tiptap/extension-bubble-menu": "^3.32.2",
-    "@tiptap/extension-typography": "^3.32.2",
     "@tiptap/extension-underline": "^3.32.2",
     "@tiptap/pm": "^3.32.2",
     "@tiptap/react": "^3.32.2",

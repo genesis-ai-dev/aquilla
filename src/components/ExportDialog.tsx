@@ -1781,6 +1781,11 @@ export function ExportDialog({
           projectId,
           langCode: targetLanguage || "und",
           fileBase: defaultBaseName,
+          // AQU-2560: a Bible file's takes are named by verse, not by a cast it
+          // does not have. The exporter decides "is this scripture" from the
+          // cells; a dubbing file is never offered the choice, so a cue whose
+          // text happens to read like a reference cannot rename an episode.
+          scriptureNaming: isDubbingFile ? undefined : { projectName },
           fetchBytes: ({ projectId: pid, fileId, audioId, ext }) =>
             fetchCellAudio({ projectId: pid, fileId, audioId, ext, getSyncToken }),
           format: lineAudioFormat,

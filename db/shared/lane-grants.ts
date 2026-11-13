@@ -37,8 +37,20 @@
 // upsert and may not own the row the batch ends up with. Either way the join
 // grants exactly the one lane named and nothing else, so an archived lane
 // elsewhere in the project is never picked up as a side effect. The insert is
-// `ON CONFLICT DO NOTHING`, so a lane created twice (or a creation path that
-// no-ops) writes no duplicate rows.
+// `ON CONFLICT DO NOTHING`, so a lane created twice writes no duplicate rows.
+//
+// AQU-2557: the grant is for a lane the write CREATES. The tag-keyed writers
+// run on every write to their lane, not only the one that makes it: each
+// default-language commit, each import into the default lane, each Codex
+// re-ingest. And "holds every OTHER lane" leaves out the lane being granted,
+// so on a lane that already exists it is true of a member a lead narrowed AWAY
+// from that lane, and the rule handed them the lane they had been kept out of.
+// So a lane named by its tag is granted only when its row was inserted in the
+// current transaction: `created_at` defaults to now(), which is the
+// transaction's start time, and an upsert that finds the row leaves it alone.
+// The tag-keyed writer therefore has to put this statement in the same batch
+// as its lane insert, which every one does. A lane named by its id is one the
+// caller has just created itself, so that form is unchanged.
 //
 // Lives in db/shared so auth-worker and sync-worker apply the SAME write.
 
@@ -52,17 +64,24 @@ const GRANT_MIN_ROLE = 100
 /** The lane just created, by id when the caller owns it, else by legacy tag. */
 export type NewLaneRef = { laneId: string; legacyTag?: undefined } | { legacyTag: string; laneId?: undefined }
 
-function laneKeyColumn(ref: NewLaneRef): { column: string; value: string } {
+function laneKeyColumn(ref: NewLaneRef): { column: string; value: string; createdHere: string } {
   return ref.laneId === undefined
-    ? { column: "legacy_tag", value: ref.legacyTag }
-    : { column: "id", value: ref.laneId }
+    ? {
+        column: "legacy_tag",
+        value: ref.legacyTag,
+        // AQU-2557: only a row this transaction inserted (see the header).
+        createdHere: "AND l.created_at = transaction_timestamp()",
+      }
+    : { column: "id", value: ref.laneId, createdHere: "" }
 }
 
 /**
  * Grant one newly created target lane to every member below Maintainer who
  * already reads every other lane of the project. Safe to splice into the batch
  * that creates the lane — it reads the lane back out of `lanes`, so a creation
- * that rolled back or no-opped grants nothing.
+ * that rolled back or no-opped grants nothing. Keyed by tag, it must ride the
+ * same batch as the lane insert: a lane that was already there when the batch
+ * began is not new, and is granted to nobody (AQU-2557).
  *
  * AQU-1800: "every member" is {@link projectWallMembersSql} — the team path as
  * well as `project_members`. A project a team reaches and nobody joined
@@ -86,6 +105,7 @@ export function grantNewLaneStmt(
            ON l.project_id = ?
           AND l.role = 'target'
           AND l.${key.column} = ?
+          ${key.createdHere}
         WHERE m.role_level >= ${GRANT_MIN_ROLE}
           AND m.role_level < ${GRANT_BELOW_ROLE}
           AND NOT EXISTS (
@@ -124,11 +144,15 @@ export function grantNewLaneStmt(
     )
 }
 
-/** {@link grantNewLaneStmt} for a caller that writes outside a batch. */
+/**
+ * {@link grantNewLaneStmt} for a caller that writes outside a batch. By id only:
+ * outside the lane insert's batch a tag-keyed grant would never find a lane
+ * this transaction created (AQU-2557).
+ */
 export async function grantNewLane(
   db: AquillaDb,
   projectId: string,
-  ref: NewLaneRef,
+  ref: { laneId: string },
   grantedBy: number | null,
 ): Promise<void> {
   await grantNewLaneStmt(db, projectId, ref, grantedBy).run()

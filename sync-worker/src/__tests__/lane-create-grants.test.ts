@@ -17,7 +17,7 @@
 
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { handleCellEvent } from '../events/handlers/cell-events'
-import { ensureTargetLaneStmt } from '../../../db/shared/lanes'
+import { ensureProjectLanes, ensureTargetLaneStmt } from '../../../db/shared/lanes'
 import { grantNewLaneStmt } from '../../../db/shared/lane-grants'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 
@@ -141,5 +141,79 @@ describe('AQU-1781 ensure-lane-for-tag grants the lane it ensures', () => {
     await run()
     expect(await grantedLanes(2)).toEqual([lane])
     expect(await grantedLanes(3)).toEqual([])
+  })
+})
+
+// The grant is for a lane the write CREATES. Every tag-keyed writer also runs
+// it when the lane is already there (each default-language commit, each import
+// into the default lane, each Codex re-ingest), and the rule's "holds every
+// OTHER lane" leaves out the lane being granted. So a member a lead narrowed to
+// one language through grant rows alone (no scope row: what the member
+// inspector and the AQU-730 backfill write) passed it for every lane they had
+// been kept out of, and the next write to that lane handed it to them.
+describe('a write to a lane the project already has grants nothing new', () => {
+  /**
+   * Adds target lanes to the bare project, plus member 5: a contributor a lead
+   * narrowed by grant rows only. Member 2 holds every lane listed.
+   */
+  async function seedLanes(lanes: Array<{ id: string; tag: string }>, member5Holds: string[]): Promise<void> {
+    for (const [i, lane] of lanes.entries()) {
+      await t.pg.query(
+        `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+         VALUES ($1, $2, 'target', $3, $3, $4)`,
+        [lane.id, PROJECT, lane.tag, i + 1],
+      )
+      await t.pg.query(
+        `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by)
+         VALUES ($1, 2, $2, 400, 1)`,
+        [PROJECT, lane.id],
+      )
+    }
+    await t.pg.query(
+      `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ($1, 5, 400, 1)`,
+      [PROJECT],
+    )
+    for (const lane of member5Holds) {
+      await t.pg.query(
+        `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by)
+         VALUES ($1, 5, $2, 400, 1)`,
+        [PROJECT, lane],
+      )
+    }
+  }
+
+  it('a default-language translation does not give the default lane to a member narrowed to another language', async () => {
+    await seedLanes([{ id: 'blank001', tag: '' }, { id: 'spanish1', tag: 'es' }], ['spanish1'])
+    await defaultCommit('tc-1')
+    expect(await grantedLanes(5)).toEqual(['spanish1'])
+    expect(await grantedLanes(2)).toEqual(['blank001', 'spanish1'])
+  })
+
+  it('asking again for lanes the project has (a Codex re-ingest) gives none to a member narrowed to another', async () => {
+    await seedLanes([{ id: 'spanish1', tag: 'es' }, { id: 'french01', tag: 'fr' }], ['spanish1'])
+    await t.pg.query(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`)
+    await ensureProjectLanes(t.db, PROJECT, { dataTargetTags: ['es', 'fr'] })
+    expect(await grantedLanes(5)).toEqual(['spanish1'])
+    expect(await grantedLanes(3)).toEqual([])
+  })
+
+  it('the grant re-run on an existing tagged lane grants nothing', async () => {
+    await seedLanes([{ id: 'spanish1', tag: 'es' }, { id: 'french01', tag: 'fr' }], ['french01'])
+    await t.db.batch([
+      ensureTargetLaneStmt(t.db, PROJECT, 'es'),
+      grantNewLaneStmt(t.db, PROJECT, { legacyTag: 'es' }, null),
+    ])
+    expect(await grantedLanes(5)).toEqual(['french01'])
+  })
+
+  it('a lane the write does create is still granted to the members who held every other lane', async () => {
+    await seedLanes([{ id: 'spanish1', tag: 'es' }], ['spanish1'])
+    await t.pg.query(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`)
+    await ensureProjectLanes(t.db, PROJECT, { dataTargetTags: ['es', 'fr'] })
+    const fr = await targetLaneIdForTag('fr')
+    expect(await grantedLanes(2)).toEqual([fr, 'spanish1'].sort())
+    expect(await grantedLanes(5)).toEqual([fr, 'spanish1'].sort())
+    expect(await grantedLanes(3)).toEqual([])
+    expect(await grantedLanes(4)).toEqual([])
   })
 })

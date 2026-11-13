@@ -308,6 +308,36 @@ describe("what is actually inside the zip", () => {
     expect(samples.length).toBe(RATE * 6 + RATE * 0.25)
   })
 
+  it("leaves an untimed take out BEFORE fetching it", async () => {
+    // A Bible book is a thousand takes with no start time between them.
+    // Downloading and decoding every one only to leave it out was minutes of
+    // work for a refusal — and the refusal has to be able to say why.
+    const fetched: string[] = []
+    const verse = (id: string) =>
+      cell({
+        id,
+        selectedAudioId: `a-${id}`,
+        attachments: { [`a-${id}`]: { url: `frontier-audio://a-${id}.wav`, type: "audio/wav" } },
+      })
+    const progress: [number, number][] = []
+    const result = await exportAudioByCharacter({
+      cells: [verse("v1"), verse("v2")],
+      settings: SETTINGS,
+      projectId: "p1",
+      langCode: "swh",
+      fetchBytes: async ({ audioId }) => {
+        fetched.push(audioId)
+        return new Uint8Array([1, 2, 3, 4])
+      },
+      decode: async () => oneSecond(),
+      resolveName: () => "LUKE",
+      onProgress: (d, t) => progress.push([d, t]),
+    })
+    expect(fetched).toEqual([])
+    expect(result).toMatchObject({ clips: 2, untimed: 2, skipped: 0, characters: 0 })
+    expect(progress.at(-1)).toEqual([2, 2])
+  })
+
   // ── The mix contains what you hear (Sam, 2026-08-27) ─────────────────────
   //
   // `startSec` is the take's AUDIBLE start — anchor plus head trim — so laying

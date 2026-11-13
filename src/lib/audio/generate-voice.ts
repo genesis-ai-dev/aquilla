@@ -29,6 +29,7 @@ import { recordTakeAdded } from "@/lib/history/take-steps"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
 import { probeDurationMsSafe } from "@/lib/import"
 import { synthesizeServerTts } from "./server-tts"
+import { lineDeliveryFor, withLineDelivery } from "./line-delivery"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { TelemetrySurface } from "@/lib/cell-telemetry"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
@@ -99,13 +100,16 @@ export async function generateAndAttachCellVoice(
   // stores the clip in R2, and returns its id — no client synth, no upload.
   // Branch out entirely.
   if (isServerTtsProvider(provider)) {
+    // AQU-2577: this line's own delivery (speed, tags) over its voice's. The
+    // take is still attributed to `voice`; only what is spoken differs.
+    const spoken = withLineDelivery(voice, text, lineDeliveryFor(args.projectTtsSettings, args.cellId))
     const { result, ext: serverExt, mimeType: serverMime } = await synthesizeServerTts({
       provider,
-      voice,
+      voice: spoken.voice,
       projectId: args.projectId,
       fileId: args.fileId,
       cellId: args.cellId,
-      text,
+      text: spoken.text,
       targetLanguage: args.geminiContext?.targetLanguage,
       getSyncToken,
     })

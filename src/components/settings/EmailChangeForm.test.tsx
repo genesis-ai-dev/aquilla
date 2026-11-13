@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
-const mocks = vi.hoisted(() => ({ start: vi.fn(), clear: vi.fn() }))
+const mocks = vi.hoisted(() => ({ start: vi.fn(), clear: vi.fn(), remove: vi.fn(), navigate: vi.fn() }))
 vi.mock("@/lib/frontier/google-login", () => ({
   startGoogleLogin: mocks.start,
   clearGoogleAttempt: mocks.clear,
@@ -17,6 +17,8 @@ vi.mock("@/lib/frontier/auth", () => ({
   AUTH_BASE: "https://identity.example.com",
 }))
 import { EmailChangeForm } from "./EmailChangeForm"
+vi.mock("@/lib/frontier/session-store", () => ({ removeSessionByJwt: mocks.remove }))
+vi.mock("react-router-dom", async importOriginal => ({ ...await importOriginal<typeof import("react-router-dom")>(), useNavigate: () => mocks.navigate }))
 const fetchMock = vi.fn()
 beforeEach(() => {
   vi.clearAllMocks()
@@ -76,9 +78,10 @@ it("requires the destination code after ownership proof and reports success", as
   })
   fireEvent.click(screen.getByRole("button", { name: "Confirm email change" }))
   await waitFor(() =>
-    expect(screen.getByRole("link", { name: "Log in" })).toBeTruthy(),
+    expect(mocks.navigate).toHaveBeenCalledWith("/login?add=1", { replace: true, state: { emailChanged: "new@example.com" } }),
   )
   expect(mocks.clear).toHaveBeenCalledOnce()
+  expect(mocks.remove).toHaveBeenCalledWith("alice-token")
 })
 it("shows an actionable dev access refusal without advancing", async () => {
   fetchMock.mockResolvedValue(

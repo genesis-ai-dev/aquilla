@@ -46,7 +46,7 @@ export const auth = defineNamespace({
     "auth.emailChange.rate_limited": "Too many attempts. Please wait before trying again.",
     "auth.emailChange.restart": "Start again",
     "auth.emailChange.failed": "We could not complete the change. Check your connection and try again.",
-    "auth.emailChange.success": "Your email has been changed. Log in again to continue. Your linked Google account is unchanged.",
+    "auth.emailChange.success": "Your email has been changed. You have been logged out of this account. Log in with your new email and Aquilla password, or your linked Google account.",
     "auth.emailChange.intro": "Verify your account, then enter the code sent to your new email. Your current email stays in place until you confirm. You will need to log in again afterward.",
     "auth.emailChange.code": "Verification code",
     "auth.emailChange.address": "New email",

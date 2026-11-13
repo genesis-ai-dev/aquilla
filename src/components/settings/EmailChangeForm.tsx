@@ -1,7 +1,8 @@
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { useState } from "react"
-import { Link } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
+import { removeSessionByJwt } from "@/lib/frontier/session-store"
 import { Button } from "@/components/ui/button"
 import { REGEXP_ONLY_DIGITS } from "input-otp"
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp"
@@ -45,11 +46,11 @@ export function EmailChangeForm({
   onBack: () => void
 }) {
   const t = useT()
+  const navigate = useNavigate()
   const [email, setEmail] = useState(""),
     [password, setPassword] = useState(""),
     [token, setToken] = useState("")
   const [sent, setSent] = useState(false),
-    [done, setDone] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("")
   async function submit() {
@@ -84,8 +85,9 @@ export function EmailChangeForm({
           typeof body.error === "string" ? body.error : "unavailable",
         )
       if (sent) {
-        setDone(true)
         clearGoogleAttempt()
+        await removeSessionByJwt(jwt)
+        navigate("/login?add=1", { replace: true, state: { emailChanged: email } })
       } else setSent(true)
     } catch (reason) {
       setError(
@@ -99,15 +101,6 @@ export function EmailChangeForm({
       setPassword("")
     }
   }
-  if (done)
-    return (
-      <div className="flex flex-col gap-3">
-        <p role="status">{t("auth.emailChange.success")}</p>
-        <Link className="underline" to="/login?add=1">
-          {t("common.logIn")}
-        </Link>
-      </div>
-    )
   return (
     <form
       className="flex max-w-md flex-col gap-4"

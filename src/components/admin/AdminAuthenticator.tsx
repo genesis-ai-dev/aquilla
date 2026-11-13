@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import QRCode from "qrcode"
 import { REGEXP_ONLY_DIGITS } from "input-otp"
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp"
+import { resolveBackendEnvironment } from "@/lib/deployment-environment"
 import { adminTotp } from "@/lib/frontier/admin"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -67,7 +68,7 @@ function Authenticator({ jwt }: { jwt: string }) {
       <h2 className="text-lg font-medium">Admin verification</h2>
       {!fresh && !setup && !codes && (
         <p className="text-sm text-muted-foreground">
-          Use Apple Passwords or another authenticator for admin verification.
+          Use an authenticator app to generate 6-digit codes for admin verification.
           This does not change your login methods or admin permissions.
         </p>
       )}
@@ -80,8 +81,10 @@ function Authenticator({ jwt }: { jwt: string }) {
         <p>Loading…</p>
       ) : !status.configured ? (
         <p>
-          Authenticator setup requires server configuration. Your existing
-          verification method is unchanged.
+          {resolveBackendEnvironment().kind === "preview"
+            ? "Authenticator app setup is unavailable in this CI preview. Set it up on dev instead."
+            : "Authenticator app setup is currently unavailable. Please contact the Aquilla team."}
+          {" "}You can still use your existing verification method.
         </p>
       ) : status.enabled ? (
         <>
@@ -89,8 +92,8 @@ function Authenticator({ jwt }: { jwt: string }) {
             <>
               <p className="font-medium">Authenticator app is on</p>
               <p className="text-sm text-muted-foreground">
-                Verify admin access with a code from Apple Passwords or your
-                authenticator app, or use a recovery code. Email codes are off.
+                Verify admin access with a 6-digit code from your authenticator app,
+                or use a recovery code. Email codes are off.
               </p>
               <Button
                 variant="destructive"

@@ -19,6 +19,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "./context-menu"
+import { parentMenuEdge } from "./menu-parts"
 
 /**
  * Clock is driven explicitly so the reposition window never depends on machine
@@ -130,40 +131,38 @@ describe("ContextMenu reposition", () => {
     expect(openPopup()).not.toHaveAttribute("data-instant", "trigger-change")
   })
 
-  it("keeps the submenu entrance after a reposition", () => {
+  it("anchors a submenu to the parent menu's outer edge, level with its row", () => {
     render(
-      <>
-        <ContextMenu>
-          <ContextMenuTrigger>Alpha</ContextMenuTrigger>
-          <ContextMenuContent>
-            <ContextMenuItem>Act on Alpha</ContextMenuItem>
-          </ContextMenuContent>
-        </ContextMenu>
-        <ContextMenu>
-          <ContextMenuTrigger>Beta</ContextMenuTrigger>
-          <ContextMenuContent>
-            <ContextMenuSub defaultOpen>
-              <ContextMenuSubTrigger>More</ContextMenuSubTrigger>
-              <ContextMenuSubContent>
-                <ContextMenuItem>Nested</ContextMenuItem>
-              </ContextMenuSubContent>
-            </ContextMenuSub>
-          </ContextMenuContent>
-        </ContextMenu>
-      </>,
+      <ContextMenu>
+        <ContextMenuTrigger>Beta</ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuSub defaultOpen>
+            <ContextMenuSubTrigger>More</ContextMenuSubTrigger>
+            <ContextMenuSubContent>
+              <ContextMenuItem>Nested</ContextMenuItem>
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        </ContextMenuContent>
+      </ContextMenu>,
+    )
+    fireEvent.contextMenu(screen.getByText("Beta"))
+
+    const trigger = screen.getByText("More").closest<HTMLElement>('[data-slot="menu-sub-trigger"]')!
+    const menu = openPopup() as HTMLElement
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 104, y: 230, width: 120, height: 28 }),
+    )
+    vi.spyOn(menu, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 100, y: 200, width: 128, height: 90 }),
     )
 
-    fireEvent.contextMenu(screen.getByText("Alpha"))
-    const beta = screen.getByText("Beta")
-    rightPress(beta)
-    now += 8
-    fireEvent.contextMenu(beta)
-
-    expect(openPopup()).toHaveAttribute("data-instant", "trigger-change")
-    // A submenu is one of the parts shared with the dropdown menu, and no shared
-    // part reads the reposition flag — see `menu-parts.tsx`.
-    const sub = document.querySelector('[data-slot="menu-sub-content"]')
-    expect(sub).toBeTruthy()
-    expect(sub).not.toHaveAttribute("data-instant", "trigger-change")
+    expect(parentMenuEdge(trigger).getBoundingClientRect()).toMatchObject({
+      left: 100,
+      right: 228,
+      width: 128,
+      top: 230,
+      bottom: 258,
+      height: 28,
+    })
   })
 })

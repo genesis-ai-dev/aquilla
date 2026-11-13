@@ -27,7 +27,7 @@ Put credentials in the ignored `.env.adversarial.local`, or point
 `ADVERSARIAL_ENV_FILE` at another file:
 
 ```dotenv
-ADVERSARIAL_USER_1=adv-bot:<password>      # the agent
+ADVERSARIAL_USER_1=adv-bot-1:<password>    # the agent
 ADVERSARIAL_USER_2=adv-bot-2:<password>    # the second agent in two-user attacks
 ADVERSARIAL_USER_3=adv-bot-3:<password>    # owns projects the agent may only view
 TYPESAFE_API_KEY=<decision-provider-key>
@@ -48,6 +48,22 @@ The three accounts must be plain accounts on dev. They must **not** be
 members of QA Bot Workspace. The PR walk bot's standing projects live
 there, and a goal such as "delete every translation" must not be able to
 reach them. The local target falls back to the e2e seed users.
+
+Each account's email must be on the **dev access list**. Dev and every PR
+preview admit only platform admins and listed emails, and one list covers
+both targets. A platform admin adds an email under dev → Admin → Platform
+→ Dev access; see [preview access](../../docs/security/preview-access.md).
+Do not make the accounts platform admins to get them in: a hostile goal
+would then run with admin powers. An unlisted account is refused at
+sign-in, global setup stops, and the run reads **HARNESS UNAVAILABLE**
+with "is not on the dev access list" as its reason. That cut off the
+nightly and every PR run for three days (AQU-2562). To check the accounts
+after any change to the list or to the gate:
+
+```sh
+pnpm test:adversarial --target dev --canary-only
+gh workflow run adversarial-jev.yml --ref dev -f canary_only=true   # with the repository's secrets
+```
 
 ## In GitHub Actions
 

@@ -898,7 +898,7 @@ function ReviewBody({
     for (const f of targets.values()) {
       let pos = 0
       for (const line of f.lines) {
-        const label = `${lineLabel(f, line, line.structural ? -1 : pos)}  ${line.text}`.trim()
+        const label = `${lineLabel(f, line, line.structural ? -1 : pos, { withFile: true })}  ${line.text}`.trim()
         out.push({ value: `${f.fileId}\u0000${line.cellId}`, label, fileId: f.fileId, cellId: line.cellId })
         if (!line.structural) pos++
       }

@@ -1073,11 +1073,16 @@ function takesOnOneVerse(out: Map<number, Assignment>): void {
  * its own copy, which named a file that isn't a book without its quotes
  * (AQU-2487, review, Nov 12). `position` is the line's place among the lines
  * that aren't headings, or -1 for a heading.
+ *
+ * `withFile`: the picker lists every file's lines in one list, so there a
+ * line with no verse reference carries its file's label in front ("“Welcome
+ * letter” · line 3"); a row sits under its file's heading and needs none.
  */
-export function lineLabel(file: TargetFile, line: TargetLine, position: number): string {
+export function lineLabel(file: TargetFile, line: TargetLine, position: number, { withFile = false } = {}): string {
   const m = line.ref ? VERSE_REF.exec(line.ref) : null
   if (m) return `${bookLabel({ file })} ${m[2]}:${m[3]}${m[4] ?? ""}${m[5] ? `-${m[5]}${m[6] ?? ""}` : ""}`
-  return position >= 0 ? `line ${position + 1}` : bookLabel({ file })
+  if (position < 0) return bookLabel({ file })
+  return withFile ? `${bookLabel({ file })} · line ${position + 1}` : `line ${position + 1}`
 }
 
 /**

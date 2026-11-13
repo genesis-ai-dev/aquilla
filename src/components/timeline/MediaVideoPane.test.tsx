@@ -1517,7 +1517,7 @@ describe("a stalled picture is noticed, and gets out of it", () => {
     const element = () => equip(screen.getByTestId("video-pane-media") as HTMLVideoElement)
     const video = element()
     const press = (nonce: number) => view.rerender(<MediaVideoPane {...props} togglePlay={{ nonce }} />)
-    return { video, press, view, onVideoPlaying, equip }
+    return { video, press, view, onVideoPlaying, equip, props }
   }
 
   beforeEach(() => {
@@ -1613,6 +1613,25 @@ describe("a stalled picture is noticed, and gets out of it", () => {
     tick(3) // a baseline, two frozen samples: the nudge again
     expect(getVideoBuffering()).toBe(true)
     expect(video.play).toHaveBeenCalled()
+  })
+
+  // AQU-2253 (re-review, Nov 13): the message is about film not arriving, so
+  // it goes the moment film arrives. The connection came back and a click on
+  // the ruler loaded the frame there: the frame shows, not the dark message.
+  it("after the message, a scrub while stopped lands on film that has arrived: the message goes", () => {
+    const { video, press, view, props } = mount()
+    Object.defineProperty(video, "buffered", { value: EMPTY, configurable: true })
+    press(1)
+    tick(62)
+    expect(screen.getByTestId("video-pane-not-arriving")).toBeInTheDocument()
+    tick(10) // still nothing: it stays
+    expect(screen.getByTestId("video-pane-not-arriving")).toBeInTheDocument()
+    Object.defineProperty(video, "buffered", { value: { length: 1, start: () => 0, end: () => 60 }, configurable: true })
+    view.rerender(<MediaVideoPane {...props} togglePlay={{ nonce: 1 }} seekSec={{ sec: 20, nonce: 7 }} />)
+    tick(2)
+    expect(screen.queryByTestId("video-pane-not-arriving")).toBeNull()
+    // Stopped it stays: the frame is shown, nothing starts by itself.
+    expect(getVideoBuffering()).toBe(false)
   })
 
   it("P5: a wedge over loaded film climbs to a rebuild; a rebuilt player that loads nothing stops after a minute the same way", () => {

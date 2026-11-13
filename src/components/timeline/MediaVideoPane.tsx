@@ -72,6 +72,7 @@ import {
   loadedEndOf,
   seekTargetLoaded,
   stallStep,
+  STALL_MOTION_EPS,
   STALL_TICK_MS,
   watchSeek,
   type SeekWatch,
@@ -772,6 +773,19 @@ export function MediaVideoPane({
     }, STALL_TICK_MS)
     return () => window.clearInterval(id)
   }, [slaved, filmIsClock, askForClick, sayNotArriving])
+
+  // AQU-2253 (re-review, Nov 13): "the film isn't arriving" goes the moment
+  // film arrives, by the test the minute itself uses (the loaded end moving):
+  // a click on the ruler once the connection is back shows its frame, not the
+  // message over it. Playback stays stopped until Play.
+  useEffect(() => {
+    if (!notArriving) return
+    const from = loadedEndOf(videoRef.current?.buffered)
+    const id = window.setInterval(() => {
+      if (loadedEndOf(videoRef.current?.buffered) > from + STALL_MOTION_EPS) setNotArriving(false)
+    }, STALL_TICK_MS)
+    return () => window.clearInterval(id)
+  }, [notArriving])
 
   /**
    * A YOUTUBE PICTURE DOES NOT SURVIVE A MOVE. The dock moves the film between

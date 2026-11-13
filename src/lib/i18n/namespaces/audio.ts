@@ -726,6 +726,11 @@ export const audio = defineNamespace({
     "audio.addVoice.trainBody": "5 to 60 minutes of one speaker. Ready in about 45 minutes. No ElevenLabs key needed.",
     "audio.addVoice.consentNote": "Cloning or training a real person asks your organization to confirm their consent first.",
     "audio.makeSpeech.title": "Make speech",
+    "audio.makeSpeech.ghost": "Make speech for this line",
+    "audio.makeSpeech.ghostHint": "Or click an empty clip on the timeline to fill in just that line.",
+    "audio.makeSpeech.ghostDone": "Speech made for this line",
+    "audio.makeSpeech.ghostReview": "Translated. Check the text, then click the clip again to make its speech.",
+    "audio.makeSpeech.ghostFailed": "Couldn't make speech for this line",
     "audio.makeSpeech.intro": "Each line goes through these steps in order.",
     "audio.makeSpeech.step1": "Translate the text",
     "audio.makeSpeech.translate": "Translate a line that has no translation yet",
@@ -743,10 +748,6 @@ export const audio = defineNamespace({
     "audio.makeSpeech.targetMissing": plural({
       one: "{count} line with no speech yet",
       other: "{count} lines with no speech yet",
-    }),
-    "audio.makeSpeech.targetAll": plural({
-      one: "The whole file ({count} line)",
-      other: "The whole file ({count} lines)",
     }),
     "audio.makeSpeech.run": plural({
       one: "Make speech for {count} line",
@@ -3263,6 +3264,21 @@ export const audio = defineNamespace({
       "audio.addVoice.consentNote": {
         description: "Note at the bottom of the Add a voice panel.",
       },
+      "audio.makeSpeech.ghost": {
+        description: "Tooltip and accessible label of a ghost clip on the timeline: the dashed outline where a line's speech will go. Clicking it makes speech for that one line.",
+      },
+      "audio.makeSpeech.ghostHint": {
+        description: "Hint in the Make speech panel, under the choice of lines: the same recipe can be run on one line by clicking its empty (ghost) clip on the timeline.",
+      },
+      "audio.makeSpeech.ghostDone": {
+        description: "Toast after clicking a ghost clip on the timeline, when that line's speech was made.",
+      },
+      "audio.makeSpeech.ghostReview": {
+        description: "Toast after clicking a ghost clip on the timeline, when the line was translated and the recipe is set to stop for a person to check the text before speech is made.",
+      },
+      "audio.makeSpeech.ghostFailed": {
+        description: "Toast title after clicking a ghost clip on the timeline, when making that line's speech failed.",
+      },
       "audio.makeSpeech.title": {
         description: "Heading of the Make speech side panel.",
       },
@@ -3315,12 +3331,6 @@ export const audio = defineNamespace({
         description: "Choice of what Make speech runs on: every line of the file that has no audio.",
         placeholders: {
           "count": "How many such lines there are.",
-        },
-      },
-      "audio.makeSpeech.targetAll": {
-        description: "Choice of what Make speech runs on: every line of the file.",
-        placeholders: {
-          "count": "How many lines the file has.",
         },
       },
       "audio.makeSpeech.run": {

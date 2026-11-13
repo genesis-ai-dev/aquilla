@@ -2,8 +2,9 @@
 //
 // Three steps, set once per project on this device: translate a line that has
 // no text yet, have a reader voice speak it, and change the result into a
-// character's voice. Then run it on this line, on the lines that have no
-// speech yet, or on the whole file, and watch each line go through.
+// character's voice. Then run it on the selected line or on the lines that
+// have no speech yet, and watch each line go through. The usual way to run it
+// is one line at a time, from that line's ghost clip on the timeline.
 //
 // The panel owns the recipe and the progress list. The steps themselves are
 // the workspace's (it has the cells, the session and the undo history), handed
@@ -46,7 +47,7 @@ export interface MakeSpeechPanelProps {
   onBack: () => void
 }
 
-type Target = "line" | "missing" | "all"
+type Target = "line" | "missing"
 
 const LINE_DEFAULT = "__line__"
 const NO_CHARACTER = "__none__"
@@ -86,8 +87,8 @@ export function MakeSpeechPanel({
   const missing = useMemo(() => lines.filter((l) => !l.hasSpeech).map((l) => l.cellId), [lines])
   const [target, setTarget] = useState<Target>(selectedCellId ? "line" : "missing")
   const targetIds = useMemo(
-    () => (target === "line" ? (selectedCellId ? [selectedCellId] : []) : target === "missing" ? missing : lines.map((l) => l.cellId)),
-    [target, selectedCellId, missing, lines],
+    () => (target === "line" ? (selectedCellId ? [selectedCellId] : []) : missing),
+    [target, selectedCellId, missing],
   )
 
   const [progress, setProgress] = useState<Map<string, MakeSpeechLineState> | null>(null)
@@ -121,7 +122,6 @@ export function MakeSpeechPanel({
   const targets: { value: Target; label: string; count: number }[] = [
     { value: "line", label: t("audio.makeSpeech.targetLine"), count: selectedCellId ? 1 : 0 },
     { value: "missing", label: t("audio.makeSpeech.targetMissing", { count: missing.length }), count: missing.length },
-    { value: "all", label: t("audio.makeSpeech.targetAll", { count: lines.length }), count: lines.length },
   ]
 
   return (
@@ -241,6 +241,7 @@ export function MakeSpeechPanel({
             {t("audio.makeSpeech.run", { count: targetIds.length })}
           </Button>
         )}
+        <p className="text-[11px] text-muted-foreground">{t("audio.makeSpeech.ghostHint")}</p>
         <p className="text-[11px] text-muted-foreground">{t("audio.makeSpeech.newTakeNote")}</p>
       </div>
 

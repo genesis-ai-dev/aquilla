@@ -277,7 +277,7 @@ import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynth
 import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake } from "@/lib/audio/change-voice"
 import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
 import { getTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
-import { runMakeSpeech, type MakeSpeechActions } from "@/lib/audio/make-speech"
+import { loadMakeSpeechRecipe, runMakeSpeech, type MakeSpeechActions } from "@/lib/audio/make-speech"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { takeStory } from "@/lib/audio/take-story"
@@ -13745,6 +13745,41 @@ export function ProjectWorkspace() {
     })
   }, [inspectedTake, tts.laneSettings, makeSpeechActions, t])
 
+  /**
+   * AQU-2577: a click on a line's ghost clip makes that line's speech with the
+   * project's Make speech recipe (make-speech.ts): translated first if it has
+   * no text, read by the recipe's reader — the line's own voice when none is
+   * set — then changed into its character. One line, because the user pointed
+   * at one.
+   */
+  const [makingSpeechCellIds, setMakingSpeechCellIds] = useState<ReadonlySet<string>>(() => new Set())
+  const handleGhostSpeech = useCallback((cellId: string) => {
+    if (!project) return
+    const saved = loadMakeSpeechRecipe(project.id)
+    // A voice deleted since the recipe was saved is no voice at all.
+    const known = (voiceId: string | null) => (voiceId && findVoice(tts.laneSettings, voiceId) ? voiceId : null)
+    const recipe = { ...saved, readerVoiceId: known(saved.readerVoiceId), characterVoiceId: known(saved.characterVoiceId) }
+    setMakingSpeechCellIds((cur) => new Set(cur).add(cellId))
+    void runMakeSpeech([cellId], recipe, makeSpeechActions, () => {}).then((result) => {
+      setMakingSpeechCellIds((cur) => {
+        const next = new Set(cur)
+        next.delete(cellId)
+        return next
+      })
+      const state = result.get(cellId)
+      if (state?.kind === "done") toast.add({ type: "success", title: t("audio.makeSpeech.ghostDone") })
+      else if (state?.kind === "review") toast.add({ type: "info", title: t("audio.makeSpeech.ghostReview") })
+      else {
+        const failure = getTtsStatus(ttsStatusKey(cellId))
+        toast.add({
+          type: "error",
+          title: t("audio.makeSpeech.ghostFailed"),
+          ...(failure.kind === "error" && failure.message ? { description: failure.message } : {}),
+        })
+      }
+    })
+  }, [project, tts.laneSettings, makeSpeechActions, t])
+
   // The inspected clip as the rail needs it. A take on an audio-cue sibling is
   // not in this file's cells, so the rail keeps the roster for it.
   const inspectedCell = inspectedTake && inspectedTake.fileId === activeFileId
@@ -18528,6 +18563,8 @@ export function ProjectWorkspace() {
                     // the timeline's corner cell beside "Tracks".
                     layoutControls={regionControls(dock, "tl")}
                     onOpenRecording={handleOpenRecording}
+                    onMakeSpeech={makeSpeechForRail ? handleGhostSpeech : undefined}
+                    makingSpeechCellIds={makingSpeechCellIds}
                     // AQU-1684: the track taking a take can't be hidden meanwhile.
                     recordingSlot={recordingCellId !== null ? recordingSlot : null}
                     project={editorProject ?? project ?? undefined}

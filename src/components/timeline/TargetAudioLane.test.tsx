@@ -1212,6 +1212,29 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
     expect(onSeek).not.toHaveBeenCalled()
   })
 
+  // AQU-2577: a line with words and no speech shows the ghost of its clip. A
+  // click makes that one line's speech; the record button stays beside it. A
+  // line with nothing to say has no ghost, and a line being made cannot be
+  // clicked a second time (it would spend the user's characters twice).
+  it("draws a ghost clip that makes speech for that line only", () => {
+    const onMakeSpeech = vi.fn()
+    const onOpenRecording = vi.fn()
+    const onSelect = vi.fn()
+    const worded = { ...emptyCell("c9"), translated: "هذا كان في البدء عند الله." } as CellData
+    const silent = emptyCell("c10", 40, 46)
+    const props = { ...base, items: [], emptyCells: [worded, silent], onSelect, onOpenRecording, onMakeSpeech }
+    const { rerender } = render(<TargetAudioLane {...props} />)
+    expect(screen.queryByTestId("tl-target-ghost-c10")).toBeNull()
+    fireEvent.click(screen.getByTestId("tl-target-ghost-c9"))
+    expect(onMakeSpeech).toHaveBeenCalledWith("c9")
+    expect(onSelect).toHaveBeenCalledWith("c9")
+    expect(onOpenRecording).not.toHaveBeenCalled()
+    expect(screen.getByTestId("tl-target-empty-c9-record")).toBeInTheDocument()
+
+    rerender(<TargetAudioLane {...props} makingSpeechCellIds={new Set(["c9"])} />)
+    expect(screen.getByTestId("tl-target-ghost-c9")).toBeDisabled()
+  })
+
   it("is absent when read-only, unwired, or the section is a sliver", () => {
     const { rerender } = render(
       <TargetAudioLane {...base} items={[]} emptyCells={[emptyCell("c9")]} editable={false} onOpenRecording={vi.fn()} />,

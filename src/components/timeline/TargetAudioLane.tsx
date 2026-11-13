@@ -185,6 +185,15 @@ export interface TargetAudioLaneProps {
    *  row reveals a record button on hover, so starting a line doesn't need a
    *  trip to the detail pane. */
   emptyCells?: CellData[]
+  /**
+   * AQU-2577: a line with no speech is drawn as a GHOST clip where its speech
+   * will land, and a click on it makes that line's speech (the Make speech
+   * recipe, for this line only). Absent: the empty space keeps only its hover
+   * record button.
+   */
+  onMakeSpeech?(cellId: string): void
+  /** The lines whose speech is being made right now: their ghost shows a spinner. */
+  makingSpeechCellIds?: ReadonlySet<string>
   /** AQU-646: stretches of film with no cell at all. The mic here creates the
    *  blank line first and then opens the recorder. */
   emptySpans?: readonly { startSec: number; endSec: number }[]
@@ -1969,6 +1978,8 @@ export function TargetAudioLane({
   onOpenRecording,
   validationRequirementAudio,
   emptyCells,
+  onMakeSpeech,
+  makingSpeechCellIds,
   emptySpans,
   onAddLineAndRecord,
   projectId,
@@ -2110,7 +2121,7 @@ export function TargetAudioLane({
   // section. Rendered BEFORE the chips and with no z-index, so a real chip —
   // including an overlong neighbour painting across — always wins the pointer.
   const emptySlots =
-    editable && onOpenRecording
+    editable && (onOpenRecording || onMakeSpeech)
       ? (emptyCells ?? []).flatMap((cell) => {
           // A hidden line is not recorded onto from the timeline.
           if (isHiddenCell(cell)) return []
@@ -2230,10 +2241,35 @@ export function TargetAudioLane({
           key={`empty-${cell.id}`}
           data-testid={`tl-target-empty-${cell.id}`}
           style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
-          className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
+          className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center ${onMakeSpeech ? "justify-end pe-1" : "justify-center"}`}
           {...slotHoverProps(`empty-${cell.id}`)}
         >
-          {(() => {
+          {/* AQU-2577: the ghost of the clip this line has not got yet. It fills
+              the slot under the record button; a click fills it in. */}
+          {onMakeSpeech && (cell.translated?.trim() || cell.original?.trim()) && (() => {
+            const busy = makingSpeechCellIds?.has(cell.id) === true
+            return (
+              <button
+                type="button"
+                data-testid={`tl-target-ghost-${cell.id}`}
+                data-busy={busy ? "true" : undefined}
+                title={t("audio.makeSpeech.ghost")}
+                aria-label={t("audio.makeSpeech.ghost")}
+                disabled={busy}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onSelect(cell.id)
+                  onMakeSpeech(cell.id)
+                }}
+                className="absolute inset-0 flex items-center justify-center gap-1.5 overflow-hidden rounded-md border border-dashed border-muted-foreground/40 bg-muted/30 px-2 text-[11px] text-muted-foreground transition-colors hover:border-primary/60 hover:bg-primary/5 hover:text-foreground disabled:cursor-progress"
+              >
+                {busy ? <Spinner className="size-3 shrink-0" /> : <Sparkles className="size-3 shrink-0" aria-hidden />}
+                {widthPx >= 110 && <span className="truncate">{t("audio.makeSpeech.title")}</span>}
+              </button>
+            )
+          })()}
+          {onOpenRecording && (() => {
             const buttonPx = slotButtonPx(chipH)
             const iconPx = slotIconPx(buttonPx)
             return (

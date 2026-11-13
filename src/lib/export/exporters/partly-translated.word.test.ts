@@ -249,3 +249,23 @@ describe("Word export — lines are joined by the gap the source had between the
     expect(firstParagraph(out.xml)).toBe(`${T1}  ${S2}.`)
   })
 })
+
+describe("Word export — a text box whose only paragraph loses every line (AQU-2552, review r6)", () => {
+  // From Fixer 1's shared tests: it passes here and fails on the 2552 branch
+  // alone, whose exporter numbers a text box's paragraphs one off from its
+  // importer (the AQU-2539 bug), so it lives in this B-only file.
+  const box = (inner: string) =>
+    `<w:p><w:r><w:pict><v:shape><v:textbox><w:txbxContent>${inner}</w:txbxContent></v:textbox></v:shape></w:pict></w:r></w:p>`
+
+  it("keeps an empty paragraph in the box and leaves the paragraph after the box alone", async () => {
+    const body = box(para(run(`${S1}. ${S2}. ${S3}.`))) + para(run("After."))
+    const cells = importedCells(body, undefined, () => "")
+    const inBox = cells.filter((cell) => cell.original.startsWith("The "))
+    expect(inBox).toHaveLength(3)
+    const hiddenIds = new Set(inBox.map((cell) => cell.id))
+    const out = await exportAsDialog(body, undefined, cells.map((cell) => (hiddenIds.has(cell.id) ? { ...cell, hidden: true } : cell)))
+    expect(out.xml).toContain(box("<w:p></w:p>"))
+    expect(out.xml).toContain("After.")
+    expect(out.xml).not.toContain("The first line")
+  })
+})

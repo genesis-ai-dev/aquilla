@@ -84,7 +84,8 @@ import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import {
   packageBlockKey,
   translationsByPackageBlock,
-  blockParts,
+  positionalBlockParts,
+  positionalLines,
   type BlockPart,
   removedPackageBlockKeys,
   insertionsAfterPackageBlock,
@@ -201,25 +202,19 @@ export function buildLegacyGroups(cells: CellData[]): {
   groups: string[]
   groupToData: Map<string, LegacyGroup>
 } {
-  const groups: string[] = []
   const groupToData = new Map<string, LegacyGroup>()
-  const groupCells = new Map<string, CellData[]>()
-  for (const cell of cells) {
-    // AQU-1068: a line somebody ADDED here has no paragraph in the original
-    // package, so letting it consume a slot shifts every mapping after it and
-    // writes translations into the WRONG paragraphs of the client's document.
-    // Locator-based files are already immune — an added line has no locator, so
-    // `translationsByPackageBlock` skips it. This is the positional path's guard.
-    if (isUserAddedLine(cell)) continue
-    const legacyGroup = cell.group || cell.id
-    if (!groupCells.has(legacyGroup)) {
-      groups.push(legacyGroup)
-      groupCells.set(legacyGroup, [])
-    }
-    groupCells.get(legacyGroup)!.push(cell)
-  }
+  // AQU-1068: a line somebody ADDED here has no paragraph in the original
+  // package, so letting it consume a slot shifts every mapping after it and
+  // writes translations into the WRONG paragraphs of the client's document.
+  // Locator-based files are already immune — an added line has no locator, so
+  // `translationsByPackageBlock` skips it. positionalLines is the positional
+  // path's guard (and AQU-2552 review r6: it keeps a split piece in its line's
+  // paragraph).
+  const groupCells = positionalLines(cells)
+  const groups = [...groupCells.keys()]
   for (const [group, list] of groupCells) {
-    groupToData.set(group, { parts: blockParts(list), source: list.map((cell) => cell.original ?? "").join(" ") })
+    // AQU-2552 (review r6): a hidden line keeps its original text on such a file.
+    groupToData.set(group, { parts: positionalBlockParts(list), source: list.map((cell) => cell.original ?? "").join(" ") })
   }
   return { groups, groupToData }
 }

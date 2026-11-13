@@ -1,4 +1,5 @@
 import type { CellData } from "@/hooks/useCells"
+import { isUserAddedLine, splitFromCellId } from "@/lib/timeline/user-line-origin"
 
 export interface PackageBlockTranslation {
   plain: string
@@ -32,11 +33,48 @@ export interface BlockPart {
  */
 export function blockParts(cells: readonly CellData[], lostLines = false): BlockPart[] {
   const live = cells.filter((cell) => cell.hidden !== true)
-  const translated = (cell: CellData) => cell.translated.trim() !== "" || (cell.translatedHtml?.trim() ?? "") !== ""
+  const translated = (cell: CellData) => visibleTranslation(cell) !== ""
   if (!live.some(translated) && !lostLines && live.length === cells.length) return []
   return live.map((cell): BlockPart => translated(cell)
-    ? { plain: cell.translated.trim(), html: cell.translatedHtml?.trim() ?? "", source: cell.original ?? "" }
+    ? { plain: visibleTranslation(cell), html: cell.translatedHtml?.trim() ?? "", source: cell.original ?? "" }
     : { plain: (cell.original ?? "").trim(), html: "", source: cell.original ?? "", untranslated: true })
+}
+
+/**
+ * AQU-2552 (review r6): the parts of a paragraph of a file imported before
+ * locators. Such a file can place no removal, so a hidden line keeps its
+ * original text, as the export dialog's note says: it is written as its
+ * source, like an untranslated line, and a paragraph with no translated line
+ * is left as it is.
+ */
+export function positionalBlockParts(cells: readonly CellData[]): BlockPart[] {
+  return blockParts(cells.map((cell) => (cell.hidden === true
+    ? { ...cell, hidden: undefined, translated: "", translatedHtml: undefined }
+    : cell)))
+}
+
+/**
+ * AQU-2552 (review r6): a line's translation as a reader sees it. A line counts
+ * as translated only when this is not blank: a translation typed and then
+ * erased leaves its empty markup behind (`<p></p>`), and that is no
+ * translation, so the line keeps its source.
+ */
+function visibleTranslation(cell: CellData): string {
+  const plain = (cell.translated ?? "").trim()
+  if (plain !== "") return plain
+  const html = cell.translatedHtml ?? ""
+  if (html.trim() === "") return ""
+  return html
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&#(\d+);/g, (_m, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_m, code: string) => String.fromCodePoint(parseInt(code, 16)))
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .trim()
 }
 
 interface PackageBlockLocator {
@@ -48,6 +86,65 @@ interface PackageBlockLocator {
 
 export function packageBlockKey(memberPath: string, blockPath: string): string {
   return `${memberPath}\u0000${blockPath}`
+}
+
+/**
+ * AQU-2552 (review r6): a line split in the editor is still a line of the
+ * paragraph it came from. The piece has no locator of its own; it carries
+ * `splitFrom`, the row it was cut from (itself a piece when a piece was cut
+ * again). This follows that chain back to the imported line it starts at. A
+ * line a person added on its own has no `splitFrom` and gets null: it stays an
+ * added line.
+ */
+function splitPieceRoot(cells: readonly CellData[]): (cell: Pick<CellData, "metadata">) => CellData | null {
+  const byId = new Map(cells.map((cell) => [cell.id, cell] as const))
+  return (cell) => {
+    const seen = new Set<string>()
+    let from = splitFromCellId(cell)
+    while (from !== null && !seen.has(from)) {
+      seen.add(from)
+      const parent = byId.get(from)
+      if (!parent) return null
+      if (!isUserAddedLine(parent)) return parent
+      from = splitFromCellId(parent)
+    }
+    return null
+  }
+}
+
+/** The locator of the imported line a split piece came from (see above). */
+function splitPieceHome(cells: readonly CellData[]): (cell: Pick<CellData, "metadata">) => PackageBlockLocator | null {
+  const rootOf = splitPieceRoot(cells)
+  return (cell) => {
+    const root = rootOf(cell)
+    return root ? packageBlockLocator(root) : null
+  }
+}
+
+/**
+ * The lines of each paragraph of a file imported before locators, keyed by the
+ * group the importer gave them, in first-seen order: the k-th group fills the
+ * k-th paragraph with text. A line added here has no paragraph and takes no
+ * slot (AQU-1068). AQU-2552 (review r6): a piece split off a line joins that
+ * line's paragraph, right after it, so its words are not lost.
+ */
+export function positionalLines(cells: readonly CellData[]): Map<string, CellData[]> {
+  const rootOf = splitPieceRoot(cells)
+  const pieces = new Map<CellData, CellData[]>()
+  for (const cell of cells) {
+    if (!isUserAddedLine(cell)) continue
+    const root = rootOf(cell)
+    if (root) pieces.set(root, [...(pieces.get(root) ?? []), cell])
+  }
+  const lines = new Map<string, CellData[]>()
+  for (const cell of cells) {
+    if (isUserAddedLine(cell)) continue
+    const group = cell.group || cell.id
+    const list = lines.get(group) ?? []
+    list.push(cell, ...(pieces.get(cell) ?? []))
+    lines.set(group, list)
+  }
+  return lines
 }
 
 function packageBlockLocator(cell: CellData): PackageBlockLocator | null {
@@ -81,22 +178,27 @@ export function translationsByPackageBlock(
   cells: CellData[],
   removed: readonly RemovedCellLocatorSource[] = [],
 ): Map<string, PackageBlockTranslation> {
-  const lost = blocksOf(removed)
-  const grouped = new Map<string, Array<{ cell: CellData; locator: PackageBlockLocator }>>()
-  for (const cell of cells) {
-    const locator = packageBlockLocator(cell)
-    if (!locator) continue
+  const lost = blocksOf(removed, cells)
+  const homeOf = splitPieceHome(cells)
+  const grouped = new Map<string, Array<{ cell: CellData; locator: PackageBlockLocator; rank: number }>>()
+  cells.forEach((cell, index) => {
+    // AQU-2552 (review r6): a split piece is a line of its line's paragraph,
+    // after that line (rank 0) and after earlier pieces, in row order.
+    const own = packageBlockLocator(cell)
+    const locator = own ?? homeOf(cell)
+    if (!locator) return
     const key = packageBlockKey(locator.memberPath, locator.blockPath)
     const list = grouped.get(key) ?? []
-    list.push({ cell, locator })
+    list.push({ cell, locator, rank: own ? 0 : index + 1 })
     grouped.set(key, list)
-  }
+  })
 
   const translations = new Map<string, PackageBlockTranslation>()
   for (const [key, entries] of grouped) {
     entries.sort((a, b) =>
       a.locator.segment - b.locator.segment
-      || a.locator.physicalOrder - b.locator.physicalOrder,
+      || a.locator.physicalOrder - b.locator.physicalOrder
+      || a.rank - b.rank,
     )
     const parts = blockParts(entries.map(({ cell }) => cell), lost.has(key))
     const plain = parts.map((part) => part.plain).filter(Boolean).join(" ")
@@ -149,20 +251,23 @@ export function removedPackageBlockKeys(
   removed: readonly RemovedCellLocatorSource[],
   cells: readonly CellData[] = [],
 ): Set<string> {
-  const keys = blocksOf(removed)
+  const keys = blocksOf(removed, cells)
+  const homeOf = splitPieceHome(cells)
   for (const cell of cells) {
     if (cell.hidden === true) continue
-    const locator = packageBlockLocator(cell)
+    const locator = packageBlockLocator(cell) ?? homeOf(cell)
     if (locator) keys.delete(packageBlockKey(locator.memberPath, locator.blockPath))
   }
   return keys
 }
 
-/** The package blocks these removed cells came from. */
-function blocksOf(removed: readonly RemovedCellLocatorSource[]): Set<string> {
+/** The package blocks these removed cells came from (a removed split piece's
+ *  is its line's, AQU-2552 review r6). */
+function blocksOf(removed: readonly RemovedCellLocatorSource[], cells: readonly CellData[] = []): Set<string> {
+  const homeOf = splitPieceHome(cells)
   const keys = new Set<string>()
   for (const entry of removed) {
-    const locator = packageBlockLocator({ metadata: entry.metadata } as CellData)
+    const locator = packageBlockLocator({ metadata: entry.metadata } as CellData) ?? homeOf({ metadata: entry.metadata })
     if (locator) keys.add(packageBlockKey(locator.memberPath, locator.blockPath))
   }
   return keys
@@ -187,8 +292,16 @@ export function insertionsAfterPackageBlock(
   isAdded: (cell: CellData) => boolean,
 ): Map<string, string[]> {
   const insertions = new Map<string, string[]>()
+  const homeOf = splitPieceHome(cells)
   let anchorKey: string | null = null
   for (const cell of cells) {
+    // AQU-2552 (review r6): a piece split off an imported line is a line of
+    // that line's paragraph (translationsByPackageBlock), not a new paragraph.
+    const home = homeOf(cell)
+    if (home) {
+      anchorKey = packageBlockKey(home.memberPath, home.blockPath)
+      continue
+    }
     if (isAdded(cell)) {
       if (!anchorKey) continue
       const text = cell.translated?.trim()

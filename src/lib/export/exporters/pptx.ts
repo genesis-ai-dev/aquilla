@@ -25,7 +25,8 @@ import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
 import { pptxParagraphBlocks, pptxSlideParts } from "@/lib/parsers/pptx"
 import {
-  blockParts,
+  positionalBlockParts,
+  positionalLines,
   packageBlockKey,
   translationsByPackageBlock,
   removedPackageBlockKeys,
@@ -86,29 +87,22 @@ export async function exportPptx(
   }
 
   // Build a map: group → joined translation text, preserving first-seen order.
-  const groupOrder: string[] = []
+  // AQU-1068: a line somebody ADDED here has no place in the original
+  // package, and the legacy fallback below maps cells to paragraphs BY
+  // POSITION — so letting one into this array shifts every mapping after it
+  // and writes translations into the wrong paragraphs of the client's own
+  // document. Locator-based files are already immune (an added line has no
+  // locator, so it is simply skipped); positionalLines is the positional
+  // path's guard (and AQU-2552 review r6: it keeps a split piece in its line's
+  // paragraph).
+  const groupCells = positionalLines(cells)
+  const groupOrder: string[] = [...groupCells.keys()]
   const groupToTranslation = new Map<string, string>()
-  const groupCells = new Map<string, CellData[]>()
-
-  for (const cell of cells) {
-    // AQU-1068: a line somebody ADDED here has no place in the original
-    // package, and the legacy fallback below maps cells to paragraphs BY
-    // POSITION — so letting one into this array shifts every mapping after it
-    // and writes translations into the wrong paragraphs of the client's own
-    // document. Locator-based files are already immune (an added line has no
-    // locator, so it is simply skipped); this is the positional path's guard.
-    if (isUserAddedLine(cell)) continue
-    const legacyGroup = cell.group || cell.id
-    if (!groupCells.has(legacyGroup)) {
-      groupOrder.push(legacyGroup)
-      groupCells.set(legacyGroup, [])
-    }
-    groupCells.get(legacyGroup)!.push(cell)
-  }
   // AQU-2552: a paragraph's lines in order, each its translation or its source
-  // where it has none (see blockParts); "" when none is translated.
+  // where it has none (see blockParts); "" when none is translated. A hidden
+  // line keeps its original text here (positionalBlockParts).
   for (const [group, list] of groupCells) {
-    groupToTranslation.set(group, blockParts(list).map((part) => part.plain).filter(Boolean).join(" "))
+    groupToTranslation.set(group, positionalBlockParts(list).map((part) => part.plain).filter(Boolean).join(" "))
   }
   const locatedTranslations = translationsByPackageBlock(cells, options.removedCells ?? [])
   const hasLocatedTranslations = locatedTranslations.size > 0
@@ -191,8 +185,12 @@ export async function exportPptx(
       // AQU-1068: this paragraph's cell was removed in the app, so the
       // paragraph leaves the deck. The snapshot above means the removal
       // cannot disturb the indices this walk is built on.
+      // AQU-2552 (review r6): a text box or table cell must keep a paragraph
+      // (the format allows none fewer), so the last one left in it is emptied
+      // rather than dropped.
       if (removedKeys.has(blockKey)) {
-        p.parentNode?.removeChild(p)
+        if (isLastParagraphLeft(p)) emptyParagraph(p)
+        else p.parentNode?.removeChild(p)
         removed++
         slideMutated = true
         continue
@@ -262,6 +260,25 @@ export async function exportPptx(
   })
 
   return { blob, injected, untouched, removed, inserted, warnings }
+}
+
+/** AQU-2552 (review r6): is this the only paragraph left in its text body? */
+function isLastParagraphLeft(p: Element): boolean {
+  const parent = p.parentNode
+  if (!parent) return false
+  for (let node = parent.firstChild; node; node = node.nextSibling) {
+    if (node !== p && node.nodeType === 1 && (node as Element).tagName === "a:p") return false
+  }
+  return true
+}
+
+/** AQU-2552 (review r6): the paragraph without its words: its runs, line
+ *  breaks and fields go; its properties (a:pPr, a:endParaRPr) stay. */
+function emptyParagraph(p: Element): void {
+  for (const child of Array.from(p.childNodes)) {
+    const tag = child.nodeType === 1 ? (child as Element).tagName : ""
+    if (tag === "a:r" || tag === "a:br" || tag === "a:fld") p.removeChild(child)
+  }
 }
 
 /**

@@ -241,7 +241,7 @@ export function ClipInspector({
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold" data-testid="clip-inspector-title">{title}</p>
             <p className="truncate text-xs text-muted-foreground">
-              {takeVoice?.name ?? (story.recordedBy ? t("audio.inspector.recordedBy", { name: story.recordedBy }) : t("audio.inspector.recording"))}
+              {takeVoice?.name ?? (story.recordedBy ? t("editor.voice.recordedBy", { name: story.recordedBy }) : t("audio.inspector.recording"))}
               {" · "}
               <span className="tabular-nums">{clock(att.durationMs)}</span>
             </p>
@@ -262,7 +262,7 @@ export function ClipInspector({
         <SectionTitle>{t("audio.inspector.howMade")}</SectionTitle>
         <ol className="space-y-1 text-xs" data-testid="clip-inspector-story">
           {story.kind !== "spoken" && story.reader == null && (
-            <StoryRow n={1}>{story.recordedBy ? t("audio.inspector.stepRecordedBy", { name: story.recordedBy }) : t("audio.inspector.stepRecorded")}</StoryRow>
+            <StoryRow n={1}>{story.recordedBy ? t("editor.voice.recordedBy", { name: story.recordedBy }) : t("audio.inspector.stepRecorded")}</StoryRow>
           )}
           {story.reader && <StoryRow n={1}>{t("audio.inspector.stepSpoken", { name: story.reader.name })}</StoryRow>}
           {story.kind === "revoiced" && (
@@ -400,7 +400,7 @@ export function ClipInspector({
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" disabled={!canEdit} onClick={onAddVoice}>
             <Plus data-icon="inline-start" />
-            {t("audio.inspector.addVoice")}
+            {t("audio.addVoice.title")}
           </Button>
           {onTrainFromTake && (
             <Button type="button" variant="outline" size="sm" onClick={onTrainFromTake}>

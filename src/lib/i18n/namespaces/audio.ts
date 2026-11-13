@@ -682,20 +682,18 @@ export const audio = defineNamespace({
     "audio.inspector.title": "This clip",
     "audio.inspector.backToVoices": "Back to all voices",
     "audio.inspector.takeGone": "This clip is no longer on the line.",
-    "audio.inspector.recording": "Recording",
-    "audio.inspector.recordedBy": "Recorded by {name}",
-    "audio.inspector.playTake": "Play this clip",
-    "audio.inspector.pauseTake": "Pause this clip",
+    "audio.inspector.recording": "A person's recording",
+    "audio.inspector.playTake": "Play this take",
+    "audio.inspector.pauseTake": "Pause this take",
     "audio.inspector.howMade": "How this was made",
     "audio.inspector.stepRecorded": "Recorded by a person",
-    "audio.inspector.stepRecordedBy": "Recorded by {name}",
     "audio.inspector.stepSpoken": "Spoken by {name}",
     "audio.inspector.stepRevoiced": "Changed into {name}'s voice",
     "audio.inspector.removedVoice": "a removed voice",
-    "audio.inspector.delivery": "Delivery",
+    "audio.inspector.delivery": "How it is spoken",
     "audio.inspector.deliveryNeedsElevenLabs": "Speed, expressiveness and tags can be set for ElevenLabs voices. {name} is not one.",
     "audio.inspector.scope": "Use these settings for",
-    "audio.inspector.scopeLine": "This line",
+    "audio.inspector.scopeLine": "Only this line",
     "audio.inspector.scopeVoice": "All {name} lines",
     "audio.inspector.expressiveness": "Expressiveness",
     "audio.inspector.closeness": "Stay close to voice",
@@ -708,18 +706,16 @@ export const audio = defineNamespace({
     "audio.inspector.useTagModel": "Use Eleven v4 for this voice",
     "audio.inspector.regenerate": "Regenerate this line",
     "audio.inspector.hearItFirst": "Hear it first",
-    "audio.inspector.voice": "Voice",
+    "audio.inspector.voice": "Voice for this line",
     "audio.inspector.lineVoice": "This line's voice is {name}.",
     "audio.inspector.useVoice": "Use {name} for this line",
-    "audio.inspector.addVoice": "Add a voice",
     "audio.inspector.newVoiceFromTake": "Train a voice from this",
     "audio.addVoice.title": "Add a voice",
     "audio.addVoice.searchPlaceholder": "Search voices",
-    "audio.addVoice.searchAriaLabel": "Search ElevenLabs voices",
     "audio.addVoice.onlyLanguage": "Only {language}",
     "audio.addVoice.account": "In your ElevenLabs account",
     "audio.addVoice.library": "ElevenLabs voice library",
-    "audio.addVoice.inProject": "In this project",
+    "audio.addVoice.inProject": "Already in this project",
     "audio.addVoice.addAriaLabel": "Add {name} to this project",
     "audio.addVoice.makeNew": "Or make a new one",
     "audio.addVoice.cloneTitle": "Clone a real speaker",
@@ -729,7 +725,6 @@ export const audio = defineNamespace({
     "audio.addVoice.trainTitle": "Train a voice on Aquilla",
     "audio.addVoice.trainBody": "5 to 60 minutes of one speaker. Ready in about 45 minutes. No ElevenLabs key needed.",
     "audio.addVoice.consentNote": "Cloning or training a real person asks your organization to confirm their consent first.",
-    "audio.makeSpeech.open": "Make speech",
     "audio.makeSpeech.title": "Make speech",
     "audio.makeSpeech.intro": "Each line goes through these steps in order.",
     "audio.makeSpeech.step1": "Translate the text",
@@ -757,16 +752,14 @@ export const audio = defineNamespace({
       one: "Make speech for {count} line",
       other: "Make speech for {count} lines",
     }),
-    "audio.makeSpeech.stop": "Stop",
     "audio.makeSpeech.newTakeNote": "Every result is a new take. Nothing replaces a recording someone made.",
-    "audio.makeSpeech.progress": "Progress",
+    "audio.makeSpeech.progress": "This run",
     "audio.makeSpeech.progressCount": "{done} of {total} done",
-    "audio.makeSpeech.stateWaiting": "Waiting",
-    "audio.makeSpeech.stateDone": "Done",
+    "audio.makeSpeech.stateWaiting": "Not started",
     "audio.makeSpeech.stateReview": "Translated — check it",
-    "audio.makeSpeech.stateSkipped": "No text",
-    "audio.makeSpeech.stateFailed": "Failed",
-    "audio.makeSpeech.stepTranslating": "Translating",
+    "audio.makeSpeech.stateSkipped": "No text to speak",
+    "audio.makeSpeech.stateFailed": "Did not finish",
+    "audio.makeSpeech.stepTranslating": "Translating the text",
     "audio.makeSpeech.stepSpeaking": "Speaking",
     "audio.makeSpeech.stepRevoicing": "Changing voice",
     "audio.aiError.elevenLabsNoKeyTitle": "ElevenLabs key needed",
@@ -3116,12 +3109,6 @@ export const audio = defineNamespace({
       "audio.inspector.recording": {
         description: "Shown under a clip's name in the clip inspector when a person recorded it and we do not know who.",
       },
-      "audio.inspector.recordedBy": {
-        description: "Shown under a clip's name in the clip inspector when a person recorded it.",
-        placeholders: {
-          "name": "The username of the person who recorded it.",
-        },
-      },
       "audio.inspector.playTake": {
         description: "Accessible label of the play button in the clip inspector.",
       },
@@ -3133,12 +3120,6 @@ export const audio = defineNamespace({
       },
       "audio.inspector.stepRecorded": {
         description: "A step in 'How this was made': the audio is a person's recording and we do not know whose.",
-      },
-      "audio.inspector.stepRecordedBy": {
-        description: "A step in 'How this was made': the audio is a person's recording.",
-        placeholders: {
-          "name": "The username of the person who recorded it.",
-        },
       },
       "audio.inspector.stepSpoken": {
         description: "A step in 'How this was made': a synthetic voice read the line's text aloud (text to speech).",
@@ -3228,9 +3209,6 @@ export const audio = defineNamespace({
           "name": "The voice's name in the project.",
         },
       },
-      "audio.inspector.addVoice": {
-        description: "Button in the clip inspector's Voice section: opens the Add a voice panel.",
-      },
       "audio.inspector.newVoiceFromTake": {
         description: "Button in the clip inspector's Voice section, shown for a person's recording: starts training a new voice from this recording.",
       },
@@ -3239,9 +3217,6 @@ export const audio = defineNamespace({
       },
       "audio.addVoice.searchPlaceholder": {
         description: "Placeholder of the search field in the Add a voice panel. It searches the user's ElevenLabs voices and ElevenLabs' public voice library together.",
-      },
-      "audio.addVoice.searchAriaLabel": {
-        description: "Accessible label of the search field in the Add a voice panel. ElevenLabs is a brand name: do not translate it.",
       },
       "audio.addVoice.onlyLanguage": {
         description: "Toggle chip under the search field in the Add a voice panel: limits the public voice library to voices in the project's target language.",
@@ -3287,9 +3262,6 @@ export const audio = defineNamespace({
       },
       "audio.addVoice.consentNote": {
         description: "Note at the bottom of the Add a voice panel.",
-      },
-      "audio.makeSpeech.open": {
-        description: "Button at the top of the Voices side panel: opens the Make speech panel, which turns lines into spoken audio in a few steps.",
       },
       "audio.makeSpeech.title": {
         description: "Heading of the Make speech side panel.",
@@ -3357,9 +3329,6 @@ export const audio = defineNamespace({
           "count": "How many lines it will run on.",
         },
       },
-      "audio.makeSpeech.stop": {
-        description: "Button shown in place of the main button while Make speech runs: stops after the current line.",
-      },
       "audio.makeSpeech.newTakeNote": {
         description: "Note under the main button of the Make speech panel.",
       },
@@ -3375,9 +3344,6 @@ export const audio = defineNamespace({
       },
       "audio.makeSpeech.stateWaiting": {
         description: "A line's state in the Make speech progress list: not started yet.",
-      },
-      "audio.makeSpeech.stateDone": {
-        description: "A line's state in the Make speech progress list: all its steps finished.",
       },
       "audio.makeSpeech.stateReview": {
         description: "A line's state in the Make speech progress list: it was translated and left for a person to check; no speech was made.",

@@ -54,7 +54,7 @@ const NO_CHARACTER = "__none__"
 const STATE_KEYS: Record<MakeSpeechLineState["kind"], MessageKey> = {
   waiting: "audio.makeSpeech.stateWaiting",
   running: "audio.makeSpeech.stateWaiting",
-  done: "audio.makeSpeech.stateDone",
+  done: "common.done",
   review: "audio.makeSpeech.stateReview",
   skipped: "audio.makeSpeech.stateSkipped",
   failed: "audio.makeSpeech.stateFailed",
@@ -93,6 +93,7 @@ export function MakeSpeechPanel({
   const [progress, setProgress] = useState<Map<string, MakeSpeechLineState> | null>(null)
   const [running, setRunning] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => () => abortRef.current?.abort(), [])
   const run = useCallback(async () => {
     if (running || targetIds.length === 0) return
@@ -100,6 +101,8 @@ export function MakeSpeechPanel({
     abortRef.current = abort
     setRunning(true)
     setProgress(new Map())
+    // Progress is at the top of the panel; the button that started it is at the bottom.
+    panelRef.current?.scrollTo({ top: 0, behavior: "smooth" })
     try {
       await runMakeSpeech(targetIds, effective, actions, (cellId, state) => {
         setProgress((cur) => new Map(cur ?? []).set(cellId, state))
@@ -122,7 +125,7 @@ export function MakeSpeechPanel({
   ]
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto" data-testid="make-speech-panel" data-showcase="voice.make-speech">
+    <div ref={panelRef} className="flex h-full min-h-0 flex-col overflow-y-auto" data-testid="make-speech-panel" data-showcase="voice.make-speech">
       <div className="space-y-1 border-b p-3">
         <div className="flex items-center gap-2">
           <Button type="button" variant="outline" size="icon-sm" aria-label={t("audio.inspector.backToVoices")} onClick={onBack}>
@@ -133,6 +136,37 @@ export function MakeSpeechPanel({
         <p className="text-xs text-muted-foreground">{t("audio.makeSpeech.intro")}</p>
       </div>
 
+      {progress && (
+        <div className="space-y-2 border-b p-3" data-testid="make-speech-progress">
+          <div className="flex items-baseline justify-between text-xs">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t("audio.makeSpeech.progress")}</h3>
+            <span className="tabular-nums text-muted-foreground">{t("audio.makeSpeech.progressCount", { done, total: progress.size })}</span>
+          </div>
+          <div
+            role="progressbar" aria-label={t("audio.makeSpeech.progress")} aria-valuemin={0} aria-valuemax={progress.size} aria-valuenow={done}
+            className="h-1.5 overflow-hidden rounded-full bg-muted"
+          >
+            <div className="h-full bg-primary transition-[width]" style={{ width: `${progress.size ? (done / progress.size) * 100 : 0}%` }} />
+          </div>
+          <ul className="divide-y text-xs">
+            {[...progress.entries()].map(([cellId, state]) => (
+              <li key={cellId} className="flex items-center gap-2 py-1.5">
+                <span dir="auto" className="min-w-0 flex-1 truncate">{labelOf(cellId)}</span>
+                <span
+                  className={cn(
+                    "shrink-0",
+                    state.kind === "done" ? "font-medium text-emerald-700 dark:text-emerald-400"
+                      : state.kind === "failed" ? "font-medium text-destructive"
+                        : state.kind === "running" ? "font-medium text-foreground" : "text-muted-foreground",
+                  )}
+                >
+                  {state.kind === "running" ? t(STEP_KEYS[state.step]) : t(STATE_KEYS[state.kind])}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="space-y-2.5 border-b p-3">
         <Step n={1} title={t("audio.makeSpeech.step1")}>
           <label className="flex items-start gap-2 text-xs">
@@ -153,7 +187,7 @@ export function MakeSpeechPanel({
             items={readerItems} value={reader ?? LINE_DEFAULT} disabled={running}
             onValueChange={(v) => { if (v) update({ readerVoiceId: v === LINE_DEFAULT ? null : v }) }}
           >
-            <SelectTrigger aria-label={t("audio.makeSpeech.readerAriaLabel")} className="w-full"><SelectValue /></SelectTrigger>
+            <SelectTrigger aria-label={t("audio.makeSpeech.readerAriaLabel")} className="w-full min-w-0 [&>span]:truncate"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectGroup>
                 {readerItems.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
@@ -167,7 +201,7 @@ export function MakeSpeechPanel({
             items={characterItems} value={character ?? NO_CHARACTER} disabled={running}
             onValueChange={(v) => { if (v) update({ characterVoiceId: v === NO_CHARACTER ? null : v }) }}
           >
-            <SelectTrigger aria-label={t("audio.makeSpeech.characterAriaLabel")} className="w-full"><SelectValue /></SelectTrigger>
+            <SelectTrigger aria-label={t("audio.makeSpeech.characterAriaLabel")} className="w-full min-w-0 [&>span]:truncate"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectGroup>
                 {characterItems.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
@@ -199,7 +233,7 @@ export function MakeSpeechPanel({
         {running ? (
           <Button type="button" variant="outline" className="w-full" onClick={() => abortRef.current?.abort()}>
             <Square data-icon="inline-start" />
-            {t("audio.makeSpeech.stop")}
+            {t("common.stop")}
           </Button>
         ) : (
           <Button type="button" className="w-full" disabled={targetIds.length === 0} onClick={() => void run()} data-testid="make-speech-run">
@@ -210,37 +244,6 @@ export function MakeSpeechPanel({
         <p className="text-[11px] text-muted-foreground">{t("audio.makeSpeech.newTakeNote")}</p>
       </div>
 
-      {progress && (
-        <div className="space-y-2 p-3" data-testid="make-speech-progress">
-          <div className="flex items-baseline justify-between text-xs">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t("audio.makeSpeech.progress")}</h3>
-            <span className="tabular-nums text-muted-foreground">{t("audio.makeSpeech.progressCount", { done, total: progress.size })}</span>
-          </div>
-          <div
-            role="progressbar" aria-label={t("audio.makeSpeech.progress")} aria-valuemin={0} aria-valuemax={progress.size} aria-valuenow={done}
-            className="h-1.5 overflow-hidden rounded-full bg-muted"
-          >
-            <div className="h-full bg-primary transition-[width]" style={{ width: `${progress.size ? (done / progress.size) * 100 : 0}%` }} />
-          </div>
-          <ul className="divide-y text-xs">
-            {[...progress.entries()].map(([cellId, state]) => (
-              <li key={cellId} className="flex items-center gap-2 py-1.5">
-                <span dir="auto" className="min-w-0 flex-1 truncate">{labelOf(cellId)}</span>
-                <span
-                  className={cn(
-                    "shrink-0",
-                    state.kind === "done" ? "font-medium text-emerald-700 dark:text-emerald-400"
-                      : state.kind === "failed" ? "font-medium text-destructive"
-                        : state.kind === "running" ? "font-medium text-foreground" : "text-muted-foreground",
-                  )}
-                >
-                  {state.kind === "running" ? t(STEP_KEYS[state.step]) : t(STATE_KEYS[state.kind])}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   )
 }

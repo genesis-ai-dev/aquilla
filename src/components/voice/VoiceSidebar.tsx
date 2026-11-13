@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button"
 import { AddVoicePanel, type MakeVoiceMode } from "./inspector/AddVoicePanel"
 import { ClipInspector } from "./inspector/ClipInspector"
 import { MakeSpeechPanel, type MakeSpeechLine } from "./inspector/MakeSpeechPanel"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { canManageVoices } from "@/lib/audio/voice-permission"
 import { upsertVoice } from "@/lib/audio/voices"
 import type { MakeSpeechActions } from "@/lib/audio/make-speech"
@@ -73,6 +73,16 @@ export function VoiceSidebar({
   targetLanguage, fileId, cells, laneId, leadsManageVoices, clip, makeSpeech,
 }: VoiceSidebarProps) {
   const t = useT()
+  const { locale } = useI18n()
+  // The lane's language as a person reads it ("Arabic"), where the tag is one the browser knows.
+  const languageLabel = useMemo(() => {
+    if (!targetLanguage) return undefined
+    try {
+      return new Intl.DisplayNames([locale], { type: "language" }).of(targetLanguage) ?? targetLanguage
+    } catch {
+      return targetLanguage
+    }
+  }, [targetLanguage, locale])
   const [view, setView] = useState<"cast" | "add" | "speech">("cast")
   const [createRequest, setCreateRequest] = useState<{ mode: MakeVoiceMode; seq: number } | null>(null)
   const canEdit = canManageVoices(project.syncRole?.level ?? null, leadsManageVoices ?? project.projectLeadsManageVoices === true)
@@ -115,6 +125,7 @@ export function VoiceSidebar({
         session={session}
         voices={tts.allVoices}
         language={targetLanguage}
+        languageLabel={languageLabel}
         canEdit={canEdit}
         onBack={() => setView("cast")}
         onAdd={async (voice) => {
@@ -157,7 +168,7 @@ export function VoiceSidebar({
         voices={laneVoices}
         lines={makeSpeech.lines}
         selectedCellId={makeSpeech.selectedCellId}
-        targetLanguage={targetLanguage}
+        targetLanguage={languageLabel}
         actions={makeSpeech.actions}
         onBack={() => setView("cast")}
       />,
@@ -169,7 +180,7 @@ export function VoiceSidebar({
       {makeSpeech && (
         <Button type="button" variant="outline" className="w-full shrink-0" onClick={() => setView("speech")} data-testid="make-speech-open">
           <AudioLines data-icon="inline-start" />
-          {t("audio.makeSpeech.open")}
+          {t("audio.makeSpeech.title")}
         </Button>
       )}
       <div className="min-h-0 flex-1 overflow-hidden rounded-xl border bg-background">

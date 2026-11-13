@@ -41,6 +41,8 @@ export interface AddVoicePanelProps {
   voices: Voice[]
   /** The lane's language: the library opens filtered to it. */
   language?: string
+  /** That language as a person reads it ("Arabic"). */
+  languageLabel?: string
   canEdit: boolean
   onBack: () => void
   /** Put a voice in the project's cast. */
@@ -71,7 +73,7 @@ const detailOf = (labels: Record<string, string>, lead?: string) =>
     .filter((part): part is string => Boolean(part)).join(" · ")
 
 export function AddVoicePanel({
-  projectId, fileId, session, voices, language, canEdit, onBack, onAdd, onMakeNew,
+  projectId, fileId, session, voices, language, languageLabel, canEdit, onBack, onAdd, onMakeNew,
 }: AddVoicePanelProps) {
   const t = useT()
   const connection = useElevenLabsAccount({ projectId, fileId, session })
@@ -214,7 +216,7 @@ export function AddVoicePanel({
           <>
             <Input
               type="search" value={query} onChange={(e) => setQuery(e.target.value)}
-              placeholder={t("audio.addVoice.searchPlaceholder")} aria-label={t("audio.addVoice.searchAriaLabel")}
+              placeholder={t("audio.addVoice.searchPlaceholder")} aria-label={t("audio.elevenLabs.searchAriaLabel")}
               className="h-9"
             />
             {languageCode && (
@@ -226,7 +228,7 @@ export function AddVoicePanel({
                 )}
                 onClick={() => setOnlyLanguage((on) => !on)}
               >
-                {t("audio.addVoice.onlyLanguage", { language: language ?? languageCode })}
+                {t("audio.addVoice.onlyLanguage", { language: languageLabel ?? language ?? languageCode })}
               </button>
             )}
           </>

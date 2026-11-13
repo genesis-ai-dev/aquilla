@@ -32,7 +32,7 @@ import {
   listSessions, addSession, activateSession, removeSession,
   loadActiveSession, sessionKey, subscribeSession, patchSessionEmails,
   loadAccountsSnapshot, publishDataOwner, listStoredSessions,
-  isStoredSessionCurrent, replaceActiveSessionJwt,
+  isStoredSessionCurrent, replaceActiveSessionJwt, removeSessionByJwt,
 } from "./session-store"
 
 function mkSession(overrides: Partial<FrontierSession> = {}): FrontierSession {
@@ -471,4 +471,18 @@ it("isolates reused usernames, preserves verified legacy ownership and keeps ren
   await clearSession()
   await saveSession(mkSession({username:"reuse",jwt:"again",accountId:"702"}))
   expect((await loadActiveSession())?.storageKey).toBe(replacementKey)
+})
+
+it("email-change cleanup removes only its revoked credential and preserves a newer login", async () => {
+  await clearSession()
+  await addSession(mkSession({ username: "alice", jwt: "old-alice" }))
+  await addSession(mkSession({ username: "bob", jwt: "bob-token" }))
+  await activateSession("alice")
+  await removeSessionByJwt("old-alice")
+  expect((await loadActiveSession())?.username).toBe("bob")
+  expect((await listStoredSessions()).map(x => x.session.jwt)).toEqual(["bob-token"])
+  await addSession(mkSession({ username: "alice", jwt: "new-alice" }))
+  await removeSessionByJwt("old-alice")
+  expect((await listStoredSessions()).map(x => x.session.jwt).sort()).toEqual(["bob-token", "new-alice"])
+  await clearSession()
 })

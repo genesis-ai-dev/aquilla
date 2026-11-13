@@ -32,9 +32,18 @@ export const CUSTOM_VOICE_MIN_MINUTES = 5
 /** Where quality stops improving much. */
 export const CUSTOM_VOICE_RECOMMENDED_MINUTES = 15
 export const CUSTOM_VOICE_MAX_MINUTES = 60
-/** Same per-recording cap the worker enforces (MAX_VOICE_CLIP_BYTES). */
+/**
+ * Same per-upload cap the worker enforces (MAX_VOICE_CLIP_BYTES). A WAV longer
+ * than this goes up as several pieces (wav-split.ts), so the cap bounds one
+ * upload, not one recording.
+ */
 export const CUSTOM_VOICE_MAX_CLIP_BYTES = 20 * 1024 * 1024
-export const CUSTOM_VOICE_MAX_CLIPS = 40
+/**
+ * Uploads per voice, as the worker enforces (MAX_CUSTOM_VOICE_CLIPS). Sized so
+ * an hour of 48 kHz / 24-bit stereo, the largest thing a studio usually sends,
+ * fits once it is cut into pieces.
+ */
+export const CUSTOM_VOICE_MAX_CLIPS = 80
 
 export type CustomVoiceState = "queued" | "training" | "ready" | "failed"
 

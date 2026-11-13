@@ -112,7 +112,11 @@ describe.each([DEV_IDENTITY_WORKER, "aquilla-auth-preview"])("API requests on %s
     expect(res.status).toBe(403)
     const body = (await res.json()) as { error: string; code: string }
     expect(body.code).toBe("dev_access_restricted")
-    expect(body.error).toMatch(/dev\.aquilla\.app is restricted/)
+    expect(body.error).toBe(
+      worker === "aquilla-auth-preview"
+        ? "Access to CI previews is restricted. Ask the Aquilla team to add you to the dev access list."
+        : "Access to dev is restricted. Ask the Aquilla team to add you to the dev access list.",
+    )
   })
 
   it("lets a listed account through, matching the email case-insensitively", async () => {

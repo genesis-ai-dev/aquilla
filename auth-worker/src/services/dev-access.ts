@@ -44,8 +44,10 @@ export const DEV_IDENTITY_WORKER =
 export const DEV_ACCESS_RESTRICTED = "dev_access_restricted"
 
 /** What a refused person reads. Plain words: who to ask, not how it works. */
-export const DEV_ACCESS_RESTRICTED_MESSAGE =
-  "Access to dev.aquilla.app is restricted. Ask the Aquilla team to add you to the dev access list."
+export function devAccessRestrictedMessage(env: Pick<Env, "DEPLOYMENT_WORKER_NAME">): string {
+  const site = env.DEPLOYMENT_WORKER_NAME === "aquilla-auth-preview" ? "CI previews" : "dev"
+  return `Access to ${site} is restricted. Ask the Aquilla team to add you to the dev access list.`
+}
 
 /** Longest email RFC 5321 allows; also caps the KV key length. */
 export const DEV_ACCESS_EMAIL_MAX = 254

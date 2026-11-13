@@ -8,6 +8,7 @@ import {
   cellStartProgrammeSec,
   leadSecForMove,
   MIN_TARGET_LEAD_SEC,
+  playStartLineId,
   playsHeardLines,
   programmeLines,
   programmeToSource,
@@ -626,5 +627,47 @@ describe("recordingsLines (group D)", () => {
     expect(recordingsLines(sections, heard, false)).toBe(sections)
     expect(playsHeardLines(null, true)).toBe(false)
     expect(playsHeardLines(heard, false)).toBe(false)
+  })
+})
+
+// AQU-2253 (Nov 13): following the recordings, a file with an audio cue file
+// plays its heard lines, so a subtitle row has no place of its own in what
+// plays. Its Play, Space and the strip's Play with it selected start from the
+// heard line that performs it.
+describe("playStartLineId", () => {
+  const heard = [
+    verse("cue1", 1, 4, undefined, { medium: undefined }),
+    verse("cue2", 5, 8, undefined, { medium: undefined }),
+    verse("cue3", 9, 12, undefined, { medium: undefined }),
+  ]
+  const s1 = verse("s1", 0, 3, undefined, { medium: "text" })
+  const s2 = verse("s2", 6, 7, undefined, { medium: "text" })
+  const late = verse("s9", 20, 21, undefined, { medium: "text" })
+  // s2 is performed by cue3 AND cue2, handed over in no order: the first in
+  // film order is the one it starts from, as the mic picks.
+  const cuesForText = new Map([["s2", ["cue3", "cue2"]]])
+
+  it("a subtitle row starts from the first heard line that performs it", () => {
+    expect(playStartLineId(s2, heard, true, cuesForText)).toBe("cue2")
+  })
+
+  it("a row no heard line performs starts from the first heard line at or after its start", () => {
+    expect(playStartLineId(s1, heard, true, cuesForText)).toBe("cue1")
+    expect(playStartLineId(verse("s5", 4.5, 5, undefined, { medium: "text" }), heard, true, cuesForText)).toBe("cue2")
+    expect(playStartLineId(verse("s6", 5, 6, undefined, { medium: "text" }), heard, true, cuesForText)).toBe("cue2")
+  })
+
+  it("a row after the last heard line has nowhere to start", () => {
+    expect(playStartLineId(late, heard, true, cuesForText)).toBeNull()
+  })
+
+  it("a heard line starts from itself", () => {
+    expect(playStartLineId(heard[2], heard, true, cuesForText)).toBe("cue3")
+  })
+
+  it("following the source, and with no heard lines, every row starts from itself", () => {
+    expect(playStartLineId(s2, heard, false, cuesForText)).toBe("s2")
+    expect(playStartLineId(s2, null, true, cuesForText)).toBe("s2")
+    expect(playStartLineId(s2, [], true, cuesForText)).toBe("s2")
   })
 })

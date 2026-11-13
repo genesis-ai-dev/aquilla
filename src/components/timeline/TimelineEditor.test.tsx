@@ -4621,6 +4621,48 @@ describe("TimelineEditor — an added track finds its takes where they actually 
       expect(parseFloat(one.style.width)).toBeCloseTo(6 * 38, 0)
       expect(parseFloat(two.style.left)).toBeCloseTo(6 * 38, 0)
     })
+
+    // AQU-2253 (Nov 13): following the recordings only the heard lines play,
+    // so a subtitle row has no place in what plays and its own Play did
+    // nothing. It plays from the first heard line that performs it, or with
+    // none, from the first heard line at or after the row's start.
+    describe("a subtitle row's own Play", () => {
+      const heard3 = [...heard, cell({ id: "cue3", fileId: "f1-cues", original: "Line three.", startTime: 9, endTime: 10, ...take("cue3", 1_000) } as Partial<CellData>)]
+      const raw3 = heard3.map(({ attachments: _a, selectedAudioId: _s, ...c }) => c as CellData)
+      const rows = [
+        cell({ id: "sA", original: "Performed", medium: "text", startTime: 50, endTime: 52 }),
+        cell({ id: "sB", original: "Unperformed", medium: "text", startTime: 8.5, endTime: 9.5 }),
+      ]
+      const links = buildCueLinkIndex([{
+        kind: "text-audio", fromFileId: "f1", fromCellId: "sA",
+        toFileId: "f1-cues", toCellId: "cue2", origin: "auto", confidence: 1,
+      }])
+      const playRow = (cellId: string, timingMode: "audioFirst" | "dubbing") => {
+        const onPlayFromTime = vi.fn()
+        const props = {
+          fileId: "f1", coreMediaUrl: null, editable: true, cells: rows,
+          audioCues: raw3, targetCells: heard3, cueLinks: links, timingMode,
+          onRetimeSubtitle: () => {}, onSeekToTime: vi.fn(), onPlayFromTime,
+        }
+        const { rerender } = render(<TimelineEditor {...props} activateRequest={null} />)
+        rerender(<TimelineEditor {...props} activateRequest={{ cellId, nonce: 1, play: true }} />)
+        return onPlayFromTime
+      }
+
+      it("plays from the heard line that performs it", () => {
+        // cue1's 6 s take, then cue2: cue2 starts at 6 s.
+        expect(playRow("sA", "audioFirst")).toHaveBeenCalledWith(6)
+      })
+
+      it("with no heard line performing it, plays from the first heard line at or after its start", () => {
+        // cue3 (film 9 s) is the first at or after 8.5 s; laid out it starts at 6 + 2 = 8 s.
+        expect(playRow("sB", "audioFirst")).toHaveBeenCalledWith(8)
+      })
+
+      it("following the source, plays from the row's own time", () => {
+        expect(playRow("sA", "dubbing")).toHaveBeenCalledWith(50)
+      })
+    })
   })
 
   // ── AQU-646 stage 6C ───────────────────────────────────────────────────────

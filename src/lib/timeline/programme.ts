@@ -30,6 +30,7 @@ import type { CellData } from "@/hooks/useCells"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { standInEstimator, STAND_IN_MIN_SEC } from "./stand-in"
 import { isDefaultTrackSlot } from "./track-slots"
+import { primaryAudioHome } from "@/lib/audio/linked-takes"
 
 /** A window on some clock, in seconds. */
 export interface Window {
@@ -609,6 +610,36 @@ export function playsHeardLines(
   followsRecordings: boolean,
 ): boolean {
   return followsRecordings && heardLines != null && heardLines.length > 0
+}
+
+/**
+ * AQU-2253 (Nov 13): the line Play starts from when a line is picked: a
+ * row's own Play, Space and the strip's Play with it selected. Where the file
+ * plays its heard lines (`playsHeardLines`), a subtitle row has no place in
+ * what plays, so it starts from the first heard line that performs it (the
+ * one the mic records on, `primaryAudioHome`), or with none, from the first
+ * heard line at or after the row's start. Null when no heard line is left
+ * from there. Every other file plays its own lines, so a row starts from
+ * itself.
+ */
+export function playStartLineId(
+  row: Pick<CellData, "id" | "startTime">,
+  heardLines: readonly CellData[] | null | undefined,
+  followsRecordings: boolean,
+  cuesForText: ReadonlyMap<string, readonly string[]>,
+): string | null {
+  if (!playsHeardLines(heardLines, followsRecordings)) return row.id
+  const lines = heardLines as readonly CellData[]
+  const home = primaryAudioHome(row.id, { cueCells: lines, cuesForText })
+  if (home) return home
+  const from = row.startTime
+  if (from == null) return null
+  let first: CellData | null = null
+  for (const line of lines) {
+    if (line.startTime == null || line.startTime < from) continue
+    if (!first || line.startTime < (first.startTime as number)) first = line
+  }
+  return first?.id ?? null
 }
 
 /**

@@ -58,7 +58,7 @@ import { canCutAt } from "@/lib/audio/cut-take"
 import { isTextEntryTarget } from "@/lib/history/arbiter"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { standInEstimator } from "@/lib/timeline/stand-in"
-import { layOutProgramme, programmeLines, recordingsLines } from "@/lib/timeline/programme"
+import { layOutProgramme, playStartLineId, programmeLines, recordingsLines } from "@/lib/timeline/programme"
 import { hasTiming } from "@/lib/timeline/derive"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS, type SourceRegionMap } from "@/lib/timeline/source-regions"
 import { isUserAddedLine } from "@/lib/timeline/user-lines"
@@ -3905,7 +3905,14 @@ export function TimelineEditor({
     // pairing drawer navigates to one — and looking only in `cells` meant every
     // such request found nothing and silently returned, so the track never
     // moved.
-    const cell = cells.find((c) => c.id === cellId) ?? audioCues?.find((c) => c.id === cellId)
+    const picked = cells.find((c) => c.id === cellId) ?? audioCues?.find((c) => c.id === cellId)
+    // AQU-2253 (Nov 13): following the recordings, a file with an audio cue
+    // file plays only its heard lines, so a subtitle row has no place in what
+    // plays: it goes to the heard line Play starts from for it, as Space and
+    // the strip's Play do (`playStartLineId`). Every other line is its own.
+    const heard = audioCues ? targetCells : null
+    const startId = picked ? playStartLineId(picked, heard, audioFirst, links.cuesForText) : null
+    const cell = startId === picked?.id ? picked : heard?.find((c) => c.id === startId)
     const at = cell ? layout.seekSecFor(cell) : null
     if (at == null) return
     const viewport = scrollRef.current?.clientWidth ?? 0

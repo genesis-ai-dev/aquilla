@@ -370,7 +370,7 @@ import {
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { filmKindOf, filmPiecesFor, filmVoicesProgramme, linkedFilmBehindLines, programmeFilmFor, stripLinesFor } from "@/lib/timeline/film-pieces"
-import { layOutProgramme, playsHeardLines, recordingsLines } from "@/lib/timeline/programme"
+import { layOutProgramme, playStartLineId, playsHeardLines, recordingsLines } from "@/lib/timeline/programme"
 import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
 import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
@@ -15334,6 +15334,17 @@ export function ProjectWorkspace() {
     () => recordingsLines(timelineCells, audioCueCells, timingMode === "audioFirst"),
     [timelineCells, audioCueCells, timingMode],
   )
+  // AQU-2253 (Nov 13): the line Space and the strip's Play start from with a
+  // line selected. Playing the heard lines, a subtitle row has no place in
+  // `playbackCells`, so it starts from the heard line that performs it
+  // (`playStartLineId`, the timeline's row Play asks the same).
+  const timelinePlayStartId = useMemo(() => {
+    if (!timelineSelectedCellId) return null
+    const row = timelineCells.find((c) => c.id === timelineSelectedCellId)
+    return row
+      ? playStartLineId(row, audioCueCells, timingMode === "audioFirst", cueLinks.cuesForText)
+      : timelineSelectedCellId
+  }, [timelineSelectedCellId, timelineCells, audioCueCells, timingMode, cueLinks])
   // AQU-2253 (Sam, Nov 9): following the recordings a LINKED film plays on its
   // own clock, so Play runs to whichever ends later: the lines or the film.
   // The queue is told how long the film is and which lines are this file's,
@@ -17027,13 +17038,13 @@ export function ProjectWorkspace() {
     // the bar's own button — start at the highlighted section when there is
     // one (AQU-666), and mark that explicit so a missing clip is surfaced
     // there rather than skipped past (AQU-660).
-    const from = timelineSelectedCellId
-      ? playbackCells.findIndex((c) => c.id === timelineSelectedCellId)
+    const from = timelinePlayStartId
+      ? playbackCells.findIndex((c) => c.id === timelinePlayStartId)
       : -1
     const ctx = { cells: playbackCells, projectId: project.id, session: frontierSession }
     if (from >= 0) startQueue(ctx, from, true)
     else startQueueAtTime(ctx, 0, { play: true })
-  }, [project?.id, playbackCells, frontierSession, timelineSelectedCellId, videoIsTransport, virtualIsTransport, timelineAudioLoaded])
+  }, [project?.id, playbackCells, frontierSession, timelinePlayStartId, videoIsTransport, virtualIsTransport, timelineAudioLoaded])
 
   // AQU-654: count outstanding (non-waived) LQA/validation infractions on the
   // active file. Export never hard-blocks on these — the count only drives a
@@ -19612,7 +19623,7 @@ export function ProjectWorkspace() {
                 session={frontierSession ?? null}
                 settings={tts.laneSettings}
                 onActiveCell={handleBarActiveCell}
-                startCellId={timelineSelectedCellId}
+                startCellId={timelinePlayStartId}
                 coreMediaUrl={activeFile.coreMediaUrl ?? null}
                 videoPaneOnScreen={showVideoPane}
                 timelineDurationSec={timelineDurationSec}

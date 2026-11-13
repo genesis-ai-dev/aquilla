@@ -1008,9 +1008,18 @@ function placeInLines(
 
 /** A piece that leaves with the lost line it sits in (see placeInLines). */
 function givenUpWithLine(piece: DocxPiece): boolean {
-  if (piece.kind === "keepInRun" || piece.kind === "footnote" || piece.kind === "text") return true
+  // AQU-2552 (review r7): a run that holds paragraphs of its own (a text box)
+  // never leaves with a line: its lines are lines of their own.
+  if (piece.kind === "keepInRun") return !piece.children.some(holdsParagraphs)
+  if (piece.kind === "footnote" || piece.kind === "text") return true
   if (piece.kind !== "keep" || piece.el.tagName !== "w:r") return false
+  if (holdsParagraphs(piece.el)) return false
   return !piece.el.children.some((child) => isElement(child) && child.tagName === "w:commentReference")
+}
+
+/** Does this element hold a paragraph anywhere inside it? */
+function holdsParagraphs(el: XmlElement): boolean {
+  return el.children.some((child) => isElement(child) && (child.tagName === "w:p" || holdsParagraphs(child)))
 }
 
 const WORD_CHAR_RE = /[\p{L}\p{N}\p{M}]/u

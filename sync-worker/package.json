@@ -14,7 +14,7 @@
   "dependencies": {
     "hono": "^4.13.16",
     "partyserver": "^0.5.10",
-    "postgres": "^4.0.0"
+    "postgres": "3.4.9"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261102.1",

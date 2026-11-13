@@ -405,8 +405,11 @@ function orderEnteringScope(target: readonly TimelineTrack[], index: number): nu
 export function adjustTrackDrop(
   rows: readonly TrackRow[],
   resolution: TrackPointerDrop,
-  pointer: { y: number; overTop: number; overHeight: number } | null,
+  pointer: { y: number; overTop: number; overHeight: number; activeHeight?: number } | null,
 ): TrackPointerDrop {
+  if (resolution.kind === "move" && pointer != null) {
+    return aboveOpenFolder(rows, resolution, pointer.y, pointer.overTop, pointer.activeHeight ?? 0)
+  }
   if (resolution.kind !== "regroup" || resolution.toPosition == null || pointer == null) return resolution
   const list = tracksInGroup(rows, resolution.group)
   if (list.length === 0 || resolution.toPosition < 0 || resolution.toPosition >= list.length) return resolution
@@ -434,6 +437,33 @@ export function adjustTrackDrop(
   }
   if (pointer.y <= pointer.overTop + pointer.overHeight / 2) return resolution
   return { ...resolution, toPosition: resolution.toPosition + 1 }
+}
+
+/**
+ * Above an open folder is the root slot before it, not its heading. The
+ * collision measures the folder where it lies, but a track dragged up onto
+ * it has slid it down by the track's height to open that slot: the pointer
+ * reads "on the heading" while the row is drawn above the folder. Above the
+ * column, the folder is the target too, the pointer over nothing at all.
+ */
+function aboveOpenFolder(
+  rows: readonly TrackRow[],
+  drop: Extract<TrackPointerDrop, { kind: "move" }>,
+  pointerY: number,
+  overTop: number,
+  activeHeight: number,
+): TrackPointerDrop {
+  if (drop.group !== TIMELINE_ROOT_GROUP) return drop
+  const root = tracksInGroup(rows, TIMELINE_ROOT_GROUP)
+  const over = root[drop.toPosition]
+  if (!over || over.kind !== "folder" || over.id === drop.trackId) return drop
+  const folder = rows.find((row) => row.track.id === over.id)
+  if (!folder || folder.collapsed || folder.members.length === 0) return drop
+  const movedIndex = root.findIndex((track) => track.id === drop.trackId)
+  const drawnTop = movedIndex > drop.toPosition ? overTop + activeHeight : overTop
+  if (!(pointerY < drawnTop)) return drop
+  const folderAt = movedIndex >= 0 && movedIndex < drop.toPosition ? drop.toPosition - 1 : drop.toPosition
+  return { kind: "regroup", trackId: drop.trackId, fromGroup: TIMELINE_ROOT_GROUP, group: TIMELINE_ROOT_GROUP, toPosition: folderAt }
 }
 
 export function commitTrackReorder(

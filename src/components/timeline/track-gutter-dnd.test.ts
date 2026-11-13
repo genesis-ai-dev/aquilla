@@ -158,6 +158,27 @@ describe("commitTrackReorder", () => {
     expect(commitTrackReorder(folded, belowFolder, true)).toEqual({
       kind: "reorder", trackId: "source-subtitles", order: 5,
     })
+
+    // A folder first in the column, a track dragged up onto it from below.
+    // The collision reads the folder where it lies, but the track has slid
+    // it down by its own height: the pointer over the heading's old place is
+    // over the slot above the folder. That slot, and the space above the
+    // column, are the root before the folder, with no gap inside it and no
+    // drop into it. The heading where it is drawn is still the way in.
+    const folderFirst = buildTrackRows(deriveTracksForFile({
+      trackOverrides: { grp: { kind: "folder", name: "Dubs", order: -1 }, "target-audio": { groupId: "grp", order: 0 } },
+    }))
+    const ontoHeading: TrackPointerDrop = { kind: "move", trackId: "source-audio", group: TIMELINE_ROOT_GROUP, toPosition: 0 }
+    const folderAt = { overTop: 0, overHeight: 120, activeHeight: 72 }
+    for (const y of [-20, 30]) {
+      const aboveFolder = adjustTrackDrop(folderFirst, ontoHeading, { ...folderAt, y })
+      expect(aboveFolder, `y ${y}`).toMatchObject({ kind: "regroup", group: TIMELINE_ROOT_GROUP, toPosition: 0 })
+      expect(dragGapForDrop(folderFirst, aboveFolder, 72), `y ${y}`).toBeNull()
+      expect(commitTrackReorder(folderFirst, aboveFolder, true), `y ${y}`).toEqual({
+        kind: "reorder", trackId: "source-audio", order: orderBesideFolder(folderFirst, "grp", "above"),
+      })
+    }
+    expect(adjustTrackDrop(folderFirst, ontoHeading, { ...folderAt, y: 90 })).toEqual(ontoHeading)
   })
 
   it("plans a scope drop as a hold carrying where the pointer left the row", () => {

@@ -3314,11 +3314,16 @@ export function TimelineEditor({
   }
 
   /** Where the pointer is, in the same frame the collision rect is measured. */
-  function trackPointer(event: DragOverEvent | DragMoveEvent | DragEndEvent): { y: number; overTop: number; overHeight: number } | null {
+  function trackPointer(event: DragOverEvent | DragMoveEvent | DragEndEvent): { y: number; overTop: number; overHeight: number; activeHeight: number } | null {
     const rect = event.over?.rect
     const start = event.activatorEvent
     if (!rect || !(start instanceof MouseEvent)) return null
-    return { y: start.clientY + event.delta.y, overTop: rect.top, overHeight: rect.height }
+    return {
+      y: start.clientY + event.delta.y,
+      overTop: rect.top,
+      overHeight: rect.height,
+      activeHeight: event.active.rect.current.initial?.height ?? 0,
+    }
   }
 
   function resolvedTrackDrop(event: DragOverEvent | DragMoveEvent | DragEndEvent) {

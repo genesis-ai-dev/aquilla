@@ -12,7 +12,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useParatextDiscovery } from "@/lib/paratext-bridge/use-paratext-discovery"
 import { pickFolder } from "@/lib/paratext-bridge/tauri"
-import { ParatextProjectRow, useLinkedGuids } from "@/components/paratext/ParatextProjectRow"
+import { ParatextProjectRow, useLinkedProjects } from "@/components/paratext/ParatextProjectRow"
 
 const PARATEXT_DOCS_URL =
   `${(import.meta.env.VITE_DOCS_URL as string | undefined)?.trim() || "https://help.aquilla.app"}/projects/paratext-projects/`
@@ -22,7 +22,7 @@ const PARATEXT_DOCS_URL =
 export function ParatextProjectsPage() {
   const t = useT()
   const d = useParatextDiscovery()
-  const linked = useLinkedGuids(d.projects)
+  const linked = useLinkedProjects(d.projects)
   const [query, setQuery] = useState("")
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -98,7 +98,7 @@ export function ParatextProjectsPage() {
                   </div>
                 ) : null}
                 <ul className="divide-y rounded-lg border bg-card" data-testid="paratext-project-list">
-                  {shown.map((p) => <ParatextProjectRow key={p.path} project={p} linked={linked.has(p.guid)} />)}
+                  {shown.map((p) => <ParatextProjectRow key={p.path} project={p} linked={linked.has(p.stateId)} />)}
                 </ul>
                 </div>
               )}

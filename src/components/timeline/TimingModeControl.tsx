@@ -152,13 +152,13 @@ export function TimingModeControl({
               data-testid="tl-timing-mode-trigger"
               aria-label={t("editor.timeline.timingMenuAria", { mode: name })}
               className={cn(
-                "inline-flex items-center gap-1 rounded-md border border-border bg-background text-foreground/80 hover:bg-muted aria-expanded:bg-muted",
+                "inline-flex items-center gap-1 rounded-md border border-border bg-background text-foreground hover:bg-muted aria-expanded:bg-muted",
                 bar ? "h-7 px-2.5" : "h-6 px-2",
               )}
             >
-              <Timer className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+              <Timer className="h-3.5 w-3.5" aria-hidden="true" />
               <span className="font-medium">{name}</span>
-              <ChevronDown className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
+              <ChevronDown className="h-3 w-3" aria-hidden="true" />
             </DropdownMenuTrigger>
           </AppTooltip>
           <DropdownMenuContent align="start" className="w-80 min-w-80">

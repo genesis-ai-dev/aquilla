@@ -882,6 +882,13 @@ export const importExport = defineNamespace({
     "importExport.dialog.stillToRecordCount": "{count} still to record",
     "importExport.dialog.untimedClipCount": "{count} untimed",
     "importExport.dialog.nothingRecordedYet": "Nothing is recorded yet, so there is nothing to export.",
+    // A Bible book: a recording on every verse, and no verse with a start
+    // time. "Nothing is recorded yet" was false there — the by-character mix
+    // just has nowhere to put a take that sits at no second.
+    "importExport.dialog.nothingTimedToPlace": plural({
+      one: "{count} recording has no start time, so it cannot be placed on a character track. Export by line or as chapter audio to include it.",
+      other: "{count} recordings have no start time, so they cannot be placed on character tracks. Export by line or as chapter audio to include them.",
+    }),
     "importExport.dialog.nothingOnMainTrack": plural({
       one: "Nothing is recorded on the main Target audio track — {count} take is on an added track. Export by line to include it.",
       other: "Nothing is recorded on the main Target audio track — {count} takes are on added tracks. Export by line to include them.",
@@ -2650,6 +2657,11 @@ export const importExport = defineNamespace({
       "importExport.dialog.audioShapeGroupAriaLabel": {
         description:
           "Accessible name for the radio group choosing the shape of an audio export — one track per character, one file per recorded line, or one continuous file per chapter.",
+      },
+      "importExport.dialog.nothingTimedToPlace": {
+        description:
+          "Shown in the Export dialog's by-character audio preview, and as the refusal if the export is run anyway, when the file has recordings but none of its lines has a start time (typically a Bible book, where verses are recorded but not timed). The by-character export lays each recording at its own second on a track, so it cannot place these; 'by line' and 'chapter audio' are the two other audio export shapes in the same dialog, which can.",
+        placeholders: { count: "Number of recordings that have no start time." },
       },
       "importExport.dialog.nothingOnMainTrack": {
         description:

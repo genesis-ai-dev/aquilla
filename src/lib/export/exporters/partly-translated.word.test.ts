@@ -148,6 +148,18 @@ describe("Word export — a line's footnote is that line's own (AQU-2552, review
     expect(noteText(out.notes!, 1)).toBe("Note one.")
   })
 
+  it("finds a line the importer joined from two sentences with one space where the paragraph has two", async () => {
+    const a = "This second line is a sentence of a little over ninety characters, all told, and not fewer."
+    const b = "Its next sentence follows two spaces after it and is about as long"
+    const joined = para(run(S1) + footnoteRefRun(1) + run(`. ${a}  ${b}`) + footnoteRefRun(2) + run(`. ${S3}.`)) + para(run("Next paragraph."))
+    const cells = importedCells(joined, notes, (k) => (k === 2 ? T3 : "")).map((cell) => (cell.id === "c1-1" ? { ...cell, hidden: true } : cell))
+    expect(cells.filter((cell) => cell.id.startsWith("c1-")).map((cell) => cell.original)).toEqual([`${S1}${NOTE("Note one.")}.`, `${a} ${b}${NOTE("Note two.")}.`, `${S3}.`])
+    const out = await exportAsDialog(joined, notes, cells)
+    // Written as the paragraph has it: both spaces, its own reference.
+    expect(firstParagraph(out.xml)).toBe(`${a}  ${b}[2]. ${T3}`)
+    expect(out.notes).toBe(notes)
+  })
+
   it("with nothing hidden: a translation that dropped its marker leaves its reference after it, never another line's", async () => {
     const cells = importedCells(body, notes, (k) => (k === 0 ? T1 : k === 2 ? T3 : ""))
     const out = await exportAsDialog(body, notes, cells)

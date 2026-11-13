@@ -236,7 +236,7 @@
     "jszip": "^3.10.2",
     "lucide-react": "^1.66.0",
     "onnxruntime-web": "1.31.1",
-    "postgres": "^4.0.0",
+    "postgres": "3.4.9",
     "posthog-js": "^1.444.2",
     "qrcode": "^1.5.4",
     "react": "^19.3.1",

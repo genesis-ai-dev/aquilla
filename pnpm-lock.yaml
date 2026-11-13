@@ -151,8 +151,8 @@ importers:
         specifier: 1.31.1
         version: 1.31.1
       postgres:
-        specifier: ^4.0.0
-        version: 4.0.0
+        specifier: 3.4.9
+        version: 3.4.9
       posthog-js:
         specifier: ^1.444.2
         version: 1.444.2(@types/react@19.3.0)(react@19.3.1)
@@ -5716,9 +5716,9 @@ packages:
     resolution: {integrity: sha512-9ZhXKM/rw350N1ovuWHbGxnGh/SNJ4cnxHiM0rxE4VN41wsg8P8zWn9hv/buK00RP4WvlOyr/RBDiptyxVbkZQ==}
     engines: {node: '>=0.10.0'}
 
-  postgres@4.0.0:
-    resolution: {integrity: sha512-kBh8qXtcvvIAc00DftQyOxz7M/3Zxww1tRMXZPLzipNXXl5PIzHml+9zB3Mrge2U8ldc0WF1ZdLp1iYQi7Kh3A==}
-    engines: {node: '>=20'}
+  postgres@3.4.9:
+    resolution: {integrity: sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw==}
+    engines: {node: '>=12'}
 
   posthog-js@1.444.2:
     resolution: {integrity: sha512-gsG9GllefB1o0brQNND4shWbyfE4xmp1Yh791yrDxPIi4OgB6qQ96263bajVjfI8tWKM9wlxPTRwkPQZ1gA/Ug==}
@@ -12661,7 +12661,7 @@ snapshots:
     dependencies:
       xtend: 4.0.2
 
-  postgres@4.0.0: {}
+  postgres@3.4.9: {}
 
   posthog-js@1.444.2(@types/react@19.3.0)(react@19.3.1):
     dependencies:

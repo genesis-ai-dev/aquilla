@@ -53,7 +53,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { downloadBlob as downloadExportBlob } from "@/lib/export/export-service"
 import { collectInlineStyleWarnings, type ExportFidelityWarning } from "@/lib/export/fidelity"
-import { chapterFilenameSuffix, filterCellsByChapter, listChapterLabels } from "@/lib/export/chapter-scope"
+import { chapterFilenameSuffix, chapterNumbersByLabel, filterCellsByChapter, listChapterLabels } from "@/lib/export/chapter-scope"
 import {
   DEFAULT_EXPORT_CONTENT_MODE,
   dropHiddenCells,
@@ -1061,11 +1061,15 @@ export function ExportDialog({
    * AQU-465: the formats a chapter can be sliced out of.
    *
    * Exactly the formats built from the in-memory cell array (the `filteredCells`
-   * branch of handleExport). The round-trip formats are deliberately absent:
-   * USFM/DOCX/PPTX/IDML/JSON reinject translations into the ORIGINAL document —
-   * USFM server-side — so there is no cell array to filter, and handing back a
+   * branch of handleExport). The package round-trip formats are deliberately
+   * absent: DOCX/PPTX/IDML/JSON reinject translations into the ORIGINAL
+   * document, so there is no cell array to filter, and handing back a
    * one-chapter .docx would mean rebuilding the document rather than exporting
    * it. Those stay whole-file.
+   *
+   * USFM is not in this list and is sliceable all the same (AQU-2561): its
+   * original is plain text, so the worker cuts the chapter out of it. That is
+   * a different mechanism with its own condition — see `canScopeToChapter`.
    */
   const chapterScopeFormats = ["txt", "md", "html", "tsv", "csv", "xlf", "tmx", "vtt", "srt", "plain-text-dump", "metadata-csv"] as const
   const supportsChapterScope = (fmt: ExportFormat): boolean =>
@@ -1384,10 +1388,17 @@ export function ExportDialog({
     [chapterLabels, t],
   )
 
+  /** AQU-2561: USFM asks the worker for a chapter by number, so it needs the
+   *  labels to map onto distinct numbers. Null on a several-books-in-one file. */
+  const usfmChapterNumbers = useMemo(() => chapterNumbersByLabel(chapterLabels), [chapterLabels])
+
   /** Only offered where it means something: a file with more than one chapter,
-   *  exporting itself (not the project) through a cell-array format. */
+   *  exporting itself (not the project) through a cell-array format — or as
+   *  USFM, when the worker can find the chapter by its number. */
   const canScopeToChapter =
-    effectiveScope === "file" && supportsChapterScope(format) && chapterLabels.length > 1
+    effectiveScope === "file" &&
+    chapterLabels.length > 1 &&
+    (supportsChapterScope(format) || (format === "usfm" && usfmChapterNumbers !== null))
   const activeChapter = canScopeToChapter ? chapterFilter : ""
 
   // Drop the chapter on close, on a file switch, and whenever the remembered
@@ -1498,11 +1509,27 @@ export function ExportDialog({
             : `${t("importExport.status.exportedFilesCount", { count: result.exported })}; ${t("importExport.status.skippedOlderImports", { count: result.skipped.length })}`
           setStatus({ kind: "ok", msg })
         } else {
+          // AQU-2561: one chapter, cut out of the original by the worker. As
+          // in the cell-array branch below, the primary "Download <file>"
+          // action (`overrideFormat`) always hands back the whole file,
+          // whatever chapter the fold is showing. The label and the number
+          // travel together: a label with no number is exported whole AND
+          // named whole, never as a whole book under a one-chapter name.
+          const chapterNumber = overrideFormat || !activeChapter ? undefined : usfmChapterNumbers?.get(activeChapter)
+          const chapterLabel = chapterNumber === undefined ? "" : activeChapter
           // AQU-437: use user-chosen stem with .SFM extension.
           const stem = buildExportStem(false)
-          const downloadName = `${stem}.SFM`
+          const downloadName = `${stem}${chapterFilenameSuffix(chapterLabel)}.SFM`
           // AQU-276: read lossy-verse count from response header.
-          const result = await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken, targetLang, validatedOnly })
+          const result = await downloadSourceFile({
+            projectId,
+            fileId: activeFileId,
+            downloadName,
+            getToken,
+            targetLang,
+            validatedOnly,
+            ...(chapterNumber !== undefined ? { chapter: chapterNumber } : {}),
+          })
           const lossyCount = result.lossyVerseCount
           if (lossyCount !== null && lossyCount > 0) {
             setStatus({

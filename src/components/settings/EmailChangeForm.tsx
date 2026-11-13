@@ -34,10 +34,12 @@ export function EmailChangeForm({
   googleLinked = false,
   onBack,
   onSetPassword,
+  statusUnavailable = false,
 }: {
   jwt: string
   passwordAvailable: boolean
   googleLinked?: boolean
+  statusUnavailable?: boolean
   onSetPassword: () => void
   onBack: () => void
 }) {
@@ -99,7 +101,7 @@ export function EmailChangeForm({
   }
   if (!passwordAvailable) return <div className="flex flex-col gap-4">
     <p role="status">{t("auth.emailChange.password_required")}</p>
-    <Button type="button" variant="outline" onClick={onSetPassword}>{t("auth.methods.setPassword")}</Button>
+    <Button type="button" variant="outline" disabled={statusUnavailable} onClick={onSetPassword}>{t("auth.methods.setPassword")}</Button>
   </div>
   return (
     <form

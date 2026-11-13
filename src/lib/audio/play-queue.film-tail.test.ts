@@ -2231,13 +2231,41 @@ describe("an unrecorded line under the film is a line: Play selected, and the qu
     startQueue(ctxFor(cells, only("b3", "b4")), 0, true)
     await wait()
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
-    el("b3")!.tick(1)
+    // Line by line: each take plays to its own end.
+    el("b3")!.onended?.()
     await wait()
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b4" })
-    el("b4")!.tick(1)
+    el("b4")!.onended?.()
     await wait()
     expect(getQueueState().kind).toBe("idle")
     expect(el("b5")).toBeUndefined()
+  })
+
+  // The q44 fixes' last check (Nov 13): the run above re-asked the queue with
+  // the chosen lines alone, and those CAN be laid out, so an unrecorded chosen
+  // line played with the film while "Play selected" (asked line by line over
+  // the file's lines) did not count it: with Skip off, "Play selected 1"
+  // played two lines. The run now goes on line by line, chosen lines only:
+  // what it plays is what was counted.
+  it("a book whose lines can't be laid out, Skip off: Play selected plays exactly the chosen lines it counts", async () => {
+    setSkipSilentLinesPref(false)
+    const b2 = line("b2", 1_000)
+    delete (b2.attachments![`audio-b2-1700000000-take.webm`] as unknown as Record<string, unknown>).durationMs
+    const cells = [line("b1", 1_000), b2, line("b3", 1_000), line("b4"), line("b5", 1_000)]
+    linkFilm(60, cells)
+    const counted = ["b3", "b4"].filter((id) => linesPlaybackStopsAt(cells, queuePlaybackAsk()).has(id))
+    startQueue(ctxFor(cells, only("b3", "b4")), 0, true)
+    await wait()
+    const played: string[] = []
+    for (let i = 0; i < 40 && getQueueState().kind !== "idle"; i++) {
+      const id = (getQueueState() as { cellId?: string }).cellId
+      if (id && played.at(-1) !== id) played.push(id)
+      if (i === 0) el("b3")!.onended?.() // line by line: the take plays to its own end
+      await wait(100)
+    }
+    expect(counted).toEqual(["b3"])
+    expect(played).toEqual(counted)
+    expect(getQueueState().kind).toBe("idle")
   })
 
   it("Next inside Play selected steps onto the unrecorded line, and never onto one not chosen", async () => {

@@ -385,17 +385,19 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     [freeTiming, programmeTracks, film, skipSilent],
   )
   const fileStops = useMemo(() => (playbackLines ? linesPlaybackStopsAt(playbackLines, ask) : null), [playbackLines, ask])
-  // The review (Nov 12), N9: on a film file it is a run of the chosen lines
-  // among the lines Play plays, whichever chosen lines are not among them (a
-  // book's other chapters): the old run of lines on their own has no film.
+  // On a film file it is a run of the lines Play plays when every chosen line
+  // is among them (the check of the q44 fixes, Nov 12, SHOULD B: none may be
+  // left out). A selection reaching past them (a book's other chapter) is a
+  // run of the chosen lines on their own, as on a file with no film: the
+  // queue keeps the film out of such a run (N9).
   const selectionRun = useMemo(() => {
-    if (playbackLines && filmOverRun(film, playbackLines.map((c) => c.id)).coverSec > 0) {
+    if (playbackLines && fileStops && filmOverRun(film, playbackLines.map((c) => c.id)).coverSec > 0) {
       // N11: membership by a Set, and the run starts at the first chosen line
       // in the order Play plays them, not the table's.
       const chosen = new Set(playbackRange.map((c) => c.id))
       const only = new Set(playbackLines.filter((c) => chosen.has(c.id)).map((c) => c.id))
       const from = playbackLines.findIndex((c) => only.has(c.id))
-      if (from >= 0 && fileStops) {
+      if (from >= 0 && only.size === chosen.size) {
         return { cells: playbackLines, from, only, stopCount: [...only].filter((id) => fileStops.has(id)).length }
       }
     }

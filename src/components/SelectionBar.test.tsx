@@ -1366,13 +1366,14 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     expect(explicit).toBe(true)
   })
 
-  // The review (Nov 12), N9: a selection with a line that is not among the
-  // lines Play plays (another chapter of a book, say) is still a run of those
-  // lines on a film file, over the chosen ones among them, never the old run
-  // with the picture still.
-  it("on a film file, a selection with a line outside the lines Play plays runs over the chosen ones among them", async () => {
-    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
-    const audio = audioMapFor(["cell-1"])
+  // The check of the q44 fixes (Nov 12), SHOULD B: the film runs only when
+  // every chosen line is among the lines Play plays. A selection reaching
+  // past them (a book's other chapter, say) plays every chosen line, as on a
+  // file with no film: its recordings back to back, the picture still. No
+  // chosen line is left out of the count or the run.
+  it("the film runs only when every chosen line is among the lines Play plays", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-3"]))
+    const audio = audioMapFor(["cell-1", "cell-3"])
     // The chapter on the timeline holds cell-1 and cell-2; cell-3 is in another.
     const lines = filmFile(audio, 60).slice(0, 2)
     renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
@@ -1382,11 +1383,10 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
 
     await userEvent.setup().click(playButton())
 
-    const [ctx, fromIndex] = vi.mocked(startQueue).mock.calls[0]
-    expect(ctx.cells).toBe(lines)
-    expect(ctx.snapshot).toBeUndefined()
-    expect([...(ctx.only ?? [])]).toEqual(["cell-1", "cell-2"])
-    expect(fromIndex).toBe(0)
+    const [ctx] = vi.mocked(startQueue).mock.calls[0]
+    expect(ctx.snapshot).toBe(true)
+    expect(ctx.only).toBeUndefined()
+    expect(ctx.cells.map((c) => c.id)).toEqual(["cell-1", "cell-3"])
   })
 
   // The review (Nov 12), N11: the run starts at the first chosen line in the

@@ -62,10 +62,10 @@ export interface TnParseResult {
   strings: TranslatableString[]
   /** Rows that were skipped because no canonical_ref could be assembled */
   skippedCount: number
-  /** AQU-2487 (browser pass, Nov 12): every book the file name holds, the one
-   *  read where unfoldingWord puts it first, when the name holds more than one
-   *  and rows that give only "chapter:verse" were skipped because of it. The
-   *  refusal names them instead of pointing at the columns. */
+  /** AQU-2487 (browser pass, Nov 12): set when rows that give only
+   *  "chapter:verse" were skipped because the file name doesn't give one book:
+   *  every book code the name holds (perhaps none), the one in unfoldingWord's
+   *  place first. The refusal names the file name instead of the columns. */
   fileNameBooks?: string[]
 }
 
@@ -97,12 +97,11 @@ const TN_BOOKS: ReadonlySet<string> = new Set([...BOOK_CODES_BY_NUMBER.slice(0, 
  * holds its book anywhere else, is not guessed at: null, and the rows are
  * refused as having no book.
  *
- * `books` is every book the name holds, the one in unfoldingWord's place
- * first, so a name with more than one can be refused by naming them.
+ * `books` is every book code the name holds, anywhere in it, the one in
+ * unfoldingWord's place first, so a refusal can say what the name holds.
  */
 function bookFromTnFileName(fileName: string | undefined): { book: string | null; books: string[] } {
-  const none = { book: null, books: [] }
-  if (!fileName) return none
+  if (!fileName) return { book: null, books: [] }
   const base = (fileName.split(/[\\/]/).pop() ?? fileName).replace(/\.tsv$/i, "")
   const words = base.split(/[^A-Za-z0-9]+/).filter(Boolean)
   const asBook = (word: string | undefined): string | null => {
@@ -111,14 +110,12 @@ function bookFromTnFileName(fileName: string | undefined): { book: string | null
   }
   const isNumber = (word: string | undefined): boolean => word != null && /^\d+$/.test(word)
   const tn = words.findIndex((w) => w.toLowerCase() === "tn")
-  // Without "tn", only the numbered form at the very start.
-  if (tn === -1 && !isNumber(words[0])) return none
   let at = tn + 1
   if (isNumber(words[at])) at++
-  const book = asBook(words[at])
-  if (!book) return none
-  const books = [...new Set([book, ...words.map(asBook).filter((b): b is string => b != null)])]
-  return { book: books.length === 1 ? book : null, books }
+  // Without "tn", only the numbered form at the very start.
+  const book = tn !== -1 || isNumber(words[0]) ? asBook(words[at]) : null
+  const books = [...new Set([book, ...words.map(asBook)].filter((b): b is string => b != null))]
+  return { book: book && books.length === 1 ? book : null, books }
 }
 
 export function parseTnTsv(tsvText: string, fileName?: string): TnParseResult {
@@ -280,6 +277,6 @@ export function parseTnTsv(tsvText: string, fileName?: string): TnParseResult {
     notes,
     strings,
     skippedCount,
-    ...(wantedFileBook > 0 && fileNameBooks.length > 1 ? { fileNameBooks } : {}),
+    ...(wantedFileBook > 0 ? { fileNameBooks } : {}),
   }
 }

@@ -1419,14 +1419,16 @@ export async function importTranslationNotes(
   const { strings, skippedCount, fileNameBooks } = parseTnTsv(text, file.name)
 
   if (strings.length === 0) {
-    // AQU-2487 (browser pass, Nov 12): when the name's books are why the rows
-    // have none, say so; the columns sentence sent people to the wrong place.
+    // AQU-2487 (browser pass, Nov 12): when the file name is why the rows have
+    // no book, say so; the columns sentence sent people to the wrong place.
     throw new Error(
       fileNameBooks
-        ? t("importExport.errors.tnFileNameHoldsBooks", {
-            books: fileNameBooks.join(", "),
-            example: `tn_${fileNameBooks[0]}.tsv`,
-          })
+        ? fileNameBooks.length > 1
+          ? t("importExport.errors.tnFileNameHoldsBooks", {
+              books: fileNameBooks.join(", "),
+              example: `tn_${fileNameBooks[0]}.tsv`,
+            })
+          : t("importExport.errors.tnFileNameNoBook")
         : skippedCount > 0
           ? t("importExport.errors.tnNoValidRowsWithSkipped", { count: skippedCount })
           : t("importExport.errors.tnNoValidRows"),

@@ -251,19 +251,29 @@ front:intro\tabc0\t\t\t\t0\t# Introduction to Genesis
     }
   })
 
-  // AQU-2487 (browser pass, Nov 12): the refusal names the books, so the
-  // parser hands them on, the one in unfoldingWord's place first.
-  it("names the books when the name holds more than one", () => {
+  // AQU-2487 (browser pass, Nov 12, and its review): whenever rows were
+  // skipped because they needed the book from the name and it didn't give
+  // one, the parser says which book codes the name holds (perhaps none), the
+  // one in unfoldingWord's place first, so the refusal can name the name.
+  it("says which books the name holds whenever the rows needed one from it", () => {
     expect(parseTnTsv(CURRENT, "tn_GEN_rev.tsv").fileNameBooks).toEqual(["GEN", "REV"])
     expect(parseTnTsv(CURRENT, "rev_tn_GEN.tsv").fileNameBooks).toEqual(["GEN", "REV"])
     expect(parseTnTsv(CURRENT, "57-TIT_act.tsv").fileNameBooks).toEqual(["TIT", "ACT"])
-    for (const name of ["titus-notes-rev.tsv", "notes_job.tsv", "GEN_tn.tsv", "tn_GEN.tsv", "tn_GEN_GEN.tsv"]) {
+    expect(parseTnTsv(CURRENT, "GEN_REV.tsv").fileNameBooks).toEqual(["GEN", "REV"])
+    expect(parseTnTsv(CURRENT, "notes_job.tsv").fileNameBooks).toEqual(["JOB"])
+    expect(parseTnTsv(CURRENT, "GEN_tn.tsv").fileNameBooks).toEqual(["GEN"])
+    expect(parseTnTsv(CURRENT, "Titus notes.tsv").fileNameBooks).toEqual([])
+    expect(parseTnTsv(CURRENT, "my_new_notes.tsv").fileNameBooks).toEqual([])
+    expect(parseTnTsv(CURRENT).fileNameBooks).toEqual([])
+    // The name gave the rows their book.
+    for (const name of ["tn_GEN.tsv", "tn_GEN_GEN.tsv"]) {
       expect(parseTnTsv(CURRENT, name).fileNameBooks, name).toBeUndefined()
     }
-    // Rows that name their own book never needed the file name.
+    // Rows that name their own book, or have no reference, never needed it.
     const own = parseTnTsv("Reference\tID\tNote\nMAT 5:3\tx\tBlessed.", "tn_GEN_rev.tsv")
     expect(own.notes[0].canonicalRef).toBe("MAT 5:3")
     expect(own.fileNameBooks).toBeUndefined()
+    expect(parseTnTsv("Reference\tID\tNote\n\tx\tA note.", "tn_GEN_rev.tsv").fileNameBooks).toBeUndefined()
   })
 })
 

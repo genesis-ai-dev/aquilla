@@ -787,6 +787,27 @@ function rebuildParagraphIn(
       sourceLooks.push(s.fromLine === undefined ? undefined : s.fromLine >= 0 ? (lineLooks[s.fromLine + i] ?? base ?? "") : (base ?? ""))
     }
   }
+  // AQU-2552 (review r7): a line with no translation, written as its source,
+  // keeps its own pieces (a picture, a bookmark) where they sit among its
+  // words: each goes before the character it preceded in the source, or
+  // after the line's last one.
+  let inlineAt: Map<DocxPiece, number> | undefined
+  if (placed) {
+    const fromSource = new Map<number, number>()
+    let index = 0
+    for (const s of all) {
+      for (let i = 0; i < s.text.length; i++, index++) {
+        if (s.fromLine !== undefined && s.fromLine >= 0) fromSource.set(s.fromLine + i, index)
+      }
+    }
+    inlineAt = new Map()
+    for (const [piece, offset] of placed.offsets) {
+      const before = fromSource.get(offset)
+      const after = fromSource.get(offset - 1)
+      if (before !== undefined) inlineAt.set(piece, before)
+      else if (after !== undefined) inlineAt.set(piece, after + 1)
+    }
+  }
   const translatedText = part.writeText(text)
   // (writeText keeps the length, so index i is the same character in both.)
   const writtenText = sourceLooks.some((look) => look !== undefined)
@@ -805,7 +826,7 @@ function rebuildParagraphIn(
     writtenText,
     marks,
     sourceLooks,
-    ...(placed ? { lineOf, footnoteLines: placed.footnoteLines, lost: placed.lost, lostChar: placed.lostChar } : {}),
+    ...(placed ? { lineOf, footnoteLines: placed.footnoteLines, lost: placed.lost, lostChar: placed.lostChar, inlineAt } : {}),
     translatedLook: part.translatedLook,
     baseRpr: base ?? "",
     io,
@@ -1140,9 +1161,16 @@ function placeInLines(
   flat: readonly DocxPiece[],
   inLine: readonly boolean[],
   layout: LineLayout,
-): { footnoteLines: Map<DocxPiece, number>; lost: Set<DocxPiece>; lostChar: (piece: DocxPiece, i: number) => boolean } {
+): {
+  footnoteLines: Map<DocxPiece, number>
+  lost: Set<DocxPiece>
+  lostChar: (piece: DocxPiece, i: number) => boolean
+  /** Where in the line text each piece that is not the line's text sits. */
+  offsets: Map<DocxPiece, number>
+} {
   const footnoteLines = new Map<DocxPiece, number>()
   const lost = new Set<DocxPiece>()
+  const offsets = new Map<DocxPiece, number>()
   const textStart = new Map<DocxPiece, number>()
   const inLost = (at: number) => layout.lost.some((s) => s.start <= at && at < s.end)
   let end = 0
@@ -1163,13 +1191,14 @@ function placeInLines(
         : layout.lost.some((s) => s.start <= start && end <= s.end)
       : givenUpWithLine(piece) && layout.lost.some((s) => s.start < start && start < s.end)
     if (gone) lost.add(piece)
+    else if (!isLine) offsets.set(piece, start)
   })
   // A run that holds both a lost line's words and another line's.
   const lostChar = (piece: DocxPiece, i: number) => {
     const start = textStart.get(piece)
     return start !== undefined && inLost(start + i)
   }
-  return { footnoteLines, lost, lostChar }
+  return { footnoteLines, lost, lostChar, offsets }
 }
 
 /** A piece that leaves with the lost line it sits in (see placeInLines). */

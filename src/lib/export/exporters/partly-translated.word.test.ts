@@ -225,7 +225,8 @@ describe("Word export — a hidden or deleted line's pictures, fields and tabs l
     const body = para(run(`${S1}. ${S2}. The third line shows figure `) + complexField("SEQ Figure \\* ARABIC", "1") + run(` and${PAD}`) + pictureRun + run(".")) + next
     const cells = importedCells(body, undefined, () => "").map((cell) => (cell.id === "c1-2" ? { ...cell, hidden: true } : cell))
     const out = await exportAsDialog(body, undefined, cells)
-    expect(firstParagraph(out.xml)).toBe(`${S1}. The third line shows figure {field}1 and${PAD}.[picture]`)
+    // AQU-2552 (review r7 D1): the picture stays beside its words, before the stop.
+    expect(firstParagraph(out.xml)).toBe(`${S1}. The third line shows figure {field}1 and${PAD}[picture].`)
   })
 })
 

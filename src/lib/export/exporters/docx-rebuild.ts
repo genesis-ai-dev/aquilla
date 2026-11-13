@@ -97,6 +97,10 @@ export interface RebuildInput {
    *  no word of it is reported as having lost its look. */
   lost?: ReadonlySet<DocxPiece>
   lostChar?: (piece: DocxPiece, i: number) => boolean
+  /** AQU-2552 (review r7): pieces after the paragraph's first word that sit
+   *  among the words of a line written as its source, each with the index of
+   *  `text` it is written before; the rest follow the translation. */
+  inlineAt?: ReadonlyMap<DocxPiece, number>
   io: RebuildIo
 }
 
@@ -218,10 +222,14 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   const firstWord = nodes.findIndex((node) => holdsWord(node))
   const front: RNode[] = []
   const back: RNode[] = []
+  const inline: { at: number; node: RNode }[] = []
   nodes.forEach((node, k) => {
     if (node.kind === "text" || node.kind === "marker" || matches.has(node)) return
-    ;(firstWord === -1 || k <= firstWord ? front : back).push(node)
+    const at = firstWord !== -1 && k > firstWord && node.kind === "keep" ? input.inlineAt?.get(node.piece) : undefined
+    if (at !== undefined) inline.push({ at, node })
+    else (firstWord === -1 || k <= firstWord ? front : back).push(node)
   })
+  inline.sort((a, b) => a.at - b.at)
 
   // The translation, with matched stretches written as the source had them.
   const ordered = [...matches.entries()].sort((a, b) => a[1].start - b[1].start)
@@ -264,6 +272,12 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
     if (line !== undefined && holding.has(line)) ends.set(line, i + 1)
   })
   const lineEnds = [...ends].map(([line, at]) => ({ at, line })).sort((a, b) => a.at - b.at)
+  let nextInline = 0
+  const inlineTo = (k: number) => {
+    const batch: RNode[] = []
+    while (nextInline < inline.length && inline[nextInline].at <= k) batch.push(inline[nextInline++].node)
+    if (batch.length > 0) stream += renderLeaves(batch, io)
+  }
   let nextEnd = 0
   const endLinesTo = (k: number) => {
     while (nextEnd < lineEnds.length && lineEnds[nextEnd].at <= k) {
@@ -279,6 +293,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
     let k = from
     while (k < to) {
       endLinesTo(k)
+      inlineTo(k)
       const m = markers.findIndex((marker) => marker.start === k)
       const marker = m === -1 ? undefined : markers[m]
       if (marker) {
@@ -292,7 +307,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
         k = marker.end
         continue
       }
-      const next = Math.min(to, markers.find((m) => m.start > k)?.start ?? to, lineEnds[nextEnd]?.at ?? to)
+      const next = Math.min(to, markers.find((m) => m.start > k)?.start ?? to, lineEnds[nextEnd]?.at ?? to, inline[nextInline]?.at ?? to)
       stream += runsByLook(written, k, next, (i) => input.sourceLooks?.[i] ?? lookFor(input, input.marks[i] ?? new Set()))
       k = next
     }
@@ -311,6 +326,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
     }
     plain(cursor, start)
     endLinesTo(start)
+    inlineTo(start)
     if (node.kind === "wrapper" || node.kind === "field") {
       stream += renderVerbatim(node.kind === "wrapper" ? [node] : [...node.open, ...node.result, node.close], io)
       if (node.kind === "field") result.keptFields++
@@ -325,6 +341,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   }
   plain(cursor, input.text.length)
   endLinesTo(Infinity)
+  inlineTo(Infinity)
   // (A claimed reference whose marker was never reached is not lost.)
   const leftover = refs.filter((_, i) => !used.has(i) || (claimed.has(i) && !placed.has(i))).map((ref) => ref.xml).join("")
 

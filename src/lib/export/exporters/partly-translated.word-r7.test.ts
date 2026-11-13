@@ -234,7 +234,8 @@ describe("Word export — a line is found in its paragraph in segment order (AQU
     const bytes = await docxBytes(para(run(S + " ") + run("Refrain line") + IMG + run(PAD + " ") + run("Third line" + PAD)) + NEXT)
     const [a, b, c, n] = await importCells(bytes)
     const out = await wordOut(bytes, [hide(typed(a, "Refrain.")), b, typed(c, "Trois."), n])
-    expect(paras(out.body)[0]).toContain("[IMG]")
+    // Where it sits in the source, beside its words (D1).
+    expect(paras(out.body)).toEqual(["Refrain line[IMG] … Trois.", "Next paragraph."])
   })
 
   it("a hidden second copy takes its picture with it", async () => {
@@ -285,5 +286,36 @@ describe("Word export — what sits between two lines stays when one of them is 
     const [a, b, n] = await importCells(bytes)
     const hidden = await wordOut(bytes, [hide(typed(a, "Fin.")), typed(b, "Chapitre deux."), n])
     expect(paras(hidden.body)).toEqual(["Chapitre deux.", "Next paragraph."])
+  })
+})
+
+describe("Word export — an untranslated line keeps its pieces where they are (AQU-2552, review r7 D1)", () => {
+  const F = ["Première ligne ici.", "Deuxième ligne ici.", "Troisième ligne ici."]
+  // Line 1 holds a picture, a figure-number field, a tab and an italic word.
+  const s1 = run("First line") + IMG + run(" here, Figure ") + FIELD + run(",") + `<w:r><w:tab/></w:r>` + run("an ") + run("italic", "<w:i/>") + run(PAD + " ")
+  const body = para(s1 + run("Second line here" + PAD + " ") + run("Third line here" + PAD)) + NEXT
+
+  it("the untranslated line's picture stays beside its words when the other lines are translated", async () => {
+    const bytes = await docxBytes(body)
+    const [a, b, c, n] = await importCells(bytes)
+    expect(a.original.replaceAll(PAD.trim(), "…")).toBe("First line here, Figure 1,\tan italic …")
+    const out = await wordOut(bytes, [a, typed(b, F[1]), typed(c, F[2]), n])
+    expect(paras(out.body)).toEqual([`First line[IMG] here, Figure {field}1,[TAB]an italic … ${F[1]} ${F[2]}`, "Next paragraph."])
+    expect(out.body).toContain("<w:i/>")
+    expect(out.result.lostLooks).toEqual([])
+  })
+
+  it("so does it when the line after it is hidden", async () => {
+    const bytes = await docxBytes(body)
+    const [a, b, c, n] = await importCells(bytes)
+    const out = await wordOut(bytes, [a, hide(b), typed(c, F[2]), n])
+    expect(paras(out.body)).toEqual([`First line[IMG] here, Figure {field}1,[TAB]an italic … ${F[2]}`, "Next paragraph."])
+  })
+
+  it("a translated line's picture still follows the paragraph's words", async () => {
+    const bytes = await docxBytes(body)
+    const [a, b, c, n] = await importCells(bytes)
+    const out = await wordOut(bytes, [typed(a, F[0]), b, typed(c, F[2]), n])
+    expect(paras(out.body)).toEqual([`${F[0]} Second line here … ${F[2]}[IMG]{field}`, "Next paragraph."])
   })
 })

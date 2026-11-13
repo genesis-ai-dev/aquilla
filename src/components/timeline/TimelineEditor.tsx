@@ -706,6 +706,15 @@ export interface TimelineEditorProps {
      *  because a track arriving in a new scope needs a rank in it and its old
      *  number ranks it somewhere else entirely. */
     onMoveToScope(trackId: string, groupId: string | null, order: number): void
+    /** The menu's "Move to": these tracks go to the bottom of that folder. */
+    onMoveToFolder?(trackIds: readonly string[], folderId: string): void
+    /**
+     * "Move to" moves (folder changes and new folders) are drawn at once and
+     * held, like drops, until the track list has been left alone for
+     * `TRACK_ORDER_SAVE_QUIET_MS`. This saves the ones being held; the editor
+     * calls it on the same clock and triggers that save its own drops.
+     */
+    onSaveMoves?(): void
     onCreateFolderFrom(trackIds: readonly string[]): string
     onDelete(trackIds: readonly string[]): void
     /**
@@ -1677,6 +1686,8 @@ export function TimelineEditor({
         canPromote: Boolean(onPromoteTrackToRows),
         canHide: canHideTracks,
         canSetLengths: Boolean(lineLengthsAction),
+        canMoveToFolder: Boolean(trackEditing?.onMoveToFolder),
+        folders: folderTracks,
       }),
     )
   }
@@ -1742,6 +1753,51 @@ export function TimelineEditor({
     return count
   }
 
+  // "Move to" moves rows the way a drop does: measured now, slid once the move
+  // paints. `openOnLanding` is a closed destination folder, opened in the same
+  // pass so the track is seen arriving instead of vanishing into it.
+  const pendingTrackMove = useRef<{ snapshot: TrackMoveSnapshot; openOnLanding: string | null } | null>(null)
+  function armTrackMove(trackIds: readonly string[], destinationFolderId: string | null) {
+    const root = editorRef.current
+    if (!root) return
+    const chosen = new Set(trackIds)
+    pendingTrackMove.current = {
+      snapshot: snapshotTrackMove(
+        root,
+        tracks.filter((tr) => chosen.has(tr.id)).map((tr) => ({ id: tr.id, groupId: tr.groupId ?? null })),
+      ),
+      openOnLanding: destinationFolderId,
+    }
+  }
+  useLayoutEffect(() => {
+    const pending = pendingTrackMove.current
+    const root = editorRef.current
+    if (!pending || !root) return
+    if (performance.now() - pending.snapshot.at > TRACK_MOVE_MAX_WAIT_MS) {
+      pendingTrackMove.current = null
+      return
+    }
+    if (!trackMoveLanded(pending.snapshot, tracks)) return
+    const destination = pending.openOnLanding
+    if (destination && collapsedFolders.has(destination)) {
+      // Re-renders before paint; this effect plays the move on that pass.
+      const next = new Set(collapsedFolders)
+      next.delete(destination)
+      saveCollapsedFolders(fileId, next)
+      setCollapsedFolders(next)
+      return
+    }
+    pendingTrackMove.current = null
+    playTrackMove(root, pending.snapshot)
+  }, [tracks, collapsedFolders, fileId])
+
+  /** A "Move to" move waits for the list to settle, as a drop does. Offline it
+   *  saves now, so a refusal is said while the move is still in mind. */
+  function holdMenuMove() {
+    if (online) armQuietSave()
+    else saveUnsavedOrders()
+  }
+
   function trackMenu(track: TimelineTrack): ReactNode {
     // Stage 2b: the menu acts on the SELECTION when the row it was opened on is
     // part of one — see `menuTargets`, which also makes an outside row the
@@ -1754,14 +1810,27 @@ export function TimelineEditor({
       onSetColor: onSetTrackColor,
       onPromote: onPromoteTrackToRows,
       ...(canHideTracks ? { onHide: hideTracks, busyTrackIds: busyTrackIds() } : {}),
+      folders: folderTracks,
       editing: trackEditing
         ? {
-            onLeaveFolder: trackEditing.onLeaveFolder,
+            onLeaveFolder: (trackIds) => {
+              armTrackMove(trackIds, null)
+              trackEditing.onLeaveFolder(trackIds)
+              holdMenuMove()
+            },
+            onMoveToFolder: trackEditing.onMoveToFolder
+              ? (trackIds, folderId) => {
+                  armTrackMove(trackIds, folderId)
+                  trackEditing.onMoveToFolder?.(trackIds, folderId)
+                  holdMenuMove()
+                }
+              : undefined,
             onCreateFolderFrom: (trackIds) => {
+              armTrackMove(trackIds, null)
               const folderId = trackEditing.onCreateFolderFrom(trackIds)
-              // The row does not exist until the write lands and the refresh
-              // arrives; setting this now means the field is focused the
-              // instant it does, with no second gesture.
+              holdMenuMove()
+              // The workspace draws the new row before saving it, so the
+              // field is focused as it appears, with no second gesture.
               setRenamingTrackId(folderId)
               setTrackSelection(EMPTY_SELECTION)
             },
@@ -3214,33 +3283,505 @@ export function TimelineEditor({
   }
 
   /** Where the pointer is, in the same frame the collision rect is measured. */
-  function trackPointer(event: DragOverEvent | DragEndEvent): { y: number; overTop: number; overHeight: number } | null {
+  function trackPointer(event: DragOverEvent | DragMoveEvent | DragEndEvent): { y: number; overTop: number; overHeight: number } | null {
     const rect = event.over?.rect
     const start = event.activatorEvent
     if (!rect || !(start instanceof MouseEvent)) return null
     return { y: start.clientY + event.delta.y, overTop: rect.top, overHeight: rect.height }
   }
 
-  function resolvedTrackDrop(event: DragOverEvent | DragEndEvent) {
+  function resolvedTrackDrop(event: DragOverEvent | DragMoveEvent | DragEndEvent) {
     return adjustTrackDrop(trackRows, resolveTrackDrop(event.active, event.over), trackPointer(event))
   }
 
-  function endTrackDrag() {
-    setDraggedTrackId(null)
+  /** The gap currently painted, for the top-edge retention in the handler below. */
+  const dragGapRef = useRef<GutterDragGap | null>(null)
+
+  function clearDragGap() {
+    dragGapRef.current = null
+    if (dragGapKey.current == null) return
+    dragGapKey.current = null
+    setDragGap(null)
   }
+
+  /** The first gutter row's top WITHOUT its gap slide — where the column
+   *  actually starts, however far its first row is currently displaced. */
+  function firstRowLayoutTop(): number | null {
+    const slot = gutterInnerRef.current?.querySelector("[data-reorderable]")
+    if (!(slot instanceof HTMLElement)) return null
+    const rect = slot.getBoundingClientRect()
+    if (typeof DOMMatrixReadOnly !== "function") return rect.top
+    const shifted = new DOMMatrixReadOnly(getComputedStyle(slot).transform).m42
+    return rect.top - (Number.isFinite(shifted) ? shifted : 0)
+  }
+
+  /**
+   * Open the gap the release would land in, while the drag is still in the
+   * air. Same-scope reorders get this from the sortable already; a drag
+   * crossing a folder wall got nothing, so a folder's members stood still
+   * while a track was dragged in among them, and a member dragged above its
+   * folder disappeared under the folder's band with the folder never moving.
+   *
+   * Wired to drag MOVE as well as drag over: the gap's boundary is decided
+   * by which half of the hovered member the pointer is in, and that can
+   * change — the track sliding between two members of a folder it has not
+   * entered yet — without the hovered row ever changing.
+   */
+  function onTrackDragOver(event: DragOverEvent | DragMoveEvent) {
+    if (!liveTrackEditing.current) { clearDragGap(); return }
+    const trackId = String(event.active.id)
+    // Above the whole column the collision gives up — the nearest target
+    // becomes the dragged row itself, or nothing — and the answer turns
+    // into a same-list drop, or a heading hit, that would clear or re-aim
+    // this gap. But a release at that height still lands at the top (the
+    // folder's leave preview, or the first row's slot), so a gap already
+    // open at the top STAYS open: the folder at the head of the column
+    // keeps the dragged track's room however far above it the pointer
+    // rides, instead of sliding home the moment the pointer leaves the
+    // last row's rect.
+    const current = dragGapRef.current
+    const start = event.activatorEvent
+    const pointerY = start instanceof MouseEvent ? start.clientY + event.delta.y : null
+    const top = pointerY == null ? null : firstRowLayoutTop()
+    if (shouldRetainTopDragGap(current, trackId, pointerY, top)) return
+    const gap = dragGapForDrop(
+      baseRowsRef.current,
+      resolvedTrackDrop(event),
+      event.active.rect.current.initial?.height ?? rowH,
+    )
+    if (!gap) { clearDragGap(); return }
+    const key = `${trackId}|${gap.groupId ?? ""}|${gap.boundary}`
+    if (dragGapKey.current === key) return
+    dragGapKey.current = key
+    const next = { ...gap, trackId }
+    dragGapRef.current = next
+    setDragGap(next)
+  }
+
+  function clearFolderExit() {
+    if (folderExitTimer.current != null) {
+      window.clearTimeout(folderExitTimer.current)
+      folderExitTimer.current = null
+    }
+    if (folderEnterTimer.current != null) {
+      window.clearTimeout(folderEnterTimer.current)
+      folderEnterTimer.current = null
+    }
+    folderEnterTarget.current = null
+    if (folderExitMove.current) {
+      document.removeEventListener("pointermove", folderExitMove.current)
+      folderExitMove.current = null
+    }
+    if (folderExitUp.current) {
+      document.removeEventListener("pointerup", folderExitUp.current)
+      folderExitUp.current = null
+    }
+  }
+
+  function openFolder(folderId: string) {
+    setCollapsedFolders((prev) => {
+      if (!prev.has(folderId)) return prev
+      const next = new Set(prev)
+      next.delete(folderId)
+      saveCollapsedFolders(fileId, next)
+      return next
+    })
+  }
+
+  function commitFolderPreview() {
+    const preview = folderPreviewRef.current
+    const editing = liveTrackEditing.current
+    if (!preview || !editing || folderPreviewCommitted.current) return
+    folderPreviewCommitted.current = true
+    if (preview.kind === "enter") {
+      openFolder(preview.folderId)
+      holdScopeMove(preview.trackId, preview.folderId, preview.order)
+      return
+    }
+    holdScopeMove(preview.trackId, null, preview.order)
+  }
+
+  function showLeavePreview(edge: "above" | "below") {
+    const home = folderHomeRef.current
+    if (!home) return
+    const current = folderPreviewRef.current
+    if (current?.kind === "leave" && current.edge === edge && current.trackId === home.trackId) return
+    const order = orderBesideFolder(baseRowsRef.current, home.folderId, edge)
+    if (order == null) return
+    const next = { kind: "leave" as const, trackId: home.trackId, folderId: home.folderId, edge, order }
+    folderPreviewRef.current = next
+    setFolderPreview(next)
+  }
+
+  function showEnterPreview(folderId: string) {
+    const trackId = draggedTrackRef.current
+    if (!trackId) return
+    const current = folderPreviewRef.current
+    if (current?.kind === "enter" && current.folderId === folderId && current.trackId === trackId) return
+    const next = { kind: "enter" as const, trackId, folderId, edge: null, order: 0 }
+    folderPreviewRef.current = next
+    setFolderPreview(next)
+  }
+
+  function clearFolderPreview() {
+    if (folderExitTimer.current != null) {
+      window.clearTimeout(folderExitTimer.current)
+      folderExitTimer.current = null
+    }
+    if (folderEnterTimer.current != null) {
+      window.clearTimeout(folderEnterTimer.current)
+      folderEnterTimer.current = null
+    }
+    folderEnterTarget.current = null
+    if (!folderPreviewRef.current) return
+    folderPreviewRef.current = null
+    setFolderPreview(null)
+  }
+
+  function clearLeavePreview() {
+    if (folderExitTimer.current != null) {
+      window.clearTimeout(folderExitTimer.current)
+      folderExitTimer.current = null
+    }
+    if (folderPreviewRef.current?.kind !== "leave") return
+    folderPreviewRef.current = null
+    setFolderPreview(null)
+  }
+
+  function clearEnterPreview() {
+    if (folderEnterTimer.current != null) {
+      window.clearTimeout(folderEnterTimer.current)
+      folderEnterTimer.current = null
+    }
+    folderEnterTarget.current = null
+    if (folderPreviewRef.current?.kind !== "enter") return
+    folderPreviewRef.current = null
+    setFolderPreview(null)
+  }
+
+  /** The top-level folder whose block, heading and open members, the pointer is on. */
+  function folderRowAt(pointerY: number): TrackRow | null {
+    for (const row of baseRowsRef.current) {
+      if (row.depth !== 0 || row.track.kind !== "folder") continue
+      const toggle = document.querySelector(`[data-testid="tl-folder-toggle-${CSS.escape(row.track.id)}"]`)
+      const block = toggle?.closest("[data-reorderable]")
+      if (!(block instanceof HTMLElement)) continue
+      const rect = block.getBoundingClientRect()
+      if (pointerY >= rect.top && pointerY <= rect.bottom) return row
+    }
+    return null
+  }
+
+  /** The heading the pointer is on of a folder a track goes into by resting
+   *  there: an empty one, or a closed one, which opens for it. */
+  function restingFolderAt(pointerY: number): string | null {
+    const row = folderRowAt(pointerY)
+    return row && (row.members.length === 0 || row.collapsed) ? row.track.id : null
+  }
+
+  /**
+   * Leaving a folder only drops the indent. Entering an empty one only adds
+   * it, after the track has rested on the heading; resting on a closed one
+   * opens it, so the track can be aimed among its members. The row stays with
+   * the pointer either way; the write is the pointer coming up.
+   */
+  function followFolderDrag(pointerX: number, pointerY: number) {
+    if (!liveTrackEditing.current) return
+    const restId = restingFolderAt(pointerY)
+    if (restId) {
+      clearLeavePreview()
+      if (folderEnterAnchor.current?.folderId !== restId) {
+        folderEnterAnchor.current = { folderId: restId, x: pointerX, y: pointerY }
+      }
+      const current = folderPreviewRef.current
+      if (current?.kind === "enter" && current.folderId === restId) return
+      if (folderEnterTimer.current != null && folderEnterTarget.current === restId) return
+      if (folderEnterTimer.current != null) {
+        window.clearTimeout(folderEnterTimer.current)
+        folderEnterTimer.current = null
+      }
+      folderEnterTarget.current = restId
+      folderEnterTimer.current = window.setTimeout(() => {
+        folderEnterTimer.current = null
+        const folder = baseRowsRef.current.find((row) => row.track.id === restId)
+        if (folder && folder.members.length > 0) openFolder(restId)
+        else showEnterPreview(restId)
+      }, FOLDER_ENTER_DWELL_MS)
+      return
+    }
+    // Resting is measured against where the pointer STOPPED, not against
+    // where the folder is now: the sortable slides the folder out from under
+    // a pointer that crosses its midpoint, so a still pointer soon reads as
+    // "no longer over the folder" and the dwell cancelled itself before it
+    // could ever fire. A pointer that has genuinely moved on cancels it.
+    const anchor = folderEnterAnchor.current
+    if (
+      anchor
+      && (folderEnterTarget.current === anchor.folderId
+        || (folderPreviewRef.current?.kind === "enter" && folderPreviewRef.current.folderId === anchor.folderId))
+      && Math.hypot(pointerX - anchor.x, pointerY - anchor.y) <= 8
+    ) return
+    folderEnterAnchor.current = null
+    clearEnterPreview()
+
+    const home = folderHomeRef.current
+    if (!home) return
+    // Over another open folder, the drop goes in among its members.
+    const over = folderRowAt(pointerY)
+    if (over && over.track.id !== home.folderId) {
+      clearLeavePreview()
+      return
+    }
+    const edge = folderDragEdge(home.top, home.bottom, pointerY)
+    if (edge === "above") {
+      if (folderExitTimer.current != null) {
+        window.clearTimeout(folderExitTimer.current)
+        folderExitTimer.current = null
+      }
+      showLeavePreview("above")
+      return
+    }
+    if (edge === "below") {
+      if (folderPreviewRef.current?.kind === "leave" && folderPreviewRef.current.edge === "above") clearLeavePreview()
+      if (
+        folderExitTimer.current != null
+        || (folderPreviewRef.current?.kind === "leave" && folderPreviewRef.current.edge === "below")
+      ) return
+      folderExitTimer.current = window.setTimeout(() => {
+        folderExitTimer.current = null
+        showLeavePreview("below")
+      }, FOLDER_EXIT_DWELL_MS)
+      return
+    }
+    clearLeavePreview()
+  }
+
+  function endTrackDrag() {
+    draggedTrackRef.current = null
+    folderHomeRef.current = null
+    folderEnterAnchor.current = null
+    clearDragGap()
+    clearFolderExit()
+    // Unconditionally: the drag start stopped the clock for "Move to" moves
+    // the workspace is holding too, and an empty save is nothing.
+    armQuietSave()
+  }
+
+  /** A reorder dropped but not yet painted: see `TRACK_RELEASE_SETTLE_MS`. */
+  const pendingReorder = useRef<{ timer: number; paint: () => void } | null>(null)
+  /** `orderOnly`: nothing else in this batch touches the lanes. Not so for the
+   *  save, which runs inside whatever click or shortcut prompted it. */
+  const flushPendingReorder = useCallback((orderOnly = true) => {
+    const pending = pendingReorder.current
+    if (!pending) return
+    pendingReorder.current = null
+    window.clearTimeout(pending.timer)
+    if (orderOnly) paintingOrderOnly.current = true
+    pending.paint()
+  }, [])
+  /** Each painted drop's write, bound to the props it was dropped on (this
+   *  component is not remounted on a file switch). One per track: a later drop
+   *  of the same track replaces it, except that a reorder of a track whose
+   *  folder move is unsaved is that move's new order. A `groupId` (null is the
+   *  top level) makes it a move. See `TRACK_ORDER_SAVE_QUIET_MS`. */
+  const unsavedWrites = useRef(new Map<string, {
+    order: number
+    groupId?: string | null
+    reorder?: (trackId: string, order: number) => void
+    move?: (trackId: string, groupId: string | null, order: number) => void
+  }>())
+  const quietSaveTimer = useRef<number | null>(null)
+  const cancelQuietSave = useCallback(() => {
+    if (quietSaveTimer.current == null) return
+    window.clearTimeout(quietSaveTimer.current)
+    quietSaveTimer.current = null
+  }, [])
+  /** The drops held here. The "Move to" moves the workspace holds stay put. */
+  const saveDragWrites = useCallback(() => {
+    flushPendingReorder(false)
+    cancelQuietSave()
+    const writes = [...unsavedWrites.current]
+    if (writes.length === 0) return
+    unsavedWrites.current.clear()
+    // The parent paints each write's place in the same batch as this clear.
+    for (const [trackId, place] of writes) {
+      if (place.groupId !== undefined) place.move?.(trackId, place.groupId, place.order)
+      else place.reorder?.(trackId, place.order)
+    }
+    setUnsavedOrders(null)
+  }, [flushPendingReorder, cancelQuietSave])
+  /** Everything waiting. "Move to" moves first: a drop held here was made
+   *  after them (pressing "Move to" saves the drops before it), so it lands
+   *  last and wins. */
+  const saveUnsavedOrders = useCallback(() => {
+    liveTrackEditing.current?.onSaveMoves?.()
+    saveDragWrites()
+  }, [saveDragWrites])
+  /** Restarted by every drop, cancelled by every drag start. */
+  const armQuietSave = useCallback(() => {
+    cancelQuietSave()
+    quietSaveTimer.current = window.setTimeout(saveUnsavedOrders, TRACK_ORDER_SAVE_QUIET_MS)
+  }, [cancelQuietSave, saveUnsavedOrders])
+  function reorderAfterSettle(trackId: string, order: number) {
+    const reorder = onReorderTrack
+    if (!reorder) return
+    const forFileId = fileId
+    // Offline, the parent refuses with a reason; say so now, not seconds later.
+    const holdUnsaved = online
+    flushPendingReorder()
+    const timer = window.setTimeout(() => flushPendingReorder(), TRACK_RELEASE_SETTLE_MS)
+    pendingReorder.current = {
+      timer,
+      paint: () => {
+        const unsaved = unsavedWrites.current.get(trackId)
+        unsavedWrites.current.set(trackId, unsaved?.groupId !== undefined ? { ...unsaved, order } : { order, reorder })
+        setUnsavedOrders((current) => {
+          const same = current?.fileId === forFileId
+          const scopes = same ? current.scopes : new Map<string, PendingTrackScope>()
+          if (scopes.has(trackId)) {
+            return { fileId: forFileId, orders: current?.orders ?? new Map(), scopes: withPendingScopeOrders(scopes, [{ trackId, order }]) }
+          }
+          const orders = new Map(same ? current.orders : [])
+          orders.set(trackId, order)
+          return { fileId: forFileId, orders, scopes }
+        })
+        if (holdUnsaved) {
+          armQuietSave()
+        } else {
+          paintingOrderOnly.current = false
+          saveUnsavedOrders()
+        }
+      },
+    }
+  }
+  /** A drop into, out of or between folders. Painted with the release, which
+   *  glides the row into its new list, and saved like a reorder. */
+  function holdScopeMove(trackId: string, groupId: string | null, order: number) {
+    const move = liveTrackEditing.current?.onMoveToScope
+    if (!move) return
+    const forFileId = fileId
+    flushPendingReorder()
+    unsavedWrites.current.set(trackId, { order, groupId, move })
+    paintingOrderOnly.current = true
+    setUnsavedOrders((current) => {
+      const same = current?.fileId === forFileId
+      const scopes = new Map(same ? current.scopes : [])
+      scopes.set(trackId, { groupId, order })
+      return { fileId: forFileId, orders: withoutPendingOrder(same ? current.orders : new Map(), trackId), scopes }
+    })
+    if (online) {
+      armQuietSave()
+    } else {
+      paintingOrderOnly.current = false
+      saveUnsavedOrders()
+    }
+  }
+  // Anything but arranging tracks saves first: a click off the rows (menus,
+  // undo, the editor), a shortcut, a hidden tab, a file switch, an unmount.
+  // Plain typing does not, so the first keystroke after a drag stays light.
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest("[data-reorderable]")) return
+      // "Move to" is arranging tracks too, so the moves keep settling. The
+      // drops are saved, so the move is placed against the rows on screen.
+      if (event.target instanceof Element && event.target.closest("[data-tl-track-move]")) {
+        saveDragWrites()
+        return
+      }
+      saveUnsavedOrders()
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) saveUnsavedOrders()
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") saveUnsavedOrders()
+    }
+    window.addEventListener("pointerdown", onPointerDown, true)
+    window.addEventListener("keydown", onKeyDown, true)
+    document.addEventListener("visibilitychange", onVisibility)
+    window.addEventListener("pagehide", saveUnsavedOrders)
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown, true)
+      window.removeEventListener("keydown", onKeyDown, true)
+      document.removeEventListener("visibilitychange", onVisibility)
+      window.removeEventListener("pagehide", saveUnsavedOrders)
+      saveUnsavedOrders()
+    }
+  }, [fileId, saveUnsavedOrders, saveDragWrites])
 
   function onTrackDragStart(event: DragStartEvent) {
+    // The next drag measures the list, so the last drop must be painted in it.
+    flushPendingReorder()
+    cancelQuietSave()
     trackDragMovedRef.current = true
-    setDraggedTrackId(String(event.active.id))
+    const id = String(event.active.id)
+    draggedTrackRef.current = id
+    clearFolderPreview()
+    clearFolderExit()
+    folderPreviewCommitted.current = false
+    const isFolder = baseRowsRef.current.some((row) => row.track.id === id && row.track.kind === "folder")
+    if (!liveTrackEditing.current || isFolder) return
+    const member = baseRowsRef.current.find((row) => row.track.id === id && row.depth === 1)
+    const folderId = member?.track.groupId
+    if (folderId) {
+      const toggle = document.querySelector(`[data-testid="tl-folder-toggle-${CSS.escape(folderId)}"]`)
+      const block = toggle?.closest("[data-reorderable]")
+      if (block instanceof HTMLElement) {
+        const rect = block.getBoundingClientRect()
+        folderHomeRef.current = { trackId: id, folderId, top: rect.top, bottom: rect.bottom }
+      }
+    }
+    const move = (pointer: PointerEvent) => followFolderDrag(pointer.clientX, pointer.clientY)
+    const up = () => commitFolderPreview()
+    folderExitMove.current = move
+    folderExitUp.current = up
+    document.addEventListener("pointermove", move)
+    document.addEventListener("pointerup", up)
   }
 
-  function onTrackDragEnd(event: DragEndEvent) {
-    const resolution = resolvedTrackDrop(event)
+  function onTrackDragEnd(event: DragEndEvent): boolean | "scope" {
+    const preview = folderPreviewRef.current
     endTrackDrag()
-    const commit = commitTrackReorder(trackRows, resolution, Boolean(trackEditing))
-    if (!commit) return
-    if (commit.kind === "reorder") onReorderTrack?.(commit.trackId, commit.order)
-    else trackEditing?.onMoveToScope(commit.trackId, commit.groupId, commit.order)
+    if (preview) {
+      // Out of its folder, the track lands where the gap shows it going.
+      // Beside the folder is only for a pointer with no row to aim at.
+      const out = preview.kind === "leave"
+        ? commitTrackReorder(baseRowsRef.current, resolvedTrackDrop(event), true)
+        : null
+      if (out?.kind === "move" && out.groupId === null && out.trackId === preview.trackId) {
+        folderPreviewCommitted.current = true
+        holdScopeMove(out.trackId, null, out.order)
+        return "scope"
+      }
+      // A preview commit is a scope move like any other — say so, or the
+      // release plan reads it as a cancelled drag and the row teleports to
+      // its new list instead of gliding there.
+      commitFolderPreview()
+      return "scope"
+    }
+    const resolution = resolvedTrackDrop(event)
+    const pointer = trackPointer(event)
+    if (pointer && resolution.kind === "move") {
+      const over = baseRowsRef.current.filter((row) => row.depth === 0)[resolution.toPosition]?.track
+      const toggle = over?.kind === "folder"
+        ? document.querySelector(`[data-testid="tl-folder-toggle-${CSS.escape(over.id)}"]`)
+        : null
+      const heading = toggle?.closest("[data-reorderable]")
+      const top = heading instanceof HTMLElement ? heading.getBoundingClientRect().top : null
+      const above = top == null ? null : orderAboveClosedFolder(baseRowsRef.current, resolution, pointer.y, top)
+      if (above && onReorderTrack) {
+        reorderAfterSettle(above.trackId, above.order)
+        return true
+      }
+    }
+    const commit = commitTrackReorder(baseRowsRef.current, resolution, Boolean(trackEditing))
+    if (!commit) return false
+    if (commit.kind === "reorder") {
+      reorderAfterSettle(commit.trackId, commit.order)
+      return true
+    }
+    holdScopeMove(commit.trackId, commit.groupId, commit.order)
+    return "scope"
   }
 
   /** A move expressed in scope indices. `scope.tracks` is ascending by `order`,

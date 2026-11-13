@@ -3197,6 +3197,8 @@ describe("TimelineEditor — rows come from the track model", () => {
     onAdd: vi.fn((_spec: { kind: string; name: string }) => "new-track-id"),
     onLeaveFolder: vi.fn(),
     onMoveToScope: vi.fn(),
+    onMoveToFolder: vi.fn(),
+    onSaveMoves: vi.fn(),
     onCreateFolderFrom: vi.fn((_ids: readonly string[]) => "new-folder-id"),
     onDelete: vi.fn(),
   })
@@ -3250,7 +3252,7 @@ describe("TimelineEditor — rows come from the track model", () => {
       .querySelectorAll<HTMLElement>("[data-tl-track-row]")[0])
     expect(screen.getByText("Rename")).toBeTruthy()
     expect(screen.queryByText("Color")).toBeNull()
-    expect(screen.queryByText("New folder from this track")).toBeNull()
+    expect(screen.queryByTestId("tl-track-move-to")).toBeNull()
     unmount()
 
     render(
@@ -3262,7 +3264,7 @@ describe("TimelineEditor — rows come from the track model", () => {
     fireEvent.contextMenu(screen.getByTestId("tl-scroll").previousElementSibling!
       .querySelectorAll<HTMLElement>("[data-tl-track-row]")[0])
     expect(screen.getByText("Rename")).toBeTruthy()
-    expect(screen.getByText("New folder from this track")).toBeTruthy()
+    expect(screen.getByTestId("tl-track-move-to")).toBeTruthy()
   })
 
   // The maintainers' machinery is withheld from someone who can do neither.
@@ -3277,7 +3279,7 @@ describe("TimelineEditor — rows come from the track model", () => {
     fireEvent.contextMenu(screen.getByTestId("tl-track-menu-target-audio"))
     expect(screen.getByText("Hide track")).toBeTruthy()
     expect(screen.queryByText("Rename")).toBeNull()
-    expect(screen.queryByText("New folder from this track")).toBeNull()
+    expect(screen.queryByTestId("tl-track-move-to")).toBeNull()
   })
 
   // Deleting really deletes, so it asks — and it asks with the NUMBER, which is
@@ -3686,63 +3688,68 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(screen.queryByText("Color")).toBeNull()
   })
 
-  // Stage 3c (Sam, 2026-08-24): the verb used to eject the track from the
-  // folder it was in and make a fresh top-level folder at the BOTTOM of the
-  // list — not what "new folder from this track" says it does. He chose
-  // withholding it over allowing subfolders, which one level is enforced by
-  // construction throughout track-groups anyway.
-  it("does not offer a new folder for a track that is already in one", () => {
-    render(selectable({ trackEditing: editingActions(), tracks: foldedTracks() }))
-    const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
-    fireEvent.contextMenu(named("Spanish"))
-    expect(screen.queryByText(/^New folder/)).toBeNull()
-    // The honest route out is right there instead.
-    expect(screen.getByText("Take out of folder")).toBeInTheDocument()
-  })
-
-  // Sam, 2026-08-25: with tracks both inside and outside a folder selected, the
-  // menu offered BOTH verbs, each quietly scoped to its own half — "make a
-  // folder out of two of these" next to "eject the other three", with nothing
-  // saying which was which. They are opposites; a selection that could take
-  // either is one the user has not finished making.
-  it("offers NEITHER foldering verb on a selection that straddles a folder", () => {
-    render(selectable({ trackEditing: editingActions(), tracks: foldedTracks() }))
-    const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
-    // Spanish is inside the folder; Source audio is not.
-    fireEvent.click(named("Spanish"))
-    fireEvent.click(named("Source audio"), { metaKey: true })
-    fireEvent.contextMenu(named("Source audio"))
-    expect(screen.queryByText(/^New folder/)).toBeNull()
-    expect(screen.queryByText(/^Take out of folder/)).toBeNull()
-  })
-
-  it("still offers each verb when the selection is all one way", () => {
+  // "Move to" is where a track changes folder: a new one, none, or one of the
+  // file's folders by name — never the folder the whole selection is already in.
+  it("moves the selection through Move to: a folder by name, or No folder", () => {
     const editing = editingActions()
     render(selectable({ trackEditing: editing, tracks: foldedTracks() }))
     const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
-    // All inside → eject, no new-folder.
+
+    // Both inside Dubs → New folder and No folder, and Dubs is not listed.
     fireEvent.click(named("Target audio"))
     fireEvent.click(named("Spanish"), { metaKey: true })
     fireEvent.contextMenu(named("Spanish"))
-    expect(screen.getByText(/^Take 2 tracks out of/)).toBeInTheDocument()
-    expect(screen.queryByText(/^New folder/)).toBeNull()
-    fireEvent.keyDown(document.body, { key: "Escape" })
+    fireEvent.click(screen.getByText("Move 2 tracks to"))
+    expect(screen.getByRole("menuitem", { name: "New folder" })).toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: "Dubs" })).toBeNull()
+    fireEvent.click(screen.getByRole("menuitem", { name: "No folder" }))
+    expect((editing.onLeaveFolder.mock.calls[0][0] as string[]).sort()).toEqual(["target-audio", "trk-es"])
 
-    // All outside → new-folder, no eject.
+    // Outside → Dubs is listed, and there is no folder to leave.
     fireEvent.click(named("Source audio"))
     fireEvent.contextMenu(named("Source audio"))
-    expect(screen.getByText(/^New folder/)).toBeInTheDocument()
-    expect(screen.queryByText(/^Take out of folder/)).toBeNull()
+    fireEvent.click(screen.getByText("Move to"))
+    expect(screen.queryByRole("menuitem", { name: "No folder" })).toBeNull()
+    fireEvent.click(screen.getByRole("menuitem", { name: "Dubs" }))
+    expect(editing.onMoveToFolder).toHaveBeenCalledWith(["source-audio"], "grp")
   })
 
-  it("makes a folder FROM the selection, and there is no move-to-folder", () => {
+  // Like drops, "Move to" moves are held until the track list settles: several
+  // made in a row are saved together, once, after the last of them.
+  it("saves Move to moves once the list has been left alone, not per move", () => {
+    const editing = editingActions()
+    render(selectable({ trackEditing: editing, tracks: foldedTracks() }))
+    const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
+    const moveSourceAudio = (choice: string) => {
+      fireEvent.click(named("Source audio"))
+      fireEvent.contextMenu(named("Source audio"))
+      fireEvent.click(screen.getByText("Move to"))
+      const item = screen.getByRole("menuitem", { name: choice })
+      fireEvent.pointerDown(item)
+      fireEvent.click(item)
+    }
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      moveSourceAudio("Dubs")
+      act(() => { vi.advanceTimersByTime(TRACK_ORDER_SAVE_QUIET_MS - 100) })
+      moveSourceAudio("New folder")
+      act(() => { vi.advanceTimersByTime(TRACK_ORDER_SAVE_QUIET_MS - 1) })
+      expect(editing.onSaveMoves).not.toHaveBeenCalled()
+      act(() => { vi.advanceTimersByTime(1) })
+      expect(editing.onSaveMoves).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("makes a folder FROM the selection through Move to → New folder", () => {
     const editing = editingActions()
     render(selectable({ trackEditing: editing }))
     fireEvent.click(rows()[1])
     fireEvent.click(rows()[2], { metaKey: true })
     fireEvent.contextMenu(rows()[2])
-    expect(screen.queryByText(/move to folder/i)).toBeNull()
-    fireEvent.click(screen.getByText("New folder from 2 tracks"))
+    fireEvent.click(screen.getByText("Move 2 tracks to"))
+    fireEvent.click(screen.getByRole("menuitem", { name: "New folder" }))
     expect(editing.onCreateFolderFrom).toHaveBeenCalledTimes(1)
     expect((editing.onCreateFolderFrom.mock.calls[0][0] as string[]).sort()).toEqual([
       "source-audio",
@@ -5328,6 +5335,800 @@ describe("TimelineEditor — dropping a track on a folder member moves it into t
     dragTrackOnto("Source text", "Target audio")
     expect(onMoveToScope).toHaveBeenCalledTimes(1)
     expect(onReorderTrack).not.toHaveBeenCalled()
+  })
+
+  // An open heading takes the track in. A closed folder does not: a drop on
+  // it, or above it, is a reorder beside the heading.
+  it("moves into a folder from its heading, and out onto the heading or a root row", () => {
+    const onReorderTrack = vi.fn()
+    const onMoveToScope = vi.fn()
+    const view = render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={folded()}
+        onRetimeSubtitle={() => {}} onReorderTrack={onReorderTrack}
+        trackEditing={{
+          onAdd: () => "x", onLeaveFolder: () => {},
+          onMoveToScope, onCreateFolderFrom: () => "y", onDelete: () => {},
+        }}
+      />,
+    )
+    dragTrackOnto("Source text", "Dubs")
+    expect(onMoveToScope).toHaveBeenCalledWith("source-subtitles", "grp", -1)
+    expect(onReorderTrack).not.toHaveBeenCalled()
+
+    dragTrackOnto("Target audio", "Dubs")
+    expect(onMoveToScope).toHaveBeenCalledWith("target-audio", null, 3)
+
+    // Out onto a root row: where that row's gap was, not beside the folder.
+    dragTrackOnto("Target audio", "Source text")
+    expect(onMoveToScope).toHaveBeenLastCalledWith("target-audio", null, -1)
+    view.unmount()
+
+    // A drag swallows the next click, so the closed folder is a fresh render
+    // that reads the collapse from storage instead of from a toggle press.
+    localStorage.setItem("aquilla:tlFoldersClosed:f1", JSON.stringify(["grp"]))
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={folded()}
+        onRetimeSubtitle={() => {}} onReorderTrack={onReorderTrack}
+        trackEditing={{
+          onAdd: () => "x", onLeaveFolder: () => {},
+          onMoveToScope, onCreateFolderFrom: () => "y", onDelete: () => {},
+        }}
+      />,
+    )
+    const scopeCalls = onMoveToScope.mock.calls.length
+    dragTrackOnto("Source text", "Dubs")
+    expect(onMoveToScope).toHaveBeenCalledTimes(scopeCalls)
+    expect(onReorderTrack).toHaveBeenCalledWith("source-subtitles", 5)
+  })
+
+  it("steps a member out after it rests under the folder, and above the folder at once", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    const names = () => [...document.querySelectorAll<HTMLElement>("[data-tl-track-row]")].map((el) => {
+      const text = el.textContent ?? ""
+      if (text.includes("Target audio")) return "Target audio"
+      if (text.includes("Source audio")) return "Source audio"
+      if (text.includes("Source text")) return "Source text"
+      if (text.includes("Dubs")) return "Dubs"
+      return text
+    })
+    const indented = () => trackRowNamed("Target audio").querySelector(":scope > div")?.className.includes("pl-6") === true
+    try {
+      const onMoveToScope = vi.fn()
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+          tracks={folded()}
+          onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+          trackEditing={{
+            onAdd: () => "x", onLeaveFolder: () => {},
+            onMoveToScope, onCreateFolderFrom: () => "y", onDelete: () => {},
+          }}
+        />,
+      )
+      const pull = (pointerY: number) => {
+        layoutTrackSlots()
+        const row = trackRowNamed("Target audio")
+        const host = trackSlot("Target audio").getBoundingClientRect()
+        const start = { x: host.left + host.width / 2, y: host.top + 12 }
+        fireEvent.pointerDown(row, trackPointer(start.x, start.y))
+        const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+        fireEvent.pointerMove(document, nudged)
+        fireEvent.pointerMove(document, nudged)
+        fireEvent.pointerMove(document, trackPointer(start.x, pointerY))
+      }
+
+      const bottom = trackSlot("Dubs").getBoundingClientRect().bottom
+      pull(bottom + 400)
+      act(() => { vi.advanceTimersByTime(1100) })
+      expect(indented()).toBe(true)
+      expect(onMoveToScope).not.toHaveBeenCalled()
+      act(() => { vi.advanceTimersByTime(100) })
+      expect(indented()).toBe(false)
+      expect(names()).toEqual(["Source text", "Source audio", "Dubs", "Target audio"])
+      fireEvent.pointerUp(document, trackPointer(20, bottom + 400, 0))
+      saveHeldDrops()
+      expect(onMoveToScope).toHaveBeenCalledWith("target-audio", null, 5)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("moves a member above its folder as soon as the pointer is above it", () => {
+    const onMoveToScope = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={folded()}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+        trackEditing={{
+          onAdd: () => "x", onLeaveFolder: () => {},
+          onMoveToScope, onCreateFolderFrom: () => "y", onDelete: () => {},
+        }}
+      />,
+    )
+    layoutTrackSlots()
+    const top = trackSlot("Dubs").getBoundingClientRect().top
+    const row = trackRowNamed("Target audio")
+    const host = trackSlot("Target audio").getBoundingClientRect()
+    const start = { x: host.left + host.width / 2, y: host.top + 12 }
+    fireEvent.pointerDown(row, trackPointer(start.x, start.y))
+    const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, trackPointer(start.x, top - 30))
+    const names = [...document.querySelectorAll<HTMLElement>("[data-tl-track-row]")].map((el) => {
+      const text = el.textContent ?? ""
+      if (text.includes("Target audio")) return "Target audio"
+      if (text.includes("Dubs")) return "Dubs"
+      return ""
+    }).filter(Boolean)
+    expect(trackRowNamed("Target audio").querySelector(":scope > div")?.className.includes("pl-6")).toBe(false)
+    expect(names.slice(-2)).toEqual(["Dubs", "Target audio"])
+    expect(onMoveToScope).not.toHaveBeenCalled()
+    // The pointer is on the upper half of the row above the folder, so the
+    // gap opens above that row too — and that is where the release lands,
+    // not merely beside the folder it came out of.
+    expect(translatedY(trackSlot("Source audio").style.transform)).toBe(40)
+    expect(translatedY(trackSlot("Source text").style.transform)).toBe(0)
+    fireEvent.pointerUp(document, trackPointer(start.x, top - 30, 0))
+    saveHeldDrops()
+    expect(onMoveToScope).toHaveBeenCalledWith("target-audio", null, 1)
+  })
+
+  it("slides the folder down while a member is held above it, and opens a gap inside the folder for a track held over its members", () => {
+    const onMoveToScope = vi.fn()
+    const editor = () => (
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={folded()}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+        trackEditing={{
+          onAdd: () => "x", onLeaveFolder: () => {},
+          onMoveToScope, onCreateFolderFrom: () => "y", onDelete: () => {},
+        }}
+      />
+    )
+    const view = render(editor())
+    const hold = (from: string, point: { x: number; y: number }) => {
+      layoutTrackSlots()
+      const row = trackRowNamed(from)
+      const host = trackSlot(from).getBoundingClientRect()
+      const start = { x: host.left + host.width / 2, y: host.top + 12 }
+      fireEvent.pointerDown(row, trackPointer(start.x, start.y))
+      const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+      fireEvent.pointerMove(document, nudged)
+      fireEvent.pointerMove(document, nudged)
+      fireEvent.pointerMove(document, trackPointer(point.x, point.y))
+    }
+
+    // Held above the folder, the folder block itself makes room: it slides
+    // down by the dragged member's height instead of the member sliding
+    // underneath its band.
+    const folderTop = trackSlot("Dubs").getBoundingClientRect().top
+    hold("Target audio", { x: 120, y: folderTop - 30 })
+    expect(translatedY(trackSlot("Dubs").style.transform)).toBe(40)
+    expect(translatedY(trackSlot("Source text").style.transform)).toBe(40)
+    fireEvent.pointerUp(document, trackPointer(120, folderTop - 30, 0))
+    saveHeldDrops()
+    // The gap is at the top of the column, so that is where it lands.
+    expect(onMoveToScope).toHaveBeenCalledWith("target-audio", null, -1)
+    view.unmount()
+
+    // A fresh render for the second hold: the first drop's release hold is
+    // still parked on the member row, as it would be until the new scope
+    // paints, and its transform is not the gap's to read.
+    render(editor())
+    // Held over the folder's member, the member makes room: the heading
+    // slides up into the dragged track's vacated slot while the member
+    // stays, opening the gap between them.
+    layoutTrackSlots()
+    const member = trackSlot("Target audio").getBoundingClientRect()
+    // Only the gutter rows move for it: the editor does not render, so no
+    // lane beside them is redrawn.
+    const laneEpoch = () => screen.getByTestId("tl-editor").getAttribute("data-tl-lane-epoch")
+    const epochBefore = laneEpoch()
+    const drawsBefore = laneDraws.count
+    hold("Source text", { x: member.left + member.width / 2, y: member.top + 8 })
+    expect(translatedY(trackSlot("Dubs").style.transform)).toBe(-40)
+    expect(translatedY(trackSlot("Target audio").style.transform)).toBe(40)
+    expect(laneEpoch()).toBe(epochBefore)
+    expect(laneDraws.count).toBe(drawsBefore)
+    // Sliding into the member's lower half re-aims the same drag past it —
+    // the member settles back and the gap moves below it, with no new row
+    // ever hovered — and the release lands where the gap was.
+    fireEvent.pointerMove(document, trackPointer(member.left + member.width / 2, member.top + 32))
+    expect(translatedY(trackSlot("Dubs").style.transform)).toBe(-40)
+    expect(translatedY(trackSlot("Target audio").style.transform)).toBe(0)
+    fireEvent.pointerUp(document, trackPointer(member.left + member.width / 2, member.top + 32, 0))
+    saveHeldDrops()
+    expect(onMoveToScope).toHaveBeenCalledWith("source-subtitles", "grp", 1)
+  })
+
+  it("keeps a member on the pointer while its folder makes room, and lands it without the folder sliding again", () => {
+    // Stateful: the scope move paints in the same commit as the drop, as the
+    // workspace's optimistic overlay does.
+    function Harness() {
+      const [moved, setMoved] = useState<Record<string, { groupId: string | null; order: number }>>({})
+      return (
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+          tracks={deriveTracksForFile({
+            trackOverrides: {
+              grp: { kind: "folder", name: "Dubs", order: 4 },
+              "target-audio": { groupId: "grp", order: 0 },
+              ...moved,
+            },
+          })}
+          onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+          trackEditing={{
+            onAdd: () => "x", onLeaveFolder: () => {},
+            onMoveToScope: (trackId, groupId, order) => setMoved((prev) => ({ ...prev, [trackId]: { groupId, order } })),
+            onCreateFolderFrom: () => "y", onDelete: () => {},
+          }}
+        />
+      )
+    }
+    render(<Harness />)
+    layoutTrackSlots()
+    const folder = trackSlot("Dubs")
+    const above = folder.getBoundingClientRect().top - 30
+    const host = trackSlot("Target audio").getBoundingClientRect()
+    const start = { x: host.left + host.width / 2, y: host.top + 12 }
+    fireEvent.pointerDown(trackRowNamed("Target audio"), trackPointer(start.x, start.y))
+    const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, trackPointer(start.x, above))
+    expect(translatedY(folder.style.transform)).toBe(40)
+    // The folder eases down, so the member's counter to it eases on the same
+    // curve — on `translate`, apart from the pointer's untransitioned share.
+    // Instant, it threw the row a slide's height off the pointer.
+    const member = trackSlot("Target audio")
+    expect(member.style.translate).toBe("0px -40px")
+    expect(member.style.transition).toBe("translate 180ms cubic-bezier(0.2, 0, 0, 1)")
+    expect(translatedY(member.style.transform)).toBe(above - start.y)
+
+    fireEvent.pointerUp(document, trackPointer(start.x, above, 0))
+    // The new scope puts the folder where its gap was already drawing it, so
+    // the gap goes at once. Easing it closed over the moved layout threw the
+    // folder back a row and slid it down again.
+    expect(trackSlot("Dubs")).toBe(folder)
+    expect(folder.style.transform).toBe("")
+  })
+
+  it("glides a member back when the gap closes, and drops below the folder from the empty space under it", () => {
+    const onReorderTrack = vi.fn()
+    const onMoveToScope = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={folded()}
+        onRetimeSubtitle={() => {}} onReorderTrack={onReorderTrack}
+        trackEditing={{
+          onAdd: () => "x", onLeaveFolder: () => {},
+          onMoveToScope, onCreateFolderFrom: () => "y", onDelete: () => {},
+        }}
+      />,
+    )
+    layoutTrackSlots()
+    const member = trackSlot("Target audio").getBoundingClientRect()
+    const row = trackRowNamed("Source text")
+    const host = trackSlot("Source text").getBoundingClientRect()
+    const start = { x: host.left + host.width / 2, y: host.top + 12 }
+    fireEvent.pointerDown(row, trackPointer(start.x, start.y))
+    const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, nudged)
+    // Over the member: it slides away to open the gap…
+    fireEvent.pointerMove(document, trackPointer(member.left + member.width / 2, member.top + 8))
+    expect(translatedY(trackSlot("Target audio").style.transform)).toBe(40)
+    // …and past it, into the empty space under the folder, the gap closes
+    // around a top-level landing instead: the member glides home on the
+    // slide curve rather than snapping, and the drop stays out.
+    const below = member.bottom + 30
+    fireEvent.pointerMove(document, trackPointer(member.left + member.width / 2, below))
+    expect(translatedY(trackSlot("Target audio").style.transform)).toBe(0)
+    expect(trackSlot("Target audio").style.transition).toContain("transform 180ms")
+    releaseTrackDrag(member.left + member.width / 2, below)
+    expect(onMoveToScope).not.toHaveBeenCalled()
+    expect(onReorderTrack).toHaveBeenCalledWith("source-subtitles", 5)
+  })
+
+  it("keeps the top folder's room open while the pointer rides above the whole column", () => {
+    const onMoveToScope = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={deriveTracksForFile({
+          trackOverrides: {
+            grp: { kind: "folder", name: "Dubs", order: -1 },
+            "target-audio": { groupId: "grp", order: 0 },
+          },
+        })}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+        trackEditing={{
+          onAdd: () => "x", onLeaveFolder: () => {},
+          onMoveToScope, onCreateFolderFrom: () => "y", onDelete: () => {},
+        }}
+      />,
+    )
+    layoutTrackSlots()
+    const folderTop = trackSlot("Dubs").getBoundingClientRect().top
+    const row = trackRowNamed("Target audio")
+    const host = trackSlot("Target audio").getBoundingClientRect()
+    const start = { x: host.left + host.width / 2, y: host.top + 12 }
+    fireEvent.pointerDown(row, trackPointer(start.x, start.y))
+    const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, nudged)
+    // Just above the folder: it slides down to make the member's room.
+    fireEvent.pointerMove(document, trackPointer(start.x, folderTop - 10))
+    expect(translatedY(trackSlot("Dubs").style.transform)).toBe(40)
+    // Far above the whole column, past every row's rect, the room stays —
+    // and the release there still lands the member above the folder.
+    fireEvent.pointerMove(document, trackPointer(start.x, folderTop - 200))
+    expect(translatedY(trackSlot("Dubs").style.transform)).toBe(40)
+    // The member stops at the column's top, as a top-level track does. Out of
+    // its own list it follows the pointer, and that travel ran off the top.
+    expect(host.top + translatedY(trackSlot("Target audio").style.transform)).toBe(folderTop)
+    fireEvent.pointerUp(document, trackPointer(start.x, folderTop - 200, 0))
+    saveHeldDrops()
+    expect(onMoveToScope).toHaveBeenCalledWith("target-audio", null, -2)
+  })
+
+  it("draws a track in the air over every folder heading it crosses", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={deriveTracksForFile({ trackOverrides: {
+          grp: { kind: "folder", name: "Dubs", order: 1 },
+          "target-audio": { groupId: "grp", order: 0 },
+        } })}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+        trackEditing={{ onAdd: () => "x", onLeaveFolder: () => {}, onMoveToScope: () => {}, onCreateFolderFrom: () => "y", onDelete: () => {} }}
+      />,
+    )
+    layoutTrackSlots()
+    const z = (el: HTMLElement) => Number(/(?:^|\s)z-(\d+)(?:\s|$)/.exec(el.className)?.[1] ?? 0)
+    // The heading's band is lifted to cover the gutter rule. A row in the air
+    // under it vanished beneath any folder that was not sliding at the time.
+    const heading = z(trackRowNamed("Dubs"))
+    const lift = (name: string) => {
+      const host = trackSlot(name).getBoundingClientRect()
+      const x = host.left + host.width / 2
+      fireEvent.pointerDown(trackRowNamed(name), trackPointer(x, host.top + 12))
+      const nudged = trackPointer(x, host.top + 12 + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+      fireEvent.pointerMove(document, nudged)
+      fireEvent.pointerMove(document, nudged)
+    }
+    lift("Source text")
+    expect(z(trackSlot("Source text"))).toBeGreaterThan(heading)
+    fireEvent.keyDown(document, { key: "Escape", code: "Escape" })
+    // A member ranks only inside its folder's block once the block slides, so
+    // the block itself has to clear the headings that come after it.
+    lift("Target audio")
+    expect(z(trackSlot("Dubs"))).toBeGreaterThan(heading)
+    fireEvent.keyDown(document, { key: "Escape", code: "Escape" })
+  })
+
+  it("keeps the folder below a second member dragged above the column, and eases the first one home under it", () => {
+    const rects = measureTracksPainted()
+    try {
+      const onMoveToScope = vi.fn()
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+          tracks={deriveTracksForFile({ trackOverrides: {
+            grp: { kind: "folder", name: "Dubs", order: -1 },
+            "target-audio": { groupId: "grp", order: 0 },
+            "trk-es": { kind: "audio", name: "Spanish", groupId: "grp", order: 1, sourceTrackId: "source-subtitles" },
+          } })}
+          onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+          trackEditing={{ onAdd: () => "x", onLeaveFolder: () => {}, onMoveToScope, onCreateFolderFrom: () => "y", onDelete: () => {} }}
+        />,
+      )
+      const folderTop = trackSlot("Dubs").getBoundingClientRect().top
+      const first = trackSlot("Target audio").getBoundingClientRect()
+      const host = trackSlot("Spanish").getBoundingClientRect()
+      const x = host.left + host.width / 2
+      const move = (y: number) => { fireEvent.pointerMove(document, trackPointer(x, y)); rects.settle() }
+      fireEvent.pointerDown(trackRowNamed("Spanish"), trackPointer(x, host.top + 12))
+      move(host.top + 30)
+      move(host.top + 30)
+      for (let y = host.top + 30; y >= first.top + 8; y -= 10) move(y)
+      expect(translatedY(trackSlot("Target audio").style.transform)).toBe(40)
+      for (let y = first.top; y >= folderTop - 200; y -= 10) move(y)
+      // Capped at the column's top, the row's centre sits over the folder's
+      // first member, and the nearest centre took the drop back into the
+      // folder: the folder closed its room over the dragged row.
+      expect(translatedY(trackSlot("Dubs").style.transform)).toBe(40)
+      // Out of the folder's list, the member's slide goes as the folder's
+      // starts. Snapped, it jumped a row up and rode back down with the folder.
+      const member = trackSlot("Target audio")
+      expect(translatedY(member.style.transform)).toBe(0)
+      expect(member.style.transition).toContain("transform 180ms")
+      fireEvent.pointerUp(document, trackPointer(x, folderTop - 200, 0))
+      saveHeldDrops()
+      expect(onMoveToScope).toHaveBeenCalledWith("trk-es", null, -2)
+    } finally {
+      rects.restore()
+    }
+  })
+
+  it("glides a member into its new home when the scope paints, instead of teleporting it there", () => {
+    const onMoveToScope = vi.fn()
+    const editor = (tracks: ReturnType<typeof deriveTracksForFile>) => (
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={tracks}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+        trackEditing={{
+          onAdd: () => "x", onLeaveFolder: () => {},
+          onMoveToScope, onCreateFolderFrom: () => "y", onDelete: () => {},
+        }}
+      />
+    )
+    const view = render(editor(folded()))
+    layoutTrackSlots()
+    const laneDrawsBeforeDrop = laneDraws.count
+    const top = trackSlot("Dubs").getBoundingClientRect().top
+    const row = trackRowNamed("Target audio")
+    const host = trackSlot("Target audio").getBoundingClientRect()
+    const start = { x: host.left + host.width / 2, y: host.top + 12 }
+    fireEvent.pointerDown(row, trackPointer(start.x, start.y))
+    const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, trackPointer(start.x, top - 30))
+    fireEvent.pointerUp(document, trackPointer(start.x, top - 30, 0))
+
+    // The new scope paints with the release, held unsaved: the member is a
+    // root row now, which is a new node in a new list. It must start where
+    // the pointer left it — offset from its new home, on the slide curve —
+    // not appear there instantly. The lanes it already drew move with it.
+    expect(onMoveToScope).not.toHaveBeenCalled()
+    const landed = trackSlot("Target audio")
+    expect(landed.parentElement?.closest("[data-reorderable]")).toBeNull()
+    expect(translatedY(landed.style.transform)).not.toBe(0)
+    expect(landed.style.transition).toContain("transform")
+    expect(laneDraws.count).toBe(laneDrawsBeforeDrop)
+
+    // The save, and the parent's read of it, do not move it again.
+    saveHeldDrops()
+    expect(onMoveToScope).toHaveBeenCalledWith("target-audio", null, 1)
+    view.rerender(editor(deriveTracksForFile({
+      trackOverrides: {
+        grp: { kind: "folder", name: "Dubs", order: 4 },
+        "target-audio": { order: 1 },
+      },
+    })))
+    expect(trackSlot("Target audio").parentElement?.closest("[data-reorderable]")).toBeNull()
+  })
+
+  it("indents a track that rests on an empty folder, and opens it when let go", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    localStorage.setItem("aquilla:tlFoldersClosed:f1", JSON.stringify(["grp"]))
+    const indented = () => trackRowNamed("Source text").querySelector(":scope > div")?.className.includes("pl-6") === true
+    try {
+      const onMoveToScope = vi.fn()
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+          tracks={deriveTracksForFile({ trackOverrides: { grp: { kind: "folder", name: "Dubs", order: 4 } } })}
+          onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+          trackEditing={{
+            onAdd: () => "x", onLeaveFolder: () => {},
+            onMoveToScope, onCreateFolderFrom: () => "y", onDelete: () => {},
+          }}
+        />,
+      )
+      layoutTrackSlots()
+      const folder = trackSlot("Dubs").getBoundingClientRect()
+      const row = trackRowNamed("Source text")
+      const host = trackSlot("Source text").getBoundingClientRect()
+      const start = { x: host.left + host.width / 2, y: host.top + 12 }
+      fireEvent.pointerDown(row, trackPointer(start.x, start.y))
+      const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+      fireEvent.pointerMove(document, nudged)
+      fireEvent.pointerMove(document, nudged)
+      fireEvent.pointerMove(document, trackPointer(start.x, folder.top + folder.height / 2))
+      act(() => { vi.advanceTimersByTime(900) })
+      expect(indented()).toBe(false)
+      expect(onMoveToScope).not.toHaveBeenCalled()
+      expect(screen.getByTestId("tl-folder-toggle-grp")).toHaveAttribute("aria-expanded", "false")
+      act(() => { vi.advanceTimersByTime(100) })
+      expect(indented()).toBe(true)
+      expect(onMoveToScope).not.toHaveBeenCalled()
+      fireEvent.pointerUp(document, trackPointer(start.x, folder.top + folder.height / 2, 0))
+      saveHeldDrops()
+      expect(onMoveToScope).toHaveBeenCalledWith("source-subtitles", "grp", 0)
+      expect(screen.getByTestId("tl-folder-toggle-grp")).toHaveAttribute("aria-expanded", "true")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /** Rects worked out from the tree as it stands whenever one is read, for
+   *  drags that mount rows or move them between lists mid-drag. */
+  const measureTracksLive = () => measureTracks(() => 0)
+
+  /** Live rects with the translates a browser paints: the row's own, and a
+   *  member's folder block's. A transform changed under a transform
+   *  transition still reads where it was until `settle()` lets time pass. */
+  const measureTracksPainted = () => {
+    const seen = new WeakMap<HTMLElement, { inline: string; painted: number }>()
+    const shift = (node: HTMLElement) => {
+      const inline = node.style.transform
+      const last = seen.get(node)
+      if (last?.inline === inline) return last.painted
+      const easing = /\btransform \d*[1-9]\d*ms/.test(node.style.transition)
+      const painted = last && easing ? last.painted : translatedY(inline)
+      seen.set(node, { inline, painted })
+      return painted
+    }
+    const spy = measureTracks(shift)
+    return {
+      restore: () => spy.mockRestore(),
+      settle: () => {
+        for (const node of document.querySelectorAll<HTMLElement>("[data-reorderable]")) {
+          seen.set(node, { inline: node.style.transform, painted: translatedY(node.style.transform) })
+        }
+      },
+    }
+  }
+
+  const measureTracks = (shift: (node: HTMLElement) => number) => {
+    const measure = HTMLElement.prototype.getBoundingClientRect
+    return vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (!this.matches("[data-reorderable]")) return measure.call(this)
+      let top = 0
+      for (const slot of document.querySelectorAll<HTMLElement>("[data-reorderable]")) {
+        if (slot.parentElement?.closest("[data-reorderable]")) continue
+        const members = [...slot.querySelectorAll<HTMLElement>("[data-reorderable]")]
+        const memberIndex = members.indexOf(this)
+        if (memberIndex >= 0) return trackBox(top + 40 + memberIndex * 40 + shift(slot) + shift(this), 40)
+        const height = 40 + members.length * 40
+        if (slot === this) return trackBox(top + shift(this), height)
+        top += height
+      }
+      return trackBox(0, 0)
+    })
+  }
+
+  it("lands a track dropped into a folder that slid to make room from where it was let go", async () => {
+    const rects = measureTracksPainted()
+    try {
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+          tracks={folded()}
+          onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+          trackEditing={{
+            onAdd: () => "x", onLeaveFolder: () => {},
+            onMoveToScope: () => {}, onCreateFolderFrom: () => "y", onDelete: () => {},
+          }}
+        />,
+      )
+      const member = trackSlot("Target audio").getBoundingClientRect()
+      const host = trackSlot("Source text").getBoundingClientRect()
+      const start = { x: host.left + host.width / 2, y: host.top + 12 }
+      fireEvent.pointerDown(trackRowNamed("Source text"), trackPointer(start.x, start.y))
+      const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+      fireEvent.pointerMove(document, nudged)
+      fireEvent.pointerMove(document, nudged)
+      // Past the folder's last member: the folder slides up into the dragged
+      // track's vacated row to open the gap under its member.
+      const at = { x: member.left + member.width / 2, y: member.top + 32 }
+      fireEvent.pointerMove(document, trackPointer(at.x, at.y))
+      expect(translatedY(trackSlot("Dubs").style.transform)).toBe(-40)
+      rects.settle()
+      const heldTop = trackSlot("Source text").getBoundingClientRect().top
+      fireEvent.pointerUp(document, trackPointer(at.x, at.y, 0))
+
+      // The new row starts where the held one was. The folder's slide eases
+      // closed as the row mounts, so a measure that kept it saw the folder
+      // still a row up, and started the row a whole row below the pointer.
+      const landed = trackSlot("Source text")
+      expect(landed.parentElement?.closest("[data-reorderable]")).toBe(trackSlot("Dubs"))
+      expect(trackSlot("Dubs").style.transform).toBe("")
+      expect(landed.getBoundingClientRect().top).toBe(heldTop)
+      expect(translatedY(landed.style.transform)).not.toBe(0)
+
+      // Closing and opening the folder mounts the member again. That is not
+      // a drop, so it must not fly in from where the old drop let go.
+      saveHeldDrops()
+      // The sensor swallows clicks for 50 ms after a drop.
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)) })
+      fireEvent.click(screen.getByTestId("tl-folder-toggle-grp"))
+      expect(screen.getByTestId("tl-folder-toggle-grp")).toHaveAttribute("aria-expanded", "false")
+      fireEvent.click(screen.getByTestId("tl-folder-toggle-grp"))
+      expect(trackSlot("Source text")).not.toBe(landed)
+      expect(trackSlot("Source text").style.transform).toBe("")
+    } finally {
+      rects.restore()
+    }
+  })
+
+  // Dragged out of its folder and back in without letting go, the member
+  // below it came back into the list mid-slide and measured its rest by
+  // stripping its transform. In a browser that restarts the slide from 0: the
+  // row dropped a whole row and climbed back.
+  it("keeps a member's slide when the dragged track comes back into the folder", () => {
+    const rects = measureTracksPainted()
+    try {
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+          tracks={deriveTracksForFile({ trackOverrides: {
+            grp: { kind: "folder", name: "Dubs", order: 1 },
+            "target-audio": { groupId: "grp", order: 0 },
+            "trk-es": { kind: "audio", name: "Spanish", groupId: "grp", order: 1, sourceTrackId: "source-subtitles" },
+          } })}
+          onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+          trackEditing={{ onAdd: () => "x", onLeaveFolder: () => {}, onMoveToScope: () => {}, onCreateFolderFrom: () => "y", onDelete: () => {} }}
+        />,
+      )
+      const folder = trackSlot("Dubs").getBoundingClientRect()
+      const host = trackSlot("Target audio").getBoundingClientRect()
+      const x = host.left + host.width / 2
+      const move = (y: number) => { fireEvent.pointerMove(document, trackPointer(x, y)); rects.settle() }
+      fireEvent.pointerDown(trackRowNamed("Target audio"), trackPointer(x, host.top + 12))
+      move(host.top + 30)
+      move(host.top + 30)
+      for (let y = host.top + 30; y <= folder.bottom + 30; y += 10) move(y)
+      expect(translatedY(trackSlot("Spanish").style.transform)).toBe(-40)
+
+      const spanish = trackSlot("Spanish")
+      const writes = new MutationObserver(() => {})
+      writes.observe(spanish, { attributes: true, attributeFilter: ["style"], attributeOldValue: true })
+      for (let y = folder.bottom + 30; y >= host.top + 30; y -= 10) move(y)
+      const stripped = writes.takeRecords().map((r) => r.oldValue ?? "").filter((style) => /transition: none/.test(style))
+      writes.disconnect()
+      expect(stripped).toEqual([])
+      fireEvent.keyDown(document, { key: "Escape", code: "Escape" })
+    } finally {
+      rects.restore()
+    }
+  })
+
+  it("opens a closed folder a track rests on, and lets it go in among the members", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    localStorage.setItem("aquilla:tlFoldersClosed:f1", JSON.stringify(["grp"]))
+    const rects = measureTracksLive()
+    try {
+      const onMoveToScope = vi.fn()
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+          tracks={folded()}
+          onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+          trackEditing={{
+            onAdd: () => "x", onLeaveFolder: () => {},
+            onMoveToScope, onCreateFolderFrom: () => "y", onDelete: () => {},
+          }}
+        />,
+      )
+      const toggle = () => screen.getByTestId("tl-folder-toggle-grp")
+      const folder = trackSlot("Dubs").getBoundingClientRect()
+      const host = trackSlot("Source text").getBoundingClientRect()
+      const start = { x: host.left + host.width / 2, y: host.top + 12 }
+      fireEvent.pointerDown(trackRowNamed("Source text"), trackPointer(start.x, start.y))
+      const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+      fireEvent.pointerMove(document, nudged)
+      fireEvent.pointerMove(document, nudged)
+      fireEvent.pointerMove(document, trackPointer(start.x, folder.top + folder.height / 2))
+      act(() => { vi.advanceTimersByTime(FOLDER_ENTER_DWELL_MS - 1) })
+      expect(toggle()).toHaveAttribute("aria-expanded", "false")
+      act(() => { vi.advanceTimersByTime(1) })
+      expect(toggle()).toHaveAttribute("aria-expanded", "true")
+
+      const member = trackSlot("Target audio").getBoundingClientRect()
+      const below = trackPointer(member.left + member.width / 2, member.top + 32)
+      fireEvent.pointerMove(document, below)
+      fireEvent.pointerMove(document, below)
+      fireEvent.pointerUp(document, trackPointer(below.clientX, below.clientY, 0))
+      saveHeldDrops()
+      expect(onMoveToScope).toHaveBeenCalledWith("source-subtitles", "grp", 1)
+    } finally {
+      rects.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it("moves a member straight into the open folder below its own", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    const rects = measureTracksLive()
+    try {
+      const onMoveToScope = vi.fn()
+      const onReorderTrack = vi.fn()
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+          tracks={deriveTracksForFile({
+            trackOverrides: {
+              grp: { kind: "folder", name: "Dubs", order: 4 },
+              "target-audio": { groupId: "grp", order: 0 },
+              grp2: { kind: "folder", name: "Takes", order: 5 },
+              "trk-extra": { kind: "audio", name: "Extra", groupId: "grp2", order: 0, sourceTrackId: "source-subtitles" },
+            },
+          })}
+          onRetimeSubtitle={() => {}} onReorderTrack={onReorderTrack}
+          trackEditing={{
+            onAdd: () => "x", onLeaveFolder: () => {},
+            onMoveToScope, onCreateFolderFrom: () => "y", onDelete: () => {},
+          }}
+        />,
+      )
+      const host = trackSlot("Target audio").getBoundingClientRect()
+      const start = { x: host.left + host.width / 2, y: host.top + 12 }
+      fireEvent.pointerDown(trackRowNamed("Target audio"), trackPointer(start.x, start.y))
+      const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+      fireEvent.pointerMove(document, nudged)
+      fireEvent.pointerMove(document, nudged)
+      const member = trackSlot("Extra").getBoundingClientRect()
+      const below = trackPointer(member.left + member.width / 2, member.top + 32)
+      fireEvent.pointerMove(document, below)
+      fireEvent.pointerMove(document, below)
+      act(() => { vi.advanceTimersByTime(FOLDER_EXIT_DWELL_MS + 100) })
+      fireEvent.pointerUp(document, trackPointer(below.clientX, below.clientY, 0))
+      // In the other folder at once, and saved, like a reorder, once the
+      // tracks are left alone: the save re-renders the whole workspace.
+      const takes = trackSlot("Takes")
+      expect(takes.contains(trackSlot("Target audio"))).toBe(true)
+      act(() => { vi.advanceTimersByTime(TRACK_ORDER_SAVE_QUIET_MS - 1) })
+      expect(onMoveToScope).not.toHaveBeenCalled()
+
+      // Rearranged inside its new folder before that save: still one move,
+      // carrying the newer order. A reorder alone would leave it out of the
+      // folder on the server.
+      const moved = trackSlot("Target audio").getBoundingClientRect()
+      const from = { x: moved.left + moved.width / 2, y: moved.top + 12 }
+      fireEvent.pointerDown(trackRowNamed("Target audio"), trackPointer(from.x, from.y))
+      const lifted = trackPointer(from.x, from.y - TRACK_DRAG_ACTIVATION_DISTANCE - 8)
+      fireEvent.pointerMove(document, lifted)
+      fireEvent.pointerMove(document, lifted)
+      const extra = trackSlot("Extra").getBoundingClientRect()
+      const above = trackPointer(extra.left + extra.width / 2, extra.top + 8)
+      fireEvent.pointerMove(document, above)
+      fireEvent.pointerUp(document, trackPointer(above.clientX, above.clientY, 0))
+      act(() => { vi.advanceTimersByTime(TRACK_RELEASE_SETTLE_MS + TRACK_ORDER_SAVE_QUIET_MS) })
+      expect(onReorderTrack).not.toHaveBeenCalled()
+      expect(onMoveToScope).toHaveBeenCalledTimes(1)
+      expect(onMoveToScope).toHaveBeenCalledWith("target-audio", "grp2", -1)
+    } finally {
+      rects.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it("reorders above a closed folder instead of putting the track inside", () => {
+    localStorage.setItem("aquilla:tlFoldersClosed:f1", JSON.stringify(["grp"]))
+    const onReorderTrack = vi.fn()
+    const onMoveToScope = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={deriveTracksForFile({
+          trackOverrides: {
+            grp: { kind: "folder", name: "Dubs", order: 4 },
+            "target-audio": { groupId: "grp", order: 0 },
+            "trk-extra": { kind: "audio", name: "Extra", order: 6, sourceTrackId: "source-subtitles" },
+          },
+        })}
+        onRetimeSubtitle={() => {}} onReorderTrack={onReorderTrack}
+        trackEditing={{
+          onAdd: () => "x", onLeaveFolder: () => {},
+          onMoveToScope, onCreateFolderFrom: () => "y", onDelete: () => {},
+        }}
+      />,
+    )
+    dragTrackOnto("Extra", "Dubs")
+    expect(onMoveToScope).not.toHaveBeenCalled()
+    expect(onReorderTrack).toHaveBeenCalledWith("trk-extra", 3)
   })
 })
 

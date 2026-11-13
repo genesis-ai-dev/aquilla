@@ -14425,6 +14425,7 @@ export function ProjectWorkspace() {
   const handleReorderTrack = useCallback(
     (trackId: string, order: number) => {
       if (!activeFileId) return
+      flushQueuedTrackMoves.current()
       // The offline guard sits HERE, at commit time, and not at pointerdown:
       // connectivity can drop mid-drag, and refusing to lift a row because the
       // wifi blinked when the finger went down is heavy-handed. Before the
@@ -14674,19 +14675,121 @@ export function ProjectWorkspace() {
    * The orders ascend from the first free slot so a run of tracks keeps the
    * sequence it had rather than all landing on one number.
    */
+  /**
+   * "Move to" choices waiting to be saved: one merged patch per track, so a
+   * track moved three times is written once, where it ended up. The editor
+   * saves them on its drops' clock (`onSaveMoves`), once the track list has
+   * settled — a save ends in a workspace-wide refresh, and one landing between
+   * moves stalls the next.
+   */
+  const queuedTrackMoves = useRef<{
+    fileId: string | null
+    failure: string
+    patches: Map<string, Parameters<typeof emitFileTrackSet>[0]["patch"]>
+    reverts: Array<() => void>
+  }>({ fileId: null, failure: "", patches: new Map(), reverts: [] })
+
+  const saveQueuedTrackMoves = useCallback(() => {
+    const queued = queuedTrackMoves.current
+    if (!queued.fileId || queued.patches.size === 0) return
+    queuedTrackMoves.current = { fileId: null, failure: "", patches: new Map(), reverts: [] }
+    const reverts = queued.reverts
+    void applyTrackPatches(
+      [...queued.patches].map(([trackId, patch]) => ({ trackId, patch })),
+      queued.failure,
+      () => { for (const revert of reverts) revert() },
+      queued.fileId,
+    )
+  }, [applyTrackPatches])
+  useEffect(() => {
+    flushQueuedTrackMoves.current = saveQueuedTrackMoves
+  }, [saveQueuedTrackMoves])
+
+  /**
+   * A "Move to" choice: drawn now, through the same display-only overlays a
+   * drag uses, and queued for `saveQueuedTrackMoves`. A refused or failed
+   * write takes the overlay back off.
+   */
+  const paintAndQueueTrackMove = useCallback(
+    (
+      places: ReadonlyArray<{ trackId: string; groupId: string | null; order: number }>,
+      changes: ReadonlyArray<{ trackId: string; patch: Parameters<typeof emitFileTrackSet>[0]["patch"] }>,
+      failure: string,
+      newTracks: readonly TimelineTrack[] = [],
+    ) => {
+      if (!activeFileId) return
+      const forFileId = activeFileId
+      const movedIds = new Set(places.map((p) => p.trackId))
+      const newIds = new Set(newTracks.map((tr) => tr.id))
+      if (newTracks.length > 0) {
+        setPendingNewTracks((current) => ({
+          fileId: forFileId,
+          tracks: [...(current?.fileId === forFileId ? current.tracks : []), ...newTracks],
+        }))
+      }
+      setPendingTrackScopes((current) => {
+        const next = new Map(current?.fileId === forFileId ? current.places : undefined)
+        for (const p of places) next.set(p.trackId, { groupId: p.groupId, order: p.order })
+        return { fileId: forFileId, places: next }
+      })
+      setPendingTrackOrders((current) => {
+        if (current?.fileId !== forFileId) return current
+        let orders: Map<string, number> = current.orders
+        for (const id of movedIds) if (orders.has(id)) orders = withoutPendingOrder(orders, id)
+        if (orders === current.orders) return current
+        return orders.size === 0 ? null : { fileId: forFileId, orders }
+      })
+      const revert = () => {
+        setPendingTrackScopes((current) => {
+          if (!current || current.fileId !== forFileId) return current
+          const next = new Map(current.places)
+          for (const id of movedIds) next.delete(id)
+          return next.size === 0 ? null : { fileId: forFileId, places: next }
+        })
+        setPendingNewTracks((current) => {
+          if (!current || current.fileId !== forFileId) return current
+          const left = current.tracks.filter((tr) => !newIds.has(tr.id))
+          return left.length === 0 ? null : { fileId: forFileId, tracks: left }
+        })
+      }
+      // Another file's moves are saved before this file's start queueing.
+      if (queuedTrackMoves.current.fileId && queuedTrackMoves.current.fileId !== forFileId) saveQueuedTrackMoves()
+      const queued = queuedTrackMoves.current
+      queued.fileId = forFileId
+      queued.failure = failure
+      for (const c of changes) queued.patches.set(c.trackId, { ...queued.patches.get(c.trackId), ...c.patch })
+      queued.reverts.push(revert)
+    },
+    [activeFileId, saveQueuedTrackMoves],
+  )
+
+  // Both append after the rows on screen, queued moves included (pressing
+  // "Move to" saves the editor's held drops first), so a second move made
+  // before the first saves does not land on the first one's slot.
   const handleLeaveFolder = useCallback(
     (trackIds: readonly string[]) => {
-      const firstFree = orderForScopeAppend(serverTimelineTracks, null)
-      const changes = trackIds.map((trackId, i) => ({ trackId, patch: { groupId: null, order: firstFree + i } }))
+      const firstFree = orderForScopeAppend(timelineTracks, null)
+      const places = trackIds.map((trackId, i) => ({ trackId, groupId: null, order: firstFree + i }))
+      const changes = places.map((p) => ({ trackId: p.trackId, patch: { groupId: null, order: p.order } }))
       recordTrackChanges("editor.history.stepMoveTrack", changes.map((c) => ({ trackId: c.trackId, after: c.patch })))
-      void applyTrackPatches(changes, "Couldn't take the track out of its folder:")
+      paintAndQueueTrackMove(places, changes, "Couldn't take the track out of its folder:")
     },
-    [applyTrackPatches, serverTimelineTracks, recordTrackChanges],
+    [paintAndQueueTrackMove, timelineTracks, recordTrackChanges],
+  )
+
+  const handleMoveToFolder = useCallback(
+    (trackIds: readonly string[], folderId: string) => {
+      const firstFree = orderForScopeAppend(timelineTracks, folderId)
+      const places = trackIds.map((trackId, i) => ({ trackId, groupId: folderId, order: firstFree + i }))
+      const changes = places.map((p) => ({ trackId: p.trackId, patch: { groupId: folderId, order: p.order } }))
+      recordTrackChanges("editor.history.stepMoveTrack", changes.map((c) => ({ trackId: c.trackId, after: c.patch })))
+      paintAndQueueTrackMove(places, changes, "Couldn't move the track:")
+    },
+    [paintAndQueueTrackMove, timelineTracks, recordTrackChanges],
   )
 
   /**
-   * Sam, 2026-08-24: a folder is made FROM tracks, never picked from a list of
-   * destinations.
+   * Sam, 2026-08-24: a folder is made FROM tracks.
    *
    * The folder takes the place of the TOPMOST selected track, so the block
    * lands where the person was already looking rather than at the bottom of the
@@ -14706,59 +14809,70 @@ export function ProjectWorkspace() {
    * two into separate events would leave it half-moved if the second were
    * refused.
    *
-   * A TIE IS RESOLVED BY APPENDING, not by renormalising the target scope. The
-   * resolver hands out midpoints, and a midpoint can only collide when the two
-   * neighbours already share a number; putting the track at the end of that
-   * scope is a free, unambiguous slot and costs one write instead of N. The
-   * user can drag it where they meant afterwards — which is the ungated
-   * gesture, so it is always available.
+   * THE ORDER IS TAKEN AS GIVEN. The editor reads it off the rows it draws,
+   * held drops included, and resolves a tie there by appending. Judged here,
+   * against the server's orders, a tie could be one the user no longer sees:
+   * a member moved down a moment ago still holds its old top slot until the
+   * held drop saves, and a track dropped above it went to the bottom.
    */
   const handleMoveTrackToScope = useCallback(
     (trackId: string, groupId: string | null, order: number) => {
-      if (!Number.isFinite(order)) return
-      const folderIds = folderIdsOf(serverTimelineTracks)
-      const tied = serverTimelineTracks.some(
-        (t) => t.id !== trackId && trackScope(t, folderIds) === groupId && t.order === order,
-      )
-      const settled = tied ? orderForScopeAppend(serverTimelineTracks, groupId) : order
-      recordTrackChanges("editor.history.stepMoveTrack", [{ trackId, after: { groupId, order: settled } }])
-      void applyTrackPatch(trackId, { groupId, order: settled }, "Couldn't move the track:")
+      if (!Number.isFinite(order) || !activeFileId) return
+      flushQueuedTrackMoves.current()
+      const forFileId = activeFileId
+      const revert = () =>
+        setPendingTrackScopes((current) => {
+          if (!current || current.fileId !== forFileId) return current
+          const places = new Map(current.places)
+          places.delete(trackId)
+          return places.size === 0 ? null : { fileId: forFileId, places }
+        })
+      setPendingTrackScopes((current) => {
+        const places = new Map(current && current.fileId === forFileId ? current.places : undefined)
+        places.set(trackId, { groupId, order })
+        return { fileId: forFileId, places }
+      })
+      setPendingTrackOrders((current) => {
+        if (current?.fileId !== forFileId || !current.orders.has(trackId)) return current
+        const orders = withoutPendingOrder(current.orders, trackId)
+        return orders.size === 0 ? null : { fileId: forFileId, orders }
+      })
+      recordTrackChanges("editor.history.stepMoveTrack", [{ trackId, after: { groupId, order } }])
+      void applyTrackPatch(trackId, { groupId, order }, "Couldn't move the track:", revert)
     },
-    [applyTrackPatch, serverTimelineTracks, recordTrackChanges],
+    [activeFileId, applyTrackPatch, recordTrackChanges],
   )
 
   const handleCreateFolderFrom = useCallback(
     (trackIds: readonly string[]): string => {
       const folderId = uuidv7()
       const chosen = new Set(trackIds)
-      const members = serverTimelineTracks.filter((tr) => chosen.has(tr.id))
+      const members = timelineTracks.filter((tr) => chosen.has(tr.id))
       const topMost = members.length > 0 ? members[0] : null
-      const folderIds = folderIdsOf(serverTimelineTracks)
+      const folderIds = folderIdsOf(timelineTracks)
       // Where the block goes: the topmost member's own slot when it is already
       // top-level, otherwise the bottom. A folder cannot be created inside a
       // folder, so a member that lives in one contributes no position.
       const order =
         topMost && trackScope(topMost, folderIds) === null
           ? topMost.order
-          : orderForScopeAppend(serverTimelineTracks, null)
+          : orderForScopeAppend(timelineTracks, null)
+      // The STORED name, in English whatever the creator's UI language —
+      // see `nextFolderName`. The menu LABEL stays translated.
+      const name = nextFolderName(timelineTracks)
 
+      const places = members.map((member, i) => ({ trackId: member.id, groupId: folderId, order: i }))
       const changes = [
-        {
-          trackId: folderId,
-          // The STORED name, in English whatever the creator's UI language —
-          // see `nextFolderName`. The menu LABEL stays translated.
-          patch: { kind: "folder" as const, name: nextFolderName(serverTimelineTracks), order },
-        },
-        ...members.map((member, i) => ({
-          trackId: member.id,
-          patch: { groupId: folderId, order: i },
-        })),
+        { trackId: folderId, patch: { kind: "folder" as const, name, order } },
+        ...places.map((p) => ({ trackId: p.trackId, patch: { groupId: folderId, order: p.order } })),
       ]
       recordTrackChanges("editor.history.stepAddFolder", changes.map((c) => ({ trackId: c.trackId, after: c.patch })))
-      void applyTrackPatches(changes, "Couldn't make the folder:")
+      paintAndQueueTrackMove(places, changes, "Couldn't make the folder:", [
+        { id: folderId, kind: "folder", name, order, groupId: null },
+      ])
       return folderId
     },
-    [applyTrackPatches, serverTimelineTracks, recordTrackChanges],
+    [paintAndQueueTrackMove, timelineTracks, recordTrackChanges],
   )
 
   const handleDeleteTrack = useCallback(
@@ -18062,6 +18176,8 @@ export function ProjectWorkspace() {
                             onAdd: handleAddTrack,
                             onLeaveFolder: handleLeaveFolder,
                             onMoveToScope: handleMoveTrackToScope,
+                            onMoveToFolder: handleMoveToFolder,
+                            onSaveMoves: saveQueuedTrackMoves,
                             onCreateFolderFrom: handleCreateFolderFrom,
                             onDelete: handleDeleteTrack,
                             onSetLineLengths: handleSetTrackLineLengths,

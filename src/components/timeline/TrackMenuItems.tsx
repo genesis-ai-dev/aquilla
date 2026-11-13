@@ -28,11 +28,12 @@
 // AND IF NOTHING IS OFFERED, THE MENU DOES NOT OPEN. See `trackMenuIsEmpty`.
 
 import type { ReactNode } from "react"
-import { EyeOff, FolderPlus, FolderMinus, Palette, Pencil, Ruler, Rows3, Trash2 } from "lucide-react"
+import { EyeOff, Folder, FolderInput, FolderPlus, FolderMinus, Palette, Pencil, Ruler, Rows3, Trash2 } from "lucide-react"
 import {
   ContextMenuCheckboxItem,
   ContextMenuItem,
   ContextMenuRadioGroup,
+  ContextMenuSeparator,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
@@ -60,6 +61,8 @@ export type SetTrackColor = (updates: ReadonlyArray<{ trackId: string; color: st
 export interface TrackEditingActions {
   onLeaveFolder(trackIds: readonly string[]): void
   onCreateFolderFrom(trackIds: readonly string[]): void
+  /** Puts these tracks at the bottom of an existing folder. */
+  onMoveToFolder?(trackIds: readonly string[], folderId: string): void
   onDelete(trackIds: readonly string[]): void
   /**
    * AQU-2252 (Sam, Oct 29): whether these tracks' takes set their lines'
@@ -101,12 +104,17 @@ export function trackMenuScopes({
   canPromote = false,
   canHide = false,
   canSetLengths = false,
+  canMoveToFolder = false,
+  folders = [],
   busyIds,
 }: {
   targets: readonly TimelineTrack[]
   canRename: boolean
   canColour: boolean
   canEdit: boolean
+  canMoveToFolder?: boolean
+  /** The file's folders — the destinations "Move to" can list. */
+  folders?: readonly TimelineTrack[]
   /** AQU-2252: track editing, while the file follows its recordings. */
   canSetLengths?: boolean
   /** AQU-1566: the file is a linked video with no rows and the person is a
@@ -155,25 +163,20 @@ export function trackMenuScopes({
     ? { tracks: [...targets], checked: targets.every((tr) => tr.setsLineLengths !== false) }
     : null
 
-  // THE FOLDERING VERBS ARE ALL-OR-NONE TOO, and for a sharper reason than
-  // colour's. A folder is never inside another folder (track-groups never reads
-  // a folder's own groupId), so neither verb is offered on one; and a track that
-  // is ALREADY in a folder cannot start a new one, because the verb would
-  // quietly eject it and make a fresh top-level folder at the bottom of the
-  // list, which is not what "new folder from this track" says it does. Sam chose
-  // withholding it over allowing subfolders.
-  //
-  // A MIXED SELECTION — some inside a folder, some outside — GETS NEITHER VERB
-  // (Sam, 2026-08-25). It used to get BOTH, each quietly scoped to its own half,
-  // so one menu offered to make a folder out of two of your five tracks and to
-  // eject the other three, with nothing on screen saying which was which. The
-  // two verbs are opposites; a selection that could take either is a selection
-  // the user has not finished making.
+  // A folder is never inside another folder (track-groups never reads a
+  // folder's own groupId), so "Move to" is not offered on one. It names its
+  // destination, so it can take a selection that is already in a folder, or
+  // straddles one: every track ends up where the person picked. It always
+  // offers a new folder; it lists every folder except one the whole selection
+  // already sits in, and "No folder" while any of them is in one, so each
+  // choice moves something.
   const plainTracks = targets.filter((tr) => tr.kind !== "folder")
-  const anyFoldered = plainTracks.some((tr) => Boolean(tr.groupId))
-  const allFoldered = plainTracks.length > 0 && plainTracks.every((tr) => Boolean(tr.groupId))
-  const foldable = plainTracks.length > 0 && !anyFoldered ? plainTracks : []
-  const inAFolder = allFoldered ? plainTracks : []
+  const movable = plainTracks.length > 0 && plainTracks.length === targets.length ? plainTracks : []
+  const moveDestinations = canMoveToFolder
+    ? folders.filter((f) => f.kind === "folder" && !movable.every((tr) => tr.groupId === f.id))
+    : []
+  const leavers = movable.filter((tr) => Boolean(tr.groupId))
+  const moveTo = movable.length > 0 ? { tracks: movable, folders: moveDestinations, leavers } : null
 
   return {
     only,
@@ -182,8 +185,7 @@ export function trackMenuScopes({
     hideBusy,
     rename: canRename ? only : null,
     colourable: canColour ? colourable : [],
-    foldable: canEdit ? foldable : [],
-    inAFolder: canEdit ? inAFolder : [],
+    moveTo: canEdit ? moveTo : null,
     deletable: canEdit ? deletable : [],
     lengths: canEdit ? lengths : null,
   }
@@ -196,8 +198,7 @@ export function trackMenuIsEmpty(scopes: ReturnType<typeof trackMenuScopes>): bo
     scopes.hideable.length === 0 &&
     scopes.rename == null &&
     scopes.colourable.length === 0 &&
-    scopes.foldable.length === 0 &&
-    scopes.inAFolder.length === 0 &&
+    scopes.moveTo == null &&
     scopes.deletable.length === 0 &&
     scopes.lengths == null
   )
@@ -212,6 +213,7 @@ export function trackMenuItems({
   onPromote,
   onHide,
   busyTrackIds,
+  folders,
 }: {
   /**
    * The tracks this menu acts on — the selection when the right-clicked row is
@@ -235,9 +237,11 @@ export function trackMenuItems({
   onHide?: (trackIds: readonly string[]) => void
   /** AQU-1684: tracks recording or being dragged, which may not be hidden now. */
   busyTrackIds?: ReadonlySet<string>
+  /** The file's folders, for "Move to". */
+  folders?: readonly TimelineTrack[]
 }): ReactNode {
   // ONE AUTHORITY, read here and by the trigger that decided to open at all.
-  const { promotable, hideable, hideBusy, rename, colourable, foldable, inAFolder, deletable, lengths } = trackMenuScopes({
+  const { promotable, hideable, hideBusy, rename, colourable, moveTo, deletable, lengths } = trackMenuScopes({
     targets,
     canRename: Boolean(onRename),
     canColour: Boolean(onSetColor),
@@ -245,6 +249,8 @@ export function trackMenuItems({
     canPromote: Boolean(onPromote),
     canHide: Boolean(onHide),
     canSetLengths: Boolean(editing?.onSetLineLengths),
+    canMoveToFolder: Boolean(editing?.onMoveToFolder),
+    folders,
     busyIds: busyTrackIds,
   })
 
@@ -355,29 +361,43 @@ export function trackMenuItems({
         </ContextMenuCheckboxItem>
       )}
 
-      {/* Stage 2b: "Move to folder" is GONE. Sam, 2026-08-24: "there shouldn't
-          be the option to add to a folder, the option should be to create a new
-          folder containing these tracks. And if a folder already exists, it
-          should be possible to drag a track into that folder." A submenu
-          listing folders was a worse answer to the same question — it grows
-          with the file and it makes the common case (there is no folder yet)
-          an empty popup. */}
-      {editing && foldable.length > 0 && (
-        <ContextMenuItem onClick={() => editing.onCreateFolderFrom(ids(foldable))}>
-          <FolderPlus className="h-3.5 w-3.5" />
-          {foldable.length > 1
-            ? t("editor.timeline.trackNewFolderFromCount", { count: foldable.length })
-            : t("editor.timeline.trackNewFolderFrom")}
-        </ContextMenuItem>
-      )}
-
-      {editing && inAFolder.length > 0 && (
-        <ContextMenuItem onClick={() => editing.onLeaveFolder(ids(inAFolder))}>
-          <FolderMinus className="h-3.5 w-3.5" />
-          {inAFolder.length > 1
-            ? t("editor.timeline.trackLeaveFolderCount", { count: inAFolder.length })
-            : t("editor.timeline.trackLeaveFolder")}
-        </ContextMenuItem>
+      {/* Dragging into a folder still works; this is the same move for anyone
+          who would rather pick the destination by name. "No folder" is how a
+          track leaves one — only the tracks that are in a folder are sent, so
+          one already at the top level keeps its place. */}
+      {editing && moveTo && (
+        <ContextMenuSub>
+          {/* `data-tl-track-move`: arranging tracks, like a drag, so pressing
+              here does not save the moves still waiting to settle. */}
+          <ContextMenuSubTrigger data-testid="tl-track-move-to" data-tl-track-move="">
+            <FolderInput className="h-3.5 w-3.5" />
+            {moveTo.tracks.length > 1
+              ? t("editor.timeline.trackMoveToCount", { count: moveTo.tracks.length })
+              : t("editor.timeline.trackMoveTo")}
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent data-tl-track-move="">
+            <ContextMenuItem onClick={() => editing.onCreateFolderFrom(ids(moveTo.tracks))}>
+              <FolderPlus className="h-3.5 w-3.5" />
+              {t("editor.timeline.trackMoveToNewFolder")}
+            </ContextMenuItem>
+            {moveTo.leavers.length > 0 && (
+              <ContextMenuItem onClick={() => editing.onLeaveFolder(ids(moveTo.leavers))}>
+                <FolderMinus className="h-3.5 w-3.5" />
+                {t("editor.timeline.trackMoveToNoFolder")}
+              </ContextMenuItem>
+            )}
+            {moveTo.folders.length > 0 && <ContextMenuSeparator />}
+            {moveTo.folders.map((folder) => (
+              <ContextMenuItem
+                key={folder.id}
+                onClick={() => editing.onMoveToFolder?.(ids(moveTo.tracks), folder.id)}
+              >
+                <Folder className="h-3.5 w-3.5" />
+                {folder.name}
+              </ContextMenuItem>
+            ))}
+          </ContextMenuSubContent>
+        </ContextMenuSub>
       )}
 
       {editing && deletable.length > 0 && (

@@ -21,7 +21,7 @@ import { getCachedSession, sessionCacheKey, setCachedSession } from "../lib/sess
 import {
   checkDevAccess,
   DEV_ACCESS_RESTRICTED,
-  DEV_ACCESS_RESTRICTED_MESSAGE,
+  devAccessRestrictedMessage,
 } from "../services/dev-access"
 
 export type AuthHonoEnv = { Bindings: Env; Variables: Variables }
@@ -273,7 +273,7 @@ export const authMiddleware = async (
           401,
         )
       case "dev_access_restricted":
-        return c.json({ error: DEV_ACCESS_RESTRICTED_MESSAGE, code: DEV_ACCESS_RESTRICTED }, 403)
+        return c.json({ error: devAccessRestrictedMessage(c.env), code: DEV_ACCESS_RESTRICTED }, 403)
       case "dev_access_unavailable":
         return c.json(
           { error: "Unable to check dev access right now. Please retry.", code: DEV_ACCESS_RESTRICTED },

@@ -44,7 +44,7 @@ import { parseAdminEmails } from "../middleware/platform-admin"
 import {
   checkDevAccess,
   DEV_ACCESS_RESTRICTED,
-  DEV_ACCESS_RESTRICTED_MESSAGE,
+  devAccessRestrictedMessage,
 } from "../services/dev-access"
 import { evictUserSessions } from "../lib/session-cache"
 import { withPostResponseDb } from "../lib/post-response-db"
@@ -199,7 +199,7 @@ export function devAccessRefusal(
     return c.json({ error: message, detail: message, code: DEV_ACCESS_RESTRICTED }, 503)
   }
   return c.json(
-    { error: DEV_ACCESS_RESTRICTED_MESSAGE, detail: DEV_ACCESS_RESTRICTED_MESSAGE, code: DEV_ACCESS_RESTRICTED },
+    { error: devAccessRestrictedMessage(c.env), detail: devAccessRestrictedMessage(c.env), code: DEV_ACCESS_RESTRICTED },
     403,
   )
 }

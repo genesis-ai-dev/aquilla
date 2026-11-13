@@ -494,3 +494,49 @@ describe("more layers sounding at once than the players allow (AQU-2252)", () =>
     expect(sounding).toContain("b1")
   })
 })
+
+// AQU-2432 (review, Nov 9): an unrecorded line's ROOM through the real queue,
+// on lines cut from an imported recording. Its original sounds only for its
+// room, then the next take follows; with no room, none of it sounds.
+describe("an unrecorded line's room, on lines with an original (AQU-2432)", () => {
+  const room = (cell: CellData, roomMs: number) => ({ ...cell, recordingsRoomMs: roomMs }) as CellData
+  // s1: a 0.4 s take · s2: 2 s of the recording (1–3 s), nobody's take · s3: a 0.4 s take.
+  const film = (roomMs: number) => [sourceLine("s1", 0, 1, undefined, 400), room(sourceLine("s2", 1, 3), roomMs), sourceLine("s3", 3, 4, undefined, 400)]
+
+  it("a narrow room: its original plays from its start for the room alone, then the next take", async () => {
+    startQueue(ctxFor(film(500)), 0)
+    await settle()
+    expect(getQueueProgress().duration).toBeCloseTo(1.3, 5)
+    el("s1")!.tick(0.4)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "s2" })
+    expect(sourceEl()!.paused).toBe(false)
+    expect(sourceEl()!.currentTime).toBeCloseTo(1, 5)
+    sourceEl()!.tick(1.3)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "s2" })
+    sourceEl()!.tick(1.5) // its room is over: 0.5 s of its 2 s original
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "s3" })
+    expect(el("s3")!.paused).toBe(false)
+    expect(getQueueProgress().currentTime).toBeCloseTo(0.9, 5)
+  })
+
+  it("no room: none of its original plays; the next take follows the one before at once", async () => {
+    startQueue(ctxFor(film(0)), 0)
+    await settle()
+    const playing: string[] = []
+    el("s1")!.tick(0.4)
+    for (let i = 0; i < 12; i++) {
+      await Promise.resolve()
+      const st = getQueueState()
+      if (st.kind !== "idle" && "cellId" in st && st.cellId) playing.push(st.cellId)
+    }
+    await settle()
+    expect(playing).not.toContain("s2")
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "s3" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(0.4, 5)
+    // The recording went from s1's part straight to s3's own, under its take.
+    expect(sourceEl()!.currentTime).toBeCloseTo(3, 5)
+  })
+})

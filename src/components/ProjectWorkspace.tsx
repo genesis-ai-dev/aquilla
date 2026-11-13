@@ -192,6 +192,7 @@ import {
   fetchDeletedFilesWithProjectToken,
   pushedRollupProgress,
   canRestructureTracks,
+  timelineTakeDrags,
   resolveTakeLine,
   historyFileName,
   buildRouteScopedTokenFetcher,
@@ -296,8 +297,13 @@ import { readProjectSettingsFor, writeProjectSettingsFor } from "@/lib/history/s
 import { useHistoryShortcuts } from "@/lib/history/useHistory"
 import { useHistoryReporter } from "@/components/history/useHistoryReporter"
 import { useSettingsStepKinds } from "@/components/ProjectSettings/useSettingsStepKinds"
-import { pieceStretchOf, playingInSlot, takeStepHandlers, type CutRecord, type StoredTakePlace, type TakeLevel } from "@/lib/history/take-steps"
+import { pieceStretchOf, playingInSlot, setTakeAddedHeals, takeStepHandlers, type CutRecord, type StoredTakePlace, type TakeAddData, type TakeLevel, type TakePlaceData } from "@/lib/history/take-steps"
+import { pullBacksWokenBy } from "@/lib/timeline/programme"
+import { createEditorStructureCache, tableLineNumber } from "@/lib/editor-structure-cache"
 import type { TakePlace } from "@/lib/timeline/take-place"
+import { applyLineRoomMove, lineRoomStepHandlers, type LineRoomStepData } from "@/lib/history/line-room-steps"
+import { lineRoomKey, stampLineRooms, writeLineRooms, type LineRoomChange } from "@/lib/timeline/line-room"
+import type { TakeRoomsMove } from "@/components/timeline/TargetAudioLane"
 import { enqueueTakeRemovals, hasOwnRecordingLeft, removeTake, renameTake } from "@/lib/audio/take-actions"
 import { pieceNameIn } from "@/lib/audio/take-groups"
 import { regenerateVoiceTake } from "./AudioRecorder/regenerate-voice"
@@ -2220,6 +2226,10 @@ export function ProjectWorkspace() {
   /** Paint a dragged cue chip's new anchor. Same dependency-ordering escape as
    *  the resolver above — the state it writes is declared far below. */
   const setCueAnchorOverridesRef = useRef<(cellId: string, offsetMs: number) => void>(() => {})
+  /** AQU-2432 (review, Nov 9): the same for a heard line's ROOM (null clears
+   *  it), and the cue file's re-read once a room is saved there. */
+  const setCueRoomOverridesRef = useRef<(cellId: string, roomMs: number | null) => void>(() => {})
+  const refreshCueFileRef = useRef<(fileId: string) => void>(() => {})
   /** Maps whatever id asked for the recorder onto the cell it should open on.
    *  Null ⇒ nothing to record here (a subtitle line no cue performs). */
   const openRecordingTargetRef = useRef<(cellId: string) => string | null>((id) => id)
@@ -4437,6 +4447,97 @@ export function ProjectWorkspace() {
     [applyTakePlace, activeFileId],
   )
 
+  // AQU-2432 (Sam, Nov 9): AN UNRECORDED LINE'S ROOM, following the recordings.
+  // Dragging the next take earlier against a line nobody has recorded makes
+  // THAT LINE's room smaller (later: gives it back). The room is the line's,
+  // for the language being worked in (lib/timeline/line-room): it rides the
+  // line's own timeline event into the source row's metadata, under a key that
+  // carries the language, is shown at once, and reaches every device like the
+  // take's place does.
+  //
+  // AQU-2432 (review, Nov 9): to the file that OWNS the line — a film's heard
+  // line lives in its cue file, not the open one — found the way a take's is
+  // (`resolveTakeCellRef`), and shown at once there (lib/timeline/line-room,
+  // `writeLineRooms`).
+  const applyLineRooms = useCallback(
+    async (rooms: readonly LineRoomChange[]) => {
+      const projectId = project?.id
+      if (!projectId || !activeFileId || rooms.length === 0) return
+      const key = lineRoomKey(activeLane)
+      await writeLineRooms({
+        fileOf: (cellId) => resolveTakeCellRef.current(cellId)?.fileId ?? null,
+        paint: (fileId, cellId, roomMs) => {
+          if (fileId === activeFileId) applyOptimisticCellTiming(cellId, { metadata: { [key]: roomMs } })
+          else setCueRoomOverridesRef.current(cellId, roomMs)
+        },
+        emit: (fileId, cellId, roomMs) => emitCellLaneRetime({
+          projectId,
+          fileId,
+          cellId,
+          recordingsRoomMs: roomMs,
+          ...(activeLane ? { targetLang: activeLane } : {}),
+          author: currentUsername,
+        }),
+        flush: async (fileIds) => {
+          await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+          for (const fileId of fileIds) {
+            if (fileId === activeFileId) revalidateCells()
+            else refreshCueFileRef.current(fileId)
+          }
+        },
+      }, rooms)
+    },
+    [project?.id, activeFileId, activeLane, currentUsername, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells],
+  )
+  /** AQU-2432 (review, Nov 9): a line's stored room now, read in the file that
+   *  owns it (null: none stored); undefined when no file holds the line. */
+  const readLineRoom = useCallback((cellId: string): number | null | undefined => {
+    const owner = resolveTakeCellRef.current(cellId)
+    return owner ? (owner.cell.recordingsRoomMs ?? null) : undefined
+  }, [])
+  // One drag, one step: every room it changed, and the take's own place when
+  // the drag changed that too (its pause closes first on the way earlier, and
+  // opens once the rooms are whole on the way later).
+  const handleMoveTakeRooms = useCallback(
+    async (move: TakeRoomsMove) => {
+      const owner = resolveTakeCellRef.current(move.cellId)
+      if (!owner) return
+      const att = owner.cell.attachments?.[move.audioId]
+      recordStep<LineRoomStepData>({
+        kind: "line.room",
+        data: {
+          rooms: move.rooms.map((r) => ({
+            cellId: r.cellId,
+            before: readLineRoom(r.cellId) ?? null,
+            after: r.roomMs,
+          })),
+          ...(move.take
+            ? {
+                take: {
+                  cellId: move.cellId,
+                  audioId: move.audioId,
+                  before: att?.targetOffsetMs ?? null,
+                  after: move.take.place.targetOffsetMs,
+                  recordingsBefore: att?.recordingsOffsetMs ?? null,
+                  recordingsAfter: move.take.place.recordingsOffsetMs,
+                },
+              }
+            : {}),
+        },
+        labelKey: "editor.history.stepLineRoom",
+        fileId: activeFileId,
+        fileName: activeFileNameRef.current,
+      })
+      // AQU-2432 (review, Nov 9): both shown at once, together.
+      await applyLineRoomMove(
+        { applyRooms: applyLineRooms, applyPlace: applyTakePlace },
+        move.rooms,
+        move.take ? { cellId: move.cellId, audioId: move.audioId, place: move.take.place } : null,
+      )
+    },
+    [applyLineRooms, applyTakePlace, readLineRoom, activeFileId],
+  )
+
   // AQU-1767 phase 1: CUT dub takes into independent pieces — from the blade
   // (one chip, where it was clicked) or "cut at the playhead" (every dub chip
   // under it). One user action is one history step, however many cuts it made.
@@ -4936,9 +5037,18 @@ export function ProjectWorkspace() {
   )
   setCueAnchorOverridesRef.current = (cellId, offsetMs) =>
     setCueAnchorOverrides((prev) => new Map(prev).set(cellId, offsetMs))
+  // AQU-2432 (review, Nov 9): a heard line's ROOM, the same way — and its
+  // stored room stamped on it as the cell store stamps the open file's lines,
+  // so following the recordings the heard lines are laid out with their rooms.
+  const [cueRoomOverrides, setCueRoomOverrides] = useState<ReadonlyMap<string, number | null>>(new Map())
+  setCueRoomOverridesRef.current = (cellId, roomMs) =>
+    setCueRoomOverrides((prev) => new Map(prev).set(cellId, roomMs))
+  refreshCueFileRef.current = (fileId) => {
+    if (fileId === audioCueSibling?.id) refreshAudioCues()
+  }
   const audioCueCells = useMemo(() => {
     if (!audioCues) return null
-    const merged = mergeCellsWithAudio(audioCues, cueAudioByCellId)
+    const merged = stampLineRooms(mergeCellsWithAudio(audioCues, cueAudioByCellId), activeLane, cueRoomOverrides)
     if (cueAnchorOverrides.size === 0) return merged
     return merged.map((c) => {
       const offset = cueAnchorOverrides.get(c.id)
@@ -4946,7 +5056,7 @@ export function ProjectWorkspace() {
         ? c
         : { ...c, metadata: { ...(c.metadata ?? {}), target_offset_ms: offset } }
     })
-  }, [audioCues, cueAudioByCellId, cueAnchorOverrides])
+  }, [audioCues, cueAudioByCellId, cueAnchorOverrides, cueRoomOverrides, activeLane])
   // AQU-2125: what a save folds — read at save time (see `castFoldLinesRef`).
   castFoldLinesRef.current = () => castLinesOf([...cellSummaries, ...(audioCueCells ?? [])])
   cueTakeCountRef.current = () => {
@@ -10488,6 +10598,13 @@ export function ProjectWorkspace() {
   const handleLastTakeRemoved = useCallback((cellId: string) => {
     lastTakeRemovedRef.current(cellId)
   }, [])
+  // AQU-2432 (review, Nov 9): the table's # column for a line, so the
+  // timeline's marker for a line with no room names it as the table does.
+  // Read when a marker asks (few, and only lines with no room); one identity.
+  const tableNumberCache = useMemo(() => createEditorStructureCache(), [cellStore])
+  const lineNumberForRef = useRef<(cellId: string) => string | null>(() => null)
+  lineNumberForRef.current = (cellId) => tableLineNumber(cellStore, tableNumberCache, cellId)
+  const lineNumberFor = useCallback((cellId: string) => lineNumberForRef.current(cellId), [])
 
   /** Stable wrapper over the ref above — see `audioHomeRef`. */
   const audioHomeFor = useCallback((cell: CellData) => audioHomeRef.current(cell), [])
@@ -10632,6 +10749,7 @@ export function ProjectWorkspace() {
     countCastLines: handleCountCastLines, // 2026-09-28: "Apply to all «name» lines (N)"
     onTakeSaved: handleTakeSaved, // AQU-646: a take gives a text-less line a target row
     onLastTakeRemoved: handleLastTakeRemoved, // …and deleting its last one takes that back
+    lineNumberFor, // AQU-2432 (review, Nov 9): what the table numbers a line
     audioHomeFor, // AQU-646 stage 3f: where this row's audio belongs
     myScopes, // AQU-633: per-cell validate scope gate
     cellStore, // AQU-1271: the add-concept popover subscribes for its match preview
@@ -10656,7 +10774,7 @@ export function ProjectWorkspace() {
     // AQU-2204: following its recordings, a file shows no source times — so
     // a line's "Edit timestamps" is unavailable, with the reason.
     followsRecordings: timingMode === "audioFirst",
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, trainFromTake, handleLineVoicePicked, handleApplyLineVoice, addVoiceForLine, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleSetMilestoneFromCell, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, trainFromTake, handleLineVoicePicked, handleApplyLineVoice, addVoiceForLine, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, lineNumberFor, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleSetMilestoneFromCell, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
 
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
@@ -15936,6 +16054,14 @@ export function ProjectWorkspace() {
         },
         takeRestored: (cellId) => handleTakeSaved(cellId),
       }),
+      // AQU-2432 (Sam, Nov 9): a drag that changed unrecorded lines' rooms.
+      ...lineRoomStepHandlers({
+        // AQU-2432 (review, Nov 9): read in the file that owns the line.
+        readRoom: readLineRoom,
+        applyRooms: applyLineRooms,
+        readTake: readAtt,
+        applyPlace: (cellId, audioId, place) => applyTakePlace(cellId, audioId, place),
+      }),
       ...rowStepHandlers({
         readRow: (cellId) => {
           const cell = getActiveCell(cellId)
@@ -16044,6 +16170,7 @@ export function ProjectWorkspace() {
     return unregister
   }, [
     readTake, applyTakeTrim, applyTakeGain, applyTakePlace, applyTakeCut, applyTakeUncut, applyTakeRemove, applyTakeRename, applyTakeSelect,
+    applyLineRooms, readLineRoom,
     handleLastTakeRemoved, handleTakeSaved,
     getActiveCell, readRowTiming, cellStore, applyRetimeSubtitle, applyCellHidden, removeLineCore, applyRestoreRow, applyRepoint,
     activeLane, applyTargetText, project?.id, currentUsername, getTokenForProjectFile, revalidateAuditStats, revalidateCell,
@@ -16113,6 +16240,33 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setQueueLayerTrackSlots(layerTrackSlotsKey ? layerTrackSlotsKey.split("\u0000") : [])
   }, [layerTrackSlotsKey])
+
+  // AQU-2432 (review, Nov 9): RECORDING AN EMPTY LINE NEVER BRINGS BACK AN OLD
+  // OVERLAP. When a take fills a line that had none, the next line's takes
+  // that still hold a pull-back (read as none while the line was empty) are put
+  // back on their line's start — where they are drawn and heard now — in the
+  // recording's own step (lib/history/take-steps, `setTakeAddedHeals`). Only a
+  // take that filled an empty slot can do it; a new version of a take that was
+  // already there never does. Laid out from the lines the file plays: a heard
+  // line's take lives in the cue file.
+  const takeAddedHealsRef = useRef<(data: TakeAddData, where: { fileId: string }) => TakePlaceData[]>(() => [])
+  takeAddedHealsRef.current = (data, where) => {
+    if (data.selectedBefore != null) return []
+    const cells = audioCueSibling && where.fileId === audioCueSibling.id
+      ? (audioCueCells ?? [])
+      : where.fileId === activeFileId ? audioMergedCells : []
+    return pullBacksWokenBy(cells, data.cellId, [data.audioId, ...(data.pieces ?? [])], programmeTracks).flatMap(({ cellId, audioId }) => {
+      const att = cells.find((c) => c.id === cellId)?.attachments?.[audioId]
+      if (!att) return []
+      const targetOffsetMs = att.targetOffsetMs ?? null
+      void applyTakePlace(cellId, audioId, { targetOffsetMs, recordingsOffsetMs: 0 })
+      return [{ cellId, audioId, before: targetOffsetMs, after: targetOffsetMs, recordingsBefore: att.recordingsOffsetMs ?? null, recordingsAfter: 0 }]
+    })
+  }
+  useEffect(() => {
+    setTakeAddedHeals((data, where) => takeAddedHealsRef.current(data, where))
+    return () => setTakeAddedHeals(null)
+  }, [])
 
   // AQU-2251: with "Skip lines with nothing to play" on, the built-in clock
   // jumps from the end of one line with a take to the start of the next one.
@@ -18445,9 +18599,14 @@ export function ProjectWorkspace() {
                     // rule, which lets maintainers through so an import's
                     // retimes are not caught by the lock.
                     timingLocked={timingLocked}
-                    onRetimeTarget={handleRetimeTarget}
+                    // AQU-2432 (browser pass, Nov 11): a take is moved or
+                    // trimmed only by someone who can save it.
+                    {...timelineTakeDrags(project?.syncRole?.level ?? null, {
+                      onRetimeTarget: handleRetimeTarget,
+                      onMoveTakeRooms: handleMoveTakeRooms,
+                      onTrimTarget: handleTrimTarget,
+                    })}
                     onRetimeCue={handleRetimeAudioCue}
-                    onTrimTarget={handleTrimTarget}
                     onCutTargets={handleCutTargets}
                     onRegenerateVoice={handleRegenerateTimelineVoice}
                     onChangeVoice={handleChangeTimelineVoice}

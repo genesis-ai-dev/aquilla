@@ -195,3 +195,49 @@ describe("CellStore.setOwnTakeCellIds", () => {
     expect(store.getCellView("t1")?.hasOwnTake).toBe(true)
   })
 })
+
+// AQU-2432 (Sam, Nov 9): an unrecorded line's ROOM following the recordings is
+// stored on the SOURCE row's metadata, one key per language
+// (lib/timeline/line-room). The store stamps the active language's onto the
+// line, so the layout, the transport and the exports read one field.
+describe("CellStore: a line's room following the recordings", () => {
+  const withRooms = () => [
+    row("b1", { metadata: { recordings_room_ms: 1_500, "recordings_room_ms:fr": 0, cast_name: "Mia" } }),
+    row("b2"),
+  ]
+  const inLane = (store: CellStore, lane: string) =>
+    store.setRuntime({ projectId: "p", fileId: "f", username: "alice", requiredValidations: 1, auditStats: new Map(), lane })
+
+  it("stamps the default language's room onto the line; a line with none has none", () => {
+    const store = makeStore(withRooms())
+    expect(store.getCellView("b1")?.recordingsRoomMs).toBe(1_500)
+    expect(store.getCellView("b2")?.recordingsRoomMs).toBeUndefined()
+  })
+
+  it("each language reads its own room: switching language switches it, and a language with none stored has none", () => {
+    const store = makeStore(withRooms())
+    inLane(store, "fr")
+    expect(store.getCellView("b1")?.recordingsRoomMs).toBe(0)
+    inLane(store, "ar")
+    expect(store.getCellView("b1")?.recordingsRoomMs).toBeUndefined()
+    inLane(store, "")
+    expect(store.getCellView("b1")?.recordingsRoomMs).toBe(1_500)
+  })
+
+  it("a drag's room shows at once, before the server answers, and Undo's null takes it away again", () => {
+    const store = makeStore(withRooms())
+    store.applyOptimisticCellTiming("b2", { metadata: { recordings_room_ms: 0 } })
+    expect(store.getCellView("b2")?.recordingsRoomMs).toBe(0)
+    store.applyOptimisticCellTiming("b2", { metadata: { recordings_room_ms: null } })
+    expect(store.getCellView("b2")?.recordingsRoomMs).toBeUndefined()
+    // …and it never disturbs the line's other metadata.
+    store.applyOptimisticCellTiming("b1", { metadata: { recordings_room_ms: 200 } })
+    expect(store.getCellView("b1")?.metadata?.cast_name).toBe("Mia")
+  })
+
+  it("a reload keeps it: the room comes back with the rows", () => {
+    const store = makeStore([row("b1")])
+    store.replaceRows([row("b1", { metadata: { recordings_room_ms: 700 } })], { full: true })
+    expect(store.getCellView("b1")?.recordingsRoomMs).toBe(700)
+  })
+})

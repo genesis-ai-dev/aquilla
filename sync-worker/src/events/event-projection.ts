@@ -28,6 +28,7 @@ import { trackPatchRequiresExisting } from './track-editing-authority'
 import { usableCorpusMarker } from './corpus-marker'
 import { assignDeclaredLanguages } from '../../../db/shared/file-declared-languages'
 import { usableSortIndex } from './sort-index'
+import { lineRoomToStore } from './line-room-authority'
 import { commentAuthorLabel } from './comment-authorship'
 import {
   audioLaneDualReadBinds,
@@ -285,6 +286,17 @@ function attachPieceLaneBinds(
 export function laneOfAudioEvent(payload: unknown): string {
   const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
   return typeof lang === 'string' ? lang : ''
+}
+
+/**
+ * AQU-2432 (Sam, Nov 9): the `cells.metadata` key an unrecorded line's room is
+ * stored under for a language — `recordings_room_ms` for the project's default
+ * one (tag `''`), `recordings_room_ms:<tag>` for any other. The client reads
+ * the same key (src/lib/timeline/line-room.ts, `lineRoomKey`); the two must
+ * agree.
+ */
+export function lineRoomMetadataKey(laneTag: string): string {
+  return laneTag ? `recordings_room_ms:${laneTag}` : 'recordings_room_ms'
 }
 
 /**
@@ -664,6 +676,8 @@ const INTEGER_MS_PAYLOAD_KEYS = [
   'subtitleStartMs',
   'subtitleEndMs',
   'targetStartMs',
+  // AQU-2432 (review, Nov 9): an unrecorded line's room.
+  'recordingsRoomMs',
 ] as const
 
 /**
@@ -3651,6 +3665,50 @@ case 'cell.audio.attach': {
           )
         }
         // Non-number, non-null values (corrupt replay data) are skipped.
+      }
+      // AQU-2432 (Sam, Nov 9): an unrecorded line's ROOM following the
+      // recordings — how long the line lasts while it has no take, made
+      // smaller than its natural length by dragging the next take earlier
+      // against it. It is the LINE's (nothing is stored on the dragged take),
+      // and it is PER LANGUAGE, because whether a line is recorded is: so the
+      // key carries the language the event names — plain for the default one,
+      // `recordings_room_ms:<tag>` for any other. The same per-key merge as
+      // the keys above, so two people closing two lines' rooms, or a room and
+      // a subtitle span, never clobber each other. The key is BOUND, never
+      // written into the SQL: a language tag is a string someone chose.
+      // Number (≥ 0, 0 included: "no room" is not "no room stored") sets;
+      // null clears, back to the natural length; anything else is skipped.
+      // AQU-2432 (review, Nov 9): refused for that field only — negative, not
+      // a number, or above a day (which failed the bigint cast, and with it the
+      // whole batch) is skipped, and the keys above still land
+      // (line-room-authority.ts).
+      const room = lineRoomToStore(p.recordingsRoomMs)
+      if (room !== undefined) {
+        const roomKey = lineRoomMetadataKey(laneOfAudioEvent(event.payload))
+        if (room !== null) {
+          stmts.push(
+            db
+              .prepare(
+                `UPDATE cells
+                 SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(?::text, ?::bigint)
+                 WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+              )
+              .bind(roomKey, room, event.projectId, event.fileId, event.cellId),
+          )
+        } else {
+          stmts.push(
+            db
+              .prepare(
+                `UPDATE cells
+                 SET metadata = CASE
+                   WHEN metadata IS NULL THEN NULL
+                   ELSE metadata - ?::text
+                 END
+                 WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+              )
+              .bind(roomKey, event.projectId, event.fileId, event.cellId),
+          )
+        }
       }
       return ['cells']
     }

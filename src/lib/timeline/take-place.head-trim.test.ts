@@ -127,7 +127,7 @@ describe("a take with its start trimmed off, moved (AQU-2495)", () => {
 describe("the limits themselves (AQU-2495)", () => {
   const section = { start: 12, end: 20 }
   it("clampMoveStart: the floor is the start of the file, not the take's head trim", () => {
-    const c = { free: false, lineStartSec: null, section, lenSec: 135, prevChipStartSec: null, nextChipStartSec: null }
+    const c = { free: false, floorSec: null, section, lenSec: 135, prevChipStartSec: null, nextChipStartSec: null }
     expect(clampMoveStart(12, c)).toBe(12)
     expect(clampMoveStart(-3, c)).toBe(0)
   })

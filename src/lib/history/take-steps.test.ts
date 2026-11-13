@@ -85,6 +85,18 @@ describe("take.place in both timings (AQU-2267)", () => {
     expect(ctx.applyPlace).not.toHaveBeenCalled()
   })
 
+  // AQU-2432 (Sam, Nov 6): a take dragged over the end of the take before it
+  // has a place below its line's start following the recordings.
+  it("a move back over the take before it is undone and redone as one step, its place below 0 kept", async () => {
+    const pulled = { cellId: "c", audioId: "a", before: -1_000, after: -1_600, recordingsBefore: 0, recordingsAfter: -600 }
+    const takes: Takes = { a: { targetOffsetMs: -1_600, recordingsOffsetMs: -600 } }
+    const { ctx, handlers } = ctxFor(takes)
+    expect(await handlers["take.place"].undo(pulled)).toEqual({ kind: "done" })
+    expect(ctx.applyPlace).toHaveBeenCalledWith("c", "a", { targetOffsetMs: -1_000, recordingsOffsetMs: 0 })
+    expect(await handlers["take.place"].redo(pulled)).toEqual({ kind: "done" })
+    expect(takes.a).toMatchObject({ targetOffsetMs: -1_600, recordingsOffsetMs: -600 })
+  })
+
   it("a step saved before AQU-2267 names one place: it undoes that one, with no place of its own following the recordings", async () => {
     const { ctx, handlers } = ctxFor({ a: { targetOffsetMs: 200 } })
     expect(await handlers["take.place"].undo({ cellId: "c", audioId: "a", before: -1_000, after: 200 })).toEqual({ kind: "done" })

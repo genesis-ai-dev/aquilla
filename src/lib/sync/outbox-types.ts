@@ -897,6 +897,10 @@ export interface OutboxEventPayloads {
     /** Legacy absolute dub anchor. Still projected so historical events replay
      *  unchanged, but nothing writes it any more. */
     targetStartMs?: number | null
+    /** AQU-2432 (Sam, Nov 9): an unrecorded line's ROOM following the
+     *  recordings, in ms (≥ 0; 0 is "no room"), for the language `targetLang`
+     *  names. Null clears it (its natural length). See lib/timeline/line-room. */
+    recordingsRoomMs?: number | null
     /** AQU-1462: lane this presentation timing belongs to. Omitted when shared. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

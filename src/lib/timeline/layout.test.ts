@@ -282,8 +282,10 @@ describe("moving a take — retimeAnchorSec / canRetimeTarget (AQU-2215)", () =>
     it("dragging back to the line's start stores no pause at all", () => {
       // Line start (programme 3) → the cell's own start on the file clock.
       expect(layout.retimeAnchorSec(cells[1], attOf(cells[1]), 3)).toBeCloseTo(2, 5)
-      // And further left clamps there rather than going negative.
-      expect(layout.retimeAnchorSec(cells[1], attOf(cells[1]), 1)).toBeCloseTo(2, 5)
+      // AQU-2432 (Sam, Nov 6): further left it goes over the end of v1's take,
+      // a place before its line's start (the move clamp stops it at v1's take's
+      // start, 0).
+      expect(layout.retimeAnchorSec(cells[1], attOf(cells[1]), 1)).toBeCloseTo(0, 5)
     })
 
     it("the pause it stores is the one the next layout draws the take at", () => {
@@ -341,8 +343,9 @@ describe("moving a take — retimeAnchorSec / canRetimeTarget (AQU-2215)", () =>
       expect(l.canRetimeTarget(cell, cell.attachments![takeId] as never)).toBe(true)
       // Its slot starts at 2 s (after the 2 s stand-in); dragged to 3.25 s.
       expect(l.retimeAnchorSec(cell, cell.attachments![takeId] as never, 3.25)).toBeCloseTo(1.25)
-      // Dragged back before its slot: no pause.
-      expect(l.retimeAnchorSec(cell, cell.attachments![takeId] as never, 1.5)).toBe(0)
+      // AQU-2432: dragged back before its slot, over the stand-in before it — a
+      // place before its slot's start.
+      expect(l.retimeAnchorSec(cell, cell.attachments![takeId] as never, 1.5)).toBeCloseTo(-0.5, 5)
     })
   })
 })
@@ -395,10 +398,12 @@ describe("a piece of a split take, in both timings (AQU-1758)", () => {
     expect(slot.targetPieces!.map((p) => [p.atSec, p.gapBeforeSec])).toEqual([[0, undefined], [4, expect.closeTo(1, 5)]])
   })
 
-  it("dragged back over the first piece following the recordings, it stays against it and its place does not change", () => {
+  it("dragged back over the first piece following the recordings, it sounds over its end (AQU-2432)", () => {
+    // Before AQU-2432 it stayed against the first piece. Sam, Nov 6 (rule 6):
+    // a piece can be dragged over the end of the piece in front, as a take
+    // over the take before it — 1.5 s here, 1.5 s before its place.
     const cell = cut()
     const anchor = recordings(cell).retimeAnchorSec(cell, piece(cell), 1.5)!
-    // The place it already has: the lane records no move.
-    expect(anchor).toBeCloseTo(targetChipGeom(cell, piece(cell))!.anchor, 5)
+    expect(anchor - targetChipGeom(cell, piece(cell))!.anchor).toBeCloseTo(-1.5, 5)
   })
 })

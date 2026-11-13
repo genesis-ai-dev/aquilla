@@ -112,3 +112,47 @@ describe("joining a split take's pieces", () => {
     expect(blob?.size).toBe(44 + (24000 + 12000) * 2)
   })
 })
+
+// AQU-2432 (Sam, Nov 6): a piece dragged over the end of the piece in front
+// sounds over it — both at full volume, mixed into the joined copy.
+describe("joining pieces that overlap", () => {
+  const i16 = (b: Uint8Array, o: number) => new DataView(b.buffer, b.byteOffset).getInt16(o, true)
+
+  it("mixes the overlap, sample by sample, and the clip lasts to the last end", async () => {
+    const full = await wav(1)
+    // 0.1–0.3 then 0.5–0.6 starting 0.05 s before the first ends.
+    const joined = joinWavSpans(full, [{ start: 0.1, end: 0.3 }, { start: 0.5, end: 0.6, overlapBeforeSec: 0.05 }])!
+    const frames = 9600 + 4800 - 2400
+    expect(joined.length).toBe(44 + frames * 2)
+    expect(u32(joined, 40)).toBe(frames * 2)
+    const at = (sec: number) => 44 + Math.round(sec * 48000) * 2
+    // Before the overlap: the first piece alone.
+    expect(i16(joined, 44)).toBe(i16(full, at(0.1)))
+    // In it: both, summed.
+    const k = 9600 - 2400 + 10
+    expect(i16(joined, 44 + k * 2)).toBe(i16(full, at(0.1) + k * 2) + i16(full, at(0.5) + 10 * 2))
+    // After it: the second alone.
+    const after = 9600 + 100
+    expect(i16(joined, 44 + after * 2)).toBe(i16(full, at(0.5) + (after - 7200) * 2))
+  })
+
+  it("a piece inside the one in front ends before it: the clip ends with the first", async () => {
+    const full = await wav(1)
+    const joined = joinWavSpans(full, [{ start: 0, end: 0.5 }, { start: 0.6, end: 0.7, overlapBeforeSec: 0.4 }])!
+    expect(u32(joined, 40)).toBe(24000 * 2)
+  })
+
+  it("is held at full scale where the sum would pass it", () => {
+    // Two pieces of a full-scale square wave, laid one over the other.
+    const loud = encodeWavPcm16(new Float32Array(4800).fill(0.9), 48000)
+    return loud.arrayBuffer().then((buf) => {
+      const bytes = new Uint8Array(buf)
+      const joined = joinWavSpans(bytes, [{ start: 0, end: 0.05 }, { start: 0, end: 0.05, overlapBeforeSec: 0.05 }])!
+      expect(i16(joined, 44 + 100)).toBe(32767)
+    })
+  })
+
+  it("a WAV it cannot mix by bytes goes to the decode path", () => {
+    expect(joinWavSpans(stereo24(4410), [{ start: 0, end: 0.05 }, { start: 0.05, end: 0.1, overlapBeforeSec: 0.01 }])).toBeNull()
+  })
+})

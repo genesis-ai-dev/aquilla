@@ -127,6 +127,13 @@ export interface EditorActionsContextValue {
    */
   onTakeSaved?: (cellId: string) => void
   /**
+   * AQU-2432 (review, Nov 9): the number the text table's # column shows for
+   * a line (null: it numbers it nothing), so the timeline's marker for a line
+   * with no room calls the line what the table calls it. Identity-stable in
+   * the workspace, like `onTakeSaved`.
+   */
+  lineNumberFor?: (cellId: string) => string | null
+  /**
    * The cell's last recording was deleted from the Recording tab (2026-09-29)
    * — the same reset of the target row the recorder's delete triggers.
    * Identity-stable in the workspace, like `onTakeSaved`.

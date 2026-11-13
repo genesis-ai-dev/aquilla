@@ -1,6 +1,6 @@
 import type { CellData } from "@/hooks/useCells"
 import { deriveParagraphs } from "./parsers/paragraphs"
-import { importDisplayLabel, verseLabelFromCanonical } from "./scripture-reference"
+import { cellNumberLabel, importDisplayLabel, verseLabelFromCanonical } from "./scripture-reference"
 import { isStructuralCell } from "./cells/structural"
 import { splitFromCellId } from "./timeline/user-line-origin"
 
@@ -138,4 +138,42 @@ export function createEditorStructureCache() {
       }
     },
   }
+}
+
+/**
+ * AQU-2432 (review, Nov 9): the number the text table's # column shows for a
+ * line — derived as EditorTable derives it (`cellNumberLabel` over this cache,
+ * the way the tools' editor services do), with line numbers on — so a surface
+ * that names a line by number (the timeline's marker for a line with no room)
+ * calls it what the table calls it. Null when the table numbers it nothing
+ * (a heading), or the line is not in the store.
+ */
+export function tableLineNumber(
+  store: {
+    getCellIds(): readonly string[]
+    getCellVersion(id: string): number
+    getCellView(id: string): StructuralCell | null
+    getNavigationIndex(): readonly { kind: string }[]
+  },
+  cache: ReturnType<typeof createEditorStructureCache>,
+  cellId: string,
+): string | null {
+  const ids = store.getCellIds()
+  const rowIndex = ids.indexOf(cellId)
+  const view = rowIndex >= 0 ? store.getCellView(cellId) : null
+  if (!view) return null
+  const { sequentialNumberByCellId, versePartByCellId } = cache.read(ids, store)
+  const scriptureNumbering = store.getNavigationIndex().every((e) =>
+    e.kind === "chapter" || e.kind === "chapter-range" || e.kind === "preface")
+  return cellNumberLabel({
+    lineNumbersEnabled: true,
+    cellType: view.type,
+    canonicalRef: view.group,
+    sourceCanonicalRef: view.globalReferences?.[0],
+    scriptureNumbering,
+    rowIndex,
+    contentNumber: sequentialNumberByCellId.get(cellId) ?? rowIndex + 1,
+    displayLabel: importDisplayLabel(view.metadata),
+    versePart: versePartByCellId.get(cellId),
+  })
 }

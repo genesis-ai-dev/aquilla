@@ -1247,6 +1247,10 @@ export interface CellLaneRetimeInput {
    *  historical events keep projecting. See lane-timing.ts for why the read
    *  fallback is permanent rather than a migration. */
   targetStartMs?: number | null
+  /** AQU-2432 (Sam, Nov 9): an unrecorded line's ROOM following the
+   *  recordings, in ms, for the language `targetLang` names. null clears it
+   *  (back to its natural length). See lib/timeline/line-room. */
+  recordingsRoomMs?: number | null
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
@@ -1264,7 +1268,8 @@ export async function emitCellLaneRetime(input: CellLaneRetimeInput): Promise<st
     input.subtitleStartMs === undefined &&
     input.subtitleEndMs === undefined &&
     input.targetOffsetMs === undefined &&
-    input.targetStartMs === undefined
+    input.targetStartMs === undefined &&
+    input.recordingsRoomMs === undefined
   ) {
     throw new Error("emitCellLaneRetime: at least one timing key is required")
   }
@@ -1280,6 +1285,7 @@ export async function emitCellLaneRetime(input: CellLaneRetimeInput): Promise<st
       ...(input.subtitleEndMs !== undefined ? { subtitleEndMs: intMs(input.subtitleEndMs) } : {}),
       ...(input.targetOffsetMs !== undefined ? { targetOffsetMs: intMs(input.targetOffsetMs) } : {}),
       ...(input.targetStartMs !== undefined ? { targetStartMs: intMs(input.targetStartMs) } : {}),
+      ...(input.recordingsRoomMs !== undefined ? { recordingsRoomMs: intMs(input.recordingsRoomMs) } : {}),
       ...targetLaneFields(input),
     },
     clientTs: input.clientTs,

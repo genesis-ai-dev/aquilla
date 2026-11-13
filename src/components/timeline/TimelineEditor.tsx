@@ -166,7 +166,7 @@ import { useBatchProgress, canTranscribeCell } from "@/lib/audio/batch-audio"
 import { useOnline } from "@/hooks/useOnline"
 import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
-import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions, type TargetAudioItem } from "./TargetAudioLane"
+import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions, type TakeRoomsMove, type TargetAudioItem } from "./TargetAudioLane"
 import type { TakeVoiceNote } from "@/lib/audio/take-voice"
 import { TimelinePlayhead } from "./TimelinePlayhead"
 import { MediaTextHeader, TimelineTimingRow } from "./TimelineChipStrip"
@@ -258,6 +258,11 @@ export interface TimelineEditorProps {
    *  AQU-2267: `place` is what to store — the take's place in both timings
    *  after the move, each held by its own timing's limits. */
   onRetimeTarget?(cellId: string, anchorSec: number, audioId: string, place: TakePlace): void
+  /** AQU-2432 (Sam, Nov 9): following the recordings, a take dragged against
+   *  a line nobody has recorded sets that line's ROOM — every room the drag
+   *  changed, and the take's own place when it changed that too, as one step.
+   *  Fired instead of `onRetimeTarget` for such a drag. */
+  onMoveTakeRooms?(move: TakeRoomsMove): void
   /** Matt's QA (2026-08-21): a drag on an AUDIO-CUE chip, final bounds in
    *  seconds, fired once on pointer-up. The workspace commits it as
    *  `cell.retime` against the hidden sibling — the same event a re-import's
@@ -1270,6 +1275,7 @@ export function TimelineEditor({
   sequenceOrdered = false,
   showSources = true,
   onRetimeTarget,
+  onMoveTakeRooms,
   onRetimeCue,
   virtualIsTransport = false,
   skipSilentLinesApplies,
@@ -4320,6 +4326,7 @@ export function TimelineEditor({
             // which takes can hold a pause at all, so the mode question is
             // answered in one module instead of by withholding the handler.
             onRetimeTarget={onRetimeTarget}
+            onMoveTakeRooms={onMoveTakeRooms}
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={cutOne}
@@ -4402,6 +4409,7 @@ export function TimelineEditor({
             }}
             onSeek={laneProps.onSeek}
             onRetimeTarget={onRetimeTarget}
+            onMoveTakeRooms={onMoveTakeRooms}
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={cutOne}
@@ -4409,6 +4417,10 @@ export function TimelineEditor({
             takeVoiceFor={takeVoiceFor}
             getPlayheadSec={getPlayheadSec}
             emptyCells={own.empty}
+            // AQU-2432 (Sam, Nov 9): a line with no room is marked on every
+            // track whose takes are laid end to end; a track made a layer
+            // (music, effects) has no seam to mark.
+            lineMarkers={track.setsLineLengths !== false}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, slotForTrack(track.id)) : undefined}
             projectId={project?.id ?? null}
             fileId={fileId}

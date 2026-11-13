@@ -228,7 +228,12 @@ export function useMediaDock(input: UseMediaDockInput) {
     if (!timelineStacked) return { tl: {}, body: {}, ll: {}, lr: {} }
     const both = view.isOpen("ll") && view.isOpen("lr")
     const area = (a: DockArea): PanelConstraints => {
-      if (!view.isOpen(a)) return PINNED
+      // A folded area is pinned only beside an open one. With the whole row
+      // folded, the row's own pin hides it, and pinning it too would leave a
+      // lone area (or both) at zero for good: the group keeps that layout for
+      // its set of panels and ignores every resize out of it, so the text came
+      // back as an empty 0 px column.
+      if (!view.isOpen(a)) return view.bodyOpen ? PINNED : {}
       if (!both) return {}
       return {
         minSize: minWidthOf(a),
@@ -555,6 +560,8 @@ export function useMediaDock(input: UseMediaDockInput) {
     if (!timelineStacked) return
     for (const r of ["tl", "ll", "lr"] as const) {
       if (!view.exists(r) || view.isOpen(r)) continue
+      // Unpinned inside a folded row (see the constraints): the row is at zero.
+      if (r !== "tl" && !view.bodyOpen) continue
       const px = safeSize(r)
       if (px !== null && !isFoldSized(px)) {
         repairsRef.current++

@@ -755,7 +755,7 @@ export const audio = defineNamespace({
     "audio.makeSpeech.newTakeNote": "Every result is a new take. Nothing replaces a recording someone made.",
     "audio.makeSpeech.progress": "This run",
     "audio.makeSpeech.progressCount": "{done} of {total} done",
-    "audio.makeSpeech.stateWaiting": "Not started",
+    "audio.makeSpeech.stateWaiting": "In the queue",
     "audio.makeSpeech.stateReview": "Translated — check it",
     "audio.makeSpeech.stateSkipped": "No text to speak",
     "audio.makeSpeech.stateFailed": "Did not finish",

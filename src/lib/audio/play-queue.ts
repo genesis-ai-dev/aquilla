@@ -492,7 +492,8 @@ export function setProgrammeFilm(film: ProgrammeFilm | null, fileId: string | nu
  * The workspace's word about the linked film (see `setProgrammeFilm`), for a
  * surface showing lines: the bottom strip reads it with `filmOverRun` (the
  * length shown before anything plays reaches the film's end where Play runs
- * on to it) and `linesHaveAnythingToPlayCountingFilm` (Play is offered).
+ * on to it), and the strip and "Play selected" hand it to
+ * `linesPlaybackStopsAt` (Play is offered, and what is counted).
  */
 export function useProgrammeFilm(): ProgrammeFilm | null {
   return useSyncExternalStore(

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
@@ -256,6 +256,14 @@ describe("PreferencesDialog", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Preferences" })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "Theme" })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "App font size" })).toHaveTextContent("Default")
+
+    const scroller = dialog.querySelector<HTMLElement>(".overflow-y-auto")!
+    scroller.scrollTop = 640
+    fireEvent.scroll(scroller)
+    await userEvent.click(screen.getByRole("link", { name: /Translator profile/i }))
+    expect(scroller.scrollTop).toBe(0)
+    await userEvent.click(screen.getByRole("button", { name: "Preferences" }))
+    expect(scroller.scrollTop).toBe(640)
 
     await userEvent.click(screen.getByRole("button", { name: /close/i }))
     expect(screen.getByTestId("editor-background")).toBeInTheDocument()

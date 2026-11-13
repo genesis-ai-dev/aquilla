@@ -72,7 +72,7 @@ it("requires the destination code after ownership proof and reports success", as
     password: "secret",
   })
   fireEvent.change(screen.getByLabelText("Verification code"), {
-    target: { value: "a".repeat(48) },
+    target: { value: "012345" },
   })
   fireEvent.click(screen.getByRole("button", { name: "Confirm email change" }))
   await waitFor(() =>

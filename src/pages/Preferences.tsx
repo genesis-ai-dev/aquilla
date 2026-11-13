@@ -2,7 +2,7 @@ import { EmptyState } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
 import { LoginMethodsSection } from "@/components/settings/LoginMethodsSection"
 import { Button } from "@/components/ui/button"
-import { useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import { Navigate, useLocation, useNavigate, useParams, type Location } from "react-router-dom"
 import { Bell, Cpu, Gauge, KeyRound, Link2, Mic, PanelLeft, ServerCog, UserRound } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
@@ -648,6 +648,14 @@ export function PreferencesDialog() {
   } | null
   const backgroundLocation = modalState?.backgroundLocation
   const modalDepth = modalState?.preferencesModalDepth ?? 1
+  const scrollContainer = useRef<HTMLDivElement>(null)
+  const scrollPositions = useRef(new Map<string, number>())
+  const scrollKey = section ?? "index"
+  useLayoutEffect(() => {
+    const container = scrollContainer.current
+    if (container) container.scrollTop = scrollPositions.current.get(scrollKey) ?? 0
+  }, [scrollKey])
+
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) navigate(-modalDepth) }}>
@@ -659,7 +667,9 @@ export function PreferencesDialog() {
           <DialogTitle>{t("nav.account.preferences")}</DialogTitle>
           <DialogDescription>{t("onboarding.preferences.dialogDescription")}</DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div ref={scrollContainer}
+          onScroll={(event) => scrollPositions.current.set(scrollKey, event.currentTarget.scrollTop)}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <SaveStatusProvider>
             {section
               ? <PreferencesDetail slug={section} modal />

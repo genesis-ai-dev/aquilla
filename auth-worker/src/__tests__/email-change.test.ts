@@ -14,7 +14,7 @@ const post = (path: string, body: object) =>
     { method: "POST", headers: authHeader(jwt), body: JSON.stringify(body) },
     testEnv,
   )
-const code = () => send.mock.calls.at(-1)![0].text.match(/[a-f0-9]{48}/)![0]
+const code = () => send.mock.calls.at(-1)![0].text.match(/\b[0-9]{6}\b/)![0]
 beforeEach(async () => {
   send.mockReset()
   send.mockResolvedValue(undefined)
@@ -62,6 +62,25 @@ describe("verified email changes", () => {
         )
       ).status,
     ).toBe(401)
+  })
+  it("atomically limits concurrent guesses and permits a fresh request after lockout", async () => {
+    await request()
+    const valid = code()
+    const wrong = valid === "000000" ? "111111" : "000000"
+    const responses = await Promise.all(Array.from({ length: 10 }, () => post("confirm", { token: wrong })))
+    expect(responses.every(r => r.status === 400)).toBe(true)
+    expect(await env.AQUILLA_PG.prepare("SELECT confirmation_attempts FROM email_change_requests WHERE user_id=1").first()).toEqual({ confirmation_attempts: 5 })
+    expect((await post("confirm", { token: valid })).status).toBe(400)
+    expect((await request()).status).toBe(200)
+    expect((await post("confirm", { token: code() })).status).toBe(200)
+  })
+  it("allows a correct fifth attempt and rejects malformed codes", async () => {
+    await request()
+    const valid = code()
+    for (const token of ["12345", "1234567", "abcdef"]) expect((await post("confirm", { token })).status).toBe(400)
+    const wrong = valid === "000000" ? "111111" : "000000"
+    for (let i=0; i<4; i++) expect((await post("confirm", {token:wrong})).status).toBe(400)
+    expect((await post("confirm", {token:valid})).status).toBe(200)
   })
   it("rejects incorrect password and sends nothing", async () => {
     expect(

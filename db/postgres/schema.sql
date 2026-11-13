@@ -3258,6 +3258,7 @@ CREATE TABLE email_change_requests (
  new_email TEXT NOT NULL,
  session_version INTEGER NOT NULL,
  token_hash TEXT NOT NULL,
+ confirmation_attempts INTEGER NOT NULL DEFAULT 0 CHECK (confirmation_attempts BETWEEN 0 AND 5),
  expires_at TIMESTAMPTZ NOT NULL
 );
 

@@ -16,6 +16,20 @@ import { checkDevAccess } from "../services/dev-access"
 import { countRecentEvents, recordAuthEvent } from "../utils/rate-limit"
 import { evictUserSessions } from "../lib/session-cache"
 
+function sixDigitCode(): string {
+  const values = new Uint32Array(1)
+  do { crypto.getRandomValues(values) } while (values[0] >= 4294000000)
+  return String(values[0] % 1_000_000).padStart(6, "0")
+}
+
+// A keyed digest prevents offline enumeration of the small code space from a DB copy.
+async function codeHash(secret: string, userId: number, code: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
+  const digest = await crypto.subtle.sign("HMAC", key, encoder.encode(`email-change:${userId}:${code}`))
+  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("")
+}
+
 const routes = new Hono<AuthHonoEnv>()
 routes.use(
   "*",
@@ -121,16 +135,14 @@ routes.post("/request", zValidator("json", requestSchema), async (c) => {
     proved = !!row
   }
   if (!proved) return c.json({ error: "ownership_proof_required" }, 401)
-  const token = Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) =>
-    b.toString(16).padStart(2, "0"),
-  ).join("")
-  const hash = await sha256Hex(token)
+  const token = sixDigitCode()
+  const hash = await codeHash(c.env.SECRET_KEY, old.id, token)
   const saved = await c.env.AQUILLA_PG.prepare(
     `INSERT INTO email_change_requests(user_id,old_email,new_email,session_version,token_hash,expires_at)
     SELECT id,email,?,session_version,?,now()+interval '15 minutes' FROM users
     WHERE id=? AND email=? AND session_version=? AND password_hash IS NOT DISTINCT FROM ?
     ON CONFLICT(user_id) DO UPDATE SET old_email=excluded.old_email,new_email=excluded.new_email,
-    session_version=excluded.session_version,token_hash=excluded.token_hash,expires_at=excluded.expires_at RETURNING user_id`,
+    session_version=excluded.session_version,token_hash=excluded.token_hash,expires_at=excluded.expires_at,confirmation_attempts=0 RETURNING user_id`,
   )
     .bind(
       email,
@@ -167,19 +179,21 @@ routes.post(
       token: z
         .string()
         .trim()
-        .regex(/^[a-f0-9]{48}$/),
+        .regex(/^[0-9]{6}$/),
     }),
   ),
   async (c) => {
     const old = await account(c)
     if (!old) return c.json({ error: "session_expired" }, 401)
-    const hash = await sha256Hex(c.req.valid("json").token)
+    const hash = await codeHash(c.env.SECRET_KEY, old.id, c.req.valid("json").token)
     const pending = await c.env.AQUILLA_PG.prepare(
-      "SELECT new_email FROM email_change_requests WHERE user_id=? AND token_hash=? AND expires_at>now()",
+      `UPDATE email_change_requests SET confirmation_attempts=confirmation_attempts+1
+       WHERE user_id=? AND expires_at>now() AND confirmation_attempts<5
+       RETURNING new_email,token_hash`,
     )
-      .bind(old.id, hash)
-      .first<{ new_email: string }>()
-    if (!pending) return c.json({ error: "invalid_or_expired_code" }, 400)
+      .bind(old.id)
+      .first<{ new_email: string; token_hash: string }>()
+    if (!pending || pending.token_hash !== hash) return c.json({ error: "invalid_or_expired_code" }, 400)
     const refusal = await guard(c, old, pending.new_email)
     if (refusal) return c.json({ error: refusal }, 403)
     try {

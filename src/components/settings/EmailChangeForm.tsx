@@ -3,6 +3,8 @@ import type { MessageKey } from "@/lib/i18n/messages/en"
 import { useState } from "react"
 import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
+import { REGEXP_ONLY_DIGITS } from "input-otp"
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp"
 import { Input } from "@/components/ui/input"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { Field, FieldLabel } from "@/components/ui/field"
@@ -50,7 +52,7 @@ export function EmailChangeForm({
     [busy, setBusy] = useState(false),
     [error, setError] = useState("")
   async function submit() {
-    if (busy) return
+    if (busy || (sent && !/^[0-9]{6}$/.test(token))) return
     setBusy(true)
     setError("")
     try {
@@ -130,13 +132,20 @@ export function EmailChangeForm({
             <FieldLabel htmlFor="email-change-code">
               {t("auth.emailChange.code")}
             </FieldLabel>
-            <Input
+            <InputOTP
+              maxLength={6}
+              pattern={REGEXP_ONLY_DIGITS}
+              inputMode="numeric"
               id="email-change-code"
               autoComplete="one-time-code"
               required
               value={token}
-              onChange={(e) => setToken(e.target.value)}
-            />
+              onChange={setToken}
+            >
+              <InputOTPGroup>
+                {Array.from({ length: 6 }, (_, index) => <InputOTPSlot key={index} index={index} />)}
+              </InputOTPGroup>
+            </InputOTP>
           </Field>
         </>
       ) : (
@@ -192,7 +201,7 @@ export function EmailChangeForm({
         </>
       )}
       {(sent || passwordAvailable || googleProof) && (
-        <Button disabled={busy} type="submit">
+        <Button disabled={busy || (sent && token.length !== 6)} type="submit">
           {t(sent ? "auth.emailChange.confirm" : "auth.emailChange.send")}
         </Button>
       )}

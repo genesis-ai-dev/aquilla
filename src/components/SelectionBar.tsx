@@ -397,23 +397,28 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     [anyChosen, filmCovers, playbackLines, ask],
   )
   // On a film file it is a run of the lines Play plays when every chosen line
-  // is among them (the check of the q44 fixes, Nov 12, SHOULD B: none may be
-  // left out). A selection reaching past them (a book's other chapter) is a
+  // on the timeline is among them (the check of the q44 fixes, Nov 12,
+  // SHOULD B: none may be left out). A selection reaching past them (a book's other chapter) is a
   // run of the chosen lines on their own, as on a file with no film: the
   // queue keeps the film out of such a run (N9).
   const selectionRun = useMemo(() => {
     if (!anyChosen) return { cells: playbackRange, only: null, stopCount: 0 }
-    if (playbackLines && fileStops) {
+    if (playbackLines && fileStops && film) {
+      // The second check (Nov 13), NOTE 3: asked only of the chosen rows on
+      // the timeline (the film's word names every line it draws, in every
+      // chapter). A row it does not draw, a chapter heading while "Count
+      // headings" is off or an unrecorded hidden line, cannot play anyway.
       // Membership by a Set (N11). Where the run starts is the queue's to
       // say: its first chosen stop, in the order it plays them.
-      const chosen = new Set(playbackRange.map((c) => c.id))
-      const only = new Set(playbackLines.filter((c) => chosen.has(c.id)).map((c) => c.id))
-      if (only.size > 0 && only.size === chosen.size) {
-        return { cells: playbackLines, only, stopCount: [...only].filter((id) => fileStops.has(id)).length }
+      const inList = new Set(playbackLines.map((c) => c.id))
+      const onTimeline = playbackRange.filter((c) => film.cellIds.has(c.id)).map((c) => c.id)
+      if (onTimeline.length > 0 && onTimeline.every((id) => inList.has(id))) {
+        const only = new Set(onTimeline)
+        return { cells: playbackLines, only, stopCount: onTimeline.filter((id) => fileStops.has(id)).length }
       }
     }
     return { cells: playbackRange, only: null, stopCount: linesPlaybackStopsAt(playbackRange, { ...ask, film: null }).size }
-  }, [anyChosen, playbackRange, playbackLines, fileStops, ask])
+  }, [anyChosen, playbackRange, playbackLines, fileStops, film, ask])
   const playableSelectedCount = selectionRun.stopCount
 
   /**

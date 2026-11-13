@@ -1512,6 +1512,32 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     })
   })
 
+  // The second check of the q44 fixes (Nov 13), NOTE 3 (aquilla-media's
+  // pick): a chosen row that is not on the timeline at all (a chapter heading
+  // while "Count headings" is off, an unrecorded hidden line) cannot play
+  // anyway, so it is left out of the question; it no longer takes the film
+  // away from the rest of the range. The film's word names every line the
+  // timeline draws, in every chapter.
+  it("a chosen row that is not on the timeline at all does not take the film away from the rest", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
+    const audio = audioMapFor(["cell-1", "cell-3"])
+    setQueueTimingMode("audioFirst")
+    // cell-2 is a heading the timeline does not draw: not among the film's
+    // lines, nor the lines Play plays.
+    const lines = mergeCellsWithAudio([THREE[0]!, THREE[2]!], audio)
+    act(() => setProgrammeFilm({ endSec: 60, cellIds: new Set(["cell-1", "cell-3"]) }, "file-1"))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audio, freeTiming: true, playbackLines: lines,
+    })
+    expect(playButton().textContent).toContain("2")
+
+    await userEvent.setup().click(playButton())
+
+    const [ctx] = vi.mocked(startQueue).mock.calls[0]
+    expect(ctx.cells).toBe(lines)
+    expect([...(ctx.only ?? [])].sort()).toEqual(["cell-1", "cell-3"])
+  })
+
   it("with no film, Play selected is still a run of the chosen lines on their own", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-3"]))
     renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { isTauriRuntime } from "../offline/is-tauri"
 import { paratextTauri, type Discovery, type DiscoveredProject } from "./tauri"
-import { parseParatextSettings, isUtf8Project, booksPresent, bookCodeFromProjectFile, type ParatextSettings } from "./project"
+import { parseParatextSettings, isUtf8Project, booksPresent, bookCodeFromProjectFile, bridgeStateId, type BridgeStateId, type ParatextSettings } from "./project"
 import { parseProjectUserAccess, type ProjectUserAccess } from "./access"
 import { BOOK_CODES_BY_NUMBER } from "./book-codes"
 
@@ -10,6 +10,8 @@ export interface BridgeProject {
   folderName: string
   settings: ParatextSettings
   guid: string
+  /** Key for this folder's saved bridge state; two folders of one project differ. */
+  stateId: BridgeStateId
   utf8: boolean
   access: ProjectUserAccess | null
   /** Book files on disk that belong to this project, with their codes. */
@@ -29,6 +31,7 @@ export function toBridgeProject(p: DiscoveredProject): BridgeProject | null {
     folderName: p.folderName,
     settings,
     guid: settings.guid,
+    stateId: bridgeStateId(settings.guid, p.path),
     utf8: isUtf8Project(settings),
     access: p.userAccessXml ? parseProjectUserAccess(p.userAccessXml) : null,
     books,

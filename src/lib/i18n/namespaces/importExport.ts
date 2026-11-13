@@ -1095,7 +1095,7 @@ export const importExport = defineNamespace({
       "The file name holds more than one book ({books}), so the notes can't be filed under one. " +
       "Rename the file so it names one book, such as {example}.",
     "importExport.errors.tnFileNameNoBook":
-      "The file name doesn't say which book these notes are for. Rename the file to name one book, such as tn_GEN.tsv.",
+      "The file name doesn't give the book the way unfoldingWord names its files. Rename the file to name one book, such as tn_GEN.tsv.",
     "importExport.errors.biblicaExpectsIdml": "Biblica study notes import expects an InDesign .idml package.",
     "importExport.errors.biblicaNoStudyNotes":
       "{fileName} parsed successfully but contained no study notes. Biblica notes live in `intro:*` " +
@@ -2895,7 +2895,7 @@ export const importExport = defineNamespace({
       },
       "importExport.errors.tnFileNameNoBook": {
         description:
-          "Thrown when a Translation Notes file gives its rows only chapter and verse (as unfoldingWord's files do) and its file name doesn't give one book where unfoldingWord puts it: right after 'tn' (tn_GEN.tsv) or as 'NN-BOOK' at the start (01-GEN.tsv). Shown instead of the 'no valid note rows' message. 'tn_GEN.tsv' is an example file name: keep it as it is.",
+          "Thrown when a Translation Notes file gives its rows only chapter and verse (as unfoldingWord's files do) and its file name doesn't give one book where unfoldingWord puts it: right after 'tn' (tn_GEN.tsv) or as 'NN-BOOK' at the start (01-GEN.tsv). The name may hold no book at all, or one in another place (GEN_tn.tsv), so the sentence says how it falls short, not that it has no book. Shown instead of the 'no valid note rows' message. 'tn_GEN.tsv' is an example file name: keep it as it is.",
       },
       "importExport.errors.biblicaNoStudyNotes": {
         description: "Thrown when a Biblica IDML package parses successfully but contains no study-note paragraphs.",

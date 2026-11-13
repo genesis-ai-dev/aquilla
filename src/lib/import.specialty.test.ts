@@ -106,7 +106,10 @@ describe("specialty import durability", () => {
     const twoBooks = (books: string, example: string) =>
       `The file name holds more than one book (${books}), so the notes can't be filed under one. ` +
       `Rename the file so it names one book, such as ${example}.`
-    const noBook = "The file name doesn't say which book these notes are for. Rename the file to name one book, such as tn_GEN.tsv."
+    // One sentence for every name that holds no book, or holds one elsewhere
+    // ("GEN_tn.tsv"): it says how the name falls short, not that it has none.
+    const noBook =
+      "The file name doesn't give the book the way unfoldingWord names its files. Rename the file to name one book, such as tn_GEN.tsv."
 
     expect(await refusal("tn_GEN_rev.tsv")).toBe(twoBooks("GEN, REV", "tn_GEN.tsv"))
     expect(await refusal("rev_tn_GEN.tsv")).toBe(twoBooks("GEN, REV", "tn_GEN.tsv"))

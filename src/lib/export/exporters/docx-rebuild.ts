@@ -223,11 +223,48 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   const front: RNode[] = []
   const back: RNode[] = []
   const inline: { at: number; node: RNode }[] = []
+  const inlineOf = (node: RNode, k: number) =>
+    firstWord !== -1 && k > firstWord && node.kind === "keep" ? input.inlineAt?.get(node.piece) : undefined
+  // AQU-2552 (review r8): a bookmark or comment mark is placed among the words
+  // only when every other mark of its pair is placed there too; otherwise
+  // they all follow the translation, in order, so none ends before it starts.
+  const pairs = new Map<string, { inline: boolean; start: boolean; end: boolean }>()
+  const inlineNodes = new Set(nodes.filter((node, k) => inlineOf(node, k) !== undefined))
+  for (const leaf of leavesOf(nodes)) {
+    const pair = pairOf(leaf.piece)
+    if (!pair) continue
+    const entry = pairs.get(pair.key) ?? { inline: true, start: false, end: false }
+    if (!inlineNodes.has(leaf)) entry.inline = false
+    if (pair.side === "start") entry.start = true
+    if (pair.side === "end") entry.end = true
+    pairs.set(pair.key, entry)
+  }
+  const pairedInline = (node: RNode) => {
+    const pair = node.kind === "keep" ? pairOf(node.piece) : null
+    const entry = pair ? pairs.get(pair.key) : undefined
+    return !entry || (entry.inline && entry.start && entry.end)
+  }
+  // The end of a range copied in place inside a matched link or content
+  // control (an untranslated line's) comes before the translation's end, so
+  // a start mark of that range that would follow the translation goes in
+  // front of it instead.
+  const framedEnds = new Set<string>()
+  for (const node of matches.keys()) {
+    if (node.kind !== "wrapper" && node.kind !== "field") continue
+    for (const leaf of leavesOf([node])) {
+      const pair = pairOf(leaf.piece)
+      if (pair && pair.side !== "start") framedEnds.add(pair.key)
+    }
+  }
+  const startOfFramed = (node: RNode) => {
+    const pair = node.kind === "keep" ? pairOf(node.piece) : null
+    return pair !== null && pair.side === "start" && framedEnds.has(pair.key)
+  }
   nodes.forEach((node, k) => {
     if (node.kind === "text" || node.kind === "marker" || matches.has(node)) return
-    const at = firstWord !== -1 && k > firstWord && node.kind === "keep" ? input.inlineAt?.get(node.piece) : undefined
+    const at = pairedInline(node) ? inlineOf(node, k) : undefined
     if (at !== undefined) inline.push({ at, node })
-    else (firstWord === -1 || k <= firstWord ? front : back).push(node)
+    else (firstWord === -1 || k <= firstWord || startOfFramed(node) ? front : back).push(node)
   })
   inline.sort((a, b) => a.at - b.at)
 
@@ -451,6 +488,25 @@ function leavesOf(nodes: readonly RNode[]): LeafNode[] {
         return leavesOf(node.nodes)
     }
   })
+}
+
+/** AQU-2552 (review r8): marks that pair up across the paragraph (a range's
+ *  start and end, a comment's reference), with the side each is. */
+const PAIRED_MARKS: Record<string, [string, "start" | "end"]> = {
+  "w:bookmarkStart": ["bookmark", "start"], "w:bookmarkEnd": ["bookmark", "end"],
+  "w:commentRangeStart": ["comment", "start"], "w:commentRangeEnd": ["comment", "end"],
+  "w:moveFromRangeStart": ["moveFrom", "start"], "w:moveFromRangeEnd": ["moveFrom", "end"],
+  "w:moveToRangeStart": ["moveTo", "start"], "w:moveToRangeEnd": ["moveTo", "end"],
+  "w:permStart": ["perm", "start"], "w:permEnd": ["perm", "end"],
+}
+function pairOf(piece: Leaf): { key: string; side: "start" | "end" | "reference" } | null {
+  const children = piece.kind === "keepInRun" ? piece.children : piece.kind === "keep" && piece.el.tagName === "w:r" ? piece.el.children : null
+  if (children) {
+    const reference = children.find((c): c is XmlElement => isElement(c) && c.tagName === "w:commentReference")
+    return reference ? { key: `comment:${reference.attributes["w:id"] ?? ""}`, side: "reference" } : null
+  }
+  const mark = piece.kind === "keep" ? PAIRED_MARKS[piece.el.tagName] : undefined
+  return mark ? { key: `${mark[0]}:${piece.el.attributes["w:id"] ?? ""}`, side: mark[1] } : null
 }
 
 /** AQU-2552 (review r8): a wrapper's own properties, valid only inside it. */

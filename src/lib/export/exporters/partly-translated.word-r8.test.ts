@@ -253,3 +253,65 @@ describe("Word export — a deleted split piece keeps its place after the row it
     expect(paras(deleted.body)[0]).toBe(`Un. Deuxième ligne ${L2c} Third line[IMG] here[^2] …`)
   })
 })
+
+/** Every bookmark and comment range in the part starts before it ends (and a
+ *  comment's reference follows its range). */
+function rangesInOrder(xml: string): string[] {
+  const out: string[] = []
+  const first = (re: RegExp) => { const m = re.exec(xml); return m ? m.index : -1 }
+  for (const m of xml.matchAll(/<w:bookmarkStart\b[^>]*w:id="([^"]+)"/g)) {
+    const end = first(new RegExp(`<w:bookmarkEnd\\b[^>]*w:id="${m[1]}"`))
+    if (end !== -1 && end < m.index!) out.push(`bookmark ${m[1]} ends before it starts`)
+  }
+  for (const m of xml.matchAll(/<w:commentRangeStart\b[^>]*w:id="([^"]+)"/g)) {
+    const end = first(new RegExp(`<w:commentRangeEnd\\b[^>]*w:id="${m[1]}"`))
+    const reference = first(new RegExp(`<w:commentReference\\b[^>]*w:id="${m[1]}"`))
+    if (end !== -1 && end < m.index!) out.push(`comment ${m[1]} ends before it starts`)
+    if (reference !== -1 && reference < Math.max(end, m.index!)) out.push(`comment ${m[1]} referenced before its range`)
+  }
+  return out
+}
+
+describe("Word export — a bookmark or comment is placed among the words only with its partner (AQU-2552, review r8 F4)", () => {
+  const START = `<w:bookmarkStart w:id="3" w:name="_Ref1"/><w:commentRangeStart w:id="4"/>`
+  const END = `<w:bookmarkEnd w:id="3"/><w:commentRangeEnd w:id="4"/><w:r><w:commentReference w:id="4"/></w:r>`
+  const firstPara = (xml: string) => xml.match(/<w:body>(<w:p\b[\s\S]*?<\/w:p>)/)![1]
+  // From line 1 ("First line|here") into line 2 ("Second line|here").
+  const across = para(run("First line") + START + run(" here" + PAD + " ") + run("Second line") + END + run(" here" + PAD + " ") + run(L3)) + NEXT
+
+  it("from a translated line into an untranslated one: both ends go to the paragraph's end, in order", async () => {
+    const bytes = await docxBytes(across)
+    const [a, b, c, n] = await importCells(bytes)
+    const out = await wordOut(bytes, [typed(a, "Un."), b, typed(c, "Trois."), n])
+    expect(rangesInOrder(out.body)).toEqual([])
+    expect(paras(out.body)[0]).toBe("Un. Second line here … Trois.")
+    expect(firstPara(out.body)).toMatch(new RegExp(`Trois\\.</w:t></w:r>${(START + END).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</w:p>$`))
+  })
+
+  it("from an untranslated line into a translated one: so too", async () => {
+    const bytes = await docxBytes(across)
+    const [a, b, c, n] = await importCells(bytes)
+    const out = await wordOut(bytes, [a, typed(b, "Deux."), typed(c, "Trois."), n])
+    expect(rangesInOrder(out.body)).toEqual([])
+    expect(firstPara(out.body)).toMatch(new RegExp(`Trois\\.</w:t></w:r>${(START + END).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</w:p>$`))
+  })
+
+  it("ending inside a link of an untranslated line, copied in place: its start goes in front, never after its end", async () => {
+    const src = run("First line") + `<w:bookmarkStart w:id="3" w:name="_Ref1"/>` + run(" here" + PAD + " ") + `<w:hyperlink w:anchor="x">${run("Second line")}<w:bookmarkEnd w:id="3"/></w:hyperlink>` + run(" here" + PAD + " ") + run(L3)
+    const bytes = await docxBytes(para(src) + NEXT)
+    const [a, b, c, n] = await importCells(bytes)
+    const out = await wordOut(bytes, [typed(a, "Un."), b, typed(c, "Trois."), n])
+    expect(rangesInOrder(out.body)).toEqual([])
+    expect(firstPara(out.body)).toMatch(/^<w:p><w:bookmarkStart w:id="3" w:name="_Ref1"\/><w:r>/)
+    expect(firstPara(out.body)).toContain(`<w:hyperlink w:anchor="x"><w:r><w:t xml:space="preserve">Second line</w:t></w:r><w:bookmarkEnd w:id="3"/></w:hyperlink>`)
+  })
+
+  it("both ends inside one untranslated line stay among its words", async () => {
+    const within = para(run(L1 + " ") + run("Second") + START + run(" line") + END + run(" here" + PAD + " ") + run(L3)) + NEXT
+    const bytes = await docxBytes(within)
+    const [a, b, c, n] = await importCells(bytes)
+    const out = await wordOut(bytes, [typed(a, "Un."), b, typed(c, "Trois."), n])
+    expect(rangesInOrder(out.body)).toEqual([])
+    expect(firstPara(out.body)).toContain(`Second</w:t></w:r>${START}<w:r><w:t xml:space="preserve"> line</w:t></w:r>${END}`)
+  })
+})

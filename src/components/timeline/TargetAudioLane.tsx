@@ -40,7 +40,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { CloneFromTakeButton } from "@/components/cell/CloneFromTakeButton"
 import { useVoicingAs } from "@/lib/audio/voicing-as"
-import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
+import { MISSING_AUDIO_MESSAGE, useQueueStateValue } from "@/lib/audio/play-queue"
 import { TimelineSlotButton } from "./TimelineSlotButton"
 import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
 import { isVisible, secToPx, pxToSec, chipRadiusPx } from "@/lib/timeline/scale"
@@ -347,7 +347,7 @@ function TargetAudioChip({
   audioFirst,
   pxPerSec,
   selected,
-  loading,
+  loading: loadingProp,
   missing,
   editable,
   snap,
@@ -444,6 +444,10 @@ function TargetAudioChip({
   const t = useT()
   const originPx = useTimelineOriginPx()
   const { cell } = chip.item
+  // Read here rather than handed down: the line being waited on changes as
+  // playback moves, and a prop from the editor redrew every lane each time.
+  const waitedOn = useQueueStateValue((state) => state.kind === "loading" && state.cellId === cell.id)
+  const loading = loadingProp || waitedOn
   const { geom, section } = chip
   // AQU-2252: the rules FOLLOWING THE RECORDINGS gives a take — its line grows
   // to hold it, so it never runs long and moves only inside its line. Every

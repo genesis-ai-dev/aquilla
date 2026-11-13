@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
+import { createPlayingCueStore, PlayingCueContext, useIsPlayingCue, type PlayingCueStore } from "./editor-playing-cue"
 import { recordStep } from "@/lib/history/history"
 import { settleSourceStep, type SourceSession } from "@/lib/history/source-steps"
 import { createPortal } from "react-dom"
@@ -1036,6 +1037,9 @@ interface EditorTableProps {
   /** AQU-1118: the row whose line is playing right now (the bottom bar's
    *  current line), so its "Play from this cue" button shows Pause. */
   playingCueCellId?: string | null
+  /** The same, as a store the rows read for themselves: a line change then
+   *  re-renders two rows rather than the table. Wins over `playingCueCellId`. */
+  playingCue?: PlayingCueStore
   /** AQU-1118: what that Pause does — stops whatever is playing this file. */
   onPauseCue?: () => void
   /**
@@ -1196,6 +1200,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   cellOpenCommentCount,
   onSeekToCue,
   playingCueCellId = null,
+  playingCue,
   onPauseCue,
   sourceLineEditing,
   lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode = "auto", targetDirectionMode = "auto", sourceTextDirection, targetTextDirection,
@@ -1235,6 +1240,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onSaveVoiceOverride,
   onAdoptVoicesAsCast,
 }, ref) {
+  // Rows read the playing line from a store (see editor-playing-cue). A
+  // caller without one (tests, the bare table) hands it in as a prop.
+  const ownCueStore = useState(createPlayingCueStore)[0]
+  const cueStore = playingCue ?? ownCueStore
+  useLayoutEffect(() => {
+    if (!playingCue) ownCueStore.set(playingCueCellId)
+  }, [playingCue, ownCueStore, playingCueCellId])
   const t = useT()
   // Who gets the lane switcher: MAINTAINER+ over every lane (AQU-608), and a
   // lane-limited member over the lanes the read wall left them (`scopedLanes`).
@@ -2918,18 +2930,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           // per row would re-render every rendered row on every store bump,
           // which is the whole-file churn round 6 went into removing.
           const neighbourTimes = timestampNeighbours(index, displayCellIds, cellStore, isTimeOrdered && hasTiming(cell))
-          // AQU-1118 (Sam, Oct 7): the line that is playing is marked on the
-          // row itself, and the mark moves from row to row with playback. The
-          // Pause icon alone sat in a closed ⋯ menu, so the move was invisible.
-          const cuePlayingRow = playingCueCellId != null && playingCueCellId === cell.id
           const needsSourceReview = cellNeedsSourceReview(cell.metadata, activeLaneId)
           return (
-      <div
-        data-cell-id={cell.id}
+      <PlayingCueRow
+        cellId={cell.id}
         data-index={index}
-        data-cue-playing={cuePlayingRow ? "true" : undefined}
         data-source-review={needsSourceReview ? "true" : undefined}
-        aria-current={cuePlayingRow ? "time" : undefined}
         data-untimed={untimedInTimeLens ? "true" : undefined}
         data-cell-kind={isScriptureRow ? "scripture" : undefined}
         data-paragraph-start={showParagraphBoundary ? "true" : undefined}
@@ -2943,9 +2949,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           untimedInTimeLens && "border-s-2 border-dashed border-amber-400/70",
           isScriptureRow && "border-s-2 border-sky-400/70",
           showParagraphBoundary && "mt-3",
-          // A bar drawn OVER the row's start edge rather than a border, so the
-          // row's content never shifts as the mark moves from row to row.
-          cuePlayingRow && "bg-primary/[0.07] before:pointer-events-none before:absolute before:inset-y-0 before:start-0 before:z-10 before:w-[3px] before:bg-primary",
         )}
       >
         {/* AQU-2260 third pass: why the row is ringed in yellow opens from an
@@ -3067,7 +3070,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           getFootnoteDetails={getFootnoteDetails}
           cellOpenCommentCount={cellOpenCommentCount}
           onSeekToCue={onSeekToCue}
-          cuePlaying={playingCueCellId != null && playingCueCellId === cell.id}
           onPauseCue={onPauseCue}
           rowIndex={index}
           contentNumber={sequentialNumberByCellId.get(cell.id) ?? index + 1}
@@ -3137,7 +3139,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             </span>
           </div>
         )}
-      </div>
+      </PlayingCueRow>
           )
         }}
       </CellStoreRow>
@@ -3225,7 +3227,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onSaveBacktranslation,
     onSaveGloss,
     onSeekToCue,
-    playingCueCellId,
     onPauseCue,
     previews,
     project,
@@ -3334,6 +3335,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   })
 
   return (
+    <PlayingCueContext.Provider value={cueStore}>
     <SmartEditsProvider value={smartEditsContext}>
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
       {showStripNav && stripNavSlot
@@ -3632,6 +3634,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       )}
     </div>
     </SmartEditsProvider>
+    </PlayingCueContext.Provider>
   )
 })
 
@@ -4291,8 +4294,6 @@ interface MemoizedRowProps {
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   cellOpenCommentCount?: Map<string, number>
   onSeekToCue?: (cellId: string) => void
-  /** AQU-1118: this row's line is the one playing. */
-  cuePlaying?: boolean
   onPauseCue?: () => void
   rowIndex: number
   /** AQU-610: 1-based ordinal among numbered (non-paratext) cells for sequential numbering. */
@@ -4362,6 +4363,30 @@ interface MemoizedRowProps {
   scriptureNumbering: boolean
 }
 
+/**
+ * AQU-1118 (Sam, Oct 7): the line that is playing is marked on the row itself,
+ * and the mark moves from row to row with playback. The Pause icon alone sat in
+ * a closed ⋯ menu, so the move was invisible. The row reads the mark itself, so
+ * a move re-renders the two rows it is between and not the table.
+ */
+function PlayingCueRow({ cellId, className, ...rest }: React.ComponentProps<"div"> & { cellId: string }) {
+  const playing = useIsPlayingCue(cellId)
+  return (
+    <div
+      {...rest}
+      data-cell-id={cellId}
+      data-cue-playing={playing ? "true" : undefined}
+      aria-current={playing ? "time" : undefined}
+      className={cn(
+        className,
+        // A bar drawn OVER the row's start edge rather than a border, so the
+        // row's content never shifts as the mark moves from row to row.
+        playing && "bg-primary/[0.07] before:pointer-events-none before:absolute before:inset-y-0 before:start-0 before:z-10 before:w-[3px] before:bg-primary",
+      )}
+    />
+  )
+}
+
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
     cell, linkedTakes, audioColumn, audioOnlyLane, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
@@ -4395,7 +4420,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     prevStartSec, nextStartSec, timedFile,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, onSaveGloss, getStatisticalBt,
     getFootnoteDetails,
-    onSeekToCue, cuePlaying, onPauseCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
+    onSeekToCue, onPauseCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
     onOpenAudioSetup,
@@ -4547,7 +4572,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         getFootnoteDetails={getFootnoteDetails}
         openCommentCount={openCommentCount}
         onSeekToCue={onSeekToCue}
-        cuePlaying={cuePlaying}
         onPauseCue={onPauseCue}
         rowIndex={rowIndex}
         contentNumber={contentNumber}
@@ -4735,9 +4759,6 @@ interface EditorRowProps {
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
   openCommentCount: number
   onSeekToCue?: (cellId: string) => void
-  /** AQU-1118: this row's line is the one playing, so its "Play from this
-   *  cue" button shows Pause and stops playback. */
-  cuePlaying?: boolean
   onPauseCue?: () => void
   onDragStart: () => void
   onDragEnter: () => void
@@ -5674,7 +5695,6 @@ function EditorRow({
   getFootnoteDetails,
   openCommentCount,
   onSeekToCue,
-  cuePlaying = false,
   onPauseCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
@@ -5699,6 +5719,9 @@ function EditorRow({
   sourceFootnoteNumberOffset,
   targetFootnoteNumberOffset,
 }: EditorRowProps) {
+  // AQU-1118: this row's line is the one playing, so its "Play from this
+  // cue" button shows Pause and stops playback.
+  const cuePlaying = useIsPlayingCue(cell.id)
   const t = useT()
   // Aquilla Tools (prototype): inline tool mounts under this cell.
   const hasInlineTools = useHasInlineTools()

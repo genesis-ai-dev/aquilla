@@ -68,6 +68,7 @@ vi.mock("youtube-video-element", () => {
 })
 
 import { MediaVideoPane, readCaptionPlacement, readSubtitleMode } from "./MediaVideoPane"
+import { createVideoSeekStore } from "./video-seek-store"
 import { DOCK_HOST_MOVING } from "./media-dock-layout"
 import { __resetPlaybackSourceForTests, playbackSourceKey } from "@/lib/audio/playback-source"
 import {
@@ -682,17 +683,18 @@ describe("MediaVideoPane", () => {
       return play
     }
 
-    /** Mount, arm the element, then deliver one nonce'd seek. */
+    /** Mount, arm the element, then deliver one seek. */
     const seek = (
-      stamp: { sec: number; nonce: number; play?: boolean },
+      stamp: { sec: number; play?: boolean },
       props: Partial<React.ComponentProps<typeof MediaVideoPane>> = {},
       planted: { readyState?: number; seeking?: boolean } = {},
     ) => {
+      const seeks = createVideoSeekStore()
       const base = { src: "https://cdn/episode.webm", fileId: "f1", cells: subs, onVideoTime: vi.fn(), ...props }
-      const view = render(<MediaVideoPane {...base} />)
+      render(<MediaVideoPane {...base} seek={seeks} />)
       const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
       const play = plant(video, planted)
-      view.rerender(<MediaVideoPane {...base} seekSec={stamp} />)
+      act(() => seeks.request(stamp.sec, stamp.play))
       return { video, play }
     }
 
@@ -701,7 +703,7 @@ describe("MediaVideoPane", () => {
     })
 
     it("starts the film, at the cue's second", () => {
-      const { video, play } = seek({ sec: 10, nonce: 1, play: true })
+      const { video, play } = seek({ sec: 10, play: true })
       expect(video.currentTime).toBe(10)
       expect(play).toHaveBeenCalledTimes(1)
     })
@@ -709,7 +711,7 @@ describe("MediaVideoPane", () => {
     it("a plain cue moves the frame and leaves the film stopped", () => {
       // The row click / chip click contract, unchanged — this is the assertion
       // that stops the fix leaking onto every other way of pointing at a line.
-      const { video, play } = seek({ sec: 10, nonce: 1 })
+      const { video, play } = seek({ sec: 10 })
       expect(video.currentTime).toBe(10)
       expect(play).not.toHaveBeenCalled()
     })
@@ -717,7 +719,7 @@ describe("MediaVideoPane", () => {
     it("holds the start until the seek lands, then plays once", () => {
       // A cold or streaming element is still seeking when the command arrives.
       // Starting it then would sound the position it is leaving.
-      const { video, play } = seek({ sec: 10, nonce: 1, play: true }, {}, { readyState: 0 })
+      const { video, play } = seek({ sec: 10, play: true }, {}, { readyState: 0 })
       expect(play).not.toHaveBeenCalled()
       expect(getVideoBuffering()).toBe(true)
       fireEvent.seeked(video)
@@ -728,7 +730,7 @@ describe("MediaVideoPane", () => {
     it("stands down while the recorder holds the floor", () => {
       // `suspended` has a 250ms watchdog that would pause it back — 250ms of
       // the soundtrack in the take. Never starting it is the honest answer.
-      const { play } = seek({ sec: 10, nonce: 1, play: true }, { suspended: true })
+      const { play } = seek({ sec: 10, play: true }, { suspended: true })
       expect(play).not.toHaveBeenCalled()
     })
 
@@ -737,7 +739,7 @@ describe("MediaVideoPane", () => {
       // second driver is the failure the transport module exists to prevent.
       // `CELLS` carry attachments, which is what makes the pane slaved — the
       // seek still lands (it is deliberately ungated) but the start does not.
-      const { video, play } = seek({ sec: 10, nonce: 1, play: true }, { cells: CELLS })
+      const { video, play } = seek({ sec: 10, play: true }, { cells: CELLS })
       expect(video.currentTime).toBe(10)
       expect(play).not.toHaveBeenCalled()
     })
@@ -760,19 +762,12 @@ describe("MediaVideoPane", () => {
       // on a PAUSED film this is what stops the playhead, the bar's readout and
       // the marked row from sitting on the position the film used to be at.
       const onVideoTime = vi.fn()
-      const view = render(
-        <MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} onVideoTime={onVideoTime} />,
+      const seeks = createVideoSeekStore()
+      render(
+        <MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} onVideoTime={onVideoTime} seek={seeks} />,
       )
       onVideoTime.mockClear()
-      view.rerender(
-        <MediaVideoPane
-          src="https://cdn/episode.webm"
-          fileId="f1"
-          cells={subs}
-          onVideoTime={onVideoTime}
-          seekSec={{ sec: 12, nonce: 1 }}
-        />,
-      )
+      act(() => seeks.request(12))
       expect(onVideoTime).toHaveBeenCalledWith(12)
       // ...and the line under the new position comes with it, so the dialogue
       // table's marked row moves on a scrub rather than on the next tick.
@@ -792,19 +787,12 @@ describe("MediaVideoPane", () => {
     it("publishes nothing while the queue owns the clock", () => {
       // A slaved picture is the queue's to report; two writers would fight.
       const onVideoTime = vi.fn()
-      const view = render(
-        <MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={CELLS} onVideoTime={onVideoTime} />,
+      const seeks = createVideoSeekStore()
+      render(
+        <MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={CELLS} onVideoTime={onVideoTime} seek={seeks} />,
       )
       onVideoTime.mockClear()
-      view.rerender(
-        <MediaVideoPane
-          src="https://cdn/episode.webm"
-          fileId="f1"
-          cells={CELLS}
-          onVideoTime={onVideoTime}
-          seekSec={{ sec: 12, nonce: 1 }}
-        />,
-      )
+      act(() => seeks.request(12))
       expect(onVideoTime).not.toHaveBeenCalledWith(12)
     })
   })

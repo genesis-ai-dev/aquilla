@@ -6,7 +6,7 @@ import { TimelineEditor } from "./TimelineEditor"
 import { MediaTopBar } from "./MediaTopBar"
 import type { CellData } from "@/hooks/useCells"
 import type { QueueState, QueueProgress } from "@/lib/audio/play-queue"
-import { selectQueueForFile } from "@/lib/audio/queue-scope"
+import { selectQueueForFile, selectQueueStateForFile } from "@/lib/audio/queue-scope"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { resetVideoDurationsForTests, setVideoDurationSec } from "@/lib/timeline/video-duration"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
@@ -176,8 +176,16 @@ vi.mock("@/lib/audio/play-queue", async () => {
     useQueueProgress: () => mockProgress,
     // Uses the REAL scoping rule (a side-effect-free module) so this stub cannot
     // drift from the guard that keeps one file's queue out of another's timeline.
-    useQueueForFile: (cellIds: ReadonlySet<string>) =>
-      selectQueueForFile(mockQueueState, mockProgress, cellIds),
+    // Subscribed to `progressTicks`, so a test can publish a tick the way the
+    // real queue does — to its subscribers alone, not by re-rendering the editor.
+    useQueueForFile: (cellIds: ReadonlySet<string>) => {
+      useSyncExternalStore(progressTicks.subscribe, () => progressTicks.version)
+      return selectQueueForFile(mockQueueState, mockProgress, cellIds)
+    },
+    useQueueStateForFile: (cellIds: ReadonlySet<string>) =>
+      selectQueueStateForFile(mockQueueState, cellIds),
+    useQueueStateValue: <T,>(select: (state: QueueState) => T) =>
+      useSyncExternalStore(progressTicks.subscribe, () => select(mockQueueState)),
     useMissingClipCells: () => mockMissingCells,
     MISSING_AUDIO_MESSAGE: "This clip's audio is missing.",
     // 2026-08-11: the editor gates its clock write on this. Built over the REAL

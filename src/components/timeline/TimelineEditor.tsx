@@ -95,8 +95,7 @@ import { InfoNote } from "@/components/ui/info-note"
 import { TimingModeControl } from "./TimingModeControl"
 import { createMenuHandle } from "@/components/ui/menu-parts"
 import { EMPTY_CUE_LINK_INDEX, type CueLinkIndex } from "@/lib/sync/cell-links-read"
-import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
-import { resolveCueCharacter, formatCueCharacter } from "@/lib/timeline/cue-character"
+import { MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
 import type { TakePlace } from "@/lib/timeline/take-place"
 import { gutterWidthPx, loadGutterCollapsed, saveGutterCollapsed } from "@/lib/timeline/gutter-width"
@@ -159,7 +158,8 @@ import { RowMetricsContext, useRowMetrics, type RowMetrics } from "./useRowMetri
 // write behind lib/audio/audibility, because the video pane's header carries a
 // mute button too now and two components each merging a toggle into their OWN
 // copy of the preference clobber one another.
-import { useQueueForFile, useMissingClipCells, queueClockIsFileTime } from "@/lib/audio/play-queue"
+import { useQueueStateValue, useMissingClipCells } from "@/lib/audio/play-queue"
+import { selectQueueStateForFile } from "@/lib/audio/queue-scope"
 import { seedAudibility, toggleAudibility, trackAudible, useQueueAudibility } from "@/lib/audio/audibility"
 
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
@@ -170,8 +170,7 @@ import { nextFolderName, nextTrackName } from "@/lib/timeline/track-names"
 import { usePersonPref } from "@/lib/prefs/person-prefs"
 import { timelineFollowPlayheadPref, timelineSnapPref } from "@/lib/prefs/person-pref-list"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
-import { useVideoClockSec, useVideoClockPlaying } from "@/lib/timeline/video-clock"
-import { useVirtualClockPlaying, useVirtualClockSec } from "@/lib/timeline/virtual-clock"
+import { useVideoClockPlaying } from "@/lib/timeline/video-clock"
 import { useVideoDurationSec } from "@/lib/timeline/video-duration"
 import { useUiSlot } from "@/lib/ui-slots"
 import { setAudioQualityPref, useAudioQualityPref } from "@/lib/store/audio-quality-pref"
@@ -185,8 +184,9 @@ import { TimelineLane } from "./TimelineLane"
 import type { ChangeVoiceQuality } from "@/lib/audio/change-voice"
 import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions, type TargetAudioItem } from "./TargetAudioLane"
 import type { TakeVoiceNote } from "@/lib/audio/take-voice"
-import { TimelinePlayhead } from "./TimelinePlayhead"
-import { MediaTextHeader, TimelineTimingRow } from "./TimelineChipStrip"
+import { TimelineTransportClock } from "./TimelineTransportClock"
+import { useCreatePlayheadStore } from "./playhead-store"
+import { TimelineCurrentChip } from "./TimelineCurrentChip"
 import {
   applySelect,
   EMPTY_SELECTION,
@@ -195,10 +195,8 @@ import {
   type SelectMods,
   type TimelineSelection,
 } from "./selection"
-import { useTimelineClock } from "./useTimelineClock"
-import { armOutputLatency, displaySec, HIGH_LATENCY_SEC } from "@/lib/audio/output-latency"
+import { HIGH_LATENCY_SEC } from "@/lib/audio/output-latency"
 import { useOutputLatency } from "./useOutputLatency"
-import { resolveEntryAudio, useClipAudioMissing } from "./useClipAudioMissing"
 import type { CellData } from "@/hooks/useCells"
 import { type AudioTimingMode, type ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -1825,11 +1823,9 @@ export function TimelineEditor({
   const bindLaneShift = useCallback((node: HTMLDivElement | null) => {
     if (node) paintLaneNode(node, laneShiftsRef.current)
   }, [])
-  const clock = useTimelineClock()
+  const clock = useCreatePlayheadStore()
   // AQU-1758: read (never rendered from) when a take's ⋯ opens its menu.
-  const playheadSecRef = useRef(0)
-  playheadSecRef.current = clock.currentSec
-  const getPlayheadSec = useCallback(() => playheadSecRef.current, [])
+  const getPlayheadSec = clock.sec
   const chipStripSlot = useUiSlot("media-chip-strip")
   // Media redesign, layout: the workspace's top bar, where the tools go.
   const topToolsSlot = useUiSlot("media-top-tools")
@@ -1852,52 +1848,22 @@ export function TimelineEditor({
   // (the playhead's rAF interpolation must park during a gate — that's the
   // whole point), but the follow re-engage below keys on running, or every cold
   // boundary would re-yank a user who deliberately scrolled away mid-playback.
-  const queue = useQueueForFile(cellIdSet)
-  const queueProgress = queue.progress
-  const { active: queueActive, playing: queuePlaying, running: queueRunning } = queue
-  // Decision 2026-08-05: the verse being WAITED ON shows a small spinner on
-  // its chip ("loading" is exactly the parked-gate/cold-load state and
-  // carries the cellId), and a definitively 404'd dub shows a missing badge.
-  const loadingCellId = queue.kind === "loading" ? queue.cellId : null
+  // Two flags off the queue's STATE, and not its line. Every render here
+  // redraws every mounted time column; its seconds tick ~4×/sec
+  // (`TimelineTransportClock` reads them) and its line changes on every verse
+  // (`TimelineCurrentChip` reads that, and each chip reads whether it is the
+  // one being waited on — decision 2026-08-05, a small spinner).
+  const queueActive = useQueueStateValue((state) => selectQueueStateForFile(state, cellIdSet).active)
+  const queueRunning = useQueueStateValue((state) => selectQueueStateForFile(state, cellIdSet).running)
+  // A definitively 404'd dub shows a missing badge.
   const missingCellIds = useMissingClipCells()
-  // 2026-08-11: the queue's progress is only a FILE position when the master
-  // element is the shared source clip. On a take it is a per-take clock that
-  // restarts at 0 — play-queue says outright that "no consumer may treat [it]
-  // as a position on the file" — so writing it here yanked the playhead to
-  // zero whenever a take was played from a row's rail. Same test the video
-  // pane already makes (MediaVideoPane's `clockIsFileTime`).
-  const queueSoundingCell = useMemo(
-    () => (queue.cellId != null ? cells.find((c) => c.id === queue.cellId) : undefined),
-    [cells, queue.cellId],
-  )
-  // AQU-1747: ...and in FREE TIMING the x-axis is not the file at all — it is
-  // the programme, the verses laid end to end. There a shared source clip's
-  // file position is the wrong number, and the right one (the programme second
-  // the transport publishes) was never read, so a video-less subtitle file
-  // played its takes back to back while the playhead sat on 0:00. So: ask each
-  // mode for the clock IT draws, and accept nothing else. `programmeClock`
-  // carries the same guarantee for the programme that `queueClockIsFileTime`
-  // does for the file — a per-take clock satisfies neither.
-  const queueClockOnTimeline = audioFirst
-    ? queueProgress.programmeClock
-    : queueClockIsFileTime(queueSoundingCell)
   /**
-   * AQU-646 stage 5: where the hand is, while the playhead is being dragged.
-   *
-   * NON-NULL MEANS THE SCRUB OWNS THE CLOCK, and that ownership is the whole
-   * reason a drag looks right. This clock has three writers below, each an
-   * effect fired by a transport publishing where it actually landed — and a
-   * landed position is always BEHIND the pointer, because the picture is being
-   * seeked on a throttle. Leave them running during a drag and every seek
-   * yanks the head back to where the throttle last sampled: an oscillation
-   * between the hand and the film, at the throttle's period, fully rendered
-   * because pausing also stops `monotonicSec` from swallowing regressions.
-   *
-   * Held in a ref as well as state: the three effects below read it, and they
-   * must see the CURRENT value rather than the one captured when they were
-   * scheduled.
+   * AQU-646 stage 5: the playhead is being dragged, so the hand owns the
+   * clock. The transport writers in `TimelineTransportClock` stand down while
+   * this is set: a transport's landed position is always BEHIND the pointer,
+   * because the picture is being seeked on a throttle, and letting them write
+   * yanked the head back to where the throttle last sampled.
    */
-  const [scrubSec, setScrubSec] = useState<number | null>(null)
   const scrubbingRef = useRef(false)
   // The workspace crossing is the expensive part of a seek — it re-renders a
   // tree the size of the whole project view — so it is throttled while the
@@ -1905,94 +1871,8 @@ export function TimelineEditor({
   // the trailing edge the last thing the hand did might never be sent.
   const scrubSendRef = useRef<{ at: number; timer: ReturnType<typeof setTimeout> | null }>({ at: 0, timer: null })
   useEffect(() => () => { if (scrubSendRef.current.timer) clearTimeout(scrubSendRef.current.timer) }, [])
-  useEffect(() => {
-    if (scrubbingRef.current) return
-    if (queueActive && queueClockOnTimeline) clock.setCurrentSec(queueProgress.currentTime)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
-  }, [queueActive, queueClockOnTimeline, queueProgress.currentTime])
-  // The other driver: a file with a linked video but NO audio can never start
-  // the queue, so the video plays itself and owns the playhead. Strictly gated
-  // on the queue being idle, so the two writers can never overlap — which is
-  // exactly what used to happen when the <video> lived in this component.
-  const videoClockSec = useVideoClockSec()
   const videoPlaying = useVideoClockPlaying()
-  useEffect(() => {
-    if (scrubbingRef.current) return
-    if (!queueActive && videoClockSec != null) clock.setCurrentSec(videoClockSec)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
-  }, [queueActive, videoClockSec])
-  // AQU-646 stage 3h: THE THIRD WRITER — a file with timings and no master.
-  //
-  // Sam, 2026-08-25: a VTT imported on its own never moved the playhead, and
-  // the reason was honest rather than broken — the queue only publishes a FILE
-  // position while an imported recording is the master, and there was no film
-  // either. So nothing wrote this at all.
-  //
-  // Gated on BOTH of the others being idle, for the same reason they are gated
-  // against each other: two writers on one clock is what made the playhead and
-  // the film detach, and `virtualOwnsFile` already guarantees exclusivity —
-  // this is the belt to its braces, and it is what keeps the ordering of these
-  // three effects from mattering.
-  const virtualClockSec = useVirtualClockSec()
-  const virtualPlaying = useVirtualClockPlaying()
-  useEffect(() => {
-    if (scrubbingRef.current) return
-    if (!queueActive && videoClockSec == null && virtualClockSec != null) {
-      clock.setCurrentSec(virtualClockSec)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
-  }, [queueActive, videoClockSec, virtualClockSec])
-  // Whichever transport actually owns the clock. Parking (rather than merely
-  // withholding seconds) matters: the playhead's rAF interpolation extrapolates
-  // from its last anchor while `playing`, so leaving it running against a
-  // position nobody updates draws steady, confident, wrong motion.
-  const transportPlaying = queueActive
-    ? queuePlaying && queueClockOnTimeline
-    : videoClockSec != null
-      ? videoPlaying
-      : virtualPlaying
-  const transportRate = queueActive ? queueProgress.rate : 1
-  // AQU-646: how far behind the clock your EARS are, and whether to draw the
-  // playhead there.
-  //
-  // COMPENSATION IS A LATCH, NOT A GATE ON `transportPlaying`. That flag is
-  // deliberately strict — it dips false at every COLD VERSE GATE (see the
-  // comment above it) — so applying the shift only while it is true would
-  // switch compensation off and on at every verse: a forward jump into the
-  // gate, then a hold coming out of it as the never-move-backward rule
-  // swallowed the re-application. That is precisely the bounce this timeline
-  // spent a round eliminating, arriving again by another route.
-  //
-  // So: arm on the rising edge of playing, disarm when the transport goes
-  // genuinely idle, and disarm on an explicit seek (in `seekTo` below). A cold
-  // gate touches none of those, so it changes nothing.
   const outputLatencySec = useOutputLatency()
-  const transportActive = queueActive || videoClockSec != null
-  const [compensating, setCompensating] = useState(false)
-  const wasPlayingRef = useRef(false)
-  useEffect(() => {
-    if (transportPlaying && !wasPlayingRef.current) {
-      armOutputLatency()
-      setCompensating(true)
-    }
-    wasPlayingRef.current = transportPlaying
-  }, [transportPlaying])
-  useEffect(() => {
-    if (!transportActive) setCompensating(false)
-  }, [transportActive])
-  // Where the head is DRAWN. Raw `clock.currentSec` still drives everything
-  // that seeks or writes; this drives everything that renders or scrolls TO the
-  // head, so the page-flip cannot fire several pixels from where the line is.
-  // While scrubbing, the hand IS the position — no latency compensation, which
-  // describes where a sound will be heard and has no meaning for a picture
-  // being dragged.
-  const displayCurrentSec =
-    scrubSec != null ? scrubSec : displaySec(clock.currentSec, outputLatencySec, compensating)
-  useEffect(() => {
-    if (transportPlaying) clock.play()
-    else clock.pause()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
-  }, [transportPlaying])
   useEffect(() => {
     // Starting playback is an explicit "watch this" — re-engage follow. Keyed
     // on running (playing OR loading) so a gate's brief "loading" dip doesn't
@@ -2788,7 +2668,7 @@ export function TimelineEditor({
   const takeSelCellFor = (slot: string) => (takeSel?.slot === slot ? takeSel.cellId : null)
   function selectedTakeCutAtPlayhead(): { cellId: string; audioId: string; atMs: number } | null {
     if (!takeSel) return null
-    const sec = displayCurrentSec
+    const sec = clock.displaySec()
     const items =
       takeSel.slot === RECORDING_SLOT
         ? targetItems
@@ -2977,150 +2857,19 @@ export function TimelineEditor({
   // Mounted columns redraw when the lanes' data changes.
   const laneEpoch = useRef(0)
   laneEpoch.current += 1
-  // 2026-08-07: the chip strip describes the CURRENT chip — an explicit
-  // selection wins; with nothing selected it follows the cell the queue is
-  // sounding (or holds while paused); after the queue goes idle it keeps the
-  // last one so the strip doesn't blank out mid-thought. Same file guard as the
-  // playhead: a stale singleton queue never fills this file's strip.
-  const soundingId = queueActive ? queue.cellId : null
-  const [lastTouchedId, setLastTouchedId] = useState<string | null>(null)
-  useEffect(() => {
-    const id = selectedId ?? soundingId
-    if (id) setLastTouchedId(id)
-  }, [selectedId, soundingId])
-  // 2026-08-08 (Sam): an AUTOMATIC playback advance clears the selection —
-  // one pointer, one moving light. EDGE-triggered on the sounding cell's
-  // transitions: only when the queue moves from A to B (both non-null) and
-  // the departed A was the selected cell does the selection drop. A fresh
-  // click-then-jump is race-proof by construction (its selection ≠ the
-  // departed cell), untimed selections survive (they never sound), and
-  // pause/idle produce no transition, so nothing clears.
-  const prevSoundingRef = useRef<string | null>(null)
-  useEffect(() => {
-    const prev = prevSoundingRef.current
-    prevSoundingRef.current = soundingId
-    if (prev == null || soundingId == null || soundingId === prev) return
-    setSelectedId((sel) => (sel === prev ? null : sel))
-  }, [soundingId])
-  const currentCellId = selectedId ?? soundingId ?? lastTouchedId
-  // Searches the AUDIO CUES too (stage 4): a cue is a legitimate selection now,
-  // and it lives in the hidden sibling file, so looking only in `cells` left the
-  // timing readout blank for every chip on the Source-audio row.
-  const currentCell = useMemo(
-    () =>
-      cells.find((c) => c.id === currentCellId) ??
-      audioCues?.find((c) => c.id === currentCellId) ??
-      independentTextCells.find((c) => c.id === currentCellId) ??
-      null,
-    [cells, audioCues, independentTextCells, currentCellId],
-  )
-  // AQU-646 stage 6: who speaks the current chip, and whether the camera is on
-  // them. Resolved HERE because this is the one place that holds both halves —
-  // the links and the subtitle cells the character sheet was keyed to. A cue
-  // has no character of its own, so without this the header opposite the video
-  // named nobody for the only kind of chip stage 4 leaves you selecting.
-  const currentCharacter = useMemo(
-    () => resolveCueCharacter({ cell: currentCell, links, textCells: cells }),
-    [currentCell, links, cells],
-  )
-  // One object for the header's two call sites below — portalled and inline.
-  // They render the SAME thing and used to say so twice; a third prop was one
-  // more chance for the two to drift apart.
-  // Meeting note (2026-08-05): the detail readout carries the dub's own
-  // numbers — its range, its duration, and ALWAYS the end-to-end difference
-  // (original end − dub end). 2026-08-06 (Sam): the diff is INFORMATIONAL (a
-  // difference can be intentional) — chip-vs-chip OVERLAP is the warning, a
-  // separate number computed with the same trespasser gating the lane uses.
-  // Dubbing only, and never from a guessed width (SUB-48).
-  const currentChipStats = useMemo(() => {
-    if (!currentCell) return null
-    // Free timing (2026-08-06, Sam): the file-clock RANGES are meaningless
-    // against the re-flowed track — the only honest numbers are durations.
-    // Src = the original's window length, Tgt = the dub's measured length.
-    if (audioFirst) {
-      // AQU-2204 (Sam, Oct 26): a file that follows its recordings shows no
-      // SOURCE timing anywhere — not even the original's length — so only the
-      // recording's own length is read out.
-      const srcDurationSec = null
-      // AQU-1767: a split take's length is all its pieces'.
-      const geoms = targetItems
-        .filter((t) => t.cell.id === currentCell.id)
-        .map((t) => layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId], t.audioId))
-      const tgtDurationSec = geoms.length > 0 && geoms.every((g) => g && !g.usingFallback)
-        ? geoms.reduce((sum, g) => sum + (g!.end - g!.start), 0)
-        : null
-      // Always the free readout, even with nothing measured: falling back to
-      // the plain row would print the line's SOURCE range.
-      return { kind: "free" as const, srcDurationSec, tgtDurationSec }
-    }
-    // AQU-1767: a split take's pieces are consecutive items, and the pills read
-    // them as the one take they are (Sam, 2026-10-19): from the first piece's
-    // start to the last piece's end, the sound they keep added up, and how many
-    // pieces. Diff and overlap measure that span against the line and its
-    // neighbours — the silences between pieces are inside the take.
-    const first = targetItems.findIndex((t) => t.cell.id === currentCell.id)
-    if (first < 0) return null
-    let last = first
-    while (targetItems[last + 1]?.cell.id === currentCell.id) last += 1
-    const geomOf = (t: (typeof targetItems)[number] | undefined) =>
-      t ? layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId], t.audioId) : null
-    const pieceGeoms = targetItems.slice(first, last + 1).map(geomOf)
-    if (pieceGeoms.some((g) => !g || g.usingFallback)) return null
-    const spans = pieceGeoms.map((g) => ({ start: g!.start, end: g!.end }))
-    const geom = {
-      start: Math.min(...spans.map((s) => s.start)),
-      end: Math.max(...spans.map((s) => s.end)),
-    }
-    const soundSec = spans.reduce((sum, s) => sum + (s.end - s.start), 0)
-    const { startTime, endTime } = currentCell
-    const prev = geomOf(targetItems[first - 1])
-    const next = geomOf(targetItems[last + 1])
-    const { headSec, tailSec } = chipOverlaps(
-      geom,
-      prev ? { start: prev.start, end: prev.end } : null,
-      next?.start ?? null,
-    )
-    // Blame the trespasser (same rule as the chip): only territory THIS chip
-    // left its own section to claim counts toward its overlap number. The
-    // head half also depends on the PREVIOUS chip's end, so it is masked when
-    // that width is a guess (SUB-48 — same mask the lane applies).
-    // 2026-08-08 (Sam): the two halves stay SEPARATE — a chip that spills at
-    // both ends reads as two labeled numbers, not one meaningless sum.
-    const tailTrespass = tailSec != null && typeof endTime === "number" && geom.end > endTime ? tailSec : 0
-    const headTrespass =
-      headSec != null && !prev?.usingFallback && typeof startTime === "number" && geom.start < startTime
-        ? headSec
-        : 0
-    // 2026-08-08 (Sam): Diff is the whole DURATION difference now. The old
-    // end-only number missed a target that also starts before its verse:
-    // start + end diffs sum to (source duration − target duration), positive
-    // exactly when the target is shorter. The halves survive in the hover.
-    const startDiffSec = typeof startTime === "number" ? geom.start - startTime : null
-    const endDiffSec = typeof endTime === "number" ? endTime - geom.end : null
-    return {
-      kind: "dubbing" as const,
-      startSec: geom.start,
-      endSec: geom.end,
-      durationSec: soundSec,
-      ...(spans.length > 1 ? { pieces: spans.length } : {}),
-      startDiffSec,
-      endDiffSec,
-      durationDiffSec: startDiffSec != null && endDiffSec != null ? startDiffSec + endDiffSec : null,
-      headOverlapSec: headTrespass > 0 ? headTrespass : null,
-      tailOverlapSec: tailTrespass > 0 ? tailTrespass : null,
-    }
-  }, [audioFirst, currentCell, targetItems, layout])
-  const currentClipAudio = useMemo(
-    () => (currentCellId ? resolveEntryAudio(audioByCellId?.get(currentCellId)) : null),
-    [audioByCellId, currentCellId],
-  )
-  const audioMissing = useClipAudioMissing({
-    audio: currentClipAudio,
-    projectId: project?.id ?? null,
-    fileId,
-    session: session ?? null,
-  })
-
+  /** Set just before a render whose only change is a dropped order painting. */
+  const paintingOrderOnly = useRef(false)
+  /** Each lane as last drawn, by track and time window. A render that only
+   *  paints a dropped order moves these into place rather than drawing every
+   *  lane again — on a long file that redraw is most of what a drop costs, and
+   *  it lands on the next grab when the tracks are being sorted quickly. The
+   *  columns draw in a later commit than this render, so the choice is taken
+   *  here and closed over. */
+  const drawnLanesRef = useRef(new Map<string, ReactNode>())
+  const reuseDrawnLanes = paintingOrderOnly.current
+  if (!reuseDrawnLanes) drawnLanesRef.current = new Map()
+  const drawnLanes = drawnLanesRef.current
+  useLayoutEffect(() => { paintingOrderOnly.current = false })
   function endSmoothScroll() {
     smoothScrollCleanupRef.current?.()
     smoothScrollCleanupRef.current = null
@@ -3207,7 +2956,7 @@ export function TimelineEditor({
     // A MANUAL scroll while playback runs means "stop following me". Our own
     // programmatic scrolls fire this handler too — the 150ms stamp window
     // filters them out.
-    if (transportPlaying && !scrollIsProgrammatic()) {
+    if (clock.transportPlaying() && !scrollIsProgrammatic()) {
       setFollowReleased(true)
     }
     scheduleResumePlace()
@@ -3317,7 +3066,7 @@ export function TimelineEditor({
   }
 
   function applyZoom(next: number) {
-    const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next))
+    const z = Math.max(ZOOM_MIN, Math.min(maxPxPerSec, next))
     // AQU-646: keep an anchor stable across the zoom — the playhead when
     // following live playback, otherwise the viewport center.
     const el = scrollRef.current
@@ -3325,7 +3074,7 @@ export function TimelineEditor({
       // Round 5: a video-driven follow keeps its anchor too — zooming used to
       // recentre on the viewport middle instead of the playhead.
       const followAnchor = follow && (queueActive || videoPlaying)
-      const anchorSec = followAnchor ? displayCurrentSec : pxToSec(el.scrollLeft + el.clientWidth / 2, pxPerSec)
+      const anchorSec = followAnchor ? clock.displaySec() : pxToSec(el.scrollLeft + el.clientWidth / 2, pxPerSec)
       const target = Math.max(0, secToPx(anchorSec, z) - (followAnchor ? viewportPx * 0.1 : viewportPx / 2))
       setPxPerSec(z)
       // Apply after React paints the new track width, or the browser clamps
@@ -3665,11 +3414,8 @@ export function TimelineEditor({
   }
 
   function moveScrub(sec: number) {
-    setScrubSec(sec)
-    // Keep the local clock in step for everything else that reads it (the
-    // follow-scroll anchor, the cell trace), even though the head is drawn from
-    // `scrubSec` directly.
-    clock.seekTo(sec)
+    // Moves the head and the clock, and renders only the head.
+    clock.scrub(sec)
     const now = performance.now()
     const send = scrubSendRef.current
     if (send.timer) { clearTimeout(send.timer); send.timer = null }
@@ -3689,7 +3435,7 @@ export function TimelineEditor({
     const send = scrubSendRef.current
     if (send.timer) { clearTimeout(send.timer); send.timer = null }
     scrubbingRef.current = false
-    setScrubSec(null)
+    clock.scrub(null)
     // CLEARED BEFORE THE LANDING SEEK, so that seek routes through the ordinary
     // path and the queue is cued where the hand stopped. The other order leaves
     // the transport suppressed for its own landing.
@@ -3709,8 +3455,7 @@ export function TimelineEditor({
   function sendSeek(sec: number, send: ((sec: number) => void) | undefined) {
     // A deliberate seek must land exactly where it was aimed: the timeline is
     // an editor, and at rest the head has to agree with the chip edge under it.
-    setCompensating(false)
-    clock.seekTo(sec)
+    clock.seek(sec)
     // AQU-646: explicit seeks drive the audio queue too, and re-engage follow.
     // The linked video rides along on this same call — the workspace stamps a
     // seek for the pane before deciding what the queue can do with it, because
@@ -3830,26 +3575,6 @@ export function TimelineEditor({
     setMediaCursorCell(selectedId)
   }, [selectedId])
 
-  // AQU-646 follow-playhead: page-flip the view when the playhead approaches
-  // the right edge (or leaves the left). Reads the element's live scrollLeft —
-  // state can lag a programmatic scroll by a frame.
-  // 2026-08-11: reads the CLOCK, not the queue's progress. A linked video with
-  // no audio never starts the queue, so this used to sit out the entire film —
-  // and it is the only thing that scrolls a track which, on a 70-minute
-  // episode, is roughly 160,000px wide.
-  useEffect(() => {
-    if (!follow || !transportPlaying) return
-    const el = scrollRef.current
-    if (!el) return
-    const target = computeFollowScroll(
-      secToPx(displayCurrentSec, pxPerSec),
-      el.scrollLeft,
-      viewportPx,
-      trackWidthPx,
-    )
-    if (target != null) scrollTrackTo(target)
-  }, [follow, transportPlaying, displayCurrentSec, pxPerSec, viewportPx, trackWidthPx])
-
   // 2026-08-07 (wire a): USER chip selection — as opposed to programmatic
   // selection from a row click — also notifies the workspace so the text
   // table scrolls to and flashes the matching row.
@@ -3935,9 +3660,6 @@ export function TimelineEditor({
   }, [transcribeTargetIds, takeCells])
 
   const mediaTextHeaderProps = {
-    cell: currentCell,
-    castName: formatCueCharacter(currentCharacter.names),
-    cameraState: currentCharacter.cameraState ?? null,
     // AQU-646 stage 3e: the transcribe controls used to be a full-width row of
     // their own beneath the lanes, on screen whether or not there was anything
     // to transcribe. They sit in the text header now, and ONLY WHEN THERE IS A
@@ -4265,7 +3987,6 @@ export function TimelineEditor({
             viewEndSec={rowProps.viewEndSec}
             selectedId={selectedId}
             selectedTakeCellId={takeSelCellFor(RECORDING_SLOT)}
-            loadingCellId={loadingCellId}
             missingCellIds={missingCellIds}
             editable={editable}
             masterHonorsTrims={masterHonorsTrims}
@@ -4348,7 +4069,6 @@ export function TimelineEditor({
             viewEndSec={rowProps.viewEndSec}
             selectedId={selectedId}
             selectedTakeCellId={takeSelCellFor(slotForTrack(track.id))}
-            loadingCellId={loadingCellId}
             missingCellIds={missingCellIds}
             editable={editable}
             masterHonorsTrims={masterHonorsTrims}
@@ -4561,7 +4281,7 @@ export function TimelineEditor({
             const el = scrollRef.current
             if (el) {
               const target = computeFollowScroll(
-                secToPx(displayCurrentSec, pxPerSec), el.scrollLeft, el.clientWidth, trackWidthPx,
+                secToPx(clock.displaySec(), pxPerSec), el.scrollLeft, el.clientWidth, trackWidthPx,
               )
               if (target != null) scrollTrackTo(target)
             }
@@ -4966,7 +4686,15 @@ export function TimelineEditor({
                           ref={bindLaneShift}
                           data-tl-track-lane={row.track.id}
                           data-tl-lane-group={row.depth === 1 ? row.track.groupId ?? undefined : undefined}
-                          className={cn(selectedTrackIdSet.has(row.track.id) && "bg-accent/40")}
+                          // In the air it is drawn over the lanes it crosses,
+                          // a folder's band included, and under the playhead
+                          // (z-20). Only then: at rest, the rule above holds.
+                          className={cn(
+                            "data-[tl-lifted]:relative data-[tl-lifted]:z-10",
+                            selectedTrackIdSet.has(row.track.id)
+                              ? "bg-accent/40 data-[tl-lifted]:bg-[color-mix(in_oklab,var(--color-accent)_40%,var(--color-background))]"
+                              : "data-[tl-lifted]:bg-background",
+                          )}
                           // AQU-1684: a drag under way in this lane keeps it
                           // from being hidden. Capture, because the chips own
                           // their pointerdown.
@@ -5554,16 +5282,18 @@ export function TimelineEditor({
                   ))}
                 </div>
               )}
-              <TimelinePlayhead
-                currentSec={displayCurrentSec}
+              <TimelineTransportClock
+                store={clock}
+                cellIds={cellIdSet}
+                cells={cells}
+                audioFirst={audioFirst}
+                scrubbingRef={scrubbingRef}
                 pxPerSec={pxPerSec}
-                // AQU-646 stage 5: NOT just `transportPlaying`. That flag is
-                // derived from store state and lags a pause by a commit or two,
-                // and while it is still true the playhead's own rAF keeps
-                // extrapolating FORWARD over the scrub position. It is also
-                // what makes `monotonicSec` swallow a backward drag as a hold.
-                playing={transportPlaying && scrubSec == null}
-                rate={transportRate}
+                follow={follow}
+                viewportPx={viewportPx}
+                trackWidthPx={trackWidthPx}
+                scrollRef={scrollRef}
+                scrollTrackTo={scrollTrackTo}
               />
             </div>
             </TimelineScrollBusContext.Provider>
@@ -5571,20 +5301,24 @@ export function TimelineEditor({
         </div>
       </RowMetricsContext.Provider>
 
-      {/* 2026-08-08 (Sam): the NUMBERS stay with the timeline — they measure
-          the chips above, not the dialogue below — and close this section off
-          at its bottom edge. The wrapper is the row's `shrink-0`: it is chrome,
-          and the panel's height belongs to the tracks. */}
-      <div className="shrink-0">
-        <TimelineTimingRow cell={currentCell} chipStats={currentChipStats} audioMissing={audioMissing} />
-      </div>
-      {/* The section label, the line's own context and the segment navigator
-          head the TEXT column of the band below, opposite the Video header.
-          The slot is owned by the workspace; portal when it exists, render
-          inline when this editor is mounted alone (tests). */}
-      {chipStripSlot
-        ? createPortal(<MediaTextHeader {...mediaTextHeaderProps} />, chipStripSlot)
-        : <MediaTextHeader {...mediaTextHeaderProps} />}
+      <TimelineCurrentChip
+        cellIds={cellIdSet}
+        selectedId={selectedId}
+        setSelectedId={setSelectedId}
+        cells={cells}
+        audioCues={audioCues}
+        independentTextCells={independentTextCells}
+        links={links}
+        audioFirst={audioFirst}
+        targetItems={targetItems}
+        layout={layout}
+        audioByCellId={audioByCellId}
+        projectId={project?.id ?? null}
+        fileId={fileId}
+        session={session ?? null}
+        chipStripSlot={chipStripSlot}
+        header={mediaTextHeaderProps}
+      />
       {/* Both lanes' clicks arrive at one `toggleLink`, so one dialog covers
           making and breaking alike. Rendered unconditionally and gated on its
           own `open` — a dialog that unmounts mid-animation flickers. */}

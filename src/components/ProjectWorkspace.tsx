@@ -6,7 +6,7 @@ import { recordModelCall, type RecordModelCall } from "@/lib/ai-interventions/cl
 import { useCharacterSheetCells } from "@/hooks/useCharacterSheetCells"
 import { confirmedTargetHeadKeys } from "@/lib/sync/confirmed-target-heads"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
-import { Suspense, cloneElement, isValidElement, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
+import { Suspense, cloneElement, isValidElement, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useRememberLastWorkspace } from "@/hooks/useRememberLastWorkspace"
@@ -217,7 +217,8 @@ import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, setQueueLayerTrackSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
-  hasAnyPlayableAudio, onQueueRanOut, stopQueue } from "@/lib/audio/play-queue"
+  hasAnyPlayableAudio, onQueueRanOut, stopQueue, useQueueStateValue } from "@/lib/audio/play-queue"
+import { selectQueueStateForFile } from "@/lib/audio/queue-scope"
 import {
   chapterOfCell, nextPlayableChapter, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
   timelineChaptersOf, type TimelineChapter,
@@ -225,19 +226,20 @@ import {
 import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
 import { applyChapterPick, planChapterPick, rowEndsPlayback } from "@/lib/timeline/chapter-pick"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
-import { useTransportForFile } from "@/hooks/useTransportForFile"
+import { useHeldCellIdOnClock, useTransportStateForFile, type UseTransportForFileArgs } from "@/hooks/useTransportForFile"
 import { usePauseAudioWhenHidden } from "@/hooks/usePauseAudioWhenHidden"
 import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
 import { recordingDrivesPlayback, switchPlaybackSource, usePlaybackSource, type PlaybackSource } from "@/lib/audio/playback-source"
 import { youTubeVideoId } from "@/lib/video/youtube"
-import { cellIdAtSec, heldCellIdAtSec } from "@/lib/timeline/source-regions"
+import { cellIdAtSec } from "@/lib/timeline/source-regions"
 import { clearVideoControllerIf, setVideoController } from "@/lib/timeline/video-controller"
 import {
   getVirtualClockPlaying,
+  getVirtualClockSec,
   startVirtualClock,
   stopVirtualClock,
+  subscribeVirtualClock,
   useVirtualClockPlaying,
-  useVirtualClockSec,
   virtualClockController,
   virtualClockPause,
   virtualClockPlay,
@@ -488,10 +490,11 @@ import { MediaVideoPane } from "./timeline/MediaVideoPane"
 import { shouldShowVideoPane } from "./timeline/video-pane-layout"
 import {
   getVideoClockPlaying,
+  getVideoClockSec,
   setVideoClockSec,
   setVideoClockPlaying,
+  subscribeVideoClock,
   useVideoClockPlaying,
-  useVideoClockSec,
 } from "@/lib/timeline/video-clock"
 import { setVideoDurationSec, useVideoDurationSec } from "@/lib/timeline/video-duration"
 import { uiSlotRef } from "@/lib/ui-slots"
@@ -748,6 +751,40 @@ function sameStringMap(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, st
 }
 
 /** Persist whether the Agent editor tab is open for a project (survives file-tab switches). */
+/**
+ * AQU-1118: the row the table marks as playing — the transport's line, held
+ * through the silence after it until the next starts (Sam, Oct 7). The same
+ * hook and inputs as the bottom bar, so the two cannot disagree. It changes
+ * with every line of playback, so it goes to the rows through a store and
+ * renders nothing here.
+ */
+function PlayingCuePublisher({ store, transport, cells, enabled }: {
+  store: PlayingCueStore
+  transport: UseTransportForFileArgs
+  cells: readonly CellData[]
+  enabled: boolean
+}) {
+  const state = useTransportStateForFile(transport)
+  const held = useHeldCellIdOnClock(state.source, enabled && state.running && state.cellId == null, cells)
+  const cellId = enabled && state.running ? (state.cellId ?? held) : null
+  useLayoutEffect(() => { store.set(cellId) }, [store, cellId])
+  return null
+}
+
+/** Hands the dub driver each new second a clock publishes. Returns the
+ *  unsubscribe, for an effect's cleanup. */
+function tickDubsFromClock(subscribe: (listener: () => void) => () => void, sec: () => number | null): () => void {
+  let last: number | null | undefined
+  const tick = () => {
+    const now = sec()
+    if (now === last) return
+    last = now
+    if (now != null) tickExternalDubs(now)
+  }
+  tick()
+  return subscribe(tick)
+}
+
 function agentTabStorageKey(projectId: string): string {
   return `aquilla:agent-tab:${projectId}`
 }
@@ -8785,7 +8822,11 @@ export function ProjectWorkspace() {
     },
     [saveVoiceOverride, t],
   )
-  const trackedCellRef = useEditorViewportTrackedCellRef(parallelBiblesPanelActive)
+  // Only while one of the panels that reads it is open: the table follows
+  // playback, and each row it scrolls past re-rendered this whole shell.
+  const trackedCellRef = useEditorViewportTrackedCellRef(
+    parallelBiblesPanelActive && (parallelBiblesOpen || verseResourcesOpen || whosWhoOpen),
+  )
   // Drop the tracked ref when switching files so the previous file's verse
   // doesn't leak into the new file's panel (the new EditorTable re-fires).
   useEffect(() => {
@@ -13952,11 +13993,11 @@ export function ProjectWorkspace() {
   useEffect(() => {
     updateExternalDubCells(dubDriverCells)
   }, [dubDriverCells])
-  const videoDubSec = useVideoClockSec()
   const videoDubPlaying = useVideoClockPlaying()
-  useEffect(() => {
-    if (videoDubSec != null) tickExternalDubs(videoDubSec)
-  }, [videoDubSec])
+  // Subscribed, not rendered: the picture's clock ticks several times a
+  // second, and reading it as state re-rendered this whole workspace (and the
+  // timeline under it) on every tick.
+  useEffect(() => tickDubsFromClock(subscribeVideoClock, getVideoClockSec), [])
   useEffect(() => {
     setExternalDubsPlaying(videoDubPlaying)
   }, [videoDubPlaying])
@@ -14007,7 +14048,6 @@ export function ProjectWorkspace() {
     setVideoController(virtualClockController)
     return () => clearVideoControllerIf(virtualClockController)
   }, [virtualIsTransport])
-  const virtualSec = useVirtualClockSec()
   const virtualPlaying = useVirtualClockPlaying()
   // The same driver, the same cells, the same four calls the picture makes.
   useEffect(() => {
@@ -14019,15 +14059,22 @@ export function ProjectWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [virtualIsTransport, project?.id, frontierSession])
   useEffect(() => {
-    if (virtualIsTransport && virtualSec != null) tickExternalDubs(virtualSec)
-  }, [virtualIsTransport, virtualSec])
+    if (!virtualIsTransport) return
+    return tickDubsFromClock(subscribeVirtualClock, getVirtualClockSec)
+  }, [virtualIsTransport])
   useEffect(() => {
     if (virtualIsTransport) setExternalDubsPlaying(virtualPlaying)
   }, [virtualIsTransport, virtualPlaying])
-  /** Which line the playhead is on, for the bar's caption and the table follow. */
-  const virtualSoundingCellId = useMemo(
-    () => (virtualIsTransport && virtualSec != null ? cellIdAtSec(dubDriverCells, virtualSec) : null),
-    [virtualIsTransport, virtualSec, dubDriverCells],
+  /** Which line the playhead is on, for the bar's caption and the table follow.
+   *  A selector over the clock, so it re-renders when the line changes. */
+  const readVirtualSoundingCellId = () => {
+    const sec = virtualIsTransport ? getVirtualClockSec() : null
+    return sec != null ? cellIdAtSec(dubDriverCells, sec) : null
+  }
+  const virtualSoundingCellId = useSyncExternalStore(
+    subscribeVirtualClock,
+    readVirtualSoundingCellId,
+    readVirtualSoundingCellId,
   )
   // AQU-1118: which row is playing right now, so its "Play from this cue"
   // button can turn into Pause. The bottom bar's own answer, from the same hook
@@ -14037,7 +14084,9 @@ export function ProjectWorkspace() {
     () => audioMergedCells.some((c) => queueClockIsFileTime(c)),
     [audioMergedCells],
   )
-  const fileTransport = useTransportForFile({
+  // Read by `WithPlayingCue` around the table, not here: the line changes with
+  // every verse of playback, and this shell is far too big to render for it.
+  const fileTransportArgs: UseTransportForFileArgs = {
     cellIds: fileCellIds,
     coreMediaUrl: activeFile?.coreMediaUrl ?? null,
     anyCellClockIsFileTime: anyFileCellClockIsFileTime,
@@ -14045,12 +14094,7 @@ export function ProjectWorkspace() {
     timelineDurationSec,
     virtualSoundingCellId,
     freeTiming: timingMode === "audioFirst",
-  })
-  // …and through the silence after a line it stays on that line until the
-  // next one starts (Sam, Oct 7): the transport's own line is null in a gap.
-  const playingCueCellId = fileTransport.running
-    ? (fileTransport.cellId ?? heldCellIdAtSec(audioMergedCells, fileTransport.progress.currentTime))
-    : null
+  }
 
   // ── A book or document on the timeline, the whole file ──
   //
@@ -14076,14 +14120,21 @@ export function ProjectWorkspace() {
     const chapters = timelineChaptersOf(readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex()))
     return chapters.length > 0 ? chapters : EMPTY_TIMELINE_CHAPTERS
   }, [sequenceTimeline, cellStore, cellStoreVersion])
-  const queueCellOnFile = fileTransport.source === "queue" && fileTransport.active ? fileTransport.cellId : null
+  // The chapter the queue is on, for this file. Selected rather than read as
+  // the queue's line, so it re-renders this shell at a chapter boundary only.
+  const queueChapterKey = useQueueStateValue((state) => {
+    if (timelineScopes.length === 0) return null
+    const queue = selectQueueStateForFile(state, fileCellIds)
+    return queue.active ? (chapterOfCell(timelineScopes, queue.cellId)?.key ?? null) : null
+  })
   // Remembered so a scroll of the table still has a chapter to name. The
   // timeline itself is `timelineLines`: every chapter, in the file's order.
   const timelineChapter = useMemo(
     () => timelineScopes.length > 0
-      ? resolveTimelineChapter({ chapters: timelineScopes, chosenKey: chosenScopeKey, queueCellId: queueCellOnFile })
+      ? (timelineScopes.find((chapter) => chapter.key === queueChapterKey)
+        ?? resolveTimelineChapter({ chapters: timelineScopes, chosenKey: chosenScopeKey, queueCellId: null }))
       : null,
-    [timelineScopes, chosenScopeKey, queueCellOnFile],
+    [timelineScopes, chosenScopeKey, queueChapterKey],
   )
   const timelineCells = timelineLines
   // The bottom strip reads its own audio and merges it in; it gets the same
@@ -14101,7 +14152,6 @@ export function ProjectWorkspace() {
   const handleTableChapterChange = useCallback((key: string | null) => {
     setChosenScopeKey(key)
   }, [])
-  const queueChapterKey = chapterOfCell(timelineScopes, queueCellOnFile)?.key ?? null
   // AQU-1758 (Sam, Oct 29): picking a chapter while Play all plays jumps to
   // it and keeps playing, from its first line, on the whole book's clock.
   // Picking one while playback is paused ends that playback, as before
@@ -15498,7 +15548,8 @@ export function ProjectWorkspace() {
   // seeks — no session to mint tokens, or a target inside the trailing pad that
   // no section owns — and in those cases the picture must still move, so the
   // pane cannot infer position from queue progress alone.
-  const [videoSeek, setVideoSeek] = useState<{ sec: number; nonce: number; play?: boolean } | null>(null)
+  const videoSeek = useState(createVideoSeekStore)[0]
+  const playingCue = useState(createPlayingCueStore)[0]
   /** Space, when the picture is the transport. A nonce rather than a desired
    *  state: the picture keeps its native controls, and only a toggle against
    *  the element's own `paused` can stay in step with them. */
@@ -15525,7 +15576,7 @@ export function ProjectWorkspace() {
    * cancel, from the editor's own unmount, and here on a file switch.
    */
   const scrubbingRef = useRef(false)
-  useEffect(() => { scrubbingRef.current = false; setVideoSeek(null); setVideoToggle(null) }, [activeFileId])
+  useEffect(() => { scrubbingRef.current = false; videoSeek.clear(); setVideoToggle(null) }, [activeFileId, videoSeek])
   const handleTimelineScrubStart = useCallback(() => {
     scrubbingRef.current = true
     // `pauseAllTransports`, not `pauseAllPlayback`: the latter is queue-only and
@@ -15567,7 +15618,7 @@ export function ProjectWorkspace() {
     // reaches "Play from this cue": that button renders only on caption files,
     // whose rows are never file-timed audio.
     const play = opts?.play === true && videoIsTransport
-    setVideoSeek((prev) => ({ sec: Math.max(0, sec), nonce: (prev?.nonce ?? 0) + 1, play }))
+    videoSeek.request(Math.max(0, sec), play)
     // AQU-646 stage 5: A SCRUB MOVES THE PICTURE AND NOTHING ELSE (Sam).
     //
     // Placed AFTER the stamp so the frame still follows the hand, and BEFORE
@@ -15615,7 +15666,7 @@ export function ProjectWorkspace() {
       sec,
       { play: false },
     )
-  }, [project?.id, timelineCells, frontierSession, videoIsTransport, virtualIsTransport, recordingCellId])
+  }, [project?.id, timelineCells, frontierSession, videoIsTransport, virtualIsTransport, recordingCellId, videoSeek])
 
   /** AQU-1117: "Play from this cue" — the same routing as an ordinary seek,
    *  with the start riding along on the stamp so the film begins at the cue
@@ -18023,7 +18074,7 @@ export function ProjectWorkspace() {
                   // film's mute button, and audibility is stored per file.
                   fileId={activeFile.id}
                   cells={audioMergedCells}
-                  seekSec={videoSeek}
+                  seek={videoSeek}
                   togglePlay={videoToggle}
                   suspended={recordingCellId !== null}
                   onVideoTime={setVideoClockSec}
@@ -18105,6 +18156,15 @@ export function ProjectWorkspace() {
                 {extensionEditorRev4.overlay}
                 </>
               ) : (
+              <>
+              <PlayingCuePublisher
+                store={playingCue}
+                transport={fileTransportArgs}
+                cells={audioMergedCells}
+                // AQU-1642 / AQU-1758: on a book or document too — the line the
+                // bottom strip is playing is marked.
+                enabled={timelineStacked && (isSubtitleFile || !activeFileTimeOrdered)}
+              />
               <EditorTable
             ref={bindEditorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
@@ -18186,9 +18246,7 @@ export function ProjectWorkspace() {
             getStatisticalBt={getStatisticalBt}
             onAlignmentSeedChange={handleAlignmentSeedChange}
             onSeekToCue={isSubtitleFile && timelineStacked ? handleCueSeek : undefined}
-            // AQU-1642 / AQU-1758: on a book or document too — the line the
-            // bottom strip is playing is marked.
-            playingCueCellId={timelineStacked && (isSubtitleFile || !activeFileTimeOrdered) ? playingCueCellId : null}
+            playingCue={playingCue}
             onPauseCue={pauseAllTransports}
             sourceLineEditing={sourceLineEditing}
             lineNumbersEnabled={fileMeta.lineNumbersEnabled}
@@ -18261,6 +18319,7 @@ export function ProjectWorkspace() {
             onActiveChapterChange={sequenceTimeline ? handleTableChapterChange : undefined}
             onChapterPicked={sequenceTimeline ? handleChapterPicked : undefined}
           />
+              </>
               )}
               </div>
               <CellRowsLoadStatus progress={cellLoadProgress} loading={cellsLoading} error={cellsError} onRetryClick={retryCells} />

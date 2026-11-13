@@ -310,8 +310,22 @@ function hitContainer(hit: Collision): DroppableContainer | undefined {
  * The pointer wins when it is on a row. A folder's sortable wraps its members,
  * so both contain the pointer; the smaller one is the member, and that is the
  * slot. Off a row, the nearest track is the slot.
+ *
+ * A folder only lands among the top-level rows. Over an open folder's member
+ * it read as going into that folder, which a folder cannot, so the drop was
+ * refused and the folder snapped back.
  */
 export const trackCollision: CollisionDetection = (args) => {
+  const activeId = String(args.active.id)
+  const draggingFolder = args.droppableContainers.some((container) => readGroup(container.data.current) === activeId)
+  if (!draggingFolder) return collideTracks(args)
+  return collideTracks({
+    ...args,
+    droppableContainers: args.droppableContainers.filter((container) => readGroup(container.data.current) === TIMELINE_ROOT_GROUP),
+  })
+}
+
+const collideTracks: CollisionDetection = (args) => {
   const hits = pointerWithin(args)
   const rows = hits.filter((hit) => {
     const container = hitContainer(hit)
@@ -460,6 +474,8 @@ function aboveOpenFolder(
   const folder = rows.find((row) => row.track.id === over.id)
   if (!folder || folder.collapsed || folder.members.length === 0) return drop
   const movedIndex = root.findIndex((track) => track.id === drop.trackId)
+  // A folder never goes into a folder, so over a heading it is already a reorder.
+  if (root[movedIndex]?.kind === "folder") return drop
   const drawnTop = movedIndex > drop.toPosition ? overTop + activeHeight : overTop
   if (!(pointerY < drawnTop)) return drop
   const folderAt = movedIndex >= 0 && movedIndex < drop.toPosition ? drop.toPosition - 1 : drop.toPosition

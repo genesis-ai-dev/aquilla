@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { buildTrackRows } from "@/lib/timeline/track-groups"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
-import type { DragEndEvent } from "@dnd-kit/core"
+import type { DragEndEvent, DroppableContainer } from "@dnd-kit/core"
 import {
   TIMELINE_ROOT_GROUP,
   adjustTrackDrop,
@@ -15,6 +15,7 @@ import {
   paintLaneShifts,
   folderDragEdge,
   shouldRetainTopDragGap,
+  trackCollision,
   type TrackDragGap,
   type TrackLaneShift,
   type TrackPointerDrop,
@@ -179,6 +180,39 @@ describe("commitTrackReorder", () => {
       })
     }
     expect(adjustTrackDrop(folderFirst, ontoHeading, { ...folderAt, y: 90 })).toEqual(ontoHeading)
+  })
+
+  it("moves a folder above an open folder instead of snapping it back", () => {
+    const twoFolders = buildTrackRows(deriveTracksForFile({
+      trackOverrides: {
+        a: { kind: "folder", name: "A", order: -1 },
+        "target-audio": { groupId: "a", order: 0 },
+        b: { kind: "folder", name: "B", order: 5 },
+        "trk-es": { kind: "audio", name: "Spanish", groupId: "b", order: 0, sourceTrackId: "source-subtitles" },
+      },
+    }))
+    const box = (top: number, height: number) => ({ top, bottom: top + height, left: 0, right: 200, width: 200, height })
+    const slot = (id: string, group: string, index: number) => ({
+      id, key: id, disabled: false, node: { current: null }, rect: { current: null },
+      data: { current: { group, sortable: { containerId: group, index, items: [] } } },
+    }) as unknown as DroppableContainer
+    const containers = [slot("a", TIMELINE_ROOT_GROUP, 0), slot("target-audio", "a", 0), slot("b", TIMELINE_ROOT_GROUP, 3), slot("trk-es", "b", 0)]
+    const droppableRects = new Map([["a", box(0, 120)], ["target-audio", box(48, 72)], ["b", box(300, 120)], ["trk-es", box(348, 72)]])
+    const collide = (activeId: string) => trackCollision({
+      active: { id: activeId, data: { current: null }, rect: { current: { initial: null, translated: null } } },
+      collisionRect: box(60, 120),
+      droppableRects,
+      droppableContainers: containers,
+      pointerCoordinates: { x: 50, y: 80 },
+    } as unknown as Parameters<typeof trackCollision>[0])
+    // Over another folder's member, a folder aims at that folder; a track still goes in.
+    expect(collide("b")[0]?.id).toBe("a")
+    expect(collide("source-audio")[0]?.id).toBe("target-audio")
+
+    const ontoA: TrackPointerDrop = { kind: "move", trackId: "b", group: TIMELINE_ROOT_GROUP, toPosition: 0 }
+    const drop = adjustTrackDrop(twoFolders, ontoA, { y: 30, overTop: 0, overHeight: 120, activeHeight: 120 })
+    expect(drop).toEqual(ontoA)
+    expect(commitTrackReorder(twoFolders, drop, true)).toMatchObject({ kind: "reorder", trackId: "b" })
   })
 
   it("plans a scope drop as a hold carrying where the pointer left the row", () => {

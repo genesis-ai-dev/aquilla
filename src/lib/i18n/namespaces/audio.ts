@@ -22,8 +22,10 @@ export const audio = defineNamespace({
     "audio.train.speakerNamePlaceholder": "e.g. Maria (narrator)",
     "audio.train.addRecordings": "Add recordings",
     "audio.train.addRecordingsAriaLabel": "Add recordings of the speaker",
-    "audio.train.recordingTips": "One speaker, clean speech, any language · 5–60 min · up to 20 MB per file",
+    "audio.train.recordingTips": "One speaker, clean speech, any language · 5–60 min in total · WAV, or MP3/M4A up to 20 MB per file",
     "audio.train.fileTooLarge": "Over 20 MB",
+    "audio.train.fileTooLargeUseWav": "Over {mb} MB — use a WAV for a recording this long",
+    "audio.train.tooMuchData": "Over {mb} MB in total (the limit is {max} min) — remove some",
     "audio.train.removeRecordingAriaLabel": "Remove {name}",
     "audio.train.audioMeter": "{minutes} min",
     "audio.train.tooMuchAudio": "Over {max} min — remove some",
@@ -902,6 +904,17 @@ export const audio = defineNamespace({
       "audio.train.recommendedHint": {
         description: "Right of the meter once the minimum is met: how much audio gives the best quality.",
         placeholders: { recommended: "Recommended minutes, e.g. '15'." },
+      },
+      "audio.train.fileTooLargeUseWav": {
+        description: "Shown in red next to one picked recording in Train voice when a compressed audio file (MP3, M4A) is over the per-file size limit. Uncompressed WAV files have no per-file limit, so the fix is to use a WAV. WAV, MP3 and MB are not translated.",
+        placeholders: { mb: "The per-file size limit in megabytes, e.g. '20'." },
+      },
+      "audio.train.tooMuchData": {
+        description: "Shown instead of the meter line in Train voice when the picked recordings are too large to upload in total, even though they may be within the maximum length. MB is not translated.",
+        placeholders: {
+          mb: "The total upload limit in megabytes, e.g. '1600'.",
+          max: "Maximum minutes of audio allowed, e.g. '60'.",
+        },
       },
       "audio.train.tooMuchAudio": {
         description: "Shown instead of the meter line when the recordings exceed the maximum.",

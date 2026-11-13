@@ -656,12 +656,19 @@ Worker (`aquilla-dev-identity`) admits only:
 
 Everyone else is refused at sign-in and sign-up with a plain message, and every
 API request they make answers `403` with `code: "dev_access_restricted"`.
-Production, the per-branch previews, local dev and e2e are never gated: the
-check keys on `DEPLOYMENT_WORKER_NAME` being the development identity Worker
-named in `config/cloudflare-deployments.json`.
+Production, local dev and e2e are never gated: the check keys on
+`DEPLOYMENT_WORKER_NAME` being the development identity Worker named in
+`config/cloudflare-deployments.json`. The per-branch previews
+(`aquilla-auth-preview`) enforce the same list since AQU-2555; see
+`docs/security/preview-access.md`.
+
+Automated suites sign in as ordinary accounts, so their accounts must be on
+the list too. `docs/security/preview-access.md` names them (today: Adversarial
+Jev's three bot accounts). Check that table before removing an entry you do
+not recognise.
 
 The list lives in the KV namespace `aquilla-dev-access-list`, bound as
-`DEV_ACCESS_LIST` on the development profile only. KV sits outside the Neon
+`DEV_ACCESS_LIST` on the development profile and on the branch previews. KV sits outside the Neon
 restore, so the nightly refresh never touches it. One key per lower-cased email.
 
 To change it, open **Admin → Platform → Dev access** on dev.aquilla.app. It

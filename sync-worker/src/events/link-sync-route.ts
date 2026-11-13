@@ -69,6 +69,9 @@ export async function syncUntilCaughtUp(
       skippedHashEqual: total.skippedHashEqual + next.skippedHashEqual,
       windows: total.windows + next.windows,
       more: next.more,
+      ...(total.envelopesRepaired || next.envelopesRepaired
+        ? { envelopesRepaired: (total.envelopesRepaired ?? 0) + (next.envelopesRepaired ?? 0) }
+        : {}),
     }
   }
   return total

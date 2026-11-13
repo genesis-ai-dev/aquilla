@@ -153,8 +153,8 @@ describe("Google login boundary", () => {
     expect((await manage("disconnect", { password })).status).toBe(200)
   })
 
-  it("enforces dev access before signup and linked login, including revocation between steps", async () => {
-    testEnv.DEPLOYMENT_WORKER_NAME = "aquilla-dev-identity"
+  it.each(["aquilla-dev-identity", "aquilla-auth-preview"])("enforces access on %s before signup and linked login, including revocation between steps", async (worker) => {
+    testEnv.DEPLOYMENT_WORKER_NAME = worker
     const get = vi.fn().mockResolvedValue(null)
     testEnv.DEV_ACCESS_LIST = { get } as unknown as KVNamespace
     const denied = await post("exchange", { code: await handoff(), verifier })

@@ -952,7 +952,7 @@ export interface ProjectRecord {
    *  unaffected. */
   importCellUnit?: CellUnit
   /** Curly quotes as you type in the translation editor. Synced via
-   *  ProjectWideSettings; absent/false leaves straight quotes alone. */
+   *  ProjectWideSettings; on unless stored as false. */
   smartQuotes?: boolean
 }
 

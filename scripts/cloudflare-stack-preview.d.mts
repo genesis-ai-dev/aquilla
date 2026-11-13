@@ -18,6 +18,7 @@ export interface PreviewConfig {
     observability: { enabled: boolean }
     vars?: Record<string, string>
     hyperdrive?: Array<{ binding: string; id: string }>
+    kv_namespaces?: Array<{ binding: string; id: string }>
     r2_buckets?: Array<{ binding: string; bucket_name: string }>
     version_metadata?: { binding: string }
     durable_objects?: {

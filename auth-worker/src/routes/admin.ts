@@ -1,3 +1,5 @@
+import totpRoutes from "./admin-totp"
+import { factor, deployment } from "../lib/admin-totp"
 // Platform-operator (site-wide admin) surface — read-only, cross-tenant.
 //
 // Every route here bypasses the org-scoped 403 guards used elsewhere, so the
@@ -84,7 +86,8 @@ admin.use("*", requirePlatformAdmin)
  */
 admin.get("/me", async (c) => {
   const user = c.get("user")
-  const hardened = adminElevationRequired(c.env)
+  const totpEnabled = (await factor(c))?.enabled === true
+  const hardened = adminElevationRequired(c.env) || totpEnabled
   // OPS-35: scoped to this session's own grant, matching requireAdminElevation
   // — otherwise the SPA would report `elevated: true` on a session that the
   // gate below then 403s, which is exactly the account-vs-session confusion
@@ -92,9 +95,10 @@ admin.get("/me", async (c) => {
   const row = hardened
     ? await c.env.AQUILLA_PG.prepare(
         `SELECT elevated_until FROM admin_elevations
-          WHERE user_id = ? AND session_key = ? AND elevated_until > now()`,
+          WHERE user_id = ? AND session_key = ? AND elevated_until > now()
+          AND factor_generation IS NOT DISTINCT FROM (SELECT generation FROM admin_totp WHERE user_id=admin_elevations.user_id AND deployment=? AND enabled)`,
       )
-        .bind(user.id, c.get("sessionKey"))
+        .bind(user.id, c.get("sessionKey"), deployment(c))
         .first<{ elevated_until: string }>()
     : null
   return c.json({
@@ -102,11 +106,14 @@ admin.get("/me", async (c) => {
     username: user.username,
     email: user.email,
     hardened,
+    totpEnabled,
     // When the console isn't hardened, it's open (no step-up needed).
     elevated: hardened ? Boolean(row) : true,
     elevatedUntil: row?.elevated_until ?? null,
   })
 })
+
+admin.route("/totp", totpRoutes)
 
 // ── Step-up elevation (NOT behind requireAdminElevation — they establish it) ──
 
@@ -121,6 +128,7 @@ admin.get("/me", async (c) => {
  */
 admin.post("/elevation/request", async (c) => {
   const user = c.get("user")
+  if ((await factor(c))?.enabled) return c.json({ error: "totp_required" }, 409)
 
   const recent = await c.env.AQUILLA_PG.prepare(
     `SELECT COUNT(*) AS n FROM admin_elevation_codes
@@ -183,6 +191,7 @@ const elevationVerifySchema = z.object({ code: z.string().min(4).max(12) })
 admin.post("/elevation/verify", zValidator("json", elevationVerifySchema), async (c) => {
   const user = c.get("user")
   const { code } = c.req.valid("json")
+  if ((await factor(c))?.enabled) return c.json({ error: "totp_required" }, 409)
 
   // [Pen test] Auth & session mgmt (2026-07-27): this endpoint had no attempt
   // limiting — a caller already holding a valid (e.g. stolen) non-elevated
@@ -267,7 +276,7 @@ admin.post("/elevation/verify", zValidator("json", elevationVerifySchema), async
     `INSERT INTO admin_elevations (user_id, session_key, elevated_until, updated_at)
      VALUES (?, ?, ?, now())
      ON CONFLICT (user_id, session_key)
-       DO UPDATE SET elevated_until = EXCLUDED.elevated_until, updated_at = now()`,
+       DO UPDATE SET elevated_until = EXCLUDED.elevated_until, updated_at = now(), factor_generation = NULL`,
   )
     .bind(user.id, sessionKey, until)
     .run()

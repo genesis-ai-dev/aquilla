@@ -299,14 +299,9 @@ export function clampOrgDirectoryLimit(raw: string | undefined): number {
 }
 
 /** Same page size as the org switcher — project tables and pickers share it. */
-export const PROJECT_DIRECTORY_DEFAULT_LIMIT = ORG_DIRECTORY_DEFAULT_LIMIT
-export const PROJECT_DIRECTORY_MAX_LIMIT = ORG_DIRECTORY_MAX_LIMIT
-
 export const clampProjectDirectoryLimit = clampOrgDirectoryLimit
 
 /** Same page size as the org switcher / project tables. */
-export const TEAM_DIRECTORY_DEFAULT_LIMIT = ORG_DIRECTORY_DEFAULT_LIMIT
-export const TEAM_DIRECTORY_MAX_LIMIT = ORG_DIRECTORY_MAX_LIMIT
 export const clampTeamDirectoryLimit = clampOrgDirectoryLimit
 export const encodeTeamDirectoryCursor = encodeOrgDirectoryCursor
 export const decodeTeamDirectoryCursor = decodeOrgDirectoryCursor
@@ -2936,15 +2931,6 @@ function extractRoleFloor(
 export async function getRosterViewMinRole(env: Env, orgId: number): Promise<number> {
   const settings = await loadOrgSettingsBlob(env, orgId)
   return extractRoleFloor(settings, "rosterViewMinRole", DEFAULT_ROSTER_VIEW_MIN_ROLE)
-}
-
-/**
- * Resolve the effective member-progress-view floor for an org (falls back to
- * the MAINTAINER default when the org hasn't configured one).
- */
-export async function getMemberProgressViewMinRole(env: Env, orgId: number): Promise<number> {
-  const settings = await loadOrgSettingsBlob(env, orgId)
-  return extractRoleFloor(settings, "memberProgressViewMinRole", DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE)
 }
 
 /**

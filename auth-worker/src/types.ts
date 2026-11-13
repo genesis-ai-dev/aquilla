@@ -164,6 +164,8 @@ export interface Env {
    * Set it "true" in production/staging.
    */
   ADMIN_REQUIRE_ELEVATION?: string
+  /** Dedicated random encryption secret for admin TOTP seeds; distinct per deployment. */
+  ADMIN_TOTP_KEY?: string
   /** Minutes a step-up code is valid for entry. Default: 10. */
   ELEVATION_TTL_MINUTES?: string
   /** Hours an elevated admin session lasts after a successful verify. Default: 6. */

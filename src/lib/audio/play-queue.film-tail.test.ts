@@ -2216,6 +2216,30 @@ describe("an unrecorded line under the film is a line: Play selected, and the qu
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "a1" })
   })
 
+  // The second check of the q44 fixes (Nov 13), SHOULD: on a file with no
+  // times, a take whose length was never measured means the lines cannot be
+  // laid out (`playedProgramme` is null) and the queue plays line by line, a
+  // path that knows nothing of chosen lines: "Play selected 2" on verses 3-4
+  // played from verse 1 through the chapter. There the chosen lines play on
+  // their own, as on a file with no film.
+  it("a book whose lines can't be laid out (a take of unknown length): Play selected of b3, b4 plays b3, then b4, and stops", async () => {
+    const b2 = line("b2", 1_000)
+    const att = b2.attachments![`audio-b2-1700000000-take.webm`] as unknown as Record<string, unknown>
+    delete att.durationMs
+    const cells = [line("b1", 1_000), b2, line("b3", 1_000), line("b4", 1_000), line("b5", 1_000)]
+    linkFilm(60, cells)
+    startQueue(ctxFor(cells, only("b3", "b4")), 0, true)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    el("b3")!.tick(1)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b4" })
+    el("b4")!.tick(1)
+    await wait()
+    expect(getQueueState().kind).toBe("idle")
+    expect(el("b5")).toBeUndefined()
+  })
+
   it("Next inside Play selected steps onto the unrecorded line, and never onto one not chosen", async () => {
     const cells = [...chosen(), line("b4", 1_000)]
     linkFilm(10, cells)

@@ -4791,6 +4791,15 @@ export function startQueue(ctx: PlayContext, fromIndex: number, explicit = false
     void progPlaySlot(start, null, true, explicit)
     return
   }
+  // The second check of the q44 fixes (Nov 13): the line-by-line path knows
+  // nothing of chosen lines (a file whose lines cannot be laid out, a take
+  // never measured on a file with no times), so there a run of chosen lines
+  // is the chosen lines on their own, as on a file with no film.
+  if (ctx.only) {
+    const { only, ...rest } = ctx
+    startQueue({ ...rest, cells: ctx.cells.filter((c) => only.has(c.id)), snapshot: true }, 0, explicit)
+    return
+  }
   const start = findNextPlayable(ctx.cells, Math.max(0, fromIndex))
   if (start < 0) {
     setState(IDLE)

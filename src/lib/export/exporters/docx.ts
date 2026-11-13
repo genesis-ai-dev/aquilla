@@ -198,7 +198,7 @@ interface LegacyGroup {
  * Exported so the added-line guard below can be tested directly; the positional
  * path is otherwise only reachable through a whole .docx package.
  */
-export function buildLegacyGroups(cells: CellData[]): {
+export function buildLegacyGroups(cells: CellData[], removed: readonly RemovedCellLocatorSource[] = []): {
   groups: string[]
   groupToData: Map<string, LegacyGroup>
 } {
@@ -210,7 +210,7 @@ export function buildLegacyGroups(cells: CellData[]): {
   // `translationsByPackageBlock` skips it. positionalLines is the positional
   // path's guard (and AQU-2552 review r6: it keeps a split piece in its line's
   // paragraph).
-  const groupCells = positionalLines(cells)
+  const groupCells = positionalLines(cells, removed)
   const groups = [...groupCells.keys()]
   for (const [group, list] of groupCells) {
     // AQU-2552 (review r6): a hidden line keeps its original text on such a file.
@@ -271,7 +271,7 @@ export async function exportDocx(
     isHiddenRun: hiddenRunTest(readDocxStyleSheet(stylesXml ? parseXmlLite(stylesXml) : undefined)),
   }
 
-  const { groups, groupToData } = buildLegacyGroups(cells)
+  const { groups, groupToData } = buildLegacyGroups(cells, options.removedCells ?? [])
   const locatedTranslations = translationsByPackageBlock(cells, options.removedCells ?? [])
   const hasLocatedTranslations = locatedTranslations.size > 0
   // AQU-1068. BOTH lookups are built BEFORE the package walk, which is the
@@ -279,7 +279,7 @@ export async function exportDocx(
   // positional slot would shift every mapping after it and write translations
   // into the wrong paragraphs of the client's document.
   const removedKeys = removedPackageBlockKeys(options.removedCells ?? [], cells)
-  const insertions = insertionsAfterPackageBlock(cells, isUserAddedLine)
+  const insertions = insertionsAfterPackageBlock(cells, isUserAddedLine, options.removedCells ?? [])
   // AQU-2552 (review r6): the paragraphs that lost a line, hidden or deleted.
   // AQU-2552 (review r7): with the cells, so a lost split piece marks its
   // line's paragraph. Every cell is handed over as hidden: the helper only
@@ -1001,7 +1001,14 @@ function lineLocator(metadata: Record<string, unknown> | null | undefined): { ke
  * (the dialog hands both), or that shares a segment with a cell, adds none.
  */
 function paragraphLines(cells: readonly CellData[], removed: readonly RemovedCellLocatorSource[]): Map<string, ParagraphLine[]> {
-  const byId = new Map(cells.map((cell) => [cell.id, cell] as const))
+  // AQU-2552 (review r7, N1): the split chain goes on through the server's
+  // records of deleted rows, as the shared splitPieceRoot does: a piece whose
+  // line was deleted is still a line of that line's paragraph.
+  const byId = new Map<string, { metadata?: Record<string, unknown> | null }>()
+  for (const entry of removed) {
+    if (typeof entry.cellId === "string" && entry.cellId !== "") byId.set(entry.cellId, { metadata: entry.metadata })
+  }
+  for (const cell of cells) byId.set(cell.id, cell)
   const homeOf = (cell: { metadata?: Record<string, unknown> | null }) => {
     const seen = new Set<string>()
     let from = splitFromCellId(cell)

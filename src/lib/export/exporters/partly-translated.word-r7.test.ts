@@ -371,3 +371,34 @@ describe("Word export — a hidden or deleted split piece is a lost line of its 
     expect(paras(deleted.body)).toEqual([`Première ligne ici ${F[1]} ${F[2]}`, "Next paragraph."])
   })
 })
+
+describe("Word export — a split piece whose line was deleted is still a line of its paragraph (AQU-2552, review r7 N1, B's own line list)", () => {
+  // Line 1 holds a picture inside its first words; it is cut after "First
+  // line", and that first half is then deleted. The server's removed record
+  // carries the row's cellId, so the piece is found as a line of paragraph 1.
+  const s1 = run("First") + IMG + run(" line here, and then the rest of it" + PAD + " ")
+  const body = para(s1 + run("Second line here" + PAD + " ") + run("Third line here" + PAD)) + NEXT
+
+  it("the deleted half takes its picture and words with it; the piece keeps its words in its place", async () => {
+    const bytes = await docxBytes(body)
+    const [a, b, c, n] = await importCells(bytes)
+    const at = a.original.indexOf(" here")
+    const parent = { ...a, original: a.original.slice(0, at) } as CellData
+    const pc = piece(a, "p1", a.original.slice(at + 1))
+    const result = await exportDocx(bytes, scopeRoundTripCells([pc, b, typed(c, "Troisième ligne ici."), n], "current"), {
+      removedCells: [{ cellId: parent.id, canonicalRef: parent.group ?? null, metadata: parent.metadata ?? null }],
+    })
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
+    const xml = await zip.file("word/document.xml")!.async("string")
+    expect(() => assertWellFormedXml(xml)).not.toThrow()
+    expect(structuralProblems(xml, undefined)).toEqual([])
+    const out = paras(xml)
+    expect(out).toHaveLength(2)
+    expect(out[0]).toMatch(/^here, and then the rest of it/)
+    expect(out[0]).toContain("Second line here")
+    expect(out[0]).toContain("Troisième ligne ici.")
+    expect(out[0]).not.toContain("First")
+    expect(out[0]).not.toContain("[IMG]")
+    expect(out[1]).toBe("Next paragraph.")
+  })
+})

@@ -10,6 +10,9 @@ import { exportPptx } from "./pptx"
 import { hiddenRoundTripRemovals, scopeRoundTripCells } from "../validation-scope"
 import { splitLineOrigin, userLineOrigin } from "@/lib/timeline/user-line-origin"
 import type { CellData } from "@/hooks/useCells"
+import { extractDocxStrings } from "@/lib/parsers/docx"
+import { extractPptxStrings } from "@/lib/parsers/pptx"
+import { normalizeTranslatableStrings, aquillaImportMetadata } from "@/lib/import/normalized-manifest"
 
 const LINES = ["First line here.", "Second line here.", "Third line here."]
 const FRENCH = ["Première ligne ici.", "Deuxième ligne ici.", "Troisième ligne ici."]
@@ -415,5 +418,150 @@ describe("PowerPoint export — a paragraph partly translated (AQU-2552)", () =>
       threeLines(at, { hidden: [0, 1, 2] }),
     )
     expect(xml).toContain("<a:tc><a:txBody><a:bodyPr/><a:p/></a:txBody></a:tc>")
+  })
+})
+
+// ── A line split in the editor whose first half was then deleted ────────────
+//
+// AQU-2552 (review r7): the piece left behind is still a line of the deleted
+// line's paragraph. Its record names the deleted row, and the server's record
+// of that row (`fetchRemovedCells`) carries its `cellId`, so the export follows
+// the split through it. Cells here come from the importer itself.
+
+const PAD = " and it goes on with many more words, long enough that the importer cuts the paragraph after this sentence ends."
+const LONG = ["First line here" + PAD, "Second line here" + PAD, "Third line here" + PAD]
+const PIECE = PAD.trim()
+
+/** The cells a real import makes of `bytes`: located, or (`legacy`) as a file
+ *  imported before locators, grouped and with no import metadata. */
+async function importedCells(bytes: ArrayBuffer, fileType: "docx" | "pptx", legacy = false): Promise<CellData[]> {
+  const strings = fileType === "docx" ? await extractDocxStrings(bytes) : await extractPptxStrings(bytes)
+  const file = normalizeTranslatableStrings(strings, { fileName: `t.${fileType}`, fileType })
+  return strings.map((s, i) => ({
+    ...lineCell(0, null),
+    id: `c${i}`,
+    original: file.units[i].sourceText,
+    originalHtml: file.units[i].sourceHtml,
+    group: legacy ? (s.group ?? "") : "",
+    ...UNTRANSLATED,
+    status: "empty",
+    metadata: legacy ? null : { aquillaImport: aquillaImportMetadata(file, file.units[i]), ...(s.paragraphStart ? { paragraphStart: true } : {}) },
+  }) as CellData)
+}
+
+/** A line typed in the editor (plain and HTML), validated. */
+const typedLine = (cell: CellData, text: string): CellData => ({ ...cell, translated: text, translatedHtml: `<p>${text}</p>`, status: "validated" }) as CellData
+
+/** The rest of `line`, split off it in the editor (no locator of its own). */
+const splitOff = (line: CellData, id: string, original: string, over: Partial<CellData> = {}): CellData =>
+  ({ ...line, id, original, originalHtml: undefined, group: "", metadata: { aquillaOrigin: splitLineOrigin(line.id) }, ...UNTRANSLATED, status: "empty", ...over }) as CellData
+
+/** A deleted row as the server reports it. */
+const removedRecord = (cell: CellData) => ({ cellId: cell.id, canonicalRef: cell.group || null, metadata: cell.metadata ?? null })
+
+const LONG_WORD = wordPara(LONG.join(" ")) + `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t xml:space="preserve">Next paragraph.</w:t></w:r></w:p>`
+const LONG_SLIDE = `<p:sp><p:txBody><a:bodyPr/><a:p><a:r><a:t>${LONG.join(" ")}</a:t></a:r></a:p><a:p><a:pPr algn="ctr"/><a:r><a:t>Next paragraph.</a:t></a:r></a:p></p:txBody></p:sp>`
+
+/** Line 2 cut in two, its first half deleted; the piece `piece` stays. */
+function parentDeleted(cells: CellData[], piece: Partial<CellData>, translate = true) {
+  const [first, second, third, next] = cells
+  const half = { ...second, original: "Second line here" } as CellData
+  const rest = splitOff(second, "piece", PIECE, piece)
+  return {
+    cells: [translate ? typedLine(first, "Un.") : first, rest, translate ? typedLine(third, "Trois.") : third, next],
+    removed: [removedRecord(half)],
+  }
+}
+
+/** The paragraph "Next paragraph." cut into "Next" and "paragraph.", "Next" deleted. */
+function onlyLineParentDeleted(cells: CellData[], piece: Partial<CellData>) {
+  const [first, second, third, next] = cells
+  const half = { ...next, original: "Next" } as CellData
+  return {
+    cells: [typedLine(first, "Un."), typedLine(second, "Deux."), typedLine(third, "Trois."), splitOff(next, "piece", "paragraph.", piece)],
+    removed: [removedRecord(half)],
+  }
+}
+
+const TRANSLATED_PIECE = { translated: "et la suite.", translatedHtml: "<p>et la suite.</p>", status: "validated" } as Partial<CellData>
+
+describe("Word export — a split line whose first half was deleted (AQU-2552 review r7)", () => {
+  const word = async (make: (cells: CellData[]) => { cells: CellData[]; removed: ReturnType<typeof removedRecord>[] }, legacy = false) => {
+    const bytes = await docx(LONG_WORD)
+    const { cells, removed } = make(await importedCells(bytes, "docx", legacy))
+    return wordExport(LONG_WORD, cells, removed)
+  }
+
+  it("keeps an untranslated piece's words in their place", async () => {
+    expect(wordParagraphs(await word((cells) => parentDeleted(cells, {})))).toEqual([`Un. ${PIECE} Trois.`, "Next paragraph."])
+  })
+
+  it("writes a translated piece in its place, not as a paragraph of its own", async () => {
+    expect(wordParagraphs(await word((cells) => parentDeleted(cells, TRANSLATED_PIECE)))).toEqual(["Un. et la suite. Trois.", "Next paragraph."])
+  })
+
+  it("keeps the piece's words when no line is translated", async () => {
+    expect(wordParagraphs(await word((cells) => parentDeleted(cells, {}, false))))
+      .toEqual([`${LONG[0]} ${PIECE} ${LONG[2]}`, "Next paragraph."])
+  })
+
+  it("keeps a paragraph whose only line was cut and its first half deleted, in its own style", async () => {
+    const xml = await word((cells) => onlyLineParentDeleted(cells, { translated: "paragraphe.", translatedHtml: "<p>paragraphe.</p>", status: "validated" }))
+    expect(wordParagraphs(xml)).toEqual(["Un. Deux. Trois.", "paragraphe."])
+    expect(xml).toMatch(/<w:pStyle w:val="Heading1"\/>[\s\S]*paragraphe\./)
+    const untranslated = await word((cells) => onlyLineParentDeleted(cells, {}))
+    expect(wordParagraphs(untranslated)).toEqual(["Un. Deux. Trois.", "paragraph."])
+  })
+
+  it("follows a split through a deleted piece to its line", async () => {
+    const xml = await word((cells) => {
+      const [first, second, third, next] = cells
+      const middle = splitOff(second, "p1", "and it goes on with many more words,")
+      const last = splitOff(middle, "p2", "long enough that the importer cuts the paragraph after this sentence ends.", TRANSLATED_PIECE)
+      return { cells: [typedLine(first, "Un."), { ...second, original: "Second line here" } as CellData, last, typedLine(third, "Trois."), next], removed: [removedRecord(middle)] }
+    })
+    expect(wordParagraphs(xml)).toEqual(["Un. Second line here et la suite. Trois.", "Next paragraph."])
+  })
+
+  it("keeps the piece in its line's paragraph on a file imported before locators", async () => {
+    expect(wordParagraphs(await word((cells) => parentDeleted(cells, {}), true))).toEqual([`Un. ${PIECE} Trois.`, "Next paragraph."])
+    expect(wordParagraphs(await word((cells) => parentDeleted(cells, TRANSLATED_PIECE), true))).toEqual(["Un. et la suite. Trois.", "Next paragraph."])
+  })
+})
+
+describe("PowerPoint export — a split line whose first half was deleted (AQU-2552 review r7)", () => {
+  const slide = async (make: (cells: CellData[]) => { cells: CellData[]; removed: ReturnType<typeof removedRecord>[] }, legacy = false) => {
+    const bytes = await deck(LONG_SLIDE)
+    const { cells, removed } = make(await importedCells(bytes, "pptx", legacy))
+    const xml = await slideXml(bytes, cells, removed)
+    return {
+      xml,
+      paragraphs: (xml.match(/<a:p\b[^>]*\/>|<a:p\b[^>]*>[\s\S]*?<\/a:p>/g) ?? []).map((p) =>
+        [...p.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((m) => m[1]).join("").replace(/\s+/g, " ").trim()),
+    }
+  }
+
+  it("keeps an untranslated piece's words in their place", async () => {
+    expect((await slide((cells) => parentDeleted(cells, {}))).paragraphs).toEqual([`Un. ${PIECE} Trois.`, "Next paragraph."])
+  })
+
+  it("writes a translated piece in its place, not as a paragraph of its own", async () => {
+    expect((await slide((cells) => parentDeleted(cells, TRANSLATED_PIECE))).paragraphs).toEqual(["Un. et la suite. Trois.", "Next paragraph."])
+  })
+
+  it("keeps the piece's words when no line is translated", async () => {
+    expect((await slide((cells) => parentDeleted(cells, {}, false))).paragraphs).toEqual([`${LONG[0]} ${PIECE} ${LONG[2]}`, "Next paragraph."])
+  })
+
+  it("keeps a paragraph whose only line was cut and its first half deleted, in its own look", async () => {
+    const { xml, paragraphs } = await slide((cells) => onlyLineParentDeleted(cells, { translated: "paragraphe.", translatedHtml: "<p>paragraphe.</p>", status: "validated" }))
+    expect(paragraphs).toEqual(["Un. Deux. Trois.", "paragraphe."])
+    expect(xml).toMatch(/<a:pPr algn="ctr"\/><a:r>(?:(?!<\/a:p>)[\s\S])*paragraphe\./)
+    expect((await slide((cells) => onlyLineParentDeleted(cells, {}))).paragraphs).toEqual(["Un. Deux. Trois.", "paragraph."])
+  })
+
+  it("keeps the piece in its line's paragraph on a deck imported before locators", async () => {
+    expect((await slide((cells) => parentDeleted(cells, {}), true)).paragraphs).toEqual([`Un. ${PIECE} Trois.`, "Next paragraph."])
+    expect((await slide((cells) => parentDeleted(cells, TRANSLATED_PIECE), true)).paragraphs).toEqual(["Un. et la suite. Trois.", "Next paragraph."])
   })
 })

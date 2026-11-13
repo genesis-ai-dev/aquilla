@@ -95,7 +95,7 @@ export async function exportPptx(
   // locator, so it is simply skipped); positionalLines is the positional
   // path's guard (and AQU-2552 review r6: it keeps a split piece in its line's
   // paragraph).
-  const groupCells = positionalLines(cells)
+  const groupCells = positionalLines(cells, options.removedCells ?? [])
   const groupOrder: string[] = [...groupCells.keys()]
   const groupToTranslation = new Map<string, string>()
   // AQU-2552: a paragraph's lines in order, each its translation or its source
@@ -110,7 +110,7 @@ export async function exportPptx(
   // exists: a mapping computed while the tree is being mutated writes
   // translations into the wrong paragraphs of the client's own deck.
   const removedKeys = removedPackageBlockKeys(options.removedCells ?? [], cells)
-  const insertions = insertionsAfterPackageBlock(cells, isUserAddedLine)
+  const insertions = insertionsAfterPackageBlock(cells, isUserAddedLine, options.removedCells ?? [])
 
   let injected = 0
   let untouched = 0

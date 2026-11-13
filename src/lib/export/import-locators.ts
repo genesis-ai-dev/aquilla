@@ -88,6 +88,10 @@ export function packageBlockKey(memberPath: string, blockPath: string): string {
   return `${memberPath}\u0000${blockPath}`
 }
 
+/** A row a split chain can pass through: a live cell, or a deleted one as the
+ *  server reports it (AQU-2552 review r7). */
+type LineRecord = Pick<CellData, "id" | "metadata" | "group">
+
 /**
  * AQU-2552 (review r6): a line split in the editor is still a line of the
  * paragraph it came from. The piece has no locator of its own; it carries
@@ -95,9 +99,23 @@ export function packageBlockKey(memberPath: string, blockPath: string): string {
  * again). This follows that chain back to the imported line it starts at. A
  * line a person added on its own has no `splitFrom` and gets null: it stays an
  * added line.
+ *
+ * AQU-2552 (review r7): a row of the chain may have been deleted, the line
+ * itself included; the piece is still a line of that line's paragraph. The
+ * chain goes on through the server's records of deleted rows (`removed`),
+ * which carry the row's `cellId` and its create-time metadata.
  */
-function splitPieceRoot(cells: readonly CellData[]): (cell: Pick<CellData, "metadata">) => CellData | null {
-  const byId = new Map(cells.map((cell) => [cell.id, cell] as const))
+function splitPieceRoot(
+  cells: readonly CellData[],
+  removed: readonly RemovedCellLocatorSource[] = [],
+): (cell: Pick<CellData, "metadata">) => LineRecord | null {
+  const byId = new Map<string, LineRecord>()
+  for (const entry of removed) {
+    if (typeof entry.cellId === "string" && entry.cellId !== "") {
+      byId.set(entry.cellId, { id: entry.cellId, metadata: entry.metadata, group: entry.canonicalRef ?? "" })
+    }
+  }
+  for (const cell of cells) byId.set(cell.id, cell)
   return (cell) => {
     const seen = new Set<string>()
     let from = splitFromCellId(cell)
@@ -113,8 +131,11 @@ function splitPieceRoot(cells: readonly CellData[]): (cell: Pick<CellData, "meta
 }
 
 /** The locator of the imported line a split piece came from (see above). */
-function splitPieceHome(cells: readonly CellData[]): (cell: Pick<CellData, "metadata">) => PackageBlockLocator | null {
-  const rootOf = splitPieceRoot(cells)
+function splitPieceHome(
+  cells: readonly CellData[],
+  removed: readonly RemovedCellLocatorSource[] = [],
+): (cell: Pick<CellData, "metadata">) => PackageBlockLocator | null {
+  const rootOf = splitPieceRoot(cells, removed)
   return (cell) => {
     const root = rootOf(cell)
     return root ? packageBlockLocator(root) : null
@@ -127,10 +148,18 @@ function splitPieceHome(cells: readonly CellData[]): (cell: Pick<CellData, "meta
  * k-th paragraph with text. A line added here has no paragraph and takes no
  * slot (AQU-1068). AQU-2552 (review r6): a piece split off a line joins that
  * line's paragraph, right after it, so its words are not lost.
+ *
+ * AQU-2552 (review r7): a piece whose line was deleted joins the deleted
+ * line's paragraph, at its own place in the list. `removed` (the server's
+ * records of deleted rows) names that line and its group.
  */
-export function positionalLines(cells: readonly CellData[]): Map<string, CellData[]> {
-  const rootOf = splitPieceRoot(cells)
-  const pieces = new Map<CellData, CellData[]>()
+export function positionalLines(
+  cells: readonly CellData[],
+  removed: readonly RemovedCellLocatorSource[] = [],
+): Map<string, CellData[]> {
+  const rootOf = splitPieceRoot(cells, removed)
+  const live = new Set<LineRecord>(cells)
+  const pieces = new Map<LineRecord, CellData[]>()
   for (const cell of cells) {
     if (!isUserAddedLine(cell)) continue
     const root = rootOf(cell)
@@ -138,7 +167,14 @@ export function positionalLines(cells: readonly CellData[]): Map<string, CellDat
   }
   const lines = new Map<string, CellData[]>()
   for (const cell of cells) {
-    if (isUserAddedLine(cell)) continue
+    if (isUserAddedLine(cell)) {
+      const root = rootOf(cell)
+      if (root && !live.has(root)) {
+        const group = root.group || root.id
+        lines.set(group, [...(lines.get(group) ?? []), cell])
+      }
+      continue
+    }
     const group = cell.group || cell.id
     const list = lines.get(group) ?? []
     list.push(cell, ...(pieces.get(cell) ?? []))
@@ -147,7 +183,7 @@ export function positionalLines(cells: readonly CellData[]): Map<string, CellDat
   return lines
 }
 
-function packageBlockLocator(cell: CellData): PackageBlockLocator | null {
+function packageBlockLocator(cell: Pick<CellData, "metadata">): PackageBlockLocator | null {
   const envelope = cell.metadata?.aquillaImport
   if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) return null
   const normalized = envelope as Record<string, unknown>
@@ -179,7 +215,7 @@ export function translationsByPackageBlock(
   removed: readonly RemovedCellLocatorSource[] = [],
 ): Map<string, PackageBlockTranslation> {
   const lost = blocksOf(removed, cells)
-  const homeOf = splitPieceHome(cells)
+  const homeOf = splitPieceHome(cells, removed)
   const grouped = new Map<string, Array<{ cell: CellData; locator: PackageBlockLocator; rank: number }>>()
   cells.forEach((cell, index) => {
     // AQU-2552 (review r6): a split piece is a line of its line's paragraph,
@@ -230,6 +266,12 @@ export function translationsByPackageBlock(
 /** The metadata shape the server hands back for a cell that is gone. */
 export interface RemovedCellLocatorSource {
   metadata: Record<string, unknown> | null
+  /** AQU-2552 (review r7): the row's id, so a piece split off it still finds
+   *  its line (see `splitPieceRoot`). The server always sends it; a hidden
+   *  line, still among the cells, needs none. */
+  cellId?: string
+  /** The row's group (its canonical ref), for a file imported before locators. */
+  canonicalRef?: string | null
 }
 
 /**
@@ -252,7 +294,7 @@ export function removedPackageBlockKeys(
   cells: readonly CellData[] = [],
 ): Set<string> {
   const keys = blocksOf(removed, cells)
-  const homeOf = splitPieceHome(cells)
+  const homeOf = splitPieceHome(cells, removed)
   for (const cell of cells) {
     if (cell.hidden === true) continue
     const locator = packageBlockLocator(cell) ?? homeOf(cell)
@@ -262,12 +304,12 @@ export function removedPackageBlockKeys(
 }
 
 /** The package blocks these removed cells came from (a removed split piece's
- *  is its line's, AQU-2552 review r6). */
+ *  is its line's, AQU-2552 review r6, even when that line is gone too, r7). */
 function blocksOf(removed: readonly RemovedCellLocatorSource[], cells: readonly CellData[] = []): Set<string> {
-  const homeOf = splitPieceHome(cells)
+  const homeOf = splitPieceHome(cells, removed)
   const keys = new Set<string>()
   for (const entry of removed) {
-    const locator = packageBlockLocator({ metadata: entry.metadata } as CellData) ?? homeOf({ metadata: entry.metadata })
+    const locator = packageBlockLocator(entry) ?? homeOf(entry)
     if (locator) keys.add(packageBlockKey(locator.memberPath, locator.blockPath))
   }
   return keys
@@ -286,13 +328,18 @@ function blocksOf(removed: readonly RemovedCellLocatorSource[], cells: readonly 
  * to write — the same treatment an untranslated imported paragraph gets. And
  * one with no preceding located cell at all, because there is nowhere to put
  * it; placing it at the top of the document would be a guess.
+ *
+ * AQU-2552 (review r7): `removed` (the server's records of deleted rows) lets
+ * a piece whose line was deleted find that line's paragraph, so it is written
+ * there and not as a paragraph of its own.
  */
 export function insertionsAfterPackageBlock(
   cells: readonly CellData[],
   isAdded: (cell: CellData) => boolean,
+  removed: readonly RemovedCellLocatorSource[] = [],
 ): Map<string, string[]> {
   const insertions = new Map<string, string[]>()
-  const homeOf = splitPieceHome(cells)
+  const homeOf = splitPieceHome(cells, removed)
   let anchorKey: string | null = null
   for (const cell of cells) {
     // AQU-2552 (review r6): a piece split off an imported line is a line of

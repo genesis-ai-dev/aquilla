@@ -41,8 +41,10 @@ type RNode =
   | { kind: "text"; piece: TextPiece }
   | { kind: "marker"; piece: FootnotePiece }
   | { kind: "keep"; piece: Leaf }
-  | { kind: "wrapper"; piece: ContainerPiece; children: RNode[] }
-  | { kind: "field"; open: RNode[]; result: RNode[]; close: RNode }
+  /** `partial`: it lost some of what it held to a hidden or deleted line, so
+   *  it is never copied byte for byte (see `withoutLost`). */
+  | { kind: "wrapper"; piece: ContainerPiece; children: RNode[]; partial?: true }
+  | { kind: "field"; open: RNode[]; result: RNode[]; close: RNode; partial?: true }
   /** A wrapper whose text was not found (a simple field, a content control,
    *  a tracked insertion…): kept with its own tags, emptied of its text. */
   | { kind: "emptyField"; piece: ContainerPiece; children: RNode[] }
@@ -88,8 +90,12 @@ export interface RebuildInput {
   lineOf?: readonly (number | undefined)[]
   footnoteLines?: ReadonlyMap<DocxPiece, number>
   /** AQU-2552 (review r6): what a hidden or deleted line held in the source
-   *  paragraph. It contributes nothing: its footnote references are left out. */
+   *  paragraph (see `withoutLost`), and which characters of a run that holds
+   *  words of both a lost line and another are the lost line's. It
+   *  contributes nothing: no footnote reference, picture, field or tab, and
+   *  no word of it is reported as having lost its look. */
   lost?: ReadonlySet<DocxPiece>
+  lostChar?: (piece: DocxPiece, i: number) => boolean
   io: RebuildIo
 }
 
@@ -156,7 +162,8 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   }
   const written = input.writtenText ?? input.text
 
-  let nodes = buildNodes(input.items, input.lineSet, input.lost)
+  let nodes = buildNodes(input.items, input.lineSet)
+  if (input.lost && input.lost.size > 0) nodes = withoutLost(nodes, input.lost)
   const refs: { xml: string; id: string; line: number | undefined }[] = []
   collectMarkers(nodes, (piece) => {
     refs.push({ xml: io.elementXml(piece.run), id: piece.id, line: input.footnoteLines?.get(piece) })
@@ -166,7 +173,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   let matches: Map<RNode, Match>
   for (;;) {
     const lost: { text: string; look: string }[] = []
-    matches = matchAnchors(nodes, masked, input.baseRpr, io, lost)
+    matches = matchAnchors(nodes, masked, input.baseRpr, io, lost, input.lostChar)
     result.lostLooks = lost.filter((l) => seenDifferently(l.look, input.baseRpr)).map((l) => l.text)
     let changed = false
     const next: RNode[] = []
@@ -178,7 +185,11 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
       if (node.kind === "wrapper") {
         changed = true
         const tag = node.piece.el.tagName
-        if (!holdsText(node)) {
+        if (!holdsText(node) && node.partial) {
+          // AQU-2552 (review r6): what a hidden or deleted line left of it,
+          // in its own tags.
+          next.push({ kind: "emptyField", piece: node.piece, children: node.children })
+        } else if (!holdsText(node)) {
           // Nothing of it is translated (a picture content control, an
           // insertion around a picture): kept as it is.
           next.push({ kind: "keep", piece: { kind: "keep", el: node.piece.el } })
@@ -318,22 +329,87 @@ function runsByLook(text: string, from: number, to: number, lookAt: (i: number) 
 
 // ── Nodes ───────────────────────────────────────────────────────────────────
 
-function buildNodes(items: readonly DocxPiece[], lineSet: ReadonlySet<DocxPiece>, lost?: ReadonlySet<DocxPiece>): RNode[] {
-  const nodes: RNode[] = []
-  for (const item of items) {
-    if (item.kind === "container") {
-      nodes.push({ kind: "wrapper", piece: item, children: buildNodes(item.items, lineSet, lost) })
-      continue
+function buildNodes(items: readonly DocxPiece[], lineSet: ReadonlySet<DocxPiece>): RNode[] {
+  const nodes = items.map((item): RNode => {
+    if (item.kind === "container") return { kind: "wrapper", piece: item, children: buildNodes(item.items, lineSet) }
+    if (lineSet.has(item)) {
+      if (item.kind === "footnote") return { kind: "marker", piece: item }
+      if (item.kind === "text") return { kind: "text", piece: item }
     }
-    if (lineSet.has(item) && item.kind === "footnote") {
-      // AQU-2552 (review r6): a hidden or deleted line's footnote reference
-      // is not written.
-      if (!lost?.has(item)) nodes.push({ kind: "marker", piece: item })
-      continue
-    }
-    nodes.push(lineSet.has(item) && item.kind === "text" ? { kind: "text", piece: item } : { kind: "keep", piece: item })
-  }
+    return { kind: "keep", piece: item }
+  })
   return foldFields(nodes)
+}
+
+/**
+ * AQU-2552 (review r6): the nodes without what a hidden or deleted line held
+ * (`lost`, see docx.ts placeInLines). Its text, footnote references and runs
+ * go. A field or a wrapper (a link, a content control…) goes whole when all
+ * the text it holds is lost, or, holding none, when all its runs are; what of
+ * it is no run (a bookmark) stays, unwrapped. One that lost only some of its
+ * pieces stays, without them. A field character outside a whole field (a
+ * field running over several paragraphs) always stays.
+ */
+function withoutLost(nodes: readonly RNode[], lost: ReadonlySet<DocxPiece>): RNode[] {
+  const out: RNode[] = []
+  for (const node of nodes) {
+    switch (node.kind) {
+      case "text":
+      case "marker":
+        if (!lost.has(node.piece)) out.push(node)
+        break
+      case "keep":
+        if (fieldCharOf(node) !== null || !lost.has(node.piece)) out.push(node)
+        break
+      case "wrapper":
+      case "field": {
+        const inner = node.kind === "wrapper" ? node.children : [...node.open, ...node.result, node.close]
+        const leaves = leavesOf(inner)
+        const text = leaves.filter((leaf) => leaf.kind !== "keep")
+        const runs = leaves.filter((leaf) => leaf.kind === "keep" && isRunPiece(leaf.piece))
+        const judged = text.length > 0 ? text : runs
+        const gone = judged.filter((leaf) => lost.has(leaf.piece)).length
+        if (judged.length > 0 && gone === judged.length) {
+          out.push(...withoutLost(inner.filter((n) => !(n.kind === "keep" && isRunPiece(n.piece))), lost))
+        } else if (leaves.some((leaf) => lost.has(leaf.piece))) {
+          out.push(node.kind === "wrapper"
+            ? { ...node, children: withoutLost(node.children, lost), partial: true }
+            : { ...node, result: withoutLost(node.result, lost), partial: true })
+        } else {
+          out.push(node)
+        }
+        break
+      }
+      default:
+        out.push(node)
+    }
+  }
+  return out
+}
+
+type LeafNode = Extract<RNode, { kind: "text" | "marker" | "keep" }>
+
+function leavesOf(nodes: readonly RNode[]): LeafNode[] {
+  return nodes.flatMap((node): LeafNode[] => {
+    switch (node.kind) {
+      case "text":
+      case "marker":
+      case "keep":
+        return [node]
+      case "wrapper":
+      case "emptyField":
+        return leavesOf(node.children)
+      case "field":
+        return leavesOf([...node.open, ...node.result, node.close])
+      case "emptied":
+        return leavesOf(node.nodes)
+    }
+  })
+}
+
+/** A run of the source, or part of one: what a field is made of. */
+function isRunPiece(piece: Leaf): boolean {
+  return piece.kind === "keepInRun" || piece.kind === "footnote" || piece.kind === "text" || (piece.kind === "keep" && piece.el.tagName === "w:r")
 }
 
 function fieldCharOf(node: RNode): string | null {
@@ -493,7 +569,12 @@ function trimmed(text: string): { lead: number; text: string } {
   return { lead, text: text.trim() }
 }
 
-function anchorsOf(nodes: readonly RNode[], baseRpr: string, io: RebuildIo): { anchors: Anchor[]; text: string; unsought: LostStretch[] } {
+function anchorsOf(
+  nodes: readonly RNode[],
+  baseRpr: string,
+  io: RebuildIo,
+  lostChar?: (piece: DocxPiece, i: number) => boolean,
+): { anchors: Anchor[]; text: string; unsought: LostStretch[] } {
   const anchors: Anchor[] = []
   /** Look stretches with a letter or digit too short to be looked for. */
   const unsought: LostStretch[] = []
@@ -589,6 +670,13 @@ function anchorsOf(nodes: readonly RNode[], baseRpr: string, io: RebuildIo): { a
       // UTF-16 units, the unit of every offset here.
       const text = node.piece.text
       for (let i = 0; i < text.length; i++) {
+        // AQU-2552 (review r6): a hidden or deleted line's words are never
+        // looked for, nor reported: they end a stretch, like a frame.
+        if (lostChar?.(node.piece, i)) {
+          flushStretches()
+          offset++
+          continue
+        }
         chars.push({ ch: text[i], look, special: look !== baseRpr, at: offset })
         owner.push(node)
         offset++
@@ -599,7 +687,9 @@ function anchorsOf(nodes: readonly RNode[], baseRpr: string, io: RebuildIo): { a
     if (node.kind === "keep") continue
     flushStretches()
     const text = textOf(node)
-    if (node.kind === "wrapper" || node.kind === "field") {
+    // AQU-2552 (review r6): one that lost pieces to a hidden or deleted line
+    // is never copied byte for byte, so it is not looked for.
+    if ((node.kind === "wrapper" || node.kind === "field") && !node.partial) {
       const { lead, text: needle } = trimmed(text)
       // A field or link is found by its whole visible text, however short
       // (a caption's number "1"): its own structure is the anchor.
@@ -620,11 +710,18 @@ interface LostStretch {
   look: string
 }
 
-function matchAnchors(nodes: readonly RNode[], masked: string, baseRpr: string, io: RebuildIo, lost: LostStretch[]): Map<RNode, Match> {
+function matchAnchors(
+  nodes: readonly RNode[],
+  masked: string,
+  baseRpr: string,
+  io: RebuildIo,
+  lost: LostStretch[],
+  lostChar?: (piece: DocxPiece, i: number) => boolean,
+): Map<RNode, Match> {
   const out = new Map<RNode, Match>()
   const lookMatches: Match[] = []
   let cursor = 0
-  const { anchors, text: sourceText, unsought } = anchorsOf(nodes, baseRpr, io)
+  const { anchors, text: sourceText, unsought } = anchorsOf(nodes, baseRpr, io, lostChar)
   // A stretch grown to its whole word ("12th" from a superscript "th") starts
   // in the main look: its own look is the first one that is not.
   const ownLook = (looks: readonly string[]) => looks.find((look) => look !== baseRpr) ?? looks[0]

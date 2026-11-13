@@ -798,7 +798,7 @@ function rebuildParagraphIn(
     writtenText,
     marks,
     sourceLooks,
-    ...(placed ? { lineOf, footnoteLines: placed.footnoteLines, lost: placed.lost } : {}),
+    ...(placed ? { lineOf, footnoteLines: placed.footnoteLines, lost: placed.lost, lostChar: placed.lostChar } : {}),
     translatedLook: part.translatedLook,
     baseRpr: base ?? "",
     io,
@@ -903,7 +903,9 @@ function translationSpans(
   parts.forEach((part, line) => {
     // Where this segment's source sits in the paragraph's line, if it does.
     const at = stretches[line]
-    const gap = at && previous ? lineText.slice(previous.end, at.start) : ""
+    // AQU-2552 (review r6): where hidden or deleted lines sat between the
+    // two, the gap is the one before them; theirs went with them.
+    const gap = at && previous ? /^\s*/.exec(lineText.slice(previous.end, at.start))![0] : ""
     previous = at
     const spans = part.html ? htmlToSpans(part.html) : []
     // A line with no translation is its source, as it sits in the line.
@@ -967,26 +969,50 @@ function lostStretches(stretches: readonly (LineStretch | null)[], lineText: str
 
 /**
  * AQU-2552 (review r6): the line whose stretch of the paragraph holds each
- * footnote reference (where its marker sits in the line text), and the
- * references a hidden or deleted line held.
+ * footnote reference (where its marker sits in the line text), and what a
+ * hidden or deleted line held, which is left out: the line's text and
+ * footnote references wholly inside its stretch, and the runs (pictures,
+ * symbols, a field's parts) that sit inside it. Bookmarks, comment marks and
+ * the like pair with something elsewhere and stay; so does anything before
+ * the paragraph's first word or after its last, as on import.
  */
 function placeInLines(
   flat: readonly DocxPiece[],
   inLine: readonly boolean[],
   layout: LineLayout,
-): { footnoteLines: Map<DocxPiece, number>; lost: Set<DocxPiece> } {
+): { footnoteLines: Map<DocxPiece, number>; lost: Set<DocxPiece>; lostChar: (piece: DocxPiece, i: number) => boolean } {
   const footnoteLines = new Map<DocxPiece, number>()
   const lost = new Set<DocxPiece>()
+  const textStart = new Map<DocxPiece, number>()
+  const inLost = (at: number) => layout.lost.some((s) => s.start <= at && at < s.end)
   let end = 0
   flat.forEach((piece, k) => {
     const start = end
-    if (inLine[k]) end += piece.kind === "text" ? piece.text.length : piece.kind === "footnote" ? (piece.marker ?? "").length : 0
-    if (piece.kind !== "footnote" || !inLine[k]) return
-    const line = layout.stretches.findIndex((s) => s !== null && s.start <= start && start < s.end)
-    if (line !== -1) footnoteLines.set(piece, line)
-    if (layout.lost.some((s) => s.start <= start && end <= s.end)) lost.add(piece)
+    const isLine = inLine[k] && (piece.kind === "text" || piece.kind === "footnote")
+    if (isLine) end += piece.kind === "text" ? piece.text.length : piece.kind === "footnote" ? (piece.marker ?? "").length : 0
+    if (isLine && piece.kind === "text") textStart.set(piece, start)
+    if (isLine && piece.kind === "footnote") {
+      const line = layout.stretches.findIndex((s) => s !== null && s.start <= start && start < s.end)
+      if (line !== -1) footnoteLines.set(piece, line)
+    }
+    const gone = isLine
+      ? layout.lost.some((s) => s.start <= start && end <= s.end)
+      : givenUpWithLine(piece) && layout.lost.some((s) => s.start < start && start < s.end)
+    if (gone) lost.add(piece)
   })
-  return { footnoteLines, lost }
+  // A run that holds both a lost line's words and another line's.
+  const lostChar = (piece: DocxPiece, i: number) => {
+    const start = textStart.get(piece)
+    return start !== undefined && inLost(start + i)
+  }
+  return { footnoteLines, lost, lostChar }
+}
+
+/** A piece that leaves with the lost line it sits in (see placeInLines). */
+function givenUpWithLine(piece: DocxPiece): boolean {
+  if (piece.kind === "keepInRun" || piece.kind === "footnote" || piece.kind === "text") return true
+  if (piece.kind !== "keep" || piece.el.tagName !== "w:r") return false
+  return !piece.el.children.some((child) => isElement(child) && child.tagName === "w:commentReference")
 }
 
 const WORD_CHAR_RE = /[\p{L}\p{N}\p{M}]/u

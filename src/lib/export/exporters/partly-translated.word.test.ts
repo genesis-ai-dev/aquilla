@@ -163,3 +163,47 @@ describe("Word export — a line's footnote is that line's own (AQU-2552, review
     expect(noteText(out.notes!, 2)).toBe("Note deux.")
   })
 })
+
+describe("Word export — a hidden or deleted line's pictures, fields and tabs leave with it (AQU-2552, review r6)", () => {
+  const next = para(run("Next paragraph."))
+  const italic = "<w:rPr><w:i/></w:rPr>"
+  /** Line 2 of three, with this in its middle. */
+  const withInLine2 = (inner: string) => para(run(`${S1}. The second line`) + inner + run(`${PAD}. ${S3}.`)) + next
+  const shapes: [string, string][] = [
+    ["a picture", pictureRun],
+    ["a figure-number field", run(" shows figure ") + complexField("SEQ Figure \\* ARABIC", "1") + run(" and")],
+    ["a tab", "<w:r><w:tab/></w:r>"],
+    ["an italic word", run(" has an ") + run("italic", italic) + run(" word and")],
+    ["a link", `<w:hyperlink w:anchor="_Top"><w:r><w:t xml:space="preserve"> links somewhere and</w:t></w:r></w:hyperlink>`],
+  ]
+  const translate = (k: number) => [T1, "", T3][k]
+
+  it.each(shapes)("a hidden line takes %s with it", async (_name, inner) => {
+    const body = withInLine2(inner)
+    const cells = importedCells(body, undefined, translate).map((cell) => (cell.id === "c1-2" ? { ...cell, hidden: true } : cell))
+    expect(cells.filter((cell) => cell.id.startsWith("c1-"))).toHaveLength(3)
+    const out = await exportAsDialog(body, undefined, cells)
+    expect(firstParagraph(out.xml)).toBe(`${T1} ${T3}`)
+    expect(out.xml).not.toMatch(/SEQ Figure|w:drawing|w:hyperlink/)
+    // Nothing is said about words the export left out on purpose.
+    expect(out.result.lostLooks).toEqual([])
+    expect(out.result.fidelity.emptiedFields).toBe(0)
+    expect(out.result.fidelity.droppedLinks).toBe(0)
+  })
+
+  it.each(shapes.slice(0, 2))("a deleted line takes %s with it", async (_name, inner) => {
+    const body = withInLine2(inner)
+    const all = importedCells(body, undefined, translate)
+    const deleted = all.filter((cell) => cell.id === "c1-2")
+    const out = await exportAsDialog(body, undefined, all.filter((cell) => cell.id !== "c1-2"), deleted)
+    expect(firstParagraph(out.xml)).toBe(`${T1} ${T3}`)
+    expect(out.xml).not.toMatch(/SEQ Figure|w:drawing/)
+  })
+
+  it("keeps what a remaining line holds: its picture, its field", async () => {
+    const body = para(run(`${S1}. ${S2}. The third line shows figure `) + complexField("SEQ Figure \\* ARABIC", "1") + run(` and${PAD}`) + pictureRun + run(".")) + next
+    const cells = importedCells(body, undefined, () => "").map((cell) => (cell.id === "c1-2" ? { ...cell, hidden: true } : cell))
+    const out = await exportAsDialog(body, undefined, cells)
+    expect(firstParagraph(out.xml)).toBe(`${S1}. The third line shows figure {field}1 and${PAD}.[picture]`)
+  })
+})

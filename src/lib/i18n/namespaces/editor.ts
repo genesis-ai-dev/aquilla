@@ -2618,11 +2618,12 @@ export const editor = defineNamespace({
     // — Expansion tabs: issues and metadata ————————————————————————
     "editor.expansion.issues": "Issues",
     "editor.expansion.metadata": "Metadata",
-    // AQU-2408: the cell's own label, typed in the expansion panel. Metadata,
-    // never a voice or a character (docs/decisions/0007).
-    "editor.cellLabel.title": "Label",
+    // AQU-2408: the cell's own label, typed in the cell's corner label slot.
+    // Metadata, never a voice or a character (docs/decisions/0007).
     "editor.cellLabel.placeholder": "Add a label",
     "editor.cellLabel.inputAria": "Cell label",
+    "editor.cellLabel.add": "Add label",
+    "editor.cellLabel.edit": "Edit label",
     "editor.metadata.showOnCells": "Show {key} on cells",
     "editor.issues.none": "No translation rule issues on this cell.",
     "editor.issues.waived": "Waived",
@@ -10291,21 +10292,32 @@ export const editor = defineNamespace({
           "noun; the tab is disabled when there are none.",
         maxLength: 16,
       },
-      "editor.cellLabel.title": {
-        description:
-          "Label of the row at the top of a cell's expansion panel that holds the cell's " +
-          "own label — a short note typed on the line (a section name, a reviewer's " +
-          "mark). A noun. It is not a voice or a character.",
-        maxLength: 14,
-      },
       "editor.cellLabel.placeholder": {
         description:
           "Placeholder inside the empty cell-label text field, inviting the person to " +
-          "type one. A short imperative.",
+          "type one. The field appears in the top corner of a cell, where the label is " +
+          "shown. A short imperative.",
         maxLength: 24,
       },
       "editor.cellLabel.inputAria": {
-        description: "Screen-reader name of the cell-label text field in a cell's expansion panel.",
+        description:
+          "Screen-reader name of the text field a cell's own label is typed in — a " +
+          "short note on the line (a section name, a reviewer's mark). It is not a " +
+          "voice or a character.",
+      },
+      "editor.cellLabel.add": {
+        description:
+          "Tooltip and accessible name of the tag-icon button in a cell's More actions " +
+          "menu, on a cell with no label yet. Clicking it opens a small text field in " +
+          "the cell's top corner, where the label will show. A short imperative.",
+        maxLength: 24,
+      },
+      "editor.cellLabel.edit": {
+        description:
+          "Tooltip and accessible name of the same tag-icon button on a cell that " +
+          "already has a label; also the start of the accessible name of the label " +
+          "itself, which can be clicked to change it. A short imperative.",
+        maxLength: 24,
       },
       "editor.expansion.metadata": {
         description:

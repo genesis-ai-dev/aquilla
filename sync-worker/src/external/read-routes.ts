@@ -70,7 +70,8 @@ import { handleFilesReadRequest } from "../events/files-read-route"
 import { handleCellsReadRequest } from "../events/cells-read-route"
 import { loadProjectSettings } from "../../../db/shared/projects"
 import { loadTranslationInstructions } from "../../../db/shared/load-translation-instructions"
-import { filterSettingsBlobForMember } from "../../../db/shared/lane-visibility"
+import { filterSettingsBlobForMember, visibleTagsForMember } from "../../../db/shared/lane-visibility"
+import { eventRowsForVisibleLanes } from "../events/lane-read-wall"
 import { paginate, parsePageParams } from "./pagination"
 import { recordAgentRead, resolveAuthorshipPolicy, scrubAuthorField } from "./pii"
 import { handleExternalSimilarRequest } from "./similar-route"
@@ -189,7 +190,13 @@ async function handleExternalProjects(request: Request, env: ExternalReadsEnv): 
   const projects = await listProjectsForCredential(
     env.AQUILLA_PG,
     cred,
-    { ...(orgId !== null ? { orgId } : {}), ...(sort ? { sort } : {}) },
+    {
+      ...(orgId !== null ? { orgId } : {}),
+      ...(sort ? { sort } : {}),
+      // AQU-2504: name this route, not the MCP tool, in any support-access
+      // audit row — the trail should say which adapter the operator used.
+      tool: "GET /api/v1/external/projects",
+    },
   )
   return Response.json({ data: projects, nextCursor: null })
 }
@@ -490,7 +497,17 @@ async function handleExternalCellHistory(
     .bind(projectId, cellId, fetchLimit)
     .all<EventRowRaw>()
 
-  const page = paginate(result.results.map(mapHistoryRow), offset, limit)
+  // AQU-730 read wall: a PAT acts as its owner, so a member walled to some
+  // target lanes reads only those lanes' events here too — the same rule the
+  // in-app history route applies.
+  const { visible } = await visibleTagsForMember(
+    env.AQUILLA_PG as AquillaDb,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(authed.ctx.credential.userId),
+    authed.ctx.role,
+  )
+  const page = paginate(eventRowsForVisibleLanes(result.results, visible).map(mapHistoryRow), offset, limit)
 
   // AQU-1180: history is the densest identity surface on the API — one author
   // per event, ordered in time. Scrub the page the caller actually receives

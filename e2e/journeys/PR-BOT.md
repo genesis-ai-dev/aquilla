@@ -357,6 +357,18 @@ the same PR head sha, and that parenthetical is the only thing allowed
 after it; the planner takes the newest walk naming the head sha, so it
 replaces the BLOCKED comment before it.
 
+The planner also reads a comment that opens with the marker
+`<!-- aquilla-qa-walk <sha> -->`, with or without a
+`## QA walk — #<n> @ <sha>` heading on the next line, and the status line
+after that. Either way the status line is the first line under the heading
+or marker; a status anywhere else is not read.
+
+A status with a qualifier, `**PASS (test level only)**` or
+`**PASS** (test level only)`, is not a PASS to the planner. It reads as
+`partial` and the PR holds: the change had a screen and nobody saw it. If
+there was no preview to walk, that is **BLOCKED**; if the diff has no
+screen, that is **NOT CHECKED**.
+
 Short. A reviewer reads the first line and knows whether to look. Status
 is exactly one of **PASS**, **FAIL**, **FLAKY**, **BLOCKED**,
 **NOT CHECKED**. Never "approved" or "LGTM": the bot may say the change

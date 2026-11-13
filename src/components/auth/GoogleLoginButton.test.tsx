@@ -12,14 +12,18 @@ it.each([true, false, "unavailable"])("only explicit activation can start Google
   expect(mocks.start).not.toHaveBeenCalled()
   if (enabled === true) {
     const button = await screen.findByRole("button", { name: "Continue with Google" })
+    expect(screen.getByText("or")).toBeVisible()
     fireEvent.mouseEnter(button); fireEvent.focus(button)
     expect(mocks.start).not.toHaveBeenCalled()
     fireEvent.click(button)
     await screen.findByRole("alert")
     expect(mocks.start).toHaveBeenCalledExactlyOnceWith("/join/invitation", true)
     expect(button).toBeEnabled()
-  } else if (enabled === false) expect(screen.queryByRole("button")).toBeNull()
-  else expect(await screen.findByRole("button",{name:"Retry Google login availability"})).toBeEnabled()
+  } else {
+    if (enabled === false) expect(screen.queryByRole("button")).toBeNull()
+    else expect(await screen.findByRole("button",{name:"Retry Google login availability"})).toBeEnabled()
+    expect(screen.queryByText("or")).toBeNull()
+  }
 })
 
 it.each(["button","online"])("recovers capability without provider contact via %s", async trigger => {

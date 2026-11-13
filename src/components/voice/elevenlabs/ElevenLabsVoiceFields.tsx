@@ -82,7 +82,7 @@ export function ElevenLabsVoiceFields({
     })
   }, [draft.name, onChange, ref, session?.username])
 
-  const canClone = connection.state.status === "ready" ? connection.state.account.canClone : undefined
+  const canClone = connection.state.status === "ready" ? connection.state.account.canClone ?? undefined : undefined
   const cloning = source === "clone" && !editing
 
   if (!connection.key) {

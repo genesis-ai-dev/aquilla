@@ -903,3 +903,16 @@ export async function removeAdminDevAccess(jwt: string, email: string): Promise<
   })
   if (!res.ok) throw new UserError(res.status, await readError(res))
 }
+
+/** Admin-only authenticator endpoints. Never persist returned enrollment secrets. */
+export async function adminTotp<T>(jwt: string, path = "", body?: object): Promise<T> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/totp${path ? `/${path}` : ""}`, {
+    method: body ? "POST" : "GET",
+    headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  const result = await res.json() as T
+  if (path === "verify" && !(body as {disable?: boolean})?.disable) notifyElevationGranted()
+  return result
+}

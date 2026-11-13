@@ -4544,7 +4544,6 @@ export const am: Catalog = {
   "importExport.format.txt.description": "የቀላል ጽሑፍ ዙር ጉዞ፦ የአንቀጽ መዋቅር ይጠበቃል፤ ያልተተረጎሙ አንቀጾች ምንጩን ይይዛሉ (የሚዲያ መስመሮች ግልባጫቸውን ይጠቀማሉ)።",
   "importExport.format.md.description": "የMarkdown ዙር ጉዞ፦ ራስጌዎች፣ የተደረደሩ/ያልተደረደሩ ዝርዝሮች እና ጥቅሶች እንደገና ይገነባሉ፤ ያልተተረጎሙ ብሎኮች ምንጩን ይይዛሉ (የሚዲያ መስመሮች ግልባጫቸውን ይጠቀማሉ)።",
   "importExport.format.html.label": "ድረ ገጽ",
-  "importExport.format.html.description": "በአንድ ራሱን የያዘ ፋይል የመጽሐፉ ተነባቢ ገጽ፦ የምዕራፍ ማውጫ፣ ቁጥር ያላቸው ጥቅሶች እና የክፍል ራስጌዎች፣ ለገምጋሚዎች እና ለህትመት። ያልተተረጎሙ መስመሮች ምንጭ ጽሑፋቸውን ምልክት ተደርጎ ያሳያሉ። ለእንደገና ማስመጣት አይደለም፤ የአንቀጽ አቀማመጥ እና የግርጌ ማስታወሻዎች እስካሁን አይጠበቁም።",
   "importExport.format.tsv.label": "ባለሁለት ቋንቋ TSV",
   "importExport.format.tsv.description": "id/source/target በትር የተለየ፣ ለእያንዳንዱ ክፍለ ጽሑፍ አንድ ረድፍ።",
   "importExport.format.csv.label": "ባለሁለት ቋንቋ CSV",

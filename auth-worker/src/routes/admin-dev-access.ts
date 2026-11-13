@@ -11,8 +11,8 @@
 //   POST   /dev-access         — { email } → add (idempotent)
 //   DELETE /dev-access/:email  — remove
 //
-// Off dev (production, previews, local) the list does nothing, so GET answers
-// enabled=false and writes answer 409 rather than writing to a list nobody reads.
+// Management stays on dev. Previews enforce the list but cannot edit it;
+// off dev, GET answers enabled=false and writes answer 409.
 
 import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -40,7 +40,7 @@ const addSchema = z.object({ email: emailSchema })
 
 const OFF_DEV = {
   error: "dev_access_off",
-  message: "The dev access list only applies on dev.aquilla.app.",
+  message: "Manage the dev access list on dev.aquilla.app.",
 }
 const UNBOUND = {
   error: "dev_access_unbound",

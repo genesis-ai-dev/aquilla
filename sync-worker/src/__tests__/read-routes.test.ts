@@ -52,6 +52,33 @@ describe('GET /events', () => {
     expect(body.events[1].id).toBe('e1')
     expect(body.events[1].parentId).toBe(null)
   })
+
+  // AQU-730: the file-wide log is the per-cell history, for every cell at once.
+  it('applies the lane read wall to a walled member and to nobody else', async () => {
+    const ev = (id: string, kind: string, payload: string, seq: number) => ({
+      id, schema_version: 1, project_id: 'proj-a', file_id: 'file-x', cell_id: 'c1',
+      parent_id: null, kind, author: 'alice', payload, client_ts: seq, server_ts: seq, server_seq: seq,
+    })
+    const { db } = await makeTestDb({
+      events: [
+        ev('s1', 'source.cell.create', '{"value":"src"}', 1),
+        ev('a1', 'target.cell.commit', '{"value":"mine","laneId":"lane-a"}', 2),
+        ev('b1', 'target.cell.commit', '{"value":"theirs","laneId":"lane-b"}', 3),
+        ev('v1', 'cell.validate', '{"laneId":"lane-b"}', 4),
+        ev('u1', 'target.cell.commit', '{"value":"unstamped"}', 5),
+      ],
+    })
+    const get = async (claims: Parameters<typeof makeTestToken>[1], wall: string | undefined) => {
+      const token = await makeTestToken(SECRET, { projectId: 'proj-a', fileId: 'file-x', ...claims })
+      const req = new Request('https://w/events?fileId=file-x', { headers: { Authorization: `Bearer ${token}` } })
+      const res = (await handleEventsReadRequest(req, { ...envWith(db), LANE_READ_WALL: wall }))!
+      return ((await res.json()) as { events: { id: string }[] }).events.map((e) => e.id)
+    }
+    expect(await get({ role: 400, laneGrants: [{ lane: 'lane-a', level: 400 }] }, '1')).toEqual(['a1', 's1'])
+    expect(await get({ role: 400 }, '1')).toEqual(['s1'])
+    expect(await get({ role: 600 }, '1')).toHaveLength(5)
+    expect(await get({ role: 400 }, undefined)).toHaveLength(5)
+  })
 })
 
 describe('GET /cell-validators', () => {

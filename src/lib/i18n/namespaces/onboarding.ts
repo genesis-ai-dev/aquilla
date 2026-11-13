@@ -74,6 +74,14 @@ export const onboarding = defineNamespace({
     "onboarding.oauth.accessWrite": "{client} can also add comments, translations, drafts and imports, subject to the mode below.",
     "onboarding.oauth.modeAsk": "each change {client} makes waits for a person to approve it.",
     "onboarding.oauth.modeAct": "changes apply immediately, within your current permissions.",
+    // AQU-2504 — platform-admin support access, offered only to an admin who
+    // has already stepped up in the admin console. The hint is the only place
+    // an admin is told what they are granting, so it names all three bounds
+    // (expiry, audit, attribution) and the fact that it includes WRITES.
+    "onboarding.oauth.supportAccessLegend": "Support access",
+    "onboarding.oauth.supportAccessLabel": "Connect for support work",
+    "onboarding.oauth.supportAccessHint": "Read and change any organization and project, including ones you are not a member of, so you can look at what a customer is asking about and fix it. It expires with your current admin session, every organization and project you open is recorded in the admin audit log, and anything you change is shown to that organization's own members as done by a platform admin.",
+    "onboarding.oauth.supportAccessReplacesOrgs": "Support access covers every organization, so there is nothing to select here.",
 
     // — Shared small words reused across this namespace's own surfaces ———————
     "onboarding.common.continue": "Continue",

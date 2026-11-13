@@ -1,9 +1,10 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { beforeEach, expect, it, vi } from "vitest"
-const mocks = vi.hoisted(() => ({ request: vi.fn(), start: vi.fn() }))
+const mocks = vi.hoisted(() => ({ request: vi.fn(), start: vi.fn(), preview: false }))
 vi.mock("@/lib/frontier/google-login", () => ({ googleRequest: mocks.request, startGoogleLogin: mocks.start }))
+vi.mock("@/lib/deployment-environment", () => ({ resolveBackendEnvironment: () => ({ kind: mocks.preview ? "preview" : "development" }) }))
 import { GoogleLoginButton } from "./GoogleLoginButton"
-beforeEach(() => { vi.clearAllMocks(); mocks.start.mockRejectedValue(new Error("unavailable")) })
+beforeEach(() => { mocks.preview = false; vi.clearAllMocks(); mocks.start.mockRejectedValue(new Error("unavailable")) })
 it.each([true, false, "unavailable"])("only explicit activation can start Google; capability=%s", async enabled => {
   if (enabled === "unavailable") mocks.request.mockRejectedValue(new Error("offline"))
   else mocks.request.mockResolvedValue({ enabled })
@@ -38,5 +39,18 @@ it.each(["button","online"])("recovers capability without provider contact via %
   else fireEvent(window,new Event("online"))
   await screen.findByRole("button",{name:"Continue with Google"})
   expect(mocks.request).toHaveBeenCalledTimes(2)
+  expect(mocks.start).not.toHaveBeenCalled()
+})
+
+it("keeps Google visible but disabled in CI without requesting availability or contacting Google", () => {
+  mocks.preview = true
+  render(<GoogleLoginButton />)
+  const button = screen.getByRole("button", { name: "Continue with Google" })
+  expect(button).toBeDisabled()
+  expect(screen.getByText(/Google login is disabled in CI previews/)).toBeVisible()
+  expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull()
+  fireEvent.click(button)
+  fireEvent(window, new Event("online"))
+  expect(mocks.request).not.toHaveBeenCalled()
   expect(mocks.start).not.toHaveBeenCalled()
 })

@@ -4,16 +4,19 @@ import "./google-login-button.css"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { googleRequest, startGoogleLogin } from "@/lib/frontier/google-login"
+import { resolveBackendEnvironment } from "@/lib/deployment-environment"
 import { safeLoginNext } from "@/lib/navigation/login-path"
 
 export function GoogleLoginButton({ next, signup = false }: { next?: string; signup?: boolean }) {
   const t = useT()
+  const preview = resolveBackendEnvironment().kind === "preview"
   const [enabled, setEnabled] = useState<boolean | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState(false)
   const [configFailed, setConfigFailed] = useState(false)
   const [check, setCheck] = useState(0)
   useEffect(() => {
+    if (preview) return
     let mounted = true
     setConfigFailed(false)
     // First-party capability check only; no Google request or asset preload.
@@ -22,19 +25,19 @@ export function GoogleLoginButton({ next, signup = false }: { next?: string; sig
       if (mounted) setEnabled(c.enabled)
     }).catch(() => { if (mounted) setConfigFailed(true) })
     return () => { mounted = false }
-  }, [check])
+  }, [check, preview])
   useEffect(() => {
     const retry = () => setCheck(value => value + 1)
     window.addEventListener("online", retry)
     return () => window.removeEventListener("online", retry)
   }, [])
-  if (configFailed || enabled === false) return <div className="flex flex-col gap-2">
+  if (preview || configFailed || enabled === false) return <div className="flex flex-col gap-2">
     <Button className="google-login-button" type="button" variant="outline" disabled>
       <img src={googleLogo} width={20} height={20} alt="" aria-hidden="true" />
       {t("auth.google.continue")}
     </Button>
-    <p role="alert" className="text-sm text-muted-foreground">{t(configFailed ? "auth.google.unavailable" : "auth.google.notConfigured")}</p>
-    {configFailed && <Button className="self-start" type="button" variant="link" size="sm" onClick={() => setCheck(value => value + 1)}>{t("auth.google.retryAvailability")}</Button>}
+    <p role="alert" className="text-sm text-muted-foreground">{t(preview ? "auth.google.previewDisabled" : configFailed ? "auth.google.unavailable" : "auth.google.notConfigured")}</p>
+    {!preview && configFailed && <Button className="self-start" type="button" variant="link" size="sm" onClick={() => setCheck(value => value + 1)}>{t("auth.google.retryAvailability")}</Button>}
   </div>
   if (!enabled) return null
   const current = window.location.pathname + window.location.search

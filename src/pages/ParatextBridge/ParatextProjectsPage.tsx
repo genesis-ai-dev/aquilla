@@ -1,33 +1,34 @@
-import { useNavigate } from "react-router-dom"
-import { BookOpen, ExternalLink, FolderPlus, RefreshCw, X } from "lucide-react"
+import { useMemo, useState } from "react"
+import { BookOpen, FolderPlus, RefreshCw, Search, X } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { ThisComputerSidebar } from "@/components/this-computer/ThisComputerSidebar"
 import { ThisComputerBreadcrumb } from "@/components/this-computer/ThisComputerBreadcrumb"
 import { Page, PageHeader } from "@/components/ui/page"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { EmptyState } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { useParatextDiscovery, type BridgeProject } from "@/lib/paratext-bridge/use-paratext-discovery"
+import { useParatextDiscovery } from "@/lib/paratext-bridge/use-paratext-discovery"
 import { pickFolder } from "@/lib/paratext-bridge/tauri"
-import { getBookName } from "@/lib/file-labeling/bible-book-names"
+import { ParatextProjectRow, useLinkedGuids } from "@/components/paratext/ParatextProjectRow"
 
 const PARATEXT_DOCS_URL =
   `${(import.meta.env.VITE_DOCS_URL as string | undefined)?.trim() || "https://help.aquilla.app"}/projects/paratext-projects/`
-
-function paratextBookPath(project: BridgeProject, fileName: string): string {
-  const q = new URLSearchParams({ project: project.path, file: fileName })
-  return `/paratext/book?${q.toString()}`
-}
 
 /** Desktop-only: Paratext projects found on this computer. One click opens a
  *  book; edits are written straight into the Paratext project folder. */
 export function ParatextProjectsPage() {
   const t = useT()
-  const navigate = useNavigate()
   const d = useParatextDiscovery()
+  const linked = useLinkedGuids(d.projects)
+  const [query, setQuery] = useState("")
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return d.projects
+    return d.projects.filter((p) => [p.settings.fullName, p.settings.name, p.settings.language].some((v) => v?.toLowerCase().includes(q)))
+  }, [d.projects, query])
 
   const addFolder = async () => {
     const path = await pickFolder(t("paratextBridge.thisComputer.pickFolderTitle"))
@@ -89,47 +90,16 @@ export function ParatextProjectsPage() {
               {d.projects.length === 0 ? (
                 <EmptyState icon={BookOpen} title={t("paratextBridge.noProjects")} description={t("paratextBridge.noProjectsHint")} />
               ) : (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {d.projects.map((p) => (
-                    <Card key={p.path} data-testid="paratext-project">
-                      <CardHeader>
-                        <CardTitle className="flex items-center justify-between gap-2">
-                          <span className="truncate">{p.settings.fullName}</span>
-                          <Badge variant="outline">{p.settings.name}</Badge>
-                        </CardTitle>
-                        <CardDescription>
-                          {t("paratextBridge.booksCount", { count: p.books.length })}
-                          {p.settings.language ? ` · ${p.settings.language}` : ""}
-                          {!p.utf8 ? ` · ${t("paratextBridge.notUtf8")}` : ""}
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        <Button
-                          size="sm"
-                          disabled={!p.utf8 || p.books.length === 0}
-                          data-testid="paratext-open-in-aquilla"
-                          onClick={() => navigate(`/paratext/open?${new URLSearchParams({ project: p.path }).toString()}`)}
-                        >
-                          <ExternalLink />{t("paratextBridge.openInAquilla")}
-                        </Button>
-                        <div className="flex flex-wrap gap-1">
-                          {p.books.map((b) => (
-                            <Button
-                              key={b.fileName}
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 px-2 font-mono text-xs"
-                              title={getBookName(b.code) ?? b.code}
-                              disabled={!p.utf8}
-                              onClick={() => navigate(paratextBookPath(p, b.fileName))}
-                            >
-                              {b.code}
-                            </Button>
-                          ))}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+                <div className="space-y-3">
+                {d.projects.length > 5 ? (
+                  <div className="relative max-w-xs">
+                    <Search className="pointer-events-none absolute start-2.5 top-2.5 size-4 text-muted-foreground" aria-hidden />
+                    <Input className="ps-8" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("paratextBridge.project.search")} aria-label={t("paratextBridge.project.search")} data-testid="paratext-project-search" />
+                  </div>
+                ) : null}
+                <ul className="divide-y rounded-lg border bg-card" data-testid="paratext-project-list">
+                  {shown.map((p) => <ParatextProjectRow key={p.path} project={p} linked={linked.has(p.guid)} />)}
+                </ul>
                 </div>
               )}
 

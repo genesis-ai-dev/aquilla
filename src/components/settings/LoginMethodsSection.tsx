@@ -49,7 +49,7 @@ function AccountLoginMethods({ jwt, username }: { jwt: string; username: string 
         <SettingsRow
           className="flex-wrap items-center"
           label={t(methods.password ? "auth.methods.passwordSet" : "auth.methods.passwordMissing")}
-          control={<Button size="sm" variant="outline" onClick={() => { setChangingEmail(false); setRecovering(true) }}>{t(methods.password ? "auth.methods.resetPassword" : "auth.methods.setPassword")}</Button>}
+          control={!(changingEmail && !methods.password) && <Button size="sm" variant="outline" onClick={() => { setChangingEmail(false); setRecovering(true) }}>{t(methods.password ? "auth.methods.resetPassword" : "auth.methods.setPassword")}</Button>}
         />
         {recovering && <SettingsBlock><div className="max-w-md"><FrontierForgotPasswordForm account={{ email: methods.email, jwt }} backLabel={t("auth.methods.back")} onBack={() => setRecovering(false)} returnTo="/preferences/login-methods" /></div></SettingsBlock>}
         <SettingsRow

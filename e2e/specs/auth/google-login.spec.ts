@@ -154,7 +154,7 @@ test("Google-only email change opens password setup directly without provider co
   await page.getByRole("button", { name: "Change email", exact: true }).click()
   await expect(page.getByRole("status")).toContainText("Set an Aquilla password first")
   await expect(page.getByRole("button", { name: "Back to login methods", exact: true })).toHaveCount(0)
-  await page.getByRole("button", { name: "Set an Aquilla password", exact: true }).first().click()
+  await page.getByRole("button", { name: "Set an Aquilla password", exact: true }).click()
   await expect(page.getByRole("button", { name: "Send reset link", exact: true })).toBeVisible()
   await expect(page.getByText("Set an Aquilla password first", { exact: false })).toHaveCount(0)
   await expect(page).toHaveURL(/preferences\/login-methods$/)

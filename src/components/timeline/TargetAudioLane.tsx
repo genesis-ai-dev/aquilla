@@ -1312,7 +1312,7 @@ function TargetAudioChip({
           aria-hidden
           data-testid={`tl-target-${testKey}-handle-l`}
           onPointerDown={(e) => beginDrag("resize-l", e)}
-          className="absolute inset-y-0 left-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 transition-opacity group-hover/chip:opacity-100 bg-background/70"
+          className="absolute inset-y-0 left-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 group-hover/chip:opacity-100 bg-background/70"
         >
           <span className="h-4 w-0.5 rounded bg-current" />
         </span>
@@ -1352,7 +1352,7 @@ function TargetAudioChip({
             // corner state badge.
             className={cn(
               "pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2",
-              showPlayButton && "transition-opacity group-hover/chip:opacity-0",
+              showPlayButton && "group-hover/chip:opacity-0",
             )}
         >
           {/* THE SAME GLYPH THAT USED TO SIT DEAD CENTRE, byte for byte
@@ -1443,7 +1443,7 @@ function TargetAudioChip({
           IT YIELDS THE CORNER TO A STATE GLYPH. `left-1.5 top-1` is a single
           priority slot (missing > syncFailed > loading > saving), and three of
           those four mean the clip cannot play anyway. The sparkle beside it
-          fades on hover instead, since both want the left side and only one of
+          hides on hover instead, since both want the left side and only one of
           them is an action.
 
           BOTH `stopPropagation` CALLS ARE LOAD-BEARING. Without the pointerdown
@@ -1591,7 +1591,7 @@ function TargetAudioChip({
           aria-hidden
           data-testid={`tl-target-${testKey}-handle-r`}
           onPointerDown={(e) => beginDrag("resize-r", e)}
-          className="absolute inset-y-0 right-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 transition-opacity group-hover/chip:opacity-100 bg-background/70"
+          className="absolute inset-y-0 right-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 group-hover/chip:opacity-100 bg-background/70"
         >
           <span className="h-4 w-0.5 rounded bg-current" />
         </span>

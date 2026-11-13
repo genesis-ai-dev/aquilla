@@ -56,7 +56,7 @@ function TargetChipWaveformImpl({ peaks, x0, x1, chipH }: TargetChipWaveformProp
       // that runs past an edge is clipped rather than painting a neighbour.
       // pointer-events-none keeps the body drag and both trim handles reachable
       // through it.
-      className="pointer-events-none absolute inset-0 h-full w-full fill-current opacity-40 transition-opacity group-hover/chip:opacity-70"
+      className="pointer-events-none absolute inset-0 h-full w-full fill-current opacity-40 group-hover/chip:opacity-70"
       viewBox={`${x0} 0 ${width} ${chipH}`}
       // The whole point: bin-space horizontally, pixels vertically, stretched
       // independently. Without this the bars would letterbox instead of filling.

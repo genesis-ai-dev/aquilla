@@ -44,7 +44,7 @@ import { parseAdminEmails } from "../middleware/platform-admin"
 import {
   checkDevAccess,
   DEV_ACCESS_RESTRICTED,
-  DEV_ACCESS_RESTRICTED_MESSAGE,
+  devAccessRestrictedMessage,
 } from "../services/dev-access"
 import { evictUserSessions } from "../lib/session-cache"
 import { withPostResponseDb } from "../lib/post-response-db"
@@ -199,7 +199,7 @@ export function devAccessRefusal(
     return c.json({ error: message, detail: message, code: DEV_ACCESS_RESTRICTED }, 503)
   }
   return c.json(
-    { error: DEV_ACCESS_RESTRICTED_MESSAGE, detail: DEV_ACCESS_RESTRICTED_MESSAGE, code: DEV_ACCESS_RESTRICTED },
+    { error: devAccessRestrictedMessage(c.env), detail: devAccessRestrictedMessage(c.env), code: DEV_ACCESS_RESTRICTED },
     403,
   )
 }
@@ -1273,11 +1273,11 @@ async function deliverPasswordReset(c: Context<AuthHonoEnv>, email: string, retu
             .bind(user.id)
             .run()
           await db.prepare(
-            `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
-             VALUES (?, ?, ?)
+            `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, email_at_issue)
+             VALUES (?, ?, ?, ?)
              ON CONFLICT (token_hash) DO UPDATE SET user_id = excluded.user_id, expires_at = excluded.expires_at`,
           )
-            .bind(user.id, tokenHash, expiresAt.toISOString())
+            .bind(user.id, tokenHash, expiresAt.toISOString(), user.email)
             .run()
 
           const encodedUsername = encodeURIComponent(user.username)
@@ -1358,7 +1358,11 @@ auth.post(
       const resetToken = await c.env.AQUILLA_PG.prepare(
         `SELECT expires_at FROM password_reset_tokens
          WHERE user_id = ?
-           AND token_hash = ?`,
+           AND token_hash = ? AND EXISTS (
+             SELECT 1 FROM users u WHERE u.id=password_reset_tokens.user_id
+             AND (password_reset_tokens.email_at_issue=u.email OR
+               (password_reset_tokens.email_at_issue IS NULL AND u.email_changed_at IS NULL))
+           )`,
       )
         .bind(user.id, await sha256Hex(token))
         .first<ResetTokenRow>()
@@ -1426,7 +1430,11 @@ auth.post(
       const resetToken = await c.env.AQUILLA_PG.prepare(
         `SELECT expires_at FROM password_reset_tokens
          WHERE user_id = ?
-           AND token_hash = ?`,
+           AND token_hash = ? AND EXISTS (
+             SELECT 1 FROM users u WHERE u.id=password_reset_tokens.user_id
+             AND (password_reset_tokens.email_at_issue=u.email OR
+               (password_reset_tokens.email_at_issue IS NULL AND u.email_changed_at IS NULL))
+           )`,
       )
         .bind(user.id, await sha256Hex(token))
         .first<ResetTokenRow>()
@@ -1455,6 +1463,8 @@ auth.post(
         WHERE user_id=? AND EXISTS (
           SELECT 1 FROM password_reset_tokens proof
           WHERE proof.user_id=? AND proof.token_hash=? AND proof.expires_at>now()
+          AND EXISTS(SELECT 1 FROM users u WHERE u.id=proof.user_id
+            AND (proof.email_at_issue=u.email OR (proof.email_at_issue IS NULL AND u.email_changed_at IS NULL)))
         ) RETURNING user_id
       ), changed AS (
         UPDATE users SET password_hash=?, updated_at=now(),

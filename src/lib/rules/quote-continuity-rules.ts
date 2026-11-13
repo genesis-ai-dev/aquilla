@@ -16,6 +16,7 @@
 // text (AQU-1733's "no configuration" half). Nothing here is behind a flag.
 
 import type { RuleInfraction, TranslationRule } from "@/lib/parsers/types"
+import { hasQuotationMarks } from "@/lib/lqa/check-functions/unpaired-quotes"
 import {
   scanQuoteContinuity,
   type QuoteContinuityCell,
@@ -28,15 +29,22 @@ export const QUOTE_CONTINUITY_CHECK_ID = "unpaired-quotes"
 /** What the pass needs from one cell of the file, in reading order. */
 export interface QuoteContinuityCellInput extends QuoteContinuityCell {
   fileId: string
+  /**
+   * The cell's source text. Only asked whether it marks quotations at all:
+   * that decides if a quotation still open where the translation stops is
+   * pending or already wrong.
+   */
+  source?: string
 }
 
 /** Cells the file's text is read from — an untranslated cell contributes "". */
 export function quoteContinuityCells(
-  cells: readonly { id: string; fileId: string; translated: string; status: string }[],
+  cells: readonly { id: string; fileId: string; original?: string; translated: string; status: string }[],
 ): QuoteContinuityCellInput[] {
   return cells.map((cell) => ({
     id: cell.id,
     fileId: cell.fileId,
+    source: cell.original,
     text: cell.status === "empty" ? "" : cell.translated,
   }))
 }
@@ -60,8 +68,15 @@ function placeKey(cellId: string, start: number, end: number): string {
  *    pairs across cells. A verse holding only the closing mark of a speech
  *    that began earlier has an odd mark count of its own, and the check's
  *    source comparison cannot rescue it when the source marks no quotations at
- *    all — which is every Greek or Hebrew source. An infraction is only
- *    withdrawn when EVERY mark it names is one the walk accounted for.
+ *    all — which is every Greek or Hebrew source. The same goes for the
+ *    opening mark of a quotation still open where the translation stops: the
+ *    walk does not report it (its closing mark may be in a verse nobody has
+ *    written yet), so the per-cell check must not either — unless that cell's
+ *    source marks quotations itself. The per-cell check only fires against
+ *    such a source when the source closes what the translation leaves open,
+ *    and that is evidence the mark is missing here, not pending. An
+ *    infraction is only withdrawn when EVERY mark it names is one the walk
+ *    accounted for.
  *
  * Returns `perCell` unchanged when the rule is off or the project's quotation
  * marks are unknown: with no system to read, there is nothing to reconcile.
@@ -79,8 +94,12 @@ export function reconcileQuoteInfractions(
   if (!rule) return [...perCell]
 
   const fileOf = new Map(cells.map((cell) => [cell.id, cell.fileId]))
-  const { unclosed, strays, matched } = scanQuoteContinuity(cells, marks)
-  const resolved = new Set(matched.map((place) => placeKey(place.cellId, place.start, place.end)))
+  const { unclosed, strays, matched, pending } = scanQuoteContinuity(cells, marks)
+  const sourceOf = new Map(cells.map((cell) => [cell.id, cell.source ?? ""]))
+  const stillPending = pending.filter((place) => !hasQuotationMarks(sourceOf.get(place.cellId) ?? ""))
+  const resolved = new Set(
+    [...matched, ...stillPending].map((place) => placeKey(place.cellId, place.start, place.end)),
+  )
 
   const kept = perCell.filter((infraction) => {
     if (infraction.ruleId !== rule.id) return true

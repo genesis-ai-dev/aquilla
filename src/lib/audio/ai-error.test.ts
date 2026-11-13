@@ -362,4 +362,25 @@ describe("categorizeAiError — ElevenLabs (BYOK)", () => {
       expect(`${result.title} ${result.body}`).not.toMatch(/Gemini|Inworld|OpenRouter/)
     }
   })
+
+  // A restricted key is a valid key: it must not be told "ElevenLabs rejected
+  // your key", and the fix is one permission, so the copy names it.
+  it("names the permission a restricted key is missing", async () => {
+    const { errorFromElevenLabs } = await import("./elevenlabs/errors")
+    const named = categorizeAiError(errorFromElevenLabs(403, JSON.stringify({
+      error: "elevenlabs_missing_permission",
+      message: "ElevenLabs API key is missing the permission text_to_speech",
+      permission: "text_to_speech",
+    })).message)
+    expect(named.category).toBe("elevenlabs-missing-permission")
+    expect(named.body).toContain("text_to_speech")
+    expect(named.title).not.toMatch(/rejected/i)
+
+    const unnamed = categorizeAiError(errorFromElevenLabs(403, JSON.stringify({
+      error: "elevenlabs_missing_permission",
+      message: "ElevenLabs API key is missing a permission",
+    })).message)
+    expect(unnamed.category).toBe("elevenlabs-missing-permission")
+    expect(unnamed.body).toMatch(/missing a permission/)
+  })
 })

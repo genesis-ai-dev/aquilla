@@ -1457,4 +1457,14 @@ export interface EventClaims {
    * operators have no membership rows). Absent on older tokens.
    */
   src?: string
+  /**
+   * AQU-2504: this is a connector SUPPORT-ACCESS write token (`src` stays
+   * `"external"`). The SECOND, narrower exemption from the live membership
+   * re-check: a platform admin doing support work in a customer's project has
+   * no membership rows there by design, and the grant they ARE judged against —
+   * the support window plus a live `platform_admins` row — is re-checked on
+   * every call before the token is minted. Exempts nothing else. Absent means
+   * no. See sync-worker/src/auth.ts `SyncTokenClaims.support`.
+   */
+  support?: boolean
 }

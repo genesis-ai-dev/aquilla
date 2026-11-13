@@ -81,6 +81,8 @@ export function previewConfig(surface, { cwd, urls = {} }) {
     LANE_READ_WALL: "1",
   }
   if (surface === "auth") {
+    // Same durable allowlist as dev; it survives nightly database refreshes.
+    config.previews.kv_namespaces = [{ binding: "DEV_ACCESS_LIST", id: "9763251a3c84471bac48032d44bf3ea8" }]
     Object.assign(config.previews.vars, {
       ALGORITHM: "HS256",
       ACCESS_TOKEN_EXPIRE_MINUTES: "43200",

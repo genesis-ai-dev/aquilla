@@ -86,6 +86,16 @@ export interface QuoteContinuityResult {
    * withdraw that false alarm.
    */
   matched: QuoteMarkPlace[]
+  /**
+   * The opening marks of quotations still open where the translation stops —
+   * dropped at an untranslated cell, so neither reported nor paired. A per-cell
+   * check sees each one as a mark without its partner, and against a source
+   * that marks no quotations it reports it. That is the same false alarm on a
+   * half-translated file this walk exists to keep quiet, so the caller
+   * withdraws these too. They come back as `unclosed` once the gap is
+   * translated and still nothing closes them.
+   */
+  pending: QuoteMarkPlace[]
 }
 
 /**
@@ -96,7 +106,7 @@ export interface QuoteContinuityResult {
  */
 export const MAX_UNCLOSED_REPORTED = 3
 
-const EMPTY: QuoteContinuityResult = { unclosed: [], strays: [], matched: [] }
+const EMPTY: QuoteContinuityResult = { unclosed: [], strays: [], matched: [], pending: [] }
 
 interface OpenMark {
   cellId: string
@@ -126,12 +136,15 @@ export function scanQuoteContinuity(
 
   const strays: StrayQuoteClose[] = []
   const matched: QuoteMarkPlace[] = []
+  const pending: QuoteMarkPlace[] = []
   let open: OpenMark[] = []
   let lastScanned = -1
 
   cells.forEach((cell, cellIndex) => {
     if (cell.text.trim() === '') {
-      // A gap in the evidence, not a broken quotation.
+      // A gap in the evidence, not a broken quotation: what is still open is
+      // set aside as pending rather than reported.
+      for (const mark of open) pending.push({ cellId: mark.cellId, start: mark.start, end: mark.end })
       open = []
       return
     }
@@ -190,5 +203,5 @@ export function scanQuoteContinuity(
     cellsOpen: Math.max(0, lastScanned - mark.cellIndex),
   }))
 
-  return { unclosed, strays, matched }
+  return { unclosed, strays, matched, pending }
 }

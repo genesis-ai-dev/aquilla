@@ -73,6 +73,7 @@ import { assertCredentialMayWrite, assertCredentialScope } from './token-bridge'
 import type { ChangesetSummary, ChangesetWarning, ExternalEnv, PlannedEventIds } from './types'
 import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
+import { resolveCallerProjectRoleForGate } from './support-access'
 import { loadProjectSettings } from '../../../db/shared/projects'
 import { buildAudioId } from '../../../db/shared/audio-id'
 import { laneContextFrom, laneIdRequiredMessage, resolveTargetLaneId } from './external-lane'
@@ -387,7 +388,19 @@ export async function prepareChangesetCore(
   const requiredRole = Math.max(
     ...validated.commands.map((command) => requiredRoleForCommand(command, assignmentMinRole)),
   )
-  const resolvedRole = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
+  // AQU-2504: support access is the LAST path tried here, as everywhere — a
+  // platform admin who is a genuine member of this project stages on their own
+  // grant and is not audited. Staging exposes project state (cell existence,
+  // the server-computed effect summary), so on support access it is recorded as
+  // a cross-tenant READ; the write itself is audited at the one door every
+  // external event write goes through.
+  const resolvedRole = await resolveCallerProjectRoleForGate(
+    db,
+    cred,
+    projectId,
+    'changeset prepare',
+    resolveProjectRoleShared,
+  )
   if (!resolvedRole || resolvedRole.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role to stage this changeset')
   }

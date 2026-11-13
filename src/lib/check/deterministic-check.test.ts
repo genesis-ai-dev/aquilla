@@ -736,6 +736,81 @@ describe("Quotation left open across cells (AQU-1733)", () => {
     expect(result.ruleFindings).toEqual([])
   })
 
+  describe("where the translation stops and the source marks no quotations", () => {
+    // The case above is quiet for the wrong reason: its source carries the
+    // same odd mark count, so the per-cell check never fires. A Greek or
+    // Hebrew source carries none, the per-cell check DOES fire on the opening
+    // cell, and the walk has to withdraw it — the quotation is still pending,
+    // not broken. This is the shape the PR #1885 QA walk failed on.
+    const opens = cell("And he said, Follow me,", "Et il dit : « Suivez-moi,", { id: "opens-bare" })
+    const untranslated = cell("and I will make you fishers of men.", "", { id: "untranslated-bare" })
+    const later = cell("Immediately they left their nets.", "Aussitôt ils laissèrent leurs filets.", { id: "later-bare" })
+    const french = { quoteMarks: { levels: [{ open: "«", close: "»" }], continuation: "reopen-each-paragraph" as const } }
+
+    it("the per-cell check does fire on the opening cell", () => {
+      expect(checkRulesForCell(opens, "file-1", quoteRules)).toEqual([
+        expect.objectContaining({ cellId: "opens-bare", reason: "builtin:unpaired-quotes" }),
+      ])
+    })
+
+    it.each([
+      ["the next cell is untranslated", [opens, untranslated]],
+      ["a later cell is translated again", [opens, untranslated, later]],
+    ])("Check file stays quiet when %s", async (_name, cells) => {
+      const result = await runDeterministicCheck({
+        fileId: "file-1",
+        cells,
+        rules: quoteRules,
+        concepts: [],
+        languageProfile: french,
+      })
+      expect(result.ruleFindings).toEqual([])
+      expect(result.totalFindingCount).toBe(0)
+    })
+
+    it("Check file stays quiet with the marks read off the text, not a recorded profile", async () => {
+      const closedElsewhere = cell("He said, Come.", "Il dit : « Venez. »", { id: "paired-bare" })
+      const result = await runDeterministicCheck({
+        fileId: "file-1",
+        cells: [closedElsewhere, opens, untranslated],
+        rules: quoteRules,
+        concepts: [],
+      })
+      expect(result.ruleFindings).toEqual([])
+    })
+
+    it("still flags it when the source closes the quotation in that same cell", async () => {
+      // A source that marks quotations IS evidence: it ends this one here, so
+      // the missing mark is missing now, whatever the next verse will say.
+      const sourceCloses = cell("And he said, “Follow me.”", "Et il dit : « Suivez-moi.", { id: "source-closes" })
+      const result = await runDeterministicCheck({
+        fileId: "file-1",
+        cells: [sourceCloses, untranslated],
+        rules: quoteRules,
+        concepts: [],
+        languageProfile: french,
+      })
+      expect(result.ruleFindings[0].infractions).toEqual([
+        expect.objectContaining({ cellId: "source-closes", spans: [expect.objectContaining({ matchedText: "«" })] }),
+      ])
+      expect(result.totalFindingCount).toBe(1)
+    })
+
+    it("still flags it once the following cell is translated without the closing mark", async () => {
+      const continues = cell("and I will make you fishers of men.", "et je vous ferai pêcheurs d’hommes.", { id: "continues-bare" })
+      const result = await runDeterministicCheck({
+        fileId: "file-1",
+        cells: [opens, continues],
+        rules: quoteRules,
+        concepts: [],
+        languageProfile: french,
+      })
+      expect(result.ruleFindings[0].infractions).toEqual([
+        expect.objectContaining({ cellId: "opens-bare", spans: [expect.objectContaining({ matchedText: "«" })] }),
+      ])
+    })
+  })
+
   it("reports one row when both passes see the same missing partner", async () => {
     // Inside one cell the per-cell check fires too (the source is balanced
     // here). The reviewer gets one finding, not two.

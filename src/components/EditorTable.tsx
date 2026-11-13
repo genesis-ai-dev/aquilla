@@ -11,7 +11,7 @@ import {
 import {
   Check, AlertTriangle,
   MessageCircle, Play, Pause, Mic, MicOff, FileText,
-  Activity, NotebookPen, Pencil, ChevronDown, Braces,
+  Activity, NotebookPen, Pencil, ChevronDown, Braces, Tag,
   Languages,
   Plus,
   Pilcrow,
@@ -141,7 +141,7 @@ import { useManualStyleAlign, useStyleAlignDirtyMatch } from "@/lib/store/style-
 import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
-import { CellLabelRow } from "@/components/CellLabelRow"
+import { CellLabelField } from "@/components/CellLabelField"
 import { canEditCellLabel } from "@/lib/cell-label-gate"
 import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/inworld-voices"
 import { queueClockIsFileTime, useIsQueueCurrentCell, useQueueCellPlayhead, useQueueCurrentCellId } from "@/lib/audio/play-queue"
@@ -369,6 +369,7 @@ import {
 import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
 import { isFlagEnabled } from "@/lib/features/flags"
 import { SmartEditsProvider, useSmartEditsForCell, useSmartEditsPassage } from "@/hooks/useSmartEdits"
+import { readLanguageProfile } from "../../db/shared/language-profile"
 import {
   useCellPresence,
   type CellPresencePeer,
@@ -387,6 +388,8 @@ const rowRenders = new Map<string, number>()
 const ESTIMATED_ROW_HEIGHT_PX = 140
 /** How long focus must rest on an empty cell before its draft retrieval starts (AQU-617). */
 const COMPLETION_PREFETCH_DWELL_MS = 300
+/** AQU-2408: how long a just-typed cell label is shown ahead of the projection. */
+const PENDING_LABEL_HOLD_MS = 10_000
 
 // The grid template (gutter, source, Bible columns, target) is one helper
 // shared by the headers, the paragraph bar and the rows: lib/editor/editor-grid.ts.
@@ -6578,6 +6581,12 @@ function EditorRow({
     () => laneLanguageCodeForTag(activeLane, project.lanes) ?? undefined,
     [activeLane, project],
   )
+  // Smart quotes type the marks the project recorded, which are also the
+  // marks its quotation checks expect.
+  const targetQuoteMarks = useMemo(
+    () => readLanguageProfile(project.languageProfile).quoteMarks,
+    [project.languageProfile],
+  )
   const hasTargetFootnoteMarker = (visibleTranslated ?? "").includes("\\f")
   const mayHaveFootnotes = hasSourceFootnoteMarker || hasTargetFootnoteMarker
   const showFootnotesInExpansion = footnoteViewMode === "off" && mayHaveFootnotes
@@ -7965,7 +7974,25 @@ function EditorRow({
   // the two corners went blank anyway.
   const castVoiceId = cellLabelsEnabled ? assignedCastVoiceId(project.ttsSettings, cell) : undefined
   const castName = castVoiceId ? findVoice(project.ttsSettings, castVoiceId)?.name : undefined
-  const labelText = castName ?? ownCastName(cell) ?? cell.cellLabel ?? null
+  // AQU-2408: the label just typed in this row's corner, shown until the
+  // projection carries it back. The field closes on Enter, and the stored value
+  // only moves once the event has round-tripped, so without this the corner
+  // would go blank (or snap back to the old label) for that long. It is dropped
+  // the moment the stored label changes at all, and after a few seconds
+  // regardless, so a write that never lands cannot leave a label on screen.
+  const [pendingLabel, setPendingLabel] = useState<{ value: string | null } | null>(null)
+  const [seenStoredLabel, setSeenStoredLabel] = useState(cell.cellLabel ?? null)
+  if ((cell.cellLabel ?? null) !== seenStoredLabel) {
+    setSeenStoredLabel(cell.cellLabel ?? null)
+    setPendingLabel(null)
+  }
+  useEffect(() => {
+    if (!pendingLabel) return
+    const timer = setTimeout(() => setPendingLabel(null), PENDING_LABEL_HOLD_MS)
+    return () => clearTimeout(timer)
+  }, [pendingLabel])
+  const ownLabel = pendingLabel ? pendingLabel.value : cell.cellLabel ?? null
+  const labelText = castName ?? ownCastName(cell) ?? ownLabel
   // AQU-1687: Bible voices. The voice chip outranks only the cell's own
   // label: an assigned voice or a `cast_name` keeps the slot whether or not
   // cell labels are shown, because dubbing projects already name their
@@ -8029,12 +8056,22 @@ function EditorRow({
   // consulted.) The 40px gutter column is reserved unconditionally, so a
   // missing circle read as a missing CONTROL rather than a missing column.
   // AQU-2408: who may type the cell's label. The project's tier (maintainer
-  // unless opened to project leads) is enforced here, where the field is drawn,
+  // unless opened to project leads) is enforced here, where the field is opened,
   // exactly as the cell-editing tier is; the server's static floor (project
   // lead) sits underneath. docs/decisions/0007-cell-labels-are-metadata-never-cast.md.
   const mayEditCellLabel =
     Boolean(onSaveCellLabel) &&
     canEditCellLabel({ roleLevel: project.syncRole?.level ?? null, settings: project })
+  // The label is typed where it is read: the source corner's label slot turns
+  // into a field (CellLabelField) while this is true. Opened by the Label
+  // button in the rail's `⋯`, or by a click on the label itself; the field
+  // closes itself on Enter, blur or Escape. It opens whatever "Show cell
+  // labels" says, and whatever else holds the slot — the button was pressed.
+  const [labelEditing, setLabelEditing] = useState(false)
+  const closeLabelEditing = useCallback(() => setLabelEditing(false), [])
+  // The corner shows a ladder (voice, cast name, label). Only when what it
+  // shows IS this cell's own label does a click on it open the field.
+  const cornerLabelIsOwn = showCellLabel && labelText === ownLabel
   const speaksInGutter = castGutter && !isStructuralCell(cell.type)
   const gutterVoice = speaksInGutter
     ? resolveCastVoice(ttsSettings, cell, cell.ttsSettings?.voiceId)
@@ -9033,7 +9070,7 @@ function EditorRow({
               20px above its translation — the target lane can't be made
               conditional to match, because it also reserves the strip the
               floating action rail occupies. */}
-          <div data-testid="source-context-line" data-selection-ignore="" className={cn("mb-1 flex h-4 items-center gap-2 text-xs text-muted-foreground", showCellLabel || showVoiceChip ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
+          <div data-testid="source-context-line" data-selection-ignore="" className={cn("mb-1 flex h-4 items-center gap-2 text-xs text-muted-foreground", showCellLabel || showVoiceChip || labelEditing ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
             {/* AQU-646: the character, on the SOURCE side too (Sam,
                 2026-08-26) — "put that character label also in the top left
                 of source cells… we'll just scoot the time range over".
@@ -9051,15 +9088,42 @@ function EditorRow({
                 a name is not a timecode. The width cap is what does the
                 scooting: a long character name truncates rather than pushing
                 the timing out of the row. */}
-            {showCellLabel && (
+            {/* AQU-2408: the cell's own label is typed right here, in the slot
+                it is read from. While the field is open it has the slot to
+                itself; it saves through `onSaveCellLabel` and closes itself. */}
+            {labelEditing && onSaveCellLabel ? (
+              <CellLabelField
+                label={ownLabel}
+                onSave={(label) => {
+                  setPendingLabel({ value: label })
+                  // "Before" is what the field was opened on — which is the
+                  // pending label when a second edit beats the first one home.
+                  onSaveCellLabel({ ...cell, cellLabel: ownLabel ?? undefined }, label)
+                }}
+                onClose={closeLabelEditing}
+              />
+            ) : showCellLabel && (
               <AppTooltip content={labelText} disabled={!labelText}>
-                <span data-testid="source-cell-label" dir="auto" className="max-w-[45%] shrink-0 truncate">
-                  {labelText}
-                </span>
+                {mayEditCellLabel && cornerLabelIsOwn ? (
+                  <button
+                    type="button"
+                    data-testid="source-cell-label"
+                    dir="auto"
+                    aria-label={`${t("editor.cellLabel.edit")}: ${labelText}`}
+                    onClick={(e) => { e.stopPropagation(); setLabelEditing(true) }}
+                    className="max-w-[45%] shrink-0 cursor-text truncate rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    {labelText}
+                  </button>
+                ) : (
+                  <span data-testid="source-cell-label" dir="auto" className="max-w-[45%] shrink-0 truncate">
+                    {labelText}
+                  </span>
+                )}
               </AppTooltip>
             )}
             {/* AQU-1687: the Bible voice chip, in the same slot, one per row. */}
-            {showVoiceChip && cellVoices && <VoiceChip view={cellVoices} className="max-w-[45%] shrink-0" />}
+            {showVoiceChip && !labelEditing && cellVoices && <VoiceChip view={cellVoices} className="max-w-[45%] shrink-0" />}
             {/* A TIMECODE IS NOT SHOWN HERE ANY MORE (Sam, 2026-08-27,
                 relaying the client): it moved to the foot of the cell — see
                 `source-timing-line` — so the character label has this corner
@@ -9365,7 +9429,9 @@ function EditorRow({
                     textDirection={targetCellDirection}
                     directionMode={targetDirectionMode}
                     lang={targetLanguageCode}
-                    smartQuotes={project.smartQuotes}
+                    // On unless the project turned it off.
+                    smartQuotes={project.smartQuotes !== false}
+                    quoteMarks={targetQuoteMarks}
                     className={cn(
                       "w-full",
                       showCompletionOverlay && "opacity-30 transition-opacity",
@@ -10021,6 +10087,21 @@ function EditorRow({
                 />
               )}
 
+              {/* The cell's own label (AQU-2408). This button turns the source
+                  corner's label slot into a field with the caret in it — the
+                  label is typed where it is read. Absent below the project's
+                  label tier: those members only ever read the corner. */}
+              {mayEditCellLabel && (
+                <RailButton
+                  icon={<Tag className="h-3.5 w-3.5" />}
+                  tooltip={ownLabel ? t("editor.cellLabel.edit") : t("editor.cellLabel.add")}
+                  onClick={() => {
+                    setRailOverflowOpen(false)
+                    setLabelEditing(true)
+                  }}
+                />
+              )}
+
               <TargetReferenceActions
                 cellId={cell.id}
                 openCommentCount={openCommentCount}
@@ -10296,17 +10377,6 @@ function EditorRow({
               renderContent: () => <InlineToolsTab fileId={cell.fileId} cellId={cell.id} />,
             }] : []),
         ]
-        // The cell's own label — a note on the line, metadata, never a voice
-        // (AQU-2408). Read by everyone it is shown to; typed at or above the
-        // project's label tier. Sits above the tabs because it is about the
-        // whole line, not one lens on it.
-        const labelRow = (
-          <CellLabelRow
-            label={cell.cellLabel ?? null}
-            editable={mayEditCellLabel}
-            onSave={onSaveCellLabel ? (label) => onSaveCellLabel(cell, label) : undefined}
-          />
-        )
         const panel = (
           <CellExpansion
             open
@@ -10330,14 +10400,12 @@ function EditorRow({
               hasPrev={detailHasPrev}
               hasNext={detailHasNext}
             >
-              {labelRow}
               {panel}
             </CellDetailDialog>
           )
         }
         return (
           <div className="ps-[3.75rem] pe-4 pb-2">
-            {labelRow}
             {panel}
           </div>
         )

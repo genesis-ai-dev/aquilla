@@ -55,6 +55,35 @@ export async function getBundleStatus(): Promise<BundleStatus | null> {
   return invoke<BundleStatus>("get_bundle_status")
 }
 
+/** The installed shell's own version, and the web bundle it is serving. */
+export interface DesktopVersions {
+  shell: string
+  bundle: string | null
+}
+
+let desktopVersions: Promise<DesktopVersions | null> | undefined
+
+/**
+ * What the footer shows as "the version" on desktop. The web bundle is replaced
+ * by hot updates and cannot know which shell it landed in, so the shell is asked
+ * at run time. Neither value changes while the app is open (a staged bundle
+ * applies on relaunch), so one answer is kept. Null outside Tauri or on failure.
+ */
+export function getDesktopVersions(): Promise<DesktopVersions | null> {
+  if (!isTauriRuntime()) return Promise.resolve(null)
+  desktopVersions ??= (async () => {
+    try {
+      const { getVersion } = await import("@tauri-apps/api/app")
+      const [shell, status] = await Promise.all([getVersion(), getBundleStatus().catch(() => null)])
+      return { shell, bundle: status?.version ?? null }
+    } catch (error) {
+      console.warn("[bundle] couldn't read the shell version", error)
+      return null
+    }
+  })()
+  return desktopVersions
+}
+
 /** Relaunches the shell; a staged bundle applies on that launch. */
 export async function restartApp(): Promise<void> {
   if (!isTauriRuntime()) return

@@ -317,6 +317,10 @@ tag = "v2"
 new_sqlite_classes = ["KnowledgeIndexDriver"]
 
 [env.production.vars]
+# Dedicated production login client; no Google request is made before user activation.
+GOOGLE_LOGIN_CLIENT_ID = "688714906958-u6ml2k74knt4uf1n4as3tu2mfl5c8ruo.apps.googleusercontent.com"
+GOOGLE_LOGIN_REDIRECT_URI = "https://api.aquilla.app/identity/api/v2/auth/oauth/google/callback"
+GOOGLE_LOGIN_APP_ORIGINS = "https://aquilla.app"
 # Omnilingual ASR on Modal (infra/modal/omni_asr.py). Hosted transcription for
 # languages Whisper lacks, plus the zero-shot opt-in. Empty = Automatic keeps
 # Whisper auto-detect for those languages and an explicit Omnilingual choice

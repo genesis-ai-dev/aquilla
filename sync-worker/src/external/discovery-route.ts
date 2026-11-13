@@ -82,6 +82,8 @@ function apiMap(): Record<string, unknown> {
       'GET /api/v1/external/docs': 'This API map rendered as Markdown prose. No auth needed.',
       'GET /api/v1/external/skills': 'Index of agent skills — L2 playbooks that sequence existing commands (MCP: the get_skill tool). No auth needed.',
       'GET /api/v1/external/skills/:name': 'One skill’s full Markdown body. Start with project-setup when standing up a partner project. No auth needed.',
+      'GET /api/v1/external/help': 'Index of the public Aquilla help site (app how-to pages): { site, pages: [{ path, title, description, section, url }] }. For questions about the app’s interface, not API work (MCP: the get_help tool). No auth needed.',
+      'GET /api/v1/external/help/:page': 'One help page as Markdown: { path, title, url, markdown }. Accepts a page path such as help/export/ (or help/export). An unlisted page returns not_found. No auth needed.',
       'GET /api/v1/external/setup-template': 'The partner intake form as Markdown (to email a partner) plus the JSON schema of the ProjectSetup body it produces. No auth needed.',
       'POST /api/v1/external/setup-template/parse': 'Body { markdown } (the filled intake form) → { setup, warnings, nextStep }: a ProjectSetup body minus kind/projectId, every blank named, required: true on the four never-guess fields. Pure transform; no auth needed.',
       'GET /api/v1/external/projects/:projectId/files': 'List a project’s files. Optional ?sort=created lists newest first (default: most recently edited first).',
@@ -137,6 +139,14 @@ function apiMap(): Record<string, unknown> {
       endpoint: `GET ${EXTERNAL_ROOT}/skills/:name`,
       note:
         'A skill sequences EXISTING commands and routes; it adds no capability and stages nothing on its own. project-setup: intake template → one ProjectSetup command → one approval → verification receipt.',
+    },
+    // AQU-2581: app help from the public help site, not API documentation.
+    help: {
+      index: `GET ${EXTERNAL_ROOT}/help`,
+      endpoint: `GET ${EXTERNAL_ROOT}/help/:page`,
+      tool: 'get_help',
+      note:
+        'Public app help from https://help.aquilla.app: how to do things in the Aquilla app and where its controls are. Not API documentation: for commands use describe_command and for API workflows get_skill.',
     },
     accessCeiling: {
       note:

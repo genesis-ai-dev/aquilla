@@ -113,6 +113,7 @@ import { handleExternalDiscoveryRequest } from "./external/discovery-route"
 import { handleExternalCommandsDocRequest } from "./external/commands-doc-route"
 import { handleExternalSetupTemplateRequest } from "./external/setup-template-route"
 import { handleExternalSkillsRequest } from "./external/skills-route"
+import { handleExternalHelpRequest } from "./external/help-route"
 export { ProjectSync } from "./project-do"
 // Inert legacy DO class — kept exported so deploys don't trip the
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
@@ -238,6 +239,8 @@ declare global {
       SIDE_EFFECTS?: Queue<import("./side-effects/types").SideEffectMessage>
       /** Optional — Base URL for deep links in notification emails (e.g. https://aquilla.app). */
       BASE_URL?: string
+      /** Optional — public help site read by the get_help tool. Unset = https://help.aquilla.app. */
+      HELP_SITE_URL?: string
       /** PostHog project token (phc_…) — when set, 4xx/5xx responses are
        *  shipped to PostHog Logs (see posthog-logs.ts). Unset locally/e2e. */
       POSTHOG_KEY?: string
@@ -683,6 +686,9 @@ const worker = {
     if (externalSetupTemplateResponse) return withCors(externalSetupTemplateResponse, request)
     const externalSkillsResponse = handleExternalSkillsRequest(request)
     if (externalSkillsResponse) return withCors(externalSkillsResponse, request)
+    // AQU-2581: app help from the public help site (REST half of get_help).
+    const externalHelpResponse = await handleExternalHelpRequest(request, env)
+    if (externalHelpResponse) return withCors(externalHelpResponse, request)
 
     // Static command documentation (the REST half of describe_command).
     // Unauthenticated like the discovery root, and mounted with it so both sit

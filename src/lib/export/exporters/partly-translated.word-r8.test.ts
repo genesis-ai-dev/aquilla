@@ -199,3 +199,57 @@ describe("Word export — a wrapper that only a lost line fills goes whole (AQU-
     expect(out.body).not.toContain("<w:sdt>")
   })
 })
+
+describe("Word export — a deleted split piece keeps its place after the row it was cut from (AQU-2552, review r8 F1)", () => {
+  // Line 2 holds a picture and note 1 in its middle; the editor cuts it in
+  // three: P "Second line here and it goes on", Q1 "with many more words,
+  // long enough that[^1]" (the picture and note 1), Q2 "the importer cuts…".
+  // Line 3 holds a picture and note 2.
+  const L2a = "Second line here and it goes on"
+  const L2b = `with many more words, long enough that${"\\f + \\ft Note one.\\f*"}`
+  const L2c = "the importer cuts the paragraph after this sentence ends."
+  const body = para(run(L1 + " ") + run(L2a + " with many more words,") + IMG + run(" long enough that") + ref(1) + run(" " + L2c + " ") + run("Third line") + IMG + run(" here") + ref(2) + run(PAD)) + NEXT
+  const cut = async () => {
+    const bytes = await docxBytes(body, ["Note one.", "Note two."])
+    const [a, b, c, n] = await importCells(bytes)
+    const P = { ...typed(b, "Deuxième ligne"), original: L2a } as CellData
+    const Q1 = piece(b, "q1", L2b)
+    return { bytes, a, P, Q1, c, n }
+  }
+  const view = (out: Out) => [paras(out.body)[0], noteText(out.notes, 1), noteText(out.notes, 2)]
+
+  it("the middle piece deleted reads exactly as the middle piece hidden: its picture and note go, line 3 keeps its own", async () => {
+    const { bytes, a, P, Q1, c, n } = await cut()
+    const Q2 = piece(Q1, "q2", L2c)
+    const hidden = await wordOut(bytes, [typed(a, "Un."), P, hide(Q1), Q2, c, n])
+    expect(view(hidden)).toEqual([`Un. Deuxième ligne ${L2c} Third line[IMG] here[^2] …`, "Note one.", "Note two."])
+    const deleted = await wordOut(bytes, [typed(a, "Un."), P, Q2, c, n], [Q1])
+    expect(view(deleted)).toEqual(view(hidden))
+  })
+
+  it("so with the last piece and line 3 translated", async () => {
+    const { bytes, a, P, Q1, c, n } = await cut()
+    const Q2 = piece(Q1, "q2", L2c)
+    const hidden = await wordOut(bytes, [typed(a, "Un."), P, hide(Q1), typed(Q2, "la fin."), typed(c, "Trois."), n])
+    const deleted = await wordOut(bytes, [typed(a, "Un."), P, typed(Q2, "la fin."), typed(c, "Trois."), n], [Q1])
+    expect(view(deleted)).toEqual(view(hidden))
+    expect(paras(deleted.body)[0]).toBe("Un. Deuxième ligne la fin. Trois.[^2][IMG]")
+  })
+
+  it("so with line 1 hidden too", async () => {
+    const { bytes, a, P, Q1, c, n } = await cut()
+    const Q2 = piece(Q1, "q2", L2c)
+    const hidden = await wordOut(bytes, [hide(typed(a, "Un.")), P, hide(Q1), Q2, c, n])
+    const deleted = await wordOut(bytes, [hide(typed(a, "Un.")), P, Q2, c, n], [Q1])
+    expect(view(deleted)).toEqual(view(hidden))
+  })
+
+  it("both pieces cut from P: the deleted one sits right after P", async () => {
+    const { bytes, a, P, Q1, c, n } = await cut()
+    const Q2 = piece(P, "q2", L2c)
+    const hidden = await wordOut(bytes, [typed(a, "Un."), P, hide(Q1), Q2, c, n])
+    const deleted = await wordOut(bytes, [typed(a, "Un."), P, Q2, c, n], [Q1])
+    expect(view(deleted)).toEqual(view(hidden))
+    expect(paras(deleted.body)[0]).toBe(`Un. Deuxième ligne ${L2c} Third line[IMG] here[^2] …`)
+  })
+})

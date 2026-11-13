@@ -997,7 +997,9 @@ function lineLocator(metadata: Record<string, unknown> | null | undefined): { ke
  * AQU-2552 (review r7): every line of each paragraph, in the order
  * `translationsByPackageBlock` puts them (segment, then import order, a split
  * piece after the line it was cut from), hidden lines and the server's
- * removed records included. A removed record that is a hidden cell's own
+ * removed records included. AQU-2552 (review r8): a deleted split piece sits
+ * right after the row it was cut from, as it did in the editor, so deleting
+ * a piece reads as hiding it. A removed record that is a hidden cell's own
  * (the dialog hands both), or that shares a segment with a cell, adds none.
  */
 function paragraphLines(cells: readonly CellData[], removed: readonly RemovedCellLocatorSource[]): Map<string, ParagraphLine[]> {
@@ -1021,8 +1023,33 @@ function paragraphLines(cells: readonly CellData[], removed: readonly RemovedCel
     }
     return null
   }
-  const lists = new Map<string, { line: ParagraphLine; segment: number; order: number; rank: number }[]>()
-  const add = (at: { key: string; segment: number; order: number }, line: ParagraphLine, rank: number) => {
+  // AQU-2552 (review r8): where a line sits among the rows of its own line:
+  // the line itself first, a live or hidden piece by its place in the
+  // editor, and a deleted piece (whose place is not known) right after the
+  // row it was cut from, before that row's next live piece.
+  const rankOfCell = new Map<string, number[]>()
+  cells.forEach((cell, index) => rankOfCell.set(cell.id, [lineLocator(cell.metadata) ? 0 : index + 1]))
+  const removedAt = new Map<string, number>()
+  removed.forEach((entry, k) => {
+    if (typeof entry.cellId === "string" && entry.cellId !== "" && !rankOfCell.has(entry.cellId)) removedAt.set(entry.cellId, k)
+  })
+  const removedRank = (entry: RemovedCellLocatorSource, k: number, seen = new Set<string>()): number[] => {
+    const from = splitFromCellId(entry)
+    if (from === null || seen.has(from)) return [Number.MAX_SAFE_INTEGER, k]
+    seen.add(from)
+    const parent = rankOfCell.get(from) ?? (removedAt.has(from) ? removedRank(removed[removedAt.get(from)!], removedAt.get(from)!, seen) : null)
+    return parent ? [...parent, k] : [Number.MAX_SAFE_INTEGER, k]
+  }
+  const byRank = (a: readonly number[], b: readonly number[]) => {
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+      // A row's own pieces (a longer rank) come after it and before the next row.
+      if (a[i] === undefined || b[i] === undefined) return a[i] === undefined ? -1 : 1
+      if (a[i] !== b[i]) return a[i] - b[i]
+    }
+    return 0
+  }
+  const lists = new Map<string, { line: ParagraphLine; segment: number; order: number; rank: number[] }[]>()
+  const add = (at: { key: string; segment: number; order: number }, line: ParagraphLine, rank: number[]) => {
     const list = lists.get(at.key) ?? []
     list.push({ line, segment: at.segment, order: at.order, rank })
     lists.set(at.key, list)
@@ -1038,23 +1065,23 @@ function paragraphLines(cells: readonly CellData[], removed: readonly RemovedCel
       const record = JSON.stringify(cell.metadata ?? null)
       hiddenRecords.set(record, (hiddenRecords.get(record) ?? 0) + 1)
     }
-    add(at, { source: cell.original ?? "", kept: cell.hidden !== true }, own ? 0 : index + 1)
+    add(at, { source: cell.original ?? "", kept: cell.hidden !== true }, rankOfCell.get(cell.id) ?? [index + 1])
   })
-  for (const entry of removed) {
+  removed.forEach((entry, k) => {
     const record = JSON.stringify(entry.metadata ?? null)
     const twins = hiddenRecords.get(record) ?? 0
     if (twins > 0) {
       hiddenRecords.set(record, twins - 1)
-      continue
+      return
     }
     const own = lineLocator(entry.metadata)
-    if (own && segmentsHeld.has(`${own.key}\u0000${own.segment}`)) continue
+    if (own && segmentsHeld.has(`${own.key}\u0000${own.segment}`)) return
     const at = own ?? homeOf({ metadata: entry.metadata })
-    if (at) add(at, { source: null, kept: false }, own ? 0 : Number.MAX_SAFE_INTEGER)
-  }
+    if (at) add(at, { source: null, kept: false }, own ? [0] : removedRank(entry, k))
+  })
   const out = new Map<string, ParagraphLine[]>()
   for (const [key, list] of lists) {
-    list.sort((a, b) => a.segment - b.segment || a.order - b.order || a.rank - b.rank)
+    list.sort((a, b) => a.segment - b.segment || a.order - b.order || byRank(a.rank, b.rank))
     out.set(key, list.map((entry) => entry.line))
   }
   return out

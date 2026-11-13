@@ -1192,8 +1192,9 @@ function lostStretches(stretches: readonly (LineStretch | null)[], lineText: str
  * hidden or deleted line held, which is left out: the line's text and
  * footnote references wholly inside its stretch, and the runs (pictures,
  * symbols, a field's parts) that sit inside it. Bookmarks, comment marks and
- * the like pair with something elsewhere and stay; so does anything before
- * the paragraph's first word or after its last, as on import.
+ * the like pair with something elsewhere and stay; so do page and column
+ * breaks (review r8), and anything before the paragraph's first word or after
+ * its last, as on import.
  */
 function placeInLines(
   flat: readonly DocxPiece[],
@@ -1243,11 +1244,20 @@ function placeInLines(
 function givenUpWithLine(piece: DocxPiece): boolean {
   // AQU-2552 (review r7): a run that holds paragraphs of its own (a text box)
   // never leaves with a line: its lines are lines of their own.
-  if (piece.kind === "keepInRun") return !piece.children.some(holdsParagraphs)
+  // AQU-2552 (review r8): nor does a page or column break, hidden or deleted
+  // line alike: it shapes the page, not the line's words.
+  if (piece.kind === "keepInRun") return !piece.children.some((child) => holdsParagraphs(child) || isPageOrColumnBreak(child))
   if (piece.kind === "footnote" || piece.kind === "text") return true
   if (piece.kind !== "keep" || piece.el.tagName !== "w:r") return false
   if (holdsParagraphs(piece.el)) return false
-  return !piece.el.children.some((child) => isElement(child) && child.tagName === "w:commentReference")
+  return !piece.el.children.some((child) => isElement(child) && (child.tagName === "w:commentReference" || isPageOrColumnBreak(child)))
+}
+
+/** AQU-2552 (review r8): a `w:br` that starts a new page or column. */
+function isPageOrColumnBreak(el: XmlElement): boolean {
+  if (el.tagName !== "w:br") return false
+  const type = el.attributes["w:type"]
+  return type === "page" || type === "column"
 }
 
 /** Does this element hold a paragraph anywhere inside it? */

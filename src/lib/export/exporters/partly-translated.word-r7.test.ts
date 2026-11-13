@@ -281,11 +281,13 @@ describe("Word export — what sits between two lines stays when one of them is 
     expect(paras(deleted.body)).toEqual(["Fin.[PAGE]", "Next paragraph."])
   })
 
-  it("a page break inside a hidden line still leaves with it", async () => {
+  // AQU-2552 (review r8, F2): a page break never leaves with a lost line, so
+  // this replaces round 7's "a page break inside a hidden line leaves with it".
+  it("a page break inside a hidden line stays", async () => {
     const bytes = await docxBytes(para(run("End of chapter") + PAGE_BREAK + run(" one" + PAD + " ") + run(L2)) + NEXT)
     const [a, b, n] = await importCells(bytes)
     const hidden = await wordOut(bytes, [hide(typed(a, "Fin.")), typed(b, "Chapitre deux."), n])
-    expect(paras(hidden.body)).toEqual(["Chapitre deux.", "Next paragraph."])
+    expect(paras(hidden.body)).toEqual(["[PAGE]Chapitre deux.", "Next paragraph."])
   })
 })
 

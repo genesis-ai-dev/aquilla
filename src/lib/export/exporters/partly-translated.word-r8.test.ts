@@ -334,3 +334,43 @@ describe("Word export — a picture in a wrapper stays beside an untranslated li
     expect(paras(out.body)[0]).toBe("First line here … Deux. Trois.[IMG]")
   })
 })
+
+describe("Word export — a page or column break never leaves with a lost line (AQU-2552, review r8 F2)", () => {
+  const COLUMN_BREAK = `<w:r><w:br w:type="column"/></w:r>`
+  const breaks: [string, string, string][] = [["page break", PAGE_BREAK, "[PAGE]"], ["column break", COLUMN_BREAK, "[COLUMN]"]]
+  const seen = (xml: string) => paras(xml.replaceAll(`<w:br w:type="column"/>`, "<w:t>[COLUMN]</w:t>"))
+
+  it.each(breaks)("a %s between two lines that are both deleted stays, as between two hidden ones", async (_name, br, mark) => {
+    const bytes = await docxBytes(para(run(L1 + " ") + br + run(L2 + " ") + run(L3)) + NEXT)
+    const [a, b, c, n] = await importCells(bytes)
+    const hidden = await wordOut(bytes, [hide(typed(a, "Un.")), hide(typed(b, "Deux.")), typed(c, "Trois."), n])
+    expect(seen(hidden.body)[0]).toBe(`${mark}Trois.`)
+    const deleted = await wordOut(bytes, [typed(c, "Trois."), n], [a, b])
+    expect(seen(deleted.body)[0]).toBe(`${mark}Trois.`)
+  })
+
+  it.each(breaks)("a %s inside a hidden or deleted line stays", async (_name, br, mark) => {
+    const bytes = await docxBytes(para(run("First line") + br + run(" here" + PAD + " ") + run(L2 + " ") + run(L3)) + NEXT)
+    const [a, b, c, n] = await importCells(bytes)
+    const hidden = await wordOut(bytes, [hide(typed(a, "Un.")), typed(b, "Deux."), typed(c, "Trois."), n])
+    expect(seen(hidden.body)[0]).toBe(`${mark}Deux. Trois.`)
+    const deleted = await wordOut(bytes, [typed(b, "Deux."), typed(c, "Trois."), n], [a])
+    expect(seen(deleted.body)[0]).toBe(`${mark}Deux. Trois.`)
+  })
+
+  it("a page break in the same run as a hidden line's words stays", async () => {
+    const bytes = await docxBytes(para(`<w:r><w:t xml:space="preserve">First line</w:t><w:br w:type="page"/><w:t xml:space="preserve"> here${PAD} </w:t></w:r>` + run(L2 + " ") + run(L3)) + NEXT)
+    const [a, b, c, n] = await importCells(bytes)
+    const hidden = await wordOut(bytes, [hide(typed(a, "Un.")), typed(b, "Deux."), typed(c, "Trois."), n])
+    expect(paras(hidden.body)[0]).toBe("[PAGE]Deux. Trois.")
+  })
+
+  it("a picture inside a hidden or deleted line still leaves with it", async () => {
+    const bytes = await docxBytes(para(run("First line") + IMG + run(" here" + PAD + " ") + run(L2 + " ") + run(L3)) + NEXT)
+    const [a, b, c, n] = await importCells(bytes)
+    const hidden = await wordOut(bytes, [hide(typed(a, "Un.")), typed(b, "Deux."), typed(c, "Trois."), n])
+    expect(paras(hidden.body)[0]).toBe("Deux. Trois.")
+    const deleted = await wordOut(bytes, [typed(b, "Deux."), typed(c, "Trois."), n], [a])
+    expect(paras(deleted.body)[0]).toBe("Deux. Trois.")
+  })
+})

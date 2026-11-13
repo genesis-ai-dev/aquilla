@@ -783,8 +783,11 @@ export function filmIsBehindSlot(slot: ProgrammeSlot, filmCoverSec: number): boo
 
 /**
  * What a line of the programme has to play, following the recordings:
- *  - "sound": its own take or original, a take of its own on another track,
- *    or a take from another line running on over it (AQU-2252, `underLayers`);
+ *  - "sound": its own take or original, or a take on another track sounding
+ *    inside the line, its own or one running on over it from another line
+ *    (AQU-2252, `underLayers`). A take of its own placed wholly outside the
+ *    line is not sound in it (the second check of the q44 fixes, Nov 13): the
+ *    queue crosses the line at once there;
  *  - "film": nothing of its own, but a linked film is playing behind it
  *    (AQU-2253, Sam, Nov 9: "the rule 'skip lines with nothing to play'
  *    should only land when there is literally nothing to play: recorded or
@@ -809,7 +812,7 @@ export function whatSlotPlays(
   underLayers: ReadonlySet<string> = new Set(),
   filmCoverSec = 0,
 ): SlotPlays {
-  if (slotHasOwnSound(slot) || underLayers.has(slot.cellId)) return "sound"
+  if (slot.sourceWindow || slot.targetWindow || underLayers.has(slot.cellId)) return "sound"
   if (filmIsBehindSlot(slot, filmCoverSec)) return "film"
   return hiddenCellIds.has(slot.cellId) ? "hidden" : "nothing"
 }

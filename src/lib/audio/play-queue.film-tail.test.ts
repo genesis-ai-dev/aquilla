@@ -2319,3 +2319,35 @@ describe("an unrecorded line under the film is a line: Play selected, and the qu
     })
   })
 })
+
+// The second check of the q44 fixes (Nov 13), NOTE 4: a line whose only take
+// is on an added track, dragged wholly before the line, has nothing sounding
+// inside it. The queue crosses it at once; `linesPlaybackStopsAt` counted it
+// as a stop, because the layout called any take of the line's own on another
+// track "sound" wherever it sat. Now "sound" from a take on another track
+// means one sounding inside the line (`underLayers`), for both.
+describe("a line whose only take is on an added track, placed wholly before the line", () => {
+  // c1 recorded 2 s [0, 2). c2: nothing on the main track, a 0.4 s take on
+  // Track 1 placed 1.5 s before c2's start: it sounds at [0.5, 0.9), inside
+  // c1. c3 recorded 1 s.
+  const cellsOf = () => {
+    const c2 = line("c2", undefined, 400)
+    const layer = c2.attachments![`audio-c2-1700000500-track.webm`] as unknown as Record<string, unknown>
+    layer.targetOffsetMs = -1_500
+    return [line("c1", 2_000), c2, line("c3", 1_000)]
+  }
+  beforeEach(() => {
+    setQueueTargetSlots(["recording", TRACK])
+    setQueueLayerTrackSlots([TRACK])
+  })
+
+  it("is no stop for the helper, as the queue crosses it", async () => {
+    const cells = cellsOf()
+    expect(linesPlaybackStopsAt(cells, queuePlaybackAsk()).has("c2")).toBe(false)
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    el("c1")!.tick(2)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c3" })
+  })
+})

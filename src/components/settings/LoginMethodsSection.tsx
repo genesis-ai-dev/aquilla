@@ -1,7 +1,6 @@
 import { EmailChangeForm } from "./EmailChangeForm"
 import { Spinner } from "@/components/ui/spinner"
-import { Link } from "react-router-dom"
-import { loginPath } from "@/lib/navigation/login-path"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { useEffect, useState } from "react"
 import { useAccounts } from "@/hooks/useAccounts"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -29,23 +28,28 @@ function AccountLoginMethods({ jwt, username }: { jwt: string; username: string 
     setMethods(null); setError(false); setSessionExpired(false)
     void googleRequest<NonNullable<typeof methods>>("methods", undefined, jwt)
       .then(value => { if (current) setMethods(value) })
-      .catch(reason => { if (current) { setError(true); setSessionExpired(reason instanceof Error && reason.message === "session_expired") } })
+      .catch(reason => {
+        if (!current) return
+        const rejected = reason instanceof Error && reason.message === "session_expired"
+        setError(true)
+        setSessionExpired(rejected)
+        if (rejected) void notifySessionExpiredIfCurrent(jwt)
+      })
     return () => { current = false }
   }, [jwt, revision])
+  if (sessionExpired) return null // The shared recovery banner owns this state.
   return <SettingsGroup>
-      {error && <SettingsBlock><p role="alert" className="text-sm text-destructive">{t(sessionExpired ? "auth.sessionExpired.message" : "auth.methods.failed")}</p></SettingsBlock>}
+      {error && <SettingsBlock><p role="alert" className="text-sm text-destructive">{t("auth.methods.failed")}</p></SettingsBlock>}
       {!methods && !error && <SettingsBlock><Spinner /></SettingsBlock>}
-      {!methods && error && <SettingsBlock>{sessionExpired
-        ? <Link className="underline" to={loginPath({ next: "/preferences/login-methods", add: true })}>{t("auth.sessionExpired.signInAgain")}</Link>
-        : <Button size="sm" variant="outline" onClick={() => setRevision(n => n + 1)}>{t("auth.methods.refresh")}</Button>
-      }</SettingsBlock>}
+      {!methods && error && <SettingsBlock><Button size="sm" variant="outline" onClick={() => setRevision(n => n + 1)}>{t("auth.methods.refresh")}</Button>
+      </SettingsBlock>}
       {methods && <>
-        <SettingsRow label={methods.email} description={t("auth.emailChange.accountEmail")} control={<Button size="sm" variant="outline" onClick={() => setChangingEmail(true)}>{t("auth.emailChange.action")}</Button>} />
-        {changingEmail && <SettingsBlock><EmailChangeForm jwt={jwt} passwordAvailable={methods.password} googleLinked={methods.google} onBack={() => setChangingEmail(false)} /></SettingsBlock>}
+        <SettingsRow label={methods.email} description={t("auth.emailChange.accountEmail")} control={<Button size="sm" variant="outline" onClick={() => { setRecovering(false); setChangingEmail(true) }}>{t("auth.emailChange.action")}</Button>} />
+        {changingEmail && <SettingsBlock><EmailChangeForm jwt={jwt} passwordAvailable={methods.password} googleLinked={methods.google} onSetPassword={() => { setChangingEmail(false); setRecovering(true) }} onBack={() => setChangingEmail(false)} /></SettingsBlock>}
         <SettingsRow
           className="flex-wrap items-center"
           label={t(methods.password ? "auth.methods.passwordSet" : "auth.methods.passwordMissing")}
-          control={<Button size="sm" variant="outline" onClick={() => setRecovering(true)}>{t(methods.password ? "auth.methods.resetPassword" : "auth.methods.setPassword")}</Button>}
+          control={<Button size="sm" variant="outline" onClick={() => { setChangingEmail(false); setRecovering(true) }}>{t(methods.password ? "auth.methods.resetPassword" : "auth.methods.setPassword")}</Button>}
         />
         {recovering && <SettingsBlock><div className="max-w-md"><FrontierForgotPasswordForm account={{ email: methods.email, jwt }} backLabel={t("auth.methods.back")} onBack={() => setRecovering(false)} returnTo="/preferences/login-methods" /></div></SettingsBlock>}
         <SettingsRow

@@ -1,6 +1,5 @@
 import { EmptyState } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
-import { loginPath } from "@/lib/navigation/login-path"
 import { LoginMethodsSection } from "@/components/settings/LoginMethodsSection"
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
@@ -573,7 +572,6 @@ function sectionDescription(section: PreferenceSection, description: string): Re
 function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: boolean }) {
   const { t } = useI18n()
   const navigate = useNavigate()
-  const location = useLocation()
   const { session, loading, sessionLoadError, retrySessionLoad } = useFrontierSession()
   if (INLINE_PREFERENCE_SLUGS.has(slug)) return <Navigate to="/preferences" replace />
   const section = PREFERENCE_SECTIONS.find((s) => s.slug === slug)
@@ -587,7 +585,6 @@ function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: bool
         <EmptyState variant="inline" icon={UserRound}
           title={t("auth.settings.loginRequired")}
           description={t("auth.settings.loginDescription")}
-          action={<Button onClick={() => navigate(loginPath({ next: location.pathname + location.search }))}>{t("common.logIn")}</Button>}
         />}
     </div>
     return modal ? content : <AppShell sidebar={<OrgSidebar />}

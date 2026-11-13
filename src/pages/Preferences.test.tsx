@@ -333,7 +333,7 @@ describe("signed-out account preferences", () => {
     authState.signedIn = false
     renderAt(`/preferences/${slug}`)
     expect(screen.getByText("Log in to manage your account")).toBeVisible()
-    expect(screen.getByRole("button", { name: "Log in" })).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Log in" })).not.toBeInTheDocument()
     expect(screen.queryByText("Manage how you log in to your Aquilla account.")).not.toBeInTheDocument()
   })
   it("does not show a login prompt before session hydration finishes", () => {

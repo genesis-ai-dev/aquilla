@@ -60,6 +60,23 @@ const addRecording = () =>
   fireEvent.change(fileInput(), { target: { files: [new File([new Uint8Array([1])], "maria.wav", { type: "audio/wav" })] } })
 
 describe("ElevenLabsConnectCard", () => {
+  // A restricted key without `user_read` connects on the voice list (the
+  // worker's check); the line must not show a made-up "0 characters left".
+  it("connects a restricted key and says Connected in place of a quota", async () => {
+    fetchElevenLabsAccount.mockResolvedValue({
+      tier: "", characterCount: 0, characterLimit: 0, canClone: null, resetAtUnix: null, quotaKnown: false,
+    })
+    render(<ElevenLabsConnectCard projectId="p1" session={session} />)
+    fireEvent.change(screen.getByLabelText("ElevenLabs API key"), { target: { value: "sk_restricted" } })
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+
+    const line = await screen.findByTestId("elevenlabs-connected")
+    expect(await within(line).findByText("Connected")).toBeInTheDocument()
+    expect(within(line).queryByText(/characters left/)).toBeNull()
+    expect(getElevenLabsKey()).toBe("sk_restricted")
+    expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument()
+  })
+
   it("is one key row until connected, then one muted line with Disconnect", async () => {
     render(<ElevenLabsConnectCard projectId="p1" session={session} />)
     const input = screen.getByLabelText("ElevenLabs API key")

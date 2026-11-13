@@ -506,8 +506,9 @@ export interface TimelineEditorProps {
   /** AQU-646 stage 3: which TRACK's slot the take should land in. The default
    *  dub row passes "recording", so its behaviour is unchanged. */
   onOpenRecording?(cellId: string, slot: string): void
-  /** AQU-2577: make speech for one line, from its ghost clip on the dub row. */
-  onMakeSpeech?(cellId: string): void
+  /** AQU-2577: pick a line for Make speech from its ghost clip on the dub row. */
+  onPickGhost?(cellId: string, opts: { additive: boolean }): void
+  pickedGhostIds?: ReadonlySet<string>
   makingSpeechCellIds?: ReadonlySet<string>
   /** AQU-1684: the slot the recorder is recording into while it is open, else
    *  null — that track may not be hidden from under the take. */
@@ -1334,7 +1335,8 @@ export function TimelineEditor({
   onScrubStart,
   onScrubEnd,
   onOpenRecording,
-  onMakeSpeech,
+  onPickGhost,
+  pickedGhostIds,
   makingSpeechCellIds,
   recordingSlot = null,
   initialSelectedCellId,
@@ -4328,7 +4330,8 @@ export function TimelineEditor({
             takeVoiceFor={takeVoiceFor}
             getPlayheadSec={getPlayheadSec}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, RECORDING_SLOT) : undefined}
-            onMakeSpeech={onMakeSpeech}
+            onPickGhost={onPickGhost}
+            pickedGhostIds={pickedGhostIds}
             makingSpeechCellIds={makingSpeechCellIds}
             emptyCells={emptyTargets}
             // AQU-646: the mic over a stretch with no cell at all creates the

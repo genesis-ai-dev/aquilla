@@ -1213,24 +1213,28 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
   })
 
   // AQU-2577: a line with words and no speech shows the ghost of its clip. A
-  // click makes that one line's speech; the record button stays beside it. A
-  // line with nothing to say has no ghost, and a line being made cannot be
-  // clicked a second time (it would spend the user's characters twice).
-  it("draws a ghost clip that makes speech for that line only", () => {
-    const onMakeSpeech = vi.fn()
+  // click picks that line and generates nothing; Shift-click adds to the pick.
+  // The record button stays beside it. A line with nothing to say has no
+  // ghost, and a line being made cannot be picked again.
+  it("draws a ghost clip that picks the line, and Shift-click picks several", () => {
+    const onPickGhost = vi.fn()
     const onOpenRecording = vi.fn()
     const onSelect = vi.fn()
     const worded = { ...emptyCell("c9"), translated: "هذا كان في البدء عند الله." } as CellData
     const silent = emptyCell("c10", 40, 46)
-    const props = { ...base, items: [], emptyCells: [worded, silent], onSelect, onOpenRecording, onMakeSpeech }
+    const props = { ...base, items: [], emptyCells: [worded, silent], onSelect, onOpenRecording, onPickGhost }
     const { rerender } = render(<TargetAudioLane {...props} />)
     expect(screen.queryByTestId("tl-target-ghost-c10")).toBeNull()
     fireEvent.click(screen.getByTestId("tl-target-ghost-c9"))
-    expect(onMakeSpeech).toHaveBeenCalledWith("c9")
+    expect(onPickGhost).toHaveBeenLastCalledWith("c9", { additive: false })
     expect(onSelect).toHaveBeenCalledWith("c9")
+    fireEvent.click(screen.getByTestId("tl-target-ghost-c9"), { shiftKey: true })
+    expect(onPickGhost).toHaveBeenLastCalledWith("c9", { additive: true })
     expect(onOpenRecording).not.toHaveBeenCalled()
     expect(screen.getByTestId("tl-target-empty-c9-record")).toBeInTheDocument()
 
+    rerender(<TargetAudioLane {...props} pickedGhostIds={new Set(["c9"])} />)
+    expect(screen.getByTestId("tl-target-ghost-c9")).toHaveAttribute("aria-pressed", "true")
     rerender(<TargetAudioLane {...props} makingSpeechCellIds={new Set(["c9"])} />)
     expect(screen.getByTestId("tl-target-ghost-c9")).toBeDisabled()
   })

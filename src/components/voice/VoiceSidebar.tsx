@@ -21,7 +21,7 @@ import { MakeSpeechPanel, type MakeSpeechLine } from "./inspector/MakeSpeechPane
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { canManageVoices } from "@/lib/audio/voice-permission"
 import { upsertVoice } from "@/lib/audio/voices"
-import type { MakeSpeechActions } from "@/lib/audio/make-speech"
+import type { MakeSpeechActions, MakeSpeechLineState } from "@/lib/audio/make-speech"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { liveTargetLaneLanguages } from "@/lib/lanes/lane-language"
 import type { ProjectTtsApi } from "@/hooks/useProjectTts"
@@ -65,6 +65,10 @@ interface VoiceSidebarProps {
     lines: MakeSpeechLine[]
     selectedCellId: string | null
     actions: MakeSpeechActions
+    /** The lines picked on the timeline (their ghost clips). */
+    picked: readonly string[]
+    onClearPicked: () => void
+    onLineState: (cellId: string, state: MakeSpeechLineState) => void
   }
 }
 
@@ -136,6 +140,23 @@ export function VoiceSidebar({
       />,
     )
   }
+  // Lines picked on the timeline come first: the rail is about what was just clicked.
+  const pickedLines = makeSpeech?.picked ?? []
+  if (makeSpeech && pickedLines.length > 0) {
+    return frame(
+      <MakeSpeechPanel
+        projectId={projectId}
+        voices={laneVoices}
+        lines={makeSpeech.lines}
+        selectedCellId={makeSpeech.selectedCellId}
+        picked={pickedLines}
+        targetLanguage={languageLabel}
+        actions={makeSpeech.actions}
+        onLineState={makeSpeech.onLineState}
+        onBack={() => { makeSpeech.onClearPicked(); setView("cast") }}
+      />,
+    )
+  }
   if (clip && fileId) {
     return frame(
       <ClipInspector
@@ -170,6 +191,7 @@ export function VoiceSidebar({
         selectedCellId={makeSpeech.selectedCellId}
         targetLanguage={languageLabel}
         actions={makeSpeech.actions}
+        onLineState={makeSpeech.onLineState}
         onBack={() => setView("cast")}
       />,
     )

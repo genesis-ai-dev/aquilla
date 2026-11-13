@@ -132,28 +132,33 @@ describe("AddVoicePanel", () => {
 })
 
 describe("MakeSpeechPanel", () => {
-  it("runs the recipe on the lines with no speech, and says what happened to each", async () => {
-    localStorage.clear()
+  const lines = [
+    { cellId: "a", label: "First line", hasText: true, hasSpeech: false },
+    { cellId: "b", label: "Second line", hasText: false, hasSpeech: false },
+    { cellId: "done", label: "Already spoken", hasText: true, hasSpeech: true },
+  ]
+  function harness() {
     const calls: string[] = []
     const text = new Set(["a"])
     const actions = {
       hasText: (id: string) => text.has(id),
       translate: vi.fn(async (id: string) => { calls.push(`translate ${id}`); text.add(id); return true }),
       speak: vi.fn(async (id: string, voice: string | null) => { calls.push(`speak ${id} ${voice}`); return id !== "b" }),
-      revoice: vi.fn(async () => true),
+      revoice: vi.fn(async (id: string, voice: string) => { calls.push(`revoice ${id} ${voice}`); return true }),
     }
+    return { calls, actions }
+  }
+  beforeEach(() => localStorage.clear())
+
+  it("opened from the roster, runs on the lines with no speech and says what happened to each", async () => {
+    const { calls, actions } = harness()
     render(
       <MakeSpeechPanel
         projectId="p1" voices={[elevenVoice("layla", "Layla")]} targetLanguage="Arabic" selectedCellId={null} onBack={vi.fn()}
-        actions={actions}
-        lines={[
-          { cellId: "a", label: "First line", hasSpeech: false },
-          { cellId: "b", label: "Second line", hasSpeech: false },
-          { cellId: "done", label: "Already spoken", hasSpeech: true },
-        ]}
+        actions={actions} lines={lines}
       />,
     )
-    // Nothing is selected, so the run starts on the lines that have no speech.
+    // Nothing is selected or picked, so the run starts on the lines that have no speech.
     fireEvent.click(screen.getByRole("button", { name: "Make speech for 2 lines" }))
     const progress = within(await screen.findByTestId("make-speech-progress"))
     await waitFor(() => expect(progress.getByText("2 of 2 done")).toBeInTheDocument())
@@ -161,5 +166,29 @@ describe("MakeSpeechPanel", () => {
     expect(progress.getByText("First line").parentElement).toHaveTextContent("Done")
     expect(progress.getByText("Second line").parentElement).toHaveTextContent("Did not finish")
     expect(progress.queryByText("Already spoken")).toBeNull()
+  })
+
+  // Lines picked on the timeline: the panel is about exactly those, shows what
+  // each step will do to them, and generates nothing until the button is pressed.
+  it("for picked lines, shows the pipeline and runs it on those lines with the voices clicked", async () => {
+    const { calls, actions } = harness()
+    const onLineState = vi.fn()
+    render(
+      <MakeSpeechPanel
+        projectId="p1" voices={[elevenVoice("layla", "Layla"), elevenVoice("chip", "Chip")]} targetLanguage="Arabic"
+        selectedCellId="a" picked={["b"]} onBack={vi.fn()} actions={actions} lines={lines} onLineState={onLineState}
+      />,
+    )
+    expect(within(screen.getByTestId("make-speech-picked")).getByText("Second line")).toBeInTheDocument()
+    expect(screen.getByTestId("make-speech-translate-note")).toHaveTextContent("1 line has no text yet and will be translated first.")
+    // The picked line is the target, not the line selected in the editor.
+    expect(screen.queryByRole("button", { name: "The selected line" })).toBeNull()
+    expect(calls).toEqual([])
+
+    fireEvent.click(within(screen.getByRole("group", { name: "The voice that reads the text" })).getByRole("button", { name: "Layla" }))
+    fireEvent.click(within(screen.getByRole("group", { name: "The voice it is changed into" })).getByRole("button", { name: "Chip" }))
+    fireEvent.click(screen.getByRole("button", { name: "Make speech for 1 line" }))
+    await waitFor(() => expect(onLineState).toHaveBeenCalledWith("b", { kind: "failed", step: "speak" }))
+    expect(calls).toEqual(["translate b", "speak b layla"])
   })
 })

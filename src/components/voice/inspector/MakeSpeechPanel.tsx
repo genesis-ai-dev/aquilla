@@ -1,21 +1,29 @@
-// "Make speech" (AQU-2577): the recipe panel in the Voices rail.
+// "Make speech" (AQU-2577): the panel the Voices rail shows for lines that
+// have no speech yet.
 //
-// Three steps, set once per project on this device: translate a line that has
-// no text yet, have a reader voice speak it, and change the result into a
-// character's voice. Then run it on the selected line or on the lines that
-// have no speech yet, and watch each line go through. The usual way to run it
-// is one line at a time, from that line's ghost clip on the timeline.
+// It is the whole pipeline, read top to bottom, for the lines picked:
 //
-// The panel owns the recipe and the progress list. The steps themselves are
-// the workspace's (it has the cells, the session and the undo history), handed
-// in as `actions`; the order they run in is make-speech.ts.
+//   the text  →  1 translate it  →  2 a reader speaks it  →  3 change it into
+//   a character's voice
+//
+// Each step is one row: what it will do to these lines, and the one choice it
+// needs (a voice), made by clicking a chip. Then one button. Nothing is
+// generated until that button is pressed.
+//
+// The lines come from the timeline: a click on a line's ghost clip picks it,
+// and Shift-click adds more. Opened from the roster instead, with nothing
+// picked, the panel offers the selected line or every line with no speech.
+//
+// The panel owns the recipe (remembered per project on this device) and the
+// progress list. The steps themselves are the workspace's, handed in as
+// `actions`; the order they run in is make-speech.ts.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, Play, Square } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
+import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import {
   loadMakeSpeechRecipe,
   runMakeSpeech,
@@ -29,8 +37,10 @@ import type { Voice } from "@/lib/parsers/types"
 
 export interface MakeSpeechLine {
   cellId: string
-  /** What names the line in the progress list: its text, or its source when it has none yet. */
+  /** What names the line in the lists: its text, or its source when it has none yet. */
   label: string
+  /** The line has target text; without it, step 1 translates it first. */
+  hasText: boolean
   hasSpeech: boolean
 }
 
@@ -41,16 +51,20 @@ export interface MakeSpeechPanelProps {
   lines: MakeSpeechLine[]
   /** The line selected in the editor, if any. */
   selectedCellId: string | null
-  /** The language lines are translated into, as the lane names it. */
+  /**
+   * The lines picked on the timeline (their ghost clips). When there are any,
+   * the panel is about exactly these lines and offers no other choice of lines.
+   */
+  picked?: readonly string[]
+  /** The language lines are translated into, as a person reads it ("Arabic"). */
   targetLanguage?: string
   actions: MakeSpeechActions
+  /** Each line's state as the run goes, for whoever draws the lines (the timeline's ghosts). */
+  onLineState?: (cellId: string, state: MakeSpeechLineState) => void
   onBack: () => void
 }
 
 type Target = "line" | "missing"
-
-const LINE_DEFAULT = "__line__"
-const NO_CHARACTER = "__none__"
 
 const STATE_KEYS: Record<MakeSpeechLineState["kind"], MessageKey> = {
   waiting: "audio.makeSpeech.stateWaiting",
@@ -67,7 +81,7 @@ const STEP_KEYS = {
 } as const satisfies Record<string, MessageKey>
 
 export function MakeSpeechPanel({
-  projectId, voices, lines, selectedCellId, targetLanguage, actions, onBack,
+  projectId, voices, lines, selectedCellId, picked, targetLanguage, actions, onLineState, onBack,
 }: MakeSpeechPanelProps) {
   const t = useT()
   const [recipe, setRecipe] = useState<MakeSpeechRecipe>(() => loadMakeSpeechRecipe(projectId))
@@ -84,12 +98,17 @@ export function MakeSpeechPanel({
     [recipe, reader, character],
   )
 
+  const byId = useMemo(() => new Map(lines.map((l) => [l.cellId, l])), [lines])
   const missing = useMemo(() => lines.filter((l) => !l.hasSpeech).map((l) => l.cellId), [lines])
+  const pickedIds = useMemo(() => (picked ?? []).filter((id) => byId.has(id)), [picked, byId])
+  const hasPicked = pickedIds.length > 0
   const [target, setTarget] = useState<Target>(selectedCellId ? "line" : "missing")
   const targetIds = useMemo(
-    () => (target === "line" ? (selectedCellId ? [selectedCellId] : []) : missing),
-    [target, selectedCellId, missing],
+    () => (hasPicked ? pickedIds : target === "line" ? (selectedCellId ? [selectedCellId] : []) : missing),
+    [hasPicked, pickedIds, target, selectedCellId, missing],
   )
+  // What step 1 will do to these lines.
+  const untranslated = targetIds.filter((id) => byId.get(id)?.hasText === false).length
 
   const [progress, setProgress] = useState<Map<string, MakeSpeechLineState> | null>(null)
   const [running, setRunning] = useState(false)
@@ -107,17 +126,15 @@ export function MakeSpeechPanel({
     try {
       await runMakeSpeech(targetIds, effective, actions, (cellId, state) => {
         setProgress((cur) => new Map(cur ?? []).set(cellId, state))
+        onLineState?.(cellId, state)
       }, abort.signal)
     } finally {
       setRunning(false)
     }
-  }, [running, targetIds, effective, actions])
+  }, [running, targetIds, effective, actions, onLineState])
 
-  const voiceItems = voices.map((v) => ({ value: v.id, label: v.name }))
-  const readerItems = [{ value: LINE_DEFAULT, label: t("audio.makeSpeech.readerLineVoice") }, ...voiceItems]
-  const characterItems = [{ value: NO_CHARACTER, label: t("audio.makeSpeech.noCharacter") }, ...voiceItems]
   const done = progress ? [...progress.values()].filter((s) => s.kind !== "waiting" && s.kind !== "running").length : 0
-  const labelOf = (cellId: string) => lines.find((l) => l.cellId === cellId)?.label ?? cellId
+  const labelOf = (cellId: string) => byId.get(cellId)?.label ?? cellId
 
   const targets: { value: Target; label: string; count: number }[] = [
     { value: "line", label: t("audio.makeSpeech.targetLine"), count: selectedCellId ? 1 : 0 },
@@ -125,7 +142,7 @@ export function MakeSpeechPanel({
   ]
 
   return (
-    <div ref={panelRef} className="flex h-full min-h-0 flex-col overflow-y-auto" data-testid="make-speech-panel" data-showcase="voice.make-speech">
+    <div ref={panelRef} className="flex h-full min-h-0 flex-col overflow-y-auto overflow-x-hidden" data-testid="make-speech-panel" data-showcase="voice.make-speech">
       <div className="space-y-1 border-b p-3">
         <div className="flex items-center gap-2">
           <Button type="button" variant="outline" size="icon-sm" aria-label={t("audio.inspector.backToVoices")} onClick={onBack}>
@@ -167,8 +184,57 @@ export function MakeSpeechPanel({
           </ul>
         </div>
       )}
+
+      {/* The lines this is about. */}
+      <div className="space-y-2 border-b p-3">
+        {hasPicked ? (
+          <>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {t("audio.makeSpeech.pickedCount", { count: pickedIds.length })}
+            </h3>
+            <ul className="max-h-32 divide-y overflow-y-auto rounded-lg border text-xs" data-testid="make-speech-picked">
+              {pickedIds.map((id) => (
+                <li key={id} className="flex items-center gap-2 px-2 py-1.5">
+                  <span dir="auto" className="min-w-0 flex-1 truncate">{labelOf(id)}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="text-[11px] text-muted-foreground">{t("audio.makeSpeech.shiftHint")}</p>
+          </>
+        ) : (
+          <>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t("audio.makeSpeech.runOn")}</h3>
+            <div role="group" aria-label={t("audio.makeSpeech.runOn")} className="flex flex-col overflow-hidden rounded-lg border text-xs">
+              {targets.map((option, i) => (
+                <button
+                  key={option.value} type="button" aria-pressed={target === option.value}
+                  disabled={running || option.count === 0}
+                  className={cn(
+                    "h-8 px-2.5 text-start disabled:opacity-40",
+                    i > 0 && "border-t",
+                    target === option.value ? "bg-foreground font-medium text-background" : "hover:bg-accent",
+                  )}
+                  onClick={() => setTarget(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground">{t("audio.makeSpeech.ghostHint")}</p>
+          </>
+        )}
+      </div>
+
+      {/* The pipeline, in the order it runs. */}
       <div className="space-y-2.5 border-b p-3">
         <Step n={1} title={t("audio.makeSpeech.step1")}>
+          <p className="text-xs text-muted-foreground" data-testid="make-speech-translate-note">
+            {untranslated === 0
+              ? t("audio.makeSpeech.translateNone")
+              : !recipe.translate
+                ? t("audio.makeSpeech.translateSkipped", { count: untranslated })
+                : t("audio.makeSpeech.translateSome", { count: untranslated })}
+          </p>
           <label className="flex items-start gap-2 text-xs">
             <Checkbox checked={recipe.translate} onCheckedChange={(v) => update({ translate: v === true })} disabled={running} />
             <span>{targetLanguage ? t("audio.makeSpeech.translateInto", { language: targetLanguage }) : t("audio.makeSpeech.translate")}</span>
@@ -183,53 +249,26 @@ export function MakeSpeechPanel({
         </Step>
 
         <Step n={2} title={t("audio.makeSpeech.step2")}>
-          <Select
-            items={readerItems} value={reader ?? LINE_DEFAULT} disabled={running}
-            onValueChange={(v) => { if (v) update({ readerVoiceId: v === LINE_DEFAULT ? null : v }) }}
-          >
-            <SelectTrigger aria-label={t("audio.makeSpeech.readerAriaLabel")} className="w-full min-w-0 [&>span]:truncate"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {readerItems.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+          <VoiceChips
+            ariaLabel={t("audio.makeSpeech.readerAriaLabel")}
+            voices={voices} value={reader} disabled={running}
+            noneLabel={t("audio.makeSpeech.readerLineVoice")}
+            onPick={(voiceId) => update({ readerVoiceId: voiceId })}
+          />
         </Step>
 
         <Step n={3} title={t("audio.makeSpeech.step3")} strong={character != null}>
-          <Select
-            items={characterItems} value={character ?? NO_CHARACTER} disabled={running}
-            onValueChange={(v) => { if (v) update({ characterVoiceId: v === NO_CHARACTER ? null : v }) }}
-          >
-            <SelectTrigger aria-label={t("audio.makeSpeech.characterAriaLabel")} className="w-full min-w-0 [&>span]:truncate"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {characterItems.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+          <VoiceChips
+            ariaLabel={t("audio.makeSpeech.characterAriaLabel")}
+            voices={voices} value={character} disabled={running}
+            noneLabel={t("audio.makeSpeech.noCharacter")}
+            onPick={(voiceId) => update({ characterVoiceId: voiceId })}
+          />
           <p className="text-[11px] text-muted-foreground">{t("audio.makeSpeech.characterNote")}</p>
         </Step>
       </div>
 
-      <div className="space-y-2.5 border-b p-3">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t("audio.makeSpeech.runOn")}</h3>
-        <div role="group" aria-label={t("audio.makeSpeech.runOn")} className="flex flex-col overflow-hidden rounded-lg border text-xs">
-          {targets.map((option, i) => (
-            <button
-              key={option.value} type="button" aria-pressed={target === option.value}
-              disabled={running || option.count === 0}
-              className={cn(
-                "h-8 px-2.5 text-start disabled:opacity-40",
-                i > 0 && "border-t",
-                target === option.value ? "bg-foreground font-medium text-background" : "hover:bg-accent",
-              )}
-              onClick={() => setTarget(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+      <div className="space-y-2 p-3">
         {running ? (
           <Button type="button" variant="outline" className="w-full" onClick={() => abortRef.current?.abort()}>
             <Square data-icon="inline-start" />
@@ -241,10 +280,40 @@ export function MakeSpeechPanel({
             {t("audio.makeSpeech.run", { count: targetIds.length })}
           </Button>
         )}
-        <p className="text-[11px] text-muted-foreground">{t("audio.makeSpeech.ghostHint")}</p>
         <p className="text-[11px] text-muted-foreground">{t("audio.makeSpeech.newTakeNote")}</p>
       </div>
+    </div>
+  )
+}
 
+/** One voice out of the project's, picked by a click; the first chip is "none of them". */
+function VoiceChips({ ariaLabel, voices, value, noneLabel, disabled, onPick }: {
+  ariaLabel: string
+  voices: Voice[]
+  value: string | null
+  noneLabel: string
+  disabled: boolean
+  onPick: (voiceId: string | null) => void
+}) {
+  const chip = (selected: boolean) => cn(
+    "flex h-7 max-w-full items-center gap-1.5 rounded-full border px-2.5 text-xs disabled:opacity-50",
+    selected ? "border-primary bg-primary/10 font-medium text-foreground" : "text-muted-foreground hover:bg-accent",
+  )
+  return (
+    <div role="group" aria-label={ariaLabel} className="flex flex-wrap gap-1.5">
+      <button type="button" aria-pressed={value == null} disabled={disabled} className={chip(value == null)} onClick={() => onPick(null)}>
+        <span className="truncate">{noneLabel}</span>
+      </button>
+      {voices.map((voice) => (
+        <button
+          key={voice.id} type="button" aria-pressed={value === voice.id} disabled={disabled}
+          className={cn(chip(value === voice.id), "ps-1")}
+          onClick={() => onPick(voice.id)}
+        >
+          <VoiceAvatar voice={voice} size={20} className="rounded-full" />
+          <span className="truncate">{voice.name}</span>
+        </button>
+      ))}
     </div>
   )
 }

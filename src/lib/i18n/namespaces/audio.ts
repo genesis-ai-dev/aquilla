@@ -726,11 +726,22 @@ export const audio = defineNamespace({
     "audio.addVoice.trainBody": "5 to 60 minutes of one speaker. Ready in about 45 minutes. No ElevenLabs key needed.",
     "audio.addVoice.consentNote": "Cloning or training a real person asks your organization to confirm their consent first.",
     "audio.makeSpeech.title": "Make speech",
-    "audio.makeSpeech.ghost": "Make speech for this line",
-    "audio.makeSpeech.ghostHint": "Or click an empty clip on the timeline to fill in just that line.",
-    "audio.makeSpeech.ghostDone": "Speech made for this line",
-    "audio.makeSpeech.ghostReview": "Translated. Check the text, then click the clip again to make its speech.",
-    "audio.makeSpeech.ghostFailed": "Couldn't make speech for this line",
+    "audio.makeSpeech.ghost": "Pick this line to make its speech. Shift-click to pick several.",
+    "audio.makeSpeech.ghostHint": "Or click an empty clip on the timeline to pick lines there.",
+    "audio.makeSpeech.pickedCount": plural({
+      one: "{count} line picked",
+      other: "{count} lines picked",
+    }),
+    "audio.makeSpeech.shiftHint": "Shift-click another empty clip to add it, or to take it out.",
+    "audio.makeSpeech.translateNone": "These lines already have their text. Nothing to translate.",
+    "audio.makeSpeech.translateSome": plural({
+      one: "{count} line has no text yet and will be translated first.",
+      other: "{count} lines have no text yet and will be translated first.",
+    }),
+    "audio.makeSpeech.translateSkipped": plural({
+      one: "{count} line has no text yet and will be skipped.",
+      other: "{count} lines have no text yet and will be skipped.",
+    }),
     "audio.makeSpeech.intro": "Each line goes through these steps in order.",
     "audio.makeSpeech.step1": "Translate the text",
     "audio.makeSpeech.translate": "Translate a line that has no translation yet",
@@ -3265,19 +3276,28 @@ export const audio = defineNamespace({
         description: "Note at the bottom of the Add a voice panel.",
       },
       "audio.makeSpeech.ghost": {
-        description: "Tooltip and accessible label of a ghost clip on the timeline: the dashed outline where a line's speech will go. Clicking it makes speech for that one line.",
+        description: "Tooltip and accessible label of a ghost clip on the timeline: the dashed outline where a line's speech will go. Clicking it picks the line and opens the Make speech panel; nothing is generated yet. Shift is the keyboard key.",
+      },
+      "audio.makeSpeech.pickedCount": {
+        description: "Heading in the Make speech panel above the list of lines the user picked on the timeline.",
+        placeholders: { count: "How many lines are picked." },
+      },
+      "audio.makeSpeech.shiftHint": {
+        description: "Hint under the list of picked lines in the Make speech panel. 'Empty clip' is the dashed outline on the timeline where a line's speech will go. Shift is the keyboard key.",
+      },
+      "audio.makeSpeech.translateNone": {
+        description: "Note in step 1 (Translate the text) of the Make speech panel when every chosen line already has its translation.",
+      },
+      "audio.makeSpeech.translateSome": {
+        description: "Note in step 1 (Translate the text) of the Make speech panel: how many of the chosen lines have no translation and will be translated before speech is made.",
+        placeholders: { count: "How many lines have no translation yet." },
+      },
+      "audio.makeSpeech.translateSkipped": {
+        description: "Note in step 1 (Translate the text) of the Make speech panel when translating is switched off: how many of the chosen lines have no translation and will be left out.",
+        placeholders: { count: "How many lines have no translation yet." },
       },
       "audio.makeSpeech.ghostHint": {
-        description: "Hint in the Make speech panel, under the choice of lines: the same recipe can be run on one line by clicking its empty (ghost) clip on the timeline.",
-      },
-      "audio.makeSpeech.ghostDone": {
-        description: "Toast after clicking a ghost clip on the timeline, when that line's speech was made.",
-      },
-      "audio.makeSpeech.ghostReview": {
-        description: "Toast after clicking a ghost clip on the timeline, when the line was translated and the recipe is set to stop for a person to check the text before speech is made.",
-      },
-      "audio.makeSpeech.ghostFailed": {
-        description: "Toast title after clicking a ghost clip on the timeline, when making that line's speech failed.",
+        description: "Hint in the Make speech panel, under the choice of lines: lines can also be picked by clicking their empty (ghost) clips on the timeline.",
       },
       "audio.makeSpeech.title": {
         description: "Heading of the Make speech side panel.",

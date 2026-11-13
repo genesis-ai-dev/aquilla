@@ -277,7 +277,7 @@ import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynth
 import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake } from "@/lib/audio/change-voice"
 import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
 import { getTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
-import { loadMakeSpeechRecipe, runMakeSpeech, type MakeSpeechActions } from "@/lib/audio/make-speech"
+import { runMakeSpeech, type MakeSpeechActions, type MakeSpeechLineState } from "@/lib/audio/make-speech"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { takeStory } from "@/lib/audio/take-story"
@@ -13746,39 +13746,35 @@ export function ProjectWorkspace() {
   }, [inspectedTake, tts.laneSettings, makeSpeechActions, t])
 
   /**
-   * AQU-2577: a click on a line's ghost clip makes that line's speech with the
-   * project's Make speech recipe (make-speech.ts): translated first if it has
-   * no text, read by the recipe's reader — the line's own voice when none is
-   * set — then changed into its character. One line, because the user pointed
-   * at one.
+   * AQU-2577: the lines picked for Make speech on the timeline. A click on a
+   * line's ghost clip picks it and brings the Voices rail forward on the Make
+   * speech panel; with Shift, Ctrl or ⌘ it is added to, or taken out of, the
+   * lines already picked. Picking generates nothing: the panel's button does.
    */
+  const [pickedGhostIds, setPickedGhostIds] = useState<readonly string[]>([])
+  const pickedGhostSet = useMemo(() => new Set(pickedGhostIds), [pickedGhostIds])
+  const handlePickGhost = useCallback((cellId: string, opts: { additive: boolean }) => {
+    setPickedGhostIds((cur) => (opts.additive
+      ? (cur.includes(cellId) ? cur.filter((id) => id !== cellId) : [...cur, cellId])
+      : [cellId]))
+    setInspectedTake(null)
+    setDockTab("voices")
+  }, [setDockTab])
+  const clearPickedGhosts = useCallback(() => setPickedGhostIds([]), [])
+  /** The lines whose speech is being made right now: their ghosts show a spinner. */
   const [makingSpeechCellIds, setMakingSpeechCellIds] = useState<ReadonlySet<string>>(() => new Set())
-  const handleGhostSpeech = useCallback((cellId: string) => {
-    if (!project) return
-    const saved = loadMakeSpeechRecipe(project.id)
-    // A voice deleted since the recipe was saved is no voice at all.
-    const known = (voiceId: string | null) => (voiceId && findVoice(tts.laneSettings, voiceId) ? voiceId : null)
-    const recipe = { ...saved, readerVoiceId: known(saved.readerVoiceId), characterVoiceId: known(saved.characterVoiceId) }
-    setMakingSpeechCellIds((cur) => new Set(cur).add(cellId))
-    void runMakeSpeech([cellId], recipe, makeSpeechActions, () => {}).then((result) => {
-      setMakingSpeechCellIds((cur) => {
-        const next = new Set(cur)
-        next.delete(cellId)
-        return next
-      })
-      const state = result.get(cellId)
-      if (state?.kind === "done") toast.add({ type: "success", title: t("audio.makeSpeech.ghostDone") })
-      else if (state?.kind === "review") toast.add({ type: "info", title: t("audio.makeSpeech.ghostReview") })
-      else {
-        const failure = getTtsStatus(ttsStatusKey(cellId))
-        toast.add({
-          type: "error",
-          title: t("audio.makeSpeech.ghostFailed"),
-          ...(failure.kind === "error" && failure.message ? { description: failure.message } : {}),
-        })
-      }
+  const handleMakeSpeechLineState = useCallback((cellId: string, state: MakeSpeechLineState) => {
+    const running = state.kind === "running"
+    setMakingSpeechCellIds((cur) => {
+      if (cur.has(cellId) === running) return cur
+      const next = new Set(cur)
+      if (running) next.add(cellId)
+      else next.delete(cellId)
+      return next
     })
-  }, [project, tts.laneSettings, makeSpeechActions, t])
+    // A line that now has speech has no ghost left to stay picked.
+    if (state.kind === "done") setPickedGhostIds((cur) => cur.filter((id) => id !== cellId))
+  }, [])
 
   // The inspected clip as the rail needs it. A take on an audio-cue sibling is
   // not in this file's cells, so the rail keeps the roster for it.
@@ -13806,15 +13802,23 @@ export function ProjectWorkspace() {
       .map((c) => ({
         cellId: c.id,
         label: (c.translated?.trim() || c.original?.trim() || c.id).slice(0, 80),
+        hasText: Boolean(c.translated?.trim()),
         hasSpeech: lineTake(c).audioId != null,
       })),
     [audioMergedCells],
   )
   const makeSpeechForRail = useMemo(
     () => (lens === "audio" && activeLaneDelivers !== "audio"
-      ? { lines: makeSpeechLines, selectedCellId: timelineSelectedCellId, actions: makeSpeechActions }
+      ? {
+          lines: makeSpeechLines,
+          selectedCellId: timelineSelectedCellId,
+          actions: makeSpeechActions,
+          picked: pickedGhostIds,
+          onClearPicked: clearPickedGhosts,
+          onLineState: handleMakeSpeechLineState,
+        }
       : undefined),
-    [lens, activeLaneDelivers, makeSpeechLines, timelineSelectedCellId, makeSpeechActions],
+    [lens, activeLaneDelivers, makeSpeechLines, timelineSelectedCellId, makeSpeechActions, pickedGhostIds, clearPickedGhosts, handleMakeSpeechLineState],
   )
 
   const stationMenuItems = useMemo(() => ({ station: <StationMenuItems /> }), [])
@@ -13825,6 +13829,7 @@ export function ProjectWorkspace() {
     // goes back to the roster.
     if (owner) {
       setInspectedTake({ fileId: owner.fileId, cellId, audioId })
+      setPickedGhostIds([])
       setDockTab("voices")
     }
     if (!STATION_PICKS.wayIn.followTimelineSelection || !stationShowingRef.current) return
@@ -18563,7 +18568,8 @@ export function ProjectWorkspace() {
                     // the timeline's corner cell beside "Tracks".
                     layoutControls={regionControls(dock, "tl")}
                     onOpenRecording={handleOpenRecording}
-                    onMakeSpeech={makeSpeechForRail ? handleGhostSpeech : undefined}
+                    onPickGhost={makeSpeechForRail ? handlePickGhost : undefined}
+                    pickedGhostIds={pickedGhostSet}
                     makingSpeechCellIds={makingSpeechCellIds}
                     // AQU-1684: the track taking a take can't be hidden meanwhile.
                     recordingSlot={recordingCellId !== null ? recordingSlot : null}

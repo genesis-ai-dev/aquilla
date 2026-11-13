@@ -1389,13 +1389,15 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     expect(ctx.cells.map((c) => c.id)).toEqual(["cell-1", "cell-3"])
   })
 
-  // The review (Nov 12), N11: the run starts at the first chosen line in the
-  // order Play plays them, which need not be the table's.
-  it("on a film file, starts at the first chosen line in the order Play plays the lines", async () => {
+  // The check of the q44 fixes (Nov 12), NOTE C: where a run of chosen lines
+  // starts is the queue's to say, from the order it plays them (a book's
+  // sequence, a timed file's times), which neither the table's order nor the
+  // list's need be. The bar hands it no start of its own.
+  it("on a film file, hands the queue the run with no start of its own", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-3"]))
     const audio = audioMapFor(["cell-1", "cell-3"])
-    // Play plays cell-3 first (a file laid out by time, say).
-    const lines = [...filmFile(audio, 60)].reverse()
+    const [one, two, three] = filmFile(audio, 60)
+    const lines = [two!, three!, one!]
     renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
       audioMode: true, session: SESSION, audioByCellId: audio, freeTiming: true, playbackLines: lines,
     })
@@ -1403,7 +1405,9 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     await userEvent.setup().click(playButton())
 
     const [ctx, fromIndex] = vi.mocked(startQueue).mock.calls[0]
-    expect(ctx.cells[fromIndex as number]?.id).toBe("cell-3")
+    expect(ctx.cells).toBe(lines)
+    expect([...(ctx.only ?? [])].sort()).toEqual(["cell-1", "cell-3"])
+    expect(fromIndex).toBe(0)
   })
 
   // The check of the q44 fixes (Nov 12), SHOULD A: the count is the queue's

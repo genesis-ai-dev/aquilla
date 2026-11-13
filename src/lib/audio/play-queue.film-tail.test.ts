@@ -2199,6 +2199,24 @@ describe("an unrecorded line under the film is a line: Play selected, and the qu
     expect(panel()).toBe("pause")
   })
 
+  // The check of the q44 fixes (Nov 12), NOTE C: a run of chosen lines
+  // starts at its own first chosen stop, in the order Play plays the lines
+  // (here their sequence), wherever the list or the table put them: the queue
+  // only moves forward from where it starts.
+  it("a run of chosen lines starts at the first chosen line in the order Play plays them, and reaches every one", async () => {
+    const a = { ...line("a1", 1_000), sequenceIndex: 2 } as CellData
+    const b = { ...line("a2", 1_000), sequenceIndex: 1 } as CellData
+    const c = { ...line("a3", 1_000), sequenceIndex: 3 } as CellData
+    const cells = [a, b, c] // Play plays a2, a1, a3
+    linkFilm(60, cells)
+    startQueue(ctxFor(cells, only("a1", "a2")), 0, true)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "a2" })
+    el("a2")!.tick(1)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "a1" })
+  })
+
   it("Next inside Play selected steps onto the unrecorded line, and never onto one not chosen", async () => {
     const cells = [...chosen(), line("b4", 1_000)]
     linkFilm(10, cells)

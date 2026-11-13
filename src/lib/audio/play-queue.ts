@@ -3008,7 +3008,8 @@ export interface PlayContext {
    * plays only these lines, stepping over the others (the playhead and the
    * film jump between chosen lines that are not next to each other), and
    * stops at the end of the last one: no run on to the film's end, and Play
-   * all does not go on into the next chapter.
+   * all does not go on into the next chapter. It starts at its first chosen
+   * stop in the order it plays them, whatever start it is handed.
    */
   only?: ReadonlySet<string>
 }
@@ -4774,7 +4775,10 @@ export function startQueue(ctx: PlayContext, fromIndex: number, explicit = false
   if (timingMode === "audioFirst" && progEngageForContext()) {
     progLayersPurge() // AQU-2252: a fresh start
     progForgetFilmQuiet()
-    const start = progStartIndexFor(ctx.cells, fromIndex)
+    // The check of the q44 fixes (Nov 12): a run of chosen lines starts at
+    // its own first chosen stop, in the order it plays them; it only moves
+    // forward from where it starts, so a start in another order loses lines.
+    const start = ctx.only ? progNextPlayable(0) : progStartIndexFor(ctx.cells, fromIndex)
     if (start < 0) {
       // FORTIFY: exit through progFinish so the gate/interval/prefetch die
       // with the attempt — a bare IDLE left a pending gate's timer alive,

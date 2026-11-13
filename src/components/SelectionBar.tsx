@@ -392,16 +392,15 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // queue keeps the film out of such a run (N9).
   const selectionRun = useMemo(() => {
     if (playbackLines && fileStops && filmOverRun(film, playbackLines.map((c) => c.id)).coverSec > 0) {
-      // N11: membership by a Set, and the run starts at the first chosen line
-      // in the order Play plays them, not the table's.
+      // Membership by a Set (N11). Where the run starts is the queue's to
+      // say: its first chosen stop, in the order it plays them.
       const chosen = new Set(playbackRange.map((c) => c.id))
       const only = new Set(playbackLines.filter((c) => chosen.has(c.id)).map((c) => c.id))
-      const from = playbackLines.findIndex((c) => only.has(c.id))
-      if (from >= 0 && only.size === chosen.size) {
-        return { cells: playbackLines, from, only, stopCount: [...only].filter((id) => fileStops.has(id)).length }
+      if (only.size > 0 && only.size === chosen.size) {
+        return { cells: playbackLines, only, stopCount: [...only].filter((id) => fileStops.has(id)).length }
       }
     }
-    return { cells: playbackRange, from: 0, only: null, stopCount: linesPlaybackStopsAt(playbackRange, { ...ask, film: null }).size }
+    return { cells: playbackRange, only: null, stopCount: linesPlaybackStopsAt(playbackRange, { ...ask, film: null }).size }
   }, [playbackRange, playbackLines, film, fileStops, ask])
   const playableSelectedCount = selectionRun.stopCount
 
@@ -429,10 +428,10 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // the last one. Anywhere else, as before.
   const onPlaySelected = useCallback(() => {
     if (!session?.jwt) return
-    const { cells, from, only } = selectionRun
+    const { cells, only } = selectionRun
     startQueue(only
       ? { cells, projectId: project.id, session, only }
-      : { cells, projectId: project.id, session, snapshot: true }, from, true)
+      : { cells, projectId: project.id, session, snapshot: true }, 0, true)
   }, [selectionRun, project.id, session])
 
   // AQU-1722: a line's name the way the reader sees it — its reference, else

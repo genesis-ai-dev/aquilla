@@ -384,14 +384,26 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     () => ({ freeTiming, ...(programmeTracks ? { tracks: programmeTracks } : {}), film, skipSilent }),
     [freeTiming, programmeTracks, film, skipSilent],
   )
-  const fileStops = useMemo(() => (playbackLines ? linesPlaybackStopsAt(playbackLines, ask) : null), [playbackLines, ask])
+  // The second check (Nov 13), NOTE 2: the lines Play plays are laid out only
+  // when it can be asked, a film behind them and something chosen in the
+  // Media view; not again for every click.
+  const anyChosen = audioMode === true && playbackRange.length > 0
+  const filmCovers = useMemo(
+    () => playbackLines != null && filmOverRun(film, playbackLines.map((c) => c.id)).coverSec > 0,
+    [playbackLines, film],
+  )
+  const fileStops = useMemo(
+    () => (anyChosen && filmCovers && playbackLines ? linesPlaybackStopsAt(playbackLines, ask) : null),
+    [anyChosen, filmCovers, playbackLines, ask],
+  )
   // On a film file it is a run of the lines Play plays when every chosen line
   // is among them (the check of the q44 fixes, Nov 12, SHOULD B: none may be
   // left out). A selection reaching past them (a book's other chapter) is a
   // run of the chosen lines on their own, as on a file with no film: the
   // queue keeps the film out of such a run (N9).
   const selectionRun = useMemo(() => {
-    if (playbackLines && fileStops && filmOverRun(film, playbackLines.map((c) => c.id)).coverSec > 0) {
+    if (!anyChosen) return { cells: playbackRange, only: null, stopCount: 0 }
+    if (playbackLines && fileStops) {
       // Membership by a Set (N11). Where the run starts is the queue's to
       // say: its first chosen stop, in the order it plays them.
       const chosen = new Set(playbackRange.map((c) => c.id))
@@ -401,7 +413,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
       }
     }
     return { cells: playbackRange, only: null, stopCount: linesPlaybackStopsAt(playbackRange, { ...ask, film: null }).size }
-  }, [playbackRange, playbackLines, film, fileStops, ask])
+  }, [anyChosen, playbackRange, playbackLines, fileStops, ask])
   const playableSelectedCount = selectionRun.stopCount
 
   /**

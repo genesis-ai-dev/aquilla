@@ -70,6 +70,13 @@ vi.mock("@/lib/audio/play-queue", async (importActual) => ({
   ...(await importActual<typeof import("@/lib/audio/play-queue")>()),
   startQueue: vi.fn(),
 }))
+// The layout itself, watched (and kept), so a test can count how often the
+// bar lays a file's lines out.
+vi.mock("@/lib/timeline/programme", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/timeline/programme")>()
+  return { ...actual, playedProgramme: vi.fn(actual.playedProgramme) }
+})
+import { playedProgramme } from "@/lib/timeline/programme"
 
 function makeProject(roleLevel: number | null): ProjectRecord {
   const base: ProjectRecord = {
@@ -1459,6 +1466,49 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
       expect(playButton().textContent).toContain("3")
       view.rerender(<TooltipProvider delay={0}>{bar(false, audio)}</TooltipProvider>)
       expect(playButton().textContent).toContain("1")
+    })
+  })
+
+  // The second check of the q44 fixes (Nov 13), NOTE 2: the stops of the
+  // lines Play plays are worked out only when they can be asked: a film
+  // behind the lines and something chosen in the Media view. Not on every
+  // file that follows its recordings, with nothing chosen, or in the Text view.
+  describe("the lines Play plays are laid out only when a film covers them and something is chosen", () => {
+    const MANY = Array.from({ length: 50 }, (_, i) => makeCell({ id: `m${i}` }))
+    const STORE = makeStore(MANY)
+    const bar = (lines: CellData[], audioMode: boolean) => (
+      <TooltipProvider delay={0}>
+        <SelectionBar project={makeProject(ROLE.CONTRIBUTOR)} cellStore={STORE} session={SESSION} username="alice" activeLane=""
+          myScopes={[]} completeBatch={vi.fn()} audioMode={audioMode} audioByCellId={new Map()} playbackLines={lines} freeTiming />
+      </TooltipProvider>
+    )
+    const fileLayouts = () => vi.mocked(playedProgramme).mock.calls.filter(([cells]) => cells.length === 50).length
+    beforeEach(() => { vi.mocked(playedProgramme).mockClear() })
+
+    it("no film: nothing chosen, the Text view, a selection, the lines changing: never", () => {
+      const spy = vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set())
+      const view = render(bar(MANY, false))
+      view.rerender(bar([...MANY], false))
+      spy.mockReturnValue(new Set(["m3"]))
+      view.rerender(bar(MANY, true))
+      spy.mockReturnValue(new Set(["m3", "m4"]))
+      view.rerender(bar(MANY, true))
+      expect(fileLayouts()).toBe(0)
+      // And nothing chosen lays out nothing at all.
+      expect(vi.mocked(playedProgramme).mock.calls.filter(([cells]) => cells.length === 0)).toHaveLength(0)
+    })
+
+    it("a film behind the lines: once when something is chosen, not again for another click", () => {
+      act(() => setProgrammeFilm({ endSec: 600, cellIds: new Set(MANY.map((c) => c.id)) }, "file-1"))
+      const spy = vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set())
+      const view = render(bar(MANY, true))
+      expect(fileLayouts()).toBe(0)
+      spy.mockReturnValue(new Set(["m3"]))
+      view.rerender(bar(MANY, true))
+      expect(fileLayouts()).toBe(1)
+      spy.mockReturnValue(new Set(["m3", "m4"]))
+      view.rerender(bar(MANY, true))
+      expect(fileLayouts()).toBe(1)
     })
   })
 

@@ -73,11 +73,23 @@ async function seedWithPassword(id: number, username: string, password: string) 
 }
 
 describe("where the gate runs", () => {
-  it("is off on production, previews and local, whatever the list says", async () => {
-    for (const name of [undefined, "aquilla-identity", "aquilla-auth-preview", "aquilla-identity-local"]) {
+  it("is off on production and local, whatever the list says", async () => {
+    for (const name of [undefined, "aquilla-identity", "aquilla-identity-local"]) {
       env.DEPLOYMENT_WORKER_NAME = name
       expect(await checkDevAccess(env, "stranger@example.com")).toEqual({ allowed: true })
     }
+  })
+
+  it("requires explicit dev access for a preview-only bootstrap admin", async () => {
+    env.DEPLOYMENT_WORKER_NAME = "aquilla-auth-preview"
+    env.DEV_ACCESS_LIST = kv as unknown as KVNamespace
+    await seedUser(1, "root")
+    const jwt = await jwtFor("root")
+    expect((await usersMe(jwt)).status).toBe(403)
+    await kv.put("root@example.com", "{}")
+    expect((await usersMe(jwt)).status).toBe(200)
+    await kv.delete("root@example.com")
+    expect((await usersMe(jwt)).status).toBe(403)
   })
 
   it("leaves a stranger's API calls alone off dev", async () => {
@@ -87,8 +99,12 @@ describe("where the gate runs", () => {
   })
 })
 
-describe("API requests on dev", () => {
-  beforeEach(onDev)
+describe.each([DEV_IDENTITY_WORKER, "aquilla-auth-preview"])("API requests on %s", (worker) => {
+  beforeEach(async () => {
+    onDev(); env.DEPLOYMENT_WORKER_NAME = worker
+    if (worker === "aquilla-auth-preview")
+      await env.AQUILLA_PG.prepare("INSERT INTO platform_admins(email) VALUES ('root@example.com')").run()
+  })
 
   it("refuses an account that is not on the list, with a plain message", async () => {
     await seedUser(2, "wendi")
@@ -157,8 +173,12 @@ describe("API requests on dev", () => {
   })
 })
 
-describe("sign-in and sign-up on dev", () => {
-  beforeEach(onDev)
+describe.each([DEV_IDENTITY_WORKER, "aquilla-auth-preview"])("sign-in and sign-up on %s", (worker) => {
+  beforeEach(async () => {
+    onDev(); env.DEPLOYMENT_WORKER_NAME = worker
+    if (worker === "aquilla-auth-preview")
+      await env.AQUILLA_PG.prepare("INSERT INTO platform_admins(email) VALUES ('root@example.com')").run()
+  })
 
   it("refuses a correct password from an account not on the list", async () => {
     await seedWithPassword(2, "wendi", "right-password")

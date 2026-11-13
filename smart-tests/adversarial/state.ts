@@ -10,6 +10,7 @@ import {
 import { OUTBOX_SCHEMA_VERSION } from "../../src/lib/sync/outbox-types"
 import { readTargetLane } from "../target-lane"
 import type { AdversarialUser, TargetKind } from "./target"
+import { loginFailure, SetupFailure } from "./health"
 import type { Snapshot } from "./invariants"
 
 const directory = path.dirname(fileURLToPath(import.meta.url))
@@ -39,11 +40,17 @@ async function json<T>(response: Response, operation: string): Promise<T> {
 
 /** Password login, the same endpoint the SPA uses. The password never leaves this process. */
 export async function login(user: AdversarialUser): Promise<PersistedSession> {
-  const body = await json<{ access_token: string }>(await fetch(`${identity()}/api/v1/auth/token`, {
+  const response = await fetch(`${identity()}/api/v1/auth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username: user.username, password: user.password }),
-  }), `login ${user.username}`)
+  })
+  if (!response.ok) {
+    // Only the refusal code is read; the rest of the body never reaches a message.
+    const code = await response.json().then((body: { code?: unknown } | null) => body?.code, () => undefined)
+    throw new SetupFailure(loginFailure(user.username, response.status, code))
+  }
+  const body = await response.json() as { access_token: string }
   return { jwt: body.access_token, username: user.username, createdAt: new Date().toISOString() }
 }
 

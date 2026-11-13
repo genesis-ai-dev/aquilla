@@ -31,6 +31,10 @@ export interface McpOAuthClient {
   /** Pre-registered clients (Zapier): the page offers mode and access. */
   scopeChoices?: boolean
   organizations: { id: string; name: string | null }[]
+  /** AQU-2504: the signed-in user is a platform admin with an active admin
+   *  elevation, so the page may offer support access instead of an org
+   *  selection. Absent/false for everyone else, who never sees the option. */
+  supportAccessAvailable?: boolean
 }
 
 export type McpOAuthResult<T> =

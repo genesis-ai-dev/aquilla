@@ -2,7 +2,8 @@
 // src/lib/paratext-bridge/ (which does all parsing and splicing in TS).
 //
 // Discovers Paratext project folders on this machine (Windows registry, Wine
-// prefixes, platform defaults, user-added roots), reads/hashes/writes book
+// prefixes, the Paratext 8/9, Paratext 10 and Paratext Lite default folders,
+// user-added roots), reads/hashes/writes book
 // files inside a discovered project only, and watches a project folder for
 // external changes. Backups live under the app data dir, never inside the
 // project folder (Paratext Send/Receive would commit stray files).
@@ -331,21 +332,44 @@ fn registry_roots() -> Vec<Root> {
 }
 
 // The folders Paratext creates by default, independent of any registry or
-// Wine lookup. Pure on `home` so the list itself is testable: on Windows the
-// installer's `C:\My Paratext N Projects`; on Linux (Paratext 9 for Linux) and
-// anything else Unix-like, `~/ParatextNProjects`. Wine prefixes add their own
-// `drive_c` defaults in `wine_roots`.
-fn platform_default_roots(home: Option<&Path>) -> Vec<Root> {
-    let mut out = Vec::new();
+// Wine lookup. Pure on `home` and `config` so the list itself is testable.
+//
+// Paratext 8/9: on Windows the installer's `C:\My Paratext N Projects`; on
+// Linux (Paratext 9 for Linux) and anything else Unix-like,
+// `~/ParatextNProjects`. Wine prefixes add their own `drive_c` defaults in
+// `wine_roots`.
+//
+// Paratext 10 (0.4.0) keeps projects in the same folder format under the
+// user's home on every OS: `~/.paratext-10-studio/projects/Paratext 9
+// Projects`. Platform.Bible, which it is built on, uses `~/.platform.bible`
+// the same way.
+//
+// Paratext Lite keeps them under its app-settings folder, which is `config`
+// (`dirs::config_dir()`): `~/Library/Application Support` on macOS,
+// `%APPDATA%` on Windows, `~/.config` on Linux. Only the macOS path has been
+// seen on a real install; the other two follow the same convention.
+fn platform_default_roots(home: Option<&Path>, config: Option<&Path>) -> Vec<Root> {
+    let mut paths: Vec<PathBuf> = Vec::new();
     if cfg!(windows) {
-        out.push(Root { path: "C:\\My Paratext 9 Projects".to_string(), source: "default" });
-        out.push(Root { path: "C:\\My Paratext 8 Projects".to_string(), source: "default" });
+        paths.push(PathBuf::from("C:\\My Paratext 9 Projects"));
+        paths.push(PathBuf::from("C:\\My Paratext 8 Projects"));
     } else if let Some(home) = home {
         for name in ["Paratext9Projects", "Paratext8Projects"] {
-            out.push(Root { path: home.join(name).to_string_lossy().into_owned(), source: "default" });
+            paths.push(home.join(name));
         }
     }
-    out
+    if let Some(home) = home {
+        for app in [".paratext-10-studio", ".platform.bible"] {
+            paths.push(home.join(app).join("projects").join("Paratext 9 Projects"));
+        }
+    }
+    if let Some(config) = config {
+        paths.push(config.join("paratextlite").join("Paratext8Projects"));
+    }
+    paths
+        .into_iter()
+        .map(|p| Root { path: p.to_string_lossy().into_owned(), source: "default" })
+        .collect()
 }
 
 fn wine_prefixes() -> Vec<PathBuf> {
@@ -386,10 +410,19 @@ fn wine_roots() -> Vec<Root> {
     out
 }
 
+// Paratext keeps `RegistrationInfo.xml` in a per-version folder: `Paratext93`,
+// `Paratext96` (also what Paratext Lite writes), `Paratext100` (Paratext 10).
+fn is_registration_dir(name: &str) -> bool {
+    name.starts_with("Paratext9") || name.starts_with("Paratext10")
+}
+
 fn registration_candidates() -> Vec<PathBuf> {
     let mut dirs_to_scan: Vec<PathBuf> = Vec::new();
-    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-        dirs_to_scan.push(PathBuf::from(local));
+    // `%LOCALAPPDATA%` on Windows, `~/Library/Application Support` on macOS,
+    // `~/.local/share` on Linux: where native Paratext 10 and Paratext Lite
+    // write the per-version folder.
+    if let Some(local) = dirs::data_local_dir() {
+        dirs_to_scan.push(local);
     }
     for prefix in wine_prefixes() {
         if let Ok(users) = std::fs::read_dir(prefix.join("drive_c").join("users")) {
@@ -404,7 +437,7 @@ fn registration_candidates() -> Vec<PathBuf> {
             continue;
         };
         for e in rd.filter_map(|e| e.ok()) {
-            if e.file_name().to_string_lossy().starts_with("Paratext9") {
+            if is_registration_dir(&e.file_name().to_string_lossy()) {
                 let f = e.path().join("RegistrationInfo.xml");
                 if f.is_file() {
                     out.push(f);
@@ -423,18 +456,25 @@ fn registered_user() -> Option<RegisteredUser> {
         .find_map(|xml| parse_registration_info(&xml))
 }
 
+// True when a process name or command line belongs to a Paratext that can
+// have a project open: Paratext 8/9 (`Paratext.exe`, natively or under Wine),
+// Paratext 10 (`Paratext 10`, and its `ParanextDataProvider` child, which is
+// the process that reads and writes project files), or Paratext Lite.
+fn is_paratext_process(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    ["paratext.exe", "paratext 10", "paranextdataprovider", "paratextlite"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+}
+
 fn paratext_running_now() -> bool {
     use sysinfo::{ProcessesToUpdate, System};
     // sysinfo >= 0.40 makes `System::new()` fallible; on failure fall through to `ps`.
     let via_sysinfo = System::new().is_ok_and(|mut sys| {
         sys.refresh_processes(ProcessesToUpdate::All, true);
         sys.processes().values().any(|p| {
-            let name = p.name().to_string_lossy().to_ascii_lowercase();
-            name.contains("paratext.exe")
-                || p
-                    .cmd()
-                    .iter()
-                    .any(|a| a.to_string_lossy().to_ascii_lowercase().contains("paratext.exe"))
+            is_paratext_process(&p.name().to_string_lossy())
+                || p.cmd().iter().any(|a| is_paratext_process(&a.to_string_lossy()))
         })
     });
     if via_sysinfo {
@@ -445,9 +485,7 @@ fn paratext_running_now() -> bool {
     #[cfg(unix)]
     {
         if let Ok(out) = std::process::Command::new("ps").args(["-axo", "args="]).output() {
-            return String::from_utf8_lossy(&out.stdout)
-                .to_ascii_lowercase()
-                .contains("paratext.exe");
+            return is_paratext_process(&String::from_utf8_lossy(&out.stdout));
         }
     }
     false
@@ -489,7 +527,7 @@ fn save_user_roots(app: &AppHandle, roots: &[String]) -> Result<(), String> {
 
 fn run_discovery(app: &AppHandle) -> Discovery {
     let mut candidates = registry_roots();
-    candidates.extend(platform_default_roots(dirs::home_dir().as_deref()));
+    candidates.extend(platform_default_roots(dirs::home_dir().as_deref(), dirs::config_dir().as_deref()));
     candidates.extend(wine_roots());
     candidates.extend(load_user_roots(app).into_iter().map(|p| Root { path: p, source: "user" }));
     let (roots, projects) = discover_in_roots(candidates);
@@ -869,16 +907,93 @@ mod tests {
     #[test]
     fn platform_defaults_are_the_folders_paratext_creates() {
         let home = Path::new(if cfg!(windows) { "C:\\Users\\u" } else { "/home/u" });
-        let paths: Vec<String> = platform_default_roots(Some(home)).into_iter().map(|r| r.path).collect();
+        let config = Path::new(if cfg!(windows) { "C:\\Users\\u\\AppData\\Roaming" } else { "/home/u/.config" });
+        let paths: Vec<String> = platform_default_roots(Some(home), Some(config)).into_iter().map(|r| r.path).collect();
         if cfg!(windows) {
-            assert_eq!(paths, vec!["C:\\My Paratext 9 Projects", "C:\\My Paratext 8 Projects"]);
+            assert_eq!(
+                paths,
+                vec![
+                    "C:\\My Paratext 9 Projects",
+                    "C:\\My Paratext 8 Projects",
+                    "C:\\Users\\u\\.paratext-10-studio\\projects\\Paratext 9 Projects",
+                    "C:\\Users\\u\\.platform.bible\\projects\\Paratext 9 Projects",
+                    "C:\\Users\\u\\AppData\\Roaming\\paratextlite\\Paratext8Projects",
+                ]
+            );
         } else {
-            assert_eq!(paths, vec!["/home/u/Paratext9Projects", "/home/u/Paratext8Projects"]);
-            // No home dir means no guess: a bogus relative path would be
-            // scanned against the cwd.
-            assert!(platform_default_roots(None).is_empty());
+            assert_eq!(
+                paths,
+                vec![
+                    "/home/u/Paratext9Projects",
+                    "/home/u/Paratext8Projects",
+                    "/home/u/.paratext-10-studio/projects/Paratext 9 Projects",
+                    "/home/u/.platform.bible/projects/Paratext 9 Projects",
+                    "/home/u/.config/paratextlite/Paratext8Projects",
+                ]
+            );
+            // No home or config dir means no guess: a bogus relative path
+            // would be scanned against the cwd.
+            assert!(platform_default_roots(None, None).is_empty());
         }
-        assert!(platform_default_roots(Some(home)).iter().all(|r| r.source == "default"));
+        assert!(platform_default_roots(Some(home), Some(config)).iter().all(|r| r.source == "default"));
+    }
+
+    // A Paratext 10 or Paratext Lite projects folder holds support folders
+    // (`_Backups`, `_Resources`, `Terms`…) beside the projects. Only folders
+    // with a project Settings.xml may be listed: anything listed becomes a
+    // folder Aquilla is allowed to write into.
+    #[test]
+    fn a_paratext_10_projects_folder_lists_projects_and_skips_support_folders() {
+        let home = std::env::temp_dir().join(format!("aq-pt10-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let p10 = home.join(".paratext-10-studio").join("projects").join("Paratext 9 Projects");
+        let lite = home.join("cfg").join("paratextlite").join("Paratext8Projects");
+        make_project(&p10, "MAO", true);
+        make_project(&lite, "TPP1", true);
+        for support in ["_Backups", "_Resources", "Temp Files"] {
+            std::fs::create_dir_all(p10.join(support)).unwrap();
+        }
+        std::fs::create_dir_all(lite.join("Terms")).unwrap();
+        std::fs::write(lite.join("Terms").join("Settings.xml"), "<Terms />").unwrap();
+
+        let candidates = platform_default_roots(Some(&home), Some(&home.join("cfg")));
+        let (roots, projects) = discover_in_roots(candidates);
+        let names: Vec<&str> = projects.iter().map(|p| p.folder_name.as_str()).collect();
+        assert_eq!(names, vec!["MAO", "TPP1"]);
+        // Folders that do not exist on this machine are not reported as scanned.
+        assert_eq!(roots.len(), 2);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    // Without a registered user every edit is refused, so the folders native
+    // Paratext 10 and Paratext Lite write must count, and look-alikes must not.
+    #[test]
+    fn registration_folders_cover_paratext_9_lite_and_10() {
+        for name in ["Paratext93", "Paratext96", "Paratext100"] {
+            assert!(is_registration_dir(name), "{name}");
+        }
+        for name in ["Paratext8", "paratextlite", "paratext-10-studio"] {
+            assert!(!is_registration_dir(name), "{name}");
+        }
+    }
+
+    // The "Paratext is running" badge warns that Paratext may overwrite a
+    // book from its in-memory copy. Paratext 10 and Paratext Lite hold
+    // projects open the same way, under different process names.
+    #[test]
+    fn running_check_recognises_every_paratext_app() {
+        for process in [
+            "Paratext.exe",
+            "C:\\Program Files\\Paratext 9\\Paratext.exe",
+            "/Applications/Paratext 10.app/Contents/MacOS/Paratext 10",
+            "ParanextDataProvider",
+            "/Applications/ParatextLite.app/Contents/MacOS/ParatextLite",
+        ] {
+            assert!(is_paratext_process(process), "{process}");
+        }
+        for process in ["Aquilla", "/usr/bin/hg", "ParatextProjectStats"] {
+            assert!(!is_paratext_process(process), "{process}");
+        }
     }
 
     // A linked folder must come back after a restart (the file is the only

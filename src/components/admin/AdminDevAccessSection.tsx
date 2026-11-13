@@ -71,7 +71,7 @@ export function AdminDevAccessSection({ jwt }: { jwt: string }) {
   if (!list.enabled) {
     return (
       <p className="text-sm text-muted-foreground">
-        The dev access list only applies on dev.aquilla.app. Open this page there to change it.
+        Manage access to development and CI previews from this page on dev.aquilla.app.
       </p>
     )
   }
@@ -88,11 +88,11 @@ export function AdminDevAccessSection({ jwt }: { jwt: string }) {
   return (
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">
-        Only platform admins and the people listed here can sign in to dev.aquilla.app. Platform
-        admins don&apos;t need an entry. Changes apply straight away.
+        Only platform admins and the people listed here can sign in to dev.aquilla.app and updated CI previews. Platform
+        admins don&apos;t need an entry. Changes may take a short time to reach every preview.
       </p>
 
-      <Section title="People with dev access" description="Everyone listed here can sign in to dev.">
+      <Section title="People with dev access" description="The same list controls development and updated CI previews.">
         {list.entries.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nobody yet. Only platform admins can sign in.</p>
         ) : (

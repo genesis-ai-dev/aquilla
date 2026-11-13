@@ -223,4 +223,24 @@ describe("GET concept occurrences", () => {
     expect((await get(db, `/api/v1/projects/${PROJECT}/concepts/missing/occurrences`, token)).status).toBe(404)
     expect(await handleConceptOccurrencesRequest(new Request("https://w/api/v1/projects/p/concepts"), envWith(db))).toBeNull()
   })
+
+  // AQU-730: the page carries `lane`'s target text, so the wall checks the lane.
+  it("refuses a walled member a lane they are not granted", async () => {
+    const { db } = await seed({
+      term: "grace",
+      cells: [
+        cell({ cell_id: "c1", side: "source", value: "by grace alone" }),
+        cell({ cell_id: "c1", side: "target", value: "por favor" }),
+      ],
+    })
+    const path = `/api/v1/projects/${PROJECT}/concepts/c1/occurrences`
+    const call = async (role: number, wall: string | undefined) => {
+      const token = await makeTestToken(SECRET, { projectId: PROJECT, role })
+      const req = new Request(`https://w${path}`, { headers: { Authorization: `Bearer ${token}` } })
+      return (await handleConceptOccurrencesRequest(req, { ...envWith(db), LANE_READ_WALL: wall }))!.status
+    }
+    expect(await call(400, "1")).toBe(403)
+    expect(await call(600, "1")).toBe(200)
+    expect(await call(400, undefined)).toBe(200)
+  })
 })

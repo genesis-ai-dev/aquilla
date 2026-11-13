@@ -105,6 +105,9 @@ const ParatextProjectsPage = lazy(() =>
 const ParatextBookPage = lazy(() =>
   import("@/pages/ParatextBridge/ParatextBookPage").then((m) => ({ default: m.ParatextBookPage })),
 )
+const ParatextProjectPage = lazy(() =>
+  import("@/pages/ParatextBridge/ParatextProjectPage").then((m) => ({ default: m.ParatextProjectPage })),
+)
 const ThisComputerPage = lazy(() =>
   import("@/pages/ThisComputer/ThisComputerPage").then((m) => ({ default: m.ThisComputerPage })),
 )
@@ -495,6 +498,7 @@ function AppRoutes() {
         {/* Desktop-only "This computer" workspace: linked folders + Paratext projects on this device. */}
         <Route path="/this-computer" element={<LazyRoute><ThisComputerPage /></LazyRoute>} />
         <Route path="/paratext" element={<LazyRoute><ParatextProjectsPage /></LazyRoute>} />
+        <Route path="/paratext/project" element={<LazyRoute><ParatextProjectPage /></LazyRoute>} />
         <Route path="/paratext/book" element={<LazyRoute><ParatextBookPage /></LazyRoute>} />
         <Route path="/paratext/open" element={<LazyRoute><ParatextOpenPage /></LazyRoute>} />
         <Route path="/preferences" element={<Preferences />} />

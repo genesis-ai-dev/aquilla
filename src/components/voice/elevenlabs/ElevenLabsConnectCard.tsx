@@ -4,7 +4,9 @@
 // muted line under it ("Stays on this device · Get a key"). Connect validates
 // the key against the account route before saving it, so a typo never gets
 // stored. With a key → one muted line: "ElevenLabs · N characters left" and a
-// quiet Disconnect.
+// quiet Disconnect. A restricted key that may not read the account still
+// connects (the worker checks it against the voice list): its line says
+// "Connected" in place of a quota.
 //
 // The key lives on this device for this user only (src/lib/audio/elevenlabs/key.ts);
 // it never enters project settings.
@@ -125,7 +127,10 @@ function ConnectedLine({
 
   let body: ReactNode
   let title: string | undefined
-  if (state.status === "ready") {
+  if (state.status === "ready" && state.account.quotaKnown === false) {
+    body = <span>{t("audio.elevenLabs.connectedNoQuota")}</span>
+    title = t("audio.elevenLabs.connectedNoQuotaHint")
+  } else if (state.status === "ready") {
     const { account } = state
     const left = Math.max(0, account.characterLimit - account.characterCount)
     const low = account.characterLimit > 0 && left / account.characterLimit < 0.1

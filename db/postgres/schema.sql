@@ -1821,6 +1821,14 @@ CREATE TABLE IF NOT EXISTS api_credentials (
     -- makes every write surface answer scope_denied; 'write' (the default, so
     -- every pre-0113 token keeps working) is the original all-or-nothing grant.
     access       TEXT NOT NULL DEFAULT 'write' CHECK (access IN ('read', 'write')),
+    -- AQU-2504 (0198): connector support access — a platform admin's
+    -- time-boxed, read-only reach into orgs/projects they are not a member of.
+    -- `support_access` is the grant (ticked at connector consent);
+    -- `support_access_until` is the time box. Cross-tenant reads need BOTH, plus
+    -- a live `platform_admins` row for user_id, so the grant outliving its
+    -- window leaves an ordinary member-scoped token.
+    support_access       BOOLEAN NOT NULL DEFAULT false,
+    support_access_until TIMESTAMPTZ,
     CONSTRAINT api_credentials_org_ids_array CHECK (org_ids IS NULL OR
       (jsonb_typeof(org_ids) = 'array' AND org_id IS NULL AND project_id IS NULL))
 );
@@ -2856,11 +2864,17 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_codes (
   expires_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   access TEXT NOT NULL DEFAULT 'write',
+  -- AQU-2504 (0198): carries the connector consent page's "support access"
+  -- choice from consent to mint. A support-access code has no org picker, so
+  -- all three scope columns are NULL and the third CHECK branch is what allows
+  -- it; the mint re-checks the platform-admin allowlist before honouring it.
+  support_access BOOLEAN NOT NULL DEFAULT false,
   CONSTRAINT mcp_oauth_codes_access_check CHECK (access IN ('read', 'write')),
   CONSTRAINT mcp_oauth_codes_scope_check CHECK (
     (org_ids IS NOT NULL AND jsonb_typeof(org_ids) = 'array'
       AND jsonb_array_length(org_ids) > 0 AND org_id IS NULL AND project_id IS NULL)
-    OR (org_ids IS NULL AND ((project_id IS NULL) <> (org_id IS NULL))))
+    OR (org_ids IS NULL AND ((project_id IS NULL) <> (org_id IS NULL)))
+    OR (support_access AND org_ids IS NULL AND org_id IS NULL AND project_id IS NULL))
 );
 CREATE INDEX IF NOT EXISTS mcp_oauth_codes_expiry ON mcp_oauth_codes(expires_at);
 
@@ -3215,3 +3229,25 @@ CREATE TABLE IF NOT EXISTS social_login_flows (
   expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + interval '10 minutes'
 );
 CREATE INDEX IF NOT EXISTS social_login_flows_expiry ON social_login_flows(expires_at);
+-- AQU-2553: factors are isolated from copied production data by deployment name.
+CREATE TABLE IF NOT EXISTS admin_totp (
+ user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ deployment TEXT NOT NULL,
+ generation TEXT NOT NULL,
+ secret_enc TEXT NOT NULL,
+ enabled BOOLEAN NOT NULL DEFAULT false,
+ setup_session TEXT NOT NULL,
+ expires_at TIMESTAMPTZ NOT NULL,
+ confirmed_step BIGINT,
+ last_step BIGINT NOT NULL DEFAULT -1,
+ recovery_hashes JSONB NOT NULL DEFAULT '[]',
+ PRIMARY KEY(user_id, deployment)
+);
+ALTER TABLE admin_elevations ADD COLUMN IF NOT EXISTS factor_generation TEXT;
+CREATE TABLE IF NOT EXISTS admin_totp_attempts (
+ user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ deployment TEXT NOT NULL,
+ started_at TIMESTAMPTZ NOT NULL,
+ attempts INTEGER NOT NULL,
+ PRIMARY KEY(user_id,deployment)
+);

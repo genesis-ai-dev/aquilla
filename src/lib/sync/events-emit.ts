@@ -85,6 +85,9 @@ export interface BuildEventInput<K extends OutboxEventKind> {
   clientTs?: number
   /** Pre-generated UUIDv7. Defaults to a fresh one. Exposed for tests + idempotency. */
   id?: string
+  /** Envelope version, for the kinds whose projection requires another than
+   *  OUTBOX_SCHEMA_VERSION (`source.cell.metadata.patch` is version 2). */
+  schemaVersion?: number
 }
 
 /**
@@ -116,7 +119,7 @@ export function buildRawEvent<K extends OutboxEventKind>(
 
   const envelope: OutboxRawEvent<K> = {
     id,
-    schemaVersion: OUTBOX_SCHEMA_VERSION,
+    schemaVersion: input.schemaVersion ?? OUTBOX_SCHEMA_VERSION,
     kind: input.kind,
     projectId: input.projectId,
     ...(input.fileId ? { fileId: input.fileId } : {}),
@@ -455,6 +458,46 @@ export async function emitTargetCellCommits(
 ): Promise<string[]> {
   for (const input of inputs) noteTargetCellCommit(input)
   const events = await enqueueEvents(inputs.map(targetCellCommitEventInput))
+  return events.map(({ eventId }) => eventId)
+}
+
+export interface IdmlTargetMarkupInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The translation's words inside the source's protected style runs. */
+  targetHtml: string
+  author: string
+  clientTs?: number
+}
+
+/** `source.cell.metadata.patch` is projected only at envelope version 2. */
+const METADATA_PATCH_SCHEMA_VERSION = 2
+
+/**
+ * Replace the HTML of translations on the project's DEFAULT lane without
+ * committing them: the words, the history, the chain head and every validation
+ * stay as they were. For one job — an IDML translation typed as plain text
+ * whose words are being placed, unchanged, into the paragraph's style runs
+ * (`alignReimportedIdmlFile`, `keepValidated`). A `target.cell.commit` would
+ * save the same HTML and reset the line to unvalidated, which is right when
+ * the words changed and a pure loss when they did not.
+ *
+ * Project lead and above (the role gate throws below that), and the default
+ * lane only: the projection addresses the lane whose tag is `''`.
+ */
+export async function emitIdmlTargetMarkup(inputs: IdmlTargetMarkupInput[]): Promise<string[]> {
+  const events = await enqueueEvents(inputs.map((input) => ({
+    kind: "source.cell.metadata.patch" as const,
+    schemaVersion: METADATA_PATCH_SCHEMA_VERSION,
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { version: 1 as const, metadata: {}, targetHtml: input.targetHtml },
+    ...(input.clientTs !== undefined ? { clientTs: input.clientTs } : {}),
+  })))
   return events.map(({ eventId }) => eventId)
 }
 

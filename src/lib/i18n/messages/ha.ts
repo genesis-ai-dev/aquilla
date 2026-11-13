@@ -4542,7 +4542,6 @@ export const ha: Catalog = {
   "importExport.format.txt.description": "Zagayen rubutu tsirara: ana kiyaye tsarin sakin layi; sakin layin da ba a fassara ba suna kiyaye asali (layukan midiya suna amfani da rubutun sautinsu).",
   "importExport.format.md.description": "Zagayen markdown: ana sake gina kanu, jerin da aka tsara/ba a tsara ba, da maganganu; tubalan da ba a fassara ba suna kiyaye asali (layukan midiya suna amfani da rubutun sautinsu).",
   "importExport.format.html.label": "Shafin yanar gizo",
-  "importExport.format.html.description": "Shafi mai iya karantawa na littafi a fayil ɗaya mai zaman kansa: fihirisar babi, ayoyi masu lamba da kanunai na sashe, don masu bita da buga. Layukan da ba a fassara ba suna nuna rubutun asalinsu, an yi musu alama. Ba don sake shigowa ba; har yanzu ba a kiyaye tsarin sakin layi da bayanan ƙasa ba.",
   "importExport.format.tsv.label": "TSV na harsuna biyu",
   "importExport.format.tsv.description": "id/asali/manufa an raba da shafi, jere ɗaya ga kowane yanki.",
   "importExport.format.csv.label": "CSV na harsuna biyu",

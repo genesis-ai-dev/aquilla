@@ -4050,3 +4050,168 @@ same sandbox; this run did not re-prove it by re-running trunk, because it has a
 mechanical proof that the failures are not this diff's: **`git diff -U0 -- '*.ts' '*.tsx'`
 filtered to lines that do not begin `//`, `*` or `/*` is empty** — the diff contains zero
 changed non-comment source lines, so there is nothing in it that any spec could execute.
+
+## 2026-11-13 — dead-code run: 12 zero-reference exports in `auth-worker` (the safe half of the queued 23)
+
+**Done this run** (theme 1, dead-code deletion; 8 files counting this ledger, 7 source +
+this one, no test file touched). This is the slice the 2026-11-11 entry queued: of the 23
+worker exports whose name appears exactly once in the whole repo, the ones that are **not**
+in a frozen zone, taken **one package at a time** so only that package's suite joins the
+gate. `auth-worker` was chosen over `sync-worker` because it holds 12 of the safe set
+against `sync-worker`'s 3.
+
+**Deleted** (12 symbols, 58 lines; every one verified at deletion time by
+`git grep -n '\b<name>\b'` across every tracked `.ts`/`.tsx`/`.md`/`.js`/`.mjs`/`.json`
+outside `node_modules`, this ledger excluded — **one hit each, the declaration**, plus a
+second non-word-boundary sweep of the whole tree to catch string/dynamic uses):
+
+- `lib/billing/plans.ts:285 isPaidStatus` — the `active|trialing|past_due` predicate.
+  `BillingStatus` itself stays (used by `billing/apply.ts` and `billing/words.ts`).
+- `lib/billing/stripe.ts:31 addonPriceId` — reads `env.STRIPE_PRICE_ADDON`. The binding and
+  its `Env` field are untouched (wrangler config is a frozen zone); only the unreferenced
+  accessor goes. `StripeConfigError` keeps 8 other callers.
+- `lib/agent/tools/select-cells.ts:139 SelectScope` — superseded in place: the one function
+  that takes a scope declares it **inline** at `:215`
+  (`scope: { fileId: string; range?: RefRange } & RequiredLaneRef`), so the interface was
+  documentation for a shape nothing refers to. `RefRange` stays (5 uses, incl. `tools/read.ts`).
+  Note for future greps: a bare `SelectScope` substring search returns 14 false hits in
+  sync-worker — all of them `audioSelectScopeSql`/`audioSelectScopeBinds`. Word boundaries matter.
+- `lib/langquest/connections.ts:80 ConnectionOut` — `ReturnType<typeof connectionOut>`.
+  **Deliberately judged not a frozen response shape**: it is *derived*, not declarative. The
+  shape is produced by `connectionOut()`, which stays and still returns exactly what it did;
+  deleting an alias that is computed from a surviving function cannot change a wire shape.
+  (Contrast `auth-worker/src/types.ts:498 UserResponse`, left alone below, which *declares* one.)
+- `services/lane-grants.ts:207 applyMemberLaneGrantsForProjects` — a 23-line documented
+  AD-12 function. **Born dead, and this is the one worth a human's eye**:
+  `git log --all -S applyMemberLaneGrantsForProjects -- . ':!auth-worker/src/services/lane-grants.ts'`
+  returns only the commit that added it to *this ledger* — no caller has existed on any ref
+  in this container's history. Its sibling 12 lines above (`applyMigratedMemberLaneGrants`)
+  is the live admission path and is untouched, as are `applyDirectAddLaneGrants` (6 uses) and
+  `resolveProjectRoleShared` (25).
+- `services/org-permissions.ts:302,303,308,309` — `{PROJECT,TEAM}_DIRECTORY_{DEFAULT,MAX}_LIMIT`,
+  four consts that are plain aliases of `ORG_DIRECTORY_{DEFAULT,MAX}_LIMIT`. The two `clamp*`
+  aliases beside them (`clampProjectDirectoryLimit`, `clampTeamDirectoryLimit`) and the two
+  cursor aliases **are** referenced and stay; only the four unused numeric aliases go, and the
+  two doc comments were kept over the surviving aliases they still describe.
+- `services/org-permissions.ts:2945 getMemberProgressViewMinRole` — the single-floor fetch,
+  **superseded by the batched loader, not by a lost feature**. The floor is still enforced:
+  `routes/projects.ts:1363` calls `canViewMemberProgress(roleLevel, floors.memberProgressViewMinRole)`
+  with floors from the batched `loadOrgRoleFloors` path (`org-permissions.ts:3217,3224`), and
+  `canViewMemberProgress`/`DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE` keep 7 references between
+  them plus their own `org-permissions.roster-progress.test.ts`. Its sibling
+  `getRosterViewMinRole` has other callers and is untouched. **This check was the point**: a
+  dead resolver next to a live floor is exactly the shape of "the tuning was lost", and it
+  wasn't — the read just moved to the one-fetch-for-both path.
+- `services/source-linking.ts:600,601 SourceLinkConsumes`, `SourceLinkGate` — two string
+  unions nothing imports. `SourceLinkMode` on the line above **stays**: it is cited by a prose
+  comment at `:237` ("or null for a legacy link (see SourceLinkMode)"), so it is a live doc
+  reference even though no type position uses it — which is also why it never appeared in the
+  23. The shared header was trimmed from "link mode/consumes/gate" to "link mode" so the
+  sentence still describes what survives it.
+
+**No helper was orphaned by the deletions** — re-checked after the edit for all nine symbols
+the deleted code called or aliased (`ORG_DIRECTORY_*`, `StripeConfigError`, `connectionOut`,
+`applyDirectAddLaneGrants`, `resolveProjectRoleShared`, `loadOrgSettingsBlob`,
+`extractRoleFloor`, `DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE`): every one still has callers.
+
+**Still deferred, and still for the reasons the 2026-11-11 entry gives** — the 11 frozen-zone
+members of the 23 are untouched and stay queued: the four `sync-worker/src/external/*` ones
+(`cellFieldsBatchFloor`, `staticPatchSettingsFloor`, `eventLaneFields`, `PiiEnv` — published
+Agent API surface), `auth-worker/src/types.ts:498 UserResponse` (declares a route response
+shape; needs a human to say the route no longer returns it),
+`project-do-handlers.ts:320 ProjectDoBroadcastBatch` (DO wire message),
+`__tests__/helpers/cloudflare-workers-stub.ts:23 WorkerEntrypoint` (test helper, which this
+routine may not touch) and `lib/contextual/types.ts:42 REDRAFT_MAX_ITERATIONS` (the standing
+`contextual/tick.ts` invariant warning).
+
+### The `sync-worker` half — next run's slice, unchanged in size
+
+Three safe symbols remain, all in one package, so it is one more clean run on the same terms
+(and it adds only `cd sync-worker && npm test` to the gate):
+`events/progress-projection.ts:605,616` (`clearSectionProgressStmt`,
+`allSectionsProgressRecomputeStmt`) and `events/scoped-search.ts:259 sanitizeFtsAnyTerm`.
+
+### Sandbox note that cost this run ~25 minutes, for the next run
+
+**`cd auth-worker && npm ci` does not work in this container, with or without
+`--legacy-peer-deps`** — it fails `EUSAGE ... Missing: jose@6.2.17 from lock file`, because
+`auth-worker/package-lock.json` has drifted from its `package.json` (`jose: ^6.2.13`). The
+2026-11-09 entry's advice to add `--legacy-peer-deps` is now out of date: the flag is not the
+problem, the lockfile is. **Use `pnpm install --frozen-lockfile --ignore-workspace` instead**
+(auth-worker carries its own `pnpm-lock.yaml`); it installs in ~2s, leaves `git status` clean
+and leaves both lockfiles untouched, which matters because lockfiles are a frozen zone here.
+Symptom if you skip this: the suite still *runs* and reports **275 of 412 files failed** with
+`Cannot find package '@hono/zod-validator'/'fflate'/'bcryptjs'` — that is a missing-deps
+artifact, **not** a red baseline. With deps present the suite is fully green.
+
+### Gates recorded 2026-11-13 (`origin/dev` `4c7aba04`)
+
+| gate | baseline | after |
+| --- | --- | --- |
+| `pnpm lint` | exit 0 — 980 problems, 0 errors | exit 0 — 980 problems, 0 errors; the two runs' output differs **only** in two line numbers (see below) |
+| `pnpm build` | exit 0 (`tsc -b` + `vite build` + brand check) | exit 0 |
+| `pnpm test` | exit 1 — 1 failed / 2396 passed / 2 skipped (2399 files); 1 failed / 27640 passed / 1 expected fail / 23 skipped (27665 tests), 1899.25s | **exit 1 — identical counts**, same single failure, 1642.24s |
+| `cd auth-worker && npm test` | **exit 0** — 412 passed (412 files); 4905 passed / 2 expected fail (4907), 1796.69s | **exit 0 — identical counts**, 1650.00s |
+
+**The lint diff, in full**: `diff` of the two runs returns exactly two lines, both
+pre-existing `no-useless-assignment` warnings in `auth-worker/src/services/source-linking.ts`
+whose line numbers moved by **2** — `787:7`→`785:7` (`files`) and `1112:7`→`1110:7`
+(`cells`) — which is precisely the two type-alias lines deleted above them. Same rule, same
+message, same file, same total (980). No warning appeared, disappeared or changed severity:
+for a deletion diff this is the strongest form the usual "byte-identical" check can take.
+
+The baseline was re-run from scratch on a **stashed-clean tree** after a first attempt
+started before the edits landed; the numbers above are from the clean run, and
+`rm -rf packages/*/dist` preceded the baseline lint as in every run since 2026-08-26.
+
+**The one `pnpm test` failure is the same pre-existing one the 2026-11-09 and 2026-11-11
+entries document** — `scripts/release-cut.test.ts > buildReleaseBranch against a scratch repo
+> fails loud when the pick cannot commit, and leaves nothing in progress`. It sets
+`commit.gpgsign=true` with a `gpg.program` that does not exist and expects a throw; in a cloud
+sandbox the commit succeeds anyway. This diff touches no file that test imports (it is
+`scripts/`, the diff is `auth-worker/`), it is frozen by the routine's "a file whose tests are
+already red is frozen" rule, and the fix has to touch the test file — so it is still owed to
+Ryder rather than filed.
+
+### `pnpm test:e2e:smoke` — the first run in this ledger with a real baseline, and what it showed
+
+Earlier entries recorded the smoke suite only on the branch and compared against remembered
+numbers. This run took a **baseline on a detached clean `origin/dev`** as well, which is what
+made the one anomaly below legible. Shard composition has drifted since 2026-11-11 (shard 3
+now runs 38 tests, not 37 — AQU-2553's admin-authenticator spec landed 2026-11-12), so the
+old numbers were no longer a valid comparison anyway.
+
+| run | tree | shard 1 | shard 2 | shard 3 |
+| --- | --- | --- | --- | --- |
+| baseline | clean `origin/dev` | 42 passed / **3 failed** | 33 passed | **38 passed** |
+| after (A) | this branch | 42 passed / **3 failed** | 33 passed | 37 passed / **1 failed** |
+| after (B) | this branch, re-run | 42 passed / **3 failed** | 33 passed | 37 passed / **1 failed** |
+
+**Shard 1's 3 failures are the known pre-existing ones**, unchanged in all three runs:
+`editor/import-and-edit.smoke.spec.ts:339` for srt, vtt and sbv, each a 15s `locator.click`
+timeout. Same file, same line, same three caption formats the 2026-11-09 and 2026-11-11
+entries document.
+
+**Shard 3's single failure is flake, and the proof is that it is a *different test* each
+time**: run A failed `projects/admin-console-billing.smoke.spec.ts:51` (with
+`ENOENT: scandir 'auth-worker/.wrangler/tmp/email'` — a harness artifact, not an assertion),
+run B failed `validation/validate.smoke.spec.ts:137`. Both specs then **passed in isolation
+on this branch** (6/6, exit 0, 43s), and admin-console-billing also passed in isolation on
+clean dev (3/3). Neither file is touched by this diff, and neither imports anything it
+touches. A deterministic breakage does not move between files; a sandbox running three
+Playwright shards in parallel does.
+
+**This is the one place this run cannot say "identical before and after"**, so it says so
+plainly rather than rounding it off. What the diff *can* prove mechanically is stronger than
+the smoke comparison: every deleted symbol had zero references repo-wide (word-boundary grep
+plus a substring sweep), `tsc -b` is green, and **auth-worker's own 412-file / 4905-test
+suite is byte-identical before and after** — if any of these deletions had removed live code,
+that suite is where it would show, and it does not.
+
+**Worth logging for the next run**: `sync-worker/` and `agent-worker/` also ship without
+`node_modules` in a fresh container, and the e2e stack needs them. The first smoke attempt
+failed all three shards at boot with `Could not resolve "partyserver"`; the fix is the same
+`pnpm install --frozen-lockfile --ignore-workspace` used for auth-worker, run in each of
+`sync-worker/` and `agent-worker/`. A second attempt then failed on
+`Address already in use (127.0.0.1:9788)` — a failed shard boot leaves its `wrangler dev`
+behind, and those must be stopped before retrying.

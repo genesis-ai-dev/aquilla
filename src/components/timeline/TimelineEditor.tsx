@@ -3897,6 +3897,18 @@ export function TimelineEditor({
     onSelectCell?.(selectedId)
   }, [selectedId, onSelectedCellChange, onSelectCell])
 
+  // AQU-2253 (Nov 13): the line a picked line seeks to and plays from — a row
+  // click in the table and a clean click on its card both ask this. Following
+  // the recordings, a file with an audio cue file plays only its heard lines,
+  // so a subtitle line has no place in what plays: it goes to the heard line
+  // Play starts from for it, as Space and the strip's Play do
+  // (`playStartLineId`). Every other line is its own.
+  function startLineFor(picked: CellData): CellData | null {
+    const heard = audioCues ? targetCells : null
+    const startId = playStartLineId(picked, heard, audioFirst, links.cuesForText)
+    return startId === picked.id ? picked : (heard?.find((c) => c.id === startId) ?? null)
+  }
+
   // Center the track on a clip and cue playback (paused) at its start —
   // identical to a clean card click. Reads the live clientWidth (viewportPx
   // state can still be 0 pre-measurement). Untimed cells: no timecode, no-op.
@@ -3906,13 +3918,7 @@ export function TimelineEditor({
     // such request found nothing and silently returned, so the track never
     // moved.
     const picked = cells.find((c) => c.id === cellId) ?? audioCues?.find((c) => c.id === cellId)
-    // AQU-2253 (Nov 13): following the recordings, a file with an audio cue
-    // file plays only its heard lines, so a subtitle row has no place in what
-    // plays: it goes to the heard line Play starts from for it, as Space and
-    // the strip's Play do (`playStartLineId`). Every other line is its own.
-    const heard = audioCues ? targetCells : null
-    const startId = picked ? playStartLineId(picked, heard, audioFirst, links.cuesForText) : null
-    const cell = startId === picked?.id ? picked : heard?.find((c) => c.id === startId)
+    const cell = picked ? startLineFor(picked) : null
     const at = cell ? layout.seekSecFor(cell) : null
     if (at == null) return
     const viewport = scrollRef.current?.clientWidth ?? 0
@@ -4099,8 +4105,11 @@ export function TimelineEditor({
     // Clean card click → navigate playback to the clip's start (both lanes;
     // untimed chips have no timecode to seek to). SUB-53: "the clip's start"
     // is a programme second in audio-first mode, so the layout resolves it.
+    // AQU-2253: through `startLineFor`, so a subtitle card goes where its row
+    // in the table does.
     onSeek: (cellId: string) => {
-      const cell = cells.find((c) => c.id === cellId)
+      const picked = cells.find((c) => c.id === cellId)
+      const cell = picked ? startLineFor(picked) : null
       const at = cell ? layout.seekSecFor(cell) : null
       if (at != null) seekTo(at)
     },

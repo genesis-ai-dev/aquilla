@@ -4662,6 +4662,38 @@ describe("TimelineEditor — an added track finds its takes where they actually 
       it("following the source, plays from the row's own time", () => {
         expect(playRow("sA", "dubbing")).toHaveBeenCalledWith(50)
       })
+
+      // AQU-2253 (review, Nov 13): a clean click on the row's card in the
+      // Subtitles row seeks where a click on the row in the table does. It
+      // looked the subtitle up among the heard lines, found nothing and
+      // stayed put. sC sits on the film where cue2, which performs it, does,
+      // so its card is drawn following the recordings too.
+      const carded = [cell({ id: "sC", original: "Performed", medium: "text", startTime: 5.5, endTime: 7.5 })]
+      const cardLinks = buildCueLinkIndex([{
+        kind: "text-audio", fromFileId: "f1", fromCellId: "sC",
+        toFileId: "f1-cues", toCellId: "cue2", origin: "auto", confidence: 1,
+      }])
+      const clickCard = (cellId: string, timingMode: "audioFirst" | "dubbing") => {
+        const onSeekToTime = vi.fn()
+        render(
+          <TimelineEditor
+            fileId="f1" coreMediaUrl={null} editable cells={carded}
+            audioCues={raw3} targetCells={heard3} cueLinks={cardLinks} timingMode={timingMode}
+            onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime}
+          />,
+        )
+        fireEvent.click(screen.getByTestId(`tl-card-${cellId}`))
+        return onSeekToTime
+      }
+
+      it("a click on its card seeks to the heard line that performs it", () => {
+        // cue1's 6 s take, then cue2: cue2 starts at 6 s.
+        expect(clickCard("sC", "audioFirst")).toHaveBeenCalledWith(6)
+      })
+
+      it("following the source, a click on its card seeks to the row's own time", () => {
+        expect(clickCard("sC", "dubbing")).toHaveBeenCalledWith(5.5)
+      })
     })
   })
 

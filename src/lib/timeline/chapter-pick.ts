@@ -6,7 +6,10 @@
 // the same start Play all makes when it carries on into the next chapter. A
 // chapter with nothing to play cannot carry it on, so playback stops there.
 // (AQU-2253: following the recordings, a linked film behind a chapter's lines
-// is something to play for a pick, as for the strip's Play.)
+// is something to play for a pick, as for the strip's Play. Nov 12: a pick
+// asks the queue's own answer, `linesPlaybackStopsAt`, so with "Skip lines
+// with nothing to play" off a chapter nobody has recorded is played through
+// in silence, as Play plays it.)
 //
 // Paused on another chapter: that playback ends, as it always has, and the
 // timeline shows the chapter picked. Picking the chapter that is playing, or
@@ -20,10 +23,11 @@
 import type { CellData } from "@/hooks/useCells"
 import {
   linesHaveAnythingOfTheirOwnToPlay,
-  linesHaveAnythingToPlayCountingFilm,
+  linesPlaybackStopsAt,
   startQueue,
   stopQueue,
   type PlayContext,
+  type PlaybackAsk,
   type QueueState,
 } from "@/lib/audio/play-queue"
 import { nextPlayableChapter, scopeCells, type TimelineChapter } from "./sequence-timeline"
@@ -63,6 +67,7 @@ export function planChapterPick({
   pickedKey,
   playingKey,
   queueKind,
+  ask,
 }: {
   chapters: readonly TimelineChapter[]
   /** The lines the book's timeline may draw, before any chapter. */
@@ -71,14 +76,17 @@ export function planChapterPick({
   /** The chapter playback is on in this file, or null. */
   playingKey: string | null
   queueKind: QueueState["kind"]
+  /** What the queue's answer turns on (its timing, tracks, film, Skip). */
+  ask: PlaybackAsk
 }): ChapterPickPlan {
   if (!playingKey || playingKey === pickedKey) return { kind: "show" }
   if (queueKind !== "playing" && queueKind !== "loading") return { kind: "stop" }
   const chapter = chapters.find((c) => c.key === pickedKey)
   // AQU-2253 (review 2, Nov 9): a pick is someone asking for that chapter, so
-  // it asks what pressing Play on it asks: a take, an original, or a linked
-  // film behind its lines (Play all's own move asks for the chapter's own).
-  if (!chapter || !linesHaveAnythingToPlayCountingFilm(scopeCells(lines, chapter))) return { kind: "stop" }
+  // it asks what pressing Play on it asks: the lines the queue stops at
+  // (a take, an original, a linked film behind them, or, with Skip off, any
+  // line). Play all's own move asks for the chapter's own.
+  if (!chapter || linesPlaybackStopsAt(scopeCells(lines, chapter), ask).size === 0) return { kind: "stop" }
   return { kind: "play", chapter }
 }
 

@@ -5342,14 +5342,13 @@ export function linesPlaybackStopsAt(cells: readonly CellData[], ask: PlaybackAs
 //
 // Two questions, asked by different callers, so they have two names:
 //
-//  - `linesHaveAnythingToPlayCountingFilm`: a take, an original, OR a linked
-//    film playing behind the lines (the workspace's word, `setProgrammeFilm`;
-//    following the recordings the film is their source, `whatSlotPlays`).
-//    Asked of a chapter picked in the chapter picker while Play all plays
-//    (lib/timeline/chapter-pick's `planChapterPick`). A chapter only the film
-//    can play is played when someone asks for it: the film is behind its
-//    lines and the lines nobody recorded are crossed with it. (The bottom
-//    strip's Play asks `linesPlaybackStopsAt`.)
+//  - `linesPlaybackStopsAt` (above): the queue's own answer, the film behind
+//    the lines counted. Asked where a PERSON picks the lines to play: the
+//    bottom strip's Play, "Play selected", and a chapter picked in the
+//    chapter picker while Play all plays (lib/timeline/chapter-pick's
+//    `planChapterPick`). A chapter only the film can play is played when
+//    someone asks for it: the film is behind its lines and the lines nobody
+//    recorded are crossed with it.
 //
 //  - `linesHaveAnythingOfTheirOwnToPlay`: a take or an original, the film
 //    NOT counted. Asked by Play all's own move into the next chapter when a
@@ -5360,14 +5359,6 @@ export function linesPlaybackStopsAt(cells: readonly CellData[], ask: PlaybackAs
 //    counting it, Play all ran the whole book through the film's first
 //    minutes. So Play all goes on only into a chapter with something of its
 //    own, and a chapter only the film could play ends it there, as before.
-
-/**
- * A take, an original, or a linked film behind these lines: what a person
- * pressing Play (or picking the chapter) gets played. See above.
- */
-export function linesHaveAnythingToPlayCountingFilm(cells: CellData[], film: ProgrammeFilm | null = progFilm): boolean {
-  return linesHaveAnythingOfTheirOwnToPlay(cells) || filmOverRun(film, cells.map((c) => c.id)).coverSec > 0
-}
 
 /**
  * A take or an original of the lines' own, the film not counted: what Play

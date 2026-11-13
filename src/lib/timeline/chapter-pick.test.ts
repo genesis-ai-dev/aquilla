@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { applyChapterPick, planChapterPick, rowEndsPlayback } from "./chapter-pick"
 import type { TimelineChapter } from "./sequence-timeline"
 import {
-  getQueueProgress, getQueueState, setProgrammeFilm, setQueueTimingMode, startQueue, stopQueue, type PlayContext,
+  getQueueProgress, getQueueState, queuePlaybackAsk, setProgrammeFilm, setQueueTimingMode, startQueue, stopQueue, type PlayContext,
 } from "@/lib/audio/play-queue"
 import type { CellData } from "@/hooks/useCells"
 
@@ -70,9 +70,13 @@ const session = { jwt: "t", username: "dev", createdAt: "" } as PlayContext["ses
 const take = (id: string) => [...FakeAudio.instances].reverse().find((a) => a.src.includes(`/${id}.webm`))
 const settle = () => vi.advanceTimersByTimeAsync(0)
 
+/** What the queue's own answer turns on, following the recordings with no
+ *  film and "Skip lines with nothing to play" on (the defaults). */
+const ASK = { freeTiming: true, film: null, skipSilent: true } as const
+
 describe("planChapterPick", () => {
   const plan = (pickedKey: string, playingKey: string | null, queueKind: ReturnType<typeof getQueueState>["kind"]) =>
-    planChapterPick({ chapters: CHAPTERS, lines: RUTH, pickedKey, playingKey, queueKind })
+    planChapterPick({ chapters: CHAPTERS, lines: RUTH, pickedKey, playingKey, queueKind, ask: ASK })
 
   it("while playing another chapter: play the picked one", () => {
     expect(plan("RUT 2", "RUT 1", "playing")).toEqual({ kind: "play", chapter: CHAPTERS[1] })
@@ -91,8 +95,31 @@ describe("planChapterPick", () => {
   it("a picked chapter with nothing to play: stop", () => {
     const silent = [...RUTH.slice(0, 2), { ...verse("r2v1"), selectedAudioId: undefined, attachments: {} } as unknown as CellData]
     expect(
-      planChapterPick({ chapters: CHAPTERS, lines: silent, pickedKey: "RUT 2", playingKey: "RUT 1", queueKind: "playing" }),
+      planChapterPick({ chapters: CHAPTERS, lines: silent, pickedKey: "RUT 2", playingKey: "RUT 1", queueKind: "playing", ask: ASK }),
     ).toEqual({ kind: "stop" })
+  })
+
+  // The check of the q44 fixes (Nov 12), aquilla-media's pick: a pick asks
+  // what pressing Play on the chapter asks, the queue's own answer for its
+  // lines (`linesPlaybackStopsAt`), with the same Skip setting.
+  it("with Skip off, a picked chapter nobody has recorded is played through, in silence, as Play would", () => {
+    const silent = [...RUTH.slice(0, 2), { ...verse("r2v1"), selectedAudioId: undefined, attachments: {} } as unknown as CellData]
+    expect(
+      planChapterPick({ chapters: CHAPTERS, lines: silent, pickedKey: "RUT 2", playingKey: "RUT 1", queueKind: "playing", ask: { ...ASK, skipSilent: false } }),
+    ).toEqual({ kind: "play", chapter: CHAPTERS[1] })
+  })
+
+  it("a picked chapter whose lines all lie past its film's end has nothing to play: stop", () => {
+    const unrecorded = (id: string) => ({ ...verse(id), selectedAudioId: undefined, attachments: {} }) as unknown as CellData
+    const book = [...RUTH.slice(0, 2), unrecorded("r2v1"), unrecorded("r2v2")]
+    // The film behind every chapter is 0.01 s long: each chapter runs from 0:00.
+    const film = { endSec: 0.01, runsOn: false, cellIds: new Set(book.map((c) => c.id)) }
+    expect(
+      planChapterPick({ chapters: CHAPTERS, lines: book, pickedKey: "RUT 2", playingKey: "RUT 1", queueKind: "playing", ask: { ...ASK, film } }),
+    ).toEqual({ kind: "stop" })
+    expect(
+      planChapterPick({ chapters: CHAPTERS, lines: book, pickedKey: "RUT 2", playingKey: "RUT 1", queueKind: "playing", ask: { ...ASK, film: { ...film, endSec: 60 } } }),
+    ).toEqual({ kind: "play", chapter: CHAPTERS[1] })
   })
 })
 
@@ -118,7 +145,7 @@ describe.each([
     await settle()
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "r1v1" })
 
-    const plan = planChapterPick({ chapters: CHAPTERS, lines: RUTH, pickedKey: "RUT 2", playingKey: "RUT 1", queueKind: getQueueState().kind })
+    const plan = planChapterPick({ chapters: CHAPTERS, lines: RUTH, pickedKey: "RUT 2", playingKey: "RUT 1", queueKind: getQueueState().kind, ask: queuePlaybackAsk() })
     applyChapterPick(plan, { lines: RUTH, projectId: "p1", session })
     await settle()
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "r2v1" })
@@ -172,7 +199,7 @@ describe("picking a chapter nobody has recorded, on a book with a linked film", 
   /** The workspace's word on a book: the film named with every chapter's lines. */
   const bookFilm = () => setProgrammeFilm({ endSec: 600, runsOn: false, cellIds: new Set(book.map((c) => c.id)) })
   const pickRuth2 = () =>
-    planChapterPick({ chapters: CHAPTERS, lines: book, pickedKey: "RUT 2", playingKey: "RUT 1", queueKind: "playing" })
+    planChapterPick({ chapters: CHAPTERS, lines: book, pickedKey: "RUT 2", playingKey: "RUT 1", queueKind: "playing", ask: queuePlaybackAsk() })
 
   beforeEach(() => {
     FakeAudio.instances = []
@@ -203,7 +230,7 @@ describe("picking a chapter nobody has recorded, on a book with a linked film", 
     await settle()
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "r1v1" })
     applyChapterPick(
-      planChapterPick({ chapters: CHAPTERS, lines: book, pickedKey: "RUT 2", playingKey: "RUT 1", queueKind: getQueueState().kind }),
+      planChapterPick({ chapters: CHAPTERS, lines: book, pickedKey: "RUT 2", playingKey: "RUT 1", queueKind: getQueueState().kind, ask: queuePlaybackAsk() }),
       { lines: book, projectId: "p1", session },
     )
     await settle()

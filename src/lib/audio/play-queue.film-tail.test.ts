@@ -25,7 +25,6 @@ import {
   linesHaveAnythingOfTheirOwnToPlay,
   linesPlaybackStopsAt,
   queuePlaybackAsk,
-  linesHaveAnythingToPlayCountingFilm,
   onQueueRanOut,
   pauseQueue,
   resumeQueue,
@@ -1618,12 +1617,12 @@ describe("Skip lines with nothing to play lands only where there is nothing at a
     // it asks for something of the chapter's own, which it has not.
     it("a chapter with nothing recorded: the film to play when someone asks for it, nothing of its own for Play all", () => {
       const unrecordedChapter = [line("b3"), line("b4")]
-      expect(linesHaveAnythingToPlayCountingFilm(unrecordedChapter, null)).toBe(false)
+      expect(linesPlaybackStopsAt(unrecordedChapter, { ...queuePlaybackAsk(), film: null }).size > 0).toBe(false)
       bookFilm(60)
-      expect(linesHaveAnythingToPlayCountingFilm(unrecordedChapter)).toBe(true)
+      expect(linesPlaybackStopsAt(unrecordedChapter, queuePlaybackAsk()).size > 0).toBe(true)
       expect(linesHaveAnythingOfTheirOwnToPlay(unrecordedChapter)).toBe(false)
       // Another file's film does not count.
-      expect(linesHaveAnythingToPlayCountingFilm([line("x1")])).toBe(false)
+      expect(linesPlaybackStopsAt([line("x1")], queuePlaybackAsk()).size > 0).toBe(false)
     })
   })
 })
@@ -1751,7 +1750,7 @@ describe("Play all on a book with a linked film goes on only into a chapter with
   it("A. nothing recorded: the chapter Play was pressed on plays with the film, and Play all stops after it", async () => {
     bookWith(["c1a", "c1b", "c2a", "c2b", "c3a", "c3b"].map((id) => line(id)), 600)
     // Play is offered on the chapter: the film is behind its lines.
-    expect(linesHaveAnythingToPlayCountingFilm(chapter("LUK 1"))).toBe(true)
+    expect(linesPlaybackStopsAt(chapter("LUK 1"), queuePlaybackAsk()).size > 0).toBe(true)
     startQueue(ctxFor(chapter("LUK 1")), 0)
     await wait(1_000)
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c1a" })

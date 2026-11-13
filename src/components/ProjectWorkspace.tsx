@@ -226,7 +226,7 @@ import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, setQueueLayerTrackSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
-  onQueueRanOut, stopQueue, setProgrammeSourceVoicedByFilm, setProgrammeFilm } from "@/lib/audio/play-queue"
+  onQueueRanOut, queuePlaybackAsk, stopQueue, setProgrammeSourceVoicedByFilm, setProgrammeFilm } from "@/lib/audio/play-queue"
 import {
   chapterOfCell, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
   timelineChaptersOf, type TimelineChapter,
@@ -15404,6 +15404,8 @@ export function ProjectWorkspace() {
       pickedKey: key,
       playingKey: queueChapterKeyRef.current,
       queueKind: getQueueState().kind,
+      // What the queue was told: the pick asks at the moment it is made.
+      ask: queuePlaybackAsk(),
     })
     return applyChapterPick(plan, { lines: run?.cells ?? [], ...chapterPickRunRef.current })
   }, [])

@@ -29,6 +29,14 @@ export const STALL_TICK_MS = 1000
  *  reaching for the button. */
 export const STALL_FROZEN_TICKS = 2
 
+/** AQU-2253 (review, Nov 13): how long a film may load nothing new, while it is
+ *  wanted and has not loaded past where it stands, before the wait stops and
+ *  the pane says the film isn't arriving. A minute: far past a slow network
+ *  that is still delivering (anything new loaded starts it again), and the one
+ *  ceiling on waiting for the network, through a seek or a stall alike. */
+export const FILM_NOT_ARRIVING_SEC = 60
+const NOT_ARRIVING_TICKS = Math.round((FILM_NOT_ARRIVING_SEC * 1000) / STALL_TICK_MS)
+
 /** Samples of real motion before the escalation budget resets.
  *
  *  THIS IS THE ONE THAT MATTERS. Each rung of the ladder buys a twitch of
@@ -61,6 +69,9 @@ export type StallAction =
   /** AQU-2253 (browser pass, Nov 11): believed stalled, but the film has played
    *  out what it loaded: say so (the spinner) and wait for the network. */
   | { kind: "wait" }
+  /** AQU-2253 (review, Nov 13): nothing new has loaded for
+   *  FILM_NOT_ARRIVING_SEC. Stop waiting, stop claiming anything, and say why. */
+  | { kind: "notArriving" }
 
 export interface StallState {
   /** Where the clock was at the previous sample. Null means "no baseline" —
@@ -74,6 +85,11 @@ export interface StallState {
   stalled: boolean
   /** The ladder ran out. No further attempts until something resets us. */
   gaveUp: boolean
+  /** AQU-2253 (review, Nov 13): samples in a row, while wanted and not loaded
+   *  past where it stands, with nothing new loaded. */
+  starvedTicks: number
+  /** How far the film had loaded at the previous sample; null: no baseline. */
+  loadedEnd: number | null
 }
 
 export const IDLE_STALL_STATE: StallState = {
@@ -83,6 +99,8 @@ export const IDLE_STALL_STATE: StallState = {
   spent: 0,
   stalled: false,
   gaveUp: false,
+  starvedTicks: 0,
+  loadedEnd: null,
 }
 
 export interface StallSample {
@@ -106,6 +124,9 @@ export interface StallSample {
    *  nudge is tried; the rungs that throw away what has loaded (reopening,
    *  rebuilding) are kept for loaded film that stops. Left out: loaded. */
   loadedAhead?: boolean
+  /** AQU-2253 (review, Nov 13): the furthest second the film has loaded to
+   *  (0 for nothing). Its not advancing is what counts toward the ceiling. */
+  loadedEnd?: number
 }
 
 /** AQU-2253 (browser pass, Nov 9): how far past a seek's target the film must
@@ -149,6 +170,15 @@ export function seekTargetLoaded(video: {
     if (loaded.start(i) <= at + STALL_MOTION_EPS && loaded.end(i) >= end - 0.1) return true
   }
   return false
+}
+
+/** AQU-2253 (review, Nov 13): the furthest second the film has loaded to, 0
+ *  for nothing (`StallSample.loadedEnd`). */
+export function loadedEndOf(loaded: LoadedRanges | null | undefined): number {
+  let end = 0
+  if (!loaded) return end
+  for (let i = 0; i < loaded.length; i++) end = Math.max(end, loaded.end(i))
+  return end
 }
 
 /** Since when the element has been seeking to `target` with it loaded. */
@@ -208,7 +238,7 @@ export function browserPlaysHls(video: { canPlayType?: (type: string) => string 
  * we replaced the player.
  */
 export function forgetStallSample(state: StallState): StallState {
-  return { ...state, lastSec: null, frozenTicks: 0, healthyTicks: 0 }
+  return { ...state, lastSec: null, frozenTicks: 0, healthyTicks: 0, loadedEnd: null }
 }
 
 /**
@@ -219,9 +249,29 @@ export function forgetStallSample(state: StallState): StallState {
  * and playing); reset the ladder only after three moving ones.
  */
 export function stallStep(
-  state: StallState,
+  prior: StallState,
   sample: StallSample,
 ): { state: StallState; action: StallAction } {
+  // AQU-2253 (review, Nov 13): the one ceiling on waiting for the network. A
+  // film wanted, not loaded past where it stands, and loading nothing new
+  // (through a seek or a stall alike) is waited on for FILM_NOT_ARRIVING_SEC,
+  // then given up on with the reason. Anything new loaded starts the minute
+  // again; a pause, a film no longer wanted, or one that has loaded ends it.
+  const wanted = sample.wantPlay && !sample.paused && !sample.ended
+  const end = sample.loadedEnd ?? 0
+  const starvedTicks = !wanted || sample.loadedAhead !== false
+    ? 0
+    : prior.loadedEnd == null
+      ? prior.starvedTicks
+      : end > prior.loadedEnd + STALL_MOTION_EPS ? 0 : prior.starvedTicks + 1
+  const state: StallState = { ...prior, starvedTicks, loadedEnd: wanted ? end : null }
+  if (starvedTicks >= NOT_ARRIVING_TICKS && !state.gaveUp) {
+    return {
+      state: { ...state, lastSec: null, frozenTicks: 0, healthyTicks: 0, starvedTicks: 0, stalled: false, gaveUp: true },
+      action: { kind: "notArriving" },
+    }
+  }
+
   // Not our business. A paused, ended, seeking or not-yet-started picture is
   // frozen for reasons that already have owners, and reading any of them as a
   // stall would put a spinner over a film the user themselves stopped.
@@ -256,6 +306,7 @@ export function stallStep(
         ...base,
         frozenTicks: 0,
         healthyTicks,
+        starvedTicks: 0,
         stalled: false,
         // Sustained playback, and only that, buys the ladder back.
         spent: settled ? 0 : state.spent,
@@ -279,7 +330,8 @@ export function stallStep(
   const rung = RUNGS[spent]
   // AQU-2253 (browser pass, Nov 11): a film waiting on the network is waited
   // on, as a seek into film that has not loaded is: asked to fetch again once
-  // (the nudge), never emptied to reopen or rebuild it, never given up on.
+  // (the nudge), never emptied to reopen or rebuild it. (Review, Nov 13: up to
+  // the ceiling above.)
   if (sample.loadedAhead === false && rung !== "nudge") return { state: next, action: { kind: "wait" } }
   if (rung) return { state: { ...next, spent: spent + 1 }, action: { kind: "recover", rung } }
   return { state: { ...next, gaveUp: true }, action: { kind: "giveUp" } }

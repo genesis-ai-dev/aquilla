@@ -1280,6 +1280,9 @@ export const editor = defineNamespace({
     "editor.timeline.textPaneTitle": "Text",
     "editor.timeline.videoPaneLinked": "Linked film",
     "editor.timeline.videoPaneStart": "Click to start the picture",
+    // AQU-2253 (review, Nov 13): in place of the line above when the film has
+    // loaded nothing new for a minute; playback has been paused.
+    "editor.timeline.videoPaneNotArriving": "The film isn't arriving. Check the connection, then press Play.",
     "editor.timeline.videoPanePicture": "picture",
     "editor.timeline.videoPaneBar": "bar",
     "editor.timeline.videoPaneErrorTitle": "This film could not be loaded",

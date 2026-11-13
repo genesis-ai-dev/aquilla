@@ -69,6 +69,7 @@ import {
   forgetStallSample,
   IDLE_SEEK_WATCH,
   IDLE_STALL_STATE,
+  loadedEndOf,
   seekTargetLoaded,
   stallStep,
   STALL_TICK_MS,
@@ -250,6 +251,10 @@ export function MediaVideoPane({
   /** The YouTube player's error code when it failed (null: none given). */
   const [youTubeErrorCode, setYouTubeErrorCode] = useState<number | null>(null)
   const [needsGesture, setNeedsGesture] = useState(false)
+  /** AQU-2253 (review, Nov 13): the wait for the network reached its ceiling
+   *  (FILM_NOT_ARRIVING_SEC with nothing new loaded): playback stopped, and the
+   *  pane says why in place of "Click to start". Play tries again. */
+  const [notArriving, setNotArriving] = useState(false)
   /** Bumped by loadedmetadata/durationchange: the media load algorithm resets
    *  playbackRate when the source changes, so rate has to be re-applied. */
   const [mediaEpoch, setMediaEpoch] = useState(0)
@@ -430,6 +435,12 @@ export function MediaVideoPane({
    *  the clock the transport pauses: nothing runs on behind the overlay. */
   const askForClick = useCallback(() => {
     setNeedsGesture(true)
+    if (filmIsClockRef.current) pauseQueue()
+  }, [])
+  /** AQU-2253 (review, Nov 13): the film isn't arriving. The same stop as
+   *  above, with the reason instead of a click to offer. */
+  const sayNotArriving = useCallback(() => {
+    setNotArriving(true)
     if (filmIsClockRef.current) pauseQueue()
   }, [])
 
@@ -685,8 +696,10 @@ export function MediaVideoPane({
         seeking: video.seeking && !seek.stuck,
         seekStuck: seek.stuck,
         // AQU-2253 (browser pass, Nov 11): a film that has played out what it
-        // loaded is waiting on the network, and is waited on (video-stall.ts).
+        // loaded is waiting on the network, and is waited on (video-stall.ts),
+        // for as long as something new is loading (review, Nov 13).
         loadedAhead: loaded,
+        loadedEnd: loadedEndOf(video.buffered),
         // AQU-2253 (review, Nov 9): …or, where the film is the clock (no
         // readiness wait there), a film still opening: the same patience.
         pendingPlay: pendingPlayRef.current != null
@@ -701,14 +714,15 @@ export function MediaVideoPane({
         return
       }
 
-      if (action.kind === "giveUp") {
+      if (action.kind === "giveUp" || action.kind === "notArriving") {
         report(false, false)
         wantPlayRef.current = false
         // Stop the element too, so its own flag agrees with the intent we just
         // abandoned. A wedged picture that unwedges itself an hour later must
         // not start playing at a user who has long since moved on.
         video.pause()
-        askForClick()
+        if (action.kind === "giveUp") askForClick()
+        else sayNotArriving()
         return
       }
 
@@ -757,7 +771,7 @@ export function MediaVideoPane({
       setLoadAttempt((n) => n + 1)
     }, STALL_TICK_MS)
     return () => window.clearInterval(id)
-  }, [slaved, filmIsClock, askForClick])
+  }, [slaved, filmIsClock, askForClick, sayNotArriving])
 
   /**
    * A YOUTUBE PICTURE DOES NOT SURVIVE A MOVE. The dock moves the film between
@@ -940,6 +954,7 @@ export function MediaVideoPane({
     const wantFilm = queue.playing || (filmIsClock && queue.kind === "loading")
     if (wantFilm && !wantPlayRef.current) {
       stallRef.current = IDLE_STALL_STATE
+      setNotArriving(false)
       wantSinceRef.current = now
     }
     wantPlayRef.current = wantFilm
@@ -1107,6 +1122,7 @@ export function MediaVideoPane({
     if (!seekWantsPlayRef.current || slaved || suspended) return
     wantPlayRef.current = true
     stallRef.current = IDLE_STALL_STATE
+    setNotArriving(false)
     requestPlayWhenReady(video)
     // The NONCE is the command: re-running on `slaved`, `suspended` or the
     // stable play helper would replay a seek the user made long ago.
@@ -1149,6 +1165,7 @@ export function MediaVideoPane({
         if (!video) return
         wantPlayRef.current = true
         stallRef.current = IDLE_STALL_STATE
+        setNotArriving(false)
         requestPlayWhenReady(video)
       },
       pause: () => {
@@ -1220,6 +1237,7 @@ export function MediaVideoPane({
       // A press is a fresh start, so it is also a fresh ladder — including for
       // a picture that had run out of attempts.
       stallRef.current = IDLE_STALL_STATE
+      setNotArriving(false)
       requestPlayWhenReady(video)
     } else {
       wantPlayRef.current = false
@@ -1259,6 +1277,7 @@ export function MediaVideoPane({
     setAspect(DEFAULT_VIDEO_ASPECT)
     setFailed(false)
     setNeedsGesture(false)
+    setNotArriving(false)
     playFailuresRef.current = 0
     prevTickRef.current = null
     lastSeekAtRef.current = null
@@ -1619,6 +1638,15 @@ export function MediaVideoPane({
           >
             {t("editor.timeline.videoPaneStart")}
           </button>
+        )}
+        {notArriving && !needsGesture && (
+          <div
+            role="status"
+            data-testid="video-pane-not-arriving"
+            className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/40 px-4 text-center text-xs font-medium text-white"
+          >
+            {t("editor.timeline.videoPaneNotArriving")}
+          </div>
         )}
       </div>
       {/* The other choice: keep the image itself completely clear and put

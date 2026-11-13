@@ -724,6 +724,23 @@ describe("MediaVideoPane", () => {
           tick(10)
           expect(video.load).not.toHaveBeenCalled()
         })
+
+        // AQU-2253 (review, Nov 13): a film that loads nothing, where it is the
+        // clock: after a minute the transport pauses and the panel says why.
+        it("that loads nothing for a minute pauses the transport and says the film isn't arriving", () => {
+          const view = render(following())
+          const video = wedge(screen.getByTestId("video-pane-media") as HTMLVideoElement)
+          Object.defineProperty(video, "buffered", { value: { length: 0, start: () => 0, end: () => 0 }, configurable: true })
+          clockAt(9.0, "loading")
+          view.rerender(following())
+          tick(30)
+          expect(pauseQueue).not.toHaveBeenCalled()
+          tick(32)
+          expect(pauseQueue).toHaveBeenCalled()
+          expect(screen.getByTestId("video-pane-not-arriving")).toHaveTextContent("The film isn't arriving. Check the connection, then press Play.")
+          expect(screen.queryByTestId("video-pane-play-gesture")).toBeNull()
+          expect(video.load).not.toHaveBeenCalled()
+        })
       })
     })
 
@@ -1558,6 +1575,74 @@ describe("a stalled picture is noticed, and gets out of it", () => {
     video.currentTime = 13
     tick(1)
     expect(getVideoBuffering()).toBe(false)
+  })
+
+  // AQU-2253 (review, Nov 13; probes P4, P5): waiting on the network has a
+  // ceiling. A film that loads nothing for a minute stops, is paused, and the
+  // pane says why in place of "Click to start"; Play tries again from the start.
+  const EMPTY = { length: 0, start: () => 0, end: () => 0 }
+  it("P4: a film that loads nothing waits a minute with the spinner, then stops and says the film isn't arriving", () => {
+    const onVideoPlaying = vi.fn()
+    const { video, press } = mount({ onVideoPlaying })
+    Object.defineProperty(video, "buffered", { value: EMPTY, configurable: true })
+    press(1)
+    tick(30)
+    expect(getVideoBuffering()).toBe(true)
+    expect(screen.queryByTestId("video-pane-not-arriving")).toBeNull()
+    tick(32)
+    expect(screen.getByTestId("video-pane-not-arriving")).toHaveTextContent("The film isn't arriving. Check the connection, then press Play.")
+    expect(screen.queryByTestId("video-pane-play-gesture")).toBeNull()
+    expect(getVideoBuffering()).toBe(false)
+    expect(video.pause).toHaveBeenCalled()
+    expect(onVideoPlaying).toHaveBeenLastCalledWith(false)
+    expect(video.load).not.toHaveBeenCalled()
+    expect(screen.getByTestId("video-pane-media")).toBe(video)
+  })
+
+  it("Play after 'not arriving' tries again from the start of the ladder", () => {
+    const { video, press } = mount()
+    Object.defineProperty(video, "buffered", { value: EMPTY, configurable: true })
+    press(1)
+    tick(62)
+    expect(screen.getByTestId("video-pane-not-arriving")).toBeInTheDocument()
+    ;(video.play as ReturnType<typeof vi.fn>).mockClear()
+    press(2)
+    expect(screen.queryByTestId("video-pane-not-arriving")).toBeNull()
+    expect(video.play).toHaveBeenCalled()
+    ;(video.play as ReturnType<typeof vi.fn>).mockClear()
+    tick(3) // a baseline, two frozen samples: the nudge again
+    expect(getVideoBuffering()).toBe(true)
+    expect(video.play).toHaveBeenCalled()
+  })
+
+  it("P5: a wedge over loaded film climbs to a rebuild; a rebuilt player that loads nothing stops after a minute the same way", () => {
+    const m = mount()
+    m.press(1)
+    tick(STALL_TICKS) // nudge
+    tick(2) // reopen
+    expect(m.video.load).toHaveBeenCalled()
+    tick(3) // rebuild
+    const rebuilt = m.equip(screen.getByTestId("video-pane-media") as HTMLVideoElement)
+    expect(rebuilt).not.toBe(m.video)
+    Object.defineProperty(rebuilt, "buffered", { value: EMPTY, configurable: true })
+    tick(30)
+    expect(screen.queryByTestId("video-pane-play-gesture")).toBeNull()
+    expect(getVideoBuffering()).toBe(true)
+    tick(32)
+    expect(screen.getByTestId("video-pane-not-arriving")).toBeInTheDocument()
+    expect(screen.queryByTestId("video-pane-play-gesture")).toBeNull()
+  })
+
+  it("P6: the same rebuilt player over loaded film still ends with 'Click to start'", () => {
+    const m = mount()
+    m.press(1)
+    tick(8)
+    const rebuilt = screen.getByTestId("video-pane-media") as HTMLVideoElement
+    expect(rebuilt).not.toBe(m.video)
+    m.equip(rebuilt)
+    tick(3)
+    expect(screen.getByTestId("video-pane-play-gesture")).toBeInTheDocument()
+    expect(screen.queryByTestId("video-pane-not-arriving")).toBeNull()
   })
 
   it("says nothing about a film the user paused", () => {

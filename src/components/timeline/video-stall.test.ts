@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  FILM_NOT_ARRIVING_SEC,
   forgetStallSample,
   IDLE_STALL_STATE,
   browserPlaysHls,
@@ -11,6 +12,7 @@ import {
   stallStep,
   STALL_FROZEN_TICKS,
   STALL_SETTLED_TICKS,
+  STALL_TICK_MS,
   type StallAction,
   type StallSample,
   type StallState,
@@ -91,7 +93,7 @@ describe("a frozen clock while the element claims to be playing", () => {
 describe("a film that has run out of what it loaded", () => {
   const starved = (n: number, at = 76) => Array.from({ length: n }, () => running(at, { loadedAhead: false }))
 
-  it("says so and nudges once, and never reopens, rebuilds or gives up however long it waits", () => {
+  it("says so and nudges once, and never reopens, rebuilds or gives up while it waits", () => {
     const { state, actions } = run(starved(60))
     expect(actions[0]).toEqual({ kind: "recover", rung: "nudge" })
     expect(actions.slice(1).every((a) => a.kind === "wait")).toBe(true)
@@ -117,6 +119,58 @@ describe("a film that has run out of what it loaded", () => {
     const { actions } = run([...frozen(3, 76), ...starved(20)])
     expect(actions[0]).toEqual({ kind: "recover", rung: "nudge" })
     expect(actions.slice(1).every((a) => a.kind === "wait")).toBe(true)
+  })
+})
+
+// AQU-2253 (review, Nov 13; probes P1, P2): waiting on the network has a
+// ceiling. A film that loads nothing at all (a blocked or hanging host, a
+// streaming player that went quiet, a rebuilt player that never fetches) would
+// otherwise spin for good; before the wait it ended at "Click to start" after
+// about 8 s. After FILM_NOT_ARRIVING_SEC with nothing new loaded it stops and
+// says so; anything new arriving starts the minute again.
+describe("a film that loads nothing stops waiting after a minute", () => {
+  const TICKS = (FILM_NOT_ARRIVING_SEC * 1000) / STALL_TICK_MS
+  const empty = (n: number, end = 0, at = 0) => Array.from({ length: n }, () => running(at, { loadedAhead: false, loadedEnd: end }))
+
+  it("P1: a film that never loads anything: a nudge, the spinner, and after a minute it is not arriving, once", () => {
+    const { state, actions } = run(empty(TICKS + 30))
+    expect(actions[0]).toEqual({ kind: "recover", rung: "nudge" })
+    expect(actions.filter((a) => a.kind === "notArriving")).toHaveLength(1)
+    expect(actions.some((a) => a.kind === "giveUp" || (a.kind === "recover" && a.rung !== "nudge"))).toBe(false)
+    expect(actions.at(-1)).toEqual({ kind: "notArriving" })
+    expect(state.gaveUp).toBe(true)
+    // …not a moment before the minute is up.
+    expect(run(empty(TICKS)).actions.some((a) => a.kind === "notArriving")).toBe(false)
+  })
+
+  it("P2: a wedge over loaded film climbs to a rebuild; a rebuilt player that loads nothing then stops after a minute", () => {
+    const loaded = Array.from({ length: 7 }, () => running(12, { loadedAhead: true, loadedEnd: 60 }))
+    const { actions } = run([...loaded, ...empty(TICKS + 5, 0, 12)])
+    const rungs = actions.filter((a) => a.kind === "recover").map((a) => (a.kind === "recover" ? a.rung : ""))
+    expect(rungs).toEqual(["nudge", "recover", "rebuild"])
+    expect(actions.some((a) => a.kind === "giveUp")).toBe(false)
+    expect(actions.at(-1)).toEqual({ kind: "notArriving" })
+  })
+
+  it("a film still arriving, however slowly, is waited on past the minute", () => {
+    const trickle = Array.from({ length: TICKS * 3 }, (_, i) => running(0, { loadedAhead: false, loadedEnd: Math.floor(i / 30) * 0.2 }))
+    expect(run(trickle).actions.some((a) => a.kind === "notArriving")).toBe(false)
+  })
+
+  it("a minute of waiting counts through a seek that never lands over film that has not loaded", () => {
+    const { actions } = run(Array.from({ length: TICKS + 2 }, () => running(26, { seeking: true, loadedAhead: false, loadedEnd: 21 })))
+    expect(actions).toEqual([{ kind: "notArriving" }])
+  })
+
+  it("a pause, or the film paused, starts the minute again", () => {
+    const { actions } = run([...empty(TICKS - 5), running(0, { wantPlay: false }), ...empty(TICKS - 5)])
+    expect(actions.some((a) => a.kind === "notArriving")).toBe(false)
+  })
+
+  it("loaded film that stops keeps the ladder: never 'not arriving', 'Click to start' after the rebuild", () => {
+    const { actions } = run(Array.from({ length: TICKS + 10 }, () => running(12, { loadedAhead: true, loadedEnd: 60 })))
+    expect(actions.some((a) => a.kind === "notArriving")).toBe(false)
+    expect(actions.at(-1)).toEqual({ kind: "giveUp" })
   })
 })
 

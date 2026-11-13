@@ -34,6 +34,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { BookNameIndex, englishBookName } from "@/lib/audio/bulk-upload/book-names"
 import {
   canChooseLine,
+  lineLabel,
   lonePart,
   matchRecordings,
   needsLength,
@@ -205,13 +206,6 @@ type Phase =
   | { kind: "ready"; read: ReadRecording[]; targets: Map<string, TargetFile>; lengths: ReadonlyMap<number, number> }
 
 const LOAD_CONCURRENCY = 3
-
-/** "Genesis 1:3", or "Welcome letter · 12" for a document's line. */
-function lineLabel(file: TargetFile, line: TargetLine, position: number): string {
-  const m = line.ref ? /^([1-3]?[A-Z]{2,3})\s+(\d+:\S+)$/.exec(line.ref) : null
-  if (m) return `${file.bookCode ? englishBookName(file.bookCode) : file.name} ${m[2]}`
-  return `${file.name} · ${position + 1}`
-}
 
 /** "3.1 minutes", "12 seconds": how long a recording runs, in the reader's language. */
 function lengthText(ms: number, locale: string): string {
@@ -904,7 +898,7 @@ function ReviewBody({
     for (const f of targets.values()) {
       let pos = 0
       for (const line of f.lines) {
-        const label = `${lineLabel(f, line, pos)}  ${line.text}`.trim()
+        const label = `${lineLabel(f, line, line.structural ? -1 : pos)}  ${line.text}`.trim()
         out.push({ value: `${f.fileId}\u0000${line.cellId}`, label, fileId: f.fileId, cellId: line.cellId })
         if (!line.structural) pos++
       }

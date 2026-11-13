@@ -520,6 +520,45 @@ describe("a contributor, and a saved rule set aside (review, Oct 30)", () => {
   })
 })
 
+// AQU-2487 (review of the browser pass, Nov 12): in the sheet "chapter one"'s
+// own Upload recordings…, the row read "“chapter one” 1:2" while the line
+// picker offered "chapter one 1:2", from its own copy of the label. Both use
+// match.ts's one label, so a line reads the same in the row and the picker.
+describe("a file that isn't a Bible book, named in the row and in the line picker", () => {
+  it("names a line the same way in the row and in the picker, and after it is chosen", async () => {
+    const lines: TargetLine[] = Array.from({ length: 17 }, (_, i) => ({ cellId: `s:${i + 1}`, ref: `JON 1:${i + 1}`, text: `Jonah 1:${i + 1} text`, structural: false, hasRecording: false }))
+    vi.mocked(loadTargetFile).mockResolvedValueOnce({ fileId: "sheet", name: "chapter one", bookCode: null, lines })
+    render(
+      <RecordingsReview
+        projectId="p1"
+        canAskAssistant
+        file={{ id: "sheet", name: "chapter one" }}
+        projectFiles={[{ id: "sheet", name: "chapter one", bookCode: null } as never]}
+        getToken={async () => "file-jwt"}
+        lane=""
+        languageLabel={null}
+        username="lee"
+        chosen={chosen(["Jonah 1-2.ogg"])}
+        onStarted={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+    const row = await waitFor(() => screen.getByTestId("recordings-row"))
+    expect(row).toHaveAttribute("data-target", "“chapter one” 1:2")
+    fireEvent.click(screen.getByTestId("recordings-change"))
+    const search = await screen.findByRole("combobox", { name: "Search lines" })
+    fireEvent.change(search, { target: { value: "1:5" } })
+    const option = await waitFor(() => {
+      const found = screen.getAllByTestId("recordings-line-option").find((o) => o.textContent?.includes("1:5 "))
+      if (!found) throw new Error("no option for 1:5")
+      return found
+    })
+    expect(option.textContent?.split("  ")[0].trim()).toBe("“chapter one” 1:5")
+    fireEvent.click(option)
+    await waitFor(() => expect(screen.getByTestId("recordings-row")).toHaveAttribute("data-target", "“chapter one” 1:5"))
+  })
+})
+
 // ── The second review (Oct 30) ──────────────────────────────────────────────
 
 describe("a saved rule that places only part of a folder (review, Oct 30)", () => {

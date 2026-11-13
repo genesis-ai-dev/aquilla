@@ -723,8 +723,8 @@ function indexFile(file: TargetFile): FileIndex {
 /** What the preview calls the file a recording goes into: a Bible book by its
  *  name ("Jonah"), any other file by its own name in quotes ("“chapter one”"),
  *  so a file's name never reads as a book's (AQU-2487, browser pass, Nov 12). */
-function bookLabel(fi: FileIndex): string {
-  return fi.file.bookCode ? englishBookName(fi.file.bookCode) : `“${fi.file.name}”`
+function bookLabel({ file }: { file: TargetFile }): string {
+  return file.bookCode ? englishBookName(file.bookCode) : `“${file.name}”`
 }
 
 function refLabel(fi: FileIndex, chapter: number, verse: number | string): string {
@@ -803,7 +803,7 @@ function resolve(fi: FileIndex, wanted: Wanted, part: PartInfo | undefined): Res
       const line = fi.numbered[wanted.line - 1]
       if (!line || wanted.line < 1) return { reason: { code: "noSuchLine", line: wanted.line, count: fi.numbered.length } }
       // A verse counted from the top reads as its verse ("Genesis 2:5").
-      return { cellIds: [line.cellId], read: lineReadLabel(fi, line, fi.position.get(line.cellId) ?? wanted.line - 1), ...(part ? { part } : {}) }
+      return { cellIds: [line.cellId], read: lineLabel(fi.file, line, fi.position.get(line.cellId) ?? wanted.line - 1), ...(part ? { part } : {}) }
     }
     case "lineRange": {
       if (wanted.toLine < wanted.line) return { reason: { code: "rangeBackwards", from: `line ${wanted.line}`, to: `line ${wanted.toLine}` } }
@@ -990,7 +990,7 @@ export function matchRecordings(
         const at = pos + shift
         const line = at >= 0 ? lines[at] : undefined
         out.set(r.index, line
-          ? { index: r.index, method: "order", fileId: fi.file.fileId, cellIds: [line.cellId], orderRun: groupKey, read: lineReadLabel(fi, line, fi.position.get(line.cellId) ?? at), ...(chapterStart && startAt == null ? { fromFolder: ordered[0].folderChapter!.segment } : {}) }
+          ? { index: r.index, method: "order", fileId: fi.file.fileId, cellIds: [line.cellId], orderRun: groupKey, read: lineLabel(fi.file, line, fi.position.get(line.cellId) ?? at), ...(chapterStart && startAt == null ? { fromFolder: ordered[0].folderChapter!.segment } : {}) }
           : { index: r.index, method: "order", orderRun: groupKey, reason: at < 0 ? { code: "beforeFirstLine" } : { code: "pastLastLine", count: lines.length } })
       })
       continue
@@ -1036,7 +1036,7 @@ export function matchRecordings(
       method: prev.method ?? "name",
       fileId: choice.fileId,
       cellIds: [choice.cellId],
-      read: lineReadLabel(fi, line, at ?? -1),
+      read: lineLabel(fi.file, line, at ?? -1),
       chosen: true,
       ...(prev.part && prev.cellIds?.length === 1 && prev.cellIds[0] === choice.cellId ? { part: prev.part } : {}),
     })
@@ -1066,11 +1066,17 @@ function takesOnOneVerse(out: Map<number, Assignment>): void {
   }
 }
 
-/** How a chosen or order-placed line reads in the preview. */
-function lineReadLabel(fi: FileIndex, line: TargetLine, position: number): string {
+/**
+ * How a line reads in the preview ("Genesis 1:3", "“chapter one” 1:3", "line
+ * 12" for a document's line, the file's name for a heading), in its row and in
+ * the line picker alike: the picker had its own copy, which named a file that
+ * isn't a book without its quotes (AQU-2487, review, Nov 12). `position` is
+ * the line's place among the lines that aren't headings, or -1 for a heading.
+ */
+export function lineLabel(file: TargetFile, line: TargetLine, position: number): string {
   const m = line.ref ? VERSE_REF.exec(line.ref) : null
-  if (m) return `${bookLabel(fi)} ${m[2]}:${m[3]}${m[4] ?? ""}${m[5] ? `-${m[5]}${m[6] ?? ""}` : ""}`
-  return position >= 0 ? `line ${position + 1}` : fi.file.name
+  if (m) return `${bookLabel({ file })} ${m[2]}:${m[3]}${m[4] ?? ""}${m[5] ? `-${m[5]}${m[6] ?? ""}` : ""}`
+  return position >= 0 ? `line ${position + 1}` : file.name
 }
 
 /**

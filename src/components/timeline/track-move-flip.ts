@@ -55,9 +55,9 @@ function trackIdOf(key: string): string {
 }
 
 /** The lanes are a virtualized list that places its rows a frame or more after
- *  the gutter's, so a lane measured with the rows has not moved yet. Frames to
- *  wait for one before taking it as staying put. */
-const LANE_SETTLE_FRAMES = 12
+ *  the gutter's, so a lane measured with the rows has not moved yet. How long
+ *  to wait for one before taking it as staying put. */
+const LANE_SETTLE_MS = 250
 
 /** Slide every row from where the snapshot saw it to where it is now. A row
  *  the move created (a new folder) fades in where it lands. A lane that lands
@@ -65,9 +65,12 @@ const LANE_SETTLE_FRAMES = 12
  *  its name instead of leaving the name sliding beside an empty lane. */
 export function playTrackMove(root: ParentNode, snapshot: TrackMoveSnapshot): void {
   if (prefersReducedMotion()) return
-  const start = performance.now()
   const handled = new Set<string>()
-  const pass = (elapsed: number) => {
+  /** Each name's slide. A lane joining late starts on its name's start time:
+   *  a slide is pending until the next paint, which a busy render delays, so
+   *  the wall clock since the move ran the lane ahead of its name. */
+  const names = new Map<string, Animation>()
+  const pass = () => {
     // Measure everything before animating anything: a running animation's
     // transform is part of the rect.
     const plans: { node: HTMLElement; key: string; dy: number | null }[] = []
@@ -84,32 +87,35 @@ export function playTrackMove(root: ParentNode, snapshot: TrackMoveSnapshot): vo
     }
     for (const { node, key, dy } of plans) {
       handled.add(key)
-      slideTrackNode(node, key, dy, elapsed, snapshot)
+      const isRow = key.startsWith("row:")
+      const animation = slideTrackNode(node, key, dy, snapshot)
+      if (!animation) continue
+      if (isRow) names.set(trackIdOf(key), animation)
+      else {
+        const startTime = names.get(trackIdOf(key))?.startTime
+        if (startTime != null) animation.startTime = startTime
+      }
     }
   }
-  pass(0)
-  let frames = 0
-  const next = () => {
-    frames += 1
-    pass(performance.now() - start)
-    if (frames < LANE_SETTLE_FRAMES) requestAnimationFrame(next)
-  }
-  requestAnimationFrame(next)
+  pass()
+  if (typeof MutationObserver !== "function") return
+  // Caught as the list moves the lane, before that frame paints. Checking on
+  // the next frame instead let the lane flash at its new place, ahead of its
+  // name, and then jump back to slide.
+  const observer = new MutationObserver(pass)
+  observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["style"] })
+  window.setTimeout(() => observer.disconnect(), LANE_SETTLE_MS)
 }
 
-function slideTrackNode(node: HTMLElement, key: string, dy: number | null, elapsed: number, snapshot: TrackMoveSnapshot): void {
-  if (typeof node.animate !== "function") return
-  if (dy == null) {
-    node.animate([{ opacity: 0 }, { opacity: 1 }], trackSlideMotion(0))
-    return
-  }
+function slideTrackNode(node: HTMLElement, key: string, dy: number | null, snapshot: TrackMoveSnapshot): Animation | null {
+  if (typeof node.animate !== "function") return null
+  if (dy == null) return node.animate([{ opacity: 0 }, { opacity: 1 }], trackSlideMotion(0))
   const lifted = snapshot.moving.has(trackIdOf(key))
   const animation = node.animate(
     [{ transform: `translateY(${dy}px)` }, { transform: "translateY(0)" }],
     trackSlideMotion(Math.abs(dy)),
   )
-  if (elapsed > 0) animation.currentTime = elapsed
-  if (!lifted) return
+  if (!lifted) return animation
   // The same lift a dragged row and its lane wear (see SortableTrackBlock
   // and the lane's `data-tl-lifted` classes), for the length of the trip.
   const isRow = key.startsWith("row:")
@@ -130,4 +136,5 @@ function slideTrackNode(node: HTMLElement, key: string, dy: number | null, elaps
   }
   animation.addEventListener("finish", land)
   animation.addEventListener("cancel", land)
+  return animation
 }

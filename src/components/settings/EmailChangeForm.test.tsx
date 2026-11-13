@@ -33,32 +33,26 @@ function renderForm(passwordAvailable = true) {
     <MemoryRouter>
       <EmailChangeForm
         jwt="alice-token"
-        username="alice"
         passwordAvailable={passwordAvailable}
-        googleAvailable
+        googleLinked
         onBack={() => {}}
       />
     </MemoryRouter>,
   )
 }
-it("contacts no provider on mount and starts Google only on explicit action", () => {
+it("requires password setup for Google-only accounts without contacting a provider", () => {
   renderForm(false)
   expect(fetchMock).not.toHaveBeenCalled()
   expect(mocks.start).not.toHaveBeenCalled()
-  mocks.start.mockResolvedValue(undefined)
-  fireEvent.click(screen.getByRole("button", { name: "Verify with Google" }))
-  expect(mocks.start).toHaveBeenCalledWith(
-    "/preferences/login-methods",
-    false,
-    "alice",
-    true,
-  )
+  expect(screen.getByRole("status").textContent).toContain("Set an Aquilla password")
+  expect(screen.queryByRole("button", {name:"Send verification email"})).toBeNull()
 })
 it("requires the destination code after ownership proof and reports success", async () => {
   fetchMock
     .mockResolvedValueOnce(Response.json({ sent: true }))
     .mockResolvedValueOnce(Response.json({ changed: true }))
   renderForm()
+  expect(screen.getByRole("note").textContent).toContain("disconnect Google")
   fireEvent.change(screen.getByLabelText("New email"), {
     target: { value: "new@example.com" },
   })

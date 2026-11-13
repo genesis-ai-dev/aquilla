@@ -5,6 +5,7 @@ import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { hashPasswordWerkzeugScrypt } from "../utils/password"
 import { sha256Hex } from "../../../db/shared/api-credentials"
 import { pkceChallenge } from "../routes/oauth-google"
+import { pg } from "./helpers/pg-test-env"
 const send = vi.fn(async (_mail: { text: string }) => {})
 let jwt: string
 const testEnv = Object.assign(Object.create(env), { EMAIL: { send } })
@@ -33,7 +34,7 @@ beforeEach(async () => {
 const request = () =>
   post("request", { email: "new@example.com", password: "a strong password" })
 describe("verified email changes", () => {
-  it("changes only after mailbox proof, preserves Google and revokes the old session", async () => {
+  it("changes only after mailbox proof, unlinks Google and revokes the old session", async () => {
     await env.AQUILLA_PG.prepare(
       "INSERT INTO provider_identities(provider,subject,user_id) VALUES('google','stable-sub',1)",
     ).run()
@@ -53,7 +54,7 @@ describe("verified email changes", () => {
       await env.AQUILLA_PG.prepare(
         "SELECT subject,user_id FROM provider_identities",
       ).first(),
-    ).toEqual({ subject: "stable-sub", user_id: 1 })
+    ).toBeNull()
     expect(
       (
         await app.request(
@@ -64,6 +65,43 @@ describe("verified email changes", () => {
       ).status,
     ).toBe(401)
   })
+  it.each(["users", "provider_identities"])("rolls back every account change if %s mutation fails", async table => {
+    await env.AQUILLA_PG.prepare("INSERT INTO provider_identities(provider,subject,user_id) VALUES('google','stable-sub',1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO platform_admins(email) VALUES('alice@example.com')").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO password_reset_tokens(user_id,token_hash,expires_at) VALUES(1,'reset',now()+interval '1 day')").run()
+    await request()
+    const token=code()
+    await pg.exec(`CREATE FUNCTION fail_email_change() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'injected failure'; END $$;
+      CREATE TRIGGER fail_change BEFORE ${table==="users"?"UPDATE":"DELETE"} ON ${table}
+      FOR EACH ROW EXECUTE FUNCTION fail_email_change();`)
+    try {
+      expect((await post("confirm",{token})).status).toBe(409)
+      expect(await env.AQUILLA_PG.prepare("SELECT email,session_version FROM users WHERE id=1").first()).toEqual({email:"alice@example.com",session_version:0})
+      expect(await env.AQUILLA_PG.prepare("SELECT subject FROM provider_identities WHERE user_id=1").first()).toEqual({subject:"stable-sub"})
+      expect(await env.AQUILLA_PG.prepare("SELECT email FROM platform_admins").first()).toEqual({email:"alice@example.com"})
+      expect(await env.AQUILLA_PG.prepare("SELECT token_hash FROM password_reset_tokens WHERE user_id=1").first()).toEqual({token_hash:"reset"})
+      expect((await app.request("/api/v2/auth/me",{headers:authHeader(jwt)},testEnv)).status).toBe(200)
+    } finally {
+      await pg.exec(`DROP TRIGGER fail_change ON ${table}; DROP FUNCTION fail_email_change();`)
+    }
+    // The valid code remains retryable after a transaction failure.
+    expect((await post("confirm",{token})).status).toBe(200)
+  })
+  it("rejects outstanding codes issued under the former Google-proof policy", async () => {
+    await request()
+    const token=code()
+    const encoder=new TextEncoder()
+    const key=await crypto.subtle.importKey("raw",encoder.encode(env.SECRET_KEY),{name:"HMAC",hash:"SHA-256"},false,["sign"])
+    const digest=await crypto.subtle.sign("HMAC",key,encoder.encode(`email-change:1:${token}`))
+    const oldHash=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,"0")).join("")
+    await env.AQUILLA_PG.prepare("UPDATE email_change_requests SET token_hash=? WHERE user_id=1").bind(oldHash).run()
+    expect((await post("confirm",{token})).status).toBe(400)
+    expect(await env.AQUILLA_PG.prepare("SELECT email FROM users WHERE id=1").first()).toEqual({email:"alice@example.com"})
+    expect((await request()).status).toBe(200)
+    expect((await post("confirm",{token:code()})).status).toBe(200)
+  })
+
   it("atomically limits concurrent guesses and permits a fresh request after lockout", async () => {
     await request()
     const valid = code()
@@ -134,7 +172,7 @@ describe("verified email changes", () => {
     expect((await request()).status).toBe(403)
     expect(send).not.toHaveBeenCalled()
   })
-  it("accepts only a fresh Google proof linked to this account", async () => {
+  it("requires password setup even with a fresh Google proof linked to this account", async () => {
     await env.AQUILLA_PG.prepare(
       "UPDATE users SET password_hash=NULL WHERE id=1",
     ).run()
@@ -149,22 +187,14 @@ describe("verified email changes", () => {
     )
       .bind(await pkceChallenge(verifier), await sha256Hex(googleCode))
       .run()
-    expect(
-      (
-        await post("request", {
-          email: "new@example.com",
-          google: { code: googleCode, verifier },
-        })
-      ).status,
-    ).toBe(200)
-    expect(
-      (
-        await post("request", {
-          email: "new@example.com",
-          google: { code: googleCode, verifier },
-        })
-      ).status,
-    ).toBe(401)
+    const response = await post("request", {
+      email: "new@example.com", google: { code: googleCode, verifier },
+    })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({error:"password_required"})
+    expect(send).not.toHaveBeenCalled()
+    expect(await env.AQUILLA_PG.prepare("SELECT email FROM users WHERE id=1").first()).toEqual({email:"alice@example.com"})
+
   })
   it("preserves database admin grant atomically", async () => {
     await env.AQUILLA_PG.prepare(

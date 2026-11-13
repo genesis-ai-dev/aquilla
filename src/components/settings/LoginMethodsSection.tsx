@@ -41,7 +41,7 @@ function AccountLoginMethods({ jwt, username }: { jwt: string; username: string 
       }</SettingsBlock>}
       {methods && <>
         <SettingsRow label={methods.email} description={t("auth.emailChange.accountEmail")} control={<Button size="sm" variant="outline" onClick={() => setChangingEmail(true)}>{t("auth.emailChange.action")}</Button>} />
-        {changingEmail && <SettingsBlock><EmailChangeForm jwt={jwt} username={username} passwordAvailable={methods.password} googleAvailable={methods.google && methods.google_available} onBack={() => setChangingEmail(false)} /></SettingsBlock>}
+        {changingEmail && <SettingsBlock><EmailChangeForm jwt={jwt} passwordAvailable={methods.password} googleLinked={methods.google} onBack={() => setChangingEmail(false)} /></SettingsBlock>}
         <SettingsRow
           className="flex-wrap items-center"
           label={t(methods.password ? "auth.methods.passwordSet" : "auth.methods.passwordMissing")}

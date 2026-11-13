@@ -10,12 +10,10 @@ import { Input } from "@/components/ui/input"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { AUTH_BASE } from "@/lib/frontier/auth"
-import {
-  clearGoogleAttempt,
-  startGoogleLogin,
-} from "@/lib/frontier/google-login"
+import { clearGoogleAttempt } from "@/lib/frontier/google-login"
 
 const messages: Record<string, MessageKey> = {
+  password_required: "auth.emailChange.password_required",
   incorrect_password: "auth.emailChange.incorrect_password",
   admin_verification_required: "auth.emailChange.admin_verification_required",
   administrator_coordination_required:
@@ -32,17 +30,13 @@ const messages: Record<string, MessageKey> = {
 }
 export function EmailChangeForm({
   jwt,
-  username,
   passwordAvailable,
-  googleAvailable,
-  googleProof,
+  googleLinked = false,
   onBack,
 }: {
   jwt: string
-  username: string
   passwordAvailable: boolean
-  googleAvailable: boolean
-  googleProof?: { code: string; verifier: string }
+  googleLinked?: boolean
   onBack: () => void
 }) {
   const t = useT()
@@ -54,7 +48,7 @@ export function EmailChangeForm({
     [busy, setBusy] = useState(false),
     [error, setError] = useState("")
   async function submit() {
-    if (busy || (sent && !/^[0-9]{6}$/.test(token))) return
+    if (!passwordAvailable || busy || (sent && !/^[0-9]{6}$/.test(token))) return
     setBusy(true)
     setError("")
     try {
@@ -74,7 +68,7 @@ export function EmailChangeForm({
               ? { token }
               : {
                   email,
-                  ...(googleProof ? { google: googleProof } : { password }),
+                  password,
                 },
           ),
         },
@@ -101,6 +95,10 @@ export function EmailChangeForm({
       setPassword("")
     }
   }
+  if (!passwordAvailable) return <div className="flex flex-col gap-4">
+    <p role="status">{t("auth.emailChange.password_required")}</p>
+    <Button type="button" variant="outline" onClick={onBack}>{t("auth.emailChange.back")}</Button>
+  </div>
   return (
     <form
       className="flex max-w-md flex-col gap-4"
@@ -112,6 +110,7 @@ export function EmailChangeForm({
       <p className="text-sm text-muted-foreground">
         {t("auth.emailChange.intro")}
       </p>
+      {googleLinked && <p className="text-sm" role="note">{t("auth.emailChange.unlinkWarning")}</p>}
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}
@@ -157,7 +156,7 @@ export function EmailChangeForm({
               onChange={(e) => setEmail(e.target.value)}
             />
           </Field>
-          {!googleProof && passwordAvailable && (
+          {passwordAvailable && (
             <Field>
               <FieldLabel htmlFor="email-change-password">
                 {t("auth.emailChange.password")}
@@ -171,30 +170,9 @@ export function EmailChangeForm({
               />
             </Field>
           )}
-          {(!googleProof || !!error) && googleAvailable && (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={busy}
-              onClick={() => {
-                setBusy(true)
-                void startGoogleLogin(
-                  "/preferences/login-methods",
-                  false,
-                  username,
-                  true,
-                ).catch(() => {
-                  setError(t("auth.emailChange.googleFailed"))
-                  setBusy(false)
-                })
-              }}
-            >
-              {t("auth.emailChange.google")}
-            </Button>
-          )}
         </>
       )}
-      {(sent || passwordAvailable || googleProof) && (
+      {(sent || passwordAvailable) && (
         <Button disabled={busy || (sent && token.length !== 6)} type="submit">
           {t(sent ? "auth.emailChange.confirm" : "auth.emailChange.send")}
         </Button>

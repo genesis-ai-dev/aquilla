@@ -236,10 +236,13 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
     if (k !== -1) used.add(k)
     return k === -1 ? null : refs[k]
   }
-  const lineEnds: { at: number; line: number }[] = []
+  // Where each line that holds a reference ends (after its last character).
+  const holding = new Set(refs.map((ref) => ref.line))
+  const ends = new Map<number, number>()
   input.lineOf?.forEach((line, i) => {
-    if (line !== undefined && input.lineOf![i + 1] !== line) lineEnds.push({ at: i + 1, line })
+    if (line !== undefined && holding.has(line)) ends.set(line, i + 1)
   })
+  const lineEnds = [...ends].map(([line, at]) => ({ at, line })).sort((a, b) => a.at - b.at)
   let nextEnd = 0
   const endLinesTo = (k: number) => {
     while (nextEnd < lineEnds.length && lineEnds[nextEnd].at <= k) {

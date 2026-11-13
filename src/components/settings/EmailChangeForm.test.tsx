@@ -28,13 +28,13 @@ afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
 })
-function renderForm(passwordAvailable = true) {
+function renderForm(passwordAvailable = true, googleLinked = true) {
   return render(
     <MemoryRouter>
       <EmailChangeForm onSetPassword={() => {}}
         jwt="alice-token"
         passwordAvailable={passwordAvailable}
-        googleLinked
+        googleLinked={googleLinked}
         onBack={() => {}}
       />
     </MemoryRouter>,
@@ -52,7 +52,7 @@ it("requires the destination code after ownership proof and reports success", as
     .mockResolvedValueOnce(Response.json({ sent: true }))
     .mockResolvedValueOnce(Response.json({ changed: true }))
   renderForm()
-  expect(screen.getByRole("note").textContent).toContain("disconnect Google")
+  expect(screen.getByRole("note").textContent).toContain("When you confirm your new email, Google login will be disconnected")
   fireEvent.change(screen.getByLabelText("New email"), {
     target: { value: "new@example.com" },
   })
@@ -76,6 +76,10 @@ it("requires the destination code after ownership proof and reports success", as
   )
   expect(mocks.clear).toHaveBeenCalledOnce()
   expect(mocks.remove).toHaveBeenCalledWith("alice-token")
+})
+it("does not show a Google warning when Google is not linked", () => {
+  renderForm(true, false)
+  expect(screen.queryByRole("note")).toBeNull()
 })
 it("shows an actionable dev access refusal without advancing", async () => {
   fetchMock.mockResolvedValue(

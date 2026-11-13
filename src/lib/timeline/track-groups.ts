@@ -230,11 +230,8 @@ export function scopeSiblings(
 }
 
 /**
- * How far a MEMBER ROW is drawn in from the wall — `pl-3.5`, and the width the
- * drop line inherits so the line lands where the row it promises will.
- *
- * THIS IS A DRAWING MEASUREMENT, NOT A GESTURE ONE. It used to be both, and
- * that was the bug: see `folderReachInPx`.
+ * Floor for the old horizontal reach gesture. A member row is drawn with
+ * `pl-6`, and that indent is not this number. See `folderReachInPx`.
  */
 export const FOLDER_DROP_INDENT_PX = 16
 

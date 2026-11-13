@@ -14352,11 +14352,28 @@ export function ProjectWorkspace() {
   const applyTrackOrder = useCallback(
     async (forFileId: string, changes: Array<{ trackId: string; order: number }>) => {
       if (!project?.id || changes.length === 0) return
-      setPendingTrackOrders({ fileId: forFileId, orders: new Map(changes.map((c) => [c.trackId, c.order])) })
+      // Merged, not replaced: the timeline saves several held drops in one
+      // batch, and replacing would drop the earlier ones back to their stored
+      // places until the refresh lands.
+      setPendingTrackOrders((current) => {
+        const orders = new Map(current?.fileId === forFileId ? current.orders : [])
+        for (const c of changes) orders.set(c.trackId, c.order)
+        return { fileId: forFileId, orders }
+      })
+      setPendingTrackScopes((current) =>
+        current?.fileId === forFileId
+          ? { fileId: forFileId, places: withPendingScopeOrders(current.places, changes) }
+          : current)
       // Bound to the file the drag was made on, so a refresh that arrives after
-      // the user has moved on cannot revert a different file's overlay.
+      // the user has moved on cannot revert a different file's overlay. Only
+      // this write's entries, and only while nothing newer has replaced them.
       const revert = () =>
-        setPendingTrackOrders((current) => (current && current.fileId === forFileId ? null : current))
+        setPendingTrackOrders((current) => {
+          if (!current || current.fileId !== forFileId) return current
+          const orders = new Map(current.orders)
+          for (const c of changes) if (orders.get(c.trackId) === c.order) orders.delete(c.trackId)
+          return orders.size === 0 ? null : { fileId: forFileId, orders }
+        })
       try {
         if (changes.length === 1) {
           await emitFileTrackSet({
@@ -14474,8 +14491,17 @@ export function ProjectWorkspace() {
   // overwritten by whatever this client last read. That rule is why there is no
   // generic `patchTrack(trackId, patch)` here.
   const applyTrackPatch = useCallback(
-    async (trackId: string, patch: Parameters<typeof emitFileTrackSet>[0]["patch"], failure: string) => {
-      if (!project?.id || !activeFileId) return
+    async (
+      trackId: string,
+      patch: Parameters<typeof emitFileTrackSet>[0]["patch"],
+      failure: string,
+      onFailure?: () => void,
+    ) => {
+      if (!project?.id || !activeFileId) {
+        onFailure?.()
+        return
+      }
+      let refused = false
       try {
         await emitFileTrackSet({
           projectId: project.id,
@@ -14493,12 +14519,15 @@ export function ProjectWorkspace() {
           onRejected: (entries) => {
             const mine = entries.filter((r) => r.kind === "file.track.set" && r.fileId === activeFileId)
             if (mine.length === 0) return
+            refused = true
             toast.add({ type: "error", title: `${failure} ${mine[0].reason}` })
           },
         })
         refresh()
+        if (refused) onFailure?.()
       } catch (e) {
         toast.add({ type: "error", title: e instanceof Error ? `${failure} ${e.message}` : failure })
+        onFailure?.()
       }
     },
     [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh],
@@ -14518,14 +14547,22 @@ export function ProjectWorkspace() {
     async (
       changes: ReadonlyArray<{ trackId: string; patch: Parameters<typeof emitFileTrackSet>[0]["patch"] }>,
       failure: string,
+      onFailure?: () => void,
+      /** The file the changes were made on, when that may no longer be open. */
+      forFileId?: string,
     ) => {
-      if (!project?.id || !activeFileId || changes.length === 0) return
+      const fileId = forFileId ?? activeFileId
+      if (!project?.id || !fileId || changes.length === 0) {
+        onFailure?.()
+        return
+      }
+      let refused = false
       try {
         await enqueueEvents(
           changes.map((c) => ({
             kind: "file.track.set" as const,
             projectId: project.id,
-            fileId: activeFileId,
+            fileId,
             parentId: null,
             author: currentUsername,
             payload: { trackId: c.trackId, patch: c.patch },
@@ -14534,14 +14571,17 @@ export function ProjectWorkspace() {
         await flushOutboxBatch({
           getTokenForFile: getTokenForProjectFile,
           onRejected: (entries) => {
-            const mine = entries.filter((r) => r.kind === "file.track.set" && r.fileId === activeFileId)
+            const mine = entries.filter((r) => r.kind === "file.track.set" && r.fileId === fileId)
             if (mine.length === 0) return
+            refused = true
             toast.add({ type: "error", title: `${failure} ${mine[0].reason}` })
           },
         })
         refresh()
+        if (refused) onFailure?.()
       } catch (e) {
         toast.add({ type: "error", title: e instanceof Error ? `${failure} ${e.message}` : failure })
+        onFailure?.()
       }
     },
     [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh],

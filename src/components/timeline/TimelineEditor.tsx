@@ -15,6 +15,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -121,7 +122,14 @@ import {
   ROW_H_MIN,
   TL_ROW_H_CLASS,
 } from "@/lib/timeline/row-metrics"
-import { orderForDrop } from "@/lib/timeline/track-reorder"
+import {
+  applyPendingOrders,
+  applyPendingScopes,
+  orderForDrop,
+  withoutPendingOrder,
+  withPendingScopeOrders,
+  type PendingTrackScope,
+} from "@/lib/timeline/track-reorder"
 import { SCRUB_SEEK_THROTTLE_MS } from "@/lib/timeline/scrub"
 import {
   buildTrackRows,
@@ -875,6 +883,27 @@ function LinkedVideoLanePrompt({ onAttach }: { onAttach?: () => void }) {
   )
 }
 
+/** A gutter block with its cross-folder gap slide read straight from the drag
+ *  store. A member also counters its folder block's slide (see `counterShiftY`). */
+function GapShiftedTrackBlock({
+  gutterDrag,
+  folderId = null,
+  ...block
+}: Omit<ComponentProps<typeof SortableTrackBlock>, "shiftY" | "counterShiftY"> & {
+  gutterDrag: GutterDragStore
+  folderId?: string | null
+}) {
+  const shift = useGutterGapShift(gutterDrag, block.id)
+  const folderShift = useGutterGapShift(gutterDrag, folderId)
+  return (
+    <SortableTrackBlock
+      {...block}
+      shiftY={shift - folderShift}
+      counterShiftY={folderId == null ? undefined : folderShift}
+    />
+  )
+}
+
 function LaneLabel({
   name,
   sub,
@@ -884,7 +913,8 @@ function LaneLabel({
   subSlot,
   reorder,
   folder,
-  indented,
+  indented: restingIndent,
+  dragIndent,
   renaming,
   selected,
   onRowClick,
@@ -928,6 +958,8 @@ function LaneLabel({
   folder?: { trackId: string; collapsed: boolean; memberCount: number; onToggle(): void }
   /** …and this row is inside one. */
   indented?: boolean
+  /** Where a drag in the air would put this row, which overrides `indented`. */
+  dragIndent?: { store: GutterDragStore; trackId: string }
   /** AQU-646 stage 3b: the whole gutter is collapsed to a strip, so this row
    *  keeps only the glyphs that still mean something without words. ALL ROWS
    *  TOGETHER OR NONE (Sam) — there is no per-row version of this, which is why
@@ -936,6 +968,7 @@ function LaneLabel({
   collapsed?: boolean
 } & Omit<React.HTMLAttributes<HTMLDivElement>, "children">) {
   const t = useT()
+  const indented = useGutterIndent(dragIndent, restingIndent ?? false)
   const renameRef = useRef<HTMLInputElement>(null)
   const renameFocused = useRef(false)
   const isRenaming = renaming != null
@@ -990,6 +1023,7 @@ function LaneLabel({
       // contract is that it renders what the hardcoded rows did, and the
       // untimed strip below the tracks is not one of them.
       data-tl-track-row={reorder ? "" : undefined}
+      data-tl-track-id={folder?.trackId ?? reorder?.trackId}
       role={reorder ? "listitem" : undefined}
       aria-roledescription={reorder ? t("editor.timeline.sortableTrackRole") : undefined}
       tabIndex={reorder ? 0 : undefined}
@@ -1056,8 +1090,9 @@ function LaneLabel({
       aria-label={collapsed ? name : rest["aria-label"]}
     >
       {/* The indent is on the CONTENT, not the row, so the row's background
-          still spans the full gutter. */}
-      <div className={cn("flex min-w-0 flex-col gap-0.5", indented && !collapsed && "pl-3.5")}>
+          still spans the full gutter. A member steps in past the folder's
+          own name, which is what makes the nest readable. */}
+      <div className={cn("flex min-w-0 flex-col gap-0.5", indented && !collapsed && "pl-6")}>
         <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-foreground">
           {/* AQU-646 stage 2: a folder's disclosure control stands where every
               other row's colour dot stands, so the column of glyphs stays a
@@ -1305,7 +1340,7 @@ export function TimelineEditor({
   session,
   audioByCellId,
   legacyMeasure,
-  tracks = DEFAULT_TRACKS,
+  tracks: tracksProp = DEFAULT_TRACKS,
   textTrackCells,
   onHiddenTracksChange,
   textTrackErrors,
@@ -1318,11 +1353,27 @@ export function TimelineEditor({
   trackEditing,
 }: TimelineEditorProps) {
   const t = useT()
+  /** Drops painted here but not yet handed to `onReorderTrack` (`orders`) or
+   *  `onMoveToScope` (`scopes`). A track is in one or the other, never both. */
+  const [unsavedOrders, setUnsavedOrders] = useState<{
+    fileId: string
+    orders: ReadonlyMap<string, number>
+    scopes: ReadonlyMap<string, PendingTrackScope>
+  } | null>(null)
+  const tracks = useMemo(
+    () => (unsavedOrders?.fileId === fileId
+      ? applyPendingScopes(applyPendingOrders(tracksProp, unsavedOrders.orders), unsavedOrders.scopes)
+      : tracksProp),
+    [tracksProp, unsavedOrders, fileId],
+  )
+  const folderTracks = useMemo(() => tracks.filter((tr) => tr.kind === "folder"), [tracks])
   const audioFirst = timingMode === "audioFirst"
   // AQU-646 stage 6B: the two masters that fire takes through the overlay pool
   // — and therefore honour their trims. See the lane's `masterHonorsTrims`.
   const masterHonorsTrims = Boolean(coreMediaUrl) || virtualIsTransport
-  const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
+  // The zoom asked for. What is drawn is `pxPerSec`, held under the ceiling
+  // a file of this length allows.
+  const [chosenPxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
   // Stage 3: the OTHER zoom. Every row container and every chip box reads these
   // three numbers through CSS custom properties on the root below, so one state
   // value resizes the gutter, four lanes and everything drawn on them at once —
@@ -1402,6 +1453,16 @@ export function TimelineEditor({
    * lanes render the same list, in the same order" a property of the code
    * rather than a coincidence two `.map` calls have to keep agreeing on.
    */
+  // The folder preview and the cross-folder gap, read by the gutter rows alone.
+  // The preview only changes the indent. The row stays under the pointer,
+  // and the folder write waits until the pointer comes up. The gap is the room
+  // a cross-folder drag is opening while it is still in the air: which folder
+  // the dragged track would land in (null = the top level) and how far each
+  // other row slides to make that room. Set from the same resolution the
+  // release commits, so the gap shown is the landing made.
+  const [gutterDrag] = useState(createGutterDragStore)
+  const setFolderPreview = gutterDrag.setPreview
+  const setDragGap = gutterDrag.setGap
   const trackRows = buildTrackRows(tracks, collapsedFolders, hiddenTrackIds)
 
   function toggleFolder(folderId: string) {
@@ -1467,17 +1528,19 @@ export function TimelineEditor({
     window.addEventListener("pointercancel", release, true)
   }
   /** Tracks that may not be hidden right now: the one the recorder is taking
-   *  into, the one being reordered and the lane a drag is under way in. */
+   *  into and the lane a drag is under way in. */
   function busyTrackIds(): ReadonlySet<string> {
     const busy = new Set<string>()
     if (recordingSlot) busy.add(trackIdForSlot(recordingSlot))
-    if (draggedTrackId) busy.add(draggedTrackId)
     if (pressedLaneTrackId) busy.add(pressedLaneTrackId)
     return busy
   }
   function hideTracks(trackIds: readonly string[]) {
     const busy = busyTrackIds()
-    const hiding = trackIds.filter((id) => !busy.has(id))
+    // The row being reordered too. Its menu cannot be open mid-drag, so it is
+    // checked here and not drawn: a render per lift and drop redraws every lane.
+    const dragged = draggedTrackRef.current
+    const hiding = trackIds.filter((id) => !busy.has(id) && id !== dragged)
     if (hiding.length === 0) return
     setHiddenTrackIds((prev) => {
       const next = new Set(prev)
@@ -1780,18 +1843,44 @@ export function TimelineEditor({
       if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
     }
   }, [fileId])
+  const folderExitTimer = useRef<number | null>(null)
+  const folderEnterTimer = useRef<number | null>(null)
+  const folderEnterTarget = useRef<string | null>(null)
+  const folderExitMove = useRef<((event: PointerEvent) => void) | null>(null)
+  const folderExitUp = useRef<((event: PointerEvent) => void) | null>(null)
+  const folderPreviewCommitted = useRef(false)
+  /** The last gap painted, so a drag-over that changes nothing re-renders nothing. */
+  const dragGapKey = useRef<string | null>(null)
+  /** Where the pointer rested to begin the empty-folder dwell, so the folder
+   *  sliding out from under a still pointer cannot cancel its own dwell. */
+  const folderEnterAnchor = useRef<{ folderId: string; x: number; y: number } | null>(null)
+  const folderHomeRef = useRef<{ trackId: string; folderId: string; top: number; bottom: number } | null>(null)
   /** The track in the air, so it cannot be hidden mid-drag. */
-  const [draggedTrackId, setDraggedTrackId] = useState<string | null>(null)
+  const draggedTrackRef = useRef<string | null>(null)
+  const folderPreviewRef = useRef<FolderPreview | null>(null)
+  const baseRowsRef = useRef(trackRows)
+  baseRowsRef.current = trackRows
+  const liveTrackEditing = useRef(trackEditing)
+  liveTrackEditing.current = trackEditing
   useEffect(() => () => {
+    if (folderExitTimer.current != null) window.clearTimeout(folderExitTimer.current)
+    if (folderEnterTimer.current != null) window.clearTimeout(folderEnterTimer.current)
+    if (folderExitMove.current) document.removeEventListener("pointermove", folderExitMove.current)
+    if (folderExitUp.current) document.removeEventListener("pointerup", folderExitUp.current)
   }, [])
   // The preview stays up through the write. Once the tracks themselves show
   // the same place, the indent is the row's own and the preview can go.
   useEffect(() => {
+    const preview = folderPreviewRef.current
     if (!preview) return
     const track = tracks.find((item) => item.id === preview.trackId)
     if (!track) return
     const arrived = preview.kind === "enter"
+      ? track.groupId === preview.folderId
+      : (track.groupId ?? null) === null
     if (arrived) {
+      folderPreviewRef.current = null
+      setFolderPreview(null)
     }
   }, [tracks])
   /** Lane copies of each row's slide. A ref, painted onto the lane nodes:
@@ -1812,6 +1901,7 @@ export function TimelineEditor({
         && current.hidden === shift.hidden
         && current.transition === shift.transition
         && current.hold === shift.hold
+        && current.lift === shift.lift
       ) {
         return
       }
@@ -4592,9 +4682,14 @@ export function TimelineEditor({
           const open = folderId != null && !block.row.collapsed && block.members.length > 0
           const renaming = renamingTrackId === block.row.track.id
           const draggable = !renaming && canDragTrack(block.row, trackRows, allowCrossing)
+          // The cross-folder gap, converted from flattened row space into
+          // this block's nesting: the block paints its heading's slide, and
+          // each member paints only what is left of its own slide once the
+          // block's is taken off (its lane adds the block's back on).
           return (
-            <SortableTrackBlock
+            <GapShiftedTrackBlock
               key={block.row.track.id}
+              gutterDrag={gutterDrag}
               sortable={sortable}
               id={block.row.track.id}
               group={TIMELINE_ROOT_GROUP}
@@ -4608,8 +4703,10 @@ export function TimelineEditor({
                     const memberRenaming = renamingTrackId === member.row.track.id
                     const memberDraggable = !memberRenaming && canDragTrack(member.row, trackRows, allowCrossing)
                     return (
-                      <SortableTrackBlock
+                      <GapShiftedTrackBlock
                         key={member.row.track.id}
+                        gutterDrag={gutterDrag}
+                        folderId={folderId}
                         sortable={sortable}
                         id={member.row.track.id}
                         group={folderId}
@@ -4617,21 +4714,31 @@ export function TimelineEditor({
                         onShift={reportLaneShift}
                       >
                         {renderRow(member.row, member.index)}
-                      </SortableTrackBlock>
+                      </GapShiftedTrackBlock>
                     )
                   })}
                 </TrackSortableList>
               )}
-            </SortableTrackBlock>
+            </GapShiftedTrackBlock>
           )
         })}
       </TrackSortableList>
     )
   }
 
+  function drawnLane(row: TrackRow, startSec: number, endSec: number): ReactNode {
+    // A folder's band summarises its members, so a reorder inside it redraws it.
+    if (row.track.kind === "folder") return laneForTrack(row, { startSec, endSec })
+    const key = `${row.track.id}|${startSec}|${endSec}`
+    if (reuseDrawnLanes && drawnLanes.has(key)) return drawnLanes.get(key)
+    const lane = laneForTrack(row, { startSec, endSec })
+    drawnLanes.set(key, lane)
+    return lane
+  }
+
   function renderTrackRows(startSec: number, endSec: number) {
     return trackRows.map((row) => {
-      const lane = laneForTrack(row, { startSec, endSec })
+      const lane = drawnLane(row, startSec, endSec)
                 // A row with NO MENU CAPABILITY at all — a viewer — is the row
                 // that shipped, byte for byte. That flag is role-derived and
                 // never flips mid-session, so this early return costs nothing.
@@ -4962,8 +5069,11 @@ export function TimelineEditor({
             <TrackReorderDnd
               enabled={Boolean(onReorderTrack)}
               onDragStart={onTrackDragStart}
+              onDragOver={onTrackDragOver}
+              onDragMove={onTrackDragOver}
               onDragEnd={onTrackDragEnd}
               onDragCancel={endTrackDrag}
+              onPaintNow={flushPendingReorder}
             >
             <div
               ref={gutterInnerRef}
@@ -5052,6 +5162,7 @@ export function TimelineEditor({
                         : undefined
                     }
                     indented={row.depth === 1}
+                    dragIndent={{ store: gutterDrag, trackId: track.id }}
                     // Sam, Oct 5: the playback-sound menu belongs on the Source
                     // audio lane too. It takes the sublabel's line, under the
                     // name and next to the speaker, so the name keeps its full

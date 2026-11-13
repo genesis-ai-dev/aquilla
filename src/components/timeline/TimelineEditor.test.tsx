@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -15,7 +16,13 @@ import { ZOOM_DEFAULT, ZOOM_MAX } from "@/lib/timeline/scale"
 import { getSkipSilentLinesPref, resetSkipSilentLinesPrefCacheForTests } from "@/lib/store/skip-silent-lines-pref"
 import { resetPersonPrefCachesForTests } from "@/lib/prefs/person-prefs"
 import { timelineFollowPlayheadPref, timelineSnapPref } from "@/lib/prefs/person-pref-list"
-import { TRACK_DRAG_ACTIVATION_DISTANCE } from "@/components/timeline/track-gutter-dnd"
+import {
+  FOLDER_ENTER_DWELL_MS,
+  FOLDER_EXIT_DWELL_MS,
+  TRACK_DRAG_ACTIVATION_DISTANCE,
+  TRACK_ORDER_SAVE_QUIET_MS,
+  TRACK_RELEASE_SETTLE_MS,
+} from "@/components/timeline/track-gutter-dnd"
 
 /**
  * Media redesign, layout: the timeline's settings (snap, follow, original
@@ -81,6 +88,28 @@ function trackSlot(name: string): HTMLElement {
   return slot
 }
 
+/** A press off the track rows saves every held drop at once. */
+function saveHeldDrops() {
+  fireEvent.pointerDown(document.body)
+}
+
+function translatedY(transform: string): number {
+  const match = /translate3d\([^,]+,\s*(-?\d+(?:\.\d+)?)px/.exec(transform)
+    ?? /translateY\((-?\d+(?:\.\d+)?)px\)/.exec(transform)
+  return match ? Number(match[1]) : 0
+}
+
+/** Let go, and wait out the settle and the quiet a same-list drop saves after. */
+function releaseTrackDrag(x: number, y: number) {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+  try {
+    fireEvent.pointerUp(document, trackPointer(x, y, 0))
+    act(() => { vi.advanceTimersByTime(TRACK_RELEASE_SETTLE_MS + TRACK_ORDER_SAVE_QUIET_MS) })
+  } finally {
+    vi.useRealTimers()
+  }
+}
+
 /** Drag `from` onto `to` from the row itself, the way a pointer does. */
 function dragTrackOnto(from: string, to: string) {
   layoutTrackSlots()
@@ -94,7 +123,7 @@ function dragTrackOnto(from: string, to: string) {
   const dest = trackSlot(to).getBoundingClientRect()
   const point = trackPointer(dest.left + dest.width / 2, dest.top + 8)
   fireEvent.pointerMove(document, point)
-  fireEvent.pointerUp(document, trackPointer(point.clientX, point.clientY, 0))
+  releaseTrackDrag(point.clientX, point.clientY)
 }
 
 // dnd-kit swallows the click that follows a drag by stopping it on `document`
@@ -130,6 +159,34 @@ function inTimelineSettings<T>(find: () => T): T {
 let mockOutputLatencySec = 0
 vi.mock("./useOutputLatency", () => ({ useOutputLatency: () => mockOutputLatencySec }))
 
+/** How many times a subtitle/text lane has drawn: the cost a reorder must not pay. */
+const laneDraws = vi.hoisted(() => ({ count: 0 }))
+vi.mock("./TimelineLane", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./TimelineLane")>()
+  const { createElement } = await import("react")
+  return {
+    ...actual,
+    TimelineLane: (props: Parameters<typeof actual.TimelineLane>[0]) => {
+      laneDraws.count += 1
+      return createElement(actual.TimelineLane, props)
+    },
+  }
+})
+
+const progressTicks = vi.hoisted(() => {
+  const listeners = new Set<() => void>()
+  return {
+    version: 0,
+    subscribe(listener: () => void) {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    publish() {
+      progressTicks.version += 1
+      for (const listener of listeners) listener()
+    },
+  }
+})
 let mockQueueState: QueueState = { kind: "idle" }
 let mockProgress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
 // Round 5: the speaker buttons push audibility straight into the queue.
@@ -514,6 +571,37 @@ describe("TimelineEditor", () => {
         reset()
       }
     })
+  })
+
+  // The queue publishes ~4×/sec while it plays. When the editor read those
+  // seconds itself, every tick redrew every lane, and playback stuttered.
+  it("moves the playhead on a progress tick, and on to the next line, without redrawing the lanes", () => {
+    mockQueueState = { kind: "playing", cellIndex: 0, cellId: "m1" }
+    mockProgress = { currentTime: 6, duration: 20, rate: 1, volume: 1, programmeClock: false }
+    try {
+      render(
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+      )
+      const drawsBefore = laneDraws.count
+      expect(drawsBefore).toBeGreaterThan(0)
+      act(() => {
+        mockProgress = { ...mockProgress, currentTime: 8 }
+        progressTicks.publish()
+      })
+      expect(parseFloat(screen.getByTestId("tl-playhead").style.left)).toBeCloseTo(8 * 38, 0)
+      // Playback crosses into the next line: the readout follows it, and the
+      // lanes are not drawn again for it.
+      act(() => {
+        mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
+        mockProgress = { ...mockProgress, currentTime: 12 }
+        progressTicks.publish()
+      })
+      expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "m2")
+      expect(laneDraws.count).toBe(drawsBefore)
+    } finally {
+      mockQueueState = { kind: "idle" }
+      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
+    }
   })
 
   it("the playhead tracks queue progress for THIS file's cells", () => {
@@ -4521,6 +4609,94 @@ describe("TimelineEditor — dragging a track row reorders it", () => {
     expect(onReorderTrack).toHaveBeenCalledWith("source-subtitles", 2.5)
   })
 
+  it("paints a drop once it settles and saves it once the tracks are quiet, sooner if the user moves on", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      const onReorderTrack = vi.fn()
+      const { rerender } = render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+          onRetimeSubtitle={() => {}} onReorderTrack={onReorderTrack}
+        />,
+      )
+      const textBelowAudio = () => {
+        const names = [...document.querySelectorAll("[data-tl-track-row]")].map((el) => el.textContent ?? "")
+        return names.findIndex((n) => n.includes("Source text")) > names.findIndex((n) => n.includes("Source audio"))
+      }
+      const drop = () => {
+        layoutTrackSlots()
+        const host = trackSlot("Source text").getBoundingClientRect()
+        const start = { x: host.left + host.width / 2, y: host.top + 12 }
+        fireEvent.pointerDown(trackRowNamed("Source text"), trackPointer(start.x, start.y))
+        const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+        fireEvent.pointerMove(document, nudged)
+        fireEvent.pointerMove(document, nudged)
+        const dest = trackSlot("Source audio").getBoundingClientRect()
+        const point = trackPointer(dest.left + dest.width / 2, dest.top + 8)
+        fireEvent.pointerMove(document, point)
+        fireEvent.pointerUp(document, trackPointer(point.clientX, point.clientY, 0))
+      }
+      // The order paints once the row has landed; the save, which re-renders
+      // the whole workspace, waits until the tracks have been left alone.
+      // Until the paint the lanes are not redrawn at all — not on the lift,
+      // not on the drop — which on a long file is the whole cost of a drag.
+      // The paint moves the lanes it already drew rather than drawing them again.
+      const laneEpoch = () => screen.getByTestId("tl-editor").getAttribute("data-tl-lane-epoch")
+      const beforeDrag = laneEpoch()
+      drop()
+      act(() => { vi.advanceTimersByTime(TRACK_RELEASE_SETTLE_MS - 1) })
+      expect(textBelowAudio()).toBe(false)
+      expect(laneEpoch()).toBe(beforeDrag)
+      const drawsBeforePaint = laneDraws.count
+      act(() => { vi.advanceTimersByTime(1) })
+      expect(textBelowAudio()).toBe(true)
+      expect(laneDraws.count).toBe(drawsBeforePaint)
+      act(() => { vi.advanceTimersByTime(TRACK_ORDER_SAVE_QUIET_MS - 1) })
+      expect(onReorderTrack).not.toHaveBeenCalled()
+      act(() => { vi.advanceTimersByTime(1) })
+      expect(onReorderTrack).toHaveBeenCalledTimes(1)
+      expect(onReorderTrack).toHaveBeenLastCalledWith("source-subtitles", 2.5)
+      expect(laneDraws.count).toBeGreaterThan(drawsBeforePaint)
+
+      // Another drag holds the save off until it, too, is over.
+      drop()
+      act(() => { vi.advanceTimersByTime(TRACK_RELEASE_SETTLE_MS + TRACK_ORDER_SAVE_QUIET_MS - 100) })
+      layoutTrackSlots()
+      const host = trackSlot("Source audio").getBoundingClientRect()
+      const start = { x: host.left + host.width / 2, y: host.top + 12 }
+      fireEvent.pointerDown(trackRowNamed("Source audio"), trackPointer(start.x, start.y))
+      const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+      fireEvent.pointerMove(document, nudged)
+      fireEvent.pointerMove(document, nudged)
+      act(() => { vi.advanceTimersByTime(TRACK_ORDER_SAVE_QUIET_MS) })
+      expect(onReorderTrack).toHaveBeenCalledTimes(1)
+      fireEvent.pointerUp(document, trackPointer(start.x, start.y, 0))
+      act(() => { vi.advanceTimersByTime(TRACK_ORDER_SAVE_QUIET_MS) })
+      expect(onReorderTrack).toHaveBeenCalledTimes(2)
+
+      // Doing anything else saves at once: a click off the rows, a shortcut
+      // (even before the row has landed), or switching to another file.
+      const moveOn = [
+        () => fireEvent.pointerDown(document.body),
+        () => fireEvent.keyDown(document.body, { key: "z", metaKey: true }),
+        () => rerender(
+          <TimelineEditor
+            fileId="f2" coreMediaUrl={null} editable cells={rowCells}
+            onRetimeSubtitle={() => {}} onReorderTrack={onReorderTrack}
+          />,
+        ),
+      ]
+      for (const [i, moveOnNow] of moveOn.entries()) {
+        drop()
+        if (i !== 1) act(() => { vi.advanceTimersByTime(TRACK_RELEASE_SETTLE_MS) })
+        moveOnNow()
+        expect(onReorderTrack).toHaveBeenCalledTimes(3 + i)
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("keeps the dragged row at its own height and draws no drop line", () => {
     render(
       <TimelineEditor
@@ -4538,6 +4714,10 @@ describe("TimelineEditor — dragging a track row reorders it", () => {
     fireEvent.pointerMove(document, nudged)
     fireEvent.pointerMove(document, nudged)
     expect(slot.className).not.toContain("opacity-0")
+    // The moving row carries a solid surface, so the name it crosses does not
+    // show through it. A row still sitting in its slot stays transparent.
+    expect(slot.className).toContain("bg-background")
+    expect(trackSlot("Source text").className).not.toContain("bg-background")
     expect(slot.style.height).toBe("")
     expect(row).toBeInTheDocument()
     expect(screen.queryByTestId("tl-track-drop-line")).toBeNull()
@@ -4582,6 +4762,202 @@ describe("TimelineEditor — dragging a track row reorders it", () => {
     expect(lane?.style.transform).toBe("translateY(0px)")
     expect(screen.getByTestId("tl-editor").getAttribute("data-tl-lane-epoch")).toBe(epoch)
     fireEvent.pointerUp(document, trackPointer(start.x, start.y, 0))
+  })
+
+  it("eases a row home when it is let go far below its slot", async () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}} onRenameTrack={() => {}}
+      />,
+    )
+    layoutTrackSlots()
+    const row = trackRowNamed("Source text")
+    const slot = trackSlot("Source text")
+    const host = slot.getBoundingClientRect()
+    const start = { x: host.left + host.width / 2, y: host.top + 12 }
+    fireEvent.pointerDown(row, trackPointer(start.x, start.y))
+    const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, nudged)
+    const dropped = trackPointer(start.x, start.y + 640)
+    fireEvent.pointerMove(document, dropped)
+    const held = slot.style.transform
+    expect(held).toContain("translate3d")
+    expect(held).not.toContain("0px, 0px, 0")
+    const lane = document.querySelector<HTMLElement>('[data-tl-track-lane="source-subtitles"]')
+    expect(lane?.style.transform).toMatch(/translateY\(-?\d/)
+    expect(lane?.style.transform).not.toBe("translateY(0px)")
+    // Drawn over the lanes it crosses, a folder's band included.
+    expect(lane).toHaveAttribute("data-tl-lifted")
+    expect(document.querySelector('[data-tl-track-lane="source-audio"]')).not.toHaveAttribute("data-tl-lifted")
+
+    fireEvent.pointerUp(document, trackPointer(dropped.clientX, dropped.clientY, 0))
+    // Still at the release offset for this frame, so the return can ease.
+    expect(slot.style.transform).toBe(held)
+    expect(slot.style.transition).toContain("0ms")
+    expect(lane?.style.transform).not.toBe("")
+    expect(lane?.style.transform).not.toBe("translateY(0px)")
+
+    // A transition starts from the last RESOLVED style, and the drop's frame
+    // callback can run before the hold is ever painted. Layout must be read
+    // while the hold is on the row, or the glide has no start to ease from.
+    const readPoses: string[] = []
+    const measure = slot.getBoundingClientRect
+    slot.getBoundingClientRect = () => {
+      readPoses.push(slot.style.transform)
+      return measure()
+    }
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+    })
+    expect(readPoses).toContain(held)
+    expect(slot.style.transition).toMatch(/transform \d+ms cubic-bezier\(0\.2, 0, 0, 1\)/)
+    expect(slot.style.transform).toBe("translate3d(0px, 0px, 0)")
+    expect(lane?.style.transition).toBe(slot.style.transition)
+    expect(lane?.style.transform).toBe("translateY(0px)")
+    expect(lane).toHaveAttribute("data-tl-lifted")
+    await waitFor(() => expect(lane).not.toHaveAttribute("data-tl-lifted"))
+  })
+
+  it("settles a swap by the leftover offset, not the whole drag", async () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}} onRenameTrack={() => {}}
+      />,
+    )
+    layoutTrackSlots()
+    const row = trackRowNamed("Source text")
+    const slot = trackSlot("Source text")
+    const host = slot.getBoundingClientRect()
+    const start = { x: host.left + host.width / 2, y: host.top + 12 }
+    fireEvent.pointerDown(row, trackPointer(start.x, start.y))
+    const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, nudged)
+    const audio = trackSlot("Source audio")
+    const dest = audio.getBoundingClientRect()
+    const point = trackPointer(dest.left + dest.width / 2, dest.top + dest.height / 2)
+    fireEvent.pointerMove(document, point)
+    const held = translatedY(slot.style.transform)
+    const neighborHeld = audio.style.transform
+    expect(Math.abs(held)).toBeGreaterThan(20)
+    expect(neighborHeld).not.toContain("0px, 0px, 0")
+
+    fireEvent.pointerUp(document, trackPointer(point.clientX, point.clientY, 0))
+    expect(translatedY(slot.style.transform)).toBe(held)
+
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+    })
+    const settled = translatedY(slot.style.transform)
+    // The row eases from where the pointer left it onto the slot, a few pixels.
+    expect(Math.abs(settled - held)).toBeLessThan(24)
+    expect(settled).not.toBe(0)
+    expect(audio.style.transform).toBe(neighborHeld)
+    const lane = document.querySelector<HTMLElement>('[data-tl-track-lane="source-subtitles"]')
+    expect(Math.abs(translatedY(lane?.style.transform ?? "") - settled)).toBeLessThan(1)
+  })
+
+  it("stops a row at the column's top edge, and lands it in the first slot when let go above it", () => {
+    function Harness() {
+      const [overrides, setOverrides] = useState<Record<string, { order: number }>>({})
+      return (
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+          tracks={deriveTracksForFile({ trackOverrides: overrides })}
+          onRetimeSubtitle={() => {}}
+          onReorderTrack={(trackId, order) => setOverrides((prev) => ({ ...prev, [trackId]: { order } }))}
+          onRenameTrack={() => {}}
+        />
+      )
+    }
+    render(<Harness />)
+    for (const slot of document.querySelectorAll<HTMLElement>("[data-reorderable]")) {
+      slot.getBoundingClientRect = () => {
+        const siblings = [...(slot.parentElement?.querySelectorAll<HTMLElement>(":scope > [data-reorderable]") ?? [])]
+        return trackBox(Math.max(0, siblings.indexOf(slot)) * 40, 40)
+      }
+    }
+    const slots = () => [...document.querySelectorAll<HTMLElement>("[data-reorderable]")]
+    const last = slots().at(-1)
+    if (!last) throw new Error("no rows")
+    const host = last.getBoundingClientRect()
+    const start = { x: host.left + host.width / 2, y: host.top + 12 }
+    const above = -30
+    fireEvent.pointerDown(last.querySelector("[data-tl-track-row]") ?? last, trackPointer(start.x, start.y))
+    const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, trackPointer(start.x, above))
+    fireEvent.pointerMove(document, trackPointer(start.x, above))
+    expect(translatedY(last.style.transform)).toBe(-host.top)
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      fireEvent.pointerUp(document, trackPointer(start.x, above, 0))
+      // It never slides back toward the bottom on the way in.
+      expect(host.top + translatedY(last.style.transform)).toBe(0)
+      act(() => { vi.advanceTimersByTime(TRACK_RELEASE_SETTLE_MS) })
+      expect(slots()[0]).toBe(last)
+      expect(translatedY(last.style.transform)).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("does not replay a neighbour's finished slide when the new order paints", () => {
+    // A stateful harness: the reorder writes straight back into the tracks
+    // prop, so the new order paints the moment it is written — the geometry
+    // the release animation actually meets in the app.
+    function Harness() {
+      const [overrides, setOverrides] = useState<Record<string, { order: number }>>({})
+      return (
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+          tracks={deriveTracksForFile({ trackOverrides: overrides })}
+          onRetimeSubtitle={() => {}}
+          onReorderTrack={(trackId, order) => setOverrides((prev) => ({ ...prev, [trackId]: { order } }))}
+          onRenameTrack={() => {}}
+        />
+      )
+    }
+    render(<Harness />)
+    // Live rects: a row's top follows its place in the DOM, so when the new
+    // order paints, measurement sees the new layout — as a browser does.
+    for (const slot of document.querySelectorAll<HTMLElement>("[data-reorderable]")) {
+      slot.getBoundingClientRect = () => {
+        const siblings = [...(slot.parentElement?.querySelectorAll<HTMLElement>(":scope > [data-reorderable]") ?? [])]
+        return trackBox(Math.max(0, siblings.indexOf(slot)) * 40, 40)
+      }
+    }
+    const row = trackRowNamed("Source text")
+    const host = trackSlot("Source text").getBoundingClientRect()
+    const start = { x: host.left + host.width / 2, y: host.top + 12 }
+    fireEvent.pointerDown(row, trackPointer(start.x, start.y))
+    const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, nudged)
+    const audio = trackSlot("Source audio")
+    const dest = audio.getBoundingClientRect()
+    fireEvent.pointerMove(document, trackPointer(dest.left + dest.width / 2, dest.top + dest.height / 2))
+    // The neighbour has already slid into the dragged row's slot.
+    expect(translatedY(audio.style.transform)).toBe(-40)
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      fireEvent.pointerUp(document, trackPointer(dest.left + dest.width / 2, dest.top + dest.height / 2, 0))
+      // Parked where the drag left it while the dropped row settles…
+      expect(translatedY(audio.style.transform)).toBe(-40)
+      act(() => { vi.advanceTimersByTime(TRACK_RELEASE_SETTLE_MS) })
+    } finally {
+      vi.useRealTimers()
+    }
+    // …then the new order paints and the neighbour is already home: no
+    // transform, and no second glide over ground it already covered. (With
+    // the release measured off a mid-slide rect, it snapped back a full
+    // row and slid the same 40px again.)
+    expect(trackSlot("Source audio")).toBe(audio)
+    expect(audio.style.transform).toBe("")
   })
 })
 
@@ -4907,7 +5283,13 @@ describe("TimelineEditor — the gutter's trailing controls sit in one column", 
 // Dropping a track on a folder's member is the file list's cross-group drop:
 // it joins that folder. With track editing off, the same gesture writes nothing.
 describe("TimelineEditor — dropping a track on a folder member moves it into the folder", () => {
-  beforeEach(() => { topOwner.value = 1 })
+  beforeEach(() => {
+    topOwner.value = 1
+    // Collapse is personal and sticky. A folder closed by an earlier test
+    // would hide the member this drop aims at.
+    localStorage.removeItem("aquilla:tlFoldersClosed:f1")
+    localStorage.removeItem("aquilla:tlTracksHidden:f1")
+  })
 
   const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
   const folded = () =>

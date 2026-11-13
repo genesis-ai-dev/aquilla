@@ -211,3 +211,64 @@ export function settledPendingOrders(
   }
   return settled
 }
+
+/** A folder move paints both fields. `groupId: null` is the root list. */
+export type PendingTrackScope = { groupId: string | null; order: number }
+
+/**
+ * The same overlay as `applyPendingOrders`, for a drag that also crossed a
+ * folder wall. Copies only — the pending place must not leak into an emit.
+ */
+export function applyPendingScopes(
+  tracks: readonly TimelineTrack[],
+  pending: ReadonlyMap<string, PendingTrackScope>,
+): TimelineTrack[] {
+  const seats = new Map<string, number>()
+  tracks.forEach((track, index) => seats.set(track.id, index))
+  const patched = tracks.map((track) => {
+    const place = pending.get(track.id)
+    return place === undefined ? { ...track } : { ...track, groupId: place.groupId, order: place.order }
+  })
+  return patched.sort(compareTracksBySeat(seats, tracks.length))
+}
+
+/**
+ * A track has one place in flight. A folder move supersedes its pending order:
+ * the server ends up holding the move's order, so the old one never settles,
+ * and once the move did it would pull the row back to that old rank.
+ */
+export function withoutPendingOrder(
+  orders: ReadonlyMap<string, number>,
+  trackId: string,
+): Map<string, number> {
+  const next = new Map(orders)
+  next.delete(trackId)
+  return next
+}
+
+/** …and a later order for a track whose folder move is in flight is that move's new rank. */
+export function withPendingScopeOrders(
+  places: ReadonlyMap<string, PendingTrackScope>,
+  changes: ReadonlyArray<{ trackId: string; order: number }>,
+): Map<string, PendingTrackScope> {
+  const next = new Map(places)
+  for (const { trackId, order } of changes) {
+    const place = next.get(trackId)
+    if (place) next.set(trackId, { ...place, order })
+  }
+  return next
+}
+
+/** Drop a pending scope once the server read carries the same group and order. */
+export function settledPendingScopes(
+  pending: ReadonlyMap<string, PendingTrackScope>,
+  serverTracks: readonly TimelineTrack[],
+): string[] {
+  const settled: string[] = []
+  for (const track of serverTracks) {
+    const wanted = pending.get(track.id)
+    if (!wanted) continue
+    if (track.order === wanted.order && (track.groupId ?? null) === wanted.groupId) settled.push(track.id)
+  }
+  return settled
+}

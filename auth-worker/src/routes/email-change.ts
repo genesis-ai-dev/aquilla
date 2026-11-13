@@ -115,7 +115,6 @@ routes.post("/request", zValidator("json", requestSchema), async (c) => {
     return c.json({ error: "email_unchanged" }, 400)
   const refusal = await guard(c, old, email)
   if (refusal) return c.json({ error: refusal }, 403)
-  if (!c.env.EMAIL) return c.json({ error: "email_delivery_unavailable" }, 503)
   let proved = password
     ? (await verifyPassword(password, old.password_hash)).isValid
     : false
@@ -134,7 +133,8 @@ routes.post("/request", zValidator("json", requestSchema), async (c) => {
       .first()
     proved = !!row
   }
-  if (!proved) return c.json({ error: "ownership_proof_required" }, 401)
+  if (!proved) return c.json({ error: password && !google ? "incorrect_password" : "ownership_proof_required" }, 401)
+  if (!c.env.EMAIL) return c.json({ error: "email_delivery_unavailable" }, 503)
   const token = sixDigitCode()
   const hash = await codeHash(c.env.SECRET_KEY, old.id, token)
   const saved = await c.env.AQUILLA_PG.prepare(

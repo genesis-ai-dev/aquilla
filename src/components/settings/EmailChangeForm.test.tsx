@@ -102,3 +102,16 @@ it("shows an actionable dev access refusal without advancing", async () => {
   )
   expect(screen.queryByLabelText("Verification code")).toBeNull()
 })
+
+it.each([
+  ["incorrect_password", 401, "That Aquilla password is incorrect"],
+  ["email_delivery_unavailable", 503, "We could not send the verification email"],
+])("distinguishes %s without advancing to mailbox verification", async (error, status, message) => {
+  fetchMock.mockResolvedValue(Response.json({ error }, { status }))
+  renderForm()
+  fireEvent.change(screen.getByLabelText("New email"), { target: { value: "new@example.com" } })
+  fireEvent.change(screen.getByLabelText("Aquilla password"), { target: { value: "secret" } })
+  fireEvent.click(screen.getByRole("button", { name: "Send verification email" }))
+  expect((await screen.findByRole("alert")).textContent).toContain(message)
+  expect(screen.queryByLabelText("Verification code")).toBeNull()
+})

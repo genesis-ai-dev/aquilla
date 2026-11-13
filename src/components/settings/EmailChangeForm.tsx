@@ -15,6 +15,7 @@ import {
 } from "@/lib/frontier/google-login"
 
 const messages: Record<string, MessageKey> = {
+  incorrect_password: "auth.emailChange.incorrect_password",
   admin_verification_required: "auth.emailChange.admin_verification_required",
   administrator_coordination_required:
     "auth.emailChange.administrator_coordination_required",

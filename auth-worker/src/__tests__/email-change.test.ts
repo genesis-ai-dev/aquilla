@@ -16,6 +16,7 @@ const post = (path: string, body: object) =>
   )
 const code = () => send.mock.calls.at(-1)![0].text.match(/\b[0-9]{6}\b/)![0]
 beforeEach(async () => {
+  testEnv.EMAIL = { send }
   send.mockReset()
   send.mockResolvedValue(undefined)
   delete testEnv.DEPLOYMENT_WORKER_NAME
@@ -82,12 +83,17 @@ describe("verified email changes", () => {
     for (let i=0; i<4; i++) expect((await post("confirm", {token:wrong})).status).toBe(400)
     expect((await post("confirm", {token:valid})).status).toBe(200)
   })
-  it("rejects incorrect password and sends nothing", async () => {
-    expect(
-      (await post("request", { email: "new@example.com", password: "wrong" }))
-        .status,
-    ).toBe(401)
-    expect(send).not.toHaveBeenCalled()
+  it("reports incorrect passwords before checking mail availability and sends nothing", async () => {
+    for (const available of [true, false]) {
+      testEnv.EMAIL = available ? { send } : undefined
+      const response = await post("request", { email: "new@example.com", password: "wrong" })
+      expect(response.status).toBe(401)
+      expect(await response.json()).toEqual({ error: "incorrect_password" })
+    }
+    expect((await request()).status).toBe(503)
+    testEnv.EMAIL = { send }
+    expect((await request()).status).toBe(200)
+    expect(send).toHaveBeenCalledOnce()
   })
   it("rejects reserved admin addresses", async () => {
     await env.AQUILLA_PG.prepare(

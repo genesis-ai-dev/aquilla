@@ -357,14 +357,17 @@ import {
   type SynthTargetPlan,
 } from "@/lib/audio/linked-takes"
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
-import { deriveTracksForFile } from "@/lib/timeline/tracks"
+import { deriveTracksForFile, type TimelineTrack } from "@/lib/timeline/tracks"
 import { nextFolderName } from "@/lib/timeline/track-names"
-import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
+import { applyPendingOrders, applyPendingScopes, renormaliseOrders, settledPendingOrders, settledPendingScopes, withoutPendingOrder, withPendingScopeOrders, type PendingTrackScope } from "@/lib/timeline/track-reorder"
+import { applyPendingColors, settledPendingColors, withPendingColors, withoutPendingColors } from "@/lib/timeline/track-colors"
 import { contentFileIdsOfShownTracks, folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
 import { loadHiddenTracks } from "@/lib/timeline/track-collapse"
 import { GENERATED_VOICE_SLOT, programmeTrackSlots, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
+import { createVideoSeekStore } from "@/components/timeline/video-seek-store"
+import { createPlayingCueStore, type PlayingCueStore } from "@/components/editor-playing-cue"
 import type { ChangeVoiceMenuBlocker, ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
 import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
@@ -13683,13 +13686,63 @@ export function ProjectWorkspace() {
     fileId: string
     orders: Map<string, number>
   } | null>(null)
+  // A folder move changes group and order together. Painted before the emit,
+  // same as a reorder, so the row does not sit in the old folder until the
+  // project GET comes back.
+  const [pendingTrackScopes, setPendingTrackScopes] = useState<{
+    fileId: string
+    places: Map<string, PendingTrackScope>
+  } | null>(null)
+  // A folder "Move to → New folder" made, drawn before the server has it so
+  // its members have somewhere to go the moment the choice is made. Display-
+  // only, like the two above; dropped once the server read carries the id.
+  const [pendingNewTracks, setPendingNewTracks] = useState<{
+    fileId: string
+    tracks: TimelineTrack[]
+  } | null>(null)
+  // A recolour, painted before the emit. `refresh()` is a full project GET;
+  // without this the row keeps its old hue until that lands.
+  const [pendingTrackColors, setPendingTrackColors] = useState<{
+    fileId: string
+    colors: Map<string, string | null>
+  } | null>(null)
+  const pendingTrackColorsRef = useRef(pendingTrackColors)
+  pendingTrackColorsRef.current = pendingTrackColors
+  /** Saves the "Move to" moves still queued (`saveQueuedTrackMoves`, below).
+   *  A drag's write calls it first, so the outbox holds writes in the order
+   *  they were made and a held move can never land over a later drag. */
+  const flushQueuedTrackMoves = useRef<() => void>(() => {})
   const timelineTracks = useMemo(() => {
-    if (!pendingTrackOrders || pendingTrackOrders.fileId !== activeFile?.id) return serverTimelineTracks
-    // Sorted by tracks.ts's exported comparator (inside applyPendingOrders), so
-    // the optimistic order and the settled one cannot disagree on a tie and
-    // swap the row back at the instant the user lets go of it.
-    return applyPendingOrders(serverTimelineTracks, pendingTrackOrders.orders)
-  }, [serverTimelineTracks, pendingTrackOrders, activeFile?.id])
+    let tracks = serverTimelineTracks
+    if (pendingNewTracks && pendingNewTracks.fileId === activeFile?.id) {
+      const known = new Set(tracks.map((tr) => tr.id))
+      const added = pendingNewTracks.tracks.filter((tr) => !known.has(tr.id))
+      if (added.length > 0) tracks = [...tracks, ...added]
+    }
+    if (pendingTrackOrders && pendingTrackOrders.fileId === activeFile?.id) {
+      // Sorted by tracks.ts's exported comparator (inside applyPendingOrders), so
+      // the optimistic order and the settled one cannot disagree on a tie and
+      // swap the row back at the instant the user lets go of it.
+      tracks = applyPendingOrders(tracks, pendingTrackOrders.orders)
+    }
+    if (pendingTrackScopes && pendingTrackScopes.fileId === activeFile?.id) {
+      tracks = applyPendingScopes(tracks, pendingTrackScopes.places)
+    }
+    if (pendingTrackColors && pendingTrackColors.fileId === activeFile?.id) {
+      tracks = applyPendingColors(tracks, pendingTrackColors.colors)
+    }
+    return tracks
+  }, [serverTimelineTracks, pendingNewTracks, pendingTrackOrders, pendingTrackScopes, pendingTrackColors, activeFile?.id])
+  useEffect(() => {
+    if (!pendingNewTracks || pendingNewTracks.fileId !== activeFileId) return
+    const known = new Set(serverTimelineTracks.map((tr) => tr.id))
+    if (!pendingNewTracks.tracks.some((tr) => known.has(tr.id))) return
+    setPendingNewTracks((current) => {
+      if (!current || current.fileId !== activeFileId) return current
+      const left = current.tracks.filter((tr) => !known.has(tr.id))
+      return left.length === 0 ? null : { fileId: current.fileId, tracks: left }
+    })
+  }, [serverTimelineTracks, pendingNewTracks, activeFileId])
   // Drop each pending order once the server read carries it — the same shape as
   // the optimistic-rename reconciliation above, and driven for free: the
   // dragger's own `file.track.set` frame comes back over the WS and triggers
@@ -13707,12 +13760,37 @@ export function ProjectWorkspace() {
       return next.size === 0 ? null : { fileId: current.fileId, orders: next }
     })
   }, [serverTimelineTracks, pendingTrackOrders, activeFileId])
+  useEffect(() => {
+    if (!pendingTrackScopes || pendingTrackScopes.fileId !== activeFileId) return
+    const settled = settledPendingScopes(pendingTrackScopes.places, serverTimelineTracks)
+    if (settled.length === 0) return
+    setPendingTrackScopes((current) => {
+      if (!current || current.fileId !== activeFileId) return current
+      const next = new Map(current.places)
+      for (const id of settled) next.delete(id)
+      return next.size === 0 ? null : { fileId: current.fileId, places: next }
+    })
+  }, [serverTimelineTracks, pendingTrackScopes, activeFileId])
+  useEffect(() => {
+    if (!pendingTrackColors || pendingTrackColors.fileId !== activeFileId) return
+    const settled = settledPendingColors(pendingTrackColors.colors, serverTimelineTracks)
+    if (settled.length === 0) return
+    setPendingTrackColors((current) => {
+      if (!current || current.fileId !== activeFileId) return current
+      const next = new Map(current.colors)
+      for (const id of settled) next.delete(id)
+      return next.size === 0 ? null : { fileId: current.fileId, colors: next }
+    })
+  }, [serverTimelineTracks, pendingTrackColors, activeFileId])
   // The third way out: leaving the file (or the project) abandons the overlay.
   // Whatever the server ends up storing is the truth for a file you are no
   // longer looking at, and an overlay held across a switch would be applied to
   // a list it was never computed against.
   useEffect(() => {
     setPendingTrackOrders(null)
+    setPendingTrackScopes(null)
+    setPendingNewTracks(null)
+    setPendingTrackColors(null)
   }, [activeFileId, projectId])
   // Pre-merge round: the control returned to the timeline toolbar. The gate
   // is "don't pass the callback": below the floor the toolbar renders the
@@ -14633,15 +14711,38 @@ export function ProjectWorkspace() {
    * hands them over already paired with their track; this stays one enqueue, so
    * a bulk recolour is still one write that lands or fails together.
    */
+  const paintTrackColors = useCallback(
+    (updates: ReadonlyArray<{ trackId: string; color: string | null }>): (() => void) => {
+      const fileId = activeFileId
+      if (!fileId || updates.length === 0) return () => {}
+      setPendingTrackColors((current) => ({
+        fileId,
+        colors: withPendingColors(current?.fileId === fileId ? current.colors : null, updates),
+      }))
+      return () => {
+        setPendingTrackColors((current) => {
+          if (!current || current.fileId !== fileId) return current
+          const colors = withoutPendingColors(current.colors, updates)
+          return colors === null ? null : { fileId, colors }
+        })
+      }
+    },
+    [activeFileId],
+  )
+  const paintTrackColorsRef = useRef(paintTrackColors)
+  paintTrackColorsRef.current = paintTrackColors
+
   const handleSetTrackColor = useCallback(
     (updates: ReadonlyArray<{ trackId: string; color: string | null }>) => {
+      const revert = paintTrackColors(updates)
       recordTrackChanges("editor.history.stepTrackColour", updates.map(({ trackId, color }) => ({ trackId, after: { color } })))
       void applyTrackPatches(
         updates.map(({ trackId, color }) => ({ trackId, patch: { color } })),
         "Couldn't change the colour:",
+        revert,
       )
     },
-    [applyTrackPatches, recordTrackChanges],
+    [applyTrackPatches, paintTrackColors, recordTrackChanges],
   )
 
   /**
@@ -15534,9 +15635,20 @@ export function ProjectWorkspace() {
       ...trackStepHandlers({
         readTrack: (trackId) => {
           const tr = serverTimelineTracks.find((x) => x.id === trackId)
-          return tr ? trackFieldsOf(tr) : null
+          if (!tr) return null
+          const pending = pendingTrackColorsRef.current
+          const color = pending?.fileId === activeFileIdRef.current ? pending.colors.get(trackId) : undefined
+          return trackFieldsOf(color === undefined ? tr : { ...tr, color })
         },
-        patchTracks: (changes) => applyTrackPatches(changes as never, "Couldn't undo the track change:"),
+        patchTracks: (changes) => {
+          const colors = changes.flatMap((change) =>
+            change.patch && "color" in change.patch
+              ? [{ trackId: change.trackId, color: change.patch.color ?? null }]
+              : [],
+          )
+          const revert = paintTrackColorsRef.current(colors)
+          return applyTrackPatches(changes as never, "Couldn't undo the track change:", revert)
+        },
         restoreTakes: async (takes) => {
           // Choosing a deleted take brings it back. Bring every one back, then
           // give each slot its old choice — the last write per slot wins.

@@ -144,20 +144,44 @@ import { loadCollapsedFolders, loadHiddenTracks, saveCollapsedFolders, saveHidde
 import { TRACK_ACCENT_CLASS, TRACK_DOT_CLASS, trackHueVarsFor } from "@/lib/timeline/track-colors"
 import type { SummarySpan } from "@/lib/timeline/summary-band"
 import { TimelineFolderLane } from "./TimelineFolderLane"
-import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core"
+import {
+  createGutterDragStore,
+  useGutterGapShift,
+  useGutterIndent,
+  type FolderPreview,
+  type GutterDragGap,
+  type GutterDragStore,
+} from "./gutter-drag-store"
+import type { DragEndEvent, DragMoveEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core"
 import {
   TIMELINE_ROOT_GROUP,
   SortableTrackBlock,
   TrackReorderDnd,
   TrackSortableList,
+  FOLDER_ENTER_DWELL_MS,
+  FOLDER_EXIT_DWELL_MS,
+  TRACK_ORDER_SAVE_QUIET_MS,
+  TRACK_RELEASE_SETTLE_MS,
   adjustTrackDrop,
   canDragTrack,
   commitTrackReorder,
+  dragGapForDrop,
+  folderDragEdge,
+  orderAboveClosedFolder,
+  orderBesideFolder,
   paintLaneNode,
   paintLaneShifts,
   resolveTrackDrop,
+  shouldRetainTopDragGap,
   type TrackLaneShift,
 } from "./track-gutter-dnd"
+import {
+  TRACK_MOVE_MAX_WAIT_MS,
+  playTrackMove,
+  snapshotTrackMove,
+  trackMoveLanded,
+  type TrackMoveSnapshot,
+} from "./track-move-flip"
 import { RowMetricsContext, useRowMetrics, type RowMetrics } from "./useRowMetrics"
 // Read-only queue subscriptions only — playback COMMANDS stay in the
 // workspace (onSeekToTime), keeping this component testable with a spy prop.

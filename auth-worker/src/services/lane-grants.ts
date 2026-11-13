@@ -194,30 +194,6 @@ export async function applyMigratedMemberLaneGrants(
 }
 
 /**
- * One person, the projects a membership write just opened or re-levelled.
- *
- * The role is re-resolved per project rather than taken from the caller's
- * write, because the effective role is max-wins across the direct, team and
- * org paths (AD-12): a Contributor on the team who is also a Maintainer on the
- * org resolves to Maintainer and must get no rows at all. Projects the person
- * cannot actually reach (archived, or no surviving path) are skipped. Per
- * project the work is `applyDirectAddLaneGrants`, so every admission path
- * lands a member in the same place.
- */
-export async function applyMemberLaneGrantsForProjects(
-  db: AquillaDb,
-  userId: number,
-  projectIds: readonly string[],
-  grantedBy: number | null,
-): Promise<void> {
-  for (const projectId of new Set(projectIds)) {
-    const role = await resolveProjectRoleShared(db, { id: String(userId) }, projectId)
-    if (!role) continue
-    await applyDirectAddLaneGrants(db, projectId, userId, role.level, grantedBy)
-  }
-}
-
-/**
  * AQU-1808 — the kind='lane' scope rows an explicit lane choice names,
  * replacing whatever rows the person already had on this project.
  *

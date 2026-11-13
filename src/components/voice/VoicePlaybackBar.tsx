@@ -29,6 +29,7 @@ import { isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/
 import { resolveCastVoice } from "@/lib/audio/voices"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { filmOverRun, layOutProgramme, playedProgramme, type BuildProgrammeOptions } from "@/lib/timeline/programme"
+import { useSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -198,9 +199,14 @@ export function VoicePlaybackBar({
   // here: the lines' own takes and originals alone. Nov 12 (the review of
   // question 44): one call, the queue's own answer for these lines, with this
   // bar's timing and tracks (`linesPlaybackStopsAt`).
+  // The check of the q44 fixes (Nov 12): with "Skip lines with nothing to
+  // play" read here and handed on, so a change to it moves Play at once.
+  const skipSilent = useSkipSilentLinesPref()
   const canPlay = useMemo(
-    () => audioLoaded && (drivesVideo || linesPlaybackStopsAt(cells, { freeTiming: filmCounts, tracks: programmeTracks }, film).size > 0),
-    [audioLoaded, drivesVideo, filmCounts, film, cells, programmeTracks],
+    () => audioLoaded && (drivesVideo || linesPlaybackStopsAt(cells, {
+      freeTiming: filmCounts, ...(programmeTracks ? { tracks: programmeTracks } : {}), film, skipSilent,
+    }).size > 0),
+    [audioLoaded, drivesVideo, filmCounts, film, cells, programmeTracks, skipSilent],
   )
   const activeIndex = transport.cellId ? cells.findIndex((c) => c.id === transport.cellId) : -1
   const activeCell = activeIndex >= 0 ? cells[activeIndex] : undefined

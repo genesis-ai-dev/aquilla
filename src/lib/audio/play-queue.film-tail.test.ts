@@ -24,6 +24,7 @@ import {
   getQueueState,
   linesHaveAnythingOfTheirOwnToPlay,
   linesPlaybackStopsAt,
+  queuePlaybackAsk,
   linesHaveAnythingToPlayCountingFilm,
   onQueueRanOut,
   pauseQueue,
@@ -2232,7 +2233,7 @@ describe("an unrecorded line under the film is a line: Play selected, and the qu
   it("the lines playback stops at count the unrecorded line the film plays behind", () => {
     const cells = chosen()
     linkFilm(10, cells)
-    expect([...linesPlaybackStopsAt(cells)]).toEqual(["b1", "b2", "b3"])
+    expect([...linesPlaybackStopsAt(cells, queuePlaybackAsk())]).toEqual(["b1", "b2", "b3"])
     // Play all's own move into the next chapter still asks without the film.
     expect(linesHaveAnythingOfTheirOwnToPlay([cells[1]!])).toBe(false)
   })
@@ -2241,7 +2242,7 @@ describe("an unrecorded line under the film is a line: Play selected, and the qu
     // a1 recorded 2 s [0, 2); a2 a stand-in [2, 3.5), the film's to 3 s; a3 a stand-in [3.5, 5), past it.
     const cells = [line("a1", 2_000), line("a2"), line("a3")]
     linkFilm(3, cells)
-    const stops = linesPlaybackStopsAt(cells)
+    const stops = linesPlaybackStopsAt(cells, queuePlaybackAsk())
     expect([...stops]).toEqual(["a1", "a2"])
     const last = cells.map((c) => c.id).lastIndexOf([...stops].pop()!)
     startQueue(ctxFor(cells), last)
@@ -2253,13 +2254,13 @@ describe("an unrecorded line under the film is a line: Play selected, and the qu
     setSkipSilentLinesPref(false)
     const cells = [line("a1", 2_000), line("a2"), line("a3")]
     linkFilm(3, cells)
-    expect([...linesPlaybackStopsAt(cells)]).toEqual(["a1", "a2", "a3"])
+    expect([...linesPlaybackStopsAt(cells, queuePlaybackAsk())]).toEqual(["a1", "a2", "a3"])
   })
 
   it("uses the timing it is handed: following the source the film is not counted", () => {
     const cells = chosen()
     linkFilm(10, cells)
-    expect([...linesPlaybackStopsAt(cells, { freeTiming: false })]).toEqual(["b1", "b3"])
+    expect([...linesPlaybackStopsAt(cells, { ...queuePlaybackAsk(), freeTiming: false })]).toEqual(["b1", "b3"])
   })
 
   describe("on a file with no film nothing changes: an unrecorded line has nothing to play", () => {
@@ -2273,7 +2274,7 @@ describe("an unrecorded line under the film is a line: Play selected, and the qu
     })
 
     it("it is not a line playback stops at", () => {
-      expect([...linesPlaybackStopsAt(chosen())]).toEqual(["b1", "b3"])
+      expect([...linesPlaybackStopsAt(chosen(), queuePlaybackAsk())]).toEqual(["b1", "b3"])
     })
   })
 })

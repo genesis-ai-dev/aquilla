@@ -18588,6 +18588,8 @@ export function ProjectWorkspace() {
                   reportBulkRepetitions={reportBulkRepetitions}
                   audioMode={lens === "audio"}
                   playbackLines={playbackCells}
+                  freeTiming={timingMode === "audioFirst"}
+                  programmeTracks={programmeTracks}
                   audioOnlyLane={activeLaneDelivers === "audio"}
                   orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
                   onVoiceTogether={async (sel) => {

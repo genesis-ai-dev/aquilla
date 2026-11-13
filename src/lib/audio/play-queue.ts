@@ -5274,6 +5274,35 @@ export function updateQueueCells(cells: CellData[]): void {
 }
 
 /**
+ * What `linesPlaybackStopsAt` is asked with: everything the queue's answer
+ * turns on, handed over so no caller depends on what the queue was last told
+ * (the check of the q44 fixes, Nov 12: a React caller reads each one and
+ * works the stops out again when one changes).
+ */
+export interface PlaybackAsk {
+  /** The file follows its recordings (its timing control). */
+  freeTiming: boolean
+  /** The added tracks laid in with the lines (the workspace's
+   *  `programmeTracks`); none when absent. */
+  tracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">
+  /** The workspace's word about the linked film (`useProgrammeFilm`). */
+  film: ProgrammeFilm | null
+  /** "Skip lines with nothing to play" (`useSkipSilentLinesPref`). */
+  skipSilent: boolean
+}
+
+/** What the queue has been told, as a `PlaybackAsk`: for a caller outside
+ *  React (an event handler, a test), which asks at the moment it acts. */
+export function queuePlaybackAsk(): PlaybackAsk {
+  return {
+    freeTiming: timingMode === "audioFirst",
+    tracks: { layerSlots: targetSlots.filter((slot) => !isDefaultTrackSlot(slot)), layerTrackSlots },
+    film: progFilm,
+    skipSilent: getSkipSilentLinesPref(),
+  }
+}
+
+/**
  * The lines of this list that playback stops at, decided as the queue decides
  * them (Sam, Nov 12, question 44, and the review of it). Following the
  * recordings, laid out as the queue plays them (`playedProgramme`), a line is
@@ -5286,33 +5315,20 @@ export function updateQueueCells(cells: CellData[]): void {
  * (`masterAudioForCell`).
  *
  * One answer for every surface that asks the queue's question before asking
- * the queue: "Play selected" counts the chosen lines among these, and the
- * bottom strip offers Play when there is one. `as` is the timing and tracks
- * the asker has (the strip renders before the queue is told); absent, the
- * queue's own. `film` is the workspace's word, as a React caller reads it
- * (`useProgrammeFilm`).
+ * the queue: "Play selected" counts the chosen lines among these, the bottom
+ * strip offers Play when there is one, and a chapter picked while Play all
+ * plays is played when it has one. Asked with everything it turns on (`ask`).
  */
-export function linesPlaybackStopsAt(
-  cells: readonly CellData[],
-  as?: { freeTiming: boolean; tracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots"> },
-  film: ProgrammeFilm | null = progFilm,
-): ReadonlySet<string> {
-  const followsRecordings = as ? as.freeTiming : timingMode === "audioFirst"
-  const played = followsRecordings
-    ? playedProgramme(cells, as?.tracks ?? {
-        layerSlots: targetSlots.filter((slot) => !isDefaultTrackSlot(slot)),
-        layerTrackSlots,
-      })
-    : null
+export function linesPlaybackStopsAt(cells: readonly CellData[], ask: PlaybackAsk): ReadonlySet<string> {
+  const played = ask.freeTiming ? playedProgramme(cells, ask.tracks) : null
   if (!played || played.programme.slots.length === 0) {
     return new Set(cells.filter((c) => masterAudioForCell(c) !== undefined).map((c) => c.id))
   }
-  const coverSec = filmOverRun(film, cells.map((c) => c.id)).coverSec
-  const skip = getSkipSilentLinesPref()
+  const coverSec = filmOverRun(ask.film, cells.map((c) => c.id)).coverSec
   const stops = new Set<string>()
   for (const slot of played.programme.slots) {
     const plays = whatSlotPlays(slot, played.hiddenCellIds, played.underLayers, coverSec)
-    if (plays === "sound" || plays === "film" || (plays === "nothing" && !skip)) stops.add(slot.cellId)
+    if (plays === "sound" || plays === "film" || (plays === "nothing" && !ask.skipSilent)) stops.add(slot.cellId)
   }
   return stops
 }

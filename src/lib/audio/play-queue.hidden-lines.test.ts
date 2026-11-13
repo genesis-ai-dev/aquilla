@@ -17,6 +17,7 @@ import {
   getQueueProgress,
   getQueueState,
   linesPlaybackStopsAt,
+  queuePlaybackAsk,
   seekQueueToTime,
   skipBack,
   skipForward,
@@ -249,6 +250,6 @@ describe("Play all from the bottom bar", () => {
   })
 
   it("has nothing to play when only hidden lines are voiced", () => {
-    expect(linesPlaybackStopsAt([hidden(line("a", 0, 0))]).size).toBe(0)
+    expect(linesPlaybackStopsAt([hidden(line("a", 0, 0))], queuePlaybackAsk()).size).toBe(0)
   })
 })

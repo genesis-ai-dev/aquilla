@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { renderWithTooltips, expectClickNote, expectDisabledNote } from "@/test-utils/tooltip"
+import { TooltipProvider } from "@/components/ui/tooltip"
 
 /** AQU-2260 (Sam, Oct 29): a text button carries its own words, so no hover. */
 async function expectNoHover(el: Element) {
@@ -33,6 +34,7 @@ import type { MemberScope } from "@/lib/sync/member-scopes"
 import * as selectionModule from "@/lib/audio/selection"
 import { setProgrammeFilm, setQueueTimingMode, startQueue } from "@/lib/audio/play-queue"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
+import { resetSkipSilentLinesPrefCacheForTests, setSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { toast } from "@/components/ui/toast"
 import posthog from "@/lib/posthog"
@@ -1320,7 +1322,7 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     setQueueTimingMode("audioFirst")
     const lines = mergeCellsWithAudio(THREE, audio)
     renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
-      audioMode: true, session: SESSION, audioByCellId: audio, playbackLines: lines,
+      audioMode: true, session: SESSION, audioByCellId: audio, freeTiming: true, playbackLines: lines,
     })
     expect(playButton().textContent).toContain("2")
 
@@ -1340,7 +1342,7 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     // 2 s; cell-3 a stand-in [2.5, 4), past the film's end.
     const audio = audioMapFor(["cell-1"])
     renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
-      audioMode: true, session: SESSION, audioByCellId: audio, playbackLines: filmFile(audio, 2),
+      audioMode: true, session: SESSION, audioByCellId: audio, freeTiming: true, playbackLines: filmFile(audio, 2),
     })
     expect(playButton().textContent).toContain("2")
     expect(playButton().textContent).not.toContain("3")
@@ -1351,7 +1353,7 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     const audio = audioMapFor(["cell-1"])
     const lines = filmFile(audio, 60)
     renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
-      audioMode: true, session: SESSION, audioByCellId: audio, playbackLines: lines,
+      audioMode: true, session: SESSION, audioByCellId: audio, freeTiming: true, playbackLines: lines,
     })
 
     await userEvent.setup().click(playButton())
@@ -1374,7 +1376,7 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     // The chapter on the timeline holds cell-1 and cell-2; cell-3 is in another.
     const lines = filmFile(audio, 60).slice(0, 2)
     renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
-      audioMode: true, session: SESSION, audioByCellId: audio, playbackLines: lines,
+      audioMode: true, session: SESSION, audioByCellId: audio, freeTiming: true, playbackLines: lines,
     })
     expect(playButton().textContent).toContain("2")
 
@@ -1395,7 +1397,7 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     // Play plays cell-3 first (a file laid out by time, say).
     const lines = [...filmFile(audio, 60)].reverse()
     renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
-      audioMode: true, session: SESSION, audioByCellId: audio, playbackLines: lines,
+      audioMode: true, session: SESSION, audioByCellId: audio, freeTiming: true, playbackLines: lines,
     })
 
     await userEvent.setup().click(playButton())
@@ -1404,10 +1406,62 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     expect(ctx.cells[fromIndex as number]?.id).toBe("cell-3")
   })
 
+  // The check of the q44 fixes (Nov 12), SHOULD A: the count is the queue's
+  // own answer, which turns on the file's timing, its added tracks and "Skip
+  // lines with nothing to play". The bar reads the setting itself and is
+  // handed the file's timing and tracks, as the strip is, so a change to
+  // either moves the count at once.
+  describe("the count follows the timing and \"Skip lines with nothing to play\"", () => {
+    beforeEach(() => {
+      localStorage.removeItem("aq.skip-silent-lines.v1")
+      resetSkipSilentLinesPrefCacheForTests()
+    })
+    afterEach(() => {
+      act(() => setSkipSilentLinesPref(true))
+      localStorage.removeItem("aq.skip-silent-lines.v1")
+      resetSkipSilentLinesPrefCacheForTests()
+    })
+    const bar = (freeTiming: boolean, audio: Map<string, CellAudioEntry>) => (
+      <SelectionBar
+        project={makeProject(ROLE.CONTRIBUTOR)} cellStore={STORE} session={SESSION} username="alice" activeLane=""
+        myScopes={[]} completeBatch={vi.fn()} audioMode audioByCellId={audio}
+        playbackLines={mergeCellsWithAudio(THREE, audio)} freeTiming={freeTiming} programmeTracks={NO_TRACKS}
+      />
+    )
+    const STORE = makeStore(THREE)
+    const NO_TRACKS = { layerSlots: [], layerTrackSlots: [] }
+
+    it("no film, following the recordings, Skip off: two unrecorded lines are two lines to play", () => {
+      setSkipSilentLinesPref(false)
+      vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+      renderWithTooltips(bar(true, new Map()))
+      expect(playButton()).not.toBeDisabled()
+      expect(playButton().textContent).toContain("2")
+    })
+
+    it("Skip turned off with three lines chosen, one recorded: the count follows, 1 to 3", () => {
+      vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
+      renderWithTooltips(bar(true, audioMapFor(["cell-1"])))
+      expect(playButton().textContent).toContain("1")
+      act(() => setSkipSilentLinesPref(false))
+      expect(playButton().textContent).toContain("3")
+    })
+
+    it("the file switched to follow its source with lines chosen: the count follows, 3 to 1", () => {
+      setSkipSilentLinesPref(false)
+      vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
+      const audio = audioMapFor(["cell-1"])
+      const view = renderWithTooltips(bar(true, audio))
+      expect(playButton().textContent).toContain("3")
+      view.rerender(<TooltipProvider delay={0}>{bar(false, audio)}</TooltipProvider>)
+      expect(playButton().textContent).toContain("1")
+    })
+  })
+
   it("with no film, Play selected is still a run of the chosen lines on their own", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-3"]))
     renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
-      audioMode: true, session: SESSION, audioByCellId: audioMapFor(["cell-1", "cell-3"]), playbackLines: THREE,
+      audioMode: true, session: SESSION, audioByCellId: audioMapFor(["cell-1", "cell-3"]), freeTiming: true, playbackLines: THREE,
     })
 
     await userEvent.setup().click(playButton())
@@ -1422,7 +1476,7 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
     const lines = filmFile(new Map(), 60)
     renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
-      audioMode: true, session: SESSION, audioByCellId: new Map(), playbackLines: lines,
+      audioMode: true, session: SESSION, audioByCellId: new Map(), freeTiming: true, playbackLines: lines,
     })
     expect(playButton()).not.toBeDisabled()
     expect(playButton().textContent).toContain("2")

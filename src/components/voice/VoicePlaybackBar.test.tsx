@@ -77,6 +77,7 @@ import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { __resetPlaybackSourceForTests, setPlaybackSource } from "@/lib/audio/playback-source"
+import { resetSkipSilentLinesPrefCacheForTests, setSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 
 function cell(over: Partial<CellData> = {}): CellData {
   return {
@@ -551,5 +552,45 @@ describe("VoicePlaybackBar: a linked film following the recordings (AQU-2253)", 
     expect((screen.getByTestId("transport-play") as HTMLButtonElement).disabled).toBe(false)
     render(strip(RECORDED))
     expect(screen.getAllByTestId("transport-time")[1]).toHaveTextContent("0:00 / 1:28")
+  })
+})
+
+// The check of the q44 fixes (Nov 12), SHOULD A: the strip's Play is the
+// queue's own answer (`linesPlaybackStopsAt`), and that answer depends on
+// "Skip lines with nothing to play". The strip reads the setting itself and
+// hands it on, so turning it on or off in the timeline's settings moves Play
+// at once, as the queue would play it.
+describe("VoicePlaybackBar — the strip's Play follows \"Skip lines with nothing to play\"", () => {
+  const session = { jwt: "t" } as unknown as FrontierSession
+  const UNRECORDED = [cell({ id: "u1", original: "One" }), cell({ id: "u2", original: "Two" })]
+  const strip = (cells: CellData[]) => (
+    <VoicePlaybackBar variant="strip" cells={cells} projectId="p" session={session} settings={undefined} freeTiming />
+  )
+  const playOff = () => (screen.getByTestId("transport-play") as HTMLButtonElement).disabled
+  beforeEach(() => {
+    localStorage.removeItem("aq.skip-silent-lines.v1")
+    resetSkipSilentLinesPrefCacheForTests()
+    transportSource.value = "queue"
+    __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 })
+  })
+  afterEach(() => {
+    act(() => setSkipSilentLinesPref(true))
+    localStorage.removeItem("aq.skip-silent-lines.v1")
+    resetSkipSilentLinesPrefCacheForTests()
+  })
+
+  it("Skip off: Play is offered on a book with nothing recorded, which the queue plays through", () => {
+    setSkipSilentLinesPref(false)
+    render(strip(UNRECORDED))
+    expect(playOff()).toBe(false)
+  })
+
+  it("Skip turned off while the strip is up: Play comes on; turned on again: it goes off", () => {
+    render(strip(UNRECORDED))
+    expect(playOff()).toBe(true)
+    act(() => setSkipSilentLinesPref(false))
+    expect(playOff()).toBe(false)
+    act(() => setSkipSilentLinesPref(true))
+    expect(playOff()).toBe(true)
   })
 })

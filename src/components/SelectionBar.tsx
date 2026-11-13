@@ -30,7 +30,8 @@ import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import { isBulkAudioValidatableByMe, isBulkAudioUnvalidatableByMe } from "@/lib/review/bulk-audio-validation"
 import { fileHasAudio as fileHasAnyAudio } from "@/lib/audio/file-has-audio"
 import { linesPlaybackStopsAt, startQueue, useProgrammeFilm } from "@/lib/audio/play-queue"
-import { filmOverRun } from "@/lib/timeline/programme"
+import { filmOverRun, type BuildProgrammeOptions } from "@/lib/timeline/programme"
+import { useSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { BatchVoiceDialog } from "@/components/voice/BatchVoiceDialog"
 import { audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
@@ -108,6 +109,11 @@ interface Props {
    * selected" plays its lines as a run of these, so the film follows it.
    */
   playbackLines?: CellData[]
+  /** The file follows its recordings, and the added tracks laid in with its
+   *  lines: what the strip is handed (`freeTiming`, `programmeTracks`), so
+   *  the "Play selected" count is the queue's answer for this file. */
+  freeTiming?: boolean
+  programmeTracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">
   /**
    * Media redesign slice 2 (P2.3): the language delivers Audio and no text, so
    * the text actions (AI translate, validate text, harmonize) and the voices
@@ -165,7 +171,7 @@ type Running =
   | { kind: "voice" }
   | { kind: "validate-audio" }
 
-export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, playbackLines, audioOnlyLane = false, orderedBy, mediaLayer = false, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted, prepareBulkRepetitions, reportBulkRepetitions }: Props) {
+export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, playbackLines, freeTiming = false, programmeTracks, audioOnlyLane = false, orderedBy, mediaLayer = false, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted, prepareBulkRepetitions, reportBulkRepetitions }: Props) {
   const analytics = useAccountAnalytics()
   const t = useT()
   // AQU-1503: skip clauses join the way a list is written in the reader's
@@ -369,7 +375,16 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // plays 3. On a file with a linked film a line nobody has recorded counts:
   // the film is its to play; a line laid out past the film's end does not.
   // The workspace's word about the film is read here so the count follows it.
+  // The check of the q44 fixes (Nov 12): so are "Skip lines with nothing to
+  // play" and the timing and tracks the bar is handed, and the stops are
+  // worked out again only when one of them, or the lines, change.
   const film = useProgrammeFilm()
+  const skipSilent = useSkipSilentLinesPref()
+  const ask = useMemo(
+    () => ({ freeTiming, ...(programmeTracks ? { tracks: programmeTracks } : {}), film, skipSilent }),
+    [freeTiming, programmeTracks, film, skipSilent],
+  )
+  const fileStops = useMemo(() => (playbackLines ? linesPlaybackStopsAt(playbackLines, ask) : null), [playbackLines, ask])
   // The review (Nov 12), N9: on a film file it is a run of the chosen lines
   // among the lines Play plays, whichever chosen lines are not among them (a
   // book's other chapters): the old run of lines on their own has no film.
@@ -380,13 +395,12 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
       const chosen = new Set(playbackRange.map((c) => c.id))
       const only = new Set(playbackLines.filter((c) => chosen.has(c.id)).map((c) => c.id))
       const from = playbackLines.findIndex((c) => only.has(c.id))
-      if (from >= 0) {
-        const stops = linesPlaybackStopsAt(playbackLines, undefined, film)
-        return { cells: playbackLines, from, only, stopCount: [...only].filter((id) => stops.has(id)).length }
+      if (from >= 0 && fileStops) {
+        return { cells: playbackLines, from, only, stopCount: [...only].filter((id) => fileStops.has(id)).length }
       }
     }
-    return { cells: playbackRange, from: 0, only: null, stopCount: linesPlaybackStopsAt(playbackRange, undefined, null).size }
-  }, [playbackRange, playbackLines, film])
+    return { cells: playbackRange, from: 0, only: null, stopCount: linesPlaybackStopsAt(playbackRange, { ...ask, film: null }).size }
+  }, [playbackRange, playbackLines, film, fileStops, ask])
   const playableSelectedCount = selectionRun.stopCount
 
   /**

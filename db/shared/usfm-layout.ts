@@ -70,7 +70,9 @@ export interface UsfmLead {
   body: string
 }
 
-const LEAD_LINE = /^[ \t]*\\([a-z]+\d*)(?:[ \t]+([^\r\n]*?))?[ \t]*(?:(?:\r?\n)+|$)/
+// One whitespace run and one greedy capture (trimmed by the caller): two
+// adjacent optional runs here would backtrack quadratically on a long line.
+const LEAD_LINE = /^[ \t]*\\([a-z]+\d*)(?:[ \t]([^\r\n]*))?(?:(?:\r?\n)+|$)/
 
 /** Split the leading heading and bare paragraph-marker lines off a translation. */
 export function splitUsfmLead(value: string): UsfmLead {

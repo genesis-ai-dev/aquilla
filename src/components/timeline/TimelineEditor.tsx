@@ -1124,8 +1124,15 @@ function LaneLabel({
     >
       {/* The indent is on the CONTENT, not the row, so the row's background
           still spans the full gutter. A member steps in past the folder's
-          own name, which is what makes the nest readable. */}
-      <div className={cn("flex min-w-0 flex-col gap-0.5", indented && !collapsed && "pl-6")}>
+          own name, which is what makes the nest readable. It eases on the
+          rows' slide curve, so a track dragged over a folder steps in with
+          the gap opening for it. */}
+      <div
+        className={cn(
+          "flex min-w-0 flex-col gap-0.5 transition-[padding-left] duration-[180ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
+          indented && !collapsed && "pl-6",
+        )}
+      >
         <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-foreground">
           {/* AQU-646 stage 2: a folder's disclosure control stands where every
               other row's colour dot stands, so the column of glyphs stays a

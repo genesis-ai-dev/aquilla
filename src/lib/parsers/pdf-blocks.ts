@@ -108,10 +108,14 @@ const END_PUNCT = /[.!?:;"”’)\]…»]$/
 const MIN_TAG_COVERAGE = 0.8
 
 /** pdf.js puts a right-to-left run's combining marks before their letter.
- *  AQU-2551 review finding 10: decided by the piece's direction alone, so a
- *  piece that starts with an unpointed letter or a space is repaired too. */
+ *  AQU-2551 review finding 10: decided for the whole piece, not by its first
+ *  character. No word starts with a mark, so a right-to-left piece in which
+ *  any word does ("ספר ְּבֵראִׁשית", " ְּבֵראִׁשית") is in pdf.js's reversed
+ *  order and is repaired; one in which none does ("לֹא" in a Word PDF) is
+ *  already in reading order. */
+const MARK_AT_WORD_START = /(?:^|\s)\p{Mn}/u
 function repairRtl(piece: PdfTextPiece): PdfTextPiece {
-  if (piece.dir !== "rtl") return piece
+  if (piece.dir !== "rtl" || !MARK_AT_WORD_START.test(piece.s)) return piece
   return { ...piece, s: piece.s.replace(/(\p{Mn}+)(\p{L})/gu, "$2$1") }
 }
 

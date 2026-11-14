@@ -391,6 +391,12 @@ describe("review findings: right-to-left text (Nov 14)", () => {
     expect(read([{ s: "ספר ְּבֵראִׁשית", x: 100, y: 700, w: 120 }])).toEqual(["ספר בְּרֵאשִׁית"])
     expect(read([{ s: " ְּבֵראִׁשית", x: 100, y: 700, w: 120 }])).toEqual(["בְּרֵאשִׁית"])
   })
+
+  // The 58-page Word PDF draws "לֹא" as a piece already in reading order: no
+  // word in it starts with a mark, which is the sign of pdf.js's reversal.
+  it("leaves a right-to-left piece alone when none of its words starts with a mark", () => {
+    expect(read([{ s: "לֹא", x: 100, y: 700, w: 14 }])).toEqual(["לֹא"])
+  })
 })
 
 describe("PDFs with no text to import (question 56)", () => {

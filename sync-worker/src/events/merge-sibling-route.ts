@@ -293,11 +293,12 @@ export async function mergeSibling(
     ensureTargetLaneStmt(db, hostProjectId, lane),
     grantNewLaneStmt(db, hostProjectId, { legacyTag: lane }, null),
   ]
-  const LANE_STMTS = 2
-  const lead = Math.min(BATCH_LIMIT - LANE_STMTS, allStmts.length)
-  await retryingLaneIdCollision(() =>
-    runFoldBatch(db, [...laneStmts(), ...allStmts.slice(0, lead)]),
-  )
+  const lead = await retryingLaneIdCollision(async () => {
+    const head = laneStmts()
+    const take = Math.min(BATCH_LIMIT - head.length, allStmts.length)
+    await runFoldBatch(db, [...head, ...allStmts.slice(0, take)])
+    return take
+  })
   for (let i = lead; i < allStmts.length; i += BATCH_LIMIT) {
     await runFoldBatch(db, allStmts.slice(i, i + BATCH_LIMIT))
   }

@@ -74,6 +74,8 @@ describe("mergeSibling — a lane-id clash retries with a new id (AQU-2587)", ()
     // The taken id was minted first and a later one won: the clash happened
     // and the retry carried a new id.
     expect(ids.minted[0]).toBe(TAKEN)
+    // Exactly one retry: the taken id, then the one that won.
+    expect(ids.minted).toHaveLength(2)
     expect(result).toMatchObject({ merged: 1, lane: "fr" })
     const lanes = await t.pg.query<{ id: string }>(
       `SELECT id FROM lanes WHERE project_id = $1 AND role = 'target' AND legacy_tag = 'fr'`,

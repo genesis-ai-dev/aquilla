@@ -123,7 +123,6 @@ export async function extractPdfImport(buffer: ArrayBuffer, options?: PdfParseOp
   // pdf.js transfers (detaches) the bytes it is given: hand it a copy.
   const task = pdfjs.getDocument({
     data: new Uint8Array(buffer.slice(0)),
-    isEvalSupported: false,
     disableFontFace: true,
     useSystemFonts: false,
     verbosity: pdfjs.VerbosityLevel.ERRORS,

@@ -22,6 +22,14 @@ function eventlog(rows: ReplayRow[], head: number | undefined) {
         const last = [...rows].sort((a, b) => b.seqNumGlobal - a.seqNumGlobal || b.seqNumClient - a.seqNumClient)[0]
         return last === undefined ? [] : [{ ...last }]
       }
+      if (query.includes("json_group_array")) {
+        // What SQLite's json_each/json_extract give: the rows' ids, or NULL when rows isn't an array.
+        return rows.filter((r) => r.name === "v1.EventsQueued").map((r) => {
+          const batch = JSON.parse(r.argsJson) as { rows?: unknown }
+          const ids = Array.isArray(batch.rows) ? JSON.stringify(batch.rows.map((x: { id?: unknown }) => x?.id ?? null)) : null
+          return { seqNumGlobal: r.seqNumGlobal, seqNumClient: r.seqNumClient, ids }
+        })
+      }
       const names = /name (?:= '([^']+)'|IN \(([^)]+)\))/.exec(query)
       const wanted = names?.[1] !== undefined ? [names[1]] : (names?.[2] ?? "").split(",").map((n) => n.trim().replaceAll("'", ""))
       return rows.filter((r) => wanted.includes(r.name)).map((r) => ({ ...r }))

@@ -33,7 +33,7 @@ import {
 import type { CqrsRawEvent } from "./outbox-types"
 import { CQRS_SCHEMA_VERSION } from "./outbox-types"
 import { flushOutboxBatch } from "./outbox-flush"
-import { journalTargetCommit } from "./outbox-recovery"
+import { journalBatch, journalTargetCommit } from "./outbox-recovery"
 
 // ── Tauri offline routing (Phase 4) test harness ───────────────────────────
 // outbox.ts dynamically `import()`s "@/lib/offline/store" only when
@@ -430,27 +430,54 @@ describe("cqrs outbox", () => {
     expect(notifications).toBe(1)
   })
 
-  it("enqueueOutboxEvents journals a small batch's target commits before IndexedDB can finish", async () => {
+  const journalKeys = () => Object.keys(localStorage).filter((k) => k.startsWith("aquilla:outbox-recovery:"))
+
+  it("enqueueOutboxEvents journals a small batch as one entry before IndexedDB can finish", async () => {
     setActiveOutboxOwner("alice")
     const pending = enqueueOutboxEvents([ev("b1", "c1"), ev("b2", "c2")])
-    for (const id of ["b1", "b2"]) {
-      expect(JSON.parse(localStorage.getItem(`aquilla:outbox-recovery:v1:${id}`)!)).toMatchObject({
-        ownerKey: "alice", event: { id },
-      })
-    }
+    expect(journalKeys()).toEqual(["aquilla:outbox-recovery:batch:v1:b1"])
+    const journaled = JSON.parse(localStorage.getItem("aquilla:outbox-recovery:batch:v1:b1")!) as { id: string; ownerKey: string }[]
+    expect(journaled.map((rec) => [rec.id, rec.ownerKey])).toEqual([["b1", "alice"], ["b2", "alice"]])
     await pending
-    expect(localStorage.getItem("aquilla:outbox-recovery:v1:b1")).toBeNull()
-    expect(localStorage.getItem("aquilla:outbox-recovery:v1:b2")).toBeNull()
+    expect(journalKeys()).toEqual([])
     expect(await outboxPendingCount()).toBe(2)
   })
 
   it("enqueueOutboxEvents leaves a large batch out of the journal", async () => {
     setActiveOutboxOwner("alice")
-    const events = Array.from({ length: 201 }, (_, i) => ev(`big${i}`, `c${i}`))
-    const pending = enqueueOutboxEvents(events)
-    expect(Object.keys(localStorage).filter((k) => k.startsWith("aquilla:outbox-recovery:v1:"))).toEqual([])
-    await pending
-    expect(await outboxPendingCount()).toBe(201)
+    const many = Array.from({ length: 501 }, (_, i) => ev(`big${i}`, `c${i}`))
+    const pendingMany = enqueueOutboxEvents(many)
+    expect(journalKeys()).toEqual([])
+    await pendingMany
+
+    const long = ["l1", "l2"].map((id) => ({ ...ev(id, id), payload: { value: "x".repeat(200_000) } }) as CqrsRawEvent)
+    const pendingLong = enqueueOutboxEvents(long)
+    expect(journalKeys()).toEqual([])
+    await pendingLong
+    expect(await outboxPendingCount()).toBe(503)
+  })
+
+  it("recovers a journaled batch whole, a create with the commit chained on it", async () => {
+    const create = { ...ev("cr1", "c1"), kind: "target.cell.create", parentId: null, payload: { value: "" } } as unknown as CqrsRawEvent
+    const commit = { ...ev("cm1", "c1"), parentId: "cr1" }
+    const rec = (event: CqrsRawEvent) => ({
+      id: event.id, event, ownerKey: "alice", enqueuedAt: 1,
+      attempts: 0, lastAttemptAt: null, lastError: null, status: "pending" as const,
+    })
+    expect(journalBatch([rec(create), rec(commit)])).toBe("aquilla:outbox-recovery:batch:v1:cr1")
+    setActiveOutboxOwner("alice")
+    expect((await peekOutboxBatch(10)).map((r) => r.id).sort()).toEqual(["cm1", "cr1"])
+    expect(journalKeys()).toEqual([])
+  })
+
+  it("recovers nothing from a batch entry with any unreplayable record", async () => {
+    localStorage.setItem("aquilla:outbox-recovery:batch:v1:x1", JSON.stringify([
+      { id: "x1", event: { ...ev("x1", "c1") }, ownerKey: "alice", status: "pending" },
+      { id: "x2", event: { ...ev("other", "c2") }, ownerKey: "alice", status: "pending" },
+    ]))
+    setActiveOutboxOwner("alice")
+    expect(await peekOutboxBatch(10)).toEqual([])
+    expect(journalKeys()).toEqual([])
   })
 
   it("enqueueOutboxEvents keeps a batch in the owner scope that initiated it", async () => {
@@ -806,9 +833,50 @@ describe("Tauri offline routing", () => {
     }
 
     expect(currentOfflineStore!.query(offlineTables.eventQueue.count())).toBe(0)
-    // Still journaled, and only there: the next boot recovers it once.
-    expect(localStorage.getItem("aquilla:outbox-recovery:v1:tc1")).not.toBeNull()
-    localStorage.clear()
+    // Refused means not queued: no journal for the next boot to replay
+    // alongside the caller's retry.
+    expect(Object.keys(localStorage).filter((k) => k.startsWith("aquilla:outbox-recovery:"))).toEqual([])
+  })
+
+  it("enqueueOutboxEvents keeps a delete with the commit it chains on, in IndexedDB", async () => {
+    setTauriRuntime(true)
+    markProjectOfflineReady("proj1")
+    const del = {
+      ...commitEvent, id: "del1", kind: "target.cell.delete", parentId: "tc1", payload: {},
+    } as unknown as CqrsRawEvent
+    const unrelated = { ...commitEvent, id: "tc-other", cellId: "cell2" }
+
+    await enqueueOutboxEvents([commitEvent, del, unrelated])
+
+    expect((await peekOutboxBatch(10)).map((r) => r.id).sort()).toEqual(["del1", "tc1"])
+    expect(currentOfflineStore!.query(offlineTables.eventQueue.select("id"))).toEqual(["tc-other"])
+  })
+
+  it("enqueueOutboxEvents sends the batch to IndexedDB when the offline queue refuses it", async () => {
+    setActiveOutboxOwner("alice")
+    setTauriRuntime(true)
+    markProjectOfflineReady("proj1")
+    const comment = {
+      ...commitEvent, id: "cm1", kind: "comment.create", cellId: undefined, parentId: null,
+      payload: { body: "note" },
+    } as unknown as CqrsRawEvent
+    vi.spyOn(currentOfflineStore!, "commit").mockImplementationOnce(() => {
+      throw new Error("store shut down")
+    })
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    let notifications = 0
+    const unsub = subscribeToOutbox(() => { notifications++ })
+    try {
+      await enqueueOutboxEvents([comment, commitEvent])
+    } finally {
+      unsub()
+      warn.mockRestore()
+    }
+
+    expect((await peekOutboxBatch(10)).map((r) => r.id).sort()).toEqual(["cm1", "tc1"])
+    expect(currentOfflineStore!.query(offlineTables.eventQueue.count())).toBe(0)
+    expect(notifications).toBe(1)
+    expect(Object.keys(localStorage).filter((k) => k.startsWith("aquilla:outbox-recovery:"))).toEqual([])
   })
 
   it("a routed row round-trips into the exact OutboxRawEvent shape sync-adapter.ts's toRawEvent() expects", async () => {

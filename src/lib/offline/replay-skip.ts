@@ -71,16 +71,22 @@ const QUEUE_ROW_EVENTS = new Set(["v1.EventQueued", "v1.EventQueueStatusSet", "v
 /** Queues many rows at once; see the header for when it can be skipped. */
 const BATCH_QUEUE_EVENT = "v1.EventsQueued"
 
-/** The queue row ids of a v1.EventsQueued, or undefined if they can't be read. */
-const batchRowIds = (args: Record<string, unknown>): string[] | undefined => {
-  const rows = args.rows
-  if (!Array.isArray(rows)) return undefined
-  const ids: string[] = []
-  for (const row of rows) {
-    const id = typeof row === "object" && row !== null ? (row as { id?: unknown }).id : undefined
-    if (typeof id !== "string") return undefined
-    ids.push(id)
-  }
+/**
+ * Selects each v1.EventsQueued's seq and its rows' ids as a JSON array (NULL
+ * when `rows` isn't an array). SQLite extracts the ids, so the payloads — up to
+ * 500 edits per batch — are never decoded in JS just to read them.
+ */
+const batchIdsQuery = (eventlogTable: string) => `SELECT seqNumGlobal, seqNumClient,
+  CASE WHEN json_type(argsJson, '$.rows') = 'array'
+    THEN (SELECT json_group_array(json_extract(value, '$.id')) FROM json_each(argsJson, '$.rows'))
+  END AS ids
+  FROM ${eventlogTable} WHERE name = '${BATCH_QUEUE_EVENT}'`
+
+/** The queue row ids from `batchIdsQuery`'s `ids` column, or undefined if they can't be read. */
+const batchRowIds = (idsJson: unknown): string[] | undefined => {
+  if (typeof idsJson !== "string") return undefined
+  const ids = JSON.parse(idsJson) as unknown
+  if (!Array.isArray(ids) || !ids.every((id): id is string => typeof id === "string")) return undefined
   return ids
 }
 
@@ -166,12 +172,10 @@ export function planReplaySkip(eventlog: ReplayEventlog): ((row: ReplayRow) => b
     const replayedRows = new Set<string>()
     // A batch whose row ids can't be read: replay every queue event.
     let unreadableBatch = false
-    const batches = eventlog.select(
-      `SELECT seqNumGlobal, seqNumClient, argsJson FROM ${eventlog.eventlogTable} WHERE name = '${BATCH_QUEUE_EVENT}'`,
-    )
+    const batches = eventlog.select(batchIdsQuery(eventlog.eventlogTable))
     for (const batch of batches) {
       const seq = seqOf(batch)
-      const ids = batchRowIds(argsOf({ argsJson: String(batch.argsJson) }))
+      const ids = batchRowIds(batch.ids)
       if (ids === undefined) {
         unreadableBatch = true
         continue

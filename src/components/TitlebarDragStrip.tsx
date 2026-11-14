@@ -1,6 +1,6 @@
 import { useEffect } from "react"
 import {
-  TRAFFIC_LIGHTS_HEIGHT,
+  TITLEBAR_BAND_HEIGHT,
   useMacTitlebarOverlay,
   useTitlebarDrag,
 } from "@/hooks/useMacTitlebarOverlay"
@@ -9,7 +9,8 @@ import {
  * macOS desktop only. Pages rendered outside AppShell (sign-in, invites, the
  * 404, …) have no header band, so they get a title-bar band of their own:
  * `html[data-mac-titlebar]` (index.css) pushes the page down by
- * TRAFFIC_LIGHTS_HEIGHT, and this strip fills that band as the drag handle.
+ * TITLEBAR_BAND_HEIGHT (AppShell's header height), and this strip fills
+ * that band as the drag handle.
  * Because the page starts below it, the strip never covers page controls and
  * nothing sits under the traffic lights.
  *
@@ -26,7 +27,7 @@ export function TitlebarDragStrip() {
     if (!inset) return
     const root = document.documentElement
     root.dataset.macTitlebar = "true"
-    root.style.setProperty("--mac-titlebar-h", `${TRAFFIC_LIGHTS_HEIGHT}px`)
+    root.style.setProperty("--mac-titlebar-h", `${TITLEBAR_BAND_HEIGHT}px`)
     return () => {
       delete root.dataset.macTitlebar
       root.style.removeProperty("--mac-titlebar-h")

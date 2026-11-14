@@ -4,7 +4,7 @@ import { isTauriRuntime } from "@/lib/offline/is-tauri"
 /**
  * The desktop window is built with macOS's overlay title bar in
  * `src-tauri/src/lib.rs` (`title_bar_style(Overlay)` +
- * `traffic_light_position(16, 20)`): no native title strip, the webview runs
+ * `traffic_light_position(16, 28)`): no native title strip, the webview runs
  * to the top edge, and the traffic lights float over our top-left corner.
  * The constants below mirror that position — change them together.
  * Windows/Linux keep their native title bar, so this is macOS + Tauri only.
@@ -21,8 +21,12 @@ export interface MacTitlebarOverlay {
 /** Horizontal room the traffic lights take, from the window's left edge:
  *  `trafficLightPosition.x` (16) + the three buttons (~52) + breathing room. */
 export const TRAFFIC_LIGHTS_WIDTH = 76
-/** Vertical room: `trafficLightPosition.y` (20) + button height (~14) + 6. */
+/** Vertical room: with `traffic_light_position` y=28 the buttons span
+ *  y≈19–33 (centred on AppShell's 52px header midline), + breathing room. */
 export const TRAFFIC_LIGHTS_HEIGHT = 40
+/** Title-bar band for pages outside AppShell: the same 52px as AppShell's
+ *  header, so the traffic lights sit centred in it there too. */
+export const TITLEBAR_BAND_HEIGHT = 52
 
 /** macOS proper. iOS WebKit also says "like Mac OS X" in its UA, so rule out
  *  touch devices (iPadOS reports itself as "Macintosh" but has touch points). */

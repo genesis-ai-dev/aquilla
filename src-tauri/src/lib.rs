@@ -68,14 +68,18 @@ pub fn run() {
                 .center()
                 .resizable(true);
             // macOS: drop the native title strip and let the SPA's top row be the
-            // title bar, traffic lights floating over it. y=20 centres them on
+            // title bar, traffic lights floating over it. y=28 centres them on
             // AppShell's 52px header band; the SPA keeps that corner clear and
             // marks the drag regions (src/hooks/useMacTitlebarOverlay.ts).
+            // Note `y` is not the buttons' top edge: tao sizes the title-bar
+            // container to button height + y and the buttons keep their own
+            // offset in it. Measured on macOS 26: y=28 puts their centre at
+            // 26px, the header band's midline; y=20 left them ~8px high.
             #[cfg(target_os = "macos")]
             let main_window = main_window
                 .title_bar_style(tauri::TitleBarStyle::Overlay)
                 .hidden_title(true)
-                .traffic_light_position(tauri::LogicalPosition::new(16.0, 20.0));
+                .traffic_light_position(tauri::LogicalPosition::new(16.0, 28.0));
             main_window.build()?;
             hot_bundle::start(app.handle());
 

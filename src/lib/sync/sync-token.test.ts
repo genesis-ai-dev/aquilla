@@ -5,6 +5,7 @@ import {
   makeSyncTokenFetcher,
   makeSyncTokenMinter,
   SyncTokenError,
+  warmSyncToken,
 } from "./sync-token"
 import {
   clearElevationRequired,
@@ -559,6 +560,45 @@ describe("makeSyncTokenMinter forceRefresh (AQU-1788)", () => {
     finishFirst(new Response(JSON.stringify(minted("tok-inflight").body), { status: 200 }))
     expect(await inFlight).toEqual({ token: "tok-inflight", status: 200 })
     expect(await forced).toEqual({ token: "tok-forced", status: 200 })
+  })
+})
+
+describe("warmSyncToken", () => {
+  const originalFetch = global.fetch
+  afterEach(() => {
+    global.fetch = originalFetch
+  })
+
+  it("lets the file minter join a mint that already started", async () => {
+    let calls = 0
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    global.fetch = vi.fn(async () => {
+      calls += 1
+      const n = calls
+      await gate
+      return new Response(JSON.stringify({
+        token: n === 1 ? "warm-jwt" : "fresh-jwt",
+        expiresIn: 900,
+        role: { level: 400, name: "contributor", source: "override" },
+      }), { status: 200, headers: { "Content-Type": "application/json" } })
+    }) as unknown as typeof fetch
+
+    warmSyncToken("jwt-user", "proj-warm", "file-warm", API)
+    const mint = makeSyncTokenMinter(
+      () => "jwt-user",
+      "proj-warm",
+      "file-warm",
+      { projectName: "ignored" },
+      API,
+    )
+    const pending = mint()
+    expect(calls).toBe(1)
+    release()
+    await expect(pending).resolves.toEqual({ token: "warm-jwt", status: 200 })
+    await expect(mint()).resolves.toEqual({ token: "warm-jwt", status: 200 })
+    await expect(mint({ forceRefresh: true })).resolves.toEqual({ token: "fresh-jwt", status: 200 })
+    expect(calls).toBe(2)
   })
 })
 

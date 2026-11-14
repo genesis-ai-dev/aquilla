@@ -2,12 +2,15 @@
 
 import { formatVttTime } from "@/lib/video/vtt-generator"
 
-/** `m:ss` (or `m:ss.t` with tenths). Guards NaN/negatives to 0. */
+/** `m:ss` (or `m:ss.t` with tenths). Past an hour, `h:mm:ss`, so a long
+ *  film reads `77:26:34` rather than `4646:34`. Guards NaN/negatives to 0. */
 export function fmtClock(sec: number, withTenths = false): string {
   if (!Number.isFinite(sec) || sec < 0) sec = 0
-  const m = Math.floor(sec / 60)
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
   const s = Math.floor(sec % 60)
-  const base = `${m}:${String(s).padStart(2, "0")}`
+  const ss = String(s).padStart(2, "0")
+  const base = h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`
   if (!withTenths) return base
   const tenths = Math.floor((sec - Math.floor(sec)) * 10)
   return `${base}.${tenths}`

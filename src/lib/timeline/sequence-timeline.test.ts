@@ -89,7 +89,7 @@ describe("the lines one chapter puts on the timeline", () => {
     expect(sequenceTimelineCells(cells, CHAPTERS[1], false).map((c) => c.id)).toEqual(["h2", "v3"])
   })
 
-  it("covers the whole file when there are no chapters", () => {
+  it("covers every chapter when the timeline draws the whole file", () => {
     expect(sequenceTimelineCells(cells, null, false).map((c) => c.id)).toEqual(["v1", "v2", "h2", "v3", "v5", "v6"])
     expect(scopeCells(cells, null)).toHaveLength(cells.length)
     expect(scopeCells(cells, CHAPTERS[2]).map((c) => c.id)).toEqual(["v5", "v6"])

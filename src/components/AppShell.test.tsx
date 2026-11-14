@@ -689,6 +689,22 @@ describe("AppShell macOS overlay title bar", () => {
     expect(screen.queryByTestId("logo")).toBeNull()
   })
 
+  it("is not a title bar in native fullscreen", async () => {
+    stubLgUp(true)
+    titlebar.value = { overlay: true, inset: false }
+    renderOverlayShell({ header: <input aria-label="Rename" /> })
+    const input = screen.getByRole("textbox", { name: "Rename" })
+    input.focus()
+    const header = document.querySelector<HTMLElement>('[data-slot="app-shell-header"]')!
+    fireEvent.mouseDown(header, { button: 0, detail: 1 })
+    fireEvent.mouseDown(header, { button: 0, detail: 2, clientX: 300, clientY: 20 })
+    fireEvent.mouseUp(header, { button: 0, detail: 2, clientX: 300, clientY: 20 })
+    await Promise.resolve()
+    expect(tauriWindow.startDragging).not.toHaveBeenCalled()
+    expect(tauriInvoke).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(input)
+  })
+
   it("does not make anything a drag handle outside the macOS desktop app", async () => {
     stubLgUp(true)
     renderShell(<div />)

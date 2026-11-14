@@ -184,9 +184,10 @@ export function AppShell({
   // ~20 page-level tests that don't wrap I18nProvider, so this reads null
   // there instead of throwing — the switcher just doesn't render.
   const i18n = useI18nOptional()
-  // macOS desktop: the top strip doubles as the window's title bar.
+  // macOS desktop: the top strip doubles as the window's title bar — except in
+  // native fullscreen, where there is no window to move or zoom.
   const titlebar = useMacTitlebarOverlay()
-  const titlebarDrag = useTitlebarDrag(titlebar.overlay)
+  const titlebarDrag = useTitlebarDrag(titlebar.inset)
   const brandLogo = logoSlot ?? (brand ? (
     <Link
       to="/"

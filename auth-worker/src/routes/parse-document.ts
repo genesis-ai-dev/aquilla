@@ -361,7 +361,10 @@ function inflatePdfStreams(bytes: Uint8Array, raw: string, work: PdfWorkBudget):
   let examined = 0
 
   work.charge(raw.length) // the keyword scan below
-  const streamRe = /stream\r?\n/g
+  // AQU-2594: not the tail of `endstream`. That match used to carry the scan
+  // (below, `lastIndex = dataEnd`) past the next real stream, so only some of
+  // a PDF's content streams were read.
+  const streamRe = /(?<!end)stream\r?\n/g
   let match: RegExpExecArray | null
   while ((match = streamRe.exec(raw)) !== null) {
     if (budget <= 0) break

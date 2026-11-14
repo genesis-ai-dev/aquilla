@@ -297,8 +297,16 @@ function makeWordStylePdf(): Uint8Array {
   return concat([strToU8("%PDF-1.7\r\n%\xb5\xb5\xb5\xb5\r\n"), ...objects, strToU8("trailer\r\n<</Size 13/Root 1 0 R>>\r\n%%EOF\r\n")])
 }
 
-/** What dev 9004eb77c extracted from `makeWordStylePdf()`. */
-const WORD_STYLE_TEXT_BEFORE = "Style guide for the Arabic teamRule 1: keep (proper) names as written"
+/**
+ * Every page of `makeWordStylePdf()`. Before AQU-2594 the extractor gave only
+ * the first line here: its `stream` keyword search also matched inside each
+ * `endstream`, and the stray match then carried the scan past the next real
+ * stream, so it read only some of a PDF's content streams.
+ */
+const WORD_STYLE_TEXT =
+  "Style guide for the Arabic teamRule 1: keep (proper) names as written\n" +
+  "Rule 2: write numbers as digitsRule 3: caf\u00e9 stays caf\u00e9\n" +
+  "Rule 4: one space after a full stopRule 5: the end"
 
 /**
  * dev 9004eb77c's text-operator scan, verbatim: the oracle the one-pass
@@ -361,8 +369,24 @@ const FUZZ_TOKENS = [
 ]
 
 describe("extractTextFromPdf — ordinary PDFs read as before (AQU-2594)", () => {
-  it("gives a Word-style compressed PDF the same text it gave before the bounds", () => {
-    expect(extractTextFromPdf(makeWordStylePdf())).toBe(WORD_STYLE_TEXT_BEFORE)
+  it("reads every page of a Word-style compressed PDF", () => {
+    expect(extractTextFromPdf(makeWordStylePdf())).toBe(WORD_STYLE_TEXT)
+  })
+
+  it("reads every content stream, whatever its size (an `endstream` is not a `stream`)", () => {
+    for (const lineCount of [1, 400]) {
+      const page = (n: number) =>
+        flateStreamObject(
+          zlibSync(
+            strToU8(
+              Array.from({ length: lineCount }, (_, l) => `BT\n1 0 0 1 72 ${l} Tm\n(Page ${n}) Tj\nET`).join("\n"),
+            ),
+          ),
+        )
+      const pdf = concat([strToU8("%PDF-1.4\n"), page(1), page(2), page(3), page(4), strToU8("%%EOF")])
+      const pagesRead = new Set(extractTextFromPdf(pdf).split("\n"))
+      expect([...pagesRead]).toEqual(["Page 1", "Page 2", "Page 3", "Page 4"])
+    }
   })
 
   it("finds exactly the text the old regex scan found, on 20,000 generated inputs", () => {

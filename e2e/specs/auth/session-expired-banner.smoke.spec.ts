@@ -111,24 +111,19 @@ test("dead credential raises the banner; it persists, dismisses, and re-login cl
   await tamperStoredJwt(page)
   await page.goto("/orgs/all")
 
-  // The 401 from the orgs fetch latches the banner; the AQU-882 error card
-  // coexists with it rather than replacing it.
+  // The rejected credential has one shared explanation; the organization
+  // switcher must not offer a misleading retry for an authentication failure.
   await expect(banner(page)).toBeVisible({ timeout: 10_000 })
-  await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
+  await expect(page.getByTestId("org-switcher-error")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /Account menu: alice.*Log in again/i })).toBeVisible()
+  const destination = page.url()
 
-  // Dismiss lowers it; the next 401 (from the in-place Retry) re-raises it.
+  // Dismissing the banner must not make the saved account appear valid.
   await banner(page).getByRole("button", { name: "Dismiss" }).click()
   await expect(banner(page)).toBeHidden()
-  await page.getByRole("button", { name: "Retry", exact: true }).click()
-  await expect(banner(page)).toBeVisible({ timeout: 10_000 })
-
-  // AQU-884: client-side navigation must not wipe it — the banner's own
-  // "Log in again" link routes to /login without a reload.
-  await banner(page).getByRole("link", { name: /log in again/i }).click()
-  await expect(page.getByRole("button", { name: "Log in" })).toBeVisible({ timeout: 10_000 })
-  // Login is itself the recovery action, so the global banner is suppressed
-  // there rather than linking recursively back to another /login URL.
-  await expect(banner(page)).toBeHidden()
+  await page.getByRole("button", { name: "Log in again", exact: true }).click()
+  await expect(page.getByRole("dialog")).toBeVisible()
+  expect(page.url()).toBe(destination)
 
   // Re-login. finalizeSession() lowers the flag; the post-login render burst
   // still 401s with the replaced JWT, and the guarded notifier must drop

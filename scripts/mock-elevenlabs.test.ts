@@ -9,6 +9,7 @@ import type http from "node:http"
 import {
   MOCK_ELEVENLABS_FREE_KEY,
   MOCK_ELEVENLABS_QUOTA_KEY,
+  MOCK_ELEVENLABS_RESTRICTED_KEY,
   MOCK_ELEVENLABS_VALID_KEY,
   createMockElevenLabsServer,
 } from "./mock-elevenlabs"
@@ -40,6 +41,24 @@ describe("mock ElevenLabs", () => {
     }))
     expect(quota.status).toBe(401)
     expect(((await quota.json()) as { detail: { status: string } }).detail.status).toBe("quota_exceeded")
+  })
+
+  // AQU-2572: a restricted key is valid. It reads voices, and is refused only
+  // the calls it has no permission for, in the live API's own envelope.
+  it("answers a restricted key like the live API: voices yes, account and cloning no", async () => {
+    const account = await fetch(`${origin}/v1/user/subscription`, as(MOCK_ELEVENLABS_RESTRICTED_KEY))
+    expect(account.status).toBe(401)
+    expect(((await account.json()) as { detail: { status: string; message: string } }).detail).toMatchObject({
+      status: "missing_permissions",
+      message: "The API key you used is missing the permission user_read to execute this operation.",
+    })
+    const voices = await fetch(`${origin}/v2/voices`, as(MOCK_ELEVENLABS_RESTRICTED_KEY))
+    expect(voices.status).toBe(200)
+    const form = new FormData()
+    form.set("name", "Reader")
+    form.append("files", new Blob([new Uint8Array([1])], { type: "audio/wav" }), "a.wav")
+    const clone = await fetch(`${origin}/v1/voices/add`, as(MOCK_ELEVENLABS_RESTRICTED_KEY, { method: "POST", body: form }))
+    expect(((await clone.json()) as { detail: { message: string } }).detail.message).toContain("voices_write")
   })
 
   it("synthesizes audible mp3, serves previews, and lists a clone as cloned", async () => {

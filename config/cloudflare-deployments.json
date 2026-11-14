@@ -62,7 +62,9 @@
             "GITLAB_ADMIN_TOKEN",
             "MONDAY_CLIENT_SECRET",
             "MONDAY_SIGNING_SECRET",
-            "OMNI_SHARED_SECRET"
+            "OMNI_SHARED_SECRET",
+            "ADMIN_TOTP_KEY",
+            "GOOGLE_LOGIN_CLIENT_SECRET"
           ],
           "plainText": {
             "ENVIRONMENT": "production",
@@ -93,7 +95,9 @@
             "MONDAY_CLIENT_SECRET",
             "MONDAY_SIGNING_SECRET",
             "MONDAY_TOKEN_KEY",
-            "OMNI_SHARED_SECRET"
+            "OMNI_SHARED_SECRET",
+            "ADMIN_TOTP_KEY",
+            "GOOGLE_LOGIN_CLIENT_SECRET"
           ],
           "requiredBindings": {
             "DEV_ACCESS_LIST": "kv_namespace"

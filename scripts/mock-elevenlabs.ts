@@ -17,6 +17,9 @@
 //   test-elevenlabs-key    valid
 //   test-elevenlabs-quota  valid for reads, out of characters for audio
 //   test-elevenlabs-free   valid, but the plan cannot clone
+//   test-elevenlabs-restricted  valid, but a restricted key: it lacks
+//                          user_read (the account/quota read) and voices_write
+//                          (cloning). Voices, models and audio work (AQU-2572)
 //   anything else          401 invalid_api_key
 //
 // Run: npx tsx scripts/mock-elevenlabs.ts [port]   (pnpm dev boots it on :9457)
@@ -29,6 +32,7 @@ import { fileURLToPath } from "node:url"
 export const MOCK_ELEVENLABS_VALID_KEY = "test-elevenlabs-key"
 export const MOCK_ELEVENLABS_QUOTA_KEY = "test-elevenlabs-quota"
 export const MOCK_ELEVENLABS_FREE_KEY = "test-elevenlabs-free"
+export const MOCK_ELEVENLABS_RESTRICTED_KEY = "test-elevenlabs-restricted"
 
 const DEFAULT_PORT = 9457
 const VOICES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public", "character-voices")
@@ -74,6 +78,18 @@ function errorResponse(status: number, code: string, message: string): Response 
   return Response.json({ detail: { type: "mock", code, status: code, message } }, { status })
 }
 
+/** The live API's answer to a restricted key calling what it may not (captured Nov 2026). */
+function missingPermissionResponse(permission: string): Response {
+  return Response.json({
+    detail: {
+      type: "authentication_error",
+      code: "unauthorized",
+      message: `The API key you used is missing the permission ${permission} to execute this operation.`,
+      status: "missing_permissions",
+    },
+  }, { status: 401 })
+}
+
 const sampleCache = new Map<string, Uint8Array>()
 function sampleBytes(name: string): Uint8Array {
   const safe = name.replace(/[^a-z0-9-]/g, "")
@@ -116,14 +132,16 @@ export async function handleMockElevenLabs(
   }
 
   const key = request.headers.get("xi-api-key") ?? ""
-  if (![MOCK_ELEVENLABS_VALID_KEY, MOCK_ELEVENLABS_QUOTA_KEY, MOCK_ELEVENLABS_FREE_KEY].includes(key)) {
+  if (![MOCK_ELEVENLABS_VALID_KEY, MOCK_ELEVENLABS_QUOTA_KEY, MOCK_ELEVENLABS_FREE_KEY, MOCK_ELEVENLABS_RESTRICTED_KEY].includes(key)) {
     return errorResponse(401, "invalid_api_key", "Invalid API key")
   }
   const quotaExhausted = key === MOCK_ELEVENLABS_QUOTA_KEY
+  const restricted = key === MOCK_ELEVENLABS_RESTRICTED_KEY
   const all = (): MockVoice[] => [...PREMADE, ...state.cloned]
   const voiceById = (id: string) => all().find((v) => v.voice_id === id)
 
   if (request.method === "GET" && pathname === "/v1/user/subscription") {
+    if (restricted) return missingPermissionResponse("user_read")
     return Response.json({
       tier: key === MOCK_ELEVENLABS_FREE_KEY ? "free" : "creator",
       status: "active",
@@ -177,6 +195,7 @@ export async function handleMockElevenLabs(
   }
 
   if (request.method === "POST" && pathname === "/v1/voices/add") {
+    if (restricted) return missingPermissionResponse("voices_write")
     if (key === MOCK_ELEVENLABS_FREE_KEY) {
       return errorResponse(403, "feature_not_available", "Instant voice cloning is not available on your plan")
     }

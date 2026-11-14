@@ -136,7 +136,11 @@ A PR is *held* when a holding area it touches has no green gate (below)
 or its walk is not `PASS`/`none`; the label clears both. The walk is read
 from the bot's comment in either shape it posts (the `## Bot walk — PR <n> @
 <sha>` heading, or the `<!-- aquilla-qa-walk <sha> -->` marker it has opened
-with since 2026-11-06). A PASS the bot qualified, such as `**PASS (test level
+with since 2026-11-06), and only from an author with standing in the
+repository: an organization member, the owner or a collaborator
+(`author_association` on the comment), or a login named in the
+`WALK_TRUSTED_LOGINS` repository variable. Anyone can comment on a PR in a
+public repository, so a stranger's `**PASS**` or `**FAIL**` is not a walk. A PASS the bot qualified, such as `**PASS (test level
 only)**`, is `partial`: it ran tests and never opened a preview, so the PR
 holds until a real walk or the label. A walk may be
 posted after the merge: the planner takes the newest walk that names the
@@ -334,6 +338,8 @@ nothing, and `release:approved` is the one label the planner reads.
   `release-deploy.yml`, default the runbook's reporting identity), and any
   FAIL from it holds even if a later comment says PASS. A GitHub App for
   the runner replaces the login list when it exists.
+  The comments on the HEAD are read across every page, and `release-verify`
+  counts only as a check run GitHub Actions produced.
 - **Jev cadence.** One Hetzner stack, one suite at a time, queued. An
   hourly cut whose Jev run takes longer than an hour simply deploys the
   hour after; two cuts can not race because one release is in flight at

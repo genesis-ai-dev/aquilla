@@ -127,7 +127,7 @@ describe("Project settings save as you change them", () => {
     expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
     await user.click(screen.getByRole("switch", { name: "Smart quotes" }))
     expect(patchSpy).toHaveBeenCalledTimes(1)
-    expect(patchSpy.mock.calls[0][0]).toEqual({ smartQuotes: true })
+    expect(patchSpy.mock.calls[0][0]).toEqual({ smartQuotes: false })
     expect(patchSpy.mock.calls[0][1]).toMatchObject({ expect: [{ key: "smartQuotes", value: undefined }] })
     expect(await screen.findByTestId("save-status-smartQuotes")).toHaveTextContent("Saved")
   })

@@ -215,7 +215,10 @@ export interface TakeStepContext {
   readTake(cellId: string, audioId: string): CodexCellAttachment | null
   /** Which take plays in a slot right now (the group's first piece for a cut take). */
   selectedIn(cellId: string, slot: string): string | null
-  applyTrim(cellId: string, audioId: string, w: TakeWindow): Promise<void>
+  /** False when nothing was stored because the window can no longer play
+   *  (merge review round 2, R2-2: wholly before 0:00 after a colleague's
+   *  drag); the step then reports the take as changed. */
+  applyTrim(cellId: string, audioId: string, w: TakeWindow): Promise<boolean | void>
   /** AQU-2327: a take's volume and fades, all three in one write. */
   applyGain?(cellId: string, audioId: string, level: TakeLevel): Promise<void>
   /** AQU-2267: both places, in one write. */
@@ -257,7 +260,7 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
     const att = ctx.readTake(d.cellId, d.audioId)
     if (!att) return GONE
     if (!sameWindow(att, from)) return CHANGED
-    await ctx.applyTrim(d.cellId, d.audioId, to)
+    if ((await ctx.applyTrim(d.cellId, d.audioId, to)) === false) return CHANGED
     return DONE
   }
   // AQU-2327: the level together — a change since, to any of the three, is

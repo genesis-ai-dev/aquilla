@@ -51,6 +51,17 @@ describe("take.window / take.place", () => {
     expect(ctx.applyTrim).toHaveBeenCalledTimes(1)
   })
 
+  // Merge review round 2, note R2-2: the workspace's trim write stores nothing
+  // when the window can no longer play (wholly before 0:00 after a colleague's
+  // drag) and says so; the step reports the take as changed.
+  it("a window the trim write could not store is skipped as changed", async () => {
+    const takes: Takes = { a: { trimStartMs: 100, trimEndMs: 900 } }
+    const { handlers } = ctxFor(takes, { applyTrim: vi.fn(async () => false) })
+    const data = { cellId: "c", audioId: "a", before: { trimStartMs: 0, trimEndMs: 1000 }, after: { trimStartMs: 100, trimEndMs: 900 } }
+    expect(await handlers["take.window"].undo(data)).toEqual({ kind: "skipped", reason: "changed" })
+    expect(takes.a).toMatchObject({ trimStartMs: 100, trimEndMs: 900 })
+  })
+
   it("a move whose take is gone is skipped as gone", async () => {
     const { handlers } = ctxFor({})
     expect(await handlers["take.place"].undo({ cellId: "c", audioId: "a", before: null, after: 250 })).toEqual({

@@ -653,15 +653,22 @@ export function resolveTakeLine(args: {
  * keeps. The workspace's trim write (`applyTakeTrim`) stores only this, so an
  * Undo or Redo of a trim keeps it too: a colleague may have dragged the take
  * since, its clip before 0:00, and the old window would sound before the file.
+ *
+ * Merge review round 2 (R2-2): null when nothing of the window is left once
+ * held, a window lying wholly before 0:00. Its end would be at or before its
+ * start, which reads as no end at all, so the take would play from the held
+ * start to the end of its clip: audio from neither window.
  */
 export function heldTakeTrim(
   cell: CellData,
   att: ChipAtt,
   trims: { trimStartMs?: number; trimEndMs?: number },
-): { trimStartMs?: number; trimEndMs?: number } {
+): { trimStartMs?: number; trimEndMs?: number } | null {
   const floorMs = Math.round(minHeadTrimSec(cell, att) * 1000)
-  const start = trims.trimStartMs
-  return { trimStartMs: floorMs > 0 && (start ?? 0) < floorMs ? floorMs : start, trimEndMs: trims.trimEndMs }
+  const asked = trims.trimStartMs
+  const start = floorMs > 0 && (asked ?? 0) < floorMs ? floorMs : asked
+  if (start != null && trims.trimEndMs != null && trims.trimEndMs <= start) return null
+  return { trimStartMs: start, trimEndMs: trims.trimEndMs }
 }
 
 /**

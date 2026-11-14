@@ -52,6 +52,19 @@ describe("a trim's start is held so the take's sound never starts before 0:00 (A
     expect(heldTakeTrim(cell, att(cell), { trimStartMs: undefined, trimEndMs: undefined })).toEqual({ trimStartMs: undefined, trimEndMs: undefined })
   })
 
+  // Merge review round 2, note R2-2: a window that lies wholly before 0:00
+  // (an Undo back to {0, 3 s} after the clip was dragged to -4 s) cannot be
+  // held: raised to {4 s, 3 s} its end is before its start, which the app reads
+  // as no end, so it would play 4 s to the clip's end, audio from neither
+  // window. Nothing is stored; the take stays as it is.
+  it("a window wholly before 0:00 is not held: nothing is stored", () => {
+    const cell = lineWithTake(-6000, 4000)
+    expect(heldTakeTrim(cell, att(cell), { trimStartMs: undefined, trimEndMs: 3000 })).toBeNull()
+    expect(heldTakeTrim(cell, att(cell), { trimStartMs: 1000, trimEndMs: 4000 })).toBeNull()
+    // An end just past the floor still leaves something to play.
+    expect(heldTakeTrim(cell, att(cell), { trimStartMs: 1000, trimEndMs: 4001 })).toEqual({ trimStartMs: 4000, trimEndMs: 4001 })
+  })
+
   it("the workspace's trim write holds every trim it stores to it", () => {
     const src = readFileSync(join(__dirname, "ProjectWorkspace.tsx"), "utf8")
     const at = src.indexOf("const applyTakeTrim = useCallback(")
@@ -60,5 +73,8 @@ describe("a trim's start is held so the take's sound never starts before 0:00 (A
     expect(body).toMatch(/heldTakeTrim\(cell, att, /)
     // Nothing in it stores the trims it was handed rather than the held ones.
     expect(body).not.toMatch(/trims\.trimStartMs/)
+    // R2-2: with nothing it can hold, it stores nothing and says so, so a
+    // trim's Undo or Redo reports the take as changed.
+    expect(body).toMatch(/if \(!held\) return false/)
   })
 })

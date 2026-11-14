@@ -4205,8 +4205,11 @@ export function ProjectWorkspace() {
       if (!owner || !cell || !att) return
       const takeFileId = owner.fileId
       // AQU-2495 (merge review, Nov 13, note 2): its sound never before 0:00,
-      // an Undo or Redo of a trim included — the floor every trim keeps.
+      // an Undo or Redo of a trim included — the floor every trim keeps. A
+      // window wholly before 0:00 has nothing left to play: nothing is stored,
+      // and the step reports the take as changed (round 2, R2-2).
       const held = heldTakeTrim(cell, att, trims)
+      if (!held) return false
       // AQU-646: read the clip's slot; infer only when it is absent. Drives the
       // optimistic overlay's "newest shadow per slot" bookkeeping, which puts
       // the shadow in the wrong slot if this guesses.
@@ -4239,6 +4242,7 @@ export function ProjectWorkspace() {
       await trimP
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       notifyAudioAttachmentsChanged(takeFileId)
+      return true
     },
     [project?.id, activeFileId, currentUsername, getTokenForProjectFile, activeLane],
   )

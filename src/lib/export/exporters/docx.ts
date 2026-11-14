@@ -910,7 +910,7 @@ function rebuildParagraphIn(
     writtenText,
     marks,
     sourceLooks,
-    ...(placed ? { lineOf, footnoteLines: placed.footnoteLines, lost: placed.lost, lostChar: placed.lostChar, inlineAt } : {}),
+    ...(placed ? { lineOf, footnoteLines: placed.footnoteLines, lost: placed.lost, lostChar: placed.lostChar, inlineAt, textLines: placed.textLines } : {}),
     translatedLook: part.translatedLook,
     baseRpr: base ?? "",
     io,
@@ -1357,11 +1357,15 @@ function placeInLines(
   /** Where in the line text each piece that is not the line's text sits,
    *  and each wrapper (where its first piece does). */
   offsets: Map<DocxPiece, number>
+  /** AQU-2552 (review r10): the first and last line the characters of each
+   *  text piece (by its element) that are not a lost line's belong to. */
+  textLines: Map<XmlElement, { first: number; last: number }>
 } {
   const footnoteLines = new Map<DocxPiece, number>()
   const lost = new Set<DocxPiece>()
   const offsets = new Map<DocxPiece, number>()
   const textStart = new Map<DocxPiece, number>()
+  const textLines = new Map<XmlElement, { first: number; last: number }>()
   const inLost = (at: number) => layout.lost.some((s) => s.start <= at && at < s.end)
   let end = 0
   flat.forEach((piece, k) => {
@@ -1376,6 +1380,15 @@ function placeInLines(
     }
     end += text.length
     textStart.set(piece, start)
+    if (piece.kind === "text") {
+      for (let i = 0; i < text.length; i++) {
+        if (!/\S/.test(text[i]) || inLost(start + i)) continue
+        const line = layout.stretches.findIndex((s) => s !== null && s.start <= start + i && start + i < s.end)
+        if (line === -1) continue
+        const seen = textLines.get(piece.el)
+        textLines.set(piece.el, { first: Math.min(seen?.first ?? line, line), last: Math.max(seen?.last ?? line, line) })
+      }
+    }
     if (piece.kind === "footnote") {
       const line = layout.stretches.findIndex((s) => s !== null && s.start <= start && start < s.end)
       if (line !== -1) footnoteLines.set(piece, line)
@@ -1411,7 +1424,7 @@ function placeInLines(
     const start = textStart.get(piece)
     return start !== undefined && inLost(start + i)
   }
-  return { footnoteLines, lost, lostChar, offsets }
+  return { footnoteLines, lost, lostChar, offsets, textLines }
 }
 
 const WORD_CHAR_RE = /[\p{L}\p{N}\p{M}]/u

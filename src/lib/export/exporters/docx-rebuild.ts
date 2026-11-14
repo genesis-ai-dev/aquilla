@@ -107,6 +107,11 @@ export interface RebuildInput {
    *  goes where it is given (where it began), else, like a field, where its
    *  first such piece goes. */
   inlineAt?: ReadonlyMap<DocxPiece, number>
+  /** AQU-2552 (review r10): for each text piece's element, the first and
+   *  last line (as in `lineOf`) its characters that remain belong to. A link,
+   *  field or content control is looked for only where its lines are
+   *  written. */
+  textLines?: ReadonlyMap<XmlElement, { first: number; last: number }>
   io: RebuildIo
 }
 
@@ -185,7 +190,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   let matches: Map<RNode, Match>
   for (;;) {
     const lost: { text: string; look: string }[] = []
-    matches = matchAnchors(nodes, masked, input.baseRpr, io, lost)
+    matches = matchAnchors(nodes, masked, input.baseRpr, io, lost, input.lineOf, input.textLines)
     result.lostLooks = lost.filter((l) => seenDifferently(l.look, input.baseRpr)).map((l) => l.text)
     let changed = false
     const next: RNode[] = []
@@ -668,6 +673,8 @@ interface Anchor {
    *  for in order when the whole stretch is not in the translation (it is
    *  opened up, like a link or field that is not found). */
   words?: LookAnchor[]
+  /** For a link, field or content control: the lines its words are in. */
+  lines?: { first: number; last: number }
 }
 
 const WORD_CHAR = /[\p{L}\p{N}\p{M}]/u
@@ -693,6 +700,7 @@ function anchorsOf(
   nodes: readonly RNode[],
   baseRpr: string,
   io: RebuildIo,
+  textLines?: ReadonlyMap<XmlElement, { first: number; last: number }>,
 ): { anchors: Anchor[]; text: string; unsought: LostStretch[] } {
   const anchors: Anchor[] = []
   /** Look stretches with a letter or digit too short to be looked for. */
@@ -808,7 +816,15 @@ function anchorsOf(
       // A field or link is found by its whole visible text, however short
       // (a caption's number "1"): its own structure is the anchor.
       if (HAS_LETTER_OR_DIGIT.test(needle) && !needle.includes(SOURCE_FOOTNOTE)) {
-        anchors.push({ node, order: offset + lead, needle })
+        // AQU-2552 (review r10): with the lines its words are in.
+        const lines = leavesOf([node]).flatMap((leaf) => {
+          const at = leaf.kind === "text" ? textLines?.get(leaf.piece.el) : undefined
+          return at ? [at] : []
+        })
+        anchors.push({
+          node, order: offset + lead, needle,
+          ...(lines.length > 0 ? { lines: { first: Math.min(...lines.map((l) => l.first)), last: Math.max(...lines.map((l) => l.last)) } } : {}),
+        })
       }
     }
     offset += text.length
@@ -830,11 +846,13 @@ function matchAnchors(
   baseRpr: string,
   io: RebuildIo,
   lost: LostStretch[],
+  lineOf?: readonly (number | undefined)[],
+  textLines?: ReadonlyMap<XmlElement, { first: number; last: number }>,
 ): Map<RNode, Match> {
   const out = new Map<RNode, Match>()
   const lookMatches: Match[] = []
   let cursor = 0
-  const { anchors, text: sourceText, unsought } = anchorsOf(nodes, baseRpr, io)
+  const { anchors, text: sourceText, unsought } = anchorsOf(nodes, baseRpr, io, textLines)
   // A stretch grown to its whole word ("12th" from a superscript "th") starts
   // in the main look: its own look is the first one a reader sees differently
   // from it (core check: not one that differs only in, say, proofing language).
@@ -851,10 +869,31 @@ function matchAnchors(
     }
     return findWhole(masked, needle, cursor)
   }
+  // AQU-2552 (review r10): where the lines a link, field or content control's
+  // words are in are written in the translation; it is looked for only there.
+  const writtenRange = (lines: { first: number; last: number }) => {
+    let start = -1
+    let end = -1
+    lineOf!.forEach((line, i) => {
+      if (line === undefined || line < lines.first || line > lines.last) return
+      if (start === -1) start = i
+      end = i + 1
+    })
+    return { start, end }
+  }
+  const findIn = (anchor: Anchor) => {
+    if (!anchor.lines || !lineOf) return find(anchor.needle, anchor.order)
+    const range = writtenRange(anchor.lines)
+    if (range.start === -1) return null
+    const found = find(anchor.needle, anchor.order)
+    if (found && found.start >= range.start && found.end <= range.end) return found
+    const inside = findWhole(masked, anchor.needle, Math.max(cursor, range.start))
+    return inside && inside.end <= range.end ? inside : null
+  }
   for (const anchor of anchors) {
     // A look stretch's node may carry several stretches; frames carry one.
     if (anchor.looks === undefined && out.has(anchor.node)) continue
-    const found = find(anchor.needle, anchor.order)
+    const found = findIn(anchor)
     if (found !== null) {
       const match = { ...found, ...(anchor.looks ? { looks: anchor.looks, text: anchor.needle } : {}) }
       if (anchor.looks) lookMatches.push(match)

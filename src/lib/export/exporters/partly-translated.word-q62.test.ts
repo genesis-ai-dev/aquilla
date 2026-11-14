@@ -672,6 +672,36 @@ describe("Word export — what a lost line owns is its own text range and its fo
     }
   })
 
+  // Review r10 (N3): a link's, field's or content control's words are looked
+  // for only inside the written range of the line they belong to, so a
+  // translated line before it holding the same word more often than its
+  // source does never takes them.
+  const wordsOf = (xml: string) => [...xml.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g)].map((m) => m[1]).join("")
+  it.each([
+    ["a link", `${LINK}${run("here" + PAD + " ")}${run("Third")}</w:hyperlink>`, LINK, "</w:hyperlink>"],
+    ["a content control", `${SDT}${run("here" + PAD + " ")}${run("Third")}</w:sdtContent></w:sdt>`, SDT, "</w:sdtContent>"],
+    ["a field", FIELD_OF(run("here" + PAD + " ") + run("Third")), `w:fldCharType="separate"/></w:r>`, `<w:r><w:fldChar w:fldCharType="end"/>`],
+  ])("%s left holding a word of the next line stays on that line's word, whatever a line before it holds", async (_, wrapped, open, close) => {
+    const { bytes, a, b, c, rest } = await intoLine3(wrapped)
+    for (const line1 of ["Third un.", "Un Third. Third."]) {
+      for (const out of [await wordOut(bytes, [typed(a, line1), hide(b), c, ...rest]), await wordOut(bytes, [typed(a, line1), c, ...rest], [b])]) {
+        const p = firstPara(out.body)
+        expect(wordsOf(p).replaceAll(PAD.trim(), "…")).toBe(`${line1} Third line here …`)
+        expect(wordsOf(p.slice(0, p.indexOf(open)))).toBe(`${line1} `)
+        expect(wordsOf(p.slice(p.indexOf(open), p.indexOf(close)))).toBe("Third")
+      }
+    }
+  })
+
+  it("a link on a word of an untranslated line stays on that line's word when a translated line before it holds the word too", async () => {
+    const bytes = await docxBytes(para(run(L1 + " ") + run("Second line here" + PAD + " ") + `${LINK}${run("Third")}</w:hyperlink>` + run(" line here" + PAD)) + NEXT)
+    const [a, b, c, ...rest] = await importCells(bytes, false)
+    const out = await wordOut(bytes, [typed(a, "Third un."), typed(b, "Deux."), c, ...rest])
+    const p = firstPara(out.body)
+    expect(wordsOf(p.slice(0, p.indexOf(LINK)))).toBe("Third un. Deux. ")
+    expect(out.result.fidelity.droppedLinks).toBe(0)
+  })
+
   // R7: the structure check flags a link with no run again; only a link this
   // export emptied on purpose (its words were all a lost line's) is exempt,
   // named by its start tag.

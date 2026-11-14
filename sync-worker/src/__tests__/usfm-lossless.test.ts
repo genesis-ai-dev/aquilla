@@ -8,6 +8,7 @@ import {
   serializeUsfmLossless,
 } from "../lib/usfm-lossless"
 import { findUsfmChapter, serializeUsfmChapter } from "../lib/usfm-chapter"
+import { serializeUsfmWithLayout } from "../../../db/shared/usfm-layout"
 
 describe("hasIntraVerseMarkers (AQU-276)", () => {
   it("returns false for plain prose verse text", () => {
@@ -413,7 +414,9 @@ describe("serializeUsfmChapter (AQU-2561)", () => {
     ["CRLF with a byte-order mark", "\uFEFF" + LINES.join("\r\n") + "\r\n"],
   ])("matches the whole-file output for every chapter (%s)", (_name, raw) => {
     const doc = parseUsfmLossless(raw)
-    const whole = serializeUsfmLossless(doc, overrides, edits)
+    // AQU-2559: the whole-file export is the layout serializer now, so that
+    // is what a chapter must match.
+    const whole = serializeUsfmWithLayout(doc, overrides, edits)
     const c1 = whole.indexOf("\\c 1")
     const c2 = whole.indexOf("\\c 2")
     const front = whole.slice(0, c1)

@@ -226,6 +226,7 @@ function reasonText(t: ReturnType<typeof useT>, reason: UnmatchedReason, fmt: (n
     case "noSuchLine": return t("recordingsUpload.reason.noSuchLine", { line: reason.line, count: reason.count })
     case "noNumber": return t("recordingsUpload.reason.noNumber")
     case "tooManyNumbers": return t("recordingsUpload.reason.tooManyNumbers")
+    case "wordBeforeNumber": return t("recordingsUpload.reason.wordBeforeNumber", { word: reason.word })
     case "pastLastLine": return t("recordingsUpload.reason.pastLastLine", { count: reason.count })
     case "beforeFirstLine": return t("recordingsUpload.reason.beforeFirstLine")
     case "duplicate": return t("recordingsUpload.reason.duplicate", { other: reason.other, target: reason.target })
@@ -423,6 +424,15 @@ export function RecordingsReview({
         names: sampleNames(retryOf ? retryOf.failures.map((f) => f.name) : eligible.map((i) => inputs[i].name)),
         outline: projectOutline(projectFileInfos(projectFiles, new BookNameIndex())),
         ...(retryOf ? { previous: retryOf.first.rule, failures: retryOf.failures } : {}),
+        // AQU-2496 (review, Nov 9): an answer the server refuses with a
+        // reason is asked about once more, with the reason, while one of the
+        // folder's two calls is left.
+        anotherCall: () => {
+          if (callCount.current >= MAX_ASSISTANT_CALLS) return false
+          callCount.current += 1
+          setCallsMade(callCount.current)
+          return true
+        },
         signal: controller.signal,
       })
       if (controller.signal.aborted) return
@@ -810,7 +820,13 @@ function ReviewBody({
     }
     return m
   }, [targets])
-  const recordedCount = [...lineIds].filter((id) => lineById.get(id)?.line.hasRecording).length
+  // AQU-2496 (review, Nov 9): what the "can't be undone" note says: files over
+  // several lines, and lines whose main-track take the upload replaces.
+  // AQU-2496 (browser pass, Nov 12): that sentence is also the only one that
+  // says the earlier recording stays in its take list; the rows' own
+  // "already recorded" marks say which lines have a recording on any track.
+  const rangeCount = matched.filter((a) => a.cellIds!.length > 1).length
+  const replacedCount = [...lineIds].filter((id) => lineById.get(id)?.line.mainTake).length
 
   // Parts: how many a verse has, for "part 2 of 3".
   const partsOf = useMemo(() => {
@@ -932,9 +948,17 @@ function ReviewBody({
             {takes.byNumber && <> {t("recordingsUpload.preview.takesHighest")}</>}
           </p>
         )}
-        {recordedCount > 0 && (
-          <p className="text-xs text-muted-foreground" data-testid="recordings-recorded-note">
-            {t("recordingsUpload.preview.recordedCount", { count: fmt(recordedCount) })}
+        {/* AQU-2496 (review, Nov 9; Sam's call: say it, no grouped Undo): a
+            bulk upload records no Undo step, so the preview says so before
+            the person commits. Deleting a new recording doesn't bring the
+            line's earlier one back into play, so that is said where it applies. */}
+        {uploadCount > 0 && (
+          <p className="text-xs text-muted-foreground" data-testid="recordings-no-undo-note">
+            {[
+              t("recordingsUpload.preview.noUndo", { count: uploadCount }),
+              rangeCount > 0 ? t("recordingsUpload.preview.noUndoRange") : null,
+              replacedCount > 0 ? t("recordingsUpload.preview.noUndoRecorded", { count: fmt(replacedCount) }) : null,
+            ].filter(Boolean).join(" ")}
           </p>
         )}
         <p className="text-xs text-muted-foreground">

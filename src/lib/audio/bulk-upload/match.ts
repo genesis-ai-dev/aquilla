@@ -63,6 +63,11 @@ export interface TargetLine {
   /** A heading, book title or chapter label — never given a recording by
    *  number or by order, though the person may choose one by hand. */
   structural: boolean
+  /** AQU-2496 (review, Nov 9): its recording (`hasRecording`) is the main
+   *  track's own chosen take, which a bulk upload's new take replaces there
+   *  (every bulk take goes on the main track). False where it plays on an
+   *  added track or a layer. */
+  mainTake?: boolean
   /** The line already has a recording that plays in this language. */
   hasRecording: boolean
   /** AQU-2491 (review, Nov 9): its start (ms), when it has times. */
@@ -111,6 +116,7 @@ export type UnmatchedReason =
   | { code: "noSuchLine"; line: number; count: number }
   | { code: "noNumber" }
   | { code: "tooManyNumbers" }
+  | { code: "wordBeforeNumber"; word: string }
   | { code: "pastLastLine"; count: number }
   | { code: "beforeFirstLine" }
   | { code: "duplicate"; target: string; other: string }
@@ -836,6 +842,51 @@ export function canChooseLine(a: Assignment): boolean {
 /** Reads a name with no book table, for a destination that is not a Bible book. */
 const NO_BOOKS = new BookNameIndex({ builtins: false })
 
+/** No name cut short (`cutShortByWord`): outside a Bible book none is. */
+const NOT_CUT: ReadonlyMap<number, UnmatchedReason> = new Map()
+
+/**
+ * AQU-2496 (review, Nov 9): the names in a Bible book whose reference a word
+ * the app doesn't know cut short, each with why it isn't read. "Ruthu sura 2
+ * mstari 5" (Swahili: chapter 2, verse 5) was read as far as "2", so a folder
+ * of Ruth's verses landed as four whole-chapter recordings and 81
+ * "duplicates". Such a name is not guessed at: it is listed with the word,
+ * unread, so the assistant is offered and the person can choose its line.
+ *
+ * A name is cut short when it gave ONE number, a word ended the reference,
+ * and a number follows that word. It never lands on the whole chapter:
+ *   - when that number is a verse of the chapter, the name is unread;
+ *   - when it is past the chapter's end but a verse of another chapter could
+ *     be that long ("mstari 23" in Ruth 1, which has 22), it is no such verse.
+ * What was read right stays read:
+ *   - a name that already gave its chapter and verse ("Genesis 1-1 ENGESV
+ *     2023"): two numbers were read;
+ *   - a number no verse of the book has ("Ruth 3 ESV 2023"): a year or an
+ *     edition, so the name is the chapter;
+ *   - a version's code with its number run on ("RVR60"), or a take or a
+ *     version word and its number ("toma 2"): read-name.ts reads those.
+ * A folder of every chapter's verse 1 ends every name with the same number,
+ * so how many names share it says nothing: each is judged alone.
+ */
+function cutShortByWord(fi: FileIndex, group: readonly ReadRecording[]): Map<number, UnmatchedReason> {
+  const out = new Map<number, UnmatchedReason>()
+  // AQU-2496 (review, Nov 9): a name with the Digital Bible Platform's shape
+  // that doesn't fit it (read-name.ts `readDbpName`) is unread too, so it is
+  // listed, and the folder's order never places it.
+  for (const r of group) if (r.reading.halfFits) out.set(r.index, { code: "tooManyNumbers" })
+  const longest = Math.max(0, ...fi.chapterLengths.map(([, verses]) => verses))
+  for (const r of group) {
+    const after = r.reading.afterWord
+    const read = r.reading.numbers.filter((n) => n.marker !== "take" && n.marker !== "part")
+    if (!after || read.length !== 1) continue
+    const chapter = read[0].value
+    const verse = after.numbers[0]
+    if (fi.verses.has(`${chapter}:${verse}`)) out.set(r.index, { code: "wordBeforeNumber", word: after.word })
+    else if (fi.chapters.has(chapter) && verse >= 1 && verse <= longest) out.set(r.index, { code: "noSuchVerse", ref: refLabel(fi, chapter, verse) })
+  }
+  return out
+}
+
 export interface MatchOptions {
   /** Moves an order run's start: +1 starts it one line later, −1 one earlier. */
   orderShift?: ReadonlyMap<string, number>
@@ -902,12 +953,15 @@ export function matchRecordings(
     const group = fi.bible
       ? rawGroup.map((r) => (r.folderChapter && !fi.chapters.has(r.folderChapter.chapter) ? { ...r, folderChapter: undefined } : r))
       : rawGroup.map((r) => (r.reading.book ? { ...r, reading: readName(r.file.name, NO_BOOKS) } : r))
-    const nums = pruneConstants(group, fi.bible, fi.file.bookCode)
+    // AQU-2496 (review, Nov 9): a name an unknown word cut short is not read,
+    // so it takes no part in the folder's numbering or its count either.
+    const cut = fi.bible ? cutShortByWord(fi, group) : NOT_CUT
+    const nums = pruneConstants(cut.size > 0 ? group.filter((r) => !cut.has(r.index)) : group, fi.bible, fi.file.bookCode)
     // A number alone in a Bible book: chapter or verse, by the folder's count.
     const lone = new Map<number, NameNumber>()
     if (fi.bible) {
       for (const r of group) {
-        const n = loneNumber(r, nums.get(r.index)!)
+        const n = cut.has(r.index) ? null : loneNumber(r, nums.get(r.index)!)
         if (n) lone.set(r.index, n)
       }
     }
@@ -916,6 +970,10 @@ export function matchRecordings(
       ? { as: loneReading.as, ms: loneReading.byLengthMs }
       : undefined
     const results = group.map((r) => {
+      const cutReason = cut.get(r.index)
+      if (cutReason != null) {
+        return { r, res: { reason: cutReason } as Resolved, interp: null as Interpreted | null }
+      }
       // In one Bible book, a name of another book is the wrong file.
       if (fi.bible && fi.file.bookCode && r.reading.book && r.reading.book.code !== fi.file.bookCode) {
         return { r, res: { reason: { code: "otherBook", book: englishBookName(r.reading.book.code), fileName: bookLabel(fi) } as UnmatchedReason } as Resolved, interp: null as Interpreted | null }

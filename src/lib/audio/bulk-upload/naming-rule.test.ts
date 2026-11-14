@@ -15,6 +15,7 @@ import {
   sampleNames,
   shapesOf,
   whyNotSavable,
+  whyRuleRefused,
   type NamingRule,
 } from "./naming-rule"
 import { askForNamingRule, loadSavedNamingRules, NamingRuleError } from "./naming-rule-client"
@@ -89,7 +90,11 @@ describe("a template is safe text, never the assistant's own expression", () => 
   it("reads a letter run on to a number as its part, never a second number", () => {
     const rule = parseNamingRule({ templates: [{ pattern: "{book} {chapter}-{verse}{part}" }] })!
     expect(applyNamingRule(rule, "Mat 19-4a.mp3")).toBe("Mat 19:4 part a.mp3")
-    expect(applyNamingRule(rule, "Mat 19-121.mp3")).toBeNull()
+    // AQU-2496 (review, Nov 9): the letter may be missing, so a name without
+    // one is its verse, whole. "121" is still never verse 12, part 1.
+    expect(applyNamingRule(rule, "Mat 19-121.mp3")).toBe("Mat 19:121.mp3")
+    expect(applyNamingRule(rule, "Mat 19-4.mp3")).toBe("Mat 19:4.mp3")
+    expect(applyNamingRule(rule, "Mat 19-1211.mp3")).toBeNull()
   })
 })
 
@@ -637,5 +642,179 @@ describe("why a rule isn't kept", () => {
   it("gives every reason that holds, in the order the preview says them", () => {
     const j = why({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Sermon: "MAT" } }, ["Files/Sermon-ch19_v01.ogg", "Files/Sermon-ch19_v20.ogg", "Files/Sermon-ch19_v99.ogg"])
     expect(j.notKept).toEqual(["bookWord", "notAllPlaced", "scattered"])
+  })
+})
+
+// AQU-2496 (review, Nov 9): the rule's {book} stopped at the first mark on a
+// letter, so a rule could never read a book named in Hindi, Bengali, Thai or
+// vowelled Arabic.
+describe("a rule's {book} reads a name written with marks on its letters", () => {
+  it.each([
+    ["Hindi", "उत्पत्ति"],
+    ["Bengali", "আদিপুস্তক"],
+    ["Thai", "มัทธิว"],
+    ["vowelled Arabic", "تَكْوِين"],
+  ])("%s", (_script, word) => {
+    const rule = parseNamingRule({ templates: [{ pattern: "{book} {chapter}-{verse}" }], books: { [word]: "GEN" } })!
+    expect(applyNamingRule(rule, `${word} 1-2.mp3`)).toBe("GEN 1:2.mp3")
+  })
+
+  it("still reads Latin book words, and never a digit or a separator as part of one", () => {
+    const rule = parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT" } })!
+    expect(applyNamingRule(rule, "Mt-ch19_v01.ogg")).toBe("MAT 19:1.ogg")
+    expect(applyNamingRule(rule, "Mt_x-ch19_v01.ogg")).toBeNull()
+  })
+})
+
+// AQU-2496 (review, Nov 9): the rule's book words were compared exactly, so a
+// rule worked out from names written with Arabic vowel marks or Hebrew points
+// placed none of the files typed without them, and the reverse.
+describe("a rule's book word with or without the marks that are optional in writing", () => {
+  const PLAIN = "التكوين" // التكوين
+  const MARKED = "التَّكْوِين" // with fatha, shadda, sukun, kasra
+  const HEBREW = "בראשית" // בראשית
+  const POINTED = "בְּרֵאשִׁית"
+
+  it.each([
+    [PLAIN, MARKED],
+    [MARKED, PLAIN],
+    [HEBREW, POINTED],
+    [POINTED, HEBREW],
+  ])("a rule that maps %s reads a name written %s", (word, written) => {
+    const rule = parseNamingRule({ templates: [{ pattern: "{book} {chapter}-{verse}" }], books: { [word]: "GEN" } })!
+    expect(applyNamingRule(rule, `${written} 1-2.mp3`)).toBe("GEN 1:2.mp3")
+  })
+
+  it("names the project's book either way, so such a rule can be kept", () => {
+    expect(shared.bookWordNames(MARKED, "GEN", [{ name: PLAIN, code: "GEN" }])).toBe(true)
+    expect(shared.bookWordNames(PLAIN, "GEN", [{ name: MARKED, code: "GEN" }])).toBe(true)
+  })
+})
+
+// AQU-2496 (review, Nov 9): names an unknown word cut short were placed or
+// called duplicates, both of which never go to the assistant.
+describe("a name an unknown word cut short goes to the assistant", () => {
+  it("is offered, and a rule that says what the words mean places every file", () => {
+    const ruth = book("rut", "RUT", "Ruth", [22, 23, 18, 22])
+    const paths = ["Files/Ruthu sura 2 mstari 5.mp3", "Files/Ruthu sura 2 mstari 6.mp3", "Files/Ruthu sura 3 mstari 1.mp3"]
+    const index = new BookNameIndex()
+    index.addProjectName("Ruthu", "RUT")
+    const read = readRecordings(paths.map(audio), { scope: { kind: "project" }, index, projectFiles: [{ fileId: "rut", name: "Ruth", bookCode: "RUT" }], maxBytes: 1 << 30 })
+    const before = matchRecordings(read, new Map([["rut", ruth]]))
+    expect(before.map((a) => a.reason?.code)).toEqual(["wordBeforeNumber", "wordBeforeNumber", "wordBeforeNumber"])
+    expect(before.every(ruleEligible)).toBe(true)
+    const rule = parseNamingRule({ templates: [{ pattern: "{book} sura {chapter} mstari {verse}" }], books: { Ruthu: "RUT" } })!
+    expect(land(rule, paths, [ruth])).toEqual(["rut:2:5", "rut:2:6", "rut:3:1"])
+  })
+})
+
+// AQU-2496 (review, Nov 9): a folder that mixes whole verses and pieces
+// ("v01", "v02a", "v02b") failed every time. No placeholder could be missing,
+// so the one-template answer left "v01" unplaced, every other natural answer
+// was refused whole, and nothing told the assistant why.
+describe("a folder that mixes whole verses and pieces of a verse", () => {
+  const ruth = [book("rut", "RUT", "Ruth", [22, 23, 18, 22])]
+  const paths = ["Files/Ru-ch01_v01.wav", "Files/Ru-ch01_v02a.wav", "Files/Ru-ch01_v02b.wav"]
+
+  it("one template with the letter run on to the verse fits the names with and without it", () => {
+    const rule = parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}{part}" }], books: { Ru: "RUT" } })!
+    expect(paths.map((p) => applyNamingRule(rule, p.split("/").pop()!))).toEqual(["RUT 1:1.wav", "RUT 1:2 part a.wav", "RUT 1:2 part b.wav"])
+    const landed = landAll(rule, paths, ruth)
+    expect(landed.assignments.map((a) => [a.cellIds?.[0], a.part?.label])).toEqual([["rut:1:1", undefined], ["rut:1:2", "a"], ["rut:1:2", "b"]])
+    const j = judgeRule(rule, new Set(landed.made.keys()), landed.made, landed.assignments, landed.names, landed.where)
+    expect(j.placed.size).toBe(3)
+    expect(j.keep).toBe(true)
+  })
+
+  it("the letter may be missing only straight after a number, and a take after it still reads", () => {
+    const rule = parseNamingRule({ templates: [{ pattern: "v{verse}{part}_t{take}" }], book: "RUT", chapter: 1 })!
+    expect(applyNamingRule(rule, "v02_t3.wav")).toBe("RUT 1:2 take 3.wav")
+    expect(applyNamingRule(rule, "v02b_t3.wav")).toBe("RUT 1:2 part b take 3.wav")
+    // A second number is never read as a missing letter plus something else.
+    expect(applyNamingRule(rule, "v021_t3.wav")).toBe("RUT 1:21 take 3.wav")
+    expect(applyNamingRule(rule, "v02x_t3.wav")).toBeNull()
+    // A part with text before it is still asked for.
+    const apart = parseNamingRule({ templates: [{ pattern: "v{verse}_p{part}" }], book: "RUT", chapter: 1 })!
+    expect(applyNamingRule(apart, "v02.wav")).toBeNull()
+    expect(applyNamingRule(apart, "v02_p1.wav")).toBe("RUT 1:2 part 1.wav")
+  })
+
+  it("the two-template answer still fits, whichever template comes first", () => {
+    for (const templates of [
+      [{ pattern: "{book}-ch{chapter}_v{verse}" }, { pattern: "{book}-ch{chapter}_v{verse}{part}" }],
+      [{ pattern: "{book}-ch{chapter}_v{verse}{part}" }, { pattern: "{book}-ch{chapter}_v{verse}" }],
+    ]) {
+      const rule = parseNamingRule({ templates, books: { Ru: "RUT" } })!
+      expect(land(rule, paths, ruth)).toEqual(["rut:1:1", "rut:1:2", "rut:1:2"])
+    }
+  })
+
+  it("says why each natural but unusable answer is refused, for the one re-ask", () => {
+    const why = (answer: unknown) => {
+      expect(parseNamingRule(answer)).toBeNull()
+      return whyRuleRefused(answer)
+    }
+    const base = "{book}-ch{chapter}_v{verse}"
+    expect(why({ templates: [{ pattern: `${base}{any}` }] })).toMatch(/\{any\} can't sit right beside another placeholder/)
+    expect(why({ templates: [{ pattern: `${base}{part?}` }] })).toMatch(/can't be optional/)
+    expect(why({ templates: [{ pattern: `${base}{piece}` }] })).toMatch(/\{piece\} is not a placeholder/)
+    expect(why({ templates: [{ pattern: base }, { pattern: `${base}a` }, { pattern: `${base}b` }] })).toMatch(/3 templates.*at most two/)
+    expect(why({ templates: [{ pattern: "{chapter}{verse}" }] })).toMatch(/two number placeholders/)
+    expect(why({ templates: [{ pattern: "v{verse}-{verse}" }] })).toMatch(/\{verse\} is used twice/)
+    expect(why({ assignments: [] })).toMatch(/templates/)
+    expect(why("not a rule")).toMatch(/JSON object/)
+    expect(why({ templates: [{ pattern: "{verse}" }], book: "XYZ" })).toMatch(/books|book/)
+    // The refused template is quoted, so the assistant sees which one.
+    expect(why({ templates: [{ pattern: base }, { pattern: `${base}{any}` }] })).toContain(JSON.stringify(`${base}{any}`))
+    // Never longer than the server takes back, whatever the answer held.
+    expect(why({ templates: [{ pattern: `${"{nope}".repeat(200)}` }] }).length).toBeLessThanOrEqual(shared.MAX_REFUSAL_CHARS)
+  })
+})
+
+describe("asking again when the answer was refused (AQU-2496)", () => {
+  const RULE = { templates: [{ pattern: "v{verse}{part}" }], book: "RUT", chapter: 1 }
+  const refusedThen = (second: Response) => {
+    const bodies: Array<Record<string, unknown>> = []
+    const keys: string[] = []
+    const fetchImpl = (async (_url: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+      keys.push(new Headers(init?.headers).get("Idempotency-Key") ?? "")
+      return bodies.length === 1
+        ? new Response(JSON.stringify({ error: "invalid_naming_rule", reason: "The template \"v{verse}{any}\" can't be used." }), { status: 502 })
+        : second
+    }) as unknown as typeof fetch
+    return { fetchImpl, bodies, keys }
+  }
+
+  it("asks once more with the reason, as a call of its own, and uses a usable second answer", async () => {
+    const { fetchImpl, bodies, keys } = refusedThen(new Response(JSON.stringify({ rule: RULE }), { status: 200 }))
+    let taken = 0
+    const rule = await askForNamingRule({ projectId: "p", identityToken: "t", fetchImpl, names: ["v01.wav", "v02a.wav"], outline: "", anotherCall: () => { taken++; return true } })
+    expect(rule.templates).toEqual([{ pattern: "v{verse}{part}" }])
+    expect(taken).toBe(1)
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0]).not.toHaveProperty("refused")
+    expect(bodies[1]).toMatchObject({ names: ["v01.wav", "v02a.wav"], refused: "The template \"v{verse}{any}\" can't be used." })
+    expect(keys[0]).not.toBe(keys[1])
+  })
+
+  it("asks no third time when the second answer is refused too", async () => {
+    const { fetchImpl, bodies } = refusedThen(new Response(JSON.stringify({ error: "invalid_naming_rule", reason: "still not usable" }), { status: 502 }))
+    const asked = askForNamingRule({ projectId: "p", identityToken: "t", fetchImpl, names: ["v01.wav"], outline: "", anotherCall: () => true })
+    await expect(asked).rejects.toMatchObject({ problem: "failed" })
+    expect(bodies).toHaveLength(2)
+  })
+
+  it("doesn't ask again when no call is left, or when the server gave no reason", async () => {
+    const none = refusedThen(new Response("{}", { status: 500 }))
+    await expect(askForNamingRule({ projectId: "p", identityToken: "t", fetchImpl: none.fetchImpl, names: ["v01.wav"], outline: "", anotherCall: () => false })).rejects.toBeInstanceOf(NamingRuleError)
+    expect(none.bodies).toHaveLength(1)
+    const bodies: unknown[] = []
+    const noReason = (async (_url: unknown, init?: RequestInit) => {
+      bodies.push(init?.body)
+      return new Response(JSON.stringify({ error: "invalid_naming_rule" }), { status: 502 })
+    }) as unknown as typeof fetch
+    await expect(askForNamingRule({ projectId: "p", identityToken: "t", fetchImpl: noReason, names: ["v01.wav"], outline: "", anotherCall: () => true })).rejects.toBeInstanceOf(NamingRuleError)
+    expect(bodies).toHaveLength(1)
   })
 })

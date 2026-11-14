@@ -54,6 +54,9 @@ type Route = { method: string; url: string; body: Record<string, unknown> | null
 /** An answer that fails, and one that never comes until the request is aborted. */
 const FAIL = Symbol("fail")
 const HANG = Symbol("hang")
+/** An answer the server refuses, saying why (AQU-2496). */
+const REFUSED = Symbol("refused")
+const REFUSED_WHY = "The template \"{book}-ch{chapter}_v{verse}{any}\" can't be used: {any} can't sit right beside another placeholder."
 let calls: Route[] = []
 let answers: unknown[] = []
 let saved: Record<string, unknown> = {}
@@ -98,6 +101,9 @@ beforeEach(() => {
         return new Promise<Response>((_, reject) => {
           init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")))
         })
+      }
+      if (answer === REFUSED) {
+        return new Response(JSON.stringify({ error: "invalid_naming_rule", reason: REFUSED_WHY }), { status: 502 })
       }
       if (answer === FAIL) {
         await new Promise((r) => setTimeout(r, 20))
@@ -283,6 +289,45 @@ describe("at most two calls for a folder (review, Oct 30)", () => {
     await waitFor(() => expect(asks()).toHaveLength(2))
     again.unmount()
     expect(asks()[1].signal?.aborted).toBe(true)
+  })
+})
+
+// AQU-2496 (review, Nov 9): an answer the server refused came back the same
+// however often it was asked for, so a folder mixing "v01" with "v02a" failed
+// every time. The refusal now says why, and the one re-ask carries the reason.
+describe("an answer the server refuses is asked about once more, with the reason", () => {
+  it("asks again on its own, sends the reason, and places the files by the second answer", async () => {
+    answers = [REFUSED, RULE]
+    review()
+    fireEvent.click(await enabledAsk())
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(3))
+    expect(asks()).toHaveLength(2)
+    expect(asks()[0].body).not.toHaveProperty("refused")
+    expect(asks()[1].body).toMatchObject({ names: NAMES, refused: REFUSED_WHY })
+    expect(asks()[0].headers.get("Idempotency-Key")).not.toBe(asks()[1].headers.get("Idempotency-Key"))
+    expect(screen.queryByTestId("recordings-assistant-problem")).toBeNull()
+  })
+
+  it("counts as the folder's second call: a second refusal ends it, and the offer doesn't come back", async () => {
+    answers = [REFUSED, REFUSED, RULE]
+    review()
+    fireEvent.click(await enabledAsk())
+    const problem = await screen.findByTestId("recordings-assistant-problem")
+    expect(problem).toHaveTextContent("The assistant couldn't work out the naming")
+    expect(problem).not.toHaveTextContent("Try again")
+    await settle()
+    expect(asks()).toHaveLength(2)
+    expect(screen.queryByTestId("recordings-assistant-ask")).toBeNull()
+  })
+
+  it("is never a third call after a retry: a refused retry leaves the first answer's files placed", async () => {
+    answers = [RULE, REFUSED, RULE]
+    review(["Mt-ch19_v01.ogg", "Mt-ch19_v02.ogg", "Mt-ch19_v99.ogg"])
+    fireEvent.click(await enabledAsk())
+    await waitFor(() => expect(asks()).toHaveLength(2))
+    await settle()
+    expect(asks()).toHaveLength(2)
+    expect(screen.getAllByTestId("recordings-row")).toHaveLength(2)
   })
 })
 
@@ -677,6 +722,84 @@ describe("smaller review items (review, Oct 30)", () => {
   })
 })
 
+// AQU-2496 (review, Nov 9): the "can't be undone" note said "the recordings"
+// for one file, didn't say a file over several lines adds a take to each, and
+// said to choose the earlier recording again on lines where it never stopped
+// playing (it plays on an added track or a layer; every bulk take goes on the
+// main track).
+describe("the can't-be-undone note is true for every kind of upload", () => {
+  const note = () => screen.getByTestId("recordings-no-undo-note")
+  const withLines = (patch: Record<string, Partial<TargetLine>>) => {
+    const file = matthew()
+    file.lines = file.lines.map((line) => (patch[line.cellId] ? { ...line, ...patch[line.cellId] } : line))
+    vi.mocked(loadTargetFile).mockResolvedValueOnce(file)
+  }
+
+  it("says the recording, for one file", async () => {
+    review(["Matthew 19-1.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
+    expect(note()).toHaveTextContent(/^This can't be undone with Undo\. To take it back, delete the recording it adds\.$/)
+  })
+
+  it("says a file over several lines adds a take to each of them", async () => {
+    review(["Matthew 19.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
+    expect(note()).toHaveTextContent(
+      "This can't be undone with Undo. To take it back, delete the recording it adds. A file that covers several lines adds a take to each of those lines; delete that take on each line.",
+    )
+  })
+
+  // AQU-2496 (browser pass and its review, Nov 12): a separate "N of those
+  // lines already has a recording" note counted differently from the rows'
+  // "already recorded" marks, which are true per row (a take on any track).
+  // It is gone: the one sentence that counts lines, "takes over from an
+  // earlier one", says the earlier recording stays in its take list.
+  const marked = () => screen.getAllByTestId("recordings-how").filter((el) => el.textContent?.includes("already recorded")).length
+  it("leaves out choosing again where the earlier recording plays on another track and never stopped; the row still says already recorded", async () => {
+    withLines({ "mat:19:2": { hasRecording: true, mainTake: false } })
+    review(["Matthew 19-1.ogg", "Matthew 19-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    expect(marked()).toBe(1)
+    expect(note()).not.toHaveTextContent("earlier")
+    expect(screen.queryByTestId("recordings-recorded-note")).toBeNull()
+    cleanup()
+    withLines({ "mat:19:1": { hasRecording: true, mainTake: true }, "mat:19:2": { hasRecording: true, mainTake: false } })
+    review(["Matthew 19-1.ogg", "Matthew 19-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    expect(marked()).toBe(2)
+    expect(note()).toHaveTextContent(
+      "On 1 line the new recording takes over from an earlier one, which stays in its take list; after deleting the new one, choose the earlier recording again there.",
+    )
+    expect(screen.queryByTestId("recordings-recorded-note")).toBeNull()
+  })
+
+  // AQU-2496 (review of the browser pass, Nov 12): the (i) said the new
+  // recording "becomes the one that plays", untrue where the earlier one plays
+  // on an added track and goes on playing there.
+  it("says in the (i) that the new recording plays, true on any track", async () => {
+    withLines({ "mat:19:2": { hasRecording: true, mainTake: false } })
+    review(["Matthew 19-1.ogg", "Matthew 19-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    fireEvent.click(screen.getByRole("button", { name: "How each recording finds its line" }))
+    const rule = await screen.findByText(/A line that already has a recording keeps it in its take list/)
+    expect(rule.textContent).toMatch(/^A line that already has a recording keeps it in its take list, and the new recording plays\. Several files/)
+  })
+
+  it("says where the new recordings take over from earlier ones, one line or several", async () => {
+    withLines({ "mat:19:1": { hasRecording: true, mainTake: true }, "mat:19:2": { hasRecording: true, mainTake: true } })
+    review(["Matthew 19-1.ogg", "Matthew 19-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    expect(note()).toHaveTextContent(
+      "This can't be undone with Undo. To take it back, delete the recordings it adds. On 2 lines the new recordings take over from earlier ones, which stay in their take lists; after deleting the new ones, choose the earlier recording again on each.",
+    )
+    cleanup()
+    withLines({ "mat:19:1": { hasRecording: true, mainTake: true } })
+    review(["Matthew 19-1.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
+    expect(note()).toHaveTextContent("On 1 line the new recording takes over from an earlier one, which stays in its take list; after deleting the new one, choose the earlier recording again there.")
+  })
+})
+
 // Sam, Oct 30: "Forget this naming for the team" only for someone the server
 // will let forget it, and a plain word when it didn't go through.
 describe("forgetting a team's naming", () => {
@@ -799,5 +922,39 @@ describe("whether the naming will be kept", () => {
     await screen.findByTestId("recordings-assistant-note")
     await settle()
     expect(screen.queryByTestId("recordings-assistant-keep")).toBeNull()
+  })
+})
+
+// AQU-2496 (review, Nov 9; Sam's call the same day: say it, don't build a
+// grouped Undo). A bulk upload records no Undo step, so the preview says so
+// before the person commits, and how to take it back.
+describe("the preview says a bulk upload can't be undone", () => {
+  const PLACED = ["Matthew 19-1.ogg", "Matthew 19-2.ogg"]
+
+  it("says so in one line, with how to take it back, before anything uploads", async () => {
+    review(PLACED)
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    const note = screen.getByTestId("recordings-no-undo-note")
+    expect(note).toHaveTextContent("This can't be undone with Undo. To take it back, delete the recordings it adds.")
+    expect(note).not.toHaveTextContent("earlier recording")
+    expect(started).not.toHaveBeenCalled()
+  })
+
+  it("adds what else it takes on a line that already had a recording: choosing the earlier one again", async () => {
+    const recorded = matthew()
+    recorded.lines = recorded.lines.map((line) => (line.cellId === "mat:19:2" ? { ...line, hasRecording: true, mainTake: true } : line))
+    vi.mocked(loadTargetFile).mockResolvedValueOnce(recorded)
+    review(PLACED)
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    expect(screen.queryByTestId("recordings-recorded-note")).toBeNull()
+    expect(screen.getByTestId("recordings-no-undo-note")).toHaveTextContent(
+      "This can't be undone with Undo. To take it back, delete the recordings it adds. On 1 line the new recording takes over from an earlier one, which stays in its take list; after deleting the new one, choose the earlier recording again there.",
+    )
+  })
+
+  it("says nothing when no file can be placed, since nothing would upload", async () => {
+    review()
+    await enabledAsk()
+    expect(screen.queryByTestId("recordings-no-undo-note")).toBeNull()
   })
 })

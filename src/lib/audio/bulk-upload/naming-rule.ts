@@ -53,6 +53,7 @@ export {
   type ProjectBooks,
   type UnsavableReason,
   whyNotSavable,
+  whyRuleRefused,
 } from "../../../../shared/recording-naming-rule"
 
 function extension(name: string): string {

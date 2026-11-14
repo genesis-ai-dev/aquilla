@@ -641,6 +641,13 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         // why the inference cannot be trusted once a third slot exists.
         slot: slotArg ?? (audioId === cell.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording"),
         timings,
+        // AQU-2491 (review, Nov 9): the words land on the take that was chosen
+        // when this run STARTED, and a run can take a while (a cold model, a
+        // long take, a rate-limit wait, a place in "Transcribe all"). By now
+        // the person may have recorded a newer take or deleted this one, so
+        // the write adds the words and chooses nothing: the line keeps
+        // playing what it plays, and a deleted take stays deleted.
+        wordsOnly: true,
         // Preserve attachment fields the projection UPSERT would otherwise
         // null out — belt and braces now that the projection COALESCEs them
         // too (SUB-49).

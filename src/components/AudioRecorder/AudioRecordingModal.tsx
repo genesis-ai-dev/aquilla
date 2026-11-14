@@ -94,11 +94,12 @@ import { SegmentTabs } from "@/components/ui/tabs"
 import { setRecordingFormatPref, useRecordingFormatPref } from "@/lib/store/recording-format-pref"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { ACCEPT, OFFLINE_MESSAGE, attachAudioFileToCell, validateAudioFile } from "@/lib/audio/attach-file"
+import { bornTakePlace, recordedTakePlaceMs } from "@/lib/audio/new-take-place"
 import { playingInSlot, recordTakeAdded } from "@/lib/history/take-steps"
 import { recordingLimitsFor } from "@/lib/audio/recording-limits"
 import { MAX_AUDIO_UPLOAD_BYTES, audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
-import { emitCellAudioAttach, emitCellAudioValidate, emitCellLaneRetime } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioMeasure, emitCellAudioPlace, emitCellAudioValidate } from "@/lib/sync/events-emit"
 import { audioValidationScope } from "@/lib/audio/audio-validation-permissions"
 import { shouldAutoValidateFreshRecording } from "@/lib/review/auto-validation"
 import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
@@ -961,9 +962,13 @@ export function AudioRecordingModal({
   // Round 8c: takes recorded before the webm-duration fix attached without a
   // durationMs (Chrome writes no duration header into MediaRecorder blobs), so
   // their chips still fall back to section width. Heal the SELECTED take once
-  // per modal visit: fetch its bytes, decode the real length, re-attach with
-  // it (re-attach re-selects, which is a no-op here — and COALESCE keeps the
-  // name, while passing the trims keeps them).
+  // per modal visit: fetch its bytes, decode the real length, and fill it in.
+  //
+  // AQU-2491 (review, Nov 9): with `cell.audio.measure`, which fills an
+  // unknown length and nothing else, never a re-attach. An attach chooses the
+  // take and brings it back if deleted, and on a slow network this lands late:
+  // after a new take was recorded, or this one deleted, the old one played
+  // again. Its name, trims, place and choice are left as they are.
   const healTriedRef = useRef<Set<string>>(new Set())
   useEffect(() => {
     if (!open || !session?.jwt || !activeCell) return
@@ -986,26 +991,20 @@ export function AudioRecordingModal({
           new Blob([bytes as BlobPart], { type: take.mimeType ?? "audio/webm" }),
         )
         if (durationMs == null) return
-        const healEventId = await emitCellAudioAttach({
+        const healEventId = await emitCellAudioMeasure({
           projectId: project.id, fileId: cell.fileId, cellId: cell.id,
-          // AQU-646: the take's own slot. Provably "recording" today (the find
-          // above filters on it), but this re-attach assigns slot outright, so
-          // it must not be the one place still naming it by hand once
-          // `recordingTakes` is scoped to a target track.
-          audioId: take.audioId, url: take.url, slot: take.slot,
-          mimeType: take.mimeType ?? undefined,
+          audioId: take.audioId,
           durationMs: Math.round(durationMs),
-          label: take.label ?? undefined,
-          trimStartMs: take.trimStartMs ?? undefined,
-          trimEndMs: take.trimEndMs ?? undefined,
           ...(laneTag ? { targetLang: laneTag } : {}),
           author: username,
         })
+        // Painted at its length at once, without claiming the slot.
         injectOptimisticAudioAttachment(
           cell.fileId,
           cell.id,
           { ...take, durationMs: Math.round(durationMs) },
           healEventId,
+          { claimSelection: false },
         )
         notifyAudioAttachmentsChanged(cell.fileId)
       } catch {
@@ -1480,6 +1479,13 @@ export function AudioRecordingModal({
         operator,
         durationMs: takeDurationMs,
       })
+      // AQU-2491 (review, Nov 9): the place is THIS TAKE'S, never the line's.
+      // Written on the line it moved every take there with no place of its
+      // own (other tracks, other languages), and Undo left them moved. On a
+      // timed line with no pre-roll to undo, the take's first sample is the
+      // line's start, said outright so a place an older save left on the line
+      // can't pull it early. A line with no times gets no place, as before.
+      const takePlaceMs = recordedTakePlaceMs(laneOffsetMs, activeCell)
       const audioId = buildAudioId(activeCell.id)
       // Warm the OPFS byte cache BEFORE upload (FRO-355), keyed exactly as
       // transcribeCell/useCellAudio look bytes up (audioId+ext of the
@@ -1520,8 +1526,8 @@ export function AudioRecordingModal({
           ...takeTrimWindow,
           label: takeLabel,
           ...(laneTag ? { targetLang: laneTag } : {}),
-          // AQU-1572: the recorder's own save path — the heal re-attach above
-          // passes no origin, so a take counts exactly once.
+          // AQU-1572: the recorder's own save path — the duration heal above
+          // sends no attach at all, so a take counts exactly once.
           audioOrigin: "record",
           surface: "recorder",
           author: username,
@@ -1573,6 +1579,8 @@ export function AudioRecordingModal({
         // trip) until the server projection lands and silently corrected it.
         trimStartMs: takeTrimWindow.trimStartMs ?? null,
         trimEndMs: takeTrimWindow.trimEndMs ?? null,
+        // AQU-2491 (review, Nov 9): and its own place, written just below.
+        ...(takePlaceMs != null ? { targetOffsetMs: takePlaceMs } : {}),
         // The take's provenance, so the strip's control reads right before
         // the projection comes back: a dub, recorded by me, and — when the
         // rule says so — already carrying my vote.
@@ -1634,13 +1642,19 @@ export function AudioRecordingModal({
       // attached, and it merely sits `preRollMs` late until someone drags it.
       // (targetOffsetMsFor clamps at file zero, so a line in the first 200ms of
       // the film keeps what runway it has — and the trim inherits the clamp.)
-      if (laneOffsetMs != null) {
+      //
+      // AQU-2491 (review, Nov 9): stored on the TAKE (`cell.audio.place`), the
+      // write a drag on the timeline makes. No place of its own following the
+      // recordings: that timing reads this one, as it read the line's before.
+      if (takePlaceMs != null) {
         try {
-          await emitCellLaneRetime({
+          await emitCellAudioPlace({
             projectId: project.id,
             fileId: activeCell.fileId,
             cellId: activeCell.id,
-            targetOffsetMs: laneOffsetMs,
+            audioId: savedTakeId,
+            targetOffsetMs: takePlaceMs,
+            recordingsOffsetMs: null,
             ...(laneTag ? { targetLang: laneTag } : {}),
             author: username,
           })
@@ -1746,6 +1760,9 @@ export function AudioRecordingModal({
         surface: "recorder",
         // Decision 11: uploading is an Undo step too.
         history: { selectedBefore: playingInSlot(audioEntry, targetSlot) },
+        // AQU-2491 (review, Nov 9): its own place, the line's start, as a
+        // recorded take with no pre-roll has.
+        place: bornTakePlace(activeCell),
       })
       onTakeSaved?.(activeCell.id)
       returnToReady(`${label} added`)
@@ -1967,9 +1984,10 @@ export function AudioRecordingModal({
         : null,
       durationMs: previewDurationMs,
     })
-    return laneOffsetMs != null
-      ? activeCell.startTime + laneOffsetMs / 1000
-      : targetChipGeom(activeCell, undefined)?.anchor ?? activeCell.startTime
+    // AQU-2491 (review, Nov 9): Save's own rule, so a take with no pre-roll
+    // plays against its line's start, where Save puts it, and never against a
+    // place an older recording left on the line.
+    return activeCell.startTime + (recordedTakePlaceMs(laneOffsetMs, activeCell) ?? 0) / 1000
   })()
   // A split take plays from its first piece, so the film follows that piece.
   const readyAnchorAtt = readySplit?.[0] ?? readyAtt

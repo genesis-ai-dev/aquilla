@@ -13,6 +13,32 @@ const ev = (serverSeq: number, kind: string, payload: object, author = "ana") =>
 })
 
 describe("the Station's History rows", () => {
+  // AQU-2491 (review, Nov 9): every new take is now given its own place
+  // (`cell.audio.place`) right after its attach. That is where it was born, not
+  // a move: History says "Recorded", not "Recorded" and then "Moved". A real
+  // move later still says so.
+  it("a place written with the take's own attach is not a move; a later one is", () => {
+    const at = (serverSeq: number, kind: string, payload: object, clientTs: number, author = "ana") => ({ ...ev(serverSeq, kind, payload, author), clientTs })
+    const rows = historyRowsFromEvents(
+      [
+        at(1, "cell.audio.attach", { audioId: "t1" }, 10_000),
+        at(2, "cell.audio.validate", { audioId: "t1" }, 10_020),
+        at(3, "cell.audio.place", { audioId: "t1", targetOffsetMs: 0 }, 10_040),
+        at(4, "cell.audio.attach", { audioId: "t1" }, 11_000),
+        at(5, "cell.audio.place", { audioId: "t1", targetOffsetMs: 300 }, 11_200),
+        at(6, "cell.audio.place", { audioId: "t1", targetOffsetMs: 900 }, 90_000, "rita"),
+      ],
+      new Set(["t1"]),
+    )
+    expect(rows.map((r) => [r.key, r.who])).toEqual([
+      ["editor.station.hRecorded", "ana"],
+      ["editor.station.hApproved", "ana"],
+      ["editor.station.hRecorded", "ana"],
+      ["editor.station.hMoved", "ana"],
+      ["editor.station.hMoved", "rita"],
+    ])
+  })
+
   it("tells one recording's story oldest first, with who did it", () => {
     const rows = historyRowsFromEvents(
       [

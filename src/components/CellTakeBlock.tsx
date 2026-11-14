@@ -40,9 +40,11 @@ import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { DenoiseButton } from "./audio/DenoiseButton"
 import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { keptWindowSec, piecesWindowSec, type KeptWindow } from "@/lib/audio/kept-window"
-import { takeTrackVars } from "@/lib/timeline/take-colors"
+import { takeTrackVars, tracksForTakesIn } from "@/lib/timeline/take-colors"
 import { TRACK_DOT_CLASS } from "@/lib/timeline/track-colors"
+import { minHeadTrimSec } from "@/lib/timeline/lane-timing"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
+import { pieceStretchOf, playingInSlot, recordTakeWindowRun } from "@/lib/history/take-steps"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeTake } from "@/lib/audio/transcribe-take"
 import { isGeneratedTake } from "@/lib/audio/track-audio"
@@ -63,7 +65,7 @@ import { splitTakeName } from "@/lib/audio/take-groups"
 import { pieceGroupOf, type AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { TakesStrip, nextTakeLabel } from "@/components/AudioRecorder/TakesStrip"
 import { attachmentOutFrom } from "@/lib/audio/cut-take"
-import { GENERATED_VOICE_SLOT, RECORDING_SLOT, slotsForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
+import { GENERATED_VOICE_SLOT, programmeTrackSlots, RECORDING_SLOT, slotsForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
 import { formatTakeSeconds, takePlayedMs } from "@/lib/audio/take-length"
 import { useInRouterContext, useNavigate } from "react-router-dom"
 import { isVoiceChangedAudioId } from "@/lib/audio/change-voice"
@@ -268,10 +270,23 @@ function CellTakeBlockView({
   // AQU-2235: the one rule the timeline and the takes list ask too — an added
   // track's AI voice sits in its single slot, known by its `voiceId`.
   const isGenerated = isGeneratedTake(owner, selectedAudioId, attachment)
+  // AQU-2495 (review, Nov 9): a take's clip may start before 0:00; its sound
+  // may not (`minHeadTrimSec`).
+  const startFloorSec = attachment ? minHeadTrimSec(owner, attachment) : 0
   // Trimmed where it is shown (Sam, 2026-09-25): the edit lands on the cell
   // that HOLDS the take — a linked heard-line take writes to its cue.
   const commitTrim = useCallback((start: number | null, end: number | null) => {
     if (!selectedAudioId || !attachment) return
+    // AQU-2492 (review, Nov 9): the same trim on the timeline is an Undo step,
+    // and here it was none, so ⌘Z straight after it undid something else
+    // (possibly on another line). The step and its guard are the timeline's.
+    const before = { trimStartMs: attachment.trimStartMs ?? undefined, trimEndMs: attachment.trimEndMs ?? undefined }
+    const after = { trimStartMs: trimMs(start) ?? undefined, trimEndMs: trimMs(end) ?? undefined }
+    // Finding 14 (same review): a held arrow key saves on every repeat; a run
+    // of them close together is one step.
+    if (before.trimStartMs !== after.trimStartMs || before.trimEndMs !== after.trimEndMs) {
+      recordTakeWindowRun({ cellId: owner.id, audioId: selectedAudioId, before, after }, { fileId: owner.fileId })
+    }
     void persistTakeTrim({
       projectId: project.id,
       fileId: owner.fileId,
@@ -330,6 +345,13 @@ function CellTakeBlockView({
     const trackTakes = Object.entries(owner.attachments ?? {})
       .filter(([id, a]) => !a.isDeleted && ownSlots.has(a.slot ?? RECORDING_SLOT) && !audioIdSeededWith(id, owner.fileId))
       .map(([audioId, a]) => ({ audioId, label: a.label ?? null, pieceOf: a.pieceOf ?? null, trimStartMs: a.trimStartMs ?? null }))
+    // AQU-2492 (review, Nov 9): an Undo step, naming what played in the slot
+    // before (the take in pieces), read outside the try for the compiler.
+    const history = { selectedBefore: playingInSlot(owner, slot) }
+    // Merge review, Nov 13: a take on a track made a layer is placed as it is
+    // following the source, in both timings (the joined take's place). The
+    // tracks are the timeline's: a heard line's take lives in the cue sibling.
+    const onLayer = programmeTrackSlots(tracksForTakesIn(project.files, trackFileId ?? owner.fileId)).layerTrackSlots.includes(slot)
     try {
       await joinTakePieces({
         session,
@@ -337,10 +359,13 @@ function CellTakeBlockView({
         fileId: owner.fileId,
         cellId: owner.id,
         pieces: split,
+        line: owner,
+        onLayer,
         slot,
         label: nextTakeLabel(trackTakes),
         ...(targetLang ? { targetLang } : {}),
         username,
+        history,
       })
     } catch (e) {
       failed = toUserFacingError(e).message
@@ -348,7 +373,7 @@ function CellTakeBlockView({
     setJoining(false)
     if (failed) setJoinError(failed)
     else await onCommitted?.(owner.id)
-  }, [split, session, project.id, owner.fileId, owner.id, owner.attachments, targetLang, username, onCommitted])
+  }, [split, session, project.id, project.files, trackFileId, owner, targetLang, username, onCommitted])
 
   // Deletable even when it is the line's only take (Sam, 2026-09-29) — the
   // same removal as the takes lists. Nothing is chosen in its place: the line
@@ -362,9 +387,12 @@ function CellTakeBlockView({
     setDeleting(true)
     const slot = attachment.slot ?? (selectedAudioId === owner.selectedGeneratedVoiceAudioId ? GENERATED_VOICE_SLOT : RECORDING_SLOT)
     const lane = targetLang ? { targetLang } : {}
-    const removal = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, slot, ...lane, author: username, history: { wasSelected: true } }
+    // AQU-2492 (review, Nov 9), finding 8: with who had approved it (each
+    // piece of a split take), so only an approval given after its Undo stops
+    // the Redo.
+    const removal = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, slot, ...lane, author: username, history: { wasSelected: true, approvedBy: attachment.validators ?? [], stretch: pieceStretchOf(selectedAudioId, attachment) } }
     // A split take goes whole, every piece in one step (Sam, 2026-10-14).
-    const removing = split ? split.map((piece) => ({ audioId: piece.audioId, slot: piece.slot ?? slot })) : null
+    const removing = split ? split.map((piece) => ({ audioId: piece.audioId, slot: piece.slot ?? slot, validators: piece.validators ?? [] })) : null
     const remove = removing
       ? () => removeWholeTake({ ...removal, pieces: removing })
       : () => removeTake(removal)
@@ -752,6 +780,9 @@ function CellTakeBlockView({
         strategy={project.audioMediaStrategy ?? "lazy"}
         {...(piecesWindow ? { pieces: piecesWindow } : {})}
         trimEditable={editable && !split}
+        // AQU-2495 (review, Nov 9): its start comes back only as far as keeps
+        // its sound inside the file, as the timeline's left trim handle does.
+        {...(startFloorSec > 0 ? { trimLimits: { minStart: startFloorSec, maxEnd: null } } : {})}
         onCommitTrim={commitTrim}
         testId="cell-take-waveform"
       >

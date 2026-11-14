@@ -17,6 +17,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 import { synthesizeForCell, setTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
+import { bornTakePlace } from "@/lib/audio/new-take-place"
 import { withGroup } from "@/lib/history/history"
 import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
 import { modelWeightsOnDevice, useModelStatus } from "@/lib/audio/prefetch"
@@ -74,7 +75,11 @@ interface Props {
    *
    * Empty or absent on every ordinary file, which is one clip as before.
    */
-  alsoAttachTo?: readonly { cellId: string; fileId: string }[]
+  alsoAttachTo?: readonly { cellId: string; fileId: string; startTime?: number | null }[]
+  /** AQU-2491 (review, Nov 9): the start (seconds) of the line `cellId` names,
+   *  when it has times. The new voice is placed there as its own place, as is
+   *  each `alsoAttachTo` line's on its own `startTime`. */
+  lineStartTime?: number | null
   /** Required for resolving attached audio via sync-worker R2. */
   projectId?: string
   /** Required for the sync-worker R2 audio key. */
@@ -150,6 +155,7 @@ export function CellTtsButton({
   generatedVoiceAudioId,
   attachments,
   alsoAttachTo,
+  lineStartTime,
   projectId,
   fileId,
   targetLang,
@@ -277,6 +283,8 @@ export function CellTtsButton({
                 ...(targetLang ? { targetLang } : {}),
                 surface: "cell", // AQU-1572
                 history: { selectedBefore: null },
+                // AQU-2491 (review, Nov 9): its own place, the line's start.
+                place: bornTakePlace({ startTime: lineStartTime ?? undefined }),
               })
               // The other heard lines performing this same subtitle. Sequential,
               // not parallel: they share one synth backend and one progress slot,
@@ -301,6 +309,7 @@ export function CellTtsButton({
                     ...(targetLang ? { targetLang } : {}),
                     surface: "cell", // AQU-1572: one event per line it voiced
                     history: { selectedBefore: null },
+                    place: bornTakePlace({ startTime: also.startTime ?? undefined }),
                   })
                   alsoWritten += 1
                 } catch (e) {
@@ -419,6 +428,7 @@ export function CellTtsButton({
     context,
     previewOnly,
     alsoAttachTo,
+    lineStartTime,
     t,
   ])
 

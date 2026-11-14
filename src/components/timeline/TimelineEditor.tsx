@@ -56,7 +56,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useHistoryView } from "@/lib/history/useHistory"
 import { stepLabel } from "@/lib/history/step-label"
-import { redoLast, undoLast, type HistoryResult } from "@/lib/history/history"
+import { beforeHistoryMove, redoLast, undoLast, type HistoryResult } from "@/lib/history/history"
 import { canCutAt } from "@/lib/audio/cut-take"
 import { isTextEntryTarget } from "@/lib/history/arbiter"
 import { deriveLanes } from "@/lib/timeline/lanes"
@@ -190,7 +190,7 @@ import { RowMetricsContext, useRowMetrics, type RowMetrics } from "./useRowMetri
 // write behind lib/audio/audibility, because the video pane's header carries a
 // mute button too now and two components each merging a toggle into their OWN
 // copy of the preference clobber one another.
-import { useQueueStateValue, useMissingClipCells } from "@/lib/audio/play-queue"
+import { useQueueStateValue, useMissingClipTakes } from "@/lib/audio/play-queue"
 import { selectQueueStateForFile } from "@/lib/audio/queue-scope"
 import { seedAudibility, toggleAudibility, trackAudible, useQueueAudibility } from "@/lib/audio/audibility"
 
@@ -213,7 +213,7 @@ import { TimelineHorizontalList, TimelineScrollingRuler } from "./TimelineHorizo
 import { TimelineOrigin } from "./timeline-origin"
 import { createTimelineScrollBus, TimelineScrollBusContext, type TimelineScrollBus } from "./timeline-scroll-bus"
 import { TimelineLane } from "./TimelineLane"
-import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions, type TargetAudioItem } from "./TargetAudioLane"
+import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions, type TakeRoomsMove, type TargetAudioItem } from "./TargetAudioLane"
 import type { TakeVoiceNote } from "@/lib/audio/take-voice"
 import { TimelineTransportClock } from "./TimelineTransportClock"
 import { useCreatePlayheadStore } from "./playhead-store"
@@ -315,6 +315,11 @@ export interface TimelineEditorProps {
    *  AQU-2267: `place` is what to store — the take's place in both timings
    *  after the move, each held by its own timing's limits. */
   onRetimeTarget?(cellId: string, anchorSec: number, audioId: string, place: TakePlace): void
+  /** AQU-2432 (Sam, Nov 9): following the recordings, a take dragged against
+   *  a line nobody has recorded sets that line's ROOM — every room the drag
+   *  changed, and the take's own place when it changed that too, as one step.
+   *  Fired instead of `onRetimeTarget` for such a drag. */
+  onMoveTakeRooms?(move: TakeRoomsMove): void
   /** Matt's QA (2026-08-21): a drag on an AUDIO-CUE chip, final bounds in
    *  seconds, fired once on pointer-up. The workspace commits it as
    *  `cell.retime` against the hidden sibling — the same event a re-import's
@@ -1306,6 +1311,7 @@ export function TimelineEditor({
   sequenceOrdered = false,
   showSources = true,
   onRetimeTarget,
+  onMoveTakeRooms,
   onRetimeCue,
   virtualIsTransport = false,
   skipSilentLinesApplies,
@@ -2053,7 +2059,8 @@ export function TimelineEditor({
   const queueActive = useQueueStateValue((state) => selectQueueStateForFile(state, cellIdSet).active)
   const queueRunning = useQueueStateValue((state) => selectQueueStateForFile(state, cellIdSet).running)
   // A definitively 404'd dub shows a missing badge.
-  const missingCellIds = useMissingClipCells()
+  // AQU-2495 (review, Nov 9): by take, so one dead file marks one clip.
+  const missingTakeKeys = useMissingClipTakes()
   /**
    * AQU-646 stage 5: the playhead is being dragged, so the hand owns the
    * clock. The transport writers in `TimelineTransportClock` stand down while
@@ -3750,6 +3757,10 @@ export function TimelineEditor({
       saveUnsavedOrders()
     }
   }, [fileId, saveUnsavedOrders, saveDragWrites])
+  // AQU-2492: …and so does every Undo and Redo, however it was chosen (Enter
+  // on the menu's Undo, Space on a focused button, the History panel), so the
+  // Undo pressed straight after a drop undoes the drop.
+  useEffect(() => beforeHistoryMove(saveUnsavedOrders), [saveUnsavedOrders])
 
   function onTrackDragStart(event: DragStartEvent) {
     // The next drag measures the list, so the last drop must be painted in it.
@@ -4660,7 +4671,7 @@ export function TimelineEditor({
             viewEndSec={rowProps.viewEndSec}
             selectedId={selectedId}
             selectedTakeCellId={takeSelCellFor(RECORDING_SLOT)}
-            missingCellIds={missingCellIds}
+            missingTakeKeys={missingTakeKeys}
             editable={editable}
             masterHonorsTrims={masterHonorsTrims}
             snapEnabled={snapOn && !audioFirst}
@@ -4678,6 +4689,7 @@ export function TimelineEditor({
             // which takes can hold a pause at all, so the mode question is
             // answered in one module instead of by withholding the handler.
             onRetimeTarget={onRetimeTarget}
+            onMoveTakeRooms={onMoveTakeRooms}
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={cutOne}
@@ -4747,7 +4759,7 @@ export function TimelineEditor({
             viewEndSec={rowProps.viewEndSec}
             selectedId={selectedId}
             selectedTakeCellId={takeSelCellFor(slotForTrack(track.id))}
-            missingCellIds={missingCellIds}
+            missingTakeKeys={missingTakeKeys}
             editable={editable}
             masterHonorsTrims={masterHonorsTrims}
             // AQU-2252: a layer's takes snap as they do following the source.
@@ -4759,6 +4771,7 @@ export function TimelineEditor({
             }}
             onSeek={laneProps.onSeek}
             onRetimeTarget={onRetimeTarget}
+            onMoveTakeRooms={onMoveTakeRooms}
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={cutOne}
@@ -4766,6 +4779,10 @@ export function TimelineEditor({
             takeVoiceFor={takeVoiceFor}
             getPlayheadSec={getPlayheadSec}
             emptyCells={own.empty}
+            // AQU-2432 (Sam, Nov 9): a line with no room is marked on every
+            // track whose takes are laid end to end; a track made a layer
+            // (music, effects) has no seam to mark.
+            lineMarkers={track.setsLineLengths !== false}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, slotForTrack(track.id)) : undefined}
             projectId={project?.id ?? null}
             fileId={fileId}

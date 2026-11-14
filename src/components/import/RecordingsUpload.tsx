@@ -51,7 +51,7 @@ import {
 } from "@/lib/audio/bulk-upload/match"
 import { AUDIO_FILE_ACCEPT } from "@/lib/audio/mime"
 import { chosenFromDrop, chosenFromInput, type ChosenFile } from "@/lib/audio/bulk-upload/collect-files"
-import { learnHeaderNames, loadTargetFile, projectFileInfos, type ProjectFileLike } from "@/lib/audio/bulk-upload/load-targets"
+import { learnHeaderNames, loadTargetFile, projectFileInfos, takePlacesOf, type ProjectFileLike } from "@/lib/audio/bulk-upload/load-targets"
 import { BULK_MAX_FILE_BYTES, isBulkUploadRunning, startBulkUpload } from "@/lib/audio/bulk-upload/engine"
 import { takesSentence, type LineTakes } from "@/lib/audio/bulk-upload/takes-summary"
 import { readLengths } from "@/lib/audio/bulk-upload/read-length"
@@ -652,6 +652,8 @@ export function RecordingsReview({
             jobs,
             files: chosen.map((c) => c.file),
             targetLabel: (job: UploadJob) => labelOf.get(job.files[0]) ?? "",
+            // AQU-2491 (review, Nov 9): each take is placed on its line's start.
+            ...(ready ? { placeOf: takePlacesOf(ready.targets.values()) } : {}),
           }).catch(() => {})
           onStarted()
         } catch (e) {

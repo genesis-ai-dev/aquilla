@@ -8,12 +8,13 @@ vi.mock("./outbox", () => ({ enqueueOutboxEvent: vi.fn(async () => {}), enqueueO
 import {
   emitCellAudioTrim,
   emitCellAudioUncut,
+  emitCellLaneRetime,
   emitCellLinkSet,
   emitCellRetime,
   emitFileTrackSet,
   emitFileVideoSet,
 } from "./events-emit"
-import { enqueueOutboxEvent, enqueueOutboxEvents } from "./outbox"
+import { enqueueOutboxEvent } from "./outbox"
 
 const mockEnqueue = enqueueOutboxEvent as unknown as ReturnType<typeof vi.fn>
 beforeEach(() => mockEnqueue.mockClear())
@@ -196,30 +197,51 @@ describe("emitFileTrackSet", () => {
 })
 
 describe("emitCellAudioUncut (AQU-1767)", () => {
-  it("queues remove, trim-back and rename as ONE outbox write, in that order", async () => {
-    const batch = enqueueOutboxEvents as unknown as ReturnType<typeof vi.fn>
-    batch.mockClear()
-    const ids = await emitCellAudioUncut({
+  // AQU-2492 (review, Nov 9): one event, not a remove, a trim and a rename,
+  // so the server can also give the take back its approvals from before the
+  // cut and keep the pieces' approvals for a Redo. Still ONE outbox write.
+  it("queues the undo of a cut as ONE cell.audio.uncut event", async () => {
+    const id = await emitCellAudioUncut({
       projectId: "p1", fileId: "f1", cellId: "c1",
       removeAudioId: "piece.wav", audioId: "a1.wav", trimStartMs: null, trimEndMs: null,
       rename: { label: "Take 1" }, author: "u",
     })
-    expect(batch).toHaveBeenCalledTimes(1)
-    const events = batch.mock.calls[0]![0] as any[]
-    expect(events.map((e) => e.kind)).toEqual(["cell.audio.remove", "cell.audio.trim", "cell.audio.rename"])
-    expect(events[0].payload).toEqual({ audioId: "piece.wav" })
-    expect(events[1].payload).toEqual({ audioId: "a1.wav", trimStartMs: null, trimEndMs: null })
-    expect(events[2].payload).toEqual({ audioId: "a1.wav", label: "Take 1" })
-    expect(ids).toEqual(events.map((e) => e.id))
+    expect(mockEnqueue).toHaveBeenCalledTimes(1)
+    const ev = mockEnqueue.mock.calls[0]![0] as any
+    expect(ev.kind).toBe("cell.audio.uncut")
+    expect(ev.cellId).toBe("c1")
+    expect(ev.parentId).toBeNull()
+    expect(ev.payload).toEqual({
+      audioId: "a1.wav", pieceAudioId: "piece.wav", trimStartMs: null, trimEndMs: null, rename: { label: "Take 1" },
+    })
+    expect(id).toBe(ev.id)
   })
 
-  it("leaves the rename out when the cut didn't rename", async () => {
-    const batch = enqueueOutboxEvents as unknown as ReturnType<typeof vi.fn>
-    batch.mockClear()
+  it("leaves the rename out when the cut didn't rename, and names the lane", async () => {
     await emitCellAudioUncut({
       projectId: "p1", fileId: "f1", cellId: "c1",
-      removeAudioId: "piece.wav", audioId: "a1.wav", trimStartMs: 200, trimEndMs: 3000, author: "u",
+      removeAudioId: "piece.wav", audioId: "a1.wav", trimStartMs: 200, trimEndMs: 3000, targetLang: "es", author: "u",
     })
-    expect((batch.mock.calls[0]![0] as any[]).map((e) => e.kind)).toEqual(["cell.audio.remove", "cell.audio.trim"])
+    const ev = mockEnqueue.mock.calls.at(-1)![0] as any
+    expect(ev.payload).toEqual({ audioId: "a1.wav", pieceAudioId: "piece.wav", trimStartMs: 200, trimEndMs: 3000, targetLang: "es" })
+  })
+})
+
+// AQU-2432 (Sam, Nov 9): an unrecorded line's ROOM following the recordings
+// rides the line's own timeline event, for the language being worked in.
+describe("emitCellLaneRetime: a line's room (AQU-2432)", () => {
+  it("states the room and the language it is for, on the LINE (no take is named)", async () => {
+    await emitCellLaneRetime({ projectId: "p1", fileId: "f1", cellId: "c2", recordingsRoomMs: 1500.4, targetLang: "fr", author: "u" })
+    const ev = mockEnqueue.mock.calls.at(-1)![0] as any
+    expect(ev.kind).toBe("cell.lane.retime")
+    expect(ev.cellId).toBe("c2")
+    expect(ev.payload).toEqual({ recordingsRoomMs: 1500, targetLang: "fr" })
+  })
+
+  it("a room of 0 is sent (no room at all), and null clears it back to the natural length", async () => {
+    await emitCellLaneRetime({ projectId: "p1", fileId: "f1", cellId: "c2", recordingsRoomMs: 0, author: "u" })
+    expect((mockEnqueue.mock.calls.at(-1)![0] as any).payload).toEqual({ recordingsRoomMs: 0 })
+    await emitCellLaneRetime({ projectId: "p1", fileId: "f1", cellId: "c2", recordingsRoomMs: null, author: "u" })
+    expect((mockEnqueue.mock.calls.at(-1)![0] as any).payload).toEqual({ recordingsRoomMs: null })
   })
 })

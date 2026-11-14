@@ -32,6 +32,7 @@ import { DragTimeChip } from "./DragTimeChip"
 import type { CellData } from "@/hooks/useCells"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { dragSlopPx } from "@/lib/timeline/drag-slop"
 import { useTimelineOriginPx } from "./timeline-origin"
 import { AppTooltip } from "@/components/ui/tooltip"
 
@@ -291,6 +292,8 @@ export function TimelineCard({
     if (e.button !== 0 || e.ctrlKey) return
     e.stopPropagation()
     const startX = e.clientX
+    // AQU-2491 (review, Nov 9): a finger's tap wanders further than a mouse's.
+    const slopPx = dragSlopPx(e.pointerType)
     try {
       ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
     } catch {
@@ -299,13 +302,17 @@ export function TimelineCard({
     setDrag({ mode, dx: 0 })
     movedRef.current = false
     const onMove = (ev: PointerEvent) => {
-      if (Math.abs(ev.clientX - startX) > 3) movedRef.current = true
+      if (Math.abs(ev.clientX - startX) > slopPx) movedRef.current = true
       setDrag((d) => (d ? { ...d, dx: ev.clientX - startX } : d))
     }
     const onUp = (ev: PointerEvent) => {
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
       setDrag(null)
+      // AQU-2491 (review, Nov 9): a press that never crossed the drag
+      // threshold is a click, and a click retimes nothing. The release used
+      // to save the pixel or two the hand slipped.
+      if (!movedRef.current) return
       const s = proposeSpan(mode, pxToSec(ev.clientX - startX, pxPerSec))
       if (s.startSec !== startSec || s.endSec !== endSec) {
         onRetime(cell.id, s.startSec, s.endSec)

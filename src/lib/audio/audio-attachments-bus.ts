@@ -250,20 +250,25 @@ function withoutViewFlags(att: AudioAttachmentOut): AudioAttachmentOut {
  *     keeps its claim and its own values.
  * A claiming inject keeps the original supersede-outright semantics: it
  * represents a NEW user intent, which really should win.
+ *
+ * AQU-2492 (review, Nov 9), finding 1: `opts.revive` is a non-claiming paint
+ * of a clip THIS write brings back — the Redo of a cut names the piece its
+ * Undo removed. It is a user intent like a claiming one: it supersedes the
+ * pending delete of that clip and any older paint of it, and claims nothing.
  */
 export function injectOptimisticAudioAttachment(
   fileId: string,
   cellId: string,
   incoming: AudioAttachmentOut,
   eventId?: string | Promise<string>,
-  opts?: { claimSelection?: boolean },
+  opts?: { claimSelection?: boolean; revive?: boolean },
 ): void {
   const claimSelection = opts?.claimSelection ?? true
   const attachment = withoutViewFlags(incoming)
   const byCell = cellMap(fileId)
   const list = byCell.get(cellId) ?? []
 
-  if (!claimSelection) {
+  if (!claimSelection && !opts?.revive) {
     // The user's delete outranks a metadata write — drop this paint entirely.
     if (list.some((s) => s.kind === "remove" && s.audioId === attachment.audioId)) return
     const live = list.find(
@@ -658,6 +663,9 @@ export async function rehydrateShadowsFromOutbox(projectId: string, fileId: stri
       const url = payload.url
       const slot = payload.slot
       if (typeof audioId !== "string" || typeof url !== "string") continue
+      // AQU-2426 (review, Nov 9): a words-only re-attach adds no clip and
+      // chooses none, so it has nothing to show while it is queued.
+      if (payload.wordsOnly === true) continue
       // ANY non-empty slot. (AQU-646 stage 3)
       //
       // This used to accept only the two well-known names, which meant a
@@ -697,6 +705,12 @@ export async function rehydrateShadowsFromOutbox(projectId: string, fileId: stri
       // only matters for which selection the remove shadow clears, and the
       // read-side prune keys removes by audioId — recording covers both.
       injectOptimisticAudioRemove(fileId, cellId, audioId, "recording", record.id)
+    } else if (event.kind === "cell.audio.uncut") {
+      // AQU-2492: an undo of a cut removes the piece the cut made, as the
+      // remove it replaces did (pending only, for the same reason).
+      const pieceAudioId = payload.pieceAudioId
+      if (typeof pieceAudioId !== "string" || record.status !== "pending") continue
+      injectOptimisticAudioRemove(fileId, cellId, pieceAudioId, "recording", record.id)
     } else if (event.kind === "cell.audio.select" && payload.audioId === null) {
       // A queued "nothing selected" (2026-09-28) — pending only, like removes:
       // a stuck one asserts nothing the server holds.

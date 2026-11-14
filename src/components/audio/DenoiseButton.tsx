@@ -24,6 +24,7 @@ import {
   notifyAudioAttachmentsChanged,
 } from "@/lib/audio/audio-attachments-bus"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { recordStep } from "@/lib/history/history"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { toUserFacingError } from "@/lib/errors/user-error"
 
@@ -113,6 +114,16 @@ export function DenoiseButton(props: Props) {
     if (!referenceAudioId || reverting) return
     setError(null)
     setReverting(true)
+    // AQU-2492 (review, Nov 9): going back to the original was no Undo step,
+    // so ⌘Z after it undid something else. It is a choice of take: Undo plays
+    // the cleaned take again while the original still plays. Both are named
+    // as their whole takes (a split take by its group), read before the try.
+    // Finding 6 (same review): a whole take is chosen on ITS track too — on
+    // an added track, choosing on the main one unchose the line's main-track
+    // recording and left two takes playing on the added track.
+    const slot = split?.[0]?.slot ?? source?.slot ?? "recording"
+    const cleaned = split ? (split[0].pieceOf ?? split[0].audioId) : selectedAudioId
+    const original = originalTake?.pieceOf ?? referenceAudioId
     try {
       // Optimistically re-select the original by re-injecting its attachment
       // (a recording-slot injection also flips selectedAudioId), so the UI
@@ -120,8 +131,8 @@ export function DenoiseButton(props: Props) {
       const revertP = emitCellAudioSelect({
         projectId, fileId, cellId,
         audioId: referenceAudioId,
-        // A split take may sit on an added track: choose on its own slot.
-        slot: split?.[0]?.slot ?? "recording",
+        // A take may sit on an added track: choose on its own slot.
+        slot,
         ...(targetLang ? { targetLang } : {}),
         author,
       })
@@ -134,7 +145,7 @@ export function DenoiseButton(props: Props) {
         injectOptimisticAudioAttachment(fileId, cellId, {
           audioId: referenceAudioId,
           url: originalUrl,
-          slot: "recording",
+          slot,
           mimeType: null,
           voiceId: null,
           referenceAudioId: null,
@@ -145,6 +156,12 @@ export function DenoiseButton(props: Props) {
       }
       await revertP
       notifyAudioAttachmentsChanged(fileId)
+      recordStep({
+        kind: "take.select",
+        data: { cellId, slot, before: cleaned, after: original },
+        labelKey: "editor.history.stepRevertNoise",
+        fileId,
+      })
     } catch (e) {
       // AQU-510: localized reason, not the raw throw (no `context` noun —
       // it would be interpolated untranslated).
@@ -152,7 +169,7 @@ export function DenoiseButton(props: Props) {
     } finally {
       setReverting(false)
     }
-  }, [referenceAudioId, reverting, originalUrl, originalDurationMs, projectId, fileId, cellId, author, targetLang, split, originalTake])
+  }, [referenceAudioId, reverting, originalUrl, originalDurationMs, projectId, fileId, cellId, author, targetLang, split, originalTake, selectedAudioId, source?.slot])
 
   if (isDenoised) {
     return (

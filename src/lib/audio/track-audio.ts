@@ -155,3 +155,12 @@ export function resolveTargetPieces(cell: CellData, slot?: string): TargetAudioR
   }
   return out.length > 0 ? out : [first]
 }
+
+/**
+ * AQU-2495 (review, Nov 9): one take of one line, as a key — what the
+ * missing-audio mark is kept and asked by. It was kept by line, so one take
+ * whose file was gone marked every take of its line, on every track.
+ */
+export function missingTakeKey(cellId: string, audioId: string): string {
+  return `${cellId}\u0000${audioId}`
+}

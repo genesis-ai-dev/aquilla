@@ -65,6 +65,8 @@ export interface TargetLine {
   structural: boolean
   /** The line already has a recording that plays in this language. */
   hasRecording: boolean
+  /** AQU-2491 (review, Nov 9): its start (ms), when it has times. */
+  startMs?: number | null
 }
 
 export interface TargetFile {

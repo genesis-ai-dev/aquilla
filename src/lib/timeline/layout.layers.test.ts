@@ -115,7 +115,9 @@ describe("every track sets its lines' lengths by default (AQU-2252, Oct 29)", ()
     const a = att(cells[1], layerId("l2"))
     expect(layout.canRetimeTarget(cells[1], a, layerId("l2"))).toBe(true)
     expect(layout.retimeAnchorSec(cells[1], a, 4.5, layerId("l2"))).toBeCloseTo(2.5, 5)
-    expect(layout.retimeAnchorSec(cells[1], a, 0.5, layerId("l2"))).toBeCloseTo(0, 5)
+    // AQU-2432 (Sam, Nov 6): …and left past it, over the end of the take
+    // before it on its track: a place 1.5 s before its line's start.
+    expect(layout.retimeAnchorSec(cells[1], a, 0.5, layerId("l2"))).toBeCloseTo(-1.5, 5)
     // The pause a drag stores is the one the next layout draws.
     const moved = ruth(2000, { ...TRACK_TAKE, targetOffsetMs: 2500 })
     expect(trackGeom(moved).start).toBeCloseTo(4.5, 5)
@@ -348,10 +350,10 @@ describe("the programme's takes on added tracks (AQU-2252)", () => {
       expect(source(moved).targetGeom(moved, att(moved, PIECE), PIECE)!.start - 2).toBeCloseTo(4, 5)
     })
 
-    it("dragged back over the first piece following the recordings, its place does not change", () => {
+    it("dragged back over the first piece following the recordings, it sounds over its end (AQU-2432)", () => {
       const cell = cut()
       const anchor = recordings(cell).retimeAnchorSec(cell, att(cell, PIECE), 1.5, PIECE)!
-      expect(anchor).toBeCloseTo(source(cell).targetGeom(cell, att(cell, PIECE), PIECE)!.anchor, 5)
+      expect(anchor - source(cell).targetGeom(cell, att(cell, PIECE), PIECE)!.anchor).toBeCloseTo(-1.5, 5)
     })
   })
 

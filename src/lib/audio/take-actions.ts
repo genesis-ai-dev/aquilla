@@ -9,6 +9,7 @@ import { audioIdSeededWith } from "@/lib/audio/upload"
 import { isOwnTake, type TakeLine } from "@/lib/audio/own-take"
 import { recordStep, withGroup } from "@/lib/history/history"
 import { wholeTakeRenames } from "@/lib/audio/take-groups"
+import type { PieceStretch } from "@/lib/history/take-steps"
 
 /**
  * Remove one take. SUB-48: the remove gets its own overlay, so the take leaves
@@ -29,8 +30,11 @@ export async function removeTake(args: {
   author: string
   /** AQU-1767 phase 2: whether this was the take that played, so Undo can
    *  choose it again. Omit to record no history step (a bulk removal records
-   *  its own). */
-  history?: { wasSelected: boolean }
+   *  its own). AQU-2492 (review, Nov 9), finding 8: `approvedBy`, who had
+   *  approved it, so only an approval given after its Undo stops the Redo.
+   *  AQU-2492 (review, Nov 12): `stretch`, where it sat in its take, so its
+   *  Undo never brings it back over a stretch another piece plays by then. */
+  history?: { wasSelected: boolean; approvedBy?: readonly string[]; stretch?: PieceStretch }
 }): Promise<void> {
   const { projectId, fileId, cellId, audioId, slot, author, targetLang } = args
   const removeP = emitCellAudioRemove({ projectId, fileId, cellId, audioId, author, ...(targetLang ? { targetLang } : {}) })
@@ -40,7 +44,11 @@ export async function removeTake(args: {
   if (args.history) {
     recordStep({
       kind: "take.remove",
-      data: { cellId, audioId, slot, wasSelected: args.history.wasSelected, selectedBefore: null },
+      data: {
+        cellId, audioId, slot, wasSelected: args.history.wasSelected, selectedBefore: null,
+        ...(args.history.approvedBy ? { approvedBy: { [audioId]: [...args.history.approvedBy] } } : {}),
+        ...(args.history.stretch ? { stretches: { [audioId]: args.history.stretch } } : {}),
+      },
       labelKey: "editor.history.stepDeleteTake",
       fileId,
     })
@@ -57,8 +65,9 @@ export async function removeWholeTake(args: {
   projectId: string
   fileId: string
   cellId: string
-  /** Every live piece, first one first. */
-  pieces: readonly { audioId: string; slot: string }[]
+  /** Every live piece, first one first, with (AQU-2492, finding 8) who had
+   *  approved it. */
+  pieces: readonly { audioId: string; slot: string; validators?: readonly string[] | null }[]
   targetLang?: string
   author: string
   /** Whether it was the take that played, so Undo can choose it again. */
@@ -68,7 +77,10 @@ export async function removeWholeTake(args: {
   const [first, ...rest] = pieces
   if (!first) return
   if (rest.length === 0) {
-    await removeTake({ projectId, fileId, cellId, audioId: first.audioId, slot: first.slot, author, ...(targetLang ? { targetLang } : {}), history: args.history })
+    await removeTake({
+      projectId, fileId, cellId, audioId: first.audioId, slot: first.slot, author, ...(targetLang ? { targetLang } : {}),
+      history: { ...args.history, approvedBy: first.validators ?? [] },
+    })
     return
   }
   const queued = await enqueueEvents(
@@ -89,6 +101,7 @@ export async function removeWholeTake(args: {
     data: {
       cellId, audioId: first.audioId, slot: first.slot, wasSelected: args.history.wasSelected, selectedBefore: null,
       pieces: rest.map((piece) => piece.audioId),
+      approvedBy: Object.fromEntries(pieces.map((piece) => [piece.audioId, [...(piece.validators ?? [])]])),
     },
     labelKey: "editor.history.stepDeleteTake",
     fileId,

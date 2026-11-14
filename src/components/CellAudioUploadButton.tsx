@@ -23,6 +23,7 @@ import { Upload } from "lucide-react"
 import { RailButton } from "./CellActionRail"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { ACCEPT, attachAudioFileToCell } from "@/lib/audio/attach-file"
+import { bornTakePlace } from "@/lib/audio/new-take-place"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { toUserFacingError } from "@/lib/errors/user-error"
 
@@ -39,9 +40,12 @@ interface Props {
   disabled?: boolean
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /** AQU-2491 (review, Nov 9): the line's start (seconds), when it has times.
+   *  The uploaded take is placed there, as its own place. */
+  lineStartTime?: number | null
 }
 
-export function CellAudioUploadButton({ projectId, fileId, cellId, username, disabled, onTakeSaved, targetLang }: Props) {
+export function CellAudioUploadButton({ projectId, fileId, cellId, username, disabled, onTakeSaved, targetLang, lineStartTime }: Props) {
   const t = useT()
   const { session } = useFrontierSession()
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -71,6 +75,8 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
         // Decision 11: an Undo step. The rail shows only on a line with no
         // audio yet, so nothing played before.
         history: { selectedBefore: null },
+        // AQU-2491 (review, Nov 9): its own place, the line's start.
+        place: bornTakePlace({ startTime: lineStartTime ?? undefined }),
       })
       onTakeSaved?.(cellId)
     } catch (e) {
@@ -83,7 +89,7 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
     } finally {
       setUploading(false)
     }
-  }, [session, projectId, fileId, cellId, username, onTakeSaved, t, targetLang])
+  }, [session, projectId, fileId, cellId, username, onTakeSaved, t, targetLang, lineStartTime])
 
   const onInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]

@@ -31,7 +31,7 @@ import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
 import { ROLE } from "@/lib/frontier/roles"
 import type { MemberScope } from "@/lib/sync/member-scopes"
 import * as selectionModule from "@/lib/audio/selection"
-import { startQueue } from "@/lib/audio/play-queue"
+import { setQueueTargetSlots, setQueueTimingMode, startQueue } from "@/lib/audio/play-queue"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { toast } from "@/components/ui/toast"
 import posthog from "@/lib/posthog"
@@ -47,6 +47,7 @@ vi.mock("@/lib/posthog", () => ({
 import { MAX_SELECTED } from "@/lib/audio/selection"
 import type { AudioAttachmentOut, CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
+import { playingInSlot } from "@/lib/history/take-steps"
 
 // AQU-616: mock the emit helpers so bulk validate/unvalidate clicks don't hit
 // the real outbox/IDB, and so we can assert they fired alongside the new
@@ -1129,6 +1130,35 @@ describe("SelectionBar — Voice together failure", () => {
   })
 })
 
+// AQU-2492 (review, Nov 9), finding 2: undoing "Voice together" gives every
+// line back the voice it played before — so the lines handed to it must say
+// what each one plays. Store cells carry no audio; the bar hands over the
+// selection WITH its audio merged in, the way the generate dialog sees it.
+describe("SelectionBar — Voice together hands over what each line plays (AQU-2492)", () => {
+  it("a line's own AI voice reaches Voice together as what that line played before", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    const onVoiceTogether = vi.fn(async (_cells: CellData[]) => {})
+    const translated = [
+      makeCell({ id: "cell-1", translated: "bonjour" }),
+      makeCell({ id: "cell-2", translated: "le monde" }),
+    ]
+    renderBar(makeProject(ROLE.CONTRIBUTOR), translated, [], "", {
+      audioMode: true,
+      onVoiceTogether,
+      audioByCellId: audioMap({ audioId: "g1.webm", slot: "generatedVoice" }),
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^Voice together/i }))
+    await vi.waitFor(() => expect(onVoiceTogether).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
+    const handed = onVoiceTogether.mock.calls[0]![0]
+    expect(handed.map((c) => c.id)).toEqual(["cell-1", "cell-2"])
+    expect(playingInSlot(handed[0], "generatedVoice")).toBe("g1.webm")
+    expect(playingInSlot(handed[1], "generatedVoice")).toBeNull()
+    // Still the lines' own text: the clip is made from it.
+    expect(handed.map((c) => c.translated)).toEqual(["bonjour", "le monde"])
+    vi.restoreAllMocks()
+  })
+})
+
 // AQU-1722 — "Generate voice": the OTHER batch in the audio lens. One take per
 // selected line, all in one chosen voice, as opposed to "Voice together"'s one
 // shared clip. The two sit side by side, so these tests pin that both are
@@ -1304,6 +1334,34 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
 
     await expectDisabledNote(playButton(), "None of the selected lines has audio yet")
     expect(startQueue).not.toHaveBeenCalled()
+  })
+
+  // AQU-2495 (review, Nov 9): following the recordings, a take on an added
+  // track plays too, so lines recorded only on added tracks have something to
+  // play. The button counted the main track's takes alone and was greyed with
+  // "no audio" over lines the run would play.
+  it("following the recordings, counts lines recorded only on an added track, and plays them", async () => {
+    const TRACK = "trk-1"
+    const trackOnly = (id: string): CellAudioEntry => {
+      const take = { ...audioMap().get("cell-1")!.attachments["take-1"], audioId: `voice-${id}`, slot: TRACK }
+      return { attachments: { [take.audioId]: take }, selectedBySlot: { [TRACK]: take.audioId }, selectedAudioId: null, selectedGeneratedVoiceAudioId: null, audioTimings: {} }
+    }
+    setQueueTimingMode("audioFirst")
+    setQueueTargetSlots(["recording", TRACK])
+    try {
+      vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
+      renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+        audioMode: true, session: SESSION, audioByCellId: new Map([["cell-1", trackOnly("cell-1")], ["cell-2", trackOnly("cell-2")]]),
+      })
+      const btn = playButton()
+      expect(btn).not.toBeDisabled()
+      expect(btn.textContent).toContain("2")
+      await userEvent.setup().click(btn)
+      expect(startQueue).toHaveBeenCalledTimes(1)
+    } finally {
+      setQueueTimingMode("dubbing")
+      setQueueTargetSlots(["recording"])
+    }
   })
 
   it("stays out of the text lens — a selection there offers Translate, not playback", () => {

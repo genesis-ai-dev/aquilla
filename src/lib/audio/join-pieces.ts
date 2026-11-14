@@ -13,11 +13,15 @@
 //     uploaded as a WAV.
 
 import type { FrontierSession } from "@/lib/frontier/types"
+import type { CellData } from "@/hooks/useCells"
 import { buildAudioId, fetchCellAudio, parseFrontierAudioUrl, uploadCellAudio } from "@/lib/audio/upload"
 import { audioCacheGet } from "@/lib/audio/bytes-cache"
 import { attachUploadedTake, OFFLINE_MESSAGE } from "@/lib/audio/attach-file"
+import { keptTakePlace, type TakePlace } from "@/lib/audio/new-take-place"
+import { targetChipGeom, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { recordTakeAdded } from "@/lib/history/take-steps"
 
 export interface JoinPiece {
   audioId: string
@@ -26,6 +30,9 @@ export interface JoinPiece {
   trimEndMs?: number | null
   durationMs?: number | null
   mimeType?: string | null
+  /** AQU-2491 (review, Nov 9): its own places, which the joined take keeps. */
+  targetOffsetMs?: number | null
+  recordingsOffsetMs?: number | null
 }
 
 /** Within this many ms, two edges are the same place (rounding at the cut). */
@@ -52,6 +59,47 @@ export function wholeRecordingOf(pieces: readonly JoinPiece[]): string | null {
   return url
 }
 
+/**
+ * AQU-2491 (merge review, Nov 13): WHERE THE JOINED TAKE SITS. One rule: its
+ * clip starts where its first piece's SOUND started, in each timing.
+ *
+ * The decoded join leaves the first piece's head trim out (`droppedHeadMs`;
+ * the whole recording keeps it, and drops nothing). So: take what the piece
+ * reads in each timing now, and move each place that marks a clip's start by
+ * the head the join dropped. Two facts about what is stored decide which:
+ *   1. A place following the source, and a layer's place following the
+ *      recordings, mark the clip's start. A main or voice take's place
+ *      following the recordings marks its sound (a head trim tightens the
+ *      line there), so it stays.
+ *   2. A take with no place of its own reads the next one down: following the
+ *      source, its line's (on a line with no times, its slot's start);
+ *      following the recordings, its place following the source (on the main
+ *      track or a voice track, as its line's start when it is before it).
+ * The new clip has no head left to hide, so it never starts before 0:00
+ * (`targetOffsetMsFor`; AQU-2495). Dropping nothing keeps the piece's places
+ * as they are: no place stays no place.
+ */
+export function joinedTakePlace(
+  line: CellData,
+  first: JoinPiece,
+  droppedHeadMs: number,
+  onLayer: boolean,
+): TakePlace | null {
+  const dropMs = Math.max(0, Math.round(droppedHeadMs))
+  if (dropMs === 0) return keptTakePlace(first)
+  const timed = typeof line.startTime === "number" && Number.isFinite(line.startTime)
+  const lineStartSec = timed ? line.startTime! : 0
+  // What the piece reads now, following the source…
+  const lineGeom = first.targetOffsetMs == null && timed ? targetChipGeom(line, undefined) : null
+  const sourceMs = first.targetOffsetMs ?? (lineGeom ? Math.round((lineGeom.anchor - lineStartSec) * 1000) : 0)
+  // …and following the recordings.
+  const recordingsMs = first.recordingsOffsetMs ?? (onLayer ? sourceMs : Math.max(0, sourceMs))
+  return {
+    targetOffsetMs: targetOffsetMsFor(line, lineStartSec + (sourceMs + dropMs) / 1000),
+    recordingsOffsetMs: onLayer ? recordingsMs + dropMs : recordingsMs,
+  }
+}
+
 export interface JoinPiecesArgs {
   session: FrontierSession | null
   projectId: string
@@ -59,6 +107,12 @@ export interface JoinPiecesArgs {
   cellId: string
   /** Every live piece of the take, in clip order. */
   pieces: readonly JoinPiece[]
+  /** The line the take is on (the cell holding it), which the joined take is
+   *  placed against (`joinedTakePlace`). */
+  line: CellData
+  /** The take is on a track made a layer (music, effects): following the
+   *  recordings its clip is placed as following the source. */
+  onLayer: boolean
   slot: string
   targetLang?: string
   username: string
@@ -66,6 +120,28 @@ export interface JoinPiecesArgs {
    *  new take — the caller works it out with `nextTakeLabel` over the line's
    *  takes on this track. */
   label?: string
+  /** AQU-2492 (review, Nov 9): record an Undo step for the joined take,
+   *  naming the take that played in its slot before (the take in pieces). */
+  history?: { selectedBefore: string | null }
+}
+
+/**
+ * The joined take is an added take: Undo takes it away and plays the pieces
+ * again. AQU-2492 (review, Nov 9), finding 15: recorded as the join STARTS,
+ * waiting on it (`landed`), so ⌘Z pressed while it decodes and uploads waits
+ * for it and undoes the join, never an older step. A failed join drops it.
+ */
+function recordJoined(args: JoinPiecesArgs, audioId: string): (ok: boolean) => void {
+  if (!args.history) return () => {}
+  let landed: (ok: boolean) => void = () => {}
+  const pending = new Promise<boolean>((resolve) => { landed = resolve })
+  recordTakeAdded(
+    "join",
+    { cellId: args.cellId, audioId, slot: args.slot, selectedBefore: args.history.selectedBefore },
+    { fileId: args.fileId },
+    { pending },
+  )
+  return landed
 }
 
 async function bytesOf(url: string, args: JoinPiecesArgs, getSyncToken: ReturnType<typeof audioSyncTokenFetcherForSession>): Promise<Uint8Array> {
@@ -94,10 +170,37 @@ export async function joinTakePieces(args: JoinPiecesArgs): Promise<string> {
   }
 
   const whole = wholeRecordingOf(args.pieces)
+  // AQU-2491 (review, Nov 9): made from the pieces, it is placed by their place
+  // (the first piece's) rather than reading one an older recording left on the
+  // line. Merge review, Nov 13: where that piece's SOUND was — the decoded
+  // join leaves its head trim out, the whole recording keeps it.
+  const place = joinedTakePlace(args.line, args.pieces[0], whole ? 0 : (args.pieces[0].trimStartMs ?? 0), args.onLayer)
+  // AQU-2492 (review, Nov 9), finding 15: the joined take's id, minted before
+  // any work, so its Undo step can be recorded as the join starts.
+  const baseId = buildAudioId(args.cellId)
+  const ext = whole ? (parseFrontierAudioUrl(whole)?.ext ?? "wav") : "wav"
+  const audioId = `${baseId}.${ext}`
+  const landed = recordJoined(args, audioId)
+  try {
+    await joinAs(args, getSyncToken, { ...common, place }, whole, baseId, audioId)
+  } catch (e) {
+    landed(false)
+    throw e
+  }
+  notifyAudioAttachmentsChanged(args.fileId)
+  landed(true)
+  return audioId
+}
+
+async function joinAs(
+  args: JoinPiecesArgs,
+  getSyncToken: ReturnType<typeof audioSyncTokenFetcherForSession>,
+  common: Omit<Parameters<typeof attachUploadedTake>[0], "audioId" | "url" | "mimeType" | "durationMs">,
+  whole: string | null,
+  baseId: string,
+  audioId: string,
+): Promise<void> {
   if (whole) {
-    const parsed = parseFrontierAudioUrl(whole)
-    const ext = parsed?.ext ?? "wav"
-    const audioId = `${buildAudioId(args.cellId)}.${ext}`
     const last = [...args.pieces].sort((a, b) => (b.trimEndMs ?? Infinity) - (a.trimEndMs ?? Infinity))[0]
     await attachUploadedTake({
       ...common,
@@ -106,8 +209,7 @@ export async function joinTakePieces(args: JoinPiecesArgs): Promise<string> {
       mimeType: args.pieces[0].mimeType ?? undefined,
       durationMs: last.durationMs ?? last.trimEndMs ?? undefined,
     })
-    notifyAudioAttachmentsChanged(args.fileId)
-    return audioId
+    return
   }
 
   const { decodeToMono48k, concatPcm, TARGET_RATE } = await import("@/lib/audio/decode-mono")
@@ -126,15 +228,13 @@ export async function joinTakePieces(args: JoinPiecesArgs): Promise<string> {
   }
   const joined = concatPcm(parts)
   const blob = encodeWavPcm16(joined, TARGET_RATE)
-  const result = await uploadCellAudio({ projectId: args.projectId, fileId: args.fileId, audioId: buildAudioId(args.cellId), ext: "wav", blob, getSyncToken })
-  const audioId = `${result.audioId}.${result.ext}`
+  const result = await uploadCellAudio({ projectId: args.projectId, fileId: args.fileId, audioId: baseId, ext: "wav", blob, getSyncToken })
   await attachUploadedTake({
     ...common,
+    // The id the step names: the upload stores the bytes under it.
     audioId,
     url: result.url,
     mimeType: "audio/wav",
     durationMs: Math.round((joined.length / TARGET_RATE) * 1000),
   })
-  notifyAudioAttachmentsChanged(args.fileId)
-  return audioId
 }

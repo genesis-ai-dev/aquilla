@@ -179,9 +179,11 @@ export function VoicePlaybackBar({
   // makes the cells file-timed, which hands the file from the picture or the
   // virtual clock to the queue. A press in that window went to the engine that
   // was about to lose the file, so nothing sounded (AQU-1643).
+  // AQU-2495 (review, Nov 9): following the recordings, a take on an added
+  // track plays too, so a chapter recorded only on added tracks can be played.
   const canPlay = useMemo(
-    () => audioLoaded && (drivesVideo || hasAnyPlayableAudio(cells)),
-    [audioLoaded, drivesVideo, cells],
+    () => audioLoaded && (drivesVideo || hasAnyPlayableAudio(cells, { freeTiming, tracks: programmeTracks })),
+    [audioLoaded, drivesVideo, cells, freeTiming, programmeTracks],
   )
   const activeIndex = transport.cellId ? cells.findIndex((c) => c.id === transport.cellId) : -1
   const activeCell = activeIndex >= 0 ? cells[activeIndex] : undefined
@@ -280,6 +282,24 @@ export function VoicePlaybackBar({
   const stepLine = useCallback(
     (dir: -1 | 1) => {
       if (!drivesVideo) {
+        // AQU-2495 (review, Nov 9): with nothing playing, a run that has ended
+        // left the queue holding ITS lines, which may be a chapter the person
+        // has since left. Step from where they are now, as Play starts: from
+        // the selected line, else in the chapter showing. Next starts the line
+        // after it (the first line, with none selected); Previous the nearest
+        // before it with anything to play (the last such line, with none).
+        if (transport.kind === "idle") {
+          const at = startCellId ? cells.findIndex((c) => c.id === startCellId) : -1
+          if (dir > 0) {
+            if (at + 1 < cells.length) startAt(at >= 0 ? at + 1 : 0)
+            return
+          }
+          const tracks = { freeTiming, tracks: programmeTracks }
+          for (let i = (at >= 0 ? at : cells.length) - 1; i >= 0; i--) {
+            if (hasAnyPlayableAudio([cells[i]], tracks)) { startAt(i); return }
+          }
+          return
+        }
         if (dir < 0) skipBack()
         else skipForward()
         return
@@ -294,7 +314,7 @@ export function VoicePlaybackBar({
         : lineStarts.find((t) => t > from)
       videoController.seek(Math.max(0, next ?? (dir < 0 ? 0 : duration)))
     },
-    [drivesVideo, videoController, currentTime, duration, lineStarts],
+    [drivesVideo, videoController, currentTime, duration, lineStarts, transport.kind, startCellId, cells, startAt, freeTiming, programmeTracks],
   )
 
   const progressFraction = duration > 0 ? Math.min(1, currentTime / duration) : 0

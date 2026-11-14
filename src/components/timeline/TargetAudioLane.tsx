@@ -49,13 +49,17 @@ import {
   chipOverlaps,
   chipTrespass,
   dualFaultMeetSec,
+  earliestSoundSec,
   maxAudibleStartSec,
   minAudibleEndSec,
   MIN_TARGET_LEN_SEC,
   type TargetChipGeom,
 } from "@/lib/timeline/lane-timing"
-import { clampMoveStart, movedTakePlace, pieceLeadInTakeSec, type TakePlace } from "@/lib/timeline/take-place"
-import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
+import { clampMoveStart, movedTakePlace, pieceLeadInTakeSec, placeAfterRoomMove, type TakePlace } from "@/lib/timeline/take-place"
+import type { LineRoomChange } from "@/lib/timeline/line-room"
+import { emptyLineMarkers } from "@/lib/timeline/line-markers"
+import { EmptyLineMarker } from "./EmptyLineMarker"
+import { missingTakeKey, sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { canCutAt } from "@/lib/audio/cut-take"
 import { pieceTrimLimitsMs } from "@/lib/sync/cell-audio-read-types"
 import { pieceNameIn, takeBaseLabel } from "@/lib/audio/take-groups"
@@ -81,11 +85,28 @@ import { takeBadgeState } from "@/components/cell/audio-validation-state"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { chipPlaylineClass } from "@/components/audio/chip-classes"
 import type { TakeVoiceNote } from "@/lib/audio/take-voice"
+import { dragSlopPx } from "@/lib/timeline/drag-slop"
 
 /** AQU-2235: a glyph in the name bar's right end — record, ⋯, play. No
  *  button is drawn around it (board 54); the bar's height is its target. */
 const BAR_GLYPH_CLASS =
   "inline-flex h-full w-3.5 items-center justify-center rounded-[3px] text-current opacity-80 outline-none hover:opacity-100 focus-visible:ring-1 focus-visible:ring-ring"
+
+/**
+ * AQU-2432 (Sam, Nov 9): a take's move that changed the room of the
+ * unrecorded lines before its line. One user action, one history step.
+ */
+export interface TakeRoomsMove {
+  cellId: string
+  audioId: string
+  /** Each line whose room the move changed, with the room it is left (ms;
+   *  null: back at its natural length, nothing stored). */
+  rooms: LineRoomChange[]
+  /** The take's own place after the move, when the move changed that too (its
+   *  pause closed first, or opened once the rooms were whole). Null when the
+   *  rooms took all of it: nothing is stored on the take. */
+  take: { anchorSec: number; place: TakePlace } | null
+}
 
 export interface TargetAudioItem {
   cell: CellData
@@ -126,9 +147,11 @@ export interface TargetAudioLaneProps {
   /** The verse the transport is WAITING ON (queue state "loading") — its chip
    *  shows a small spinner while the readiness gate parks. */
   loadingCellId?: string | null
-  /** Cells whose dub audio definitively 404'd — their chips carry a missing
-   *  badge (decision 2026-08-05). */
-  missingCellIds?: ReadonlySet<string>
+  /** The takes whose dub audio definitively 404'd — their chips carry a
+   *  missing badge (decision 2026-08-05). AQU-2495 (review, Nov 9): each a
+   *  `missingTakeKey(cellId, audioId)`. It was the line's id, which marked
+   *  every take of the line, on every track. */
+  missingTakeKeys?: ReadonlySet<string>
   editable: boolean
   /**
    * DOES THE THING DRIVING PLAYBACK HONOUR A DUB'S TRIMS?
@@ -167,6 +190,15 @@ export interface TargetAudioLaneProps {
    *  after the move (`movedTakePlace`). `anchorSec` stays the anchor in the
    *  timing the move was made in. */
   onRetimeTarget?(cellId: string, anchorSec: number, audioId: string, place: TakePlace): void
+  /**
+   * AQU-2432 (Sam, Nov 9): a move that changed the ROOM of the unrecorded
+   * lines before the take's line — following the recordings, a drag against a
+   * line nobody has recorded sets that line's room, never the take's place.
+   * Called INSTEAD of `onRetimeTarget` for such a move, so it is one step:
+   * every room it changed, and the take's own place when the move changed
+   * that too (its pause). Absent, a take stops at its own line's start.
+   */
+  onMoveTakeRooms?(move: TakeRoomsMove): void
   /** Round 7: trim a chip — the COMPLETE desired trim state (both keys
    *  resolved; undefined clears a key back to the clip edge). */
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
@@ -187,6 +219,11 @@ export interface TargetAudioLaneProps {
    *  row reveals a record button on hover, so starting a line doesn't need a
    *  trip to the detail pane. */
   emptyCells?: CellData[]
+  /** AQU-2432 (Sam, Nov 9): draw the marker for a line of `emptyCells` whose
+   *  room was closed too narrow to draw (lib/timeline/line-markers). On by
+   *  default; off on a track made a layer, whose takes are not laid end to
+   *  end, so it has no seam to mark. */
+  lineMarkers?: boolean
   /** AQU-646: stretches of film with no cell at all. The mic here creates the
    *  blank line first and then opens the recorder. */
   emptySpans?: readonly { startSec: number; endSec: number }[]
@@ -330,6 +367,7 @@ export interface ChangeVoiceMenuState {
 function TargetAudioChip({
   chip,
   prevChip,
+  prevReach = null,
   prevMeetSec,
   nextChipStartSec,
   nextMeetSec,
@@ -345,6 +383,7 @@ function TargetAudioChip({
   onSelectTake,
   onSeek,
   onRetimeTarget,
+  onMoveTakeRooms,
   onTrimTarget,
   bladeActive = false,
   onCutTarget,
@@ -387,6 +426,10 @@ function TargetAudioChip({
   /** The PREVIOUS chip's span — a chip can begin before its own section
    *  (end-based drag bounds), so its head can lie under this neighbour. */
   prevChip: { start: number; end: number; usingFallback: boolean } | null
+  /** AQU-2432: of the chips before this one on its track, the one whose end
+   *  reaches furthest — what a take dragged earlier over the end of the take
+   *  before it, following the recordings, is drawn short from. */
+  prevReach?: { start: number; end: number; usingFallback: boolean } | null
   /** 2026-08-08 / 2026-08-27: when the PREVIOUS chip and this one trespass on
    *  EACH OTHER, its end is no place to yield at — both rest-cut to this
    *  shared meet point instead (`dualFaultMeetSec`, resolved once in the
@@ -419,6 +462,8 @@ function TargetAudioChip({
    *  would make dragging one chip move the other. AQU-2267: `place` is the
    *  take's place in both timings after the move. */
   onRetimeTarget?(cellId: string, anchorSec: number, audioId: string, place: TakePlace): void
+  /** AQU-2432 (Sam, Nov 9): see `TargetAudioLaneProps.onMoveTakeRooms`. */
+  onMoveTakeRooms?(move: TakeRoomsMove): void
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
   bladeActive?: boolean
   onCutTarget?(cellId: string, audioId: string, atMs: number): void
@@ -554,8 +599,9 @@ function TargetAudioChip({
       // stack and can never be intentional. The rule is symmetric: the floor
       // stops a backward drag at the previous chip's start, the ceiling stops
       // a forward drag at the next chip's start. Hard floor last: audible
-      // start ≥ trimStart ⇔ stored anchor ≥ 0, so nothing renders or persists
-      // before file time zero.
+      // start ≥ 0, so nothing sounds before file time zero. (AQU-2495, review,
+      // Nov 9: it was "≥ trimStart", which held a head-trimmed take's unheard
+      // start inside the file and kept its sound from any earlier line.)
       // `maxAudibleStartSec` / `minAudibleEndSec` ARE these two expressions,
       // extracted (see lane-timing) so the trim arms below can enforce the same
       // bound. Identical arithmetic — the second reads "this chip's END may not
@@ -570,19 +616,32 @@ function TargetAudioChip({
       // line's own start, because a pause cannot be negative (dragging left
       // shortens it back to none and stops).
       //
+      // AQU-2432 (Sam, Nov 6): …and now past it, earlier, over the end of the
+      // take before it on this track, so one speaker can come in before the
+      // other has finished — up to that take's start, never past it (the two
+      // may overlap but never swap order); a piece of a cut take, between the
+      // pieces either side of it. The layout answers both (`moveBounds`).
+      //
       // AQU-2252: …except a take on a track made a layer, whose line does not
       // grow to hold it: every bound above applies to it, against its line.
       //
       // AQU-2267: the arithmetic is `clampMoveStart`, shared with the move's
       // other timing, which it carries the take into by the same distance.
+      //
+      // AQU-2432 (Sam, Nov 9): against a line NOBODY HAS RECORDED there is no
+      // take to come in over. The drag goes on earlier all the same, by
+      // closing that line's room (and the rooms of the unrecorded lines
+      // before it), and stops at the end of the nearest recorded line — where
+      // it can be saved (`onMoveTakeRooms`); elsewhere at its own line's start.
+      const bounds = freeRules ? (layout?.moveBounds(cell, chipAtt, chip.item.audioId) ?? null) : null
       start = clampMoveStart(start, {
         free: freeRules,
-        lineStartSec: chip.slot?.startSec ?? null,
+        floorSec: (onMoveTakeRooms ? bounds?.roomFloorSec : undefined) ?? bounds?.floorSec ?? chip.slot?.startSec ?? null,
+        ceilSec: bounds?.ceilSec ?? null,
         section,
         lenSec: len,
         prevChipStartSec: prevChip?.start ?? null,
         nextChipStartSec,
-        trimStartSec: geom.trimStartSec,
         leadInTakeSec: pieceLead,
       })
       return { start, end: start + len }
@@ -609,8 +668,11 @@ function TargetAudioChip({
       // span the layout measures the chip against. That IS `geom.anchor` for a
       // line's main take; a layer's sample zero can sit before its line, and
       // its head trim comes back off only as far as the line's start.
+      // AQU-2495 (review, Nov 9): …nor back past the start of the file — the
+      // clip's start can sit before it now, and its sound must not. The
+      // Station's Start and the Recording tab hold to the same rule.
       const lo = Math.max(
-        geom.anchor,
+        earliestSoundSec(geom.anchor),
         freeRules ? section.start : -Infinity,
         prevChip?.start ?? -Infinity,
         pieceLimits?.minStartMs != null ? geom.anchor + pieceLimits.minStartMs / 1000 : -Infinity,
@@ -646,22 +708,32 @@ function TargetAudioChip({
   // there is nothing to run past and nothing to collide with — the warnings
   // would fire on every single line and mean nothing. AQU-2252: a take on a
   // track made a layer is the exception — its line does not hold it.
-  const overflow = freeRules ? "none" : chipOverflowState(span, section, prevChip, nextChipStartSec)
-  const overlaps = freeRules
-    ? { headSec: null, tailSec: null }
-    : chipOverlaps(span, prevChip, nextChipStartSec)
+  //
+  // AQU-2432 (Sam, Nov 6): …but a take may now be dragged earlier, over the
+  // end of the take before it on its track. That overlap is allowed but not
+  // desirable ("Logic doesn't allow overlap at pretty much at all"), so it
+  // keeps today's red warning, the way two takes that collide following the
+  // source wear it: the take moved over the one before it is the one at
+  // fault — red, drawn from where the earlier take ends with the arrow strip
+  // at its start, whole on hover, and its details say how much it overlaps.
+  // The earlier take is never at fault here (its line grows to hold it).
+  const freeOverlaps = freeRules ? chipOverlaps(span, prevReach, null) : null
+  const overflow = freeOverlaps
+    ? (freeOverlaps.headSec != null ? "overlap" : "none")
+    : chipOverflowState(span, section, prevChip, nextChipStartSec)
+  const overlaps = freeOverlaps ?? chipOverlaps(span, prevChip, nextChipStartSec)
   // Blame the trespasser: a warning belongs to THIS chip only for territory
   // it left its section to claim (mirrors the chipOverflowState rule). The
   // number is masked on fallback chips — never derived from a guessed width.
   // The head number depends on the PREVIOUS chip's end too, so it is also
   // masked when THAT width is a guess (starts are always measured, so the
   // tail number needs no such mask).
-  const { head: headTrespass, tail: tailTrespass } = freeRules
-    ? { head: false, tail: false }
+  const { head: headTrespass, tail: tailTrespass } = freeOverlaps
+    ? { head: freeOverlaps.headSec != null, tail: false }
     : chipTrespass(span, section, prevChip, nextChipStartSec)
   const tailOverlapSec = tailTrespass && !geom.usingFallback ? overlaps.tailSec : null
   const headOverlapSec =
-    headTrespass && !geom.usingFallback && !prevChip?.usingFallback ? overlaps.headSec : null
+    headTrespass && !geom.usingFallback && !(freeOverlaps ? prevReach : prevChip)?.usingFallback ? overlaps.headSec : null
   // AQU-2215: following the recordings, only a take that can hold a pause
   // before its line is movable — a split take's pieces and a take of unknown
   // length are placed end to end and have nowhere to go, so they keep the
@@ -696,9 +768,13 @@ function TargetAudioChip({
   // true edge visibly ACROSS the neighbour's resting cut, so the collision
   // the red warns about can actually be seen.
   // SUB-53: inert in audio-first (verses are laid out end to end) — but for a
-  // take on a track made a layer (AQU-2252), which its line does not hold.
+  // take on a track made a layer (AQU-2252), which its line does not hold, and
+  // AQU-2432 a take dragged over the end of the one before it, drawn from
+  // where the takes before it end.
   const engaged = hovered || drag !== null
-  const headCutSec = headTrespass ? (prevMeetSec ?? prevChip?.end ?? section.start) : null
+  const headCutSec = headTrespass
+    ? (freeOverlaps ? (prevReach?.end ?? section.start) : (prevMeetSec ?? prevChip?.end ?? section.start))
+    : null
   const tailCutSec = tailTrespass ? (nextMeetSec ?? nextChipStartSec ?? section.end) : null
   const paintedStart = !engaged && headCutSec != null ? headCutSec : span.start
   const paintedEnd = !engaged && tailCutSec != null ? tailCutSec : span.end
@@ -806,6 +882,8 @@ function TargetAudioChip({
     if (e.button !== 0 || e.ctrlKey) return
     e.stopPropagation()
     const startX = e.clientX
+    // AQU-2491 (review, Nov 9): a finger's tap wanders further than a mouse's.
+    const slopPx = dragSlopPx(e.pointerType)
     try {
       ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
     } catch {
@@ -815,7 +893,7 @@ function TargetAudioChip({
     movedRef.current = false
 
     const onMove = (ev: PointerEvent) => {
-      if (Math.abs(ev.clientX - startX) > 3) {
+      if (Math.abs(ev.clientX - startX) > slopPx) {
         // ON THE THRESHOLD, NOT ON POINTERDOWN. A press that never becomes a
         // drag must stay exactly the click it always was — including that it
         // does not stop the film.
@@ -837,6 +915,13 @@ function TargetAudioChip({
       window.removeEventListener("pointerup", onUp)
       window.removeEventListener("pointercancel", onCancel)
       setDrag(null)
+      // AQU-2491 (review, Nov 9): a press that never crossed the drag
+      // threshold is a click, and a click saves nothing. The threshold used to
+      // decide only "was this a click"; the release still saved the pixel or
+      // two the hand slipped, so choosing a take, or double-clicking its name
+      // to rename it, moved it in both timings (and a slip on a trim handle
+      // trimmed it).
+      if (!movedRef.current) return
       const s = proposeSpan(mode, pxToSec(ev.clientX - startX, pxPerSec))
       if (mode === "move") {
         // AQU-2215: the layout inverts the drag, because only it knows what
@@ -853,14 +938,29 @@ function TargetAudioChip({
         // compared with the take's place FOLLOWING THE SOURCE, so following
         // the recordings such a nudge put a take that led its line back on
         // its line's start.)
-        const moved = movedTakePlace({
-          here: layout,
-          other: getOtherLayout?.(),
-          track,
-          take: chip.item,
-          fromStartSec: geom.start,
-          toStartSec: s.start,
-        })
+        //
+        // AQU-2432 (Sam, Nov 9): a drag against a line nobody has recorded
+        // sets THAT LINE'S ROOM. The rooms take their share of the move first
+        // (`roomsForMove`); the take's own place is read from what is left,
+        // and when the rooms took all of it nothing is stored on the take.
+        // AQU-2432 (review, Nov 9): …but an old pull-back still stored on it
+        // is put back on its line's start in the same step (`placeAfterRoomMove`).
+        const roomMove = onMoveTakeRooms
+          ? (layout?.roomsForMove(cell, chipAtt, chip.item.audioId, geom.start, s.start) ?? null)
+          : null
+        const moveArgs = { here: layout, other: getOtherLayout?.(), track, take: chip.item, fromStartSec: geom.start }
+        const moved = roomMove
+          ? placeAfterRoomMove({ ...moveArgs, takeStartSec: roomMove.takeStartSec })
+          : movedTakePlace({ ...moveArgs, toStartSec: s.start })
+        if (roomMove) {
+          onMoveTakeRooms?.({
+            cellId: cell.id,
+            audioId: chip.item.audioId,
+            rooms: roomMove.rooms,
+            take: moved ? { anchorSec: moved.anchorSec, place: moved.place } : null,
+          })
+          return
+        }
         if (!moved) return
         onRetimeTarget?.(cell.id, moved.anchorSec, chip.item.audioId, moved.place)
         return
@@ -1966,7 +2066,7 @@ export function TargetAudioLane({
   selectedId,
   selectedTakeCellId = null,
   loadingCellId,
-  missingCellIds,
+  missingTakeKeys,
   editable,
   masterHonorsTrims,
   snapEnabled,
@@ -1974,6 +2074,7 @@ export function TargetAudioLane({
   onSelectTake,
   onSeek,
   onRetimeTarget,
+  onMoveTakeRooms,
   onTrimTarget,
   bladeActive = false,
   onCutTarget,
@@ -1983,6 +2084,7 @@ export function TargetAudioLane({
   onOpenRecording,
   validationRequirementAudio,
   emptyCells,
+  lineMarkers: showLineMarkers = true,
   emptySpans,
   onAddLineAndRecord,
   projectId,
@@ -2124,11 +2226,26 @@ export function TargetAudioLane({
   // SUB-51: a record button hiding in the empty space under each dub-free
   // section. Rendered BEFORE the chips and with no z-index, so a real chip —
   // including an overlong neighbour painting across — always wins the pointer.
+  //
+  // AQU-2432 (Sam, Nov 9, rule 8): a line whose room was closed too narrow to
+  // draw — down to none — is drawn as a marker at the seam instead, so it is
+  // always possible to see that a line sits there (lib/timeline/line-markers).
+  // It shows to everyone, whether or not they can record.
+  const lineMarkers = emptyLineMarkers({
+    cells: showLineMarkers ? (emptyCells ?? []) : [],
+    programme: layout?.programme,
+    pxPerSec,
+    viewStartSec,
+    viewEndSec,
+  })
+  const markedCellIds = new Set(lineMarkers.map((m) => m.cell.id))
   const emptySlots =
     editable && onOpenRecording
       ? (emptyCells ?? []).flatMap((cell) => {
           // A hidden line is not recorded onto from the timeline.
           if (isHiddenCell(cell)) return []
+          // Its marker stands for it: selecting it there is how it is recorded.
+          if (markedCellIds.has(cell.id)) return []
           // SUB-53: an un-dubbed verse's slot is just its original's length,
           // so the button sits over exactly where the dub will land.
           const span = layout?.spanFor(cell, "source") ?? null
@@ -2141,6 +2258,18 @@ export function TargetAudioLane({
           return [{ cell, leftPx: secToPx(start, pxPerSec), widthPx }]
         })
       : []
+
+  // AQU-2432: for each chip, the chip before it on this track that reaches
+  // furthest — a long take can run on past the short one after it, over the
+  // next (following the recordings, three at once).
+  const reachBefore: ({ start: number; end: number; usingFallback: boolean } | null)[] = []
+  {
+    let reach: { start: number; end: number; usingFallback: boolean } | null = null
+    for (const c of chips) {
+      reachBefore.push(reach)
+      if (!reach || c.geom.end > reach.end) reach = { start: c.geom.start, end: c.geom.end, usingFallback: c.geom.usingFallback }
+    }
+  }
 
   // 2026-08-08: every chip's fault flags, resolved once. A chip needs its
   // NEIGHBOUR's flag as well as its own: when both trespass on each other,
@@ -2283,6 +2412,7 @@ export function TargetAudioLane({
                   }
                 : null
             }
+            prevReach={reachBefore[i]}
             prevMeetSec={i > 0 ? meetAfter[i - 1] : null}
             nextChipStartSec={chips[i + 1]?.geom.start ?? null}
             nextMeetSec={meetAfter[i]}
@@ -2296,13 +2426,14 @@ export function TargetAudioLane({
               selectedTakeCellId === chip.item.cell.id ? "take" : selectedId === chip.item.cell.id ? "line" : false
             }
             loading={loadingCellId === chip.item.cell.id}
-            missing={missingCellIds?.has(chip.item.cell.id) ?? false}
+            missing={missingTakeKeys?.has(missingTakeKey(chip.item.cell.id, chip.item.audioId)) ?? false}
             editable={editable}
             snap={{ enabled: Boolean(snapEnabled), candidates: candidatesFor(chip.item.audioId, chip.section) }}
             onSelect={onSelect}
             onSelectTake={onSelectTake}
             onSeek={onSeek}
             onRetimeTarget={onRetimeTarget}
+            onMoveTakeRooms={onMoveTakeRooms}
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={onCutTarget}
@@ -2318,6 +2449,21 @@ export function TargetAudioLane({
           />
         ) : null,
       )}
+      {lineMarkers.map((marker) => (
+        <EmptyLineMarker
+          key={`marker-${marker.cell.id}`}
+          marker={marker}
+          selected={selectedId === marker.cell.id}
+          // A click selects the line and leaves the playhead where it is, as
+          // a click on a take in this row does (Sam, 2026-10-14). On the
+          // line's own text rows the marker also takes the playhead to it,
+          // as a click on its box there does.
+          onSelect={onSelect}
+          // Over every take at rest (their paint order counts down from the
+          // number of takes); a hovered, selected or dragged take is 1000 up.
+          zIndex={chips.length + 1}
+        />
+      ))}
     </div>
   )
 }

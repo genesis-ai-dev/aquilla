@@ -25,6 +25,8 @@ const LANE_FREE_KINDS: ReadonlySet<string> = new Set([
   "settings.projectName",
   "settings.device",
   "film.link",
+  // AQU-2492: a file's timing is the file's, in every language.
+  "file.timing",
   "cue.link",
   "cue.links",
   "cast.assign",

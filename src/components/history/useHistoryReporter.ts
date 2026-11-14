@@ -38,6 +38,9 @@ export function useHistoryReporter(
           type: "info",
           title: t("editor.history.blockedLanguage", { step: name, language: laneName(result.step.lane ?? "") }),
         })
+      } else if (o.kind === "blocked" && o.reason === "offline") {
+        // AQU-2492 (review, Nov 9): kept, for when the connection is back.
+        toast.add({ type: "info", title: t("editor.history.blockedOffline", { step: name }) })
       } else if (o.kind === "moved") {
         // Decision 11: another of this person's devices got there first.
         toast.add({ type: "info", title: t(which === "undo" ? "editor.history.movedUndo" : "editor.history.movedRedo", { step: name }) })

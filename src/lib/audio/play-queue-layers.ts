@@ -10,7 +10,9 @@
 // them: a book can carry a layer under thousands of lines.
 
 import type { CellData } from "@/hooks/useCells"
-import type { Programme } from "@/lib/timeline/programme"
+import type { Programme, ProgrammePiece } from "@/lib/timeline/programme"
+import { RECORDING_SLOT } from "@/lib/timeline/track-slots"
+import { resolveTargetPieces } from "./track-audio"
 
 export interface ProgLayerRef {
   cellId: string
@@ -24,6 +26,18 @@ export interface ProgLayerRef {
   endSec: number
   /** Its window on its own clip's clock. */
   window: { start: number; end: number }
+  /**
+   * AQU-2432 (Sam, Nov 6): not a layer but the end of a line's OWN take on
+   * the main track that plays on past its line — the line after it was pulled
+   * back over it — from where its line ends to where the take does. Both
+   * play, mixed, with no cutting off. The transport clocks the line by that
+   * take until its line ends, then lets it ring on as this (it is never fired
+   * while it is still its line's own); a jump into the stretch fires it here.
+   */
+  tail?: true
+  /** AQU-2432: a tail of a split take — the pieces its joined copy is made
+   *  of; `window` is on that copy's clock. */
+  joinPieces?: readonly ProgrammePiece[]
 }
 
 export interface LayerSchedule {
@@ -45,8 +59,25 @@ export function buildLayerSchedule(prog: Programme | null, cells: readonly CellD
   const layers: ProgLayerRef[] = []
   let maxLenSec = 0
   for (const slot of prog.slots) {
-    const cell = slot.layers ? byId.get(slot.cellId) : undefined
+    const cell = byId.get(slot.cellId)
     if (!cell) continue
+    // AQU-2432: the line's own take, where it plays on past its line's end.
+    const win = slot.targetWindow
+    if (win) {
+      const takeStartSec = slot.startSec + (slot.targetLeadSec ?? 0)
+      const takeEndSec = takeStartSec + (win.end - win.start)
+      const fromSec = Math.max(slot.startSec + slot.slotLenSec, takeStartSec)
+      const take = resolveTargetPieces(cell)[0]
+      if (take?.url && takeEndSec - fromSec > EPS_SEC) {
+        maxLenSec = Math.max(maxLenSec, takeEndSec - fromSec)
+        layers.push({
+          cellId: slot.cellId, cell, slot: RECORDING_SLOT, audioId: take.audioId, url: take.url,
+          startSec: fromSec, endSec: takeEndSec, window: { start: win.start + (fromSec - takeStartSec), end: win.end },
+          tail: true,
+          ...(slot.targetPieces ? { joinPieces: slot.targetPieces } : {}),
+        })
+      }
+    }
     for (const l of slot.layers ?? []) {
       // No honest length → nothing honest to play, the main take's rule too.
       const url = cell.attachments?.[l.audioId]?.url
@@ -96,4 +127,14 @@ export function layersSoundIn(s: LayerSchedule, fromSec: number, toSec: number):
     if (s.layers[i].endSec > fromSec) return true
   }
   return false
+}
+
+/** AQU-2432: the tail of line `cellId`'s own take that starts at `sec` (its
+ *  line's end), if the schedule holds one. */
+export function lineTailAt(s: LayerSchedule, cellId: string, sec: number): ProgLayerRef | null {
+  for (let i = layerIndexAfter(s, sec - 0.001, /* orAt */ true); i < s.layers.length && s.layers[i].startSec <= sec + 0.001; i++) {
+    const l = s.layers[i]
+    if (l.tail && l.cellId === cellId) return l
+  }
+  return null
 }

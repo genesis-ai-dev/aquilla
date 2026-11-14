@@ -192,7 +192,9 @@ import {
   fetchDeletedFilesWithProjectToken,
   pushedRollupProgress,
   canRestructureTracks,
+  timelineTakeDrags,
   resolveTakeLine,
+  heldTakeTrim,
   historyFileName,
   buildRouteScopedTokenFetcher,
   archivedProjectNotice,
@@ -286,20 +288,25 @@ import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib
 import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
-import { CastStepBuilder, castValueOf, filmNow, mediaStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm } from "@/lib/history/media-steps"
+import { CastStepBuilder, castValueOf, filmNow, fileMayFollowTiming, mediaStepHandlers, recordTimingSwitch, timingNow, timingStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm, type PendingTiming } from "@/lib/history/media-steps"
 import { cellLabelStepHandlers, recordCellLabelStep } from "@/lib/history/label-steps"
 import { sourceStepHandlers } from "@/lib/history/source-steps"
 import { recordingLinesStepHandlers } from "@/lib/history/recording-lines-steps"
 import { rowStepHandlers } from "@/lib/history/row-steps"
 import { HistoryPanel } from "./history/HistoryPanel"
 import { editStepHandlers } from "@/lib/history/edit-steps"
-import { trackStepHandlers, trackFieldsOf, type TrackFields, type TrackTake } from "@/lib/history/track-steps"
+import { TrackWriteNotes, trackStepHandlers, trackFieldsOf, type TrackFields, type TrackTake } from "@/lib/history/track-steps"
 import { readProjectSettingsFor, writeProjectSettingsFor } from "@/lib/history/settings-access"
 import { useHistoryShortcuts } from "@/lib/history/useHistory"
 import { useHistoryReporter } from "@/components/history/useHistoryReporter"
 import { useSettingsStepKinds } from "@/components/ProjectSettings/useSettingsStepKinds"
-import { playingInSlot, takeStepHandlers, type CutRecord, type StoredTakePlace, type TakeLevel } from "@/lib/history/take-steps"
+import { pieceStretchOf, playingInSlot, setTakeAddedHeals, takeStepHandlers, type CutRecord, type StoredTakePlace, type TakeAddData, type TakeLevel, type TakePlaceData } from "@/lib/history/take-steps"
+import { pullBacksWokenBy } from "@/lib/timeline/programme"
+import { createEditorStructureCache, tableLineNumber } from "@/lib/editor-structure-cache"
 import type { TakePlace } from "@/lib/timeline/take-place"
+import { applyLineRoomMove, lineRoomStepHandlers, type LineRoomStepData } from "@/lib/history/line-room-steps"
+import { lineRoomKey, stampLineRooms, writeLineRooms, type LineRoomChange } from "@/lib/timeline/line-room"
+import type { TakeRoomsMove } from "@/components/timeline/TargetAudioLane"
 import { enqueueTakeRemovals, hasOwnRecordingLeft, removeTake, renameTake } from "@/lib/audio/take-actions"
 import { pieceNameIn } from "@/lib/audio/take-groups"
 import { regenerateVoiceTake } from "./AudioRecorder/regenerate-voice"
@@ -362,6 +369,7 @@ import {
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import { deriveTracksForFile, type TimelineTrack } from "@/lib/timeline/tracks"
 import { nextFolderName } from "@/lib/timeline/track-names"
+import { paintTrackWrites, unpaintTrackWrites, type TrackOverlays, type TrackWritePatch } from "@/lib/timeline/track-paint"
 import { applyPendingOrders, applyPendingScopes, renormaliseOrders, settledPendingOrders, settledPendingScopes, withoutPendingOrder, withPendingScopeOrders, type PendingTrackScope } from "@/lib/timeline/track-reorder"
 import { applyPendingColors, settledPendingColors, withPendingColors, withoutPendingColors } from "@/lib/timeline/track-colors"
 import { contentFileIdsOfShownTracks, folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
@@ -406,6 +414,7 @@ import { useOnline } from "@/hooks/useOnline"
 import { useConnectivity } from "@/lib/offline/connectivity"
 import { clearLaneCast, setLaneCast } from "@/lib/audio/lane-cast"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
+import { bornTakePlace } from "@/lib/audio/new-take-place"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { TimeOrderedEmptyState } from "./TimeOrderedEmptyState"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline, type MadeLine } from "@/lib/timeline/attach-media"
@@ -2274,6 +2283,10 @@ export function ProjectWorkspace() {
   /** Paint a dragged cue chip's new anchor. Same dependency-ordering escape as
    *  the resolver above — the state it writes is declared far below. */
   const setCueAnchorOverridesRef = useRef<(cellId: string, offsetMs: number) => void>(() => {})
+  /** AQU-2432 (review, Nov 9): the same for a heard line's ROOM (null clears
+   *  it), and the cue file's re-read once a room is saved there. */
+  const setCueRoomOverridesRef = useRef<(cellId: string, roomMs: number | null) => void>(() => {})
+  const refreshCueFileRef = useRef<(fileId: string) => void>(() => {})
   /** Maps whatever id asked for the recorder onto the cell it should open on.
    *  Null ⇒ nothing to record here (a subtitle line no cue performs). */
   const openRecordingTargetRef = useRef<(cellId: string) => string | null>((id) => id)
@@ -4252,6 +4265,12 @@ export function ProjectWorkspace() {
       const att = cell?.attachments?.[audioId]
       if (!owner || !cell || !att) return
       const takeFileId = owner.fileId
+      // AQU-2495 (merge review, Nov 13, note 2): its sound never before 0:00,
+      // an Undo or Redo of a trim included — the floor every trim keeps. A
+      // window wholly before 0:00 has nothing left to play: nothing is stored,
+      // and the step reports the take as changed (round 2, R2-2).
+      const held = heldTakeTrim(cell, att, trims)
+      if (!held) return false
       // AQU-646: read the clip's slot; infer only when it is absent. Drives the
       // optimistic overlay's "newest shadow per slot" bookkeeping, which puts
       // the shadow in the wrong slot if this guesses.
@@ -4267,8 +4286,8 @@ export function ProjectWorkspace() {
         fileId: takeFileId,
         cellId,
         audioId,
-        trimStartMs: trims.trimStartMs ?? null,
-        trimEndMs: trims.trimEndMs ?? null,
+        trimStartMs: held.trimStartMs ?? null,
+        trimEndMs: held.trimEndMs ?? null,
         ...(activeLane ? { targetLang: activeLane } : {}),
         author: currentUsername,
       })
@@ -4278,12 +4297,13 @@ export function ProjectWorkspace() {
       // its trim saved. Votes ride along too (AQU-490: trim keeps them).
       injectOptimisticAudioTrim(takeFileId, cellId, {
         ...attachmentOutFrom(audioId, att, slot),
-        trimStartMs: trims.trimStartMs ?? null,
-        trimEndMs: trims.trimEndMs ?? null,
+        trimStartMs: held.trimStartMs ?? null,
+        trimEndMs: held.trimEndMs ?? null,
       }, trimP)
       await trimP
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       notifyAudioAttachmentsChanged(takeFileId)
+      return true
     },
     [project?.id, activeFileId, currentUsername, getTokenForProjectFile, activeLane],
   )
@@ -4496,11 +4516,109 @@ export function ProjectWorkspace() {
     [applyTakePlace, activeFileId],
   )
 
+  // AQU-2432 (Sam, Nov 9): AN UNRECORDED LINE'S ROOM, following the recordings.
+  // Dragging the next take earlier against a line nobody has recorded makes
+  // THAT LINE's room smaller (later: gives it back). The room is the line's,
+  // for the language being worked in (lib/timeline/line-room): it rides the
+  // line's own timeline event into the source row's metadata, under a key that
+  // carries the language, is shown at once, and reaches every device like the
+  // take's place does.
+  //
+  // AQU-2432 (review, Nov 9): to the file that OWNS the line — a film's heard
+  // line lives in its cue file, not the open one — found the way a take's is
+  // (`resolveTakeCellRef`), and shown at once there (lib/timeline/line-room,
+  // `writeLineRooms`).
+  const applyLineRooms = useCallback(
+    async (rooms: readonly LineRoomChange[]) => {
+      const projectId = project?.id
+      if (!projectId || !activeFileId || rooms.length === 0) return
+      const key = lineRoomKey(activeLane)
+      await writeLineRooms({
+        fileOf: (cellId) => resolveTakeCellRef.current(cellId)?.fileId ?? null,
+        paint: (fileId, cellId, roomMs) => {
+          if (fileId === activeFileId) applyOptimisticCellTiming(cellId, { metadata: { [key]: roomMs } })
+          else setCueRoomOverridesRef.current(cellId, roomMs)
+        },
+        emit: (fileId, cellId, roomMs) => emitCellLaneRetime({
+          projectId,
+          fileId,
+          cellId,
+          recordingsRoomMs: roomMs,
+          ...(activeLane ? { targetLang: activeLane } : {}),
+          author: currentUsername,
+        }),
+        flush: async (fileIds) => {
+          await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+          for (const fileId of fileIds) {
+            if (fileId === activeFileId) revalidateCells()
+            else refreshCueFileRef.current(fileId)
+          }
+        },
+      }, rooms)
+    },
+    [project?.id, activeFileId, activeLane, currentUsername, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells],
+  )
+  /** AQU-2432 (review, Nov 9): a line's stored room now, read in the file that
+   *  owns it (null: none stored); undefined when no file holds the line. */
+  const readLineRoom = useCallback((cellId: string): number | null | undefined => {
+    const owner = resolveTakeCellRef.current(cellId)
+    return owner ? (owner.cell.recordingsRoomMs ?? null) : undefined
+  }, [])
+  // One drag, one step: every room it changed, and the take's own place when
+  // the drag changed that too (its pause closes first on the way earlier, and
+  // opens once the rooms are whole on the way later).
+  const handleMoveTakeRooms = useCallback(
+    async (move: TakeRoomsMove) => {
+      const owner = resolveTakeCellRef.current(move.cellId)
+      if (!owner) return
+      const att = owner.cell.attachments?.[move.audioId]
+      recordStep<LineRoomStepData>({
+        kind: "line.room",
+        data: {
+          rooms: move.rooms.map((r) => ({
+            cellId: r.cellId,
+            before: readLineRoom(r.cellId) ?? null,
+            after: r.roomMs,
+          })),
+          ...(move.take
+            ? {
+                take: {
+                  cellId: move.cellId,
+                  audioId: move.audioId,
+                  before: att?.targetOffsetMs ?? null,
+                  after: move.take.place.targetOffsetMs,
+                  recordingsBefore: att?.recordingsOffsetMs ?? null,
+                  recordingsAfter: move.take.place.recordingsOffsetMs,
+                },
+              }
+            : {}),
+        },
+        labelKey: "editor.history.stepLineRoom",
+        fileId: activeFileId,
+        fileName: activeFileNameRef.current,
+      })
+      // AQU-2432 (review, Nov 9): both shown at once, together.
+      await applyLineRoomMove(
+        { applyRooms: applyLineRooms, applyPlace: applyTakePlace },
+        move.rooms,
+        move.take ? { cellId: move.cellId, audioId: move.audioId, place: move.take.place } : null,
+      )
+    },
+    [applyLineRooms, applyTakePlace, readLineRoom, activeFileId],
+  )
+
   // AQU-1767 phase 1: CUT dub takes into independent pieces — from the blade
   // (one chip, where it was clicked) or "cut at the playhead" (every dub chip
   // under it). One user action is one history step, however many cuts it made.
   const applyTakeCut = useCallback(
-    async (cellId: string, audioId: string, atMs: number, newAudioId: string): Promise<boolean> => {
+    async (
+      cellId: string,
+      audioId: string,
+      atMs: number,
+      newAudioId: string,
+      /** AQU-2492: a Redo's pieces come back with the approvals they had at the Undo. */
+      pieceVoters?: { first: string[]; second: string[] },
+    ): Promise<boolean> => {
       if (!project?.id) return false
       const cur = readTake(cellId, audioId)
       if (!cur || !canCutAt(cur.att, atMs)) return false
@@ -4522,23 +4640,30 @@ export function ProjectWorkspace() {
       // The picture of what the server will make: the first piece ends at the
       // cut, the new one starts there, both unvalidated. The new piece claims
       // no selection — it rides its group's, through `pieceOf`.
+      // AQU-2492: on a Redo, each with the approvals it had at the Undo.
       const shared = attachmentOutFrom(audioId, att, slot)
+      const firstVoters = pieceVoters?.first ?? []
+      const secondVoters = pieceVoters?.second ?? []
       injectOptimisticAudioTrim(takeFileId, cellId, {
         ...shared,
         trimEndMs: Math.round(atMs),
-        validatorCount: 0,
-        validators: [],
+        validatorCount: firstVoters.length,
+        validators: firstVoters,
         ...(labels.firstLabel ? { label: labels.firstLabel } : {}),
       }, cutP)
       injectOptimisticAudioAttachment(takeFileId, cellId, {
         ...shared,
         audioId: newAudioId,
         trimStartMs: Math.round(atMs),
-        validatorCount: 0,
-        validators: [],
+        validatorCount: secondVoters.length,
+        validators: secondVoters,
         pieceOf: att.pieceOf ?? audioId,
         ...(labels.newLabel ? { label: labels.newLabel } : {}),
-      }, cutP, { claimSelection: false })
+        // AQU-2492 (review, Nov 9), finding 1: the cut brings this piece to
+        // life, so it outranks a pending removal of it — a Redo names the
+        // piece its Undo just removed, and dropping this paint hid the second
+        // half for the removal's 12 s grace (an Undo then read it as gone).
+      }, cutP, { claimSelection: false, revive: true })
       await cutP
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       notifyAudioAttachmentsChanged(takeFileId)
@@ -4571,14 +4696,21 @@ export function ProjectWorkspace() {
         author: currentUsername,
       })
       if (piece) {
-        injectOptimisticAudioRemove(fileId, c.cellId, c.newAudioId, piece.att.slot ?? slot, batchP.then((ids) => ids[0]!))
+        injectOptimisticAudioRemove(fileId, c.cellId, c.newAudioId, piece.att.slot ?? slot, batchP)
       }
+      // AQU-2492: the joined take shows the approvals it had before the cut,
+      // which the server gives back — never the first piece's.
+      const wholeVoters = c.before.validators ?? []
       injectOptimisticAudioTrim(fileId, c.cellId, {
         ...attachmentOutFrom(c.audioId, cur.att, slot),
+        // Finding 7: and the volume and fades it had before the cut.
+        ...(c.before.level ?? {}),
         trimStartMs,
         trimEndMs: c.before.trimEndMs,
+        validatorCount: wholeVoters.length,
+        validators: wholeVoters,
         ...(c.renamed ? { label: c.before.label } : {}),
-      }, batchP.then((ids) => ids[1]!))
+      }, batchP)
       await batchP
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       notifyAudioAttachmentsChanged(fileId)
@@ -4641,6 +4773,11 @@ export function ProjectWorkspace() {
             label: cur.att.label ?? null,
             targetOffsetMs: cur.att.targetOffsetMs ?? null,
             recordingsOffsetMs: cur.att.recordingsOffsetMs ?? null,
+            // AQU-2492: who had approved it, which its Undo gives back.
+            validators: [...(cur.att.validators ?? [])],
+            // AQU-2492 (review, Nov 9), finding 7: its volume and fades, which
+            // the server keeps with the cut and gives back on Undo.
+            level: { gainDb: cur.att.gainDb ?? null, fadeInMs: cur.att.fadeInMs ?? null, fadeOutMs: cur.att.fadeOutMs ?? null },
           },
           renamed: pieceLabels(cut.audioId, cur.owner.cell.attachments).firstLabel != null,
         })
@@ -4969,9 +5106,18 @@ export function ProjectWorkspace() {
   )
   setCueAnchorOverridesRef.current = (cellId, offsetMs) =>
     setCueAnchorOverrides((prev) => new Map(prev).set(cellId, offsetMs))
+  // AQU-2432 (review, Nov 9): a heard line's ROOM, the same way — and its
+  // stored room stamped on it as the cell store stamps the open file's lines,
+  // so following the recordings the heard lines are laid out with their rooms.
+  const [cueRoomOverrides, setCueRoomOverrides] = useState<ReadonlyMap<string, number | null>>(new Map())
+  setCueRoomOverridesRef.current = (cellId, roomMs) =>
+    setCueRoomOverrides((prev) => new Map(prev).set(cellId, roomMs))
+  refreshCueFileRef.current = (fileId) => {
+    if (fileId === audioCueSibling?.id) refreshAudioCues()
+  }
   const audioCueCells = useMemo(() => {
     if (!audioCues) return null
-    const merged = mergeCellsWithAudio(audioCues, cueAudioByCellId)
+    const merged = stampLineRooms(mergeCellsWithAudio(audioCues, cueAudioByCellId), activeLane, cueRoomOverrides)
     if (cueAnchorOverrides.size === 0) return merged
     return merged.map((c) => {
       const offset = cueAnchorOverrides.get(c.id)
@@ -4979,7 +5125,7 @@ export function ProjectWorkspace() {
         ? c
         : { ...c, metadata: { ...(c.metadata ?? {}), target_offset_ms: offset } }
     })
-  }, [audioCues, cueAudioByCellId, cueAnchorOverrides])
+  }, [audioCues, cueAudioByCellId, cueAnchorOverrides, cueRoomOverrides, activeLane])
   // AQU-2125: what a save folds — read at save time (see `castFoldLinesRef`).
   castFoldLinesRef.current = () => castLinesOf([...cellSummaries, ...(audioCueCells ?? [])])
   cueTakeCountRef.current = () => {
@@ -10571,6 +10717,13 @@ export function ProjectWorkspace() {
   const handleLastTakeRemoved = useCallback((cellId: string) => {
     lastTakeRemovedRef.current(cellId)
   }, [])
+  // AQU-2432 (review, Nov 9): the table's # column for a line, so the
+  // timeline's marker for a line with no room names it as the table does.
+  // Read when a marker asks (few, and only lines with no room); one identity.
+  const tableNumberCache = useMemo(() => createEditorStructureCache(), [cellStore])
+  const lineNumberForRef = useRef<(cellId: string) => string | null>(() => null)
+  lineNumberForRef.current = (cellId) => tableLineNumber(cellStore, tableNumberCache, cellId)
+  const lineNumberFor = useCallback((cellId: string) => lineNumberForRef.current(cellId), [])
 
   /** Stable wrapper over the ref above — see `audioHomeRef`. */
   const audioHomeFor = useCallback((cell: CellData) => audioHomeRef.current(cell), [])
@@ -10715,6 +10868,7 @@ export function ProjectWorkspace() {
     countCastLines: handleCountCastLines, // 2026-09-28: "Apply to all «name» lines (N)"
     onTakeSaved: handleTakeSaved, // AQU-646: a take gives a text-less line a target row
     onLastTakeRemoved: handleLastTakeRemoved, // …and deleting its last one takes that back
+    lineNumberFor, // AQU-2432 (review, Nov 9): what the table numbers a line
     audioHomeFor, // AQU-646 stage 3f: where this row's audio belongs
     myScopes, // AQU-633: per-cell validate scope gate
     cellStore, // AQU-1271: the add-concept popover subscribes for its match preview
@@ -10739,7 +10893,7 @@ export function ProjectWorkspace() {
     // AQU-2204: following its recordings, a file shows no source times — so
     // a line's "Edit timestamps" is unavailable, with the reason.
     followsRecordings: timingMode === "audioFirst",
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, trainFromTake, handleLineVoicePicked, handleApplyLineVoice, addVoiceForLine, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleSetMilestoneFromCell, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, trainFromTake, handleLineVoicePicked, handleApplyLineVoice, addVoiceForLine, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, lineNumberFor, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleSetMilestoneFromCell, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
 
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
@@ -13316,7 +13470,9 @@ export function ProjectWorkspace() {
         ...(activeLane ? { targetLang: activeLane } : {}),
         author: currentUsername,
         // A take on the timeline is one that plays: Undo chooses it again.
-        history: { wasSelected: true },
+        // AQU-2492 (review, Nov 9), finding 8: and who had approved it.
+        // AQU-2492 (review, Nov 12): and where it sat in its take.
+        history: { wasSelected: true, approvedBy: cur.att.validators ?? [], stretch: pieceStretchOf(audioId, cur.att) },
       }
       let removed = false
       try {
@@ -14305,8 +14461,6 @@ export function ProjectWorkspace() {
     fileId: string
     colors: Map<string, string | null>
   } | null>(null)
-  const pendingTrackColorsRef = useRef(pendingTrackColors)
-  pendingTrackColorsRef.current = pendingTrackColors
   /** Saves the "Move to" moves still queued (`saveQueuedTrackMoves`, below).
    *  A drag's write calls it first, so the outbox holds writes in the order
    *  they were made and a held move can never land over a later drag. */
@@ -14947,6 +15101,21 @@ export function ProjectWorkspace() {
       recordingCellId === null,
   })
   timingAckOwnWriteRef.current = { note: timingAck.noteOwnWrite, clear: timingAck.clearOwnWrite }
+  // AQU-2492 (review, Nov 9): what the open file follows as far as this tab
+  // knows: the timing written here until the project read answers (the
+  // film's rule), for the switch's Undo step and its "changed since?" guard.
+  const timingWrittenRef = useRef<Map<string, PendingTiming>>(new Map())
+  const timingReadRef = useRef(timingChoiceMode)
+  timingReadRef.current = timingChoiceMode
+  const readTimingMode = useCallback(
+    (fileId: string): AudioTimingMode | undefined => {
+      if (fileId !== activeFileId) return undefined
+      const now = timingNow(timingReadRef.current, timingWrittenRef.current.get(fileId))
+      if (now.settled) timingWrittenRef.current.delete(fileId)
+      return now.mode
+    },
+    [activeFileId],
+  )
   // Apply THIS FILE's mode: register the change as our own first (so the
   // changer never gets the "timing mode changed" modal for their own click),
   // then emit + flush + refresh — the same shape as applyLinkVideo, and the
@@ -14954,9 +15123,11 @@ export function ProjectWorkspace() {
   // On failure the own-write registration is withdrawn: leaving it standing
   // would make the abandoned attempt resurface later as somebody else's.
   const applyTimingMode = useCallback(
-    async (mode: AudioTimingMode, forFileId: string) => {
-      if (!project?.id) return
+    async (mode: AudioTimingMode, forFileId: string): Promise<boolean> => {
+      if (!project?.id) return false
       timingAck.noteOwnWrite(mode)
+      const readBefore = timingReadRef.current
+      let refused = false
       try {
         await emitFileTimingSet({
           projectId: project.id,
@@ -14964,7 +15135,14 @@ export function ProjectWorkspace() {
           timingMode: mode,
           author: currentUsername,
         })
-        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        // AQU-2492: a refused switch is no switch (and no Undo step).
+        const mine = (entries: ReadonlyArray<{ kind: string; fileId: string | null }>) =>
+          entries.some((r) => r.kind === "file.timing.set" && r.fileId === forFileId)
+        await flushOutboxBatch({
+          getTokenForFile: getTokenForProjectFile,
+          onRejected: (entries) => { refused ||= mine(entries) },
+          onForbidden: (entries) => { refused ||= mine(entries) },
+        })
         refresh()
       } catch (e) {
         timingAck.clearOwnWrite()
@@ -14973,20 +15151,35 @@ export function ProjectWorkspace() {
           priority: "high",
           title: e instanceof Error ? `Couldn't change the timing mode: ${e.message}` : "Couldn't change the timing mode.",
         })
+        return false
       }
+      if (refused) {
+        timingAck.clearOwnWrite()
+        return false
+      }
+      timingWrittenRef.current.set(forFileId, { mode, readBefore })
+      return true
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the ack callbacks are stable (useCallback([]))
     [project?.id, currentUsername, getTokenForProjectFile, refresh, timingAck.noteOwnWrite, timingAck.clearOwnWrite],
   )
+  // AQU-2492 (review, Nov 9), finding 11: may the open file follow `mode`?
+  // Asked of the resolver the file's timing is resolved by (fileMayFollowTiming),
+  // by the switch and by its Undo alike.
+  const timingOffered = useCallback(
+    (mode: AudioTimingMode) =>
+      fileMayFollowTiming(activeFile, project ?? undefined, { hasAudioCues: fileHasAudioCues, nothingToFollow: timingNothingToFollow }, mode),
+    [activeFile, project, fileHasAudioCues, timingNothingToFollow],
+  )
   const handleChangeTimingMode = useCallback(
     (mode: AudioTimingMode) => {
-      // AQU-646, rescoped by AQU-1704 and AQU-2204: a file timed to a film has
-      // no "Follows recordings" to switch to, and the control offers none.
-      // Silent because it is unreachable from the UI; this exists so no
-      // programmatic caller can write a mode the resolver would then ignore.
-      if (mode === "audioFirst" && timingFilmTimed) return
-      // AQU-2204 (board 24): with nothing to follow, Follows source isn't offered.
-      if (mode === "dubbing" && timingNothingToFollow) return
+      // AQU-646, rescoped by AQU-1704 and AQU-2204: a mode the file can't
+      // follow (a film-timed file's "Follows recordings"; with nothing to
+      // follow, "Follows source") is not offered by the control. Silent
+      // because it is unreachable from the UI; this exists so no programmatic
+      // caller can write a mode the resolver would then ignore. AQU-2492
+      // (review, Nov 9), finding 11: the resolver itself is asked.
+      if (!timingOffered(mode)) return
       if (!activeFileId) return
       // The mode rides the outbox, so offline it would sit queued while the
       // toolbar kept reading the old value — say so instead of half-doing it.
@@ -14998,27 +15191,70 @@ export function ProjectWorkspace() {
         })
         return
       }
-      void applyTimingMode(mode, activeFileId)
+      // AQU-2492 (review, Nov 9; Sam's call the same day): switching is an
+      // Undo step, naming what the file followed before the write went out.
+      // Finding 5 (same review): recorded as the switch STARTS, waiting on its
+      // write, so ⌘Z pressed while it saves undoes the switch, never an older
+      // step (a refused switch drops it).
+      const fileId = activeFileId
+      const before = readTimingMode(fileId)
+      const write = applyTimingMode(mode, fileId)
+      if (before !== undefined && before !== mode) {
+        recordTimingSwitch({ fileId, before, after: mode }, { fileName: activeFileNameRef.current }, write)
+      }
+      void write
     },
-    [activeFileId, timingFilmTimed, timingNothingToFollow, applyTimingMode],
+    [activeFileId, timingOffered, applyTimingMode, readTimingMode],
   )
   // AQU-1767 phase 2: one track action is one history step. Each change keeps
   // the fields its verb wrote, as they were before and as they are after;
   // `after: null` deletes, a track that did not exist has `before: null`.
+  // AQU-2492 (review, Nov 9): each track's changes written from here that the
+  // project read has not shown yet. The Undo guard and a step's "before" read
+  // a track THROUGH them, so ⌘Z straight after deleting (renaming, moving,
+  // recolouring) a track sees what was just written, not the read from before.
+  // Finding 10 (same review): kept per FILE — the built-in rows have the same
+  // ids in every file, and this workspace stays open across files.
+  const trackNotesRef = useRef(new TrackWriteNotes())
+  const serverTracksRef = useRef(serverTimelineTracks)
+  serverTracksRef.current = serverTimelineTracks
+  const readTrackSettled = useCallback((trackId: string): TrackFields | null => {
+    const tr = serverTracksRef.current.find((x) => x.id === trackId)
+    return tr ? trackFieldsOf(tr) : null
+  }, [])
+  /** The track as far as this tab knows (null: it does not exist). */
+  const readTrackNow = useCallback((trackId: string): TrackFields | null => {
+    const fileId = activeFileIdRef.current
+    return fileId ? trackNotesRef.current.read(fileId, trackId, readTrackSettled(trackId)) : readTrackSettled(trackId)
+  }, [readTrackSettled])
+  /** Note writes to `fileId`'s tracks. A file no longer open needs none: its
+   *  steps wait until it is open again, and its read has caught up by then. */
+  const noteTrackWrites = useCallback((changes: ReadonlyArray<{ trackId: string; patch: unknown }>, fileId: string | null) => {
+    if (!fileId || fileId !== activeFileIdRef.current) return
+    for (const c of changes) trackNotesRef.current.note(fileId, c.trackId, readTrackSettled(c.trackId), c.patch as TrackFields | null)
+  }, [readTrackSettled])
+  /** A write that was refused never shows in a read: stop expecting it. */
+  const forgetTrackWrites = useCallback((trackIds: readonly string[], fileId: string | null) => {
+    if (fileId) trackNotesRef.current.forget(fileId, trackIds)
+  }, [])
   const recordTrackChanges = useCallback(
     (
       labelKey: string,
       changes: ReadonlyArray<{ trackId: string; after: TrackFields | null }>,
       takes?: TrackTake[],
+      /** Each track as it was before the change, when the caller read it earlier. */
+      was?: ReadonlyMap<string, TrackFields | null>,
     ) => {
       if (changes.length === 0) return
       recordStep({
         kind: "track.patch",
         data: {
           changes: changes.map(({ trackId, after }) => {
-            const track = serverTimelineTracks.find((x) => x.id === trackId)
-            const keys = after ? (Object.keys(after) as Array<keyof TrackFields>) : undefined
-            return { trackId, before: track ? trackFieldsOf(track, keys) : null, after }
+            const track = was ? (was.get(trackId) ?? null) : readTrackNow(trackId)
+            if (!track || !after) return { trackId, before: track, after }
+            const before: TrackFields = {}
+            for (const k of Object.keys(after) as Array<keyof TrackFields>) (before as Record<string, unknown>)[k] = track[k] ?? null
+            return { trackId, before, after }
           }),
           ...(takes && takes.length > 0 ? { takes } : {}),
         },
@@ -15028,7 +15264,7 @@ export function ProjectWorkspace() {
         fileName: activeFileNameRef.current,
       })
     },
-    [serverTimelineTracks, activeFileId],
+    [readTrackNow, activeFileId],
   )
 
   /**
@@ -15056,16 +15292,19 @@ export function ProjectWorkspace() {
         current?.fileId === forFileId
           ? { fileId: forFileId, places: withPendingScopeOrders(current.places, changes) }
           : current)
+      noteTrackWrites(changes.map((c) => ({ trackId: c.trackId, patch: { order: c.order } })), forFileId)
       // Bound to the file the drag was made on, so a refresh that arrives after
       // the user has moved on cannot revert a different file's overlay. Only
       // this write's entries, and only while nothing newer has replaced them.
-      const revert = () =>
+      const revert = () => {
+        forgetTrackWrites(changes.map((c) => c.trackId), forFileId)
         setPendingTrackOrders((current) => {
           if (!current || current.fileId !== forFileId) return current
           const orders = new Map(current.orders)
           for (const c of changes) if (orders.get(c.trackId) === c.order) orders.delete(c.trackId)
           return orders.size === 0 ? null : { fileId: forFileId, orders }
         })
+      }
       try {
         if (changes.length === 1) {
           await emitFileTrackSet({
@@ -15112,7 +15351,7 @@ export function ProjectWorkspace() {
             : denialMessage(t, ROLE.MAINTAINER, level) })
       }
     },
-    [project?.id, project?.syncRole?.level, serverRoleLevel, currentUsername, getTokenForProjectFile, refresh],
+    [project?.id, project?.syncRole?.level, serverRoleLevel, currentUsername, getTokenForProjectFile, refresh, noteTrackWrites, forgetTrackWrites],
   )
   const handleReorderTrack = useCallback(
     (trackId: string, order: number) => {
@@ -15194,6 +15433,7 @@ export function ProjectWorkspace() {
         onFailure?.()
         return
       }
+      noteTrackWrites([{ trackId, patch }], activeFileId)
       let refused = false
       try {
         await emitFileTrackSet({
@@ -15212,18 +15452,22 @@ export function ProjectWorkspace() {
           onRejected: (entries) => {
             const mine = entries.filter((r) => r.kind === "file.track.set" && r.fileId === activeFileId)
             if (mine.length === 0) return
+            forgetTrackWrites([trackId], activeFileId)
             refused = true
             toast.add({ type: "error", title: `${failure} ${mine[0].reason}` })
           },
+          // A 403 is a refusal too: the paint comes off with onFailure below.
+          onForbidden: () => { forgetTrackWrites([trackId], activeFileId); refused = true },
         })
         refresh()
         if (refused) onFailure?.()
       } catch (e) {
+        forgetTrackWrites([trackId], activeFileId)
         toast.add({ type: "error", title: e instanceof Error ? `${failure} ${e.message}` : failure })
         onFailure?.()
       }
     },
-    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh],
+    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh, noteTrackWrites, forgetTrackWrites],
   )
 
   /**
@@ -15249,6 +15493,8 @@ export function ProjectWorkspace() {
         onFailure?.()
         return
       }
+      noteTrackWrites(changes, fileId)
+      const forget = () => forgetTrackWrites(changes.map((c) => c.trackId), fileId)
       let refused = false
       try {
         await enqueueEvents(
@@ -15266,18 +15512,22 @@ export function ProjectWorkspace() {
           onRejected: (entries) => {
             const mine = entries.filter((r) => r.kind === "file.track.set" && r.fileId === fileId)
             if (mine.length === 0) return
+            forget()
             refused = true
             toast.add({ type: "error", title: `${failure} ${mine[0].reason}` })
           },
+          // A 403 is a refusal too: the paint comes off with onFailure below.
+          onForbidden: () => { forget(); refused = true },
         })
         refresh()
         if (refused) onFailure?.()
       } catch (e) {
+        forget()
         toast.add({ type: "error", title: e instanceof Error ? `${failure} ${e.message}` : failure })
         onFailure?.()
       }
     },
-    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh],
+    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh, noteTrackWrites, forgetTrackWrites],
   )
 
   const handleRenameTrack = useCallback(
@@ -15345,6 +15595,43 @@ export function ProjectWorkspace() {
   )
   const paintTrackColorsRef = useRef(paintTrackColors)
   paintTrackColorsRef.current = paintTrackColors
+  /**
+   * AQU-2492: an Undo or Redo's track places, drawn before the write, through
+   * the overlays a drag and a "Move to" draw theirs in (lib/timeline/track-paint).
+   * Pressed straight after a move, the Undo reaches the server in the same
+   * batch, so the read never shows the moved place and the move's own paint
+   * would never come off. Returns what takes this paint back off.
+   */
+  const paintTrackPlaces = useCallback(
+    (changes: ReadonlyArray<{ trackId: string; patch: TrackWritePatch | null }>): (() => void) => {
+      const fileId = activeFileId
+      if (!fileId || changes.length === 0) return () => {}
+      const known = new Set(serverTracksRef.current.map((tr) => tr.id))
+      const none = { orders: new Map<string, number>(), scopes: new Map<string, PendingTrackScope>(), newTracks: [] as TimelineTrack[] }
+      type Step = (o: TrackOverlays, c: typeof changes, k: ReadonlySet<string>) => TrackOverlays
+      const apply = (step: Step) => {
+        setPendingTrackOrders((current) => {
+          const orders = step({ ...none, orders: current?.fileId === fileId ? current.orders : new Map() }, changes, known).orders
+          return orders.size === 0 ? null : { fileId, orders: new Map(orders) }
+        })
+        setPendingTrackScopes((current) => {
+          const places = step({ ...none, scopes: current?.fileId === fileId ? current.places : new Map() }, changes, known).scopes
+          return places.size === 0 ? null : { fileId, places: new Map(places) }
+        })
+        setPendingNewTracks((current) => {
+          const tracks = step({ ...none, newTracks: current?.fileId === fileId ? current.tracks : [] }, changes, known).newTracks
+          return tracks.length === 0 ? null : { fileId, tracks: [...tracks] }
+        })
+      }
+      apply(paintTrackWrites)
+      return () => {
+        if (activeFileIdRef.current === fileId) apply(unpaintTrackWrites)
+      }
+    },
+    [activeFileId],
+  )
+  const paintTrackPlacesRef = useRef(paintTrackPlaces)
+  paintTrackPlacesRef.current = paintTrackPlaces
 
   const handleSetTrackColor = useCallback(
     (updates: ReadonlyArray<{ trackId: string; color: string | null }>) => {
@@ -15454,7 +15741,11 @@ export function ProjectWorkspace() {
         if (orders === current.orders) return current
         return orders.size === 0 ? null : { fileId: forFileId, orders }
       })
+      // AQU-2492: noted now, not when the queue saves, so an Undo pressed
+      // straight after the move sees the move it is undoing.
+      noteTrackWrites(changes, forFileId)
       const revert = () => {
+        forgetTrackWrites(changes.map((c) => c.trackId), forFileId)
         setPendingTrackScopes((current) => {
           if (!current || current.fileId !== forFileId) return current
           const next = new Map(current.places)
@@ -15475,7 +15766,7 @@ export function ProjectWorkspace() {
       for (const c of changes) queued.patches.set(c.trackId, { ...queued.patches.get(c.trackId), ...c.patch })
       queued.reverts.push(revert)
     },
-    [activeFileId, saveQueuedTrackMoves],
+    [activeFileId, saveQueuedTrackMoves, noteTrackWrites, forgetTrackWrites],
   )
 
   // Both append after the rows on screen, queued moves included (pressing
@@ -15679,6 +15970,9 @@ export function ProjectWorkspace() {
         .flatMap((t) => folderMembers(serverTimelineTracks, t.id))
         .filter((m) => !chosen.has(m.id))
       const firstFreeOrder = orderForScopeAppend(serverTimelineTracks, null)
+      // AQU-2492 (review, Nov 9): each track as it is now, read before the
+      // writes go out: what the Undo step puts back.
+      const wasBefore = new Map([...members, ...doomed].map((t) => [t.id, readTrackNow(t.id)]))
 
       void (async () => {
         try {
@@ -15756,7 +16050,15 @@ export function ProjectWorkspace() {
               ...doomed.map((t) => ({ trackId: t.id, after: null })),
             ],
             removals.map((r) => ({ ...r, wasSelected: playing(r) })),
+            wasBefore,
           )
+          // AQU-2492 (review, Nov 9): the rows went, and the project read does
+          // not know yet. Noted so an Undo pressed now is checked against the
+          // delete, not against the read from before it.
+          noteTrackWrites([
+            ...members.map((member, i) => ({ trackId: member.id, patch: { groupId: null, order: firstFreeOrder + i } })),
+            ...doomed.map((t) => ({ trackId: t.id, patch: null })),
+          ], activeFileId)
 
           // ── PHASE 2: the recordings, now that the row is really gone ──────
           if (removals.length > 0) {
@@ -15804,6 +16106,8 @@ export function ProjectWorkspace() {
       refreshOutboxPending,
       refresh,
       recordTrackChanges,
+      readTrackNow,
+      noteTrackWrites,
     ],
   )
 
@@ -15855,11 +16159,17 @@ export function ProjectWorkspace() {
   // plain apply — none of them records a step of its own.
 
   /** Choose a take in a slot (null empties it), the way the takes list does. */
+  // AQU-2492 (review, Nov 9), finding 9: deleted takes this tab chose again
+  // (choosing one brings it back) that the read has not listed yet, for a
+  // minute: the next step sees them as live, not "gone".
+  const broughtBackRef = useRef<Map<string, number>>(new Map())
   const applyTakeSelect = useCallback(
     async (cellId: string, slot: string, audioId: string | null) => {
       if (!project?.id) return
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return
+      const listed = audioId ? owner.cell.attachments?.[audioId] : undefined
+      if (audioId && (!listed || listed.isDeleted)) broughtBackRef.current.set(`${cellId}\u0000${audioId}`, Date.now() + 60_000)
       const where = {
         projectId: project.id,
         fileId: owner.fileId,
@@ -16023,8 +16333,8 @@ export function ProjectWorkspace() {
     [project?.id, currentUsername, getTokenForProjectFile, refreshAudioCues, revalidateCells],
   )
   useEffect(() => {
-    return registerStepKinds(
-      mediaStepHandlers({
+    return registerStepKinds({
+      ...mediaStepHandlers({
         readFilm: readFilmLink,
         writeFilm: async (_fileId, url) => writeFilmLink(url),
         readCueLink: (textCellId, cueCellId) => {
@@ -16042,8 +16352,20 @@ export function ProjectWorkspace() {
         readVoiceSettings: () => (ttsRef.current.settings as Record<string, unknown> | undefined) ?? null,
         writeVoiceSettings: (patch) => ttsRef.current.saveTts(patch as Partial<ProjectTtsSettings>),
       }),
-    )
-  }, [readFilmLink, writeFilmLink, writeCueLinks, getTokenForProjectFile, readCastValue, writeCastValues])
+      // AQU-2492 (review, Nov 9): a file's timing, with the switch's own rules
+      // (project lead and above; a mode the file can't follow is not offered,
+      // finding 11: as the resolver says, the same question the switch asks).
+      ...timingStepHandlers({
+        readTiming: readTimingMode,
+        mayChangeTiming: () => canEditTimingMode,
+        offersTiming: (_fileId, mode) => timingOffered(mode),
+        writeTiming: (fileId, mode) => applyTimingMode(mode, fileId),
+        // Finding 5: refused offline, as the switch is (handleChangeTimingMode).
+        online: () => navigator.onLine,
+      }),
+    })
+  }, [readFilmLink, writeFilmLink, writeCueLinks, getTokenForProjectFile, readCastValue, writeCastValues,
+    readTimingMode, canEditTimingMode, timingOffered, applyTimingMode])
   // AQU-2408: a cell's label, undone by writing the previous one back. Only the
   // open file's rows can be read, so a step held for another file is blocked
   // as "elsewhere" rather than guessed at.
@@ -16161,9 +16483,8 @@ export function ProjectWorkspace() {
         applyTrim: (cellId, audioId, w) => applyTakeTrim(cellId, audioId, w),
         applyGain: (cellId, audioId, level) => applyTakeGain(cellId, audioId, level),
         applyPlace: (cellId, audioId, place) => applyTakePlace(cellId, audioId, place),
-        cut: (c, newAudioId) => applyTakeCut(c.cellId, c.audioId, c.atMs, newAudioId),
+        cut: (c, newAudioId) => applyTakeCut(c.cellId, c.audioId, c.atMs, newAudioId, c.pieceVoters),
         uncut: applyTakeUncut,
-        newPieceId: (c) => newPieceAudioId(c.cellId, c.audioId),
         select: applyTakeSelect,
         remove: (cellId, audioId) => applyTakeRemove(cellId, audioId),
         rename: async (cellId, audioId, label) => {
@@ -16172,8 +16493,10 @@ export function ProjectWorkspace() {
           if (owner) notifyAudioAttachmentsChanged(owner.fileId)
         },
         // Decision 11: a take that was added (recorded, uploaded, generated…).
-        approvedByOthers: (cellId, audioId) =>
-          (readAtt(cellId, audioId)?.validators ?? []).find((v) => v !== currentUsername) ?? null,
+        approvedByOthers: (cellId, audioId, except) =>
+          (readAtt(cellId, audioId)?.validators ?? []).find((v) => v !== currentUsername && !except?.includes(v)) ?? null,
+        // AQU-2492 (review, Nov 9), finding 9.
+        broughtBack: (cellId, audioId) => (broughtBackRef.current.get(`${cellId}\u0000${audioId}`) ?? 0) > Date.now(),
         liveGroup: (cellId, audioId) => {
           const atts = resolveTakeCellRef.current(cellId)?.cell.attachments ?? {}
           const group = atts[audioId]?.pieceOf ?? audioId
@@ -16189,6 +16512,14 @@ export function ProjectWorkspace() {
           if (!hasOwnRecordingLeft(takes, "", owner?.cell ?? cellId)) handleLastTakeRemoved(cellId)
         },
         takeRestored: (cellId) => handleTakeSaved(cellId),
+      }),
+      // AQU-2432 (Sam, Nov 9): a drag that changed unrecorded lines' rooms.
+      ...lineRoomStepHandlers({
+        // AQU-2432 (review, Nov 9): read in the file that owns the line.
+        readRoom: readLineRoom,
+        applyRooms: applyLineRooms,
+        readTake: readAtt,
+        applyPlace: (cellId, audioId, place) => applyTakePlace(cellId, audioId, place),
       }),
       ...rowStepHandlers({
         readRow: (cellId) => {
@@ -16273,21 +16604,26 @@ export function ProjectWorkspace() {
         writeSettings: (patch, opts) => writeProjectSettingsFor(project?.id ?? null, patch, opts),
       }),
       ...trackStepHandlers({
-        readTrack: (trackId) => {
-          const tr = serverTimelineTracks.find((x) => x.id === trackId)
-          if (!tr) return null
-          const pending = pendingTrackColorsRef.current
-          const color = pending?.fileId === activeFileIdRef.current ? pending.colors.get(trackId) : undefined
-          return trackFieldsOf(color === undefined ? tr : { ...tr, color })
-        },
+        // AQU-2492 (review, Nov 9): through what was written here and not
+        // read back yet, so an Undo straight after the change is not skipped
+        // as "changed since" (and the step dropped for good). A colour painted
+        // before it saves is one of those writes: every paint goes out through
+        // applyTrackPatches, which notes it in the same tick.
+        readTrack: readTrackNow,
         patchTracks: (changes) => {
           const colors = changes.flatMap((change) =>
             change.patch && "color" in change.patch
               ? [{ trackId: change.trackId, color: change.patch.color ?? null }]
               : [],
           )
-          const revert = paintTrackColorsRef.current(colors)
-          return applyTrackPatches(changes as never, "Couldn't undo the track change:", revert)
+          // A "Move to" still queued was saved before this Undo began: every
+          // Undo and Redo saves what the timeline holds (beforeHistoryMove).
+          const revertColors = paintTrackColorsRef.current(colors)
+          const revertPlaces = paintTrackPlacesRef.current(changes)
+          return applyTrackPatches(changes as never, "Couldn't undo the track change:", () => {
+            revertColors()
+            revertPlaces()
+          })
         },
         restoreTakes: async (takes) => {
           // Choosing a deleted take brings it back. Bring every one back, then
@@ -16309,10 +16645,11 @@ export function ProjectWorkspace() {
     return unregister
   }, [
     readTake, applyTakeTrim, applyTakeGain, applyTakePlace, applyTakeCut, applyTakeUncut, applyTakeRemove, applyTakeRename, applyTakeSelect,
+    applyLineRooms, readLineRoom,
     handleLastTakeRemoved, handleTakeSaved,
     getActiveCell, readRowTiming, cellStore, applyRetimeSubtitle, applyCellHidden, removeLineCore, applyRestoreRow, applyRepoint,
     activeLane, applyTargetText, project?.id, currentUsername, getTokenForProjectFile, revalidateAuditStats, revalidateCell,
-    serverTimelineTracks, applyTrackPatches,
+    readTrackNow, applyTrackPatches,
   ])
 
   // A step made in another file waits until that file is open again. The
@@ -16378,6 +16715,33 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setQueueLayerTrackSlots(layerTrackSlotsKey ? layerTrackSlotsKey.split("\u0000") : [])
   }, [layerTrackSlotsKey])
+
+  // AQU-2432 (review, Nov 9): RECORDING AN EMPTY LINE NEVER BRINGS BACK AN OLD
+  // OVERLAP. When a take fills a line that had none, the next line's takes
+  // that still hold a pull-back (read as none while the line was empty) are put
+  // back on their line's start — where they are drawn and heard now — in the
+  // recording's own step (lib/history/take-steps, `setTakeAddedHeals`). Only a
+  // take that filled an empty slot can do it; a new version of a take that was
+  // already there never does. Laid out from the lines the file plays: a heard
+  // line's take lives in the cue file.
+  const takeAddedHealsRef = useRef<(data: TakeAddData, where: { fileId: string }) => TakePlaceData[]>(() => [])
+  takeAddedHealsRef.current = (data, where) => {
+    if (data.selectedBefore != null) return []
+    const cells = audioCueSibling && where.fileId === audioCueSibling.id
+      ? (audioCueCells ?? [])
+      : where.fileId === activeFileId ? audioMergedCells : []
+    return pullBacksWokenBy(cells, data.cellId, [data.audioId, ...(data.pieces ?? [])], programmeTracks).flatMap(({ cellId, audioId }) => {
+      const att = cells.find((c) => c.id === cellId)?.attachments?.[audioId]
+      if (!att) return []
+      const targetOffsetMs = att.targetOffsetMs ?? null
+      void applyTakePlace(cellId, audioId, { targetOffsetMs, recordingsOffsetMs: 0 })
+      return [{ cellId, audioId, before: targetOffsetMs, after: targetOffsetMs, recordingsBefore: att.recordingsOffsetMs ?? null, recordingsAfter: 0 }]
+    })
+  }
+  useEffect(() => {
+    setTakeAddedHeals((data, where) => takeAddedHealsRef.current(data, where))
+    return () => setTakeAddedHeals(null)
+  }, [])
 
   // AQU-2251: with "Skip lines with nothing to play" on, the built-in clock
   // jumps from the end of one line with a take to the start of the next one.
@@ -16945,6 +17309,8 @@ export function ProjectWorkspace() {
       surface: "cell",
       // Decision 11: an Undo step, naming what played in that slot before.
       history: { selectedBefore: playingInSlot(workspaceAudioByCellIdRef.current.get(cell.id), GENERATED_VOICE_SLOT) },
+      // AQU-2491 (review, Nov 9): its own place, the line's start.
+      place: bornTakePlace(cell),
     }).catch((e: unknown) => {
       throw new Error(categorizeAiError(e instanceof Error ? e.message : String(e)).body, { cause: e })
     })
@@ -18719,9 +19085,14 @@ export function ProjectWorkspace() {
                     // rule, which lets maintainers through so an import's
                     // retimes are not caught by the lock.
                     timingLocked={timingLocked}
-                    onRetimeTarget={handleRetimeTarget}
+                    // AQU-2432 (browser pass, Nov 11): a take is moved or
+                    // trimmed only by someone who can save it.
+                    {...timelineTakeDrags(project?.syncRole?.level ?? null, {
+                      onRetimeTarget: handleRetimeTarget,
+                      onMoveTakeRooms: handleMoveTakeRooms,
+                      onTrimTarget: handleTrimTarget,
+                    })}
                     onRetimeCue={handleRetimeAudioCue}
-                    onTrimTarget={handleTrimTarget}
                     onCutTargets={handleCutTargets}
                     onRegenerateVoice={handleRegenerateTimelineVoice}
                     onChangeVoice={handleChangeTimelineVoice}

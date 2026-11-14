@@ -7,7 +7,7 @@
 
 import { STATION_PICKS } from "@/lib/station/picks"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { recordStep } from "@/lib/history/history"
+import { recordStep, withGroup } from "@/lib/history/history"
 import { Bird, Check, CloudAlert, CloudUpload, FileClock, Pause, Pencil, Play, RotateCcw, Trash2 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtShortCalendarDate } from "@/lib/format-date"
@@ -35,6 +35,7 @@ import {
   retryFailedAudioSync,
 } from "@/lib/audio/audio-attachments-bus"
 import { hasOwnRecordingLeft, removeTake, removeWholeTake, renameTake } from "@/lib/audio/take-actions"
+import { pieceStretchOf } from "@/lib/history/take-steps"
 import { originalRecordingId, pieceNames, splitTakeName, takeBaseLabel, takeRows } from "@/lib/audio/take-groups"
 import { pieceGroupOf } from "@/lib/sync/cell-audio-read-types"
 import { useRecordingTextDrift } from "@/hooks/useRecordingTextDrift"
@@ -410,6 +411,18 @@ export function TakesStrip({
     const displaceRecording =
       slot === GENERATED_VOICE_SLOT &&
       takes.some((t) => t.audioId === selectedAudioId && t.slot === RECORDING_SLOT)
+    // AQU-2492 (review, Nov 9): what each slot held before, read PER SLOT. The
+    // take that sounded may sit in the other slot (a generated voice sounds
+    // while the recording slot holds the source clip), and naming it put it
+    // back in the wrong slot on Undo. A choice still in flight counts in its
+    // own slot.
+    const groupOf = (id: string | null | undefined) => (id ? takes.find((t) => t.audioId === id)?.pieceOf ?? id : null)
+    const heldIn = (s: string): string | null => {
+      if (optimisticSelectedId && takes.find((t) => t.audioId === optimisticSelectedId)?.slot === s) return groupOf(optimisticSelectedId)
+      return groupOf(s === GENERATED_VOICE_SLOT ? selectedGeneratedAudioId : selectedAudioId)
+    }
+    const slotBefore = heldIn(slot)
+    const recordingBefore = heldIn(RECORDING_SLOT)
     try {
       const selectP = emitCellAudioSelect({
         projectId, fileId, cellId, audioId, slot, author,
@@ -417,14 +430,11 @@ export function TakesStrip({
       })
       if (take) injectOptimisticAudioAttachment(fileId, cellId, take, selectP)
       await selectP
-      // AQU-1767 phase 2: choosing a take is a step — unless it also handed the
-      // recording slot back (the default track's generated-voice juggle),
-      // which a one-slot undo could not put back honestly.
+      // AQU-1767 phase 2: choosing a take is a step.
       if (!displaceRecording) {
-        const groupOf = (id: string | null | undefined) => (id ? takes.find((t) => t.audioId === id)?.pieceOf ?? id : null)
         recordStep({
           kind: "take.select",
-          data: { cellId, slot, before: groupOf(effectiveSelected), after: groupOf(audioId)! },
+          data: { cellId, slot, before: slotBefore, after: groupOf(audioId)! },
           labelKey: "editor.history.stepChooseTake",
           fileId,
         })
@@ -437,6 +447,26 @@ export function TakesStrip({
         if (sourceClip) injectOptimisticAudioAttachment(fileId, cellId, sourceClip, displaceP)
         else injectOptimisticAudioDeselect(fileId, cellId, RECORDING_SLOT, displaceP)
         await displaceP
+        // AQU-2492 (review, Nov 9): the default track's generated-voice juggle
+        // (an AI voice chosen over a recording also hands the recording slot
+        // back) was no step at all, so ⌘Z after it undid something else. It is
+        // ONE step of the two slot choices: Undo gives the recording slot its
+        // recording back and the voice slot what it held, each only while its
+        // slot is still as this choice left it.
+        void withGroup({ labelKey: "editor.history.stepChooseTake", fileId }, async () => {
+          recordStep({
+            kind: "take.select",
+            data: { cellId, slot, before: slotBefore, after: groupOf(audioId)! },
+            labelKey: "editor.history.stepChooseTake",
+            fileId,
+          })
+          recordStep({
+            kind: "take.select",
+            data: { cellId, slot: RECORDING_SLOT, before: recordingBefore, after: sourceClip?.audioId ?? null },
+            labelKey: "editor.history.stepChooseTake",
+            fileId,
+          })
+        }, { owns: { cells: [cellId], kinds: ["take."] } })
       }
       notifyAudioAttachmentsChanged(fileId)
     } catch {
@@ -447,7 +477,7 @@ export function TakesStrip({
     } finally {
       setBusyId((cur) => (cur === audioId ? null : cur))
     }
-  }, [optimisticSelectedId, activeTakeId, selectedAudioId, sourceClip, takes, projectId, fileId, cellId, author, targetLang])
+  }, [optimisticSelectedId, activeTakeId, selectedAudioId, selectedGeneratedAudioId, sourceClip, takes, projectId, fileId, cellId, author, targetLang])
 
   const remove = useCallback(async (audioId: string) => {
     setBusyId(audioId)
@@ -459,9 +489,16 @@ export function TakesStrip({
       const slot = takes.find((t) => t.audioId === audioId)?.slot ?? RECORDING_SLOT
       const playingNow = optimisticSelectedId ?? activeTakeId
       const groupOf = (id: string | null | undefined) => (id ? takes.find((t) => t.audioId === id)?.pieceOf ?? id : null)
+      const deleted = takes.find((t) => t.audioId === audioId)
       await removeTake({
         projectId, fileId, cellId, audioId, slot, author, ...(targetLang ? { targetLang } : {}),
-        history: { wasSelected: groupOf(playingNow) === groupOf(audioId) },
+        // AQU-2492 (review, Nov 9), finding 8: and who had approved it.
+        // AQU-2492 (review, Nov 12): and where it sat in its take.
+        history: {
+          wasSelected: groupOf(playingNow) === groupOf(audioId),
+          approvedBy: takes.find((t) => t.audioId === audioId)?.validators ?? [],
+          ...(deleted ? { stretch: pieceStretchOf(audioId, deleted) } : {}),
+        },
       })
       // Was that the cell's last recording? `takes` still holds the pre-removal
       // list, so the survivors are everything else that is a take OF THIS CELL.
@@ -488,7 +525,7 @@ export function TakesStrip({
         takes.some((t) => t.audioId === playingNow && pieceGroupOf(t, t.audioId) === group)
       await removeWholeTake({
         projectId, fileId, cellId, author, ...(targetLang ? { targetLang } : {}),
-        pieces: pieces.map((p) => ({ audioId: p.audioId, slot: p.slot ?? RECORDING_SLOT })),
+        pieces: pieces.map((p) => ({ audioId: p.audioId, slot: p.slot ?? RECORDING_SLOT, validators: p.validators ?? [] })),
         history: { wasSelected },
       })
       const gone = new Set(pieces.map((p) => p.audioId))

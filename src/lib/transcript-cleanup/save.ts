@@ -90,6 +90,11 @@ function clipFields({ projectId, owner, audioId, attachment, targetLang, author 
     ...(attachment.voiceId ? { voiceId: attachment.voiceId } : {}),
     ...(attachment.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),
     ...(targetLang ? { targetLang } : {}),
+    // AQU-2491 (review, Nov 9): a transcript is words ABOUT a take. Saving or
+    // clearing one never makes that take the chosen one (a correction on an
+    // older take in the list, a cleanup that finishes after the line was
+    // re-recorded), and never brings back a take deleted meanwhile.
+    wordsOnly: true,
     author,
   }
 }

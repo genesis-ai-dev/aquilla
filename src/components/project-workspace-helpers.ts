@@ -3,6 +3,7 @@
 // non-components).
 
 import { ROLE } from "@/lib/frontier/roles"
+import { canPerform } from "@/lib/sync/role-policy"
 import type { ContextualDraftsScope } from "@/lib/contextual/drafts-store"
 import { btSeedsFromAlignmentSeeds, type BtSeed } from "@/lib/completion/bt-glosser"
 import type { BacktranslationRecord } from "@/lib/completion/bt-record"
@@ -21,6 +22,7 @@ import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import type { SyncTokenCallbacks } from "@/lib/sync/sync-token"
+import { minHeadTrimSec, type ChipAtt } from "@/lib/timeline/lane-timing"
 
 /**
  * Returns true iff the zero-file self-heal should fire a `/link/sync`
@@ -174,6 +176,26 @@ export function canRestructureTracks(args: {
   allowTrackEditing: boolean | undefined
 }): boolean {
   return args.roleLevel >= ROLE.MAINTAINER && (args.allowTrackEditing ?? true)
+}
+
+/**
+ * AQU-2432 (browser pass, Nov 11): the timeline's take writes that start with
+ * a drag — moving a take, a line's room, trimming — for someone who can save
+ * them, and none at all below that. The timeline's `editable` is the
+ * project's and the lane's, never the person's role, so a viewer dragged a
+ * take that was never saved and stayed drawn moved. The gate is "don't pass
+ * the callback" (no callback, no drag), asked with `canPerform` as every
+ * other write in the workspace asks.
+ */
+export function timelineTakeDrags<Move, Rooms, Trim>(
+  roleLevel: number | null,
+  drags: { onRetimeTarget: Move; onMoveTakeRooms: Rooms; onTrimTarget: Trim },
+): { onRetimeTarget?: Move; onMoveTakeRooms?: Rooms; onTrimTarget?: Trim } {
+  return {
+    ...(canPerform("cell.audio.place", roleLevel) ? { onRetimeTarget: drags.onRetimeTarget } : {}),
+    ...(canPerform("cell.lane.retime", roleLevel) ? { onMoveTakeRooms: drags.onMoveTakeRooms } : {}),
+    ...(canPerform("cell.audio.trim", roleLevel) ? { onTrimTarget: drags.onTrimTarget } : {}),
+  }
 }
 
 /**
@@ -622,6 +644,31 @@ export function resolveTakeLine(args: {
   // every timeline trim a silent no-op before the fortify pass.
   const cell = mergeCellsWithAudio([own], audio)[0] ?? own
   return { fileId, cell }
+}
+
+/**
+ * AQU-2495 (merge review, Nov 13, note 2): the trim a take is given, its start
+ * held so its sound never starts before 0:00 (`minHeadTrimSec`, read from
+ * where its clip sits now) — the floor every way of un-trimming a take's start
+ * keeps. The workspace's trim write (`applyTakeTrim`) stores only this, so an
+ * Undo or Redo of a trim keeps it too: a colleague may have dragged the take
+ * since, its clip before 0:00, and the old window would sound before the file.
+ *
+ * Merge review round 2 (R2-2): null when nothing of the window is left once
+ * held, a window lying wholly before 0:00. Its end would be at or before its
+ * start, which reads as no end at all, so the take would play from the held
+ * start to the end of its clip: audio from neither window.
+ */
+export function heldTakeTrim(
+  cell: CellData,
+  att: ChipAtt,
+  trims: { trimStartMs?: number; trimEndMs?: number },
+): { trimStartMs?: number; trimEndMs?: number } | null {
+  const floorMs = Math.round(minHeadTrimSec(cell, att) * 1000)
+  const asked = trims.trimStartMs
+  const start = floorMs > 0 && (asked ?? 0) < floorMs ? floorMs : asked
+  if (start != null && trims.trimEndMs != null && trims.trimEndMs <= start) return null
+  return { trimStartMs: start, trimEndMs: trims.trimEndMs }
 }
 
 /**

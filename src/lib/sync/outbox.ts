@@ -243,15 +243,22 @@ const OFFLINE_ROUTABLE_KINDS: ReadonlySet<OutboxEventKind> = new Set<OutboxEvent
 ])
 
 let warnedOfflineStoreUnavailable = false
+let warnedOfflineStoreShutDown = false
 // A booted store answers at once; past this, the edit goes to IndexedDB.
 const OFFLINE_STORE_WAIT_MS = 3_000
 
 /** The booted offline store and its events, or null when writes must go to IndexedDB. */
 async function openOfflineQueue() {
-  const [{ getOfflineStore }, { isProjectOfflineReady }, { events: offlineEvents }] = await Promise.all([
+  const [
+    { getOfflineStore },
+    { isProjectOfflineReady },
+    { events: offlineEvents },
+    { commitOrThrow, isOfflineStoreShutDown },
+  ] = await Promise.all([
     import("@/lib/offline/store"),
     import("@/lib/offline/offline-reads"),
     import("@/lib/offline/schema"),
+    import("@/lib/offline/checked-commit"),
   ])
   // Unopenable store (e.g. newer build owns it): queue in IndexedDB. Boot failure is memoized, so warn once.
   // A store still booting (minutes while the leader rebuilds after a schema
@@ -272,7 +279,22 @@ async function openOfflineQueue() {
     bootTimedOut,
   ]).finally(() => clearTimeout(timer))
   if (!store) return null
-  return { store, offlineEvents, isReady: (projectId: string) => isProjectOfflineReady(store, projectId) }
+  // getOfflineStore memoizes the store, so one that shut down (a failed
+  // commit does that) keeps being handed out, and every query on it throws.
+  // Queue in IndexedDB until a restart boots a new one.
+  if (isOfflineStoreShutDown(store)) {
+    if (!warnedOfflineStoreShutDown) {
+      warnedOfflineStoreShutDown = true
+      console.warn("[outbox] offline store has shut down — queueing in IndexedDB until restart")
+    }
+    return null
+  }
+  const liveStore = store
+  return {
+    offlineEvents,
+    isReady: (projectId: string) => isProjectOfflineReady(liveStore, projectId),
+    commit: (run: (booted: typeof liveStore) => void) => commitOrThrow(liveStore, () => run(liveStore)),
+  }
 }
 
 function toQueuedRow(event: CqrsRawEvent) {
@@ -301,8 +323,11 @@ interface OfflineRouting {
   rest: CqrsRawEvent[]
   /** The events `commit` queues offline, in order. */
   routed: CqrsRawEvent[]
-  /** Commits the others to LiveStore's queue. Synchronous, so a caller can
-   *  clear their journal entries with nothing able to land in between. */
+  /** Commits the others to LiveStore's queue, or throws having queued none of
+   *  them (the store shut down before or during the commit). Synchronous, so
+   *  a caller can clear their journal entries with nothing able to land in
+   *  between. A commit that returns is applied in memory; LiveStore persists
+   *  it to disk shortly after. */
   commit: () => void
 }
 
@@ -379,22 +404,31 @@ async function planOfflineRouting(events: CqrsRawEvent[]): Promise<OfflineRoutin
   }
   const groups = events.length === 1 ? [events[0].id] : dependencyGroups(events)
   const blocked = new Set<string>()
-  events.forEach((event, i) => {
-    if (!OFFLINE_ROUTABLE_KINDS.has(event.kind) || !isReady(event.projectId)) blocked.add(groups[i])
-  })
+  try {
+    events.forEach((event, i) => {
+      if (!OFFLINE_ROUTABLE_KINDS.has(event.kind) || !isReady(event.projectId)) blocked.add(groups[i])
+    })
+  } catch (error) {
+    // A store that can't answer can't take the writes either.
+    console.warn("[outbox] offline store couldn't check project readiness — queueing in IndexedDB", error)
+    return none
+  }
   const routed: CqrsRawEvent[] = []
   const rest: CqrsRawEvent[] = []
   events.forEach((event, i) => (blocked.has(groups[i]) ? rest : routed).push(event))
   const commit = () => {
-    if (routed.length === 1) {
-      queue.store.commit(queue.offlineEvents.eventQueued(toQueuedRow(routed[0])))
-    } else if (routed.length > 1) {
+    if (routed.length === 0) return
+    queue.commit((store) => {
+      if (routed.length === 1) {
+        store.commit(queue.offlineEvents.eventQueued(toQueuedRow(routed[0])))
+        return
+      }
       const batches = []
       for (let i = 0; i < routed.length; i += OFFLINE_QUEUE_CHUNK) {
         batches.push(queue.offlineEvents.eventsQueued({ rows: routed.slice(i, i + OFFLINE_QUEUE_CHUNK).map(toQueuedRow) }))
       }
-      queue.store.commit(...batches)
-    }
+      store.commit(...batches)
+    })
   }
   return { rest, routed, commit }
 }
@@ -449,9 +483,15 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent, scope?: OutboxOwne
   if (!scope && isTauriRuntime()) {
     const routing = await planOfflineRouting([event])
     if (routing.rest.length === 0) {
-      routing.commit()
-      clearJournalRecord(event.id)
-      return
+      try {
+        routing.commit()
+        clearJournalRecord(event.id)
+        return
+      } catch (error) {
+        // Nothing was queued offline; the HTTP outbox below takes it, as the
+        // batch path does.
+        console.warn("[outbox] Offline queue refused an edit; using the HTTP outbox", error)
+      }
     }
   }
   const db = await openDb()
@@ -491,14 +531,17 @@ export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void>
   const byEvent = new Map(records.map((rec) => [rec.event, rec]))
   const toRecords = (list: readonly CqrsRawEvent[]) => list.map((event) => byEvent.get(event)!)
 
-  let written: OutboxRecord[] = []
+  let wrote: boolean
+  // Ids this call added to IndexedDB. A record that was already queued before
+  // it (a re-enqueue) isn't ours to remove on failure.
+  let added: string[] = []
   try {
     const routing = isTauriRuntime() ? await planOfflineRouting(events) : null
     // IndexedDB first: if it fails, nothing has reached the offline queue
     // either, so a refusal means none of the batch was queued.
     const toWrite = routing ? toRecords(routing.rest) : records
-    await putOutboxRecords(toWrite)
-    written = toWrite
+    added = await putOutboxRecords(toWrite)
+    wrote = toWrite.length > 0
     if (routing && routing.routed.length > 0) {
       try {
         routing.commit()
@@ -506,15 +549,14 @@ export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void>
         // The offline store refused them (shut down, a materializer error):
         // send them over HTTP instead, so the batch still lands whole.
         console.warn("[outbox] Offline queue refused a batch; using the HTTP outbox", error)
-        const fallback = toRecords(routing.routed)
-        await putOutboxRecords(fallback)
-        written = [...written, ...fallback]
+        added = [...added, ...(await putOutboxRecords(toRecords(routing.routed)))]
+        wrote = true
       }
     }
   } catch (error) {
     // Undo what did land, so the caller's retry can't queue it twice.
-    if (written.length > 0) {
-      await removeOutboxEvents(written.map((rec) => rec.id)).catch((cleanupError: unknown) => {
+    if (added.length > 0) {
+      await removeOutboxEvents(added).catch((cleanupError: unknown) => {
         console.warn("[outbox] Couldn't undo a partly queued batch", cleanupError)
       })
     }
@@ -522,20 +564,33 @@ export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void>
     throw error
   }
   if (journalKey) clearJournalBatch(journalKey)
-  if (written.length > 0) notifyOutboxChanged()
+  if (wrote) notifyOutboxChanged()
 }
 
-/** Writes `records` to the IndexedDB outbox in one transaction. */
-async function putOutboxRecords(records: readonly OutboxRecord[]): Promise<void> {
-  if (records.length === 0) return
+/**
+ * Writes `records` to the IndexedDB outbox in one transaction, and returns
+ * the ids that weren't already in it.
+ */
+async function putOutboxRecords(records: readonly OutboxRecord[]): Promise<string[]> {
+  if (records.length === 0) return []
   const db = await openDb()
+  let added: string[] = []
   await withOutboxQuotaRecovery(() => new Promise<void>((resolve, reject) => {
+    added = []
     const tx = db.transaction(STORE, "readwrite")
     tx.onerror = () => reject(tx.error ?? new Error("bulk enqueue tx failed"))
     tx.oncomplete = () => resolve()
     const store = tx.objectStore(STORE)
-    for (const rec of records) store.put(rec)
+    for (const rec of records) {
+      // Same transaction, so nothing can add or remove the id in between.
+      const existing = store.getKey(rec.id)
+      existing.onsuccess = () => {
+        if (existing.result === undefined) added.push(rec.id)
+        store.put(rec)
+      }
+    }
   }))
+  return added
 }
 
 /**

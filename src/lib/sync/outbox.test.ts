@@ -879,6 +879,91 @@ describe("Tauri offline routing", () => {
     expect(Object.keys(localStorage).filter((k) => k.startsWith("aquilla:outbox-recovery:"))).toEqual([])
   })
 
+  // LiveStore catches a commit's own failure and shuts the store down instead
+  // of throwing, so these use a real one: a payload the materializer can't
+  // serialize to JSON.
+  const unmaterializable = { ...commitEvent, id: "tc-bad", payload: { value: "x", size: BigInt(1) } } as unknown as CqrsRawEvent
+
+  it("enqueueOutboxEvent sends an edit to IndexedDB when its offline commit silently fails", async () => {
+    setTauriRuntime(true)
+    markProjectOfflineReady("proj1")
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      await enqueueOutboxEvent(unmaterializable)
+    } finally {
+      warn.mockRestore()
+      error.mockRestore()
+    }
+
+    expect((await peekOutboxBatch(10)).map((r) => r.id)).toEqual(["tc-bad"])
+  })
+
+  it("enqueueOutboxEvents sends the batch to IndexedDB when its offline commit silently fails", async () => {
+    setTauriRuntime(true)
+    markProjectOfflineReady("proj1")
+    const other = { ...commitEvent, id: "tc-other", cellId: "cell2" }
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      await enqueueOutboxEvents([other, unmaterializable])
+    } finally {
+      warn.mockRestore()
+      error.mockRestore()
+    }
+
+    expect((await peekOutboxBatch(10)).map((r) => r.id).sort()).toEqual(["tc-bad", "tc-other"])
+  })
+
+  it("queues in IndexedDB, single and batch, once the offline store has shut down", async () => {
+    setTauriRuntime(true)
+    markProjectOfflineReady("proj1")
+    await currentOfflineStore!.shutdownPromise()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      await enqueueOutboxEvent(commitEvent)
+      await enqueueOutboxEvents([{ ...commitEvent, id: "tc2", cellId: "cell2" }])
+    } finally {
+      warn.mockRestore()
+    }
+
+    expect((await peekOutboxBatch(10)).map((r) => r.id).sort()).toEqual(["tc1", "tc2"])
+  })
+
+  it("enqueueOutboxEvents' rollback leaves a record that was queued before it", async () => {
+    const comment = (id: string) => ({
+      ...commitEvent, id, kind: "comment.create", cellId: undefined, parentId: null,
+      payload: { body: "note" },
+    }) as unknown as CqrsRawEvent
+    await enqueueOutboxEvent(comment("cm-old"))
+    setTauriRuntime(true)
+    markProjectOfflineReady("proj1")
+    vi.spyOn(currentOfflineStore!, "commit").mockImplementationOnce(() => {
+      throw new Error("store shut down")
+    })
+    // The first outbox write (the IndexedDB part) lands; the fallback fails.
+    let outboxWrites = 0
+    const original = IDBDatabase.prototype.transaction
+    const transaction = vi.spyOn(IDBDatabase.prototype, "transaction").mockImplementation(function (
+      this: IDBDatabase, ...args: Parameters<IDBDatabase["transaction"]>
+    ) {
+      if (this.name === "aquilla-cqrs-outbox" && args[1] === "readwrite" && ++outboxWrites === 2) {
+        throw new Error("fallback write failed")
+      }
+      return original.apply(this, args)
+    })
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      await expect(enqueueOutboxEvents([comment("cm-old"), comment("cm-new"), commitEvent]))
+        .rejects.toThrow(/fallback write failed/)
+    } finally {
+      transaction.mockRestore()
+      warn.mockRestore()
+    }
+
+    expect((await peekOutboxBatch(10)).map((r) => r.id)).toEqual(["cm-old"])
+  })
+
   it("a routed row round-trips into the exact OutboxRawEvent shape sync-adapter.ts's toRawEvent() expects", async () => {
     setTauriRuntime(true)
     markProjectOfflineReady("proj1")

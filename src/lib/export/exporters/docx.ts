@@ -410,10 +410,9 @@ export async function exportDocx(
       // only its own text and footnotes. The paragraph leaves only when
       // nothing else in it remains; otherwise it is written without them.
       const rest = withoutItsLines(span)
-      if (rest?.seen) {
-        if (!span.isCopy) injected++
-        return rest.xml + renderInsertions(key, anchorXml, !span.isCopy)
-      }
+      // AQU-2552 (review r10): when it stays, it is neither translated nor
+      // removed, so it is counted as neither.
+      if (rest?.seen) return rest.xml + renderInsertions(key, anchorXml, !span.isCopy)
       if (!span.isCopy) removed++
       // AQU-2552 (review r10): its range marks are not dropped. They go to the
       // start of the next paragraph of its container (see renderParagraph),

@@ -656,6 +656,22 @@ describe("Word export — what a lost line owns is its own text range and its fo
     }
   })
 
+  // Review r10 (N5): a paragraph whose lines are all lost but which stays
+  // (it keeps a picture) is neither translated nor removed.
+  it("a paragraph whose lines are all lost but which keeps a picture is counted neither translated nor removed", async () => {
+    const bytes = await docxBytes(para(run("Only line") + IMG + run(" here.")) + para(run("Other words here.")) + NEXT)
+    const [line, other, next] = await importCells(bytes, false)
+    for (const out of [
+      await wordOut(bytes, [hide(typed(line, "Caché.")), typed(other, "Autres mots."), next]),
+      await wordOut(bytes, [typed(other, "Autres mots."), next], [line]),
+    ]) {
+      expect(paras(out.body)).toEqual(["[IMG]", "Autres mots.", "Next paragraph."])
+      expect(out.result.injected).toBe(1)
+      expect(out.result.removed).toBe(0)
+      expect(out.result.untouched).toBe(1)
+    }
+  })
+
   // R7: the structure check flags a link with no run again; only a link this
   // export emptied on purpose (its words were all a lost line's) is exempt,
   // named by its start tag.

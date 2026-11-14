@@ -5048,13 +5048,23 @@ describe("TimelineEditor — dragging a track row reorders it", () => {
       fireEvent.pointerDown(row, at(0))
       fireEvent.pointerMove(document, at(10))
       fireEvent.pointerMove(document, at(10))
+      // How far the row lifted off its place with the pointer.
+      const lift = translatedY(trackSlot(name).style.transform)
       fireEvent.pointerUp(document, at(10, 0))
       fireEvent.click(row)
+      return lift
     }
-    press("Source audio", "touch")
-    expect(selected("Source audio")).toBe(true)
-    expect(onReorderTrack).not.toHaveBeenCalled()
-    press("Source text", "mouse")
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      expect(press("Source audio", "touch")).toBe(0)
+      expect(selected("Source audio")).toBe(true)
+      // Past the hold a drop waits out before it saves: nothing was dropped.
+      act(() => { vi.advanceTimersByTime(TRACK_RELEASE_SETTLE_MS + TRACK_ORDER_SAVE_QUIET_MS) })
+      expect(onReorderTrack).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(press("Source text", "mouse")).toBe(10)
     expect(selected("Source text")).toBe(false)
   })
 })

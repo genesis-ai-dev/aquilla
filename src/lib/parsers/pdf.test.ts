@@ -399,6 +399,47 @@ describe("review findings: right-to-left text (Nov 14)", () => {
   })
 })
 
+// Review finding 7 (Nov 14): Arabic came in with altered letters. Arial and
+// Times give presentation forms (U+FExx); Geeza Pro draws one glyph for
+// several letters, and pdf.js reverses that glyph's text with the run. The
+// pieces below are what pdf.js gives for the reviewer's made PDFs, one glyph
+// (with its marks) a piece.
+describe("review findings: Arabic (Nov 14)", () => {
+  /** Pieces drawn one glyph at a time, right to left, as pdf.js gives them. */
+  const glyphs = (texts: string[], y = 700) => {
+    let x = 500
+    return texts.map((s) => { x -= 6; return { s, x, y, b: 0, w: 5, h: 12, eol: false, dir: "rtl" } })
+  }
+  const read = (texts: string[]) => pdfPagesToParagraphs([{
+    n: 1, box: { x0: 0, y0: 0, x1: 595, y1: 842 }, tree: null, items: glyphs(texts),
+  }], (t) => t).paragraphs.map((p) => p.text.normalize("NFC"))
+  /** Enough ordinary one-letter pieces to show the page is drawn glyph by glyph. */
+  const ONE_BY_ONE = ["ذ", "ه", "ب", " ", "ا", "ل", "و", "ل", "د", " "]
+
+  it("reads a glyph that stands for several letters in their order: المدرسة, الله, بَيْنَ", () => {
+    expect(read([...ONE_BY_ONE, "ا", "مل", "د", "ر", "س", "ة"])).toEqual(["ذهب الولد المدرسة"])
+    expect(read([...ONE_BY_ONE, "ا", "هلل"])).toEqual(["ذهب الولد الله"])
+    expect(read([...ONE_BY_ONE, "\u064e\u0628", "\u064e\u0652\u0646\u064a"])).toEqual(["ذهب الولد \u0628\u064e\u064a\u0652\u0646\u064e"])
+    // pdf.js's exact text for the glyph: kasra, shadda, fatha, then هلل
+    expect(read([...ONE_BY_ONE, "ا", "\u0650\u0651\u064e\u0647\u0644\u0644"])).toEqual(["ذهب الولد ا\u0644\u0644\u064e\u0651\u0647\u0650".normalize("NFC")])
+  })
+
+  it("turns presentation forms into the letters they show", () => {
+    // Arial's lam-alef ligature, and Times's positional forms of قرأ
+    expect(read(["ﻻ", " ", "ﻗ", "ﺮ", "أ"])).toEqual(["لا قرأ"])
+    // a shadda-with-fatha form inside a word gains no space
+    expect(read(["ا", "ﻟ", "ﺰ", "ﱠ", "ﻣ", "َ", "ﺎ", "ن"]).map((t) => t.replace(/\p{Mn}/gu, ""))).toEqual(["الزمان"])
+  })
+
+  it("does not reverse a right-to-left piece that holds a whole word", () => {
+    const words = pdfPagesToParagraphs([{
+      n: 1, box: { x0: 0, y0: 0, x1: 595, y1: 842 }, tree: null,
+      items: [{ s: "ذهب الولد إلى المدرسة", x: 300, y: 700, b: 0, w: 120, h: 12, eol: false, dir: "rtl" }],
+    }], (t) => t).paragraphs.map((p) => p.text)
+    expect(words).toEqual(["ذهب الولد إلى المدرسة"])
+  })
+})
+
 describe("PDFs with no text to import (question 56)", () => {
   it("refuses a scanned PDF", async () => {
     expect(await refusal(buildPdf({ pages: [{ image: true }, { image: true }] }))).toBe("scanned")

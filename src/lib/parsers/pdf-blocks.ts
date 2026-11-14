@@ -114,9 +114,69 @@ const MIN_TAG_COVERAGE = 0.8
  *  order and is repaired; one in which none does ("לֹא" in a Word PDF) is
  *  already in reading order. */
 const MARK_AT_WORD_START = /(?:^|\s)\p{Mn}/u
-function repairRtl(piece: PdfTextPiece): PdfTextPiece {
-  if (piece.dir !== "rtl" || !MARK_AT_WORD_START.test(piece.s)) return piece
-  return { ...piece, s: piece.s.replace(/(\p{Mn}+)(\p{L})/gu, "$2$1") }
+/**
+ * AQU-2551 review finding 7. `perGlyph`: the page draws its right-to-left
+ * text one glyph at a time (see `drawnPerGlyph`), so a piece is one glyph and
+ * its marks. A glyph that stands for several letters (Geeza Pro's lam-meem in
+ * "المدرسة", the "الله" ligature) had its text reversed by pdf.js with the
+ * run: it is reversed back. Then presentation forms become their letters.
+ */
+function repairRtl(piece: PdfTextPiece, perGlyph = false): PdfTextPiece {
+  let s = piece.s
+  if (piece.dir === "rtl") {
+    if (perGlyph && SEVERAL_LETTER_GLYPH.test(s)) s = unreverseGlyph(s)
+    else if (MARK_AT_WORD_START.test(s)) s = s.replace(/(\p{Mn}+)(\p{L})/gu, "$2$1")
+  }
+  s = normalizePresentationForms(s)
+  return s === piece.s ? piece : { ...piece, s }
+}
+
+/** One glyph's text as pdf.js gives it reversed: its marks, then two or more letters. */
+const SEVERAL_LETTER_GLYPH = /^\p{Mn}*\p{L}{2,}$/u
+const SHADDA = "\u0651"
+
+/** A several-letter glyph's text back in reading order. Its letters are
+ *  reversed; its marks (in drawing order once reversed) go to its letters
+ *  from the last back, a shadda sharing its letter with one vowel, as Arabic
+ *  writes it: "َْني" → "يْنَ", "َِّهلل" → "للَّهِ". */
+function unreverseGlyph(s: string): string {
+  const chars = [...s].reverse()
+  const letters = chars.filter((c) => /\p{L}/u.test(c))
+  const marks = chars.filter((c) => /\p{Mn}/u.test(c))
+  const groups: string[][] = []
+  for (const m of marks) {
+    const last = groups[groups.length - 1]
+    if (last && last.length === 1 && (last[0] === SHADDA) !== (m === SHADDA)) last.push(m)
+    else groups.push([m])
+  }
+  const onLetter = letters.map(() => "")
+  for (let g = groups.length - 1, k = letters.length - 1; g >= 0; g--, k = Math.max(0, k - 1)) {
+    onLetter[k] = groups[g].join("") + onLetter[k]
+  }
+  return letters.map((l, i) => l + onLetter[i]).join("")
+}
+
+/** Arabic presentation forms (U+FB50–FDFF, U+FE70–FEFF), which Arial and
+ *  Times map their glyphs to, as the letters they show (NFKC). A mark's own
+ *  form decomposes with a space or a tatweel before the mark; both go. */
+function normalizePresentationForms(s: string): string {
+  if (!/[\uFB50-\uFDFF\uFE70-\uFEFF]/.test(s)) return s
+  return s.replace(/[\uFB50-\uFDFF\uFE70-\uFEFF]/g, (c) => c.normalize("NFKC").replace(/^[ \u0640]+(?=\p{Mn})/u, ""))
+}
+
+/** True when the page's right-to-left text is drawn one glyph a piece: most
+ *  of its right-to-left pieces hold one letter. Then a piece with several
+ *  letters is one glyph that stands for them. */
+function drawnPerGlyph(page: PdfPageContent): boolean {
+  let pieces = 0, single = 0
+  for (const it of page.items) {
+    if (!isPiece(it) || it.dir !== "rtl") continue
+    const letters = it.s.match(/\p{L}/gu)?.length ?? 0
+    if (letters === 0) continue
+    pieces++
+    if (letters === 1) single++
+  }
+  return pieces >= 8 && single >= 0.7 * pieces
 }
 
 /** Dot leaders (TOC lines) become one space; every whitespace run one space. */
@@ -208,6 +268,7 @@ function readTaggedPage(page: PdfPageContent, joiner: TextJoiner, footnote: Foot
   // marked-content id → its pieces, in drawing order
   const byId = new Map<string, (PdfTextPiece & { order: number })[]>()
   const stack: { id: string | null; tag: string | null }[] = []
+  const perGlyph = drawnPerGlyph(page)
   page.items.forEach((it, order) => {
     if (!isPiece(it)) {
       if (it.mc === "begin") stack.push({ id: it.id, tag: it.tag })
@@ -218,7 +279,7 @@ function readTaggedPage(page: PdfPageContent, joiner: TextJoiner, footnote: Foot
     for (let k = stack.length - 1; k >= 0; k--) if (stack[k].id) { owner = stack[k].id; break }
     if (owner) {
       const list = byId.get(owner) ?? []
-      list.push({ ...repairRtl(it), order })
+      list.push({ ...repairRtl(it, perGlyph), order })
       byId.set(owner, list)
     } else if (!stack.some((e) => e.tag === "Artifact")) {
       coverage.untagged += it.s.trim().length
@@ -401,10 +462,11 @@ const MARK_CLOSE = "\u0002"
 function layoutLines(page: PdfPageContent): Line[] {
   const lines: Line[] = []
   let cur: Line | null = null
+  const perGlyph = drawnPerGlyph(page)
   for (const raw of page.items) {
     if (!isPiece(raw) || !raw.s) continue
     if (Math.abs(raw.b) > 0.01) continue // rotated text is not reading text
-    const it = repairRtl(raw)
+    const it = repairRtl(raw, perGlyph)
     const h = Math.max(it.h, 1)
     // gap to the previous piece, reading left-to-right or right-to-left
     const gap: number = cur?.prev ? Math.max(it.x - (cur.prev.x + cur.prev.w), cur.prev.x - (it.x + it.w)) : 0

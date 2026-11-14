@@ -382,6 +382,8 @@ interface Line {
   sizeChars: Map<number, number>
   text: string
   prev: (PdfTextPiece & { sup: boolean }) | null
+  /** The last piece that is not one of pdf.js's zero-height spaces. */
+  lastReal: PdfTextPiece | null
 }
 
 // Private-use sentinels around a raised footnote number in a line.
@@ -400,21 +402,32 @@ function layoutLines(page: PdfPageContent): Line[] {
     const gap: number = cur?.prev ? Math.max(it.x - (cur.prev.x + cur.prev.w), cur.prev.x - (it.x + it.w)) : 0
     // A new line: the baseline moved, or a wide jump sideways (a table cell,
     // a second column). pdf.js's own end-of-line flags are not trusted, so a
-    // raised superscript stays on its line.
+    // raised superscript stays on its line. A jump next to a right-to-left
+    // piece is that piece's own drawing order, not a jump.
+    // AQU-2551 review finding 6: the zero-height space pdf.js adds between
+    // two pieces is not a position (after a right-to-left run it sits where
+    // the run began), so it never starts a line, and a jump is measured from
+    // the last real piece before it.
+    const zeroSpace = it.h === 0 && !it.s.trim()
+    const from = cur?.lastReal ?? null
+    const jump = from ? Math.max(it.x - (from.x + from.w), from.x - (it.x + it.w)) : 0
     const newLine = !cur
       || Math.abs(it.y - cur.y) > 0.45 * Math.max(h, cur.h)
-      || (gap > 3 * h && it.dir !== "rtl" && cur.prev?.dir !== "rtl")
+      || (!zeroSpace && jump > 3 * h && it.dir !== "rtl" && from?.dir !== "rtl")
     const sup = !!cur && !newLine && h < 0.85 * cur.h && it.y - cur.y > 0.12 * cur.h
     if (newLine || !cur) {
-      cur = { y: it.y, x: it.x, right: it.x + it.w, h, size: 0, sizeChars: new Map(), text: "", prev: null }
+      cur = { y: it.y, x: it.x, right: it.x + it.w, h, size: 0, sizeChars: new Map(), text: "", prev: null, lastReal: null }
       lines.push(cur)
     } else if (!sup && cur.prev && !cur.prev.sup && cur.prev.w > 0 && it.w > 0 && gap > 0.15 * h && !/\s$/.test(cur.text) && !/^\s/.test(it.s)) {
       cur.text += " "
     }
     cur.prev = { ...it, sup }
-    cur.x = Math.min(cur.x, it.x)
-    cur.h = Math.max(cur.h, h)
-    cur.right = Math.max(cur.right, it.x + it.w)
+    if (!zeroSpace) {
+      cur.lastReal = it
+      cur.x = Math.min(cur.x, it.x)
+      cur.h = Math.max(cur.h, h)
+      cur.right = Math.max(cur.right, it.x + it.w)
+    }
     if (sup && /^\s*\d{1,3}\s*$/.test(it.s)) { cur.text += `${MARK_OPEN}${it.s.trim()}${MARK_CLOSE}`; continue }
     cur.text += it.s
     const k = Math.round(h * 2) / 2

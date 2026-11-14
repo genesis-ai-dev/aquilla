@@ -359,6 +359,17 @@ describe("review findings: right-to-left text (Nov 14)", () => {
   /** One right-to-left line: its text, its right edge and width. */
   const rtlLine = (s: string, y: number, right: number, w: number): Piece => ({ s, x: right - w, y, w, eol: true })
 
+  it("keeps an English line whole around a Hebrew phrase, past pdf.js's zero-height space (finding 6)", () => {
+    // pdf.js puts the space after a right-to-left run where the run started
+    expect(read([
+      { s: "Genesis opens with", x: 155, y: 712, w: 93.3, dir: "ltr" },
+      { s: " ", x: 248.3, y: 712, w: 4.2, h: 0, dir: "ltr" },
+      { s: "ְּבֵראִׁשית ָּבָרא", x: 251.3, y: 712, w: 53.3 },
+      { s: " ", x: 257.1, y: 712, w: 4.2, h: 0, dir: "ltr" },
+      { s: "and goes on in English.", x: 307.6, y: 712, w: 112.3, dir: "ltr" },
+    ])).toEqual(["Genesis opens with בְּרֵאשִׁית בָּרָא and goes on in English."])
+  })
+
   it("puts marks after their letters in every right-to-left piece, whatever it starts with (finding 10)", () => {
     expect(read([{ s: "ספר ְּבֵראִׁשית", x: 100, y: 700, w: 120 }])).toEqual(["ספר בְּרֵאשִׁית"])
     expect(read([{ s: " ְּבֵראִׁשית", x: 100, y: 700, w: 120 }])).toEqual(["בְּרֵאשִׁית"])

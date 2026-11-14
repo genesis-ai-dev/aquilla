@@ -62,6 +62,8 @@ export type OutboxEventKind =
   | "cell.audio.place"
   // AQU-1767: cut one dub piece in two (contributor, like trim).
   | "cell.audio.cut"
+  // AQU-2492: undo a cut, keeping the approvals (contributor, like the cut).
+  | "cell.audio.uncut"
   | "cell.audio.measure"
   // AQU-777: per-cell file attachments (screenshots / reference images).
   // Contributor-level, non-chain-mutating. The bytes are already in R2 by the
@@ -428,6 +430,9 @@ export interface OutboxEventPayloads {
     historyOnly?: boolean
     /** Audited missing-row repair; retain the original attach's creation time. */
     restoreProjectionOf?: string
+    /** AQU-2426 (review, Nov 9): adds what is known about a clip already on the
+     *  line (its words) and chooses nothing; see the sync-worker's copy. */
+    wordsOnly?: boolean
     url: string
     /** AQU-646: an OPEN string. `cell_audio.slot` is unconstrained TEXT, and an
      *  extra target-audio track addresses its takes by its own track id. The
@@ -571,6 +576,25 @@ export interface OutboxEventPayloads {
     newAudioId: string
     newLabel?: string
     firstLabel?: string
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
+  /**
+   * AQU-2492 (review, Nov 9): UNDO a cut, as one event. The server removes
+   * `pieceAudioId` (the piece the cut made; it keeps its approvals, for a
+   * Redo), gives `audioId` its whole window and, with `rename`, its old name
+   * back, keeps the first piece's approvals with this undo, and gives the take
+   * back the approvals it had before the cut. A Redo is a `cell.audio.cut`
+   * naming the same `pieceAudioId` again. See sync-worker/src/events/types.ts.
+   */
+  "cell.audio.uncut": {
+    audioId: string
+    pieceAudioId: string
+    trimStartMs: number | null
+    trimEndMs: number | null
+    rename?: { label: string | null }
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
@@ -873,6 +897,10 @@ export interface OutboxEventPayloads {
     /** Legacy absolute dub anchor. Still projected so historical events replay
      *  unchanged, but nothing writes it any more. */
     targetStartMs?: number | null
+    /** AQU-2432 (Sam, Nov 9): an unrecorded line's ROOM following the
+     *  recordings, in ms (≥ 0; 0 is "no room"), for the language `targetLang`
+     *  names. Null clears it (its natural length). See lib/timeline/line-room. */
+    recordingsRoomMs?: number | null
     /** AQU-1462: lane this presentation timing belongs to. Omitted when shared. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

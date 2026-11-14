@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const calls: string[] = []
 const emitted: Array<Record<string, unknown>> = []
 const injected: Array<unknown[]> = []
+const placed: Array<Record<string, unknown>> = []
 let emitFails = false
 
 vi.mock("@/lib/audio/upload", () => ({
@@ -24,6 +25,11 @@ vi.mock("@/lib/sync/events-emit", () => ({
     emitted.push(input)
     return "ev-1"
   }),
+  emitCellAudioPlace: vi.fn(async (input: Record<string, unknown>) => {
+    calls.push("place")
+    placed.push(input)
+    return "ev-place"
+  }),
 }))
 vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   injectOptimisticAudioAttachment: vi.fn((...args: unknown[]) => { calls.push("inject"); injected.push(args) }),
@@ -33,7 +39,11 @@ vi.mock("@/lib/audio/sync-token-fetcher", () => ({ audioSyncTokenFetcherForSessi
 vi.mock("@/lib/audio/project-audio-state", () => ({ markProjectHasAudioDataSoon: vi.fn() }))
 vi.mock("@/lib/import", () => ({ probeDurationMsSafe: vi.fn(async () => 1234.5) }))
 
-import { ACCEPT, attachAudioFileToCell, validateAudioFile } from "./attach-file"
+import { ACCEPT, attachAudioFileToCell, attachUploadedTake, validateAudioFile } from "./attach-file"
+import { bornTakePlace, keptTakePlace } from "./new-take-place"
+import { targetChipGeom } from "@/lib/timeline/lane-timing"
+import type { CellData } from "@/hooks/useCells"
+import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 
 const session = { jwt: "jwt", username: "dev", createdAt: "" } as never
 
@@ -41,6 +51,7 @@ beforeEach(() => {
   calls.length = 0
   emitted.length = 0
   injected.length = 0
+  placed.length = 0
   emitFails = false
 })
 
@@ -84,6 +95,47 @@ describe("attachAudioFileToCell (the one-file upload)", () => {
     const file = new File([new Uint8Array(10)], "verse.wav", { type: "audio/wav" })
     await expect(attachAudioFileToCell({ session, projectId: "p1", fileId: "f1", cellId: "c1", file, username: "dev", surface: "cell" })).rejects.toThrow("outbox full")
     expect(calls).toEqual(["cache", "upload", "emit", "delete"])
+  })
+})
+
+// AQU-2491 (review, Nov 9): a line recorded before AQU-2491 still holds the
+// recorder's pre-roll as ITS place (-200 ms), and a take with no place of its
+// own reads that one. An uploaded take is given its own place, the line's
+// start, so it starts on its cue and not 0.2 s early.
+describe("AQU-2491: an uploaded take sits on its line's start, whatever place the line holds", () => {
+  const oldLine = { id: "c1", fileId: "f1", startTime: 10, endTime: 14, metadata: { target_offset_ms: -200 } } as unknown as CellData
+
+  it("on a line with times, the take gets its own place 0 and starts on its cue", async () => {
+    const file = new File([new Uint8Array(10)], "verse.wav", { type: "audio/wav" })
+    await attachAudioFileToCell({ session, projectId: "p1", fileId: "f1", cellId: "c1", file, username: "dev", targetLang: "za", surface: "cell", place: bornTakePlace(oldLine) })
+    expect(calls).toEqual(["cache", "upload", "emit", "place", "inject", "notify"])
+    expect(placed).toEqual([{
+      projectId: "p1", fileId: "f1", cellId: "c1", audioId: "audio-c1-1700000000000-abc.wav",
+      targetOffsetMs: 0, recordingsOffsetMs: null, targetLang: "za", author: "dev",
+    }])
+    const painted = injected[0][2] as AudioAttachmentOut
+    expect(painted.targetOffsetMs).toBe(0)
+    // Drawn, played and exported on its cue (10 s), not at the line's 9.8 s.
+    expect(targetChipGeom(oldLine, { durationMs: 1000, targetOffsetMs: painted.targetOffsetMs })!.start).toBe(10)
+    // The overlay waits for the place, so the take never flashes early.
+    expect(injected[0][3]).toBe("ev-place")
+  })
+
+  it("on a line with no times, nothing is placed, as before", async () => {
+    const file = new File([new Uint8Array(10)], "verse.wav", { type: "audio/wav" })
+    await attachAudioFileToCell({ session, projectId: "p1", fileId: "f1", cellId: "c1", file, username: "dev", surface: "cell", place: bornTakePlace({ startTime: undefined } as CellData) })
+    expect(placed).toEqual([])
+    expect((injected[0][2] as AudioAttachmentOut).targetOffsetMs).toBeUndefined()
+  })
+
+  it("a take made from another keeps that take's places in both timings", async () => {
+    await attachUploadedTake({
+      projectId: "p1", fileId: "f1", cellId: "c1", audioId: "audio-c1-2.wav", url: "frontier-audio://audio-c1-2.wav",
+      slot: "recording", mimeType: "audio/wav", durationMs: 1000, surface: "recording-tab", username: "dev",
+      place: keptTakePlace({ targetOffsetMs: -340, recordingsOffsetMs: 120 }),
+    })
+    expect(placed).toMatchObject([{ audioId: "audio-c1-2.wav", targetOffsetMs: -340, recordingsOffsetMs: 120 }])
+    expect(injected[0][2]).toMatchObject({ targetOffsetMs: -340, recordingsOffsetMs: 120 })
   })
 })
 

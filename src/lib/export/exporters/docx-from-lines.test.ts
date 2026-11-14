@@ -19,7 +19,8 @@ import type { CellData } from "@/hooks/useCells"
 import { prepareImportFile } from "@/lib/import"
 import { extractDocxStrings } from "@/lib/parsers/docx"
 import { pdfOfParagraphs } from "@/lib/parsers/__fixtures__/build-pdf"
-import { docxFromLinesFiles, exportDocxFromLines } from "./docx-from-lines"
+import { docxFromLinesFiles, exportDocxFromLines, linesToParagraphs } from "./docx-from-lines"
+import { scopeCellsForExport } from "../validation-scope"
 
 function cell(overrides: Partial<CellData>): CellData {
   return {
@@ -133,5 +134,25 @@ describe("a PDF source comes back as Word", () => {
       { type: "text", context: "Paragraph", text: "A first paragraph that is long enough to wrap onto a second line of the page, so the reader joins it." },
       { type: "text", context: "Paragraph", text: "A second paragraph." },
     ])
+  })
+})
+
+// Review finding 9 (Nov 14): hiding a paragraph's first line, or exporting
+// "validated only" with that line unvalidated, ran the rest of the paragraph
+// into the one before it.
+describe("a paragraph whose first line is left out", () => {
+  const text = (cells: CellData[]) => linesToParagraphs(cells).map((p) => p.lines.flat().map((r) => r.text).join(""))
+  const lines = (second: Partial<CellData>) => [
+    cell({ id: "1", original: "P1 s1.", translated: "T1 s1.", paragraphStart: true, status: "validated" }),
+    cell({ id: "2", original: "P2 s1.", translated: "T2 s1.", paragraphStart: true, ...second }),
+    cell({ id: "3", original: "P2 s2.", translated: "T2 s2.", status: "validated" }),
+  ]
+
+  it("stays its own paragraph when that line is hidden", () => {
+    expect(text(scopeCellsForExport(lines({ status: "validated", hidden: true }), "current"))).toEqual(["T1 s1.", "T2 s2."])
+  })
+
+  it("stays its own paragraph on validated only", () => {
+    expect(text(scopeCellsForExport(lines({ status: "unvalidated" }), "validated-only"))).toEqual(["T1 s1.", "T2 s2."])
   })
 })

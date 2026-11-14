@@ -282,18 +282,21 @@ export async function mergeSibling(
   // that use it commit together: a fold that fails before writing anything
   // leaves no empty lane behind, and a re-run finds the record and reuses it.
   // AQU-1606: that statement mints an id. A global collision rolls the batch
-  // back, so the same statements run again with a new id and nothing is written twice.
+  // back, and the retry builds the lane statements again, so each attempt
+  // carries a new id (AQU-2587: built once outside the retry, every attempt
+  // reused the clashing id and the merge failed). Nothing is written twice.
   // AQU-1781: the fold's lane is new to the host, so nobody holds a grant for
   // it — under the read wall every host member below Maintainer would read an
   // empty lane. The grant statement follows the lane statement in the same
   // batch, keyed by the tag because the lane statement keeps an existing record.
-  const laneStmts = [
+  const laneStmts = () => [
     ensureTargetLaneStmt(db, hostProjectId, lane),
     grantNewLaneStmt(db, hostProjectId, { legacyTag: lane }, null),
   ]
-  const lead = Math.min(BATCH_LIMIT - laneStmts.length, allStmts.length)
+  const LANE_STMTS = 2
+  const lead = Math.min(BATCH_LIMIT - LANE_STMTS, allStmts.length)
   await retryingLaneIdCollision(() =>
-    runFoldBatch(db, [...laneStmts, ...allStmts.slice(0, lead)]),
+    runFoldBatch(db, [...laneStmts(), ...allStmts.slice(0, lead)]),
   )
   for (let i = lead; i < allStmts.length; i += BATCH_LIMIT) {
     await runFoldBatch(db, allStmts.slice(i, i + BATCH_LIMIT))

@@ -13,10 +13,12 @@
 //     uploaded as a WAV.
 
 import type { FrontierSession } from "@/lib/frontier/types"
+import type { CellData } from "@/hooks/useCells"
 import { buildAudioId, fetchCellAudio, parseFrontierAudioUrl, uploadCellAudio } from "@/lib/audio/upload"
 import { audioCacheGet } from "@/lib/audio/bytes-cache"
 import { attachUploadedTake, OFFLINE_MESSAGE } from "@/lib/audio/attach-file"
-import { keptTakePlace } from "@/lib/audio/new-take-place"
+import { keptTakePlace, type TakePlace } from "@/lib/audio/new-take-place"
+import { targetChipGeom, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { recordTakeAdded } from "@/lib/history/take-steps"
@@ -57,6 +59,53 @@ export function wholeRecordingOf(pieces: readonly JoinPiece[]): string | null {
   return url
 }
 
+/**
+ * AQU-2491 (merge review, Nov 13): WHERE THE JOINED TAKE SITS. One rule: it
+ * sounds from exactly where its first piece sounded, in both timings.
+ *
+ * A take's place is where its CLIP starts. The joined clip starts with as much
+ * of the first piece's head as the join kept: all of it when the pieces are
+ * their whole recording, none when their sound is decoded and joined. So its
+ * place is the first piece's, later by the head the join left out
+ * (`droppedHeadMs`), in every timing where that head held back the sound:
+ *   - following the source, on every track: the sound starts a head trim after
+ *     the clip, so the place moves by it. `targetOffsetMsFor` keeps the new
+ *     clip, which has no head left to hide, at or after 0:00 (AQU-2495: a
+ *     take's sound never starts before the file).
+ *   - following the recordings, on a track made a layer: the same. A place of
+ *     its own there moves by it; with none, the take reads its place following
+ *     the source, which already moved.
+ *   - following the recordings, on the main track or a voice track: the take
+ *     sounds from its place (a head trim tightens the line), so the place
+ *     stays. A piece with no place of its own there read its place following
+ *     the source, which the joined take's no longer is, so the place it read
+ *     becomes the joined take's own, held at its line's start (only a place a
+ *     take was given there may pull it back over the take before it).
+ * A piece with no place of its own following the source reads its line's (on
+ * a line with no times, the start of its slot), and the joined take is placed
+ * from that. With nothing left out, the joined take keeps the piece's places
+ * as they are, none where it has none.
+ */
+export function joinedTakePlace(
+  line: CellData,
+  first: JoinPiece,
+  droppedHeadMs: number,
+  onLayer: boolean,
+): TakePlace | null {
+  const dropMs = Math.max(0, Math.round(droppedHeadMs))
+  if (dropMs === 0) return keptTakePlace(first)
+  const timed = typeof line.startTime === "number" && Number.isFinite(line.startTime)
+  const lineStartSec = timed ? line.startTime! : 0
+  // Where the piece's clip starts following the source, from its line's start.
+  const lineGeom = first.targetOffsetMs == null && timed ? targetChipGeom(line, undefined) : null
+  const clipMs = first.targetOffsetMs ?? (lineGeom ? Math.round((lineGeom.anchor - lineStartSec) * 1000) : 0)
+  const own = first.recordingsOffsetMs ?? null
+  return {
+    targetOffsetMs: targetOffsetMsFor(line, lineStartSec + (clipMs + dropMs) / 1000),
+    recordingsOffsetMs: onLayer ? (own == null ? null : own + dropMs) : (own ?? Math.max(0, clipMs)),
+  }
+}
+
 export interface JoinPiecesArgs {
   session: FrontierSession | null
   projectId: string
@@ -64,6 +113,12 @@ export interface JoinPiecesArgs {
   cellId: string
   /** Every live piece of the take, in clip order. */
   pieces: readonly JoinPiece[]
+  /** The line the take is on (the cell holding it), which the joined take is
+   *  placed against (`joinedTakePlace`). */
+  line: CellData
+  /** The take is on a track made a layer (music, effects): following the
+   *  recordings its clip is placed as following the source. */
+  onLayer: boolean
   slot: string
   targetLang?: string
   username: string
@@ -118,13 +173,14 @@ export async function joinTakePieces(args: JoinPiecesArgs): Promise<string> {
     label: args.label,
     surface: "recording-tab" as const,
     ...(args.targetLang ? { targetLang: args.targetLang } : {}),
-    // AQU-2491 (review, Nov 9): made from the pieces, it keeps their place
-    // (the first piece's) rather than reading one an older recording left on
-    // the line. Pieces with none read the line's, and so does the joined take.
-    place: keptTakePlace(args.pieces[0]),
   }
 
   const whole = wholeRecordingOf(args.pieces)
+  // AQU-2491 (review, Nov 9): made from the pieces, it is placed by their place
+  // (the first piece's) rather than reading one an older recording left on the
+  // line. Merge review, Nov 13: where that piece's SOUND was — the decoded
+  // join leaves its head trim out, the whole recording keeps it.
+  const place = joinedTakePlace(args.line, args.pieces[0], whole ? 0 : (args.pieces[0].trimStartMs ?? 0), args.onLayer)
   // AQU-2492 (review, Nov 9), finding 15: the joined take's id, minted before
   // any work, so its Undo step can be recorded as the join starts.
   const baseId = buildAudioId(args.cellId)
@@ -132,7 +188,7 @@ export async function joinTakePieces(args: JoinPiecesArgs): Promise<string> {
   const audioId = `${baseId}.${ext}`
   const landed = recordJoined(args, audioId)
   try {
-    await joinAs(args, getSyncToken, common, whole, baseId, audioId)
+    await joinAs(args, getSyncToken, { ...common, place }, whole, baseId, audioId)
   } catch (e) {
     landed(false)
     throw e

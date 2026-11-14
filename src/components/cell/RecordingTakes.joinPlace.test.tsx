@@ -37,6 +37,28 @@ vi.mock("@/lib/audio/attach-file", async (orig) => ({
   attachUploadedTake: vi.fn(async (args: Record<string, unknown>) => { attached.calls.push(args) }),
 }))
 
+// Merge review, Nov 13: a join of trimmed pieces decodes and uploads their
+// sound. Here a "recording" is 1000 samples a second, its bytes its samples.
+vi.mock("@/lib/audio/upload", async (orig) => {
+  const real = await orig<typeof import("@/lib/audio/upload")>()
+  return {
+    ...real,
+    fetchCellAudio: vi.fn(async () => new Uint8Array(4000)),
+    uploadCellAudio: vi.fn(async (a: { audioId: string; ext: string; blob: Blob }) => ({ audioId: a.audioId, ext: a.ext, url: real.buildFrontierAudioUrl(a.audioId, a.ext), sizeBytes: a.blob.size })),
+  }
+})
+vi.mock("@/lib/audio/bytes-cache", () => ({ audioCacheGet: vi.fn(async () => null) }))
+vi.mock("@/lib/audio/decode-mono", async (orig) => ({
+  ...(await orig<typeof import("@/lib/audio/decode-mono")>()),
+  TARGET_RATE: 1000,
+  decodeToMono48k: vi.fn(async (bytes: Uint8Array) => new Float32Array(bytes.length)),
+  concatPcm: (clips: Float32Array[]) => new Float32Array(clips.reduce((n, c) => n + c.length, 0)),
+}))
+vi.mock("@/lib/audio/wav-encode", async (orig) => ({
+  ...(await orig<typeof import("@/lib/audio/wav-encode")>()),
+  encodeWavPcm16: (samples: Float32Array) => new Blob([new Uint8Array(samples.length)]),
+}))
+
 import { RecordingTakes } from "./RecordingTakes"
 import { applyRowOverlays } from "@/components/EditorTable"
 import type { CellData } from "@/hooks/useCells"
@@ -49,23 +71,28 @@ const P1 = "audio-c2-1.webm", P2 = "audio-c2-2.webm"
 
 /** Line 2 (5 s to 9 s), its 4 s take placed 0.5 s after the line's start and
  *  cut at 1.5 s: both pieces keep the take's place, as the server stores them. */
-function lineAsTheTableHasIt(place: { targetOffsetMs: number | null; recordingsOffsetMs: number | null } = { targetOffsetMs: 500, recordingsOffsetMs: null }): CellData {
+function lineAsTheTableHasIt(
+  place: { targetOffsetMs: number | null; recordingsOffsetMs: number | null } = { targetOffsetMs: 500, recordingsOffsetMs: null },
+  /** Merge review, Nov 13: the take's start trimmed off this far, and the track it is on. */
+  opts: { headMs?: number; slot?: string } = {},
+): CellData {
   const line = {
     id: "c2", fileId: "f1", original: "", translated: "", context: "", group: "", type: "text",
     status: "unvalidated", validationStatus: "none", activeValidators: [], validationHistory: [],
     history: [], threads: [], medium: "media", startTime: 5, endTime: 9,
   } as unknown as CellData
+  const slot = opts.slot ?? "recording"
   const piece = (audioId: string, over: Record<string, unknown>) => ({
-    audioId, url: URL, slot: "recording", mimeType: "audio/webm", voiceId: null, referenceAudioId: null,
+    audioId, url: URL, slot, mimeType: "audio/webm", voiceId: null, referenceAudioId: null,
     durationMs: 4000, trimStartMs: null, trimEndMs: null, ...place, ...over,
   })
   const entry = {
     attachments: {
-      [P1]: piece(P1, { label: "Take 1 · 1", trimEndMs: 1500 }),
+      [P1]: piece(P1, { label: "Take 1 · 1", trimEndMs: 1500, ...(opts.headMs ? { trimStartMs: opts.headMs } : {}) }),
       [P2]: piece(P2, { label: "Take 1 · 2", trimStartMs: 1500, pieceOf: P1 }),
     },
-    selectedBySlot: { recording: P1 },
-    selectedAudioId: P1,
+    selectedBySlot: { [slot]: P1 },
+    selectedAudioId: slot === "recording" ? P1 : null,
     selectedGeneratedVoiceAudioId: null,
     audioTimings: {},
   } as unknown as CellAudioEntry
@@ -99,5 +126,42 @@ describe("Join from the Recording tab keeps the place of the take it was made fr
     fireEvent.click(screen.getByTestId("cell-take-join"))
     await waitFor(() => expect(attached.calls).toHaveLength(1))
     expect(attached.calls[0]).toMatchObject({ cellId: "c2", place: { targetOffsetMs: null, recordingsOffsetMs: 700 } })
+  })
+
+  // Merge review, Nov 13 (MUST 1): with its first piece's start trimmed off,
+  // the joined recording starts where that piece's sound did, so its place
+  // following the source is that much later: the piece's clip sat 0.5 s into
+  // its line with 1 s trimmed off, and sounded from 1.5 s in. Following the
+  // recordings a main-track take sounds from its place, which stays where the
+  // piece read it (0.5 s, now the joined take's own).
+  it("with its first piece's start trimmed off: the joined take sounds where that piece did", async () => {
+    attached.calls.length = 0
+    render(
+      <RecordingTakes
+        project={project} cell={lineAsTheTableHasIt(undefined, { headMs: 1000 })} cellText="Hola" editable username="dev"
+        session={{ jwt: "j", username: "dev" } as never} onOpenRecording={vi.fn()} onUseAsCellText={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("cell-take-join"))
+    await waitFor(() => expect(attached.calls).toHaveLength(1))
+    expect(attached.calls[0]).toMatchObject({ cellId: "c2", durationMs: 3000, place: { targetOffsetMs: 1500, recordingsOffsetMs: 500 } })
+  })
+
+  // …and on a track made a layer, following the recordings its clip is placed
+  // as following the source: with no place of its own there, it reads that
+  // one, which already moved.
+  it("on a track made a layer: the joined take sounds where that piece did, in both timings", async () => {
+    attached.calls.length = 0
+    const TRACK = "01a17e67-ef58-74f7-a093-be935876197b"
+    const withLayer = { ...project, files: [{ id: "f1", trackOverrides: { [TRACK]: { kind: "audio", name: "Music", setsLineLengths: false } } }] } as unknown as ProjectRecord
+    render(
+      <RecordingTakes
+        project={withLayer} cell={lineAsTheTableHasIt({ targetOffsetMs: 500, recordingsOffsetMs: 300 }, { headMs: 1000, slot: TRACK })} cellText="Hola" editable username="dev"
+        session={{ jwt: "j", username: "dev" } as never} onOpenRecording={vi.fn()} onUseAsCellText={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("cell-take-join"))
+    await waitFor(() => expect(attached.calls).toHaveLength(1))
+    expect(attached.calls[0]).toMatchObject({ cellId: "c2", slot: TRACK, place: { targetOffsetMs: 1500, recordingsOffsetMs: 1300 } })
   })
 })

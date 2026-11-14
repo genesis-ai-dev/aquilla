@@ -40,7 +40,7 @@ import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { DenoiseButton } from "./audio/DenoiseButton"
 import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { keptWindowSec, piecesWindowSec, type KeptWindow } from "@/lib/audio/kept-window"
-import { takeTrackVars } from "@/lib/timeline/take-colors"
+import { takeTrackVars, tracksForTakesIn } from "@/lib/timeline/take-colors"
 import { TRACK_DOT_CLASS } from "@/lib/timeline/track-colors"
 import { minHeadTrimSec } from "@/lib/timeline/lane-timing"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
@@ -65,7 +65,7 @@ import { splitTakeName } from "@/lib/audio/take-groups"
 import { pieceGroupOf, type AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { TakesStrip, nextTakeLabel } from "@/components/AudioRecorder/TakesStrip"
 import { attachmentOutFrom } from "@/lib/audio/cut-take"
-import { GENERATED_VOICE_SLOT, RECORDING_SLOT, slotsForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
+import { GENERATED_VOICE_SLOT, programmeTrackSlots, RECORDING_SLOT, slotsForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
 import { formatTakeSeconds, takePlayedMs } from "@/lib/audio/take-length"
 import { useInRouterContext, useNavigate } from "react-router-dom"
 import { isVoiceChangedAudioId } from "@/lib/audio/change-voice"
@@ -348,6 +348,10 @@ function CellTakeBlockView({
     // AQU-2492 (review, Nov 9): an Undo step, naming what played in the slot
     // before (the take in pieces), read outside the try for the compiler.
     const history = { selectedBefore: playingInSlot(owner, slot) }
+    // Merge review, Nov 13: a take on a track made a layer is placed as it is
+    // following the source, in both timings (the joined take's place). The
+    // tracks are the timeline's: a heard line's take lives in the cue sibling.
+    const onLayer = programmeTrackSlots(tracksForTakesIn(project.files, trackFileId ?? owner.fileId)).layerTrackSlots.includes(slot)
     try {
       await joinTakePieces({
         session,
@@ -355,6 +359,8 @@ function CellTakeBlockView({
         fileId: owner.fileId,
         cellId: owner.id,
         pieces: split,
+        line: owner,
+        onLayer,
         slot,
         label: nextTakeLabel(trackTakes),
         ...(targetLang ? { targetLang } : {}),
@@ -367,7 +373,7 @@ function CellTakeBlockView({
     setJoining(false)
     if (failed) setJoinError(failed)
     else await onCommitted?.(owner.id)
-  }, [split, session, project.id, owner.fileId, owner.id, owner.attachments, targetLang, username, onCommitted])
+  }, [split, session, project.id, project.files, trackFileId, owner, targetLang, username, onCommitted])
 
   // Deletable even when it is the line's only take (Sam, 2026-09-29) — the
   // same removal as the takes lists. Nothing is chosen in its place: the line

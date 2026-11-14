@@ -1251,29 +1251,10 @@ function locateInSegmentOrder(
   parts: readonly { source?: string }[],
   lineText: string,
 ): { stretches: (LineStretch | null)[]; lost: LineStretch[] } {
-  const stretches: (LineStretch | null)[] = []
-  const at: (LineStretch | null)[] = []
-  let cursor = 0
-  let unknownBefore = false
   let kept = 0
-  for (const line of lines) {
-    const source = ((line.kept ? parts[kept].source : line.source) ?? "").trim()
-    let found = source ? findInLine(lineText, source, cursor) : null
-    while (found && unknownBefore && !/\S/.test(lineText.slice(cursor, found.start))) {
-      found = findInLine(lineText, source, found.start + 1)
-    }
-    at.push(found)
-    if (line.kept) {
-      stretches.push(found)
-      kept++
-    }
-    if (found) {
-      cursor = found.end
-      unknownBefore = false
-    } else if (!line.kept) {
-      unknownBefore = true
-    }
-  }
+  const sources = lines.map((line) => ((line.kept ? parts[kept++].source : line.source) ?? "").trim())
+  const at = fittedLines(sources, lineText) ?? firstFound(sources, lines, lineText)
+  const stretches = at.filter((_, k) => lines[k].kept)
   if (stretches.some((s) => s === null)) return { stretches, lost: [] }
   const lost: LineStretch[] = []
   let previous = 0
@@ -1295,6 +1276,61 @@ function locateInSegmentOrder(
   })
   closeUnknown(lineText.length)
   return { stretches, lost }
+}
+
+/** AQU-2552 (review r10): each line whose words are known found after the
+ *  one before it, so that the lines fit together: between two lines next to
+ *  each other only whitespace, and some words where lines whose words are
+ *  not known (deleted ones) sat. So a remaining line is never found inside a
+ *  deleted line's stretch. Null when no placement fits (a line not found). */
+function fittedLines(sources: readonly string[], lineText: string): (LineStretch | null)[] | null {
+  const out: (LineStretch | null)[] = []
+  let budget = 10_000
+  const place = (k: number, cursor: number, unknown: boolean): boolean => {
+    if (--budget < 0) return false
+    const fits = (to: number) => /\S/.test(lineText.slice(cursor, to)) === unknown
+    if (k === sources.length) return fits(lineText.length)
+    if (!sources[k]) {
+      out.push(null)
+      if (place(k + 1, cursor, true)) return true
+      out.pop()
+      return false
+    }
+    for (let found = findInLine(lineText, sources[k], cursor); found; found = findInLine(lineText, sources[k], found.start + 1)) {
+      if (!fits(found.start)) {
+        if (unknown) continue
+        break
+      }
+      out.push(found)
+      if (place(k + 1, found.end, false)) return true
+      out.pop()
+    }
+    return false
+  }
+  return place(0, 0, false) ? out : null
+}
+
+/** Where no placement fits: each line found at its first occurrence after
+ *  the one before it (after a line whose words are not known, past some
+ *  words), or null. */
+function firstFound(sources: readonly string[], lines: readonly ParagraphLine[], lineText: string): (LineStretch | null)[] {
+  const at: (LineStretch | null)[] = []
+  let cursor = 0
+  let unknownBefore = false
+  sources.forEach((source, k) => {
+    let found = source ? findInLine(lineText, source, cursor) : null
+    while (found && unknownBefore && !/\S/.test(lineText.slice(cursor, found.start))) {
+      found = findInLine(lineText, source, found.start + 1)
+    }
+    at.push(found)
+    if (found) {
+      cursor = found.end
+      unknownBefore = false
+    } else if (!lines[k].kept) {
+      unknownBefore = true
+    }
+  })
+  return at
 }
 
 /** The stretch [from, to) of `text` without whitespace at its edges, or null

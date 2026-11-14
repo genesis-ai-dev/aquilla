@@ -702,6 +702,19 @@ describe("Word export — what a lost line owns is its own text range and its fo
     expect(out.result.fidelity.droppedLinks).toBe(0)
   })
 
+  // Review r10 (N4): each remaining line is found after the one before it,
+  // and never inside a deleted line's stretch. Here line 2's words are also
+  // the end of line 1's first sentence, before line 1's tab: found there,
+  // line 1's tab and its last words would sit between lines 2 and 3.
+  it("a remaining line whose words a deleted line also holds is found in its own place, so the deleted line's tab goes with it", async () => {
+    const bytes = await docxBytes(para(run("First line here" + PAD) + `<w:r><w:tab/></w:r>` + run("Second line here" + PAD + " ") + run(L3)) + NEXT)
+    const [a, b, c, next] = await importCells(bytes, false)
+    expect(a.original).toMatch(/\tSecond line here and it goes on with many more words,$/)
+    expect(b.original).toBe(PAD.trim().replace(/^and it goes on with many more words, /, ""))
+    expect(paras((await wordOut(bytes, [typed(b, "Deux."), typed(c, "Trois."), next], [a])).body)[0]).toBe("Deux. Trois.")
+    expect(paras((await wordOut(bytes, [b, c, next], [a])).body)[0]).toBe(`${b.original} Third line here …`)
+  })
+
   // R7: the structure check flags a link with no run again; only a link this
   // export emptied on purpose (its words were all a lost line's) is exempt,
   // named by its start tag.

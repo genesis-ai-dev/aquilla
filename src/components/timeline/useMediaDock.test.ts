@@ -212,6 +212,43 @@ describe("useMediaDock", () => {
     })
   })
 
+  // Station closed, the page reloaded, then the Station tab: the text was
+  // display:none and laid out at 0. LegendList crashes on that collapse, and
+  // again if it has to come back from it. A tab behind another keeps the
+  // area's size instead.
+  it("keeps the text at the area's size when the Station tab opens", () => {
+    const { result } = setup()
+    const ll = document.createElement("div")
+    const lr = document.createElement("div")
+    document.body.append(ll, lr)
+    act(() => {
+      result.current.dock.boxRefs.ll(ll)
+      result.current.dock.boxRefs.lr(lr)
+    })
+    const text = result.current.dock.hosts.text!
+    const station = result.current.dock.hosts.station!
+    expect(text.style.display).toBe("")
+    expect(text.style.visibility).toBe("")
+    expect(station.style.display).not.toBe("none")
+    expect(station.style.visibility).toBe("hidden")
+    expect(station.style.position).toBe("absolute")
+
+    act(() => result.current.dock.activate("station"))
+    expect(result.current.dock.view.isShowing("station")).toBe(true)
+    expect(result.current.dock.view.isShowing("text")).toBe(false)
+    expect(text.parentElement).toBe(lr)
+    expect(text.style.display).not.toBe("none")
+    expect(text.style.visibility).toBe("hidden")
+    expect(text.style.position).toBe("absolute")
+    expect(text.inert).toBe(true)
+    expect(station.style.display).toBe("")
+    expect(station.style.visibility).toBe("")
+    expect(station.style.position).toBe("")
+    expect(station.inert).toBe(false)
+    ll.remove()
+    lr.remove()
+  })
+
   // Review finding 4: what the YouTube picture listens for
   // (MediaVideoPane.test.tsx, "moved to another area by the dock").
   it("tells the film's host it is about to move, while it still sits where it was", () => {

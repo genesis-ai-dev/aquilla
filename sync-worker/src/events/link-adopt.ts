@@ -17,6 +17,9 @@
 //      cell it now stands in for. The projection stores that name in
 //      `cells.upstream_cell_id`, so the mapping is rebuilt from the event log
 //      like every other projected column.
+//      AQU-2549: a line whose text is unchanged keeps its own event id (the
+//      projection's `adopt` rule), so only lines whose text changed read
+//      "source changed" — also on a file imported in one step.
 //
 // From then on the forward fold resolves an upstream cell of that file through
 // the mapping (`loadAdoptedCellIds`) and writes onto the project's cell. The

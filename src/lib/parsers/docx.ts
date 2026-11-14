@@ -180,8 +180,9 @@ export function docxPartsToStrings(
  * Split a paragraph into segments without ever breaking a USFM footnote span.
  * Footnote spans are masked to a break-character-free placeholder (so the
  * splitter treats it as part of a word), then restored per-segment.
+ * AQU-2551: the PDF reader cuts its paragraphs with this same function.
  */
-function splitFootnoteAware(
+export function splitFootnoteAware(
   plain: string,
   cellUnit: CellUnit = "sentence",
 ): { text: string; group: string }[] {

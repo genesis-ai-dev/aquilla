@@ -870,7 +870,7 @@ function matchAnchors(
     return findWhole(masked, needle, cursor)
   }
   // AQU-2552 (review r10): where the lines a link, field or content control's
-  // words are in are written in the translation; it is looked for only there.
+  // words are in are written in the translation; it is looked for there first.
   const writtenRange = (lines: { first: number; last: number }) => {
     let start = -1
     let end = -1
@@ -882,13 +882,18 @@ function matchAnchors(
     return { start, end }
   }
   const findIn = (anchor: Anchor) => {
-    if (!anchor.lines || !lineOf) return find(anchor.needle, anchor.order)
-    const range = writtenRange(anchor.lines)
-    if (range.start === -1) return null
     const found = find(anchor.needle, anchor.order)
-    if (found && found.start >= range.start && found.end <= range.end) return found
-    const inside = findWhole(masked, anchor.needle, Math.max(cursor, range.start))
-    return inside && inside.end <= range.end ? inside : null
+    if (!anchor.lines || !lineOf) return found
+    const range = writtenRange(anchor.lines)
+    if (range.start !== -1) {
+      if (found && found.start >= range.start && found.end <= range.end) return found
+      const inside = findWhole(masked, anchor.needle, Math.max(cursor, range.start))
+      if (inside && inside.end <= range.end) return inside
+    }
+    // AQU-2552 (review r11): not in its own line's translation (the translator
+    // moved the word to another line): looked for in the whole paragraph, as
+    // before review r10.
+    return found
   }
   for (const anchor of anchors) {
     // A look stretch's node may carry several stretches; frames carry one.

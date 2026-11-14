@@ -766,6 +766,27 @@ describe("Word export — what a lost line owns is its own text range and its fo
     expect(paras((await wordOut(bytes, [b, c, next], [a])).body)[0]).toBe(`${b.original} Third line here …`)
   })
 
+  // Review r11 (finding 2): nothing hidden, but the translator moved a word
+  // that a link, field or content control holds to another line. It is looked
+  // for in its own line's translation first; when the word is not there, in
+  // the whole paragraph, as before review r10, so it is kept, not emptied.
+  it.each([
+    ["a link", `${LINK}${run("Linked")}</w:hyperlink>`, LINK, "</w:hyperlink>"],
+    ["a content control", `${SDT}${run("Linked")}</w:sdtContent></w:sdt>`, SDT, "</w:sdtContent>"],
+    ["a field", FIELD_OF(run("Linked")), `w:fldCharType="separate"/></w:r>`, `<w:r><w:fldChar w:fldCharType="end"/>`],
+  ])("%s whose word the translator moved to another line stays on that word", async (_, wrapped, open, close) => {
+    const bytes = await docxBytes(para(run(L1 + " ") + run("Second ") + wrapped + run(" line here" + PAD + " ") + run(L3)) + NEXT)
+    const [a, b, c, ...rest] = await importCells(bytes, false)
+    expect(b.original.startsWith("Second Linked line here")).toBe(true)
+    const out = await wordOut(bytes, [typed(a, "Un Linked."), typed(b, "Deux."), typed(c, "Trois."), ...rest])
+    const p = firstPara(out.body)
+    expect(wordsOf(p)).toBe("Un Linked. Deux. Trois.")
+    expect(wordsOf(p.slice(0, p.indexOf(open)))).toBe("Un ")
+    expect(wordsOf(p.slice(p.indexOf(open), p.indexOf(close)))).toBe("Linked")
+    expect(out.result.fidelity.droppedLinks).toBe(0)
+    expect(out.result.fidelity.emptiedFields).toBe(0)
+  })
+
   // R7: the structure check flags a link with no run again; only a link this
   // export emptied on purpose (its words were all a lost line's) is exempt,
   // named by its start tag.

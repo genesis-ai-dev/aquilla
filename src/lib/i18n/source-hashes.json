@@ -4951,7 +4951,12 @@
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
     "nav.report.cropAlt": "83ec5c5cea391e3b",
-    "nav.report.descriptionFieldLabel": "526e0087cc3f254d"
+    "nav.report.descriptionFieldLabel": "526e0087cc3f254d",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -9887,7 +9892,12 @@
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
     "nav.report.cropAlt": "83ec5c5cea391e3b",
-    "nav.report.descriptionFieldLabel": "526e0087cc3f254d"
+    "nav.report.descriptionFieldLabel": "526e0087cc3f254d",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14810,7 +14820,12 @@
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
     "nav.report.cropAlt": "83ec5c5cea391e3b",
-    "nav.report.descriptionFieldLabel": "526e0087cc3f254d"
+    "nav.report.descriptionFieldLabel": "526e0087cc3f254d",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -19759,7 +19774,12 @@
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
     "nav.report.cropAlt": "83ec5c5cea391e3b",
-    "nav.report.descriptionFieldLabel": "526e0087cc3f254d"
+    "nav.report.descriptionFieldLabel": "526e0087cc3f254d",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -25983,7 +26003,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -32209,7 +32234,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -38507,7 +38537,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -44852,7 +44887,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -51112,7 +51152,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -59318,7 +59363,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -67529,7 +67579,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -76151,7 +76206,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -84416,7 +84476,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -93058,7 +93123,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -101693,7 +101763,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -110364,7 +110439,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -119021,7 +119101,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -127670,6 +127755,11 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   }
 }

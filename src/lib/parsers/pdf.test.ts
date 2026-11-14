@@ -346,6 +346,25 @@ describe("right-to-left text", () => {
   })
 })
 
+// Review findings 5, 6 and 10 (Nov 14): an untagged right-to-left PDF read
+// as if its lines started at the left edge, a Hebrew phrase in an English
+// line split the line, and some vowel marks stayed before their letters.
+describe("review findings: right-to-left text (Nov 14)", () => {
+  type Piece = { s: string; x: number; y: number; w: number; h?: number; dir?: string; eol?: boolean }
+  const page = (pieces: Piece[]) => [{
+    n: 1, box: { x0: 0, y0: 0, x1: 595, y1: 842 }, tree: null,
+    items: pieces.map((p) => ({ s: p.s, x: p.x, y: p.y, b: 0, w: p.w, h: p.h ?? 12, eol: p.eol ?? false, dir: p.dir ?? "rtl" })),
+  }]
+  const read = (pieces: Piece[]) => pdfPagesToParagraphs(page(pieces), (t) => t).paragraphs.map((p) => p.text)
+  /** One right-to-left line: its text, its right edge and width. */
+  const rtlLine = (s: string, y: number, right: number, w: number): Piece => ({ s, x: right - w, y, w, eol: true })
+
+  it("puts marks after their letters in every right-to-left piece, whatever it starts with (finding 10)", () => {
+    expect(read([{ s: "ספר ְּבֵראִׁשית", x: 100, y: 700, w: 120 }])).toEqual(["ספר בְּרֵאשִׁית"])
+    expect(read([{ s: " ְּבֵראִׁשית", x: 100, y: 700, w: 120 }])).toEqual(["בְּרֵאשִׁית"])
+  })
+})
+
 describe("PDFs with no text to import (question 56)", () => {
   it("refuses a scanned PDF", async () => {
     expect(await refusal(buildPdf({ pages: [{ image: true }, { image: true }] }))).toBe("scanned")

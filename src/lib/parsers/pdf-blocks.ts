@@ -107,9 +107,11 @@ const END_PUNCT = /[.!?:;"”’)\]…»]$/
 /** Share of a page's text the tags must cover for the tagged reader to be used. */
 const MIN_TAG_COVERAGE = 0.8
 
-/** pdf.js puts a right-to-left run's combining marks before their letter. */
+/** pdf.js puts a right-to-left run's combining marks before their letter.
+ *  AQU-2551 review finding 10: decided by the piece's direction alone, so a
+ *  piece that starts with an unpointed letter or a space is repaired too. */
 function repairRtl(piece: PdfTextPiece): PdfTextPiece {
-  if (piece.dir !== "rtl" || !/^\p{Mn}/u.test(piece.s)) return piece
+  if (piece.dir !== "rtl") return piece
   return { ...piece, s: piece.s.replace(/(\p{Mn}+)(\p{L})/gu, "$2$1") }
 }
 

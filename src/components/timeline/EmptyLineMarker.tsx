@@ -29,6 +29,7 @@ import { parseScriptureReference } from "@/lib/scripture-reference"
 import { cn } from "@/lib/utils"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { useFormat } from "@/lib/i18n/format"
+import { useTimelineOriginPx } from "./timeline-origin"
 
 /** What the marker calls its line: its own label, its reference, else its
  *  number. AQU-2432 (review, Nov 9): the number is the one the text table's
@@ -69,6 +70,9 @@ export function EmptyLineMarker({
   const fmt = useFormat()
   const { lineNumberFor } = useEditorActions()
   const { cell, atPx, tabLeftPx, roomSec, position } = marker
+  // Drawn from its time column's left edge, as every chip is: a column is
+  // one slice wide and clips what lies outside it.
+  const originPx = useTimelineOriginPx()
   const line = markerLineName(cell, position, t, lineNumberFor?.(cell.id))
   // AQU-2432 (review, Nov 9): the seconds in the reader's own number format,
   // isolated like every number in translated prose.
@@ -85,7 +89,7 @@ export function EmptyLineMarker({
       // Over its neighbours either side (a hovered or dragged take still
       // comes in front of it), and never in their way: see the header.
       className="pointer-events-none absolute inset-y-0"
-      style={{ left: `${tabLeftPx}px`, width: `${LINE_MARKER_TAB_PX}px`, zIndex }}
+      style={{ left: `${tabLeftPx - originPx}px`, width: `${LINE_MARKER_TAB_PX}px`, zIndex }}
     >
       <span
         aria-hidden

@@ -12,6 +12,7 @@ vi.mock("@/lib/audio/transport-pause", () => ({ pauseAllTransports: vi.fn() }))
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
 import { buildTimelineLayout } from "@/lib/timeline/layout"
 import { LINE_MARKER_TAB_PX } from "@/lib/timeline/line-markers"
+import { TimelineOrigin } from "./timeline-origin"
 import type { CellData } from "@/hooks/useCells"
 
 const PX = 40
@@ -267,5 +268,30 @@ describe("the marker for a line with too little room (AQU-2432, Nov 9, rule 8)",
     expect(tab.className).toContain("top-0")
     expect(tab.className).toContain("h-[var(--tl-chip-top,10px)]")
     expect(left(screen.getByTestId("tl-line-marker-c"))).toBe(3 * PX - LINE_MARKER_TAB_PX / 2)
+  })
+})
+
+describe("the marker past the first time column (AQU-2432)", () => {
+  // The lanes draw in time columns 2048px wide, each positioned from its own
+  // left edge; a marker drawn at its whole-timeline x was clipped away in
+  // every column after the first.
+  it("is drawn from that column's edge, at the seam before the next take", () => {
+    const cells = [bookLine("a", { takeMs: 60_000 }), bookLine("b", { roomMs: 0 }), bookLine("c", { takeMs: 6_000 })]
+    const layout = buildTimelineLayout("audioFirst", cells, cells, null, { standInLenSec: () => 4 })
+    const items: TargetAudioItem[] = cells.filter((c) => c.selectedAudioId)
+      .map((cell) => ({ cell, kind: "take" as const, audioId: takeId(cell.id) }))
+    renderWithTooltips(
+      <TimelineOrigin px={2048}>
+        <TargetAudioLane
+          validationRequirementAudio={1} pxPerSec={PX} viewStartSec={51.2} viewEndSec={102.4}
+          selectedId={null} editable snapEnabled={false} onSelect={() => {}}
+          layout={layout} items={items} emptyCells={cells.filter((c) => !c.selectedAudioId)}
+        />
+      </TimelineOrigin>,
+    )
+    const marker = screen.getByTestId("tl-line-marker-b")
+    expect(left(marker)).toBe(60 * PX - 2048 - LINE_MARKER_TAB_PX / 2)
+    const seam = left(marker) + left(screen.getByTestId("tl-line-marker-b-line"))
+    expect(seam).toBe(left(screen.getByTestId("tl-target-c")))
   })
 })

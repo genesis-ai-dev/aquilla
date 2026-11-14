@@ -10,6 +10,7 @@ import { renderWithTooltips } from "@/test-utils/tooltip"
 import { TimelineLane } from "./TimelineLane"
 import { buildTimelineLayout } from "@/lib/timeline/layout"
 import { LINE_MARKER_TAB_PX } from "@/lib/timeline/line-markers"
+import { TimelineOrigin } from "./timeline-origin"
 import type { CellData } from "@/hooks/useCells"
 
 const PX = 40
@@ -65,6 +66,27 @@ describe("a line with too little room, in its own rows (AQU-2432, Nov 9)", () =>
     expect(parseFloat(marker.style.left)).toBe(5 * PX - LINE_MARKER_TAB_PX / 2)
     // Its neighbours' boxes are where the layout puts them.
     expect(parseFloat(screen.getByTestId("tl-card-c").style.left)).toBe(5 * PX)
+  })
+
+  // The lanes draw in time columns 2048px wide, each positioned from its own
+  // left edge; a marker drawn at its whole-timeline x was clipped away in
+  // every column after the first.
+  it("past the first time column it is drawn from that column's edge, at the seam, as its neighbour is", () => {
+    const cells = [bookLine("a", { takeMs: 60_000 }), bookLine("b", { roomMs: 0 }), bookLine("c", { takeMs: 6_000 })]
+    const layout = buildTimelineLayout("audioFirst", cells, cells, null, { standInLenSec: () => 4 })
+    renderWithTooltips(
+      <TimelineOrigin px={2048}>
+        <TimelineLane
+          cells={cells} variant="subtitle" layout={layout} pxPerSec={PX}
+          viewStartSec={51.2} viewEndSec={102.4} selectedId={null} editable retimable={false}
+          onSelect={() => {}} onRetime={() => {}}
+        />
+      </TimelineOrigin>,
+    )
+    const marker = screen.getByTestId("tl-line-marker-b")
+    expect(parseFloat(marker.style.left)).toBe(60 * PX - 2048 - LINE_MARKER_TAB_PX / 2)
+    const seam = parseFloat(marker.style.left) + parseFloat(screen.getByTestId("tl-line-marker-b-line").style.left)
+    expect(seam).toBe(parseFloat(screen.getByTestId("tl-card-c").style.left))
   })
 
   it("a narrowed room still wide enough for its box keeps the box", () => {

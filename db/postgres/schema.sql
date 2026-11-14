@@ -1251,6 +1251,33 @@ CREATE TABLE file_revisions (
     PRIMARY KEY (project_id, file_id, revision_n)
 );
 
+-- A Google Drive folder kept in sync with a project (migration 0198). The
+-- sync-worker DriveFolderPoller writes each changed Drive file as one file
+-- revision, as `user_id` with that user's live role. drive_folder_files is the
+-- cursor: Drive file → Aquilla file, last applied Drive version and sha256.
+CREATE TABLE drive_folder_links (
+    id              TEXT PRIMARY KEY,
+    project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    folder_id       TEXT NOT NULL,
+    folder_name     TEXT,
+    user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    username        TEXT NOT NULL,
+    last_synced_at  BIGINT,
+    last_error      TEXT,
+    created_at      BIGINT NOT NULL,
+    UNIQUE (project_id, folder_id)
+);
+
+CREATE TABLE drive_folder_files (
+    link_id         TEXT NOT NULL REFERENCES drive_folder_links(id) ON DELETE CASCADE,
+    drive_file_id   TEXT NOT NULL,
+    file_id         TEXT NOT NULL,
+    drive_version   TEXT NOT NULL,
+    artifact_sha256 TEXT,
+    updated_at      BIGINT NOT NULL,
+    PRIMARY KEY (link_id, drive_file_id)
+);
+
 CREATE TABLE file_milestones (
     project_id    TEXT NOT NULL,
     file_id       TEXT NOT NULL,

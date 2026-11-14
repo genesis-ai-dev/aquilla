@@ -127,6 +127,21 @@ export const importExport = defineNamespace({
       other: "Import {count} files",
     }),
     "importExport.googleDrive.downloadingProgress": "Downloading {done}/{total} from Google Drive…",
+    "importExport.driveFolderSync.heading": "Keep a Drive folder in sync",
+    "importExport.driveFolderSync.description":
+      "Share a folder with {email} (Viewer is enough), then paste its link. Aquilla checks the folder every few seconds. " +
+      "New Word files and Google Docs become files here, and edits update the source text. Translations stay on their paragraphs.",
+    "importExport.driveFolderSync.notConfigured":
+      "Drive folder sync isn't configured on this server (no Google service account).",
+    "importExport.driveFolderSync.folderPlaceholder": "Google Drive folder link",
+    "importExport.driveFolderSync.linkButton": "Link folder",
+    "importExport.driveFolderSync.linkSummary": plural({
+      one: "{count} file · linked by {user} · last checked {when}",
+      other: "{count} files · linked by {user} · last checked {when}",
+    }),
+    "importExport.driveFolderSync.syncNow": "Sync now",
+    "importExport.driveFolderSync.unlink": "Unlink",
+    "importExport.driveFolderSync.passResult": "Checked: {created} new, {revised} updated.",
 
     // — Macula Hebrew/Greek panel —
     "importExport.macula.description":
@@ -1724,6 +1739,32 @@ export const importExport = defineNamespace({
         'Importing a source document into a project and exporting a translation back out — the format pickers, per-format hints, upload progress, collision handling and failure messages. Importing is the very first action a translator takes in Aquilla, so these strings are read before any other working surface.',
     },
     keys: {
+      // Drive folder sync (AQU-2459): a card under the Google Drive import that
+      // links a Drive folder the server checks every few seconds.
+      "importExport.driveFolderSync.description": {
+        description:
+          "Explains how to link a Google Drive folder so Aquilla keeps its documents in sync: share the folder with an address, paste the folder's link. Edits in Drive update the source text; translations stay where they are.",
+        placeholders: {
+          email: "The Google service-account email address the folder must be shared with, e.g. aquilla-sync@example.iam.gserviceaccount.com. Keep it exactly as given.",
+        },
+      },
+      "importExport.driveFolderSync.linkSummary": {
+        description:
+          "One line under a linked Drive folder's name: how many of its files are in the project, who linked it, and when Aquilla last checked it. Count-governed.",
+        placeholders: {
+          count: "Number of files from the folder that are in the project; also governs the plural form.",
+          user: "Username of the person who linked the folder.",
+          when: "Local clock time of the last check, e.g. 3:42:10 PM, or a dash when it has not run yet.",
+        },
+      },
+      "importExport.driveFolderSync.passResult": {
+        description: "Status line after the person presses Sync now on a linked Drive folder: what that check did.",
+        placeholders: {
+          created: "Number of new files added to the project from the folder.",
+          revised: "Number of existing files whose source text was updated.",
+        },
+      },
+
       // Import preview notices for subtitle files (AQU-2119) — shown in the
       // PreviewPanel's "Review before importing" list before anything is
       // written, so a .vtt whose cue times leave out the hours is reported

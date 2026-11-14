@@ -71,6 +71,7 @@ import { handleMigrateUsersReadRequest } from "./events/migrate-users-read-route
 import { handleMigrateWebhookRequest } from "./events/migrate-webhook-route"
 import { handleSourceUploadRequest } from "./events/source-upload-route"
 import { handleRevisionsRequest } from "./events/revisions-route"
+import { handleDriveLinksRequest } from "./drive/drive-links-route"
 import { handleExportSourceRequest } from "./events/export-route"
 import { handleExportBundleRequest } from "./events/export-bundle-route"
 import { handleOriginalDownloadRequest } from "./events/original-download-route"
@@ -115,6 +116,7 @@ import { handleExternalSetupTemplateRequest } from "./external/setup-template-ro
 import { handleExternalSkillsRequest } from "./external/skills-route"
 import { handleExternalHelpRequest } from "./external/help-route"
 export { ProjectSync } from "./project-do"
+export { DriveFolderPoller } from "./drive/drive-poller-do"
 // Inert legacy DO class — kept exported so deploys don't trip the
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
 export { FileSync } from "./file-sync-legacy"
@@ -288,6 +290,13 @@ declare global {
        * more day.
        */
       PROGRESS_SELFHEAL_MODE?: string
+      /** Google Drive folder sync (drive/): the service-account key JSON a
+       *  linked folder is shared with. Unset = Drive linking answers 503. */
+      GOOGLE_SERVICE_ACCOUNT_JSON?: string
+      /** One poller per linked Drive folder (drive/drive-poller-do.ts). */
+      DriveFolderPoller?: DurableObjectNamespace
+      /** Milliseconds between Drive folder passes (default 15000, floor 5000). */
+      DRIVE_POLL_INTERVAL_MS?: string
     }
   }
 }
@@ -639,6 +648,9 @@ const worker = {
     // AQU-2459: one revision of a file's source side (handler adds CORS).
     const revisionsResponse = await handleRevisionsRequest(request, env, routeCtx)
     if (revisionsResponse) return revisionsResponse
+    // Google Drive folder links (drive/; handler adds CORS).
+    const driveLinksResponse = await handleDriveLinksRequest(request, env)
+    if (driveLinksResponse) return driveLinksResponse
     const exportSourceResponse = await handleExportSourceRequest(request, env)
     if (exportSourceResponse) return exportSourceResponse
     const exportBundleResponse = await handleExportBundleRequest(request, env)

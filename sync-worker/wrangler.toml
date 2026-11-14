@@ -49,6 +49,11 @@ ACCESS_GRANTS_RESOLVER = "shadow"
 name = "ProjectSync"
 class_name = "ProjectSync"
 
+# One poller per linked Google Drive folder (src/drive/drive-poller-do.ts).
+[[durable_objects.bindings]]
+name = "DriveFolderPoller"
+class_name = "DriveFolderPoller"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["FileSync"]
@@ -56,6 +61,10 @@ new_sqlite_classes = ["FileSync"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["ProjectSync"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["DriveFolderPoller"]
 
 # R2 holds media blobs only (audio recordings, generated voice files).
 # Key layout: projects/{projectId}/cells/{cellId}/audio/{audioId}.{ext}
@@ -228,6 +237,11 @@ BASE_URL = "https://aquilla.app"
 name = "ProjectSync"
 class_name = "ProjectSync"
 
+# One poller per linked Google Drive folder (src/drive/drive-poller-do.ts).
+[[env.production.durable_objects.bindings]]
+name = "DriveFolderPoller"
+class_name = "DriveFolderPoller"
+
 [[env.production.migrations]]
 tag = "v1"
 new_sqlite_classes = ["FileSync"]
@@ -235,6 +249,10 @@ new_sqlite_classes = ["FileSync"]
 [[env.production.migrations]]
 tag = "v2"
 new_sqlite_classes = ["ProjectSync"]
+
+[[env.production.migrations]]
+tag = "v3"
+new_sqlite_classes = ["DriveFolderPoller"]
 
 [[env.production.r2_buckets]]
 binding = "SNAPSHOTS"
@@ -344,6 +362,11 @@ ACCESS_GRANTS_RESOLVER = "shadow"
 name = "ProjectSync"
 class_name = "ProjectSync"
 
+# One poller per linked Google Drive folder (src/drive/drive-poller-do.ts).
+[[env.development.durable_objects.bindings]]
+name = "DriveFolderPoller"
+class_name = "DriveFolderPoller"
+
 [[env.development.migrations]]
 tag = "v1"
 new_sqlite_classes = ["FileSync"]
@@ -351,6 +374,10 @@ new_sqlite_classes = ["FileSync"]
 [[env.development.migrations]]
 tag = "v2"
 new_sqlite_classes = ["ProjectSync"]
+
+[[env.development.migrations]]
+tag = "v3"
+new_sqlite_classes = ["DriveFolderPoller"]
 
 [[env.development.r2_buckets]]
 binding = "SNAPSHOTS"
@@ -420,6 +447,11 @@ name = "aquilla-sync-worker-e2e"
 name = "ProjectSync"
 class_name = "ProjectSync"
 
+# One poller per linked Google Drive folder (src/drive/drive-poller-do.ts).
+[[env.e2e.durable_objects.bindings]]
+name = "DriveFolderPoller"
+class_name = "DriveFolderPoller"
+
 [[env.e2e.migrations]]
 tag = "v1"
 new_sqlite_classes = ["FileSync"]
@@ -427,6 +459,10 @@ new_sqlite_classes = ["FileSync"]
 [[env.e2e.migrations]]
 tag = "v2"
 new_sqlite_classes = ["ProjectSync"]
+
+[[env.e2e.migrations]]
+tag = "v3"
+new_sqlite_classes = ["DriveFolderPoller"]
 
 [[env.e2e.r2_buckets]]
 binding = "SNAPSHOTS"

@@ -123,10 +123,16 @@ export function previewConfig(surface, { cwd, urls = {} }) {
     // Logpush), so do not expect to debug this from here. See "Preview limitations"
     // in docs/DEPLOYMENT-ENVIRONMENTS.md.
     config.previews.vars.AUTH_WORKER_URL = urls.auth ? `${urls.auth}/identity` : UNREADY
-    config.previews.durable_objects = { bindings: [{ name: "ProjectSync", class_name: "ProjectSync" }] }
+    config.previews.durable_objects = {
+      bindings: [
+        { name: "ProjectSync", class_name: "ProjectSync" },
+        { name: "DriveFolderPoller", class_name: "DriveFolderPoller" },
+      ],
+    }
     config.migrations = [
       { tag: "v1", new_sqlite_classes: ["FileSync"] },
       { tag: "v2", new_sqlite_classes: ["ProjectSync"] },
+      { tag: "v3", new_sqlite_classes: ["DriveFolderPoller"] },
     ]
   }
   return config

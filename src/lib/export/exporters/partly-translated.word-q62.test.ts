@@ -498,6 +498,35 @@ describe("Word export — what a lost line owns is its own text range and its fo
     expect(out.result.fidelity.droppedLinks).toBe(1)
   })
 
+  // From the independent review of these fixes.
+  /** The same file with a footnotes part holding `notes` (ids 1, 2…). */
+  async function withNotes(body: string, notes: string[]): Promise<ArrayBuffer> {
+    const zip = await JSZip.loadAsync(await docxBytes(body))
+    zip.file("word/footnotes.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:footnotes ${W_NS}>` +
+      notes.map((text, k) => `<w:footnote w:id="${k + 1}"><w:p><w:r><w:footnoteRef/></w:r>${text ? run(" " + text) : ""}</w:p></w:footnote>`).join("") + `</w:footnotes>`)
+    return zip.generateAsync({ type: "arraybuffer" })
+  }
+  const noteRef = `<w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><w:footnoteReference w:id="1"/></w:r>`
+
+  it("a footnote reference with no note text, in the part of a cut link that remains, is kept", async () => {
+    const bytes = await withNotes(para(run(L1 + " ") + run("Second line ") + `${LINK}${run("here" + PAD + " ")}${run("Third line")}${noteRef}${run(" here")}</w:hyperlink>` + run(PAD)) + NEXT, [""])
+    const [a, b, c, ...rest] = await importCells(bytes, false)
+    for (const out of [await wordOut(bytes, [typed(a, "Un."), hide(b), c, ...rest]), await wordOut(bytes, [typed(a, "Un."), c, ...rest], [b])]) {
+      expect(out.body.match(/<w:footnoteReference w:id="1"\/>/g)).toHaveLength(1)
+      expect(firstPara(out.body)).toContain(`${run("Third line")}${noteRef}${run(" here")}</w:hyperlink>`)
+    }
+  })
+
+  it("a footnote reference with no note text inside a lost line, or right after its last word, leaves with it", async () => {
+    for (const line2 of [run("Second line") + noteRef + run(" here" + PAD), run("Second line here" + PAD) + noteRef]) {
+      const bytes = await withNotes(para(run(L1 + " ") + line2 + run(" " + L3)) + NEXT, [""])
+      const [a, b, c, ...rest] = await importCells(bytes, false)
+      const out = await wordOut(bytes, [typed(a, "Un."), hide(b), typed(c, "Trois."), ...rest])
+      expect(paras(out.body)[0]).toBe("Un. Trois.")
+      expect(out.body).not.toContain("w:footnoteReference")
+    }
+  })
+
   // R7: the structure check flags a link with no run again; only a link this
   // export emptied on purpose (its words were all a lost line's) is exempt,
   // named by its start tag.

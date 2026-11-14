@@ -1301,8 +1301,9 @@ function placeInLines(
     const start = end
     const text = !inLine[k] ? null : piece.kind === "text" ? piece.text : piece.kind === "footnote" ? (piece.marker ?? "") : null
     if (text === null) {
-      // Not the line's text: it stays, unless it is a lost line's footnote.
-      if (piece.kind === "footnote" && layout.lost.some((s) => s.start < start && start < s.end)) lost.add(piece)
+      // Not the line's text: it stays, unless it is a lost line's footnote
+      // (inside its words or right after its last one).
+      if (piece.kind === "footnote" && layout.lost.some((s) => s.start < start && start <= s.end)) lost.add(piece)
       else offsets.set(piece, start)
       return
     }

@@ -467,7 +467,7 @@ function withoutLost(
       const text = keptText(node.piece)
       return [text === node.piece.text ? node : { kind: "text", piece: { ...node.piece, text }, cut: true }]
     }
-    if (node.kind === "text" || node.kind === "marker") return lost.has(node.piece) ? [] : [node]
+    if (node.kind === "text" || node.kind === "marker" || node.kind === "keep") return lost.has(node.piece) ? [] : [node]
     if (node.kind !== "wrapper" && node.kind !== "field") return [node]
     const inner = node.kind === "wrapper" ? node.children : [...node.open, ...node.result, node.close]
     if (!leavesOf(inner).some(ownsAny)) return [node]
@@ -1075,7 +1075,9 @@ function renderVerbatim(nodes: readonly RNode[], io: RebuildIo): string {
         return
       case "keep": {
         const piece = node.piece
+        // (A footnote reference with no note text is its whole run.)
         if (piece.kind === "keep") emit(piece.el)
+        else if (piece.kind === "footnote") emit(piece.run)
         else emitRun(piece.run)
         return
       }

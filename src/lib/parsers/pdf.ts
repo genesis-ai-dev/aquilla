@@ -127,6 +127,27 @@ const hasText = (items: readonly PdfPageItem[]) => items.some((it) => "s" in it 
 
 /** Read a PDF into import cells. Throws `PdfReadError` for a PDF it refuses. */
 export async function extractPdfImport(buffer: ArrayBuffer, options?: PdfParseOptions): Promise<PdfImport> {
+  const read = await readPdfParagraphs(buffer, (text) => createUsfmFootnoteMarker({ caller: "+", text }))
+  return { strings: paragraphsToStrings(read.paragraphs, options?.cellUnit), imageOnlyPages: read.imageOnlyPages, tagged: read.tagged }
+}
+
+/** AQU-2551: a PDF's plain text, one paragraph per line, for the rule import
+ *  and the Knowledge Base. They read the PDF here, in the browser, with the
+ *  import's own reader, and send the server only this text (review findings
+ *  1–3: the server no longer parses PDFs). A footnote stays at its mark, in
+ *  brackets. Throws `PdfReadError` for a PDF it refuses, as the import does. */
+export async function extractPdfText(buffer: ArrayBuffer): Promise<string> {
+  const read = await readPdfParagraphs(buffer, (text) => ` [${text}]`)
+  return read.paragraphs.map((p) => p.text).join("\n")
+}
+
+interface PdfParagraphsRead {
+  paragraphs: ReturnType<typeof pdfPagesToParagraphs>["paragraphs"]
+  imageOnlyPages: number[]
+  tagged: boolean
+}
+
+async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) => string): Promise<PdfParagraphsRead> {
   const pdfjs = await loadPdfJs()
   // pdf.js transfers (detaches) the bytes it is given: hand it a copy.
   const task = pdfjs.getDocument({
@@ -172,9 +193,9 @@ export async function extractPdfImport(buffer: ArrayBuffer, options?: PdfParseOp
       if (imageOnlyPages.length > 0) throw new PdfReadError("scanned", "PDF is a scanned image with no text")
       throw new PdfReadError("empty", "PDF has no text")
     }
-    const read = pdfPagesToParagraphs(pages, (text) => createUsfmFootnoteMarker({ caller: "+", text }))
+    const read = pdfPagesToParagraphs(pages, footnote)
     if (read.paragraphs.length === 0) throw new PdfReadError(imageOnlyPages.length ? "scanned" : "empty", "PDF has no text")
-    return { strings: paragraphsToStrings(read.paragraphs, options?.cellUnit), imageOnlyPages, tagged: read.tagged }
+    return { paragraphs: read.paragraphs, imageOnlyPages, tagged: read.tagged }
   } finally {
     await task.destroy().catch(() => {})
   }

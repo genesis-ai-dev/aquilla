@@ -5,9 +5,11 @@ import {
   isKnowledgeIndexStalled,
   KB_INDEX_STALE_MS,
   KnowledgeBaseApiError,
+  KnowledgeBaseReadError,
   listKnowledgeDocuments,
   uploadKnowledgeDocument,
 } from "./knowledge-base"
+import { buildPdf } from "@/lib/parsers/__fixtures__/build-pdf"
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -46,6 +48,46 @@ describe("Knowledge Base API client", () => {
     expect(init.method).toBe("POST")
     expect(init.body).toBe(file)
     expect(new Headers(init.headers).get("x-doc-name")).toBe("style%20guide.md")
+  })
+
+  // AQU-2551 review findings 1–3: the server no longer parses PDFs. A PDF is
+  // read here with the import's reader, and the upload carries the untouched
+  // original and its text.
+  it("reads a PDF in the browser and uploads the original with its text", async () => {
+    const doc = { id: "doc-3", name: "guide.pdf", scope: "project" }
+    const fetchSpy = vi.fn().mockResolvedValue(response({ doc }, 201))
+    vi.stubGlobal("fetch", fetchSpy)
+    const pdf = buildPdf({ pages: [{ runs: [{ text: "Use formal language.", x: 72, y: 700 }] }] })
+    const file = new File([pdf], "guide.pdf", { type: "application/pdf" })
+
+    await expect(uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", file)).resolves.toEqual(doc)
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(init.body).toBeInstanceOf(FormData)
+    const form = init.body as FormData
+    expect(form.get("text")).toBe("Use formal language.")
+    const sent = form.get("file") as File
+    expect(new Uint8Array(await sent.arrayBuffer())).toEqual(new Uint8Array(pdf))
+    expect(new Headers(init.headers).get("x-doc-name")).toBe("guide.pdf")
+  })
+
+  it("refuses a PDF it cannot read before uploading, in the import's words", async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+    const scanned = new File([buildPdf({ pages: [{ image: true }] })], "scan.pdf")
+    const thrown = await uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", scanned).catch((e: unknown) => e)
+    expect(thrown).toBeInstanceOf(KnowledgeBaseReadError)
+    expect((thrown as Error).message).toBe("This PDF is a scanned image. It has no text to import.")
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("turns the server's refusal of a PDF without its text into one plain sentence", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      response({ error: { code: "pdf_text_required", message: "PDFs are read in the app." } }, 415),
+    ))
+    const file = new File(["# notes"], "notes.md")
+    const thrown = await uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", file).catch((e: unknown) => e)
+    expect((thrown as KnowledgeBaseApiError).serverMessage).toBe("Reload the page, then add this PDF again.")
   })
 
   // AQU-1499: the boundary used to keep only the status, so a rejection the

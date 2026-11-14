@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, it, expect, vi } from "vitest"
-import { zipSync, strToU8 } from "fflate"
+import { zipSync, zlibSync, strToU8 } from "fflate"
 
 vi.mock("../middleware/auth", () => ({
   authMiddleware: async (
@@ -138,32 +138,44 @@ describe("POST /api/v2/parse-document — upload gate (AQU-1858)", () => {
   })
 })
 
-// AQU-2551: a PDF that gives no text says why, as a code the client words
-// ("password" or "empty"), and a readable PDF answers its text.
+// AQU-2551 review findings 1–3: the server no longer reads PDFs (a 2 MB
+// upload could make it decode a gigabyte). The app reads a PDF in the browser
+// and sends only its text; a PDF sent here is refused with a code the client
+// words, before a byte of it is decoded.
 describe("POST /api/v2/parse-document — PDFs (AQU-2551)", () => {
   const fixture = (name: string) =>
     new Uint8Array(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../../../src/lib/parsers/__fixtures__/pdf", name)))
-  const post = (bytes: Uint8Array, name: string) => {
+  const post = (bytes: Uint8Array, name: string, type = "application/pdf") => {
     const form = new FormData()
-    form.append("file", new File([bytes], name, { type: "application/pdf" }))
+    form.append("file", new File([bytes], name, { type }))
     return parseDocument.request("/", { method: "POST", body: form })
   }
 
-  it("answers a PDF's text", async () => {
+  it("refuses a PDF with code \"pdf-text-required\"", async () => {
     const res = await post(fixture("two-column.pdf"), "rules.pdf")
-    expect(res.status).toBe(200)
-    expect(((await res.json()) as { text: string }).text).toContain("The last paragraph is short.")
+    expect(res.status).toBe(415)
+    expect(((await res.json()) as { code?: string }).code).toBe("pdf-text-required")
   })
 
-  it("answers 422 with code \"password\" for a locked PDF", async () => {
-    const res = await post(fixture("locked.pdf"), "locked.pdf")
-    expect(res.status).toBe(422)
-    expect(((await res.json()) as { code?: string }).code).toBe("password")
+  it("refuses a PDF known only by its type", async () => {
+    const res = await post(fixture("two-column.pdf"), "rules", "application/pdf")
+    expect(res.status).toBe(415)
   })
 
-  it("answers 422 with code \"empty\" for a PDF with no text", async () => {
-    const res = await post(fixture("blank.pdf"), "blank.pdf")
-    expect(res.status).toBe(422)
-    expect(((await res.json()) as { code?: string }).code).toBe("empty")
+  // The reviewer's bomb: a filter name pdf.js decodes and the old check
+  // missed (`/Fl`), 60 MB of text operators from a small upload.
+  it("refuses the review's decompression bomb at once, without decoding it", async () => {
+    const ops = strToU8("BT /F1 1 Tf " + "(abcdefghij) Tj ".repeat(3_750_000) + " ET")
+    const data = zlibSync(ops, { level: 9 })
+    const bomb = new Uint8Array([
+      ...strToU8(`%PDF-1.7\n1 0 obj\n<< /Length ${data.length} /Filter /Fl >>\nstream\n`),
+      ...data,
+      ...strToU8("\nendstream\nendobj\n%%EOF\n"),
+    ])
+    expect(bomb.length).toBeLessThan(2 * 1024 * 1024)
+    const t0 = performance.now()
+    const res = await post(bomb, "bomb.pdf")
+    expect(res.status).toBe(415)
+    expect(performance.now() - t0).toBeLessThan(1000)
   })
 })

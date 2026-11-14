@@ -12,10 +12,7 @@ import { zipSync, zlibSync, strToU8 } from "fflate"
 import {
   DocumentExtractionError,
   extractTextFromDocx,
-  extractTextFromPdf,
-  PdfExtractionError,
 } from "../routes/parse-document"
-import { buildPdf } from "../../../src/lib/parsers/__fixtures__/build-pdf"
 
 // ── DOCX fixtures ────────────────────────────────────────────────────────────
 
@@ -183,90 +180,17 @@ describe("extractTextFromDocx", () => {
 
 // ── PDF (AQU-2551) ───────────────────────────────────────────────────────────
 //
-// The extractor is pdf.js (unpdf's serverless build). The old one scanned for
-// text operators and missed everything drawn with embedded fonts: about 5/6
-// of a Word PDF's text, and all its Greek and Hebrew. These fixtures are real
-// PDFs: the app's own test builder (src/lib/parsers/__fixtures__/build-pdf.ts)
-// and the PDF import's made files (macOS print-to-PDF, embedded fonts).
+// Review findings 1–3 (Nov 14): a 1.9 MB PDF got past the server's bomb check
+// and made it decode about 1 GB; a file the check accepted still used 1.3 GB;
+// the check itself could be made to take 95 s. The server no longer reads
+// PDFs at all: the app reads them in the browser and sends only the text.
+// The route's refusal is covered in parse-document-body-limit.test.ts.
 
-const PDF_FIXTURES = resolve(dirname(fileURLToPath(import.meta.url)), "../../../src/lib/parsers/__fixtures__/pdf")
-const pdfFixture = (name: string) => new Uint8Array(readFileSync(resolve(PDF_FIXTURES, name)))
-const built = (fixture: Parameters<typeof buildPdf>[0]) => new Uint8Array(buildPdf(fixture))
-
-async function pdfRefusal(bytes: Uint8Array): Promise<string> {
-  try {
-    await extractTextFromPdf(bytes)
-  } catch (err) {
-    if (err instanceof PdfExtractionError) return err.code
-    throw err
-  }
-  return "read"
-}
-
-describe("extractTextFromPdf", () => {
-  it("extracts the text of a simple PDF", async () => {
-    const pdf = built({ pages: [{ runs: [
-      { text: "Rule one applies here", x: 72, y: 700 },
-      { text: "Second rule text", x: 72, y: 680 },
-    ] }] })
-    const text = await extractTextFromPdf(pdf)
-    expect(text).toContain("Rule one applies here")
-    expect(text).toContain("Second rule text")
-  })
-
-  it("reads text drawn with embedded fonts, ligatures, Greek and Hebrew, from compressed streams", async () => {
-    const text = await extractTextFromPdf(pdfFixture("two-column.pdf"))
-    expect(text).toContain("The official fish fled the office")
-    expect(text).toContain("λόγος")
-    expect(text).toMatch(/[\u05D0-\u05EA]/)
-    expect(text).not.toContain("Þ")
-  })
-
-  it("reads a PDF with only an owner (permissions) password", async () => {
-    expect(await extractTextFromPdf(pdfFixture("owner-only.pdf"))).toContain("Two Columns of Plain Prose")
-  })
-
-  it("refuses a password-protected PDF with its own code", async () => {
-    expect(await pdfRefusal(pdfFixture("locked.pdf"))).toBe("password")
-  })
-
-  it("refuses an empty PDF, and a scanned one, as having no text", async () => {
-    expect(await pdfRefusal(pdfFixture("blank.pdf"))).toBe("empty")
-    expect(await pdfRefusal(built({ pages: [{ image: true }] }))).toBe("empty")
-  })
-
-  it("refuses a file that is not a PDF", async () => {
-    expect(await pdfRefusal(new TextEncoder().encode("%PDF-1.4\nBT (not really) Tj ET\n%%EOF"))).toBe("unreadable")
-  })
-
-  // Same decompression-bomb concern as the DOCX zip-bomb guard above: the
-  // check inflates into a bounded buffer, and a stream that fills it is
-  // refused before pdf.js would hold all of it in memory.
-  it("refuses a decompression bomb instead of expanding it", async () => {
-    const bomb = zlibSync(strToU8("a".repeat(64 * 1024 * 1024)), { level: 9 })
-    const header = strToU8(`%PDF-1.4\n4 0 obj\n<< /Length ${bomb.length} /Filter /FlateDecode >>\nstream\n`)
-    const footer = strToU8("\nendstream\nendobj\n%%EOF")
-    const pdf = new Uint8Array(header.length + bomb.length + footer.length)
-    pdf.set(header, 0)
-    pdf.set(bomb, header.length)
-    pdf.set(footer, header.length + bomb.length)
-    expect(pdf.length).toBeLessThan(2 * 1024 * 1024) // a legal upload
-    expect(await pdfRefusal(pdf)).toBe("too-complex")
-  })
-
-  // Review finding: the scan used to resume inside the word `endstream`, so
-  // every stream after the first was skipped and a bomb in stream two passed.
-  it("refuses a bomb that is not the first stream", async () => {
-    const small = zlibSync(strToU8("BT ET"))
-    const bomb = zlibSync(strToU8("a".repeat(64 * 1024 * 1024)), { level: 9 })
-    const parts = [
-      strToU8(`%PDF-1.4\n4 0 obj\n<< /Length ${small.length} /Filter /FlateDecode >>\nstream\n`), small, strToU8("\nendstream\nendobj\n"),
-      strToU8(`5 0 obj\n<< /Length ${bomb.length} /Filter /FlateDecode >>\nstream\n`), bomb, strToU8("\nendstream\nendobj\n%%EOF"),
-    ]
-    const pdf = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
-    let at = 0
-    for (const p of parts) { pdf.set(p, at); at += p.length }
-    expect(await pdfRefusal(pdf)).toBe("too-complex")
+describe("PDF text extraction", () => {
+  it("is not done on the server", async () => {
+    const mod = await import("../routes/parse-document")
+    expect(Object.keys(mod)).not.toContain("extractTextFromPdf")
+    expect(Object.keys(mod)).not.toContain("PdfExtractionError")
   })
 })
 

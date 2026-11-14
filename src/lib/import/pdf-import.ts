@@ -10,7 +10,7 @@
 
 import { t } from "@/lib/i18n/standalone"
 import type { MessageKey } from "@/lib/i18n/messages/en"
-import { extractPdfImport, PdfReadError, type PdfReadErrorCode } from "@/lib/parsers/pdf"
+import { extractPdfImport, extractPdfText, PdfReadError, type PdfReadErrorCode } from "@/lib/parsers/pdf"
 import type { CellUnit, TranslatableString } from "@/lib/parsers/types"
 import type { ImportPreviewNotice } from "./import-service"
 
@@ -20,6 +20,17 @@ const REFUSAL: Record<PdfReadErrorCode, MessageKey> = {
   password: "importExport.errors.pdfPassword",
   unreadable: "importExport.errors.pdfUnreadable",
   reader: "importExport.errors.pdfReaderFailed",
+}
+
+/** A PDF the reader refused, with its message in the person's words. */
+export class PdfRefusal extends Error {
+  readonly code: PdfReadErrorCode
+
+  constructor(err: PdfReadError) {
+    super(t(REFUSAL[err.code]), { cause: err })
+    this.name = "PdfRefusal"
+    this.code = err.code
+  }
 }
 
 export interface PdfImportRead {
@@ -32,7 +43,7 @@ export async function readPdfImport(buffer: ArrayBuffer, options?: { cellUnit?: 
   try {
     read = await extractPdfImport(buffer, options)
   } catch (err) {
-    if (err instanceof PdfReadError) throw new Error(t(REFUSAL[err.code]), { cause: err })
+    if (err instanceof PdfReadError) throw new PdfRefusal(err)
     throw err
   }
   const importNotices: ImportPreviewNotice[] = read.imageOnlyPages.length === 0 ? [] : [{
@@ -44,4 +55,16 @@ export async function readPdfImport(buffer: ArrayBuffer, options?: { cellUnit?: 
     }),
   }]
   return { strings: read.strings, importNotices }
+}
+
+/** AQU-2551: a PDF's plain text, read here in the browser, for the rule
+ *  import and the Knowledge Base, which send the server only the text. A
+ *  refused PDF throws a `PdfRefusal` with the import's own message. */
+export async function readPdfText(buffer: ArrayBuffer): Promise<string> {
+  try {
+    return await extractPdfText(buffer)
+  } catch (err) {
+    if (err instanceof PdfReadError) throw new PdfRefusal(err)
+    throw err
+  }
 }

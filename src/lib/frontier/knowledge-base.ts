@@ -1,4 +1,6 @@
 import { AUTH_BASE } from "@/lib/frontier/auth"
+import { t } from "@/lib/i18n/standalone"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import { fetchWithTimeout } from "@/lib/frontier/orgs"
 
 export type KnowledgeIndexStatus = "pending" | "ready" | "failed"
@@ -107,12 +109,32 @@ export class KnowledgeBaseApiError extends Error {
   }
 }
 
+/** A file the app could not read before uploading it (AQU-2551: a PDF is read
+ *  here, not on the server). Its message is the import's own, meant to be shown. */
+export class KnowledgeBaseReadError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options)
+    this.name = "KnowledgeBaseReadError"
+  }
+}
+
+/** Server error codes this client words itself, in place of the server's text. */
+const SERVER_CODE_MESSAGES: Readonly<Record<string, MessageKey>> = {
+  // AQU-2551: a PDF reached the server without its text (a page from before
+  // PDFs were read in the browser).
+  pdf_text_required: "importExport.errors.pdfServerRefused",
+}
+
 /** Pull `{ error: { message } }` off a non-OK response, if it has one. The body
  *  may be empty or not JSON at all (a gateway error page), which is not itself
  *  worth failing on — the status alone still produces a usable error. */
 async function readServerMessage(response: Response): Promise<string | undefined> {
   try {
-    const body = (await response.clone().json()) as { error?: { message?: unknown } }
+    const body = (await response.clone().json()) as { error?: { code?: unknown; message?: unknown } }
+    const code = body.error?.code
+    if (typeof code === "string" && Object.prototype.hasOwnProperty.call(SERVER_CODE_MESSAGES, code)) {
+      return t(SERVER_CODE_MESSAGES[code])
+    }
     const message = body.error?.message
     return typeof message === "string" && message.trim() ? message : undefined
   } catch {
@@ -180,10 +202,27 @@ export async function uploadKnowledgeDocument(
   const response = await request(scope, jwt, "", {
     method: "POST",
     headers: { "x-doc-name": encodeURIComponent(file.name) },
-    body: file,
+    body: file.name.toLowerCase().endsWith(".pdf") ? await pdfUploadBody(file) : file,
   })
   const body = (await response.json()) as { doc: KnowledgeDocument }
   return body.doc
+}
+
+/** AQU-2551 (review findings 1–3): the server no longer parses PDFs. A PDF is
+ *  read here with the import's reader, and the upload carries the original,
+ *  untouched, beside its text. */
+async function pdfUploadBody(file: File): Promise<FormData> {
+  const { readPdfText } = await import("@/lib/import/pdf-import")
+  let text: string
+  try {
+    text = await readPdfText(await file.arrayBuffer())
+  } catch (err) {
+    throw new KnowledgeBaseReadError(err instanceof Error ? err.message : String(err), { cause: err })
+  }
+  const form = new FormData()
+  form.append("file", file, file.name)
+  form.append("text", text)
+  return form
 }
 
 export async function deleteKnowledgeDocument(

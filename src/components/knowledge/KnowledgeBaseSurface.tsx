@@ -61,6 +61,7 @@ import {
   listKnowledgeDocuments,
   reindexKnowledgeDocument,
   uploadKnowledgeDocument,
+  KnowledgeBaseReadError,
   type KnowledgeDocument,
   type KnowledgeScope,
 } from "@/lib/frontier/knowledge-base"
@@ -259,7 +260,10 @@ export function KnowledgeBaseSurface({
       // actively misleading for a rejection that no retry can clear (a .docx
       // whose word/document.xml is too bloated to read) — the reason names the
       // fix, so the uploader is not left guessing.
-      const reason = err instanceof KnowledgeBaseApiError ? err.serverMessage : undefined
+      // AQU-2551: a PDF the app could not read says why, in the import's words.
+      const reason = err instanceof KnowledgeBaseApiError ? err.serverMessage
+        : err instanceof KnowledgeBaseReadError ? err.message
+        : undefined
       toast.add({
         type: "error",
         priority: "high",

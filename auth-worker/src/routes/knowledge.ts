@@ -11,7 +11,8 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE, type Env } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { getEffectiveOrgRole } from "../services/org-permissions"
-import { DocumentExtractionError, extractTextFromDocx, extractTextFromPdf } from "./parse-document"
+import { DocumentExtractionError, extractTextFromDocx, startsAsPdf } from "./parse-document"
+import { readBytesWithLimit } from "../../../shared/http-body-limit"
 import { shipLog } from "../posthog-logs"
 import { indexKnowledgeDoc, KB_INDEX_BUDGET_MS } from "../lib/knowledge/index-doc"
 import { kickKnowledgeIndexDriver } from "../lib/knowledge/index-driver"
@@ -41,6 +42,8 @@ type ErrorCode =
   | "validation_failed"
   | "storage_unavailable"
   | "job_failed"
+  // AQU-2551: a PDF arrived without the text the app reads from it.
+  | "pdf_text_required"
 
 function errorJson(code: ErrorCode, message: string, status: ContentfulStatusCode) {
   return { body: { error: { code, message } }, status } as const
@@ -91,12 +94,19 @@ type ExtractResult =
       documentXmlBytes?: number
     }
 
-async function extractText(fileName: string, bytes: Uint8Array): Promise<ExtractResult> {
+/** `pdfText`: the text the app read from a PDF in the browser (AQU-2551). The
+ *  server never reads a PDF itself; it checks that the original is one. */
+function extractText(fileName: string, bytes: Uint8Array, pdfText: string | null): ExtractResult {
   const ext = kbExtension(fileName)
   let text: string
   if (ext === ".md" || ext === ".txt") {
     text = new TextDecoder().decode(bytes)
-  } else if (ext === ".docx" || ext === ".pdf") {
+  } else if (ext === ".pdf") {
+    if (!startsAsPdf(bytes)) {
+      return { ok: false, code: "validation_failed", message: "the file is not a PDF", status: 422 }
+    }
+    text = pdfText ?? ""
+  } else if (ext === ".docx") {
     if (bytes.byteLength > MAX_KB_EXTRACT_INPUT_BYTES) {
       return {
         ok: false,
@@ -106,7 +116,7 @@ async function extractText(fileName: string, bytes: Uint8Array): Promise<Extract
       }
     }
     try {
-      text = ext === ".docx" ? extractTextFromDocx(bytes) : await extractTextFromPdf(bytes)
+      text = extractTextFromDocx(bytes)
     } catch (err) {
       // AQU-1499: this used to be a bare `catch` returning a flat "could not
       // extract text", so an uploader whose file failed for a knowable,
@@ -290,6 +300,51 @@ async function restartIndexing(c: Context<AuthHonoEnv>, docId: string): Promise<
   return c.json({ ok: true }, 202)
 }
 
+/** The multipart envelope of a PDF upload: the original (up to its own cap)
+ *  plus its text (up to MAX_KB_TEXT_CHARS, at most 3 UTF-8 bytes a UTF-16
+ *  unit), with room for the part headers. */
+const MAX_KB_PDF_FORM_BYTES = MAX_KB_ORIGINAL_BYTES + 3 * MAX_KB_TEXT_CHARS + 64 * 1024
+
+const PDF_TEXT_REQUIRED: Record<"app" | "api", string> = {
+  app: "PDFs are read in the app before they are uploaded: reload the page and upload this PDF again.",
+  api: "PDFs can't be read through the API: send the document's text as a .txt or .md file, or upload the PDF in the app.",
+}
+
+/** AQU-2551 (review findings 1–3): the server no longer reads PDFs. The app
+ *  reads one in the browser and posts a form with the original (`file`) and
+ *  its text (`text`); the original is stored as it came. A PDF sent any other
+ *  way (raw bytes from an old page, or the Agent API) is refused with
+ *  `pdf_text_required`. */
+async function readPdfUpload(
+  c: Context<AuthHonoEnv>,
+  via: "app" | "api",
+): Promise<
+  | { ok: true; bytes: Uint8Array; text: string }
+  | { ok: false; body: ReturnType<typeof errorJson>["body"]; status: ContentfulStatusCode }
+> {
+  const refused = () => errorJson("pdf_text_required", PDF_TEXT_REQUIRED[via], 415)
+  const type = c.req.header("content-type") ?? ""
+  if (via === "api" || !type.toLowerCase().startsWith("multipart/form-data")) return { ok: false, ...refused() }
+  const upload = await readBytesWithLimit(c.req.raw.headers, c.req.raw.body, MAX_KB_PDF_FORM_BYTES)
+  if (!upload.ok) {
+    return { ok: false, ...errorJson("validation_failed", `file exceeds the ${MAX_KB_ORIGINAL_BYTES}-byte limit`, 400) }
+  }
+  let form: FormData
+  try {
+    form = await new Response(upload.bytes, { headers: { "content-type": type } }).formData()
+  } catch {
+    return { ok: false, ...errorJson("validation_failed", "expected a form with the PDF and its text", 400) }
+  }
+  const file = form.get("file")
+  const text = form.get("text")
+  if (!file || typeof file === "string") {
+    return { ok: false, ...errorJson("validation_failed", "expected a form with the PDF and its text", 400) }
+  }
+  if (typeof text !== "string") return { ok: false, ...refused() }
+  // a form sends its text's line ends as CRLF; the text is stored with LF
+  return { ok: true, bytes: new Uint8Array(await (file as File).arrayBuffer()), text: text.replace(/\r\n?/g, "\n") }
+}
+
 /** The one upload implementation: extension allowlist → size cap → text
  *  extraction → R2 put → row insert → async indexing. Exported so the
  *  server-to-server route the Agent API bridges through (routes/
@@ -299,6 +354,8 @@ export async function handleUpload(
   c: Context<AuthHonoEnv>,
   scope: KnowledgeScopeRef,
   createdBy: string,
+  /** "api": the Agent API, which has no browser to read a PDF first. */
+  via: "app" | "api" = "app",
 ): Promise<Response> {
   const bucket = c.env.SNAPSHOTS
   if (!bucket) {
@@ -327,7 +384,16 @@ export async function handleUpload(
   // get them rendered as HTML for any viewer who opens the original. Derive it instead
   // from the extension we already validated above.
   const contentType = kbContentTypeForExtension(fileName)
-  const bytes = new Uint8Array(await c.req.arrayBuffer())
+  let bytes: Uint8Array
+  let pdfText: string | null = null
+  if (kbExtension(fileName) === ".pdf") {
+    const read = await readPdfUpload(c, via)
+    if (!read.ok) return c.json(read.body, read.status)
+    bytes = read.bytes
+    pdfText = read.text
+  } else {
+    bytes = new Uint8Array(await c.req.arrayBuffer())
+  }
   if (bytes.byteLength === 0) {
     const { body, status } = errorJson("validation_failed", "uploaded file is empty", 400)
     return c.json(body, status)
@@ -341,7 +407,7 @@ export async function handleUpload(
     return c.json(body, status)
   }
 
-  const extracted = await extractText(fileName, bytes)
+  const extracted = extractText(fileName, bytes, pdfText)
   if (!extracted.ok) {
     // AQU-1499: count the rejections. Partners hit this on their first
     // knowledge-base upload and work around it privately (re-saving the file),

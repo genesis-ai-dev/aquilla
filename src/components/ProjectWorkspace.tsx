@@ -7,7 +7,7 @@ import { recordModelCall, type RecordModelCall } from "@/lib/ai-interventions/cl
 import { useCharacterSheetCells } from "@/hooks/useCharacterSheetCells"
 import { confirmedTargetHeadKeys } from "@/lib/sync/confirmed-target-heads"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
-import { Suspense, cloneElement, isValidElement, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
+import { Suspense, cloneElement, isValidElement, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useRememberLastWorkspace } from "@/hooks/useRememberLastWorkspace"
@@ -36,7 +36,7 @@ import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { ProjectNoAccess } from "@/components/ProjectNoAccess"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
-import { clearLastLocation, readLastCell, readLastLocation, writeLastCell, writeLastLocation } from "@/lib/frontier/last-location-store"
+import { clearLastLocation, readLastCell, readLastCellPlace, readLastLocation, writeLastCell, writeLastLocation } from "@/lib/frontier/last-location-store"
 import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { importLanguageDecision } from "@/lib/import-language"
@@ -227,7 +227,8 @@ import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, setQueueLayerTrackSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
-  hasAnyPlayableAudio, onQueueRanOut, stopQueue } from "@/lib/audio/play-queue"
+  hasAnyPlayableAudio, onQueueRanOut, stopQueue, useQueueStateValue } from "@/lib/audio/play-queue"
+import { selectQueueStateForFile } from "@/lib/audio/queue-scope"
 import {
   chapterOfCell, nextPlayableChapter, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
   timelineChaptersOf, type TimelineChapter,
@@ -235,19 +236,20 @@ import {
 import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
 import { applyChapterPick, planChapterPick, rowEndsPlayback } from "@/lib/timeline/chapter-pick"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
-import { useTransportForFile } from "@/hooks/useTransportForFile"
+import { useHeldCellIdOnClock, useTransportStateForFile, type UseTransportForFileArgs } from "@/hooks/useTransportForFile"
 import { usePauseAudioWhenHidden } from "@/hooks/usePauseAudioWhenHidden"
 import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
 import { recordingDrivesPlayback, switchPlaybackSource, usePlaybackSource, type PlaybackSource } from "@/lib/audio/playback-source"
 import { youTubeVideoId } from "@/lib/video/youtube"
-import { cellIdAtSec, heldCellIdAtSec } from "@/lib/timeline/source-regions"
+import { cellIdAtSec } from "@/lib/timeline/source-regions"
 import { clearVideoControllerIf, setVideoController } from "@/lib/timeline/video-controller"
 import {
   getVirtualClockPlaying,
+  getVirtualClockSec,
   startVirtualClock,
   stopVirtualClock,
+  subscribeVirtualClock,
   useVirtualClockPlaying,
-  useVirtualClockSec,
   virtualClockController,
   virtualClockPause,
   virtualClockPlay,
@@ -358,13 +360,17 @@ import {
   type SynthTargetPlan,
 } from "@/lib/audio/linked-takes"
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
-import { deriveTracksForFile } from "@/lib/timeline/tracks"
+import { deriveTracksForFile, type TimelineTrack } from "@/lib/timeline/tracks"
 import { nextFolderName } from "@/lib/timeline/track-names"
-import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
-import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
+import { applyPendingOrders, applyPendingScopes, renormaliseOrders, settledPendingOrders, settledPendingScopes, withoutPendingOrder, withPendingScopeOrders, type PendingTrackScope } from "@/lib/timeline/track-reorder"
+import { applyPendingColors, settledPendingColors, withPendingColors, withoutPendingColors } from "@/lib/timeline/track-colors"
+import { contentFileIdsOfShownTracks, folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
+import { loadHiddenTracks } from "@/lib/timeline/track-collapse"
 import { GENERATED_VOICE_SLOT, programmeTrackSlots, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
-import { TimelineEditor } from "@/components/timeline/TimelineEditor"
+import { TimelineEditor, type TimelineActivateRequest } from "@/components/timeline/TimelineEditor"
+import { createVideoSeekStore } from "@/components/timeline/video-seek-store"
+import { createPlayingCueStore, type PlayingCueStore } from "@/components/editor-playing-cue"
 import type { ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
 import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
@@ -460,7 +466,7 @@ import { ParatextBridgeBadge } from "@/components/paratext/ParatextBridgeBadge"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import type { EditorLens } from "@/components/EditorModeToggle"
 import { TranscribeEditor, type TranscribeEditorHandle } from "@/components/transcribe/TranscribeEditor"
-import { createViewScrollMemory, viewSwitchRebuilds } from "@/lib/editor/view-scroll-memory"
+import { cellIdForMediaTrace, createViewScrollMemory, viewSwitchRebuilds } from "@/lib/editor/view-scroll-memory"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { ExpandableFileList } from "./ExpandableFileList"
@@ -489,10 +495,11 @@ import { MediaVideoPane } from "./timeline/MediaVideoPane"
 import { shouldShowVideoPane } from "./timeline/video-pane-layout"
 import {
   getVideoClockPlaying,
+  getVideoClockSec,
   setVideoClockSec,
   setVideoClockPlaying,
+  subscribeVideoClock,
   useVideoClockPlaying,
-  useVideoClockSec,
 } from "@/lib/timeline/video-clock"
 import { setVideoDurationSec, useVideoDurationSec } from "@/lib/timeline/video-duration"
 import { uiSlotRef } from "@/lib/ui-slots"
@@ -777,6 +784,40 @@ function sameStringMap(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, st
 }
 
 /** Persist whether the Agent editor tab is open for a project (survives file-tab switches). */
+/**
+ * AQU-1118: the row the table marks as playing — the transport's line, held
+ * through the silence after it until the next starts (Sam, Oct 7). The same
+ * hook and inputs as the bottom bar, so the two cannot disagree. It changes
+ * with every line of playback, so it goes to the rows through a store and
+ * renders nothing here.
+ */
+function PlayingCuePublisher({ store, transport, cells, enabled }: {
+  store: PlayingCueStore
+  transport: UseTransportForFileArgs
+  cells: readonly CellData[]
+  enabled: boolean
+}) {
+  const state = useTransportStateForFile(transport)
+  const held = useHeldCellIdOnClock(state.source, enabled && state.running && state.cellId == null, cells)
+  const cellId = enabled && state.running ? (state.cellId ?? held) : null
+  useLayoutEffect(() => { store.set(cellId) }, [store, cellId])
+  return null
+}
+
+/** Hands the dub driver each new second a clock publishes. Returns the
+ *  unsubscribe, for an effect's cleanup. */
+function tickDubsFromClock(subscribe: (listener: () => void) => () => void, sec: () => number | null): () => void {
+  let last: number | null | undefined
+  const tick = () => {
+    const now = sec()
+    if (now === last) return
+    last = now
+    if (now != null) tickExternalDubs(now)
+  }
+  tick()
+  return subscribe(tick)
+}
+
 function agentTabStorageKey(projectId: string): string {
   return `aquilla:agent-tab:${projectId}`
 }
@@ -1652,6 +1693,14 @@ export function ProjectWorkspace() {
     })
   }, [location, navigate, projectId])
   const editorRef = useRef<EditorTableHandle>(null)
+  // The restore effect can run before the table commits. This flips when the
+  // handle attaches, so a remembered row is scrolled to once the list exists
+  // instead of waiting for the next keystroke.
+  const [textEditorReady, setTextEditorReady] = useState(false)
+  const bindEditorRef = useCallback((node: EditorTableHandle | null) => {
+    editorRef.current = node
+    setTextEditorReady(node != null)
+  }, [])
   // The section highlighted on the Dialogue timeline. Lifted here so the bottom
   // playback bar (a sibling of the timeline) can start playback from it (AQU-666).
   const [timelineSelectedCellId, setTimelineSelectedCellId] = useState<string | null>(null)
@@ -2689,7 +2738,7 @@ export function ProjectWorkspace() {
   // the plain text table. AQU-1758 (Oct 27): so does every other file — the
   // Audio view, which replaced a book's source column with per-line voice
   // cards, is gone. A book or document lays its lines out from its recordings,
-  // one chapter at a time, with dashed stand-ins for lines not yet recorded.
+  // the whole file, every chapter, with dashed stand-ins for lines not yet recorded.
   const activeFileForLens = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const activeFileTimeOrdered = Boolean(activeFileForLens && fileOrderedBy(activeFileForLens) === "time")
   // Smart Extensions (apiRev 2 + 3): an `editor` extension mounted for the
@@ -2712,7 +2761,7 @@ export function ProjectWorkspace() {
   // 2026-08-07 (wire b): a text-table row click points the timeline at that
   // cell. Nonce'd so repeat clicks on the same row re-center; the callback is
   // identity-stable (mirror ref) because it rides in editorActionsValue.
-  const [timelineActivateRequest, setTimelineActivateRequest] = useState<{ cellId: string; nonce: number; play?: boolean } | null>(null)
+  const [timelineActivateRequest, setTimelineActivateRequest] = useState<TimelineActivateRequest | null>(null)
   const timelineStackedRef = useRef(timelineStacked)
   timelineStackedRef.current = timelineStacked
   const activateNonceRef = useRef(0)
@@ -8622,6 +8671,7 @@ export function ProjectWorkspace() {
   // not state — no workspace re-render per card click); mediaTraceCellId seeds
   // the timeline's selection on mount (state — must be render-visible then).
   const timelineSelectedCellIdRef = useRef<string | null>(null)
+  const rememberCellRef = useRef<(cellId: string, align?: "top" | "center") => void>(() => {})
   const handleTimelineSelectedCell = useCallback(
     (cellId: string | null) => {
       // Media → Text scrolls to whatever is parked here, so a CUE id would
@@ -8630,10 +8680,23 @@ export function ProjectWorkspace() {
         cellId && cueLinks.textForCue.has(cellId)
           ? (cueLinks.textForCue.get(cellId) ?? [])[0] ?? null
           : cellId
+      const lineId = timelineSelectedCellIdRef.current
+      if (lineId) rememberCellRef.current(lineId)
     },
     [cueLinks],
   )
   const [mediaTraceCellId, setMediaTraceCellId] = useState<string | null>(null)
+  // The place to open this file on, read once per file. Later scrolls write a
+  // new place, but this stays put so the timeline does not jump back to it
+  // while the reader is still moving.
+  const fileResumeRef = useRef<{ key: string; cellId: string | null }>({ key: "", cellId: null })
+  const resumeKey = `${currentUsername}|${projectId ?? ""}|${activeFileId ?? ""}`
+  if (fileResumeRef.current.key !== resumeKey) {
+    fileResumeRef.current = {
+      key: resumeKey,
+      cellId: projectId && activeFileId ? readLastCell(currentUsername, projectId, activeFileId) : null,
+    }
+  }
 
   // AQU-2153: where each view of each file was scrolled to, so a switch that
   // rebuilds the surface can put it back. Session-only, keyed by file + view —
@@ -8656,10 +8719,15 @@ export function ProjectWorkspace() {
     // made before the detour.
     if (next !== lens && timeOrdered) {
       if (next === "audio" && lens === "text") {
-        // TEXT → MEDIA: the row the user is on (last-active editor cell when
-        // visible, else the first visible row).
-        const idx = editorRef.current?.getCurrentIndex?.() ?? -1
-        setMediaTraceCellId(idx >= 0 ? cellStore.getAllSummaries()[idx]?.id ?? null : null)
+        // TEXT → MEDIA: the row at the top of the text. That is the chapter
+        // on screen. The virtualizer index is only a fallback — unmeasured
+        // rows look like row 0, and seeding that opens the book at chapter 1.
+        const summaries = cellStore.getAllSummaries()
+        setMediaTraceCellId(cellIdForMediaTrace(
+          editorRef.current?.getTopVisibleCellId?.() ?? null,
+          editorRef.current?.getCurrentIndex?.() ?? -1,
+          (index) => summaries[index]?.id,
+        ))
       } else if (next === "text" && lens === "audio" && timelineSelectedCellIdRef.current) {
         // MEDIA → TEXT: park for the consume effect — scroll + brief flash,
         // no edit-focus change. The trace is always within the open file (the
@@ -8866,9 +8934,15 @@ export function ProjectWorkspace() {
     if (pendingPresenceJumpRef.current?.fileId === activeFileId) return
     if (pendingScopeScrollRef.current?.fileId === activeFileId) return
     if (!restoreMayPark(pendingCellScrollRef.current)) return
-    const cellId = readLastCell(currentUsernameRef.current, projectId, activeFileId)
-    if (!cellId) return
-    pendingCellScrollRef.current = { cellId, flash: false, fileId: activeFileId, source: "restore" }
+    const place = readLastCellPlace(currentUsernameRef.current, projectId, activeFileId)
+    if (!place) return
+    pendingCellScrollRef.current = {
+      cellId: place.cellId,
+      flash: false,
+      fileId: activeFileId,
+      source: "restore",
+      align: place.align,
+    }
   }, [projectId, activeFileId, centerSurface])
 
   // ── last-location: scroll to remembered cell once cells are loaded ────────
@@ -8919,7 +8993,7 @@ export function ProjectWorkspace() {
   // `centerSurface`: coming back from comments/agent/memory remounts the
   // editor without touching the cell store or the file, so without it the
   // per-file last-cell park sat unconsumed until the next keystroke.
-  }, [activeFileId, cellStore, cellStoreVersion, lens, centerSurface])
+  }, [activeFileId, cellStore, cellStoreVersion, lens, centerSurface, textEditorReady])
 
   const drawerRule = rules.find((r) => r.id === drawerRuleId) || null
   const drawerInfractions = drawerRuleId
@@ -9206,7 +9280,11 @@ export function ProjectWorkspace() {
     },
     [saveVoiceOverride, t],
   )
-  const trackedCellRef = useEditorViewportTrackedCellRef(parallelBiblesPanelActive)
+  // Only while one of the panels that reads it is open: the table follows
+  // playback, and each row it scrolls past re-rendered this whole shell.
+  const trackedCellRef = useEditorViewportTrackedCellRef(
+    parallelBiblesPanelActive && (parallelBiblesOpen || verseResourcesOpen || whosWhoOpen),
+  )
   // Drop the tracked ref when switching files so the previous file's verse
   // doesn't leak into the new file's panel (the new EditorTable re-fires).
   useEffect(() => {
@@ -9815,17 +9893,38 @@ export function ProjectWorkspace() {
   useEffect(() => { focusLockClaimRef.current = focusLockState.claim }, [focusLockState.claim])
 
   const writeLocTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Remember `cellId` as where the user is in the open file — on a claim, and
-  // on a jump from the section dropdown. Debounced (500 ms) so rapid focus
-  // events don't hammer localStorage.
-  const rememberCell = useCallback((cellId: string) => {
+  const pendingPlaceRef = useRef<{ cellId: string; align: "top" | "center" } | null>(null)
+  // Remember where the user is in the open file. A click remembers that cell,
+  // centered on the way back. A scroll remembers the row at the top. The write
+  // waits out a burst of movement, and is flushed when the page goes away, so
+  // a reload in that moment still returns here.
+  const rememberCell = useCallback((cellId: string, align: "top" | "center" = "center") => {
+    pendingPlaceRef.current = { cellId, align }
     if (writeLocTimerRef.current !== null) clearTimeout(writeLocTimerRef.current)
     writeLocTimerRef.current = setTimeout(() => {
       writeLocTimerRef.current = null
-      if (!projectId || !activeFileId) return
-      writeLastLocation(currentUsername, projectId, { fileId: activeFileId, cellId })
-      writeLastCell(currentUsername, projectId, activeFileId, cellId)
+      const pending = pendingPlaceRef.current
+      pendingPlaceRef.current = null
+      if (!pending || !projectId || !activeFileId) return
+      writeLastLocation(currentUsername, projectId, { fileId: activeFileId, cellId: pending.cellId })
+      writeLastCell(currentUsername, projectId, activeFileId, pending.cellId, pending.align)
     }, 500)
+  }, [projectId, activeFileId, currentUsername])
+  rememberCellRef.current = rememberCell
+  useEffect(() => {
+    const flush = () => {
+      if (writeLocTimerRef.current !== null) {
+        clearTimeout(writeLocTimerRef.current)
+        writeLocTimerRef.current = null
+      }
+      const pending = pendingPlaceRef.current
+      pendingPlaceRef.current = null
+      if (!pending || !projectId || !activeFileId) return
+      writeLastLocation(currentUsername, projectId, { fileId: activeFileId, cellId: pending.cellId })
+      writeLastCell(currentUsername, projectId, activeFileId, pending.cellId, pending.align)
+    }
+    window.addEventListener("pagehide", flush)
+    return () => window.removeEventListener("pagehide", flush)
   }, [projectId, activeFileId, currentUsername])
   const handleClaimCell = useCallback((cellId: string) => {
     focusedCellIdRef.current = cellId
@@ -14108,9 +14207,19 @@ export function ProjectWorkspace() {
   // Media view" would be a button to where you already are.
   const handleOpenMediaView = useCallback(() => switchLens("audio"), [switchLens])
 
+  const [hiddenTimelineTrackIds, setHiddenTimelineTrackIds] = useState<ReadonlySet<string>>(() => loadHiddenTracks(activeFileId))
+  useEffect(() => {
+    setHiddenTimelineTrackIds(loadHiddenTracks(activeFileId))
+  }, [activeFileId])
+  const onHiddenTimelineTracks = useCallback((ids: ReadonlySet<string>) => {
+    setHiddenTimelineTrackIds((prev) => {
+      if (prev.size === ids.size && [...ids].every((id) => prev.has(id))) return prev
+      return ids
+    })
+  }, [])
   const timelineText = useTimelineTextCells({
     projectId: project?.id ?? null,
-    fileIds: serverTimelineTracks.flatMap(track => track.contentFileId ? [track.contentFileId] : []),
+    fileIds: contentFileIdsOfShownTracks(serverTimelineTracks, hiddenTimelineTrackIds),
     getToken: getTokenForFile,
     enabled: editorFirstPaint && lens === "audio",
   })
@@ -14165,13 +14274,63 @@ export function ProjectWorkspace() {
     fileId: string
     orders: Map<string, number>
   } | null>(null)
+  // A folder move changes group and order together. Painted before the emit,
+  // same as a reorder, so the row does not sit in the old folder until the
+  // project GET comes back.
+  const [pendingTrackScopes, setPendingTrackScopes] = useState<{
+    fileId: string
+    places: Map<string, PendingTrackScope>
+  } | null>(null)
+  // A folder "Move to → New folder" made, drawn before the server has it so
+  // its members have somewhere to go the moment the choice is made. Display-
+  // only, like the two above; dropped once the server read carries the id.
+  const [pendingNewTracks, setPendingNewTracks] = useState<{
+    fileId: string
+    tracks: TimelineTrack[]
+  } | null>(null)
+  // A recolour, painted before the emit. `refresh()` is a full project GET;
+  // without this the row keeps its old hue until that lands.
+  const [pendingTrackColors, setPendingTrackColors] = useState<{
+    fileId: string
+    colors: Map<string, string | null>
+  } | null>(null)
+  const pendingTrackColorsRef = useRef(pendingTrackColors)
+  pendingTrackColorsRef.current = pendingTrackColors
+  /** Saves the "Move to" moves still queued (`saveQueuedTrackMoves`, below).
+   *  A drag's write calls it first, so the outbox holds writes in the order
+   *  they were made and a held move can never land over a later drag. */
+  const flushQueuedTrackMoves = useRef<() => void>(() => {})
   const timelineTracks = useMemo(() => {
-    if (!pendingTrackOrders || pendingTrackOrders.fileId !== activeFile?.id) return serverTimelineTracks
-    // Sorted by tracks.ts's exported comparator (inside applyPendingOrders), so
-    // the optimistic order and the settled one cannot disagree on a tie and
-    // swap the row back at the instant the user lets go of it.
-    return applyPendingOrders(serverTimelineTracks, pendingTrackOrders.orders)
-  }, [serverTimelineTracks, pendingTrackOrders, activeFile?.id])
+    let tracks = serverTimelineTracks
+    if (pendingNewTracks && pendingNewTracks.fileId === activeFile?.id) {
+      const known = new Set(tracks.map((tr) => tr.id))
+      const added = pendingNewTracks.tracks.filter((tr) => !known.has(tr.id))
+      if (added.length > 0) tracks = [...tracks, ...added]
+    }
+    if (pendingTrackOrders && pendingTrackOrders.fileId === activeFile?.id) {
+      // Sorted by tracks.ts's exported comparator (inside applyPendingOrders), so
+      // the optimistic order and the settled one cannot disagree on a tie and
+      // swap the row back at the instant the user lets go of it.
+      tracks = applyPendingOrders(tracks, pendingTrackOrders.orders)
+    }
+    if (pendingTrackScopes && pendingTrackScopes.fileId === activeFile?.id) {
+      tracks = applyPendingScopes(tracks, pendingTrackScopes.places)
+    }
+    if (pendingTrackColors && pendingTrackColors.fileId === activeFile?.id) {
+      tracks = applyPendingColors(tracks, pendingTrackColors.colors)
+    }
+    return tracks
+  }, [serverTimelineTracks, pendingNewTracks, pendingTrackOrders, pendingTrackScopes, pendingTrackColors, activeFile?.id])
+  useEffect(() => {
+    if (!pendingNewTracks || pendingNewTracks.fileId !== activeFileId) return
+    const known = new Set(serverTimelineTracks.map((tr) => tr.id))
+    if (!pendingNewTracks.tracks.some((tr) => known.has(tr.id))) return
+    setPendingNewTracks((current) => {
+      if (!current || current.fileId !== activeFileId) return current
+      const left = current.tracks.filter((tr) => !known.has(tr.id))
+      return left.length === 0 ? null : { fileId: current.fileId, tracks: left }
+    })
+  }, [serverTimelineTracks, pendingNewTracks, activeFileId])
   // Drop each pending order once the server read carries it — the same shape as
   // the optimistic-rename reconciliation above, and driven for free: the
   // dragger's own `file.track.set` frame comes back over the WS and triggers
@@ -14189,12 +14348,37 @@ export function ProjectWorkspace() {
       return next.size === 0 ? null : { fileId: current.fileId, orders: next }
     })
   }, [serverTimelineTracks, pendingTrackOrders, activeFileId])
+  useEffect(() => {
+    if (!pendingTrackScopes || pendingTrackScopes.fileId !== activeFileId) return
+    const settled = settledPendingScopes(pendingTrackScopes.places, serverTimelineTracks)
+    if (settled.length === 0) return
+    setPendingTrackScopes((current) => {
+      if (!current || current.fileId !== activeFileId) return current
+      const next = new Map(current.places)
+      for (const id of settled) next.delete(id)
+      return next.size === 0 ? null : { fileId: current.fileId, places: next }
+    })
+  }, [serverTimelineTracks, pendingTrackScopes, activeFileId])
+  useEffect(() => {
+    if (!pendingTrackColors || pendingTrackColors.fileId !== activeFileId) return
+    const settled = settledPendingColors(pendingTrackColors.colors, serverTimelineTracks)
+    if (settled.length === 0) return
+    setPendingTrackColors((current) => {
+      if (!current || current.fileId !== activeFileId) return current
+      const next = new Map(current.colors)
+      for (const id of settled) next.delete(id)
+      return next.size === 0 ? null : { fileId: current.fileId, colors: next }
+    })
+  }, [serverTimelineTracks, pendingTrackColors, activeFileId])
   // The third way out: leaving the file (or the project) abandons the overlay.
   // Whatever the server ends up storing is the truth for a file you are no
   // longer looking at, and an overlay held across a switch would be applied to
   // a list it was never computed against.
   useEffect(() => {
     setPendingTrackOrders(null)
+    setPendingTrackScopes(null)
+    setPendingNewTracks(null)
+    setPendingTrackColors(null)
   }, [activeFileId, projectId])
   // Pre-merge round: the control returned to the timeline toolbar. The gate
   // is "don't pass the callback": below the floor the toolbar renders the
@@ -14204,7 +14388,7 @@ export function ProjectWorkspace() {
   // Stage 3: track order is PROJECT-WIDE (Sam's call) and rides `file.track.set`,
   // which the server floors at maintainer — the same clearance, read the same
   // way, as the timing mode beside it. The gate is "don't pass the callback":
-  // below the floor the gutter has no grip, no grab cursor and no tab stop.
+  // below the floor the gutter has no tab stop.
   const trackRoleLevel = serverRoleLevel ?? project?.syncRole?.level ?? 0
   const canReorderTracks = trackRoleLevel >= ROLE.MAINTAINER
   // AQU-646 stage 2 / AQU-2214: RESTRUCTURING is doubly gated — the same
@@ -14490,11 +14674,11 @@ export function ProjectWorkspace() {
   useEffect(() => {
     updateExternalDubCells(dubDriverCells)
   }, [dubDriverCells])
-  const videoDubSec = useVideoClockSec()
   const videoDubPlaying = useVideoClockPlaying()
-  useEffect(() => {
-    if (videoDubSec != null) tickExternalDubs(videoDubSec)
-  }, [videoDubSec])
+  // Subscribed, not rendered: the picture's clock ticks several times a
+  // second, and reading it as state re-rendered this whole workspace (and the
+  // timeline under it) on every tick.
+  useEffect(() => tickDubsFromClock(subscribeVideoClock, getVideoClockSec), [])
   useEffect(() => {
     setExternalDubsPlaying(videoDubPlaying)
   }, [videoDubPlaying])
@@ -14545,7 +14729,6 @@ export function ProjectWorkspace() {
     setVideoController(virtualClockController)
     return () => clearVideoControllerIf(virtualClockController)
   }, [virtualIsTransport])
-  const virtualSec = useVirtualClockSec()
   const virtualPlaying = useVirtualClockPlaying()
   // The same driver, the same cells, the same four calls the picture makes.
   useEffect(() => {
@@ -14557,15 +14740,22 @@ export function ProjectWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [virtualIsTransport, project?.id, frontierSession])
   useEffect(() => {
-    if (virtualIsTransport && virtualSec != null) tickExternalDubs(virtualSec)
-  }, [virtualIsTransport, virtualSec])
+    if (!virtualIsTransport) return
+    return tickDubsFromClock(subscribeVirtualClock, getVirtualClockSec)
+  }, [virtualIsTransport])
   useEffect(() => {
     if (virtualIsTransport) setExternalDubsPlaying(virtualPlaying)
   }, [virtualIsTransport, virtualPlaying])
-  /** Which line the playhead is on, for the bar's caption and the table follow. */
-  const virtualSoundingCellId = useMemo(
-    () => (virtualIsTransport && virtualSec != null ? cellIdAtSec(dubDriverCells, virtualSec) : null),
-    [virtualIsTransport, virtualSec, dubDriverCells],
+  /** Which line the playhead is on, for the bar's caption and the table follow.
+   *  A selector over the clock, so it re-renders when the line changes. */
+  const readVirtualSoundingCellId = () => {
+    const sec = virtualIsTransport ? getVirtualClockSec() : null
+    return sec != null ? cellIdAtSec(dubDriverCells, sec) : null
+  }
+  const virtualSoundingCellId = useSyncExternalStore(
+    subscribeVirtualClock,
+    readVirtualSoundingCellId,
+    readVirtualSoundingCellId,
   )
   // AQU-1118: which row is playing right now, so its "Play from this cue"
   // button can turn into Pause. The bottom bar's own answer, from the same hook
@@ -14575,7 +14765,9 @@ export function ProjectWorkspace() {
     () => audioMergedCells.some((c) => queueClockIsFileTime(c)),
     [audioMergedCells],
   )
-  const fileTransport = useTransportForFile({
+  // Read by `WithPlayingCue` around the table, not here: the line changes with
+  // every verse of playback, and this shell is far too big to render for it.
+  const fileTransportArgs: UseTransportForFileArgs = {
     cellIds: fileCellIds,
     coreMediaUrl: activeFile?.coreMediaUrl ?? null,
     anyCellClockIsFileTime: anyFileCellClockIsFileTime,
@@ -14583,24 +14775,20 @@ export function ProjectWorkspace() {
     timelineDurationSec,
     virtualSoundingCellId,
     freeTiming: timingMode === "audioFirst",
-  })
-  // …and through the silence after a line it stays on that line until the
-  // next one starts (Sam, Oct 7): the transport's own line is null in a gap.
-  const playingCueCellId = fileTransport.running
-    ? (fileTransport.cellId ?? heldCellIdAtSec(audioMergedCells, fileTransport.progress.currentTime))
-    : null
+  }
 
-  // ── AQU-1758: a book or document on the timeline, one chapter at a time ──
+  // ── A book or document on the timeline, the whole file ──
   //
-  // A book's timeline shows ONE CHAPTER at a time: the one the table and its
-  // chapter picker are on, or, while playback is on a line of this file, that
-  // line's chapter. A file with no chapters shows WHOLE, however long (Sam,
-  // Oct 28: the long-file parts are dropped — the timeline draws only the
-  // clips in view, so length costs nothing). The timeline, the bottom strip's
-  // Play all and every timeline seek share ONE list of lines
-  // (`timelineCells`), so the programme they each lay out is the same one. On
-  // a book, headings follow "Count headings as translatable content" and
-  // hidden lines stay off unless recorded (lib/timeline/sequence-timeline.ts).
+  // A book's timeline lays out EVERY chapter, end to end, on one clock. The
+  // chapter the table is on (`chosenScopeKey`) only names where the reader
+  // is; scrolling the table does not swap the timeline for that chapter. A
+  // file with no chapters is the same list (Sam, Oct 28: the long-file parts
+  // are dropped — the timeline draws the clips in view, so length costs
+  // nothing). The timeline, the bottom strip's Play all and every timeline
+  // seek share ONE list of lines (`timelineCells`), so the programme they
+  // each lay out is the same one. On a book, headings follow "Count headings
+  // as translatable content" and hidden lines stay off unless recorded
+  // (lib/timeline/sequence-timeline.ts).
   const sequenceTimeline = timelineEditorVisible && !activeFileTimeOrdered
   const [chosenScopeKey, setChosenScopeKey] = useState<string | null>(null)
   // The lines a book's timeline may draw at all, before any chapter.
@@ -14613,17 +14801,23 @@ export function ProjectWorkspace() {
     const chapters = timelineChaptersOf(readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex()))
     return chapters.length > 0 ? chapters : EMPTY_TIMELINE_CHAPTERS
   }, [sequenceTimeline, cellStore, cellStoreVersion])
-  const queueCellOnFile = fileTransport.source === "queue" && fileTransport.active ? fileTransport.cellId : null
+  // The chapter the queue is on, for this file. Selected rather than read as
+  // the queue's line, so it re-renders this shell at a chapter boundary only.
+  const queueChapterKey = useQueueStateValue((state) => {
+    if (timelineScopes.length === 0) return null
+    const queue = selectQueueStateForFile(state, fileCellIds)
+    return queue.active ? (chapterOfCell(timelineScopes, queue.cellId)?.key ?? null) : null
+  })
+  // Remembered so a scroll of the table still has a chapter to name. The
+  // timeline itself is `timelineLines`: every chapter, in the file's order.
   const timelineChapter = useMemo(
     () => timelineScopes.length > 0
-      ? resolveTimelineChapter({ chapters: timelineScopes, chosenKey: chosenScopeKey, queueCellId: queueCellOnFile })
+      ? (timelineScopes.find((chapter) => chapter.key === queueChapterKey)
+        ?? resolveTimelineChapter({ chapters: timelineScopes, chosenKey: chosenScopeKey, queueCellId: null }))
       : null,
-    [timelineScopes, chosenScopeKey, queueCellOnFile],
+    [timelineScopes, chosenScopeKey, queueChapterKey],
   )
-  const timelineCells = useMemo(
-    () => scopeCells(timelineLines, timelineChapter),
-    [timelineLines, timelineChapter],
-  )
+  const timelineCells = timelineLines
   // The bottom strip reads its own audio and merges it in; it gets the same
   // lines by id.
   const timelineBarCells = useMemo(() => {
@@ -14631,19 +14825,18 @@ export function ProjectWorkspace() {
     const ids = new Set(timelineCells.map((c) => c.id))
     return legacyCells.filter((c) => ids.has(c.id))
   }, [audioMergedCells, legacyCells, timelineCells])
-  // A book's chapter comes from the table: the chapter on screen, as it
-  // scrolls. Scrolling is reading, never a pick, so it leaves playback alone —
-  // a paused Play all resumes where it was, and the timeline stays on its
-  // chapter until it ends (lib/timeline/chapter-pick). A pick in the chapter
-  // picker and a row of another chapter clicked are what end a paused one.
+  // The table reports the chapter on screen as it scrolls. Scrolling is
+  // reading, never a pick, so it leaves playback alone — a paused Play all
+  // resumes where it was. The timeline keeps every chapter either way
+  // (lib/timeline/chapter-pick). A pick in the chapter picker and a row of
+  // another chapter clicked are what end a paused one.
   const handleTableChapterChange = useCallback((key: string | null) => {
     setChosenScopeKey(key)
   }, [])
-  const queueChapterKey = chapterOfCell(timelineScopes, queueCellOnFile)?.key ?? null
   // AQU-1758 (Sam, Oct 29): picking a chapter while Play all plays jumps to
-  // it and keeps playing, from its first line, in either timing. Picking one
-  // while playback is paused ends that playback, as before. Either way the
-  // timeline shows the chapter picked (lib/timeline/chapter-pick).
+  // it and keeps playing, from its first line, on the whole book's clock.
+  // Picking one while playback is paused ends that playback, as before
+  // (lib/timeline/chapter-pick).
   const queueChapterKeyRef = useRef(queueChapterKey)
   queueChapterKeyRef.current = queueChapterKey
   const chapterPickRunRef = useRef({ projectId: project?.id, session: frontierSession })
@@ -14651,7 +14844,11 @@ export function ProjectWorkspace() {
   // The file's chapters and lines, for the chapter pick below and for Play
   // all's run into the next chapter. Declared before both read it: the React
   // Compiler only treats it as a ref when it sees the useRef first.
-  const chapterRunRef = useRef<{ chapters: readonly TimelineChapter[]; cells: readonly CellData[] } | null>(null)
+  const chapterRunRef = useRef<{
+    chapters: readonly TimelineChapter[]
+    cells: readonly CellData[]
+    onScreen: TimelineChapter | null
+  } | null>(null)
   const handleChapterPicked = useCallback((key: string): boolean => {
     setChosenScopeKey(key)
     const run = chapterRunRef.current
@@ -14664,15 +14861,35 @@ export function ProjectWorkspace() {
     })
     return applyChapterPick(plan, { lines: run?.cells ?? [], ...chapterPickRunRef.current })
   }, [])
+  // The chapter navigator eases the text so the chapter's first row is at the
+  // top. When the Media timeline is open, the same pick eases the timeline so
+  // that line is at the left edge. A folded timeline, or the Text lens, has
+  // nothing on screen to move.
+  const timelinePaneOpenRef = useRef(false)
+  timelinePaneOpenRef.current = timelineStacked && dock.view.isOpen("tl")
+  const handleNavigatorCell = useCallback((cellId: string) => {
+    rememberCell(cellId)
+    if (!timelinePaneOpenRef.current) return
+    showChapterOfCellRef.current(cellId)
+    activateNonceRef.current += 1
+    setTimelineActivateRequest({
+      cellId,
+      nonce: activateNonceRef.current,
+      smooth: true,
+      align: "start",
+    })
+  }, [rememberCell])
   // Play all carries on into the next chapter: when a run of this file's
   // chapter plays out, the next chapter with anything to play starts.
   useLayoutEffect(() => {
-    chapterRunRef.current = timelineScopes.length > 0 ? { chapters: timelineScopes, cells: timelineLines } : null
+    chapterRunRef.current = timelineScopes.length > 0
+      ? { chapters: timelineScopes, cells: timelineLines, onScreen: timelineChapter }
+      : null
     showChapterOfCellRef.current = (cellId) => {
       const chapter = chapterOfCell(timelineScopes, cellId)
       if (!chapter) return
       setChosenScopeKey(chapter.key)
-      // Paused on another chapter: end it, so the timeline shows this row's.
+      // Paused on another chapter: end it. The row's chapter is already on the timeline.
       if (rowEndsPlayback({ rowKey: chapter.key, playingKey: queueChapterKeyRef.current, queueKind: getQueueState().kind })) stopQueue()
     }
   })
@@ -14681,6 +14898,10 @@ export function ProjectWorkspace() {
     if (!run || ctx.snapshot) return
     const played = chapterOfCell(run.chapters, ctx.cells[0]?.id)
     if (!played) return
+    // A run that already holds the later chapters plays them itself. Starting
+    // the next chapter here would begin it again after the book had finished.
+    const last = chapterOfCell(run.chapters, ctx.cells[ctx.cells.length - 1]?.id)
+    if (last && last.key !== played.key) return
     const linesOf = (chapter: TimelineChapter) => scopeCells(run.cells, chapter)
     const next = nextPlayableChapter(run.chapters, played.key, (chapter) => hasAnyPlayableAudio(linesOf(chapter)))
     if (!next) return
@@ -14812,11 +15033,28 @@ export function ProjectWorkspace() {
   const applyTrackOrder = useCallback(
     async (forFileId: string, changes: Array<{ trackId: string; order: number }>) => {
       if (!project?.id || changes.length === 0) return
-      setPendingTrackOrders({ fileId: forFileId, orders: new Map(changes.map((c) => [c.trackId, c.order])) })
+      // Merged, not replaced: the timeline saves several held drops in one
+      // batch, and replacing would drop the earlier ones back to their stored
+      // places until the refresh lands.
+      setPendingTrackOrders((current) => {
+        const orders = new Map(current?.fileId === forFileId ? current.orders : [])
+        for (const c of changes) orders.set(c.trackId, c.order)
+        return { fileId: forFileId, orders }
+      })
+      setPendingTrackScopes((current) =>
+        current?.fileId === forFileId
+          ? { fileId: forFileId, places: withPendingScopeOrders(current.places, changes) }
+          : current)
       // Bound to the file the drag was made on, so a refresh that arrives after
-      // the user has moved on cannot revert a different file's overlay.
+      // the user has moved on cannot revert a different file's overlay. Only
+      // this write's entries, and only while nothing newer has replaced them.
       const revert = () =>
-        setPendingTrackOrders((current) => (current && current.fileId === forFileId ? null : current))
+        setPendingTrackOrders((current) => {
+          if (!current || current.fileId !== forFileId) return current
+          const orders = new Map(current.orders)
+          for (const c of changes) if (orders.get(c.trackId) === c.order) orders.delete(c.trackId)
+          return orders.size === 0 ? null : { fileId: forFileId, orders }
+        })
       try {
         if (changes.length === 1) {
           await emitFileTrackSet({
@@ -14868,6 +15106,7 @@ export function ProjectWorkspace() {
   const handleReorderTrack = useCallback(
     (trackId: string, order: number) => {
       if (!activeFileId) return
+      flushQueuedTrackMoves.current()
       // The offline guard sits HERE, at commit time, and not at pointerdown:
       // connectivity can drop mid-drag, and refusing to lift a row because the
       // wifi blinked when the finger went down is heavy-handed. Before the
@@ -14934,8 +15173,17 @@ export function ProjectWorkspace() {
   // overwritten by whatever this client last read. That rule is why there is no
   // generic `patchTrack(trackId, patch)` here.
   const applyTrackPatch = useCallback(
-    async (trackId: string, patch: Parameters<typeof emitFileTrackSet>[0]["patch"], failure: string) => {
-      if (!project?.id || !activeFileId) return
+    async (
+      trackId: string,
+      patch: Parameters<typeof emitFileTrackSet>[0]["patch"],
+      failure: string,
+      onFailure?: () => void,
+    ) => {
+      if (!project?.id || !activeFileId) {
+        onFailure?.()
+        return
+      }
+      let refused = false
       try {
         await emitFileTrackSet({
           projectId: project.id,
@@ -14953,12 +15201,15 @@ export function ProjectWorkspace() {
           onRejected: (entries) => {
             const mine = entries.filter((r) => r.kind === "file.track.set" && r.fileId === activeFileId)
             if (mine.length === 0) return
+            refused = true
             toast.add({ type: "error", title: `${failure} ${mine[0].reason}` })
           },
         })
         refresh()
+        if (refused) onFailure?.()
       } catch (e) {
         toast.add({ type: "error", title: e instanceof Error ? `${failure} ${e.message}` : failure })
+        onFailure?.()
       }
     },
     [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh],
@@ -14978,14 +15229,22 @@ export function ProjectWorkspace() {
     async (
       changes: ReadonlyArray<{ trackId: string; patch: Parameters<typeof emitFileTrackSet>[0]["patch"] }>,
       failure: string,
+      onFailure?: () => void,
+      /** The file the changes were made on, when that may no longer be open. */
+      forFileId?: string,
     ) => {
-      if (!project?.id || !activeFileId || changes.length === 0) return
+      const fileId = forFileId ?? activeFileId
+      if (!project?.id || !fileId || changes.length === 0) {
+        onFailure?.()
+        return
+      }
+      let refused = false
       try {
         await enqueueEvents(
           changes.map((c) => ({
             kind: "file.track.set" as const,
             projectId: project.id,
-            fileId: activeFileId,
+            fileId,
             parentId: null,
             author: currentUsername,
             payload: { trackId: c.trackId, patch: c.patch },
@@ -14994,14 +15253,17 @@ export function ProjectWorkspace() {
         await flushOutboxBatch({
           getTokenForFile: getTokenForProjectFile,
           onRejected: (entries) => {
-            const mine = entries.filter((r) => r.kind === "file.track.set" && r.fileId === activeFileId)
+            const mine = entries.filter((r) => r.kind === "file.track.set" && r.fileId === fileId)
             if (mine.length === 0) return
+            refused = true
             toast.add({ type: "error", title: `${failure} ${mine[0].reason}` })
           },
         })
         refresh()
+        if (refused) onFailure?.()
       } catch (e) {
         toast.add({ type: "error", title: e instanceof Error ? `${failure} ${e.message}` : failure })
+        onFailure?.()
       }
     },
     [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh],
@@ -15052,15 +15314,38 @@ export function ProjectWorkspace() {
    * hands them over already paired with their track; this stays one enqueue, so
    * a bulk recolour is still one write that lands or fails together.
    */
+  const paintTrackColors = useCallback(
+    (updates: ReadonlyArray<{ trackId: string; color: string | null }>): (() => void) => {
+      const fileId = activeFileId
+      if (!fileId || updates.length === 0) return () => {}
+      setPendingTrackColors((current) => ({
+        fileId,
+        colors: withPendingColors(current?.fileId === fileId ? current.colors : null, updates),
+      }))
+      return () => {
+        setPendingTrackColors((current) => {
+          if (!current || current.fileId !== fileId) return current
+          const colors = withoutPendingColors(current.colors, updates)
+          return colors === null ? null : { fileId, colors }
+        })
+      }
+    },
+    [activeFileId],
+  )
+  const paintTrackColorsRef = useRef(paintTrackColors)
+  paintTrackColorsRef.current = paintTrackColors
+
   const handleSetTrackColor = useCallback(
     (updates: ReadonlyArray<{ trackId: string; color: string | null }>) => {
+      const revert = paintTrackColors(updates)
       recordTrackChanges("editor.history.stepTrackColour", updates.map(({ trackId, color }) => ({ trackId, after: { color } })))
       void applyTrackPatches(
         updates.map(({ trackId, color }) => ({ trackId, patch: { color } })),
         "Couldn't change the colour:",
+        revert,
       )
     },
-    [applyTrackPatches, recordTrackChanges],
+    [applyTrackPatches, paintTrackColors, recordTrackChanges],
   )
 
   /**
@@ -15094,19 +15379,121 @@ export function ProjectWorkspace() {
    * The orders ascend from the first free slot so a run of tracks keeps the
    * sequence it had rather than all landing on one number.
    */
+  /**
+   * "Move to" choices waiting to be saved: one merged patch per track, so a
+   * track moved three times is written once, where it ended up. The editor
+   * saves them on its drops' clock (`onSaveMoves`), once the track list has
+   * settled — a save ends in a workspace-wide refresh, and one landing between
+   * moves stalls the next.
+   */
+  const queuedTrackMoves = useRef<{
+    fileId: string | null
+    failure: string
+    patches: Map<string, Parameters<typeof emitFileTrackSet>[0]["patch"]>
+    reverts: Array<() => void>
+  }>({ fileId: null, failure: "", patches: new Map(), reverts: [] })
+
+  const saveQueuedTrackMoves = useCallback(() => {
+    const queued = queuedTrackMoves.current
+    if (!queued.fileId || queued.patches.size === 0) return
+    queuedTrackMoves.current = { fileId: null, failure: "", patches: new Map(), reverts: [] }
+    const reverts = queued.reverts
+    void applyTrackPatches(
+      [...queued.patches].map(([trackId, patch]) => ({ trackId, patch })),
+      queued.failure,
+      () => { for (const revert of reverts) revert() },
+      queued.fileId,
+    )
+  }, [applyTrackPatches])
+  useEffect(() => {
+    flushQueuedTrackMoves.current = saveQueuedTrackMoves
+  }, [saveQueuedTrackMoves])
+
+  /**
+   * A "Move to" choice: drawn now, through the same display-only overlays a
+   * drag uses, and queued for `saveQueuedTrackMoves`. A refused or failed
+   * write takes the overlay back off.
+   */
+  const paintAndQueueTrackMove = useCallback(
+    (
+      places: ReadonlyArray<{ trackId: string; groupId: string | null; order: number }>,
+      changes: ReadonlyArray<{ trackId: string; patch: Parameters<typeof emitFileTrackSet>[0]["patch"] }>,
+      failure: string,
+      newTracks: readonly TimelineTrack[] = [],
+    ) => {
+      if (!activeFileId) return
+      const forFileId = activeFileId
+      const movedIds = new Set(places.map((p) => p.trackId))
+      const newIds = new Set(newTracks.map((tr) => tr.id))
+      if (newTracks.length > 0) {
+        setPendingNewTracks((current) => ({
+          fileId: forFileId,
+          tracks: [...(current?.fileId === forFileId ? current.tracks : []), ...newTracks],
+        }))
+      }
+      setPendingTrackScopes((current) => {
+        const next = new Map(current?.fileId === forFileId ? current.places : undefined)
+        for (const p of places) next.set(p.trackId, { groupId: p.groupId, order: p.order })
+        return { fileId: forFileId, places: next }
+      })
+      setPendingTrackOrders((current) => {
+        if (current?.fileId !== forFileId) return current
+        let orders: Map<string, number> = current.orders
+        for (const id of movedIds) if (orders.has(id)) orders = withoutPendingOrder(orders, id)
+        if (orders === current.orders) return current
+        return orders.size === 0 ? null : { fileId: forFileId, orders }
+      })
+      const revert = () => {
+        setPendingTrackScopes((current) => {
+          if (!current || current.fileId !== forFileId) return current
+          const next = new Map(current.places)
+          for (const id of movedIds) next.delete(id)
+          return next.size === 0 ? null : { fileId: forFileId, places: next }
+        })
+        setPendingNewTracks((current) => {
+          if (!current || current.fileId !== forFileId) return current
+          const left = current.tracks.filter((tr) => !newIds.has(tr.id))
+          return left.length === 0 ? null : { fileId: forFileId, tracks: left }
+        })
+      }
+      // Another file's moves are saved before this file's start queueing.
+      if (queuedTrackMoves.current.fileId && queuedTrackMoves.current.fileId !== forFileId) saveQueuedTrackMoves()
+      const queued = queuedTrackMoves.current
+      queued.fileId = forFileId
+      queued.failure = failure
+      for (const c of changes) queued.patches.set(c.trackId, { ...queued.patches.get(c.trackId), ...c.patch })
+      queued.reverts.push(revert)
+    },
+    [activeFileId, saveQueuedTrackMoves],
+  )
+
+  // Both append after the rows on screen, queued moves included (pressing
+  // "Move to" saves the editor's held drops first), so a second move made
+  // before the first saves does not land on the first one's slot.
   const handleLeaveFolder = useCallback(
     (trackIds: readonly string[]) => {
-      const firstFree = orderForScopeAppend(serverTimelineTracks, null)
-      const changes = trackIds.map((trackId, i) => ({ trackId, patch: { groupId: null, order: firstFree + i } }))
+      const firstFree = orderForScopeAppend(timelineTracks, null)
+      const places = trackIds.map((trackId, i) => ({ trackId, groupId: null, order: firstFree + i }))
+      const changes = places.map((p) => ({ trackId: p.trackId, patch: { groupId: null, order: p.order } }))
       recordTrackChanges("editor.history.stepMoveTrack", changes.map((c) => ({ trackId: c.trackId, after: c.patch })))
-      void applyTrackPatches(changes, "Couldn't take the track out of its folder:")
+      paintAndQueueTrackMove(places, changes, "Couldn't take the track out of its folder:")
     },
-    [applyTrackPatches, serverTimelineTracks, recordTrackChanges],
+    [paintAndQueueTrackMove, timelineTracks, recordTrackChanges],
+  )
+
+  const handleMoveToFolder = useCallback(
+    (trackIds: readonly string[], folderId: string) => {
+      const firstFree = orderForScopeAppend(timelineTracks, folderId)
+      const places = trackIds.map((trackId, i) => ({ trackId, groupId: folderId, order: firstFree + i }))
+      const changes = places.map((p) => ({ trackId: p.trackId, patch: { groupId: folderId, order: p.order } }))
+      recordTrackChanges("editor.history.stepMoveTrack", changes.map((c) => ({ trackId: c.trackId, after: c.patch })))
+      paintAndQueueTrackMove(places, changes, "Couldn't move the track:")
+    },
+    [paintAndQueueTrackMove, timelineTracks, recordTrackChanges],
   )
 
   /**
-   * Sam, 2026-08-24: a folder is made FROM tracks, never picked from a list of
-   * destinations.
+   * Sam, 2026-08-24: a folder is made FROM tracks.
    *
    * The folder takes the place of the TOPMOST selected track, so the block
    * lands where the person was already looking rather than at the bottom of the
@@ -15126,59 +15513,70 @@ export function ProjectWorkspace() {
    * two into separate events would leave it half-moved if the second were
    * refused.
    *
-   * A TIE IS RESOLVED BY APPENDING, not by renormalising the target scope. The
-   * resolver hands out midpoints, and a midpoint can only collide when the two
-   * neighbours already share a number; putting the track at the end of that
-   * scope is a free, unambiguous slot and costs one write instead of N. The
-   * user can drag it where they meant afterwards — which is the ungated
-   * gesture, so it is always available.
+   * THE ORDER IS TAKEN AS GIVEN. The editor reads it off the rows it draws,
+   * held drops included, and resolves a tie there by appending. Judged here,
+   * against the server's orders, a tie could be one the user no longer sees:
+   * a member moved down a moment ago still holds its old top slot until the
+   * held drop saves, and a track dropped above it went to the bottom.
    */
   const handleMoveTrackToScope = useCallback(
     (trackId: string, groupId: string | null, order: number) => {
-      if (!Number.isFinite(order)) return
-      const folderIds = folderIdsOf(serverTimelineTracks)
-      const tied = serverTimelineTracks.some(
-        (t) => t.id !== trackId && trackScope(t, folderIds) === groupId && t.order === order,
-      )
-      const settled = tied ? orderForScopeAppend(serverTimelineTracks, groupId) : order
-      recordTrackChanges("editor.history.stepMoveTrack", [{ trackId, after: { groupId, order: settled } }])
-      void applyTrackPatch(trackId, { groupId, order: settled }, "Couldn't move the track:")
+      if (!Number.isFinite(order) || !activeFileId) return
+      flushQueuedTrackMoves.current()
+      const forFileId = activeFileId
+      const revert = () =>
+        setPendingTrackScopes((current) => {
+          if (!current || current.fileId !== forFileId) return current
+          const places = new Map(current.places)
+          places.delete(trackId)
+          return places.size === 0 ? null : { fileId: forFileId, places }
+        })
+      setPendingTrackScopes((current) => {
+        const places = new Map(current && current.fileId === forFileId ? current.places : undefined)
+        places.set(trackId, { groupId, order })
+        return { fileId: forFileId, places }
+      })
+      setPendingTrackOrders((current) => {
+        if (current?.fileId !== forFileId || !current.orders.has(trackId)) return current
+        const orders = withoutPendingOrder(current.orders, trackId)
+        return orders.size === 0 ? null : { fileId: forFileId, orders }
+      })
+      recordTrackChanges("editor.history.stepMoveTrack", [{ trackId, after: { groupId, order } }])
+      void applyTrackPatch(trackId, { groupId, order }, "Couldn't move the track:", revert)
     },
-    [applyTrackPatch, serverTimelineTracks, recordTrackChanges],
+    [activeFileId, applyTrackPatch, recordTrackChanges],
   )
 
   const handleCreateFolderFrom = useCallback(
     (trackIds: readonly string[]): string => {
       const folderId = uuidv7()
       const chosen = new Set(trackIds)
-      const members = serverTimelineTracks.filter((tr) => chosen.has(tr.id))
+      const members = timelineTracks.filter((tr) => chosen.has(tr.id))
       const topMost = members.length > 0 ? members[0] : null
-      const folderIds = folderIdsOf(serverTimelineTracks)
+      const folderIds = folderIdsOf(timelineTracks)
       // Where the block goes: the topmost member's own slot when it is already
       // top-level, otherwise the bottom. A folder cannot be created inside a
       // folder, so a member that lives in one contributes no position.
       const order =
         topMost && trackScope(topMost, folderIds) === null
           ? topMost.order
-          : orderForScopeAppend(serverTimelineTracks, null)
+          : orderForScopeAppend(timelineTracks, null)
+      // The STORED name, in English whatever the creator's UI language —
+      // see `nextFolderName`. The menu LABEL stays translated.
+      const name = nextFolderName(timelineTracks)
 
+      const places = members.map((member, i) => ({ trackId: member.id, groupId: folderId, order: i }))
       const changes = [
-        {
-          trackId: folderId,
-          // The STORED name, in English whatever the creator's UI language —
-          // see `nextFolderName`. The menu LABEL stays translated.
-          patch: { kind: "folder" as const, name: nextFolderName(serverTimelineTracks), order },
-        },
-        ...members.map((member, i) => ({
-          trackId: member.id,
-          patch: { groupId: folderId, order: i },
-        })),
+        { trackId: folderId, patch: { kind: "folder" as const, name, order } },
+        ...places.map((p) => ({ trackId: p.trackId, patch: { groupId: folderId, order: p.order } })),
       ]
       recordTrackChanges("editor.history.stepAddFolder", changes.map((c) => ({ trackId: c.trackId, after: c.patch })))
-      void applyTrackPatches(changes, "Couldn't make the folder:")
+      paintAndQueueTrackMove(places, changes, "Couldn't make the folder:", [
+        { id: folderId, kind: "folder", name, order, groupId: null },
+      ])
       return folderId
     },
-    [applyTrackPatches, serverTimelineTracks, recordTrackChanges],
+    [paintAndQueueTrackMove, timelineTracks, recordTrackChanges],
   )
 
   const handleDeleteTrack = useCallback(
@@ -15866,9 +16264,20 @@ export function ProjectWorkspace() {
       ...trackStepHandlers({
         readTrack: (trackId) => {
           const tr = serverTimelineTracks.find((x) => x.id === trackId)
-          return tr ? trackFieldsOf(tr) : null
+          if (!tr) return null
+          const pending = pendingTrackColorsRef.current
+          const color = pending?.fileId === activeFileIdRef.current ? pending.colors.get(trackId) : undefined
+          return trackFieldsOf(color === undefined ? tr : { ...tr, color })
         },
-        patchTracks: (changes) => applyTrackPatches(changes as never, "Couldn't undo the track change:"),
+        patchTracks: (changes) => {
+          const colors = changes.flatMap((change) =>
+            change.patch && "color" in change.patch
+              ? [{ trackId: change.trackId, color: change.patch.color ?? null }]
+              : [],
+          )
+          const revert = paintTrackColorsRef.current(colors)
+          return applyTrackPatches(changes as never, "Couldn't undo the track change:", revert)
+        },
         restoreTakes: async (takes) => {
           // Choosing a deleted take brings it back. Bring every one back, then
           // give each slot its old choice — the last write per slot wins.
@@ -16034,7 +16443,8 @@ export function ProjectWorkspace() {
   // seeks — no session to mint tokens, or a target inside the trailing pad that
   // no section owns — and in those cases the picture must still move, so the
   // pane cannot infer position from queue progress alone.
-  const [videoSeek, setVideoSeek] = useState<{ sec: number; nonce: number; play?: boolean } | null>(null)
+  const videoSeek = useState(createVideoSeekStore)[0]
+  const playingCue = useState(createPlayingCueStore)[0]
   /** Space, when the picture is the transport. A nonce rather than a desired
    *  state: the picture keeps its native controls, and only a toggle against
    *  the element's own `paused` can stay in step with them. */
@@ -16061,7 +16471,7 @@ export function ProjectWorkspace() {
    * cancel, from the editor's own unmount, and here on a file switch.
    */
   const scrubbingRef = useRef(false)
-  useEffect(() => { scrubbingRef.current = false; setVideoSeek(null); setVideoToggle(null) }, [activeFileId])
+  useEffect(() => { scrubbingRef.current = false; videoSeek.clear(); setVideoToggle(null) }, [activeFileId, videoSeek])
   const handleTimelineScrubStart = useCallback(() => {
     scrubbingRef.current = true
     // `pauseAllTransports`, not `pauseAllPlayback`: the latter is queue-only and
@@ -16103,7 +16513,7 @@ export function ProjectWorkspace() {
     // reaches "Play from this cue": that button renders only on caption files,
     // whose rows are never file-timed audio.
     const play = opts?.play === true && videoIsTransport
-    setVideoSeek((prev) => ({ sec: Math.max(0, sec), nonce: (prev?.nonce ?? 0) + 1, play }))
+    videoSeek.request(Math.max(0, sec), play)
     // AQU-646 stage 5: A SCRUB MOVES THE PICTURE AND NOTHING ELSE (Sam).
     //
     // Placed AFTER the stamp so the frame still follows the hand, and BEFORE
@@ -16151,7 +16561,7 @@ export function ProjectWorkspace() {
       sec,
       { play: false },
     )
-  }, [project?.id, timelineCells, frontierSession, videoIsTransport, virtualIsTransport, recordingCellId])
+  }, [project?.id, timelineCells, frontierSession, videoIsTransport, virtualIsTransport, recordingCellId, videoSeek])
 
   /** AQU-1117: "Play from this cue" — the same routing as an ordinary seek,
    *  with the start riding along on the stamp so the film begins at the cue
@@ -18125,7 +18535,10 @@ export function ProjectWorkspace() {
           </div>
         ) : cellAreaState.kind === "ready" ? (
           // FRO-309: relative wrapper so the search-expanded overlay can cover the editor
-          <div className="relative flex h-full w-full flex-col">
+          <div
+            className="relative flex h-full w-full flex-col"
+            {...(timelineStacked ? { "data-media-editor": "" } : {})}
+          >
             <ExtensionsBar choice={extensionEditorChoice} />
             {/* FRO-309: Expanded search results overlay */}
             {searchExpandedQuery !== null && (
@@ -18161,7 +18574,7 @@ export function ProjectWorkspace() {
               // then History. Right: the status ring, the views, Panels, ⋯.
               // The transport is the thin strip along the bottom of the view.
               <MediaTopBar
-                afterTools={<HistoryPanel onResult={reportHistory} laneName={historyLaneName} />}
+                afterTools={<HistoryPanel onResult={reportHistory} laneName={historyLaneName} align="start" />}
                 trailing={
                   <>
                     <MediaStatusRing
@@ -18267,8 +18680,9 @@ export function ProjectWorkspace() {
                     // AQU-1758: a book's text has no times to drag it to.
                     sequenceOrdered={!activeFileTimeOrdered}
                     showSources={filmAndSourcesOn}
-                    initialSelectedCellId={mediaTraceCellId}
+                    initialSelectedCellId={mediaTraceCellId ?? fileResumeRef.current.cellId}
                     onSelectedCellChange={handleTimelineSelectedCell}
+                    onResumePlace={(cellId) => rememberCell(cellId, "center")}
                     onChipActivated={jumpToCellIdFollowing}
                     onCueActivated={handleCueActivated}
                     activateRequest={timelineActivateRequest}
@@ -18395,6 +18809,7 @@ export function ProjectWorkspace() {
                     onScrubEnd={handleTimelineScrubEnd}
                     tracks={timelineTracks}
                     textTrackCells={timelineText.cellsByFile}
+                    onHiddenTracksChange={onHiddenTimelineTracks}
                     textTrackErrors={timelineText.errors}
                     onRetryTextTrack={timelineText.refresh}
                     onRetimeTextTrack={handleRetimeTextTrack}
@@ -18452,6 +18867,8 @@ export function ProjectWorkspace() {
                             onAdd: handleAddTrack,
                             onLeaveFolder: handleLeaveFolder,
                             onMoveToScope: handleMoveTrackToScope,
+                            onMoveToFolder: handleMoveToFolder,
+                            onSaveMoves: saveQueuedTrackMoves,
                             onCreateFolderFrom: handleCreateFolderFrom,
                             onDelete: handleDeleteTrack,
                             onSetLineLengths: handleSetTrackLineLengths,
@@ -18507,7 +18924,7 @@ export function ProjectWorkspace() {
                   // film's mute button, and audibility is stored per file.
                   fileId={activeFile.id}
                   cells={audioMergedCells}
-                  seekSec={videoSeek}
+                  seek={videoSeek}
                   togglePlay={videoToggle}
                   suspended={recordingCellId !== null}
                   onVideoTime={setVideoClockSec}
@@ -18581,7 +18998,7 @@ export function ProjectWorkspace() {
                   choice={extensionEditorChoice}
                   file={{ fileId: activeFileId, name: activeFile.name }}
                   bar={null}
-                  handleRef={editorRef}
+                  handleRef={bindEditorRef}
                   services={extensionEditorServices}
                   revealCellId={searchParams.get("cellId")}
                   {...(!timelineStacked && fileChapterToolbar ? { toolbarTrailing: fileChapterToolbar } : {})}
@@ -18589,8 +19006,17 @@ export function ProjectWorkspace() {
                 {extensionEditorRev4.overlay}
                 </>
               ) : (
+              <>
+              <PlayingCuePublisher
+                store={playingCue}
+                transport={fileTransportArgs}
+                cells={audioMergedCells}
+                // AQU-1642 / AQU-1758: on a book or document too — the line the
+                // bottom strip is playing is marked.
+                enabled={timelineStacked && (isSubtitleFile || !activeFileTimeOrdered)}
+              />
               <EditorTable
-            ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
+            ref={bindEditorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
             bibleOpen={parallelBiblesPanelActive}
             parallelBibles={editorParallelBibles}
@@ -18672,9 +19098,7 @@ export function ProjectWorkspace() {
             getStatisticalBt={getStatisticalBt}
             onAlignmentSeedChange={handleAlignmentSeedChange}
             onSeekToCue={isSubtitleFile && timelineStacked ? handleCueSeek : undefined}
-            // AQU-1642 / AQU-1758: on a book or document too — the line the
-            // bottom strip is playing is marked.
-            playingCueCellId={timelineStacked && (isSubtitleFile || !activeFileTimeOrdered) ? playingCueCellId : null}
+            playingCue={playingCue}
             onPauseCue={pauseAllTransports}
             sourceLineEditing={sourceLineEditing}
             lineNumbersEnabled={fileMeta.lineNumbersEnabled}
@@ -18722,7 +19146,8 @@ export function ProjectWorkspace() {
             onClaimCell={handleClaimCell}
             onReleaseCell={handleReleaseCell}
             onViewCell={handleViewCell}
-            onNavigateToCell={rememberCell}
+            onNavigateToCell={handleNavigatorCell}
+            onPlaceChange={(cellId) => rememberCell(cellId, "top")}
             onTargetPresenceSelection={handleTargetPresenceSelection}
             onAckRemoteChange={handleAckRemoteChange}
             staleCellIds={staleCellIds}
@@ -18748,6 +19173,7 @@ export function ProjectWorkspace() {
             onActiveChapterChange={sequenceTimeline ? handleTableChapterChange : undefined}
             onChapterPicked={sequenceTimeline ? handleChapterPicked : undefined}
           />
+              </>
               )}
               </div>
               <CellRowsLoadStatus progress={cellLoadProgress} loading={cellsLoading} error={cellsError} onRetryClick={retryCells} />

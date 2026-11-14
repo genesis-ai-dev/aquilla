@@ -169,6 +169,28 @@ describe("useMediaDock", () => {
     }
   })
 
+  // Text folded, the page reloaded, Text turned back on: an empty 0 px column.
+  // Pinned while alone in its row, the area was held at zero by the panel
+  // group for good, whatever the dock asked of it after.
+  it("pins a folded area only beside an open one", () => {
+    const pinned = { minSize: 0, maxSize: 0 }
+    writeStoredDock("f2", { ...startDockLayout(), folded: { tl: false, ll: false, lr: true } })
+    const left = { tab: null, isRail: true, setTab: () => {} }
+    const alone = renderHook(() =>
+      useMediaDock({ fileId: "f2", timelineStacked: true, filmPresent: false, start: START, left }),
+    )
+    expect(alone.result.current.constraints.body).toEqual(pinned)
+    expect(alone.result.current.constraints.lr).toEqual({})
+
+    const { result } = setup()
+    act(() => result.current.dock.fold("lr"))
+    expect(result.current.dock.constraints.lr).toEqual(pinned)
+    press(FULL_SCREEN)
+    expect(result.current.dock.constraints.body).toEqual(pinned)
+    expect(result.current.dock.constraints.ll).toEqual({})
+    expect(result.current.dock.constraints.lr).toEqual({})
+  })
+
   // Review finding 7, as Sources › Hide film already did.
   describe("hiding a panel", () => {
     it("one of two tabs: the other shows, and the area they share stays open", () => {

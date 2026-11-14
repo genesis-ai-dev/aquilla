@@ -91,7 +91,7 @@ type ExtractResult =
       documentXmlBytes?: number
     }
 
-function extractText(fileName: string, bytes: Uint8Array): ExtractResult {
+async function extractText(fileName: string, bytes: Uint8Array): Promise<ExtractResult> {
   const ext = kbExtension(fileName)
   let text: string
   if (ext === ".md" || ext === ".txt") {
@@ -106,7 +106,7 @@ function extractText(fileName: string, bytes: Uint8Array): ExtractResult {
       }
     }
     try {
-      text = ext === ".docx" ? extractTextFromDocx(bytes) : extractTextFromPdf(bytes)
+      text = ext === ".docx" ? extractTextFromDocx(bytes) : await extractTextFromPdf(bytes)
     } catch (err) {
       // AQU-1499: this used to be a bare `catch` returning a flat "could not
       // extract text", so an uploader whose file failed for a knowable,
@@ -341,7 +341,7 @@ export async function handleUpload(
     return c.json(body, status)
   }
 
-  const extracted = extractText(fileName, bytes)
+  const extracted = await extractText(fileName, bytes)
   if (!extracted.ok) {
     // AQU-1499: count the rejections. Partners hit this on their first
     // knowledge-base upload and work around it privately (re-saving the file),

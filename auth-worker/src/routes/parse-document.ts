@@ -9,17 +9,15 @@
 // DOCX: it's a zip — extract word/document.xml and strip XML tags. Uses
 // fflate (Workers-compatible, no Node-only deps).
 //
-// PDF: minimal text-stream extraction (look for BT…ET blocks and Tj/TJ
-// operators). Content streams are inflated first (see below). Complex PDFs
-// with embedded fonts or encoding tables may still produce garbled text.
-// SWARM-TODO(AQU-197-pdf): replace the minimal PDF text extractor with a
-// proper Workers-compatible library (e.g. unpdf) once a build-verified
-// version is available. The current extractor is a best-effort fallback.
+// PDF: read with pdf.js through unpdf's serverless build (AQU-2551). A
+// password-protected or text-less PDF answers 422 with a `code` ("password",
+// "empty") so the client can say which.
 
 import { Hono } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import { unzipSync, unzlibSync, inflateSync } from "fflate"
+import { extractText, getDocumentProxy } from "unpdf"
 import { readBytesWithLimit } from "../../../shared/http-body-limit"
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024 // 2 MB
@@ -49,17 +47,17 @@ const MAX_UPLOAD_BYTES = MAX_FILE_BYTES + 16 * 1024
 // text, and 64 MB leaves room inside a Worker's 128 MB budget. Raising it
 // further means making the inflate itself streaming first.
 const MAX_DOCX_XML_BYTES = 64 * 1024 * 1024 // 64 MB
-// Total inflated size budget across all of a PDF's content streams (AQU-197).
-// Same decompression-bomb concern as the DOCX cap above: a 2 MB upload can
-// declare streams that inflate to gigabytes. fflate truncates to a preallocated
-// `out` buffer rather than throwing, so a per-call buffer sized to the
-// remaining budget makes overrunning it structurally impossible.
-const MAX_PDF_INFLATED_BYTES = 20 * 1024 * 1024 // 20 MB
-// Per-stream allocation cap. The output buffer has to be preallocated, so
-// without this every stream in a many-stream PDF would allocate the whole
-// remaining budget. A single content stream from a ≤2 MB upload inflating past
-// 4 MB of text operators is not a real document.
-const MAX_PDF_STREAM_BYTES = 4 * 1024 * 1024 // 4 MB
+// Total inflated size budget across a PDF's compressed streams (AQU-197,
+// AQU-2551). Same decompression-bomb concern as the DOCX cap above: a 2 MB
+// upload can declare streams that inflate to gigabytes. A PDF over it is
+// refused before pdf.js reads it (assertPdfInflatesWithinBudget). AQU-2551:
+// fonts and object streams now count too, since pdf.js decodes them, so the
+// budget is set well above what a ≤2 MB real document inflates to.
+const MAX_PDF_INFLATED_BYTES = 48 * 1024 * 1024 // 48 MB
+// Per-stream cap. The check's output buffer has to be preallocated, so without
+// this every stream would allocate the whole remaining budget. A single
+// stream from a ≤2 MB upload inflating past 16 MB is not a real document.
+const MAX_PDF_STREAM_BYTES = 16 * 1024 * 1024 // 16 MB
 
 const parseDocument = new Hono<AuthHonoEnv>()
 
@@ -302,55 +300,58 @@ function decodeTextSpan(decoder: TextDecoder, span: Uint8Array): string {
     .replace(/&amp;/g, "&")
 }
 
-// ── PDF helpers ───────────────────────────────────────────────────────────────
+// ── PDF ──────────────────────────────────────────────────────────────────────
 
-// Inflate every /FlateDecode content stream in the file.
-//
-// AQU-197: essentially every PDF produced by a real writer (Word, InDesign,
-// LaTeX, "print to PDF") stores its content streams zlib-compressed, so the
-// text operators never appear in the raw bytes and a raw scan extracts
-// nothing at all. Only hand-written/synthetic PDFs are uncompressed.
+/** Why a PDF gave no text, for the client to word (AQU-2551). */
+export type PdfExtractionCode = "password" | "empty" | "unreadable" | "too-complex"
+
+export class PdfExtractionError extends DocumentExtractionError {
+  readonly code: PdfExtractionCode
+
+  constructor(code: PdfExtractionCode, message: string, options?: { cause?: unknown }) {
+    super(message, options)
+    this.name = "PdfExtractionError"
+    this.code = code
+  }
+}
+
+// AQU-2551: a decompression-bomb gate before pdf.js sees the file. A ≤2 MB
+// upload can declare streams that inflate to gigabytes, and pdf.js keeps a
+// stream's whole decoded output while it reads it, inside a 128 MB Worker.
+// Every /FlateDecode stream except images (which text extraction never
+// decodes) is inflated into a buffer of bounded size; fflate truncates to that
+// buffer instead of growing, so the check itself cannot balloon. A stream that
+// fills its buffer, or a file over the total, is refused.
 //
 // Decoding latin1 maps bytes 0x00–0xFF one-to-one onto U+0000–U+00FF, so
 // offsets into `raw` are byte offsets into `bytes` and can be used to slice.
-function inflatePdfStreams(bytes: Uint8Array, raw: string): string[] {
-  const decoded: string[] = []
+function assertPdfInflatesWithinBudget(bytes: Uint8Array): void {
+  const raw = new TextDecoder("latin1").decode(bytes)
   let budget = MAX_PDF_INFLATED_BYTES
-
   const streamRe = /stream\r?\n/g
   let match: RegExpExecArray | null
   while ((match = streamRe.exec(raw)) !== null) {
-    if (budget <= 0) break
-
     // A stream's dictionary is the `<< … >>` immediately preceding the keyword.
     const dictStart = raw.lastIndexOf("<<", match.index)
     const dict = dictStart === -1 ? "" : raw.slice(dictStart, match.index)
-    if (!dict.includes("/FlateDecode")) continue
-    // Images and embedded font programs inflate to binary that can never hold
-    // text operators — skip them so they don't consume the budget.
-    if (/\/Subtype\s*\/Image|\/FontFile/.test(dict)) continue
-
     const dataStart = match.index + match[0].length
     const dataEnd = raw.indexOf("endstream", dataStart)
-    if (dataEnd === -1) continue
-
-    const inflated = inflateBounded(bytes.subarray(dataStart, dataEnd), budget)
-    if (inflated) {
-      budget -= inflated.length
-      decoded.push(new TextDecoder("latin1").decode(inflated))
-    }
-
-    // Resume scanning past this stream so its binary payload isn't re-searched.
+    if (dataEnd === -1) break
     streamRe.lastIndex = dataEnd
+    if (!dict.includes("/FlateDecode") || /\/Subtype\s*\/Image/.test(dict)) continue
+    const cap = Math.min(budget, MAX_PDF_STREAM_BYTES)
+    const inflated = inflateBounded(bytes.subarray(dataStart, dataEnd), cap)
+    if (!inflated) continue // corrupt or not zlib: pdf.js decides
+    if (inflated.length >= cap) {
+      throw new PdfExtractionError("too-complex", "the PDF is too complex to read: its compressed content expands too far.")
+    }
+    budget -= inflated.length
   }
-
-  return decoded
 }
 
-// Inflate into a buffer sized to the remaining budget. fflate truncates to the
-// provided `out` buffer instead of throwing, which is what bounds a bomb.
-function inflateBounded(slice: Uint8Array, budget: number): Uint8Array | null {
-  const cap = Math.min(budget, MAX_PDF_STREAM_BYTES)
+// Inflate into a buffer of `cap` bytes. fflate truncates to the provided `out`
+// buffer instead of throwing, which is what bounds a bomb.
+function inflateBounded(slice: Uint8Array, cap: number): Uint8Array | null {
   // zlib-wrapped is the norm; some writers emit raw deflate instead.
   for (const inflate of [unzlibSync, inflateSync]) {
     try {
@@ -362,66 +363,43 @@ function inflateBounded(slice: Uint8Array, budget: number): Uint8Array | null {
   return null
 }
 
-export function extractTextFromPdf(bytes: Uint8Array): string {
-  // SWARM-TODO(AQU-197-pdf): this is a minimal best-effort extractor.
-  // It decodes the raw byte stream looking for PDF text operators (Tj, TJ, ')
-  // inside BT…ET blocks. It handles ISO-8859-1 literals and octal escapes
-  // but will produce garbled output for PDFs with custom font encoding tables.
-  const raw = new TextDecoder("latin1").decode(bytes)
-
-  // Scan the inflated content streams as well as the raw bytes, so both
-  // real-world (compressed) and uncompressed PDFs extract.
-  const haystacks = [...inflatePdfStreams(bytes, raw), raw]
-
-  const chunks: string[] = []
-
-  for (const haystack of haystacks) {
-    // Iterate BT…ET blocks
-    const btEtRe = /BT\s([\s\S]*?)ET/g
-    let blockMatch: RegExpExecArray | null
-    while ((blockMatch = btEtRe.exec(haystack)) !== null) {
-      const block = blockMatch[1]
-
-      // Match string operands of Tj / ' / " operators and TJ arrays
-      // Tj: (string) Tj
-      // TJ: [(string) ...] TJ
-      // ' : (string) '
-      const opRe = /\(([^)\\]*(?:\\.[^)\\]*)*)\)\s*(?:Tj|'|")|(\[[\s\S]*?\])\s*TJ/g
-      let opMatch: RegExpExecArray | null
-      while ((opMatch = opRe.exec(block)) !== null) {
-        if (opMatch[1] !== undefined) {
-          // Single string
-          chunks.push(decodePdfString(opMatch[1]))
-        } else if (opMatch[2] !== undefined) {
-          // TJ array — extract all parenthesized strings
-          const arrayStr = opMatch[2]
-          const strRe = /\(([^)\\]*(?:\\.[^)\\]*)*)\)/g
-          let strMatch: RegExpExecArray | null
-          while ((strMatch = strRe.exec(arrayStr)) !== null) {
-            chunks.push(decodePdfString(strMatch[1]))
-          }
-        }
-      }
-      chunks.push("\n")
+/**
+ * The text of a PDF, read with pdf.js (unpdf's serverless build, made for
+ * Workers: no DOM, no canvas, its worker inlined). AQU-2551: this replaced a
+ * scan for text operators that missed everything drawn with embedded
+ * (Identity-H) fonts — about 5/6 of a Word PDF's text, and all its Greek and
+ * Hebrew. pdf.js maps each glyph back to Unicode through the font's own
+ * tables.
+ *
+ * A password-protected PDF and one with no text (empty, or scanned images)
+ * are refused with a `PdfExtractionError` code, so the client can say which.
+ */
+export async function extractTextFromPdf(bytes: Uint8Array): Promise<string> {
+  assertPdfInflatesWithinBudget(bytes)
+  let pdf: Awaited<ReturnType<typeof getDocumentProxy>>
+  try {
+    // pdf.js transfers (detaches) the buffer it is given: hand it a copy.
+    pdf = await getDocumentProxy(bytes.slice(), {
+      useSystemFonts: false,
+      disableFontFace: true,
+      stopAtErrors: false,
+    })
+  } catch (err) {
+    if ((err as { name?: string } | null)?.name === "PasswordException") {
+      throw new PdfExtractionError("password", "the PDF is password-protected. Remove the password and upload it again.", { cause: err })
     }
+    throw new PdfExtractionError("unreadable", "the file could not be read as a PDF.", { cause: err })
   }
-
-  return chunks
-    .join("")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim()
-}
-
-function decodePdfString(s: string): string {
-  // Unescape PDF string escape sequences
-  return s
-    .replace(/\\(\d{1,3})/g, (_m, oct) => String.fromCharCode(parseInt(oct, 8)))
-    .replace(/\\n/g, "\n")
-    .replace(/\\r/g, "\r")
-    .replace(/\\t/g, "\t")
-    .replace(/\\\\/g, "\\")
-    .replace(/\\\(/g, "(")
-    .replace(/\\\)/g, ")")
+  let text: string
+  try {
+    text = (await extractText(pdf, { mergePages: true })).text
+  } finally {
+    await pdf.loadingTask.destroy().catch(() => {})
+  }
+  if (!text.trim()) {
+    throw new PdfExtractionError("empty", "the PDF has no text. It may be scanned images or empty.")
+  }
+  return text.trim()
 }
 
 // ── Route ─────────────────────────────────────────────────────────────────────
@@ -499,7 +477,7 @@ parseDocument.post("/", authMiddleware, async (c) => {
     if (isDocx) {
       text = extractTextFromDocx(bytes)
     } else {
-      text = extractTextFromPdf(bytes)
+      text = await extractTextFromPdf(bytes)
     }
   } catch (err) {
     console.error("parse-document extraction failed:", err)
@@ -513,6 +491,8 @@ parseDocument.post("/", authMiddleware, async (c) => {
           err instanceof DocumentExtractionError
             ? `Could not extract text from file: ${err.message}`
             : "Could not extract text from file",
+        // AQU-2551: why a PDF gave no text, so the client can say which.
+        ...(err instanceof PdfExtractionError ? { code: err.code } : {}),
       },
       422,
     )

@@ -11,6 +11,9 @@
 // the caller is known. The streaming cap itself is covered at its own
 // boundary in shared/http-body-limit.test.ts.
 
+import { readFileSync } from "node:fs"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, it, expect, vi } from "vitest"
 import { zipSync, strToU8 } from "fflate"
 
@@ -132,5 +135,35 @@ describe("POST /api/v2/parse-document — upload gate (AQU-1858)", () => {
     })
 
     expect(res.status).toBe(400)
+  })
+})
+
+// AQU-2551: a PDF that gives no text says why, as a code the client words
+// ("password" or "empty"), and a readable PDF answers its text.
+describe("POST /api/v2/parse-document — PDFs (AQU-2551)", () => {
+  const fixture = (name: string) =>
+    new Uint8Array(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../../../src/lib/parsers/__fixtures__/pdf", name)))
+  const post = (bytes: Uint8Array, name: string) => {
+    const form = new FormData()
+    form.append("file", new File([bytes], name, { type: "application/pdf" }))
+    return parseDocument.request("/", { method: "POST", body: form })
+  }
+
+  it("answers a PDF's text", async () => {
+    const res = await post(fixture("two-column.pdf"), "rules.pdf")
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { text: string }).text).toContain("The last paragraph is short.")
+  })
+
+  it("answers 422 with code \"password\" for a locked PDF", async () => {
+    const res = await post(fixture("locked.pdf"), "locked.pdf")
+    expect(res.status).toBe(422)
+    expect(((await res.json()) as { code?: string }).code).toBe("password")
+  })
+
+  it("answers 422 with code \"empty\" for a PDF with no text", async () => {
+    const res = await post(fixture("blank.pdf"), "blank.pdf")
+    expect(res.status).toBe(422)
+    expect(((await res.json()) as { code?: string }).code).toBe("empty")
   })
 })

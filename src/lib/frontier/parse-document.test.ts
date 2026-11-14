@@ -51,6 +51,18 @@ describe("parseDocumentFile", () => {
     expect(String((err as Error).cause)).toContain("422")
   })
 
+  // AQU-2551: the worker says why a PDF gave no text, and the person is told.
+  it("says a PDF is password-protected, or has no text, when the worker says so", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ error: "Could not extract text from file: …", code: "password" }, 422))
+    await expect(parseDocumentFile(new File(["x"], "r.pdf"), JWT)).rejects.toThrow(
+      "This PDF is password-protected. Remove the password and import it again.",
+    )
+    fetchMock.mockResolvedValue(jsonResponse({ error: "Could not extract text from file: …", code: "empty" }, 422))
+    await expect(parseDocumentFile(new File(["x"], "r.pdf"), JWT)).rejects.toThrow("This PDF has no text.")
+    fetchMock.mockResolvedValue(jsonResponse({ error: "…", code: "too-complex" }, 422))
+    await expect(parseDocumentFile(new File(["x"], "r.pdf"), JWT)).rejects.toThrow("We couldn't read that file.")
+  })
+
   // A 200 with no `text` is the same dead end for the user as a 4xx, and used
   // to throw the untranslated "Worker returned empty text."
   it("treats an ok response with no text as the same keyed failure", async () => {

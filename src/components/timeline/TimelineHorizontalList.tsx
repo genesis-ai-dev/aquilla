@@ -68,6 +68,7 @@ export function TimelineHorizontalList({
           drops the containment only while a chip is actually being dragged,
           and the list rises above the ruler. Transparent parts of the list
           still show the ruler and the playhead through. */}
+      {/* i18n-exempt CSS selectors for the drag containment override, not user-visible copy */}
       <style>{`
         [data-tl-hlist]:has([data-tl-drag]) .legend-list-content-container > div { contain: none !important; }
         [data-tl-hlist]:has([data-tl-drag]) { position: relative; z-index: 30; }

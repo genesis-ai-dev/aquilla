@@ -19,7 +19,7 @@
 import { Hono } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
-import { unzipSync, unzlibSync, inflateSync } from "fflate"
+import { unzipSync, Inflate } from "fflate"
 import { readBytesWithLimit } from "../../../shared/http-body-limit"
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024 // 2 MB
@@ -55,11 +55,30 @@ const MAX_DOCX_XML_BYTES = 64 * 1024 * 1024 // 64 MB
 // `out` buffer rather than throwing, so a per-call buffer sized to the
 // remaining budget makes overrunning it structurally impossible.
 const MAX_PDF_INFLATED_BYTES = 20 * 1024 * 1024 // 20 MB
-// Per-stream allocation cap. The output buffer has to be preallocated, so
-// without this every stream in a many-stream PDF would allocate the whole
-// remaining budget. A single content stream from a ≤2 MB upload inflating past
-// 4 MB of text operators is not a real document.
+// Per-stream cap. A single content stream from a ≤2 MB upload inflating past
+// 4 MB of text operators is not a real document. One output buffer of this
+// size is reused for every stream in the file (AQU-2594).
 const MAX_PDF_STREAM_BYTES = 4 * 1024 * 1024 // 4 MB
+// AQU-2594: bounds on the work around those caps. They bounded the bytes
+// inflated, not the scanning: a crafted ~2 MB upload cost minutes of CPU or
+// hundreds of MB (see the PDF helpers below).
+//
+// A stream's dictionary is looked for only this far before its `stream`
+// keyword. Writers put `<<…>>` right before it; a few hundred bytes is long.
+const PDF_DICT_WINDOW = 4 * 1024 // 4 KB
+// Stream keywords examined per file. Each costs a dictionary search, so this
+// bounds a file of nothing but tiny streams; 10,000 real streams in a 2 MB
+// upload would average 200 bytes each.
+const MAX_PDF_STREAMS = 10_000
+// The whole extraction's work: bytes scanned (the keyword scan, dictionary
+// searches, stream bodies searched for `endstream`, every text scan) plus
+// bytes inflated. A 2 MB PDF that fills the 20 MB inflation cap spends about
+// 45 MB; past this the file is refused as too complex.
+const MAX_PDF_WORK_BYTES = 64 * 1024 * 1024 // 64 MB
+// Compressed bytes handed to the inflater per step. Deflate expands at most
+// ~1032:1, so a step yields at most ~1 MB and inflation stops within a step
+// of the per-stream cap instead of decoding the whole stream.
+const INFLATE_STEP_BYTES = 1024
 
 const parseDocument = new Hono<AuthHonoEnv>()
 
@@ -304,6 +323,25 @@ function decodeTextSpan(decoder: TextDecoder, span: Uint8Array): string {
 
 // ── PDF helpers ───────────────────────────────────────────────────────────────
 
+/**
+ * AQU-2594: the running total of one extraction's work: bytes scanned plus
+ * bytes inflated. Past MAX_PDF_WORK_BYTES the file is refused as too complex,
+ * before the work, rather than read slowly.
+ */
+class PdfWorkBudget {
+  private spent = 0
+
+  charge(bytes: number): void {
+    this.spent += bytes
+    if (this.spent > MAX_PDF_WORK_BYTES) {
+      throw new DocumentExtractionError(
+        "the document is too complex to read: this PDF takes more work to read than the limit allows. " +
+          'Saving it again ("Save As" a new PDF, or as a .docx) usually helps.',
+      )
+    }
+  }
+}
+
 // Inflate every /FlateDecode content stream in the file.
 //
 // AQU-197: essentially every PDF produced by a real writer (Word, InDesign,
@@ -313,17 +351,29 @@ function decodeTextSpan(decoder: TextDecoder, span: Uint8Array): string {
 //
 // Decoding latin1 maps bytes 0x00–0xFF one-to-one onto U+0000–U+00FF, so
 // offsets into `raw` are byte offsets into `bytes` and can be used to slice.
-function inflatePdfStreams(bytes: Uint8Array, raw: string): string[] {
+function inflatePdfStreams(bytes: Uint8Array, raw: string, work: PdfWorkBudget): string[] {
   const decoded: string[] = []
   let budget = MAX_PDF_INFLATED_BYTES
+  // AQU-2594: one output buffer for the call, reused for every stream; only
+  // the bytes a stream produced are copied out of it.
+  let out: Uint8Array | undefined
+  const latin1 = new TextDecoder("latin1")
+  let examined = 0
 
+  work.charge(raw.length) // the keyword scan below
   const streamRe = /stream\r?\n/g
   let match: RegExpExecArray | null
   while ((match = streamRe.exec(raw)) !== null) {
     if (budget <= 0) break
+    if (++examined > MAX_PDF_STREAMS) break
 
     // A stream's dictionary is the `<< … >>` immediately preceding the keyword.
-    const dictStart = raw.lastIndexOf("<<", match.index)
+    // AQU-2594: looked for only within PDF_DICT_WINDOW of it. Searching back
+    // to the file's start made a file with no `<<` quadratic.
+    const windowStart = Math.max(0, match.index - PDF_DICT_WINDOW)
+    const inWindow = raw.slice(windowStart, match.index).lastIndexOf("<<")
+    const dictStart = inWindow === -1 ? -1 : windowStart + inWindow
+    work.charge(match.index - (dictStart === -1 ? windowStart : dictStart))
     const dict = dictStart === -1 ? "" : raw.slice(dictStart, match.index)
     if (!dict.includes("/FlateDecode")) continue
     // Images and embedded font programs inflate to binary that can never hold
@@ -332,12 +382,17 @@ function inflatePdfStreams(bytes: Uint8Array, raw: string): string[] {
 
     const dataStart = match.index + match[0].length
     const dataEnd = raw.indexOf("endstream", dataStart)
-    if (dataEnd === -1) continue
+    // AQU-2594: no `endstream` after this keyword means none after any later
+    // one either; stopping keeps each later search from rescanning the tail.
+    if (dataEnd === -1) break
+    work.charge(dataEnd - dataStart)
 
-    const inflated = inflateBounded(bytes.subarray(dataStart, dataEnd), budget)
-    if (inflated) {
-      budget -= inflated.length
-      decoded.push(new TextDecoder("latin1").decode(inflated))
+    out ??= new Uint8Array(MAX_PDF_STREAM_BYTES)
+    const limit = Math.min(budget, MAX_PDF_STREAM_BYTES)
+    const produced = inflateBounded(bytes.subarray(dataStart, dataEnd), out, limit, work)
+    if (produced !== null) {
+      budget -= produced
+      decoded.push(latin1.decode(out.subarray(0, produced)))
     }
 
     // Resume scanning past this stream so its binary payload isn't re-searched.
@@ -347,19 +402,219 @@ function inflatePdfStreams(bytes: Uint8Array, raw: string): string[] {
   return decoded
 }
 
-// Inflate into a buffer sized to the remaining budget. fflate truncates to the
-// provided `out` buffer instead of throwing, which is what bounds a bomb.
-function inflateBounded(slice: Uint8Array, budget: number): Uint8Array | null {
-  const cap = Math.min(budget, MAX_PDF_STREAM_BYTES)
+// Inflate one stream into `out`, keeping at most `limit` bytes, and return how
+// many it kept, or null when neither framing decodes it.
+//
+// AQU-2594: fflate given a preallocated `out` keeps only what fits but still
+// decodes the whole stream, so a 2 MB bomb cost seconds of CPU. The stream is
+// now fed to the inflater a step at a time and left once `limit` bytes are
+// kept, and every byte it decoded is charged to the work budget.
+function inflateBounded(
+  slice: Uint8Array,
+  out: Uint8Array,
+  limit: number,
+  work: PdfWorkBudget,
+): number | null {
   // zlib-wrapped is the norm; some writers emit raw deflate instead.
-  for (const inflate of [unzlibSync, inflateSync]) {
+  for (const deflateData of [zlibDeflateData, rawDeflateData]) {
+    const run = { kept: 0, decoded: 0 }
+    let ok = false
     try {
-      return inflate(slice, { out: new Uint8Array(cap) })
+      inflateSteps(deflateData(slice), out, limit, run)
+      ok = true
     } catch {
       // Wrong framing or corrupt stream — fall through and try the next.
     }
+    work.charge(run.decoded)
+    if (ok) return run.kept
   }
   return null
+}
+
+/** The deflate data of a zlib stream, as fflate's unzlibSync reads it: the same
+ *  header check, and the 4-byte checksum left off. */
+function zlibDeflateData(slice: Uint8Array): Uint8Array {
+  const cmf = slice[0] ?? 0
+  const flg = slice[1] ?? 0
+  if ((cmf & 15) !== 8 || cmf >> 4 > 7 || ((cmf << 8) | flg) % 31) throw new Error("invalid zlib data")
+  // A preset dictionary is refused, as unzlibSync refuses it without one.
+  if ((flg >> 5) & 1) throw new Error("invalid zlib data: need dictionary")
+  return slice.subarray(2, -4)
+}
+
+function rawDeflateData(slice: Uint8Array): Uint8Array {
+  return slice
+}
+
+function inflateSteps(
+  data: Uint8Array,
+  out: Uint8Array,
+  limit: number,
+  run: { kept: number; decoded: number },
+): void {
+  const inflater = new Inflate((chunk) => {
+    run.decoded += chunk.length
+    const take = Math.min(chunk.length, limit - run.kept)
+    if (take > 0) {
+      out.set(chunk.subarray(0, take), run.kept)
+      run.kept += take
+    }
+  })
+  for (let at = 0; at < data.length; at += INFLATE_STEP_BYTES) {
+    if (run.kept >= limit || deflateEnded(inflater)) return
+    const end = Math.min(at + INFLATE_STEP_BYTES, data.length)
+    inflater.push(data.subarray(at, end), end === data.length)
+  }
+}
+
+/**
+ * Whether the inflater has finished the deflate stream's final block. Bytes
+ * after it are ignored, as the one-shot inflate ignored them, but fflate keeps
+ * every unconsumed byte and copies it again on each push, so feeding it a long
+ * tail would be quadratic. fflate has no public flag for this; `s.f && !s.l`
+ * (final block seen, no block in progress) is the test its own inflate loop
+ * makes. If a future fflate renames them this reads false, and the bound test
+ * for a short stream with a long tail fails.
+ */
+function deflateEnded(inflater: Inflate): boolean {
+  const state = (inflater as unknown as { s?: { f?: number; l?: unknown } }).s
+  return !!state?.f && !state.l
+}
+
+// AQU-2594: the text operators are found in one pass. The regexes this
+// replaced (/BT\s([\s\S]*?)ET/, then /\((…)\)\s*(?:Tj|'|")|(\[[\s\S]*?\])\s*TJ/
+// in each block and /\((…)\)/ in each TJ array) rescanned to the end from
+// every `BT`, `(` or `[` that never closed, so a 2 MB upload of `(` took
+// hours. The scan below finds the same matches; parse-document-pdf-bounds
+// .test.ts checks it against those regexes.
+function scanTextOperators(haystack: string, chunks: string[]): void {
+  for (let from = 0; ; ) {
+    const bt = textBlockStart(haystack, from)
+    if (bt === -1) return
+    const et = haystack.indexOf("ET", bt + 3)
+    // No `ET` after this `BT` means none after any later one either.
+    if (et === -1) return
+    scanTextBlock(haystack.slice(bt + 3, et), chunks)
+    chunks.push("\n")
+    from = et + 2
+  }
+}
+
+/** The next `BT` followed by whitespace, at or after `from`. */
+function textBlockStart(s: string, from: number): number {
+  for (let at = s.indexOf("BT", from); at !== -1; at = s.indexOf("BT", at + 1)) {
+    if (isRegexSpace(s.charCodeAt(at + 2))) return at
+  }
+  return -1
+}
+
+const CHAR_LPAREN = 0x28 // (
+const CHAR_RPAREN = 0x29 // )
+const CHAR_LBRACKET = 0x5b // [
+const CHAR_BACKSLASH = 0x5c // \
+
+/** Shown strings in one BT…ET block: `(…) Tj`, `(…) '`, `(…) "` and `[…] TJ`. */
+function scanTextBlock(block: string, chunks: string[]): void {
+  // A `(` before this index cannot start a shown string: an earlier `(` that
+  // failed ended at the same place, so this one fails the same way.
+  let stringsFailBefore = 0
+  // The first `]` followed by TJ at or after the last `[` looked up (-1: none
+  // left, -2: not looked for yet). `[` positions only increase, so the search
+  // for it never goes back over the block.
+  let arrayEnd = -2
+
+  let i = 0
+  while (i < block.length) {
+    const c = block.charCodeAt(i)
+    if (c === CHAR_LPAREN && i >= stringsFailBefore) {
+      const close = literalEnd(block, i)
+      if (block.charCodeAt(close) === CHAR_RPAREN) {
+        const opEnd = showStringOperatorEnd(block, skipRegexSpace(block, close + 1))
+        if (opEnd !== -1) {
+          chunks.push(decodePdfString(block.slice(i + 1, close)))
+          i = opEnd
+          continue
+        }
+      }
+      stringsFailBefore = close
+    } else if (c === CHAR_LBRACKET) {
+      if (arrayEnd !== -1 && arrayEnd <= i) arrayEnd = nextTjArrayEnd(block, i + 1)
+      if (arrayEnd !== -1) {
+        scanArrayStrings(block.slice(i, arrayEnd + 1), chunks)
+        i = skipRegexSpace(block, arrayEnd + 1) + 2
+        continue
+      }
+    }
+    i++
+  }
+}
+
+/** The first `]` at or after `from` that whitespace and then `TJ` follow, or -1. */
+function nextTjArrayEnd(block: string, from: number): number {
+  for (let r = block.indexOf("]", from); r !== -1; r = block.indexOf("]", r + 1)) {
+    if (block.startsWith("TJ", skipRegexSpace(block, r + 1))) return r
+  }
+  return -1
+}
+
+/** Every string literal in a TJ array, `[` and `]` included. */
+function scanArrayStrings(array: string, chunks: string[]): void {
+  for (let at = array.indexOf("("); at !== -1; ) {
+    const close = literalEnd(array, at)
+    if (array.charCodeAt(close) === CHAR_RPAREN) {
+      chunks.push(decodePdfString(array.slice(at + 1, close)))
+      at = array.indexOf("(", close + 1)
+    } else {
+      // Every `(` before `close` ends there too, so none of them match.
+      at = array.indexOf("(", close)
+    }
+  }
+}
+
+/**
+ * Where the string literal opened at `open` ends: the index of its closing
+ * `)`, or of the point the old pattern gave up — a `\` before a line end or
+ * the end of the text — which is never a `)`. A `\` escapes the next
+ * character; the pattern's `.` did not match a line end.
+ */
+function literalEnd(s: string, open: number): number {
+  let i = open + 1
+  while (i < s.length) {
+    const c = s.charCodeAt(i)
+    if (c === CHAR_RPAREN) return i
+    if (c === CHAR_BACKSLASH) {
+      if (i + 1 >= s.length || isLineTerminator(s.charCodeAt(i + 1))) return i
+      i += 2
+    } else {
+      i++
+    }
+  }
+  return i
+}
+
+/** The end of a `Tj`, `'` or `"` operator at `at`, or -1 when there is none. */
+function showStringOperatorEnd(s: string, at: number): number {
+  if (s.startsWith("Tj", at)) return at + 2
+  const c = s.charCodeAt(at)
+  return c === 0x27 || c === 0x22 ? at + 1 : -1 // ' or "
+}
+
+function skipRegexSpace(s: string, from: number): number {
+  let i = from
+  while (i < s.length && isRegexSpace(s.charCodeAt(i))) i++
+  return i
+}
+
+const REGEX_SPACE = /\s/
+
+/** What the replaced patterns' `\s` matched. */
+function isRegexSpace(code: number): boolean {
+  if (code === 0x20 || (code >= 0x09 && code <= 0x0d)) return true
+  return code > 0x7f && REGEX_SPACE.test(String.fromCharCode(code))
+}
+
+function isLineTerminator(code: number): boolean {
+  return code === 0x0a || code === 0x0d || code === 0x2028 || code === 0x2029
 }
 
 export function extractTextFromPdf(bytes: Uint8Array): string {
@@ -368,42 +623,16 @@ export function extractTextFromPdf(bytes: Uint8Array): string {
   // inside BT…ET blocks. It handles ISO-8859-1 literals and octal escapes
   // but will produce garbled output for PDFs with custom font encoding tables.
   const raw = new TextDecoder("latin1").decode(bytes)
+  const work = new PdfWorkBudget()
 
   // Scan the inflated content streams as well as the raw bytes, so both
   // real-world (compressed) and uncompressed PDFs extract.
-  const haystacks = [...inflatePdfStreams(bytes, raw), raw]
+  const haystacks = [...inflatePdfStreams(bytes, raw, work), raw]
 
   const chunks: string[] = []
-
   for (const haystack of haystacks) {
-    // Iterate BT…ET blocks
-    const btEtRe = /BT\s([\s\S]*?)ET/g
-    let blockMatch: RegExpExecArray | null
-    while ((blockMatch = btEtRe.exec(haystack)) !== null) {
-      const block = blockMatch[1]
-
-      // Match string operands of Tj / ' / " operators and TJ arrays
-      // Tj: (string) Tj
-      // TJ: [(string) ...] TJ
-      // ' : (string) '
-      const opRe = /\(([^)\\]*(?:\\.[^)\\]*)*)\)\s*(?:Tj|'|")|(\[[\s\S]*?\])\s*TJ/g
-      let opMatch: RegExpExecArray | null
-      while ((opMatch = opRe.exec(block)) !== null) {
-        if (opMatch[1] !== undefined) {
-          // Single string
-          chunks.push(decodePdfString(opMatch[1]))
-        } else if (opMatch[2] !== undefined) {
-          // TJ array — extract all parenthesized strings
-          const arrayStr = opMatch[2]
-          const strRe = /\(([^)\\]*(?:\\.[^)\\]*)*)\)/g
-          let strMatch: RegExpExecArray | null
-          while ((strMatch = strRe.exec(arrayStr)) !== null) {
-            chunks.push(decodePdfString(strMatch[1]))
-          }
-        }
-      }
-      chunks.push("\n")
-    }
+    work.charge(haystack.length)
+    scanTextOperators(haystack, chunks)
   }
 
   return chunks

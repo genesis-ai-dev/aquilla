@@ -1,5 +1,5 @@
 // Background prefetch for the heavy in-browser AI models. Drives both the
-// onboarding "Download AI features" step and the floating progress chip.
+// onboarding "Download AI features" step and the download / memory-load toasts.
 //
 // Internals: sends a "warmup" message to the lazy-loaded Whisper and MMS
 // workers; they call their pipeline init (downloading model weights to the
@@ -27,8 +27,15 @@ export type ModelId = "whisper" | "mms"
 export type ModelPrefetchStatus =
   | { kind: "idle" }
   | { kind: "downloading"; loaded: number; total: number; file: string }
+  // Weights are on disk; the ONNX session is being created in the worker.
+  | { kind: "loading"; file: string }
   | { kind: "ready" }
   | { kind: "error"; message: string }
+
+/** Weights are already on this device. A memory load does not undo that. */
+export function modelWeightsOnDevice(status: ModelPrefetchStatus): boolean {
+  return status.kind === "ready" || status.kind === "loading"
+}
 
 const READY: ModelPrefetchStatus = { kind: "ready" }
 const IDLE: ModelPrefetchStatus = { kind: "idle" }
@@ -76,35 +83,81 @@ function markReady(model: ModelId): void {
   setStatus(model, READY)
 }
 
-/**
- * Feed download progress observed during an on-demand synth/transcribe (i.e.
- * not the explicit prefetch/onboarding path) into the shared store, so the
- * floating AiModelDownloadChip lights up no matter what triggered the download
- * — e.g. generating audio from the Voice Studio on a cold cache.
- *
- * setStatus's monotonic guard locks `total` to the largest file, so
- * loaded >= total fires only when the biggest weight finishes — at which point
- * the model is effectively downloaded and we flip to ready (the synthesis
- * compute that follows is fast and not a download).
- */
-export function noteModelDownloading(
-  model: ModelId,
-  p: { loaded: number; total: number; file: string },
-): void {
-  if (getModelStatus(model).kind === "ready") return
-  setStatus(model, { kind: "downloading", loaded: p.loaded, total: p.total, file: p.file })
-  const cur = getModelStatus(model)
-  if (cur.kind === "downloading" && cur.total > 0 && cur.loaded >= cur.total) markReady(model)
+const FILE_DONE = new Set(["done", "downloaded", "cached"])
+
+/** The weight file, not a sidecar (config, tokenizer, tokens). */
+function isWeightFile(file: string): boolean {
+  const name = file.toLowerCase()
+  return name.endsWith(".onnx") || name.endsWith(".onnx_data") || name.endsWith(".bin")
+}
+
+function markLoading(model: ModelId, file: string): void {
+  const prev = getModelStatus(model)
+  if (prev.kind === "loading" && prev.file === file) return
+  setStatus(model, { kind: "loading", file })
 }
 
 /**
- * Settle the chip when a synth/transcribe finishes. Only acts if we were still
- * showing a download (the total=0 case where the CDN omitted Content-Length and
- * loaded>=total never tripped): success marks ready, failure clears back to
- * idle so the chip hides — the per-cell badge surfaces the actual error.
+ * Feed download progress observed during an on-demand synth/transcribe (i.e.
+ * not the explicit prefetch/onboarding path) into the shared store, so the
+ * download toast lights up no matter what triggered the download — e.g.
+ * generating audio from the Voice Studio on a cold cache.
+ *
+ * Byte progress stays on `downloading`. The weight file finishing (loaded >=
+ * total, or a done/downloaded/cached status) moves to `loading`: the bytes
+ * are local and the worker is building the ONNX session. `status: "ready"`
+ * (transformers.js, after the session exists) or noteModelDownloadSettled
+ * marks ready. A cached model stays `ready` through byte progress — a later
+ * weight "done" is what opens the memory-load phase, and a warm pipeline
+ * emits neither.
+ */
+export function noteModelDownloading(
+  model: ModelId,
+  p: { loaded: number; total: number; file: string; status?: string },
+): void {
+  const phase = p.status ?? ""
+  if (phase === "progress_total") return
+  if (phase === "ready") {
+    markReady(model)
+    return
+  }
+  if (FILE_DONE.has(phase)) {
+    if (isWeightFile(p.file)) markLoading(model, p.file)
+    return
+  }
+
+  const current = getModelStatus(model)
+  if (current.kind === "ready") return
+  if (current.kind === "loading") {
+    const newWeight =
+      isWeightFile(p.file) && p.file !== current.file && (p.total <= 0 || p.loaded < p.total)
+    if (!newWeight) return
+  }
+
+  // Tokens, config, and tokenizer finish in a flash. Publishing that as the
+  // bar paints it full, and the weight file then starts the bar over at 0.
+  if (p.file && !isWeightFile(p.file)) return
+
+  // A file that is already complete is not progress. The weight file moves
+  // straight to the memory-load phase instead of sitting at 100%.
+  if (p.total > 0 && p.loaded >= p.total) {
+    if (isWeightFile(p.file)) markLoading(model, p.file)
+    return
+  }
+
+  setStatus(model, { kind: "downloading", loaded: p.loaded, total: p.total, file: p.file })
+}
+
+/**
+ * Settle when a synth/transcribe finishes. Only acts if a download or memory
+ * load is still on screen (the total=0 case, where the CDN omitted
+ * Content-Length and loaded>=total never tripped, or a worker that never
+ * posted "ready"): success marks ready, failure clears back to idle so the
+ * toast hides — the per-cell badge surfaces the actual error.
  */
 export function noteModelDownloadSettled(model: ModelId, ok: boolean): void {
-  if (getModelStatus(model).kind !== "downloading") return
+  const kind = getModelStatus(model).kind
+  if (kind !== "downloading" && kind !== "loading") return
   if (ok) markReady(model)
   else setStatus(model, IDLE)
 }
@@ -134,11 +187,13 @@ export async function hydratePrefetchStatus(): Promise<void> {
       const keys = await cache.keys()
       const urls = keys.map((k) => k.url)
       for (const m of Object.keys(MODEL_REPOS) as ModelId[]) {
-        if (status.get(m)?.kind === "downloading") continue
+        const kind = status.get(m)?.kind
+        if (kind === "downloading" || kind === "loading") continue
         if (urls.some((u) => u.includes(MODEL_REPOS[m]))) status.set(m, READY)
       }
     }
-    if (USE_SHERPA_MMS_MODELS && status.get("mms")?.kind !== "downloading") {
+    const mmsKind = status.get("mms")?.kind
+    if (USE_SHERPA_MMS_MODELS && mmsKind !== "downloading" && mmsKind !== "loading") {
       const sherpaHasCache = await caches.has(MMS_SHERPA_CACHE_KEY)
       if (sherpaHasCache) status.set("mms", READY)
     }
@@ -204,8 +259,11 @@ export async function getMmsWorker(): Promise<Worker> {
 }
 
 async function warmWhisper(): Promise<void> {
-  if (getModelStatus("whisper").kind === "ready") return
-  setStatus("whisper", { kind: "downloading", loaded: 0, total: 0, file: "" })
+  const kind = getModelStatus("whisper").kind
+  if (kind === "ready") return
+  if (kind !== "downloading" && kind !== "loading") {
+    setStatus("whisper", { kind: "downloading", loaded: 0, total: 0, file: "" })
+  }
   let worker: Worker
   try {
     worker = await getWhisperWorker()
@@ -221,7 +279,7 @@ async function warmWhisper(): Promise<void> {
         const m = event.data
         if (m.requestId !== requestId) return
         if (m.type === "progress") {
-          setStatus("whisper", { kind: "downloading", loaded: m.loaded, total: m.total, file: m.file })
+          noteModelDownloading("whisper", { loaded: m.loaded, total: m.total, file: m.file, status: m.status })
           return
         }
         worker.removeEventListener("message", onMessage)
@@ -244,7 +302,10 @@ async function warmWhisper(): Promise<void> {
 async function warmMms(language: string | undefined): Promise<void> {
   const lang = inferMmsLanguageCode(language) ?? DEFAULT_MMS_LANGUAGE
   if (getModelStatus("mms").kind === "ready" && readyMmsLanguage === lang) return
-  setStatus("mms", { kind: "downloading", loaded: 0, total: 0, file: "" })
+  const kind = getModelStatus("mms").kind
+  if (kind !== "downloading" && kind !== "loading") {
+    setStatus("mms", { kind: "downloading", loaded: 0, total: 0, file: "" })
+  }
   let worker: Worker
   try {
     worker = await getMmsWorker()
@@ -260,7 +321,7 @@ async function warmMms(language: string | undefined): Promise<void> {
         const m = event.data
         if (m.requestId !== requestId) return
         if (m.type === "progress") {
-          setStatus("mms", { kind: "downloading", loaded: m.loaded, total: m.total, file: m.file })
+          noteModelDownloading("mms", { loaded: m.loaded, total: m.total, file: m.file, status: m.status })
           return
         }
         worker.removeEventListener("message", onMessage)

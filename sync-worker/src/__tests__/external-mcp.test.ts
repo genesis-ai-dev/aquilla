@@ -226,7 +226,7 @@ describe('MCP tools/list', () => {
     })
   })
 
-  it('returns all 37 tools each with an input schema', async () => {
+  it('returns all 38 tools each with an input schema', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb)
     const res = await rpc(env, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })
@@ -239,6 +239,8 @@ describe('MCP tools/list', () => {
         'get_project', 'get_project_settings', 'get_prompt_preview',
         // AQU-1294 skills.
         'get_skill',
+        // AQU-2581 app help.
+        'get_help',
         'list_changesets',
         // AQU-2403 membership roster read.
         'list_members',
@@ -260,7 +262,7 @@ describe('MCP tools/list', () => {
         'upload_artifact', 'wait_for_changeset',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(37)
+    expect(body.result.tools).toHaveLength(38)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)

@@ -19,6 +19,7 @@ const REFUSAL: Record<PdfReadErrorCode, MessageKey> = {
   empty: "importExport.errors.pdfEmpty",
   password: "importExport.errors.pdfPassword",
   unreadable: "importExport.errors.pdfUnreadable",
+  reader: "importExport.errors.pdfReaderFailed",
 }
 
 export interface PdfImportRead {

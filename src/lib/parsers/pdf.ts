@@ -22,7 +22,9 @@ import { createUsfmFootnoteMarker } from "../footnotes/insert"
 import { splitFootnoteAware } from "./docx"
 import { pdfPagesToParagraphs, type PdfPageContent, type PdfPageItem, type PdfStructNode } from "./pdf-blocks"
 
-export type PdfReadErrorCode = "password" | "scanned" | "empty" | "unreadable"
+/** `reader`: pdf.js itself could not start (its worker or code failed to
+ *  load), which says nothing about the PDF. */
+export type PdfReadErrorCode = "password" | "scanned" | "empty" | "unreadable" | "reader"
 
 /** A PDF the import refuses, with the reason. The caller words the message. */
 export class PdfReadError extends Error {
@@ -51,6 +53,9 @@ type PdfJs = typeof import("pdfjs-dist")
 
 let pdfjsPromise: Promise<PdfJs> | null = null
 
+/** pdf.js's own names for a file it read and found is not a usable PDF. */
+const NOT_A_PDF = new Set(["InvalidPDFException", "FormatError", "MissingPDFException"])
+
 async function loadPdfJs(): Promise<PdfJs> {
   pdfjsPromise ??= (async () => {
     const pdfjs = await import("pdfjs-dist")
@@ -64,7 +69,7 @@ async function loadPdfJs(): Promise<PdfJs> {
     return await pdfjsPromise
   } catch (err) {
     pdfjsPromise = null
-    throw err
+    throw new PdfReadError("reader", `PDF reader could not load: ${(err as Error)?.message ?? String(err)}`, { cause: err })
   }
 }
 
@@ -137,7 +142,9 @@ export async function extractPdfImport(buffer: ArrayBuffer, options?: PdfParseOp
     await task.destroy().catch(() => {})
     const name = (err as { name?: string } | null)?.name
     if (name === "PasswordException") throw new PdfReadError("password", "PDF is password-protected", { cause: err })
-    throw new PdfReadError("unreadable", `PDF could not be read: ${(err as Error)?.message ?? String(err)}`, { cause: err })
+    const message = (err as Error)?.message ?? String(err)
+    if (name && NOT_A_PDF.has(name)) throw new PdfReadError("unreadable", `PDF could not be read: ${message}`, { cause: err })
+    throw new PdfReadError("reader", `PDF reader failed: ${message}`, { cause: err })
   }
   try {
     const paintOps = imagePaintOps(pdfjs)

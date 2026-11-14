@@ -73,6 +73,21 @@ describe("a PDF on the source path", () => {
       .rejects.toThrow("This file could not be read as a PDF.")
     expect(fetchSpy).not.toHaveBeenCalled()
   })
+
+  // Review finding: a PDF saved without its extension ("report", or a
+  // browser's "x.pdf.download") took the unknown-file path, and signed in it
+  // went to the AI sandbox. Its bytes say what it is.
+  it("reads a PDF by its bytes when its name has no .pdf, and never sends it to the sandbox", async () => {
+    const fetchSpy = vi.fn(async () => new Response("{}", { status: 500 }))
+    vi.stubGlobal("fetch", fetchSpy)
+    const bytes = pdfOfParagraphs(["A paragraph from a file with no extension."])
+    const prepared = await prepareImportFile(new File([bytes], "report"), { ...PROJECT, identityToken: "token-2551", cellUnit: "paragraph" })
+    expect(prepared.fileType).toBe("pdf")
+    expect(prepared.results[0].strings.map((s) => s.original)).toEqual(["A paragraph from a file with no extension."])
+    await expect(prepareImportFile(new File([buildPdf({ pages: [{ image: true }] })], "scan.pdf.download"), { ...PROJECT, identityToken: "token-2551" }))
+      .rejects.toThrow("This PDF is a scanned image. It has no text to import.")
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
 })
 
 // ─── a translated PDF ───────────────────────────────────────────────────────

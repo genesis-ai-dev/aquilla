@@ -817,6 +817,18 @@ export async function importFile(
   return { refs, speakerPairs: imported.speakerPairs, ...(skipped.length ? { skipped } : {}) }
 }
 
+/** AQU-2551: a PDF whose name lost its extension ("report", "x.pdf.download")
+ *  is still a PDF, and must not take the unknown-file path to the AI sandbox:
+ *  the PDF header ("%PDF-") sits in its first kilobyte. */
+async function pdfByContent(file: File): Promise<FileType | null> {
+  const head = new Uint8Array(await file.slice(0, 1024).arrayBuffer())
+  const signature = [0x25, 0x50, 0x44, 0x46, 0x2d]
+  for (let i = 0; i + signature.length <= head.length; i++) {
+    if (signature.every((byte, k) => head[i + k] === byte)) return "pdf"
+  }
+  return null
+}
+
 /** Parse/classify exactly once so preview and commit use the same immutable
  * recipe and parsed units. Deterministic content sniffing precedes AI. */
 export async function prepareImportFile(
@@ -827,7 +839,7 @@ export async function prepareImportFile(
   // Fail before parsing/decompression and before any server event. The same
   // ceiling is enforced again by the artifact route as a trust boundary.
   assertSourceUploadByteLength(file.size)
-  const extensionType = detectFileType(file.name)
+  const extensionType = detectFileType(file.name) ?? await pdfByContent(file)
   if (extensionType) {
     // Opaque packages/media need their deterministic binary adapter. Textual
     // extensions are sniffed as content first so a USFM document named .txt,

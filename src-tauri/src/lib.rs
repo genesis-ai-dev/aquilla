@@ -9,6 +9,7 @@ mod llm_proxy;
 mod paratext;
 mod repo_root;
 mod shutdown_guard;
+mod titlebar;
 
 use llm_proxy::LlmConfig;
 use tauri::{Manager, WebviewWindowBuilder};
@@ -79,7 +80,8 @@ pub fn run() {
             let main_window = main_window
                 .title_bar_style(tauri::TitleBarStyle::Overlay)
                 .hidden_title(true)
-                .traffic_light_position(tauri::LogicalPosition::new(16.0, 28.0));
+                .traffic_light_position(tauri::LogicalPosition::new(16.0, 28.0))
+                .initialization_script(titlebar::OVERLAY_FLAG_SCRIPT);
             main_window.build()?;
             hot_bundle::start(app.handle());
 
@@ -117,6 +119,7 @@ pub fn run() {
                     keychain::get_token,
                     keychain::set_token,
                     keychain::clear_token,
+                    titlebar::titlebar_double_click,
                     keychain::get_refresh_token,
                     auth::open_auth_browser,
                     auth::simulate_deep_link_callback,
@@ -158,6 +161,7 @@ pub fn run() {
                     keychain::get_token,
                     keychain::set_token,
                     keychain::clear_token,
+                    titlebar::titlebar_double_click,
                     keychain::get_refresh_token,
                     auth::open_auth_browser,
                     connectivity::get_connectivity,

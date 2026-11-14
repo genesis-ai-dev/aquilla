@@ -50,6 +50,11 @@ flate2 = "1"
 tar = "0.4"
 http = "1"
 
+# Reads the user's title-bar double-click setting (src/titlebar.rs). Same
+# major as tao's, so no second copy is built.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSUserDefaults"] }
+
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
 

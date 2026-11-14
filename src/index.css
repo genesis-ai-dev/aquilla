@@ -302,6 +302,14 @@
    diagonal stripes of the translated colour and the stripe colour. One
    utility so the Progress card, the bars and the swatches all draw the same
    stripes; the colours are the palette tokens in the theme blocks below. */
+/* Banners pinned to the window's top edge: keep their content clear of the
+   macOS traffic lights (on both sides, so centred text stays centred). */
+@utility mac-titlebar-clear {
+  html[data-mac-titlebar] & {
+    padding-inline: var(--mac-traffic-lights-w);
+  }
+}
+
 @utility bg-progress-ai {
   background-image: repeating-linear-gradient(
     135deg,
@@ -607,23 +615,6 @@
   html[data-app-frame] body {
     overflow: hidden;
   }
-  /* macOS desktop, pages outside AppShell: reserve a title-bar band so the
-     traffic lights and the drag strip (TitlebarDragStrip) sit above the page
-     rather than over it. Full-height pages shrink by the band so it doesn't
-     turn into a scroll. AppShell's header is the drag handle while it is
-     mounted, so the band and strip go away under `data-app-frame`. */
-  html[data-mac-titlebar]:not([data-app-frame]) body {
-    padding-top: var(--mac-titlebar-h);
-  }
-  html[data-mac-titlebar]:not([data-app-frame]) body .min-h-screen {
-    min-height: calc(100vh - var(--mac-titlebar-h));
-  }
-  html[data-mac-titlebar]:not([data-app-frame]) body .h-screen {
-    height: calc(100vh - var(--mac-titlebar-h));
-  }
-  html[data-app-frame] [data-slot="titlebar-drag-strip"] {
-    display: none;
-  }
   html.dark {
     color-scheme: dark;
   }
@@ -656,6 +647,29 @@
     cursor: default;
   }
 }
+
+/* macOS desktop (TitlebarDragStrip sets `data-mac-titlebar` and the vars).
+   Deliberately outside @layer base: Tailwind's utilities layer beats every
+   base rule whatever its specificity, so `.min-h-screen` would win.
+
+   Pages outside AppShell: reserve a title-bar band so the traffic lights and
+   the drag strip sit above the page rather than over it. Full-height pages
+   shrink by the band so it doesn't turn into a scroll. AppShell's header is
+   the drag handle while it is mounted, so the band and strip go away under
+   `data-app-frame`. */
+html[data-mac-titlebar]:not([data-app-frame]) body {
+  padding-top: var(--mac-titlebar-h);
+}
+html[data-mac-titlebar]:not([data-app-frame]) body :is(.min-h-screen, .min-h-svh, .min-h-dvh, .min-h-lvh) {
+  min-height: calc(100vh - var(--mac-titlebar-h));
+}
+html[data-mac-titlebar]:not([data-app-frame]) body :is(.h-screen, .h-svh, .h-dvh, .h-lvh) {
+  height: calc(100vh - var(--mac-titlebar-h));
+}
+html[data-app-frame] [data-slot="titlebar-drag-strip"] {
+  display: none;
+}
+
 
 /* App-chrome: kill drag-select everywhere. Unlayered + * so it wins over
    @layer base/utilities and doesn't rely on user-select inheritance (which

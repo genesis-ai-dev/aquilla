@@ -64,7 +64,7 @@ export function StorageFullBanner() {
   }
 
   return (
-    <div className="fixed top-0 start-0 end-0 z-40 flex items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200">
+    <div className="fixed top-0 start-0 end-0 z-40 mac-titlebar-clear flex items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200">
       <HardDrive className="h-3.5 w-3.5 shrink-0" />
       <span>{t("error.storageNearlyFull.message")}</span>
       <button

@@ -19,20 +19,14 @@ const win = vi.hoisted(() => {
 })
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => win }))
 
-const MAC_UA =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)"
-const IPHONE_UA =
-  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
-
-function stubPlatform(platform: string, ua: string, touchPoints = 0) {
-  vi.spyOn(navigator, "platform", "get").mockReturnValue(platform)
-  vi.spyOn(navigator, "userAgent", "get").mockReturnValue(ua)
-  vi.spyOn(navigator, "maxTouchPoints", "get").mockReturnValue(touchPoints)
+const setOverlayFlag = (on: boolean) => {
+  if (on) window.__AQUILLA_MAC_TITLEBAR_OVERLAY__ = true
+  else delete window.__AQUILLA_MAC_TITLEBAR_OVERLAY__
 }
 
 describe("useMacTitlebarOverlay", () => {
   beforeEach(() => {
-    ;(window as unknown as Record<string, unknown>).__TAURI__ = {}
+    setOverlayFlag(true)
     __resetMacTitlebarStoreForTests()
     win.state.fullscreen = false
     win.state.resized = []
@@ -40,33 +34,26 @@ describe("useMacTitlebarOverlay", () => {
     win.onResized.mockClear()
   })
   afterEach(() => {
-    delete (window as unknown as Record<string, unknown>).__TAURI__
+    setOverlayFlag(false)
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
-  it("is on for the macOS desktop app only", () => {
-    stubPlatform("MacIntel", MAC_UA)
+  it("is on only when the native shell says it built an overlay title bar", () => {
     expect(isMacTitlebarOverlay()).toBe(true)
-    // iOS WebKit says "like Mac OS X" — no traffic lights there.
-    stubPlatform("iPhone", IPHONE_UA, 5)
-    expect(isMacTitlebarOverlay()).toBe(false)
-    // iPadOS desktop-class UA reports MacIntel, but has touch points.
-    stubPlatform("MacIntel", MAC_UA, 5)
-    expect(isMacTitlebarOverlay()).toBe(false)
-    stubPlatform("Win32", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+    // Browser, Windows/Linux shell, or an older macOS shell: no flag.
+    setOverlayFlag(false)
     expect(isMacTitlebarOverlay()).toBe(false)
   })
 
-  it("is off in the browser even on a Mac", () => {
-    stubPlatform("MacIntel", MAC_UA)
-    delete (window as unknown as Record<string, unknown>).__TAURI__
+  it("is off without the flag, and never watches fullscreen", () => {
+    setOverlayFlag(false)
     const { result } = renderHook(() => useMacTitlebarOverlay())
     expect(result.current).toEqual({ overlay: false, inset: false })
     expect(win.isFullscreen).not.toHaveBeenCalled()
   })
 
   it("shares one fullscreen watch, so a fresh mount starts from the known state", async () => {
-    stubPlatform("MacIntel", MAC_UA)
     win.state.fullscreen = true
     const first = renderHook(() => useMacTitlebarOverlay())
     await waitFor(() => expect(first.result.current.inset).toBe(false))
@@ -88,5 +75,61 @@ describe("useMacTitlebarOverlay", () => {
       for (const cb of win.state.resized) cb()
     })
     await waitFor(() => expect(seen.at(-1)).toBe(true))
+  })
+
+  it("checks once a burst of resizes settles, then once more after the animation", async () => {
+    vi.useFakeTimers()
+    renderHook(() => useMacTitlebarOverlay())
+    await vi.waitFor(() => expect(win.onResized).toHaveBeenCalledTimes(1))
+    expect(win.isFullscreen).toHaveBeenCalledTimes(1)
+
+    // A live drag-resize: dozens of events, no IPC per event.
+    for (let i = 0; i < 40; i++) {
+      for (const cb of win.state.resized) cb()
+      await vi.advanceTimersByTimeAsync(10)
+    }
+    expect(win.isFullscreen).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(150)
+    expect(win.isFullscreen).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(win.isFullscreen).toHaveBeenCalledTimes(3)
+  })
+
+  it("catches a fullscreen exit that macOS reports late", async () => {
+    vi.useFakeTimers()
+    win.state.fullscreen = true
+    const { result } = renderHook(() => useMacTitlebarOverlay())
+    await vi.waitFor(() => expect(win.onResized).toHaveBeenCalledTimes(1))
+    expect(result.current.inset).toBe(false)
+
+    // The last resize of the exit animation lands while the window still
+    // says fullscreen; the flag clears only afterwards.
+    await act(async () => {
+      for (const cb of win.state.resized) cb()
+      await vi.advanceTimersByTimeAsync(150)
+    })
+    expect(result.current.inset).toBe(false)
+    win.state.fullscreen = false
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(result.current.inset).toBe(true)
+  })
+
+  it("ignores a stale reply that arrives after a newer one", async () => {
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useMacTitlebarOverlay())
+    await vi.waitFor(() => expect(win.onResized).toHaveBeenCalledTimes(1))
+
+    let resolveSlow: (v: boolean) => void = () => {}
+    win.isFullscreen
+      .mockImplementationOnce(() => new Promise<boolean>((r) => { resolveSlow = r }))
+      .mockImplementationOnce(async () => true)
+    await act(async () => {
+      for (const cb of win.state.resized) cb()
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(result.current.inset).toBe(false)
+    // The first (older) check finally answers "not fullscreen": too late.
+    await act(async () => { resolveSlow(false) })
+    expect(result.current.inset).toBe(false)
   })
 })

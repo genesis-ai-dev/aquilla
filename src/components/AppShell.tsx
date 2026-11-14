@@ -223,10 +223,11 @@ export function AppShell({
   //    resizable dock actually narrows to DOCK_COLLAPSED_WIDTH (the org
   //    aside stays w-56), so only then does the header clear the overhang;
   //  - no in-flow sidebar (narrow window): the header band starts at x=0.
-  // The mobile sheet is a separate overlay, so its copy of the aside is left
-  // alone.
+  //    The sidebar opens as a sheet from the window's left edge instead, so
+  //    the sheet's chrome row clears the lights the same way as the expanded
+  //    sidebar's (the sheet is never a collapsed rail).
   const sidebarInFlow = !mobileNav
-  const insetSidebarRow = titlebar.inset && sidebarInFlow && !chromeCollapsed
+  const insetSidebarRow = titlebar.inset && !chromeCollapsed
   const insetRail = titlebar.inset && sidebarInFlow && chromeCollapsed
   const railIsNarrow = chromeCollapsed && useDockResize
   const headerInset = !titlebar.inset

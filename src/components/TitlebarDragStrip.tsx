@@ -1,6 +1,7 @@
 import { useEffect } from "react"
 import {
   TITLEBAR_BAND_HEIGHT,
+  TRAFFIC_LIGHTS_WIDTH,
   useMacTitlebarOverlay,
   useTitlebarDrag,
 } from "@/hooks/useMacTitlebarOverlay"
@@ -28,9 +29,12 @@ export function TitlebarDragStrip() {
     const root = document.documentElement
     root.dataset.macTitlebar = "true"
     root.style.setProperty("--mac-titlebar-h", `${TITLEBAR_BAND_HEIGHT}px`)
+    // Read by `mac-titlebar-clear` (index.css) on the top-pinned banners.
+    root.style.setProperty("--mac-traffic-lights-w", `${TRAFFIC_LIGHTS_WIDTH}px`)
     return () => {
       delete root.dataset.macTitlebar
       root.style.removeProperty("--mac-titlebar-h")
+      root.style.removeProperty("--mac-traffic-lights-w")
     }
   }, [inset])
 

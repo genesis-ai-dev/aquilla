@@ -149,6 +149,37 @@ interface CachedToken {
 const REFRESH_SAFETY_MS = 30_000
 
 /**
+ * A file route can mint its sync token while the workspace chunk is still
+ * loading. The minter created later joins this instead of starting a second
+ * POST. Keyed by the identity that minted it, so an account switch cannot
+ * pick up the previous account's token.
+ */
+const warmedSyncTokens = new Map<string, Promise<{ resp: SyncTokenResponse; mintedAt: number } | null>>()
+
+function warmKey(apiUrl: string, jwt: string, projectId: string, fileId: string): string {
+  return `${apiUrl}\n${jwt}\n${projectId}\n${fileId}`
+}
+
+/** Start the file's sync-token mint now. A later minter for the same identity reuses it. */
+export function warmSyncToken(
+  jwt: string,
+  projectId: string,
+  fileId: string,
+  apiUrl: string = AUTH_API_URL,
+): void {
+  const key = warmKey(apiUrl, jwt, projectId, fileId)
+  if (warmedSyncTokens.has(key)) return
+  const slot = fetchSyncToken(jwt, projectId, fileId, {}, apiUrl).then(
+    (resp) => ({ resp, mintedAt: Date.now() }),
+    () => {
+      warmedSyncTokens.delete(key)
+      return null
+    },
+  )
+  warmedSyncTokens.set(key, slot)
+}
+
+/**
  * Build a getToken callback suitable for YProvider's `params` option. Caches
  * the minted token in memory and refreshes it when within 30 s of expiry.
  * Returns null when the fetch fails — caller decides how to surface that.
@@ -255,6 +286,23 @@ export function makeSyncTokenMinter(
     if (forceRefresh) cached = null
     if (!forceRefresh && cached && cached.jwt === jwt && cached.expiresAtMs > now + REFRESH_SAFETY_MS) {
       return { token: cached.value, status: 200, ...platformRole(cached.role) }
+    }
+    const warmSlotKey = warmKey(apiUrl ?? AUTH_API_URL, jwt, projectId, fileId)
+    if (forceRefresh) warmedSyncTokens.delete(warmSlotKey)
+    else {
+      const warmed = warmedSyncTokens.get(warmSlotKey)
+      if (warmed) {
+        const slot = await warmed
+        if (slot && getJwt() === jwt) {
+          const expiresAtMs = slot.mintedAt + slot.resp.expiresIn * 1000
+          if (expiresAtMs > Date.now() + REFRESH_SAFETY_MS) {
+            cached = { value: slot.resp.token, expiresAtMs, jwt, role: slot.resp.role }
+            callbacks.onRole?.(slot.resp.role)
+            return { token: slot.resp.token, status: 200, ...platformRole(slot.resp.role) }
+          }
+        }
+        warmedSyncTokens.delete(warmSlotKey)
+      }
     }
     const existing = forceRefresh ? undefined : pending.get(jwt)
     if (existing) return existing

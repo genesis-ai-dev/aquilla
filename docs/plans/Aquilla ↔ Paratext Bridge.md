@@ -50,7 +50,7 @@ Units are derived from the file on every open; only the highlighted overlay live
 
 ### Unit IDs
 
-IDs come from Paratext references, not from content. The ID stays fixed when the text changes; the hash changes. Grammar: `{BOOK} {chapter}:{verse}[/{marker}#{n}]`. Full key: `pt:{projectGuid}:{unitId}`, where the GUID is the 40-hex `id` from `Settings.xml` (the same value the registration token carries).
+IDs come from Paratext references, not from content. The ID stays fixed when the text changes; the hash changes. Grammar: `{BOOK} {chapter}:{verse}[/{marker}#{n}]`. Full key: `pt:{stateId}:{unitId}`, where the state id is `{projectGuid}@{project folder}`: the GUID is the 40-hex `id` from `Settings.xml` (the same value the registration token carries), and the folder is part of the key because one project can sit in two folders on a computer (Paratext 10 and Paratext Lite each keep a copy).
 
 | Content | Example ID | Rule |
 | --- | --- | --- |

@@ -99,49 +99,17 @@ function timed<T>(run: () => T): { ms: number; value?: T; error?: unknown } {
   }
 }
 
-/**
- * Bytes of new byte buffers the extractor's own code asks for during `run`.
- * The module resolves the global `Uint8Array` when it allocates, so a counting
- * subclass sees every `new Uint8Array(n)` it makes; views (subarray) and
- * fflate's internal allocations are not counted.
- */
-function bufferBytesAllocated(run: () => void): number {
-  const Original = globalThis.Uint8Array
-  let total = 0
-  class Counting extends Original {
-    constructor(...args: unknown[]) {
-      // @ts-expect-error -- forwarding whichever constructor overload was used
-      super(...args)
-      if (typeof args[0] === "number") total += args[0]
-    }
-  }
-  globalThis.Uint8Array = Counting as unknown as Uint8ArrayConstructor
-  try {
-    run()
-  } finally {
-    globalThis.Uint8Array = Original
-  }
-  return total
-}
-
 describe("extractTextFromPdf — work bounds on crafted files (AQU-2594)", () => {
-  it("reads a file of many tiny compressed streams fast, with one output buffer for the call", () => {
+  // Its memory is checked in parse-document-pdf-memory.test.ts.
+  it("reads a file of many tiny compressed streams fast", () => {
     const tiny = concat([
       strToU8("<</Filter/FlateDecode>>stream\n"),
       zlibSync(strToU8("BT ET")),
       strToU8("\nendstream\n"),
     ])
-    const pdf = repeatToCap(tiny)
-
-    let run: ReturnType<typeof timed<string>> = { ms: 0 }
-    const allocated = bufferBytesAllocated(() => {
-      run = timed(() => extractTextFromPdf(pdf))
-    })
-
+    const run = timed(() => extractTextFromPdf(repeatToCap(tiny)))
     expect(run.error).toBeUndefined()
     expect(run.ms).toBeLessThan(FAST_MS)
-    // One 4 MB per-stream buffer, reused; not one per stream.
-    expect(allocated).toBeLessThanOrEqual(4 * 1024 * 1024)
   })
 
   it("reads a file of streams with no dictionary fast (no search back to the file's start)", () => {

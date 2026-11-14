@@ -19,7 +19,7 @@
 import { Hono } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
-import { unzipSync, Inflate } from "fflate"
+import { unzipSync, inflateSync, Inflate } from "fflate"
 import { readBytesWithLimit } from "../../../shared/http-body-limit"
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024 // 2 MB
@@ -75,9 +75,11 @@ const MAX_PDF_STREAMS = 10_000
 // bytes inflated. A 2 MB PDF that fills the 20 MB inflation cap spends about
 // 45 MB; past this the file is refused as too complex.
 const MAX_PDF_WORK_BYTES = 64 * 1024 * 1024 // 64 MB
-// Compressed bytes handed to the inflater per step. Deflate expands at most
-// ~1032:1, so a step yields at most ~1 MB and inflation stops within a step
-// of the per-stream cap instead of decoding the whole stream.
+// Deflate's largest expansion: a 258-byte copy for two bits of input.
+const MAX_DEFLATE_RATIO = 1032
+// Compressed bytes handed to the inflater per step, so a step yields at most
+// ~1 MB and inflation stops within a step of the per-stream cap instead of
+// decoding the whole stream.
 const INFLATE_STEP_BYTES = 1024
 
 const parseDocument = new Hono<AuthHonoEnv>()
@@ -409,9 +411,13 @@ function inflatePdfStreams(bytes: Uint8Array, raw: string, work: PdfWorkBudget):
 // many it kept, or null when neither framing decodes it.
 //
 // AQU-2594: fflate given a preallocated `out` keeps only what fits but still
-// decodes the whole stream, so a 2 MB bomb cost seconds of CPU. The stream is
-// now fed to the inflater a step at a time and left once `limit` bytes are
-// kept, and every byte it decoded is charged to the work budget.
+// decodes the whole stream, so a 2 MB bomb cost seconds of CPU. A stream that
+// could inflate past `limit` is now fed to the inflater a step at a time and
+// left once `limit` bytes are kept. One that can't (most of them: content
+// streams are small) is inflated in one call straight into `out`, as before,
+// which allocates nothing; the stepping inflater allocates ~160 KB per stream,
+// 1.6 GB over a file of 10,000 tiny streams. Every byte decoded is charged to
+// the work budget.
 function inflateBounded(
   slice: Uint8Array,
   out: Uint8Array,
@@ -455,6 +461,15 @@ function inflateSteps(
   limit: number,
   run: { kept: number; decoded: number },
 ): void {
+  // Too short to inflate past `limit`, so the one-call inflate is exact.
+  if (data.length * MAX_DEFLATE_RATIO <= limit) {
+    // fflate returns the whole `out` for empty input; nothing was decoded.
+    if (data.length === 0) return
+    const inflated = inflateSync(data, { out: out.subarray(0, limit) })
+    run.kept = run.decoded = inflated.length
+    return
+  }
+
   const inflater = new Inflate((chunk) => {
     run.decoded += chunk.length
     const take = Math.min(chunk.length, limit - run.kept)

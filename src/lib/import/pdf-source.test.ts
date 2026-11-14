@@ -183,3 +183,37 @@ describe("a translated PDF fills a source's lines paragraph by paragraph", () =>
     }
   })
 })
+
+// Review finding 8 (Nov 14): a table in an untagged translation PDF came in as
+// one paragraph, so every later line filled too early.
+describe("a table in an untagged translation PDF", () => {
+  const P = (t: string) => `<w:p><w:r><w:t xml:space="preserve">${t}</w:t></w:r></w:p>`
+  const TC = (t: string) => `<w:tc>${P(t)}</w:tc>`
+  async function docxBody(body: string): Promise<ArrayBuffer> {
+    const zip = new JSZip()
+    zip.file("word/document.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`)
+    return zip.generateAsync({ type: "arraybuffer" })
+  }
+
+  it("fills a Word table's cells one by one, row by row, on both settings", async () => {
+    const source = new File([await docxBody(
+      P("Before the table.") + `<w:tbl><w:tr>${TC("Name")}${TC("Age")}${TC("Town")}</w:tr><w:tr>${TC("Anna")}${TC("12")}${TC("Haifa")}</w:tr></w:tbl>` + P("After the table."),
+    )], "s.docx")
+    const pdf = buildPdf({ pages: [{ runs: [
+      { text: "Antes de la tabla.", x: 72, y: 760 },
+      { text: "Nombre", x: 72, y: 730 }, { text: "Edad", x: 250, y: 730 }, { text: "Pueblo", x: 430, y: 730 },
+      { text: "Ana", x: 72, y: 712 }, { text: "12", x: 250, y: 712 }, { text: "Haifa", x: 430, y: 712 },
+      { text: "Despues de la tabla.", x: 72, y: 680 },
+    ] }] })
+    for (const cellUnit of ["paragraph", "sentence"] as const) {
+      const lines = await sourceLines(source, cellUnit)
+      expect(lines).toHaveLength(8)
+      const result = await translate(pdfFile(pdf, "t.pdf"), lines, cellUnit)
+      expect(result.countMismatch).toBeUndefined()
+      expect(lines.map((l) => filled(result)[l.cellId])).toEqual([
+        "Antes de la tabla.", "Nombre", "Edad", "Pueblo", "Ana", "12", "Haifa", "Despues de la tabla.",
+      ])
+    }
+  })
+})

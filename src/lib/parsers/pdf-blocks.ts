@@ -584,11 +584,18 @@ function layoutPageBlocks(pages: readonly PdfPageContent[], joiner: TextJoiner, 
       const g = [...(pitch.get(size) ?? [])].sort((x, y) => x - y)
       return g.length ? g[Math.floor(g.length * 0.3)] : size * 1.2
     }
+    // AQU-2551 review finding 8: lines drawn one after another on the same
+    // baseline are a table row's cells (a wide jump sideways split them).
+    // Each cell is its own paragraph, row by row, as the Word import gives a
+    // table; before this a table came in as one paragraph.
+    const sameBaseline = (a: Line, b: Line) => Math.abs(a.y - b.y) < 0.45 * Math.max(a.h, b.h)
+    const isCell = kept.map((l, k) =>
+      (k > 0 && sameBaseline(kept[k - 1], l)) || (k + 1 < kept.length && sameBaseline(l, kept[k + 1])))
     const blocks: { lines: Line[]; size: number; topY: number }[] = []
     let blk: { lines: Line[]; size: number; topY: number } | null = null
     let prev: Line | null = null
-    for (const l of kept) {
-      let brk = !blk || !prev
+    for (const [k, l] of kept.entries()) {
+      let brk = !blk || !prev || isCell[k] || isCell[k - 1]
       if (!brk && prev) {
         const gap = prev.y - l.y
         const sizeChange = Math.abs(l.size - prev.size) > 0.12 * Math.max(l.size, prev.size)

@@ -99,7 +99,9 @@ export interface RebuildInput {
   lostChar?: (piece: DocxPiece, i: number) => boolean
   /** AQU-2552 (review r7): pieces after the paragraph's first word that sit
    *  among the words of a line written as its source, each with the index of
-   *  `text` it is written before; the rest follow the translation. */
+   *  `text` it is written before; the rest follow the translation. AQU-2552
+   *  (review r9): so do a lost line's, at the boundary where it was. A field
+   *  or wrapper goes where its first such piece goes. */
   inlineAt?: ReadonlyMap<DocxPiece, number>
   io: RebuildIo
 }
@@ -230,26 +232,30 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   const back: RNode[] = []
   const inline: { at: number; node: RNode }[] = []
   const inlineOf = (node: RNode, k: number) =>
-    firstWord !== -1 && k > firstWord && node.kind === "keep" ? inlineAt.get(node.piece) : undefined
+    firstWord === -1 || k <= firstWord || node.kind === "text" || node.kind === "marker" || matches.has(node) ? undefined
+      : node.kind === "keep" ? inlineAt.get(node.piece)
+      : leavesOf([node]).map((leaf) => inlineAt.get(leaf.piece)).find((i) => i !== undefined)
   // AQU-2552 (review r8): a bookmark or comment mark is placed among the words
   // only when every other mark of its pair is placed there too; otherwise
   // they all follow the translation, in order, so none ends before it starts.
   const pairs = new Map<string, { inline: boolean; start: boolean; end: boolean }>()
-  const inlineNodes = new Set(nodes.filter((node, k) => inlineOf(node, k) !== undefined))
-  for (const leaf of leavesOf(nodes)) {
+  nodes.forEach((node, k) => {
+    const inline = inlineOf(node, k) !== undefined
+    for (const leaf of leavesOf([node])) {
+      const pair = pairOf(leaf.piece)
+      if (!pair) continue
+      const entry = pairs.get(pair.key) ?? { inline: true, start: false, end: false }
+      if (!inline) entry.inline = false
+      if (pair.side === "start") entry.start = true
+      if (pair.side === "end") entry.end = true
+      pairs.set(pair.key, entry)
+    }
+  })
+  const pairedInline = (node: RNode) => leavesOf([node]).every((leaf) => {
     const pair = pairOf(leaf.piece)
-    if (!pair) continue
-    const entry = pairs.get(pair.key) ?? { inline: true, start: false, end: false }
-    if (!inlineNodes.has(leaf)) entry.inline = false
-    if (pair.side === "start") entry.start = true
-    if (pair.side === "end") entry.end = true
-    pairs.set(pair.key, entry)
-  }
-  const pairedInline = (node: RNode) => {
-    const pair = node.kind === "keep" ? pairOf(node.piece) : null
     const entry = pair ? pairs.get(pair.key) : undefined
     return !entry || (entry.inline && entry.start && entry.end)
-  }
+  })
   // The end of a range copied in place inside a matched link or content
   // control (an untranslated line's) comes before the translation's end, so
   // a start mark of that range that would follow the translation goes in

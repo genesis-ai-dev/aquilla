@@ -179,7 +179,8 @@ describe("Word export — a line's footnote is that line's own (AQU-2552, review
 
 // AQU-2552 (question 62): this replaces review r6's "a hidden or deleted
 // line's pictures, fields and tabs leave with it". AQU-2552 (review r9): a
-// tab among a lost line's words is its own text, and goes with them.
+// tab among a lost line's words is its own text, and goes with them; what
+// stays sits where the line was, after the line before it.
 describe("Word export — a hidden or deleted line's words, and a tab among them, go; its pictures, fields and links stay (AQU-2552, question 62)", () => {
   const next = para(run("Next paragraph."))
   const italic = "<w:rPr><w:i/></w:rPr>"
@@ -202,7 +203,7 @@ describe("Word export — a hidden or deleted line's words, and a tab among them
     const cells = importedCells(body, undefined, translate).map((cell) => (cell.id === "c1-2" ? { ...cell, hidden: true } : cell))
     expect(cells.filter((cell) => cell.id.startsWith("c1-"))).toHaveLength(3)
     const out = await exportAsDialog(body, undefined, cells)
-    expect(firstParagraph(out.xml)).toBe(`${T1} ${T3}${seen}`)
+    expect(firstParagraph(out.xml)).toBe(`${T1}${seen} ${T3}`)
     expect(out.xml).toContain(kept)
     expect(out.xml).not.toMatch(/The second line|links somewhere|italic|<w:tab\/>/)
     // Nothing is said about words the export left out on purpose.
@@ -216,7 +217,7 @@ describe("Word export — a hidden or deleted line's words, and a tab among them
     const all = importedCells(body, undefined, translate)
     const deleted = all.filter((cell) => cell.id === "c1-2")
     const out = await exportAsDialog(body, undefined, all.filter((cell) => cell.id !== "c1-2"), deleted)
-    expect(firstParagraph(out.xml)).toBe(`${T1} ${T3}${seen}`)
+    expect(firstParagraph(out.xml)).toBe(`${T1}${seen} ${T3}`)
     expect(out.xml).toContain(kept)
     expect(out.xml).not.toMatch(/The second line|links somewhere|italic|<w:tab\/>/)
     expect(out.result.lostLooks).toEqual([])

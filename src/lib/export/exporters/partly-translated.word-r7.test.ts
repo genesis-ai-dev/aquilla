@@ -238,13 +238,14 @@ describe("Word export — a line is found in its paragraph in segment order (AQU
     expect(paras(out.body)).toEqual(["Refrain line[IMG] … Trois.", "Next paragraph."])
   })
 
-  // AQU-2552 (question 62): a lost line's picture stays (it follows the
-  // paragraph's words); the remaining copy's own place is what is checked.
+  // AQU-2552 (question 62): a lost line's picture stays (AQU-2552 review r9:
+  // where the line was, after the remaining line before it); the remaining
+  // copy's own place is what is checked.
   it("a hidden second copy's words go, never the first copy's; its picture stays", async () => {
     const bytes = await docxBytes(para(run(S + " ") + run("Refrain line") + IMG + run(PAD + " ") + run("Third line" + PAD)) + NEXT)
     const [a, b, c, n] = await importCells(bytes)
     const out = await wordOut(bytes, [a, hide(typed(b, "Refrain.")), typed(c, "Trois."), n])
-    expect(paras(out.body)).toEqual(["Refrain line … Trois.[IMG]", "Next paragraph."])
+    expect(paras(out.body)).toEqual(["Refrain line …[IMG] Trois.", "Next paragraph."])
   })
 
   it("a hidden or deleted first copy's words go, though the remaining copy has the same words; its picture stays in front", async () => {
@@ -326,7 +327,8 @@ describe("Word export — an untranslated line keeps its pieces where they are (
 
 // AQU-2552 (question 62): a lost piece takes only its words and its own
 // footnote, so its picture and field now stay (round 7's N2 had them go).
-// AQU-2552 (review r9): the tab among its words is its own text, and goes.
+// AQU-2552 (review r9): the tab among its words is its own text, and goes;
+// the picture and field sit where the piece was, after "Première ligne".
 describe("Word export — a hidden or deleted split piece is a lost line of its paragraph (AQU-2552, review r7 N2)", () => {
   const F = ["Première ligne ici.", "Deuxième ligne ici.", "Troisième ligne ici."]
   // Line 1 is cut in the editor after "First line"; the piece holds a
@@ -344,7 +346,7 @@ describe("Word export — a hidden or deleted split piece is a lost line of its 
     const bytes = await docxBytes(body)
     const { parent, pc, b, c, n } = await cut(bytes)
     const out = await wordOut(bytes, [parent, hide(typed(pc, "ici, avec la suite.")), b, typed(c, F[2]), n])
-    expect(paras(out.body)).toEqual([`Première ligne Second line here … ${F[2]}[IMG]{field}`, "Next paragraph."])
+    expect(paras(out.body)).toEqual([`Première ligne[IMG]{field} Second line here … ${F[2]}`, "Next paragraph."])
     expect(out.body).not.toMatch(/<w:i\/>|italic|Figure 1/)
     expect(out.result.lostLooks).toEqual([])
     expect(out.result.fidelity.emptiedFields).toBe(0)
@@ -354,7 +356,7 @@ describe("Word export — a hidden or deleted split piece is a lost line of its 
     const bytes = await docxBytes(body)
     const { parent, pc, b, c, n } = await cut(bytes)
     const out = await wordOut(bytes, [parent, b, typed(c, F[2]), n], [pc])
-    expect(paras(out.body)).toEqual([`Première ligne Second line here … ${F[2]}[IMG]{field}`, "Next paragraph."])
+    expect(paras(out.body)).toEqual([`Première ligne[IMG]{field} Second line here … ${F[2]}`, "Next paragraph."])
     expect(out.result.lostLooks).toEqual([])
   })
 

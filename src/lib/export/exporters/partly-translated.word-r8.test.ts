@@ -180,9 +180,10 @@ describe("Word export — a wrapper that only a lost line fills stays, emptied, 
     }
     const picture = kept.includes("w:drawing") ? "[IMG]" : ""
     const hidden = await wordOut(bytes, [typed(a, "Un."), hide(typed(b, "Deux.")), typed(c, "Trois."), n])
-    expect(paras(hidden.body)[0]).toBe(`Un. Trois.${picture}`)
+    // AQU-2552 (review r9): where the line was, after the line before it.
+    expect(paras(hidden.body)[0]).toBe(`Un.${picture} Trois.`)
     const untranslated = await wordOut(bytes, [a, hide(b), c, n])
-    expect(paras(untranslated.body)[0]).toBe(`First line here … Third line here …${picture}`)
+    expect(paras(untranslated.body)[0]).toBe(`First line here …${picture} Third line here …`)
   })
 
   it("a content control around the first line, hidden or with both first lines deleted", async () => {
@@ -226,12 +227,13 @@ describe("Word export — a deleted split piece keeps its place after the row it
   const view = (out: Out) => [paras(out.body)[0], noteText(out.notes, 1), noteText(out.notes, 2)]
 
   // AQU-2552 (question 62): the lost piece's note still goes with it; its
-  // picture now stays, after the paragraph's words.
+  // picture now stays (AQU-2552 review r9: where the piece was, right after
+  // the row it was cut from).
   it("the middle piece deleted reads exactly as the middle piece hidden: its note goes, its picture stays, line 3 keeps its own", async () => {
     const { bytes, a, P, Q1, c, n } = await cut()
     const Q2 = piece(Q1, "q2", L2c)
     const hidden = await wordOut(bytes, [typed(a, "Un."), P, hide(Q1), Q2, c, n])
-    expect(view(hidden)).toEqual([`Un. Deuxième ligne ${L2c} Third line[IMG] here[^2] …[IMG]`, "Note one.", "Note two."])
+    expect(view(hidden)).toEqual([`Un. Deuxième ligne[IMG] ${L2c} Third line[IMG] here[^2] …`, "Note one.", "Note two."])
     const deleted = await wordOut(bytes, [typed(a, "Un."), P, Q2, c, n], [Q1])
     expect(view(deleted)).toEqual(view(hidden))
   })
@@ -242,7 +244,7 @@ describe("Word export — a deleted split piece keeps its place after the row it
     const hidden = await wordOut(bytes, [typed(a, "Un."), P, hide(Q1), typed(Q2, "la fin."), typed(c, "Trois."), n])
     const deleted = await wordOut(bytes, [typed(a, "Un."), P, typed(Q2, "la fin."), typed(c, "Trois."), n], [Q1])
     expect(view(deleted)).toEqual(view(hidden))
-    expect(paras(deleted.body)[0]).toBe("Un. Deuxième ligne la fin. Trois.[^2][IMG][IMG]")
+    expect(paras(deleted.body)[0]).toBe("Un. Deuxième ligne[IMG] la fin. Trois.[^2][IMG]")
   })
 
   it("so with line 1 hidden too", async () => {
@@ -259,7 +261,7 @@ describe("Word export — a deleted split piece keeps its place after the row it
     const hidden = await wordOut(bytes, [typed(a, "Un."), P, hide(Q1), Q2, c, n])
     const deleted = await wordOut(bytes, [typed(a, "Un."), P, Q2, c, n], [Q1])
     expect(view(deleted)).toEqual(view(hidden))
-    expect(paras(deleted.body)[0]).toBe(`Un. Deuxième ligne ${L2c} Third line[IMG] here[^2] …[IMG]`)
+    expect(paras(deleted.body)[0]).toBe(`Un. Deuxième ligne[IMG] ${L2c} Third line[IMG] here[^2] …`)
   })
 })
 

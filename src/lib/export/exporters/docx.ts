@@ -819,10 +819,32 @@ function rebuildParagraphIn(
       }
     }
     inlineAt = new Map()
+    // AQU-2552 (review r9): what a lost line keeps stays where the line was,
+    // at the boundary after the remaining line before it (where that line's
+    // own footnotes go), translated or not. After the last one, it follows the
+    // paragraph's words as before.
+    const lineEnd = new Map<number, number>()
+    lineOf.forEach((line, i) => { if (line !== undefined) lineEnd.set(line, i + 1) })
+    const lastLine = layout!.stretches.length - 1
+    const whereLost = (offset: number): number | undefined => {
+      for (const s of layout!.lost) {
+        const before = layout!.stretches.findLastIndex((r) => r !== null && r.end <= s.start)
+        const after = layout!.stretches.findIndex((r) => r !== null && r.start >= s.end)
+        const from = before === -1 ? -Infinity : layout!.stretches[before]!.end
+        const to = after === -1 ? Infinity : layout!.stretches[after]!.start
+        if (!((from < offset && offset < to) || (s.start <= offset && offset <= s.end))) continue
+        if (before === lastLine) return undefined
+        for (let line = before; line >= 0; line--) if (lineEnd.has(line)) return lineEnd.get(line)
+        return 0
+      }
+      return undefined
+    }
     for (const [piece, offset] of placed.offsets) {
+      const lost = whereLost(offset)
       const before = fromSource.get(offset)
       const after = fromSource.get(offset - 1)
-      if (before !== undefined) inlineAt.set(piece, before)
+      if (lost !== undefined) inlineAt.set(piece, lost)
+      else if (before !== undefined) inlineAt.set(piece, before)
       else if (after !== undefined) inlineAt.set(piece, after + 1)
     }
   }

@@ -209,7 +209,7 @@ describe("Word export — a hidden or deleted line takes only its words and its 
   it.each(KINDS)("a hidden line's words go and $name stays (file with locators)", async (kind) => {
     const { bytes, a, b, c, rest } = await linesOf(kind, false)
     const out = await wordOut(bytes, [typed(a, "Un."), hide(typed(b, "Deux.")), typed(c, "Trois."), ...rest])
-    expect(paras(out.body)[0]).toBe(`Un. Trois.${kind.seen}`)
+    expect(paras(out.body)[0]).toBe(`Un.${kind.seen} Trois.`)
     if (kind.kept === null) expect(firstPara(out.body)).not.toContain(kind.parts[0])
     else expect(firstPara(out.body)).toContain(kind.kept)
     expect(out.body).not.toMatch(/Second|links here|Deux/)
@@ -223,7 +223,7 @@ describe("Word export — a hidden or deleted line takes only its words and its 
   it.each(KINDS)("a deleted line's words go and $name stays (file with locators)", async (kind) => {
     const { bytes, a, b, c, rest } = await linesOf(kind, false)
     const out = await wordOut(bytes, [typed(a, "Un."), typed(c, "Trois."), ...rest], [b])
-    expect(paras(out.body)[0]).toBe(`Un. Trois.${kind.seen}`)
+    expect(paras(out.body)[0]).toBe(`Un.${kind.seen} Trois.`)
     if (kind.kept === null) expect(firstPara(out.body)).not.toContain(kind.parts[0])
     else expect(firstPara(out.body)).toContain(kind.kept)
     expect(out.body).not.toMatch(/Second|links here/)
@@ -317,5 +317,38 @@ describe("Word export — what a lost line owns is its own text range and its fo
       expect(paras(out.body)[0]).toBe(remaining(translated))
       expect(firstPara(out.body)).not.toMatch(/<w:tab\/>|<w:br\/>/)
     })
+  })
+
+  // R3: what a lost line keeps sits where the line was, at the boundary
+  // after the remaining line before it, its neighbours translated or not.
+  const staying = KINDS.filter((kind) => kind.seen !== "")
+  it.each(staying)("$name of a lost line sits after the remaining line before it", async (kind) => {
+    await eachLoss(kind.line2, (out, translated) => {
+      expect(paras(out.body)[0]).toBe(translated ? `Un.${kind.seen} Trois.` : `First line here …${kind.seen} Third line here …`)
+    })
+    // One neighbour translated, the other not.
+    const { bytes, a, b, c, rest } = await threeLines(kind.line2)
+    expect(paras((await wordOut(bytes, [typed(a, "Un."), hide(b), c, ...rest])).body)[0]).toBe(`Un.${kind.seen} Third line here …`)
+    expect(paras((await wordOut(bytes, [a, typed(c, "Trois."), ...rest], [b])).body)[0]).toBe(`First line here …${kind.seen} Trois.`)
+  })
+
+  it.each(staying)("$name of a lost first line sits before the first remaining line", async (kind) => {
+    const bytes = await docxBytes(para(kind.line2 + run(" " + L1 + " ") + run(L3)) + NEXT)
+    const cells = await importCells(bytes, false)
+    const at = (text: string) => cells.find((c) => c.original.startsWith(text))!
+    const [b, a, c] = [at("Second"), at("First line"), at("Third line")]
+    const rest = cells.filter((cell) => cell !== a && cell !== b && cell !== c)
+    const out = await wordOut(bytes, [hide(b), typed(a, "Un."), typed(c, "Trois."), ...rest])
+    expect(paras(out.body)[0]).toBe(`${kind.seen}Un. Trois.`)
+  })
+
+  it("a lost last line's picture follows the paragraph's words, after the remaining lines' own pieces, in source order", async () => {
+    const line1 = run("First line") + IMG.replace('id="1" name="Picture 1"', 'id="3" name="Picture 3"') + run(" here" + PAD)
+    const bytes = await docxBytes(para(line1 + run(" Second line here" + PAD + " ") + run("Third line") + IMG + run(" here" + PAD)) + NEXT)
+    const cells = await importCells(bytes, false)
+    const [a, b, c, ...rest] = cells
+    const out = await wordOut(bytes, [typed(a, "Un."), typed(b, "Deux."), hide(c), ...rest])
+    expect(paras(out.body)[0]).toBe("Un. Deux.[IMG][IMG]")
+    expect(firstPara(out.body).indexOf("Picture 3")).toBeLessThan(firstPara(out.body).indexOf("Picture 1"))
   })
 })

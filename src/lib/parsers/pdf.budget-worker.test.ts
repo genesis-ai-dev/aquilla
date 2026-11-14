@@ -10,7 +10,8 @@ import { describe, expect, it, vi } from "vitest"
 
 const destroy = vi.fn(async () => {})
 
-vi.mock("pdfjs-dist", () => ({
+// AQU-2551 review finding 12: the reader loads the legacy build.
+vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({
   GlobalWorkerOptions: { workerSrc: "" },
   OPS: {},
   VerbosityLevel: { ERRORS: 0 },

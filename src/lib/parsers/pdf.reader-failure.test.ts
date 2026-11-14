@@ -8,7 +8,8 @@ import { describe, expect, it, vi } from "vitest"
 
 const openError = vi.hoisted(() => ({ current: new Error("Setting up fake worker failed: Failed to fetch dynamically imported module") }))
 
-vi.mock("pdfjs-dist", () => ({
+// AQU-2551 review finding 12: the reader loads the legacy build.
+vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({
   GlobalWorkerOptions: { workerSrc: "" },
   OPS: {},
   VerbosityLevel: { ERRORS: 0 },

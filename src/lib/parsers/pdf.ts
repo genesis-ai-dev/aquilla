@@ -57,7 +57,11 @@ export interface PdfParseOptions {
  *  complex. A real 58-page Word PDF reads in about 2 s. */
 export const READ_BUDGET_MS = 20_000
 
-type PdfJs = typeof import("pdfjs-dist")
+// AQU-2551 review finding 12: the legacy build, for the main module and the
+// worker. The modern build calls Map.prototype.getOrInsertComputed and
+// Math.sumPrecise with no fallback, which older browsers lack; the legacy
+// build carries the fallbacks.
+type PdfJs = typeof import("pdfjs-dist/legacy/build/pdf.mjs")
 
 let pdfjsPromise: Promise<PdfJs> | null = null
 
@@ -67,9 +71,9 @@ const WORKER_FAILED = /Setting up fake worker failed/i
 
 async function loadPdfJs(): Promise<PdfJs> {
   pdfjsPromise ??= (async () => {
-    const pdfjs = await import("pdfjs-dist")
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs")
     if (typeof window !== "undefined" && typeof Worker !== "undefined" && !pdfjs.GlobalWorkerOptions.workerSrc) {
-      const { default: workerUrl } = await import("pdfjs-dist/build/pdf.worker.min.mjs?url")
+      const { default: workerUrl } = await import("pdfjs-dist/legacy/build/pdf.worker.min.mjs?url")
       pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
     }
     return pdfjs

@@ -35,7 +35,9 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 ├── agent-worker/       # sandboxed agent code-execution Worker — see Backend below
 ├── monitor-worker/     # uptime cron → Discord alerts with @mentions (monitor-worker/README.md)
 ├── db/                 # LIVE Postgres schema: postgres/schema.sql, postgres/migrations/,
-│                       #   rollout/, shim/ (D1-compatible executor over Hyperdrive)
+│                       #   postgres/rollout/, shim/ (D1-compatible executor over
+│                       #   Hyperdrive), shared/ (logic the workers share, e.g.
+│                       #   lane-progress.ts, link-file-provenance.ts)
 ├── worker/             # root SPA-serving Worker (index.ts + og/) for the production deploy
 ├── infra/modal/        # Modal services: voice_forge.py, diarization.py, omni_asr.py
 ├── src-tauri/          # Tauri desktop shell. Hot-bundle update channel: docs/superpowers/specs/
@@ -118,8 +120,8 @@ The SPA ships under several brands selected by the `BRAND` env var
 
 **Datastore: Postgres (Neon) via Hyperdrive.** The D1→Postgres cutover is **complete** — no
 worker binds D1; workers fail fast if `HYPERDRIVE` is unbound and query through
-`db/shim/postgres.ts`. Live schema/migrations are `db/postgres/`; `auth-worker/migrations/` and
-`sync-worker/migrations/` are retained only as historical D1 records.
+`db/shim/postgres.ts`. Live schema/migrations are `db/postgres/`; `auth-worker/migrations/` is
+retained only as a historical D1 record (sync-worker has no migrations directory).
 
 - **`auth-worker/`** — Worker `aquilla-identity`. `/api/v2/*`: `auth/*`, `sync-token`,
   `users/*`, `orgs/*`, `projects/*` (+ invites, settings, source-linking, member-scopes,
@@ -148,7 +150,11 @@ worker binds D1; workers fail fast if `HYPERDRIVE` is unbound and query through
   `src/events/link-provenance.ts`) that gives files a source link brought in their
   upstream type and a `file_source_blobs` pointer at the upstream's original (the
   rules: `db/shared/link-file-provenance.ts`; every mirror window applies them to
-  the files it touches, this is the backfill) — and the external
+  the files it touches, this is the backfill), and their source cells the import
+  envelope a link did not carry before AQU-1520 (`src/events/link-envelope.ts`: one
+  `source.cell.metadata.patch` per cell whose `metadata` is NULL; every link sync
+  does the same once its fold has caught up, `envelopes=N` in the log line) — and
+  the external
   **Agent API** under `/api/v1/external/*`
   (changeset engine + apply gate, artifacts, tools-only MCP server, self-describing
   discovery — see `docs/AGENT-API.md`). Every PR DOES get its own per-branch sync-worker and
@@ -164,8 +170,9 @@ worker binds D1; workers fail fast if `HYPERDRIVE` is unbound and query through
   calls it via `AGENT_SANDBOX_URL` + shared `AGENT_SANDBOX_KEY`; no zone routes. Reads
   artifacts from the same `aquilla-snapshots` R2 bucket. Local dev on `:8790`.
 
-In-flight (uncommitted on dev): Monday.com nudge — `sync-worker/src/monday-notify.ts` fires
-best-effort throttled pushes from the DO broadcast to auth-worker `/api/v2/monday/internal/push`.
+Monday.com nudge: `sync-worker/src/monday-notify.ts` fires best-effort throttled pushes from
+the DO broadcast to auth-worker `/api/v2/monday/internal/push`, whose push engine is
+`auth-worker/src/routes/monday.ts`.
 
 Frontend hosts are wired at build time through `VITE_AUTH_BASE`, `VITE_CHAT_BASE`,
 and `VITE_SYNC_WORKER_HOST`. Browser-facing API Workers mount at `/identity/*`,

@@ -215,6 +215,19 @@ describe("loadPeaksFor — it gives up quietly, never loudly", () => {
   })
 })
 
+describe("loadPeaksFor — one decode per clip", () => {
+  it("shares one decode when two callers ask for the same clip together", async () => {
+    let release: (value: ReturnType<typeof decoded>) => void = () => {}
+    decodePeaks.mockReturnValue(new Promise((resolve) => { release = resolve }))
+
+    const first = loadPeaksFor(base)
+    const second = loadPeaksFor(base)
+    release(decoded())
+    await expect(Promise.all([first, second])).resolves.toEqual([expect.any(Float32Array), expect.any(Float32Array)])
+    expect(decodePeaks).toHaveBeenCalledOnce()
+  })
+})
+
 describe("loadPeaksBatch", () => {
   const targets = Array.from({ length: 6 }, (_, i) => ({
     attachmentKey: `audio-c${i}-1-aaaaaaaa.wav`,

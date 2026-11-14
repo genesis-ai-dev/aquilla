@@ -235,3 +235,37 @@ describe("the second audio shape", () => {
     expect(vi.mocked(downloadBlob)).not.toHaveBeenCalled()
   })
 })
+
+// ── A Bible book: recorded on every verse, timed on none (AQU-2578) ───────
+//
+// The preview counted only takes the by-character mix can place — a take on a
+// line with a start time. A verse has none, so a Luke with a recording on every
+// cell was told "Nothing is recorded yet, so there is nothing to export."
+
+describe("recordings on lines with no start time", () => {
+  /** A recorded verse: a take, and no second it belongs at. */
+  const verse = (id: string): CellData => ({
+    ...recorded(id, 0),
+    startTime: undefined,
+    endTime: undefined,
+  })
+
+  it("are counted by line, and by character says why it cannot place them", async () => {
+    render(
+      <ExportDialog
+        {...BASE_PROPS}
+        cells={[verse("v1"), verse("v2"), verse("v3")]}
+        audioCells={undefined}
+      />,
+    )
+    chooseAudioByCharacter()
+    const preview = within(await screen.findByTestId("export-character-preview"))
+    expect(preview.queryByText(/Nothing is recorded yet/)).toBeNull()
+    expect(preview.getByTestId("export-nothing-to-preview")).toHaveTextContent(/3 recordings have no start time/)
+
+    // By line writes an untimed take as it is, so there it is a line like any other.
+    fireEvent.click(screen.getByText("Audio by line"))
+    expect(await preview.findByText(/3 lines/)).toBeInTheDocument()
+    expect(preview.queryByTestId("export-nothing-to-preview")).toBeNull()
+  })
+})

@@ -159,6 +159,8 @@ describe("org membership writes by deployment (AQU-2470)", () => {
     env.DEPLOYMENT_WORKER_NAME = workerName
     await seedForeignOrg()
     await seedUser(7, "root")
+    if (workerName === "aquilla-auth-preview")
+      await env.AQUILLA_PG.prepare("INSERT INTO platform_admins(email) VALUES ('root@example.com')").run()
     await seedUser(9, "helper")
 
     const res = await addMember(await jwtFor("root"), 1, "helper", 400)

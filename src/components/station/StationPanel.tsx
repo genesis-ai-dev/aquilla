@@ -48,6 +48,7 @@ import { StationLevels } from "./StationLevels"
 import { StationRecordBar, useStationRecorder } from "./StationRecorder"
 import { StationScroll, StationTransport } from "./StationTransport"
 import { STATION_EDIT_MAX_SEC, useStationEditor } from "./useStationEditor"
+import { pieceStretchOf } from "@/lib/history/take-steps"
 
 /** The Station's tab content: the open recording, or how to open one. */
 export function StationPanel({ host, visible }: { host: StationHost | null; visible: boolean }) {
@@ -315,6 +316,10 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
             ? { gainDb: ed.level.gainDb || null, fadeInMs: ed.level.fadeIn > 0 ? Math.round(ed.level.fadeIn * 1000) : null, fadeOutMs: ed.level.fadeOut > 0 ? Math.round(ed.level.fadeOut * 1000) : null }
             : { gainDb: p.att.gainDb ?? null, fadeInMs: p.att.fadeInMs ?? null, fadeOutMs: p.att.fadeOutMs ?? null },
           ...(isOpen && isPiece ? { pieceOf: pieceRoot } : {}),
+          // AQU-2492 (review, Nov 9), finding 8: who had approved the take it replaces.
+          approvedBy: p.att.validators ?? [],
+          // AQU-2492 (review, round 2): and the stretch of its recording it plays.
+          replacedStretch: pieceStretchOf(isOpen ? target.audioId : fromAudioId, p.att),
         }
       })
       const res = await saveStationVersion({

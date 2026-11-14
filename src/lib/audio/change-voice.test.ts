@@ -6,11 +6,15 @@ import type { Voice } from "@/lib/parsers/types"
 
 const convertToLibraryVoice = vi.fn()
 const emitCellAudioAttach = vi.fn()
+const emitCellAudioPlace = vi.fn()
 const injectOptimisticAudioAttachment = vi.fn()
 const convertElevenLabsSpeech = vi.fn()
 vi.mock("./voice-clone", () => ({ convertToLibraryVoice: (...a: unknown[]) => convertToLibraryVoice(...a) }))
 vi.mock("@/lib/sync/elevenlabs", () => ({ convertElevenLabsSpeech: (...a: unknown[]) => convertElevenLabsSpeech(...a) }))
-vi.mock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: (...a: unknown[]) => emitCellAudioAttach(...a) }))
+vi.mock("@/lib/sync/events-emit", () => ({
+  emitCellAudioAttach: (...a: unknown[]) => emitCellAudioAttach(...a),
+  emitCellAudioPlace: (...a: unknown[]) => emitCellAudioPlace(...a),
+}))
 vi.mock("./audio-attachments-bus", () => ({
   injectOptimisticAudioAttachment: (...a: unknown[]) => injectOptimisticAudioAttachment(...a),
   notifyAudioAttachmentsChanged: vi.fn(),
@@ -65,6 +69,7 @@ function cell(over: Partial<CellData> = {}): CellData {
 beforeEach(() => {
   convertToLibraryVoice.mockReset()
   emitCellAudioAttach.mockReset().mockResolvedValue("evt-1")
+  emitCellAudioPlace.mockReset().mockResolvedValue("evt-place")
   injectOptimisticAudioAttachment.mockReset()
 })
 
@@ -251,6 +256,47 @@ describe("changeVoiceForCell", () => {
     await expect(changeVoiceForCell({ projectId: "p1", cell: cell(), voice: stock, session, author: "dev" }))
       .rejects.toThrow("Stock can read text but can't re-voice recordings — Change voice works with character, trained and ElevenLabs voices.")
     expect(convertToLibraryVoice).not.toHaveBeenCalled()
+  })
+
+  // AQU-2491 (review, Nov 9): the new voice is the take's own recording,
+  // re-voiced sample for sample, so it keeps that take's place in both
+  // timings. Without one of its own it read the line's, which on a line
+  // recorded before AQU-2491 is the recorder's pre-roll (-200 ms) or more.
+  it("the new take keeps the place of the take it was made from, in both timings", async () => {
+    convertToLibraryVoice.mockResolvedValue({ audioId: "vc-1-audio-GEN_1_1-9-q", ext: "wav", url: "frontier-audio://vc-1-audio-GEN_1_1-9-q.wav", bytes: 3 })
+    const c = cell({
+      startTime: 10, endTime: 14, metadata: { target_offset_ms: -2770 },
+      attachments: { "audio-GEN_1_1-1-abc.webm": att({ slot: "recording", label: "Take 1", targetOffsetMs: -200, recordingsOffsetMs: 150 }) },
+    } as Partial<CellData>)
+    await changeVoiceForCell({ projectId: "p1", cell: c, voice: hearth, session, author: "dev", targetLang: "fr" })
+    expect(emitCellAudioPlace).toHaveBeenCalledWith({
+      projectId: "p1", fileId: "f1", cellId: "GEN 1:1", audioId: "vc-1-audio-GEN_1_1-9-q.wav",
+      targetOffsetMs: -200, recordingsOffsetMs: 150, targetLang: "fr", author: "dev",
+    })
+    expect(injectOptimisticAudioAttachment).toHaveBeenCalledWith(
+      "f1", "GEN 1:1", expect.objectContaining({ targetOffsetMs: -200, recordingsOffsetMs: 150 }), "evt-place",
+    )
+  })
+
+  it("re-voicing an older conversion with no place of its own keeps its original take's place", async () => {
+    convertToLibraryVoice.mockResolvedValue({ audioId: "vc-2-audio-GEN_1_1-9-q", ext: "wav", url: "frontier-audio://vc-2-audio-GEN_1_1-9-q.wav", bytes: 3 })
+    const prior = "vc-ffffffff-audio-GEN_1_1-5-p.wav"
+    const c = cell({
+      startTime: 10, endTime: 14,
+      selectedAudioId: prior,
+      attachments: {
+        "rec.webm": att({ slot: "recording", targetOffsetMs: -200 }),
+        [prior]: att({ slot: "recording", voiceId: "v-old", referenceAudioId: "rec.webm" }),
+      },
+    } as Partial<CellData>)
+    await changeVoiceForCell({ projectId: "p1", cell: c, voice: hearth, session, author: "dev" })
+    expect(emitCellAudioPlace).toHaveBeenCalledWith(expect.objectContaining({ audioId: "vc-2-audio-GEN_1_1-9-q.wav", targetOffsetMs: -200, recordingsOffsetMs: null }))
+  })
+
+  it("a take with no place of its own anywhere: nothing is placed, and the new take reads the line's, as it does", async () => {
+    convertToLibraryVoice.mockResolvedValue({ audioId: "vc-3-audio-GEN_1_1-9-q", ext: "wav", url: "frontier-audio://vc-3-audio-GEN_1_1-9-q.wav", bytes: 3 })
+    await changeVoiceForCell({ projectId: "p1", cell: cell({ startTime: 10, endTime: 14 } as Partial<CellData>), voice: hearth, session, author: "dev" })
+    expect(emitCellAudioPlace).not.toHaveBeenCalled()
   })
 })
 

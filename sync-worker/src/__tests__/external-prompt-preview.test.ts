@@ -809,6 +809,23 @@ describe("external prompt preview", () => {
       expect(after.body.retrieval.corpusSize).toBeGreaterThan(0)
     })
 
+    // The cell is kept out by id, not by source text: another cell carrying
+    // the very same line is an exact match and must be shown as an example.
+    it("an identical line in another cell is used as an example", async () => {
+      await insertCell(testDb, { cellId: "cell-live", seq: 5, source: "God saw the light" })
+      await insertCell(testDb, {
+        cellId: "cell-same-line",
+        seq: 9,
+        source: "God saw the light",
+        target: "Dieu vit la lumière",
+        validated: true,
+      })
+
+      const { body } = await preview(testDb, token)
+      expect(body.parts.examples.map((e) => e.target)).toEqual(["Dieu vit la lumière"])
+      expect(body.messages[1].content).toContain("Translation: Dieu vit la lumière")
+    })
+
     it("an unvalidated translation is never used as an example", async () => {
       await insertCell(testDb, { cellId: "cell-live", seq: 5, source: "God saw the light" })
       await insertCell(testDb, {

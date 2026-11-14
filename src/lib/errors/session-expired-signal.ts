@@ -12,7 +12,7 @@
  *    can read it at mount via `isSessionExpired()`. That matters at boot: the
  *    401 often lands before the banner mounts (or while the app is mid-redirect
  *    from `/` to `/orgs/all`), and a transient event would be missed entirely.
- *  - The flag stays set until the user dismisses the banner or re-authenticates
+ *  - The flag stays set until the user re-authenticates
  *    — `clearSessionExpired()` is the only way down. Navigation does not clear
  *    it; `finalizeSession()` calls it on every successful auth.
  *  - Fetch helpers should not call `notifySessionExpired(jwt)` directly: use
@@ -26,7 +26,7 @@ const SESSION_EXPIRED_EVENT = "session-expired"
 /** Module-level bus — stable across re-renders. */
 const bus = new EventTarget()
 
-/** JWT whose rejection is latched until dismiss / re-auth. */
+/** JWT whose rejection is latched until re-auth. */
 let expiredJwt: string | null = null
 
 /** Call from any fetch helper on 401 / UserError(session-expired). */
@@ -36,8 +36,7 @@ export function notifySessionExpired(jwt: string): void {
 }
 
 /**
- * Reset the flag — the user dismissed the banner, or re-authenticated
- * successfully (see `finalizeSession` in lib/frontier/auth.ts).
+ * Reset the flag after successful authentication (see `finalizeSession` in lib/frontier/auth.ts).
  */
 export function clearSessionExpired(): void {
   if (expiredJwt === null) return

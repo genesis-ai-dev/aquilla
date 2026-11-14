@@ -24,6 +24,22 @@ export interface SandboxRunResult {
   results: Array<Record<string, unknown>>
 }
 
+/**
+ * Largest file a `/files` read will carry out of a container. The same 25 MB
+ * that caps an upload (app.ts): a read is buffered whole in this isolate, and
+ * the file is whatever the code in the container chose to write, so without a
+ * ceiling one run can spend the memory every other tenant's request shares.
+ */
+export const FILE_READ_MAX_BYTES = 25 * 1024 * 1024
+
+/** A sandbox file is larger than `FILE_READ_MAX_BYTES`; the read was abandoned. */
+export class SandboxFileTooLargeError extends Error {
+  constructor(readonly maxBytes: number) {
+    super(`file exceeds ${maxBytes} bytes`)
+    this.name = "SandboxFileTooLargeError"
+  }
+}
+
 export interface SandboxWriteResult {
   success: boolean
   path: string

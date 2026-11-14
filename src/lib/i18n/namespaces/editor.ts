@@ -217,6 +217,10 @@ export const editor = defineNamespace({
     "editor.file.noneSelectedBody": "Pick a file from the sidebar to start translating.",
     "editor.file.noFilesTitle": "No files yet",
     "editor.file.noFilesBody": "Import a file to get started.",
+    // AQU-2475: the same empty state for someone below the import floor. The
+    // body above is an instruction they cannot follow, so it is replaced by the
+    // role that can, and no Import button is offered.
+    "editor.file.noFilesImportFloor": "{role} can import files.",
     "editor.file.importFile": "Import a file",
     "editor.file.emptyNamedTitle": "{fileName} is empty",
     "editor.file.emptyTitle": "This file has no cells yet",
@@ -1007,6 +1011,12 @@ export const editor = defineNamespace({
       "A line with no times of its own and no recording yet still takes room on the timeline, " +
       "at a stand-in length worked out from its text at the language's reading pace. It has no " +
       "real time, so it shows none. Recording the line replaces the stand-in with the recording's length.",
+    // AQU-2432 (Sam, Nov 9): the marker for an unrecorded line whose room was
+    // closed by dragging the next take earlier against it.
+    "editor.timeline.lineMarkerNoRoom":
+      "{line} isn't recorded yet. It has no room here. Drag the next take later to give it room.",
+    "editor.timeline.lineMarkerNarrowRoom":
+      "{line} isn't recorded yet. It has only {seconds} s of room here. Drag the next take later to give it room.",
     "editor.timeline.timingMenuHeading": "What decides how long each line is",
     "editor.timeline.timingMenuMuteNote": "Muting a track only changes what you hear. It never moves anything.",
     "editor.timeline.timingSourceUnavailable": "This file has no times and no source recording to follow.",
@@ -1074,6 +1084,7 @@ export const editor = defineNamespace({
     "editor.history.stepCutMany": "Cut takes",
     "editor.history.stepTrim": "Trim take",
     "editor.history.stepMove": "Move take",
+    "editor.history.stepLineRoom": "Change a line's room",
     "editor.history.undone": "Undid: {step}",
     "editor.history.redone": "Redid: {step}",
     "editor.history.skippedChanged": "Skipped “{step}”: it was changed since",
@@ -1168,6 +1179,7 @@ export const editor = defineNamespace({
     "editor.history.reasonLinesChanged": "These lines have changed since you made them, so Undo left them as they are.",
     "editor.history.reasonOtherDevice": "It changed a setting kept only on the device it was made on, so it can only be undone there.",
     "editor.history.blockedLanguage": "Open {language} to undo “{step}”",
+    "editor.history.blockedOffline": "“{step}” can't be undone or redone while offline. It's kept for when you're back online.",
     "editor.history.movedUndo": "“{step}” was already undone on another of your devices, so nothing changed here",
     "editor.history.movedRedo": "“{step}” was already redone on another of your devices, so nothing changed here",
     "editor.history.skippedApproved": "Skipped “{step}”: {name} approved it since",
@@ -1183,6 +1195,11 @@ export const editor = defineNamespace({
     "editor.history.stepStationVersion": "Save a new version",
     "editor.history.stepStationSaveOver": "Save over a take",
     "editor.history.stepTakeLevel": "Change volume or fades",
+    "editor.history.stepTimingFollowsRecordings": "Switch to Follows recordings",
+    "editor.history.stepTimingFollowsSource": "Switch to Follows source",
+    "editor.history.stepRevertNoise": "Go back to the original recording",
+    "editor.history.stepVoiceTogether": "Voice lines together",
+    "editor.history.stepJoinTake": "Join into one recording",
     "editor.history.stepLinesFromRecording": "Make lines from a recording",
     "editor.history.stepImportRecording": "Import recording",
     "editor.history.stepLinkFilm": "Link film",
@@ -1603,6 +1620,13 @@ export const editor = defineNamespace({
       one: "New folder from {count} track",
       other: "New folder from {count} tracks",
     }),
+    "editor.timeline.trackMoveTo": "Move to",
+    "editor.timeline.trackMoveToCount": plural({
+      one: "Move {count} track to",
+      other: "Move {count} tracks to",
+    }),
+    "editor.timeline.trackMoveToNewFolder": "New folder",
+    "editor.timeline.trackMoveToNoFolder": "No folder",
     "editor.timeline.trackLeaveFolder": "Take out of folder",
     "editor.timeline.trackLeaveFolderCount": plural({
       one: "Take {count} track out of its folder",
@@ -2608,11 +2632,12 @@ export const editor = defineNamespace({
     // — Expansion tabs: issues and metadata ————————————————————————
     "editor.expansion.issues": "Issues",
     "editor.expansion.metadata": "Metadata",
-    // AQU-2408: the cell's own label, typed in the expansion panel. Metadata,
-    // never a voice or a character (docs/decisions/0007).
-    "editor.cellLabel.title": "Label",
+    // AQU-2408: the cell's own label, typed in the cell's corner label slot.
+    // Metadata, never a voice or a character (docs/decisions/0007).
     "editor.cellLabel.placeholder": "Add a label",
     "editor.cellLabel.inputAria": "Cell label",
+    "editor.cellLabel.add": "Add label",
+    "editor.cellLabel.edit": "Edit label",
     "editor.metadata.showOnCells": "Show {key} on cells",
     "editor.issues.none": "No translation rule issues on this cell.",
     "editor.issues.waived": "Waived",
@@ -3101,6 +3126,31 @@ export const editor = defineNamespace({
           "tracks. Replaces an older 'move to folder' submenu: a folder is made " +
           "FROM tracks, and moving into an existing one is a drag.",
         placeholders: { count: "How many tracks go into the new folder; it also selects the plural form." },
+      },
+      "editor.timeline.trackMoveTo": {
+        description:
+          "Submenu label on a timeline track's menu. Hovering it opens a list " +
+          "of the file's folders, each shown by its name; picking one moves " +
+          "the track into that folder. Read as 'Move to → <folder name>'.",
+      },
+      "editor.timeline.trackMoveToCount": {
+        description:
+          "The same submenu label when several timeline tracks are selected. " +
+          "It opens the list of folder names; picking one moves all of them " +
+          "into that folder.",
+        placeholders: { count: "How many tracks will move; it also selects the plural form." },
+      },
+      "editor.timeline.trackMoveToNewFolder": {
+        description:
+          "First choice in the 'Move to' submenu of a timeline track: makes a " +
+          "new folder and moves the selected tracks into it. Read as " +
+          "'Move to → New folder'.",
+      },
+      "editor.timeline.trackMoveToNoFolder": {
+        description:
+          "Choice in the 'Move to' submenu of a timeline track: takes the " +
+          "selected tracks out of their folder, back to the top level of the " +
+          "track list. Read as 'Move to → No folder'.",
       },
       "editor.timeline.trackLeaveFolderCount": {
         description:
@@ -4629,6 +4679,19 @@ export const editor = defineNamespace({
         description:
           "Body under editor.file.noFilesTitle. 'Import' means bringing an existing " +
           "document (USFM, docx, subtitles, audio…) into the project.",
+      },
+      "editor.file.noFilesImportFloor": {
+        description:
+          "Replaces editor.file.noFilesBody for a member whose role is below the " +
+          "project's import floor, where the empty state offers no Import button. " +
+          "It names the role that may import instead, so the state is never a dead " +
+          "end. One short sentence; {role} is already a plural role noun, so the " +
+          "sentence takes a plural verb.",
+        placeholders: {
+          role: "Plural name of the lowest role that may import a source file in " +
+            "this project, e.g. \"Project Leads\" or \"Maintainers\" — read from " +
+            "the organization's configured import floor, so it varies per project.",
+        },
       },
       "editor.file.importFile": {
         description:
@@ -7769,6 +7832,23 @@ export const editor = defineNamespace({
           "Tooltip of that (i): why a line with no times and no recording still takes room " +
           "on the timeline (a stand-in length from its text) and why it shows no time.",
       },
+      "editor.timeline.lineMarkerNoRoom": {
+        description:
+          "Tooltip and screen-reader name of a small dashed marker on the timeline, between two " +
+          "recordings. It marks a line nobody has recorded yet whose room on the timeline was " +
+          "closed to nothing, by dragging the next recording earlier against it. Says which line, " +
+          "that it has no recording, and how to give it room again. Plain sentences.",
+        placeholders: { line: "The line's name: its reference ('Genesis 1:3'), its label, or 'Line 12'." },
+      },
+      "editor.timeline.lineMarkerNarrowRoom": {
+        description:
+          "The same marker's tooltip when the line still has a little room, too narrow to draw " +
+          "as a box. Says how many seconds of room it has.",
+        placeholders: {
+          line: "The line's name: its reference ('Genesis 1:3'), its label, or 'Line 12'.",
+          seconds: "The room in seconds, to one decimal, e.g. '0.2'. 's' after it is the unit, seconds.",
+        },
+      },
       "editor.timeline.timingMenuHeading": {
         description:
           "First line of the Timing menu (choices 'Follows source' / 'Follows recordings'), " +
@@ -7953,6 +8033,13 @@ export const editor = defineNamespace({
           "Name of one step in the edit history: a take was dragged to a new time. Short verb phrase.",
         maxLength: 30,
       },
+      "editor.history.stepLineRoom": {
+        description:
+          "Name of one step in the edit history: a take was dragged against a line nobody has " +
+          "recorded yet, which made that line's room on the timeline smaller or larger. Short " +
+          "verb phrase.",
+        maxLength: 30,
+      },
       "editor.history.undone": {
         description: "Toast after Undo succeeded.",
         placeholders: { step: "The step's name, e.g. 'Cut take'." },
@@ -8032,6 +8119,7 @@ export const editor = defineNamespace({
       "editor.history.reasonNotAllowed": { description: "Why an undo did not happen: the user may no longer make this change (for example, they lost access to that language)." },
       "editor.history.reasonLinesChanged": { description: "Why undoing 'make lines from a recording' did not happen: someone recorded, translated or edited one of those lines after they were made, so all of them were kept." },
       "editor.history.reasonOtherDevice": { description: "Why an undo in the History panel did not happen: the step changed a project setting that is kept only on one device (such as Audio loading), and this is a different device." },
+      "editor.history.blockedOffline": { description: "Toast when Undo or Redo is waiting because the step can only be written with a connection (for example switching a file's timing) and the device is offline. The step is kept; it can be undone or redone once back online.", placeholders: { step: "The step's name." } },
       "editor.history.blockedLanguage": { description: "Toast when Undo is waiting because the step was made in another language that could not be opened from here. The step is kept; it can be undone after opening that language.", placeholders: { language: "The language's name as the language switcher shows it.", step: "The step's name." } },
       "editor.history.movedUndo": { description: "Toast when Undo found that the same person had already undone this step on another computer or browser. Nothing was changed.", placeholders: { step: "The step's name." } },
       "editor.history.movedRedo": { description: "Toast when Redo found that the same person had already redone this step on another computer or browser. Nothing was changed.", placeholders: { step: "The step's name." } },
@@ -8045,6 +8133,11 @@ export const editor = defineNamespace({
       "editor.history.stepGenerateVoice": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a voice (text-to-speech take) was generated for a line. A short verb phrase.", maxLength: 40 },
       "editor.history.stepChangeVoice": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take was converted to another (cloned) voice, which adds the converted take. A short verb phrase.", maxLength: 40 },
       "editor.history.stepTakeLevel": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take's volume or its fade in/out was changed in the Station. A short verb phrase.", maxLength: 40 },
+      "editor.history.stepTimingFollowsRecordings": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): the file's timing was switched to 'Follows recordings' (each line lasts as long as its recording). Use the same words as the timing control's 'Follows recordings'. A short verb phrase.", maxLength: 40 },
+      "editor.history.stepTimingFollowsSource": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): the file's timing was switched to 'Follows source' (lines keep the times of the original). Use the same words as the timing control's 'Follows source'. A short verb phrase.", maxLength: 40 },
+      "editor.history.stepRevertNoise": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): after background noise was removed from a take, the original (uncleaned) recording was chosen to play again. A short verb phrase.", maxLength: 40 },
+      "editor.history.stepVoiceTogether": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): several selected lines were given one generated voice, read in one go ('Voice together'). A short verb phrase.", maxLength: 40 },
+      "editor.history.stepJoinTake": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take that was cut into pieces was joined into one new recording, which plays instead of the pieces. A short verb phrase.", maxLength: 40 },
       "editor.history.stepStationVersion": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an edited recording was saved from the Station as a new version, which adds a take that plays instead of the old one. A short verb phrase.", maxLength: 40 },
       "editor.history.stepStationSaveOver": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an edited recording was saved from the Station over the take it was made from, which replaces that take. A short verb phrase.", maxLength: 40 },
       "editor.history.stepRemoveNoise": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): background noise was removed from a take, which adds a cleaned take. A short verb phrase.", maxLength: 40 },
@@ -10262,21 +10355,32 @@ export const editor = defineNamespace({
           "noun; the tab is disabled when there are none.",
         maxLength: 16,
       },
-      "editor.cellLabel.title": {
-        description:
-          "Label of the row at the top of a cell's expansion panel that holds the cell's " +
-          "own label — a short note typed on the line (a section name, a reviewer's " +
-          "mark). A noun. It is not a voice or a character.",
-        maxLength: 14,
-      },
       "editor.cellLabel.placeholder": {
         description:
           "Placeholder inside the empty cell-label text field, inviting the person to " +
-          "type one. A short imperative.",
+          "type one. The field appears in the top corner of a cell, where the label is " +
+          "shown. A short imperative.",
         maxLength: 24,
       },
       "editor.cellLabel.inputAria": {
-        description: "Screen-reader name of the cell-label text field in a cell's expansion panel.",
+        description:
+          "Screen-reader name of the text field a cell's own label is typed in — a " +
+          "short note on the line (a section name, a reviewer's mark). It is not a " +
+          "voice or a character.",
+      },
+      "editor.cellLabel.add": {
+        description:
+          "Tooltip and accessible name of the tag-icon button in a cell's More actions " +
+          "menu, on a cell with no label yet. Clicking it opens a small text field in " +
+          "the cell's top corner, where the label will show. A short imperative.",
+        maxLength: 24,
+      },
+      "editor.cellLabel.edit": {
+        description:
+          "Tooltip and accessible name of the same tag-icon button on a cell that " +
+          "already has a label; also the start of the accessible name of the label " +
+          "itself, which can be clicked to change it. A short imperative.",
+        maxLength: 24,
       },
       "editor.expansion.metadata": {
         description:

@@ -39,11 +39,12 @@ export function tailCutWav(bytes: Uint8Array, endSec: number): Uint8Array | null
 }
 
 /** Where a PCM WAV's audio sits: its header bytes, and its frames' size and rate. */
-function wavLayout(bytes: Uint8Array): { dataStart: number; dataBytes: number; sizeAt: number; sampleRate: number; blockAlign: number } | null {
+function wavLayout(bytes: Uint8Array): { dataStart: number; dataBytes: number; sizeAt: number; sampleRate: number; blockAlign: number; pcm16: boolean } | null {
   if (bytes.length < 44 || tag(bytes, 0) !== "RIFF" || tag(bytes, 8) !== "WAVE") return null
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   let sampleRate = 0
   let blockAlign = 0
+  let pcm16 = false
   for (let off = 12; off + 8 <= bytes.length; ) {
     const id = tag(bytes, off)
     const size = dv.getUint32(off + 4, true)
@@ -51,12 +52,15 @@ function wavLayout(bytes: Uint8Array): { dataStart: number; dataBytes: number; s
       if (off + 24 > bytes.length) return null
       sampleRate = dv.getUint32(off + 12, true)
       blockAlign = dv.getUint16(off + 20, true)
+      // AQU-2432: 16-bit integer PCM (plain, or extensible) can be mixed by bytes.
+      const format = dv.getUint16(off + 8, true)
+      pcm16 = (format === 1 || format === 0xfffe) && dv.getUint16(off + 22, true) === 16
     } else if (id === "data") {
       if (!sampleRate || !blockAlign) return null
       const dataStart = off + 8
       const declared = size === 0 || size === 0xffffffff ? bytes.length - dataStart : size
       const avail = Math.min(declared, bytes.length - dataStart)
-      return { dataStart, dataBytes: avail - (avail % blockAlign), sizeAt: off + 4, sampleRate, blockAlign }
+      return { dataStart, dataBytes: avail - (avail % blockAlign), sizeAt: off + 4, sampleRate, blockAlign, pcm16 }
     }
     off += 8 + size + (size & 1)
   }
@@ -70,6 +74,29 @@ export interface JoinSpan {
   /** AQU-1758: silence before this span, in seconds — a gap someone dragged
    *  open between two pieces of a take. Absent: the spans touch. */
   gapBeforeSec?: number
+  /** AQU-2432 (Sam, Nov 6): this span starts this long before the end of the
+   *  span before it — a piece dragged over the end of the piece in front —
+   *  and the two are MIXED there, both at full volume. */
+  overlapBeforeSec?: number
+}
+
+/** Where each span starts in the joined clip, in frames (`rate`), and how
+ *  long the clip is: each one `gapBeforeSec` after the end of the one before
+ *  it, or `overlapBeforeSec` before it (AQU-2432); the clip lasts to whichever
+ *  ends last. */
+function spanPlaces(spans: readonly JoinSpan[], rate: number, framesOf: (i: number) => number): { at: number[]; total: number } {
+  const at: number[] = []
+  let prevEnd = 0
+  let total = 0
+  spans.forEach((s, i) => {
+    const gap = s.gapBeforeSec != null && s.gapBeforeSec > 0 ? Math.round(s.gapBeforeSec * rate) : 0
+    const overlap = s.overlapBeforeSec != null && s.overlapBeforeSec > 0 ? Math.round(s.overlapBeforeSec * rate) : 0
+    const start = Math.max(0, prevEnd + gap - overlap)
+    at.push(start)
+    prevEnd = start + framesOf(i)
+    total = Math.max(total, prevEnd)
+  })
+  return { at, total }
 }
 
 /**
@@ -81,6 +108,9 @@ export interface JoinSpan {
 export function joinWavSpans(bytes: Uint8Array, spans: readonly JoinSpan[]): Uint8Array | null {
   const w = wavLayout(bytes)
   if (!w || spans.length === 0) return null
+  // AQU-2432: spans that overlap are mixed — by bytes for 16-bit PCM, else
+  // by the decode path (null here).
+  if (spans.some((s) => (s.overlapBeforeSec ?? 0) > 0)) return w.pcm16 ? mixWavSpans16(bytes, w, spans) : null
   const ranges: [number, number, number][] = []
   let total = 0
   for (const s of spans) {
@@ -104,6 +134,41 @@ export function joinWavSpans(bytes: Uint8Array, spans: readonly JoinSpan[]): Uin
   const odv = new DataView(out.buffer)
   odv.setUint32(4, out.length - 8, true)
   odv.setUint32(w.sizeAt, total, true)
+  return out
+}
+
+/**
+ * AQU-2432: `joinWavSpans` for spans that overlap, on 16-bit PCM: every span
+ * summed into place, sample by sample, held at full scale — both pieces at
+ * full volume where they overlap, the rest as it was.
+ */
+function mixWavSpans16(
+  bytes: Uint8Array,
+  w: { dataStart: number; dataBytes: number; sizeAt: number; sampleRate: number; blockAlign: number },
+  spans: readonly JoinSpan[],
+): Uint8Array | null {
+  const ranges: [number, number][] = []
+  for (const s of spans) {
+    const a = Math.min(w.dataBytes, Math.max(0, Math.round(s.start * w.sampleRate)) * w.blockAlign)
+    const b = Math.min(w.dataBytes, Math.max(0, Math.round(s.end * w.sampleRate)) * w.blockAlign)
+    if (b <= a) return null
+    ranges.push([a, b])
+  }
+  const { at, total } = spanPlaces(spans, w.sampleRate, (i) => (ranges[i][1] - ranges[i][0]) / w.blockAlign)
+  const out = new Uint8Array(w.dataStart + total * w.blockAlign)
+  out.set(bytes.subarray(0, w.dataStart))
+  const src = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const dst = new DataView(out.buffer)
+  ranges.forEach(([a, b], i) => {
+    const to = w.dataStart + at[i] * w.blockAlign
+    for (let k = 0; k + 1 < b - a; k += 2) {
+      const sum = dst.getInt16(to + k, true) + src.getInt16(w.dataStart + a + k, true)
+      dst.setInt16(to + k, Math.max(-32768, Math.min(32767, sum)), true)
+    }
+  })
+  const odv = new DataView(out.buffer)
+  odv.setUint32(4, out.length - 8, true)
+  odv.setUint32(w.sizeAt, total * w.blockAlign, true)
   return out
 }
 
@@ -147,16 +212,18 @@ export async function joinedClip(bytes: Uint8Array, ext: string, spans: readonly
   }
   const d = await decodeMono(bytes)
   if (!d) return null
-  const parts = spans.map((s) => ({
-    gap: s.gapBeforeSec != null && s.gapBeforeSec > 0 ? Math.round(s.gapBeforeSec * d.sampleRate) : 0,
-    pcm: d.pcm.subarray(
+  const parts = spans.map((s) =>
+    d.pcm.subarray(
       Math.max(0, Math.round(s.start * d.sampleRate)),
       Math.min(d.pcm.length, Math.round(s.end * d.sampleRate)),
     ),
-  }))
-  const out = new Float32Array(parts.reduce((n, p) => n + p.gap + p.pcm.length, 0))
-  let at = 0
-  for (const p of parts) { at += p.gap; out.set(p.pcm, at); at += p.pcm.length }
+  )
+  // AQU-2432: overlapping spans are summed where they overlap.
+  const { at, total } = spanPlaces(spans, d.sampleRate, (i) => parts[i].length)
+  const out = new Float32Array(total)
+  parts.forEach((pcm, i) => {
+    for (let k = 0; k < pcm.length; k++) out[at[i] + k] += pcm[k]
+  })
   return out.length > 0 ? encodeWavPcm16(out, d.sampleRate) : null
 }
 

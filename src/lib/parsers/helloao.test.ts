@@ -52,6 +52,21 @@ describe("fetchHelloaoChapter", () => {
     expect(err).not.toBeInstanceOf(HelloaoChapterNotFoundError)
     expect((err as Error).message).toContain("503")
   })
+
+  // A translation id can be a project's stored team default, so it reaches the
+  // URL as one encoded segment and can never name a different resource.
+  it("encodes the translation id and book as single path segments", async () => {
+    const fetchMock = vi.fn(async (_url: string) => new Response("", { status: 404 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await fetchHelloaoChapter("../../evil?x=", "GEN/..", 1).catch(() => {})
+
+    const url = fetchMock.mock.calls[0][0]
+    expect(url.endsWith("/api/..%2F..%2Fevil%3Fx%3D/GEN%2F../1.json")).toBe(true)
+
+    await fetchHelloaoChapter("..", "GEN", 1).catch(() => {})
+    expect(fetchMock.mock.calls[1][0].endsWith("/api/_/GEN/1.json")).toBe(true)
+  })
 })
 
 describe("flattenHelloaoContent", () => {

@@ -18,6 +18,7 @@
 import { ROLE } from "../types"
 import type { Env } from "../types"
 import { planLaneGrants } from "../../../src/lib/lanes/grant-backfill"
+import { NO_LANE_SCOPE, grantsNoLaneScopes } from "../../../src/lib/lanes/no-lane-access"
 import { laneScopeIdsForStorage, resolveLaneScopeValue } from "../../../src/lib/lanes/scope-ids"
 import {
   loadCurrentTargetLanes,
@@ -119,16 +120,25 @@ export async function applyInviteLaneScopes(
   // "unscoped" and hand them every lane.
   const identities = await loadTargetLaneIdentities(env.AQUILLA_PG, projectId)
   const named = lanes.length > 0
-  const leadSnapshot = finalRole >= ROLE.PROJECT_LEAD && finalRole < ROLE.MAINTAINER
+  // AQU-2358: the link said "no lanes". Stored as the reserved value, at every
+  // role below maintainer — a project lead's snapshot does not override an
+  // explicit choice — so no grant is planned and no lane created later is
+  // picked up either.
+  const noLanes = grantsNoLaneScopes(lanes)
+  const leadSnapshot = !noLanes && finalRole >= ROLE.PROJECT_LEAD && finalRole < ROLE.MAINTAINER
   let laneIds: string[] = []
-  if (named) {
+  if (noLanes) {
+    laneIds = [NO_LANE_SCOPE]
+  } else if (named) {
     const resolved = laneScopeIdsForStorage(lanes, identities).laneIds
     laneIds = resolved.length === 0 ? [...lanes] : resolved
   } else if (leadSnapshot) {
     laneIds = (await loadCurrentTargetLanes(env.AQUILLA_PG, projectId)).map((lane) => lane.id)
   }
   // Below project lead, an empty list stays unscoped: grants on every current
-  // lane, and a lane created later. A project lead stores the snapshot.
+  // lane, and a lane created later. An invite minted before AQU-2358 stores
+  // NULL and is exactly that case, so it keeps the behavior it was created
+  // with. A project lead stores the snapshot.
   const writeScopes = named || leadSnapshot
 
   if (writeScopes) {

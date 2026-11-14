@@ -22,6 +22,7 @@ import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import type { SyncTokenCallbacks } from "@/lib/sync/sync-token"
+import { minHeadTrimSec, type ChipAtt } from "@/lib/timeline/lane-timing"
 
 /**
  * Returns true iff the zero-file self-heal should fire a `/link/sync`
@@ -643,6 +644,24 @@ export function resolveTakeLine(args: {
   // every timeline trim a silent no-op before the fortify pass.
   const cell = mergeCellsWithAudio([own], audio)[0] ?? own
   return { fileId, cell }
+}
+
+/**
+ * AQU-2495 (merge review, Nov 13, note 2): the trim a take is given, its start
+ * held so its sound never starts before 0:00 (`minHeadTrimSec`, read from
+ * where its clip sits now) — the floor every way of un-trimming a take's start
+ * keeps. The workspace's trim write (`applyTakeTrim`) stores only this, so an
+ * Undo or Redo of a trim keeps it too: a colleague may have dragged the take
+ * since, its clip before 0:00, and the old window would sound before the file.
+ */
+export function heldTakeTrim(
+  cell: CellData,
+  att: ChipAtt,
+  trims: { trimStartMs?: number; trimEndMs?: number },
+): { trimStartMs?: number; trimEndMs?: number } {
+  const floorMs = Math.round(minHeadTrimSec(cell, att) * 1000)
+  const start = trims.trimStartMs
+  return { trimStartMs: floorMs > 0 && (start ?? 0) < floorMs ? floorMs : start, trimEndMs: trims.trimEndMs }
 }
 
 /**

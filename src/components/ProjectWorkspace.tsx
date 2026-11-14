@@ -194,6 +194,7 @@ import {
   canRestructureTracks,
   timelineTakeDrags,
   resolveTakeLine,
+  heldTakeTrim,
   historyFileName,
   buildRouteScopedTokenFetcher,
   archivedProjectNotice,
@@ -4203,6 +4204,9 @@ export function ProjectWorkspace() {
       const att = cell?.attachments?.[audioId]
       if (!owner || !cell || !att) return
       const takeFileId = owner.fileId
+      // AQU-2495 (merge review, Nov 13, note 2): its sound never before 0:00,
+      // an Undo or Redo of a trim included — the floor every trim keeps.
+      const held = heldTakeTrim(cell, att, trims)
       // AQU-646: read the clip's slot; infer only when it is absent. Drives the
       // optimistic overlay's "newest shadow per slot" bookkeeping, which puts
       // the shadow in the wrong slot if this guesses.
@@ -4218,8 +4222,8 @@ export function ProjectWorkspace() {
         fileId: takeFileId,
         cellId,
         audioId,
-        trimStartMs: trims.trimStartMs ?? null,
-        trimEndMs: trims.trimEndMs ?? null,
+        trimStartMs: held.trimStartMs ?? null,
+        trimEndMs: held.trimEndMs ?? null,
         ...(activeLane ? { targetLang: activeLane } : {}),
         author: currentUsername,
       })
@@ -4229,8 +4233,8 @@ export function ProjectWorkspace() {
       // its trim saved. Votes ride along too (AQU-490: trim keeps them).
       injectOptimisticAudioTrim(takeFileId, cellId, {
         ...attachmentOutFrom(audioId, att, slot),
-        trimStartMs: trims.trimStartMs ?? null,
-        trimEndMs: trims.trimEndMs ?? null,
+        trimStartMs: held.trimStartMs ?? null,
+        trimEndMs: held.trimEndMs ?? null,
       }, trimP)
       await trimP
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })

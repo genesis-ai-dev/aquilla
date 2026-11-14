@@ -1103,6 +1103,11 @@ export const importExport = defineNamespace({
         "TN file parsed but no valid note rows were found — check that the first three columns are " +
         "book, chapter, and verse. ({count} rows skipped due to missing canonical reference)",
     }),
+    "importExport.errors.tnFileNameHoldsBooks":
+      "The file name holds more than one book ({books}), so the notes can't be filed under one. " +
+      "Rename the file so it names one book, such as {example}.",
+    "importExport.errors.tnFileNameNoBook":
+      "The file name doesn't give the book the way unfoldingWord names its files. Rename the file to name one book, such as tn_GEN.tsv.",
     "importExport.errors.biblicaExpectsIdml": "Biblica study notes import expects an InDesign .idml package.",
     "importExport.errors.biblicaNoStudyNotes":
       "{fileName} parsed successfully but contained no study notes. Biblica notes live in `intro:*` " +
@@ -1425,6 +1430,14 @@ export const importExport = defineNamespace({
     "importExport.reimport.updated": plural({
       one: "{count} cell updated",
       other: "{count} cells updated",
+    }),
+    "importExport.reimport.missing": plural({
+      one: "{count} cell no longer in the file",
+      other: "{count} cells no longer in the file",
+    }),
+    "importExport.reimport.updateHidesMissing": plural({
+      one: "Update this file hides the {count} cell that is no longer in the file, along with its translation.",
+      other: "Update this file hides the {count} cells that are no longer in the file, along with their translations.",
     }),
     "importExport.reimport.analysis": "Analysis",
     "importExport.reimport.noChanges": "Nothing in this file has changed.",
@@ -2889,6 +2902,18 @@ export const importExport = defineNamespace({
         description: "Thrown when a Translation Notes TSV parsed to zero valid rows, and some rows were skipped for a known reason (missing reference).",
         placeholders: { count: "Number of rows skipped for missing a canonical reference." },
       },
+      "importExport.errors.tnFileNameHoldsBooks": {
+        description:
+          "Thrown when a Translation Notes file gives its rows only chapter and verse (as unfoldingWord's files do) and its file name holds more than one book code, so the book can't be read from the name (for example tn_GEN_rev.tsv). Shown instead of the 'no valid note rows' message.",
+        placeholders: {
+          books: "The book codes found in the file name, comma-separated (e.g. 'GEN, REV') — not translated.",
+          example: "A file name naming one book the person could rename to (e.g. 'tn_GEN.tsv') — not translated.",
+        },
+      },
+      "importExport.errors.tnFileNameNoBook": {
+        description:
+          "Thrown when a Translation Notes file gives its rows only chapter and verse (as unfoldingWord's files do) and its file name doesn't give one book where unfoldingWord puts it: right after 'tn' (tn_GEN.tsv) or as 'NN-BOOK' at the start (01-GEN.tsv). The name may hold no book at all, or one in another place (GEN_tn.tsv), so the sentence says how it falls short, not that it has no book. Shown instead of the 'no valid note rows' message. 'tn_GEN.tsv' is an example file name: keep it as it is.",
+      },
       "importExport.errors.biblicaNoStudyNotes": {
         description: "Thrown when a Biblica IDML package parses successfully but contains no study-note paragraphs.",
         placeholders: { fileName: "Name of the file — not translated." },
@@ -3981,6 +4006,20 @@ export const importExport = defineNamespace({
           "Heading inside the re-import Analysis window for cells whose source text changed. The list of those cells follows it.",
         placeholders: {
           count: "Number of cells whose source text changed; also selects the plural form.",
+        },
+      },
+      "importExport.reimport.missing": {
+        description:
+          "Heading inside the re-import Analysis window for cells that are in the file now and are not in the uploaded document. The list of those cells follows it. Shown only when there is at least one.",
+        placeholders: {
+          count: "Number of cells the uploaded document no longer has; also selects the plural form.",
+        },
+      },
+      "importExport.reimport.updateHidesMissing": {
+        description:
+          "One line under the three re-import buttons, shown only when the uploaded document no longer has some cells. Says what the primary button does with them; the two copy buttons do not hide anything. 'Update this file' must match the importExport.reimport.update button label.",
+        placeholders: {
+          count: "Number of cells the uploaded document no longer has; also selects the plural form.",
         },
       },
       "importExport.reimport.analysis": {

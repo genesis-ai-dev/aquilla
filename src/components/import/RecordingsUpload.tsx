@@ -34,6 +34,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { BookNameIndex, englishBookName } from "@/lib/audio/bulk-upload/book-names"
 import {
   canChooseLine,
+  lineLabel,
   lonePart,
   matchRecordings,
   needsLength,
@@ -110,7 +111,13 @@ export interface RecordingsPickerProps {
 export function RecordingsPicker({ fileName, languageLabel, onFiles }: RecordingsPickerProps) {
   const t = useT()
   const [dragOver, setDragOver] = useState(false)
-  const take = (list: ChosenFile[]) => { if (list.length > 0) onFiles(list) }
+  // AQU-2487 (import sweep, Nov 2): an empty folder, or a drop the browser
+  // can't read, used to do nothing and say nothing. It now says so.
+  const [nothingFound, setNothingFound] = useState(false)
+  const take = (list: ChosenFile[]) => {
+    setNothingFound(list.length === 0)
+    if (list.length > 0) onFiles(list)
+  }
   return (
     <div className="space-y-3 py-1" data-testid="recordings-picker">
       <p className="text-sm text-muted-foreground">
@@ -127,7 +134,7 @@ export function RecordingsPicker({ fileName, languageLabel, onFiles }: Recording
         onDrop={(e) => {
           e.preventDefault()
           setDragOver(false)
-          void chosenFromDrop(e.dataTransfer).then(take)
+          void chosenFromDrop(e.dataTransfer).then(take, () => take([]))
         }}
       >
         <p className="mb-2 text-sm text-muted-foreground">{t("recordingsUpload.pick.dragDrop")}</p>
@@ -158,6 +165,11 @@ export function RecordingsPicker({ fileName, languageLabel, onFiles }: Recording
         </div>
         <p className="mt-3 text-xs text-muted-foreground">{t("recordingsUpload.pick.formats")}</p>
       </div>
+      {nothingFound && (
+        <p role="alert" className="text-sm text-destructive" data-testid="recordings-nothing-found">
+          {t("recordingsUpload.pick.nothingFound")}
+        </p>
+      )}
       <p className="text-xs text-muted-foreground">
         {languageLabel ? t("recordingsUpload.pick.language", { language: languageLabel }) : t("recordingsUpload.pick.languageDefault")}{" "}
         {t("recordingsUpload.pick.safe")}
@@ -194,13 +206,6 @@ type Phase =
   | { kind: "ready"; read: ReadRecording[]; targets: Map<string, TargetFile>; lengths: ReadonlyMap<number, number> }
 
 const LOAD_CONCURRENCY = 3
-
-/** "Genesis 1:3", or "Welcome letter · 12" for a document's line. */
-function lineLabel(file: TargetFile, line: TargetLine, position: number): string {
-  const m = line.ref ? /^([1-3]?[A-Z]{2,3})\s+(\d+:\S+)$/.exec(line.ref) : null
-  if (m) return `${file.bookCode ? englishBookName(file.bookCode) : file.name} ${m[2]}`
-  return `${file.name} · ${position + 1}`
-}
 
 /** "3.1 minutes", "12 seconds": how long a recording runs, in the reader's language. */
 function lengthText(ms: number, locale: string): string {
@@ -911,7 +916,7 @@ function ReviewBody({
     for (const f of targets.values()) {
       let pos = 0
       for (const line of f.lines) {
-        const label = `${lineLabel(f, line, pos)}  ${line.text}`.trim()
+        const label = `${lineLabel(f, line, line.structural ? -1 : pos, { withFile: true })}  ${line.text}`.trim()
         out.push({ value: `${f.fileId}\u0000${line.cellId}`, label, fileId: f.fileId, cellId: line.cellId })
         if (!line.structural) pos++
       }

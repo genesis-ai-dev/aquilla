@@ -565,6 +565,152 @@ describe("a contributor, and a saved rule set aside (review, Oct 30)", () => {
   })
 })
 
+// AQU-2487 (review of the browser pass, Nov 12): in the sheet "chapter one"'s
+// own Upload recordings…, the row read "“chapter one” 1:2" while the line
+// picker offered "chapter one 1:2", from its own copy of the label. Both use
+// match.ts's one label, so a line reads the same in the row and the picker.
+describe("a file that isn't a Bible book, named in the row and in the line picker", () => {
+  const JONAH_1: TargetLine[] = Array.from({ length: 17 }, (_, i) => ({ cellId: `s:${i + 1}`, ref: `JON 1:${i + 1}`, text: `Jonah 1:${i + 1} text`, structural: false, hasRecording: false }))
+  /** Upload recordings… from one file's own ⋯ menu. */
+  const into = (target: TargetFile, names: string[]) => {
+    vi.mocked(loadTargetFile).mockResolvedValueOnce(target)
+    render(
+      <RecordingsReview
+        projectId="p1"
+        canAskAssistant
+        file={{ id: target.fileId, name: target.name }}
+        projectFiles={[{ id: target.fileId, name: target.name, bookCode: target.bookCode } as never]}
+        getToken={async () => "file-jwt"}
+        lane=""
+        languageLabel={null}
+        username="lee"
+        chosen={chosen(names)}
+        onStarted={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+  }
+  /** What the open line picker offers for a search: "label  line text". */
+  const offered = async (q: string) => {
+    const search = await screen.findByRole("combobox", { name: "Search lines" })
+    fireEvent.change(search, { target: { value: q } })
+    await settle(50)
+    return screen.queryAllByTestId("recordings-line-option").map((o) => o.textContent?.trim() ?? "").filter((t) => t !== "Don't upload")
+  }
+
+  // AQU-2487 (review, Nov 12): a heading was named by the file's raw name, so
+  // the sheet's heading read "chapter one", unquoted, and a book whose file is
+  // named "রূত" showed "রূত" for its heading beside "Ruth 1:2" for its verses.
+  // A heading is named by its file's label, the way a verse names its book.
+  it("names a heading by its file's label, in the picker and in its row once chosen", async () => {
+    const heading = (cellId: string, text: string): TargetLine => ({ cellId, ref: null, text, structural: true, hasRecording: false })
+    into({ fileId: "sheet", name: "chapter one", bookCode: null, lines: [heading("s:h", "Jonah, chapter one"), ...JONAH_1] }, ["Jonah 1-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
+    fireEvent.click(screen.getByTestId("recordings-change"))
+    expect(await offered("Jonah, chapter")).toEqual(["“chapter one”  Jonah, chapter one"])
+    fireEvent.click(screen.getAllByTestId("recordings-line-option").find((o) => o.textContent?.includes("Jonah, chapter"))!)
+    await waitFor(() => expect(screen.getByTestId("recordings-row")).toHaveAttribute("data-target", "“chapter one”"))
+    cleanup()
+    const verses = Array.from({ length: 22 }, (_, i): TargetLine => ({ cellId: `rut:1:${i + 1}`, ref: `RUT 1:${i + 1}`, text: `Ruth 1:${i + 1}`, structural: false, hasRecording: false }))
+    into({ fileId: "rut", name: "রূত", bookCode: "RUT", lines: [heading("rut:title", "The Book of Ruth"), ...verses] }, ["Ruth 1-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
+    fireEvent.click(screen.getByTestId("recordings-change"))
+    expect(await offered("The Book of Ruth")).toEqual(["Ruth  The Book of Ruth"])
+    expect(await offered("Ruth 1:2")).toContain("Ruth 1:2  Ruth 1:2")
+  })
+
+  // AQU-2487 (review, Nov 12): the picker lists every file's lines in one
+  // list, and a line with no verse reference read "line 3" alone, so "Welcome
+  // letter" and "Thank you letter" offered two identical "line 3  Hello
+  // there", and searching a file's name found only its heading. In the picker
+  // such a line carries its file's label in front; rows stay under their
+  // file's heading and keep "line 3".
+  it("names the file of a line with no verse reference in the picker, so files' lines can be told apart and found", async () => {
+    const doc = (fileId: string, name: string): TargetFile => ({
+      fileId, name, bookCode: null,
+      lines: [
+        { cellId: `${fileId}:h`, ref: null, text: `${name} heading`, structural: true, hasRecording: false },
+        ...Array.from({ length: 5 }, (_, i): TargetLine => ({ cellId: `${fileId}:${i + 1}`, ref: null, text: "Hello there", structural: false, hasRecording: false })),
+      ],
+    })
+    const files: Record<string, TargetFile> = { a: doc("a", "Welcome letter"), b: doc("b", "Thank you letter"), mat: matthew() }
+    vi.mocked(loadTargetFile).mockImplementation(async (_p, f) => files[(f as { fileId: string }).fileId])
+    try {
+      render(
+        <RecordingsReview
+          projectId="p1"
+          canAskAssistant
+          file={null}
+          projectFiles={[
+            { id: "a", name: "Welcome letter", bookCode: null } as never,
+            { id: "b", name: "Thank you letter", bookCode: null } as never,
+            { id: "mat", name: "Matthew", bookCode: "MAT" } as never,
+          ]}
+          getToken={async () => "file-jwt"}
+          lane=""
+          languageLabel={null}
+          username="lee"
+          chosen={chosen(["Welcome letter 3.ogg", "Thank you letter 3.ogg", "Matthew 19-1.ogg"])}
+          onStarted={() => {}}
+          onCancel={() => {}}
+        />,
+      )
+      await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(3))
+      expect(screen.getAllByTestId("recordings-row").map((r) => r.getAttribute("data-target")).sort()).toEqual(["Matthew 19:1", "line 3", "line 3"])
+      fireEvent.click(screen.getAllByTestId("recordings-change")[0])
+      expect(await offered("line 3")).toEqual(["“Welcome letter” · line 3  Hello there", "“Thank you letter” · line 3  Hello there"])
+      expect(await offered("Thank you letter")).toEqual([
+        "“Thank you letter”  Thank you letter heading",
+        ...[1, 2, 3, 4, 5].map((n) => `“Thank you letter” · line ${n}  Hello there`),
+      ])
+      expect(await offered("Matthew 19:1")).toContain("Matthew 19:1  Matthew 19:1")
+    } finally {
+      vi.mocked(loadTargetFile).mockImplementation(async () => matthew())
+    }
+    cleanup()
+    // A book's line with no reference (an introduction) carries the book's name.
+    const intro: TargetLine = { cellId: "rut:intro", ref: null, text: "Introduction paragraph", structural: false, hasRecording: false }
+    const verses = Array.from({ length: 22 }, (_, i): TargetLine => ({ cellId: `rut:1:${i + 1}`, ref: `RUT 1:${i + 1}`, text: `Ruth 1:${i + 1}`, structural: false, hasRecording: false }))
+    into({ fileId: "rut", name: "রূত", bookCode: "RUT", lines: [intro, ...verses] }, ["Ruth 1-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
+    fireEvent.click(screen.getByTestId("recordings-change"))
+    expect(await offered("Introduction")).toEqual(["Ruth · line 1  Introduction paragraph"])
+  })
+
+  it("names a line the same way in the row and in the picker, and after it is chosen", async () => {
+    const lines: TargetLine[] = Array.from({ length: 17 }, (_, i) => ({ cellId: `s:${i + 1}`, ref: `JON 1:${i + 1}`, text: `Jonah 1:${i + 1} text`, structural: false, hasRecording: false }))
+    vi.mocked(loadTargetFile).mockResolvedValueOnce({ fileId: "sheet", name: "chapter one", bookCode: null, lines })
+    render(
+      <RecordingsReview
+        projectId="p1"
+        canAskAssistant
+        file={{ id: "sheet", name: "chapter one" }}
+        projectFiles={[{ id: "sheet", name: "chapter one", bookCode: null } as never]}
+        getToken={async () => "file-jwt"}
+        lane=""
+        languageLabel={null}
+        username="lee"
+        chosen={chosen(["Jonah 1-2.ogg"])}
+        onStarted={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+    const row = await waitFor(() => screen.getByTestId("recordings-row"))
+    expect(row).toHaveAttribute("data-target", "“chapter one” 1:2")
+    fireEvent.click(screen.getByTestId("recordings-change"))
+    const search = await screen.findByRole("combobox", { name: "Search lines" })
+    fireEvent.change(search, { target: { value: "1:5" } })
+    const option = await waitFor(() => {
+      const found = screen.getAllByTestId("recordings-line-option").find((o) => o.textContent?.includes("1:5 "))
+      if (!found) throw new Error("no option for 1:5")
+      return found
+    })
+    expect(option.textContent?.split("  ")[0].trim()).toBe("“chapter one” 1:5")
+    fireEvent.click(option)
+    await waitFor(() => expect(screen.getByTestId("recordings-row")).toHaveAttribute("data-target", "“chapter one” 1:5"))
+  })
+})
+
 // ── The second review (Oct 30) ──────────────────────────────────────────────
 
 describe("a saved rule that places only part of a folder (review, Oct 30)", () => {

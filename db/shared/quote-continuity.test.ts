@@ -109,13 +109,14 @@ describe('scanQuoteContinuity', () => {
   })
 
   it('reports nothing without a quotation system, or without cells', () => {
-    expect(scanQuoteContinuity(cells('He said, “Come.'), null)).toEqual({ unclosed: [], strays: [], matched: [] })
+    expect(scanQuoteContinuity(cells('He said, “Come.'), null)).toEqual({ unclosed: [], strays: [], matched: [], pending: [] })
     expect(scanQuoteContinuity(cells('He said, “Come.'), { levels: [], continuation: 'none' })).toEqual({
       unclosed: [],
       strays: [],
       matched: [],
+      pending: [],
     })
-    expect(scanQuoteContinuity([], ENGLISH)).toEqual({ unclosed: [], strays: [], matched: [] })
+    expect(scanQuoteContinuity([], ENGLISH)).toEqual({ unclosed: [], strays: [], matched: [], pending: [] })
   })
 })
 
@@ -145,8 +146,57 @@ describe('the marks the walk accounted for', () => {
   })
 
   it('never names a mark it is reporting', () => {
-    const { matched, unclosed } = scanQuoteContinuity(cells('He said, “Come with me.'), ENGLISH)
+    const { matched, pending, unclosed } = scanQuoteContinuity(cells('He said, “Come with me.'), ENGLISH)
     expect(unclosed).toHaveLength(1)
     expect(matched).toEqual([])
+    expect(pending).toEqual([])
+  })
+})
+
+describe('the quotations still open where the translation stops', () => {
+  // WHY: the walk drops these rather than reporting them, but a per-cell check
+  // still sees the opening mark alone in its cell and — against a source that
+  // marks no quotations — reports it. Unless the walk says which marks it set
+  // aside, the caller cannot withdraw that alarm, and a half-translated file
+  // reports the very thing the gap rule promises to keep quiet (PR #1885's QA
+  // walk, item 3).
+  it('names the opening mark, whether or not the translation resumes', () => {
+    const place = { cellId: 'c0', start: 9, end: 10 }
+    for (const texts of [
+      ['He said, “Come with me,', ''],
+      ['He said, “Come with me,', '', 'A later verse.'],
+      ['He said, “Come with me,', '   '],
+    ]) {
+      const { pending, unclosed, matched } = scanQuoteContinuity(cells(...texts), ENGLISH)
+      expect(pending).toEqual([place])
+      expect(unclosed).toEqual([])
+      expect(matched).toEqual([])
+    }
+  })
+
+  it('names every level still open, and the cell each opened in', () => {
+    const { pending } = scanQuoteContinuity(cells('He said, “Listen:', 'the prophet wrote, ‘Prepare', ''), ENGLISH)
+    expect(pending).toEqual([
+      { cellId: 'c0', start: 9, end: 10 },
+      { cellId: 'c1', start: 19, end: 20 },
+    ])
+  })
+
+  it('names nothing once the gap is translated — the quotation is then reported', () => {
+    const { pending, unclosed } = scanQuoteContinuity(
+      cells('He said, “Come with me,', 'and I will make you fishers of men.'),
+      ENGLISH,
+    )
+    expect(pending).toEqual([])
+    expect(unclosed).toHaveLength(1)
+  })
+
+  it('keeps a quotation opened after the gap apart from the one before it', () => {
+    const { pending, unclosed } = scanQuoteContinuity(
+      cells('He said, “Come with me,', '', 'She said, “Go.'),
+      ENGLISH,
+    )
+    expect(pending).toEqual([{ cellId: 'c0', start: 9, end: 10 }])
+    expect(unclosed).toEqual([expect.objectContaining({ cellId: 'c2', cellsOpen: 0 })])
   })
 })

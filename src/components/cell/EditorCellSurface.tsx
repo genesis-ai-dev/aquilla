@@ -113,7 +113,7 @@ export function EditorTargetCellColumn({
       className={cn(
         // AQU-1101: the target column is the third grid item — min-w-0 so it
         // can shrink to its track, break-words so the text inside breaks.
-        "relative flex min-w-0 flex-col break-words pl-2 transition-opacity md:pl-3",
+        "relative flex min-w-0 flex-col break-words pl-2 md:pl-3",
         reserveActionRail ? "pr-2 md:pr-9" : "pr-2 md:pr-3",
         busy && "opacity-70",
         className,
@@ -149,7 +149,7 @@ export function EditorTargetCellWell({
       className={cn(
         // AQU-1101: min-w-0 — the well is a flex child of the target column and
         // would otherwise refuse to shrink below its content's min-content width.
-        "relative flex min-h-[40px] min-w-0 flex-1 flex-col rounded-lg px-2 py-1.5 transition-colors",
+        "relative flex min-h-[40px] min-w-0 flex-1 flex-col rounded-lg px-2 py-1.5",
         compact && "min-h-0 py-0.5",
         "hover:bg-muted/60 focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
         empty && "bg-muted/40",

@@ -412,7 +412,7 @@ accessLinks.post("/:token/redeem", zValidator("json", redeemSchema), async (c) =
   }
 
   const jwtService = new JWTService(c.env)
-  const accessToken = await jwtService.createAccessToken(boundUser.username)
+  const accessToken = await jwtService.createAccessToken(boundUser.username, undefined, link.user_id)
   return c.json({
     access_token: accessToken,
     token_type: "bearer",

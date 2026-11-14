@@ -34,10 +34,12 @@ import { handleExternalTranscriptionRequest } from './transcription-route'
 import { listProjectsForCredential } from './projects-list'
 import { loadProjectDetail } from './project-detail'
 import { listOrgsForCredential } from './orgs-list'
+import { claimSupportAccess, PLATFORM_ROLE_LEVEL } from './support-access'
 import { MAX_SEARCH_PROJECTS } from './search-reads'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { COMMAND_CATALOG } from '../../../db/shared/command-catalog'
 import { AGENT_SKILLS, getSkill } from '../../../db/shared/agent-skills'
+import { helpIndex, helpPage } from './help-site'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import type { ExternalEnv } from './types'
 
@@ -188,6 +190,14 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'nothing on its own. Call get_skill { name } for the full body before starting the ' +
         'workflow it covers. project-setup: intake template → one ProjectSetup command → one ' +
         'approval → verification receipt.',
+    },
+    // AQU-2581: app help from the public help site, not API documentation.
+    help: {
+      tool: 'get_help',
+      note:
+        'Public app help from https://help.aquilla.app: how to do things in the Aquilla app and where ' +
+        'its controls are. Call get_help with no page for the index, then get_help { page } for one ' +
+        'page. Not API documentation: for commands use describe_command and for API workflows get_skill.',
     },
     projectSettings: {
       readTool: 'get_project_settings',
@@ -489,7 +499,9 @@ function getIdentityAndScope(cred: ApiCredentialContext): McpToolResult {
 async function listOrgs(env: ExternalEnv, cred: ApiCredentialContext): Promise<McpToolResult> {
   if (!env.AQUILLA_PG) return fail('job_failed', 'AQUILLA_PG not configured')
   // Shared with REST GET /api/v1/external/orgs (orgs-list.ts) — AQU-1236.
-  const orgs = await listOrgsForCredential(env.AQUILLA_PG, cred)
+  // The tool name is passed so an AQU-2504 support-access audit row names the
+  // MCP tool rather than the REST route the REST adapter would report.
+  const orgs = await listOrgsForCredential(env.AQUILLA_PG, cred, 'list_orgs')
   return ok({ orgs })
 }
 
@@ -511,7 +523,7 @@ async function listProjects(
   const projects = await listProjectsForCredential(
     env.AQUILLA_PG,
     cred,
-    orgId !== undefined ? { orgId } : {},
+    { ...(orgId !== undefined ? { orgId } : {}), tool: 'list_projects' },
   )
   return ok({ projects })
 }
@@ -523,20 +535,29 @@ async function getProject(
 ): Promise<McpToolResult> {
   if (!env.AQUILLA_PG) return fail('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
+  let scopedOrgId: string | null
   try {
-    await assertCredentialScope(db, cred, projectId)
+    scopedOrgId = (await assertCredentialScope(db, cred, projectId)).orgId
   } catch (err) {
     if (err instanceof ExternalError) return fail(err.code, err.message)
     throw err
   }
   const resolved = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
-  if (!resolved || resolved.level < ROLE.VIEWER) {
-    return fail('permission_denied', 'no project membership (VIEWER role required)')
+  // AQU-2504: with no genuine grant, live support access is the one remaining
+  // path, and claiming it writes the audit row. Shared with
+  // scopeCredentialToProject (read-auth.ts) so this adapter and the REST one
+  // cannot disagree about who may open a project.
+  let level = resolved && resolved.level >= ROLE.VIEWER ? resolved.level : null
+  if (level === null) {
+    if (!(await claimSupportAccess(db, cred, projectId, 'get_project', scopedOrgId))) {
+      return fail('permission_denied', 'no project membership (VIEWER role required)')
+    }
+    level = PLATFORM_ROLE_LEVEL
   }
   // AQU-1222: shared with the REST GET /projects/:projectId route so the two
   // adapters cannot drift — and so both carry settingsVersion, the number
   // PatchSettings.ifMatchVersion has to match.
-  const detail = await loadProjectDetail(db, projectId, resolved.level, {
+  const detail = await loadProjectDetail(db, projectId, level, {
     flag: env.LANE_READ_WALL,
     userId: Number(cred.userId),
   })
@@ -609,6 +630,18 @@ function getSkillTool(args: Record<string, unknown>): McpToolResult {
     })
   }
   return ok({ name: skill.name, title: skill.title, oneLiner: skill.oneLiner, body: skill.body })
+}
+
+// ── get_help ─────────────────────────────────────────────────────────────────
+
+/** AQU-2581: app help from the public help site (help-site.ts). Like get_skill,
+ *  no role gate and no projectId: the pages are public text. The helpers never
+ *  throw, so an outage is a tool error and the other tools are unaffected. */
+async function getHelpTool(env: ExternalEnv, args: Record<string, unknown>): Promise<McpToolResult> {
+  const page = str(args, 'page')
+  const result = page === undefined ? await helpIndex(env) : await helpPage(env, page)
+  if (!result.ok) return fail(result.code, result.message, result.details ? { details: result.details } : undefined)
+  return ok(result.body)
 }
 
 // ── delegated reads ──────────────────────────────────────────────────────────
@@ -1585,6 +1618,8 @@ export async function callTool(
       return describeCommandTool(args)
     case 'get_skill':
       return getSkillTool(args)
+    case 'get_help':
+      return getHelpTool(env, args)
     case 'search_project':
       return searchProject(env, token, args)
     case 'transcribe_audio':

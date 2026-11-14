@@ -5,7 +5,8 @@ Checked through 2026-10-29, America/Edmonton.
 The original hosted catalog has 40 tools. AQU-2135 adds `upload_artifact`;
 the later `list_style_rules` brings the live catalog to 42 tools. Claude's
 connector settings show 25 read-only and 17 write/delete entries.
-Successful hosted coverage now reaches all 42 tools. This counts successful
+Successful hosted coverage now reaches all 42 tools. AQU-2581 adds `get_help`,
+which has no hosted Claude check yet. This counts successful
 tool paths, not every provider or optional workflow. The Omnilingual provider
 comparison below still fails; Whisper succeeds on the same stored take.
 
@@ -37,6 +38,7 @@ not live provider availability. Hosted AI tests must run after deployment.
 | `get_project` | PASS | — |
 | `get_project_settings` | PASS | — |
 | `get_prompt_preview` | PASS | — |
+| `get_help` | NOT RUN: added by AQU-2581, no hosted check yet | — |
 | `get_skill` | PASS | — |
 | `list_changesets` | PASS | — |
 | `list_memory` | PASS | — |

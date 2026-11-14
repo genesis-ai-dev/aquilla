@@ -24,6 +24,7 @@ import { probeDurationMsSafe } from "@/lib/import"
 import { AUDIO_FILE_ACCEPT, AUDIO_FILE_EXT_SET, AUDIO_FORMATS_LABEL, UNPLAYABLE_AUDIO_EXTS } from "@/lib/audio/mime"
 import type { TelemetrySurface } from "@/lib/cell-telemetry"
 import { recordTakeAdded } from "@/lib/history/take-steps"
+import { placeNewTake, placedFields, type TakePlace } from "@/lib/audio/new-take-place"
 
 /** `accept` for the hidden `<input type="file">` — the shared list, not a
  *  hand-written copy of it. AQU-1922: this named 4 of the 10 supported
@@ -129,6 +130,10 @@ export interface AttachAudioFileArgs {
   /** Decision 11: record an Undo step for the new take, naming the take that
    *  played in its slot before. Omitted by bulk runs, which record none. */
   history?: { selectedBefore: string | null }
+  /** AQU-2491 (review, Nov 9): the new take's own place, `bornTakePlace(line)`:
+   *  its line's start on a line with times, so a place an older recording left
+   *  on the line can't pull it early. */
+  place?: TakePlace | null
 }
 
 export interface AttachAudioFileResult {
@@ -200,6 +205,7 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
     ...(args.targetLang ? { targetLang: args.targetLang } : {}),
     surface: args.surface,
     username,
+    place: args.place,
     // F8: the R2 object uploaded fine but the attach event failed — delete it
     // rather than leaking storage. The cleanup itself is non-fatal.
     onEmitFailed: () => {
@@ -234,6 +240,9 @@ export interface AttachUploadedTakeArgs {
   /** Runs when the attach event could not be queued, before the error is
    *  re-thrown — the caller decides whether the uploaded bytes may go. */
   onEmitFailed?: () => void
+  /** AQU-2491 (review, Nov 9): the take's own place, written right after the
+   *  attach (lib/audio/new-take-place). Absent or null: none. */
+  place?: TakePlace | null
 }
 
 /**
@@ -266,6 +275,13 @@ export async function attachUploadedTake(args: AttachUploadedTakeArgs): Promise<
     args.onEmitFailed?.()
     throw emitErr
   }
+  // AQU-2491 (review, Nov 9): its own place, so it never reads one an older
+  // recording left on the line.
+  const placeEventId = await placeNewTake({
+    projectId, fileId, cellId, audioId, place: args.place,
+    ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+    author: username,
+  })
 
   // Flip `hasAudio` immediately — the bus poke the caller sends refetches the
   // server projection, but that races the outbox flush and would otherwise
@@ -288,6 +304,7 @@ export async function attachUploadedTake(args: AttachUploadedTakeArgs): Promise<
     label,
     trimStartMs: null,
     trimEndMs: null,
-  }, attachEventId)
+    ...placedFields(args.place, placeEventId),
+  }, placeEventId ?? attachEventId)
   return attachEventId
 }

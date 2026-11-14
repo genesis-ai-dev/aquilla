@@ -170,3 +170,10 @@ it("ignores legacy browser-wide yes for a new signup and keeps the checked draft
   expect(screen.getByRole("switch", { name: /share usage data/i })).toBeChecked()
   expect(readSignupAnalyticsChoice()).toBeNull()
 })
+
+// This suite exercises password signup and consent; provider availability is
+// independently covered by GoogleLoginButton and the Google callback journey.
+vi.mock("@/lib/frontier/google-login", () => ({
+  googleRequest: async () => ({ enabled: false }),
+  startGoogleLogin: vi.fn(),
+}))

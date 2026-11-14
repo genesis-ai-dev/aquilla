@@ -164,6 +164,8 @@ export interface Env {
    * Set it "true" in production/staging.
    */
   ADMIN_REQUIRE_ELEVATION?: string
+  /** Dedicated random encryption secret for admin TOTP seeds; distinct per deployment. */
+  ADMIN_TOTP_KEY?: string
   /** Minutes a step-up code is valid for entry. Default: 10. */
   ELEVATION_TTL_MINUTES?: string
   /** Hours an elevated admin session lasts after a successful verify. Default: 6. */
@@ -227,6 +229,13 @@ export interface Env {
   /** Injected by index.ts (never configured): raw Postgres connection string
    *  so streaming routes can open a connection that outlives the Response. */
   PG_CONNECTION_STRING?: string
+
+  // Google login: optional, disabled until all four values are configured.
+  GOOGLE_LOGIN_CLIENT_ID?: string
+  GOOGLE_LOGIN_CLIENT_SECRET?: string
+  GOOGLE_LOGIN_REDIRECT_URI?: string
+  /** Exact SPA origins permitted to receive OAuth handoffs, comma separated. */
+  GOOGLE_LOGIN_APP_ORIGINS?: string
 
   // ── Monday.com integration (routes/monday.ts, lib/monday/*) ──────────────
   /** Monday OAuth app client id (plain var, [vars] in wrangler.toml). */
@@ -475,11 +484,12 @@ export interface UserRow {
   id: number
   username: string
   email: string
-  password_hash: string
+  password_hash: string | null
   preferences: string
   created_at: string
   updated_at: string
   /** Stamped on a successful password-reset; null if never reset. See authMiddleware. */
+  session_version?: number
   password_changed_at: string | null
 }
 
@@ -488,10 +498,11 @@ export interface AuthUser {
   id: number
   username: string
   email: string
-  password_hash: string
+  password_hash: string | null
   preferences: Record<string, unknown>
   created_at: string
   updated_at: string
+  session_version?: number
   password_changed_at: string | null
 }
 
@@ -510,6 +521,10 @@ export interface AuthResponse {
 export interface JWTPayload {
   /** Username — sub claim. */
   sub: string
+  /** Immutable database account ID. Absent only on legacy credentials. */
+  uid?: string
+  /** Password-reset generation; absent on legacy tokens. */
+  sv?: number
   exp: number
   iat: number
   /** Unique token id, checked against revoked_tokens on logout (migration

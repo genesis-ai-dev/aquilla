@@ -57,23 +57,31 @@ export function resolveCurrentCellIndex(args: ResolveCurrentCellIndexArgs): numb
   }
 
   // First visible row: the first whose bottom edge clears the scroll offset.
+  // A row the virtualizer has not measured reports position 0. Row 0 really
+  // does start at 0; every later 0 is unmeasured. Treating those as the top
+  // of the file is what opened Media on chapter 1 of a book the reader had
+  // scrolled into. When nothing measured clears the offset, estimate from
+  // the scroll the same way as when there is no virtualizer at all.
   const scroll = measurements?.scroll ?? fallbackScrollTop
+  const estimatedIndex = () => Math.min(
+    displayCells.length - 1,
+    Math.max(0, Math.round(scroll / estimatedRowHeight)),
+  )
   let displayIdx = 0
+  let located = false
   if (measurements) {
     for (let index = 0; index < displayCells.length; index += 1) {
       const start = measurements.positionAtIndex(index)
+      if (index > 0 && start <= 0) continue
       const size = measurements.sizeAtIndex(index) || estimatedRowHeight
       if (start + size > scroll) {
         displayIdx = index
+        located = true
         break
       }
     }
-  } else {
-    displayIdx = Math.min(
-      displayCells.length - 1,
-      Math.max(0, Math.round(scroll / estimatedRowHeight)),
-    )
   }
+  if (!located) displayIdx = estimatedIndex()
   const id = displayCells[displayIdx]?.id
   const cellIdx = id ? cells.findIndex((c) => c.id === id) : -1
   return cellIdx >= 0 ? cellIdx : 0

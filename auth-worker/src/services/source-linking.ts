@@ -595,10 +595,8 @@ export async function loadUpstreamFileIds(env: Env, upstreamProjectId: string): 
   return (results ?? []).map((r) => r.id)
 }
 
-/** AQU-476: link mode/consumes/gate — see the linked-projects design spec §2. */
+/** AQU-476: link mode — see the linked-projects design spec §2. */
 export type SourceLinkMode = "clone" | "live"
-export type SourceLinkConsumes = "source" | "target"
-export type SourceLinkGate = "head" | "validated"
 
 /**
  * Load a project including its `source_project_id`. Returns null if the

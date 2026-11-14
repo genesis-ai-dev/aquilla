@@ -1,3 +1,4 @@
+import { GoogleLoginButton } from "@/components/auth/GoogleLoginButton"
 import { useEffect, useRef, useState } from "react"
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
@@ -33,10 +34,13 @@ export function FrontierLoginForm({
   onForgotPassword,
   returnTo,
   initialUsername,
+  navigateOnSuccess = true,
 }: {
   onSuccess: (session: FrontierSession) => void | Promise<void>
   onForgotPassword?: () => void
-  /** If provided, navigate here after a successful login. */
+  /** Keep modal password recovery in place while retaining the OAuth/reset destination. */
+  navigateOnSuccess?: boolean
+  /** Destination after login, OAuth or password reset. */
   returnTo?: string
   /**
    * AQU-1345: prefills the identifier field, e.g. when sign-up refused the
@@ -65,7 +69,7 @@ export function FrontierLoginForm({
       try {
         const session = await login(value.username, value.password)
         await onSuccess(session)
-        if (returnTo) navigate(returnTo)
+        if (returnTo && navigateOnSuccess) navigate(returnTo)
       } catch (err) {
         setSubmitError(err instanceof FrontierAuthError ? err.message : t("auth.login.failed"))
       }
@@ -103,6 +107,7 @@ export function FrontierLoginForm({
           {t("auth.login.offlineNotice")}
         </p>
       )}
+      <GoogleLoginButton next={returnTo} />
       <FieldGroup className="gap-4">
         <form.Field
           name="username"

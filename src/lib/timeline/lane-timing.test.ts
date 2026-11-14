@@ -6,7 +6,9 @@ import {
   chipOverflowState,
   chipOverlaps,
   dualFaultMeetSec,
+  earliestSoundSec,
   effectiveAttachmentDurationMs,
+  minHeadTrimSec,
   subtitleSpanSec,
   targetChipGeom,
   targetDueSec,
@@ -422,5 +424,26 @@ describe("dualFaultMeetSec — where a mutually-offending pair meets (2026-08-27
     for (const [prevChip, nextChip, prevSectionEnd, nextSectionStart] of cases) {
       expectInsideBoth(meet(prevChip, nextChip, prevSectionEnd, nextSectionStart), prevChip, nextChip)
     }
+  })
+})
+
+// AQU-2495 (review, Nov 9): a take's clip may start before 0:00; its sound
+// may not. Every way of un-trimming a take's start (the timeline's left
+// handle, the Station's Start, the Recording tab, an extension's trim) holds
+// to this one rule.
+describe("the sound never starts before the file (AQU-2495)", () => {
+  it("is the clip's start, or the file's when the clip starts before it", () => {
+    expect(earliestSoundSec(3.2)).toBe(3.2)
+    expect(earliestSoundSec(-45)).toBe(0)
+  })
+
+  it("as a head trim: as much of the clip as sits before the file must stay trimmed off", () => {
+    const line = cell({ startTime: 12, endTime: 16 })
+    expect(minHeadTrimSec(line, { targetOffsetMs: -57_000, trimStartMs: 50_000, durationMs: 120_000 })).toBe(45)
+    expect(minHeadTrimSec(line, { targetOffsetMs: -200, durationMs: 3_000 })).toBe(0)
+    // A line's old place puts it there too, for a take with none of its own.
+    expect(minHeadTrimSec(cell({ startTime: 0.1, endTime: 2, metadata: { target_offset_ms: -2770 } }), { durationMs: 3_000 })).toBeCloseTo(2.67, 3)
+    // No times, no file to fall off.
+    expect(minHeadTrimSec(cell({ startTime: undefined, endTime: undefined }), { targetOffsetMs: -57_000, durationMs: 120_000 })).toBe(0)
   })
 })

@@ -76,8 +76,11 @@ export interface ElevenLabsAccount {
   tier: string
   characterCount: number
   characterLimit: number
-  canClone: boolean
+  /** Null when the key may not read the account, so the plan is unknown. */
+  canClone: boolean | null
   resetAtUnix: number | null
+  /** False for a restricted key without `user_read`: connected, quota unknown. */
+  quotaKnown?: boolean
 }
 
 /** GET /api/v1/elevenlabs/user — also how a pasted key is validated. */

@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { expect, it, vi } from "vitest"
-import { requestPasswordReset } from "@/lib/frontier/auth"
+import { requestPasswordReset, requestAccountPasswordReset } from "@/lib/frontier/auth"
 import { FrontierForgotPasswordForm } from "./FrontierForgotPasswordForm"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -13,6 +13,7 @@ vi.mock("@/hooks/useAccounts", () => ({
 vi.mock("@/lib/frontier/auth", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/frontier/auth")>(),
   requestPasswordReset: vi.fn(async () => {}),
+  requestAccountPasswordReset: vi.fn(async () => {}),
 }))
 
 it("validates once and returns to sign-in (AQU-2300)", async () => {
@@ -42,4 +43,15 @@ it("validates once and returns to sign-in (AQU-2300)", async () => {
   expect(requestPasswordReset).toHaveBeenCalledExactlyOnceWith("reader@example.com", undefined)
   fireEvent.click(screen.getByRole("button", { name: "Back to login" }))
   expect(onBack).toHaveBeenCalledOnce()
+})
+
+it("shows a read-only account email and requests reset using only its session", async () => {
+  render(<MemoryRouter><FrontierForgotPasswordForm onBack={vi.fn()} backLabel="Back to login methods" account={{ email: "selected@example.com", jwt: "selected-session" }} /></MemoryRouter>)
+  const email = screen.getByRole("textbox", { name: "Email" })
+  expect(email).toHaveValue("selected@example.com")
+  expect(email).toHaveAttribute("readonly")
+  fireEvent.submit(email.closest("form")!)
+  await screen.findByText("selected@example.com")
+  expect(requestAccountPasswordReset).toHaveBeenCalledExactlyOnceWith("selected-session")
+  expect(screen.getByRole("button", { name: "Back to login methods" })).toBeVisible()
 })

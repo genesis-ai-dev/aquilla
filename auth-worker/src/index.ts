@@ -64,6 +64,8 @@
 import { Hono } from "hono"
 import type { Env, Variables } from "./types"
 import authRoutes from "./routes/auth"
+import emailChangeRoutes from "./routes/email-change"
+import googleLoginRoutes, { pruneSocialLoginFlows } from "./routes/oauth-google"
 import syncTokenRoutes from "./routes/sync-token"
 import projectsRoutes from "./routes/projects"
 import projectMembersRoutes from "./routes/project-members"
@@ -314,6 +316,8 @@ app.get("/healthz", (c) => c.json({ ok: true }))
 // /api/v2/health that the AI controls used to gate on).
 app.get("/api/v2/health", (c) => c.json({ ok: true, name: "aquilla-identity" }))
 
+app.route("/api/v2/auth/email-change", emailChangeRoutes)
+app.route("/api/v2/auth/oauth/google", googleLoginRoutes)
 app.route("/api/v2/auth", authRoutes)
 // Legacy alias: old clients (and frontier-server-era tokens) still hit
 // /api/v1/auth/* — keep the auth surface mounted there too.
@@ -625,6 +629,7 @@ const scheduled = async (
     // this one cron covers both. Non-throwing.
     await pruneRateLimitCounters(runEnv.AQUILLA_PG)
     await pruneAuthRateLimitEvents(runEnv.AQUILLA_PG)
+    await pruneSocialLoginFlows(runEnv.AQUILLA_PG)
     // Autopilot prompt/reply traces expire after 30 days. Non-throwing.
     await pruneExpiredTraces(runEnv.AQUILLA_PG)
     // AQU-1845 — abandoned wave checkpoints. The driver clears its own after

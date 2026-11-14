@@ -12,6 +12,7 @@ mod shutdown_guard;
 mod titlebar;
 
 use llm_proxy::LlmConfig;
+use tauri::utils::config::BackgroundThrottlingPolicy;
 use tauri::{Manager, WebviewWindowBuilder};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -67,7 +68,13 @@ pub fn run() {
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(900.0, 600.0)
                 .center()
-                .resizable(true);
+                .resizable(true)
+                // WebKit's default fully suspends a webview whose window is hidden
+                // or minimized (~5 min in): timers stop, so queued offline edits
+                // stop flushing until the user brings the window back. Throttle
+                // keeps it running at the hidden-page timer clamp. macOS 14+ only;
+                // ignored elsewhere.
+                .background_throttling(BackgroundThrottlingPolicy::Throttle);
             // macOS: drop the native title strip and let the SPA's top row be the
             // title bar, traffic lights floating over it. y=28 centres them on
             // AppShell's 52px header band; the SPA keeps that corner clear and

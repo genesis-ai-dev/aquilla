@@ -22,6 +22,7 @@ import { secToPx, chipRadiusPx } from "@/lib/timeline/scale"
 import { TL_CHIP_BOX_CLASS } from "@/lib/timeline/row-metrics"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useTimelineOriginPx } from "./timeline-origin"
 
 export interface LinkOverlayItem {
   id: string
@@ -58,6 +59,7 @@ export function CueLinkOverlay({
   onPick,
 }: Props) {
   const t = useT()
+  const originPx = useTimelineOriginPx()
   return (
     <>
       {items.map((item) => {
@@ -93,7 +95,7 @@ export function CueLinkOverlay({
               onPick(item.id)
             }}
             className={cn(
-              "absolute z-20 cursor-pointer ring-inset transition-colors",
+              "absolute z-20 ring-inset transition-colors",
               TL_CHIP_BOX_CLASS,
               picked && "bg-violet-500/25 ring-2 ring-violet-500",
               !picked && linked && "bg-emerald-500/20 ring-2 ring-emerald-500",
@@ -105,7 +107,7 @@ export function CueLinkOverlay({
               !picked && !linked && !unlinked && "ring-1 ring-transparent hover:ring-violet-400/70",
             )}
             style={{
-              left: `${secToPx(item.startSec, pxPerSec)}px`,
+              left: `${secToPx(item.startSec, pxPerSec) - originPx}px`,
               width: `${widthPx}px`,
               borderRadius: `${chipRadiusPx(widthPx)}px`,
             }}

@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { setToastUndoAt, undoShortcutOwner } from "@/lib/history/arbiter"
-import { XIcon, CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
+import { XIcon, CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 
 const toastManager = ToastPrimitive.createToastManager()
 
@@ -165,17 +166,30 @@ function ToastItem({
     return () => window.clearTimeout(settle)
   }, [updateKey, toastItem.id])
 
+  const body = bodyFromToast(toastItem.data)
+
   return (
     <Toast toast={toastItem}>
       <ToastPulse pulsing={pulsing}>
         <ToastContent>
-          <div className="flex items-start gap-3">
+          <div
+            className={
+              body
+                ? "grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2"
+                : "flex items-start gap-3"
+            }
+          >
             <ToastIcon type={toastItem.type} icon={iconFromToast(toastItem.data)} />
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <ToastTitle />
-              <ToastDescription />
-            </div>
+            {body ? (
+              <ToastTitle className="min-w-0" />
+            ) : (
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <ToastTitle />
+                <ToastDescription />
+              </div>
+            )}
             <ToastClose className="-mt-1" />
+            {body ? <div className="col-span-2 col-start-2 min-w-0">{body}</div> : null}
           </div>
           {hasActions && (
             <div
@@ -196,6 +210,13 @@ function iconFromToast(data: object | undefined): React.ReactNode | null {
   if (!data || !("icon" in data)) return null
   const icon = (data as { icon?: unknown }).icon
   return React.isValidElement(icon) ? icon : null
+}
+
+/** Replaces the title/description column when a toast carries its own body. */
+function bodyFromToast(data: object | undefined): React.ReactNode | null {
+  if (!data || !("body" in data)) return null
+  const body = (data as { body?: unknown }).body
+  return React.isValidElement(body) ? body : null
 }
 
 /**
@@ -354,18 +375,56 @@ function ToastClose({
   className,
   children,
   render = <Button variant="ghost" size="icon-sm" />,
+  onPointerDown,
+  onPointerUp,
+  onPointerCancel,
+  onBlur,
   ...props
 }: ToastPrimitive.Close.Props) {
   const t = useT()
+  const [pressing, setPressing] = React.useState(false)
+  React.useEffect(() => {
+    if (!pressing) return
+    const clear = () => setPressing(false)
+    window.addEventListener("pointerup", clear)
+    window.addEventListener("pointercancel", clear)
+    return () => {
+      window.removeEventListener("pointerup", clear)
+      window.removeEventListener("pointercancel", clear)
+    }
+  }, [pressing])
   return (
     <ToastPrimitive.Close
       data-slot="toast-close"
+      data-pressing={pressing ? "" : undefined}
       aria-label={t("common.closeToastAriaLabel")}
       render={render}
       className={cn(
-        "relative shrink-0 text-muted-foreground after:absolute after:-inset-2 after:content-[''] hover:text-foreground",
+        // The control is 28px around a 16px glyph. Bleed 6px into the padding
+        // so the glyph sits on the same inset as the leading icon. The ::after
+        // is positioned off the padding edge, so 13px clears the 1px border and
+        // leaves a 12px hit slop past the hover highlight. It stacks above the
+        // title and body so that slop still receives the click.
+        "relative z-10 -me-1.5 shrink-0 text-muted-foreground after:absolute after:-inset-[13px] after:content-[''] hover:text-foreground",
+        "data-pressing:border-transparent! data-pressing:ring-0!",
         className
       )}
+      onPointerDown={(event) => {
+        setPressing(true)
+        onPointerDown?.(event)
+      }}
+      onPointerUp={(event) => {
+        setPressing(false)
+        onPointerUp?.(event)
+      }}
+      onPointerCancel={(event) => {
+        setPressing(false)
+        onPointerCancel?.(event)
+      }}
+      onBlur={(event) => {
+        setPressing(false)
+        onBlur?.(event)
+      }}
       {...props}
     >
       {children ?? (
@@ -403,9 +462,7 @@ function ToastIcon({ type, icon }: { type: string | undefined; icon?: React.Reac
   }
 
   if (type === "loading") {
-    glyph = (
-      <Loader2Icon className="animate-spin" aria-hidden="true" />
-    )
+    glyph = <Spinner />
   }
 
   if (!glyph) {

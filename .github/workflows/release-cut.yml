@@ -83,6 +83,9 @@ jobs:
       - name: Plan
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Extra logins whose walk comments count, on top of organization
+          # members and collaborators; see release-plan-walk.mjs.
+          WALK_TRUSTED_LOGINS: ${{ vars.WALK_TRUSTED_LOGINS }}
         run: node scripts/release-plan.mjs > "$RUNNER_TEMP/plan.json"
 
       - name: Cut

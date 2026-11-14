@@ -294,7 +294,7 @@ interface SavedSettings {
   importExcludeFrontMatter: boolean
   /** AQU-1720: what one imported cell is for docx/txt/md uploads. */
   importCellUnit: CellUnit
-  /** Curly quotes as you type in the cell editor. Absent/false is off. */
+  /** Curly quotes as you type in the cell editor. On unless stored as false. */
   smartQuotes: boolean
   termMatching: TermMatchingSettings
 }
@@ -353,7 +353,7 @@ function readSavedSettings(project: ProjectRecord): SavedSettings {
     precedingTargetCells: project.draftContext?.precedingTargetCells ?? DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
     importExcludeFrontMatter: project.importExcludeFrontMatter ?? false,
     importCellUnit: project.importCellUnit ?? "sentence",
-    smartQuotes: project.smartQuotes ?? false,
+    smartQuotes: project.smartQuotes ?? true,
     termMatching: project.termMatching ?? { prefixes: [], suffixes: [] },
   }
 }

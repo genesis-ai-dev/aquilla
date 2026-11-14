@@ -155,7 +155,7 @@ function renderTable(
 
 const rowEl = (cellId: string) => document.querySelector(`[data-cell-id="${cellId}"]`) as HTMLElement
 const openMenu = (cellId: string) => {
-  fireEvent.click(within(rowEl(cellId)).getByTestId(`cell-menu-${cellId}`))
+  fireEvent.contextMenu(within(rowEl(cellId)).getByTestId(`cell-menu-${cellId}`))
 }
 /** Menus are a popup layer, so entries are found on `screen`, not in the row. */
 const entry = () => screen.findByTestId("cell-menu-set-milestone")

@@ -22,8 +22,10 @@ export const audio = defineNamespace({
     "audio.train.speakerNamePlaceholder": "e.g. Maria (narrator)",
     "audio.train.addRecordings": "Add recordings",
     "audio.train.addRecordingsAriaLabel": "Add recordings of the speaker",
-    "audio.train.recordingTips": "One speaker, clean speech, any language · 5–60 min · up to 20 MB per file",
+    "audio.train.recordingTips": "One speaker, clean speech, any language · 5–60 min in total · WAV, or MP3/M4A up to 20 MB per file",
     "audio.train.fileTooLarge": "Over 20 MB",
+    "audio.train.fileTooLargeUseWav": "Over {mb} MB — use a WAV for a recording this long",
+    "audio.train.tooMuchData": "Over {mb} MB in total (the limit is {max} min) — remove some",
     "audio.train.removeRecordingAriaLabel": "Remove {name}",
     "audio.train.audioMeter": "{minutes} min",
     "audio.train.tooMuchAudio": "Over {max} min — remove some",
@@ -637,6 +639,8 @@ export const audio = defineNamespace({
     "audio.elevenLabs.accountUnavailable": "Couldn't check your ElevenLabs account.",
     "audio.elevenLabs.checkingAccount": "Checking your account\u2026",
     "audio.elevenLabs.charactersLeft": "{left} characters left",
+    "audio.elevenLabs.connectedNoQuota": "Connected",
+    "audio.elevenLabs.connectedNoQuotaHint": "This key can't read your ElevenLabs account, so the characters left aren't shown.",
     "audio.elevenLabs.searchPlaceholder": "Search your voices",
     "audio.elevenLabs.searchAriaLabel": "Search ElevenLabs voices",
     "audio.elevenLabs.categoryPremade": "Premade",
@@ -676,6 +680,9 @@ export const audio = defineNamespace({
     "audio.aiError.elevenLabsNoKeyBody": "This voice uses ElevenLabs with your own API key, and this device has none. Connect your key in the Voice Studio (edit the voice) or in Project settings → Voice.",
     "audio.aiError.elevenLabsInvalidKeyTitle": "ElevenLabs rejected your key",
     "audio.aiError.elevenLabsInvalidKeyBody": "Check the key in your ElevenLabs account, then disconnect and connect it again.",
+    "audio.aiError.elevenLabsMissingPermissionTitle": "Your ElevenLabs key isn't allowed to do that",
+    "audio.aiError.elevenLabsMissingPermissionBody": "This ElevenLabs key is restricted and is missing the permission \u201c{permission}\u201d. In ElevenLabs, edit the key to allow it, then try again.",
+    "audio.aiError.elevenLabsMissingPermissionUnnamedBody": "This ElevenLabs key is restricted and is missing a permission this needs. In ElevenLabs, edit the key's permissions, then try again.",
     "audio.aiError.elevenLabsQuotaTitle": "Out of ElevenLabs characters",
     "audio.aiError.elevenLabsQuotaBody": "Your ElevenLabs account has used this period's characters. Upgrade your ElevenLabs plan or wait for it to reset.",
     "audio.aiError.elevenLabsCloneNotAllowedTitle": "Cloning isn't on your ElevenLabs plan",
@@ -897,6 +904,17 @@ export const audio = defineNamespace({
       "audio.train.recommendedHint": {
         description: "Right of the meter once the minimum is met: how much audio gives the best quality.",
         placeholders: { recommended: "Recommended minutes, e.g. '15'." },
+      },
+      "audio.train.fileTooLargeUseWav": {
+        description: "Shown in red next to one picked recording in Train voice when a compressed audio file (MP3, M4A) is over the per-file size limit. Uncompressed WAV files have no per-file limit, so the fix is to use a WAV. WAV, MP3 and MB are not translated.",
+        placeholders: { mb: "The per-file size limit in megabytes, e.g. '20'." },
+      },
+      "audio.train.tooMuchData": {
+        description: "Shown instead of the meter line in Train voice when the picked recordings are too large to upload in total, even though they may be within the maximum length. MB is not translated.",
+        placeholders: {
+          mb: "The total upload limit in megabytes, e.g. '1600'.",
+          max: "Maximum minutes of audio allowed, e.g. '60'.",
+        },
       },
       "audio.train.tooMuchAudio": {
         description: "Shown instead of the meter line when the recordings exceed the maximum.",
@@ -2993,6 +3011,12 @@ export const audio = defineNamespace({
       "audio.elevenLabs.checkingAccount": {
         description: "Shown on the connected ElevenLabs line (after 'ElevenLabs \u00b7 ') while the app reads the account's quota.",
       },
+      "audio.elevenLabs.connectedNoQuota": {
+        description: "Shown on the connected ElevenLabs line (after 'ElevenLabs \u00b7 ') in place of the quota, when the user's API key works but is not allowed to read the account's quota.",
+      },
+      "audio.elevenLabs.connectedNoQuotaHint": {
+        description: "Hover text on the connected ElevenLabs line when it says 'Connected' in place of a quota: the key is restricted, so the remaining characters cannot be read. ElevenLabs is a brand name: do not translate it.",
+      },
       "audio.elevenLabs.charactersLeft": {
         description: "Quota on the connected ElevenLabs line, shown after 'ElevenLabs \u00b7 ': how many characters of text the user's ElevenLabs plan can still speak this billing period.",
         placeholders: {
@@ -3130,6 +3154,18 @@ export const audio = defineNamespace({
       },
       "audio.aiError.elevenLabsInvalidKeyBody": {
         description: "Popover body for an invalid ElevenLabs key: the fix is to replace it.",
+      },
+      "audio.aiError.elevenLabsMissingPermissionTitle": {
+        description: "Popover title when the user's own ElevenLabs API key is valid but restricted, and lacks the permission for the action they tried (reading text aloud, re-voicing a recording, cloning). ElevenLabs is a brand name: do not translate it.",
+      },
+      "audio.aiError.elevenLabsMissingPermissionBody": {
+        description: "Popover body for a restricted ElevenLabs API key: names the missing permission and says to edit the key in ElevenLabs. ElevenLabs is a brand name: do not translate it.",
+        placeholders: {
+          "permission": "ElevenLabs' own identifier for the permission, shown as is (e.g. text_to_speech, voices_write). Do not translate.",
+        },
+      },
+      "audio.aiError.elevenLabsMissingPermissionUnnamedBody": {
+        description: "Popover body for a restricted ElevenLabs API key when ElevenLabs did not say which permission is missing. ElevenLabs is a brand name: do not translate it.",
       },
       "audio.aiError.elevenLabsQuotaTitle": {
         description: "Popover title when the user's ElevenLabs plan has used up its characters for the billing period.",

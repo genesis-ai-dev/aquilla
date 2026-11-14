@@ -1,7 +1,7 @@
 import { GoogleLoginButton } from "@/components/auth/GoogleLoginButton"
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
-import { useNavigate, useSearchParams, Navigate, Link } from "react-router-dom"
+import { useNavigate, useSearchParams, useLocation, Navigate, Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { AuthPage, AuthPanel } from "@/components/auth/AuthPage"
 import { CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -41,6 +41,8 @@ const loginSchema = z.object({
 
 export function Login() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const changedEmail = typeof location.state?.emailChanged === "string" ? location.state.emailChanged : ""
   const [searchParams] = useSearchParams()
   const { session, loading, sessionLoadError, retrySessionLoad, login } = useFrontierSession()
   const t = useT()
@@ -55,7 +57,7 @@ export function Login() {
   const alreadySignedIn = !!session && !isJwtExpired(session.jwt)
 
   const form = useForm({
-    defaultValues: { username: "", password: "" },
+    defaultValues: { username: changedEmail, password: "" },
     validators: { onSubmit: loginSchema },
     onSubmit: async ({ value }) => {
       clearSubmitError()
@@ -92,6 +94,7 @@ export function Login() {
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
+          {changedEmail && <p role="status">{t("auth.emailChange.success")}</p>}
           {mode === "login" && <GoogleLoginButton next={next} />}
 
           {mode === "forgot" ? (

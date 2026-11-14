@@ -818,15 +818,16 @@ export async function importFile(
 }
 
 /** AQU-2551: a PDF whose name lost its extension ("report", "x.pdf.download")
- *  is still a PDF, and must not take the unknown-file path to the AI sandbox:
- *  the PDF header ("%PDF-") sits in its first kilobyte. */
+ *  is still a PDF, and must not take the unknown-file path to the AI sandbox.
+ *  Review finding 13: its header ("%PDF-") is taken only at the very start of
+ *  the file, after at most a byte-order mark or whitespace, as PDF readers
+ *  take it; a text file that mentions "%PDF-" is not a PDF. */
 async function pdfByContent(file: File): Promise<FileType | null> {
   const head = new Uint8Array(await file.slice(0, 1024).arrayBuffer())
+  let i = head[0] === 0xef && head[1] === 0xbb && head[2] === 0xbf ? 3 : 0
+  while (i < head.length && [0x00, 0x09, 0x0a, 0x0c, 0x0d, 0x20].includes(head[i])) i++
   const signature = [0x25, 0x50, 0x44, 0x46, 0x2d]
-  for (let i = 0; i + signature.length <= head.length; i++) {
-    if (signature.every((byte, k) => head[i + k] === byte)) return "pdf"
-  }
-  return null
+  return signature.every((byte, k) => head[i + k] === byte) ? "pdf" : null
 }
 
 /** Parse/classify exactly once so preview and commit use the same immutable

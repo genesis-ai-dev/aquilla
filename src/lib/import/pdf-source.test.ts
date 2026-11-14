@@ -88,6 +88,18 @@ describe("a PDF on the source path", () => {
       .rejects.toThrow("This PDF is a scanned image. It has no text to import.")
     expect(fetchSpy).not.toHaveBeenCalled()
   })
+
+  // Review finding 13 (Nov 14): the header was looked for anywhere in the
+  // first kilobyte, so a text file that mentions "%PDF-" was refused as "not
+  // a PDF". PDF readers take it only at the very start, after at most a
+  // byte-order mark or whitespace.
+  it("takes the PDF header only at the start of a file, after at most a BOM or whitespace", async () => {
+    const notes = new File(["Notes on the export.\nEvery PDF starts with %PDF-1.7 in its first line.\n"], "notes.log")
+    await expect(prepareImportFile(notes, { ...PROJECT, cellUnit: "paragraph" })).rejects.toThrow(/^Unsupported file type: notes\.log\./)
+    const bom = new Uint8Array([0xef, 0xbb, 0xbf, 0x0a, 0x20, ...new Uint8Array(pdfOfParagraphs(["After a byte-order mark."]))])
+    const prepared = await prepareImportFile(new File([bom], "report"), { ...PROJECT, cellUnit: "paragraph" })
+    expect(prepared.fileType).toBe("pdf")
+  })
 })
 
 // ─── a translated PDF ───────────────────────────────────────────────────────

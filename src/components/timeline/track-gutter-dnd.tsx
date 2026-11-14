@@ -40,22 +40,16 @@ import { dragSlopPx } from "@/lib/timeline/drag-slop"
 /** Sortable group for tracks that are not inside a folder. Not a track id. */
 export const TIMELINE_ROOT_GROUP = "timeline:root"
 
-/** Movement before a press becomes a drag, so a click still selects the track. */
+/** A mouse's movement before a press becomes a drag, so a click still selects
+ *  the track. A finger or a pen needs the app's touch distance (AQU-2491). */
 export const TRACK_DRAG_ACTIVATION_DISTANCE = 8
 
-/** AQU-2491: a finger's or a pen's tap wanders further than a mouse's (the
- *  app's `dragSlopPx`), so a press on a row is a drag once it has travelled the
- *  further of the two. */
-export function trackDragActivationPx(pointerType: string | undefined): number {
-  return Math.max(TRACK_DRAG_ACTIVATION_DISTANCE, dragSlopPx(pointerType))
-}
-
 /** dnd-kit's pointer sensor, with its activation distance read off the
- *  pointer that pressed. */
+ *  pointer that pressed (`dragSlopPx`). */
 class TrackPointerSensor extends PointerSensor {
   constructor(props: PointerSensorProps) {
     const pointerType = "pointerType" in props.event ? (props.event as PointerEvent).pointerType : undefined
-    super({ ...props, options: { ...props.options, activationConstraint: { distance: trackDragActivationPx(pointerType) } } })
+    super({ ...props, options: { ...props.options, activationConstraint: { distance: dragSlopPx(pointerType, TRACK_DRAG_ACTIVATION_DISTANCE) } } })
   }
 }
 

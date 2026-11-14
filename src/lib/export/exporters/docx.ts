@@ -569,8 +569,11 @@ export async function exportDocx(
         : null
       const stretches = inOrder?.stretches ?? locateLines(translation.parts, line)
       const lost = !translation.lostLines ? [] : inOrder && inOrder.lost.length > 0 ? inOrder.lost : lostStretches(stretches, line)
+      // AQU-2552 (review r9): separators come back from the remaining lines'
+      // text only, so a lost line's tab never turns up inside another line.
+      const remaining = lost.reduceRight((text, s) => text.slice(0, s.start) + text.slice(s.end), line)
       return {
-        spans: restoreLineSeparators(translationSpans(translation.parts, line, stretches), line, translation.source),
+        spans: restoreLineSeparators(translationSpans(translation.parts, line, stretches), remaining, translation.source),
         layout: { stretches, lost },
       }
     })

@@ -258,3 +258,21 @@ describe("Word export — a hidden or deleted line takes only its words and its 
     }
   })
 })
+
+describe("Word export — a lost line's tab never turns up in another line (AQU-2552, review r9)", () => {
+  // R2: the line separators an old translation lacks come back from the
+  // remaining lines only. "Amen." ends line 1 and follows line 2's tab.
+  it("rebuilds no tab from a hidden or deleted line's text, so none is doubled", async () => {
+    const L1g = "Glory to God" + PAD + " Amen."
+    const bytes = await docxBytes(para(run(L1g + " ") + run("Praise him" + PAD) + `<w:r><w:tab/></w:r>` + run("Amen. ") + run("Next line here" + PAD)) + NEXT)
+    const cells = await importCells(bytes, false)
+    const b = cells.find((c) => c.original.startsWith("Praise"))!
+    expect(b.original.replaceAll(PAD.trim(), "…")).toBe("Praise him …\tAmen.")
+    const rest = cells.filter((c) => c !== b)
+    for (const out of [await wordOut(bytes, [rest[0], hide(b), ...rest.slice(1)]), await wordOut(bytes, rest, [b])]) {
+      const first = paras(out.body)[0]
+      expect(first.startsWith("Glory to God … Amen. Next line here …")).toBe(true)
+      expect(first.split("[TAB]").length - 1).toBeLessThanOrEqual(1)
+    }
+  })
+})

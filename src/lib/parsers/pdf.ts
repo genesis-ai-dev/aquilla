@@ -168,10 +168,35 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
   // so the clock is also read after every wait.
   const tooComplex = () => new PdfReadError("too-complex", `PDF took over ${budgetMs} ms to read`)
   const deadline = performance.now() + budgetMs
+  // AQU-2551 (browser run): pdf.js's own destroy() waits for its worker, and a
+  // worker busy decoding one huge stream answers only when it is done (54 s
+  // for a 1 GB stream). So in the browser the reader owns the worker, and the
+  // budget ends it outright: terminate(), then refuse at once.
+  const port =
+    typeof window !== "undefined" && typeof Worker !== "undefined" && pdfjs.GlobalWorkerOptions.workerSrc
+      ? new Worker(pdfjs.GlobalWorkerOptions.workerSrc, { type: "module" })
+      : undefined
+  const pdfWorker = port ? new pdfjs.PDFWorker({ port }) : undefined
+  let timedOut = false
   let timer: ReturnType<typeof setTimeout> | undefined
   const overBudget = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(tooComplex()), budgetMs)
+    timer = setTimeout(() => {
+      timedOut = true
+      port?.terminate()
+      reject(tooComplex())
+    }, budgetMs)
   })
+  /** Ends pdf.js: politely when it is idle, at once when the budget ran out. */
+  const finish = async (): Promise<void> => {
+    clearTimeout(timer)
+    if (timedOut) {
+      void task.destroy().catch(() => {})
+    } else {
+      await task.destroy().catch(() => {})
+      pdfWorker?.destroy()
+    }
+    port?.terminate()
+  }
   overBudget.catch(() => {})
   const within = async <T,>(work: Promise<T>): Promise<T> => {
     const value = await Promise.race([work, overBudget])
@@ -184,13 +209,13 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
     disableFontFace: true,
     useSystemFonts: false,
     verbosity: pdfjs.VerbosityLevel.ERRORS,
+    ...(pdfWorker ? { worker: pdfWorker } : {}),
   })
   let doc: Awaited<typeof task.promise>
   try {
     doc = await within(task.promise)
   } catch (err) {
-    clearTimeout(timer)
-    await task.destroy().catch(() => {})
+    await finish()
     if (err instanceof PdfReadError) throw err
     const name = (err as { name?: string } | null)?.name
     if (name === "PasswordException") throw new PdfReadError("password", "PDF is password-protected", { cause: err })
@@ -208,8 +233,7 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
     if (err instanceof PdfReadError) throw err
     throw new PdfReadError("unreadable", `PDF could not be read: ${(err as Error)?.message ?? String(err)}`, { cause: err })
   } finally {
-    clearTimeout(timer)
-    await task.destroy().catch(() => {})
+    await finish()
   }
 
   async function readOpenedPdf(): Promise<PdfParagraphsRead> {

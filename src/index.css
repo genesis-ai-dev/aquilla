@@ -298,10 +298,6 @@
   }
 }
 
-/* AQU-1764: an AI draft nobody has validated yet, on any progress surface —
-   diagonal stripes of the translated colour and the stripe colour. One
-   utility so the Progress card, the bars and the swatches all draw the same
-   stripes; the colours are the palette tokens in the theme blocks below. */
 /* Banners pinned to the window's top edge: keep their content clear of the
    macOS traffic lights (on both sides, so centred text stays centred). */
 @utility mac-titlebar-clear {
@@ -310,6 +306,10 @@
   }
 }
 
+/* AQU-1764: an AI draft nobody has validated yet, on any progress surface —
+   diagonal stripes of the translated colour and the stripe colour. One
+   utility so the Progress card, the bars and the swatches all draw the same
+   stripes; the colours are the palette tokens in the theme blocks below. */
 @utility bg-progress-ai {
   background-image: repeating-linear-gradient(
     135deg,

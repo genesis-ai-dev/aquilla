@@ -172,24 +172,40 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
   // worker busy decoding one huge stream answers only when it is done (54 s
   // for a 1 GB stream). So in the browser the reader owns the worker, and the
   // budget ends it outright: terminate(), then refuse at once.
-  const port =
-    typeof window !== "undefined" && typeof Worker !== "undefined" && pdfjs.GlobalWorkerOptions.workerSrc
-      ? new Worker(pdfjs.GlobalWorkerOptions.workerSrc, { type: "module" })
-      : undefined
+  // AQU-2551 re-review finding 1: the worker is made inside a guard. A
+  // constructor that throws (no module workers, a cross-origin URL) leaves
+  // pdf.js to make its own, with its main-thread fallback; the budget still
+  // holds, though it can then only destroy the loading task.
+  let port: Worker | undefined
+  if (typeof window !== "undefined" && typeof Worker !== "undefined" && pdfjs.GlobalWorkerOptions.workerSrc) {
+    try {
+      port = new Worker(pdfjs.GlobalWorkerOptions.workerSrc, { type: "module" })
+    } catch {
+      port = undefined
+    }
+  }
   const pdfWorker = port ? new pdfjs.PDFWorker({ port }) : undefined
-  let timedOut = false
+  /** Set when the read is given up (the budget ran out, or the worker
+   *  failed): pdf.js is then not waited for. */
+  let abandoned = false
   let timer: ReturnType<typeof setTimeout> | undefined
-  const overBudget = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      timedOut = true
+  const stopped = new Promise<never>((_, reject) => {
+    const abandon = (err: PdfReadError) => {
+      if (abandoned) return
+      abandoned = true
       port?.terminate()
-      reject(tooComplex())
-    }, budgetMs)
+      reject(err)
+    }
+    timer = setTimeout(() => abandon(tooComplex()), budgetMs)
+    // AQU-2551 re-review finding 1: pdf.js's own setup listened for this; a
+    // worker that fails to start, or whose script fails to load, fires
+    // `error`. That is the reader failing, never the PDF: refuse at once.
+    port?.addEventListener("error", () => abandon(new PdfReadError("reader", "PDF reader worker failed to start")))
   })
-  /** Ends pdf.js: politely when it is idle, at once when the budget ran out. */
+  /** Ends pdf.js: politely when it is idle, at once when the read was given up. */
   const finish = async (): Promise<void> => {
     clearTimeout(timer)
-    if (timedOut) {
+    if (abandoned) {
       void task.destroy().catch(() => {})
     } else {
       await task.destroy().catch(() => {})
@@ -197,9 +213,9 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
     }
     port?.terminate()
   }
-  overBudget.catch(() => {})
+  stopped.catch(() => {})
   const within = async <T,>(work: Promise<T>): Promise<T> => {
-    const value = await Promise.race([work, overBudget])
+    const value = await Promise.race([work, stopped])
     if (performance.now() > deadline) throw tooComplex()
     return value
   }

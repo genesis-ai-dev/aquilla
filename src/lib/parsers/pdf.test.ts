@@ -432,6 +432,16 @@ describe("review findings: right-to-left text (Nov 14)", () => {
     expect(read([{ s: " ְּבֵראִׁשית", x: 100, y: 700, w: 120 }])).toEqual(["בְּרֵאשִׁית"])
   })
 
+  it("splits a right-to-left table into its cells, row by row (re-review finding 4)", () => {
+    // the reviewer's Hebrew table as pdf.js gives it: a word a piece, its
+    // number a left-to-right piece, cells about 100 pt apart
+    expect(read([
+      rtlLine("שם", 751, 445, 13.4), rtlLine("גיל", 751, 335, 12.4), rtlLine("עיר", 751, 225, 14.3),
+      rtlLine("דוד", 726.5, 445, 13.4), { s: "12", x: 323, y: 726.5, w: 12, dir: "ltr", eol: true }, rtlLine("חיפה", 726.5, 225, 19.9),
+      rtlLine("אחרי הטבלה.", 702, 445, 54),
+    ])).toEqual(["שם", "גיל", "עיר", "דוד", "12", "חיפה", "אחרי הטבלה."])
+  })
+
   // The 58-page Word PDF draws "לֹא" as a piece already in reading order: no
   // word in it starts with a mark, which is the sign of pdf.js's reversal.
   it("leaves a right-to-left piece alone when none of its words starts with a mark", () => {

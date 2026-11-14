@@ -501,8 +501,10 @@ function layoutLines(page: PdfPageContent, script: ArabicScript): Line[] {
     const gap: number = cur?.prev ? Math.max(it.x - (cur.prev.x + cur.prev.w), cur.prev.x - (it.x + it.w)) : 0
     // A new line: the baseline moved, or a wide jump sideways (a table cell,
     // a second column). pdf.js's own end-of-line flags are not trusted, so a
-    // raised superscript stays on its line. A jump next to a right-to-left
-    // piece is that piece's own drawing order, not a jump.
+    // raised superscript stays on its line. AQU-2551 re-review finding 4: the
+    // jump is measured for right-to-left pieces too, so a Hebrew or Arabic
+    // table splits into its cells (it skipped them, and a right-to-left table
+    // came in as one paragraph).
     // AQU-2551 review finding 6: the zero-height space pdf.js adds between
     // two pieces is not a position (after a right-to-left run it sits where
     // the run began), so it never starts a line, and a jump is measured from
@@ -512,7 +514,7 @@ function layoutLines(page: PdfPageContent, script: ArabicScript): Line[] {
     const jump = from ? Math.max(it.x - (from.x + from.w), from.x - (it.x + it.w)) : 0
     const newLine = !cur
       || Math.abs(it.y - cur.y) > 0.45 * Math.max(h, cur.h)
-      || (!zeroSpace && jump > 3 * h && it.dir !== "rtl" && from?.dir !== "rtl")
+      || (!zeroSpace && jump > 3 * h)
     const sup = !!cur && !newLine && h < 0.85 * cur.h && it.y - cur.y > 0.12 * cur.h
     if (newLine || !cur) {
       cur = { y: it.y, x: it.x, right: it.x + it.w, h, size: 0, sizeChars: new Map(), text: "", prev: null, lastReal: null, rtlBalance: 0, rtl: false }

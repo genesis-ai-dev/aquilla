@@ -1104,3 +1104,31 @@ describe("the preview says a bulk upload can't be undone", () => {
     expect(screen.queryByTestId("recordings-no-undo-note")).toBeNull()
   })
 })
+
+// AQU-2435: a folder named in a script's own digits is read like its twin in
+// 0–9, by a fresh rule and by the team's saved one.
+describe("a folder in another script's digits", () => {
+  /** "Mt-ch19_v01.ogg" → "Mt-ch١٩_v٠١.ogg". */
+  const arabic = (names: readonly string[]) => names.map((n) => n.replace(/\d/g, (d) => String.fromCodePoint(0x660 + Number(d))))
+
+  it("sends the names as they are, places every file by the rule, and keeps it under the shape of its twin in 0–9", async () => {
+    review(arabic(DENSE))
+    fireEvent.click(await enabledAsk())
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(3))
+    expect(asks()).toHaveLength(1)
+    expect(asks()[0].body!.names).toEqual(arabic(DENSE))
+    expect(screen.getAllByTestId("recordings-row").map((r) => r.getAttribute("data-target"))).toEqual(["Matthew 19:1", "Matthew 19:2", "Matthew 19:3"])
+    expect(await screen.findByTestId("recordings-assistant-keep")).toHaveTextContent("Your team will keep this naming for next time.")
+    fireEvent.click(screen.getByTestId("recordings-confirm"))
+    await waitFor(() => expect(saves()).toHaveLength(1))
+    expect(saves()[0].body!.shapes).toEqual(["mt-ch#_v#"])
+  })
+
+  it("is read with the team's rule kept from the same naming in 0–9, with no call", async () => {
+    saved = { "mt-ch#_v#": RULE }
+    review(arabic(NAMES))
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(3))
+    expect(asks()).toHaveLength(0)
+    expect(within(screen.getAllByTestId("recordings-row")[0]).getByTestId("recordings-how")).toHaveTextContent("by your team's saved rule")
+  })
+})

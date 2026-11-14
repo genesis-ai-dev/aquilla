@@ -818,3 +818,64 @@ describe("asking again when the answer was refused (AQU-2496)", () => {
     expect(bodies).toHaveLength(1)
   })
 })
+
+// AQU-2435: a rule reads names through AQU-2329's digit helper, so a folder
+// named in a script's own digits is read, shaped and kept like its twin in 0–9.
+describe("names in any script's digits (AQU-2435)", () => {
+  const mat = [book("mat", "MAT", "Matthew", MAT)]
+  const ARABIC = 0x660
+  const DEVANAGARI = 0x966
+  /** The same text with its digits in another script: "Mt-ch19" → "Mt-ch١٩". */
+  const inDigits = (text: string, zero: number) => text.replace(/\d/g, (d) => String.fromCodePoint(zero + Number(d)))
+  const chapterVerse = () => parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT" } })!
+
+  it("reads Mt-ch١٩_v٠١ where it reads Mt-ch19_v01, in every script's digits", () => {
+    const rule = chapterVerse()
+    expect(applyNamingRule(rule, "Mt-ch١٩_v٠١.ogg")).toBe("MAT 19:1.ogg")
+    const paths = ["Files/Mt-ch19_v01.ogg", "Files/Mt-ch19_v30.ogg", "Files/Mt-ch22_v32.ogg"]
+    for (const zero of [ARABIC, DEVANAGARI]) {
+      expect(land(rule, paths.map((p) => inDigits(p, zero)), mat)).toEqual(["mat:19:1", "mat:19:30", "mat:22:32"])
+    }
+  })
+
+  it("reads the rule's own text and book words in either digits", () => {
+    const dated = parseNamingRule({ templates: [{ pattern: `${inDigits("2024", ARABIC)} {book}-ch{chapter}_v{verse}` }], books: { Mt: "MAT" } })!
+    expect(applyNamingRule(dated, "2024 Mt-ch19_v01.ogg")).toBe("MAT 19:1.ogg")
+    expect(applyNamingRule(dated, inDigits("2024 Mt-ch19_v01.ogg", ARABIC))).toBe("MAT 19:1.ogg")
+    const corinthians = parseNamingRule({ templates: [{ pattern: "{book}_{chapter}_{verse}" }], books: { [inDigits("1كو", ARABIC)]: "1CO" } })!
+    expect(applyNamingRule(corinthians, inDigits("1كو_3_01.ogg", ARABIC))).toBe("1CO 3:1.ogg")
+    expect(applyNamingRule(corinthians, "1كو_3_01.ogg")).toBe("1CO 3:1.ogg")
+  })
+
+  it("gives a folder in another script's digits the shape of its twin in 0–9, so a team's saved rule reads both", () => {
+    expect(nameShape("Mt-ch١٩_v٠١.ogg")).toBe("mt-ch#_v#")
+    expect(nameShape(inDigits("MAT_1_LN619.mp3", DEVANAGARI))).toBe(nameShape("MAT_1_LN619.ogg"))
+    // Digits of two scripts in one number are one number.
+    expect(nameShape(`Mt-ch${inDigits("1", ARABIC)}9_v01.ogg`)).toBe("mt-ch#_v#")
+    expect(shapesOf(["Mt-ch19_v01.ogg", inDigits("Mt-ch19_v02.ogg", ARABIC), inDigits("Mt-ch19_v03.ogg", DEVANAGARI)])).toEqual(["mt-ch#_v#"])
+  })
+
+  it("keeps a rule for a folder in another script's digits exactly when it keeps it for the twin in 0–9", () => {
+    const judged = (rule: NamingRule, paths: string[]) => {
+      const landed = landAll(rule, paths, mat)
+      return judgeRule(rule, new Set(paths.map((_, i) => i)), landed.made, landed.assignments, landed.names, landed.where)
+    }
+    // Unpadded, so folder order has to put v2 before v10 in every script.
+    const western = Array.from({ length: 20 }, (_, i) => `Files/Mt-ch5_v${i + 1}.ogg`)
+    const swapped = parseNamingRule({ templates: [{ pattern: "{book}-ch{verse}_v{chapter}" }], books: { Mt: "MAT" } })!
+    expect(judged(swapped, western).notKept).toEqual(["scattered"])
+    for (const zero of [ARABIC, DEVANAGARI]) {
+      const paths = western.map((p) => inDigits(p, zero))
+      const kept = judged(chapterVerse(), paths)
+      expect(kept.placed.size).toBe(20)
+      expect({ keep: kept.keep, notKept: kept.notKept }).toEqual({ keep: true, notKept: [] })
+      expect(judged(swapped, paths).notKept).toEqual(["scattered"])
+    }
+  })
+
+  it("sends the names as they are, in their own digits, chosen as for the twin in 0–9", () => {
+    const western = Array.from({ length: 141 }, (_, i) => `Mt-ch19_v${String(i + 1).padStart(3, "0")}.ogg`)
+    const arabic = western.map((n) => inDigits(n, ARABIC))
+    expect(sampleNames(arabic)).toEqual(sampleNames(western).map((n) => inDigits(n, ARABIC)))
+  })
+})

@@ -173,6 +173,13 @@ function normalizePresentationForms(s: string, script: ArabicScript): string {
   })
 }
 
+/** AQU-2551 re-review finding 5: a lam-alef glyph (Arial's U+FEFB) carries
+ *  its lam's vowel, and pdf.js gives it after the pair, on the alef. A bare
+ *  alef takes no vowel or shadda (only a fathatan), so marks after a lam-alef
+ *  go back on the lam: "لاَ" → "لَا", "إِلاَّ" → "إِلَّا". Run on the whole
+ *  text, as a zero-width piece can carry the marks. */
+const lamAlefMarks = (s: string) => s.replace(/\u0644\u0627([\u064C-\u0652]+)/g, "\u0644$1\u0627")
+
 /** Which language an Arabic-script document is in, as far as its yeh and heh
  *  go (re-review finding 2). */
 type ArabicScript = "arabic" | "persian" | "urdu"
@@ -268,7 +275,9 @@ class TextJoiner {
           if (Math.abs(it.y - prev.y) < 0.3 * h && gap > 0.15 * h) s += " "
         }
         s += it.s
-        prev = it
+        // AQU-2551 re-review finding 5: a zero-width piece (a shadda drawn on
+        // its own) is no position to measure the next gap from
+        if (it.w > 0 || !prev) prev = it
       }
       if (it.eol) {
         if (/\p{L}[-­]$/u.test(s)) { pendingBreak = true; continue }
@@ -522,7 +531,9 @@ function layoutLines(page: PdfPageContent, script: ArabicScript): Line[] {
     } else if (!sup && cur.prev && !cur.prev.sup && cur.prev.w > 0 && it.w > 0 && gap > 0.15 * h && !/\s$/.test(cur.text) && !/^\s/.test(it.s)) {
       cur.text += " "
     }
-    cur.prev = { ...it, sup }
+    // re-review finding 5: as in TextJoiner.join, a zero-width piece is not
+    // where the next gap is measured from, so it never joins two words
+    if (it.w > 0 || !cur.prev) cur.prev = { ...it, sup }
     if (!zeroSpace) {
       cur.lastReal = it
       cur.x = Math.min(cur.x, it.x)
@@ -710,5 +721,6 @@ export function pdfPagesToParagraphs(pages: readonly PdfPageContent[], footnote:
   const anyTags = tagged.some((t) => t.byTags)
   const layout = anyTags && tagged.every((t) => t.byTags) ? null : layoutPageBlocks(pages, joiner, footnote, script)
   const perPage = pages.map((_, i) => (tagged[i].byTags ? tagged[i].blocks : layout![i]))
-  return { paragraphs: continueAcrossPages(perPage, joiner), tagged: anyTags }
+  const paragraphs = continueAcrossPages(perPage, joiner).map((p) => ({ ...p, text: lamAlefMarks(p.text) }))
+  return { paragraphs, tagged: anyTags }
 }

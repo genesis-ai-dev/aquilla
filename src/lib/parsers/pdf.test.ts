@@ -528,6 +528,34 @@ describe("review findings: Arabic (Nov 14)", () => {
     expect(readDoc([[YEH_INI, "\uFBA7", " ", "\uFB68", HEH_MED, YEH_MED, "\uFB8F"]])).toEqual(["یہ ٹھیک"])
   })
 
+  // Re-review finding 5: vowelled Arabic in Arial, the reviewer's pieces as
+  // pdf.js gives them ("لَا إِلَهَ إِلَّا اللَّهُ"): a lam-alef glyph carries
+  // its lam's vowel, and a shadda drawn as its own zero-width piece sat
+  // between two words.
+  const at = (s: string, x: number, w: number, y = 751) => ({ s, x, y, b: 0, w, h: 12, eol: false, dir: "rtl" })
+  const VOWELLED = [
+    at("\u064E\uFEFB", 438.5, 6.5), // لَا
+    at("\u0650\u0625", 432.7, 2.5), at("\u064E\uFEDF", 430.2, 2.5), at("\u064E\uFBAB", 425.7, 4.5), // إِلَهَ
+    at("\u0650\u0625", 419.9, 2.5), at("\uFEFB", 413.3, 6.5), at("\uFC60", 413.1, 0, 752.9), // إِلَّا, its shadda a piece of its own
+    at("\uFDF2", 400.5, 9.5), // الله
+  ]
+  const WORDS = ["\u0644\u064E\u0627", "\u0625\u0650\u0644\u064E\u0647\u064E", "\u0625\u0650\u0644\u064E\u0651\u0627", "\u0627\u0644\u0644\u0647"]
+
+  it("keeps a lam-alef's vowel on the lam, and a zero-width mark piece never joins two words (re-review finding 5)", () => {
+    const text = pdfPagesToParagraphs([{ n: 1, box: { x0: 0, y0: 0, x1: 595, y1: 842 }, tree: null, items: VOWELLED }], (t) => t)
+      .paragraphs.map((p) => p.text.normalize("NFC"))
+    expect(text).toEqual([WORDS.join(" ").normalize("NFC")])
+  })
+
+  it("does the same in a tagged PDF", () => {
+    const text = pdfPagesToParagraphs([{
+      n: 1, box: { x0: 0, y0: 0, x1: 595, y1: 842 },
+      items: [{ mc: "begin", id: "p0", tag: "P" }, ...VOWELLED, { mc: "end" }],
+      tree: { role: "Root", children: [{ role: "P", children: [{ type: "content", id: "p0" }] }] },
+    }], (t) => t).paragraphs.map((p) => p.text.normalize("NFC"))
+    expect(text).toEqual([WORDS.join(" ").normalize("NFC")])
+  })
+
   it("does not reverse a right-to-left piece that holds a whole word", () => {
     const words = pdfPagesToParagraphs([{
       n: 1, box: { x0: 0, y0: 0, x1: 595, y1: 842 }, tree: null,

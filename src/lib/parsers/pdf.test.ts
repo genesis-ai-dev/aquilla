@@ -265,12 +265,81 @@ describe("a tagged PDF read by its tags", () => {
   })
 })
 
+describe("review findings (Nov 14)", () => {
+  it("keeps the text of an untagged page in a tagged PDF", async () => {
+    // the tags reach nine tenths of the text, so the PDF is read by its tags
+    const long = (n: number) => `Tagged page ${n} holds a full paragraph of ordinary text, long enough to outweigh the last page.`
+    const pdf = buildPdf({
+      pages: [
+        ...[1, 2, 3].map((n) => ({ runs: [{ text: long(n), x: 72, y: 700, tag: `t${n}` }] })),
+        { runs: [{ text: "An untagged page appended later.", x: 72, y: 700 }] },
+      ],
+      structure: [{ role: "Document", children: [1, 2, 3].map((n) => ({ role: "P", id: `t${n}` })) }],
+      untaggedPages: [3],
+    })
+    expect((await paragraphs(pdf)).map((p) => p.text)).toEqual([long(1), long(2), long(3), "An untagged page appended later."])
+  })
+
+  it("does not run a paragraph that ends in a footnote into the next page", async () => {
+    const pdf = buildPdf({
+      pages: [
+        { runs: [
+          { text: "He went home.", x: 72, y: 700, tag: "a" },
+          { text: "1", x: 150, y: 704, size: 7, tag: "mark" },
+          { text: "1 See Mark 3", x: 72, y: 100, size: 8, tag: "note" },
+        ] },
+        { runs: [{ text: "A new paragraph begins.", x: 72, y: 700, tag: "b" }] },
+      ],
+      structure: [{ role: "Document", children: [
+        { role: "P", children: [{ role: "Span", id: "a" }, { role: "Span", id: "mark" }, { role: "Note", children: [{ role: "Span", id: "note" }] }] },
+        { role: "P", id: "b" },
+      ] }],
+    })
+    expect((await paragraphs(pdf)).map((p) => p.text)).toEqual(["He went home.\\f + \\ft See Mark 3\\f*", "A new paragraph begins."])
+  })
+
+  it("keeps a paragraph that runs over three pages whole, and joins a word hyphenated across a page", async () => {
+    const pdf = buildPdf({ pages: runningPages([
+      ["Done.", "This long paragraph starts on the first page and its words are con-"],
+      ["tinued on the second page, where it fills every line of the page and"],
+      ["ends on the third page, as continued text does."],
+    ]) })
+    // "continued" also appears unbroken, so the hyphen at the page break goes
+    expect((await paragraphs(pdf)).map((p) => p.text)).toEqual([
+      "Done.",
+      "This long paragraph starts on the first page and its words are continued on the second page, where it fills every line of the page and ends on the third page, as continued text does.",
+    ])
+  })
+
+  it("finds running headers on a page whose MediaBox does not start at zero", async () => {
+    const shifted = runningPages([["First page text."], ["Second page text."], ["Third page text."]])
+      .map((p) => ({ runs: p.runs!.map((r) => ({ ...r, y: r.y + 200 })) }))
+    const pdf = buildPdf({ pages: shifted, mediaBox: [0, 200, 595, 1042] })
+    expect((await paragraphs(pdf)).map((p) => p.text)).toEqual(["First page text.", "Second page text.", "Third page text."])
+  })
+
+  it("keeps a word at a page foot that only looks like a Roman numeral", async () => {
+    const pdf = buildPdf({ pages: [{ runs: [{ text: "Body text.", x: 72, y: 700 }, { text: "civil", x: 72, y: 50 }, { text: "xiv", x: 290, y: 30 }] }] })
+    const text = (await paragraphs(pdf)).map((p) => p.text).join(" ")
+    expect(text).toContain("civil")
+    expect(text).not.toContain("xiv")
+  })
+
+  it("keeps a heading that starts with a number written with a thousands point", async () => {
+    const pdf = buildPdf({
+      pages: [{ runs: [{ text: "10.000 Jahre", x: 72, y: 700, size: 14, tag: "h" }] }],
+      structure: [{ role: "Document", children: [{ role: "H1", id: "h" }] }],
+    })
+    expect((await paragraphs(pdf)).map((p) => p.text)).toEqual(["10.000 Jahre"])
+  })
+})
+
 describe("right-to-left text", () => {
   it("puts each letter's marks back after the letter pdf.js put them before", () => {
     // pdf.js gives "בְּרֵאשִׁית" with every run of marks before its letter
     const reversed = "ְּבֵראִׁשית"
     const read = pdfPagesToParagraphs([{
-      n: 1, w: 595, h: 842, tree: null,
+      n: 1, box: { x0: 0, y0: 0, x1: 595, y1: 842 }, tree: null,
       items: [{ s: reversed, x: 100, y: 700, b: 0, w: 60, h: 11, eol: false, dir: "rtl" }],
     }], (t) => t)
     expect(read.paragraphs.map((p) => p.text)).toEqual(["בְּרֵאשִׁית"])

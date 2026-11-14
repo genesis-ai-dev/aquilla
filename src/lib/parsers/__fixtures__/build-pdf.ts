@@ -33,6 +33,10 @@ export interface PdfFixture {
   pages: PdfFixturePage[]
   /** The structure tree's top elements; absent = an untagged PDF. */
   structure?: PdfFixtureElement[]
+  /** Every page's MediaBox; default [0 0 595 842]. */
+  mediaBox?: [number, number, number, number]
+  /** Pages (0-based) that get no /StructParents: untagged pages of a tagged PDF. */
+  untaggedPages?: number[]
 }
 
 const escapePdfString = (s: string) => s.replace(/[\\()]/g, (c) => `\\${c}`)
@@ -75,9 +79,9 @@ export function buildPdf(fixture: PdfFixture): ArrayBuffer {
     const content = reserve()
     set(content, `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`)
     set(pageNums[pageIndex],
-      `<< /Type /Page /Parent ${pagesObj} 0 R /MediaBox [0 0 595 842] /Contents ${content} 0 R ` +
+      `<< /Type /Page /Parent ${pagesObj} 0 R /MediaBox [${(fixture.mediaBox ?? [0, 0, 595, 842]).join(" ")}] /Contents ${content} 0 R ` +
       `/Resources << /Font << /F1 ${font} 0 R >> /XObject << /Im1 ${image} 0 R >> >>` +
-      (tagged ? ` /StructParents ${pageIndex}` : "") + " >>")
+      (tagged && !fixture.untaggedPages?.includes(pageIndex) ? ` /StructParents ${pageIndex}` : "") + " >>")
   })
   set(pagesObj, `<< /Type /Pages /Kids [${pageNums.map((n) => `${n} 0 R`).join(" ")}] /Count ${pageNums.length} >>`)
 

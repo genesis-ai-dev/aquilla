@@ -146,7 +146,6 @@ export async function extractPdfImport(buffer: ArrayBuffer, options?: PdfParseOp
     for (let n = 1; n <= doc.numPages; n++) {
       const page = await doc.getPage(n)
       try {
-        const view = page.getViewport({ scale: 1 })
         const content = await page.getTextContent({ includeMarkedContent: true })
         const items = toPageItems(content.items as RawTextItem[])
         if (!hasText(items)) {
@@ -156,7 +155,8 @@ export async function extractPdfImport(buffer: ArrayBuffer, options?: PdfParseOp
           continue
         }
         const tree = (await page.getStructTree().catch(() => null)) as PdfStructNode | null
-        pages.push({ n, w: view.width, h: view.height, items, tree })
+        const [x0, y0, x1, y1] = page.view
+        pages.push({ n, box: { x0: Math.min(x0, x1), y0: Math.min(y0, y1), x1: Math.max(x0, x1), y1: Math.max(y0, y1) }, items, tree })
       } finally {
         page.cleanup()
       }

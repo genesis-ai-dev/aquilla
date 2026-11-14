@@ -14,7 +14,9 @@
 //    producer's tag order differs from the printed order. Running headers,
 //    footers and page numbers are Artifacts and never reached; list labels
 //    (Lbl: bullets and generated numbers) are dropped, as the Word import
-//    never sees Word's generated numbers (question 55).
+//    never sees Word's generated numbers (question 55). This is decided page
+//    by page: a page with no tags, or whose tags reach little of its text, is
+//    read by its layout, so a page added to a tagged PDF keeps its text.
 //  - An UNTAGGED PDF is read by its layout: lines from positions, paragraphs
 //    from gaps, indents and size changes. Lines in the top or bottom tenth of
 //    the page that repeat on three or more pages, and lone page numbers, are
@@ -68,8 +70,10 @@ export interface PdfStructNode {
 export interface PdfPageContent {
   /** 1-based page number. */
   n: number
-  w: number
-  h: number
+  /** The page's box in the PDF's own coordinates, which text positions use
+   *  (pdf.js `page.view`): it need not start at zero, and a rotated page's
+   *  box is not swapped. */
+  box: { x0: number; y0: number; x1: number; y1: number }
   items: PdfPageItem[]
   tree: PdfStructNode | null
 }
@@ -115,7 +119,13 @@ const clean = (s: string) => s.replace(/\s*\.{5,}\s*/g, " ").replace(/\s+/g, " "
 /** Word's heading numbers ("2.1.1.", "1.1. ", "3.1 ") are printed in a tagged
  *  PDF's heading text, not in a Lbl. Drop them, as the Word import never sees
  *  them (question 55). A bare number with no dot ("1 Corinthians") stays. */
-const stripHeadingNumber = (s: string) => s.replace(/^(?:\d+(?:\.\d+)+\.?|\d+\.)(?=\s|\p{L})\s*/u, "")
+const stripHeadingNumber = (s: string) => s.replace(/^(?:\d{1,3}(?:\.\d{1,2})+\.?|\d{1,3}\.)(?=\s|\p{L})\s*/u, "")
+
+/** Inline notes (and a layout line's raised footnote mark) at a text's end,
+ *  which say nothing about whether its sentence ended. */
+const TRAILING_NOTES = /(?:\s*\\f\s(?:(?!\\f\*)[\s\S])*\\f\*|\s*\u0001\d+\u0002)+\s*$/
+/** True when the text ends its sentence, ignoring notes after the full stop. */
+const endsSentence = (text: string) => END_PUNCT.test(text.replace(TRAILING_NOTES, "").trim())
 
 class TextJoiner {
   private readonly words = new Set<string>()
@@ -307,41 +317,56 @@ function headingContext(role: string): string | null {
   return role === "H" ? "Heading" : `Heading ${role.slice(1)}`
 }
 
+/** One page's block, from either reader. */
+interface PageBlock {
+  text: string
+  page: number
+  heading: string | null
+  /** Ordinary body text, which page continuation may join. */
+  body: boolean
+  /** The layout reader's text size; null from the tags. */
+  size: number | null
+}
+
 /** Page continuation: the first body paragraph of a page continues the last
- *  one of the previous page when that one stopped mid-sentence. */
-function continueAcrossPages<T extends { text: string; page: number }>(
-  pages: readonly T[][],
-  isBody: (block: T) => boolean,
-  sameKind: (a: T, b: T) => boolean = () => true,
-): T[] {
-  const out: T[] = []
+ *  one of the previous page when that one stopped mid-sentence. A paragraph
+ *  may run over any number of pages; a word hyphenated across the page break
+ *  is joined by the spacing rule. The layout reader only joins text of one
+ *  size, so a heading set larger at a page's top never runs into the
+ *  paragraph before it. */
+function continueAcrossPages(pages: readonly PageBlock[][], joiner: TextJoiner): PdfParagraph[] {
+  const out: (PageBlock & { endPage: number })[] = []
   for (const blocks of pages) {
     blocks.forEach((b, i) => {
       const prev = out[out.length - 1]
       if (
-        i === 0 && prev && isBody(prev) && isBody(b) && b.page === prev.page + 1 && sameKind(prev, b)
-        && !END_PUNCT.test(prev.text.replace(/\\f\*$/, "").trim())
+        i === 0 && prev && prev.body && b.body && b.page === prev.endPage + 1
+        && (prev.size === null || b.size === null || prev.size === b.size)
+        && !endsSentence(prev.text)
       ) {
-        out[out.length - 1] = { ...prev, text: clean(`${prev.text} ${b.text}`) }
+        const joined = /\p{L}[-\u00ad]$/u.test(prev.text) ? joiner.joinHyphen(prev.text, b.text)
+          : /\S[–—]$/u.test(prev.text) ? prev.text + b.text
+          : `${prev.text} ${b.text}`
+        out[out.length - 1] = { ...prev, text: clean(joined), endPage: b.page }
         return
       }
-      out.push({ ...b })
+      out.push({ ...b, endPage: b.page })
     })
   }
-  return out
+  return out.map((b) => ({ text: b.text, heading: b.heading, page: b.page })).filter((p) => p.text)
 }
 
-function readTagged(pages: readonly PdfPageContent[], joiner: TextJoiner, footnote: FootnoteMarker): { paragraphs: PdfParagraph[]; coverage: number } {
+/** The tagged reader's blocks for one page, and whether its tags reach the
+ *  page's text (MIN_TAG_COVERAGE). */
+function taggedPageBlocks(page: PdfPageContent, joiner: TextJoiner, footnote: FootnoteMarker): { blocks: PageBlock[]; byTags: boolean } {
+  if (!page.tree || (page.tree.children?.length ?? 0) === 0) return { blocks: [], byTags: false }
   const coverage: Coverage = { tagged: 0, untagged: 0 }
-  const perPage = pages.map((p) => readTaggedPage(p, joiner, footnote, coverage))
-  const joined = continueAcrossPages(perPage, (b) => b.role === "P")
-  const paragraphs = joined.map((b): PdfParagraph => {
+  const blocks = readTaggedPage(page, joiner, footnote, coverage).map((b): PageBlock => {
     const heading = headingContext(b.role)
-    const text = heading ? stripHeadingNumber(b.text) : b.text
-    return { text, heading, page: b.page }
-  }).filter((p) => p.text)
+    return { text: heading ? stripHeadingNumber(b.text) : b.text, page: b.page, heading, body: b.role === "P", size: null }
+  })
   const total = coverage.tagged + coverage.untagged
-  return { paragraphs, coverage: total ? coverage.tagged / total : 0 }
+  return { blocks, byTags: blocks.length > 0 && total > 0 && coverage.tagged / total >= MIN_TAG_COVERAGE }
 }
 
 // ─── layout ─────────────────────────────────────────────────────────────────
@@ -414,33 +439,38 @@ const mostCommon = (values: number[]): number | null => {
   return best
 }
 
-interface LayoutBlock { text: string; page: number; size: number; footnote: boolean }
+/** A page number: digits, or a Roman numeral ("civil" is not one). */
+const PAGE_NUMBER = /^(?:page\s*)?(?:\d+|(?=[ivxlcdm]+$)m{0,4}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3}))$/i
 
-function readLayout(pages: readonly PdfPageContent[], joiner: TextJoiner, footnote: FootnoteMarker): PdfParagraph[] {
+/** The layout reader's blocks, page by page, before page continuation. */
+function layoutPageBlocks(pages: readonly PdfPageContent[], joiner: TextJoiner, footnote: FootnoteMarker): PageBlock[][] {
   const pagesLines = pages.map(layoutLines)
   // repeated top/bottom lines: running headers, footers, page numbers
-  const inBand = (l: Line, p: PdfPageContent) => l.y > p.h * 0.9 || l.y < p.h * 0.1
+  const inBand = (l: Line, p: PdfPageContent) => {
+    const tenth = (p.box.y1 - p.box.y0) * 0.1
+    return l.y > p.box.y1 - tenth || l.y < p.box.y0 + tenth
+  }
   const seen = new Map<string, number>()
   pagesLines.forEach((lines, i) => {
     for (const l of lines) if (inBand(l, pages[i])) seen.set(runKey(l.text), (seen.get(runKey(l.text)) ?? 0) + 1)
   })
   const minRepeat = Math.min(3, pages.length)
   const isRunning = (l: Line, p: PdfPageContent) =>
-    inBand(l, p) && ((pages.length > 1 && (seen.get(runKey(l.text)) ?? 0) >= minRepeat) || /^(page\s*)?([0-9]+|[ivxlc]+)$/i.test(l.text))
+    inBand(l, p) && ((pages.length > 1 && (seen.get(runKey(l.text)) ?? 0) >= minRepeat) || PAGE_NUMBER.test(l.text))
   // body size: the size carrying the most characters
   const sizeChars = new Map<number, number>()
   for (const lines of pagesLines) for (const l of lines) sizeChars.set(l.size, (sizeChars.get(l.size) ?? 0) + l.text.length)
   let body = 0, bodyChars = -1
   for (const [size, chars] of sizeChars) if (chars > bodyChars) { body = size; bodyChars = chars }
 
-  const perPage: LayoutBlock[][] = pagesLines.map((lines, i) => {
+  return pagesLines.map((lines, i): PageBlock[] => {
     const p = pages[i]
     const kept = lines.filter((l) => !isRunning(l, p))
     // the column box: the left edge most body lines start at, the right edge most reach
     const bodyLines = kept.filter((l) => l.size === body)
     const colLeft = mostCommon(bodyLines.map((l) => Math.round(l.x))) ?? 0
     const rights = bodyLines.map((l) => l.right).sort((a, b) => a - b)
-    const colRight = rights.length ? rights[Math.floor(rights.length * 0.9)] : p.w
+    const colRight = rights.length ? rights[Math.floor(rights.length * 0.9)] : p.box.x1
     const pitch = new Map<number, number[]>()
     for (let k = 1; k < kept.length; k++) {
       const a = kept[k - 1], b = kept[k]
@@ -462,14 +492,14 @@ function readLayout(pages: readonly PdfPageContent[], joiner: TextJoiner, footno
         const sizeChange = Math.abs(l.size - prev.size) > 0.12 * Math.max(l.size, prev.size)
         const newColumn = gap < -1
         // a paragraph cut by a column foot mid-sentence runs on at the next column's top
-        const runsOn = newColumn && l.size === prev.size && !END_PUNCT.test(prev.text)
+        const runsOn = newColumn && l.size === prev.size && !endsSentence(prev.text)
         const bigGap = gap > lead(l.size) * 1.3 || (newColumn && !runsOn)
         const startsItem = /^([•●▪◦○■\-–]|\(?\d{1,2}[.)]|\(?[a-z][.)])\s/.test(l.text)
         // a first-line indent after a line that stopped short (a hanging
         // indent's run-on lines follow a FULL line, so they stay together)
         const prevShort = prev.right < colRight - 0.05 * (colRight - colLeft)
         const indentIn = l.x - colLeft > 0.8 * l.size && prev.x - colLeft < 0.3 * l.size && prevShort
-        const shortPrev = prev.right < colRight - 0.12 * (colRight - colLeft) && END_PUNCT.test(prev.text)
+        const shortPrev = prev.right < colRight - 0.12 * (colRight - colLeft) && endsSentence(prev.text)
         const tocPrev = /\.{4,}\s*\d+$/.test(prev.text)
         brk = sizeChange || bigGap || startsItem || indentIn || shortPrev || tocPrev
       }
@@ -505,22 +535,19 @@ function readLayout(pages: readonly PdfPageContent[], joiner: TextJoiner, footno
     }
     return built
       .filter((b) => !(b.footnote && b.used))
-      .map((b) => ({ text: b.text.replace(/\u0001(\d+)\u0002/g, "$1"), page: p.n, size: b.size, footnote: b.footnote }))
+      .map((b): PageBlock => ({ text: b.text.replace(/\u0001(\d+)\u0002/g, "$1"), page: p.n, heading: null, body: !b.footnote, size: b.size }))
       .filter((b) => b.text)
   })
-  // Continuation only joins text of one size, so a heading set larger at the
-  // top of a page is never run into the paragraph before it.
-  return continueAcrossPages(perPage, (b) => !b.footnote, (a, b) => a.size === b.size)
-    .map((b) => ({ text: b.text, heading: null, page: b.page }))
 }
 
-/** Read the pages' paragraphs: by tags when the PDF is tagged and its tags
- *  cover the text, otherwise by layout. */
+/** Read the pages' paragraphs. Each page is read by its tags when it has them
+ *  and they reach its text, otherwise by its layout, so a page added to a
+ *  tagged PDF without tags keeps its text. */
 export function pdfPagesToParagraphs(pages: readonly PdfPageContent[], footnote: FootnoteMarker): PdfReadResult {
   const joiner = new TextJoiner(pages)
-  if (pages.some((p) => p.tree && (p.tree.children?.length ?? 0) > 0)) {
-    const tagged = readTagged(pages, joiner, footnote)
-    if (tagged.coverage >= MIN_TAG_COVERAGE && tagged.paragraphs.length > 0) return { paragraphs: tagged.paragraphs, tagged: true }
-  }
-  return { paragraphs: readLayout(pages, joiner, footnote), tagged: false }
+  const tagged = pages.map((p) => taggedPageBlocks(p, joiner, footnote))
+  const anyTags = tagged.some((t) => t.byTags)
+  const layout = anyTags && tagged.every((t) => t.byTags) ? null : layoutPageBlocks(pages, joiner, footnote)
+  const perPage = pages.map((_, i) => (tagged[i].byTags ? tagged[i].blocks : layout![i]))
+  return { paragraphs: continueAcrossPages(perPage, joiner), tagged: anyTags }
 }

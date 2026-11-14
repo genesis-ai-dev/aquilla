@@ -460,8 +460,10 @@ describe("moving a take inside its line (AQU-2215)", () => {
     it("shortens back to no pause at all on the left", () => {
       const slot = slotOf(cells, "v2")
       expect(leadSecForMove(slot, slot.startSec)).toBe(0)
-      // Past the line's start: a take never begins before the line it performs.
-      expect(leadSecForMove(slot, slot.startSec - 5)).toBe(0)
+      // AQU-2432 (Sam, Nov 6): past the line's start, over the end of the take
+      // before it — a place below 0 (the move clamp holds it to that take's
+      // start, and the programme holds it there again on reading).
+      expect(leadSecForMove(slot, slot.startSec - 1)).toBeCloseTo(-1, 5)
     })
 
     it("reads a nudge under the pause threshold as no pause, exactly as the layout does", () => {

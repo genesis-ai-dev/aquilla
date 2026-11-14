@@ -21,7 +21,7 @@
 // and hatched, as board 56's chopped version drew a hold). Following the
 // source its pieces sit end to end, which is exactly the one strip above.
 
-import { useEffect, type MouseEvent as ReactMouseEvent } from "react"
+import { useContext, useEffect, useState, type MouseEvent as ReactMouseEvent } from "react"
 import { Pause, Scissors } from "lucide-react"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -38,7 +38,8 @@ import {
 } from "@/lib/timeline/film-strip"
 import { pieceHeldSec, visibleFilmPieceStrips, type FilmPiece } from "@/lib/timeline/film-pieces"
 import { useRowMetrics } from "./useRowMetrics"
-import { useFilmFrames } from "./useFilmFrames"
+import { FilmFramesContext, useFilmFrames } from "./useFilmFrames"
+import { useTimelineOriginPx } from "./timeline-origin"
 
 export interface FilmTrackLaneProps {
   /** The film as linked (`coreMediaUrl`), and what resolving an uploaded one
@@ -105,6 +106,12 @@ export function FilmTrackLane({
 }: FilmTrackLaneProps) {
   const t = useT()
   const { chipH } = useRowMetrics()
+  // Drawn inside one column of the horizontal list, the lane's left edge is
+  // that column's start, not 0:00. The strip and the pieces' box are placed
+  // on the canvas's axis less that origin, as every chip is; what sits inside
+  // them is measured from their own left edge, which stays at 0:00. A click
+  // reads the box's own rect, so it is right in any column.
+  const originPx = useTimelineOriginPx()
   const { bandPx, pictureH } = filmStripRows(chipH)
   const tilePx = filmTileWidthPx(pictureH)
   const cut = pieces != null
@@ -126,8 +133,13 @@ export function FilmTrackLane({
       : []
   const piecesEndPx = cut && pieces!.length > 0 ? (pieces![pieces!.length - 1].atSec + pieces![pieces!.length - 1].lenSec) * pxPerSec : 0
 
-  const frames = useFilmFrames({ src, fileId, projectId, session, enabled: !frameFor })
-  const pictureFor = frameFor ?? frames.frameFor
+  // Inside the editor the frames are the editor's (`FilmFramesContext`): one
+  // grabber for every column's copy of this lane. Alone (its own tests), the
+  // lane fetches its own.
+  const shared = useContext(FilmFramesContext)
+  const [owner] = useState(() => ({}))
+  const frames = useFilmFrames({ src: shared ? "" : src, fileId, projectId, session, enabled: !frameFor && !shared })
+  const pictureFor = frameFor ?? (shared ? shared.frameFor : frames.frameFor)
   // Ask for the tiles in view, and only those. Keyed on their moments, so a
   // render that changes nothing about them asks for nothing new. A held
   // piece's tiles share its last frame, so it costs one.
@@ -136,9 +148,16 @@ export function FilmTrackLane({
     : tiles.map((tile) => tile.sec)
   ).join(",")
   const want = frames.want
+  const wantFor = shared?.wantFor
   useEffect(() => {
-    want(tileSecs ? tileSecs.split(",").map(Number) : [])
-  }, [want, tileSecs])
+    const secs = tileSecs ? tileSecs.split(",").map(Number) : []
+    if (!wantFor) {
+      want(secs)
+      return
+    }
+    wantFor(owner, secs)
+    return () => wantFor(owner, [])
+  }, [want, wantFor, owner, tileSecs])
 
   const seekFromClick = (e: ReactMouseEvent<HTMLDivElement>) => {
     if (!onSeekSec || !(pxPerSec > 0)) return
@@ -196,7 +215,7 @@ export function FilmTrackLane({
       className={summary ? "relative h-full" : `relative ${TL_ROW_H_CLASS} border-b border-border`}
       style={filmTrackHueVars()}
     >
-      {frames.grabber}
+      {shared ? null : frames.grabber}
       {stripPx > 0 && (
         <div
           data-testid="tl-film-strip"
@@ -206,7 +225,7 @@ export function FilmTrackLane({
           onClick={seekFromClick}
           className={`absolute ${TL_CHIP_BOX_CLASS} flex cursor-pointer flex-col overflow-hidden`}
           style={{
-            left: 0,
+            left: `${-originPx}px`,
             // Board 56: like every chip, 2 px short of its end.
             width: `${Math.max(4, stripPx - 2)}px`,
             borderRadius: `${FILM_STRIP_RADIUS_PX}px`,
@@ -232,8 +251,8 @@ export function FilmTrackLane({
           role="img"
           aria-label={t("editor.timeline.filmStripAria", { name })}
           onClick={seekFromClick}
-          className="absolute inset-y-0 left-0 cursor-pointer"
-          style={{ width: `${piecesEndPx}px` }}
+          className="absolute inset-y-0 cursor-pointer"
+          style={{ left: `${-originPx}px`, width: `${piecesEndPx}px` }}
         >
           {pieceStrips.map(({ piece, leftPx, widthPx, heldFromPx, tiles: pieceTiles }) => (
             <div

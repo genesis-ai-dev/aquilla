@@ -121,7 +121,7 @@ export function ImportSubtitlesDialog({ open, textFileName, filmUrl, onConfirm, 
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel() }}>
-      <DialogContent data-testid="import-subtitles-dialog">
+      <DialogContent data-testid="import-subtitles-dialog" data-media-editor="">
         <DialogHeader>
           <DialogTitle>{t("editor.timeline.subtitleSourceTitle")}</DialogTitle>
           <DialogDescription>
@@ -173,7 +173,7 @@ export function ImportSubtitlesDialog({ open, textFileName, filmUrl, onConfirm, 
         ) : (
           <FileDropBox className="gap-2" testId="import-subtitles-drop" onFile={(file) => void handleFile(file)}>
             <label>
-              <span className="inline-flex cursor-pointer items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent">
+                <span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent">
                 {t("editor.timeline.subtitleSourceChoose")}
               </span>
               <input

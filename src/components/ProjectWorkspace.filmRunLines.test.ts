@@ -178,10 +178,12 @@ describe("the workspace and the strip take their lists from those helpers (AQU-2
   }
 
   it("the film is named with the lines Play plays, and for the file on screen", () => {
-    // Every line of the file Play plays: `playbackCells` built from the whole
-    // of `timelineLines` rather than one chapter's `timelineCells`.
+    // Every line of the file Play plays. Since dev's whole-book timeline
+    // (Nov 13) the timeline's lines are every chapter's (`timelineCells` IS
+    // `timelineLines`), so the film's lines are `playbackCells` themselves.
+    expect(workspace).toContain("const timelineCells = timelineLines")
     expect(workspace).toContain("() => recordingsLines(timelineCells, audioCueCells, timingMode === \"audioFirst\"),")
-    expect(workspace).toContain("() => recordingsLines(timelineLines, audioCueCells, timingMode === \"audioFirst\"),")
+    expect(workspace).toContain("const filmLines = playbackCells")
     expect(workspace).toContain("() => programmeFilmFor(filmBehind, filmLines),")
     expect(workspace).toContain("setProgrammeFilm(programmeFilm, programmeFilmFileId)")
   })

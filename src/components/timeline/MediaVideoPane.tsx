@@ -64,6 +64,7 @@ import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { VIDEO_END_GUARD_SEC, VIDEO_PAUSED_SNAP_SEC, videoDriftBarSec, videoSyncAction } from "./video-sync"
 import { filmMomentAt, type FilmPiece } from "@/lib/timeline/film-pieces"
 import { nextScrubSeek } from "./video-seek-coalesce"
+import { useVideoSeek, type VideoSeekStore } from "./video-seek-store"
 import {
   browserPlaysHls,
   forgetStallSample,
@@ -123,7 +124,7 @@ export interface MediaVideoPaneProps {
    *  that forgot is cheaper than finding that out on screen. */
   fileId: string
   cells: CellData[]
-  /** A nonce-keyed seek from the timeline. Applied unconditionally, because the
+  /** Nonce-keyed seeks from the timeline. Applied unconditionally, because the
    *  queue drops seeks in several ordinary cases (no session, scrubbing into
    *  the trailing pad, a gap no section owns) and the picture must still move.
    *
@@ -134,7 +135,7 @@ export interface MediaVideoPaneProps {
    *  press site would sound the old position first and jump afterwards. Carried
    *  here, the start goes through `requestPlayWhenReady`, which already waits
    *  on `seeked`/`canplay`, so the first frame heard is the cue's. */
-  seekSec?: { sec: number; nonce: number; play?: boolean } | null
+  seek?: VideoSeekStore
   /** A nonce-keyed play/pause from the timeline (Space). Deliberately a TOGGLE
    *  rather than a desired state: the picture keeps its native controls in the
    *  standalone arrangement, so anything stateful would drift out of step with
@@ -218,7 +219,7 @@ export function MediaVideoPane({
   session,
   fileId,
   cells,
-  seekSec,
+  seek,
   togglePlay,
   suspended,
   onVideoTime,
@@ -1028,6 +1029,7 @@ export function MediaVideoPane({
   }, [followsRecordings, queueVolume, ownVolume, mediaEpoch])
 
   // An explicit seek from the timeline. Applied whatever the queue thinks.
+  const seekSec = useVideoSeek(seek)
   const seekNonce = seekSec?.nonce
   const seekTarget = seekSec?.sec
   /** AQU-1117: whether THIS seek also asked the picture to start. Read through
@@ -1615,7 +1617,7 @@ export function MediaVideoPane({
           <div
             aria-hidden
             data-testid="video-pane-youtube-click-layer"
-            className="absolute inset-0 z-[5] cursor-pointer"
+            className="absolute inset-0 z-[5]"
             onClick={onPictureClick}
           />
         )}

@@ -14,6 +14,7 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 
 vi.mock("@/lib/audio/prefetch", () => ({
   useModelStatus: () => ({ kind: "idle" }),
+  modelWeightsOnDevice: (status: { kind: string }) => status.kind === "ready" || status.kind === "loading",
 }))
 
 const generated = vi.hoisted(() => [] as Array<Record<string, unknown>>)

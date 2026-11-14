@@ -92,6 +92,17 @@ describe("the file's own pace", () => {
     const cells = [line("d", "y".repeat(42))]
     expect(standInEstimator(cells)(cells[0])).toBeCloseTo(42 / PACE_ALPHABETIC_CPS, 5)
   })
+
+  it("measures a line the same way once the whitespace and the script are folded together", () => {
+    for (const text of ["In the  beginning", "耶和华对何西阿说", "دعني أسألك سؤالاً", "a\u00A0b"]) {
+      const cells = [line("a", text)]
+      const collapsed = standInText(cells[0])
+      const expected = standInLenSec(collapsed, defaultPaceCps(collapsed))
+      expect(standInEstimator(cells)(cells[0])).toBeCloseTo(expected, 5)
+    }
+    // A line with no words has nothing to read a stand-in from (Nov 5, group D).
+    expect(standInEstimator([line("a", "")])(line("a", ""))).toBeNull()
+  })
 })
 
 // Nov 5 (group D): an imported media section's `original` is its file's name,

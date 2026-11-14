@@ -96,7 +96,8 @@ function renderLine(url: string, level: number, splitLines: NonNullable<Actions[
 }
 
 const rowEl = () => document.querySelector('[data-cell-id="line-a"]') as HTMLElement
-const openMenu = () => fireEvent.click(within(rowEl()).getByTestId("cell-menu-line-a"))
+// Dev (Nov 13): the source column itself is the menu's trigger, on a right-click.
+const openMenu = () => fireEvent.contextMenu(within(rowEl()).getByTestId("cell-menu-line-a"))
 const actions = (canSplit: boolean) => ({
   canSplit, block: null, onSplitIntoLines: vi.fn<NonNullable<Actions["splitLines"]>["onSplitIntoLines"]>(), onSplitAtPauses: vi.fn(),
 })

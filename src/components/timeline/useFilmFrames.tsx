@@ -2,7 +2,7 @@
 // ever seeked, that draws each tile's moment into a small picture. See
 // lib/timeline/film-frames for why frames come from here and what they cost.
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { readAtVersion } from "@/hooks/useActiveCellStore"
 import { useHlsVideo } from "@/hooks/useHlsVideo"
 import { useMediaPictureUrl } from "@/hooks/useMediaPictureUrl"
@@ -271,4 +271,37 @@ export function useFilmFrames({
   ) : null
 
   return { frameFor, want, grabber }
+}
+
+/**
+ * The editor's one set of film frames, shared by every copy of the film's lane.
+ *
+ * The timeline draws its lanes in columns (the horizontal list), and each
+ * mounted column draws its own copy of the film's lane over its own stretch of
+ * time. A grabber in each copy would load the film once per column and mint a
+ * clip address per column. So the editor holds the one `useFilmFrames`,
+ * renders its grabber once, and hands the lanes this: the pictures, and a way
+ * for each copy to say which moments IT shows. The queue fetches them all.
+ */
+export interface FilmFrameSource {
+  frameFor(sec: number): string | null
+  /** This copy's moments in view, replacing its last; none, when it goes. */
+  wantFor(owner: object, secs: readonly number[]): void
+}
+
+export const FilmFramesContext = createContext<FilmFrameSource | null>(null)
+
+export function useSharedFilmFrames(frames: FilmFrames): FilmFrameSource {
+  const ownersRef = useRef(new Map<object, readonly number[]>())
+  const { frameFor, want } = frames
+  const wantFor = useCallback(
+    (owner: object, secs: readonly number[]) => {
+      const owners = ownersRef.current
+      if (secs.length === 0) owners.delete(owner)
+      else owners.set(owner, secs)
+      want([...owners.values()].flat())
+    },
+    [want],
+  )
+  return useMemo(() => ({ frameFor, wantFor }), [frameFor, wantFor])
 }

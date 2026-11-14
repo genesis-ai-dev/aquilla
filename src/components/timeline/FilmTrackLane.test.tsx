@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { FilmTrackLane } from "./FilmTrackLane"
-import { captureSeekSec } from "./useFilmFrames"
+import { TimelineOrigin } from "./timeline-origin"
+import { captureSeekSec, FilmFramesContext, type FilmFrameSource } from "./useFilmFrames"
 
 // AQU-2253 (board 56): the film as one strip on its own clock.
 describe("FilmTrackLane", () => {
@@ -159,6 +160,64 @@ describe("FilmTrackLane — an imported film, cut into its lines' pieces", () =>
     expect(screen.getByTestId("tl-film-lane")).toHaveAttribute("data-film-kind", "one-strip")
     expect(screen.queryAllByTestId("tl-film-piece")).toHaveLength(0)
     expect(parseFloat(screen.getByTestId("tl-film-strip").style.width)).toBeCloseTo(27.08 * 40 - 2)
+  })
+})
+
+// Merged onto dev's horizontal list (Nov 14): the timeline draws its lanes in
+// 2048 px columns, each placed from its own left edge (`useTimelineOriginPx`),
+// and every mounted column draws its own copy of this lane.
+describe("FilmTrackLane — in one column of the timeline", () => {
+  const pieces = [
+    { cellId: "a", atSec: 0, lenSec: 3.5, filmStartSec: 0.5, filmEndSec: 4.0 },
+    { cellId: "b", atSec: 60, lenSec: 6, filmStartSec: 4.6, filmEndSec: 8.8 },
+  ]
+  const lane = (over: Partial<React.ComponentProps<typeof FilmTrackLane>> = {}) => (
+    <FilmTrackLane
+      src="http://127.0.0.1:5540/showcase-film.webm" fileId="ep1" filmSec={120} pxPerSec={40}
+      viewStartSec={51.2} viewEndSec={102.4} name="showcase-film.webm" frameFor={() => null} {...over}
+    />
+  )
+
+  it("the strip is placed from the column's start, as every chip is", () => {
+    render(<TimelineOrigin px={2048}>{lane()}</TimelineOrigin>)
+    const strip = screen.getByTestId("tl-film-strip")
+    expect(strip.style.left).toBe("-2048px")
+    expect(parseFloat(strip.style.width)).toBeCloseTo(120 * 40 - 2)
+  })
+
+  it("so are an imported film's pieces, and each piece keeps its slot", () => {
+    render(<TimelineOrigin px={2048}>{lane({ pieces })}</TimelineOrigin>)
+    expect(screen.getByTestId("tl-film-strip").style.left).toBe("-2048px")
+    // Only the piece in this column's stretch is drawn, at its canvas slot
+    // inside a box that starts at 0:00: 60 s in is 352 px into the column.
+    const chips = screen.getAllByTestId("tl-film-piece")
+    expect(chips.map((c) => c.getAttribute("data-cell-id"))).toEqual(["b"])
+    expect(parseFloat(chips[0].style.left)).toBeCloseTo(60 * 40)
+  })
+
+  it("a click in a later column still seeks to the moment under it", () => {
+    const onSeekSec = vi.fn()
+    render(<TimelineOrigin px={2048}>{lane({ onSeekSec })}</TimelineOrigin>)
+    const strip = screen.getByTestId("tl-film-strip")
+    // The strip's box starts at 0:00, off the column's left edge.
+    strip.getBoundingClientRect = () => ({ left: -1948, top: 0, width: 4798, height: 46, right: 2850, bottom: 46, x: -1948, y: 0, toJSON: () => ({}) })
+    fireEvent.click(strip, { clientX: -1948 + 70 * 40 })
+    expect(onSeekSec).toHaveBeenCalledWith(70)
+  })
+
+  it("inside the editor, the frames are the editor's: no grabber of its own, and it asks for its own tiles", () => {
+    const wantFor = vi.fn()
+    const source: FilmFrameSource = { frameFor: () => null, wantFor }
+    const { unmount } = render(
+      <FilmFramesContext.Provider value={source}>{lane({ frameFor: undefined })}</FilmFramesContext.Provider>,
+    )
+    expect(screen.queryByTestId("tl-film-grabber")).toBeNull()
+    expect(wantFor).toHaveBeenCalled()
+    const [owner, secs] = wantFor.mock.calls.at(-1)!
+    expect(secs.length).toBeGreaterThan(0)
+    expect(secs.every((sec: number) => sec >= 50 && sec <= 104)).toBe(true)
+    unmount()
+    expect(wantFor).toHaveBeenLastCalledWith(owner, [])
   })
 })
 

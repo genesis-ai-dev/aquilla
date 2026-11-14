@@ -60,6 +60,7 @@ vi.mock("@/hooks/useHlsVideo", () => ({
 
 import type { CellData } from "@/hooks/useCells"
 import { MediaVideoPane } from "./MediaVideoPane"
+import { createVideoSeekStore } from "./video-seek-store"
 import { SEEK_STUCK_MS } from "./video-stall"
 import { getVideoBuffering, resetVideoClockForTests } from "@/lib/timeline/video-clock"
 
@@ -79,7 +80,8 @@ const tick = (n = 1) => act(() => { vi.advanceTimersByTime(1000 * n) })
 
 /** A film the person pressed Play on (standalone, following the source). */
 function mount(src = "https://cdn/episode.webm") {
-  const props = { src, fileId: "f1", cells, onVideoTime: vi.fn(), onVideoPlaying: vi.fn() }
+  const seeks = createVideoSeekStore()
+  const props = { src, fileId: "f1", cells, onVideoTime: vi.fn(), onVideoPlaying: vi.fn(), seek: seeks }
   const view = render(<MediaVideoPane {...props} />)
   const writes: number[] = []
   const equip = (video: HTMLVideoElement, canPlayHls = "") => {
@@ -104,8 +106,7 @@ function mount(src = "https://cdn/episode.webm") {
   const video = equip(screen.getByTestId("video-pane-media") as HTMLVideoElement)
   view.rerender(<MediaVideoPane {...props} togglePlay={{ nonce: 1 }} />)
   /** The person (or the bar) asks the picture to go to `sec`. */
-  let nonce = 0
-  const seekTo = (sec: number) => view.rerender(<MediaVideoPane {...props} togglePlay={{ nonce: 1 }} seekSec={{ sec, nonce: ++nonce }} />)
+  const seekTo = (sec: number) => act(() => seeks.request(sec))
   /** The element starts a seek of its own to `sec`, as a write would. */
   const seeking = (sec: number) => {
     Object.defineProperty(video, "seeking", { value: true, configurable: true, writable: true })

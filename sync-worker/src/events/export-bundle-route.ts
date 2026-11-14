@@ -32,7 +32,8 @@ import { verifyTokenForProject } from "../auth"
 import { withCors } from "../cors"
 import { ROLE } from "./role-policy"
 import { resolveExportFloor } from "./export-floor"
-import { parseUsfmLossless, serializeUsfmLossless } from "../lib/usfm-lossless"
+import { parseUsfmLossless } from "../lib/usfm-lossless"
+import { serializeUsfmWithLayout } from "../../../db/shared/usfm-layout"
 import { buildUsfmExportPlan } from "./usfm-export-plan"
 import { buildPlainTextExport } from "./plaintext-export"
 import { makeZip, type ZipEntry } from "../lib/zip"
@@ -160,7 +161,7 @@ export async function handleExportBundleRequest(
       )
     }
 
-    const out = serializeUsfmLossless(parseUsfmLossless(original), overrides, edits)
+    const out = serializeUsfmWithLayout(parseUsfmLossless(original), overrides, edits)
     entries.push({
       name: uniqueZipEntryName(sfmName(meta?.name ?? "", file_id), usedNames),
       data: enc.encode(out),

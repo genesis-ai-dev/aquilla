@@ -364,6 +364,7 @@ function fidelityFor(fileType: FileType): RoundTripFidelity {
     case "srt":
     case "sbv":
       return "content-only"
+    case "pdf":
     case "audio":
     case "video":
       return "preserved-only"

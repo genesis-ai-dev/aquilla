@@ -3852,7 +3852,7 @@ export const ar: Catalog = {
   "importExport.upload.categoryTranslation": "الترجمة",
   "importExport.upload.formatsTranslation": "XLIFF/XLF وTMX وCSV/TSV",
   "importExport.upload.categoryDocuments": "المستندات",
-  "importExport.upload.formatsDocuments": "DOCX وTXT وMD وHTML وEPUB وJSON/ARB وPPTX وIDML (InDesign)",
+  "importExport.upload.formatsDocuments": "DOCX وPDF وTXT وMD وHTML وEPUB وJSON/ARB وPPTX وIDML (InDesign)",
   "importExport.upload.categoryLocalization": "التوطين",
   "importExport.upload.formatsLocalization": "PO/POT، وخصائص Java",
   "importExport.upload.categorySubtitles": "الترجمة المصاحبة",

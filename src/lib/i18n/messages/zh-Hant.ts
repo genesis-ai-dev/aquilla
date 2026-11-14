@@ -3854,7 +3854,7 @@ export const zh_Hant: Catalog = {
   "importExport.upload.categoryTranslation": "翻譯",
   "importExport.upload.formatsTranslation": "XLIFF/XLF、TMX、CSV/TSV",
   "importExport.upload.categoryDocuments": "文件",
-  "importExport.upload.formatsDocuments": "DOCX、TXT、MD、HTML、EPUB、JSON/ARB、PPTX、IDML（InDesign）",
+  "importExport.upload.formatsDocuments": "DOCX、PDF、TXT、MD、HTML、EPUB、JSON/ARB、PPTX、IDML（InDesign）",
   "importExport.upload.categoryLocalization": "在地化",
   "importExport.upload.formatsLocalization": "PO/POT、Java properties",
   "importExport.upload.categorySubtitles": "字幕",

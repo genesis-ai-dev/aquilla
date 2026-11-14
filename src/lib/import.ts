@@ -834,7 +834,7 @@ export async function prepareImportFile(
     // or an XLIFF named .xml by an upstream tool, is not flattened as prose.
     if (isMediaFileType(extensionType)) return { fileType: extensionType, results: [] }
     try {
-      if (extensionType === "docx" || extensionType === "pptx" || extensionType === "idml" || extensionType === "epub") {
+      if (extensionType === "docx" || extensionType === "pdf" || extensionType === "pptx" || extensionType === "idml" || extensionType === "epub") {
         return preparedParsedFile(
           file,
           extensionType,
@@ -904,6 +904,10 @@ export async function prepareImportFile(
       // discards its source-artifact and locator contract and can only produce
       // a non-round-trippable "custom" import.
       if (extensionType === "idml") throw error
+      // AQU-2551: a PDF the reader refuses (scanned, empty, locked, damaged)
+      // is told why. The sandbox cannot read a scan or open a locked file
+      // either, and would only make a slower, different guess at the rest.
+      if (extensionType === "pdf") throw error
       if (!ctx.identityToken) throw error
       return prepareSandboxImport(file, { ...ctx, identityToken: ctx.identityToken }, error)
     }
@@ -2895,6 +2899,20 @@ export async function parseFile(
       const strings = await extractDocxStrings(buffer, { cellUnit: options?.cellUnit })
       // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
       return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "docx" }]
+    }
+    case "pdf": {
+      // AQU-2551: pdf.js loads only now, and parses in its own worker.
+      const buffer = await file.arrayBuffer()
+      const { readPdfImport } = await import("./import/pdf-import")
+      const read = await readPdfImport(buffer, { cellUnit: options?.cellUnit })
+      return [{
+        name: file.name,
+        strings: read.strings,
+        rawBytes: buffer,
+        rawSourceFormat: "pdf",
+        roundTripFidelity: "preserved-only",
+        ...(read.importNotices.length ? { importNotices: read.importNotices } : {}),
+      }]
     }
     case "pptx": {
       const buffer = await file.arrayBuffer()

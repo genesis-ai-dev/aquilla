@@ -26,7 +26,7 @@ import type { CameraState } from "@/lib/sync/cells-read-types"
  * unnoticed: nothing type-errored, the values simply failed every predicate
  * that tests membership of a literal set.
  */
-export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "epub" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "codex" | "source" | "custom"
+export type FileType = "md" | "docx" | "pdf" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "epub" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "codex" | "source" | "custom"
 
 /** File types whose parsers produce scripture-style sections (globalReferences
  *  populated, section labels meaningful).
@@ -1471,6 +1471,8 @@ export const FILE_TYPE_BY_EXTENSION: Readonly<Record<string, FileType>> = {
   md: "md",
   markdown: "md",
   docx: "docx",
+  // AQU-2551: read in the browser by pdf.js; never sent to the AI sandbox.
+  pdf: "pdf",
   pptx: "pptx",
   idml: "idml",
   xlsx: "xlsx",

@@ -26,6 +26,7 @@ describe("source artifact format registry", () => {
       "obs",
       "obs-package",
       "paratext-project",
+      "pdf",
       "po",
       "pptx",
       "properties",

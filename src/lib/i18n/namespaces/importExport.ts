@@ -591,7 +591,7 @@ export const importExport = defineNamespace({
     "importExport.upload.categoryTranslation": "Translation",
     "importExport.upload.formatsTranslation": "XLIFF/XLF, TMX, CSV/TSV",
     "importExport.upload.categoryDocuments": "Documents",
-    "importExport.upload.formatsDocuments": "DOCX, TXT, MD, HTML, EPUB, JSON/ARB, PPTX, IDML (InDesign)",
+    "importExport.upload.formatsDocuments": "DOCX, PDF, TXT, MD, HTML, EPUB, JSON/ARB, PPTX, IDML (InDesign)",
     "importExport.upload.categoryLocalization": "Localization",
     "importExport.upload.formatsLocalization": "PO/POT, Java properties",
     "importExport.upload.categorySubtitles": "Subtitles",

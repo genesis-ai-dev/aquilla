@@ -123,3 +123,38 @@ export function buildPdf(fixture: PdfFixture): ArrayBuffer {
   for (let i = 0; i < out.length; i++) bytes[i] = out.charCodeAt(i) & 0xff
   return bytes.buffer
 }
+
+/**
+ * A document set as a PDF: each paragraph wrapped into lines of about 80
+ * characters, a blank line's space between paragraphs, new pages as needed.
+ * A paragraph starting "# " is a heading (larger type; an H1 when tagged).
+ * Latin-1 text only.
+ */
+export function pdfOfParagraphs(paragraphs: readonly string[], options?: { tagged?: boolean }): ArrayBuffer {
+  const pages: PdfFixturePage[] = [{ runs: [] }]
+  const structure: PdfFixtureElement[] = []
+  let y = 760
+  paragraphs.forEach((raw, i) => {
+    const heading = raw.startsWith("# ")
+    const text = heading ? raw.slice(2) : raw
+    const size = heading ? 16 : 11
+    const lines: string[] = []
+    let line = ""
+    for (const word of text.split(" ")) {
+      if (line && line.length + 1 + word.length > 80) { lines.push(line); line = word }
+      else line = line ? `${line} ${word}` : word
+    }
+    if (line) lines.push(line)
+    const element: PdfFixtureElement = { role: heading ? "H1" : "P", children: [] }
+    structure.push(element)
+    lines.forEach((l, k) => {
+      if (y < 80) { pages.push({ runs: [] }); y = 760 }
+      const tag = `p${i}-${k}`
+      pages[pages.length - 1].runs!.push({ text: l, x: 72, y, size, tag })
+      element.children!.push({ role: "Span", id: tag })
+      y -= size * 1.3
+    })
+    y -= 14
+  })
+  return buildPdf({ pages, ...(options?.tagged ? { structure: [{ role: "Document", children: structure }] } : {}) })
+}

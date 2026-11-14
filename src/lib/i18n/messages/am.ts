@@ -4506,7 +4506,7 @@ export const am: Catalog = {
   "importExport.upload.categoryTranslation": "ትርጉም",
   "importExport.upload.formatsTranslation": "XLIFF/XLF፣ TMX፣ CSV/TSV",
   "importExport.upload.categoryDocuments": "ሰነዶች",
-  "importExport.upload.formatsDocuments": "DOCX፣ TXT፣ MD፣ HTML፣ EPUB፣ JSON/ARB፣ PPTX፣ IDML (InDesign)",
+  "importExport.upload.formatsDocuments": "DOCX፣ PDF፣ TXT፣ MD፣ HTML፣ EPUB፣ JSON/ARB፣ PPTX፣ IDML (InDesign)",
   "importExport.upload.categoryLocalization": "አካባቢያዊነት",
   "importExport.upload.formatsLocalization": "PO/POT፣ Java properties",
   "importExport.upload.categorySubtitles": "ንዑስ ጽሑፎች",

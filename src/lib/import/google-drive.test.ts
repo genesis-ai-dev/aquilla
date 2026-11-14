@@ -66,10 +66,17 @@ describe("planDriveImport", () => {
   })
 
   it("skips unsupported extensions loudly, naming the extension", () => {
-    const plan = planDriveImport([item({ name: "scan.pdf", mimeType: "application/pdf" })])
+    const plan = planDriveImport([item({ name: "scan.tiff", mimeType: "image/tiff" })])
     expect(plan.skipped).toEqual([
-      { name: "scan.pdf", reason: "Unsupported file type (.pdf)." },
+      { name: "scan.tiff", reason: "Unsupported file type (.tiff)." },
     ])
+  })
+
+  // AQU-2551: a PDF is an import source now, from Drive like any other file.
+  it("downloads a PDF", () => {
+    const plan = planDriveImport([item({ id: "p1", name: "notes.pdf", mimeType: "application/pdf" })])
+    expect(plan.accepted.map((t) => t.action)).toEqual(["download"])
+    expect(plan.skipped).toEqual([])
   })
 
   it("never drops an item silently: accepted + skipped covers every non-folder input", () => {

@@ -60,31 +60,24 @@ export function wholeRecordingOf(pieces: readonly JoinPiece[]): string | null {
 }
 
 /**
- * AQU-2491 (merge review, Nov 13): WHERE THE JOINED TAKE SITS. One rule: it
- * sounds from exactly where its first piece sounded, in both timings.
+ * AQU-2491 (merge review, Nov 13): WHERE THE JOINED TAKE SITS. One rule: its
+ * clip starts where its first piece's SOUND started, in each timing.
  *
- * A take's place is where its CLIP starts. The joined clip starts with as much
- * of the first piece's head as the join kept: all of it when the pieces are
- * their whole recording, none when their sound is decoded and joined. So its
- * place is the first piece's, later by the head the join left out
- * (`droppedHeadMs`), in every timing where that head held back the sound:
- *   - following the source, on every track: the sound starts a head trim after
- *     the clip, so the place moves by it. `targetOffsetMsFor` keeps the new
- *     clip, which has no head left to hide, at or after 0:00 (AQU-2495: a
- *     take's sound never starts before the file).
- *   - following the recordings, on a track made a layer: the same. A place of
- *     its own there moves by it; with none, the take reads its place following
- *     the source, which already moved.
- *   - following the recordings, on the main track or a voice track: the take
- *     sounds from its place (a head trim tightens the line), so the place
- *     stays. A piece with no place of its own there read its place following
- *     the source, which the joined take's no longer is, so the place it read
- *     becomes the joined take's own, held at its line's start (only a place a
- *     take was given there may pull it back over the take before it).
- * A piece with no place of its own following the source reads its line's (on
- * a line with no times, the start of its slot), and the joined take is placed
- * from that. With nothing left out, the joined take keeps the piece's places
- * as they are, none where it has none.
+ * The decoded join leaves the first piece's head trim out (`droppedHeadMs`;
+ * the whole recording keeps it, and drops nothing). So: take what the piece
+ * reads in each timing now, and move each place that marks a clip's start by
+ * the head the join dropped. Two facts about what is stored decide which:
+ *   1. A place following the source, and a layer's place following the
+ *      recordings, mark the clip's start. A main or voice take's place
+ *      following the recordings marks its sound (a head trim tightens the
+ *      line there), so it stays.
+ *   2. A take with no place of its own reads the next one down: following the
+ *      source, its line's (on a line with no times, its slot's start);
+ *      following the recordings, its place following the source (on the main
+ *      track or a voice track, as its line's start when it is before it).
+ * The new clip has no head left to hide, so it never starts before 0:00
+ * (`targetOffsetMsFor`; AQU-2495). Dropping nothing keeps the piece's places
+ * as they are: no place stays no place.
  */
 export function joinedTakePlace(
   line: CellData,
@@ -96,13 +89,14 @@ export function joinedTakePlace(
   if (dropMs === 0) return keptTakePlace(first)
   const timed = typeof line.startTime === "number" && Number.isFinite(line.startTime)
   const lineStartSec = timed ? line.startTime! : 0
-  // Where the piece's clip starts following the source, from its line's start.
+  // What the piece reads now, following the source…
   const lineGeom = first.targetOffsetMs == null && timed ? targetChipGeom(line, undefined) : null
-  const clipMs = first.targetOffsetMs ?? (lineGeom ? Math.round((lineGeom.anchor - lineStartSec) * 1000) : 0)
-  const own = first.recordingsOffsetMs ?? null
+  const sourceMs = first.targetOffsetMs ?? (lineGeom ? Math.round((lineGeom.anchor - lineStartSec) * 1000) : 0)
+  // …and following the recordings.
+  const recordingsMs = first.recordingsOffsetMs ?? (onLayer ? sourceMs : Math.max(0, sourceMs))
   return {
-    targetOffsetMs: targetOffsetMsFor(line, lineStartSec + (clipMs + dropMs) / 1000),
-    recordingsOffsetMs: onLayer ? (own == null ? null : own + dropMs) : (own ?? Math.max(0, clipMs)),
+    targetOffsetMs: targetOffsetMsFor(line, lineStartSec + (sourceMs + dropMs) / 1000),
+    recordingsOffsetMs: onLayer ? recordingsMs + dropMs : recordingsMs,
   }
 }
 

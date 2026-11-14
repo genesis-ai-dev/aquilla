@@ -121,13 +121,13 @@ const MARK_AT_WORD_START = /(?:^|\s)\p{Mn}/u
  * "المدرسة", the "الله" ligature) had its text reversed by pdf.js with the
  * run: it is reversed back. Then presentation forms become their letters.
  */
-function repairRtl(piece: PdfTextPiece, perGlyph = false): PdfTextPiece {
+function repairRtl(piece: PdfTextPiece, perGlyph: boolean, script: ArabicScript): PdfTextPiece {
   let s = piece.s
   if (piece.dir === "rtl") {
     if (perGlyph && SEVERAL_LETTER_GLYPH.test(s)) s = unreverseGlyph(s)
     else if (MARK_AT_WORD_START.test(s)) s = s.replace(/(\p{Mn}+)(\p{L})/gu, "$2$1")
   }
-  s = normalizePresentationForms(s)
+  s = normalizePresentationForms(s, script)
   return s === piece.s ? piece : { ...piece, s }
 }
 
@@ -158,10 +158,39 @@ function unreverseGlyph(s: string): string {
 
 /** Arabic presentation forms (U+FB50–FDFF, U+FE70–FEFF), which Arial and
  *  Times map their glyphs to, as the letters they show (NFKC). A mark's own
- *  form decomposes with a space or a tatweel before the mark; both go. */
-function normalizePresentationForms(s: string): string {
+ *  form decomposes with a space or a tatweel before the mark; both go.
+ *  AQU-2551 re-review finding 2 (question 79): Arial and Times draw the
+ *  Arabic yeh with the Persian yeh's forms (U+FBFC–FBFF) and the Arabic heh
+ *  with the Urdu heh's (U+FBAA–FBAD). Outside an Urdu document the Urdu heh's
+ *  forms are the Arabic heh; outside a Persian or Urdu one the Persian yeh's
+ *  forms are the Arabic yeh. Letters drawn as themselves are never changed. */
+function normalizePresentationForms(s: string, script: ArabicScript): string {
   if (!/[\uFB50-\uFDFF\uFE70-\uFEFF]/.test(s)) return s
-  return s.replace(/[\uFB50-\uFDFF\uFE70-\uFEFF]/g, (c) => c.normalize("NFKC").replace(/^[ \u0640]+(?=\p{Mn})/u, ""))
+  return s.replace(/[\uFB50-\uFDFF\uFE70-\uFEFF]/g, (c) => {
+    if (script !== "urdu" && c >= "\uFBAA" && c <= "\uFBAD") return "\u0647"
+    if (script === "arabic" && c >= "\uFBFC" && c <= "\uFBFF") return "\u064A"
+    return c.normalize("NFKC").replace(/^[ \u0640]+(?=\p{Mn})/u, "")
+  })
+}
+
+/** Which language an Arabic-script document is in, as far as its yeh and heh
+ *  go (re-review finding 2). */
+type ArabicScript = "arabic" | "persian" | "urdu"
+/** Letters only Urdu uses, of the three: ٹ ڈ ڑ ں ے and the like. */
+const URDU_LETTERS = /[\u0679\u0688\u0691\u06BA\u06BB\u06C1-\u06C3\u06D2\u06D3]/
+/** Letters Persian (and Urdu) use and Arabic lacks: پ چ ژ گ, and the keheh ک. */
+const PERSIAN_LETTERS = /[\u067E\u0686\u0698\u06AF\u06A9]/
+
+/** Decided once for the whole document, from every page's text. */
+function documentScript(pages: readonly PdfPageContent[]): ArabicScript {
+  let persian = false
+  for (const page of pages) for (const it of page.items) {
+    if (!isPiece(it)) continue
+    const s = it.s.normalize("NFKC")
+    if (URDU_LETTERS.test(s)) return "urdu"
+    if (PERSIAN_LETTERS.test(s)) persian = true
+  }
+  return persian ? "persian" : "arabic"
 }
 
 /** True when the page's right-to-left text is drawn one glyph a piece: most
@@ -264,7 +293,7 @@ interface TaggedBlock {
 
 interface Coverage { tagged: number; untagged: number }
 
-function readTaggedPage(page: PdfPageContent, joiner: TextJoiner, footnote: FootnoteMarker, coverage: Coverage): TaggedBlock[] {
+function readTaggedPage(page: PdfPageContent, joiner: TextJoiner, footnote: FootnoteMarker, coverage: Coverage, script: ArabicScript): TaggedBlock[] {
   // marked-content id → its pieces, in drawing order
   const byId = new Map<string, (PdfTextPiece & { order: number })[]>()
   const stack: { id: string | null; tag: string | null }[] = []
@@ -279,7 +308,7 @@ function readTaggedPage(page: PdfPageContent, joiner: TextJoiner, footnote: Foot
     for (let k = stack.length - 1; k >= 0; k--) if (stack[k].id) { owner = stack[k].id; break }
     if (owner) {
       const list = byId.get(owner) ?? []
-      list.push({ ...repairRtl(it, perGlyph), order })
+      list.push({ ...repairRtl(it, perGlyph, script), order })
       byId.set(owner, list)
     } else if (!stack.some((e) => e.tag === "Artifact")) {
       coverage.untagged += it.s.trim().length
@@ -425,10 +454,10 @@ function continueAcrossPages(pages: readonly PageBlock[][], joiner: TextJoiner):
 
 /** The tagged reader's blocks for one page, and whether its tags reach the
  *  page's text (MIN_TAG_COVERAGE). */
-function taggedPageBlocks(page: PdfPageContent, joiner: TextJoiner, footnote: FootnoteMarker): { blocks: PageBlock[]; byTags: boolean } {
+function taggedPageBlocks(page: PdfPageContent, joiner: TextJoiner, footnote: FootnoteMarker, script: ArabicScript): { blocks: PageBlock[]; byTags: boolean } {
   if (!page.tree || (page.tree.children?.length ?? 0) === 0) return { blocks: [], byTags: false }
   const coverage: Coverage = { tagged: 0, untagged: 0 }
-  const blocks = readTaggedPage(page, joiner, footnote, coverage).map((b): PageBlock => {
+  const blocks = readTaggedPage(page, joiner, footnote, coverage, script).map((b): PageBlock => {
     const heading = headingContext(b.role)
     return { text: heading ? stripHeadingNumber(b.text) : b.text, page: b.page, heading, body: b.role === "P", size: null }
   })
@@ -459,14 +488,14 @@ interface Line {
 const MARK_OPEN = "\u0001"
 const MARK_CLOSE = "\u0002"
 
-function layoutLines(page: PdfPageContent): Line[] {
+function layoutLines(page: PdfPageContent, script: ArabicScript): Line[] {
   const lines: Line[] = []
   let cur: Line | null = null
   const perGlyph = drawnPerGlyph(page)
   for (const raw of page.items) {
     if (!isPiece(raw) || !raw.s) continue
     if (Math.abs(raw.b) > 0.01) continue // rotated text is not reading text
-    const it = repairRtl(raw, perGlyph)
+    const it = repairRtl(raw, perGlyph, script)
     const h = Math.max(it.h, 1)
     // gap to the previous piece, reading left-to-right or right-to-left
     const gap: number = cur?.prev ? Math.max(it.x - (cur.prev.x + cur.prev.w), cur.prev.x - (it.x + it.w)) : 0
@@ -538,8 +567,8 @@ const lineEnd = (l: Line) => (l.rtl ? -l.x : l.right)
 const PAGE_NUMBER = /^(?:page\s*)?(?:\d+|(?=[ivxlcdm]+$)m{0,4}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3}))$/i
 
 /** The layout reader's blocks, page by page, before page continuation. */
-function layoutPageBlocks(pages: readonly PdfPageContent[], joiner: TextJoiner, footnote: FootnoteMarker): PageBlock[][] {
-  const pagesLines = pages.map(layoutLines)
+function layoutPageBlocks(pages: readonly PdfPageContent[], joiner: TextJoiner, footnote: FootnoteMarker, script: ArabicScript): PageBlock[][] {
+  const pagesLines = pages.map((p) => layoutLines(p, script))
   // repeated top/bottom lines: running headers, footers, page numbers
   const inBand = (l: Line, p: PdfPageContent) => {
     const tenth = (p.box.y1 - p.box.y0) * 0.1
@@ -656,9 +685,10 @@ function layoutPageBlocks(pages: readonly PdfPageContent[], joiner: TextJoiner, 
  *  tagged PDF without tags keeps its text. */
 export function pdfPagesToParagraphs(pages: readonly PdfPageContent[], footnote: FootnoteMarker): PdfReadResult {
   const joiner = new TextJoiner(pages)
-  const tagged = pages.map((p) => taggedPageBlocks(p, joiner, footnote))
+  const script = documentScript(pages)
+  const tagged = pages.map((p) => taggedPageBlocks(p, joiner, footnote, script))
   const anyTags = tagged.some((t) => t.byTags)
-  const layout = anyTags && tagged.every((t) => t.byTags) ? null : layoutPageBlocks(pages, joiner, footnote)
+  const layout = anyTags && tagged.every((t) => t.byTags) ? null : layoutPageBlocks(pages, joiner, footnote, script)
   const perPage = pages.map((_, i) => (tagged[i].byTags ? tagged[i].blocks : layout![i]))
   return { paragraphs: continueAcrossPages(perPage, joiner), tagged: anyTags }
 }

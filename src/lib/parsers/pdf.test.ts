@@ -432,6 +432,53 @@ describe("review findings: Arabic (Nov 14)", () => {
     expect(read(["ا", "ﻟ", "ﺰ", "ﱠ", "ﻣ", "َ", "ﺎ", "ن"]).map((t) => t.replace(/\p{Mn}/gu, ""))).toEqual(["الزمان"])
   })
 
+  // Re-review finding 2 (question 79, built to the pick): Arial and Times map
+  // the Arabic yeh and heh to the Persian yeh's and the Urdu heh's forms. A
+  // document is Persian or Urdu by the letters only they use, read over the
+  // whole document; otherwise those forms are the Arabic letters.
+  const readDoc = (pages: string[][]) => pdfPagesToParagraphs(pages.map((texts, i) => ({
+    n: i + 1, box: { x0: 0, y0: 0, x1: 595, y1: 842 }, tree: null, items: glyphs(texts),
+  })), (t) => t).paragraphs.map((p) => p.text)
+  // Arial's glyphs, as pdf.js gives them
+  const YEH_INI = "\uFBFE", YEH_MED = "\uFBFF", HEH_INI = "\uFBAC", HEH_MED = "\uFBAD", HEH_FIN = "\uFBAB"
+  const YAWM = [YEH_INI, "\uFEEE", "\uFEE1"] // يوم
+  const HADHA = [HEH_INI, "\uFEAC", "\uFE8E"] // هذا
+  const SHAHR = ["\uFEB7", HEH_MED, "\uFEAE"] // شهر
+  const KEH = ["\u06A9", HEH_FIN] // که
+  const IN = ["\u0627", YEH_INI, "\uFEE6"] // این
+  const ZIBA = ["\uFEAF", YEH_INI, "\uFE92", "\uFE8E"] // زیبا
+  const AST = ["\uFE8D", "\uFEB3", "\uFE96"] // است
+  const PEDAR = ["\uFB58", "\uFEAA", "\uFEAD"] // پدر
+  const KETAB = ["\u06A9", "\uFE98", "\uFE8E", "\u0628"] // کتاب
+
+  it("reads Arial's yeh and heh in an Arabic document as the Arabic letters (re-review finding 2)", () => {
+    expect(readDoc([[...YAWM, " ", ...HADHA, " ", ...SHAHR]])).toEqual(["يوم هذا شهر"])
+  })
+
+  it("keeps the Persian yeh in a Persian document, and gives it the Arabic heh", () => {
+    expect(readDoc([[...PEDAR, " ", ...IN, " ", ...SHAHR, " ", ...KEH]])).toEqual(["پدر این شهر که"])
+  })
+
+  it("decides by the whole document: a Persian letter on page 2 keeps page 1 Persian", () => {
+    expect(readDoc([[...IN, " ", ...SHAHR, "."], [...PEDAR, "."]])).toEqual(["این شهر.", "پدر."])
+  })
+
+  it("counts the keheh (ک) as a letter Arabic lacks: short Persian with it stays Persian", () => {
+    expect(readDoc([[...IN, " ", ...KETAB, " ", ...KEH]])).toEqual(["این کتاب که"])
+  })
+
+  // What question 79 must say plainly: a short Persian text with none of the
+  // letters Arabic lacks (no پ چ ژ گ ک) cannot be told from Arabic, so its
+  // yeh comes in as the Arabic yeh. Its heh is right either way.
+  it("reads short Persian with no letter Arabic lacks as Arabic: its yeh becomes the Arabic yeh", () => {
+    expect(readDoc([[...IN, " ", ...SHAHR, " ", ...ZIBA, " ", ...AST]])).toEqual(["اين شهر زيبا است"])
+  })
+
+  it("leaves an Urdu document's heh and yeh as they are", () => {
+    // یہ ٹھیک: heh goal, tteh, the Urdu heh, the yeh
+    expect(readDoc([[YEH_INI, "\uFBA7", " ", "\uFB68", HEH_MED, YEH_MED, "\uFB8F"]])).toEqual(["یہ ٹھیک"])
+  })
+
   it("does not reverse a right-to-left piece that holds a whole word", () => {
     const words = pdfPagesToParagraphs([{
       n: 1, box: { x0: 0, y0: 0, x1: 595, y1: 842 }, tree: null,

@@ -101,7 +101,9 @@ export interface CellNumberLabelInput {
   canonicalRef: string | null | undefined
   sourceCanonicalRef?: string | null
   scriptureNumbering: boolean
-  rowIndex: number
+  /** The row's place on the page; the last resort for a count. Without it (a
+   *  line named outside the table) an uncounted line shows no number. */
+  rowIndex?: number
   /**
    * 1-based ordinal among *numbered* (non-paratext) cells, used only by the
    * sequential (non-scripture) numbering path. Passing it makes numbering start
@@ -169,7 +171,8 @@ export function cellNumberLabel({
   // how headings/titles/introductions say "I am structural, not verse zero".
   if (displayLabel !== undefined) return displayLabel
 
-  return scriptureNumbering ? null : String(contentNumber ?? rowIndex + 1)
+  const count = contentNumber ?? (rowIndex === undefined ? undefined : rowIndex + 1)
+  return scriptureNumbering || count === undefined ? null : String(count)
 }
 
 /** Friendly chapter label for editor wayfinding (`MAT 1` → `Matthew 1`). */

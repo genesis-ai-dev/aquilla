@@ -10775,7 +10775,10 @@ export function ProjectWorkspace() {
   const activeFileOrderedBy = activeFile ? fileOrderedBy(activeFile) : undefined
   const nameStatusBarCells = useCallback(
     (cellIds: readonly string[]) => readAtVersion(cellStoreVersion, () =>
-      healthCardNamer(cellIds, activeFileOrderedBy, (number) => t("editor.line.rowName", { number }))),
+      healthCardNamer(cellIds, activeFileOrderedBy, {
+        row: (label) => t("editor.line.rowName", { number: label }),
+        empty: t("editor.line.emptyName"),
+      })),
     [healthCardNamer, cellStoreVersion, activeFileOrderedBy, t],
   )
 

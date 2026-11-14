@@ -2317,6 +2317,7 @@ export const editor = defineNamespace({
     "editor.row.rowFallbackRef": "row {index}",
     // AQU-1722, AQU-2278: a line named in a list (lib/cells/line-name.ts).
     "editor.line.rowName": "row {number}",
+    "editor.line.emptyName": "(empty line)",
     "editor.row.editorAria": "{ref} — {state}",
     "editor.row.translationAria": "Translation for {ref}: {source} — {state}",
     // AQU-1163: why a target cell will not take your text — shown as the
@@ -7113,7 +7114,9 @@ export const editor = defineNamespace({
         placeholders: {
           count: "Cells the click would sign off; selects the plural form (row/rows).",
           total: "Cells selected in all (always more than count).",
-          refs: "A list of row numbers such as \"4, 5 and 10\" or \"1, 2, 3 and 3 more\".",
+          refs:
+            "A list of the rows' labels in the # column, as shown there, such as " +
+            "\"4, 5 and 10\" or \"1, 2, 3 and 3 more\".",
         },
       },
       "editor.selection.validatePartialMoreRefs": {
@@ -9092,11 +9095,23 @@ export const editor = defineNamespace({
           "What a line with no reference (no verse, no cue timing) is called " +
           "wherever lines are listed by name: the selection bar's notes, the " +
           "generate-voice plan, the health card's list of lines that need " +
-          "attention. Its number is the one in the editor table's # column. " +
-          "Shown inside a list of such names or on its own as a list entry, so " +
-          "keep it short; lowercase in English.",
+          "attention. It names the line by the label its row shows in the " +
+          "editor table's # column. Shown inside a list of such names or on its " +
+          "own as a list entry, so keep it short; lowercase in English.",
         maxLength: 12,
-        placeholders: { number: "The line's number in the editor table's # column." },
+        placeholders: {
+          number:
+            "The label the line's row shows in the editor table's # column, exactly " +
+            "as shown: usually a number (\"4\"), sometimes the source's own label " +
+            "(a spreadsheet's row number, \"14a\"). Do not translate or reformat it.",
+        },
+      },
+      "editor.line.emptyName": {
+        description:
+          "What a line is called in those same lists when it has no reference, no " +
+          "number in the # column, no label and no text of its own to go by: an " +
+          "empty line. Shown on its own as a list entry.",
+        maxLength: 24,
       },
       "editor.row.editorAria": {
         description:

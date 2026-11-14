@@ -300,8 +300,8 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     const numbers = lines.map((c) => lineNumber(c, numbering))
     const names = refs.every((ref): ref is string => Boolean(ref))
       ? { key: "editor.selection.validatePartialNamed" as const, items: refs as string[] }
-      : numbers.every((n): n is number => n !== undefined)
-        ? { key: "editor.selection.validatePartialRows" as const, items: (numbers as number[]).map(String) }
+      : numbers.every((n): n is string => n !== null)
+        ? { key: "editor.selection.validatePartialRows" as const, items: numbers as string[] }
         : null
     const shown = names && names.items.length > PARTIAL_REFS_SHOWN
       ? [
@@ -386,7 +386,10 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // hover uses, so one line is named identically wherever it is mentioned.
   const nameCell = useCallback(
     (cell: CellData): string =>
-      lineName(cell, readNumbering(), (number) => t("editor.line.rowName", { number })),
+      lineName(cell, readNumbering(), {
+        row: (label) => t("editor.line.rowName", { number: label }),
+        empty: t("editor.line.emptyName"),
+      }),
     [readNumbering, t],
   )
   // AQU-186: cells with at least one infraction or fix proposal — v1 minimum:

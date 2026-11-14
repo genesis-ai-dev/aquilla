@@ -47,7 +47,7 @@ vi.mock("@/lib/posthog", () => ({
 import { MAX_SELECTED } from "@/lib/audio/selection"
 import type { AudioAttachmentOut, CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
-import { lineStore, type TestLine } from "@/test-utils/line-store"
+import { lineStore, type TestLine, LINE_WORDS } from "@/test-utils/line-store"
 import { createHealthCardNamer } from "@/lib/health/health-card-rows"
 
 // AQU-616: mock the emit helpers so bulk validate/unvalidate clicks don't hit
@@ -1329,7 +1329,7 @@ describe("SelectionBar — the health card names lines the same way (AQU-2278)",
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set([...picked, "untranslated"]))
     renderBar(makeProject(ROLE.CONTRIBUTOR), [], [], "", { cellStore: store, onValidationCommitted: vi.fn() })
     const name = createHealthCardNamer(store)
-    const card = name(picked, undefined, (number) => `row ${number}`)
+    const card = name(picked, undefined, LINE_WORDS)
     return { card, note: await noteBeside("Validate text", /Validate 2 of 3 selected cells/) }
   }
 

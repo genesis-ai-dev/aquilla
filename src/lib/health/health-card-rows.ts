@@ -2,8 +2,7 @@
 // what it calls the lines it shows.
 
 import type { CellStore } from "@/hooks/useActiveCellStore"
-import { lineName, readLineNumbering } from "@/lib/cells/line-name"
-import { shortCellId } from "@/lib/cells/short-cell-id"
+import { lineName, readLineNumbering, type LineNameWords } from "@/lib/cells/line-name"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { isExcludedFromWork, type ExcludedCellInput } from "@/lib/health/excluded-cell"
 import type { OrderedBy } from "@/lib/parsers/types"
@@ -28,22 +27,18 @@ export function healthCardRows(
 
 type NamerStore = Pick<
   CellStore,
-  "getCellIdsForLens" | "getListVersion" | "getCellVersion" | "getCellView" | "getCellSummary"
+  "getCellIdsForLens" | "getListVersion" | "getCellVersion" | "getCellView" | "getNavigationIndex"
 >
 
 /**
  * Names the card's drags by the app's one rule for a line (`lineName`), read
  * over the table's own row order. The order is kept until the list changes,
  * so a time-ordered file is not re-sorted each time the card opens.
- *
- * A line the rule leaves unnamed (a heading has no reference and no #) is
- * called by its words instead, since an entry in this list has to say
- * something to be clicked.
  */
 export function createHealthCardNamer(store: NamerStore) {
   const structure = createEditorStructureCache()
   let order: { listVersion: number; orderedBy: OrderedBy | undefined; ids: readonly string[] } | null = null
-  return (cellIds: readonly string[], orderedBy: OrderedBy | undefined, rowName: (number: number) => string): string[] => {
+  return (cellIds: readonly string[], orderedBy: OrderedBy | undefined, words: LineNameWords): string[] => {
     const listVersion = store.getListVersion()
     if (!order || order.listVersion !== listVersion || order.orderedBy !== orderedBy) {
       order = { listVersion, orderedBy, ids: store.getCellIdsForLens(orderedBy) }
@@ -51,8 +46,7 @@ export function createHealthCardNamer(store: NamerStore) {
     const numbering = readLineNumbering(store, order.ids, structure)
     return cellIds.map((id) => {
       const cell = store.getCellView(id)
-      const name = cell ? lineName(cell, numbering, rowName) : ""
-      return name || store.getCellSummary(id)?.original.trim() || shortCellId(id)
+      return cell ? lineName(cell, numbering, words) : words.empty
     })
   }
 }

@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { DecayBreakdown } from "./DecayBreakdown"
 import { createHealthCardNamer, healthCardRows } from "@/lib/health/health-card-rows"
-import { lineStore, type TestLine } from "@/test-utils/line-store"
+import { lineStore, type TestLine, LINE_WORDS } from "@/test-utils/line-store"
 import type { CellStore } from "@/hooks/useActiveCellStore"
 import type { OrderedBy } from "@/lib/parsers/types"
 
@@ -45,7 +45,7 @@ function WorkspaceCard({ store, health, countStructural = true, orderedBy, onJum
   return (
     <Card
       rows={healthCardRows(store.getAllSummaries(), health, countStructural)}
-      nameCells={(ids) => name(ids, orderedBy, (number) => `row ${number}`)}
+      nameCells={(ids) => name(ids, orderedBy, LINE_WORDS)}
       onJumpToCell={onJumpToCell}
     />
   )

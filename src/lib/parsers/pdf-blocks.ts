@@ -618,8 +618,23 @@ function layoutPageBlocks(pages: readonly PdfPageContent[], joiner: TextJoiner, 
     // Each cell is its own paragraph, row by row, as the Word import gives a
     // table; before this a table came in as one paragraph.
     const sameBaseline = (a: Line, b: Line) => Math.abs(a.y - b.y) < 0.45 * Math.max(a.h, b.h)
-    const isCell = kept.map((l, k) =>
-      (k > 0 && sameBaseline(kept[k - 1], l)) || (k + 1 < kept.length && sameBaseline(l, kept[k + 1])))
+    // AQU-2551 re-review finding 3: a label beside its text (a list's number
+    // in its own margin column, a glossary's term) is two lines on one
+    // baseline too. Lines are cells only when two or more rows in a row share
+    // their column starts: two of their starts line up, in reading direction.
+    const rows: Line[][] = []
+    const rowOf = kept.map((l, k) => {
+      if (k > 0 && sameBaseline(kept[k - 1], l)) rows[rows.length - 1].push(l)
+      else rows.push([l])
+      return rows.length - 1
+    })
+    const shareStarts = (a: Line[], b: Line[]) => {
+      if (a.length < 2 || b.length < 2) return false
+      const tol = 0.3 * Math.max(...a.map((l) => l.size), ...b.map((l) => l.size))
+      return a.filter((x) => b.some((y) => Math.abs(lineStart(x) - lineStart(y)) <= tol)).length >= 2
+    }
+    const tableRow = rows.map((r, i) => (i > 0 && shareStarts(rows[i - 1], r)) || (i + 1 < rows.length && shareStarts(r, rows[i + 1])))
+    const isCell = kept.map((_, k) => tableRow[rowOf[k]])
     const blocks: { lines: Line[]; size: number; topY: number }[] = []
     let blk: { lines: Line[]; size: number; topY: number } | null = null
     let prev: Line | null = null
@@ -641,7 +656,10 @@ function layoutPageBlocks(pages: readonly PdfPageContent[], joiner: TextJoiner, 
         const indentIn = lineStart(l) - box.start > 0.8 * l.size && lineStart(prev) - prevBox.start < 0.3 * l.size && prevShort
         const shortPrev = lineEnd(prev) < prevBox.end - 0.12 * prevWidth && endsSentence(prev.text)
         const tocPrev = /\.{4,}\s*\d+$/.test(prev.text)
-        brk = sizeChange || bigGap || startsItem || indentIn || shortPrev || tocPrev
+        // re-review finding 3: a label on its text's baseline ("1.", a
+        // glossary's term) runs on into its text, whatever it ends with
+        const label = sameBaseline(prev, l)
+        brk = !label && (sizeChange || bigGap || startsItem || indentIn || shortPrev || tocPrev)
       }
       if (brk || !blk) {
         blk = { lines: [], size: l.size, topY: l.y }

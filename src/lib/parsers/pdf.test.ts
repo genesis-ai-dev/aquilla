@@ -176,6 +176,45 @@ describe("an untagged PDF read by its layout", () => {
   })
 })
 
+// Re-review finding 3 (Nov 14): any two lines on one baseline counted as a
+// table row, so a numbered list whose number sits in its own margin column,
+// and a glossary (term, then definition), came in split in three. Lines are
+// cells only when two or more rows in a row share their column starts.
+describe("re-review finding 3: a label beside its text is not a table", () => {
+  const L = (y: number, text: string, x = 120) => ({ text, x, y })
+  const texts = async (runs: { text: string; x: number; y: number }[]) => (await paragraphs(buildPdf({ pages: [{ runs }] }))).map((p) => p.text)
+
+  it("keeps a numbered list's number with its text", async () => {
+    const read = await texts([
+      L(700, "1.", 72), L(700, "The first point is long enough that it runs on"), L(686, "to a second line in the same paragraph."),
+      L(660, "2.", 72), L(660, "The second point is also long enough to run on"), L(646, "to a second line of its own."),
+    ])
+    expect(read).toEqual([
+      "1. The first point is long enough that it runs on to a second line in the same paragraph.",
+      "2. The second point is also long enough to run on to a second line of its own.",
+    ])
+  })
+
+  it("keeps a glossary's term with its definition", async () => {
+    expect(await texts([
+      L(700, "Covenant", 72), L(700, "A binding agreement between two parties, made with", 160), L(686, "promises on each side.", 160),
+      L(660, "Grace", 72), L(660, "Favour that is given freely and not earned by the", 160), L(646, "one who receives it.", 160),
+    ])).toEqual([
+      "Covenant A binding agreement between two parties, made with promises on each side.",
+      "Grace Favour that is given freely and not earned by the one who receives it.",
+    ])
+  })
+
+  it("still reads two rows that share their column starts as a table, a cell a paragraph", async () => {
+    expect(await texts([
+      L(760, "Before the table.", 72),
+      L(730, "Name", 72), L(730, "Age", 250), L(730, "Town", 430),
+      L(712, "Anna", 72), L(712, "12", 250), L(712, "Haifa", 430),
+      L(680, "After the table.", 72),
+    ])).toEqual(["Before the table.", "Name", "Age", "Town", "Anna", "12", "Haifa", "After the table."])
+  })
+})
+
 describe("a tagged PDF read by its tags", () => {
   const tagged = () => buildPdf({
     pages: [

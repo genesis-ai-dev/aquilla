@@ -137,6 +137,41 @@ function panelOwnsEscape(target: EventTarget | null): boolean {
 }
 
 /** Keep every scroll position under `root` across a DOM move, which resets them. */
+/** A tab that is up: in the flow, visible, reachable. */
+function revealHost(host: HTMLElement): void {
+  host.hidden = false
+  host.inert = false
+  host.style.display = ""
+  host.style.visibility = ""
+  host.style.position = ""
+  host.style.inset = ""
+}
+
+/**
+ * A tab behind another, still in its area. `display: none` would lay the text
+ * table out at 0 px. LegendList then crashes — on the way down, or when the
+ * Station tab (the one that hides the text) is opened after a reload. Held
+ * out of the flow at the area's own size, nothing inside learns it got small.
+ */
+function holdHost(host: HTMLElement): void {
+  host.hidden = false
+  host.inert = true
+  host.style.display = ""
+  host.style.position = "absolute"
+  host.style.inset = "0"
+  host.style.visibility = "hidden"
+}
+
+/** Waiting in the parking spot: not on screen at all. */
+function parkHost(host: HTMLElement): void {
+  host.hidden = true
+  host.inert = true
+  host.style.display = "none"
+  host.style.visibility = ""
+  host.style.position = ""
+  host.style.inset = ""
+}
+
 function moveKeepingScroll(root: HTMLElement, into: HTMLElement): void {
   const kept: Array<[Element, number, number]> = []
   for (const el of root.querySelectorAll("*")) {
@@ -300,7 +335,8 @@ export function useMediaDock(input: UseMediaDockInput) {
       const host = hostsRef.current[panel]
       if (!host) continue
       const area = v.areaOf(panel)
-      const box = (area && boxesRef.current[area]) || parkingRef.current
+      const areaBox = area ? boxesRef.current[area] : null
+      const box = areaBox || parkingRef.current
       if (box && host.parentElement !== box) {
         // A first placement moves nothing that has loaded; a move does.
         if (host.parentElement) host.dispatchEvent(new Event(DOCK_HOST_MOVING))
@@ -308,7 +344,9 @@ export function useMediaDock(input: UseMediaDockInput) {
       }
       // The text lens shows the text alone, whatever tab its area has up.
       const shown = stacked ? area !== null && v.activeOf(area) === panel : panel === "text"
-      host.style.display = shown ? "" : "none"
+      if (shown) revealHost(host)
+      else if (areaBox) holdHost(host)
+      else parkHost(host)
     }
   }, [])
 

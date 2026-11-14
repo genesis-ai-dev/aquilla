@@ -31,7 +31,7 @@ import { exportSrt } from "./exporters/srt"
  *  project-scope path in ExportDialog that flattens all cells into one sheet,
  *  and html, whose project zip is pages plus an index rather than one entry
  *  per file — `exporters/html-project.ts` builds that one, AQU-2183). */
-export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "vtt" | "docx" | "pptx" | "idml" | "json" | "plain-text-dump" | "metadata-csv" | "sdbh-xml" | "html">
+export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "vtt" | "docx" | "docx-lines" | "pptx" | "idml" | "json" | "plain-text-dump" | "metadata-csv" | "sdbh-xml" | "html">
 
 export interface ProjectFileCellsInput {
   fileId: string

@@ -117,7 +117,7 @@ import {
 import { idmlTelemetryProperties } from "@/lib/idml/telemetry"
 import { hasPackageLocators } from "@/lib/export/import-locators"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "html" | "json" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
+export type ExportFormat = "usfm" | "txt" | "md" | "html" | "json" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "docx-lines" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
 type AudioMode = "audio-by-character" | "audio-by-line" | "audio-chapter"
 
@@ -148,6 +148,16 @@ const BASE_FORMAT_OPTIONS: FormatOption[] = [
     ext: ".docx",
     descriptionKey: "importExport.format.docx.description",
     lossy: false,
+  },
+  {
+    // AQU-2551 (question 54): a new Word document written from the lines, for
+    // a file with no uploaded .docx to write into (a PDF source, and any
+    // other). Offered wherever the round-trip Word export is not.
+    id: "docx-lines",
+    labelKey: "importExport.format.docxLines.label",
+    ext: ".docx",
+    descriptionKey: "importExport.format.docxLines.description",
+    lossy: true,
   },
   {
     // AQU-152a: PPTX export with slide/shape/paragraph structure preserved.
@@ -1048,7 +1058,7 @@ export function ExportDialog({
 
   // AQU-2183: html does project scope too, through its own orchestrator (a zip
   // of book pages plus an index), not through buildProjectZip's one-entry-per-file shape.
-  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "pptx", "idml", "json", "plain-text-dump"] as const
+  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "docx-lines", "pptx", "idml", "json", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
   // SDBH XML reinjection spans every lexicon file — inherently project scope.
   // The report describes a PROJECT: name consistency only means anything across
@@ -1067,7 +1077,7 @@ export function ExportDialog({
    * one-chapter .docx would mean rebuilding the document rather than exporting
    * it. Those stay whole-file.
    */
-  const chapterScopeFormats = ["txt", "md", "html", "tsv", "csv", "xlf", "tmx", "vtt", "srt", "plain-text-dump", "metadata-csv"] as const
+  const chapterScopeFormats = ["txt", "md", "html", "docx-lines", "tsv", "csv", "xlf", "tmx", "vtt", "srt", "plain-text-dump", "metadata-csv"] as const
   const supportsChapterScope = (fmt: ExportFormat): boolean =>
     (chapterScopeFormats as readonly string[]).includes(fmt)
 
@@ -1106,6 +1116,7 @@ export function ExportDialog({
       // AQU-2211: the round-trip formats also need the file's original upload.
       if (f.id === "usfm") return activeFileType === "usfm" && roundTripAvailable
       if (f.id === "docx") return activeFileType === "docx" && roundTripAvailable // AQU-233: only for docx imports
+      if (f.id === "docx-lines") return !(activeFileType === "docx" && roundTripAvailable) // AQU-2551: where the round trip is not
       if (f.id === "pptx") return activeFileType === "pptx" && roundTripAvailable // AQU-152a: only for pptx imports
       if (f.id === "idml") return activeFileType === "idml" && roundTripAvailable // only for idml imports
       if (f.id === "json") return activeFileType === "json" && roundTripAvailable // AQU-525: only for json imports
@@ -1407,7 +1418,7 @@ export function ExportDialog({
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
-  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "audio-by-line" && format !== "audio-chapter" && format !== "vtt" && format !== "docx" && format !== "pptx" && format !== "json" && format !== "plain-text-dump")
+  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "audio-by-line" && format !== "audio-chapter" && format !== "vtt" && format !== "docx" && format !== "docx-lines" && format !== "pptx" && format !== "json" && format !== "plain-text-dump")
 
   const { files: projectFileCells, isLoading: projectCellsLoading, error: projectCellsError } =
     useProjectCells({
@@ -2093,6 +2104,12 @@ export function ExportDialog({
           case "md":
             blob = exportMarkdownStructured(filteredCells)
             break
+          case "docx-lines": {
+            // AQU-2551: built from the same scoped lines as the text formats.
+            const { exportDocxFromLines } = await import("@/lib/export/exporters/docx-from-lines")
+            blob = await exportDocxFromLines(filteredCells, { lang: targetLanguage })
+            break
+          }
           case "html":
             // AQU-2182: scoped like the other text formats — hidden cells,
             // validated-only and the chapter range are already applied above.

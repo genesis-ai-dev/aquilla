@@ -647,6 +647,11 @@ export const importExport = defineNamespace({
       "preserved; per-run bold/italic inside translated paragraphs is not preserved. Requires the " +
       "original file to have been imported after round-trip export support was added — files " +
       "imported before then may lack a stored original (re-import to enable).",
+    // AQU-2551 (question 54): offered where the round-trip Word export is not.
+    "importExport.format.docxLines.label": "New Word document (.docx)",
+    "importExport.format.docxLines.description":
+      "A new Word document written from the lines: headings stay headings, each paragraph's lines " +
+      "are one paragraph, and notes are Word footnotes. The original file's page layout is not kept.",
     "importExport.format.pptx.label": "PowerPoint (.pptx)",
     "importExport.format.pptx.description":
       "Translations injected back into the original slide deck. Slide/shape/paragraph structure is " +

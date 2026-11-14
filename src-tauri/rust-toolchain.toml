@@ -1,0 +1,9 @@
+# The Rust version for the desktop app, locally and in CI. rustup installs it
+# on first use in this directory, so a stale default `stable` (e.g. 1.88, too
+# old for muda/tauri) no longer breaks `pnpm tauri dev`.
+#
+# CI's dtolnay/rust-toolchain steps pass the same version as `toolchain:`
+# (ci.yml, tauri-build.yml, tauri-release.yml, dependency-audit.yml) so their
+# cross-compile targets land on this toolchain. Bump them together.
+[toolchain]
+channel = "1.95"

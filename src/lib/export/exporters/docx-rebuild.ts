@@ -171,7 +171,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
 
   const inlineAt = new Map(input.inlineAt ?? [])
   let nodes = buildNodes(input.items, input.lineSet)
-  if (input.lost && input.lost.size > 0) nodes = withoutLost(nodes, input.lost)
+  if (input.lost && input.lost.size > 0) nodes = withoutLost(nodes, input.lost, input.lostChar)
   const refs: { xml: string; id: string; line: number | undefined }[] = []
   collectMarkers(nodes, (piece) => {
     refs.push({ xml: io.elementXml(piece.run), id: piece.id, line: input.footnoteLines?.get(piece) })
@@ -439,17 +439,25 @@ function buildNodes(items: readonly DocxPiece[], lineSet: ReadonlySet<DocxPiece>
  * words and its footnote references. Everything else stays where it is: a
  * field or a wrapper (a link, a content control…) that lost some of its
  * pieces, or all of its words, stays with its own tags and properties,
- * without them.
+ * without them. AQU-2552 (review r9): it is partial when any one character of
+ * it is a lost line's (`lostChar`: a run holding words of two lines), so it
+ * is never looked for by its whole result.
  */
-function withoutLost(nodes: readonly RNode[], lost: ReadonlySet<DocxPiece>): RNode[] {
+function withoutLost(
+  nodes: readonly RNode[],
+  lost: ReadonlySet<DocxPiece>,
+  lostChar: (piece: DocxPiece, i: number) => boolean = () => false,
+): RNode[] {
+  const ownsAny = (leaf: LeafNode) =>
+    lost.has(leaf.piece) || (leaf.kind === "text" && [...leaf.piece.text].some((_, i) => lostChar(leaf.piece, i)))
   return nodes.flatMap((node): RNode[] => {
     if (node.kind === "text" || node.kind === "marker") return lost.has(node.piece) ? [] : [node]
     if (node.kind !== "wrapper" && node.kind !== "field") return [node]
     const inner = node.kind === "wrapper" ? node.children : [...node.open, ...node.result, node.close]
-    if (!leavesOf(inner).some((leaf) => lost.has(leaf.piece))) return [node]
+    if (!leavesOf(inner).some(ownsAny)) return [node]
     return [node.kind === "wrapper"
-      ? { ...node, children: withoutLost(node.children, lost), partial: true }
-      : { ...node, result: withoutLost(node.result, lost), partial: true }]
+      ? { ...node, children: withoutLost(node.children, lost, lostChar), partial: true }
+      : { ...node, result: withoutLost(node.result, lost, lostChar), partial: true }]
   })
 }
 

@@ -416,4 +416,33 @@ describe("Word export — what a lost line owns is its own text range and its fo
       }
     }
   })
+
+  // R6: a field or wrapper any of whose characters is a lost line's is never
+  // looked for by its whole result. Here line 1 ends with the very words the
+  // result holds of line 2 ("here …"), so a whole-result search finds them
+  // there, and the copy covers line 1's words with line 2's run.
+  const FIELD_OF = (inner: string) =>
+    `<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> HYPERLINK "http://x.example/" </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r>${inner}<w:r><w:fldChar w:fldCharType="end"/></w:r>`
+  const oneRun = run("here" + PAD + " Third")
+  /** Three lines, `wrapped` holding the end of line 2 and "Third", line 3's first word. */
+  async function intoLine3(wrapped: string) {
+    const bytes = await docxBytes(para(run(L1 + " ") + run("Second line ") + wrapped + run(" line here" + PAD)) + NEXT)
+    const cells = await importCells(bytes, false)
+    const at = (text: string) => cells.find((c) => c.original.startsWith(text))!
+    const [a, b, c] = [at("First line"), at("Second"), at("Third line")]
+    return { bytes, a, b, c, rest: cells.filter((cell) => cell !== a && cell !== b && cell !== c) }
+  }
+  it.each([
+    ["a field", FIELD_OF(oneRun), /fldCharType="separate"\/><\/w:r>([\s\S]*?)<w:r><w:fldChar w:fldCharType="end"/],
+    ["a link", `<w:hyperlink w:anchor="x">${oneRun}</w:hyperlink>`, /<w:hyperlink w:anchor="x">([\s\S]*?)<\/w:hyperlink>/],
+  ])("%s running from a lost line into the next, in one run, never covers another line's words", async (_, wrapped, inside) => {
+    const { bytes, a, b, c, rest } = await intoLine3(wrapped)
+    expect(b.original.replaceAll(PAD.trim(), "…")).toBe("Second line here …")
+    expect(c.original.replaceAll(PAD.trim(), "…")).toBe("Third line here …")
+    for (const out of [await wordOut(bytes, [a, hide(b), c, ...rest]), await wordOut(bytes, [a, c, ...rest], [b])]) {
+      expect(paras(out.body)[0].replace("{field}", "")).toBe("First line here … Third line here …")
+      expect(firstPara(out.body)).not.toContain(oneRun)
+      expect(inside.exec(firstPara(out.body))?.[1] ?? "").not.toMatch(/here and it goes/)
+    }
+  })
 })

@@ -600,6 +600,9 @@ export function ExportDialog({
   // says this file has none (a file migrated from Codex), there is no primary
   // download either, and the format list opens instead.
   const roundTripAvailable = activeFileHasOriginalSource !== false
+  // AQU-2551: Word is offered one way or the other: into the uploaded .docx
+  // when there is one, else as a new document from the lines.
+  const roundTripWord = activeFileType === "docx" && roundTripAvailable
   const nativeFormatCandidate = activeFileType ? NATIVE_EXPORT_BY_FILE_TYPE[activeFileType] ?? null : null
   const nativeFormatId =
     nativeFormatCandidate && ROUND_TRIP_EXPORT_FORMATS.has(nativeFormatCandidate) && !roundTripAvailable
@@ -781,8 +784,12 @@ export function ExportDialog({
       // ids come and go with the file type and the build, and selecting one
       // that is no longer listed would leave the radio group with no selection
       // and the Export button acting on a format nobody can see.
+      // AQU-2551: the two Word choices swap with the file, so a remembered
+      // one is only restored where it is the one this file offers.
+      const otherWord = roundTripWord ? "docx-lines" : "docx"
       if (
         remembered.foldFormat &&
+        remembered.foldFormat !== otherWord &&
         BASE_FORMAT_OPTIONS.some((f) => f.id === remembered.foldFormat)
       ) {
         setFormat(remembered.foldFormat as ExportFormat)
@@ -790,7 +797,7 @@ export function ExportDialog({
       restoredRef.current = true
     }
     prevOpenRef.current = open
-  }, [open, nativeFormatId, currentUsername, projectId, isDubbingFile])
+  }, [open, nativeFormatId, currentUsername, projectId, isDubbingFile, roundTripWord])
   const [dumpIncludeRefs, setDumpIncludeRefs] = useState(false)
 
   // AQU-437: Filename control state. Default changes with scope/format.
@@ -1115,8 +1122,8 @@ export function ExportDialog({
     const visible = formatOptions.filter((f) => {
       // AQU-2211: the round-trip formats also need the file's original upload.
       if (f.id === "usfm") return activeFileType === "usfm" && roundTripAvailable
-      if (f.id === "docx") return activeFileType === "docx" && roundTripAvailable // AQU-233: only for docx imports
-      if (f.id === "docx-lines") return !(activeFileType === "docx" && roundTripAvailable) // AQU-2551: where the round trip is not
+      if (f.id === "docx") return roundTripWord // AQU-233: only for docx imports
+      if (f.id === "docx-lines") return !roundTripWord // AQU-2551: where the round trip is not
       if (f.id === "pptx") return activeFileType === "pptx" && roundTripAvailable // AQU-152a: only for pptx imports
       if (f.id === "idml") return activeFileType === "idml" && roundTripAvailable // only for idml imports
       if (f.id === "json") return activeFileType === "json" && roundTripAvailable // AQU-525: only for json imports
@@ -1141,7 +1148,7 @@ export function ExportDialog({
       return at === -1 ? first.length : at
     }
     return [...rest].sort((a, b) => rank(a.id) - rank(b.id))
-  }, [activeFileType, formatOptions, hasSdbhFiles, isDubbingFile, nativeFormatId, offersHtmlPage, roundTripAvailable])
+  }, [activeFileType, formatOptions, hasSdbhFiles, isDubbingFile, nativeFormatId, offersHtmlPage, roundTripAvailable, roundTripWord])
 
 
   // A selected format can also vanish without a file switch (sdbh-xml is

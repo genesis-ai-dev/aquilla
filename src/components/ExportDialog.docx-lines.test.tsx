@@ -91,6 +91,22 @@ describe("ExportDialog — New Word document from the lines (AQU-2551)", () => {
     expect(radio(/^New Word document \(\.docx\)/)).not.toBeNull()
   })
 
+  // Review finding: a remembered "New Word document" used to stay selected,
+  // hidden, on a Word file with its original, so Export wrote the lines
+  // document instead of the round trip.
+  it("a remembered New Word document is not carried to a Word file that has its original", () => {
+    // the workspace keeps the dialog mounted and toggles `open`
+    const pdf = { ...props("pdf", "notes.pdf", true), activeFileId: "f-pdf" }
+    const word = { ...props("docx", "notes.docx", true), activeFileId: "f-word" }
+    const { rerender } = render(<ExportDialog {...pdf} />)
+    fireEvent.click(radio(/^New Word document \(\.docx\)/)!)
+    rerender(<ExportDialog {...pdf} open={false} />)
+    rerender(<ExportDialog {...word} open={false} />)
+    rerender(<ExportDialog {...word} />)
+    openFoldIfClosed()
+    expect(radio(/^Word \(\.docx\)/)).toBeChecked()
+  })
+
   it("a Word file with its original keeps the round-trip Word export and is not offered the new one", () => {
     render(<ExportDialog {...props("docx", "notes.docx", true)} />)
     openFoldIfClosed()

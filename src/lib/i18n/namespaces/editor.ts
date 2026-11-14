@@ -2315,6 +2315,8 @@ export const editor = defineNamespace({
     "editor.row.lineAria": "Line {number}",
     "editor.row.cellAria": "{ref} cell",
     "editor.row.rowFallbackRef": "row {index}",
+    // AQU-1722, AQU-2278: a line named in a list (lib/cells/line-name.ts).
+    "editor.line.rowName": "row {number}",
     "editor.row.editorAria": "{ref} — {state}",
     "editor.row.translationAria": "Translation for {ref}: {source} — {state}",
     // AQU-1163: why a target cell will not take your text — shown as the
@@ -9084,6 +9086,17 @@ export const editor = defineNamespace({
           "scripture reference of its own — just its position in the file. " +
           "Lower-case because it is substituted mid-phrase.",
         placeholders: { index: "1-based position of the row in the file." },
+      },
+      "editor.line.rowName": {
+        description:
+          "What a line with no reference (no verse, no cue timing) is called " +
+          "wherever lines are listed by name: the selection bar's notes, the " +
+          "generate-voice plan, the health card's list of lines that need " +
+          "attention. Its number is the one in the editor table's # column. " +
+          "Shown inside a list of such names or on its own as a list entry, so " +
+          "keep it short; lowercase in English.",
+        maxLength: 12,
+        placeholders: { number: "The line's number in the editor table's # column." },
       },
       "editor.row.editorAria": {
         description:

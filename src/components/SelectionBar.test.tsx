@@ -47,6 +47,8 @@ vi.mock("@/lib/posthog", () => ({
 import { MAX_SELECTED } from "@/lib/audio/selection"
 import type { AudioAttachmentOut, CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
+import { lineStore, type TestLine } from "@/test-utils/line-store"
+import { createHealthCardNamer } from "@/lib/health/health-card-rows"
 
 // AQU-616: mock the emit helpers so bulk validate/unvalidate clicks don't hit
 // the real outbox/IDB, and so we can assert they fired alongside the new
@@ -1313,5 +1315,46 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     })
 
     expect(screen.queryByRole("button", { name: /Play selected/ })).toBeNull()
+  })
+})
+
+/**
+ * AQU-2278 — the health card names a line exactly as the selection bar does
+ * (AQU-1722's one rule), over the same real store: a split verse piece, a line
+ * with only its # column, and a heading ahead of them.
+ */
+describe("SelectionBar — the health card names lines the same way (AQU-2278)", () => {
+  async function namesInBoth(lines: TestLine[], picked: string[]) {
+    const store = lineStore(lines)
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set([...picked, "untranslated"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), [], [], "", { cellStore: store, onValidationCommitted: vi.fn() })
+    const name = createHealthCardNamer(store)
+    const card = name(picked, undefined, (number) => `row ${number}`)
+    return { card, note: await noteBeside("Validate text", /Validate 2 of 3 selected cells/) }
+  }
+
+  it("by reference, a split verse piece included", async () => {
+    const { card, note } = await namesInBoth([
+      { id: "title", type: "heading", ref: "RUT 1:h:1" },
+      { id: "v4", ref: "RUT 1:4", translated: "kwanza" },
+      { id: "v5", ref: "RUT 1:5" },
+      { id: "v5-b", splitFrom: "v5", translated: "pili" },
+      { id: "untranslated", ref: "RUT 1:6" },
+    ], ["v4", "v5-b"])
+    expect(card).toEqual(["RUT 1:4", "RUT 1:5b"])
+    expect(note).toContain("Validate 2 of 3 selected cells: RUT 1:4 and RUT 1:5b")
+    vi.restoreAllMocks()
+  })
+
+  it("by the # column, which skips the heading", async () => {
+    const { card, note } = await namesInBoth([
+      { id: "title", type: "heading" },
+      { id: "p1", translated: "kwanza" },
+      { id: "p2", translated: "pili" },
+      { id: "untranslated" },
+    ], ["p1", "p2"])
+    expect(card).toEqual(["row 1", "row 2"])
+    expect(note).toContain("Validate 2 of 3 selected cells: rows 1 and 2")
+    vi.restoreAllMocks()
   })
 })

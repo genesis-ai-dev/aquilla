@@ -50,7 +50,7 @@ import {
   noPermissionMessage,
   summarizeBatchValidate,
 } from "@/lib/review/batch-validate-summary"
-import { namedCellRef } from "@/lib/cell-named-ref"
+import { lineName, lineNumber, lineReference, readLineNumbering } from "@/lib/cells/line-name"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import { showBulkValidateToast, type BulkRepetitionOutcome, type UseRepetitionValidation } from "@/hooks/useRepetitionValidation"
@@ -193,6 +193,10 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // can still be named the way the reader sees it.
   const fileCellIds = useCellIds(cellStore, orderedBy, mediaLayer)
   const structureCache = useMemo(() => createEditorStructureCache(), [cellStore])
+  const readNumbering = useCallback(
+    () => readAtVersion(cellStoreVersion, () => readLineNumbering(cellStore, fileCellIds, structureCache)),
+    [cellStore, cellStoreVersion, fileCellIds, structureCache],
+  )
 
   const selectedCells = useMemo(() => {
     return readAtVersion(cellStoreVersion, () => cellStore.getCellsByIds(selected).slice(0, MAX_SELECTED))
@@ -290,14 +294,10 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     // Lines go by their references ("GEN 1:1") when every one has one, else by
     // the table's # column ("rows 4, 5 and 10", Sam's ask), else unnamed rather
     // than half-named: a heading has no number.
-    const refs = lines.map(namedCellRef)
-    const rowNumbers = readAtVersion(cellStoreVersion, () =>
-      structureCache.read(fileCellIds, cellStore)).sequentialNumberByCellId
-    // The table's rule: a line's imported number, else its place in the file
-    // (a plain document numbers 1, 2, 3…). A file that has imported numbers
-    // leaves its headings unnumbered, so those name nothing.
-    const position = rowNumbers.size > 0 ? null : new Map(fileCellIds.map((id, i) => [id, i + 1]))
-    const numbers = lines.map((c) => rowNumbers.get(c.id) ?? position?.get(c.id))
+    // The same pieces `nameCell` below joins (src/lib/cells/line-name.ts).
+    const numbering = readNumbering()
+    const refs = lines.map((c) => lineReference(c, numbering))
+    const numbers = lines.map((c) => lineNumber(c, numbering))
     const names = refs.every((ref): ref is string => Boolean(ref))
       ? { key: "editor.selection.validatePartialNamed" as const, items: refs as string[] }
       : numbers.every((n): n is number => n !== undefined)
@@ -324,7 +324,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
         </span>
       </span>
     )
-  }, [validatableCount, selectedCells, username, myScopes, activeLane, project.id, textScopeCanValidate, noPermissionReason, allowSelfValidation, t, formatLocaleList, cellStore, cellStoreVersion, fileCellIds, structureCache])
+  }, [validatableCount, selectedCells, username, myScopes, activeLane, project.id, textScopeCanValidate, noPermissionReason, allowSelfValidation, t, formatLocaleList, readNumbering])
   const allHaveTranslation = selectedCells.length > 0 && selectedCells.every((c) => c.translated.trim())
   const voiceableCount = useMemo(
     () => selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()).length,
@@ -385,19 +385,9 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // the table's # column, else nothing. The same rule the partial-validate
   // hover uses, so one line is named identically wherever it is mentioned.
   const nameCell = useCallback(
-    (cell: CellData): string => {
-      const ref = namedCellRef(cell)
-      if (ref) return ref
-      const rowNumbers = readAtVersion(cellStoreVersion, () =>
-        structureCache.read(fileCellIds, cellStore)).sequentialNumberByCellId
-      // A file with imported numbers leaves its headings unnumbered, so those
-      // name nothing; a plain document numbers by position instead.
-      const number = rowNumbers.size > 0
-        ? rowNumbers.get(cell.id)
-        : (fileCellIds.indexOf(cell.id) + 1) || undefined
-      return number === undefined ? "" : t("audio.batchVoice.rowName", { number })
-    },
-    [cellStore, cellStoreVersion, fileCellIds, structureCache, t],
+    (cell: CellData): string =>
+      lineName(cell, readNumbering(), (number) => t("editor.line.rowName", { number })),
+    [readNumbering, t],
   )
   // AQU-186: cells with at least one infraction or fix proposal — v1 minimum:
   // show affordance when ≥ 1 selected cell has a translated value (proxy for

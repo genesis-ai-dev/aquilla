@@ -1,45 +1,58 @@
-// AQU-2278: the rows the status bar's health card ranks into "Biggest drags".
-//
-// A line is called what the editor row calls it: its own label when it has
-// one, else its reference ("RUT 1:4", a cue's timing, a script's "B4") from
-// `namedCellRef`, else its place in the table ("row 3"), the stand-in the row
-// itself uses. Never its cell id: nobody can tell which line "01a1…" is.
+// AQU-2278: what the status bar's health card ranks into "Biggest drags", and
+// what it calls the lines it shows.
 
-import { namedCellRef } from "@/lib/cell-named-ref"
-
-export interface HealthCardCell {
-  id: string
-  cellLabel?: string
-  context?: string | null
-  globalReferences?: readonly string[] | null
-}
-
-export interface HealthCardRow {
-  cellId: string
-  label: string
-  health: number
-}
+import type { CellStore } from "@/hooks/useActiveCellStore"
+import { lineName, readLineNumbering } from "@/lib/cells/line-name"
+import { shortCellId } from "@/lib/cells/short-cell-id"
+import { createEditorStructureCache } from "@/lib/editor-structure-cache"
+import { isExcludedFromWork, type ExcludedCellInput } from "@/lib/health/excluded-cell"
+import type { OrderedBy } from "@/lib/parsers/types"
 
 /**
- * `rowOrder` is the table's row order (`getCellIdsForLens`), so a line's
- * number matches the row it opens. `rowName` words that number. A line not in
- * the table (a hidden one) has no row to name, and keeps its id.
+ * The lines that are work, with their health: a parked line never is, and a
+ * heading is only when the project counts headings, the same two rules the
+ * footer's number beside the card counts by.
  */
 export function healthCardRows(
-  cells: readonly HealthCardCell[],
+  cells: ReadonlyArray<ExcludedCellInput & { id: string }>,
   healthByCell: ReadonlyMap<string, number>,
-  rowOrder: readonly string[],
-  rowName: (index: number) => string,
-): HealthCardRow[] {
-  let position: Map<string, number> | null = null
-  const rowLabel = (id: string): string => {
-    position ??= new Map(rowOrder.map((rowId, i) => [rowId, i + 1]))
-    const index = position.get(id)
-    return index === undefined ? id : rowName(index)
+  countStructural: boolean,
+): Array<{ cellId: string; health: number }> {
+  const rows: Array<{ cellId: string; health: number }> = []
+  for (const cell of cells) {
+    if (isExcludedFromWork(cell, countStructural)) continue
+    rows.push({ cellId: cell.id, health: healthByCell.get(cell.id) ?? 0 })
   }
-  return cells.map((cell) => ({
-    cellId: cell.id,
-    label: cell.cellLabel || namedCellRef(cell) || rowLabel(cell.id),
-    health: healthByCell.get(cell.id) ?? 0,
-  }))
+  return rows
+}
+
+type NamerStore = Pick<
+  CellStore,
+  "getCellIdsForLens" | "getListVersion" | "getCellVersion" | "getCellView" | "getCellSummary"
+>
+
+/**
+ * Names the card's drags by the app's one rule for a line (`lineName`), read
+ * over the table's own row order. The order is kept until the list changes,
+ * so a time-ordered file is not re-sorted each time the card opens.
+ *
+ * A line the rule leaves unnamed (a heading has no reference and no #) is
+ * called by its words instead, since an entry in this list has to say
+ * something to be clicked.
+ */
+export function createHealthCardNamer(store: NamerStore) {
+  const structure = createEditorStructureCache()
+  let order: { listVersion: number; orderedBy: OrderedBy | undefined; ids: readonly string[] } | null = null
+  return (cellIds: readonly string[], orderedBy: OrderedBy | undefined, rowName: (number: number) => string): string[] => {
+    const listVersion = store.getListVersion()
+    if (!order || order.listVersion !== listVersion || order.orderedBy !== orderedBy) {
+      order = { listVersion, orderedBy, ids: store.getCellIdsForLens(orderedBy) }
+    }
+    const numbering = readLineNumbering(store, order.ids, structure)
+    return cellIds.map((id) => {
+      const cell = store.getCellView(id)
+      const name = cell ? lineName(cell, numbering, rowName) : ""
+      return name || store.getCellSummary(id)?.original.trim() || shortCellId(id)
+    })
+  }
 }

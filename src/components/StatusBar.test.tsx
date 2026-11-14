@@ -10,17 +10,23 @@ import { useCallback, type ComponentProps } from "react"
 
 function StatusBar({ cells, healthMap, countStructural = true, ...props }: {
   cells: readonly CellSummary[]; healthMap: Map<string, number>; countStructural?: boolean
-} & Omit<ComponentProps<typeof StatusBarView>, "progress" | "getHealthByCell">) {
+} & Omit<ComponentProps<typeof StatusBarView>, "progress" | "getHealthByCell" | "nameCells">) {
   // Use the same live counter source as the workspace, including when health
   // scoring is off. The footer must not regress to server snapshot counters.
   // AQU-1083: and the same policy step the workspace applies on top of it.
   const { fileProgress } = useHealth(new Map([["active", cells]]), [], { enabled: false })
   const progress = applyStructuralPolicy(fileProgress.get("active")!, cells, countStructural)
+  // The workspace's rows; how they are named is DecayBreakdown.test's and
+  // line-name.test's business, so these go by each fixture's own label.
   const getHealthByCell = useCallback(
-    () => healthCardRows(cells, healthMap, cells.map((cell) => cell.id), (index) => `row ${index}`),
-    [cells, healthMap],
+    () => healthCardRows(cells, healthMap, countStructural),
+    [cells, healthMap, countStructural],
   )
-  return <StatusBarView progress={progress} getHealthByCell={getHealthByCell} {...props} />
+  const nameCells = useCallback(
+    (ids: readonly string[]) => ids.map((id) => cells.find((c) => c.id === id)?.cellLabel ?? id),
+    [cells],
+  )
+  return <StatusBarView progress={progress} getHealthByCell={getHealthByCell} nameCells={nameCells} {...props} />
 }
 
 const cells = [

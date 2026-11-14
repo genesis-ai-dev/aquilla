@@ -64,6 +64,15 @@ export function formatVerseReference(ref: VerseReference): string {
   return `${ref.bookCode} ${ref.chapter}:${ref.verse}${ref.toVerse ? `-${ref.toVerse}` : ""}`
 }
 
+/** A heading's or paratext row's machine locator ("RUT 1:h:1", "RUT:mt:1"):
+ *  where structure sits in a book, not a reference anyone reads. The shape the
+ *  importers mint (normalized-manifest.ts, sandbox-parser.ts, spreadsheet.ts). */
+const SCRIPTURE_STRUCTURE_RE = /^[1-3]?[A-Z]{2,3}(?:\s+\d+)?:[a-z]+\d*:\d+$/i
+
+export function isScriptureStructureLocator(value: string | null | undefined): boolean {
+  return Boolean(value) && SCRIPTURE_STRUCTURE_RE.test(value!.trim())
+}
+
 /** Canonical verse label for the editor gutter. Non-verse cells return null. */
 export function verseLabelFromCanonical(value: string | null | undefined): string | null {
   return parseScriptureReference(value)?.verse ?? null

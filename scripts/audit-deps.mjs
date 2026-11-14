@@ -19,17 +19,29 @@
 //    would be red from its first run (the transitive Node-side advisories under
 //    the browser ML libraries) and would teach people to skip it.
 //
+// Allowlist entries expire: once an entry's `reviewBy` date has passed it stops
+// matching, so the advisory goes red again and someone has to re-decide.
+//
 // Usage:
 //   node scripts/audit-deps.mjs            # exits 1 on un-allowlisted advisories
 //   node scripts/audit-deps.mjs --report   # never exits non-zero; prints only
+//   node scripts/audit-deps.mjs --dry-run  # also prints the Linear tickets the weekly
+//                                          # workflow would file; files nothing
+//
+// Set AUDIT_REPORT_FILE to also write the markdown report to that path, and
+// AUDIT_REPORT_JSON to write the machine-readable findings (every finding with
+// its package, advisories, path and allowlisted flag). scripts/audit-tickets.ts
+// reads that JSON and files or updates one Linear ticket per package.
 
 import { execFileSync } from "node:child_process"
-import { readFileSync, existsSync, appendFileSync } from "node:fs"
+import { readFileSync, existsSync, appendFileSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { resolve, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..")
-const REPORT_ONLY = process.argv.includes("--report")
+const DRY_RUN = process.argv.includes("--dry-run")
+const REPORT_ONLY = process.argv.includes("--report") || DRY_RUN
 const ALLOWLIST_PATH = resolve(ROOT, ".github/audit-allowlist.json")
 
 // Root is a pnpm workspace; each Worker carries its own package-lock.json and is
@@ -39,6 +51,8 @@ const TARGETS = [
   { dir: "auth-worker", tool: "npm" },
   { dir: "sync-worker", tool: "npm" },
   { dir: "agent-worker", tool: "npm" },
+  { dir: "monitor-worker", tool: "npm" },
+  { dir: "zapier", tool: "npm" },
 ]
 
 const SEVERITY_ORDER = ["critical", "high", "moderate", "low", "info"]
@@ -104,6 +118,9 @@ function normalise(raw, dir) {
       severity: String(advisory.severity ?? "info").toLowerCase(),
       title: advisory.title ?? "(untitled)",
       ghsa: ghsaOf(advisory.url ?? "") ?? ghsaOf(advisory.references ?? ""),
+      url: advisory.url ?? null,
+      path: advisory.findings?.[0]?.paths?.[0] ?? null,
+      fixedIn: advisory.patched_versions && advisory.patched_versions !== "<0.0.0" ? advisory.patched_versions : null,
     })
   }
 
@@ -119,6 +136,12 @@ function normalise(raw, dir) {
         severity: String(via.severity ?? vuln.severity ?? "info").toLowerCase(),
         title: via.title ?? "(untitled)",
         ghsa: ghsaOf(via.url ?? ""),
+        url: via.url ?? null,
+        path: [...(vuln.effects ?? []), name].join(" > "),
+        fixedIn:
+          vuln.fixAvailable && typeof vuln.fixAvailable === "object"
+            ? `${vuln.fixAvailable.name}@${vuln.fixAvailable.version}${vuln.fixAvailable.isSemVerMajor ? " (major)" : ""}`
+            : null,
       })
     }
   }
@@ -139,8 +162,14 @@ function loadAllowlist() {
   return parsed.accepted ?? []
 }
 
+// An entry with no `reviewBy` never expires; one whose date has passed (UTC,
+// compared as YYYY-MM-DD) no longer counts.
+const TODAY = new Date().toISOString().slice(0, 10)
+const isExpired = (entry) => Boolean(entry.reviewBy) && entry.reviewBy < TODAY
+
 function isAllowed(finding, allowlist) {
   return allowlist.some((entry) => {
+    if (isExpired(entry)) return false
     if (entry.ghsa && finding.ghsa) {
       return entry.ghsa.toUpperCase() === finding.ghsa.toUpperCase()
     }
@@ -152,6 +181,8 @@ function isAllowed(finding, allowlist) {
 const bySeverity = (a, b) =>
   SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)
 
+let reportJsonForDryRun = null
+
 function main() {
   const allowlist = loadAllowlist()
   const findings = []
@@ -160,6 +191,7 @@ function main() {
     if (raw !== null) findings.push(...normalise(raw, target.dir))
   }
 
+  const expired = allowlist.filter(isExpired)
   const fresh = findings.filter((f) => !isAllowed(f, allowlist)).sort(bySeverity)
   const accepted = findings.filter((f) => isAllowed(f, allowlist)).sort(bySeverity)
 
@@ -188,6 +220,17 @@ function main() {
     lines.push(`No new advisories. :white_check_mark:`, "")
   }
 
+  if (expired.length) {
+    lines.push(
+      `${expired.length} allowlist entr${expired.length === 1 ? "y is" : "ies are"} past \`reviewBy\` and no longer suppress anything. Re-decide each one, then extend its date or delete it:`,
+      "",
+    )
+    for (const e of expired) {
+      lines.push(`- \`${e.module}\` ${e.ghsa ?? e.title} (reviewBy ${e.reviewBy})`)
+    }
+    lines.push("")
+  }
+
   if (accepted.length) {
     lines.push(`<details><summary>${accepted.length} accepted</summary>`, "")
     for (const f of accepted) {
@@ -196,10 +239,44 @@ function main() {
     lines.push("", `</details>`, "")
   }
 
+  if (process.env.AUDIT_REPORT_JSON || DRY_RUN) {
+    const jsonPath = process.env.AUDIT_REPORT_JSON ?? resolve(tmpdir(), "audit-report.json")
+    const record = (f, allowlisted) => ({
+      ...f,
+      ecosystem: "npm",
+      allowlisted,
+    })
+    writeFileSync(
+      jsonPath,
+      `${JSON.stringify(
+        {
+          generatedAt: new Date().toISOString(),
+          findings: [...fresh.map((f) => record(f, false)), ...accepted.map((f) => record(f, true))],
+          expiredAllowlist: expired,
+        },
+        null,
+        2,
+      )}\n`,
+    )
+    if (DRY_RUN) {
+      const args = ["exec", "tsx", "scripts/audit-tickets.ts", "--report", jsonPath, "--dry-run"]
+      if (process.env.CARGO_AUDIT_JSON) args.push("--cargo", process.env.CARGO_AUDIT_JSON)
+      reportJsonForDryRun = { args }
+    }
+  }
+
   const report = lines.join("\n")
   console.log(report)
+  if (process.env.AUDIT_REPORT_FILE) {
+    writeFileSync(process.env.AUDIT_REPORT_FILE, `${report}\n`)
+  }
   if (process.env.GITHUB_STEP_SUMMARY) {
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${report}\n`)
+  }
+
+  if (reportJsonForDryRun) {
+    console.log("")
+    execFileSync("pnpm", reportJsonForDryRun.args, { cwd: ROOT, stdio: "inherit" })
   }
 
   if (fresh.length && !REPORT_ONLY) process.exit(1)

@@ -94,7 +94,7 @@ against the native Container API.
   Python packages, the runners, and `sandbox-shim` copied from
   `docker.io/cloudflare/sandbox:<version>` — a donor image that is not runnable on its own. The
   donor tag must equal the npm package version (the shim protocol is versioned; the runtime-policy
-  test enforces it, and Dependabot bumps both in one PR because the donor is a `FROM … AS` stage).
+  test enforces it, so a bump changes both in one PR; see `docs/DEPENDENCY-RULES.md`).
 - **Deploying the image.** The container application is created by the first
   `wrangler deploy --env <development|production>` of this configuration (containers config is
   per-env; the applications are named `aquilla-agent-sandbox-dev-sandbox` and

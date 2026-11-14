@@ -63,7 +63,8 @@ queue, and the preview is still that branch's code.
 
 - Deploy PRs (`Deploy YYYY-MM-DD`, base `main`). Those are grouping
   records, not a feature claim.
-- Dependabot / chore PRs with no user-visible surface.
+- Chore PRs with no user-visible surface, including any Dependabot PR left
+  open from before it was turned off (`docs/DEPENDENCY-RULES.md`).
 
 **One comment per HEAD.** If you already commented on this SHA, stop.
 If HEAD moved, one new comment for the new SHA. Do not stack BLOCKED

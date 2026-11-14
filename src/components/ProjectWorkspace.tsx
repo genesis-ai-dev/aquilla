@@ -664,6 +664,7 @@ import {
 import {
   canIncludeUntouchedAiDrafts,
   classifyBatchDraft,
+  draftableCount,
   selectBatchDraft,
   type DraftRunChoices,
   type ValidateRunChoices,
@@ -12588,11 +12589,20 @@ export function ProjectWorkspace() {
     return { rows: cellIds.length, lines }
   }, [quoteSplitFileCandidates])
 
+  // AQU-1397: what the Draft window would offer for the open file, counted
+  // over the same cells by its own rule, so the two draft entries never open it
+  // onto "nothing to draft" and never hide while it has lines to draft.
+  const draftable = useMemo(
+    () => activeFileId ? draftableCount(cellSummaries.filter((cell) => cell.fileId === activeFileId)) : 0,
+    [activeFileId, cellSummaries],
+  )
+
   const actionCtx = useMemo(() => ({
     project: project!,
     activeFileId,
     audioOnlyLane: activeLaneDelivers === "audio",
     fileProgress,
+    draftable,
     canExportByOrgPolicy,
     // The registry reads one shape; the two halves are counted apart only
     // because they read different maps (see validatableTakes above).
@@ -12600,7 +12610,7 @@ export function ProjectWorkspace() {
     batchValidateSummary,
     canSplitAtQuotes,
     quoteSplitSummary,
-  }), [project, activeFileId, activeLaneDelivers, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes, batchValidateSummary, canSplitAtQuotes, quoteSplitSummary])
+  }), [project, activeFileId, activeLaneDelivers, fileProgress, draftable, canExportByOrgPolicy, audioCounts, validatableTakes, batchValidateSummary, canSplitAtQuotes, quoteSplitSummary])
 
   // AQU-481: source import emits `file.create` (+ N `source.cell.create`), and
   // `file.create` sits at PROJECT_LEAD (500) server-side. Read the role from

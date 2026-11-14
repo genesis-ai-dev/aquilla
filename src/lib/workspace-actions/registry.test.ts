@@ -9,6 +9,10 @@ import { formatList } from "@/lib/i18n/format"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import type { BatchValidateCandidate } from "@/lib/review/batch-validate-summary"
 import { summarizeBatchValidate } from "@/lib/review/batch-validate-summary"
+import { renderHook } from "@testing-library/react"
+import { useHealth, type HealthCell } from "@/hooks/useHealth"
+import { laneLineStatus } from "@/lib/lanes/lane-delivers"
+import { draftableCount, type DraftChoiceCell } from "@/lib/review/batch-file-options"
 
 // English-only `t`, standing in for the real I18nProvider hook — description()
 // is resolved outside React (registry.ts has no component tree), so tests
@@ -198,7 +202,7 @@ describe("AQU-365: header actions hidden for below-floor roles", () => {
 
   it("shows all three for a CONTRIBUTOR (400)", () => {
     const progress = new Map([["f1", { translated: 5, validated: 0, total: 10 }]])
-    const c = ctxWithRole(ROLE.CONTRIBUTOR, { fileProgress: progress })
+    const c = ctxWithRole(ROLE.CONTRIBUTOR, { fileProgress: progress, draftable: 5 })
     expect(runCompletions.isAvailable(c)).toBe(true)
     expect(completeAll.isAvailable(c)).toBe(true)
     expect(batchValidate.isAvailable(c)).toBe(true)
@@ -210,8 +214,31 @@ describe("AQU-365: header actions hidden for below-floor roles", () => {
     expect(batchValidate.opensFileModal).toBe("validate")
   })
 
+  // AQU-1397 (Pattani Malay): AI completions were offered on a chapter with no
+  // empty lines. Most likely this was "Run AI completions", which stayed in the
+  // file menu whatever the file held; in September its confirm read "...for
+  // the next 0 untranslated cells" with a Run button. Both draft entries now
+  // show only when the Draft window has something to offer.
+  it("offers no drafting on a file with nothing to draft", () => {
+    const finished = new Map([["f1", { translated: 10, validated: 3, total: 10 }]])
+    const c = ctxWithRole(ROLE.CONTRIBUTOR, { fileProgress: finished, draftable: 0 })
+    expect(runCompletions.isAvailable(c)).toBe(false)
+    expect(completeAll.isAvailable(c)).toBe(false)
+    const ids = getVisibleActions(workspaceActions, c).map((a) => a.id)
+    expect(ids).not.toContain("run-completions")
+    expect(ids).not.toContain("complete-all")
+    // Validation is still on offer: that is the next step for a full file.
+    expect(ids).toContain("batch-validate")
+  })
+
+  it("offers no drafting before the open file has been counted", () => {
+    const c = ctxWithRole(ROLE.CONTRIBUTOR, { fileProgress: new Map([["f1", { translated: 5, validated: 0, total: 10 }]]) })
+    expect(runCompletions.isAvailable(c)).toBe(false)
+    expect(completeAll.isAvailable(c)).toBe(false)
+  })
+
   it("fails open (shows) for a local project with no syncRole", () => {
-    const c = ctxWithRole(null)
+    const c = ctxWithRole(null, { fileProgress: new Map([["f1", { translated: 5, validated: 0, total: 10 }]]), draftable: 5 })
     expect(runCompletions.isAvailable(c)).toBe(true)
     expect(batchValidate.isAvailable(c)).toBe(true)
   })
@@ -578,7 +605,7 @@ describe("split-quotes", () => {
 describe("an Audio language's file menu", () => {
   const fileProgress = new Map([["f1", { total: 10, translated: 4, validated: 1 }]])
   const ids = (overrides: Partial<WorkspaceActionContext>) =>
-    getVisibleActions(workspaceActions, ctx({ activeFileId: "f1", fileProgress, ...overrides })).map((a) => a.id)
+    getVisibleActions(workspaceActions, ctx({ activeFileId: "f1", fileProgress, draftable: 6, ...overrides })).map((a) => a.id)
   const audioCounts = { untranscribed: 2, unsynthesized: 3, voiceChangeable: 1 }
 
   it("drops the text-only actions", () => {
@@ -592,5 +619,64 @@ describe("an Audio language's file menu", () => {
   it("leaves a Text language's menu as it was", () => {
     expect(ids({ audioCounts })).toEqual(ids({ audioOnlyLane: false, audioCounts }))
     expect(ids({ audioCounts })).toEqual(expect.arrayContaining(["run-completions", "complete-all", "batch-validate", "synth-all"]))
+  })
+})
+
+// AQU-1397: the two draft entries open the Draft window, so they show exactly
+// when that window has something to offer: an empty line it would draft, or an
+// untouched AI draft it would offer to refresh. The menu used to ask the
+// file's progress count instead, which disagrees with the window in both
+// directions. These build the menu the way the workspace does: the live count
+// from the real useHealth, and `draftable` from the window's own list.
+describe("AQU-1397: the draft entries offer what the Draft window offers", () => {
+  type Line = HealthCell & DraftChoiceCell
+  const drafting = ["run-completions", "complete-all"]
+
+  function menuFor(cells: Line[]): string[] {
+    const { result } = renderHook(() => useHealth(new Map([["f1", cells]]), [], { enabled: false }))
+    return getVisibleActions(workspaceActions, ctx({
+      activeFileId: "f1",
+      fileProgress: result.current.fileProgress,
+      draftable: draftableCount(cells),
+    })).map((a) => a.id)
+  }
+
+  const human = (id: string): Line => ({ id, original: `src ${id}`, translated: `text ${id}`, status: "unvalidated" })
+
+  it("Text and audio: offers drafting while recorded lines still have no text", () => {
+    // A recorded line counts as started in a Text and audio language, so the
+    // progress count reads full; the window would still draft its text.
+    const line = (id: string, text: string, recorded: boolean): Line => ({
+      id, original: `src ${id}`, translated: text,
+      status: text ? "unvalidated" : "empty",
+      hasOwnTake: recorded,
+      laneStatus: laneLineStatus("text_and_audio", {
+        textFilled: Boolean(text), textValidated: false, recorded, audioApproved: false,
+      }),
+    })
+    const ids = menuFor([line("a", "done", false), line("b", "done", true), line("c", "", true), line("d", "", true)])
+    expect(ids).toEqual(expect.arrayContaining(drafting))
+  })
+
+  it("offers no drafting when the only empty line is hidden", () => {
+    const ids = menuFor([human("a"), human("b"), { id: "c", original: "src c", translated: "", status: "empty", hidden: true }])
+    for (const id of drafting) expect(ids, id).not.toContain(id)
+  })
+
+  it("offers no drafting when the only empty line has no source text", () => {
+    const ids = menuFor([human("a"), human("b"), { id: "c", original: "", translated: "", status: "empty" }])
+    for (const id of drafting) expect(ids, id).not.toContain(id)
+  })
+
+  it("keeps the entries on a file of AI drafts nobody has reviewed, for the window's refresh", () => {
+    const ai = (id: string): Line => ({ ...human(id), aiDrafted: true })
+    const ids = menuFor([ai("a"), ai("b"), ai("c")])
+    expect(ids).toEqual(expect.arrayContaining(drafting))
+  })
+
+  it("offers no drafting on a file of text people wrote", () => {
+    const ids = menuFor([human("a"), human("b"), human("c")])
+    for (const id of drafting) expect(ids, id).not.toContain(id)
+    expect(ids).toContain("batch-validate")
   })
 })

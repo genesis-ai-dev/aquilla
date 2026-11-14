@@ -14461,8 +14461,6 @@ export function ProjectWorkspace() {
     fileId: string
     colors: Map<string, string | null>
   } | null>(null)
-  const pendingTrackColorsRef = useRef(pendingTrackColors)
-  pendingTrackColorsRef.current = pendingTrackColors
   /** Saves the "Move to" moves still queued (`saveQueuedTrackMoves`, below).
    *  A drag's write calls it first, so the outbox holds writes in the order
    *  they were made and a held move can never land over a later drag. */

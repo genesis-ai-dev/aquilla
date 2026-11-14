@@ -160,17 +160,18 @@ function unreverseGlyph(s: string): string {
  *  Times map their glyphs to, as the letters they show (NFKC). A mark's own
  *  form decomposes with a space or a tatweel before the mark; both go.
  *  AQU-2551 re-review finding 2 (question 79): Arial and Times draw the
- *  Arabic yeh with the Persian yeh's forms (U+FBFC–FBFF) and the Arabic heh
- *  with the Urdu heh's (U+FBAA–FBAD). Outside an Urdu document the Urdu heh's
- *  forms are the Arabic heh; outside a Persian or Urdu one the Persian yeh's
- *  forms are the Arabic yeh. Letters drawn as themselves are never changed. */
+ *  Arabic yeh as the Persian yeh (U+06CC, or its forms) and the Arabic heh as
+ *  the Urdu heh (U+06BE, or its forms; at a word's start Arial gives the
+ *  letter itself). So, once the forms are letters: outside an Urdu document
+ *  the Urdu heh is the Arabic heh, and outside a Persian or Urdu one the
+ *  Persian yeh is the Arabic yeh. */
 function normalizePresentationForms(s: string, script: ArabicScript): string {
-  if (!/[\uFB50-\uFDFF\uFE70-\uFEFF]/.test(s)) return s
-  return s.replace(/[\uFB50-\uFDFF\uFE70-\uFEFF]/g, (c) => {
-    if (script !== "urdu" && c >= "\uFBAA" && c <= "\uFBAD") return "\u0647"
-    if (script === "arabic" && c >= "\uFBFC" && c <= "\uFBFF") return "\u064A"
-    return c.normalize("NFKC").replace(/^[ \u0640]+(?=\p{Mn})/u, "")
-  })
+  let out = /[\uFB50-\uFDFF\uFE70-\uFEFF]/.test(s)
+    ? s.replace(/[\uFB50-\uFDFF\uFE70-\uFEFF]/g, (c) => c.normalize("NFKC").replace(/^[ \u0640]+(?=\p{Mn})/u, ""))
+    : s
+  if (script !== "urdu") out = out.replace(/\u06BE/g, "\u0647")
+  if (script === "arabic") out = out.replace(/\u06CC/g, "\u064A")
+  return out
 }
 
 /** AQU-2551 re-review finding 5: a lam-alef glyph (Arial's U+FEFB) carries

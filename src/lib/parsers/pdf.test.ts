@@ -504,6 +504,13 @@ describe("review findings: Arabic (Nov 14)", () => {
     expect(readDoc([[...YAWM, " ", ...HADHA, " ", ...SHAHR]])).toEqual(["يوم هذا شهر"])
   })
 
+  it("does so for the letters themselves too: Arial gives a heh at a word's start as U+06BE", () => {
+    // the reviewer's vowelled Arial PDF: "هَذَا" drawn as U+06BE + fatha
+    expect(readDoc([["\u064E\u06BE", "\uFEAC", "\uFE8E", " ", "\u06CC", "\uFEEE", "\uFEE1"]]).map((t) => t.normalize("NFC")))
+      .toEqual(["\u0647\u064E\u0630\u0627 \u064A\u0648\u0645"])
+    expect(readDoc([[...PEDAR, " ", "\u06BE", "\uFEAC", "\uFE8E", " ", "\u06CC"]])).toEqual(["پدر هذا ی"])
+  })
+
   it("keeps the Persian yeh in a Persian document, and gives it the Arabic heh", () => {
     expect(readDoc([[...PEDAR, " ", ...IN, " ", ...SHAHR, " ", ...KEH]])).toEqual(["پدر این شهر که"])
   })

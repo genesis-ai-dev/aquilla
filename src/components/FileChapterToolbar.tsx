@@ -52,6 +52,8 @@ export interface FileChapterToolbarProps {
   audioLane?: boolean
   /** AQU-1767 phase 2: the History panel's button, beside the lens switch. */
   historyControl?: ReactNode
+  /** AQU-2559: the Table / Document switch, on a Bible book in the Text view. */
+  layoutSwitch?: ReactNode
   /** The media view's top bar (canvas board 55): the Panels button, before
    *  the ⋯. */
   beforeMenu?: ReactNode
@@ -77,6 +79,7 @@ export function FileChapterToolbar({
   onTranslateAsReadChange,
   audioLane = false,
   historyControl,
+  layoutSwitch,
   beforeMenu,
 }: FileChapterToolbarProps) {
   const t = useT()
@@ -184,6 +187,7 @@ export function FileChapterToolbar({
           </span>
         )}
         {historyControl}
+        {layoutSwitch}
         <EditorModeToggle
           lens={lens}
           onChange={onLensChange}

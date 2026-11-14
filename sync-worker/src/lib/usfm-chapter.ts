@@ -23,12 +23,10 @@
 // step a third time. See `serializePiece` for how the same loop is made to
 // stop early.
 
-import {
-  countLossyVerses,
-  serializeUsfmLossless,
-  type UsfmDocument,
-  type UsfmEdits,
-} from "./usfm-lossless"
+import type { UsfmDocument, UsfmEdits } from "./usfm-lossless"
+// AQU-2559: the same serializer as the whole-file export, so a chapter keeps
+// the paragraph lines after a translated verse too.
+import { countLossyVersesWithLayout, serializeUsfmWithLayout } from "../../../db/shared/usfm-layout"
 
 /** Offsets into the original text. `end` values are exclusive. */
 export interface UsfmChapterRange {
@@ -123,7 +121,7 @@ function serializePiece(
     verses: doc.verses.filter(inside(from, to)).map(shift),
     headings: doc.headings.filter(inside(from, to)).map(shift),
   }
-  const out = serializeUsfmLossless(piece, overrides, edits)
+  const out = serializeUsfmWithLayout(piece, overrides, edits)
   return out.slice(0, out.length - (doc.raw.length - to))
 }
 
@@ -149,5 +147,5 @@ export function serializeUsfmChapter(
   const exported = doc.verses.filter(
     (v) => inside(0, range.frontMatterEnd)(v) || inside(range.start, range.end)(v),
   )
-  return { text, lossyVerseCount: countLossyVerses({ ...doc, verses: exported }, overrides) }
+  return { text, lossyVerseCount: countLossyVersesWithLayout({ ...doc, verses: exported }, overrides) }
 }

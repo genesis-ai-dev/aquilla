@@ -345,6 +345,15 @@ describe("Word export — what a lost line owns is its own text range and its fo
     }, emptiedBy(kind))
   })
 
+  it("a picture right at the cut between a remaining line and the lost line after it stays at that cut", async () => {
+    const bytes = await docxBytes(para(run(L1) + IMG + run(" Second line here" + PAD + " ") + run(L3)) + NEXT)
+    const [a, b, c, ...rest] = await importCells(bytes, false)
+    expect(b.original.replaceAll(PAD.trim(), "…")).toBe("Second line here …")
+    expect(paras((await wordOut(bytes, [typed(a, "Un."), hide(b), typed(c, "Trois."), ...rest])).body)[0]).toBe("Un.[IMG] Trois.")
+    expect(paras((await wordOut(bytes, [typed(a, "Un."), typed(c, "Trois."), ...rest], [b])).body)[0]).toBe("Un.[IMG] Trois.")
+    expect(paras((await wordOut(bytes, [a, hide(b), c, ...rest])).body)[0]).toBe("First line here …[IMG] Third line here …")
+  })
+
   it.each(staying)("$name of a lost first line sits before the first remaining line", async (kind) => {
     const bytes = await docxBytes(para(kind.line2 + run(" " + L1 + " ") + run(L3)) + NEXT)
     const cells = await importCells(bytes, false)

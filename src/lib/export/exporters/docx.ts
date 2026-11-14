@@ -853,7 +853,9 @@ function rebuildParagraphIn(
         const after = layout!.stretches.findIndex((r) => r !== null && r.start >= s.end)
         const from = before === -1 ? -Infinity : layout!.stretches[before]!.end
         const to = after === -1 ? Infinity : layout!.stretches[after]!.start
-        if (!((from < offset && offset < to) || (s.start <= offset && offset <= s.end))) continue
+        // From the end of the remaining line before it (a piece right at that
+        // cut is at the boundary either way) up to the next one's start.
+        if (!((from <= offset && offset < to) || (s.start <= offset && offset <= s.end))) continue
         if (before === lastLine) return undefined
         for (let line = before; line >= 0; line--) if (lineEnd.has(line)) return lineEnd.get(line)
         return 0

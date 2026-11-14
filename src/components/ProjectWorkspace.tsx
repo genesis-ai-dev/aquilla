@@ -16616,9 +16616,8 @@ export function ProjectWorkspace() {
               ? [{ trackId: change.trackId, color: change.patch.color ?? null }]
               : [],
           )
-          // A "Move to" still queued saves first, as before a drag's write, so
-          // the outbox holds the move before the Undo of it.
-          flushQueuedTrackMoves.current()
+          // A "Move to" still queued was saved before this Undo began: every
+          // Undo and Redo saves what the timeline holds (beforeHistoryMove).
           const revertColors = paintTrackColorsRef.current(colors)
           const revertPlaces = paintTrackPlacesRef.current(changes)
           return applyTrackPatches(changes as never, "Couldn't undo the track change:", () => {

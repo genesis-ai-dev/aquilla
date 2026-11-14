@@ -56,7 +56,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useHistoryView } from "@/lib/history/useHistory"
 import { stepLabel } from "@/lib/history/step-label"
-import { redoLast, undoLast, type HistoryResult } from "@/lib/history/history"
+import { beforeHistoryMove, redoLast, undoLast, type HistoryResult } from "@/lib/history/history"
 import { canCutAt } from "@/lib/audio/cut-take"
 import { isTextEntryTarget } from "@/lib/history/arbiter"
 import { deriveLanes } from "@/lib/timeline/lanes"
@@ -3757,6 +3757,10 @@ export function TimelineEditor({
       saveUnsavedOrders()
     }
   }, [fileId, saveUnsavedOrders, saveDragWrites])
+  // AQU-2492: …and so does every Undo and Redo, however it was chosen (Enter
+  // on the menu's Undo, Space on a focused button, the History panel), so the
+  // Undo pressed straight after a drop undoes the drop.
+  useEffect(() => beforeHistoryMove(saveUnsavedOrders), [saveUnsavedOrders])
 
   function onTrackDragStart(event: DragStartEvent) {
     // The next drag measures the list, so the last drop must be painted in it.

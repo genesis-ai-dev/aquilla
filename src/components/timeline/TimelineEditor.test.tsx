@@ -4989,6 +4989,41 @@ describe("TimelineEditor — dragging a track row reorders it", () => {
     expect(audio.style.transform).toBe("")
   })
 
+  // AQU-2492 (review of the dev merge, Nov 14): a drop is held for seconds
+  // before it saves. Undo chosen with no ⌘ and no pointer (Enter on the
+  // timeline menu's Undo, Space on a focused Undo button) skipped it and took
+  // the step before. Any Undo or Redo saves what is held first.
+  it("an Undo with no key or pointer saves the held drop first, so the drop is the step it undoes", async () => {
+    const { undoLast } = await import("@/lib/history/history")
+    const onReorderTrack = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={onReorderTrack}
+      />,
+    )
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      layoutTrackSlots()
+      const host = trackSlot("Source text").getBoundingClientRect()
+      const start = { x: host.left + host.width / 2, y: host.top + 12 }
+      fireEvent.pointerDown(trackRowNamed("Source text"), trackPointer(start.x, start.y))
+      const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+      fireEvent.pointerMove(document, nudged)
+      fireEvent.pointerMove(document, nudged)
+      const dest = trackSlot("Source audio").getBoundingClientRect()
+      const point = trackPointer(dest.left + dest.width / 2, dest.top + 8)
+      fireEvent.pointerMove(document, point)
+      fireEvent.pointerUp(document, trackPointer(point.clientX, point.clientY, 0))
+      act(() => { vi.advanceTimersByTime(TRACK_RELEASE_SETTLE_MS) })
+      expect(onReorderTrack).not.toHaveBeenCalled()
+      act(() => { void undoLast() })
+      expect(onReorderTrack).toHaveBeenCalledWith("source-subtitles", 2.5)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   // AQU-2491 (review, Nov 9): a fingertip's tap often wanders 8–10 px, so on
   // a phone or an iPad the 3px threshold read a tap on a track's row as a
   // drag: the row lifted, and the tap's click was swallowed, so the track was

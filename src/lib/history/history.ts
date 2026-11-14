@@ -986,7 +986,20 @@ export async function redoLast(): Promise<HistoryResult | null> {
 // 2026-10-13, where one undo could take seconds and most presses vanished).
 let queue: Promise<unknown> = Promise.resolve()
 
+/**
+ * AQU-2492 (review of the dev merge, Nov 14): what holds a change before it
+ * saves (the timeline holds a dragged track for seconds) saves it here, before
+ * every Undo and Redo, however it was chosen. Run at the press, so the change
+ * is a step before the Undo picks one. Returns the unregister.
+ */
+const beforeMoves = new Set<() => void>()
+export function beforeHistoryMove(fn: () => void): () => void {
+  beforeMoves.add(fn)
+  return () => void beforeMoves.delete(fn)
+}
+
 function run(which: "undo" | "redo", pickId?: string): Promise<HistoryResult | null> {
+  for (const fn of [...beforeMoves]) fn()
   if (!activeScope) return Promise.resolve(null)
   // A press belongs to the project it was made in; if the user has moved on
   // by the time its turn comes, it does nothing.

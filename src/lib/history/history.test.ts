@@ -16,7 +16,9 @@ import {
   setFileNamer,
   setOpenFileProbe,
   undoLast,
+  undoStepById,
   undoTo,
+  beforeHistoryMove,
   withGroup,
   type StepHandler,
   type StepOutcome,
@@ -534,5 +536,33 @@ describe("one history per project, every language", () => {
     setHistoryScope("p1", "sam", "Spanish")
     await historyReady()
     expect((await undoLast())?.step.labelKey).toBe("settings")
+  })
+})
+
+// AQU-2492 (review of the dev merge, Nov 14): one rule, at the one place every
+// Undo and Redo goes through. A change still held (the timeline holds a
+// dragged track for seconds before it saves) is saved first, so it is a step,
+// and the Undo pressed straight after it undoes it — however Undo was chosen.
+describe("before any Undo or Redo, what is held is saved", () => {
+  it("a step the hook records is the one Undo takes, and Redo, Undo to here and Undo by id run it too", async () => {
+    const log: string[] = []
+    registerStepKinds({ "test.log": logKind(log) })
+    recordStep(step("older"))
+    let held: string | null = "drag"
+    const calls: string[] = []
+    const stop = beforeHistoryMove(() => {
+      calls.push("save")
+      if (held) recordStep(step(held))
+      held = null
+    })
+    await undoLast()
+    expect(log).toEqual(["undo drag"])
+    await redoLast()
+    await undoTo(historyView().nextUndo!.id)
+    await undoStepById(historyView().nextUndo!.id)
+    expect(calls).toEqual(["save", "save", "save", "save"])
+    stop()
+    await redoLast()
+    expect(calls).toHaveLength(4)
   })
 })

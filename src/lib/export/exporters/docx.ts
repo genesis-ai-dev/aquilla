@@ -576,7 +576,7 @@ export async function exportDocx(
     if (rest === null) return null
     const p = parseXmlLite(rest.xml).children.find(isElement)
     const hidden = (run: XmlElement) => walkContext.isHiddenRun?.(run, p!) ?? false
-    return p && holdsSomething(p, hidden) ? rest.xml : null
+    return p && seenByReader(p, hidden) ? rest.xml : null
   }
 
   function rebuildParagraph(span: DocxParagraphSpan, translation: ParagraphTranslation, counted: boolean): string | null {
@@ -962,30 +962,25 @@ function rebuildFootnotes(
   return out + footnotesXml.slice(cursor)
 }
 
-/** AQU-2552 (review r9): what a paragraph without its words holds that a
- *  reader of the document does not see: properties, whitespace, marks of no
- *  width (a bookmark, a comment's range and reference, a proofing mark, where
- *  a page last broke), text hidden in Word and a tracked deletion. A run or a
- *  wrapper (a link, a content control…) holding only these is nothing too.
- *  Anything else (a picture, a text box, a field, a page or section break)
- *  is something. */
-const NOTHING = new Set([
-  "w:rPr", "w:sdtPr", "w:sdtEndPr", "w:smartTagPr", "w:customXmlPr", "w:tab", "w:cr", "w:lastRenderedPageBreak",
-  "w:bookmarkStart", "w:bookmarkEnd", "w:commentRangeStart", "w:commentRangeEnd", "w:commentReference", "w:proofErr",
-  "w:permStart", "w:permEnd", "w:moveFromRangeStart", "w:moveFromRangeEnd", "w:moveToRangeStart", "w:moveToRangeEnd", "w:del",
-])
-const HOLDERS = new Set(["w:r", "w:hyperlink", "w:smartTag", "w:customXml", "w:sdt", "w:sdtContent", "w:ins", "w:moveTo", "w:dir", "w:bdo"])
+/** AQU-2552 (review r10): what a reader of the document sees on the page:
+ *  a character that is not a space, and a thing drawn there or breaking it
+ *  (a picture or drawing, a text box being one; an embedded object, a symbol,
+ *  an equation, a footnote's number, a page or column break, a section's
+ *  end). Text Word does not show (hidden, or deleted or moved away in a
+ *  tracked change) is not looked into. Nothing else in a paragraph is seen:
+ *  its properties, marks of no width, a field's code, and a wrapper (a link,
+ *  a field, a content control…) holding none of these. */
+const DRAWN = new Set(["w:drawing", "w:pict", "w:object", "w:sym", "m:oMath", "w:footnoteReference", "w:endnoteReference", "w:sectPr"])
+const NOT_SHOWN = new Set(["w:del", "w:moveFrom"])
 
-function holdsSomething(el: XmlElement, hidden: (run: XmlElement) => boolean): boolean {
+function seenByReader(el: XmlElement, hidden: (run: XmlElement) => boolean): boolean {
   return el.children.some((child) => {
-    if (!isElement(child) || NOTHING.has(child.tagName)) return false
-    // A section break ends a section; the paragraph carries it.
-    if (child.tagName === "w:pPr") return child.children.some((c) => isElement(c) && c.tagName === "w:sectPr")
-    if (child.tagName === "w:r" && hidden(child)) return false
+    if (!isElement(child)) return false
     if (child.tagName === "w:t") return /\S/.test(textContent(child))
-    // A line break is whitespace; a page or column break is not.
     if (child.tagName === "w:br") return /^(page|column)$/.test(getAttribute(child, "w:type") ?? "")
-    return HOLDERS.has(child.tagName) ? holdsSomething(child, hidden) : true
+    if (DRAWN.has(child.tagName)) return true
+    if (NOT_SHOWN.has(child.tagName) || (child.tagName === "w:r" && hidden(child))) return false
+    return seenByReader(child, hidden)
   })
 }
 

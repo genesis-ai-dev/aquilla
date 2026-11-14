@@ -28,7 +28,8 @@ const W_NS =
   'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" ' +
   'xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" ' +
   'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" ' +
-  'xmlns:v="urn:schemas-microsoft-com:vml" mc:Ignorable="wps"'
+  'xmlns:v="urn:schemas-microsoft-com:vml" ' +
+  'xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" mc:Ignorable="wps"'
 
 /** Long enough that the importer cuts the paragraph after each sentence. */
 const PAD = " and it goes on with many more words, long enough that the importer cuts the paragraph after this sentence ends."
@@ -556,6 +557,45 @@ describe("Word export — what a lost line owns is its own text range and its fo
     for (const out of await allLost(`<w:p><w:pPr><w:sectPr><w:type w:val="nextPage"/></w:sectPr></w:pPr>${run("Only line here.")}</w:p>`)) {
       expect(out.body).toContain(`<w:p><w:pPr><w:sectPr><w:type w:val="nextPage"/></w:sectPr></w:pPr></w:p>`)
       expect(out.body).not.toContain("Only line")
+    }
+  })
+
+  // Review r10 (N1): one answer for "nothing remains". A paragraph whose lines
+  // are all lost leaves exactly when, without them, it holds nothing a reader
+  // sees, whatever wrapper or field held the words.
+  const ONLY = "Only line here."
+  const TARGET = para(`<w:bookmarkStart w:id="1" w:name="_Ref1"/>${run("Target words.")}<w:bookmarkEnd w:id="1"/>`)
+  const target = (cells: CellData[]) => cells.filter((c) => c.original === "Target words.")
+  const moved = (tag: string, inner: string) => `<${tag} w:id="40" w:author="A" w:date="2020-01-01T00:00:00Z">${inner}</${tag}>`
+  it.each([
+    ["a link", para(`<w:hyperlink w:anchor="_Top">${run(ONLY)}</w:hyperlink>`)],
+    ["a complex field", para(FIELD_OF(run(ONLY)))],
+    ["a simple field", TARGET + para(`<w:fldSimple w:instr=" REF _Ref1 \\h ">${run(ONLY)}</w:fldSimple>`)],
+    ["a content control", para(`${SDT}${run(ONLY)}</w:sdtContent></w:sdt>`)],
+    ["a smart tag", para(`<w:smartTag w:uri="urn:x" w:element="e"><w:smartTagPr><w:attr w:name="a" w:val="b"/></w:smartTagPr>${run(ONLY)}</w:smartTag>`)],
+    ["a custom XML element", para(`<w:customXml w:uri="urn:x" w:element="e"><w:customXmlPr><w:attr w:name="a" w:val="b"/></w:customXmlPr>${run(ONLY)}</w:customXml>`)],
+    ["a tracked insertion", para(moved("w:ins", run(ONLY)))],
+    ["a tracked move here", para(moved("w:moveTo", run(ONLY)))],
+    ["words beside a tracked move away", para(run(ONLY) + moved("w:moveFrom", `<w:r><w:delText>moved</w:delText></w:r>`))],
+    ["words beside a deleted picture", para(run(ONLY) + moved("w:del", IMG))],
+    ["words beside a picture hidden in Word", para(run(ONLY) + IMG.replace("<w:r>", "<w:r><w:rPr><w:vanish/></w:rPr>"))],
+  ])("a paragraph whose lines are all lost leaves when it holds nothing a reader sees: %s emptied of them", async (_, body) => {
+    for (const out of await allLost(body, target)) {
+      expect(paras(out.body)).toEqual([...(body.startsWith(TARGET) ? ["Target words."] : []), "Next paragraph."])
+      expect(out.result.removed).toBe(1)
+      expect(out.result.injected).toBe(0)
+    }
+  })
+
+  it.each([
+    ["a column break", `<w:r><w:br w:type="column"/></w:r>`],
+    ["a symbol", `<w:r><w:sym w:font="Wingdings" w:char="F0E0"/></w:r>`],
+    ["an equation", `<m:oMath><m:r><m:t>x</m:t></m:r></m:oMath>`],
+  ])("a paragraph whose lines are all lost stays when it holds something a reader sees: %s", async (_, thing) => {
+    for (const out of await allLost(para(run("Only line") + thing + run(" here.")))) {
+      expect(firstPara(out.body)).toContain(thing)
+      expect(out.body).not.toContain("Only line")
+      expect(out.result.removed).toBe(0)
     }
   })
 

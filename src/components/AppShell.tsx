@@ -227,13 +227,17 @@ export function AppShell({
   //    The sidebar opens as a sheet from the window's left edge instead, so
   //    the sheet's chrome row clears the lights the same way as the expanded
   //    sidebar's (the sheet is never a collapsed rail).
-  const sidebarInFlow = !mobileNav
-  const insetSidebarRow = titlebar.inset && !chromeCollapsed
-  const insetRail = titlebar.inset && sidebarInFlow && chromeCollapsed
+  // The lights stay at the window's physical top-left whatever the text
+  // direction, so every inset is physical (paddingLeft, never inline-start).
+  // In an RTL locale the in-flow sidebar flips to the right edge, leaving the
+  // header to clear the lights; the sheet stays on the left (side="left").
+  const sidebarAtLeft = !mobileNav && i18n?.dir !== "rtl"
+  const insetSidebarRow = titlebar.inset && !chromeCollapsed && (mobileNav || sidebarAtLeft)
+  const insetRail = titlebar.inset && sidebarAtLeft && chromeCollapsed
   const railIsNarrow = chromeCollapsed && useDockResize
   const headerInset = !titlebar.inset
     ? 0
-    : !sidebarInFlow
+    : !sidebarAtLeft
       ? TRAFFIC_LIGHTS_WIDTH
       : railIsNarrow
         ? TRAFFIC_LIGHTS_WIDTH - DOCK_COLLAPSED_WIDTH
@@ -362,7 +366,7 @@ export function AppShell({
           {...(!mobileNav ? titlebarDrag : undefined)}
           style={
             insetSidebarRow
-              ? { paddingInlineStart: TRAFFIC_LIGHTS_WIDTH }
+              ? { paddingLeft: TRAFFIC_LIGHTS_WIDTH }
               : insetRail
                 ? { paddingTop: TRAFFIC_LIGHTS_HEIGHT }
                 : undefined
@@ -473,7 +477,7 @@ export function AppShell({
       <div
         data-slot="app-shell-header"
         {...titlebarDrag}
-        style={headerInset > 0 ? { paddingInlineStart: headerInset } : undefined}
+        style={headerInset > 0 ? { paddingLeft: headerInset } : undefined}
         className="flex h-[52px] min-h-[52px] shrink-0 items-center"
       >
         {mobileNav ? (

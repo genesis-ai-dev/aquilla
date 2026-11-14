@@ -22,6 +22,18 @@ const tauriWindow = vi.hoisted(() => ({
 const tauriInvoke = vi.hoisted(() => vi.fn(async () => {}))
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => tauriWindow }))
 vi.mock("@tauri-apps/api/core", () => ({ invoke: tauriInvoke }))
+// Forces the shell's text direction without loading an RTL locale's catalog.
+const forceRtl = vi.hoisted(() => ({ value: false }))
+vi.mock("@/lib/i18n/I18nProvider", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/i18n/I18nProvider")>()
+  return {
+    ...actual,
+    useI18nOptional: () => {
+      const value = actual.useI18nOptional()
+      return value && forceRtl.value ? { ...value, dir: "rtl" as const } : value
+    },
+  }
+})
 vi.mock("@/hooks/useMacTitlebarOverlay", async (importActual) => ({
   ...(await importActual<typeof import("@/hooks/useMacTitlebarOverlay")>()),
   useMacTitlebarOverlay: () => titlebar.value,
@@ -529,6 +541,7 @@ describe("AppShell macOS overlay title bar", () => {
   afterEach(() => {
     window.matchMedia = originalMatchMedia
     titlebar.value = { overlay: false, inset: false }
+    forceRtl.value = false
     tauriWindow.startDragging.mockClear()
     tauriInvoke.mockClear()
   })
@@ -561,16 +574,77 @@ describe("AppShell macOS overlay title bar", () => {
     titlebar.value = { overlay: true, inset }
     renderOverlayShell({ railCollapsed })
     const header = document.querySelector<HTMLElement>('[data-slot="app-shell-header"]')!
-    expect(header.style.paddingInlineStart).toBe(headerPad)
+    expect(header.style.paddingLeft).toBe(headerPad)
 
     const row = document.querySelector<HTMLElement>('[data-slot="app-shell-sidebar-chrome"]')
     if (rowPad === null) {
       expect(row).toBeNull()
       return
     }
-    expect(row!.style.paddingInlineStart).toBe(rowPad)
+    expect(row!.style.paddingLeft).toBe(rowPad)
     expect(row!.style.paddingTop).toBe(railTop)
     expect(screen.queryByTestId("logo") !== null).toBe(logoShown)
+  })
+
+  // RTL flips the in-flow sidebar to the right edge, but the lights stay at
+  // the physical top-left, so the header (now on the left) clears them.
+  it.each([
+    // [layout, railCollapsed, header padding, rail top padding]
+    ["expanded sidebar", false, "76px", ""],
+    ["collapsed rail", true, "76px", ""],
+  ] as const)("keeps the traffic-light corner clear in an RTL locale: %s", (_, railCollapsed, headerPad, railTop) => {
+    stubLgUp(true)
+    titlebar.value = { overlay: true, inset: true }
+    forceRtl.value = true
+    render(
+      <I18nProvider>
+        <MemoryRouter initialEntries={["/project/p1/editor"]}>
+          <AppShell
+            logoSlot={<span data-testid="logo">Aquilla</span>}
+            header={<div>header</div>}
+            statusBar={null}
+            leftDock={<div>dock</div>}
+            railCollapsed={railCollapsed}
+            main={<div />}
+          />
+        </MemoryRouter>
+      </I18nProvider>,
+    )
+    const header = document.querySelector<HTMLElement>('[data-slot="app-shell-header"]')!
+    expect(header.style.paddingLeft).toBe(headerPad)
+    const row = document.querySelector<HTMLElement>('[data-slot="app-shell-sidebar-chrome"]')!
+    expect(row.style.paddingLeft).toBe("")
+    expect(row.style.paddingRight).toBe("")
+    expect(row.style.paddingTop).toBe(railTop)
+    expect(screen.getByTestId("logo")).toBeInTheDocument()
+  })
+
+  it("clears the traffic lights in the left-edge sidebar sheet in an RTL locale", async () => {
+    stubLgUp(false)
+    titlebar.value = { overlay: true, inset: true }
+    forceRtl.value = true
+    render(
+      <I18nProvider>
+        <MemoryRouter initialEntries={["/project/p1/editor"]}>
+          <AppShell
+            logoSlot={<span data-testid="logo">Aquilla</span>}
+            header={<div>header</div>}
+            statusBar={null}
+            leftDock={<div>dock</div>}
+            main={<div />}
+          />
+        </MemoryRouter>
+      </I18nProvider>,
+    )
+    const header = document.querySelector<HTMLElement>('[data-slot="app-shell-header"]')!
+    expect(header.style.paddingLeft).toBe("76px")
+    await userEvent.click(screen.getByRole("button", { name: "Open sidebar" }))
+    const row = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('[data-slot="app-shell-sidebar-chrome"]')
+      expect(el).not.toBeNull()
+      return el!
+    })
+    expect(row.style.paddingLeft).toBe("76px")
   })
 
   it("drops the beta chip beside the traffic lights so the row fits a 200px dock", () => {
@@ -586,7 +660,7 @@ describe("AppShell macOS overlay title bar", () => {
     titlebar.value = { overlay: true, inset: true }
     renderOverlayShell({ railCollapsed: true, leftDock: false })
     const header = document.querySelector<HTMLElement>('[data-slot="app-shell-header"]')!
-    expect(header.style.paddingInlineStart).toBe("")
+    expect(header.style.paddingLeft).toBe("")
   })
 
   it("drags the window from empty header space without swallowing the press", () => {
@@ -685,7 +759,7 @@ describe("AppShell macOS overlay title bar", () => {
       expect(el).not.toBeNull()
       return el!
     })
-    expect(row.style.paddingInlineStart).toBe("76px")
+    expect(row.style.paddingLeft).toBe("76px")
     expect(screen.queryByTestId("logo")).toBeNull()
   })
 

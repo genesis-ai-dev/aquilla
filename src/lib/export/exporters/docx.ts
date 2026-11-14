@@ -375,21 +375,7 @@ export async function exportDocx(
     return out + xml!.slice(cursor, to)
   }
 
-  /** AQU-2552 (review r10): range marks of paragraphs that left, by
-   *  container, waiting for the next paragraph there. */
-  const carried = new Map<number, string>()
-
-  /** A paragraph as written, with any range marks a paragraph before it in
-   *  its container left behind, at its start (after its properties). */
   function renderParagraph(span: DocxParagraphSpan): string {
-    const out = renderOwnParagraph(span)
-    const marks = carried.get(span.container)
-    if (!marks || out === "") return out
-    carried.delete(span.container)
-    return withMarksAtStart(out, marks)
-  }
-
-  function renderOwnParagraph(span: DocxParagraphSpan): string {
     // A copy (the old-reader Fallback of a text box) mirrors the paragraph it
     // copies: same translation, same removal, same additions. Unpaired copies
     // are left exactly as they are.
@@ -414,14 +400,12 @@ export async function exportDocx(
       // removed, so it is counted as neither.
       if (rest?.seen) return rest.xml + renderInsertions(key, anchorXml, !span.isCopy)
       if (!span.isCopy) removed++
-      // AQU-2552 (review r10): its range marks are not dropped. They go to the
-      // start of the next paragraph of its container (see renderParagraph),
-      // or stay in it when it is that container's last and is kept, emptied.
+      // AQU-2552 (review r11): one that carries range marks (a bookmark, a
+      // comment's marks, a field running on beyond it) stays, emptied of its
+      // words, with them in it, whatever follows it: nothing is moved to
+      // another paragraph, so no pair ends before it starts.
       const marks = rest ? rangeMarks(rest.xml) : ""
-      if (lastInContainer.get(span.container) !== span.index) {
-        carried.set(span.container, (carried.get(span.container) ?? "") + marks)
-        return ""
-      }
+      if (marks === "" && lastInContainer.get(span.container) !== span.index) return ""
       const open = anchorXml.slice(0, anchorXml.indexOf(">") + 1)
       const inner = anchorXml.slice(open.length, anchorXml.lastIndexOf("</w:p>"))
       return `${open}${extractPPr(inner)}${marks}</w:p>`
@@ -1004,11 +988,12 @@ function seenByReader(el: XmlElement, hidden: (run: XmlElement) => boolean): boo
   })
 }
 
-/** AQU-2552 (review r10): what of a paragraph that leaves must stay in the
- *  document, in order: its range marks (a bookmark, a comment's range and
- *  reference, see isPairedMark), and the runs of a field that runs on into
- *  another paragraph (its start, or its end). A field all its own goes with
- *  it. What Word does not show (deleted, moved away) is not looked into. */
+/** AQU-2552 (review r10): what of a paragraph whose lines are all lost must
+ *  stay in the document, in order: its range marks (a bookmark, a comment's
+ *  range and reference, see isPairedMark), and the runs of a field that runs
+ *  on into another paragraph (its start, or its end). A field all its own
+ *  goes with its words. What Word does not show (deleted, moved away) is not
+ *  looked into. */
 function rangeMarks(paragraphXml: string): string {
   const out: { at: number; xml: string }[] = []
   const open: { at: number; xml: string }[][] = []
@@ -1035,20 +1020,6 @@ function rangeMarks(paragraphXml: string): string {
   const p = parseXmlLite(paragraphXml, { offsets: true }).children.find(isElement)
   if (p) visit(p)
   return [...out, ...open.flat()].sort((a, b) => a.at - b.at).map((m) => m.xml).join("")
-}
-
-/** A written paragraph (and what follows it) with `marks` at its start,
- *  after its properties. */
-function withMarksAtStart(xml: string, marks: string): string {
-  const p = parseXmlLite(xml, { offsets: true }).children.find(isElement)
-  if (!p || p.tagName !== "w:p") return marks + xml
-  if (p.closeStart === p.end) {
-    const tag = xml.slice(p.start, p.end).replace(/\s*\/>$/, ">")
-    return xml.slice(0, p.start) + tag + marks + "</w:p>" + xml.slice(p.end)
-  }
-  const pPr = p.children.find((c): c is XmlElement => isElement(c) && c.tagName === "w:pPr")
-  const at = pPr ? pPr.end! : p.openEnd!
-  return xml.slice(0, at) + marks + xml.slice(at)
 }
 
 /** Does this piece hold any of the line (directly, or inside a wrapper)? */

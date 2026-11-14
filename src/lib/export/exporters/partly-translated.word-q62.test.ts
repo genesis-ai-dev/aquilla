@@ -428,7 +428,9 @@ describe("Word export — what a lost line owns is its own text range and its fo
   it("a paragraph left with nothing is removed, as before: no words, or only marks of no width and its emptied wrappers", async () => {
     for (const body of [
       para(run("Only a line of words here.")),
-      para(`<w:pPr><w:pStyle w:val="Body"/></w:pPr><w:proofErr w:type="spellStart"/>` + BOOKMARK_START + run("Only a line") + BOOKMARK_END + `<w:proofErr w:type="spellEnd"/>` + run(" of words here.")),
+      // AQU-2552 (review r11): a bookmark is not one of these: it keeps its
+      // paragraph (see below).
+      para(`<w:pPr><w:pStyle w:val="Body"/></w:pPr><w:proofErr w:type="spellStart"/>` + run("Only a line") + `<w:proofErr w:type="spellEnd"/>` + run(" of words here.")),
       para(`<w:r><w:rPr><w:b/></w:rPr><w:lastRenderedPageBreak/><w:t>Only a line</w:t></w:r>` + run(" of words here.")),
       para(`<w:hyperlink w:anchor="_Top">${run("Only a line of words here.")}</w:hyperlink>`),
       para(`${SDT}${run("Only a line of words here.")}</w:sdtContent></w:sdt>`),
@@ -540,10 +542,9 @@ describe("Word export — what a lost line owns is its own text range and its fo
     }
   })
 
-  it("a paragraph whose lines are all lost leaves when what remains is nothing a reader sees: hidden text, a comment's marks, a tracked deletion", async () => {
+  it("a paragraph whose lines are all lost leaves when what remains is nothing a reader sees: hidden text, a tracked deletion", async () => {
     for (const body of [
       para(run("Only line here.") + run(" secret", "<w:vanish/>")),
-      para(`<w:commentRangeStart w:id="3"/>` + run("Only line here.") + `<w:commentRangeEnd w:id="3"/><w:r><w:commentReference w:id="3"/></w:r>`),
       para(run("Only line here.") + `<w:del w:id="9" w:author="a" w:date="2020-01-01T00:00:00Z"><w:r><w:delText>old</w:delText></w:r></w:del>`),
     ]) {
       for (const out of await allLost(body)) {
@@ -599,23 +600,23 @@ describe("Word export — what a lost line owns is its own text range and its fo
     }
   })
 
-  // Review r10 (N2): a paragraph that leaves gives its range marks (a
-  // bookmark, a comment's range and reference, a field's characters when the
-  // field runs on into another paragraph) to the start of the next paragraph,
-  // so nothing pointing at them, or pairing with them, is left without them.
+  // Review r11 (finding 1): a paragraph whose lines are all lost, and which
+  // carries a bookmark, a comment's marks or a field running on beyond it,
+  // stays, emptied of its words, with those marks in it, whatever follows it.
+  // Nothing moves to another paragraph, so nothing pointing at them, or
+  // pairing with them, is left without them or ends before it starts.
   const nextOf = (xml: string) => xml.match(/<w:body>[\s\S]*?(<w:p\b[^>]*>(?:(?!<\/w:p>)[\s\S])*Next paragraph\.[\s\S]*?<\/w:p>)/)![1]
-  const startOfNext = (xml: string) => nextOf(xml).replace(/^<w:p>/, "").split("<w:r><w:t")[0]
-  it("a heading that leaves gives its bookmark to the next paragraph, so the contents' page number still finds it", async () => {
+  it("a heading whose lines are all lost stays, emptied, with its bookmark, so the contents' page number still finds it", async () => {
     const pageRef = para(`<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGEREF _Toc1 \\h </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r>${run("3")}<w:r><w:fldChar w:fldCharType="end"/></w:r>`)
     const heading = `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:bookmarkStart w:id="5" w:name="_Toc1"/>${run("Chapter one heading.")}<w:bookmarkEnd w:id="5"/></w:p>`
     for (const out of await allLost(pageRef + heading, (cells) => cells.filter((c) => c.original === "3"))) {
-      expect(paras(out.body)).toEqual(["{field}3", "Next paragraph."])
-      expect(startOfNext(out.body)).toBe(`<w:bookmarkStart w:id="5" w:name="_Toc1"/><w:bookmarkEnd w:id="5"/>`)
+      expect(paras(out.body)).toEqual(["{field}3", "", "Next paragraph."])
+      expect(out.body).toContain(`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:bookmarkStart w:id="5" w:name="_Toc1"/><w:bookmarkEnd w:id="5"/></w:p>${NEXT}`)
       expect(out.result.removed).toBe(1)
     }
   })
 
-  it("a paragraph that leaves gives the next paragraph the start of a bookmark or comment that ends there", async () => {
+  it("a paragraph whose lines are all lost stays, emptied, with the start of a bookmark or comment that ends in the next paragraph, which is left as it was", async () => {
     for (const [mark, end] of [
       [`<w:bookmarkStart w:id="6" w:name="b6"/>`, `<w:bookmarkEnd w:id="6"/>`],
       [`<w:commentRangeStart w:id="3"/>`, `<w:commentRangeEnd w:id="3"/><w:r><w:commentReference w:id="3"/></w:r>`],
@@ -623,27 +624,60 @@ describe("Word export — what a lost line owns is its own text range and its fo
       const bytes = await docxBytes(para(mark + run(ONLY)) + para(run("Next paragraph.") + end))
       const [line, next] = await importCells(bytes, false)
       for (const out of [await wordOut(bytes, [hide(typed(line, "Caché.")), next]), await wordOut(bytes, [next], [line])]) {
-        expect(paras(out.body)).toEqual(["Next paragraph."])
-        expect(nextOf(out.body)).toBe(para(mark + run("Next paragraph.") + end))
+        expect(paras(out.body)).toEqual(["", "Next paragraph."])
+        expect(out.body).toContain(para(mark) + para(run("Next paragraph.") + end))
       }
     }
   })
 
-  it("a paragraph that leaves keeps a comment's range and reference, in order, at the start of the next paragraph", async () => {
+  it("a paragraph whose lines are all lost keeps a comment's range and reference, in order, in itself", async () => {
     const comment = `<w:commentRangeStart w:id="3"/>${run(ONLY)}<w:commentRangeEnd w:id="3"/><w:r><w:commentReference w:id="3"/></w:r>`
     for (const out of await allLost(para(comment))) {
-      expect(startOfNext(out.body)).toBe(`<w:commentRangeStart w:id="3"/><w:commentRangeEnd w:id="3"/><w:r><w:commentReference w:id="3"/></w:r>`)
+      expect(out.body).toContain(para(`<w:commentRangeStart w:id="3"/><w:commentRangeEnd w:id="3"/><w:r><w:commentReference w:id="3"/></w:r>`) + NEXT)
+      expect(out.result.removed).toBe(1)
     }
   })
 
-  it("a paragraph that leaves gives a contents field running on into the next paragraph its start; a field all its own goes", async () => {
+  it("a paragraph whose lines are all lost keeps a contents field's start running on into the next paragraph; a field all its own goes", async () => {
     const begin = `<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r>`
     const end = `<w:r><w:fldChar w:fldCharType="end"/></w:r>`
     const bytes = await docxBytes(para(begin + run("Chapter one.") + FIELD_OF(run(" More."))) + para(run("Next paragraph.") + end))
     const [line, next] = await importCells(bytes, false)
     for (const out of [await wordOut(bytes, [hide(typed(line, "Caché.")), next]), await wordOut(bytes, [next], [line])]) {
-      expect(paras(out.body)).toEqual(["{field}Next paragraph."])
-      expect(nextOf(out.body)).toBe(para(begin + run("Next paragraph.") + end))
+      expect(paras(out.body)).toEqual(["{field}", "Next paragraph."])
+      expect(out.body).toContain(para(begin) + para(run("Next paragraph.") + end))
+    }
+  })
+
+  // The checker's cases (r11, s12): a table, a block content control, or
+  // nothing at all after it. Marks moved past these ended before they began.
+  const TABLE = (inner: string) => `<w:tbl><w:tblPr/><w:tblGrid><w:gridCol/></w:tblGrid><w:tr><w:tc><w:tcPr/>${inner}</w:tc></w:tr></w:tbl>`
+  const BLOCK_SDT = (inner: string) => `<w:sdt><w:sdtPr><w:id w:val="1"/></w:sdtPr><w:sdtContent>${inner}</w:sdtContent></w:sdt>`
+  const FIELD_BEGIN = `<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> TOC \\o </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r>`
+  const FIELD_END = `<w:r><w:fldChar w:fldCharType="end"/></w:r>`
+  it.each([
+    ["a table holding a bookmark's end", `<w:bookmarkStart w:id="6" w:name="b6"/>`, (rest: string) => TABLE(para(rest + `<w:bookmarkEnd w:id="6"/>`)) + NEXT],
+    ["a table holding a comment's end", `<w:commentRangeStart w:id="3"/>`, (rest: string) => TABLE(para(rest + `<w:commentRangeEnd w:id="3"/><w:r><w:commentReference w:id="3"/></w:r>`)) + NEXT],
+    ["a table holding a field's end", FIELD_BEGIN, (rest: string) => TABLE(para(rest + FIELD_END)) + NEXT],
+    ["a content control holding a bookmark's end", `<w:bookmarkStart w:id="6" w:name="b6"/>`, (rest: string) => BLOCK_SDT(para(rest + `<w:bookmarkEnd w:id="6"/>`)) + NEXT],
+    ["a table and nothing after it", `<w:bookmarkStart w:id="6" w:name="b6"/>`, (rest: string) => TABLE(para(rest + `<w:bookmarkEnd w:id="6"/>`))],
+  ])("a paragraph whose lines are all lost, followed by %s, stays emptied with its mark, before what follows", async (_, mark, after) => {
+    const body = para(run("Before words.")) + para(mark + run(ONLY)) + after(run("Gamma words."))
+    const bytes = await docxBytes(body)
+    const cells = await importCells(bytes, false)
+    const line = cells.find((c) => c.original === ONLY)!
+    const others = cells.filter((c) => c !== line)
+    for (const out of [await wordOut(bytes, [...others, hide(typed(line, "Caché."))]), await wordOut(bytes, others, [line])]) {
+      expect(out.body).toContain(`<w:body>${para(run("Before words.")) + para(mark) + after(run("Gamma words."))}<w:sectPr/>`)
+      expect(out.result.removed).toBe(1)
+    }
+  })
+
+  it("the last paragraph of the body, its lines all lost, stays emptied with the end of a bookmark begun before it", async () => {
+    const bytes = await docxBytes(para(`<w:bookmarkStart w:id="6" w:name="b6"/>` + run("Before words.")) + para(run(ONLY) + `<w:bookmarkEnd w:id="6"/>`))
+    const [before, line] = await importCells(bytes, false)
+    for (const out of [await wordOut(bytes, [before, hide(typed(line, "Caché."))]), await wordOut(bytes, [before], [line])]) {
+      expect(out.body).toContain(`${para(`<w:bookmarkStart w:id="6" w:name="b6"/>` + run("Before words."))}${para(`<w:bookmarkEnd w:id="6"/>`)}<w:sectPr/>`)
     }
   })
 

@@ -95,6 +95,7 @@ import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/d
 import { buildHealthRibbon, type HealthRibbonPoint } from "@/lib/health/health-ribbon"
 import { ribbonInputFor, type RibbonEvidenceReaders } from "@/lib/health/ribbon-inputs"
 import { chapterHealthBuilderFor } from "@/lib/health/chapter-health"
+import { healthCardRows } from "@/lib/health/health-card-rows"
 import { useHealthCalculationsEnabled, setHealthCalculationsEnabled } from "@/lib/health/kill-switch"
 import { resolveWorkbenchWindow } from "@/lib/agent/workbench-window"
 import { partitionInfractions } from "@/lib/rules/waivers"
@@ -10764,11 +10765,13 @@ export function ProjectWorkspace() {
   const showFileStats = centerSurface === "editor"
     && (cellAreaState.kind === "ready" || cellAreaState.kind === "ready-empty")
   const getCharacterImportCells = useCallback(() => cellSummaries, [cellSummaries])
-  const getStatusBarHealth = useCallback(() => cellSummaries.map(cell => ({
-    cellId: cell.id,
-    label: cell.cellLabel || cell.id,
-    health: healthMap.get(cell.id) ?? 0,
-  })), [cellSummaries, healthMap])
+  // AQU-2278: drags are named as their rows are, never by cell id.
+  const getStatusBarHealth = useCallback(() => healthCardRows(
+    cellSummaries,
+    healthMap,
+    cellStore.getCellIdsForLens(activeFile ? fileOrderedBy(activeFile) : undefined),
+    (index) => t("editor.row.rowFallbackRef", { index }),
+  ), [cellSummaries, healthMap, cellStore, activeFile, t])
 
   async function handleSearchSelect(result: WorkspaceSearchResult, _query: string) {
     const flash = () => {

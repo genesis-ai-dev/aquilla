@@ -4,6 +4,7 @@ import type { CellSummary } from "@/hooks/useActiveCellStore"
 import { StatusBar as StatusBarView } from "./StatusBar"
 import { useHealth } from "@/hooks/useHealth"
 import { applyStructuralPolicy } from "@/lib/cells/structural"
+import { healthCardRows } from "@/lib/health/health-card-rows"
 import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 import { useCallback, type ComponentProps } from "react"
 
@@ -15,9 +16,10 @@ function StatusBar({ cells, healthMap, countStructural = true, ...props }: {
   // AQU-1083: and the same policy step the workspace applies on top of it.
   const { fileProgress } = useHealth(new Map([["active", cells]]), [], { enabled: false })
   const progress = applyStructuralPolicy(fileProgress.get("active")!, cells, countStructural)
-  const getHealthByCell = useCallback(() => cells.map(cell => ({
-    cellId: cell.id, label: cell.cellLabel || cell.id, health: healthMap.get(cell.id) ?? 0,
-  })), [cells, healthMap])
+  const getHealthByCell = useCallback(
+    () => healthCardRows(cells, healthMap, cells.map((cell) => cell.id), (index) => `row ${index}`),
+    [cells, healthMap],
+  )
   return <StatusBarView progress={progress} getHealthByCell={getHealthByCell} {...props} />
 }
 

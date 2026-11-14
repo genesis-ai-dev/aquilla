@@ -29,6 +29,9 @@ import {
   __resetShadowRehydrationForTests,
   clearOptimisticShadows,
   getOptimisticShadows,
+  injectOptimisticAudioAttachment,
+  injectOptimisticAudioRemove,
+  injectOptimisticAudioTrim,
   rehydrateShadowsFromOutbox,
   retryFailedAudioSync,
 } from "./audio-attachments-bus"
@@ -147,6 +150,22 @@ describe("AQU-924 — a failed audio attach survives a reload", () => {
     expect(shadows![0].kind).toBe("remove")
   })
 
+  // AQU-2492 (review, Nov 9): undoing a cut is one event now, not a remove, a
+  // trim and a rename; a queued one still takes the cut's piece off the screen.
+  it("rehydrates a PENDING undo of a cut as the removal of the piece the cut made", async () => {
+    await enqueueOutboxEvent(
+      attachEvent({
+        id: "evt-uncut",
+        kind: "cell.audio.uncut",
+        payload: { audioId: AUDIO_ID, pieceAudioId: "piece-b.wav", trimStartMs: null, trimEndMs: null },
+      }),
+    )
+    await rehydrateShadowsFromOutbox(PROJECT, FILE)
+    const shadows = getOptimisticShadows(FILE).get(CELL)
+    expect(shadows).toHaveLength(1)
+    expect(shadows![0]).toMatchObject({ kind: "remove", audioId: "piece-b.wav", eventId: "evt-uncut" })
+  })
+
   it("retryFailedAudioSync puts the clip's stuck attach back on the queue", async () => {
     await enqueueOutboxEvent(attachEvent())
     await quarantineOutboxEvents(["evt-attach-1"], { status: 403, reason: "HTTP 403" })
@@ -190,5 +209,52 @@ describe("AQU-924 — a failed audio attach survives a reload", () => {
     await enqueueOutboxEvent(attachEvent()) // pending, not failed
     expect(await retryFailedAudioSync(PROJECT, FILE, CELL, AUDIO_ID)).toBe(0)
     expect(await retryFailedAudioSync(PROJECT, FILE, CELL, "audio-nope.wav")).toBe(0)
+  })
+})
+
+// AQU-2492 (review, Nov 9), finding 1: Undo a cut, then Redo it before any
+// read. The Undo hides the second piece; the Redo names that same piece again
+// and paints it without claiming a selection (it rides its group's). That
+// paint used to be dropped because "a delete outranks a metadata write", so
+// the second half stayed hidden until the remove's 12 s grace ran out, and an
+// Undo pressed then read it as gone and was thrown away.
+describe("AQU-2492 — Redo of a cut straight after its Undo", () => {
+  const take = (audioId: string, over: Record<string, unknown> = {}) => ({
+    audioId,
+    url: "frontier-audio://take-a.wav",
+    slot: "recording",
+    mimeType: "audio/wav",
+    voiceId: null,
+    referenceAudioId: null,
+    durationMs: 6000,
+    trimStartMs: null,
+    trimEndMs: null,
+    ...over,
+  })
+
+  beforeEach(() => clearOptimisticShadows(FILE))
+
+  it("the piece the Redo brings back is painted at once, over the Undo's removal of it", () => {
+    // The Undo: the piece goes, the take is whole again.
+    injectOptimisticAudioRemove(FILE, CELL, "take-b", "recording", "evt-uncut")
+    injectOptimisticAudioTrim(FILE, CELL, take("take-a"), "evt-uncut")
+    // The Redo, at once: the take ends at the cut, the same piece comes back.
+    injectOptimisticAudioTrim(FILE, CELL, take("take-a", { trimEndMs: 2000 }), "evt-redo")
+    injectOptimisticAudioAttachment(
+      FILE, CELL, take("take-b", { trimStartMs: 2000, pieceOf: "take-a" }), "evt-redo",
+      { claimSelection: false, revive: true },
+    )
+    const shadows = getOptimisticShadows(FILE).get(CELL) ?? []
+    expect(shadows.some((s) => s.kind === "remove" && s.audioId === "take-b")).toBe(false)
+    const piece = shadows.find((s) => s.kind === "attach" && s.att.audioId === "take-b")
+    expect(piece).toMatchObject({ kind: "attach", claimsSelection: false, att: { trimStartMs: 2000, pieceOf: "take-a" } })
+    expect(shadows.find((s) => s.kind === "attach" && s.att.audioId === "take-a")).toMatchObject({ att: { trimEndMs: 2000 } })
+  })
+
+  it("a plain metadata paint still never brings back a take the user deleted", () => {
+    injectOptimisticAudioRemove(FILE, CELL, "take-b", "recording", "evt-remove")
+    injectOptimisticAudioAttachment(FILE, CELL, take("take-b", { durationMs: 5000 }), "evt-measure", { claimSelection: false })
+    const shadows = getOptimisticShadows(FILE).get(CELL) ?? []
+    expect(shadows.map((s) => s.kind)).toEqual(["remove"])
   })
 })

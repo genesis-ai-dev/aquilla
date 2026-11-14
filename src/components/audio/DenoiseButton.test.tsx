@@ -22,6 +22,13 @@ vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   notifyAudioAttachmentsChanged: (...a: unknown[]) => notify(...a),
 }))
 
+// AQU-2492 (review, Nov 9): the Undo steps the button records.
+const steps = vi.hoisted(() => [] as Array<Record<string, unknown>>)
+vi.mock("@/lib/history/history", async (orig) => ({
+  ...(await orig<typeof import("@/lib/history/history")>()),
+  recordStep: (step: Record<string, unknown>) => { steps.push(step) },
+}))
+
 import { DenoiseButton } from "./DenoiseButton"
 
 const session = { jwt: "jwt", username: "dir" } as never
@@ -40,6 +47,7 @@ beforeEach(() => {
   emitSelect.mockClear()
   inject.mockClear()
   notify.mockClear()
+  steps.length = 0
 })
 
 describe("DenoiseButton", () => {
@@ -108,6 +116,91 @@ describe("DenoiseButton", () => {
       expect.anything(),
     )
     expect(notify).toHaveBeenCalledWith("f1")
+  })
+
+  // AQU-2492 (review, Nov 9): going back to the original left no Undo step,
+  // so ⌘Z after it undid something else.
+  it("going back to the original is an Undo step: the cleaned take plays again", async () => {
+    render(
+      <DenoiseButton
+        {...base}
+        selectedAudioId="dn-audio-c.webm"
+        selectedUrl="frontier-audio://dn-audio-c.webm"
+        referenceAudioId="audio-a.webm"
+        originalUrl="frontier-audio://audio-a.webm"
+        originalDurationMs={1500}
+      />,
+    )
+    fireEvent.click(screen.getByText("Revert"))
+    await waitFor(() => expect(steps).toHaveLength(1))
+    expect(steps[0]).toMatchObject({
+      kind: "take.select",
+      labelKey: "editor.history.stepRevertNoise",
+      fileId: "f1",
+      data: { cellId: "c1", slot: "recording", before: "dn-audio-c.webm", after: "audio-a.webm" },
+    })
+  })
+
+  it("a split take's step names both takes by their groups, on the take's own track", async () => {
+    const piece = (audioId: string, pieceOf: string | null, referenceAudioId: string | null) => ({
+      audioId, url: `frontier-audio://${audioId}`, slot: "track-2", mimeType: null, voiceId: null,
+      referenceAudioId, durationMs: 1000, trimStartMs: null, trimEndMs: null, pieceOf,
+    })
+    render(
+      <DenoiseButton
+        {...base}
+        selectedAudioId="dn-a1.webm"
+        selectedUrl="frontier-audio://dn-a1.webm"
+        referenceAudioId="a1.webm"
+        originalUrl={null}
+        originalDurationMs={null}
+        pieces={[piece("dn-a1.webm", null, "a1.webm"), piece("dn-a2.webm", "dn-a1.webm", "a2.webm")] as never}
+        originalTake={piece("a1.webm", null, null) as never}
+      />,
+    )
+    fireEvent.click(screen.getByText("Revert"))
+    await waitFor(() => expect(steps).toHaveLength(1))
+    expect(steps[0]).toMatchObject({ data: { cellId: "c1", slot: "track-2", before: "dn-a1.webm", after: "a1.webm" } })
+  })
+
+  // AQU-2492 (review, Nov 9), finding 6: a whole take on an added track is
+  // chosen on ITS track. Choosing the original on the main track unchose the
+  // line's main-track recording, and left two takes playing on the added one.
+  it("a whole take on an added track goes back to the original on that track, and its step names that track", async () => {
+    render(
+      <DenoiseButton
+        {...base}
+        selectedAudioId="dn-audio-t.webm"
+        selectedUrl="frontier-audio://dn-audio-t.webm"
+        referenceAudioId="audio-t.webm"
+        originalUrl="frontier-audio://audio-t.webm"
+        originalDurationMs={1500}
+        source={{ slot: "track-narrator" }}
+      />,
+    )
+    fireEvent.click(screen.getByText("Revert"))
+    await waitFor(() => expect(steps).toHaveLength(1))
+    expect(emitSelect).toHaveBeenCalledWith(expect.objectContaining({ audioId: "audio-t.webm", slot: "track-narrator" }))
+    expect(inject).toHaveBeenCalledWith("f1", "c1", expect.objectContaining({ audioId: "audio-t.webm", slot: "track-narrator" }), expect.anything())
+    expect(steps[0]).toMatchObject({ data: { cellId: "c1", slot: "track-narrator", before: "dn-audio-t.webm", after: "audio-t.webm" } })
+  })
+
+  it("a refused revert records nothing", async () => {
+    emitSelect.mockRejectedValueOnce(new Error("offline"))
+    render(
+      <DenoiseButton
+        {...base}
+        selectedAudioId="dn-audio-c.webm"
+        selectedUrl="frontier-audio://dn-audio-c.webm"
+        referenceAudioId="audio-a.webm"
+        originalUrl="frontier-audio://audio-a.webm"
+        originalDurationMs={1500}
+      />,
+    )
+    fireEvent.click(screen.getByText("Revert"))
+    await waitFor(() => expect(emitSelect).toHaveBeenCalledTimes(1))
+    await act(() => new Promise((r) => setTimeout(r, 10)))
+    expect(steps).toEqual([])
   })
 
   it("omits Revert on a denoised take whose source is unknown", () => {

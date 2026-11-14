@@ -39,6 +39,7 @@ import {
   type LaneDelivers,
   type LaneLineState,
 } from "@/lib/lanes/lane-delivers"
+import { lineRoomMsFromMetadata } from "@/lib/timeline/line-room"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
 /** AQU-2094: what a sparse audit read says about a cell it leaves out. */
@@ -1104,6 +1105,13 @@ export class CellStore {
     )
     this.applyContentOverlays(cell)
     this.applyOwnTake(cell)
+    // AQU-2432 (Sam, Nov 9): the room this line is given while it has no
+    // recording, for the language being worked in. It is stored on the SOURCE
+    // row, one key per language (lib/timeline/line-room), and stamped here —
+    // the one place that knows the language — so the layout, the transport and
+    // the exports read one field.
+    const roomMs = lineRoomMsFromMetadata(source?.metadata, this.ctx.lane)
+    if (roomMs !== undefined) cell.recordingsRoomMs = roomMs
     this.viewCache.set(cellId, { version, view: cell })
     return cell
   }

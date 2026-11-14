@@ -11,5 +11,6 @@
 # nil, so the /auth-worker job aborted with `undefined method '[]' for nil` and
 # never proposed dependency updates. `packages: []` is the honest declaration —
 # auth-worker is a workspace root with no member packages — and keeps the parse
-# a mapping.
+# a mapping. Dependabot is now off (docs/DEPENDENCY-RULES.md); the key stays so
+# re-enabling it later does not bring the failure back.
 packages: []

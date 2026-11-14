@@ -25,6 +25,7 @@ import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { playingInSlot, recordTakeAdded } from "@/lib/history/take-steps"
 import { probeDurationMsSafe } from "@/lib/import"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
+import { keptTakePlace, placeNewTake, placedFields } from "./new-take-place"
 import { audioCachePutBlob } from "./bytes-cache"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { setTtsStatus, ttsStatusKey } from "./tts"
@@ -239,6 +240,16 @@ export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeV
     ...(args.targetLang ? { targetLang: args.targetLang } : {}),
     author,
   })
+  // AQU-2491 (review, Nov 9): the take's own recording, re-voiced sample for
+  // sample, so it keeps that take's place in both timings: the place of the
+  // take picked, else of the original it was converted from. With neither it
+  // reads the line's, as they do.
+  const place = keptTakePlace(take.attachment) ?? keptTakePlace(cell.attachments?.[sourceAudioId])
+  const placeEventId = await placeNewTake({
+    projectId, fileId: cell.fileId, cellId: cell.id, audioId: objectName, place,
+    ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+    author,
+  })
   injectOptimisticAudioAttachment(cell.fileId, cell.id, {
     audioId: objectName,
     url: conv.url,
@@ -250,7 +261,8 @@ export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeV
     label: label ?? null,
     trimStartMs: null,
     trimEndMs: null,
-  }, attachEventId)
+    ...placedFields(place, placeEventId),
+  }, placeEventId ?? attachEventId)
   notifyAudioAttachmentsChanged(cell.fileId)
   if (args.recordStep) {
     recordTakeAdded(

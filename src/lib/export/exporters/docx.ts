@@ -111,6 +111,7 @@ import {
   getAttribute,
   isElement,
   parseXmlLite,
+  textContent,
   type XmlElement,
 } from "@/lib/parsers/xml-lite"
 
@@ -391,6 +392,14 @@ export async function exportDocx(
     // of its container (a table cell, a text box, a note) is emptied instead,
     // pPr kept: Word needs a cell or a box to keep a paragraph.
     if (nonEmpty && removedKeys.has(key)) {
+      // AQU-2552 (review r9): every line of it is lost, and a lost line takes
+      // only its own text and footnotes. The paragraph leaves only when
+      // nothing else in it remains; otherwise it is written without them.
+      const rest = withoutItsLines(span)
+      if (rest !== null) {
+        if (!span.isCopy) injected++
+        return rest + renderInsertions(key, anchorXml, !span.isCopy)
+      }
       if (!span.isCopy) removed++
       if (lastInContainer.get(span.container) !== span.index) return ""
       const open = anchorXml.slice(0, anchorXml.indexOf(">") + 1)
@@ -557,6 +566,17 @@ export async function exportDocx(
     for (const box of untranslated) nameBoxes([box])
   }
   const noteTranslations = new Map<string, string>()
+
+  /** AQU-2552 (review r9): a paragraph whose lines are all lost, written
+   *  without what they own (all of its line text), or null when nothing
+   *  else remains in it. */
+  function withoutItsLines(span: DocxParagraphSpan): string | null {
+    const all = (line: string) => ({ spans: [], layout: { stretches: [], lost: [{ start: 0, end: line.length }] } })
+    const rest = rebuildParagraphIn(part, span, all)
+    if (rest === null) return null
+    const p = parseXmlLite(rest.xml).children.find(isElement)
+    return p && holdsSomething(p) ? rest.xml : null
+  }
 
   function rebuildParagraph(span: DocxParagraphSpan, translation: ParagraphTranslation, counted: boolean): string | null {
     // A holder whose old cell held its text boxes' words keeps its own words
@@ -757,7 +777,8 @@ function rebuildParagraphIn(
   const line = docxLine(items)
   if (!line.hasWords) return null
   const { spans, layout } = textFor(line.text)
-  if (spans.length === 0) return null
+  // (No translation at all only when every line is lost: AQU-2552 review r9.)
+  if (spans.length === 0 && !layout?.lost.length) return null
 
   const flat = flattenPieces(items)
   const inLine = linePieceFlags(flat)
@@ -936,6 +957,29 @@ function rebuildFootnotes(
     cursor = edit.end
   }
   return out + footnotesXml.slice(cursor)
+}
+
+/** AQU-2552 (review r9): what a paragraph without its words holds that is
+ *  nothing: properties, whitespace, and marks of no width (a bookmark, a
+ *  comment range, a proofing mark, where a page last broke). A run or a
+ *  wrapper (a link, a content control…) holding only these is nothing too.
+ *  Anything else (a picture, a text box, a field, a page break, hidden text)
+ *  is something. */
+const NOTHING = new Set([
+  "w:pPr", "w:rPr", "w:sdtPr", "w:sdtEndPr", "w:smartTagPr", "w:customXmlPr", "w:tab", "w:cr", "w:lastRenderedPageBreak",
+  "w:bookmarkStart", "w:bookmarkEnd", "w:commentRangeStart", "w:commentRangeEnd", "w:proofErr", "w:permStart", "w:permEnd",
+  "w:moveFromRangeStart", "w:moveFromRangeEnd", "w:moveToRangeStart", "w:moveToRangeEnd",
+])
+const HOLDERS = new Set(["w:r", "w:hyperlink", "w:smartTag", "w:customXml", "w:sdt", "w:sdtContent", "w:ins", "w:moveTo", "w:dir", "w:bdo"])
+
+function holdsSomething(el: XmlElement): boolean {
+  return el.children.some((child) => {
+    if (!isElement(child) || NOTHING.has(child.tagName)) return false
+    if (child.tagName === "w:t") return /\S/.test(textContent(child))
+    // A line break is whitespace; a page or column break is not.
+    if (child.tagName === "w:br") return /^(page|column)$/.test(getAttribute(child, "w:type") ?? "")
+    return HOLDERS.has(child.tagName) ? holdsSomething(child) : true
+  })
 }
 
 /** Does this piece hold any of the line (directly, or inside a wrapper)? */

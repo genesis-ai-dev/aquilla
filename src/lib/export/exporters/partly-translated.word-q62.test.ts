@@ -351,4 +351,69 @@ describe("Word export — what a lost line owns is its own text range and its fo
     expect(paras(out.body)[0]).toBe("Un. Deux.[IMG][IMG]")
     expect(firstPara(out.body).indexOf("Picture 3")).toBeLessThan(firstPara(out.body).indexOf("Picture 1"))
   })
+
+  // R1: a paragraph leaves only when nothing in it remains. One whose lines
+  // are all lost keeps what is not their text, written without their words.
+  /** The paragraph `body` holds, its lines all hidden, then all deleted. */
+  async function allLost(body: string, also: (cells: CellData[]) => CellData[] = () => []) {
+    const bytes = await docxBytes(body + NEXT)
+    const cells = await importCells(bytes, false)
+    const next = cells.find((c) => c.original === "Next paragraph.")!
+    const extra = also(cells)
+    const lines = cells.filter((c) => c !== next && !extra.some((x) => x.id === c.id))
+    return [
+      await wordOut(bytes, [...lines.map((c) => hide(typed(c, "Caché."))), ...extra, next]),
+      await wordOut(bytes, [...extra, next], lines),
+    ]
+  }
+
+  it("a paragraph whose lines are all lost keeps its picture, without their words", async () => {
+    for (const body of [
+      para(run("Only line") + IMG + run(" here.")),
+      para(run(L1 + " ") + run("Second line") + IMG + run(" here" + PAD)),
+    ]) {
+      for (const out of await allLost(body)) {
+        expect(paras(out.body)).toEqual(["[IMG]", "Next paragraph."])
+        expect(out.body).not.toMatch(/line here|Only line|Caché/)
+        expect(out.result.removed).toBe(0)
+      }
+    }
+  })
+
+  it("a paragraph whose lines are all lost keeps its text box, with the box's own line, translated or not", async () => {
+    const holder = para(run(L1 + " ") + run("Second line") + BOX(para(run("Box words here."))) + run(" here" + PAD))
+    const box = (cells: CellData[]) => cells.filter((c) => c.original === "Box words here.")
+    for (const out of await allLost(holder, (cells) => box(cells).map((c) => typed(c, "Mots de la boîte.")))) {
+      expect(paras(out.body)).toEqual(["[BOX]", "Next paragraph."])
+      expect(out.body.match(/Mots de la boîte\./g)).toHaveLength(2) // the box and its stored copy
+      expect(out.body).not.toMatch(/line here|Box words/)
+    }
+    for (const out of await allLost(holder, (cells) => box(cells))) {
+      expect(paras(out.body)).toEqual(["[BOX]", "Next paragraph."])
+      expect(out.body.match(/Box words here\./g)).toHaveLength(2)
+    }
+  })
+
+  it("a paragraph whose lines are all lost keeps its field and its page break, in their places", async () => {
+    const body = para(run("Figure ") + FIELD + run(" shows the map.") + `<w:r><w:br w:type="page"/></w:r>`)
+    for (const out of await allLost(body)) {
+      expect(paras(out.body)).toEqual(["{field}[PAGE]", "Next paragraph."])
+      expect(firstPara(out.body)).toContain("SEQ Figure")
+    }
+  })
+
+  it("a paragraph left with nothing is removed, as before: no words, or only marks of no width and its emptied wrappers", async () => {
+    for (const body of [
+      para(run("Only a line of words here.")),
+      para(`<w:pPr><w:pStyle w:val="Body"/></w:pPr><w:proofErr w:type="spellStart"/>` + BOOKMARK_START + run("Only a line") + BOOKMARK_END + `<w:proofErr w:type="spellEnd"/>` + run(" of words here.")),
+      para(`<w:r><w:rPr><w:b/></w:rPr><w:lastRenderedPageBreak/><w:t>Only a line</w:t></w:r>` + run(" of words here.")),
+      para(`<w:hyperlink w:anchor="_Top">${run("Only a line of words here.")}</w:hyperlink>`),
+      para(`${SDT}${run("Only a line of words here.")}</w:sdtContent></w:sdt>`),
+    ]) {
+      for (const out of await allLost(body)) {
+        expect(paras(out.body)).toEqual(["Next paragraph."])
+        expect(out.result.removed).toBe(1)
+      }
+    }
+  })
 })

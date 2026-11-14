@@ -95,6 +95,7 @@ import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/d
 import { buildHealthRibbon, type HealthRibbonPoint } from "@/lib/health/health-ribbon"
 import { ribbonInputFor, type RibbonEvidenceReaders } from "@/lib/health/ribbon-inputs"
 import { chapterHealthBuilderFor } from "@/lib/health/chapter-health"
+import { createHealthCardNamer, healthCardRows } from "@/lib/health/health-card-rows"
 import { useHealthCalculationsEnabled, setHealthCalculationsEnabled } from "@/lib/health/kill-switch"
 import { resolveWorkbenchWindow } from "@/lib/agent/workbench-window"
 import { partitionInfractions } from "@/lib/rules/waivers"
@@ -10918,11 +10919,22 @@ export function ProjectWorkspace() {
   const showFileStats = centerSurface === "editor"
     && (cellAreaState.kind === "ready" || cellAreaState.kind === "ready-empty")
   const getCharacterImportCells = useCallback(() => cellSummaries, [cellSummaries])
-  const getStatusBarHealth = useCallback(() => cellSummaries.map(cell => ({
-    cellId: cell.id,
-    label: cell.cellLabel || cell.id,
-    health: healthMap.get(cell.id) ?? 0,
-  })), [cellSummaries, healthMap])
+  // AQU-2278: the card ranks the lines the footer counts, and names only the
+  // drags it shows, by the app's one rule for a line (lib/cells/line-name.ts).
+  const getStatusBarHealth = useCallback(
+    () => healthCardRows(cellSummaries, healthMap, countStructuralCells),
+    [cellSummaries, healthMap, countStructuralCells],
+  )
+  const healthCardNamer = useMemo(() => createHealthCardNamer(cellStore), [cellStore])
+  const activeFileOrderedBy = activeFile ? fileOrderedBy(activeFile) : undefined
+  const nameStatusBarCells = useCallback(
+    (cellIds: readonly string[]) => readAtVersion(cellStoreVersion, () =>
+      healthCardNamer(cellIds, activeFileOrderedBy, {
+        row: (label) => t("editor.line.rowName", { number: label }),
+        empty: t("editor.line.emptyName"),
+      })),
+    [healthCardNamer, cellStoreVersion, activeFileOrderedBy, t],
+  )
 
   async function handleSearchSelect(result: WorkspaceSearchResult, _query: string) {
     const flash = () => {
@@ -18086,6 +18098,7 @@ export function ProjectWorkspace() {
       className="p-0"
       progress={editorStatusBarProgress}
       getHealthByCell={getStatusBarHealth}
+      nameCells={nameStatusBarCells}
       projectHealth={projectHealth}
       staleSourceCount={staleCellIds.size}
       onJumpToCell={jumpToCellId}
@@ -19921,6 +19934,7 @@ export function ProjectWorkspace() {
                 className={showAudioToolbar ? "px-0 py-0.5" : undefined}
                 progress={editorStatusBarProgress}
                 getHealthByCell={getStatusBarHealth}
+                nameCells={nameStatusBarCells}
                 projectHealth={projectHealth}
                 staleSourceCount={staleCellIds.size}
                 onJumpToCell={jumpToCellId}

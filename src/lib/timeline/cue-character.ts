@@ -50,7 +50,7 @@ const EMPTY: CueCharacter = { names: [], cameraState: undefined }
  * second copy of the typeof/empty-string guard is exactly the kind that ends up
  * one arm behind.
  */
-export const ownCastName = (cell: CellData): string | null =>
+export const ownCastName = (cell: Pick<CellData, "metadata">): string | null =>
   cell.metadata && typeof cell.metadata.cast_name === "string" && cell.metadata.cast_name !== ""
     ? cell.metadata.cast_name
     : null

@@ -4,21 +4,29 @@ import type { CellSummary } from "@/hooks/useActiveCellStore"
 import { StatusBar as StatusBarView } from "./StatusBar"
 import { useHealth } from "@/hooks/useHealth"
 import { applyStructuralPolicy } from "@/lib/cells/structural"
+import { healthCardRows } from "@/lib/health/health-card-rows"
 import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 import { useCallback, type ComponentProps } from "react"
 
 function StatusBar({ cells, healthMap, countStructural = true, ...props }: {
   cells: readonly CellSummary[]; healthMap: Map<string, number>; countStructural?: boolean
-} & Omit<ComponentProps<typeof StatusBarView>, "progress" | "getHealthByCell">) {
+} & Omit<ComponentProps<typeof StatusBarView>, "progress" | "getHealthByCell" | "nameCells">) {
   // Use the same live counter source as the workspace, including when health
   // scoring is off. The footer must not regress to server snapshot counters.
   // AQU-1083: and the same policy step the workspace applies on top of it.
   const { fileProgress } = useHealth(new Map([["active", cells]]), [], { enabled: false })
   const progress = applyStructuralPolicy(fileProgress.get("active")!, cells, countStructural)
-  const getHealthByCell = useCallback(() => cells.map(cell => ({
-    cellId: cell.id, label: cell.cellLabel || cell.id, health: healthMap.get(cell.id) ?? 0,
-  })), [cells, healthMap])
-  return <StatusBarView progress={progress} getHealthByCell={getHealthByCell} {...props} />
+  // The workspace's rows; how they are named is DecayBreakdown.test's and
+  // line-name.test's business, so these go by each fixture's own label.
+  const getHealthByCell = useCallback(
+    () => healthCardRows(cells, healthMap, countStructural),
+    [cells, healthMap, countStructural],
+  )
+  const nameCells = useCallback(
+    (ids: readonly string[]) => ids.map((id) => cells.find((c) => c.id === id)?.cellLabel ?? id),
+    [cells],
+  )
+  return <StatusBarView progress={progress} getHealthByCell={getHealthByCell} nameCells={nameCells} {...props} />
 }
 
 const cells = [

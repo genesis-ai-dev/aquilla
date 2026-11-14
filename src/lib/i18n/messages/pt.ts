@@ -2283,7 +2283,7 @@ export const pt: Catalog = {
   "audio.batchVoice.title": "Gerar voz",
   "audio.batchVoice.tooltip": "Gerar uma tomada para cada uma das {count} linhas selecionadas, em uma só voz",
   "audio.batchVoice.needTranslated": "Selecione pelo menos uma linha traduzida",
-  "audio.batchVoice.rowName": "linha {number}",
+  "editor.line.rowName": "linha {number}",
   "audio.batchVoice.voiceLabel": "Voz a usar",
   "audio.batchVoice.existingLabel": "Linhas que já têm áudio gerado",
   "audio.batchVoice.existingSkip": "Deixá-las como estão",

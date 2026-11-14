@@ -78,7 +78,7 @@ interface Exported {
 
 /** Export as the dialog does: hidden lines cleared and handed over as removals,
  *  deleted ones as the server's removals. */
-async function exportAsDialog(body: string, notes: string | undefined, cells: CellData[], deleted: CellData[] = []): Promise<Exported> {
+async function exportAsDialog(body: string, notes: string | undefined, cells: CellData[], deleted: CellData[] = [], emptiedOnPurpose: readonly string[] = []): Promise<Exported> {
   const result = await exportDocx(await makeDocx(body, notes), scopeRoundTripCells(cells, "current"), {
     removedCells: [...deleted.map((cell) => ({ metadata: cell.metadata ?? null })), ...hiddenRoundTripRemovals(cells)],
   })
@@ -86,7 +86,7 @@ async function exportAsDialog(body: string, notes: string | undefined, cells: Ce
   const xml = await zip.file(WORD)!.async("string")
   const outNotes = await zip.file(NOTES)?.async("string")
   expect(() => assertWellFormedXml(xml)).not.toThrow()
-  expect(structuralProblems(xml, outNotes)).toEqual([])
+  expect(structuralProblems(xml, outNotes, { emptiedOnPurpose })).toEqual([])
   return { xml, notes: outNotes, result }
 }
 
@@ -197,12 +197,14 @@ describe("Word export — a hidden or deleted line's words, and a tab among them
     ["a link", `<w:hyperlink w:anchor="_Top"><w:r><w:t xml:space="preserve"> links somewhere and</w:t></w:r></w:hyperlink>`, "", `<w:hyperlink w:anchor="_Top"></w:hyperlink>`],
   ]
   const translate = (k: number) => [T1, "", T3][k]
+  /** AQU-2552 (review r9): a link the export emptied on purpose, by its start tag. */
+  const emptied = (kept: string) => [kept.match(/^(<w:hyperlink\b[^>]*>)<\/w:hyperlink>$/)?.[1]].filter((tag): tag is string => tag !== undefined)
 
   it.each(shapes)("a hidden line's words go and %s stays", async (_name, inner, seen, kept) => {
     const body = withInLine2(inner)
     const cells = importedCells(body, undefined, translate).map((cell) => (cell.id === "c1-2" ? { ...cell, hidden: true } : cell))
     expect(cells.filter((cell) => cell.id.startsWith("c1-"))).toHaveLength(3)
-    const out = await exportAsDialog(body, undefined, cells)
+    const out = await exportAsDialog(body, undefined, cells, [], emptied(kept))
     expect(firstParagraph(out.xml)).toBe(`${T1}${seen} ${T3}`)
     expect(out.xml).toContain(kept)
     expect(out.xml).not.toMatch(/The second line|links somewhere|italic|<w:tab\/>/)
@@ -216,7 +218,7 @@ describe("Word export — a hidden or deleted line's words, and a tab among them
     const body = withInLine2(inner)
     const all = importedCells(body, undefined, translate)
     const deleted = all.filter((cell) => cell.id === "c1-2")
-    const out = await exportAsDialog(body, undefined, all.filter((cell) => cell.id !== "c1-2"), deleted)
+    const out = await exportAsDialog(body, undefined, all.filter((cell) => cell.id !== "c1-2"), deleted, emptied(kept))
     expect(firstParagraph(out.xml)).toBe(`${T1}${seen} ${T3}`)
     expect(out.xml).toContain(kept)
     expect(out.xml).not.toMatch(/The second line|links somewhere|italic|<w:tab\/>/)

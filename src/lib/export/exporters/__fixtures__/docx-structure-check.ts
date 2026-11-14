@@ -6,11 +6,16 @@
 // bookmark has exactly one start and one end, start first; field characters
 // balance (begin, separate, end) across the part and field instructions sit in
 // an open field code; REF/PAGEREF/NOTEREF fields name a bookmark that exists;
-// every footnote reference names a note that exists, once; runs and
-// paragraphs sit where WordprocessingML allows them; a run's properties are in
-// schema order with no property twice. Not flagged: an emptied simple field,
-// content control or link (schema-valid, by design: AQU-2552 question 62, a
-// hidden or deleted line leaves its wrapper in place, emptied of its words).
+// every footnote reference names a note that exists, once; a hyperlink holds a
+// run; runs and paragraphs sit where WordprocessingML allows them; a run's
+// properties are in schema order with no property twice. Not flagged: an
+// emptied simple field or content control (schema-valid, by design).
+//
+// One exemption, named by the caller (AQU-2552 review r9): `emptiedOnPurpose`,
+// the start tags of links the export emptied on purpose because their words
+// were all a hidden or deleted line's (question 62: the link stays, emptied).
+// Each tag exempts one empty link with exactly that start tag; any other empty
+// link is still flagged.
 import { elementsByTagName, getAttribute, isElement, parseXmlLite, textContent, type XmlElement } from "@/lib/parsers/xml-lite"
 
 const RPR_ORDER = [
@@ -25,9 +30,14 @@ const P_PARENTS = new Set(["w:body", "w:tc", "w:txbxContent", "w:sdtContent", "w
 
 const elementChildren = (el: XmlElement) => el.children.filter(isElement)
 
-export function structuralProblems(partXml: string, footnotesXml?: string): string[] {
+export function structuralProblems(
+  partXml: string,
+  footnotesXml?: string,
+  exempt: { emptiedOnPurpose?: readonly string[] } = {},
+): string[] {
   const problems: string[] = []
-  const root = parseXmlLite(partXml)
+  const root = parseXmlLite(partXml, { offsets: true })
+  const emptiedOnPurpose = [...(exempt.emptiedOnPurpose ?? [])]
 
   const walk = (el: XmlElement, parent: XmlElement | null) => {
     if (el.tagName === "w:r" && parent && !RUN_PARENTS.has(parent.tagName)) problems.push(`w:r under ${parent.tagName}`)
@@ -37,6 +47,11 @@ export function structuralProblems(partXml: string, footnotesXml?: string): stri
       if (kids.length === 0 || kids[kids.length - 1].tagName !== "w:p") problems.push("w:tc not ending in w:p")
     }
     if (el.tagName === "w:txbxContent" && !elementChildren(el).some((c) => c.tagName === "w:p")) problems.push("w:txbxContent with no paragraph")
+    if (el.tagName === "w:hyperlink" && elementsByTagName(el, "w:r").length === 0) {
+      const k = emptiedOnPurpose.indexOf(partXml.slice(el.start, el.openEnd))
+      if (k === -1) problems.push("w:hyperlink with no run")
+      else emptiedOnPurpose.splice(k, 1)
+    }
     if (el.tagName === "w:rPr" && parent?.tagName === "w:r") {
       const names = elementChildren(el).map((c) => c.tagName.replace(/^w:/, ""))
       const ranks = names.map((n) => RPR_ORDER.indexOf(n)).filter((r) => r >= 0)

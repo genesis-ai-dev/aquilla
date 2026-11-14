@@ -86,14 +86,14 @@ interface Out {
 
 /** Export as the dialog does: hidden lines cleared and handed over as
  *  removals, `deleted` as the server's removed records. */
-async function wordOut(bytes: ArrayBuffer, cells: CellData[], deleted: CellData[] = []): Promise<Out> {
+async function wordOut(bytes: ArrayBuffer, cells: CellData[], deleted: CellData[] = [], emptiedOnPurpose: readonly string[] = []): Promise<Out> {
   const result = await exportDocx(bytes, scopeRoundTripCells(cells, "current"), {
     removedCells: [...deleted.map((c) => ({ cellId: c.id, canonicalRef: c.group || null, metadata: c.metadata ?? null })), ...hiddenRoundTripRemovals(cells)],
   })
   const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
   const body = await zip.file("word/document.xml")!.async("string")
   expect(() => assertWellFormedXml(body)).not.toThrow()
-  expect(structuralProblems(body)).toEqual([])
+  expect(structuralProblems(body, undefined, { emptiedOnPurpose })).toEqual([])
   expect(looseProperties(body)).toEqual([])
   return { body, result }
 }
@@ -186,6 +186,9 @@ const KINDS: Kind[] = [
   },
 ]
 
+/** AQU-2552 (review r9): the link a kind's lost line empties on purpose, by its start tag. */
+const emptiedBy = (kind: Kind) => [kind.kept?.match(/^(<w:hyperlink\b[^>]*>)<\/w:hyperlink>$/)?.[1]].filter((tag): tag is string => tag !== undefined)
+
 const bodyOf = (kind: Kind) => para(run(L1 + " ") + kind.line2 + run(" " + L3)) + NEXT
 
 /** The paragraph's three lines, the text box's own line, and the next paragraph. */
@@ -208,7 +211,7 @@ describe("Word export — a hidden or deleted line takes only its words and its 
 
   it.each(KINDS)("a hidden line's words go and $name stays (file with locators)", async (kind) => {
     const { bytes, a, b, c, rest } = await linesOf(kind, false)
-    const out = await wordOut(bytes, [typed(a, "Un."), hide(typed(b, "Deux.")), typed(c, "Trois."), ...rest])
+    const out = await wordOut(bytes, [typed(a, "Un."), hide(typed(b, "Deux.")), typed(c, "Trois."), ...rest], [], emptiedBy(kind))
     expect(paras(out.body)[0]).toBe(`Un.${kind.seen} Trois.`)
     if (kind.kept === null) expect(firstPara(out.body)).not.toContain(kind.parts[0])
     else expect(firstPara(out.body)).toContain(kind.kept)
@@ -222,7 +225,7 @@ describe("Word export — a hidden or deleted line takes only its words and its 
 
   it.each(KINDS)("a deleted line's words go and $name stays (file with locators)", async (kind) => {
     const { bytes, a, b, c, rest } = await linesOf(kind, false)
-    const out = await wordOut(bytes, [typed(a, "Un."), typed(c, "Trois."), ...rest], [b])
+    const out = await wordOut(bytes, [typed(a, "Un."), typed(c, "Trois."), ...rest], [b], emptiedBy(kind))
     expect(paras(out.body)[0]).toBe(`Un.${kind.seen} Trois.`)
     if (kind.kept === null) expect(firstPara(out.body)).not.toContain(kind.parts[0])
     else expect(firstPara(out.body)).toContain(kind.kept)
@@ -474,5 +477,18 @@ describe("Word export — what a lost line owns is its own text range and its fo
     expect(paras(out.body)[0]).toBe("Un. Trois.")
     expect(out.body).not.toContain("w:hyperlink")
     expect(out.result.fidelity.droppedLinks).toBe(1)
+  })
+
+  // R7: the structure check flags a link with no run again; only a link this
+  // export emptied on purpose (its words were all a lost line's) is exempt,
+  // named by its start tag.
+  it("the structure check flags an empty link, unless it is one the export emptied on purpose", () => {
+    const doc = (inner: string) => `<w:document ${W_NS}><w:body>${para(inner)}</w:body></w:document>`
+    const empty = `<w:hyperlink w:anchor="_Top" w:history="1"></w:hyperlink>`
+    expect(structuralProblems(doc(empty))).toEqual(["w:hyperlink with no run"])
+    expect(structuralProblems(doc(empty), undefined, { emptiedOnPurpose: [`<w:hyperlink w:anchor="_Top" w:history="1">`] })).toEqual([])
+    expect(structuralProblems(doc(empty + empty), undefined, { emptiedOnPurpose: [`<w:hyperlink w:anchor="_Top" w:history="1">`] })).toEqual(["w:hyperlink with no run"])
+    expect(structuralProblems(doc(empty), undefined, { emptiedOnPurpose: [`<w:hyperlink w:anchor="other">`] })).toEqual(["w:hyperlink with no run"])
+    expect(structuralProblems(doc(`<w:hyperlink w:anchor="_Top">${run("words")}</w:hyperlink>`))).toEqual([])
   })
 })

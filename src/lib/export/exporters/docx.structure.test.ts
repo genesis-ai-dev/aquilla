@@ -665,7 +665,6 @@ describe("the structural check itself (AQU-2539)", () => {
       `<w:tbl><w:tr><w:tc><w:tcPr/></w:tc></w:tr></w:tbl>` +
         para(`<w:bookmarkStart w:id="1" w:name="a"/>${run("x")}`) +
         para(`<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> REF missing </w:instrText></w:r>${footnoteRefRun(9)}`) +
-        // AQU-2552 (question 62): an emptied link is schema-valid, so not flagged.
         para(`<w:hyperlink r:id="rId1"></w:hyperlink><w:r><w:rPr><w:i/><w:b/></w:rPr><w:t>y</w:t></w:r>`),
     )
     expect(structuralProblems(bad, footnotesXml({ 2: "A note." })).sort()).toEqual([
@@ -673,6 +672,7 @@ describe("the structural check itself (AQU-2539)", () => {
       "bookmarkStart with no end: 1",
       "field begin without end (1)",
       "footnoteReference to a missing note: 9",
+      "w:hyperlink with no run",
       "w:rPr children out of order: i,b",
       "w:tc not ending in w:p",
     ])

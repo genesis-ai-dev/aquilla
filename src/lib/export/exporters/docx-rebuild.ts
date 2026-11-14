@@ -30,7 +30,7 @@
 
 import { isElement, type XmlElement } from "@/lib/parsers/xml-lite"
 import type { DocxPiece } from "@/lib/parsers/docx-structure"
-import { directRprChild, rPrWithMarks, textRunXml, type Mark } from "./docx-runs"
+import { directRprChild, escapeXml, rPrWithMarks, textRunXml, type Mark } from "./docx-runs"
 
 type Leaf = Exclude<DocxPiece, { kind: "container" }>
 type TextPiece = Extract<DocxPiece, { kind: "text" }>
@@ -38,11 +38,14 @@ type FootnotePiece = Extract<DocxPiece, { kind: "footnote" }>
 type ContainerPiece = Extract<DocxPiece, { kind: "container" }>
 
 type RNode =
-  | { kind: "text"; piece: TextPiece }
+  /** `cut`: its run also holds a lost line's characters, which are taken out
+   *  of `piece.text` (AQU-2552 review r9). */
+  | { kind: "text"; piece: TextPiece; cut?: true }
   | { kind: "marker"; piece: FootnotePiece }
   | { kind: "keep"; piece: Leaf }
   /** `partial`: it lost some of what it held to a hidden or deleted line, so
-   *  it is never copied byte for byte (see `withoutLost`). */
+   *  it is looked for by what it has left and written with only that (see
+   *  `withoutLost`, `renderVerbatim`). */
   | { kind: "wrapper"; piece: ContainerPiece; children: RNode[]; partial?: true }
   | { kind: "field"; open: RNode[]; result: RNode[]; close: RNode; partial?: true }
   /** A wrapper whose text was not found (a simple field, a content control,
@@ -171,7 +174,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
 
   const inlineAt = new Map(input.inlineAt ?? [])
   let nodes = buildNodes(input.items, input.lineSet)
-  if (input.lost && input.lost.size > 0) nodes = withoutLost(nodes, input.lost, input.lostChar)
+  if (input.lost) nodes = withoutLost(nodes, input.lost, input.lostChar)
   const refs: { xml: string; id: string; line: number | undefined }[] = []
   collectMarkers(nodes, (piece) => {
     refs.push({ xml: io.elementXml(piece.run), id: piece.id, line: input.footnoteLines?.get(piece) })
@@ -181,7 +184,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   let matches: Map<RNode, Match>
   for (;;) {
     const lost: { text: string; look: string }[] = []
-    matches = matchAnchors(nodes, masked, input.baseRpr, io, lost, input.lostChar)
+    matches = matchAnchors(nodes, masked, input.baseRpr, io, lost)
     result.lostLooks = lost.filter((l) => seenDifferently(l.look, input.baseRpr)).map((l) => l.text)
     let changed = false
     const next: RNode[] = []
@@ -377,7 +380,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
     endLinesTo(start)
     inlineTo(start)
     if (node.kind === "wrapper" || node.kind === "field") {
-      stream += renderVerbatim(node.kind === "wrapper" ? [node] : [...node.open, ...node.result, node.close], io)
+      stream += renderVerbatim([node], io)
       if (node.kind === "field") result.keptFields++
       else if (node.piece.el.tagName === "w:hyperlink") result.keptLinks++
       else if (node.piece.el.tagName === "w:fldSimple") result.keptFields++
@@ -441,16 +444,27 @@ function buildNodes(items: readonly DocxPiece[], lineSet: ReadonlySet<DocxPiece>
  * pieces, or all of its words, stays with its own tags and properties,
  * without them. AQU-2552 (review r9): it is partial when any one character of
  * it is a lost line's (`lostChar`: a run holding words of two lines), so it
- * is never looked for by its whole result.
+ * is never looked for by its whole result: text keeps only its own
+ * characters, and a partial field or wrapper is looked for, and written, by
+ * what it has left.
  */
 function withoutLost(
   nodes: readonly RNode[],
   lost: ReadonlySet<DocxPiece>,
   lostChar: (piece: DocxPiece, i: number) => boolean = () => false,
 ): RNode[] {
+  const keptText = (piece: TextPiece) => {
+    let out = ""
+    for (let i = 0; i < piece.text.length; i++) if (!lostChar(piece, i)) out += piece.text[i]
+    return out
+  }
   const ownsAny = (leaf: LeafNode) =>
-    lost.has(leaf.piece) || (leaf.kind === "text" && [...leaf.piece.text].some((_, i) => lostChar(leaf.piece, i)))
+    lost.has(leaf.piece) || (leaf.kind === "text" && keptText(leaf.piece) !== leaf.piece.text)
   return nodes.flatMap((node): RNode[] => {
+    if (node.kind === "text" && !lost.has(node.piece)) {
+      const text = keptText(node.piece)
+      return [text === node.piece.text ? node : { kind: "text", piece: { ...node.piece, text }, cut: true }]
+    }
     if (node.kind === "text" || node.kind === "marker") return lost.has(node.piece) ? [] : [node]
     if (node.kind !== "wrapper" && node.kind !== "field") return [node]
     const inner = node.kind === "wrapper" ? node.children : [...node.open, ...node.result, node.close]
@@ -661,7 +675,6 @@ function anchorsOf(
   nodes: readonly RNode[],
   baseRpr: string,
   io: RebuildIo,
-  lostChar?: (piece: DocxPiece, i: number) => boolean,
 ): { anchors: Anchor[]; text: string; unsought: LostStretch[] } {
   const anchors: Anchor[] = []
   /** Look stretches with a letter or digit too short to be looked for. */
@@ -757,14 +770,9 @@ function anchorsOf(
       const look = io.rPrXml(node.piece.run)
       // UTF-16 units, the unit of every offset here.
       const text = node.piece.text
+      // (AQU-2552 review r6: a hidden or deleted line's words are never looked
+      // for, nor reported; withoutLost has taken them out of the text.)
       for (let i = 0; i < text.length; i++) {
-        // AQU-2552 (review r6): a hidden or deleted line's words are never
-        // looked for, nor reported: they end a stretch, like a frame.
-        if (lostChar?.(node.piece, i)) {
-          flushStretches()
-          offset++
-          continue
-        }
         chars.push({ ch: text[i], look, special: look !== baseRpr, at: offset })
         owner.push(node)
         offset++
@@ -775,9 +783,9 @@ function anchorsOf(
     if (node.kind === "keep") continue
     flushStretches()
     const text = textOf(node)
-    // AQU-2552 (review r6): one that lost pieces to a hidden or deleted line
-    // is never copied byte for byte, so it is not looked for.
-    if ((node.kind === "wrapper" || node.kind === "field") && !node.partial) {
+    // AQU-2552 (review r9): one that lost pieces to a hidden or deleted line
+    // is looked for by what it has left (`textOf`).
+    if (node.kind === "wrapper" || node.kind === "field") {
       const { lead, text: needle } = trimmed(text)
       // A field or link is found by its whole visible text, however short
       // (a caption's number "1"): its own structure is the anchor.
@@ -804,12 +812,11 @@ function matchAnchors(
   baseRpr: string,
   io: RebuildIo,
   lost: LostStretch[],
-  lostChar?: (piece: DocxPiece, i: number) => boolean,
 ): Map<RNode, Match> {
   const out = new Map<RNode, Match>()
   const lookMatches: Match[] = []
   let cursor = 0
-  const { anchors, text: sourceText, unsought } = anchorsOf(nodes, baseRpr, io, lostChar)
+  const { anchors, text: sourceText, unsought } = anchorsOf(nodes, baseRpr, io)
   // A stretch grown to its whole word ("12th" from a superscript "th") starts
   // in the main look: its own look is the first one a reader sees differently
   // from it (core check: not one that differs only in, say, proofing language).
@@ -1022,34 +1029,68 @@ function renderLeaves(nodes: readonly RNode[], io: RebuildIo): string {
   return out
 }
 
-/** A matched frame, byte for byte: each source element it is made of, once. */
+/** A matched frame, byte for byte: each source element it is made of, once.
+ *  AQU-2552 (review r9): a partial one (it lost characters to a hidden or
+ *  deleted line) keeps its own tags, and each of its runs is written with
+ *  only what it has left: each child as it is, cut to its own characters,
+ *  or left out. */
 function renderVerbatim(nodes: readonly RNode[], io: RebuildIo): string {
   let out = ""
   let last: XmlElement | null = null
+  let left: LeafNode[] | null = null
   const emit = (el: XmlElement) => {
     if (el === last) return
     last = el
     out += io.elementXml(el)
   }
+  const emitRun = (run: XmlElement) => {
+    if (left === null) return emit(run)
+    if (run === last) return
+    last = run
+    out += io.openTag(run)
+    for (const child of run.children) {
+      if (!isElement(child)) continue
+      const own = left.find((leaf) =>
+        leaf.piece.kind === "text" ? leaf.piece.el === child : leaf.piece.kind === "keepInRun" && leaf.piece.children.includes(child))
+      if (child.tagName === "w:rPr" || (own && !(own.kind === "text" && own.cut))) out += io.elementXml(child)
+      else if (own) out += `<w:t xml:space="preserve">${escapeXml(own.piece.text)}</w:t>`
+    }
+    out += io.closeTag(run)
+  }
+  const partly = (node: Extract<RNode, { kind: "wrapper" | "field" }>, write: () => void) => {
+    const outer = left
+    if (node.partial) left = leavesOf([node])
+    write()
+    left = outer
+  }
   const visit = (node: RNode) => {
     switch (node.kind) {
       case "text":
-        emit(node.piece.run)
+        emitRun(node.piece.run)
         return
       case "marker":
         emit(node.piece.run)
         return
       case "keep": {
         const piece = node.piece
-        emit(piece.kind === "keep" ? piece.el : piece.run)
+        if (piece.kind === "keep") emit(piece.el)
+        else emitRun(piece.run)
         return
       }
       case "wrapper":
+        if (!node.partial) return emit(node.piece.el)
+        partly(node, () => {
+          out += io.openTag(node.piece.el)
+          node.children.forEach(visit)
+          out += io.closeTag(node.piece.el)
+          last = null
+        })
+        return
       case "emptyField":
         emit(node.piece.el)
         return
       case "field":
-        ;[...node.open, ...node.result, node.close].forEach(visit)
+        partly(node, () => [...node.open, ...node.result, node.close].forEach(visit))
         return
       case "emptied":
         node.nodes.forEach(visit)

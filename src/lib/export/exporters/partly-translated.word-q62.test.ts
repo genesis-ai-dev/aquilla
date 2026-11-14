@@ -445,4 +445,34 @@ describe("Word export — what a lost line owns is its own text range and its fo
       expect(inside.exec(firstPara(out.body))?.[1] ?? "").not.toMatch(/here and it goes/)
     }
   })
+
+  // R5: a link (or other wrapper) running from a lost line into a remaining
+  // one keeps covering the remaining words. When that line is untranslated,
+  // they keep their look and the link is not reported as changed.
+  const bold = "<w:b/>"
+  const LINK = `<w:hyperlink w:anchor="x">`
+  it.each([
+    ["a link", `${LINK}${run("here" + PAD + " ")}${run("Third", bold)}</w:hyperlink>`, `${LINK}${run("Third", bold)}</w:hyperlink>`],
+    ["a content control", `${SDT}${run("here" + PAD + " ")}${run("Third", bold)}</w:sdtContent></w:sdt>`, `${SDT}${run("Third", bold)}</w:sdtContent></w:sdt>`],
+    ["a field", FIELD_OF(run("here" + PAD + " ") + run("Third", bold)), FIELD_OF(run("Third", bold))],
+    ["a link whose one run holds both lines' words", `${LINK}${oneRun}</w:hyperlink>`, `${LINK}<w:r><w:t xml:space="preserve"> Third</w:t></w:r></w:hyperlink>`],
+  ])("%s running from a lost line into an untranslated one keeps covering its remaining words", async (_, wrapped, kept) => {
+    const { bytes, a, b, c, rest } = await intoLine3(wrapped)
+    for (const out of [await wordOut(bytes, [a, hide(b), c, ...rest]), await wordOut(bytes, [a, c, ...rest], [b])]) {
+      expect(paras(out.body)[0].replace("{field}", "")).toBe("First line here … Third line here …")
+      expect(firstPara(out.body)).toContain(kept)
+      expect(out.body).not.toMatch(/Second/)
+      expect(out.result.fidelity.droppedLinks).toBe(0)
+      expect(out.result.fidelity.emptiedFields).toBe(0)
+      expect(out.result.lostLooks).toEqual([])
+    }
+  })
+
+  it("a link running from a lost line into a translated one is dropped, its words changed, as any such link", async () => {
+    const { bytes, a, b, c, rest } = await intoLine3(`${LINK}${run("here" + PAD + " ")}${run("Third")}</w:hyperlink>`)
+    const out = await wordOut(bytes, [typed(a, "Un."), hide(b), typed(c, "Trois."), ...rest])
+    expect(paras(out.body)[0]).toBe("Un. Trois.")
+    expect(out.body).not.toContain("w:hyperlink")
+    expect(out.result.fidelity.droppedLinks).toBe(1)
+  })
 })

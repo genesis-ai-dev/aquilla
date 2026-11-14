@@ -461,8 +461,10 @@ export async function exportDocx(
   /** The result's warnings: each asks for a re-import of the file. */
   const reimportWarnings: { segment: string; detail: string }[] = []
 
-  const occurrences = (hay: string, needle: string) => hay.split(needle).length - 1
-  /** The paragraphs inside a paragraph's text boxes (at any depth), with words. */
+  const occurrences = (hay: string, needle: string) => (needle ? hay.split(needle).length - 1 : 0)
+  /** The paragraphs inside a paragraph's text boxes (at any depth), with words,
+   *  hidden ones included: AQU-2539 (review r9), a box all hidden in Word has
+   *  no line today, but dev's importer read its words into the holder's cell. */
   const boxLinesIn = (holder: DocxParagraphSpan) =>
     spans
       .filter((s) => s.start > holder.start && s.end <= holder.end && !s.isCopy && !s.selfClosing)
@@ -470,7 +472,7 @@ export async function exportDocx(
         const text = lineTextOf(s)
         return { span: s, text, words: squash(text), wordsWithHidden: squash(lineTextOf(s, withHidden)) }
       })
-      .filter((box) => box.words.length > 0)
+      .filter((box) => box.wordsWithHidden.length > 0)
 
   // AQU-2539, OLD IMPORTS. Before text boxes were read separately, a text box's
   // words were read three times: into the paragraph holding the box, into the
@@ -526,7 +528,8 @@ export async function exportDocx(
       || occurrences(source, box.words) > occurrences(own, box.words)
       || occurrences(source, box.wordsWithHidden) > occurrences(own, box.wordsWithHidden))
     if (held.length === 0) continue
-    const untranslated = held.filter((box) => !translations.has(box.span.index))
+    // (A box with no visible words has nothing to translate, and is not named.)
+    const untranslated = held.filter((box) => box.words.length > 0 && !translations.has(box.span.index))
     if (own) {
       staleHolders.add(holder.index)
       fidelity.staleTextBoxHolders++

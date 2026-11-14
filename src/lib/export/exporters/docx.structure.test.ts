@@ -923,6 +923,20 @@ describe("exportDocx — an old import's cell for the paragraph holding a text b
     expect(result.warnings.map((w) => w.segment)).toEqual(["See the map below.", "Figure 4: Map"])
   })
 
+  it("keeps a holder with words of its own as it was when its box is all hidden in Word and the old cell held the box's words (review r9)", async () => {
+    // The box has no visible words, so today's import makes no line of it,
+    // but dev's importer read its hidden words into the holder's cell. The
+    // cell is stale all the same: the holder keeps its own words. The box has
+    // nothing to translate, so it is not named.
+    const own = "See the map below. "
+    const withOwn = para(run(own) + textBoxRun(para(run("SECRET", "<w:rPr><w:vanish/></w:rPr>"), "Caption")))
+    const cells = [cellAt(1, "Voir la carte ci-dessous. SECRET", { original: `${own}SECRET` })]
+    const { xml, result } = await exportedXml(withOwn, cells)
+    expect(xml).not.toContain("Voir")
+    expect(result.fidelity.staleTextBoxHolders).toBe(1)
+    expect(result.warnings.map((w) => w.segment)).toEqual(["See the map below."])
+  })
+
   it("names a text-box paragraph once, however many old cells held its words", async () => {
     // w:p[1] holder; w:p[2] the outer box ("Outer", holding the inner box
     // w:p[3], copy w:p[4]); w:p[5]..[7] the outer box's copy.

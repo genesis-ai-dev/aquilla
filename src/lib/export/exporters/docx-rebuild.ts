@@ -516,6 +516,12 @@ const PAIRED_MARKS: Record<string, [string, "start" | "end"]> = {
   "w:moveToRangeStart": ["moveTo", "start"], "w:moveToRangeEnd": ["moveTo", "end"],
   "w:permStart": ["perm", "start"], "w:permEnd": ["perm", "end"],
 }
+/** AQU-2552 (review r10): is this element one of a pair's marks (above), or
+ *  a run holding a comment's reference? */
+export function isPairedMark(el: XmlElement): boolean {
+  if (el.tagName === "w:r") return el.children.some((c) => isElement(c) && c.tagName === "w:commentReference")
+  return el.tagName in PAIRED_MARKS
+}
 function pairOf(piece: Leaf): { key: string; side: "start" | "end" | "reference" } | null {
   const children = piece.kind === "keepInRun" ? piece.children : piece.kind === "keep" && piece.el.tagName === "w:r" ? piece.el.children : null
   if (children) {

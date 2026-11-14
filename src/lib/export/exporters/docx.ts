@@ -78,7 +78,7 @@ import {
   type Span,
 } from "./docx-runs"
 import { frenchSpacing, isFrenchLanguage } from "./french-spacing"
-import { anchorCounts, rebuildParagraphInner, type RebuildIo, type RebuildResult } from "./docx-rebuild"
+import { anchorCounts, isPairedMark, rebuildParagraphInner, type RebuildIo, type RebuildResult } from "./docx-rebuild"
 import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import {
@@ -375,7 +375,21 @@ export async function exportDocx(
     return out + xml!.slice(cursor, to)
   }
 
+  /** AQU-2552 (review r10): range marks of paragraphs that left, by
+   *  container, waiting for the next paragraph there. */
+  const carried = new Map<number, string>()
+
+  /** A paragraph as written, with any range marks a paragraph before it in
+   *  its container left behind, at its start (after its properties). */
   function renderParagraph(span: DocxParagraphSpan): string {
+    const out = renderOwnParagraph(span)
+    const marks = carried.get(span.container)
+    if (!marks || out === "") return out
+    carried.delete(span.container)
+    return withMarksAtStart(out, marks)
+  }
+
+  function renderOwnParagraph(span: DocxParagraphSpan): string {
     // A copy (the old-reader Fallback of a text box) mirrors the paragraph it
     // copies: same translation, same removal, same additions. Unpaired copies
     // are left exactly as they are.
@@ -396,15 +410,22 @@ export async function exportDocx(
       // only its own text and footnotes. The paragraph leaves only when
       // nothing else in it remains; otherwise it is written without them.
       const rest = withoutItsLines(span)
-      if (rest !== null) {
+      if (rest?.seen) {
         if (!span.isCopy) injected++
-        return rest + renderInsertions(key, anchorXml, !span.isCopy)
+        return rest.xml + renderInsertions(key, anchorXml, !span.isCopy)
       }
       if (!span.isCopy) removed++
-      if (lastInContainer.get(span.container) !== span.index) return ""
+      // AQU-2552 (review r10): its range marks are not dropped. They go to the
+      // start of the next paragraph of its container (see renderParagraph),
+      // or stay in it when it is that container's last and is kept, emptied.
+      const marks = rest ? rangeMarks(rest.xml) : ""
+      if (lastInContainer.get(span.container) !== span.index) {
+        carried.set(span.container, (carried.get(span.container) ?? "") + marks)
+        return ""
+      }
       const open = anchorXml.slice(0, anchorXml.indexOf(">") + 1)
       const inner = anchorXml.slice(open.length, anchorXml.lastIndexOf("</w:p>"))
-      return `${open}${extractPPr(inner)}</w:p>`
+      return `${open}${extractPPr(inner)}${marks}</w:p>`
     }
 
     // A copy is rendered like its twin but not counted a second time.
@@ -568,15 +589,15 @@ export async function exportDocx(
   const noteTranslations = new Map<string, string>()
 
   /** AQU-2552 (review r9): a paragraph whose lines are all lost, written
-   *  without what they own (all of its line text), or null when nothing
-   *  else remains in it. */
-  function withoutItsLines(span: DocxParagraphSpan): string | null {
+   *  without what they own (all of its line text), and whether a reader
+   *  sees anything left in it (review r10). */
+  function withoutItsLines(span: DocxParagraphSpan): { xml: string; seen: boolean } | null {
     const all = (line: string) => ({ spans: [], layout: { stretches: [], lost: [{ start: 0, end: line.length }] } })
     const rest = rebuildParagraphIn(part, span, all)
     if (rest === null) return null
     const p = parseXmlLite(rest.xml).children.find(isElement)
     const hidden = (run: XmlElement) => walkContext.isHiddenRun?.(run, p!) ?? false
-    return p && seenByReader(p, hidden) ? rest.xml : null
+    return { xml: rest.xml, seen: p !== undefined && seenByReader(p, hidden) }
   }
 
   function rebuildParagraph(span: DocxParagraphSpan, translation: ParagraphTranslation, counted: boolean): string | null {
@@ -982,6 +1003,53 @@ function seenByReader(el: XmlElement, hidden: (run: XmlElement) => boolean): boo
     if (NOT_SHOWN.has(child.tagName) || (child.tagName === "w:r" && hidden(child))) return false
     return seenByReader(child, hidden)
   })
+}
+
+/** AQU-2552 (review r10): what of a paragraph that leaves must stay in the
+ *  document, in order: its range marks (a bookmark, a comment's range and
+ *  reference, see isPairedMark), and the runs of a field that runs on into
+ *  another paragraph (its start, or its end). A field all its own goes with
+ *  it. What Word does not show (deleted, moved away) is not looked into. */
+function rangeMarks(paragraphXml: string): string {
+  const out: { at: number; xml: string }[] = []
+  const open: { at: number; xml: string }[][] = []
+  const take = (el: XmlElement) => ({ at: el.start!, xml: paragraphXml.slice(el.start, el.end) })
+  const visit = (el: XmlElement) => {
+    for (const child of el.children) {
+      if (!isElement(child) || NOT_SHOWN.has(child.tagName)) continue
+      if (isPairedMark(child)) {
+        out.push(take(child))
+        continue
+      }
+      if (child.tagName !== "w:r") {
+        visit(child)
+        continue
+      }
+      const fieldChar = child.children.find((c): c is XmlElement => isElement(c) && c.tagName === "w:fldChar")
+      const code = child.children.some((c) => isElement(c) && c.tagName === "w:instrText")
+      const type = fieldChar ? getAttribute(fieldChar, "w:fldCharType") : null
+      if (type === "begin") open.push([take(child)])
+      else if (type === "end" && open.length > 0) open.pop()
+      else if (type !== null || code) (open.length > 0 ? open[open.length - 1] : out).push(take(child))
+    }
+  }
+  const p = parseXmlLite(paragraphXml, { offsets: true }).children.find(isElement)
+  if (p) visit(p)
+  return [...out, ...open.flat()].sort((a, b) => a.at - b.at).map((m) => m.xml).join("")
+}
+
+/** A written paragraph (and what follows it) with `marks` at its start,
+ *  after its properties. */
+function withMarksAtStart(xml: string, marks: string): string {
+  const p = parseXmlLite(xml, { offsets: true }).children.find(isElement)
+  if (!p || p.tagName !== "w:p") return marks + xml
+  if (p.closeStart === p.end) {
+    const tag = xml.slice(p.start, p.end).replace(/\s*\/>$/, ">")
+    return xml.slice(0, p.start) + tag + marks + "</w:p>" + xml.slice(p.end)
+  }
+  const pPr = p.children.find((c): c is XmlElement => isElement(c) && c.tagName === "w:pPr")
+  const at = pPr ? pPr.end! : p.openEnd!
+  return xml.slice(0, at) + marks + xml.slice(at)
 }
 
 /** Does this piece hold any of the line (directly, or inside a wrapper)? */

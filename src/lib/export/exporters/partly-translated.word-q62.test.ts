@@ -599,6 +599,63 @@ describe("Word export — what a lost line owns is its own text range and its fo
     }
   })
 
+  // Review r10 (N2): a paragraph that leaves gives its range marks (a
+  // bookmark, a comment's range and reference, a field's characters when the
+  // field runs on into another paragraph) to the start of the next paragraph,
+  // so nothing pointing at them, or pairing with them, is left without them.
+  const nextOf = (xml: string) => xml.match(/<w:body>[\s\S]*?(<w:p\b[^>]*>(?:(?!<\/w:p>)[\s\S])*Next paragraph\.[\s\S]*?<\/w:p>)/)![1]
+  const startOfNext = (xml: string) => nextOf(xml).replace(/^<w:p>/, "").split("<w:r><w:t")[0]
+  it("a heading that leaves gives its bookmark to the next paragraph, so the contents' page number still finds it", async () => {
+    const pageRef = para(`<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGEREF _Toc1 \\h </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r>${run("3")}<w:r><w:fldChar w:fldCharType="end"/></w:r>`)
+    const heading = `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:bookmarkStart w:id="5" w:name="_Toc1"/>${run("Chapter one heading.")}<w:bookmarkEnd w:id="5"/></w:p>`
+    for (const out of await allLost(pageRef + heading, (cells) => cells.filter((c) => c.original === "3"))) {
+      expect(paras(out.body)).toEqual(["{field}3", "Next paragraph."])
+      expect(startOfNext(out.body)).toBe(`<w:bookmarkStart w:id="5" w:name="_Toc1"/><w:bookmarkEnd w:id="5"/>`)
+      expect(out.result.removed).toBe(1)
+    }
+  })
+
+  it("a paragraph that leaves gives the next paragraph the start of a bookmark or comment that ends there", async () => {
+    for (const [mark, end] of [
+      [`<w:bookmarkStart w:id="6" w:name="b6"/>`, `<w:bookmarkEnd w:id="6"/>`],
+      [`<w:commentRangeStart w:id="3"/>`, `<w:commentRangeEnd w:id="3"/><w:r><w:commentReference w:id="3"/></w:r>`],
+    ]) {
+      const bytes = await docxBytes(para(mark + run(ONLY)) + para(run("Next paragraph.") + end))
+      const [line, next] = await importCells(bytes, false)
+      for (const out of [await wordOut(bytes, [hide(typed(line, "Caché.")), next]), await wordOut(bytes, [next], [line])]) {
+        expect(paras(out.body)).toEqual(["Next paragraph."])
+        expect(nextOf(out.body)).toBe(para(mark + run("Next paragraph.") + end))
+      }
+    }
+  })
+
+  it("a paragraph that leaves keeps a comment's range and reference, in order, at the start of the next paragraph", async () => {
+    const comment = `<w:commentRangeStart w:id="3"/>${run(ONLY)}<w:commentRangeEnd w:id="3"/><w:r><w:commentReference w:id="3"/></w:r>`
+    for (const out of await allLost(para(comment))) {
+      expect(startOfNext(out.body)).toBe(`<w:commentRangeStart w:id="3"/><w:commentRangeEnd w:id="3"/><w:r><w:commentReference w:id="3"/></w:r>`)
+    }
+  })
+
+  it("a paragraph that leaves gives a contents field running on into the next paragraph its start; a field all its own goes", async () => {
+    const begin = `<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r>`
+    const end = `<w:r><w:fldChar w:fldCharType="end"/></w:r>`
+    const bytes = await docxBytes(para(begin + run("Chapter one.") + FIELD_OF(run(" More."))) + para(run("Next paragraph.") + end))
+    const [line, next] = await importCells(bytes, false)
+    for (const out of [await wordOut(bytes, [hide(typed(line, "Caché.")), next]), await wordOut(bytes, [next], [line])]) {
+      expect(paras(out.body)).toEqual(["{field}Next paragraph."])
+      expect(nextOf(out.body)).toBe(para(begin + run("Next paragraph.") + end))
+    }
+  })
+
+  it("the last paragraph of a table cell, emptied, keeps its marks", async () => {
+    const cell = (inner: string) => `<w:tbl><w:tr><w:tc>${inner}</w:tc></w:tr></w:tbl>`
+    const bytes = await docxBytes(cell(para(`<w:bookmarkStart w:id="6" w:name="b6"/>` + run(ONLY) + `<w:bookmarkEnd w:id="6"/>`)) + NEXT)
+    const [line, next] = await importCells(bytes, false)
+    for (const out of [await wordOut(bytes, [hide(typed(line, "Caché.")), next]), await wordOut(bytes, [next], [line])]) {
+      expect(out.body).toContain(`<w:tc><w:p><w:bookmarkStart w:id="6" w:name="b6"/><w:bookmarkEnd w:id="6"/></w:p></w:tc>`)
+    }
+  })
+
   // R7: the structure check flags a link with no run again; only a link this
   // export emptied on purpose (its words were all a lost line's) is exempt,
   // named by its start tag.

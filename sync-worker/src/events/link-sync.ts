@@ -88,6 +88,7 @@ import {
   type LinkedFilePair,
 } from '../../../db/shared/link-file-provenance'
 import { loadAdoptedCellIds, runAdoption } from './link-adopt'
+import { repairMirroredCellEnvelopes } from './link-envelope'
 import type { StoredRevisionManifest } from './file-revision-apply'
 import { selectByCellKeys, type CellKey } from '../lib/cell-key-lookup'
 
@@ -1767,8 +1768,13 @@ export interface MirrorSyncResult {
   /** AQU-1563: windows this run folded and committed. */
   windows: number
   /** AQU-1563: the run stopped at its work budget with the link still behind
-   *  `toSeq`'s upstream head — call again to continue from the saved cursor. */
+   *  `toSeq`'s upstream head — call again to continue from the saved cursor.
+   *  Also set while copies made before AQU-1520 still wait for their import
+   *  envelope (link-envelope.ts): the same answer, call again. */
   more: boolean
+  /** Cells given the upstream's import envelope by this run — copies mirrored
+   *  before the link carried one (link-envelope.ts). Absent when none. */
+  envelopesRepaired?: number
 }
 
 const NOOP_RESULT: MirrorSyncResult = {
@@ -1854,6 +1860,60 @@ export async function mirrorSync(
   downstreamProjectId: string,
   opts: MirrorSyncOptions = {},
 ): Promise<MirrorSyncResult> {
+  const linked: LinkedCopies = { upstreamProjectId: null, consumes: 'source', cursor: 0, pairs: [] }
+  const result = await foldMirrorSync(db, downstreamProjectId, opts, linked)
+  // Copies mirrored before the link carried the import envelope (AQU-1520) get
+  // it here — see link-envelope.ts. Only once the fold has caught up: the
+  // envelope describes the upstream's current paragraph, and a copy still
+  // behind on its text would be handed one for a paragraph it does not hold.
+  // `consumes: 'source'` only — a target-consuming link's source text is the
+  // upstream's translation, which the upstream's envelope does not describe.
+  if (result.more || !linked.upstreamProjectId || linked.consumes !== 'source' || linked.pairs.length === 0) {
+    return result
+  }
+  try {
+    const envelopes = await repairMirroredCellEnvelopes(db, {
+      upstreamProjectId: linked.upstreamProjectId,
+      downstreamProjectId,
+      pairs: linked.pairs,
+      eventId: (key) => deterministicMirrorEventId(downstreamProjectId, key),
+      author: MIRROR_AUTHOR,
+      now: (opts.now ?? Date.now)(),
+    })
+    if (envelopes.repaired === 0) return result
+    return {
+      ...result,
+      // A run whose fold had nothing to do reports the no-op's zeroes; it did
+      // run now, at the link's cursor.
+      ...(result.ranSync ? {} : { fromSeq: linked.cursor, toSeq: linked.cursor }),
+      ranSync: true,
+      envelopesRepaired: envelopes.repaired,
+      more: envelopes.more,
+    }
+  } catch (err) {
+    // Like the provenance sweep: not worth failing a sync over. The next sync
+    // reads the same cells again.
+    console.warn(`[link-sync] ${downstreamProjectId}: import-envelope repair failed:`, err)
+    return result
+  }
+}
+
+/** What a run learned about the link's copies, for the envelope repair that
+ *  follows the fold. Filled by the provenance sweep, which already pairs every
+ *  copy with its upstream file. */
+interface LinkedCopies {
+  upstreamProjectId: string | null
+  consumes: 'source' | 'target'
+  cursor: number
+  pairs: LinkedFilePair[]
+}
+
+async function foldMirrorSync(
+  db: AquillaDb,
+  downstreamProjectId: string,
+  opts: MirrorSyncOptions,
+  linked: LinkedCopies,
+): Promise<MirrorSyncResult> {
   const link = await loadLink(db, downstreamProjectId)
   if (!link || !link.source_project_id) return NOOP_RESULT
   // Clone mode: one-time snapshot at creation, then independent forever.
@@ -1932,7 +1992,7 @@ export async function mirrorSync(
   // safe and a no-op on every sync once a project is repaired.
   const sweepFileProvenance = async (): Promise<void> => {
     try {
-      await applyProjectLinkedFileProvenance(db, {
+      const swept = await applyProjectLinkedFileProvenance(db, {
         upstreamProjectId,
         downstreamProjectId,
         downstreamFileIdOf: (upstreamFileId) =>
@@ -1942,6 +2002,10 @@ export async function mirrorSync(
         adoption,
         now: Date.now(),
       })
+      linked.upstreamProjectId = upstreamProjectId
+      linked.consumes = consumes
+      linked.cursor = cursor
+      linked.pairs = swept.pairs
     } catch (err) {
       // Export provenance is not worth failing a sync over: the next sweep
       // retries, and the mirror itself is unaffected either way.

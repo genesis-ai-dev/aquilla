@@ -3,6 +3,7 @@
 // non-components).
 
 import { ROLE } from "@/lib/frontier/roles"
+import { canPerform } from "@/lib/sync/role-policy"
 import type { ContextualDraftsScope } from "@/lib/contextual/drafts-store"
 import { btSeedsFromAlignmentSeeds, type BtSeed } from "@/lib/completion/bt-glosser"
 import type { BacktranslationRecord } from "@/lib/completion/bt-record"
@@ -21,6 +22,7 @@ import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import type { SyncTokenCallbacks } from "@/lib/sync/sync-token"
+import { minHeadTrimSec, type ChipAtt } from "@/lib/timeline/lane-timing"
 
 /**
  * Returns true iff the zero-file self-heal should fire a `/link/sync`
@@ -174,6 +176,26 @@ export function canRestructureTracks(args: {
   allowTrackEditing: boolean | undefined
 }): boolean {
   return args.roleLevel >= ROLE.MAINTAINER && (args.allowTrackEditing ?? true)
+}
+
+/**
+ * AQU-2432 (browser pass, Nov 11): the timeline's take writes that start with
+ * a drag — moving a take, a line's room, trimming — for someone who can save
+ * them, and none at all below that. The timeline's `editable` is the
+ * project's and the lane's, never the person's role, so a viewer dragged a
+ * take that was never saved and stayed drawn moved. The gate is "don't pass
+ * the callback" (no callback, no drag), asked with `canPerform` as every
+ * other write in the workspace asks.
+ */
+export function timelineTakeDrags<Move, Rooms, Trim>(
+  roleLevel: number | null,
+  drags: { onRetimeTarget: Move; onMoveTakeRooms: Rooms; onTrimTarget: Trim },
+): { onRetimeTarget?: Move; onMoveTakeRooms?: Rooms; onTrimTarget?: Trim } {
+  return {
+    ...(canPerform("cell.audio.place", roleLevel) ? { onRetimeTarget: drags.onRetimeTarget } : {}),
+    ...(canPerform("cell.lane.retime", roleLevel) ? { onMoveTakeRooms: drags.onMoveTakeRooms } : {}),
+    ...(canPerform("cell.audio.trim", roleLevel) ? { onTrimTarget: drags.onTrimTarget } : {}),
+  }
 }
 
 /**
@@ -625,6 +647,31 @@ export function resolveTakeLine(args: {
 }
 
 /**
+ * AQU-2495 (merge review, Nov 13, note 2): the trim a take is given, its start
+ * held so its sound never starts before 0:00 (`minHeadTrimSec`, read from
+ * where its clip sits now) — the floor every way of un-trimming a take's start
+ * keeps. The workspace's trim write (`applyTakeTrim`) stores only this, so an
+ * Undo or Redo of a trim keeps it too: a colleague may have dragged the take
+ * since, its clip before 0:00, and the old window would sound before the file.
+ *
+ * Merge review round 2 (R2-2): null when nothing of the window is left once
+ * held, a window lying wholly before 0:00. Its end would be at or before its
+ * start, which reads as no end at all, so the take would play from the held
+ * start to the end of its clip: audio from neither window.
+ */
+export function heldTakeTrim(
+  cell: CellData,
+  att: ChipAtt,
+  trims: { trimStartMs?: number; trimEndMs?: number },
+): { trimStartMs?: number; trimEndMs?: number } | null {
+  const floorMs = Math.round(minHeadTrimSec(cell, att) * 1000)
+  const asked = trims.trimStartMs
+  const start = floorMs > 0 && (asked ?? 0) < floorMs ? floorMs : asked
+  if (start != null && trims.trimEndMs != null && trims.trimEndMs <= start) return null
+  return { trimStartMs: start, trimEndMs: trims.trimEndMs }
+}
+
+/**
  * AQU-2079: the sync-token fetcher a project-scoped read mints through when it
  * must not wait for the project-details response.
  *
@@ -673,4 +720,54 @@ export function historyFileName(
   if (!file) return null
   if (!isHiddenTimelineFile(file)) return file.name
   return file.anchorFileId ? files.find((f) => f.id === file.anchorFileId)?.name ?? null : null
+}
+
+/** What the archived-project screen says and offers, for one reader. */
+export interface ArchivedProjectNotice {
+  /** True when this reader may restore the project themselves. */
+  canRestore: boolean
+  /** The sentence naming the state — with who archived it, when that is known. */
+  bodyKey:
+    | "workspace.archivedProject.archivedMessage"
+    | "workspace.archivedProject.archivedByMessage"
+  /** The follow-on sentence: restore it yourself, or ask someone who can. */
+  hintKey: "workspace.archivedProject.restoreHint" | "workspace.archivedProject.askHint"
+}
+
+/**
+ * AQU-2453: what a reader who opens an archived project is told.
+ *
+ * Two rules the old screen broke. It called the state "Trash" although the
+ * only action that reaches it is Project settings → Archive project, and it
+ * told every reader to "restore it to continue editing" — including the
+ * Contributor who has no Restore button, because restoring is Maintainer+.
+ * So the hint is chosen by the same predicate that draws the button: whoever
+ * cannot restore is pointed at someone who can instead of at an action they
+ * do not have.
+ *
+ * `ROLE.MAINTAINER` is the floor auth-worker itself enforces on
+ * `DELETE /api/v2/projects/:id/archive` (AQU-1070), not the owner-only one
+ * this screen used to guess — a Maintainer was shown "ask someone else" for
+ * a call that would have succeeded. The two escape hatches stay: a purely
+ * local project (no server row, so no role to read) and a session-less
+ * local-first runtime both restore from IDB alone.
+ */
+export function archivedProjectNotice(args: {
+  project: Pick<ProjectRecord, "syncRole" | "origin" | "deletedBy">
+  hasSession: boolean
+}): ArchivedProjectNotice {
+  const { project, hasSession } = args
+  const canRestore =
+    (project.syncRole?.level ?? 0) >= ROLE.MAINTAINER ||
+    (!project.origin && !project.syncRole) ||
+    !hasSession
+  return {
+    canRestore,
+    bodyKey: project.deletedBy
+      ? "workspace.archivedProject.archivedByMessage"
+      : "workspace.archivedProject.archivedMessage",
+    hintKey: canRestore
+      ? "workspace.archivedProject.restoreHint"
+      : "workspace.archivedProject.askHint",
+  }
 }

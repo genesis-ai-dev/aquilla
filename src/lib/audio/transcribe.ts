@@ -300,9 +300,9 @@ export async function runWhisperOnPcm(
   const requestId = `t-${++workerSeq}`
 
   // The first transcribe on a cold cache downloads the Whisper weights inside
-  // this worker. Feed that progress into the shared model-status store so the
-  // bottom-left AiModelDownloadChip lights up — same surface the onboarding
-  // prefetch uses — instead of the download being invisible outside this cell.
+  // this worker, then loads them into the ONNX session. Feed that progress
+  // into the shared model-status store so the download toast and the
+  // memory-load toast light up — same surface the onboarding prefetch uses.
   let sawDownload = false
   let settled = false
 
@@ -318,9 +318,16 @@ export async function runWhisperOnPcm(
             loaded: msg.loaded,
             total: msg.total,
           })
-          if (msg.total > 0) {
-            sawDownload = true
-            noteModelDownloading("whisper", { loaded: msg.loaded, total: msg.total, file: msg.file })
+          // "done" / "ready" carry no byte total. They still have to reach the
+          // store: done opens the memory-load toast, ready closes it.
+          if (msg.total > 0 || msg.status === "done" || msg.status === "downloaded" || msg.status === "cached" || msg.status === "ready") {
+            if (msg.status !== "ready") sawDownload = true
+            noteModelDownloading("whisper", {
+              loaded: msg.loaded,
+              total: msg.total,
+              file: msg.file,
+              status: msg.status,
+            })
           }
           return
         }
@@ -634,6 +641,13 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         // why the inference cannot be trusted once a third slot exists.
         slot: slotArg ?? (audioId === cell.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording"),
         timings,
+        // AQU-2491 (review, Nov 9): the words land on the take that was chosen
+        // when this run STARTED, and a run can take a while (a cold model, a
+        // long take, a rate-limit wait, a place in "Transcribe all"). By now
+        // the person may have recorded a newer take or deleted this one, so
+        // the write adds the words and chooses nothing: the line keeps
+        // playing what it plays, and a deleted take stays deleted.
+        wordsOnly: true,
         // Preserve attachment fields the projection UPSERT would otherwise
         // null out — belt and braces now that the projection COALESCEs them
         // too (SUB-49).

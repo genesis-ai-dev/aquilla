@@ -12,6 +12,7 @@ import { sign } from 'hono/jwt'
 import { ExternalError } from './errors'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
+import { resolveCallerProjectRoleForWrite } from './support-access'
 import type { SyncTokenClaims } from '../auth'
 
 /** Internal sync token lifetime — deliberately short (§ token never exposed). */
@@ -73,6 +74,11 @@ export async function assertCredentialScope(
  * `scope_denied` (403), not `permission_denied`: the caller's live project role
  * may be perfectly sufficient. What is insufficient is the token's own scope,
  * which is exactly the distinction the two codes already draw for org/project.
+ *
+ * AQU-2504 does NOT weaken this. Support access widens which PROJECTS a
+ * credential reaches, never what the credential itself may do: a read-only
+ * support credential is refused here exactly like any other read-only token
+ * (see `claimSupportAccessForWrite`, which declines for the same reason).
  */
 export function assertCredentialMayWrite(
   cred: ApiCredentialContext,
@@ -93,6 +99,18 @@ export function assertCredentialMayWrite(
  * credential owner's LIVE-resolved role. The token carries `src: 'external'`
  * so the perimeter's live membership re-check applies (external tokens are NOT
  * exempt like platform tokens). Scope is enforced before minting.
+ *
+ * AQU-2504 (writes): when the owner has no live grant at all, a credential with
+ * live SUPPORT ACCESS resolves to owner level instead of being refused, and the
+ * token additionally carries `support: true`. That claim is what tells the
+ * perimeter's live membership re-check to stand down for THIS token — a support
+ * engineer deliberately has no membership rows in the customer's project, so
+ * "revoked" is the right answer to the wrong question. It stands down for
+ * nothing else: `src` stays `'external'`, so every other external-token rule in
+ * authorize.ts still applies, and the role floors are unchanged.
+ *
+ * The audit row for the write is inserted BEFORE the token exists, and a failed
+ * insert refuses the mint — see db/shared/support-access-audit.ts.
  */
 export async function mintInternalSyncToken(
   env: TokenBridgeEnv,
@@ -100,6 +118,8 @@ export async function mintInternalSyncToken(
   cred: ApiCredentialContext,
   projectId: string,
   fileId?: string,
+  /** AQU-2504: the tool or route asking, named in the support-access audit row. */
+  tool = 'external write',
 ): Promise<string> {
   if (!env.SYNC_SECRET_KEY) {
     throw new ExternalError('job_failed', 'SYNC_SECRET_KEY not configured')
@@ -112,9 +132,17 @@ export async function mintInternalSyncToken(
 
   await assertCredentialScope(db, cred, projectId)
 
-  const resolved = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
+  const resolved = await resolveCallerProjectRoleForWrite(
+    db,
+    cred,
+    projectId,
+    tool,
+    resolveProjectRoleShared,
+    fileId,
+  )
   if (!resolved) {
-    // No live grant path — the credential owner is not (or no longer) a member.
+    // No live grant path, and no support access either — the credential owner
+    // is not (or no longer) a member.
     throw new ExternalError('permission_denied', 'no access to project')
   }
 
@@ -128,6 +156,7 @@ export async function mintInternalSyncToken(
     fileId: fileId ?? '',
     role: resolved.level,
     src: 'external',
+    ...(resolved.viaSupportAccess ? { support: true } : {}),
     aud: 'sync',
     iat: now,
     exp: now + INTERNAL_TOKEN_TTL_SECONDS,

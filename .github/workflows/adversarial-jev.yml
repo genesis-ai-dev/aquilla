@@ -12,7 +12,8 @@
 # preview auth worker.
 #
 # Repository secrets: ADVERSARIAL_USER_1..3 (username:password on dev
-# storage), TYPESAFE_API_KEY, TEXT_MODEL_API_KEY. LINEAR_API_KEY lives only
+# storage; each account's email must be on the dev access list, see
+# docs/security/preview-access.md), TYPESAFE_API_KEY, TEXT_MODEL_API_KEY. LINEAR_API_KEY lives only
 # in the `adversarial-nightly` environment, restricted to the dev branch,
 # so no pull-request workflow can read it.
 
@@ -96,7 +97,7 @@ jobs:
           else
             echo "state=ok" >> "$GITHUB_OUTPUT"
           fi
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         if: steps.gate.outputs.state == 'ok'
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         if: steps.gate.outputs.state == 'ok'
@@ -217,7 +218,7 @@ jobs:
       LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22

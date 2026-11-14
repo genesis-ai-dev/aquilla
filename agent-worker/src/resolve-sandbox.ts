@@ -1,5 +1,11 @@
 import { decodeBase64, encodeBase64 } from "./base64"
-import type { ResolveSandbox, SandboxLike, SandboxRunResult } from "./sandbox"
+import {
+  FILE_READ_MAX_BYTES,
+  SandboxFileTooLargeError,
+  type ResolveSandbox,
+  type SandboxLike,
+  type SandboxRunResult,
+} from "./sandbox"
 import type { RunCodeOptions } from "./sandbox-do"
 
 /**
@@ -30,6 +36,37 @@ function byteStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
 }
 
 /**
+ * Drain a container file into memory, giving up as soon as it passes
+ * `maxBytes`. The stream is cancelled rather than read to its end, so an
+ * oversized file costs at most one chunk beyond the cap.
+ */
+export async function readCapped(
+  body: ReadableStream<Uint8Array>,
+  maxBytes: number,
+): Promise<Uint8Array> {
+  const reader = body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {})
+      throw new SandboxFileTooLargeError(maxBytes)
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes
+}
+
+/**
  * Present the Durable Object's RPC methods as the `SandboxLike` the routes are
  * written against (sandbox.ts), so app.ts and its tests did not have to change
  * for the SDK migration: base64 in/out stays at this boundary, `timeout` becomes
@@ -50,7 +87,7 @@ export function sandboxAdapter(stub: SandboxRpc): SandboxLike {
     async readFile(path, options) {
       const body = await stub.readFile(path)
       if (!body) return { success: false, path, content: "" }
-      const bytes = new Uint8Array(await new Response(body).arrayBuffer())
+      const bytes = await readCapped(body, FILE_READ_MAX_BYTES)
       const binary = options?.encoding === "base64"
       return {
         success: true,

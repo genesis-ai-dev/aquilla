@@ -91,9 +91,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.permission.reconnectToEdit": "Reconnect to edit shared settings.",
     "projectSettings.permission.onlyRoleCanModify": "Only {role} can modify",
     "projectSettings.permission.viewPrivilegedMembers": "View {role}",
-    "projectSettings.permission.privilegedDialogTitle": "Project {role}",
-    "projectSettings.permission.privilegedDialogDescription":
-      "{role} can change shared settings, members, and other project configuration.",
     "projectSettings.permission.privilegedDialogEmpty": "No {role} on this project.",
     "projectSettings.permission.privilegedDialogError": "Couldn't load {role}.",
 
@@ -301,8 +298,18 @@ export const projectSettings = defineNamespace({
     "projectSettings.share.laneChoiceLegend": "Language lanes",
     "projectSettings.share.laneChoiceAll": "Every current language lane",
     "projectSettings.share.laneChoiceSome": "Only selected language lanes",
+    "projectSettings.share.laneChoiceAllCurrent": "All current language lanes",
     "projectSettings.share.laneChoiceRequired": "Choose the language lanes before adding this person.",
     "projectSettings.share.laneChoiceLeadNote": "A maintainer sees every language lane.",
+    "projectSettings.share.laneChoiceNoneNote":
+      "No language lanes selected — this person will see the project and its source text, and no translation.",
+    "projectSettings.share.noLanesConfirmTitle": "No language lanes selected",
+    "projectSettings.share.noLanesConfirmInvite":
+      "This invitation does not include permission for any language lanes, so the recipient will not be able to see any translation. Are you sure you want to proceed? You can tick the boxes above to grant permission for language lanes.",
+    "projectSettings.share.noLanesConfirmAdd":
+      "This does not include permission for any language lanes, so this person will not be able to see any translation. Are you sure you want to proceed? You can tick the boxes above to grant permission for language lanes.",
+    "projectSettings.share.noLanesConfirmBack": "Go back and choose language lanes",
+    "projectSettings.share.noLanesConfirmProceed": "Add without language lanes",
     "projectSettings.share.laneChoiceAdminHint":
       "To limit someone to some language lanes, use Project settings → Members on that project.",
     "projectSettings.share.copyUrlLabel": "Copy URL",
@@ -1711,22 +1718,6 @@ export const projectSettings = defineNamespace({
         description:
           "Next-action control under the per-control lock hint. Opens a modal of " +
           "people who can change the setting (GitHub: 'View admins'). Short, no period.",
-        placeholders: {
-          role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
-        },
-      },
-      "projectSettings.permission.privilegedDialogTitle": {
-        description:
-          "Title of the GitHub-style 'Workspace admins' modal listing people who " +
-          "can change shared project settings. Short, no period.",
-        placeholders: {
-          role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
-        },
-      },
-      "projectSettings.permission.privilegedDialogDescription": {
-        description:
-          "One-line explanation under the privileged-members modal title. Names " +
-          "what that role class can do, not the caller's current role.",
         placeholders: {
           role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
         },

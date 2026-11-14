@@ -294,7 +294,7 @@ interface SavedSettings {
   importExcludeFrontMatter: boolean
   /** AQU-1720: what one imported cell is for docx/txt/md uploads. */
   importCellUnit: CellUnit
-  /** Curly quotes as you type in the cell editor. Absent/false is off. */
+  /** Curly quotes as you type in the cell editor. On unless stored as false. */
   smartQuotes: boolean
   termMatching: TermMatchingSettings
 }
@@ -353,7 +353,7 @@ function readSavedSettings(project: ProjectRecord): SavedSettings {
     precedingTargetCells: project.draftContext?.precedingTargetCells ?? DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
     importExcludeFrontMatter: project.importExcludeFrontMatter ?? false,
     importCellUnit: project.importCellUnit ?? "sentence",
-    smartQuotes: project.smartQuotes ?? false,
+    smartQuotes: project.smartQuotes ?? true,
     termMatching: project.termMatching ?? { prefixes: [], suffixes: [] },
   }
 }
@@ -545,7 +545,10 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     projectPolicy.ready
     && (project?.syncRole?.level ?? 0) >= projectPolicy.rosterViewMinRole.effective
   const canSeeMembers = !isCloudProject || canViewRoster
-  const [privilegedOpen, setPrivilegedOpen] = useState(false)
+  // AQU-2457: one PrivilegedMembersDialog serves every lock line, so it has to
+  // know which one opened it. This holds that section's role floor (null =
+  // closed); the dialog names that role and lists members at it or above.
+  const [privilegedFloor, setPrivilegedFloor] = useState<number | null>(null)
   // project.files is a fresh array each render; key on the file ids. The key is
   // computed here because a dependency list entry has to be a simple expression
   // (react-hooks/use-memo).
@@ -665,7 +668,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   const roleLockHint = (
     <PermissionLockHint
       role={privilegedRole}
-      onView={id ? () => setPrivilegedOpen(true) : undefined}
+      onView={id ? () => setPrivilegedFloor(ROLE.MAINTAINER) : undefined}
       href={id ? undefined : PERMISSION_DOCS_URL}
       linkLabel={
         id
@@ -694,7 +697,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   const languageRoleLockHint = (
     <PermissionLockHint
       role={languagePrivilegedRole}
-      onView={id ? () => setPrivilegedOpen(true) : undefined}
+      onView={id ? () => setPrivilegedFloor(languageEditFloor) : undefined}
       href={id ? undefined : PERMISSION_DOCS_URL}
       linkLabel={
         id
@@ -716,7 +719,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   const structuralRoleLockHint = (
     <PermissionLockHint
       role={structuralPrivilegedRole}
-      onView={id ? () => setPrivilegedOpen(true) : undefined}
+      onView={id ? () => setPrivilegedFloor(ROLE.PROJECT_LEAD) : undefined}
       href={id ? undefined : PERMISSION_DOCS_URL}
       linkLabel={
         id
@@ -2827,10 +2830,10 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     <>
       {shell}
       <PrivilegedMembersDialog
-        open={privilegedOpen}
-        onOpenChange={setPrivilegedOpen}
+        open={privilegedFloor != null}
+        onOpenChange={(next) => { if (!next) setPrivilegedFloor(null) }}
         projectId={id ?? null}
-        roleLabel={privilegedRole}
+        minRole={privilegedFloor ?? ROLE.MAINTAINER}
       />
 
     </>

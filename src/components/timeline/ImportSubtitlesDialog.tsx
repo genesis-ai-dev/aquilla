@@ -119,7 +119,7 @@ export function ImportSubtitlesDialog({ open, textFileName, filmUrl, onConfirm, 
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel() }}>
-      <DialogContent data-testid="import-subtitles-dialog">
+      <DialogContent data-testid="import-subtitles-dialog" data-media-editor="">
         <DialogHeader>
           <DialogTitle>{t("editor.timeline.subtitleSourceTitle")}</DialogTitle>
           <DialogDescription>
@@ -169,7 +169,7 @@ export function ImportSubtitlesDialog({ open, textFileName, filmUrl, onConfirm, 
         ) : (
           <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-muted p-6 text-center">
             <label>
-              <span className="inline-flex cursor-pointer items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent">
+                <span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent">
                 {t("editor.timeline.subtitleSourceChoose")}
               </span>
               <input

@@ -64,3 +64,10 @@ describe("expired-session redirect and re-login composition", () => {
     expect(screen.queryByLabelText(/username or email/i)).not.toBeInTheDocument()
   })
 })
+
+// Password-form contracts do not depend on the optional provider configuration.
+// GoogleLoginButton and the browser journey cover its separate capability/intent path.
+vi.mock("@/lib/frontier/google-login", () => ({
+  googleRequest: async () => ({ enabled: false }),
+  startGoogleLogin: vi.fn(),
+}))

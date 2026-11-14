@@ -6,10 +6,11 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
+import { createPlayingCueStore, type PlayingCueStore } from "./editor-playing-cue"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -97,7 +98,8 @@ function makeStore(rows: CellRow[]): CellStore {
 }
 
 function table(store: CellStore, props: {
-  playingCueCellId: string | null
+  playingCueCellId?: string | null
+  playingCue?: PlayingCueStore
   onSeekToCue: (cellId: string) => void
   onPauseCue: () => void
 }) {
@@ -194,5 +196,23 @@ describe("EditorTable — the row's Play from this cue button (AQU-1118)", () =>
     expect(row("c2")).toHaveAttribute("data-cue-playing", "true")
     rerender(table(store, { ...props, playingCueCellId: null }))
     expect(document.querySelector("[data-cue-playing]")).toBeNull()
+  })
+
+  // The playing line changes every few seconds of playback. Through the store
+  // the rows follow it without the table rendering again, which on a long book
+  // cost over 100 ms a line.
+  it("follows a playing-cue store with no table rerender", async () => {
+    const playingCue = createPlayingCueStore()
+    const row = (id: string) => document.querySelector(`[data-cell-id="${id}"][data-index]`) as HTMLElement
+    render(table(rows(), { playingCue, onSeekToCue: vi.fn(), onPauseCue: vi.fn() }))
+    expect(document.querySelector("[data-cue-playing]")).toBeNull()
+    act(() => playingCue.set("c1"))
+    expect(row("c1")).toHaveAttribute("aria-current", "time")
+    const menu = await openRowMenu(0)
+    expect(within(menu).getByRole("button", { name: "Pause" })).toBeInTheDocument()
+    act(() => playingCue.set("c2"))
+    expect(row("c1")).not.toHaveAttribute("data-cue-playing")
+    expect(row("c2")).toHaveAttribute("data-cue-playing", "true")
+    expect(within(await screen.findByRole("dialog")).getByRole("button", { name: "Play from this cue" })).toBeInTheDocument()
   })
 })

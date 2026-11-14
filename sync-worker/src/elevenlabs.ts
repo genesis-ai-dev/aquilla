@@ -7,7 +7,7 @@
 // logs it. Because the user pays ElevenLabs directly there is no Aquilla credit
 // metering here — only the per-user volumetric throttles, like /voice/tts.
 //
-//   GET  /api/v1/elevenlabs/user?projectId=          tier + character quota
+//   GET  /api/v1/elevenlabs/user?projectId=          tier + character quota (unknown for a key without user_read)
 //   GET  /api/v1/elevenlabs/voices?projectId=&search=&category=&pageToken=
 //   GET  /api/v1/elevenlabs/models?projectId=        curated TTS models
 //   POST /api/v1/elevenlabs/tts                      JSON; stores mp3 + returns the
@@ -44,10 +44,10 @@ import {
   ELEVENLABS_STS_MODEL,
   ElevenLabsUpstreamError,
   cloneElevenLabsVoice,
+  connectElevenLabsAccount,
   convertSpeechElevenLabs,
   elevenLabsBaseUrl,
   elevenLabsErrorResponse,
-  getElevenLabsAccount,
   isElevenLabsModelId,
   isElevenLabsVoiceCategory,
   isElevenLabsVoiceId,
@@ -186,7 +186,7 @@ async function handleRead(
   if (config instanceof Response) return config
 
   return upstreamCall(async () => {
-    if (route === "user") return Response.json(await getElevenLabsAccount(config))
+    if (route === "user") return Response.json(await connectElevenLabsAccount(config))
     if (route === "models") return Response.json({ models: await listElevenLabsModels(config) })
     const category = url.searchParams.get("category") ?? undefined
     const page = await listElevenLabsVoices(config, {

@@ -11,6 +11,7 @@ mod repo_root;
 mod shutdown_guard;
 
 use llm_proxy::LlmConfig;
+use tauri::utils::config::BackgroundThrottlingPolicy;
 use tauri::{Manager, WebviewWindowBuilder};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -67,6 +68,12 @@ pub fn run() {
                 .min_inner_size(900.0, 600.0)
                 .center()
                 .resizable(true)
+                // WebKit's default fully suspends a webview whose window is hidden
+                // or minimized (~5 min in): timers stop, so queued offline edits
+                // stop flushing until the user brings the window back. Throttle
+                // keeps it running at the hidden-page timer clamp. macOS 14+ only;
+                // ignored elsewhere.
+                .background_throttling(BackgroundThrottlingPolicy::Throttle)
                 .build()?;
             hot_bundle::start(app.handle());
 

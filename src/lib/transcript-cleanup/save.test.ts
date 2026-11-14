@@ -19,7 +19,7 @@ vi.mock("@/lib/store/transcript-corrections-store", () => ({
   learnFromTranscriptCorrection: vi.fn(),
 }))
 
-import { saveTranscript } from "./save"
+import { clearTranscript, saveTranscript } from "./save"
 
 const attachment = { url: "frontier-audio://a", type: "audio" } as unknown as CodexCellAttachment
 
@@ -96,5 +96,23 @@ describe("saveTranscript word offsets", () => {
       { word: "the", t0: 0, t1: 0.4, start: 0, end: 3 },
       { word: "household", t0: 0.4, t1: 0.9, start: 4, end: 9 },
     ])
+  })
+})
+
+// AQU-2491 (review, Nov 9): a transcript is words about a take. Saving one (a
+// correction in the takes list, an AI cleanup that finishes after the line was
+// re-recorded) or clearing one must not make that take the chosen one, or
+// bring it back if it was deleted meanwhile.
+describe("a transcript write chooses nothing (AQU-2491)", () => {
+  it("a saved transcript rides a words-only re-attach", async () => {
+    const attach = await save(ownTake(), "the household")
+    expect(attach).toMatchObject({ audioId: "audio-c1-1700000000-abc", wordsOnly: true })
+  })
+
+  it("so does a cleared one", async () => {
+    attaches.length = 0
+    const owner = ownTake()
+    await clearTranscript({ projectId: "p1", owner, audioId: owner.selectedAudioId!, attachment, author: "u" })
+    expect(attaches[0]).toMatchObject({ timings: [], wordsOnly: true })
   })
 })

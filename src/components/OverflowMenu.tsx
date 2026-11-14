@@ -88,6 +88,14 @@ interface Props {
    * names move from the button face to a tooltip.
    */
   triggerTooltip?: string
+  /**
+   * Which side of the trigger the panel opens on. Most chrome menus drop
+   * down; a control sitting on the edge of a narrow column (the timeline's
+   * Add track +) opens toward the room beside it instead.
+   */
+  side?: "top" | "bottom" | "left" | "right" | "inline-end" | "inline-start"
+  /** How the panel lines up with the trigger along that side. */
+  align?: "start" | "center" | "end"
 }
 
 /**
@@ -145,7 +153,15 @@ function ItemBody({ item, textId }: { item: OverflowMenuItem; textId: string | u
   )
 }
 
-function OverflowMenuPanel({ items }: { items: OverflowMenuItem[] }) {
+function OverflowMenuPanel({
+  items,
+  side,
+  align = "end",
+}: {
+  items: OverflowMenuItem[]
+  side?: "top" | "bottom" | "left" | "right" | "inline-end" | "inline-start"
+  align?: "start" | "center" | "end"
+}) {
   const menuId = useId()
   // The (i)'s text reaches the item through aria-describedby, so the
   // accessible NAME stays the bare label (set outright, since the (i) button
@@ -193,7 +209,7 @@ function OverflowMenuPanel({ items }: { items: OverflowMenuItem[] }) {
       </DropdownMenuItem>
     )
   return (
-    <DropdownMenuContent align="end" className={cn(
+    <DropdownMenuContent side={side} align={align} className={cn(
       hasDescription ? "min-w-56" : "min-w-48",
       hasBadge && "w-max max-w-[min(24rem,calc(100vw-2rem))]",
     )}>
@@ -224,6 +240,8 @@ export function OverflowMenu({
   triggerIcon,
   triggerBadge,
   triggerTooltip,
+  side,
+  align,
 }: Props) {
   if (items.length === 0) return null
 
@@ -251,7 +269,7 @@ export function OverflowMenu({
   return (
     <DropdownMenu>
       {triggerTooltip ? <AppTooltip content={triggerTooltip}>{trigger}</AppTooltip> : trigger}
-      <OverflowMenuPanel items={items} />
+      <OverflowMenuPanel items={items} side={side} align={align} />
     </DropdownMenu>
   )
 }

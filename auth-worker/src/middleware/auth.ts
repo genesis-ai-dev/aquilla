@@ -21,7 +21,7 @@ import { getCachedSession, sessionCacheKey, setCachedSession } from "../lib/sess
 import {
   checkDevAccess,
   DEV_ACCESS_RESTRICTED,
-  DEV_ACCESS_RESTRICTED_MESSAGE,
+  devAccessRestrictedMessage,
 } from "../services/dev-access"
 
 export type AuthHonoEnv = { Bindings: Env; Variables: Variables }
@@ -64,6 +64,7 @@ export type SessionResolution =
 export async function resolveSession(
   env: Env,
   authHeader: string | null | undefined,
+  options: { fresh?: boolean } = {},
 ): Promise<SessionResolution> {
   if (!authHeader) return { ok: false, reason: "missing_header" }
 
@@ -130,7 +131,7 @@ export async function resolveSession(
   // replayable secret (a `jti` is already denylisted in the clear in
   // `revoked_tokens`; the fallback is a hash).
   const cacheKey = await sessionCacheKey(payload, token)
-  let user = getCachedSession(cacheKey)
+  let user = options.fresh ? null : getCachedSession(cacheKey)
 
   if (!user) {
     // [Pen test] Auth & session mgmt (2026-08-03): reject tokens the caller
@@ -160,17 +161,37 @@ export async function resolveSession(
     user = setCachedSession(cacheKey, hydrated)
   }
 
+  // AQU-2530: usernames can be reused after deletion. A signed credential
+  // must never authenticate the replacement account, including on cache hits.
+  if (payload.uid !== undefined) {
+    if (typeof payload.uid !== "string" || payload.uid !== String(user.id)) {
+      return { ok: false, reason: "invalid_token" }
+    }
+  } else {
+    // Legacy credentials lack an immutable ID. Preserve only sessions that
+    // clearly began AFTER this row existed. JWT timestamps have second
+    // precision, so equality is ambiguous and deliberately requires re-login.
+    const createdSeconds = Math.floor(new Date(user.created_at).getTime() / 1000)
+    if (!Number.isFinite(createdSeconds) || !Number.isFinite(sessionStartedAt) ||
+        sessionStartedAt <= createdSeconds || payload.iat <= createdSeconds) {
+      return { ok: false, reason: "invalid_token" }
+    }
+  }
+
   // [Pen test] Auth & session mgmt (2026-07-20): access tokens are stateless
   // and long-lived (ACCESS_TOKEN_EXPIRE_MINUTES, 30 days by default) with no
   // other revocation path, so a token minted before a password reset would
   // otherwise keep authenticating for up to 30 more days after the reset —
   // defeating the point of resetting a compromised password. Reject any
   // token issued before the account's last reset.
+  if (payload.sv !== undefined && (!Number.isSafeInteger(payload.sv) || payload.sv !== (user.session_version ?? 0))) {
+    return { ok: false, reason: "password_changed" }
+  }
   if (user.password_changed_at) {
     const changedAtSeconds = Math.floor(
       new Date(user.password_changed_at).getTime() / 1000,
     )
-    if (payload.iat < changedAtSeconds) {
+    if (payload.iat < changedAtSeconds || (payload.sv === undefined && payload.iat === changedAtSeconds)) {
       return { ok: false, reason: "password_changed" }
     }
   }
@@ -216,7 +237,8 @@ export const authMiddleware = async (
   c: Context<AuthHonoEnv>,
   next: Next,
 ): Promise<Response | void> => {
-  const resolved = await resolveSession(c.env, c.req.header("Authorization"))
+  // Renewal and identity changes must never accept a stale isolate cache.
+  const resolved = await resolveSession(c.env, c.req.header("Authorization"), { fresh: c.req.path.endsWith("/auth/refresh") || c.req.path.includes("/auth/email-change/") })
 
   if (!resolved.ok) {
     switch (resolved.reason) {
@@ -251,7 +273,7 @@ export const authMiddleware = async (
           401,
         )
       case "dev_access_restricted":
-        return c.json({ error: DEV_ACCESS_RESTRICTED_MESSAGE, code: DEV_ACCESS_RESTRICTED }, 403)
+        return c.json({ error: devAccessRestrictedMessage(c.env), code: DEV_ACCESS_RESTRICTED }, 403)
       case "dev_access_unavailable":
         return c.json(
           { error: "Unable to check dev access right now. Please retry.", code: DEV_ACCESS_RESTRICTED },

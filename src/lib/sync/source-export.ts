@@ -26,6 +26,14 @@ export interface DownloadSourceArgs {
    * today's contract: every current translation, validated or not.
    */
   validatedOnly?: boolean
+  /**
+   * AQU-2561: export only this chapter of a USFM file — the book's front
+   * matter followed by `\c <chapter>`. Omitted is the whole file. The worker
+   * refuses a chapter the file does not have rather than falling back to the
+   * whole book, so a wrong number surfaces as an error, not as a mislabelled
+   * download.
+   */
+  chapter?: number
 }
 
 function sourceExportUrl(
@@ -34,6 +42,7 @@ function sourceExportUrl(
   targetLang?: string,
   mode?: "raw",
   validatedOnly?: boolean,
+  chapter?: number,
 ): string {
   const base =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
@@ -42,6 +51,7 @@ function sourceExportUrl(
   if (targetLang) params.set("lane", targetLang)
   if (mode) params.set("mode", mode)
   if (validatedOnly) params.set("validated", "1")
+  if (chapter !== undefined) params.set("chapter", String(chapter))
   const qs = params.toString()
   return qs ? `${base}?${qs}` : base
 }
@@ -72,7 +82,7 @@ export interface DownloadSourceResult {
 export async function downloadSourceFile(args: DownloadSourceArgs): Promise<DownloadSourceResult> {
   const token = await args.getToken(args.fileId)
   if (!token) throw new SourceExportError("Couldn't get an export token — sign in and try again.")
-  const url = sourceExportUrl(args.projectId, args.fileId, args.targetLang, undefined, args.validatedOnly)
+  const url = sourceExportUrl(args.projectId, args.fileId, args.targetLang, undefined, args.validatedOnly, args.chapter)
 
   const res = await fetch(url, {
     method: "GET",

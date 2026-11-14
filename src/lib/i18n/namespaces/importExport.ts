@@ -1117,6 +1117,7 @@ export const importExport = defineNamespace({
     // AQU-2551: the server no longer reads PDFs; the app reads them. Seen only
     // when a page from before that change sends a PDF to the server.
     "importExport.errors.pdfServerRefused": "Reload the page, then add this PDF again.",
+    "importExport.errors.pdfTooComplex": "This PDF is too complex to read. Save it again from the program that made it, or import the original document.",
 
     // — Import preview notices: src/lib/import.ts — non-fatal, shown in the
     //   PreviewPanel's "Review before importing" list alongside the row count
@@ -2908,6 +2909,9 @@ export const importExport = defineNamespace({
       },
       "importExport.errors.pdfReaderFailed": {
         description: "Shown when the app's PDF reader itself failed to load (often a page left open across an update), so the PDF was not read. Reloading the page fixes it; the PDF is not at fault.",
+      },
+      "importExport.errors.pdfTooComplex": {
+        description: "Shown when a PDF takes too long to read (a damaged or deliberately crafted file), so the app stopped reading it. Saving it again from the program that made it (Word, InDesign…) usually gives a normal PDF; the person can also import that program's own document instead.",
       },
       "importExport.errors.pdfServerRefused": {
         description: "Shown in the rule import or the Knowledge Base when the server refused a PDF because the app had not read it first (a page left open across an update). Reloading the page fixes it.",

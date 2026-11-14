@@ -24,7 +24,7 @@ import { pdfPagesToParagraphs, type PdfPageContent, type PdfPageItem, type PdfSt
 
 /** `reader`: pdf.js itself could not start (its worker or code failed to
  *  load), which says nothing about the PDF. */
-export type PdfReadErrorCode = "password" | "scanned" | "empty" | "unreadable" | "reader"
+export type PdfReadErrorCode = "password" | "scanned" | "empty" | "unreadable" | "reader" | "too-complex"
 
 /** A PDF the import refuses, with the reason. The caller words the message. */
 export class PdfReadError extends Error {
@@ -47,7 +47,15 @@ export interface PdfImport {
 
 export interface PdfParseOptions {
   cellUnit?: CellUnit
+  /** Test hook: the read's time budget (READ_BUDGET_MS). */
+  budgetMs?: number
 }
+
+/** AQU-2551 review finding 4: a crafted PDF held a tab for 74 s at 1.65 GB.
+ *  One rule bounds every read: past this time it stops, pdf.js's loading
+ *  task is destroyed (which ends its worker) and the PDF is refused as too
+ *  complex. A real 58-page Word PDF reads in about 2 s. */
+export const READ_BUDGET_MS = 20_000
 
 type PdfJs = typeof import("pdfjs-dist")
 
@@ -127,7 +135,7 @@ const hasText = (items: readonly PdfPageItem[]) => items.some((it) => "s" in it 
 
 /** Read a PDF into import cells. Throws `PdfReadError` for a PDF it refuses. */
 export async function extractPdfImport(buffer: ArrayBuffer, options?: PdfParseOptions): Promise<PdfImport> {
-  const read = await readPdfParagraphs(buffer, (text) => createUsfmFootnoteMarker({ caller: "+", text }))
+  const read = await readPdfParagraphs(buffer, (text) => createUsfmFootnoteMarker({ caller: "+", text }), options?.budgetMs)
   return { strings: paragraphsToStrings(read.paragraphs, options?.cellUnit), imageOnlyPages: read.imageOnlyPages, tagged: read.tagged }
 }
 
@@ -136,8 +144,8 @@ export async function extractPdfImport(buffer: ArrayBuffer, options?: PdfParseOp
  *  import's own reader, and send the server only this text (review findings
  *  1–3: the server no longer parses PDFs). A footnote stays at its mark, in
  *  brackets. Throws `PdfReadError` for a PDF it refuses, as the import does. */
-export async function extractPdfText(buffer: ArrayBuffer): Promise<string> {
-  const read = await readPdfParagraphs(buffer, (text) => ` [${text}]`)
+export async function extractPdfText(buffer: ArrayBuffer, options?: Pick<PdfParseOptions, "budgetMs">): Promise<string> {
+  const read = await readPdfParagraphs(buffer, (text) => ` [${text}]`, options?.budgetMs)
   return read.paragraphs.map((p) => p.text).join("\n")
 }
 
@@ -147,8 +155,24 @@ interface PdfParagraphsRead {
   tagged: boolean
 }
 
-async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) => string): Promise<PdfParagraphsRead> {
+async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) => string, budgetMs = READ_BUDGET_MS): Promise<PdfParagraphsRead> {
   const pdfjs = await loadPdfJs()
+  // The budget. In the browser pdf.js works in its own Web Worker, so a
+  // timer fires while one page is still being read: every wait on pdf.js
+  // races it. Where pdf.js runs on this thread (tests), timers wait for it,
+  // so the clock is also read after every wait.
+  const tooComplex = () => new PdfReadError("too-complex", `PDF took over ${budgetMs} ms to read`)
+  const deadline = performance.now() + budgetMs
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const overBudget = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(tooComplex()), budgetMs)
+  })
+  overBudget.catch(() => {})
+  const within = async <T,>(work: Promise<T>): Promise<T> => {
+    const value = await Promise.race([work, overBudget])
+    if (performance.now() > deadline) throw tooComplex()
+    return value
+  }
   // pdf.js transfers (detaches) the bytes it is given: hand it a copy.
   const task = pdfjs.getDocument({
     data: new Uint8Array(buffer.slice(0)),
@@ -158,9 +182,11 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
   })
   let doc: Awaited<typeof task.promise>
   try {
-    doc = await task.promise
+    doc = await within(task.promise)
   } catch (err) {
+    clearTimeout(timer)
     await task.destroy().catch(() => {})
+    if (err instanceof PdfReadError) throw err
     const name = (err as { name?: string } | null)?.name
     if (name === "PasswordException") throw new PdfReadError("password", "PDF is password-protected", { cause: err })
     const message = (err as Error)?.message ?? String(err)
@@ -172,17 +198,17 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
     const pages: PdfPageContent[] = []
     const imageOnlyPages: number[] = []
     for (let n = 1; n <= doc.numPages; n++) {
-      const page = await doc.getPage(n)
+      const page = await within(doc.getPage(n))
       try {
-        const content = await page.getTextContent({ includeMarkedContent: true })
+        const content = await within(page.getTextContent({ includeMarkedContent: true }))
         const items = toPageItems(content.items as RawTextItem[])
         if (!hasText(items)) {
           // no text: a scanned page paints an image, an empty one nothing
-          const ops = await page.getOperatorList()
+          const ops = await within(page.getOperatorList())
           if (ops.fnArray.some((fn) => paintOps.has(fn))) imageOnlyPages.push(n)
           continue
         }
-        const tree = (await page.getStructTree().catch(() => null)) as PdfStructNode | null
+        const tree = (await within(page.getStructTree().catch(() => null))) as PdfStructNode | null
         const [x0, y0, x1, y1] = page.view
         pages.push({ n, box: { x0: Math.min(x0, x1), y0: Math.min(y0, y1), x1: Math.max(x0, x1), y1: Math.max(y0, y1) }, items, tree })
       } finally {
@@ -197,6 +223,7 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
     if (read.paragraphs.length === 0) throw new PdfReadError(imageOnlyPages.length ? "scanned" : "empty", "PDF has no text")
     return { paragraphs: read.paragraphs, imageOnlyPages, tagged: read.tagged }
   } finally {
+    clearTimeout(timer)
     await task.destroy().catch(() => {})
   }
 }

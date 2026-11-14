@@ -26,9 +26,12 @@ export type PdfReadErrorCode = "password" | "scanned" | "empty" | "unreadable"
 
 /** A PDF the import refuses, with the reason. The caller words the message. */
 export class PdfReadError extends Error {
-  constructor(readonly code: PdfReadErrorCode, message: string, options?: { cause?: unknown }) {
+  readonly code: PdfReadErrorCode
+
+  constructor(code: PdfReadErrorCode, message: string, options?: { cause?: unknown }) {
     super(message, options)
     this.name = "PdfReadError"
+    this.code = code
   }
 }
 

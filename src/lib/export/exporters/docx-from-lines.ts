@@ -226,6 +226,6 @@ export async function exportDocxFromLines(cells: readonly CellData[], options?: 
   const files = docxFromLinesFiles(cells, options)
   // [Content_Types].xml first, as Word writes it.
   for (const name of Object.keys(files)) zip.file(name, files[name])
-  const bytes = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE", mimeType: DOCX_MIME })
+  const bytes = await zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE", mimeType: DOCX_MIME })
   return new Blob([bytes], { type: DOCX_MIME })
 }

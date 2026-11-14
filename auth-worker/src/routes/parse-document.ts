@@ -394,10 +394,16 @@ function inflatePdfStreams(bytes: Uint8Array, raw: string, work: PdfWorkBudget):
 
     out ??= new Uint8Array(MAX_PDF_STREAM_BYTES)
     const limit = Math.min(budget, MAX_PDF_STREAM_BYTES)
-    const produced = inflateBounded(bytes.subarray(dataStart, dataEnd), out, limit, work)
+    const cost = { decoded: 0 }
+    const produced = inflateBounded(bytes.subarray(dataStart, dataEnd), out, limit, cost)
+    work.charge(cost.decoded)
     if (produced !== null) {
       budget -= produced
       decoded.push(latin1.decode(out.subarray(0, produced)))
+    } else {
+      // AQU-2594: a stream that fails to decode spends the inflation budget
+      // it may have used, so failures cannot be repeated for free.
+      budget -= cost.decoded
     }
 
     // Resume scanning past this stream so its binary payload isn't re-searched.
@@ -408,34 +414,38 @@ function inflatePdfStreams(bytes: Uint8Array, raw: string, work: PdfWorkBudget):
 }
 
 // Inflate one stream into `out`, keeping at most `limit` bytes, and return how
-// many it kept, or null when neither framing decodes it.
+// many it kept, or null when neither framing decodes it. `cost.decoded`
+// collects how many bytes the attempts decoded.
 //
 // AQU-2594: fflate given a preallocated `out` keeps only what fits but still
 // decodes the whole stream, so a 2 MB bomb cost seconds of CPU. A stream that
-// could inflate past `limit` is now fed to the inflater a step at a time and
+// could inflate past `out` is now fed to the inflater a step at a time and
 // left once `limit` bytes are kept. One that can't (most of them: content
 // streams are small) is inflated in one call straight into `out`, as before,
 // which allocates nothing; the stepping inflater allocates ~160 KB per stream,
-// 1.6 GB over a file of 10,000 tiny streams. Every byte decoded is charged to
-// the work budget.
+// 1.6 GB over a file of 10,000 tiny streams. A decode that fails counts as the
+// most it could have produced: fflate does not say how far it got, and random
+// bytes (an encrypted PDF's streams) often decode to their end before failing.
 function inflateBounded(
   slice: Uint8Array,
   out: Uint8Array,
   limit: number,
-  work: PdfWorkBudget,
+  cost: { decoded: number },
 ): number | null {
   // zlib-wrapped is the norm; some writers emit raw deflate instead.
   for (const deflateData of [zlibDeflateData, rawDeflateData]) {
-    const run = { kept: 0, decoded: 0 }
-    let ok = false
+    let data: Uint8Array
     try {
-      inflateSteps(deflateData(slice), out, limit, run)
-      ok = true
+      data = deflateData(slice)
     } catch {
-      // Wrong framing or corrupt stream — fall through and try the next.
+      continue // not this framing; nothing was decoded
     }
-    work.charge(run.decoded)
-    if (ok) return run.kept
+    const kept =
+      data.length * MAX_DEFLATE_RATIO <= out.length
+        ? inflateOnce(data, out, limit, cost)
+        : inflateSteps(data, out, limit, cost)
+    if (kept !== null) return kept
+    // Wrong framing or corrupt stream — fall through and try the next.
   }
   return null
 }
@@ -455,34 +465,50 @@ function rawDeflateData(slice: Uint8Array): Uint8Array {
   return slice
 }
 
+/** One call straight into `out`, for data too short to inflate past it. */
+function inflateOnce(
+  data: Uint8Array,
+  out: Uint8Array,
+  limit: number,
+  cost: { decoded: number },
+): number | null {
+  // fflate returns the whole `out` for empty input; nothing was decoded.
+  if (data.length === 0) return 0
+  try {
+    const produced = inflateSync(data, { out }).length
+    cost.decoded += produced
+    return Math.min(produced, limit)
+  } catch {
+    cost.decoded += data.length * MAX_DEFLATE_RATIO
+    return null
+  }
+}
+
 function inflateSteps(
   data: Uint8Array,
   out: Uint8Array,
   limit: number,
-  run: { kept: number; decoded: number },
-): void {
-  // Too short to inflate past `limit`, so the one-call inflate is exact.
-  if (data.length * MAX_DEFLATE_RATIO <= limit) {
-    // fflate returns the whole `out` for empty input; nothing was decoded.
-    if (data.length === 0) return
-    const inflated = inflateSync(data, { out: out.subarray(0, limit) })
-    run.kept = run.decoded = inflated.length
-    return
-  }
-
+  cost: { decoded: number },
+): number | null {
+  let kept = 0
   const inflater = new Inflate((chunk) => {
-    run.decoded += chunk.length
-    const take = Math.min(chunk.length, limit - run.kept)
+    cost.decoded += chunk.length
+    const take = Math.min(chunk.length, limit - kept)
     if (take > 0) {
-      out.set(chunk.subarray(0, take), run.kept)
-      run.kept += take
+      out.set(chunk.subarray(0, take), kept)
+      kept += take
     }
   })
-  for (let at = 0; at < data.length; at += INFLATE_STEP_BYTES) {
-    if (run.kept >= limit || deflateEnded(inflater)) return
+  for (let at = 0; at < data.length && kept < limit && !deflateEnded(inflater); at += INFLATE_STEP_BYTES) {
     const end = Math.min(at + INFLATE_STEP_BYTES, data.length)
-    inflater.push(data.subarray(at, end), end === data.length)
+    try {
+      inflater.push(data.subarray(at, end), end === data.length)
+    } catch {
+      cost.decoded += (end - at) * MAX_DEFLATE_RATIO
+      return null
+    }
   }
+  return kept
 }
 
 /**
@@ -499,13 +525,39 @@ function deflateEnded(inflater: Inflate): boolean {
   return !!state?.f && !state.l
 }
 
+/**
+ * AQU-2594: the shown strings, joined every TEXT_PIECES_PER_JOIN pieces. A
+ * file of ordinary, well-compressed `(ab)'` operators yields millions of
+ * two-letter strings; held all at once they took over 128 MB.
+ */
+class TextPieces {
+  private pending: string[] = []
+  private readonly joined: string[] = []
+
+  push(piece: string): void {
+    this.pending.push(piece)
+    if (this.pending.length >= TEXT_PIECES_PER_JOIN) {
+      this.joined.push(this.pending.join(""))
+      this.pending = []
+    }
+  }
+
+  text(): string {
+    this.joined.push(this.pending.join(""))
+    this.pending = []
+    return this.joined.join("")
+  }
+}
+
+const TEXT_PIECES_PER_JOIN = 8192
+
 // AQU-2594: the text operators are found in one pass. The regexes this
 // replaced (/BT\s([\s\S]*?)ET/, then /\((…)\)\s*(?:Tj|'|")|(\[[\s\S]*?\])\s*TJ/
 // in each block and /\((…)\)/ in each TJ array) rescanned to the end from
 // every `BT`, `(` or `[` that never closed, so a 2 MB upload of `(` took
 // hours. The scan below finds the same matches; parse-document-pdf-bounds
 // .test.ts checks it against those regexes.
-function scanTextOperators(haystack: string, chunks: string[]): void {
+function scanTextOperators(haystack: string, chunks: TextPieces): void {
   for (let from = 0; ; ) {
     const bt = textBlockStart(haystack, from)
     if (bt === -1) return
@@ -532,7 +584,7 @@ const CHAR_LBRACKET = 0x5b // [
 const CHAR_BACKSLASH = 0x5c // \
 
 /** Shown strings in one BT…ET block: `(…) Tj`, `(…) '`, `(…) "` and `[…] TJ`. */
-function scanTextBlock(block: string, chunks: string[]): void {
+function scanTextBlock(block: string, chunks: TextPieces): void {
   // A `(` before this index cannot start a shown string: an earlier `(` that
   // failed ended at the same place, so this one fails the same way.
   let stringsFailBefore = 0
@@ -576,7 +628,7 @@ function nextTjArrayEnd(block: string, from: number): number {
 }
 
 /** Every string literal in a TJ array, `[` and `]` included. */
-function scanArrayStrings(array: string, chunks: string[]): void {
+function scanArrayStrings(array: string, chunks: TextPieces): void {
   for (let at = array.indexOf("("); at !== -1; ) {
     const close = literalEnd(array, at)
     if (array.charCodeAt(close) === CHAR_RPAREN) {
@@ -647,19 +699,22 @@ export function extractTextFromPdf(bytes: Uint8Array): string {
   // real-world (compressed) and uncompressed PDFs extract.
   const haystacks = [...inflatePdfStreams(bytes, raw, work), raw]
 
-  const chunks: string[] = []
+  const chunks = new TextPieces()
   for (const haystack of haystacks) {
     work.charge(haystack.length)
     scanTextOperators(haystack, chunks)
   }
 
   return chunks
-    .join("")
+    .text()
     .replace(/\n{3,}/g, "\n\n")
     .trim()
 }
 
 function decodePdfString(s: string): string {
+  // AQU-2594: every escape starts with a backslash; most strings have none,
+  // and seven regex passes over each of millions of short strings added up.
+  if (!s.includes("\\")) return s
   // Unescape PDF string escape sequences
   return s
     .replace(/\\(\d{1,3})/g, (_m, oct) => String.fromCharCode(parseInt(oct, 8)))

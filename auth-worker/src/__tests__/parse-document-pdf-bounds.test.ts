@@ -42,9 +42,10 @@ function repeatToCap(unit: Uint8Array, head = "%PDF-1.4\n"): Uint8Array {
 /**
  * A zlib stream holding one dynamic-Huffman deflate block that inflates to
  * zeros at deflate's maximum ratio (2 bits per 258 bytes, about 1032:1), built
- * bit by bit so a 2 GB bomb costs milliseconds. `bytes` is its size.
+ * bit by bit so a 2 GB bomb costs milliseconds. `bytes` is its size; it
+ * inflates to about `bytes` KB.
  */
-function zlibBomb(bytes: number): Uint8Array {
+function zlibBomb(bytes: number, { truncated = false } = {}): Uint8Array {
   const out = new Uint8Array(bytes)
   out.set([0x78, 0x9c]) // zlib header; the last 4 bytes stand in for the checksum
   let bit = 16
@@ -77,7 +78,8 @@ function zlibBomb(bytes: number): Uint8Array {
   // are all-zero bits, then end-of-block.
   code(0b10, 2)
   bit += (bytes * 8 - 32 - 2 - bit) & ~1
-  code(0b11, 2)
+  // `truncated` leaves the end-of-block off, so inflating fails at the end.
+  if (!truncated) code(0b11, 2)
   return out
 }
 
@@ -139,6 +141,41 @@ describe("extractTextFromPdf — work bounds on crafted files (AQU-2594)", () =>
     expect(run.error).toBeUndefined()
     expect(run.value).toBe("Short stream")
     expect(run.ms).toBeLessThan(FAST_MS)
+  })
+
+  it("inflates each bomb to the 4 MB per-stream cap and counts it against the 20 MB total", () => {
+    const after = flateStreamObject(zlibSync(strToU8("BT\n(After the bombs) Tj\nET")))
+    const build = (bombs: number) =>
+      concat([
+        strToU8("%PDF-1.4\n"),
+        ...Array.from({ length: bombs }, () => flateStreamObject(zlibBomb(5_000))),
+        after,
+        strToU8("%%EOF"),
+      ])
+    expect(extractTextFromPdf(build(4))).toBe("After the bombs")
+    expect(extractTextFromPdf(build(5))).toBe("")
+  })
+
+  it("counts the work of streams that inflate a long way and then fail", () => {
+    // Each fails at its end after inflating ~4 MB, and is short enough to be
+    // inflated in one call.
+    const pdf = repeatToCap(flateStreamObject(zlibBomb(4_070, { truncated: true })))
+    const run = timed(() => extractTextFromPdf(pdf))
+    expect(run.error).toBeUndefined()
+    expect(run.ms).toBeLessThan(FAST_MS)
+  })
+
+  it("reads millions of tiny shown strings fast", () => {
+    // Ordinary, well-compressed text operators, no bomb: five streams of
+    // `(ab)'` fill the 20 MB inflation cap with ~4 million two-letter strings.
+    const stream = flateStreamObject(zlibSync(strToU8(`BT ${"(ab)'".repeat(838_000)} ET`)))
+    const pdf = concat([strToU8("%PDF-1.4\n"), stream, stream, stream, stream, stream, strToU8("%%EOF")])
+    const run = timed(() => extractTextFromPdf(pdf))
+    expect(run.error).toBeUndefined()
+    expect(run.ms).toBeLessThan(FAST_MS)
+    const blocks = (run.value ?? "").split("\n")
+    expect(blocks).toHaveLength(5)
+    for (const block of blocks) expect(block.length > 0 && block.replaceAll("ab", "") === "").toBe(true)
   })
 
   it("scans an unclosed run of `(` inside a text block in one pass", () => {

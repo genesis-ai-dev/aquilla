@@ -57,4 +57,33 @@ describe("extractTextFromPdf — memory (AQU-2594)", () => {
     // The one reused 4 MB output buffer, plus small change.
     expect(bytes).toBeLessThan(8 * 1024 * 1024)
   })
+
+  it("still allocates a few MB for tiny streams once the 20 MB inflation budget is nearly spent", () => {
+    // Five streams of ~4 MB minus a little leave a few hundred bytes of the
+    // 20 MB budget, then 9,000 tiny streams follow.
+    const text = (bytes: number) => `BT ${"x".repeat(bytes - 6)} ET`
+    const nearlyFull = zlibSync(strToU8(text(4 * 1024 * 1024 - 100)))
+    const tiny = zlibSync(strToU8("BT ET"))
+    const object = (payload: Uint8Array) =>
+      [strToU8(`<</Filter/FlateDecode/Length ${payload.length}>>stream\n`), payload, strToU8("\nendstream endobj\n")]
+    const build = (tinyCount: number) => {
+      const parts = [
+        strToU8("%PDF-1.4\n"),
+        ...Array.from({ length: 5 }, () => object(nearlyFull)).flat(),
+        ...Array.from({ length: tinyCount }, () => object(tiny)).flat(),
+      ]
+      const pdf = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
+      parts.reduce((at, p) => (pdf.set(p, at), at + p.length), 0)
+      return pdf
+    }
+    const withoutTiny = build(0)
+    const withTiny = build(9_000)
+
+    // The five large streams are stepped and allocate as they go; what the
+    // 9,000 tiny ones add on top is what this is about.
+    const added =
+      bytesAllocatedBy(() => extractTextFromPdf(withTiny)) -
+      bytesAllocatedBy(() => extractTextFromPdf(withoutTiny))
+    expect(added).toBeLessThan(4 * 1024 * 1024)
+  })
 })

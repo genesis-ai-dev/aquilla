@@ -141,6 +141,44 @@ describe("generateAndAttachCellVoice routing", () => {
     expect(result.blob.type).toBe("audio/mpeg")
   })
 
+  // AQU-2577: a line's own delivery, set in the clip inspector, has to reach the
+  // engine through the real generate path — the tags in front of the text, the
+  // knobs over the voice's — while the take stays attributed to the shared voice.
+  it("an ElevenLabs line is spoken with its own delivery and tags, and no other line's", async () => {
+    vi.resetModules()
+    const synthElevenLabs = vi.fn(async () => ({
+      audioId: "audio-tts-8", durationSeconds: 2,
+      objectName: "audio-tts-8.mp3", url: "frontier-audio://audio-tts-8.mp3",
+    }))
+    const emitAttach = vi.fn(async () => {})
+    vi.doMock("@/lib/sync/tts", () => ({ synthesizeCellTts: vi.fn() }))
+    vi.doMock("@/lib/sync/elevenlabs", () => ({ synthesizeElevenLabsTts: synthElevenLabs }))
+    vi.doMock("./tts", () => ({ synthesizeForCell: vi.fn(), setTtsStatus: vi.fn(), ttsStatusKey: (s: string) => s }))
+    vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: emitAttach }))
+    vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn(), injectOptimisticAudioAttachment: vi.fn() }))
+    vi.doMock("./sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "tok" }))
+    vi.doMock("./upload", () => ({ buildAudioId: () => "id", uploadCellAudio: vi.fn(), fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)) }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
+    vi.doMock("./voices", () => ({
+      resolveVoice: () => ({
+        id: "v-el", name: "Layla", provider: "elevenlabs",
+        elevenLabs: { voiceId: "el123", modelId: "eleven_v4", settings: { stability: 0.5, similarityBoost: 0.75, style: 0, speed: 1, speakerBoost: true } },
+      }),
+    }))
+    const { generateAndAttachCellVoice } = await import("./generate-voice")
+    const projectTtsSettings = { lineDelivery: { c: { settings: { speed: 0.85 }, tags: ["sighs"] } } }
+    const base = { projectId: "p", fileId: "f", session: { jwt: "j", username: "u" } as never, username: "u", projectTtsSettings }
+    await generateAndAttachCellVoice({ ...base, cellId: "c", text: "مرحبا" })
+    await generateAndAttachCellVoice({ ...base, cellId: "other", text: "مرحبا" })
+    // A delivery handed to the run itself (Make speech, before a first take) wins over the stored one.
+    await generateAndAttachCellVoice({ ...base, cellId: "c", text: "مرحبا", lineDelivery: { settings: { speed: 1.1 }, tags: ["excited"] } })
+    expect(synthElevenLabs.mock.calls.map((call) => {
+      const args = (call as unknown[])[0] as { cellId: string; text: string; voiceSettings: { speed: number } }
+      return [args.cellId, args.text, args.voiceSettings.speed]
+    })).toEqual([["c", "[sighs] مرحبا", 0.85], ["other", "مرحبا", 1], ["c", "[excited] مرحبا", 1.1]])
+    expect(emitAttach).toHaveBeenCalledWith(expect.objectContaining({ voiceId: "v-el" }))
+  })
+
   it("a character (library) voice reads with the stock voice, then re-voices that clip", async () => {
     vi.resetModules()
     const synthCellTts = vi.fn(async () => ({

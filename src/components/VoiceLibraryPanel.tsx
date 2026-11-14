@@ -108,17 +108,28 @@ interface Props {
    * blocked either way.
    */
   leadsManageVoices?: boolean
+  /**
+   * AQU-2577: the rail has its own Add a voice panel. When given, "New voice"
+   * opens that instead of the dialog.
+   */
+  onNewVoice?: () => void
+  /**
+   * AQU-2577: open the New voice dialog on one of its steps, asked for from
+   * outside the roster (the Add a voice panel's "make a new one" rows). A new
+   * `seq` is a new request.
+   */
+  createRequest?: { mode: "tts" | "clone" | "character" | "train"; seq: number } | null
 }
 
 /** What the focused modal is doing right now. */
 type Editing =
   | { kind: "closed" }
-  | { kind: "create" }
+  | { kind: "create"; mode?: "tts" | "clone" | "character" | "train" }
   | { kind: "edit"; voice: Voice }
 
 export function VoiceLibraryPanel({
   targetLanguage, targetLanes, archivedLanes, settings, laneId, onSettingsChange, projectId, fileId, session,
-  selectedVoiceId, onSelectVoice, castStats, cells, roleLevel, leadsManageVoices = false,
+  selectedVoiceId, onSelectVoice, castStats, cells, roleLevel, leadsManageVoices = false, onNewVoice, createRequest,
 }: Props) {
   const t = useT()
   const [voices, setVoices] = useState<Voice[]>([])
@@ -126,6 +137,11 @@ export function VoiceLibraryPanel({
   const [localSelectedId, setLocalSelectedId] = useState<string>("")
   const seededRef = useRef<string | null>(null)
   const [editing, setEditing] = useState<Editing>({ kind: "closed" })
+  const createSeq = createRequest?.seq
+  const createMode = createRequest?.mode
+  useEffect(() => {
+    if (createSeq != null && createMode) setEditing({ kind: "create", mode: createMode })
+  }, [createSeq, createMode])
   const [query, setQuery] = useState("")
   const laneLanguages = useMemo(
     () => projectTargetLaneLanguages({ targetLanguage, targetLanes, archivedLanes }),
@@ -351,7 +367,7 @@ export function VoiceLibraryPanel({
             variant="outline"
             className="w-full"
             disabled={!canEditVoices}
-            onClick={() => setEditing({ kind: "create" })}
+            onClick={() => (onNewVoice ? onNewVoice() : setEditing({ kind: "create" }))}
           >
             <Plus data-icon="inline-start" />
             {t("audio.newVoice.createLabel")}
@@ -378,7 +394,7 @@ export function VoiceLibraryPanel({
           onSave={saveVoice}
           onDelete={editing.kind === "edit" && canEditVoices ? () => deleteVoice(editing.voice) : undefined}
           onMakeDefault={editing.kind === "edit" && canEditVoices ? () => makeDefault(editing.voice) : undefined}
-          initialMode="tts"
+          initialMode={editing.kind === "create" ? editing.mode ?? "tts" : "tts"}
         />
       )}
     </div>

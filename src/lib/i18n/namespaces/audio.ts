@@ -655,7 +655,8 @@ export const audio = defineNamespace({
     "audio.elevenLabs.selectVoiceAriaLabel": "Use {name}",
     "audio.elevenLabs.modelLabel": "Model",
     "audio.elevenLabs.modelMultilingualV2": "Most natural; best for long narration",
-    "audio.elevenLabs.modelV3": "Most expressive delivery, in the most languages",
+    "audio.elevenLabs.modelV4": "Most emotive; reads tags like [whispers]",
+    "audio.elevenLabs.modelV3": "Expressive delivery; reads tags like [whispers]",
     "audio.elevenLabs.modelFlash": "Fastest and cheapest; good for drafts",
     "audio.elevenLabs.stability": "Stability",
     "audio.elevenLabs.speed": "Speed",
@@ -676,6 +677,108 @@ export const audio = defineNamespace({
     "audio.elevenLabs.cloneTotal": "Total {duration}",
     "audio.elevenLabs.adjust": "Adjust",
     "audio.elevenLabs.hearIt": "Hear it",
+
+    // Clip inspector, Add a voice and Make speech: the Voices rail's own panels (AQU-2577).
+    "audio.inspector.title": "This clip",
+    "audio.inspector.backToVoices": "Back to all voices",
+    "audio.inspector.takeGone": "This clip is no longer on the line.",
+    "audio.inspector.recording": "A person's recording",
+    "audio.inspector.playTake": "Play this take",
+    "audio.inspector.pauseTake": "Pause this take",
+    "audio.inspector.howMade": "How this was made",
+    "audio.inspector.stepRecorded": "Recorded by a person",
+    "audio.inspector.stepSpoken": "Spoken by {name}",
+    "audio.inspector.stepRevoiced": "Changed into {name}'s voice",
+    "audio.inspector.removedVoice": "a removed voice",
+    "audio.inspector.delivery": "How it is spoken",
+    "audio.inspector.deliveryNeedsElevenLabs": "Speed, expressiveness and tags can be set for ElevenLabs voices. {name} is not one.",
+    "audio.inspector.scope": "Use these settings for",
+    "audio.inspector.scopeLine": "Only this line",
+    "audio.inspector.scopeVoice": "All {name} lines",
+    "audio.inspector.expressiveness": "Expressiveness",
+    "audio.inspector.closeness": "Stay close to voice",
+    "audio.inspector.tags": "Tags on this line",
+    "audio.inspector.otherTag": "Other…",
+    "audio.inspector.otherTagAriaLabel": "A tag of your own",
+    "audio.inspector.otherTagPlaceholder": "e.g. slowly",
+    "audio.inspector.tagsNote": "Tags are performed, not read out. They are never part of the translation.",
+    "audio.inspector.tagsNeedModel": "{name} uses {model}, which would read a tag aloud, so tags are left out.",
+    "audio.inspector.useTagModel": "Use Eleven v4 for this voice",
+    "audio.inspector.regenerate": "Regenerate this line",
+    "audio.inspector.hearItFirst": "Hear it first",
+    "audio.inspector.voice": "Voice for this line",
+    "audio.inspector.lineVoice": "This line's voice is {name}.",
+    "audio.inspector.useVoice": "Use {name} for this line",
+    "audio.inspector.newVoiceFromTake": "Train a voice from this",
+    "audio.addVoice.title": "Add a voice",
+    "audio.addVoice.searchPlaceholder": "Search voices",
+    "audio.addVoice.onlyLanguage": "Only {language}",
+    "audio.addVoice.account": "In your ElevenLabs account",
+    "audio.addVoice.library": "ElevenLabs voice library",
+    "audio.addVoice.inProject": "Already in this project",
+    "audio.addVoice.addAriaLabel": "Add {name} to this project",
+    "audio.addVoice.makeNew": "Or make a new one",
+    "audio.addVoice.cloneTitle": "Clone a real speaker",
+    "audio.addVoice.cloneBody": "From a short clip of one person. Ready in about a minute.",
+    "audio.addVoice.designTitle": "Pick or describe a voice",
+    "audio.addVoice.designBody": "Ready-made voices from other engines, or one designed from a description.",
+    "audio.addVoice.trainTitle": "Train a voice on Aquilla",
+    "audio.addVoice.trainBody": "5 to 60 minutes of one speaker. Ready in about 45 minutes. No ElevenLabs key needed.",
+    "audio.addVoice.consentNote": "Cloning or training a real person asks your organization to confirm their consent first.",
+    "audio.makeSpeech.title": "Make speech",
+    "audio.makeSpeech.ghost": "Pick this line to make its speech. Shift-click to pick several.",
+    "audio.makeSpeech.ghostHint": "Or click an empty clip on the timeline to pick lines there.",
+    "audio.makeSpeech.pickedCount": plural({
+      one: "{count} line picked",
+      other: "{count} lines picked",
+    }),
+    "audio.makeSpeech.shiftHint": "Shift-click another empty clip to add it, or to take it out.",
+    "audio.makeSpeech.translateNone": "These lines already have their text. Nothing to translate.",
+    "audio.makeSpeech.translateSome": plural({
+      one: "{count} line has no text yet and will be translated first.",
+      other: "{count} lines have no text yet and will be translated first.",
+    }),
+    "audio.makeSpeech.translateSkipped": plural({
+      one: "{count} line has no text yet and will be skipped.",
+      other: "{count} lines have no text yet and will be skipped.",
+    }),
+    "audio.makeSpeech.intro": "Each line goes through these steps in order.",
+    "audio.makeSpeech.step1": "Translate the text",
+    "audio.makeSpeech.translate": "Translate a line that has no translation yet",
+    "audio.makeSpeech.translateInto": "Translate a line that has no {language} yet",
+    "audio.makeSpeech.review": "Stop after translating, so someone can check it before speech is made",
+    "audio.makeSpeech.step2": "Speak it",
+    "audio.makeSpeech.readerAriaLabel": "The voice that reads the text",
+    "audio.makeSpeech.readerLineVoice": "Each line's own voice",
+    "audio.makeSpeech.speedOwn": "The voice's own",
+    "audio.makeSpeech.speedReset": "Go back to the voice's own speed",
+    "audio.makeSpeech.tags": "Tags on these lines",
+    "audio.makeSpeech.tagsSomeSkipped": "Tags are performed, not read out. A voice whose model would read a tag aloud says the line without it.",
+    "audio.makeSpeech.deliveryNeedsElevenLabs": "Speed and tags can be set when an ElevenLabs voice reads the lines.",
+    "audio.makeSpeech.step3": "Change it into a character's voice",
+    "audio.makeSpeech.characterAriaLabel": "The voice it is changed into",
+    "audio.makeSpeech.noCharacter": "Leave it in the reader's voice",
+    "audio.makeSpeech.characterNote": "The reader gives the line its pronunciation and pacing. The character's voice is laid over it.",
+    "audio.makeSpeech.runOn": "Run it on",
+    "audio.makeSpeech.targetLine": "The selected line",
+    "audio.makeSpeech.targetMissing": plural({
+      one: "{count} line with no speech yet",
+      other: "{count} lines with no speech yet",
+    }),
+    "audio.makeSpeech.run": plural({
+      one: "Make speech for {count} line",
+      other: "Make speech for {count} lines",
+    }),
+    "audio.makeSpeech.newTakeNote": "Every result is a new take. Nothing replaces a recording someone made.",
+    "audio.makeSpeech.progress": "This run",
+    "audio.makeSpeech.progressCount": "{done} of {total} done",
+    "audio.makeSpeech.stateWaiting": "In the queue",
+    "audio.makeSpeech.stateReview": "Translated — check it",
+    "audio.makeSpeech.stateSkipped": "No text to speak",
+    "audio.makeSpeech.stateFailed": "Did not finish",
+    "audio.makeSpeech.stepTranslating": "Translating the text",
+    "audio.makeSpeech.stepSpeaking": "Speaking",
+    "audio.makeSpeech.stepRevoicing": "Changing voice",
     "audio.aiError.elevenLabsNoKeyTitle": "ElevenLabs key needed",
     "audio.aiError.elevenLabsNoKeyBody": "This voice uses ElevenLabs with your own API key, and this device has none. Connect your key in the Voice Studio (edit the voice) or in Project settings → Voice.",
     "audio.aiError.elevenLabsInvalidKeyTitle": "ElevenLabs rejected your key",
@@ -3011,6 +3114,305 @@ export const audio = defineNamespace({
       "audio.elevenLabs.checkingAccount": {
         description: "Shown on the connected ElevenLabs line (after 'ElevenLabs \u00b7 ') while the app reads the account's quota.",
       },
+      "audio.inspector.title": {
+        description: "Small heading at the top of the clip inspector, the side panel shown while one speech clip is selected on the timeline.",
+      },
+      "audio.inspector.backToVoices": {
+        description: "Accessible label of the back arrow in a voice side panel (clip inspector, Add a voice, Make speech). It returns to the list of the project's voices.",
+      },
+      "audio.inspector.takeGone": {
+        description: "Shown in the clip inspector when the selected clip was deleted or replaced while the panel was open.",
+      },
+      "audio.inspector.recording": {
+        description: "Shown under a clip's name in the clip inspector when a person recorded it and we do not know who.",
+      },
+      "audio.inspector.playTake": {
+        description: "Accessible label of the play button in the clip inspector.",
+      },
+      "audio.inspector.pauseTake": {
+        description: "Accessible label of the pause button in the clip inspector while the clip plays.",
+      },
+      "audio.inspector.howMade": {
+        description: "Section heading in the clip inspector, above the numbered steps that produced the clip (recorded, spoken by a voice, changed into another voice).",
+      },
+      "audio.inspector.stepRecorded": {
+        description: "A step in 'How this was made': the audio is a person's recording and we do not know whose.",
+      },
+      "audio.inspector.stepSpoken": {
+        description: "A step in 'How this was made': a synthetic voice read the line's text aloud (text to speech).",
+        placeholders: {
+          "name": "The voice's name in the project, e.g. 'Layla'.",
+        },
+      },
+      "audio.inspector.stepRevoiced": {
+        description: "A step in 'How this was made': the earlier audio was converted so it sounds like another voice (speech to speech). The words and timing stay the same.",
+        placeholders: {
+          "name": "The voice's name in the project, e.g. 'Chip Ingram'.",
+        },
+      },
+      "audio.inspector.removedVoice": {
+        description: "Stands in for a voice's name in 'How this was made' when that voice has since been deleted from the project.",
+      },
+      "audio.inspector.delivery": {
+        description: "Section heading in the clip inspector, above the controls for how the line is spoken: speed, stability, expressiveness and tags.",
+      },
+      "audio.inspector.deliveryNeedsElevenLabs": {
+        description: "Shown in the clip inspector's Delivery section when the line's voice does not come from ElevenLabs, so the controls do not apply. ElevenLabs is a brand name: do not translate it.",
+        placeholders: {
+          "name": "The voice's name in the project.",
+        },
+      },
+      "audio.inspector.scope": {
+        description: "Accessible name of the two-way switch in the clip inspector that says whether the delivery sliders change only this line or the voice for all its lines.",
+      },
+      "audio.inspector.scopeLine": {
+        description: "One side of the delivery scope switch: the sliders change only the selected line.",
+      },
+      "audio.inspector.scopeVoice": {
+        description: "The other side of the delivery scope switch: the sliders change the voice itself, so every line that voice speaks.",
+        placeholders: {
+          "name": "The voice's name in the project, e.g. 'Layla'.",
+        },
+      },
+      "audio.inspector.expressiveness": {
+        description: "Label of a slider in the clip inspector: how much the voice exaggerates its style (ElevenLabs 'style exaggeration'). 0% is the voice's own delivery.",
+      },
+      "audio.inspector.closeness": {
+        description: "Label of a slider in the clip inspector: how closely the speech sticks to the original voice (ElevenLabs 'similarity').",
+      },
+      "audio.inspector.tags": {
+        description: "Label above the row of tag chips in the clip inspector. A tag is a delivery direction such as 'whispers' or 'sighs' that the voice performs; it is not part of the translation.",
+      },
+      "audio.inspector.otherTag": {
+        description: "The last chip in the tag row of the clip inspector: opens a small field to type a tag that is not in the list.",
+      },
+      "audio.inspector.otherTagAriaLabel": {
+        description: "Accessible label of the small field for typing a custom delivery tag in the clip inspector.",
+      },
+      "audio.inspector.otherTagPlaceholder": {
+        description: "Placeholder in the small field for typing a custom delivery tag. Give one short example of a delivery direction.",
+      },
+      "audio.inspector.tagsNote": {
+        description: "Note under the tag chips in the clip inspector, when the voice's model understands tags.",
+      },
+      "audio.inspector.tagsNeedModel": {
+        description: "Note under the tag chips in the clip inspector, when the voice's ElevenLabs model does not understand tags. A link to switch model follows.",
+        placeholders: {
+          "name": "The voice's name in the project.",
+          "model": "The ElevenLabs model's product name, e.g. 'Multilingual v2'. Not translated.",
+        },
+      },
+      "audio.inspector.useTagModel": {
+        description: "Link after the note that the voice's model cannot perform tags: switches the voice to the 'Eleven v4' model, which can. 'Eleven v4' is a product name: do not translate it.",
+      },
+      "audio.inspector.regenerate": {
+        description: "Main button in the clip inspector: speaks the selected line again with the current delivery and adds the result as a new take.",
+      },
+      "audio.inspector.hearItFirst": {
+        description: "Button in the clip inspector beside Regenerate: plays the line with the current delivery without saving a take.",
+      },
+      "audio.inspector.voice": {
+        description: "Section heading in the clip inspector, above the controls for which voice speaks the line.",
+      },
+      "audio.inspector.lineVoice": {
+        description: "Sentence in the clip inspector's Voice section naming the voice cast on the selected line.",
+        placeholders: {
+          "name": "The voice's name in the project.",
+        },
+      },
+      "audio.inspector.useVoice": {
+        description: "Accessible label of a voice chip in the clip inspector: casts that voice on the selected line.",
+        placeholders: {
+          "name": "The voice's name in the project.",
+        },
+      },
+      "audio.inspector.newVoiceFromTake": {
+        description: "Button in the clip inspector's Voice section, shown for a person's recording: starts training a new voice from this recording.",
+      },
+      "audio.addVoice.title": {
+        description: "Heading of the side panel for adding a voice to the project.",
+      },
+      "audio.addVoice.searchPlaceholder": {
+        description: "Placeholder of the search field in the Add a voice panel. It searches the user's ElevenLabs voices and ElevenLabs' public voice library together.",
+      },
+      "audio.addVoice.onlyLanguage": {
+        description: "Toggle chip under the search field in the Add a voice panel: limits the public voice library to voices in the project's target language.",
+        placeholders: {
+          "language": "The target language as the project names it, e.g. 'Arabic' or 'ar'.",
+        },
+      },
+      "audio.addVoice.account": {
+        description: "Section heading in the Add a voice panel: voices the user already has in their own ElevenLabs account. ElevenLabs is a brand name: do not translate it.",
+      },
+      "audio.addVoice.library": {
+        description: "Section heading in the Add a voice panel: voices from ElevenLabs' public, shared library that the user has not saved yet. ElevenLabs is a brand name: do not translate it.",
+      },
+      "audio.addVoice.inProject": {
+        description: "Shown in place of the Add button for a voice that is already one of the project's voices.",
+      },
+      "audio.addVoice.addAriaLabel": {
+        description: "Accessible label of the Add button next to a voice in the Add a voice panel.",
+        placeholders: {
+          "name": "The voice's name.",
+        },
+      },
+      "audio.addVoice.makeNew": {
+        description: "Section heading in the Add a voice panel, above the ways to create a voice that does not exist yet.",
+      },
+      "audio.addVoice.cloneTitle": {
+        description: "Title of an option in the Add a voice panel: copy a real person's voice from a short clip.",
+      },
+      "audio.addVoice.cloneBody": {
+        description: "Description under 'Clone a real speaker' in the Add a voice panel.",
+      },
+      "audio.addVoice.designTitle": {
+        description: "Title of an option in the Add a voice panel: choose a ready-made voice from another engine, or describe one in words to have it designed.",
+      },
+      "audio.addVoice.designBody": {
+        description: "Description under 'Pick or describe a voice' in the Add a voice panel.",
+      },
+      "audio.addVoice.trainTitle": {
+        description: "Title of an option in the Add a voice panel: train a custom voice from 5 to 60 minutes of one speaker's recordings. Aquilla is the product name: do not translate it.",
+      },
+      "audio.addVoice.trainBody": {
+        description: "Description under 'Train a voice on Aquilla' in the Add a voice panel. ElevenLabs is a brand name: do not translate it.",
+      },
+      "audio.addVoice.consentNote": {
+        description: "Note at the bottom of the Add a voice panel.",
+      },
+      "audio.makeSpeech.ghost": {
+        description: "Tooltip and accessible label of a ghost clip on the timeline: the dashed outline where a line's speech will go. Clicking it picks the line and opens the Make speech panel; nothing is generated yet. Shift is the keyboard key.",
+      },
+      "audio.makeSpeech.pickedCount": {
+        description: "Heading in the Make speech panel above the list of lines the user picked on the timeline.",
+        placeholders: { count: "How many lines are picked." },
+      },
+      "audio.makeSpeech.shiftHint": {
+        description: "Hint under the list of picked lines in the Make speech panel. 'Empty clip' is the dashed outline on the timeline where a line's speech will go. Shift is the keyboard key.",
+      },
+      "audio.makeSpeech.translateNone": {
+        description: "Note in step 1 (Translate the text) of the Make speech panel when every chosen line already has its translation.",
+      },
+      "audio.makeSpeech.translateSome": {
+        description: "Note in step 1 (Translate the text) of the Make speech panel: how many of the chosen lines have no translation and will be translated before speech is made.",
+        placeholders: { count: "How many lines have no translation yet." },
+      },
+      "audio.makeSpeech.translateSkipped": {
+        description: "Note in step 1 (Translate the text) of the Make speech panel when translating is switched off: how many of the chosen lines have no translation and will be left out.",
+        placeholders: { count: "How many lines have no translation yet." },
+      },
+      "audio.makeSpeech.ghostHint": {
+        description: "Hint in the Make speech panel, under the choice of lines: lines can also be picked by clicking their empty (ghost) clips on the timeline.",
+      },
+      "audio.makeSpeech.title": {
+        description: "Heading of the Make speech side panel.",
+      },
+      "audio.makeSpeech.intro": {
+        description: "Sentence under the heading of the Make speech panel.",
+      },
+      "audio.makeSpeech.step1": {
+        description: "Title of step 1 in the Make speech panel.",
+      },
+      "audio.makeSpeech.translate": {
+        description: "Checkbox in step 1 of the Make speech panel, when the target language's name is not known.",
+      },
+      "audio.makeSpeech.translateInto": {
+        description: "Checkbox in step 1 of the Make speech panel.",
+        placeholders: {
+          "language": "The target language as the project names it, e.g. 'Arabic' or 'ar'.",
+        },
+      },
+      "audio.makeSpeech.review": {
+        description: "Second checkbox in step 1 of the Make speech panel.",
+      },
+      "audio.makeSpeech.step2": {
+        description: "Title of step 2 in the Make speech panel: a voice reads the text aloud.",
+      },
+      "audio.makeSpeech.readerAriaLabel": {
+        description: "Accessible label of the voice picker in step 2 of the Make speech panel.",
+      },
+      "audio.makeSpeech.readerLineVoice": {
+        description: "First choice in the step 2 voice picker of the Make speech panel: read each line with the voice already cast on it.",
+      },
+      "audio.makeSpeech.speedOwn": {
+        description: "Shown beside the Speed slider in step 2 of the Make speech panel while the slider has not been moved: the lines are read at the speed already set on the voice.",
+      },
+      "audio.makeSpeech.speedReset": {
+        description: "Accessible name of the small reset button beside the Speed value in the Make speech panel; clears the speed chosen for these lines.",
+      },
+      "audio.makeSpeech.tags": {
+        description: "Label above the audio-tag chips (whispers, sighs…) in step 2 of the Make speech panel. The tags chosen apply to every line the run is about.",
+      },
+      "audio.makeSpeech.tagsSomeSkipped": {
+        description: "Note under the tag chips in the Make speech panel when at least one of the reading voices uses an ElevenLabs model that does not understand audio tags.",
+      },
+      "audio.makeSpeech.deliveryNeedsElevenLabs": {
+        description: "Note in step 2 of the Make speech panel when none of the voices that will read the lines is an ElevenLabs voice, so speed and tags cannot be set.",
+      },
+      "audio.makeSpeech.step3": {
+        description: "Title of step 3 in the Make speech panel: the spoken audio is converted to sound like another voice (speech to speech).",
+      },
+      "audio.makeSpeech.characterAriaLabel": {
+        description: "Accessible label of the voice picker in step 3 of the Make speech panel.",
+      },
+      "audio.makeSpeech.noCharacter": {
+        description: "First choice in the step 3 voice picker of the Make speech panel: skip the voice change.",
+      },
+      "audio.makeSpeech.characterNote": {
+        description: "Note under the step 3 voice picker in the Make speech panel.",
+      },
+      "audio.makeSpeech.runOn": {
+        description: "Heading above the choice of which lines the Make speech recipe runs on.",
+      },
+      "audio.makeSpeech.targetLine": {
+        description: "Choice of what Make speech runs on: only the line selected in the editor.",
+      },
+      "audio.makeSpeech.targetMissing": {
+        description: "Choice of what Make speech runs on: every line of the file that has no audio.",
+        placeholders: {
+          "count": "How many such lines there are.",
+        },
+      },
+      "audio.makeSpeech.run": {
+        description: "Main button of the Make speech panel.",
+        placeholders: {
+          "count": "How many lines it will run on.",
+        },
+      },
+      "audio.makeSpeech.newTakeNote": {
+        description: "Note under the main button of the Make speech panel.",
+      },
+      "audio.makeSpeech.progress": {
+        description: "Heading above the per-line progress list in the Make speech panel.",
+      },
+      "audio.makeSpeech.progressCount": {
+        description: "Count beside the Progress heading in the Make speech panel.",
+        placeholders: {
+          "done": "Lines finished so far.",
+          "total": "Lines in this run.",
+        },
+      },
+      "audio.makeSpeech.stateWaiting": {
+        description: "A line's state in the Make speech progress list: not started yet.",
+      },
+      "audio.makeSpeech.stateReview": {
+        description: "A line's state in the Make speech progress list: it was translated and left for a person to check; no speech was made.",
+      },
+      "audio.makeSpeech.stateSkipped": {
+        description: "A line's state in the Make speech progress list: skipped because it has no translation and translating is switched off.",
+      },
+      "audio.makeSpeech.stateFailed": {
+        description: "A line's state in the Make speech progress list: a step failed.",
+      },
+      "audio.makeSpeech.stepTranslating": {
+        description: "A line's state in the Make speech progress list: step 1 is running.",
+      },
+      "audio.makeSpeech.stepSpeaking": {
+        description: "A line's state in the Make speech progress list: step 2 (text to speech) is running.",
+      },
+      "audio.makeSpeech.stepRevoicing": {
+        description: "A line's state in the Make speech progress list: step 3 (speech to speech) is running.",
+      },
       "audio.elevenLabs.connectedNoQuota": {
         description: "Shown on the connected ElevenLabs line (after 'ElevenLabs \u00b7 ') in place of the quota, when the user's API key works but is not allowed to read the account's quota.",
       },
@@ -3073,6 +3475,9 @@ export const audio = defineNamespace({
       },
       "audio.elevenLabs.modelMultilingualV2": {
         description: "One-line description under the 'Multilingual v2' model option (product name, not translated).",
+      },
+      "audio.elevenLabs.modelV4": {
+        description: "One-line description of ElevenLabs' 'Eleven v4' speech model in the model picker. 'Tags' are bracketed delivery directions in the text, such as [whispers]; keep the bracketed example untranslated.",
       },
       "audio.elevenLabs.modelV3": {
         description: "One-line description under the 'Eleven v3' model option (product name, not translated).",

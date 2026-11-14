@@ -121,7 +121,7 @@ import {
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/lib/workspace-actions/registry"
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
-import type { FileReference, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
+import type { FileReference, LineDelivery, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import { fileOrderedBy, infractionSeverity, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { resolveBibleEnrichment } from "../../db/shared/bible-enrichments"
 import { isBibleDataExperimentOn, isBibleOpen } from "@/lib/bible-data/experiment"
@@ -276,7 +276,11 @@ import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget } from "@/lib/audio/batch-audio"
 import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake } from "@/lib/audio/change-voice"
 import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
-import { getTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
+import { getTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
+import { runMakeSpeech, type MakeSpeechActions, type MakeSpeechLineState } from "@/lib/audio/make-speech"
+import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import type { CodexCellAttachment } from "@/lib/codex-editor/types"
+import { takeStory } from "@/lib/audio/take-story"
 import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove, injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
@@ -394,7 +398,7 @@ import { useRefusedFileEvents } from "@/hooks/useRefusedFileEvents"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { assignedCastVoiceId, castNameOf, findVoice, getVoiceLibrary, newVoiceId, resolveCastVoice, VOICE_PALETTE } from "@/lib/audio/voices"
-import { lineVoiceActionFor, lineVoicePending, type LineVoiceAction } from "@/lib/audio/line-voice"
+import { lineTake, lineVoiceActionFor, lineVoicePending, type LineVoiceAction } from "@/lib/audio/line-voice"
 import { whileVoicingAs } from "@/lib/audio/voicing-as"
 import { useOnline } from "@/hooks/useOnline"
 import { useConnectivity } from "@/lib/offline/connectivity"
@@ -13317,19 +13321,22 @@ export function ProjectWorkspace() {
     [project, activeFileId, myScopes, activeLane, readTake, currentUsername, getTokenForProjectFile, t],
   )
   const handleRegenerateTimelineVoice = useCallback(
-    async (cellId: string, slot: string, opts?: { voiceId?: string }) => {
-      if (!project || !frontierSession) return
+    // AQU-2577: resolves to whether a take was made, and `quiet` leaves the
+    // toasts to the caller — Make speech runs this for many lines and shows
+    // its own per-line progress.
+    async (cellId: string, slot: string, opts?: { voiceId?: string; quiet?: boolean; delivery?: LineDelivery }): Promise<boolean> => {
+      if (!project || !frontierSession) return false
       const owner = resolveTakeCellRef.current(cellId)
-      if (!owner) return
+      if (!owner) return false
       // The words a cue performs, and whose voice says them, live on the
       // subtitle it is linked to; off a cue file, the line's own.
       const readAloud = audioCueCells ? resolveCueReadAloud(cellId) : null
       const text = (readAloud?.text ?? owner.cell.translated ?? "").trim()
       if (!text) {
-        toast.add({ type: "info", title: t("editor.timeline.regenerateNoText") })
-        return
+        if (!opts?.quiet) toast.add({ type: "info", title: t("editor.timeline.regenerateNoText") })
+        return false
       }
-      toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
+      if (!opts?.quiet) toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
       // AQU-2212: a pick reads in the voice picked, before the cast settings
       // catch up; otherwise the line's own cast voice. Named while it runs.
       const voiceName = (opts?.voiceId ? findVoice(tts.laneSettings, opts.voiceId)?.name : undefined)
@@ -13348,10 +13355,14 @@ export function ProjectWorkspace() {
         text,
         voiceCellId: readAloud?.voiceCellId ?? undefined,
         ...(opts?.voiceId ? { voiceId: opts.voiceId } : {}),
+        ...(opts?.delivery ? { lineDelivery: opts.delivery } : {}),
       }).catch(() => false))
-      toast.add(ok
-        ? { type: "success", title: t("editor.timeline.regenerateDone") }
-        : { type: "error", title: t("editor.timeline.regenerateFailed") })
+      if (!opts?.quiet) {
+        toast.add(ok
+          ? { type: "success", title: t("editor.timeline.regenerateDone") }
+          : { type: "error", title: t("editor.timeline.regenerateFailed") })
+      }
+      return ok
     },
     [project, audioProject, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, tts.laneSettings, t],
   )
@@ -13389,18 +13400,18 @@ export function ProjectWorkspace() {
   )
 
   const handleChangeTimelineVoice = useCallback(
-    async (cellId: string, opts?: { voice?: Voice }) => {
-      if (!project || !frontierSession) return
+    async (cellId: string, opts?: { voice?: Voice; quiet?: boolean }): Promise<boolean> => {
+      if (!project || !frontierSession) return false
       const owner = resolveTakeCellRef.current(cellId)
-      if (!owner) return
+      if (!owner) return false
       const { cell } = owner
       // AQU-2212: a pick re-voices into the voice picked, before the cast
       // settings catch up; otherwise into the line's own cast voice.
       const voice = opts?.voice ?? resolveCastVoice(tts.laneSettings, cell, cell.ttsSettings?.voiceId)
       // The menu disables what cannot run, but it was drawn from an earlier
       // render: re-check before spending a conversion.
-      if (changeVoiceBlocker(cell, voice) != null) return
-      toast.add({ type: "info", title: t("editor.timeline.changeVoiceStarted", { name: voice.name }) })
+      if (changeVoiceBlocker(cell, voice) != null) return false
+      if (!opts?.quiet) toast.add({ type: "info", title: t("editor.timeline.changeVoiceStarted", { name: voice.name }) })
       const ok = await whileVoicingAs(cellId, voice.name, () => changeCellVoice({
         projectId: project.id,
         cell,
@@ -13411,19 +13422,22 @@ export function ProjectWorkspace() {
         recordStep: true, // decision 11: an Undo step
       }))
       if (ok) {
-        toast.add({ type: "success", title: t("editor.timeline.changeVoiceDone", { name: voice.name }) })
+        if (!opts?.quiet) toast.add({ type: "success", title: t("editor.timeline.changeVoiceDone", { name: voice.name }) })
         revalidateCells?.()
-        return
+        return true
       }
       // `changeCellVoice` swallows the throw into the cell's tts badge, which
       // is where the Audio tab reads it; say what it said rather than a bare
       // "it failed", since the timeline shows no voice card to open.
       const failure = getTtsStatus(ttsStatusKey(cell.id))
-      toast.add({
-        type: "error",
-        title: t("editor.timeline.changeVoiceFailed"),
-        ...(failure.kind === "error" && failure.message ? { description: failure.message } : {}),
-      })
+      if (!opts?.quiet) {
+        toast.add({
+          type: "error",
+          title: t("editor.timeline.changeVoiceFailed"),
+          ...(failure.kind === "error" && failure.message ? { description: failure.message } : {}),
+        })
+      }
+      return false
     },
     [project, frontierSession, tts.laneSettings, currentUsername, activeLane, revalidateCells, t],
   )
@@ -13672,13 +13686,159 @@ export function ProjectWorkspace() {
     const owner = resolveTakeCellRef.current(cellId)
     if (owner) openInStation({ fileId: owner.fileId, cellId, audioId }, { show: true })
   }, [])
+  /**
+   * AQU-2577: the speech clip the Voices rail is inspecting. Set by a click on
+   * a clip in the timeline, which also brings the rail forward; cleared by the
+   * inspector's back arrow, and whenever the file changes under it.
+   */
+  const [inspectedTake, setInspectedTake] = useState<{ fileId: string; cellId: string; audioId: string } | null>(null)
+  const inspectedBusyStatus = useTtsStatus(inspectedTake ? ttsStatusKey(inspectedTake.cellId) : undefined)
+  /**
+   * AQU-2577: the three steps Make speech chains (make-speech.ts), as this
+   * workspace already does each of them: draft a line, read it in a voice,
+   * change the take into another voice. Run quietly — the panel shows each
+   * line's progress itself.
+   */
+  const makeSpeechActions = useMemo<MakeSpeechActions>(() => ({
+    hasText: (cellId) => Boolean(resolveTakeCellRef.current(cellId)?.cell.translated?.trim()),
+    translate: async (cellId) => {
+      const owner = resolveTakeCellRef.current(cellId)
+      return owner ? Boolean(await handleCompleteSingle(owner.cell)) : false
+    },
+    speak: (cellId, readerVoiceId, delivery) =>
+      handleRegenerateTimelineVoice(cellId, RECORDING_SLOT, {
+        quiet: true,
+        ...(readerVoiceId ? { voiceId: readerVoiceId } : {}),
+        ...(delivery ? { delivery } : {}),
+      }),
+    revoice: async (cellId, characterVoiceId) => {
+      const voice = findVoice(tts.laneSettings, characterVoiceId)
+      return voice ? handleChangeTimelineVoice(cellId, { voice, quiet: true }) : false
+    },
+  }), [handleCompleteSingle, handleRegenerateTimelineVoice, handleChangeTimelineVoice, tts.laneSettings])
+  const loadInspectedTake = useCallback(async (att: CodexCellAttachment): Promise<Blob> => {
+    const ref = parseFrontierAudioUrl(att.url)
+    if (!project || !inspectedTake || !ref || !frontierSession) throw new Error("audio fetch: this clip has no stored audio")
+    const bytes = await fetchCellAudio({
+      projectId: project.id, fileId: inspectedTake.fileId, audioId: ref.audioId, ext: ref.ext,
+      getSyncToken: audioSyncTokenFetcherForSession(frontierSession),
+    })
+    return new Blob([bytes as BlobPart], { type: ref.ext === "mp3" ? "audio/mpeg" : ref.ext === "wav" ? "audio/wav" : `audio/${ref.ext}` })
+  }, [project, inspectedTake, frontierSession])
+  /** Speak the inspected line again the way its take was made: the same reader, then the same character. */
+  const handleRegenerateInspected = useCallback(() => {
+    if (!inspectedTake) return
+    const owner = resolveTakeCellRef.current(inspectedTake.cellId)
+    const story = owner ? takeStory(owner.cell, inspectedTake.audioId, tts.laneSettings) : null
+    if (!story) return
+    toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
+    void runMakeSpeech(
+      [inspectedTake.cellId],
+      { translate: false, reviewTranslation: false, readerVoiceId: story.reader?.id ?? null, characterVoiceId: story.character?.id ?? null },
+      makeSpeechActions,
+      () => {},
+    ).then((result) => {
+      const ok = result.get(inspectedTake.cellId)?.kind === "done"
+      toast.add(ok
+        ? { type: "success", title: t("editor.timeline.regenerateDone") }
+        : { type: "error", title: t("editor.timeline.regenerateFailed") })
+      if (!ok) return
+      // Follow the line to the take that plays now, so the panel shows the new one.
+      const next = resolveTakeCellRef.current(inspectedTake.cellId)
+      const audioId = next ? lineTake(next.cell).audioId : undefined
+      if (audioId) setInspectedTake((cur) => (cur?.cellId === inspectedTake.cellId ? { ...cur, audioId } : cur))
+    })
+  }, [inspectedTake, tts.laneSettings, makeSpeechActions, t])
+
+  /**
+   * AQU-2577: the lines picked for Make speech on the timeline. A click on a
+   * line's ghost clip picks it and brings the Voices rail forward on the Make
+   * speech panel; with Shift, Ctrl or ⌘ it is added to, or taken out of, the
+   * lines already picked. Picking generates nothing: the panel's button does.
+   */
+  const [pickedGhostIds, setPickedGhostIds] = useState<readonly string[]>([])
+  const pickedGhostSet = useMemo(() => new Set(pickedGhostIds), [pickedGhostIds])
+  const handlePickGhost = useCallback((cellId: string, opts: { additive: boolean }) => {
+    setPickedGhostIds((cur) => (opts.additive
+      ? (cur.includes(cellId) ? cur.filter((id) => id !== cellId) : [...cur, cellId])
+      : [cellId]))
+    setInspectedTake(null)
+    setDockTab("voices")
+  }, [setDockTab])
+  const clearPickedGhosts = useCallback(() => setPickedGhostIds([]), [])
+  /** The lines whose speech is being made right now: their ghosts show a spinner. */
+  const [makingSpeechCellIds, setMakingSpeechCellIds] = useState<ReadonlySet<string>>(() => new Set())
+  const handleMakeSpeechLineState = useCallback((cellId: string, state: MakeSpeechLineState) => {
+    const running = state.kind === "running"
+    setMakingSpeechCellIds((cur) => {
+      if (cur.has(cellId) === running) return cur
+      const next = new Set(cur)
+      if (running) next.add(cellId)
+      else next.delete(cellId)
+      return next
+    })
+  }, [])
+
+  // The inspected clip as the rail needs it. A take on an audio-cue sibling is
+  // not in this file's cells, so the rail keeps the roster for it.
+  const inspectedCell = inspectedTake && inspectedTake.fileId === activeFileId
+    ? audioMergedCells.find((c) => c.id === inspectedTake.cellId) ?? null
+    : null
+  const inspectedClip = inspectedTake && inspectedCell && lens === "audio"
+    ? {
+        cell: inspectedCell,
+        audioId: inspectedTake.audioId,
+        fileId: inspectedTake.fileId,
+        busy: inspectedBusyStatus.kind === "loading" || inspectedBusyStatus.kind === "synthesizing",
+        loadTake: loadInspectedTake,
+        onRegenerate: handleRegenerateInspected,
+        onPickVoice: (voiceId: string) => handleLineVoicePicked(inspectedCell, voiceId),
+        ...(trainFromTake && lineTake(inspectedCell).human
+          ? { onTrainFromTake: () => trainFromTake(inspectedTake.cellId, inspectedTake.audioId) }
+          : {}),
+        onClose: () => setInspectedTake(null),
+      }
+    : null
+  const makeSpeechLines = useMemo(
+    () => audioMergedCells
+      .filter((c) => c.type !== "paratext" && Boolean((c.translated || c.original || "").trim()))
+      .map((c) => ({
+        cellId: c.id,
+        label: (c.translated?.trim() || c.original?.trim() || c.id).slice(0, 80),
+        hasText: Boolean(c.translated?.trim()),
+        hasSpeech: lineTake(c).audioId != null,
+        voiceId: resolveCastVoice(tts.laneSettings, c, c.ttsSettings?.voiceId).id,
+      })),
+    [audioMergedCells, tts.laneSettings],
+  )
+  const makeSpeechForRail = useMemo(
+    () => (lens === "audio" && activeLaneDelivers !== "audio"
+      ? {
+          lines: makeSpeechLines,
+          selectedCellId: timelineSelectedCellId,
+          actions: makeSpeechActions,
+          picked: pickedGhostIds,
+          onClearPicked: clearPickedGhosts,
+          onLineState: handleMakeSpeechLineState,
+        }
+      : undefined),
+    [lens, activeLaneDelivers, makeSpeechLines, timelineSelectedCellId, makeSpeechActions, pickedGhostIds, clearPickedGhosts, handleMakeSpeechLineState],
+  )
+
   const stationMenuItems = useMemo(() => ({ station: <StationMenuItems /> }), [])
   const stationShowingRef = useRef(false)
   const handleTakeChosen = useCallback((cellId: string, audioId: string) => {
-    if (!STATION_PICKS.wayIn.followTimelineSelection || !stationShowingRef.current) return
     const owner = resolveTakeCellRef.current(cellId)
+    // AQU-2577: a clicked clip is what the Voices rail is about until the user
+    // goes back to the roster.
+    if (owner) {
+      setInspectedTake({ fileId: owner.fileId, cellId, audioId })
+      setPickedGhostIds([])
+      setDockTab("voices")
+    }
+    if (!STATION_PICKS.wayIn.followTimelineSelection || !stationShowingRef.current) return
     if (owner) openInStation({ fileId: owner.fileId, cellId, audioId })
-  }, [])
+  }, [setDockTab])
   // AQU-928: transcribe EXACTLY the sections selected on the timeline. Same
   // per-cell path (and same post-run flush/revalidate) as transcribe-all, only
   // the cell list is the user's selection instead of the whole file — so the
@@ -17492,6 +17652,8 @@ export function ProjectWorkspace() {
                     fileId={activeFileId}
                     laneId={activeLaneId}
                     leadsManageVoices={project.projectLeadsManageVoices === true && activeLaneId != null}
+                    clip={inspectedClip}
+                    makeSpeech={makeSpeechForRail}
                   />
                 </div>
               ) : undefined
@@ -18410,6 +18572,9 @@ export function ProjectWorkspace() {
                     // the timeline's corner cell beside "Tracks".
                     layoutControls={regionControls(dock, "tl")}
                     onOpenRecording={handleOpenRecording}
+                    onPickGhost={makeSpeechForRail ? handlePickGhost : undefined}
+                    pickedGhostIds={pickedGhostSet}
+                    makingSpeechCellIds={makingSpeechCellIds}
                     // AQU-1684: the track taking a take can't be hidden meanwhile.
                     recordingSlot={recordingCellId !== null ? recordingSlot : null}
                     project={editorProject ?? project ?? undefined}

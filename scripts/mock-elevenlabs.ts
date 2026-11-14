@@ -6,6 +6,8 @@
 //   GET  /v1/user/subscription          a "creator" account with quota
 //   GET  /v2/voices                     a handful of premade voices + any clones
 //   GET  /v1/models                     the curated TTS models + the STS model
+//   GET  /v1/shared-voices              a small public voice library (AQU-2577)
+//   POST /v1/voices/add/{owner}/{id}    saves a library voice to the account
 //   POST /v1/text-to-speech/{voice_id}  real, audible mp3 bytes
 //   POST /v1/voice-changer/{voice_id}   real, audible mp3 bytes
 //   POST /v1/voices/add                 a new voice id, then listed as "cloned"
@@ -56,7 +58,17 @@ const PREMADE: readonly MockVoice[] = [
   { voice_id: "mockDesign01", name: "Old Fisherman", category: "generated", labels: { gender: "male", age: "old" }, description: "Designed from a prompt", sample: "fisherman" },
 ]
 
+/** The public library: voices the account does not have until they are added. */
+const LIBRARY: readonly (MockVoice & { public_owner_id: string; language: string })[] = [
+  { voice_id: "mockLibLayla1", public_owner_id: "mockOwnerA", name: "Layla", category: "professional", language: "ar", labels: { accent: "modern standard", gender: "female", age: "young" }, description: "Calm Arabic narrator", sample: "mother-dove" },
+  { voice_id: "mockLibOmar01", public_owner_id: "mockOwnerA", name: "Omar", category: "professional", language: "ar", labels: { accent: "levantine", gender: "male", age: "middle aged" }, description: "Warm Arabic storyteller", sample: "narrator-hearth" },
+  { voice_id: "mockLibYusuf1", public_owner_id: "mockOwnerB", name: "Yusuf", category: "professional", language: "ar", labels: { accent: "gulf", gender: "male", age: "old" }, description: "Gravelly Arabic elder", sample: "elder-oak" },
+  { voice_id: "mockLibSofia1", public_owner_id: "mockOwnerB", name: "Sofía", category: "professional", language: "es", labels: { accent: "latin american", gender: "female", age: "young" }, description: "Bright Spanish narrator", sample: "youth-lark" },
+  { voice_id: "mockLibHenry1", public_owner_id: "mockOwnerC", name: "Henry", category: "professional", language: "en", labels: { accent: "british", gender: "male", age: "middle aged" }, description: "Measured English narrator", sample: "narrator-willow" },
+]
+
 const MODELS = [
+  { model_id: "eleven_v4", name: "Eleven v4", can_do_text_to_speech: true, can_do_voice_conversion: false },
   { model_id: "eleven_multilingual_v2", name: "Eleven Multilingual v2", can_do_text_to_speech: true, can_do_voice_conversion: false },
   { model_id: "eleven_v3", name: "Eleven v3", can_do_text_to_speech: true, can_do_voice_conversion: false },
   { model_id: "eleven_flash_v2_5", name: "Eleven Flash v2.5", can_do_text_to_speech: true, can_do_voice_conversion: false },
@@ -166,6 +178,41 @@ export async function handleMockElevenLabs(
 
   if (request.method === "GET" && pathname === "/v1/models") {
     return Response.json(MODELS)
+  }
+
+  if (request.method === "GET" && pathname === "/v1/shared-voices") {
+    const search = url.searchParams.get("search")?.toLowerCase() ?? ""
+    const language = url.searchParams.get("language")
+    const gender = url.searchParams.get("gender")
+    const voices = LIBRARY
+      .filter((v) => !language || v.language === language)
+      .filter((v) => !gender || v.labels.gender === gender)
+      .filter((v) => !search || `${v.name} ${v.description} ${v.language} ${Object.values(v.labels).join(" ")}`.toLowerCase().includes(search))
+      .map(({ sample, labels, ...v }) => ({
+        ...v,
+        ...labels,
+        preview_url: `${origin}/previews/${sample}.mp3`,
+        is_added_by_user: state.cloned.some((c) => c.labels.library_voice_id === v.voice_id),
+      }))
+    return Response.json({ voices, has_more: false, total_count: voices.length })
+  }
+
+  const libraryAdd = pathname.match(/^\/v1\/voices\/add\/([^/]+)\/([^/]+)$/)
+  if (request.method === "POST" && libraryAdd) {
+    const shared = LIBRARY.find((v) => v.public_owner_id === decodeURIComponent(libraryAdd[1]) && v.voice_id === decodeURIComponent(libraryAdd[2]))
+    if (!shared) return errorResponse(404, "voice_not_found", "Voice not found")
+    const body = (await request.json().catch(() => ({}))) as { new_name?: unknown }
+    if (typeof body.new_name !== "string" || !body.new_name.trim()) return errorResponse(422, "invalid_parameters", "new_name is required")
+    const voiceId = `mockAdded${String(state.cloned.length + 1).padStart(3, "0")}`
+    state.cloned.push({
+      voice_id: voiceId,
+      name: body.new_name.trim(),
+      category: "professional",
+      labels: { ...shared.labels, language: shared.language, library_voice_id: shared.voice_id },
+      description: shared.description,
+      sample: shared.sample,
+    })
+    return Response.json({ voice_id: voiceId })
   }
 
   const tts = pathname.match(/^\/v1\/text-to-speech\/([^/]+)$/)

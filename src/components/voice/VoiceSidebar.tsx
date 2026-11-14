@@ -5,14 +5,29 @@
 // still happens inside that roster's modal. Training from a line's take is
 // hosted at the workspace root (CloneVoiceModalHost) so
 // the modal opens in place without the Voices tab having to be mounted.
+//
+// AQU-2577: the rail is also where one clip is looked at and worked on. While a
+// speech clip is selected on the timeline it shows the clip inspector in the
+// roster's place; "New voice" opens the Add a voice panel; and Make speech is
+// one button above the roster. Each has a back arrow to the roster.
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
+import { AudioLines } from "lucide-react"
 import { VoiceLibraryPanel } from "../VoiceLibraryPanel"
+import { Button } from "@/components/ui/button"
+import { AddVoicePanel, type MakeVoiceMode } from "./inspector/AddVoicePanel"
+import { ClipInspector } from "./inspector/ClipInspector"
+import { MakeSpeechPanel, type MakeSpeechLine } from "./inspector/MakeSpeechPanel"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { canManageVoices } from "@/lib/audio/voice-permission"
+import { upsertVoice } from "@/lib/audio/voices"
+import type { MakeSpeechActions, MakeSpeechLineState } from "@/lib/audio/make-speech"
+import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { liveTargetLaneLanguages } from "@/lib/lanes/lane-language"
 import type { ProjectTtsApi } from "@/hooks/useProjectTts"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
-import type { ProjectRecord as Project } from "@/lib/parsers/types"
+import type { LineDelivery, ProjectRecord as Project } from "@/lib/parsers/types"
 
 interface VoiceSidebarProps {
   cells: CellData[]
@@ -32,12 +47,54 @@ interface VoiceSidebarProps {
    * passes false when the open lane is not one this lead can write.
    */
   leadsManageVoices?: boolean
+  /** AQU-2577: the speech clip selected on the timeline, shown in the inspector. */
+  clip?: {
+    cell: CellData
+    audioId: string
+    fileId: string
+    /** The line is being generated or re-voiced right now. */
+    busy: boolean
+    loadTake: (att: CodexCellAttachment) => Promise<Blob>
+    onRegenerate: () => void
+    onPickVoice: (voiceId: string) => void
+    onTrainFromTake?: () => void
+    onClose: () => void
+  } | null
+  /** AQU-2577: what Make speech runs on and with. Absent: the button is not offered. */
+  makeSpeech?: {
+    lines: MakeSpeechLine[]
+    selectedCellId: string | null
+    actions: MakeSpeechActions
+    /** The lines picked on the timeline (their ghost clips). */
+    picked: readonly string[]
+    onClearPicked: () => void
+    onLineState: (cellId: string, state: MakeSpeechLineState) => void
+  }
 }
 
 export function VoiceSidebar({
   project, projectId, tts, session, username,
-  targetLanguage, fileId, cells, laneId, leadsManageVoices,
+  targetLanguage, fileId, cells, laneId, leadsManageVoices, clip, makeSpeech,
 }: VoiceSidebarProps) {
+  const t = useT()
+  const { locale } = useI18n()
+  // The lane's language as a person reads it ("Arabic"), where the tag is one the browser knows.
+  const languageLabel = useMemo(() => {
+    if (!targetLanguage) return undefined
+    try {
+      return new Intl.DisplayNames([locale], { type: "language" }).of(targetLanguage) ?? targetLanguage
+    } catch {
+      return targetLanguage
+    }
+  }, [targetLanguage, locale])
+  const [view, setView] = useState<"cast" | "add" | "speech">("cast")
+  const [createRequest, setCreateRequest] = useState<{ mode: MakeVoiceMode; seq: number } | null>(null)
+  const canEdit = canManageVoices(project.syncRole?.level ?? null, leadsManageVoices ?? project.projectLeadsManageVoices === true)
+  const laneVoices = tts.voices
+  const makeNew = (mode: MakeVoiceMode) => {
+    setView("cast")
+    setCreateRequest((cur) => ({ mode, seq: (cur?.seq ?? 0) + 1 }))
+  }
   // `username` is part of the rail's contract (the studio is project-scoped)
   // but the cast roster reads everything else it needs off `tts`.
   // AQU-365: `project.syncRole?.level` gates character CRUD in VoiceLibraryPanel.
@@ -58,11 +115,110 @@ export function VoiceSidebar({
     [tts.settings, tts.laneSettings],
   )
 
-  return (
+  const frame = (panel: React.ReactNode) => (
     <div className="flex min-h-0 flex-1 flex-col">
+      <div className="min-h-0 flex-1 overflow-hidden rounded-xl border bg-background">{panel}</div>
+    </div>
+  )
+
+  if (view === "add") {
+    return frame(
+      <AddVoicePanel
+        projectId={projectId}
+        fileId={fileId}
+        session={session}
+        voices={tts.allVoices}
+        language={targetLanguage}
+        languageLabel={languageLabel}
+        canEdit={canEdit}
+        onBack={() => setView("cast")}
+        onAdd={async (voice) => {
+          const next = upsertVoice(tts.allVoices, voice, tts.laneSettings?.defaultVoiceId)
+          await tts.saveTts({ voices: next.voices, defaultVoiceId: next.defaultVoiceId })
+        }}
+        onMakeNew={makeNew}
+      />,
+    )
+  }
+  // AQU-2577: the delivery set in Make speech stays on the lines it ran on.
+  const saveDelivery = (cellIds: readonly string[], delivery: LineDelivery) => {
+    if (!canEdit) return
+    return tts.saveTts({
+      lineDelivery: { ...(tts.laneSettings?.lineDelivery ?? {}), ...Object.fromEntries(cellIds.map((id) => [id, delivery])) },
+    })
+  }
+  // Lines picked on the timeline come first: the rail is about what was just clicked.
+  const pickedLines = makeSpeech?.picked ?? []
+  if (makeSpeech && pickedLines.length > 0) {
+    return frame(
+      <MakeSpeechPanel
+        projectId={projectId}
+        voices={laneVoices}
+        lines={makeSpeech.lines}
+        selectedCellId={makeSpeech.selectedCellId}
+        picked={pickedLines}
+        targetLanguage={languageLabel}
+        actions={makeSpeech.actions}
+        onSaveDelivery={saveDelivery}
+        onLineState={makeSpeech.onLineState}
+        onBack={() => { makeSpeech.onClearPicked(); setView("cast") }}
+      />,
+    )
+  }
+  if (clip && fileId) {
+    return frame(
+      <ClipInspector
+        key={`${clip.cell.id}:${clip.audioId}`}
+        cell={clip.cell}
+        audioId={clip.audioId}
+        settings={tts.laneSettings}
+        allVoices={tts.allVoices}
+        voices={laneVoices}
+        projectId={projectId}
+        fileId={clip.fileId}
+        session={session}
+        language={targetLanguage}
+        canEdit={canEdit}
+        busy={clip.busy}
+        onBack={clip.onClose}
+        onSaveSettings={tts.saveTts}
+        loadTake={clip.loadTake}
+        onRegenerate={clip.onRegenerate}
+        onPickVoice={clip.onPickVoice}
+        onTrainFromTake={clip.onTrainFromTake}
+        onAddVoice={() => setView("add")}
+      />,
+    )
+  }
+  if (view === "speech" && makeSpeech) {
+    return frame(
+      <MakeSpeechPanel
+        projectId={projectId}
+        voices={laneVoices}
+        lines={makeSpeech.lines}
+        selectedCellId={makeSpeech.selectedCellId}
+        targetLanguage={languageLabel}
+        actions={makeSpeech.actions}
+        onSaveDelivery={saveDelivery}
+        onLineState={makeSpeech.onLineState}
+        onBack={() => setView("cast")}
+      />,
+    )
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      {makeSpeech && (
+        <Button type="button" variant="outline" className="w-full shrink-0" onClick={() => setView("speech")} data-testid="make-speech-open">
+          <AudioLines data-icon="inline-start" />
+          {t("audio.makeSpeech.title")}
+        </Button>
+      )}
       <div className="min-h-0 flex-1 overflow-hidden rounded-xl border bg-background">
         <div className="h-full w-full overflow-x-hidden">
           <VoiceLibraryPanel
+            onNewVoice={() => setView("add")}
+            createRequest={createRequest}
             settings={panelSettings}
             laneId={laneId}
             onSettingsChange={tts.saveTts}

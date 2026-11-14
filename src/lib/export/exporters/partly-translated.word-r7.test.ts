@@ -325,7 +325,8 @@ describe("Word export — an untranslated line keeps its pieces where they are (
 })
 
 // AQU-2552 (question 62): a lost piece takes only its words and its own
-// footnote, so its picture, field and tab now stay (round 7's N2 had them go).
+// footnote, so its picture and field now stay (round 7's N2 had them go).
+// AQU-2552 (review r9): the tab among its words is its own text, and goes.
 describe("Word export — a hidden or deleted split piece is a lost line of its paragraph (AQU-2552, review r7 N2)", () => {
   const F = ["Première ligne ici.", "Deuxième ligne ici.", "Troisième ligne ici."]
   // Line 1 is cut in the editor after "First line"; the piece holds a
@@ -339,11 +340,11 @@ describe("Word export — a hidden or deleted split piece is a lost line of its 
     return { parent, pc: piece(a, "p1", a.original.slice(at + 1)), b, c, n }
   }
 
-  it("a hidden piece's words go; its picture, field and tab stay, and no word of it is said to have lost its look", async () => {
+  it("a hidden piece's words and the tab among them go; its picture and field stay, and no word of it is said to have lost its look", async () => {
     const bytes = await docxBytes(body)
     const { parent, pc, b, c, n } = await cut(bytes)
     const out = await wordOut(bytes, [parent, hide(typed(pc, "ici, avec la suite.")), b, typed(c, F[2]), n])
-    expect(paras(out.body)).toEqual([`Première ligne Second line here … ${F[2]}[IMG]{field}[TAB]`, "Next paragraph."])
+    expect(paras(out.body)).toEqual([`Première ligne Second line here … ${F[2]}[IMG]{field}`, "Next paragraph."])
     expect(out.body).not.toMatch(/<w:i\/>|italic|Figure 1/)
     expect(out.result.lostLooks).toEqual([])
     expect(out.result.fidelity.emptiedFields).toBe(0)
@@ -353,7 +354,7 @@ describe("Word export — a hidden or deleted split piece is a lost line of its 
     const bytes = await docxBytes(body)
     const { parent, pc, b, c, n } = await cut(bytes)
     const out = await wordOut(bytes, [parent, b, typed(c, F[2]), n], [pc])
-    expect(paras(out.body)).toEqual([`Première ligne Second line here … ${F[2]}[IMG]{field}[TAB]`, "Next paragraph."])
+    expect(paras(out.body)).toEqual([`Première ligne Second line here … ${F[2]}[IMG]{field}`, "Next paragraph."])
     expect(out.result.lostLooks).toEqual([])
   })
 

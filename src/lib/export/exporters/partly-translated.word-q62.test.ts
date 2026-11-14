@@ -1,7 +1,8 @@
 // AQU-2552 (question 62, Sam's pick): a hidden or deleted line takes only what
 // the app shows as that line, its words and its own footnote. Everything else
-// in the paragraph stays: pictures, fields, tabs, page breaks, text boxes,
-// content controls, links and bookmarks. A wrapper whose words were all the
+// in the paragraph stays: pictures, fields, page breaks, text boxes, content
+// controls, links and bookmarks. (AQU-2552 review r9: a tab or line break
+// among its words is its text, and goes too.) A wrapper whose words were all the
 // lost line's stays, emptied of them, with its own properties. Every cell is
 // made by the importer from a small made .docx, as a real import makes it,
 // with locators or as a file imported before locators. Every check reads the
@@ -140,8 +141,10 @@ interface Kind {
   /** How the piece reads in `paras`. */
   seen: string
   /** What of it the written paragraph holds, byte for byte, when its line is
-   *  lost (a wrapper emptied of the line's words). */
-  kept: string
+   *  lost (a wrapper emptied of the line's words), or null when it is part of
+   *  the line's own text and leaves with it (AQU-2552 review r9: a tab among
+   *  its words). */
+  kept: string | null
   /** Line 2 as a reader meets it when it is written as its source. */
   reads: string
   /** What of it the paragraph holds then. */
@@ -159,7 +162,7 @@ const KINDS: Kind[] = [
   },
   {
     name: "a tab", line2: run("Second line") + `<w:r><w:tab/></w:r>` + run("here" + PAD), source: "Second line\there …",
-    seen: "[TAB]", kept: "<w:r><w:tab/></w:r>", reads: "Second line[TAB]here …", parts: ["<w:tab/>"],
+    seen: "", kept: null, reads: "Second line[TAB]here …", parts: ["<w:tab/>"],
   },
   {
     name: "a page break", line2: run("Second line") + `<w:r><w:br w:type="page"/></w:r>` + run(" here" + PAD), source: "Second line here …",
@@ -207,7 +210,8 @@ describe("Word export — a hidden or deleted line takes only its words and its 
     const { bytes, a, b, c, rest } = await linesOf(kind, false)
     const out = await wordOut(bytes, [typed(a, "Un."), hide(typed(b, "Deux.")), typed(c, "Trois."), ...rest])
     expect(paras(out.body)[0]).toBe(`Un. Trois.${kind.seen}`)
-    expect(firstPara(out.body)).toContain(kind.kept)
+    if (kind.kept === null) expect(firstPara(out.body)).not.toContain(kind.parts[0])
+    else expect(firstPara(out.body)).toContain(kind.kept)
     expect(out.body).not.toMatch(/Second|links here|Deux/)
     expect(paras(out.body).at(-1)).toBe("Next paragraph.")
     // Nothing is said about what the export left out on purpose.
@@ -220,7 +224,8 @@ describe("Word export — a hidden or deleted line takes only its words and its 
     const { bytes, a, b, c, rest } = await linesOf(kind, false)
     const out = await wordOut(bytes, [typed(a, "Un."), typed(c, "Trois."), ...rest], [b])
     expect(paras(out.body)[0]).toBe(`Un. Trois.${kind.seen}`)
-    expect(firstPara(out.body)).toContain(kind.kept)
+    if (kind.kept === null) expect(firstPara(out.body)).not.toContain(kind.parts[0])
+    else expect(firstPara(out.body)).toContain(kind.kept)
     expect(out.body).not.toMatch(/Second|links here/)
     expect(out.result.lostLooks).toEqual([])
     expect(out.result.fidelity.emptiedFields).toBe(0)
@@ -245,7 +250,8 @@ describe("Word export — a hidden or deleted line takes only its words and its 
     const { bytes, a, b, c, rest } = await linesOf(kind, true)
     const out = await wordOut(bytes, [typed(a, "Un."), typed(c, "Trois."), ...rest], [b])
     expect(paras(out.body)[0]).toBe(`Un. Trois.${kind.seen}`)
-    expect(firstPara(out.body)).toContain(kind.kept)
+    if (kind.kept === null) expect(firstPara(out.body)).not.toContain(kind.parts[0])
+    else expect(firstPara(out.body)).toContain(kind.kept)
     expect(out.body).not.toMatch(/Second|links here/)
   })
 
@@ -270,9 +276,46 @@ describe("Word export — a lost line's tab never turns up in another line (AQU-
     expect(b.original.replaceAll(PAD.trim(), "…")).toBe("Praise him …\tAmen.")
     const rest = cells.filter((c) => c !== b)
     for (const out of [await wordOut(bytes, [rest[0], hide(b), ...rest.slice(1)]), await wordOut(bytes, rest, [b])]) {
-      const first = paras(out.body)[0]
-      expect(first.startsWith("Glory to God … Amen. Next line here …")).toBe(true)
-      expect(first.split("[TAB]").length - 1).toBeLessThanOrEqual(1)
+      expect(paras(out.body)[0]).toBe("Glory to God … Amen. Next line here …")
     }
+  })
+})
+// AQU-2552 (review r9): one rule. A hidden or deleted line takes its own
+// text, with any tab or line break inside that text, and its own footnote;
+// everything else stays exactly where it was, at the boundary after the
+// remaining line before it. A paragraph leaves only when nothing in it
+// remains.
+describe("Word export — what a lost line owns is its own text range and its footnote (AQU-2552, review r9)", () => {
+  /** A paragraph of three lines, line 2 as given, and the next paragraph. */
+  async function threeLines(line2: string, legacy = false) {
+    const bytes = await docxBytes(para(run(L1 + " ") + line2 + run(" " + L3)) + NEXT)
+    const cells = await importCells(bytes, legacy)
+    const at = (text: string) => cells.find((c) => c.original.startsWith(text))!
+    const [a, b, c] = [at("First line"), at("Second"), at("Third line")]
+    return { bytes, a, b, c, rest: cells.filter((cell) => cell !== a && cell !== b && cell !== c) }
+  }
+  /** Line 2 lost every way: hidden or deleted, its neighbours translated or not. */
+  async function eachLoss(line2: string, check: (out: Out, translated: boolean) => void) {
+    const { bytes, a, b, c, rest } = await threeLines(line2)
+    check(await wordOut(bytes, [typed(a, "Un."), hide(typed(b, "Deux.")), typed(c, "Trois."), ...rest]), true)
+    check(await wordOut(bytes, [typed(a, "Un."), typed(c, "Trois."), ...rest], [b]), true)
+    check(await wordOut(bytes, [a, hide(b), c, ...rest]), false)
+    check(await wordOut(bytes, [a, c, ...rest], [b]), false)
+  }
+  const remaining = (translated: boolean) => (translated ? "Un. Trois." : "First line here … Third line here …")
+
+  // R4: a tab or line break inside a lost line's words is part of its text.
+  it.each([
+    ["a tab in a run of its own", run("Second line") + `<w:r><w:tab/></w:r>` + run("here" + PAD), "Second line\there …"],
+    ["a tab sharing a run with words", `<w:r><w:t>Second</w:t><w:tab/><w:t xml:space="preserve">line here${PAD}</w:t></w:r>`, "Second\tline here …"],
+    ["a line break sharing a run with words", `<w:r><w:t>Second line</w:t><w:br/><w:t xml:space="preserve">here${PAD}</w:t></w:r>`, "Second line\nhere …"],
+    ["a line break in a run of its own", run("Second line") + `<w:r><w:br/></w:r>` + run("here" + PAD), "Second line\nhere …"],
+  ])("%s inside a lost line's words leaves with them", async (_, line2, source) => {
+    const { b } = await threeLines(line2)
+    expect(b.original.replaceAll(PAD.trim(), "…")).toBe(source)
+    await eachLoss(line2, (out, translated) => {
+      expect(paras(out.body)[0]).toBe(remaining(translated))
+      expect(firstPara(out.body)).not.toMatch(/<w:tab\/>|<w:br\/>/)
+    })
   })
 })

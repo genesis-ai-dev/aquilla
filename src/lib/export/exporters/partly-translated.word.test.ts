@@ -178,8 +178,9 @@ describe("Word export — a line's footnote is that line's own (AQU-2552, review
 })
 
 // AQU-2552 (question 62): this replaces review r6's "a hidden or deleted
-// line's pictures, fields and tabs leave with it".
-describe("Word export — a hidden or deleted line's words go; its pictures, fields, tabs and links stay (AQU-2552, question 62)", () => {
+// line's pictures, fields and tabs leave with it". AQU-2552 (review r9): a
+// tab among a lost line's words is its own text, and goes with them.
+describe("Word export — a hidden or deleted line's words, and a tab among them, go; its pictures, fields and links stay (AQU-2552, question 62)", () => {
   const next = para(run("Next paragraph."))
   const italic = "<w:rPr><w:i/></w:rPr>"
   /** Line 2 of three, with this in its middle. */
@@ -188,7 +189,7 @@ describe("Word export — a hidden or deleted line's words go; its pictures, fie
   const shapes: [string, string, string, string][] = [
     ["a picture", pictureRun, "[picture]", pictureRun],
     ["a figure-number field", run(" shows figure ") + complexField("SEQ Figure \\* ARABIC", "1") + run(" and"), "{field}", "SEQ Figure"],
-    ["a tab", "<w:r><w:tab/></w:r>", "\t", "<w:r><w:tab/></w:r>"],
+    ["a tab", "<w:r><w:tab/></w:r>", "", ""],
     // An italic word is words only: they go, and nothing is said of their look.
     ["an italic word", run(" has an ") + run("italic", italic) + run(" word and"), "", ""],
     // A link its words filled stays, emptied of them.
@@ -203,7 +204,7 @@ describe("Word export — a hidden or deleted line's words go; its pictures, fie
     const out = await exportAsDialog(body, undefined, cells)
     expect(firstParagraph(out.xml)).toBe(`${T1} ${T3}${seen}`)
     expect(out.xml).toContain(kept)
-    expect(out.xml).not.toMatch(/The second line|links somewhere|italic/)
+    expect(out.xml).not.toMatch(/The second line|links somewhere|italic|<w:tab\/>/)
     // Nothing is said about words the export left out on purpose.
     expect(out.result.lostLooks).toEqual([])
     expect(out.result.fidelity.emptiedFields).toBe(0)
@@ -217,7 +218,7 @@ describe("Word export — a hidden or deleted line's words go; its pictures, fie
     const out = await exportAsDialog(body, undefined, all.filter((cell) => cell.id !== "c1-2"), deleted)
     expect(firstParagraph(out.xml)).toBe(`${T1} ${T3}${seen}`)
     expect(out.xml).toContain(kept)
-    expect(out.xml).not.toMatch(/The second line|links somewhere|italic/)
+    expect(out.xml).not.toMatch(/The second line|links somewhere|italic|<w:tab\/>/)
     expect(out.result.lostLooks).toEqual([])
   })
 

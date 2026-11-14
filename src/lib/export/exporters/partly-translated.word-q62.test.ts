@@ -539,6 +539,26 @@ describe("Word export — what a lost line owns is its own text range and its fo
     }
   })
 
+  it("a paragraph whose lines are all lost leaves when what remains is nothing a reader sees: hidden text, a comment's marks, a tracked deletion", async () => {
+    for (const body of [
+      para(run("Only line here.") + run(" secret", "<w:vanish/>")),
+      para(`<w:commentRangeStart w:id="3"/>` + run("Only line here.") + `<w:commentRangeEnd w:id="3"/><w:r><w:commentReference w:id="3"/></w:r>`),
+      para(run("Only line here.") + `<w:del w:id="9" w:author="a" w:date="2020-01-01T00:00:00Z"><w:r><w:delText>old</w:delText></w:r></w:del>`),
+    ]) {
+      for (const out of await allLost(body)) {
+        expect(paras(out.body)).toEqual(["Next paragraph."])
+        expect(out.result.removed).toBe(1)
+      }
+    }
+  })
+
+  it("a paragraph whose lines are all lost keeps its section break", async () => {
+    for (const out of await allLost(`<w:p><w:pPr><w:sectPr><w:type w:val="nextPage"/></w:sectPr></w:pPr>${run("Only line here.")}</w:p>`)) {
+      expect(out.body).toContain(`<w:p><w:pPr><w:sectPr><w:type w:val="nextPage"/></w:sectPr></w:pPr></w:p>`)
+      expect(out.body).not.toContain("Only line")
+    }
+  })
+
   // R7: the structure check flags a link with no run again; only a link this
   // export emptied on purpose (its words were all a lost line's) is exempt,
   // named by its start tag.

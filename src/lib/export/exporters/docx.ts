@@ -575,7 +575,8 @@ export async function exportDocx(
     const rest = rebuildParagraphIn(part, span, all)
     if (rest === null) return null
     const p = parseXmlLite(rest.xml).children.find(isElement)
-    return p && holdsSomething(p) ? rest.xml : null
+    const hidden = (run: XmlElement) => walkContext.isHiddenRun?.(run, p!) ?? false
+    return p && holdsSomething(p, hidden) ? rest.xml : null
   }
 
   function rebuildParagraph(span: DocxParagraphSpan, translation: ParagraphTranslation, counted: boolean): string | null {
@@ -961,26 +962,30 @@ function rebuildFootnotes(
   return out + footnotesXml.slice(cursor)
 }
 
-/** AQU-2552 (review r9): what a paragraph without its words holds that is
- *  nothing: properties, whitespace, and marks of no width (a bookmark, a
- *  comment range, a proofing mark, where a page last broke). A run or a
+/** AQU-2552 (review r9): what a paragraph without its words holds that a
+ *  reader of the document does not see: properties, whitespace, marks of no
+ *  width (a bookmark, a comment's range and reference, a proofing mark, where
+ *  a page last broke), text hidden in Word and a tracked deletion. A run or a
  *  wrapper (a link, a content control…) holding only these is nothing too.
- *  Anything else (a picture, a text box, a field, a page break, hidden text)
+ *  Anything else (a picture, a text box, a field, a page or section break)
  *  is something. */
 const NOTHING = new Set([
-  "w:pPr", "w:rPr", "w:sdtPr", "w:sdtEndPr", "w:smartTagPr", "w:customXmlPr", "w:tab", "w:cr", "w:lastRenderedPageBreak",
-  "w:bookmarkStart", "w:bookmarkEnd", "w:commentRangeStart", "w:commentRangeEnd", "w:proofErr", "w:permStart", "w:permEnd",
-  "w:moveFromRangeStart", "w:moveFromRangeEnd", "w:moveToRangeStart", "w:moveToRangeEnd",
+  "w:rPr", "w:sdtPr", "w:sdtEndPr", "w:smartTagPr", "w:customXmlPr", "w:tab", "w:cr", "w:lastRenderedPageBreak",
+  "w:bookmarkStart", "w:bookmarkEnd", "w:commentRangeStart", "w:commentRangeEnd", "w:commentReference", "w:proofErr",
+  "w:permStart", "w:permEnd", "w:moveFromRangeStart", "w:moveFromRangeEnd", "w:moveToRangeStart", "w:moveToRangeEnd", "w:del",
 ])
 const HOLDERS = new Set(["w:r", "w:hyperlink", "w:smartTag", "w:customXml", "w:sdt", "w:sdtContent", "w:ins", "w:moveTo", "w:dir", "w:bdo"])
 
-function holdsSomething(el: XmlElement): boolean {
+function holdsSomething(el: XmlElement, hidden: (run: XmlElement) => boolean): boolean {
   return el.children.some((child) => {
     if (!isElement(child) || NOTHING.has(child.tagName)) return false
+    // A section break ends a section; the paragraph carries it.
+    if (child.tagName === "w:pPr") return child.children.some((c) => isElement(c) && c.tagName === "w:sectPr")
+    if (child.tagName === "w:r" && hidden(child)) return false
     if (child.tagName === "w:t") return /\S/.test(textContent(child))
     // A line break is whitespace; a page or column break is not.
     if (child.tagName === "w:br") return /^(page|column)$/.test(getAttribute(child, "w:type") ?? "")
-    return HOLDERS.has(child.tagName) ? holdsSomething(child) : true
+    return HOLDERS.has(child.tagName) ? holdsSomething(child, hidden) : true
   })
 }
 

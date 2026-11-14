@@ -1102,6 +1102,12 @@ export const importExport = defineNamespace({
       "re-exporting it as mp3 or wav.",
     "importExport.errors.notAParatextProject":
       "That doesn't look like a Paratext project — no Settings.xml (or .ssf) with USFM books was found.",
+    // AQU-2551: a PDF the import refuses (question 56). Never sent to the AI
+    // sandbox, which cannot do better on these.
+    "importExport.errors.pdfScanned": "This PDF is a scanned image. It has no text to import.",
+    "importExport.errors.pdfEmpty": "This PDF has no text.",
+    "importExport.errors.pdfPassword": "This PDF is password-protected. Remove the password and import it again.",
+    "importExport.errors.pdfUnreadable": "This file could not be read as a PDF.",
 
     // — Import preview notices: src/lib/import.ts — non-fatal, shown in the
     //   PreviewPanel's "Review before importing" list alongside the row count
@@ -1120,6 +1126,11 @@ export const importExport = defineNamespace({
     "importExport.notices.subtitleCuesUnreadable": plural({
       one: "{count} cue time could not be read, so its wording is not in this import.",
       other: "{count} cue times could not be read, so their wording is not in this import.",
+    }),
+    // AQU-2551: a PDF with some scanned pages imports its text pages.
+    "importExport.notices.pdfImageOnlyPages": plural({
+      one: "Page {pages} is a scanned image with no text, so it is not in this import.",
+      other: "Pages {pages} are scanned images with no text, so they are not in this import.",
     }),
 
     // — Frames written as hundredths (AQU-2197): src/components/import/
@@ -1740,6 +1751,14 @@ export const importExport = defineNamespace({
         placeholders: {
           count:
             "Number of cue timestamp lines that produced no cue; also governs the plural form.",
+        },
+      },
+      "importExport.notices.pdfImageOnlyPages": {
+        description:
+          "Preview notice after importing a PDF in which some pages are scanned images with no text. Their text pages are imported; these pages are not. Count-governed.",
+        placeholders: {
+          count: "Number of image-only pages; also governs the plural form.",
+          pages: "The page numbers, comma-separated (\"2, 5, 9\") — not translated.",
         },
       },
 
@@ -2865,6 +2884,18 @@ export const importExport = defineNamespace({
       "importExport.errors.emptyFile": {
         description: "Thrown when a selected file has zero bytes.",
         placeholders: { fileName: "Name of the empty file — not translated." },
+      },
+      "importExport.errors.pdfScanned": {
+        description: "Shown when a PDF dropped on import holds only scanned page images, so there is no text to import. Aquilla does not read text out of images.",
+      },
+      "importExport.errors.pdfEmpty": {
+        description: "Shown when a PDF dropped on import has no text and no images: an empty document.",
+      },
+      "importExport.errors.pdfPassword": {
+        description: "Shown when a PDF dropped on import needs a password to open. The person removes the password (in the program that made it) and imports it again.",
+      },
+      "importExport.errors.pdfUnreadable": {
+        description: "Shown when a file named .pdf could not be opened as a PDF (damaged, or not a PDF).",
       },
       "importExport.errors.unsupportedFileTypeSignIn": {
         description: "Thrown when a file's format can't be detected and the user isn't signed in for AI-assisted detection.",

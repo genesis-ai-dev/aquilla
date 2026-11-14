@@ -7,6 +7,7 @@ import { requestAiModelConsent, WHISPER_MODEL } from "@/lib/audio/ai-consent"
 import { LocalModelsSection } from "./LocalModelsSection"
 
 const prefetch = vi.fn(async (..._args: unknown[]) => undefined)
+const statuses = new Map<string, { kind: string }>()
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { username: "alice" } }),
 }))
@@ -14,9 +15,10 @@ vi.mock("@/lib/audio/prefetch", () => ({
   hydratePrefetchStatus: vi.fn(async () => undefined),
   prefetchAiModels: (...args: unknown[]) => prefetch(...args),
   clearPrefetchStatus: vi.fn(),
-  useModelStatus: () => ({ kind: "idle" }),
+  useModelStatus: (id: string) => statuses.get(id) ?? { kind: "idle" },
+  modelWeightsOnDevice: (status: { kind: string }) => status.kind === "ready" || status.kind === "loading",
 }))
-beforeEach(() => { localStorage.clear(); prefetch.mockClear() })
+beforeEach(() => { localStorage.clear(); prefetch.mockClear(); statuses.clear() })
 const content = () => <I18nProvider><LocalModelsSection /></I18nProvider>
 it("defaults to hosted transcription without downloading a model", () => {
   render(content())
@@ -41,6 +43,12 @@ it("persists the local choice for this account and lets the user load Whisper", 
     .toBeChecked()
   await user.click(screen.getByRole("radio", { name: /Aquilla hosted/ }))
   expect(getTranscriptionProvider("alice")).toBe("hosted")
+})
+it("shows a single loading spinner, on the action button", () => {
+  statuses.set("whisper", { kind: "loading" })
+  render(content())
+  expect(screen.getAllByRole("status", { name: "Loading" })).toHaveLength(1)
+  expect(screen.getByRole("button", { name: /Loading…/ })).toBeDisabled()
 })
 it("describes Whisper with the shared consent copy", () => {
   render(content())

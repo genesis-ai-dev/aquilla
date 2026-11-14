@@ -7552,7 +7552,6 @@ export const ur: Catalog = {
   "workspace.castGutterVoice.scopeFile": "اس فائل میں ہر «{name}» سطر",
   "workspace.castGutterVoice.scopeFileCount": {"forms":{"one":"اس فائل میں ہر «{name}» سطر ({count})","other":"اس فائل میں ہر «{name}» سطر ({count})"},"countVar":"count"},
   "workspace.castGutterVoice.scopeEverywhere": "ہر قسط میں ہر «{name}» سطر",
-  "workspace.castGutterVoice.scopeNoCharacter": "اس سطر کا کوئی کردار نہیں، اس لیے آواز صرف اس سطر کے لیے ہے۔",
   "workspace.castGutterVoice.clearOneFileAtATime": "کردار ہٹانے کے لیے یہ سطر یا یہ فائل چنیں۔",
   "workspace.openWorkspace.openingProject": "منصوبہ کھل رہا ہے",
   "workspace.fileSort.lastUpdated": "آخری تازہ کاری",

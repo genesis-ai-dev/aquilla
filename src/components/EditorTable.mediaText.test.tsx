@@ -18,13 +18,12 @@ import { ROLE } from "@/lib/frontier/roles"
 
 /**
  * AQU-1068 item 5: the pencil became an entry in the source cell's ONE menu
- * (Ryder's note, relayed 2026-09-05). Reaching it is two clicks now — open the
- * menu, then pick the entry — so these helpers say that once instead of at
- * every call site. What each test asserts about the affordance is unchanged.
+ * (Ryder's note, relayed 2026-09-05). Reaching it is a right-click on the
+ * source cell, then the entry.
  */
 const openCellMenu = async () => {
-  const trigger = (await screen.findAllByRole("button", { name: "Cell actions" }))[0]
-  fireEvent.click(trigger)
+  const trigger = (await screen.findAllByLabelText("Source text"))[0]
+  fireEvent.contextMenu(trigger)
   return screen.findByTestId("cell-menu-edit-source")
 }
 /** The entry, or null when this person is not offered one at all. */

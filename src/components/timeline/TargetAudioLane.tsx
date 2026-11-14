@@ -12,6 +12,7 @@
 // don't) — with an outward chevron on the cut; hover restores the true length.
 
 import { useEffect, useRef, useState } from "react"
+import { useTimelineOriginPx } from "./timeline-origin"
 import type { ReactNode } from "react"
 import { AudioLines, AudioWaveform, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Ellipsis, GraduationCap, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
 import {
@@ -24,9 +25,10 @@ import {
 import { isVoiceChangedAudioId, type ChangeVoiceBlocker } from "@/lib/audio/change-voice"
 import { cn } from "@/lib/utils"
 import { toast } from "@/components/ui/toast"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { useVoicingAs } from "@/lib/audio/voicing-as"
-import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
+import { MISSING_AUDIO_MESSAGE, useQueueStateValue } from "@/lib/audio/play-queue"
 import { TimelineSlotButton } from "./TimelineSlotButton"
 import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
 import { isVisible, secToPx, pxToSec, chipRadiusPx } from "@/lib/timeline/scale"
@@ -338,7 +340,7 @@ function TargetAudioChip({
   audioFirst,
   pxPerSec,
   selected,
-  loading,
+  loading: loadingProp,
   missing,
   editable,
   snap,
@@ -437,7 +439,12 @@ function TargetAudioChip({
   currentUsername?: string
 }) {
   const t = useT()
+  const originPx = useTimelineOriginPx()
   const { cell } = chip.item
+  // Read here rather than handed down: the line being waited on changes as
+  // playback moves, and a prop from the editor redrew every lane each time.
+  const waitedOn = useQueueStateValue((state) => state.kind === "loading" && state.cellId === cell.id)
+  const loading = loadingProp || waitedOn
   const { geom, section } = chip
   // AQU-2252: the rules FOLLOWING THE RECORDINGS gives a take — its line grows
   // to hold it, so it never runs long and moves only inside its line. Every
@@ -1303,7 +1310,7 @@ function TargetAudioChip({
         // exactly as they always did. Rev 2 had to put the fill in this style
         // object and gate it on `overflow === "none"`, because an inline style
         // beats every class; that gate is gone with the style.
-        left: `${secToPx(paintedStart, pxPerSec)}px`,
+        left: `${secToPx(paintedStart, pxPerSec) - originPx}px`,
         width: `${paintedPx}px`,
         // Same rule as every other chip, its own smaller cap (was rounded-md).
         // AQU-2235: 4px on a clip under 24px tall (board 51).
@@ -1345,7 +1352,7 @@ function TargetAudioChip({
         // for the informational src/tgt end difference.
         overflow === "overlap" &&
           "border-red-500 ring-1 ring-red-500/70 bg-red-100/80 text-red-800 dark:bg-red-950/70 dark:text-red-300",
-        blade ? "cursor-crosshair" : canMove && "cursor-grab active:cursor-grabbing",
+        blade ? "cursor-crosshair" : canMove && "cursor-default",
         "hover:brightness-105",
         selected === "take" && "ring-2 ring-sky-500",
         selected === "line" && "ring-1 ring-sky-500/50",
@@ -1399,7 +1406,7 @@ function TargetAudioChip({
           onPointerDown={(e) => beginDrag("resize-l", e)}
           // AQU-2235: below the name bar, which is the move handle.
           style={hasBar ? { top: barH } : undefined}
-          className="absolute inset-y-0 left-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 transition-opacity group-hover/chip:opacity-100 bg-background/70"
+          className="absolute inset-y-0 left-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 group-hover/chip:opacity-100 bg-background/70"
         >
           <span className="h-4 w-0.5 rounded bg-current" />
         </span>
@@ -1587,10 +1594,10 @@ function TargetAudioChip({
               )}
             >
               {barPlay && preview && (
+                <AppTooltip content={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}>
                 <span
                   role="button"
                   tabIndex={0}
-                  title={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
                   aria-label={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
                   aria-busy={priming || undefined}
                   data-testid={`tl-target-${testKey}-play`}
@@ -1609,12 +1616,14 @@ function TargetAudioChip({
                     ? <Spinner className="h-2.5 w-2.5" />
                     : previewing ? <Square className="h-2 w-2 fill-current" /> : <Play className="h-2.5 w-2.5 fill-current" />}
                 </span>
+                </AppTooltip>
               )}
               {barRecord && onOpenRecording && (
+                <AppTooltip content={t("workspace.targetAudioLane.recordAudio")}>
                 <span
                   role="button"
                   tabIndex={0}
-                  title={t("workspace.targetAudioLane.recordAudio")}
+                  aria-label={t("workspace.targetAudioLane.recordAudio")}
                   data-testid={`tl-target-${testKey}-record`}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
@@ -1634,12 +1643,13 @@ function TargetAudioChip({
                 >
                   <Mic className="h-2.5 w-2.5" />
                 </span>
+                </AppTooltip>
               )}
               {barMore && (
+                <AppTooltip content={t("editor.rail.moreActions")}>
                 <span
                   role="button"
                   tabIndex={0}
-                  title={t("editor.rail.moreActions")}
                   aria-label={t("editor.rail.moreActions")}
                   aria-haspopup="menu"
                   data-testid={`tl-target-${testKey}-more`}
@@ -1652,15 +1662,18 @@ function TargetAudioChip({
                 >
                   <Ellipsis className="h-[11px] w-[11px]" />
                 </span>
+                </AppTooltip>
               )}
             </span>
           )}
           {barCheck && validatedState && (
-            <span
-              data-testid={`tl-target-${testKey}-validated`}
-              title={validatedState === "full"
+            <AppTooltip
+              content={validatedState === "full"
                 ? t("workspace.targetAudioLane.takeValidated")
                 : t("workspace.targetAudioLane.takeValidatedByYou")}
+            >
+            <span
+              data-testid={`tl-target-${testKey}-validated`}
               aria-label={validatedState === "full"
                 ? t("workspace.targetAudioLane.takeValidated")
                 : t("workspace.targetAudioLane.takeValidatedByYou")}
@@ -1678,6 +1691,7 @@ function TargetAudioChip({
                 ? <CheckCheck className="h-2.5 w-2.5" strokeWidth={3} />
                 : <Check className="h-2.5 w-2.5" strokeWidth={3} />}
             </span>
+            </AppTooltip>
           )}
         </span>
       )}
@@ -1758,7 +1772,7 @@ function TargetAudioChip({
           data-testid={`tl-target-${testKey}-handle-r`}
           onPointerDown={(e) => beginDrag("resize-r", e)}
           style={hasBar ? { top: barH } : undefined}
-          className="absolute inset-y-0 right-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 transition-opacity group-hover/chip:opacity-100 bg-background/70"
+          className="absolute inset-y-0 right-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 group-hover/chip:opacity-100 bg-background/70"
         >
           <span className="h-4 w-0.5 rounded bg-current" />
         </span>
@@ -1987,6 +2001,7 @@ export function TargetAudioLane({
   muted = false,
 }: TargetAudioLaneProps) {
   const t = useT()
+  const originPx = useTimelineOriginPx()
   const audioFirst = layout?.mode === "audioFirst"
   // Resolve every chip first — overflow needs the NEXT chip's start, and
   // snapping needs neighbors' effective edges.
@@ -2204,7 +2219,7 @@ export function TargetAudioLane({
           <div
             key={`addrec-${span.startSec}`}
             data-testid={`tl-target-add-${span.startSec}`}
-            style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+            style={{ left: `${leftPx - originPx}px`, width: `${widthPx}px` }}
             className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
             {...slotHoverProps(`add-${span.startSec}`)}
           >
@@ -2235,7 +2250,7 @@ export function TargetAudioLane({
         <div
           key={`empty-${cell.id}`}
           data-testid={`tl-target-empty-${cell.id}`}
-          style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+          style={{ left: `${leftPx - originPx}px`, width: `${widthPx}px` }}
           className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
           {...slotHoverProps(`empty-${cell.id}`)}
         >

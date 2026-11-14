@@ -114,7 +114,12 @@ export function EmailChangeForm({
       <p className="text-sm text-muted-foreground">
         {t("auth.emailChange.intro")}
       </p>
-      {googleLinked && <p className="text-sm" role="note">{t("auth.emailChange.unlinkWarning")}</p>}
+      {googleLinked && (
+        <div role="note" className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+          <p className="font-semibold">{t("auth.emailChange.unlinkWarningTitle")}</p>
+          <p className="mt-1">{t("auth.emailChange.unlinkWarning")}</p>
+        </div>
+      )}
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}

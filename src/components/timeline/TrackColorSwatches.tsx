@@ -25,7 +25,7 @@ export function TrackColorSwatches({ onPick }: { onPick: (hueId: string) => void
           value={hue.hex}
           aria-label={t(hue.labelKey as Parameters<typeof t>[0])}
           onClick={() => onPick(hue.id)}
-          className="group/swatch grid size-6 cursor-pointer place-items-center rounded-md outline-none data-highlighted:bg-accent"
+          className="group/swatch grid size-6 place-items-center rounded-md outline-none data-highlighted:bg-accent"
         >
           <span
             aria-hidden

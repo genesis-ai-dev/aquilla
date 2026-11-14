@@ -373,6 +373,34 @@ const TOOL_SPECS: McpToolSpec[] = [
     },
   },
   {
+    name: 'get_help',
+    description:
+      'Read the public Aquilla help site (https://help.aquilla.app), the user guide to the app. ' +
+      'Use it when the user asks how to do something in Aquilla or where a control or setting is ' +
+      'in the interface, for example "where is Export?" or "what can a Viewer do?". This is app ' +
+      'help, not API help: for API commands use describe_command, and for API workflows use ' +
+      'get_skill. Args: page (optional). Omit page for the index ({ site, pages: [{ path, title, ' +
+      'description, section, url }] }). Pass one page path ("/export/", "export" or a full ' +
+      'help.aquilla.app URL) for its Markdown ({ path, title, url, markdown }). Start with the ' +
+      'index, fetch the pages that answer the question, and give the user each page\'s url so they ' +
+      'can read it. The whole site is also in one file at https://help.aquilla.app/llms-full.txt ' +
+      'if you prefer to read everything. An unknown page returns a not_found tool error; a help ' +
+      'site outage returns a job_failed tool error. Reads no project data and needs no projectId. ' +
+      '(REST: GET /api/v1/external/help and GET /api/v1/external/help/:page.)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page: {
+          type: 'string',
+          description:
+            'Help page path or URL (e.g. "/export/", "export", "https://help.aquilla.app/export/"). ' +
+            'Omit for the index of all pages.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'search_project',
     description:
       'Full-text search a project\'s cells (the read/grep primitive). Returns matching ' +
@@ -1628,6 +1656,7 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   regenerate_brief_summary: 'stage',
   describe_command: 'read',
   get_skill: 'read',
+  get_help: 'read',
   search_project: 'read',
   find_similar_cells: 'read',
   transcribe_audio: 'spend',

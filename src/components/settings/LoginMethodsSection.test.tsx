@@ -122,3 +122,22 @@ it("keeps a retry available and does not trust stale password status after a ref
   expect(screen.getByRole("button", { name: "auth.methods.setPassword" })).toBeDisabled()
   expect(screen.getByRole("button", { name: "auth.methods.refresh" })).toBeEnabled()
 })
+
+it("closes the setup message when a password is set in another tab", async () => {
+  mocks.request.mockResolvedValueOnce({ email: "alice@example.com", password: false, google: true, google_available: true })
+    .mockResolvedValueOnce({ email: "alice@example.com", password: true, google: true, google_available: true })
+  render(<MemoryRouter><LoginMethodsSection /></MemoryRouter>)
+  fireEvent.click(await screen.findByRole("button", { name: "auth.methods.setPassword" }))
+  expect(screen.getByText("email-reset")).toBeVisible()
+  fireEvent.focus(window)
+  expect(await screen.findByText("auth.methods.passwordSet")).toBeVisible()
+  expect(screen.queryByText("email-reset")).toBeNull()
+})
+it("keeps an intentionally opened password reset panel when the password was already set", async () => {
+  mocks.request.mockResolvedValue({ email: "alice@example.com", password: true, google: true, google_available: true })
+  render(<MemoryRouter><LoginMethodsSection /></MemoryRouter>)
+  fireEvent.click(await screen.findByRole("button", { name: "auth.methods.resetPassword" }))
+  fireEvent.focus(window)
+  await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(2))
+  expect(screen.getByText("email-reset")).toBeVisible()
+})

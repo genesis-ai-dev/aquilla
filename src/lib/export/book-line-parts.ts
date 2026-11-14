@@ -14,16 +14,27 @@
 // times (a timed file's exports are not a book's), when the take's length is
 // not known (there is no honest layout), or when the export ships a different
 // take from the one playback plays.
+//
+// AQU-2432 (Sam, Nov 6, rule 7): EXPORTS MIX AN OVERLAP EXACTLY AS YOU HEAR
+// IT. Following the recordings a take can be dragged earlier, over the end of
+// the take before it — a piece over the piece in front (`overlap` below), or a
+// line's take over the end of the line before it (`bookLineOverlaps`) — and
+// playback plays both, at full volume. So the exports lay it there and mix
+// the two (lib/export/overlap-mix).
 
 import type { CellData } from "@/hooks/useCells"
 import { hasTiming } from "@/lib/timeline/derive"
-import { buildProgramme } from "@/lib/timeline/programme"
+import { buildProgramme, programmeLines } from "@/lib/timeline/programme"
 import { MIN_TARGET_LEN_SEC } from "@/lib/timeline/lane-timing"
+import { standInEstimator } from "@/lib/timeline/stand-in"
 import { resolveTargetPieces } from "@/lib/audio/track-audio"
 
 export type BookLinePart =
   /** Silence someone dragged open, in ms. */
   | { kind: "silence"; ms: number }
+  /** AQU-2432: the take part after this starts this long (ms) before the end
+   *  of the take part before it, and the two are mixed there. */
+  | { kind: "overlap"; ms: number }
   /** A take, or one piece of a cut take: the attachment, with its own trims. */
   | { kind: "take"; attachmentId: string }
 
@@ -49,7 +60,47 @@ export function bookLineParts(cell: CellData, takeId: string): BookLinePart[] | 
     ...silence(slot.targetLeadSec),
     ...pieces.flatMap((p): BookLinePart[] => [
       ...silence("gapBeforeSec" in p ? p.gapBeforeSec : undefined),
+      ...overlap("overlapBeforeSec" in p ? p.overlapBeforeSec : undefined),
       { kind: "take", attachmentId: p.audioId },
     ]),
   ]
+}
+
+function overlap(sec: number | undefined): BookLinePart[] {
+  const ms = Math.round((sec ?? 0) * 100000) / 100
+  return ms >= MIN_SILENCE_MS ? [{ kind: "overlap", ms }] : []
+}
+
+/** AQU-2432: a book's line that starts before the line before it has ended. */
+export interface BookLineOverlap {
+  /** The line it sounds over the end of — the line before it that has a take. */
+  afterCellId: string
+  /** How long before that line's audio ends this line's starts, in ms. */
+  ms: number
+}
+
+/**
+ * AQU-2432 (Sam, Nov 6): each line of a book whose audio starts before the
+ * audio of the line before it has ended — its take dragged earlier, over the
+ * end of that line's take — by how much. The book laid out as playback lays
+ * it out (`programmeLines` + `buildProgramme`, with its stand-ins), on the
+ * main track only: what these exports ship. A line's audio starts at its
+ * line's start (the pause before its take, if any, is part of it — see
+ * `bookLineParts`) and ends where its take does.
+ *
+ * Empty for a file with times: a timed file's exports are not a book's.
+ */
+export function bookLineOverlaps(cells: readonly CellData[]): Map<string, BookLineOverlap> {
+  const out = new Map<string, BookLineOverlap>()
+  const { lines, untimed } = programmeLines(cells)
+  if (!untimed) return out
+  const prog = buildProgramme(lines, { standInLenSec: standInEstimator(lines), layerSlots: [] })
+  let prev: { cellId: string; endSec: number } | null = null
+  for (const slot of prog.slots) {
+    if (!slot.targetWindow) continue
+    const ms = prev ? Math.round((prev.endSec - slot.startSec) * 100000) / 100 : 0
+    if (prev && ms >= MIN_SILENCE_MS) out.set(slot.cellId, { afterCellId: prev.cellId, ms })
+    prev = { cellId: slot.cellId, endSec: slot.startSec + (slot.targetLeadSec ?? 0) + slot.targetLenSec }
+  }
+  return out
 }

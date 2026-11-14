@@ -351,11 +351,12 @@ type LedgerState = "decides" | "delegates" | "undecided"
  * next pass reads them before re-deciding anything.
  */
 const LEDGER: Record<string, LedgerState> = {
-  // ── decides (15) ───────────────────────────────────────────────────────
+  // ── decides (16) ───────────────────────────────────────────────────────
   "_integration-helpers.ts": "decides", // OPS-49, for all three routers below
   "access-links.ts": "decides",
   "agent-connect.ts": "decides",
   "changeset-approvals.ts": "decides", // OPS-47
+  "email-change.ts": "decides", // AQU-957: moving an admin email grant requires active elevation; bootstrap grants require operator coordination.
   "credentials.ts": "decides", // OPS-44 (a PAT outlives the session)
   "invites.ts": "decides",
   "mcp-oauth.ts": "decides", // AQU-2504 (connector support access, a cross-tenant READ grant on a long-lived token)
@@ -504,8 +505,9 @@ describe("the platform-elevation census is an assertion, not a document (OPS-52)
     // where connector support access is granted, so it gates on
     // hasActiveElevation at consent rather than joining the undecided queue;
     // 18 of 51.
+    // 11-12: AQU-957 adds email-change.ts with elevation before moving admin grants; 19 of 52.
     expect({ decides: tally("decides"), delegates: tally("delegates"), undecided: tally("undecided") })
-      .toEqual({ decides: 15, delegates: 3, undecided: 33 })
+      .toEqual({ decides: 16, delegates: 3, undecided: 33 })
     expect(tally("decides") + tally("delegates") + tally("undecided")).toBe(
       Object.keys(LEDGER).length,
     )

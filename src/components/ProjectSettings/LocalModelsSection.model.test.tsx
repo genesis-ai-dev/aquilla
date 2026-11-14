@@ -44,6 +44,7 @@ vi.mock("@/lib/audio/prefetch", () => ({
   prefetchAiModels: vi.fn(),
   clearPrefetchStatus: vi.fn(),
   useModelStatus: () => ({ kind: "idle" }),
+  modelWeightsOnDevice: () => false,
 }))
 beforeEach(() => {
   localStorage.clear()

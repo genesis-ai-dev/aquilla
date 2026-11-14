@@ -2,7 +2,7 @@
 // left it" — which switches need it, and whose place belongs to whom.
 
 import { describe, expect, it } from "vitest"
-import { createViewScrollMemory, viewSwitchRebuilds } from "./view-scroll-memory"
+import { cellIdForMediaTrace, createViewScrollMemory, viewSwitchRebuilds } from "./view-scroll-memory"
 
 describe("viewSwitchRebuilds", () => {
   it("is true for every switch into or out of Transcribe", () => {
@@ -26,6 +26,25 @@ describe("viewSwitchRebuilds", () => {
     for (const lens of ["text", "audio", "transcribe"] as const) {
       expect(viewSwitchRebuilds(lens, lens)).toBe(false)
     }
+  })
+})
+
+describe("cellIdForMediaTrace", () => {
+  const at = (index: number) => (index === 40 ? "luke-5" : undefined)
+
+  it("opens Media on the row at the top of the text", () => {
+    expect(cellIdForMediaTrace("luke-5", 0, at)).toBe("luke-5")
+  })
+
+  it("does not treat an unmeasured index of 0 as the start of the file", () => {
+    // The virtualizer reports 0 when the rows above the window were never
+    // measured. Seeding that is what opened a later chapter back at chapter 1.
+    expect(cellIdForMediaTrace(null, 0, at)).toBeNull()
+    expect(cellIdForMediaTrace(null, -1, at)).toBeNull()
+  })
+
+  it("uses a later measured index when the top row cannot be read", () => {
+    expect(cellIdForMediaTrace(null, 40, at)).toBe("luke-5")
   })
 })
 

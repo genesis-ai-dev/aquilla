@@ -300,9 +300,9 @@ export async function runWhisperOnPcm(
   const requestId = `t-${++workerSeq}`
 
   // The first transcribe on a cold cache downloads the Whisper weights inside
-  // this worker. Feed that progress into the shared model-status store so the
-  // bottom-left AiModelDownloadChip lights up — same surface the onboarding
-  // prefetch uses — instead of the download being invisible outside this cell.
+  // this worker, then loads them into the ONNX session. Feed that progress
+  // into the shared model-status store so the download toast and the
+  // memory-load toast light up — same surface the onboarding prefetch uses.
   let sawDownload = false
   let settled = false
 
@@ -318,9 +318,16 @@ export async function runWhisperOnPcm(
             loaded: msg.loaded,
             total: msg.total,
           })
-          if (msg.total > 0) {
-            sawDownload = true
-            noteModelDownloading("whisper", { loaded: msg.loaded, total: msg.total, file: msg.file })
+          // "done" / "ready" carry no byte total. They still have to reach the
+          // store: done opens the memory-load toast, ready closes it.
+          if (msg.total > 0 || msg.status === "done" || msg.status === "downloaded" || msg.status === "cached" || msg.status === "ready") {
+            if (msg.status !== "ready") sawDownload = true
+            noteModelDownloading("whisper", {
+              loaded: msg.loaded,
+              total: msg.total,
+              file: msg.file,
+              status: msg.status,
+            })
           }
           return
         }

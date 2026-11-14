@@ -369,6 +369,7 @@ import {
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import { deriveTracksForFile, type TimelineTrack } from "@/lib/timeline/tracks"
 import { nextFolderName } from "@/lib/timeline/track-names"
+import { paintTrackWrites, unpaintTrackWrites, type TrackOverlays, type TrackWritePatch } from "@/lib/timeline/track-paint"
 import { applyPendingOrders, applyPendingScopes, renormaliseOrders, settledPendingOrders, settledPendingScopes, withoutPendingOrder, withPendingScopeOrders, type PendingTrackScope } from "@/lib/timeline/track-reorder"
 import { applyPendingColors, settledPendingColors, withPendingColors, withoutPendingColors } from "@/lib/timeline/track-colors"
 import { contentFileIdsOfShownTracks, folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
@@ -15594,6 +15595,43 @@ export function ProjectWorkspace() {
   )
   const paintTrackColorsRef = useRef(paintTrackColors)
   paintTrackColorsRef.current = paintTrackColors
+  /**
+   * AQU-2492: an Undo or Redo's track places, drawn before the write, through
+   * the overlays a drag and a "Move to" draw theirs in (lib/timeline/track-paint).
+   * Pressed straight after a move, the Undo reaches the server in the same
+   * batch, so the read never shows the moved place and the move's own paint
+   * would never come off. Returns what takes this paint back off.
+   */
+  const paintTrackPlaces = useCallback(
+    (changes: ReadonlyArray<{ trackId: string; patch: TrackWritePatch | null }>): (() => void) => {
+      const fileId = activeFileId
+      if (!fileId || changes.length === 0) return () => {}
+      const known = new Set(serverTracksRef.current.map((tr) => tr.id))
+      const none = { orders: new Map<string, number>(), scopes: new Map<string, PendingTrackScope>(), newTracks: [] as TimelineTrack[] }
+      type Step = (o: TrackOverlays, c: typeof changes, k: ReadonlySet<string>) => TrackOverlays
+      const apply = (step: Step) => {
+        setPendingTrackOrders((current) => {
+          const orders = step({ ...none, orders: current?.fileId === fileId ? current.orders : new Map() }, changes, known).orders
+          return orders.size === 0 ? null : { fileId, orders: new Map(orders) }
+        })
+        setPendingTrackScopes((current) => {
+          const places = step({ ...none, scopes: current?.fileId === fileId ? current.places : new Map() }, changes, known).scopes
+          return places.size === 0 ? null : { fileId, places: new Map(places) }
+        })
+        setPendingNewTracks((current) => {
+          const tracks = step({ ...none, newTracks: current?.fileId === fileId ? current.tracks : [] }, changes, known).newTracks
+          return tracks.length === 0 ? null : { fileId, tracks: [...tracks] }
+        })
+      }
+      apply(paintTrackWrites)
+      return () => {
+        if (activeFileIdRef.current === fileId) apply(unpaintTrackWrites)
+      }
+    },
+    [activeFileId],
+  )
+  const paintTrackPlacesRef = useRef(paintTrackPlaces)
+  paintTrackPlacesRef.current = paintTrackPlaces
 
   const handleSetTrackColor = useCallback(
     (updates: ReadonlyArray<{ trackId: string; color: string | null }>) => {
@@ -16578,11 +16616,15 @@ export function ProjectWorkspace() {
               ? [{ trackId: change.trackId, color: change.patch.color ?? null }]
               : [],
           )
-          const revert = paintTrackColorsRef.current(colors)
           // A "Move to" still queued saves first, as before a drag's write, so
           // the outbox holds the move before the Undo of it.
           flushQueuedTrackMoves.current()
-          return applyTrackPatches(changes as never, "Couldn't undo the track change:", revert)
+          const revertColors = paintTrackColorsRef.current(colors)
+          const revertPlaces = paintTrackPlacesRef.current(changes)
+          return applyTrackPatches(changes as never, "Couldn't undo the track change:", () => {
+            revertColors()
+            revertPlaces()
+          })
         },
         restoreTakes: async (takes) => {
           // Choosing a deleted take brings it back. Bring every one back, then

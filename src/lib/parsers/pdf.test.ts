@@ -359,6 +359,23 @@ describe("review findings: right-to-left text (Nov 14)", () => {
   /** One right-to-left line: its text, its right edge and width. */
   const rtlLine = (s: string, y: number, right: number, w: number): Piece => ({ s, x: right - w, y, w, eol: true })
 
+  it("finds paragraphs in right-to-left text by the right edge and a right indent (finding 5)", () => {
+    // first lines indented from the right margin (427 against 447), no space
+    // between paragraphs, last lines short on the left
+    expect(read([
+      rtlLine("ספר בראשית נכתב לפני שנים רבות, והוא מספר על בריאת העולם", 751, 427, 260),
+      rtlLine("ועל האבות הראשונים של העם.", 736.5, 447, 120),
+      rtlLine("בפרק הראשון נברא האור, ובפרק השני נברא האדם הראשון בגן", 722, 427, 255),
+      rtlLine("עדן.", 707.5, 447, 20),
+      rtlLine("בסוף הספר יורדים בני יעקב למצרים ושם הם גרים שנים רבות עד", 693, 427, 258),
+      rtlLine("שיצאו.", 678.5, 447, 25),
+    ])).toEqual([
+      "ספר בראשית נכתב לפני שנים רבות, והוא מספר על בריאת העולם ועל האבות הראשונים של העם.",
+      "בפרק הראשון נברא האור, ובפרק השני נברא האדם הראשון בגן עדן.",
+      "בסוף הספר יורדים בני יעקב למצרים ושם הם גרים שנים רבות עד שיצאו.",
+    ])
+  })
+
   it("keeps an English line whole around a Hebrew phrase, past pdf.js's zero-height space (finding 6)", () => {
     // pdf.js puts the space after a right-to-left run where the run started
     expect(read([

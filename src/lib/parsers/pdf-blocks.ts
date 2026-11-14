@@ -384,6 +384,10 @@ interface Line {
   prev: (PdfTextPiece & { sup: boolean }) | null
   /** The last piece that is not one of pdf.js's zero-height spaces. */
   lastReal: PdfTextPiece | null
+  /** Letters in right-to-left pieces minus the others: the line reads
+   *  right to left when positive. */
+  rtlBalance: number
+  rtl: boolean
 }
 
 // Private-use sentinels around a raised footnote number in a line.
@@ -416,7 +420,7 @@ function layoutLines(page: PdfPageContent): Line[] {
       || (!zeroSpace && jump > 3 * h && it.dir !== "rtl" && from?.dir !== "rtl")
     const sup = !!cur && !newLine && h < 0.85 * cur.h && it.y - cur.y > 0.12 * cur.h
     if (newLine || !cur) {
-      cur = { y: it.y, x: it.x, right: it.x + it.w, h, size: 0, sizeChars: new Map(), text: "", prev: null, lastReal: null }
+      cur = { y: it.y, x: it.x, right: it.x + it.w, h, size: 0, sizeChars: new Map(), text: "", prev: null, lastReal: null, rtlBalance: 0, rtl: false }
       lines.push(cur)
     } else if (!sup && cur.prev && !cur.prev.sup && cur.prev.w > 0 && it.w > 0 && gap > 0.15 * h && !/\s$/.test(cur.text) && !/^\s/.test(it.s)) {
       cur.text += " "
@@ -430,6 +434,7 @@ function layoutLines(page: PdfPageContent): Line[] {
     }
     if (sup && /^\s*\d{1,3}\s*$/.test(it.s)) { cur.text += `${MARK_OPEN}${it.s.trim()}${MARK_CLOSE}`; continue }
     cur.text += it.s
+    cur.rtlBalance += (it.dir === "rtl" ? 1 : -1) * (it.s.match(/\p{L}/gu)?.length ?? 0)
     const k = Math.round(h * 2) / 2
     cur.sizeChars.set(k, (cur.sizeChars.get(k) ?? 0) + it.s.replace(/\s/g, "").length)
   }
@@ -437,6 +442,7 @@ function layoutLines(page: PdfPageContent): Line[] {
     let best = 0, bestCount = -1
     for (const [size, count] of l.sizeChars) if (count > bestCount) { best = size; bestCount = count }
     l.size = best
+    l.rtl = l.rtlBalance > 0
     l.text = l.text.replace(/\s+/g, " ").trim()
   }
   return lines.filter((l) => l.text)
@@ -446,13 +452,21 @@ function layoutLines(page: PdfPageContent): Line[] {
 const runKey = (t: string) =>
   t.normalize("NFD").replace(/\p{M}/gu, "").replace(/[\u0001\u0002]/g, "").replace(/\d+/g, "#").replace(/\s+/g, " ").trim().toLowerCase()
 
+/** The most common value; on a tie the smallest (the outermost edge). */
 const mostCommon = (values: number[]): number | null => {
   const counts = new Map<number, number>()
   for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1)
   let best: number | null = null, bestCount = 0
-  for (const [v, c] of counts) if (c > bestCount) { best = v; bestCount = c }
+  for (const [v, c] of counts) if (c > bestCount || (c === bestCount && best !== null && v < best)) { best = v; bestCount = c }
   return best
 }
+
+/** AQU-2551 review finding 5: a line's start and end edges in its reading
+ *  direction. A right-to-left line starts at its right edge, so its edges are
+ *  measured mirrored (negated): a right indent is then an indent, and a line
+ *  that stops short on the left is short, by the same tests as left to right. */
+const lineStart = (l: Line) => (l.rtl ? -l.right : l.x)
+const lineEnd = (l: Line) => (l.rtl ? -l.x : l.right)
 
 /** A page number: digits, or a Roman numeral ("civil" is not one). */
 const PAGE_NUMBER = /^(?:page\s*)?(?:\d+|(?=[ivxlcdm]+$)m{0,4}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3}))$/i
@@ -481,11 +495,18 @@ function layoutPageBlocks(pages: readonly PdfPageContent[], joiner: TextJoiner, 
   return pagesLines.map((lines, i): PageBlock[] => {
     const p = pages[i]
     const kept = lines.filter((l) => !isRunning(l, p))
-    // the column box: the left edge most body lines start at, the right edge most reach
+    // the column box, per reading direction: the edge most body lines start
+    // at, and the edge most reach
     const bodyLines = kept.filter((l) => l.size === body)
-    const colLeft = mostCommon(bodyLines.map((l) => Math.round(l.x))) ?? 0
-    const rights = bodyLines.map((l) => l.right).sort((a, b) => a - b)
-    const colRight = rights.length ? rights[Math.floor(rights.length * 0.9)] : p.box.x1
+    const columnBox = (rtl: boolean) => {
+      const lines = bodyLines.filter((l) => l.rtl === rtl)
+      const start = mostCommon(lines.map((l) => Math.round(lineStart(l)))) ?? (rtl ? -p.box.x1 : 0)
+      const ends = lines.map(lineEnd).sort((a, b) => a - b)
+      const end = ends.length ? ends[Math.floor(ends.length * 0.9)] : rtl ? -p.box.x0 : p.box.x1
+      return { start, end }
+    }
+    const boxes = { ltr: columnBox(false), rtl: columnBox(true) }
+    const boxOf = (l: Line) => (l.rtl ? boxes.rtl : boxes.ltr)
     const pitch = new Map<number, number[]>()
     for (let k = 1; k < kept.length; k++) {
       const a = kept[k - 1], b = kept[k]
@@ -512,9 +533,11 @@ function layoutPageBlocks(pages: readonly PdfPageContent[], joiner: TextJoiner, 
         const startsItem = /^([•●▪◦○■\-–]|\(?\d{1,2}[.)]|\(?[a-z][.)])\s/.test(l.text)
         // a first-line indent after a line that stopped short (a hanging
         // indent's run-on lines follow a FULL line, so they stay together)
-        const prevShort = prev.right < colRight - 0.05 * (colRight - colLeft)
-        const indentIn = l.x - colLeft > 0.8 * l.size && prev.x - colLeft < 0.3 * l.size && prevShort
-        const shortPrev = prev.right < colRight - 0.12 * (colRight - colLeft) && endsSentence(prev.text)
+        const box = boxOf(l), prevBox = boxOf(prev)
+        const prevWidth = prevBox.end - prevBox.start
+        const prevShort = lineEnd(prev) < prevBox.end - 0.05 * prevWidth
+        const indentIn = lineStart(l) - box.start > 0.8 * l.size && lineStart(prev) - prevBox.start < 0.3 * l.size && prevShort
+        const shortPrev = lineEnd(prev) < prevBox.end - 0.12 * prevWidth && endsSentence(prev.text)
         const tocPrev = /\.{4,}\s*\d+$/.test(prev.text)
         brk = sizeChange || bigGap || startsItem || indentIn || shortPrev || tocPrev
       }

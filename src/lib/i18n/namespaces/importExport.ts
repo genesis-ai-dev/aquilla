@@ -2905,7 +2905,7 @@ export const importExport = defineNamespace({
         description: "Shown when a PDF dropped on import needs a password to open. The person removes the password (in the program that made it) and imports it again.",
       },
       "importExport.errors.pdfUnreadable": {
-        description: "Shown when a file named .pdf could not be opened as a PDF (damaged, or not a PDF).",
+        description: "Shown when a PDF could not be read: damaged, not really a PDF, or broken partway through (any error once it is open).",
       },
       "importExport.errors.pdfReaderFailed": {
         description: "Shown when the app's PDF reader itself failed to load (often a page left open across an update), so the PDF was not read. Reloading the page fixes it; the PDF is not at fault.",

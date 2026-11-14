@@ -25,6 +25,7 @@ import { buildPdf, type PdfFixturePage } from "./__fixtures__/build-pdf"
 import { splitFootnoteAware } from "./docx"
 import { extractPdfImport, PdfReadError } from "./pdf"
 import { pdfPagesToParagraphs } from "./pdf-blocks"
+import { readPdfImport } from "@/lib/import/pdf-import"
 
 const FIXTURES = "src/lib/parsers/__fixtures__/pdf"
 
@@ -437,6 +438,38 @@ describe("review findings: Arabic (Nov 14)", () => {
       items: [{ s: "ذهب الولد إلى المدرسة", x: 300, y: 700, b: 0, w: 120, h: 12, eol: false, dir: "rtl" }],
     }], (t) => t).paragraphs.map((p) => p.text)
     expect(words).toEqual(["ذهب الولد إلى المدرسة"])
+  })
+})
+
+// Review finding 11 (Nov 14): a damaged PDF showed pdf.js's raw English
+// ("Pages tree contains circular reference.") or told the person to reload
+// the page. The reviewer's two files, written here.
+describe("review findings: damaged PDFs (Nov 14)", () => {
+  /** A one-page PDF whose page tree is `pagesDict`. */
+  function damaged(pagesDict: string): ArrayBuffer {
+    const objs = [
+      "<< /Type /Catalog /Pages 2 0 R >>",
+      pagesDict,
+      "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+      "<< /Length 46 >>\nstream\nBT /F1 12 Tf 72 700 Td (Hello page one.) Tj ET\nendstream",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 3 0 R >> >> >>",
+    ]
+    let out = "%PDF-1.7\n"
+    const offsets: number[] = []
+    objs.forEach((o, i) => { offsets.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n` })
+    const xref = out.length
+    out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}`
+    out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`
+    return new TextEncoder().encode(out).buffer as ArrayBuffer
+  }
+
+  it("says a PDF whose page tree loops could not be read as a PDF", async () => {
+    await expect(readPdfImport(damaged("<< /Type /Pages /Kids [5 0 R 2 0 R] /Count 2 >>"))).rejects.toThrow(/^This file could not be read as a PDF\.$/)
+  })
+
+  it("reads the pages a PDF has when it counts more than it has", async () => {
+    const read = await readPdfImport(damaged("<< /Type /Pages /Kids [5 0 R] /Count 3 >>"))
+    expect(read.strings.map((s) => s.original)).toEqual(["Hello page one."])
   })
 })
 

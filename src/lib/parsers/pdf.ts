@@ -61,8 +61,9 @@ type PdfJs = typeof import("pdfjs-dist")
 
 let pdfjsPromise: Promise<PdfJs> | null = null
 
-/** pdf.js's own names for a file it read and found is not a usable PDF. */
-const NOT_A_PDF = new Set(["InvalidPDFException", "FormatError", "MissingPDFException"])
+/** How pdf.js says its worker could not start: the reader failed, not the
+ *  PDF (AQU-2551). */
+const WORKER_FAILED = /Setting up fake worker failed/i
 
 async function loadPdfJs(): Promise<PdfJs> {
   pdfjsPromise ??= (async () => {
@@ -190,10 +191,24 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
     const name = (err as { name?: string } | null)?.name
     if (name === "PasswordException") throw new PdfReadError("password", "PDF is password-protected", { cause: err })
     const message = (err as Error)?.message ?? String(err)
-    if (name && NOT_A_PDF.has(name)) throw new PdfReadError("unreadable", `PDF could not be read: ${message}`, { cause: err })
-    throw new PdfReadError("reader", `PDF reader failed: ${message}`, { cause: err })
+    // AQU-2551 review finding 11: only the reader failing to start says so;
+    // every other error on opening is about the file.
+    if (WORKER_FAILED.test(message)) throw new PdfReadError("reader", `PDF reader failed: ${message}`, { cause: err })
+    throw new PdfReadError("unreadable", `PDF could not be read: ${message}`, { cause: err })
   }
   try {
+    return await readOpenedPdf()
+  } catch (err) {
+    // AQU-2551 review finding 11: any error once the PDF is open ("Pages tree
+    // contains circular reference.") is about the file, never pdf.js's words.
+    if (err instanceof PdfReadError) throw err
+    throw new PdfReadError("unreadable", `PDF could not be read: ${(err as Error)?.message ?? String(err)}`, { cause: err })
+  } finally {
+    clearTimeout(timer)
+    await task.destroy().catch(() => {})
+  }
+
+  async function readOpenedPdf(): Promise<PdfParagraphsRead> {
     const paintOps = imagePaintOps(pdfjs)
     const pages: PdfPageContent[] = []
     const imageOnlyPages: number[] = []
@@ -222,9 +237,6 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
     const read = pdfPagesToParagraphs(pages, footnote)
     if (read.paragraphs.length === 0) throw new PdfReadError(imageOnlyPages.length ? "scanned" : "empty", "PDF has no text")
     return { paragraphs: read.paragraphs, imageOnlyPages, tagged: read.tagged }
-  } finally {
-    clearTimeout(timer)
-    await task.destroy().catch(() => {})
   }
 }
 

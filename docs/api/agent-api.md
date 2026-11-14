@@ -178,6 +178,7 @@ hand-rolled client), not just Claude products.
 | `get_changeset` | Fetch a changeset's status/summary/digest/receipt/approvalUrl. |
 | `confirm_changeset` | Commit a prepared changeset (ask or act). |
 | `discard_changeset` | Discard a staged/stale/expired changeset. |
+| `get_help` | Read-only. App help from the public help site (https://help.aquilla.app), for "how do I" and "where is" questions about the Aquilla interface. No `page` returns the index of pages; `page` (`/export/`, `export`, or a help-site URL) returns that page as Markdown with its `url`. Not API documentation: use `describe_command` and `get_skill` for that. Needs a credential, no project. AQU-2581, §4 below. |
 
 `prepare_translations` is the generic propose step and `confirm_changeset` the generic commit
 step for every MCP-stageable command kind — they are not SetTranslation-specific despite the
@@ -293,6 +294,8 @@ CONTRIBUTOR=400, PROJECT_LEAD=500, MAINTAINER=600).
 | `GET /api/v1/external` | none | — | Unauthenticated discovery root: machine-readable API map (endpoints, auth, quickstart, MCP config, error codes). |
 | `GET /api/v1/external/me` | `aqk_` | — | Cold-start bootstrap: identity, mode (ask\|act), scope, next-step hints. |
 | `GET /api/v1/external/projects` | `aqk_` | — | List up to 100 accessible projects (REST mirror of the MCP `list_projects` tool, same shared query). `{ data, nextCursor }`. |
+| `GET /api/v1/external/help` | none | — | Index of the public app-help pages from help.aquilla.app: `{ site, pages: [{ path, title, description, section, url }] }`. REST half of the MCP `get_help` tool. |
+| `GET /api/v1/external/help/:page` | none | — | One help page as Markdown: `{ path, title, url, markdown }`. `:page` is a page path such as `help/export/`. An unlisted page is `not_found` (404); a help-site outage is `job_failed` (500) with the site URL in the message. Only pages in the site's index are fetched. |
 | `POST /api/v1/external/mcp` | `aqk_` | per-tool | JSON-RPC 2.0 (`initialize`, `ping`, `tools/list`, `tools/call`). GET returns a JSON 405 explaining how to connect. |
 | `GET /api/v1/external/projects/:projectId/search?q=&side=&limit=&cursor=` | `aqk_` | VIEWER | Full-text search. `{ data, nextCursor }`. |
 | `GET /api/v1/external/projects/:projectId/files?limit=&cursor=` | `aqk_` | VIEWER | List files. |

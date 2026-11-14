@@ -15456,7 +15456,8 @@ export function ProjectWorkspace() {
             refused = true
             toast.add({ type: "error", title: `${failure} ${mine[0].reason}` })
           },
-          onForbidden: () => forgetTrackWrites([trackId], activeFileId),
+          // A 403 is a refusal too: the paint comes off with onFailure below.
+          onForbidden: () => { forgetTrackWrites([trackId], activeFileId); refused = true },
         })
         refresh()
         if (refused) onFailure?.()
@@ -15515,7 +15516,8 @@ export function ProjectWorkspace() {
             refused = true
             toast.add({ type: "error", title: `${failure} ${mine[0].reason}` })
           },
-          onForbidden: forget,
+          // A 403 is a refusal too: the paint comes off with onFailure below.
+          onForbidden: () => { forget(); refused = true },
         })
         refresh()
         if (refused) onFailure?.()

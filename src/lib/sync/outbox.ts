@@ -9,14 +9,14 @@
  *
  * Tauri desktop offline routing (Phase 4): `enqueueOutboxEvent(s)` first check
  * whether the event should instead land in LiveStore's local `event_queue`
- * (src/lib/offline/schema.ts) — see `routeToOfflineQueueIfEligible` below.
+ * (src/lib/offline/schema.ts) — see `planOfflineRouting` below.
  * This is a no-op everywhere except the Tauri desktop app, so the browser
  * SPA's write path (the vast majority of real traffic) is unaffected.
  */
 
 import type { CqrsRawEvent, OutboxEventKind } from "./outbox-types"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
-import { journalTargetCommit, clearJournalRecord, recoverJournal } from "./outbox-recovery"
+import { journalTargetCommit, clearJournalRecord, journalBatch, clearJournalBatch, recoverJournal } from "./outbox-recovery"
 import { purgeCellsCacheForQuota } from "./cells-cache"
 import { withStorageQuotaRecovery } from "@/lib/storage/storage-pressure"
 
@@ -242,27 +242,12 @@ const OFFLINE_ROUTABLE_KINDS: ReadonlySet<OutboxEventKind> = new Set<OutboxEvent
   "cell.unvalidate",
 ])
 
-/**
- * Tauri-only: if `event` is one of the offline-routable kinds AND its project
- * has a ready local LiveStore copy, commit it straight into LiveStore's
- * `event_queue` (Phase 3's sync adapter owns flushing those to the server) and
- * return true — the caller must NOT also write it to IndexedDB.
- *
- * The LiveStore-backed modules (store.ts, offline-reads.ts, schema.ts) are
- * dynamically imported here rather than statically at the top of this file:
- * this file is on every web-build code path, and is-tauri.ts's whole reason
- * for existing separately is to let modules like this one check the runtime
- * without pulling LiveStore/OPFS/wa-sqlite into the plain browser SPA bundle.
- * Checking the kind first (a synchronous Set lookup) also means the common
- * case — an event kind that never routes offline — never pays for the import
- * or a store round-trip at all.
- */
 let warnedOfflineStoreUnavailable = false
 // A booted store answers at once; past this, the edit goes to IndexedDB.
 const OFFLINE_STORE_WAIT_MS = 3_000
 
-async function routeToOfflineQueueIfEligible(event: CqrsRawEvent): Promise<boolean> {
-  if (!OFFLINE_ROUTABLE_KINDS.has(event.kind)) return false
+/** The booted offline store and its events, or null when writes must go to IndexedDB. */
+async function openOfflineQueue() {
   const [{ getOfflineStore }, { isProjectOfflineReady }, { events: offlineEvents }] = await Promise.all([
     import("@/lib/offline/store"),
     import("@/lib/offline/offline-reads"),
@@ -286,23 +271,132 @@ async function routeToOfflineQueueIfEligible(event: CqrsRawEvent): Promise<boole
     }),
     bootTimedOut,
   ]).finally(() => clearTimeout(timer))
-  if (!store || !isProjectOfflineReady(store, event.projectId)) return false
-  store.commit(
-    offlineEvents.eventQueued({
-      id: event.id,
-      projectId: event.projectId,
-      fileId: event.fileId ?? null,
-      cellId: event.cellId ?? null,
-      kind: event.kind,
-      payload: event.payload,
-      parentId: event.parentId ?? null,
-      author: event.author,
-      schemaVersion: event.schemaVersion,
-      clientTs: new Date(event.clientTs),
-      createdAt: new Date(),
-    }),
-  )
-  return true
+  if (!store) return null
+  return { store, offlineEvents, isReady: (projectId: string) => isProjectOfflineReady(store, projectId) }
+}
+
+function toQueuedRow(event: CqrsRawEvent) {
+  return {
+    id: event.id,
+    projectId: event.projectId,
+    fileId: event.fileId ?? null,
+    cellId: event.cellId ?? null,
+    kind: event.kind,
+    payload: event.payload,
+    parentId: event.parentId ?? null,
+    author: event.author,
+    schemaVersion: event.schemaVersion,
+    clientTs: new Date(event.clientTs),
+    createdAt: new Date(),
+  }
+}
+
+// Rows per v1.EventsQueued. One commit for a whole replace-all would put every
+// edit's payload in one eventlog row, re-parsed whole on every rebuild.
+const OFFLINE_QUEUE_CHUNK = 500
+
+/** Where `planOfflineRouting` sends a batch. */
+interface OfflineRouting {
+  /** The events for IndexedDB, in order. */
+  rest: CqrsRawEvent[]
+  /** The events `commit` queues offline, in order. */
+  routed: CqrsRawEvent[]
+  /** Commits the others to LiveStore's queue. Synchronous, so a caller can
+   *  clear their journal entries with nothing able to land in between. */
+  commit: () => void
+}
+
+/** The events `event` chains on or validates, by id. */
+function dependencyIds(event: CqrsRawEvent): string[] {
+  const ids: string[] = []
+  if (event.parentId) ids.push(event.parentId)
+  const editEventId = (event.payload as { editEventId?: unknown } | null)?.editEventId
+  if (typeof editEventId === "string") ids.push(editEventId)
+  return ids
+}
+
+/** Labels each event with its dependency group: events linked, either way, by
+ *  `dependencyIds` within the batch share a label. */
+function dependencyGroups(events: readonly CqrsRawEvent[]): string[] {
+  const parent = new Map<string, string>()
+  for (const event of events) parent.set(event.id, event.id)
+  const find = (id: string): string => {
+    let root = id
+    while (parent.get(root) !== root) root = parent.get(root)!
+    while (id !== root) {
+      const next = parent.get(id)!
+      parent.set(id, root)
+      id = next
+    }
+    return root
+  }
+  for (const event of events) {
+    for (const dep of dependencyIds(event)) {
+      if (parent.has(dep)) parent.set(find(event.id), find(dep))
+    }
+  }
+  return events.map((event) => find(event.id))
+}
+
+/**
+ * Tauri-only: picks every event that is one of the offline-routable kinds AND
+ * whose project has a ready local LiveStore copy for LiveStore's `event_queue`
+ * (Phase 3's sync adapter owns flushing those to the server), and returns the
+ * rest, in order — the caller must write only those to IndexedDB, and should
+ * do so before `commit()`, so a failed IndexedDB write leaves nothing queued.
+ * All routed events go in one `store.commit`: one commit per event re-ran
+ * every query on the queue each time, so a 200-edit batch took seconds,
+ * longer the more was already queued.
+ *
+ * Events linked by a chain or a validate, in either direction, go to the
+ * same queue: the two flush independently, so splitting them could send a
+ * commit before the create it chains on (AQU-890), or a delete before the
+ * commit it chains on, and the server would log it stale. A group goes to
+ * LiveStore only if every event in it can.
+ *
+ * The LiveStore-backed modules (store.ts, offline-reads.ts, schema.ts) are
+ * dynamically imported rather than statically at the top of this file: this
+ * file is on every web-build code path, and is-tauri.ts's whole reason for
+ * existing separately is to let modules like this one check the runtime
+ * without pulling LiveStore/OPFS/wa-sqlite into the plain browser SPA bundle.
+ * Checking the kinds first (a synchronous Set lookup) also means the common
+ * case — event kinds that never route offline — never pays for the import or
+ * a store round-trip at all.
+ */
+async function planOfflineRouting(events: CqrsRawEvent[]): Promise<OfflineRouting> {
+  const none: OfflineRouting = { rest: events, routed: [], commit: () => {} }
+  if (!events.some((event) => OFFLINE_ROUTABLE_KINDS.has(event.kind))) return none
+  const queue = await openOfflineQueue()
+  if (!queue) return none
+  const readiness = new Map<string, boolean>()
+  const isReady = (projectId: string) => {
+    let ready = readiness.get(projectId)
+    if (ready === undefined) {
+      ready = queue.isReady(projectId)
+      readiness.set(projectId, ready)
+    }
+    return ready
+  }
+  const groups = events.length === 1 ? [events[0].id] : dependencyGroups(events)
+  const blocked = new Set<string>()
+  events.forEach((event, i) => {
+    if (!OFFLINE_ROUTABLE_KINDS.has(event.kind) || !isReady(event.projectId)) blocked.add(groups[i])
+  })
+  const routed: CqrsRawEvent[] = []
+  const rest: CqrsRawEvent[] = []
+  events.forEach((event, i) => (blocked.has(groups[i]) ? rest : routed).push(event))
+  const commit = () => {
+    if (routed.length === 1) {
+      queue.store.commit(queue.offlineEvents.eventQueued(toQueuedRow(routed[0])))
+    } else if (routed.length > 1) {
+      const batches = []
+      for (let i = 0; i < routed.length; i += OFFLINE_QUEUE_CHUNK) {
+        batches.push(queue.offlineEvents.eventsQueued({ rows: routed.slice(i, i + OFFLINE_QUEUE_CHUNK).map(toQueuedRow) }))
+      }
+      queue.store.commit(...batches)
+    }
+  }
+  return { rest, routed, commit }
 }
 
 /**
@@ -323,13 +417,11 @@ function withOutboxQuotaRecovery(write: () => Promise<void>): Promise<void> {
   return withStorageQuotaRecovery(write, purgeCellsCacheForQuota)
 }
 
-export async function enqueueOutboxEvent(event: CqrsRawEvent, scope?: OutboxOwnerScope): Promise<void> {
-  // Capture before any await. A transition that lands during one must not
-  // reclassify an edit initiated by the previous account.
-  const ownerKey = ownerForScope(scope)
-  const rec: OutboxRecord = {
+/** A fresh pending outbox record for `event`. */
+function toOutboxRecord(event: CqrsRawEvent, ownerKey: OutboxRecord["ownerKey"], enqueuedAt: number): OutboxRecord {
+  return {
     id: event.id,
-    enqueuedAt: Date.now(),
+    enqueuedAt,
     event,
     attempts: 0,
     lastAttemptAt: null,
@@ -337,6 +429,13 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent, scope?: OutboxOwne
     status: "pending",
     ownerKey,
   }
+}
+
+export async function enqueueOutboxEvent(event: CqrsRawEvent, scope?: OutboxOwnerScope): Promise<void> {
+  // Capture before any await. A transition that lands during one must not
+  // reclassify an edit initiated by the previous account.
+  const ownerKey = ownerForScope(scope)
+  const rec = toOutboxRecord(event, ownerKey, Date.now())
   // pagehide cannot await the offline store, openDb or a transaction. Persist
   // the same event synchronously first, preserving the account that
   // initiated this write.
@@ -347,9 +446,13 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent, scope?: OutboxOwne
   // these. `isTauriRuntime()` is a zero-cost check on the web, so this branch
   // adds no overhead to the browser SPA's write path.
   // A scoped (guest) write never takes the signed-in desktop's offline queue.
-  if (!scope && isTauriRuntime() && (await routeToOfflineQueueIfEligible(event))) {
-    clearJournalRecord(event.id)
-    return
+  if (!scope && isTauriRuntime()) {
+    const routing = await planOfflineRouting([event])
+    if (routing.rest.length === 0) {
+      routing.commit()
+      clearJournalRecord(event.id)
+      return
+    }
   }
   const db = await openDb()
   await withOutboxQuotaRecovery(() => new Promise<void>((resolve, reject) => {
@@ -368,46 +471,71 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent, scope?: OutboxOwne
  *  re-enqueue of already-queued events is a no-op (idempotent).
  *
  *  Tauri desktop offline routing (Phase 4): the batch is partitioned first —
- *  events eligible for offline routing (see `routeToOfflineQueueIfEligible`)
- *  are committed individually into LiveStore's event_queue and never touch
- *  IndexedDB; the remainder still go through the one-transaction/one-notify
- *  IndexedDB write below, unchanged. */
+ *  events eligible for offline routing (see `planOfflineRouting`)
+ *  are committed together into LiveStore's event_queue and never touch
+ *  IndexedDB; the remainder go through the one-transaction/one-notify
+ *  IndexedDB write below, which runs first. */
 export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void> {
   if (events.length === 0) return
 
-  let remaining = events
-  if (isTauriRuntime()) {
-    const toIndexedDb: CqrsRawEvent[] = []
-    for (const event of events) {
-      if (!(await routeToOfflineQueueIfEligible(event))) toIndexedDb.push(event)
-    }
-    remaining = toIndexedDb
-  }
-  if (remaining.length === 0) return
-
+  // Capture before any await, as enqueueOutboxEvent does: routing can wait
+  // seconds for the offline store, and an account switch in that window must
+  // not reassign these edits to the next account.
   const ownerKey = activeOwnerKey
-  const db = await openDb()
   const now = Date.now()
+  const records = events.map((event) => toOutboxRecord(event, ownerKey, now))
+  // Journal the whole batch as one entry, so pagehide recovery restores all of
+  // it or none (a commit is never replayed without its create). Too big a
+  // batch (replace-all, import) stays out of localStorage, which it could fill.
+  const journalKey = ownerKey !== undefined ? journalBatch(records) : null
+  const byEvent = new Map(records.map((rec) => [rec.event, rec]))
+  const toRecords = (list: readonly CqrsRawEvent[]) => list.map((event) => byEvent.get(event)!)
+
+  let written: OutboxRecord[] = []
+  try {
+    const routing = isTauriRuntime() ? await planOfflineRouting(events) : null
+    // IndexedDB first: if it fails, nothing has reached the offline queue
+    // either, so a refusal means none of the batch was queued.
+    const toWrite = routing ? toRecords(routing.rest) : records
+    await putOutboxRecords(toWrite)
+    written = toWrite
+    if (routing && routing.routed.length > 0) {
+      try {
+        routing.commit()
+      } catch (error) {
+        // The offline store refused them (shut down, a materializer error):
+        // send them over HTTP instead, so the batch still lands whole.
+        console.warn("[outbox] Offline queue refused a batch; using the HTTP outbox", error)
+        const fallback = toRecords(routing.routed)
+        await putOutboxRecords(fallback)
+        written = [...written, ...fallback]
+      }
+    }
+  } catch (error) {
+    // Undo what did land, so the caller's retry can't queue it twice.
+    if (written.length > 0) {
+      await removeOutboxEvents(written.map((rec) => rec.id)).catch((cleanupError: unknown) => {
+        console.warn("[outbox] Couldn't undo a partly queued batch", cleanupError)
+      })
+    }
+    if (journalKey) clearJournalBatch(journalKey)
+    throw error
+  }
+  if (journalKey) clearJournalBatch(journalKey)
+  if (written.length > 0) notifyOutboxChanged()
+}
+
+/** Writes `records` to the IndexedDB outbox in one transaction. */
+async function putOutboxRecords(records: readonly OutboxRecord[]): Promise<void> {
+  if (records.length === 0) return
+  const db = await openDb()
   await withOutboxQuotaRecovery(() => new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite")
     tx.onerror = () => reject(tx.error ?? new Error("bulk enqueue tx failed"))
     tx.oncomplete = () => resolve()
     const store = tx.objectStore(STORE)
-    for (const event of remaining) {
-      const rec: OutboxRecord = {
-        id: event.id,
-        enqueuedAt: now,
-        event,
-        attempts: 0,
-        lastAttemptAt: null,
-        lastError: null,
-        status: "pending",
-        ownerKey,
-      }
-      store.put(rec)
-    }
+    for (const rec of records) store.put(rec)
   }))
-  notifyOutboxChanged()
 }
 
 /**

@@ -6,10 +6,11 @@
 // bookmark has exactly one start and one end, start first; field characters
 // balance (begin, separate, end) across the part and field instructions sit in
 // an open field code; REF/PAGEREF/NOTEREF fields name a bookmark that exists;
-// every footnote reference names a note that exists, once; a hyperlink holds a
-// run; runs and paragraphs sit where WordprocessingML allows them; a run's
-// properties are in schema order with no property twice. Not flagged: an
-// emptied simple field or content control (schema-valid, by design).
+// every footnote reference names a note that exists, once; runs and
+// paragraphs sit where WordprocessingML allows them; a run's properties are in
+// schema order with no property twice. Not flagged: an emptied simple field,
+// content control or link (schema-valid, by design: AQU-2552 question 62, a
+// hidden or deleted line leaves its wrapper in place, emptied of its words).
 import { elementsByTagName, getAttribute, isElement, parseXmlLite, textContent, type XmlElement } from "@/lib/parsers/xml-lite"
 
 const RPR_ORDER = [
@@ -36,7 +37,6 @@ export function structuralProblems(partXml: string, footnotesXml?: string): stri
       if (kids.length === 0 || kids[kids.length - 1].tagName !== "w:p") problems.push("w:tc not ending in w:p")
     }
     if (el.tagName === "w:txbxContent" && !elementChildren(el).some((c) => c.tagName === "w:p")) problems.push("w:txbxContent with no paragraph")
-    if (el.tagName === "w:hyperlink" && elementsByTagName(el, "w:r").length === 0) problems.push("w:hyperlink with no run")
     if (el.tagName === "w:rPr" && parent?.tagName === "w:r") {
       const names = elementChildren(el).map((c) => c.tagName.replace(/^w:/, ""))
       const ranks = names.map((n) => RPR_ORDER.indexOf(n)).filter((r) => r >= 0)

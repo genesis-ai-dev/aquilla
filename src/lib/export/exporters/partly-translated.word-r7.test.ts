@@ -238,20 +238,22 @@ describe("Word export — a line is found in its paragraph in segment order (AQU
     expect(paras(out.body)).toEqual(["Refrain line[IMG] … Trois.", "Next paragraph."])
   })
 
-  it("a hidden second copy takes its picture with it", async () => {
+  // AQU-2552 (question 62): a lost line's picture stays (it follows the
+  // paragraph's words); the remaining copy's own place is what is checked.
+  it("a hidden second copy's words go, never the first copy's; its picture stays", async () => {
     const bytes = await docxBytes(para(run(S + " ") + run("Refrain line") + IMG + run(PAD + " ") + run("Third line" + PAD)) + NEXT)
     const [a, b, c, n] = await importCells(bytes)
     const out = await wordOut(bytes, [a, hide(typed(b, "Refrain.")), typed(c, "Trois."), n])
-    expect(paras(out.body)).toEqual(["Refrain line … Trois.", "Next paragraph."])
+    expect(paras(out.body)).toEqual(["Refrain line … Trois.[IMG]", "Next paragraph."])
   })
 
-  it("a hidden or deleted first copy takes its picture with it, though the remaining copy has the same words", async () => {
+  it("a hidden or deleted first copy's words go, though the remaining copy has the same words; its picture stays in front", async () => {
     const bytes = await docxBytes(para(run("Refrain line") + IMG + run(PAD + " ") + run(S + " ") + run("Third line" + PAD)) + NEXT)
     const [a, b, c, n] = await importCells(bytes)
     const hidden = await wordOut(bytes, [hide(typed(a, "Refrain.")), b, typed(c, "Trois."), n])
-    expect(paras(hidden.body)).toEqual(["Refrain line … Trois.", "Next paragraph."])
+    expect(paras(hidden.body)).toEqual(["[IMG]Refrain line … Trois.", "Next paragraph."])
     const deleted = await wordOut(bytes, [b, typed(c, "Trois."), n], [a])
-    expect(paras(deleted.body)).toEqual(["Refrain line … Trois.", "Next paragraph."])
+    expect(paras(deleted.body)).toEqual(["[IMG]Refrain line … Trois.", "Next paragraph."])
   })
 })
 
@@ -322,6 +324,8 @@ describe("Word export — an untranslated line keeps its pieces where they are (
   })
 })
 
+// AQU-2552 (question 62): a lost piece takes only its words and its own
+// footnote, so its picture, field and tab now stay (round 7's N2 had them go).
 describe("Word export — a hidden or deleted split piece is a lost line of its paragraph (AQU-2552, review r7 N2)", () => {
   const F = ["Première ligne ici.", "Deuxième ligne ici.", "Troisième ligne ici."]
   // Line 1 is cut in the editor after "First line"; the piece holds a
@@ -335,20 +339,21 @@ describe("Word export — a hidden or deleted split piece is a lost line of its 
     return { parent, pc: piece(a, "p1", a.original.slice(at + 1)), b, c, n }
   }
 
-  it("a hidden piece takes its picture, field and tab with it, and no word of it is said to have lost its look", async () => {
+  it("a hidden piece's words go; its picture, field and tab stay, and no word of it is said to have lost its look", async () => {
     const bytes = await docxBytes(body)
     const { parent, pc, b, c, n } = await cut(bytes)
     const out = await wordOut(bytes, [parent, hide(typed(pc, "ici, avec la suite.")), b, typed(c, F[2]), n])
-    expect(paras(out.body)).toEqual([`Première ligne Second line here … ${F[2]}`, "Next paragraph."])
-    expect(out.body).not.toMatch(/SEQ Figure|w:drawing|<w:tab\/>|<w:i\/>/)
+    expect(paras(out.body)).toEqual([`Première ligne Second line here … ${F[2]}[IMG]{field}[TAB]`, "Next paragraph."])
+    expect(out.body).not.toMatch(/<w:i\/>|italic|Figure 1/)
     expect(out.result.lostLooks).toEqual([])
+    expect(out.result.fidelity.emptiedFields).toBe(0)
   })
 
   it("so does a deleted piece", async () => {
     const bytes = await docxBytes(body)
     const { parent, pc, b, c, n } = await cut(bytes)
     const out = await wordOut(bytes, [parent, b, typed(c, F[2]), n], [pc])
-    expect(paras(out.body)).toEqual([`Première ligne Second line here … ${F[2]}`, "Next paragraph."])
+    expect(paras(out.body)).toEqual([`Première ligne Second line here … ${F[2]}[IMG]{field}[TAB]`, "Next paragraph."])
     expect(out.result.lostLooks).toEqual([])
   })
 
@@ -381,7 +386,8 @@ describe("Word export — a split piece whose line was deleted is still a line o
   const s1 = run("First") + IMG + run(" line here, and then the rest of it" + PAD + " ")
   const body = para(s1 + run("Second line here" + PAD + " ") + run("Third line here" + PAD)) + NEXT
 
-  it("the deleted half takes its picture and words with it; the piece keeps its words in its place", async () => {
+  // AQU-2552 (question 62): the deleted half's picture now stays, in front.
+  it("the deleted half's words go and its picture stays; the piece keeps its words in its place", async () => {
     const bytes = await docxBytes(body)
     const [a, b, c, n] = await importCells(bytes)
     const at = a.original.indexOf(" here")
@@ -396,11 +402,10 @@ describe("Word export — a split piece whose line was deleted is still a line o
     expect(structuralProblems(xml, undefined)).toEqual([])
     const out = paras(xml)
     expect(out).toHaveLength(2)
-    expect(out[0]).toMatch(/^here, and then the rest of it/)
+    expect(out[0]).toMatch(/^\[IMG\]here, and then the rest of it/)
     expect(out[0]).toContain("Second line here")
     expect(out[0]).toContain("Troisième ligne ici.")
     expect(out[0]).not.toContain("First")
-    expect(out[0]).not.toContain("[IMG]")
     expect(out[1]).toBe("Next paragraph.")
   })
 })

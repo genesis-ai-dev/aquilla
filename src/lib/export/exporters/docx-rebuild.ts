@@ -92,9 +92,9 @@ export interface RebuildInput {
   footnoteLines?: ReadonlyMap<DocxPiece, number>
   /** AQU-2552 (review r6): what a hidden or deleted line held in the source
    *  paragraph (see `withoutLost`), and which characters of a run that holds
-   *  words of both a lost line and another are the lost line's. It
-   *  contributes nothing: no footnote reference, picture, field or tab, and
-   *  no word of it is reported as having lost its look. */
+   *  words of both a lost line and another are the lost line's. AQU-2552
+   *  (question 62): its words and its footnote references, nothing else. No
+   *  word of it is reported as having lost its look. */
   lost?: ReadonlySet<DocxPiece>
   lostChar?: (piece: DocxPiece, i: number) => boolean
   /** AQU-2552 (review r7): pieces after the paragraph's first word that sit
@@ -429,51 +429,22 @@ function buildNodes(items: readonly DocxPiece[], lineSet: ReadonlySet<DocxPiece>
 
 /**
  * AQU-2552 (review r6): the nodes without what a hidden or deleted line held
- * (`lost`, see docx.ts placeInLines). Its text, footnote references and runs
- * go. A field or a wrapper (a link, a content control…) goes whole, its own
- * properties included, when all the text it holds is lost, or, holding none,
- * when all its runs are; a bookmark or comment mark it held stays, unwrapped. One that lost only some of its
- * pieces stays, without them. A field character outside a whole field (a
- * field running over several paragraphs) always stays.
+ * (`lost`, see docx.ts placeInLines). AQU-2552 (question 62): that is only its
+ * words and its footnote references. Everything else stays where it is: a
+ * field or a wrapper (a link, a content control…) that lost some of its
+ * pieces, or all of its words, stays with its own tags and properties,
+ * without them.
  */
 function withoutLost(nodes: readonly RNode[], lost: ReadonlySet<DocxPiece>): RNode[] {
-  const out: RNode[] = []
-  for (const node of nodes) {
-    switch (node.kind) {
-      case "text":
-      case "marker":
-        if (!lost.has(node.piece)) out.push(node)
-        break
-      case "keep":
-        if (fieldCharOf(node) !== null || !lost.has(node.piece)) out.push(node)
-        break
-      case "wrapper":
-      case "field": {
-        const inner = node.kind === "wrapper" ? node.children : [...node.open, ...node.result, node.close]
-        const leaves = leavesOf(inner)
-        const text = leaves.filter((leaf) => leaf.kind !== "keep")
-        const runs = leaves.filter((leaf) => leaf.kind === "keep" && isRunPiece(leaf.piece))
-        const judged = text.length > 0 ? text : runs
-        const gone = judged.filter((leaf) => lost.has(leaf.piece)).length
-        if (judged.length > 0 && gone === judged.length) {
-          // AQU-2552 (review r8): its own properties (a content control's
-          // w:sdtPr, a smart tag's w:smartTagPr…) go with it; left loose in
-          // the paragraph they make a file Word calls damaged.
-          out.push(...withoutLost(inner.filter((n) => !(n.kind === "keep" && (isRunPiece(n.piece) || isWrapperProperties(n.piece)))), lost))
-        } else if (leaves.some((leaf) => lost.has(leaf.piece))) {
-          out.push(node.kind === "wrapper"
-            ? { ...node, children: withoutLost(node.children, lost), partial: true }
-            : { ...node, result: withoutLost(node.result, lost), partial: true })
-        } else {
-          out.push(node)
-        }
-        break
-      }
-      default:
-        out.push(node)
-    }
-  }
-  return out
+  return nodes.flatMap((node): RNode[] => {
+    if (node.kind === "text" || node.kind === "marker") return lost.has(node.piece) ? [] : [node]
+    if (node.kind !== "wrapper" && node.kind !== "field") return [node]
+    const inner = node.kind === "wrapper" ? node.children : [...node.open, ...node.result, node.close]
+    if (!leavesOf(inner).some((leaf) => lost.has(leaf.piece))) return [node]
+    return [node.kind === "wrapper"
+      ? { ...node, children: withoutLost(node.children, lost), partial: true }
+      : { ...node, result: withoutLost(node.result, lost), partial: true }]
+  })
 }
 
 type LeafNode = Extract<RNode, { kind: "text" | "marker" | "keep" }>
@@ -513,17 +484,6 @@ function pairOf(piece: Leaf): { key: string; side: "start" | "end" | "reference"
   }
   const mark = piece.kind === "keep" ? PAIRED_MARKS[piece.el.tagName] : undefined
   return mark ? { key: `${mark[0]}:${piece.el.attributes["w:id"] ?? ""}`, side: mark[1] } : null
-}
-
-/** AQU-2552 (review r8): a wrapper's own properties, valid only inside it. */
-const WRAPPER_PROPERTIES = new Set(["w:sdtPr", "w:sdtEndPr", "w:smartTagPr", "w:customXmlPr", "w:fldData"])
-function isWrapperProperties(piece: Leaf): boolean {
-  return piece.kind === "keep" && WRAPPER_PROPERTIES.has(piece.el.tagName)
-}
-
-/** A run of the source, or part of one: what a field is made of. */
-function isRunPiece(piece: Leaf): boolean {
-  return piece.kind === "keepInRun" || piece.kind === "footnote" || piece.kind === "text" || (piece.kind === "keep" && piece.el.tagName === "w:r")
 }
 
 function fieldCharOf(node: RNode): string | null {

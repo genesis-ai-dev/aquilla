@@ -755,8 +755,8 @@ function rebuildParagraphIn(
 
   const flat = flattenPieces(items)
   const inLine = linePieceFlags(flat)
-  const lineSet = new Set<DocxPiece>(flat.filter((_, k) => inLine[k]))
   const placed = layout ? placeInLines(flat, inLine, layout) : null
+  const lineSet = new Set<DocxPiece>(flat.filter((piece, k) => inLine[k] && !placed?.loose.has(piece)))
 
   // The innermost wrapper holding all of the line: the paragraph itself, or
   // a hyperlink / content control / … that holds every word.
@@ -1197,12 +1197,11 @@ function lostStretches(stretches: readonly (LineStretch | null)[], lineText: str
 /**
  * AQU-2552 (review r6): the line whose stretch of the paragraph holds each
  * footnote reference (where its marker sits in the line text), and what a
- * hidden or deleted line held, which is left out: the line's text and
- * footnote references wholly inside its stretch, and the runs (pictures,
- * symbols, a field's parts) that sit inside it. Bookmarks, comment marks and
- * the like pair with something elsewhere and stay; so do page and column
- * breaks (review r8), and anything before the paragraph's first word or after
- * its last, as on import.
+ * hidden or deleted line held, which is left out. AQU-2552 (question 62): that
+ * is only what the app shows as the line, its words and its own footnote
+ * references. Everything else in its stretch stays where the source has it,
+ * a tab or line break among its words included (`loose`: no longer the
+ * line's text, so written as any other piece).
  */
 function placeInLines(
   flat: readonly DocxPiece[],
@@ -1211,12 +1210,14 @@ function placeInLines(
 ): {
   footnoteLines: Map<DocxPiece, number>
   lost: Set<DocxPiece>
+  loose: Set<DocxPiece>
   lostChar: (piece: DocxPiece, i: number) => boolean
   /** Where in the line text each piece that is not the line's text sits. */
   offsets: Map<DocxPiece, number>
 } {
   const footnoteLines = new Map<DocxPiece, number>()
   const lost = new Set<DocxPiece>()
+  const loose = new Set<DocxPiece>()
   const offsets = new Map<DocxPiece, number>()
   const textStart = new Map<DocxPiece, number>()
   const inLost = (at: number) => layout.lost.some((s) => s.start <= at && at < s.end)
@@ -1230,47 +1231,29 @@ function placeInLines(
       const line = layout.stretches.findIndex((s) => s !== null && s.start <= start && start < s.end)
       if (line !== -1) footnoteLines.set(piece, line)
     }
-    // AQU-2552 (review r7): text whose words are all a lost line's goes, though
-    // the space after them (between two lines) is in the same run.
-    const gone = isLine
-      ? piece.kind === "text" && /\S/.test(piece.text)
-        ? [...piece.text.matchAll(/\S/g)].every((m) => inLost(start + m.index!))
-        : layout.lost.some((s) => s.start <= start && end <= s.end)
-      : givenUpWithLine(piece) && layout.lost.some((s) => s.start < start && start < s.end)
-    if (gone) lost.add(piece)
-    else if (!isLine) offsets.set(piece, start)
+    const within = layout.lost.some((s) => s.start <= start && end <= s.end)
+    if (!isLine) {
+      if (piece.kind === "footnote" && layout.lost.some((s) => s.start < start && start < s.end)) lost.add(piece)
+      else offsets.set(piece, start)
+    } else if (piece.kind === "footnote") {
+      if (within) lost.add(piece)
+    } else if (piece.kind === "text" && piece.source !== "t") {
+      if (within) {
+        loose.add(piece)
+        offsets.set(piece, start)
+      }
+    } else if (/\S/.test(piece.text) ? [...piece.text.matchAll(/\S/g)].every((m) => inLost(start + m.index!)) : within) {
+      // AQU-2552 (review r7): text whose words are all a lost line's goes,
+      // though the space after them (between two lines) is in the same run.
+      lost.add(piece)
+    }
   })
   // A run that holds both a lost line's words and another line's.
   const lostChar = (piece: DocxPiece, i: number) => {
     const start = textStart.get(piece)
     return start !== undefined && inLost(start + i)
   }
-  return { footnoteLines, lost, lostChar, offsets }
-}
-
-/** A piece that leaves with the lost line it sits in (see placeInLines). */
-function givenUpWithLine(piece: DocxPiece): boolean {
-  // AQU-2552 (review r7): a run that holds paragraphs of its own (a text box)
-  // never leaves with a line: its lines are lines of their own.
-  // AQU-2552 (review r8): nor does a page or column break, hidden or deleted
-  // line alike: it shapes the page, not the line's words.
-  if (piece.kind === "keepInRun") return !piece.children.some((child) => holdsParagraphs(child) || isPageOrColumnBreak(child))
-  if (piece.kind === "footnote" || piece.kind === "text") return true
-  if (piece.kind !== "keep" || piece.el.tagName !== "w:r") return false
-  if (holdsParagraphs(piece.el)) return false
-  return !piece.el.children.some((child) => isElement(child) && (child.tagName === "w:commentReference" || isPageOrColumnBreak(child)))
-}
-
-/** AQU-2552 (review r8): a `w:br` that starts a new page or column. */
-function isPageOrColumnBreak(el: XmlElement): boolean {
-  if (el.tagName !== "w:br") return false
-  const type = el.attributes["w:type"]
-  return type === "page" || type === "column"
-}
-
-/** Does this element hold a paragraph anywhere inside it? */
-function holdsParagraphs(el: XmlElement): boolean {
-  return el.children.some((child) => isElement(child) && (child.tagName === "w:p" || holdsParagraphs(child)))
+  return { footnoteLines, lost, loose, lostChar, offsets }
 }
 
 const WORD_CHAR_RE = /[\p{L}\p{N}\p{M}]/u

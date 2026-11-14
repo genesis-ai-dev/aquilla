@@ -1,6 +1,7 @@
 // AQU-2552 (review r6): B's Word export of a paragraph cut into lines, some of
 // them translated, hidden or deleted. Each line is written as its translation
-// or its source; a hidden or deleted line contributes nothing. Every cell here
+// or its source; a hidden or deleted line takes only its words and its own
+// footnote (AQU-2552, question 62): the rest stays. Every cell here
 // is made by the importer from a small made .docx, as a real import makes it,
 // and every check reads the written XML (references, pictures, fields, tabs).
 import { describe, it, expect } from "vitest"
@@ -176,40 +177,48 @@ describe("Word export — a line's footnote is that line's own (AQU-2552, review
   })
 })
 
-describe("Word export — a hidden or deleted line's pictures, fields and tabs leave with it (AQU-2552, review r6)", () => {
+// AQU-2552 (question 62): this replaces review r6's "a hidden or deleted
+// line's pictures, fields and tabs leave with it".
+describe("Word export — a hidden or deleted line's words go; its pictures, fields, tabs and links stay (AQU-2552, question 62)", () => {
   const next = para(run("Next paragraph."))
   const italic = "<w:rPr><w:i/></w:rPr>"
   /** Line 2 of three, with this in its middle. */
   const withInLine2 = (inner: string) => para(run(`${S1}. The second line`) + inner + run(`${PAD}. ${S3}.`)) + next
-  const shapes: [string, string][] = [
-    ["a picture", pictureRun],
-    ["a figure-number field", run(" shows figure ") + complexField("SEQ Figure \\* ARABIC", "1") + run(" and")],
-    ["a tab", "<w:r><w:tab/></w:r>"],
-    ["an italic word", run(" has an ") + run("italic", italic) + run(" word and")],
-    ["a link", `<w:hyperlink w:anchor="_Top"><w:r><w:t xml:space="preserve"> links somewhere and</w:t></w:r></w:hyperlink>`],
+  /** Each shape, how what stays of it reads, and what of it stays, byte for byte. */
+  const shapes: [string, string, string, string][] = [
+    ["a picture", pictureRun, "[picture]", pictureRun],
+    ["a figure-number field", run(" shows figure ") + complexField("SEQ Figure \\* ARABIC", "1") + run(" and"), "{field}", "SEQ Figure"],
+    ["a tab", "<w:r><w:tab/></w:r>", "\t", "<w:r><w:tab/></w:r>"],
+    // An italic word is words only: they go, and nothing is said of their look.
+    ["an italic word", run(" has an ") + run("italic", italic) + run(" word and"), "", ""],
+    // A link its words filled stays, emptied of them.
+    ["a link", `<w:hyperlink w:anchor="_Top"><w:r><w:t xml:space="preserve"> links somewhere and</w:t></w:r></w:hyperlink>`, "", `<w:hyperlink w:anchor="_Top"></w:hyperlink>`],
   ]
   const translate = (k: number) => [T1, "", T3][k]
 
-  it.each(shapes)("a hidden line takes %s with it", async (_name, inner) => {
+  it.each(shapes)("a hidden line's words go and %s stays", async (_name, inner, seen, kept) => {
     const body = withInLine2(inner)
     const cells = importedCells(body, undefined, translate).map((cell) => (cell.id === "c1-2" ? { ...cell, hidden: true } : cell))
     expect(cells.filter((cell) => cell.id.startsWith("c1-"))).toHaveLength(3)
     const out = await exportAsDialog(body, undefined, cells)
-    expect(firstParagraph(out.xml)).toBe(`${T1} ${T3}`)
-    expect(out.xml).not.toMatch(/SEQ Figure|w:drawing|w:hyperlink/)
+    expect(firstParagraph(out.xml)).toBe(`${T1} ${T3}${seen}`)
+    expect(out.xml).toContain(kept)
+    expect(out.xml).not.toMatch(/The second line|links somewhere|italic/)
     // Nothing is said about words the export left out on purpose.
     expect(out.result.lostLooks).toEqual([])
     expect(out.result.fidelity.emptiedFields).toBe(0)
     expect(out.result.fidelity.droppedLinks).toBe(0)
   })
 
-  it.each(shapes.slice(0, 2))("a deleted line takes %s with it", async (_name, inner) => {
+  it.each(shapes)("a deleted line's words go and %s stays", async (_name, inner, seen, kept) => {
     const body = withInLine2(inner)
     const all = importedCells(body, undefined, translate)
     const deleted = all.filter((cell) => cell.id === "c1-2")
     const out = await exportAsDialog(body, undefined, all.filter((cell) => cell.id !== "c1-2"), deleted)
-    expect(firstParagraph(out.xml)).toBe(`${T1} ${T3}`)
-    expect(out.xml).not.toMatch(/SEQ Figure|w:drawing/)
+    expect(firstParagraph(out.xml)).toBe(`${T1} ${T3}${seen}`)
+    expect(out.xml).toContain(kept)
+    expect(out.xml).not.toMatch(/The second line|links somewhere|italic/)
+    expect(out.result.lostLooks).toEqual([])
   })
 
   it("never names a hidden line's words among those that lost their look, though a run holds them and the next line's", async () => {

@@ -151,15 +151,19 @@ const L1 = "First line here" + PAD
 const L2 = "Second line here" + PAD
 const L3 = "Third line here" + PAD
 
-describe("Word export — a wrapper that only a lost line fills goes whole (AQU-2552, review r8 F0)", () => {
-  const shapes: [string, string][] = [
-    ["a content control around line 2", run(L1 + " ") + SDT(run(L2)) + run(" " + L3)],
-    ["a smart tag around line 2", run(L1 + " ") + SMART_TAG(run(L2)) + run(" " + L3)],
-    ["a custom XML element around line 2", run(L1 + " ") + CUSTOM_XML(run(L2)) + run(" " + L3)],
-    ["a picture content control inside line 2", run(L1 + " ") + run("Second line") + SDT(IMG, `<w:id w:val="5"/><w:picture/>`) + run(" here" + PAD + " ") + run(L3)],
+// AQU-2552 (question 62): this replaces review r8's F0 ("a wrapper that only a
+// lost line fills goes whole"). The wrapper stays where it was, emptied of the
+// line's words, its own properties inside it.
+describe("Word export — a wrapper that only a lost line fills stays, emptied, valid (AQU-2552, question 62)", () => {
+  /** Each shape, and what of it stays, byte for byte. */
+  const shapes: [string, string, string][] = [
+    ["a content control around line 2", run(L1 + " ") + SDT(run(L2)) + run(" " + L3), SDT("")],
+    ["a smart tag around line 2", run(L1 + " ") + SMART_TAG(run(L2)) + run(" " + L3), SMART_TAG("")],
+    ["a custom XML element around line 2", run(L1 + " ") + CUSTOM_XML(run(L2)) + run(" " + L3), CUSTOM_XML("")],
+    ["a picture content control inside line 2", run(L1 + " ") + run("Second line") + SDT(IMG, `<w:id w:val="5"/><w:picture/>`) + run(" here" + PAD + " ") + run(L3), SDT(IMG, `<w:id w:val="5"/><w:picture/>`)],
   ]
 
-  it.each(shapes)("%s: hidden or deleted, none of its tags or properties is left loose", async (_name, inner) => {
+  it.each(shapes)("%s: hidden or deleted, it stays with its own properties, none left loose", async (_name, inner, kept) => {
     const bytes = await docxBytes(para(inner) + NEXT)
     const [a, b, c, n] = await importCells(bytes)
     expect(b.original.replaceAll(PAD.trim(), "…")).toBe("Second line here …")
@@ -170,13 +174,15 @@ describe("Word export — a wrapper that only a lost line fills goes whole (AQU-
     ]) {
       expect(looseProperties(out.body)).toEqual([])
       const first = out.body.match(/<w:body>(<w:p\b[\s\S]*?<\/w:p>)/)![1]
-      expect(first).not.toMatch(/<w:(sdt|smartTag|customXml)\b|w:drawing/)
+      expect(first).toContain(kept)
+      expect(first).not.toContain("Second line")
       expect(paras(out.body)[1]).toBe("Next paragraph.")
     }
+    const picture = kept.includes("w:drawing") ? "[IMG]" : ""
     const hidden = await wordOut(bytes, [typed(a, "Un."), hide(typed(b, "Deux.")), typed(c, "Trois."), n])
-    expect(paras(hidden.body)[0]).toBe("Un. Trois.")
+    expect(paras(hidden.body)[0]).toBe(`Un. Trois.${picture}`)
     const untranslated = await wordOut(bytes, [a, hide(b), c, n])
-    expect(paras(untranslated.body)[0]).toBe("First line here … Third line here …")
+    expect(paras(untranslated.body)[0]).toBe(`First line here … Third line here …${picture}`)
   })
 
   it("a content control around the first line, hidden or with both first lines deleted", async () => {
@@ -185,18 +191,19 @@ describe("Word export — a wrapper that only a lost line fills goes whole (AQU-
     const hidden = await wordOut(bytes, [hide(typed(a, "Un.")), typed(b, "Deux."), typed(c, "Trois."), n])
     expect(looseProperties(hidden.body)).toEqual([])
     expect(paras(hidden.body)[0]).toBe("Deux. Trois.")
+    expect(hidden.body).toContain(SDT(""))
     const deleted = await wordOut(bytes, [typed(c, "Trois."), n], [a, b])
     expect(looseProperties(deleted.body)).toEqual([])
     expect(paras(deleted.body)[0]).toBe("Trois.")
+    expect(deleted.body).toContain(SDT(""))
   })
 
-  it("a bookmark inside the lost wrapper stays, outside the wrapper", async () => {
+  it("a bookmark inside the lost wrapper stays, inside the emptied wrapper", async () => {
     const bytes = await docxBytes(para(run(L1 + " ") + SDT(`<w:bookmarkStart w:id="7" w:name="here"/>` + run(L2) + `<w:bookmarkEnd w:id="7"/>`) + run(" " + L3)) + NEXT)
     const [a, b, c, n] = await importCells(bytes)
     const out = await wordOut(bytes, [typed(a, "Un."), hide(typed(b, "Deux.")), typed(c, "Trois."), n])
     expect(looseProperties(out.body)).toEqual([])
-    expect(out.body).toContain(`<w:bookmarkStart w:id="7" w:name="here"/>`)
-    expect(out.body).not.toContain("<w:sdt>")
+    expect(out.body).toContain(SDT(`<w:bookmarkStart w:id="7" w:name="here"/><w:bookmarkEnd w:id="7"/>`))
   })
 })
 
@@ -218,11 +225,13 @@ describe("Word export — a deleted split piece keeps its place after the row it
   }
   const view = (out: Out) => [paras(out.body)[0], noteText(out.notes, 1), noteText(out.notes, 2)]
 
-  it("the middle piece deleted reads exactly as the middle piece hidden: its picture and note go, line 3 keeps its own", async () => {
+  // AQU-2552 (question 62): the lost piece's note still goes with it; its
+  // picture now stays, after the paragraph's words.
+  it("the middle piece deleted reads exactly as the middle piece hidden: its note goes, its picture stays, line 3 keeps its own", async () => {
     const { bytes, a, P, Q1, c, n } = await cut()
     const Q2 = piece(Q1, "q2", L2c)
     const hidden = await wordOut(bytes, [typed(a, "Un."), P, hide(Q1), Q2, c, n])
-    expect(view(hidden)).toEqual([`Un. Deuxième ligne ${L2c} Third line[IMG] here[^2] …`, "Note one.", "Note two."])
+    expect(view(hidden)).toEqual([`Un. Deuxième ligne ${L2c} Third line[IMG] here[^2] …[IMG]`, "Note one.", "Note two."])
     const deleted = await wordOut(bytes, [typed(a, "Un."), P, Q2, c, n], [Q1])
     expect(view(deleted)).toEqual(view(hidden))
   })
@@ -233,7 +242,7 @@ describe("Word export — a deleted split piece keeps its place after the row it
     const hidden = await wordOut(bytes, [typed(a, "Un."), P, hide(Q1), typed(Q2, "la fin."), typed(c, "Trois."), n])
     const deleted = await wordOut(bytes, [typed(a, "Un."), P, typed(Q2, "la fin."), typed(c, "Trois."), n], [Q1])
     expect(view(deleted)).toEqual(view(hidden))
-    expect(paras(deleted.body)[0]).toBe("Un. Deuxième ligne la fin. Trois.[^2][IMG]")
+    expect(paras(deleted.body)[0]).toBe("Un. Deuxième ligne la fin. Trois.[^2][IMG][IMG]")
   })
 
   it("so with line 1 hidden too", async () => {
@@ -250,7 +259,7 @@ describe("Word export — a deleted split piece keeps its place after the row it
     const hidden = await wordOut(bytes, [typed(a, "Un."), P, hide(Q1), Q2, c, n])
     const deleted = await wordOut(bytes, [typed(a, "Un."), P, Q2, c, n], [Q1])
     expect(view(deleted)).toEqual(view(hidden))
-    expect(paras(deleted.body)[0]).toBe(`Un. Deuxième ligne ${L2c} Third line[IMG] here[^2] …`)
+    expect(paras(deleted.body)[0]).toBe(`Un. Deuxième ligne ${L2c} Third line[IMG] here[^2] …[IMG]`)
   })
 })
 
@@ -365,12 +374,13 @@ describe("Word export — a page or column break never leaves with a lost line (
     expect(paras(hidden.body)[0]).toBe("[PAGE]Deux. Trois.")
   })
 
-  it("a picture inside a hidden or deleted line still leaves with it", async () => {
+  // AQU-2552 (question 62): so does a picture now.
+  it("a picture inside a hidden or deleted line stays too", async () => {
     const bytes = await docxBytes(para(run("First line") + IMG + run(" here" + PAD + " ") + run(L2 + " ") + run(L3)) + NEXT)
     const [a, b, c, n] = await importCells(bytes)
     const hidden = await wordOut(bytes, [hide(typed(a, "Un.")), typed(b, "Deux."), typed(c, "Trois."), n])
-    expect(paras(hidden.body)[0]).toBe("Deux. Trois.")
+    expect(paras(hidden.body)[0]).toBe("[IMG]Deux. Trois.")
     const deleted = await wordOut(bytes, [typed(b, "Deux."), typed(c, "Trois."), n], [a])
-    expect(paras(deleted.body)[0]).toBe("Deux. Trois.")
+    expect(paras(deleted.body)[0]).toBe("[IMG]Deux. Trois.")
   })
 })

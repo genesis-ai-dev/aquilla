@@ -29,6 +29,7 @@ export type OutboxEventKind =
   | "cell.audio.gain"
   | "cell.audio.place"
   | "cell.audio.cut"
+  | "cell.audio.uncut"
   | "cell.audio.measure"
   | "cell.audio.validate"
   | "cell.audio.unvalidate"

@@ -520,7 +520,8 @@ async function rebuildProjection(
       try {
         // Defer the O(N²) per-cell file-counter recompute; do it once, set-based,
         // after the replay (step 4b) — the 67%-of-time fix, now in the rebuild.
-        buildEventProjectionStmts(tx, event, stmts, { deferFileCounters: true })
+        // AQU-2492 (review, Nov 9): `rebuild` — a replay, not a live write.
+        buildEventProjectionStmts(tx, event, stmts, { deferFileCounters: true, rebuild: true })
         if (row.kind === 'file.revision' && row.file_id) {
           // AQU-2459: a revision's cells live in its manifest, not in events.
           const manifest = revisionManifests.get(row.id)

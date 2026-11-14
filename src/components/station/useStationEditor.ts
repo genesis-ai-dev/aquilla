@@ -20,6 +20,7 @@ import {
   type PlacedSegment,
 } from "@/lib/station/edit-list"
 import { audioCacheGet } from "@/lib/audio/bytes-cache"
+import { minHeadTrimSec } from "@/lib/timeline/lane-timing"
 import { decodeToMono48k } from "@/lib/audio/decode-mono"
 import { draftKey, EMPTY_DRAFT, pushDraft, readDraft, undoDraft, writeDraft, type DraftSource, type StationDraft } from "@/lib/station/drafts"
 import { loadStationPcm, putStationPcm, type StationPcm } from "@/lib/station/load"
@@ -136,7 +137,11 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
     return { a: w.start, b: storedB < 0 ? -1 : w.end }
   }, [ops, draft.trim, storedA, storedB, pcm])
   const [liveTrim, setLiveTrim] = useState<{ a: number; b: number } | null>(null)
-  const { trimA, trimB } = clampTrim(liveTrim?.a ?? baseTrim.a, liveTrim?.b ?? baseTrim.b, length)
+  // AQU-2495 (review, Nov 9): Start comes back only as far as keeps the
+  // take's sound inside the file, the rule the timeline's left trim handle
+  // holds to: its clip may start before 0:00, its sound may not.
+  const startFloor = minHeadTrimSec(take.cell, take.att)
+  const { trimA, trimB } = clampTrim(liveTrim ? Math.max(startFloor, liveTrim.a) : baseTrim.a, liveTrim?.b ?? baseTrim.b, length)
   // ——— Volume and fades (items 21–22): the clip's own data (cell.audio.gain),
   // or the corner / line being dragged. They never change the recording.
   const stored = useMemo(
@@ -171,7 +176,7 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
    *  sound edits are unsaved, the trim waits with them for the new version. */
   const commitTrim = useCallback(
     async (a: number, b: number) => {
-      const c = clampTrim(a, b, length)
+      const c = clampTrim(Math.max(startFloor, a), b, length)
       setLiveTrim(null)
       if (ops.length > 0) {
         setDraft(pushDraft(draft, { trim: { a: c.trimA, b: c.trimB } }))
@@ -184,7 +189,7 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
       if ((curStart ?? 0) === (startMs ?? 0) && curEnd === endMs) return
       await host.trim(target.cellId, target.audioId, { trimStartMs: startMs, trimEndMs: endMs })
     },
-    [draft, host, length, ops.length, setDraft, take.att.trimEndMs, take.att.trimStartMs, target.audioId, target.cellId],
+    [draft, host, length, ops.length, setDraft, startFloor, take.att.trimEndMs, take.att.trimStartMs, target.audioId, target.cellId],
   )
 
   // ——— Selection

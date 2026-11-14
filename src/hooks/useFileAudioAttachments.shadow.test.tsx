@@ -1024,5 +1024,29 @@ describe("mergeCellsWithAudio — a take's place in both timings (AQU-2267)", ()
     const [never] = mergeCellsWithAudio([base], new Map([["c1", entry(null)]]))
     expect(never.attachments?.[LONG.audioId]?.recordingsOffsetMs).toBeUndefined()
     expect(never.attachments?.[LONG.audioId]?.targetOffsetMs).toBe(-1000)
+    // AQU-2432: a take dragged over the end of the take before it sits before
+    // its line's start following the recordings — carried as it is.
+    const [pulled] = mergeCellsWithAudio([base], new Map([["c1", entry(-600)]]))
+    expect(pulled.attachments?.[LONG.audioId]?.recordingsOffsetMs).toBe(-600)
+  })
+
+  it("a move back over the take before it is held while it saves, and confirmed once the server has it (AQU-2432)", async () => {
+    const before = { ...LONG, targetOffsetMs: -1000, recordingsOffsetMs: 0 }
+    fetchMock.mockResolvedValue(cells({ attachments: { [LONG.audioId]: before }, selectedAudioId: LONG.audioId }))
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+    queued("evt-pull")
+    act(() => injectOptimisticAudioPlace("f1", "c1", { ...before, targetOffsetMs: -1600, recordingsOffsetMs: -600 }, "evt-pull"))
+    delivered("evt-pull")
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    expect(entryOf(result)?.attachments[LONG.audioId]?.recordingsOffsetMs).toBe(-600)
+    fetchMock.mockResolvedValue(cells({ attachments: { [LONG.audioId]: { ...before, targetOffsetMs: -1600, recordingsOffsetMs: -600 } }, selectedAudioId: LONG.audioId }))
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    const att = entryOf(result)?.attachments[LONG.audioId]
+    expect([att?.targetOffsetMs, att?.recordingsOffsetMs]).toEqual([-1600, -600])
   })
 })

@@ -76,12 +76,18 @@ pub fn run() {
             // container to button height + y and the buttons keep their own
             // offset in it. Measured on macOS 26: y=28 puts their centre at
             // 26px, the header band's midline; y=20 left them ~8px high.
+            // Only when the bundle being served declares it handles all that: a
+            // downloaded bundle can predate this shell (titlebar::OVERLAY_FEATURE).
             #[cfg(target_os = "macos")]
-            let main_window = main_window
-                .title_bar_style(tauri::TitleBarStyle::Overlay)
-                .hidden_title(true)
-                .traffic_light_position(tauri::LogicalPosition::new(16.0, 28.0))
-                .initialization_script(titlebar::OVERLAY_FLAG_SCRIPT);
+            let main_window = if hot_bundle::serves_feature(app, titlebar::OVERLAY_FEATURE) {
+                main_window
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true)
+                    .traffic_light_position(tauri::LogicalPosition::new(16.0, 28.0))
+                    .initialization_script(titlebar::OVERLAY_FLAG_SCRIPT)
+            } else {
+                main_window
+            };
             main_window.build()?;
             hot_bundle::start(app.handle());
 

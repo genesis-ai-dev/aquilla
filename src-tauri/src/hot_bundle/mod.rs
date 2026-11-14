@@ -25,6 +25,8 @@ const DEFAULT_MANIFEST_URL: &str = "https://desktop-bundles.aquilla.app/producti
 /// Long enough for the window to paint first; the check is never on the startup path.
 const STARTUP_CHECK_DELAY: Duration = Duration::from_secs(5);
 
+const SHELL_FEATURES_FILE: &str = "shell-features.json";
+
 const EVENT_STAGED: &str = "bundle://staged";
 const EVENT_SHELL_OUTDATED: &str = "bundle://shell-outdated";
 const EVENT_ROLLED_BACK: &str = "bundle://rolled-back";
@@ -99,6 +101,30 @@ pub fn prepare(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     *state.launch_outcome.lock().map_err(|e| e.to_string())? = Some(outcome);
     let _ = state.store.set(store);
     Ok(())
+}
+
+/// Whether the bundle `prepare` chose declares `feature` in its `shell-features.json`, the
+/// list each SPA build writes of the window behaviour it handles (vite.config.ts). Lets the
+/// shell turn on something the web side must cooperate with only when the code being served
+/// knows about it: a downloaded bundle can be older than this shell. The embedded assets and
+/// the `tauri dev` server are built from this shell's own commit, so they always qualify.
+pub fn serves_feature(app: &tauri::App, feature: &str) -> bool {
+    let root = app.state::<HotBundleState>().serve_root.read().ok().and_then(|r| r.clone());
+    let Some(dir) = root else { return true };
+    let declared = declares_feature(&dir, feature);
+    if !declared {
+        log::info!("[hot_bundle] {} does not declare {feature}; leaving it off", dir.display());
+    }
+    declared
+}
+
+/// A missing or unreadable list declares nothing: every bundle published before the list
+/// existed predates every feature gated on it.
+fn declares_feature(bundle_dir: &std::path::Path, feature: &str) -> bool {
+    std::fs::read(bundle_dir.join(SHELL_FEATURES_FILE))
+        .ok()
+        .and_then(|raw| serde_json::from_slice::<Vec<String>>(&raw).ok())
+        .is_some_and(|features| features.iter().any(|f| f == feature))
 }
 
 /// In `tauri dev` with no downloaded bundle, keep Vite's HMR server; everywhere else the SPA
@@ -301,4 +327,24 @@ fn embedded_version(app: &AppHandle) -> String {
 
 fn embedded_sha() -> &'static str {
     option_env!("AQUILLA_BUNDLE_SHA").unwrap_or("unknown")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_bundle_that_lists_a_feature_gets_it() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!declares_feature(dir.path(), "mac-titlebar-overlay"), "bundles from before the list");
+
+        std::fs::write(dir.path().join(SHELL_FEATURES_FILE), "not json").unwrap();
+        assert!(!declares_feature(dir.path(), "mac-titlebar-overlay"));
+
+        std::fs::write(dir.path().join(SHELL_FEATURES_FILE), r#"["something-else"]"#).unwrap();
+        assert!(!declares_feature(dir.path(), "mac-titlebar-overlay"));
+
+        std::fs::write(dir.path().join(SHELL_FEATURES_FILE), r#"["mac-titlebar-overlay"]"#).unwrap();
+        assert!(declares_feature(dir.path(), "mac-titlebar-overlay"));
+    }
 }

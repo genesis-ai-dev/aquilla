@@ -116,6 +116,12 @@ export default defineConfig(({ mode }) => ({
           "dist/version.json",
           JSON.stringify({ sha: buildSha, branch: buildBranch, builtAt: buildDate }),
         )
+        // Desktop window behaviour this build handles. The Tauri shell reads it
+        // from a downloaded hot bundle before building the window and turns a
+        // feature on only when it is listed, since that bundle may predate the
+        // shell (src-tauri/src/hot_bundle/mod.rs `serves_feature`).
+        // "mac-titlebar-overlay": src/hooks/useMacTitlebarOverlay.ts.
+        writeFileSync("dist/shell-features.json", JSON.stringify(["mac-titlebar-overlay"]))
       },
     },
   ],

@@ -1,6 +1,11 @@
 //! macOS overlay title bar: the SPA's top row stands in for the native title
 //! strip (see `src/hooks/useMacTitlebarOverlay.ts`).
 
+/// Declared in the SPA's `shell-features.json` by builds that handle the overlay
+/// (vite.config.ts). A downloaded bundle older than this shell lacks it and gets
+/// the native title bar: it has no drag regions and would sit under the lights.
+pub const OVERLAY_FEATURE: &str = "mac-titlebar-overlay";
+
 /// Runs before any page script on every load: tells the SPA this shell built
 /// the window with the overlay title bar, so it keeps the traffic-light corner
 /// clear and offers drag regions. Native knows; the web side shouldn't guess

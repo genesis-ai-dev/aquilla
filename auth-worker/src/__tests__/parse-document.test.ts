@@ -253,6 +253,21 @@ describe("extractTextFromPdf", () => {
     expect(pdf.length).toBeLessThan(2 * 1024 * 1024) // a legal upload
     expect(await pdfRefusal(pdf)).toBe("too-complex")
   })
+
+  // Review finding: the scan used to resume inside the word `endstream`, so
+  // every stream after the first was skipped and a bomb in stream two passed.
+  it("refuses a bomb that is not the first stream", async () => {
+    const small = zlibSync(strToU8("BT ET"))
+    const bomb = zlibSync(strToU8("a".repeat(64 * 1024 * 1024)), { level: 9 })
+    const parts = [
+      strToU8(`%PDF-1.4\n4 0 obj\n<< /Length ${small.length} /Filter /FlateDecode >>\nstream\n`), small, strToU8("\nendstream\nendobj\n"),
+      strToU8(`5 0 obj\n<< /Length ${bomb.length} /Filter /FlateDecode >>\nstream\n`), bomb, strToU8("\nendstream\nendobj\n%%EOF"),
+    ]
+    const pdf = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
+    let at = 0
+    for (const p of parts) { pdf.set(p, at); at += p.length }
+    expect(await pdfRefusal(pdf)).toBe("too-complex")
+  })
 })
 
 // ── Size cap (client-enforced constant) ──────────────────────────────────────

@@ -337,7 +337,8 @@ function assertPdfInflatesWithinBudget(bytes: Uint8Array): void {
     const dataStart = match.index + match[0].length
     const dataEnd = raw.indexOf("endstream", dataStart)
     if (dataEnd === -1) break
-    streamRe.lastIndex = dataEnd
+    // past the whole `endstream`: the word itself contains "stream"
+    streamRe.lastIndex = dataEnd + "endstream".length
     if (!dict.includes("/FlateDecode") || /\/Subtype\s*\/Image/.test(dict)) continue
     const cap = Math.min(budget, MAX_PDF_STREAM_BYTES)
     const inflated = inflateBounded(bytes.subarray(dataStart, dataEnd), cap)

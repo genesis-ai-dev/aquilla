@@ -103,8 +103,9 @@ export interface RebuildInput {
   /** AQU-2552 (review r7): pieces after the paragraph's first word that sit
    *  among the words of a line written as its source, each with the index of
    *  `text` it is written before; the rest follow the translation. AQU-2552
-   *  (review r9): so do a lost line's, at the boundary where it was. A field
-   *  or wrapper goes where its first such piece goes. */
+   *  (review r9): so do a lost line's, at the boundary where it was. A wrapper
+   *  goes where it is given (where it began), else, like a field, where its
+   *  first such piece goes. */
   inlineAt?: ReadonlyMap<DocxPiece, number>
   io: RebuildIo
 }
@@ -237,7 +238,8 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   const inlineOf = (node: RNode, k: number) =>
     firstWord === -1 || k <= firstWord || node.kind === "text" || node.kind === "marker" || matches.has(node) ? undefined
       : node.kind === "keep" ? inlineAt.get(node.piece)
-      : leavesOf([node]).map((leaf) => inlineAt.get(leaf.piece)).find((i) => i !== undefined)
+      : (node.kind === "wrapper" || node.kind === "emptyField" ? inlineAt.get(node.piece) : undefined)
+        ?? leavesOf([node]).map((leaf) => inlineAt.get(leaf.piece)).find((i) => i !== undefined)
   // AQU-2552 (review r8): a bookmark or comment mark is placed among the words
   // only when every other mark of its pair is placed there too; otherwise
   // they all follow the translation, in order, so none ends before it starts.

@@ -782,7 +782,7 @@ function rebuildParagraphIn(
 
   const flat = flattenPieces(items)
   const inLine = linePieceFlags(flat)
-  const placed = layout ? placeInLines(flat, inLine, layout) : null
+  const placed = layout ? placeInLines(items, flat, inLine, layout) : null
   const lineSet = new Set<DocxPiece>(flat.filter((_, k) => inLine[k]))
 
   // The innermost wrapper holding all of the line: the paragraph itself, or
@@ -1277,6 +1277,7 @@ function lostStretches(stretches: readonly (LineStretch | null)[], lineText: str
  * the source has it (`offsets`).
  */
 function placeInLines(
+  items: readonly DocxPiece[],
   flat: readonly DocxPiece[],
   inLine: readonly boolean[],
   layout: LineLayout,
@@ -1284,7 +1285,8 @@ function placeInLines(
   footnoteLines: Map<DocxPiece, number>
   lost: Set<DocxPiece>
   lostChar: (piece: DocxPiece, i: number) => boolean
-  /** Where in the line text each piece that is not the line's text sits. */
+  /** Where in the line text each piece that is not the line's text sits,
+   *  and each wrapper (where its first piece does). */
   offsets: Map<DocxPiece, number>
 } {
   const footnoteLines = new Map<DocxPiece, number>()
@@ -1316,6 +1318,24 @@ function placeInLines(
       : layout.lost.some((s) => s.start <= start && end <= s.end)
     if (owned) lost.add(piece)
   })
+  // AQU-2552 (review r9): a wrapper sits where its first piece does, so one a
+  // lost line emptied still has a place.
+  const startOf = (list: readonly DocxPiece[]): number | undefined => {
+    for (const item of list) {
+      const at = item.kind === "container" ? startOf(item.items) : (textStart.get(item) ?? offsets.get(item))
+      if (at !== undefined) return at
+    }
+    return undefined
+  }
+  const wrappers = (list: readonly DocxPiece[]) => {
+    for (const item of list) {
+      if (item.kind !== "container") continue
+      const at = startOf(item.items)
+      if (at !== undefined) offsets.set(item, at)
+      wrappers(item.items)
+    }
+  }
+  wrappers(items)
   // A run that holds both a lost line's words and another line's.
   const lostChar = (piece: DocxPiece, i: number) => {
     const start = textStart.get(piece)

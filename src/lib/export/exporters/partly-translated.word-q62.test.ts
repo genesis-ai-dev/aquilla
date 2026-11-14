@@ -298,12 +298,12 @@ describe("Word export — what a lost line owns is its own text range and its fo
     return { bytes, a, b, c, rest: cells.filter((cell) => cell !== a && cell !== b && cell !== c) }
   }
   /** Line 2 lost every way: hidden or deleted, its neighbours translated or not. */
-  async function eachLoss(line2: string, check: (out: Out, translated: boolean) => void) {
+  async function eachLoss(line2: string, check: (out: Out, translated: boolean) => void, emptied: readonly string[] = []) {
     const { bytes, a, b, c, rest } = await threeLines(line2)
-    check(await wordOut(bytes, [typed(a, "Un."), hide(typed(b, "Deux.")), typed(c, "Trois."), ...rest]), true)
-    check(await wordOut(bytes, [typed(a, "Un."), typed(c, "Trois."), ...rest], [b]), true)
-    check(await wordOut(bytes, [a, hide(b), c, ...rest]), false)
-    check(await wordOut(bytes, [a, c, ...rest], [b]), false)
+    check(await wordOut(bytes, [typed(a, "Un."), hide(typed(b, "Deux.")), typed(c, "Trois."), ...rest], [], emptied), true)
+    check(await wordOut(bytes, [typed(a, "Un."), typed(c, "Trois."), ...rest], [b], emptied), true)
+    check(await wordOut(bytes, [a, hide(b), c, ...rest], [], emptied), false)
+    check(await wordOut(bytes, [a, c, ...rest], [b], emptied), false)
   }
   const remaining = (translated: boolean) => (translated ? "Un. Trois." : "First line here … Third line here …")
 
@@ -333,6 +333,16 @@ describe("Word export — what a lost line owns is its own text range and its fo
     const { bytes, a, b, c, rest } = await threeLines(kind.line2)
     expect(paras((await wordOut(bytes, [typed(a, "Un."), hide(b), c, ...rest])).body)[0]).toBe(`Un.${kind.seen} Third line here …`)
     expect(paras((await wordOut(bytes, [a, typed(c, "Trois."), ...rest], [b])).body)[0]).toBe(`First line here …${kind.seen} Trois.`)
+  })
+
+  // A wrapper the lost line emptied has nothing left in it to place it by:
+  // it sits where it began.
+  it.each(KINDS.filter((kind) => kind.name === "a link" || kind.name === "a content control"))("$name a lost line emptied sits after the remaining line before it", async (kind) => {
+    await eachLoss(kind.line2, (out, translated) => {
+      const first = firstPara(out.body)
+      expect(first.indexOf(kind.kept!)).toBeGreaterThan(first.indexOf(translated ? "Un." : "First line"))
+      expect(first.indexOf(kind.kept!)).toBeLessThan(first.indexOf(translated ? "Trois." : "Third line"))
+    }, emptiedBy(kind))
   })
 
   it.each(staying)("$name of a lost first line sits before the first remaining line", async (kind) => {

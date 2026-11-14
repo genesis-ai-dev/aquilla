@@ -14,6 +14,7 @@
 // skipping and the stop-on-failure are tested here without an engine.
 
 import { ownerScopedLocalStorageKey } from "@/lib/frontier/client-local-storage"
+import type { LineDelivery } from "@/lib/parsers/types"
 
 export interface MakeSpeechRecipe {
   /** Draft the target text for a line that has none. */
@@ -24,6 +25,11 @@ export interface MakeSpeechRecipe {
   readerVoiceId: string | null
   /** The voice the reader's take is changed into. Null: no third step. */
   characterVoiceId: string | null
+  /**
+   * How the reader delivers these lines (speed, tags), set before a line has
+   * any take. It belongs to the run, not the recipe: it is never remembered.
+   */
+  delivery?: LineDelivery
 }
 
 export const DEFAULT_MAKE_SPEECH_RECIPE: MakeSpeechRecipe = {
@@ -49,7 +55,7 @@ export interface MakeSpeechActions {
   /** Whether the line has target text right now (read again after a translate). */
   hasText(cellId: string): boolean
   translate(cellId: string): Promise<boolean>
-  speak(cellId: string, readerVoiceId: string | null): Promise<boolean>
+  speak(cellId: string, readerVoiceId: string | null, delivery?: LineDelivery): Promise<boolean>
   revoice(cellId: string, characterVoiceId: string): Promise<boolean>
 }
 
@@ -94,7 +100,7 @@ export async function runMakeSpeech(
       const ok = step === "translate"
         ? await actions.translate(cellId)
         : step === "speak"
-          ? await actions.speak(cellId, recipe.readerVoiceId)
+          ? await actions.speak(cellId, recipe.readerVoiceId, recipe.delivery)
           : await actions.revoice(cellId, recipe.characterVoiceId ?? "")
       if (!ok) {
         failed = step

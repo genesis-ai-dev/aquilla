@@ -121,7 +121,7 @@ import {
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/lib/workspace-actions/registry"
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
-import type { FileReference, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
+import type { FileReference, LineDelivery, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import { fileOrderedBy, infractionSeverity, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { resolveBibleEnrichment } from "../../db/shared/bible-enrichments"
 import { isBibleDataExperimentOn, isBibleOpen } from "@/lib/bible-data/experiment"
@@ -13324,7 +13324,7 @@ export function ProjectWorkspace() {
     // AQU-2577: resolves to whether a take was made, and `quiet` leaves the
     // toasts to the caller — Make speech runs this for many lines and shows
     // its own per-line progress.
-    async (cellId: string, slot: string, opts?: { voiceId?: string; quiet?: boolean }): Promise<boolean> => {
+    async (cellId: string, slot: string, opts?: { voiceId?: string; quiet?: boolean; delivery?: LineDelivery }): Promise<boolean> => {
       if (!project || !frontierSession) return false
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return false
@@ -13355,6 +13355,7 @@ export function ProjectWorkspace() {
         text,
         voiceCellId: readAloud?.voiceCellId ?? undefined,
         ...(opts?.voiceId ? { voiceId: opts.voiceId } : {}),
+        ...(opts?.delivery ? { lineDelivery: opts.delivery } : {}),
       }).catch(() => false))
       if (!opts?.quiet) {
         toast.add(ok
@@ -13704,8 +13705,12 @@ export function ProjectWorkspace() {
       const owner = resolveTakeCellRef.current(cellId)
       return owner ? Boolean(await handleCompleteSingle(owner.cell)) : false
     },
-    speak: (cellId, readerVoiceId) =>
-      handleRegenerateTimelineVoice(cellId, RECORDING_SLOT, { quiet: true, ...(readerVoiceId ? { voiceId: readerVoiceId } : {}) }),
+    speak: (cellId, readerVoiceId, delivery) =>
+      handleRegenerateTimelineVoice(cellId, RECORDING_SLOT, {
+        quiet: true,
+        ...(readerVoiceId ? { voiceId: readerVoiceId } : {}),
+        ...(delivery ? { delivery } : {}),
+      }),
     revoice: async (cellId, characterVoiceId) => {
       const voice = findVoice(tts.laneSettings, characterVoiceId)
       return voice ? handleChangeTimelineVoice(cellId, { voice, quiet: true }) : false
@@ -13802,8 +13807,9 @@ export function ProjectWorkspace() {
         label: (c.translated?.trim() || c.original?.trim() || c.id).slice(0, 80),
         hasText: Boolean(c.translated?.trim()),
         hasSpeech: lineTake(c).audioId != null,
+        voiceId: resolveCastVoice(tts.laneSettings, c, c.ttsSettings?.voiceId).id,
       })),
-    [audioMergedCells],
+    [audioMergedCells, tts.laneSettings],
   )
   const makeSpeechForRail = useMemo(
     () => (lens === "audio" && activeLaneDelivers !== "audio"

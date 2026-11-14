@@ -750,6 +750,11 @@ export const audio = defineNamespace({
     "audio.makeSpeech.step2": "Speak it",
     "audio.makeSpeech.readerAriaLabel": "The voice that reads the text",
     "audio.makeSpeech.readerLineVoice": "Each line's own voice",
+    "audio.makeSpeech.speedOwn": "The voice's own",
+    "audio.makeSpeech.speedReset": "Go back to the voice's own speed",
+    "audio.makeSpeech.tags": "Tags on these lines",
+    "audio.makeSpeech.tagsSomeSkipped": "Tags are performed, not read out. A voice whose model would read a tag aloud says the line without it.",
+    "audio.makeSpeech.deliveryNeedsElevenLabs": "Speed and tags can be set when an ElevenLabs voice reads the lines.",
     "audio.makeSpeech.step3": "Change it into a character's voice",
     "audio.makeSpeech.characterAriaLabel": "The voice it is changed into",
     "audio.makeSpeech.noCharacter": "Leave it in the reader's voice",
@@ -3328,6 +3333,21 @@ export const audio = defineNamespace({
       },
       "audio.makeSpeech.readerLineVoice": {
         description: "First choice in the step 2 voice picker of the Make speech panel: read each line with the voice already cast on it.",
+      },
+      "audio.makeSpeech.speedOwn": {
+        description: "Shown beside the Speed slider in step 2 of the Make speech panel while the slider has not been moved: the lines are read at the speed already set on the voice.",
+      },
+      "audio.makeSpeech.speedReset": {
+        description: "Accessible name of the small reset button beside the Speed value in the Make speech panel; clears the speed chosen for these lines.",
+      },
+      "audio.makeSpeech.tags": {
+        description: "Label above the audio-tag chips (whispers, sighs…) in step 2 of the Make speech panel. The tags chosen apply to every line the run is about.",
+      },
+      "audio.makeSpeech.tagsSomeSkipped": {
+        description: "Note under the tag chips in the Make speech panel when at least one of the reading voices uses an ElevenLabs model that does not understand audio tags.",
+      },
+      "audio.makeSpeech.deliveryNeedsElevenLabs": {
+        description: "Note in step 2 of the Make speech panel when none of the voices that will read the lines is an ElevenLabs voice, so speed and tags cannot be set.",
       },
       "audio.makeSpeech.step3": {
         description: "Title of step 3 in the Make speech panel: the spoken audio is converted to sound like another voice (speech to speech).",

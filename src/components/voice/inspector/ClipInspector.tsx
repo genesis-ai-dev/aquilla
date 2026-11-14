@@ -14,11 +14,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, Mic, Pause, Play, Plus, RefreshCw } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Slider } from "@/components/ui/slider"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
+import { LineTagChips } from "./LineTagChips"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import {
   DEFAULT_ELEVENLABS_MODEL,
@@ -32,9 +32,6 @@ import {
 import {
   lineDeliveryFor,
   lineDeliveryPatch,
-  MAX_LINE_TAGS,
-  normalizeLineTag,
-  SUGGESTED_LINE_TAGS,
   voiceTakesLineDelivery,
   withLineDelivery,
 } from "@/lib/audio/line-delivery"
@@ -151,15 +148,8 @@ export function ClipInspector({
 
   // ── Tags: always this line's ──
   const tags = stored?.tags ?? []
-  const [customTag, setCustomTag] = useState<string | null>(null)
   const setTags = (next: string[]) =>
-    void onSaveSettings(lineDeliveryPatch(settings, cell.id, { ...stored, tags: next.slice(0, MAX_LINE_TAGS) }))
-  const toggleTag = (tag: string) => setTags(tags.includes(tag) ? tags.filter((x) => x !== tag) : [...tags, tag])
-  const addCustomTag = () => {
-    const tag = normalizeLineTag(customTag ?? "")
-    if (tag && !tags.includes(tag)) setTags([...tags, tag])
-    setCustomTag(null)
-  }
+    void onSaveSettings(lineDeliveryPatch(settings, cell.id, { ...stored, tags: next }))
   const useTagModel = () =>
     void onSaveSettings({
       voices: allVoices.map((v) => (v.id === speaker.id && v.elevenLabs ? { ...v, elevenLabs: { ...v.elevenLabs, modelId: "eleven_v4" } } : v)),
@@ -309,39 +299,7 @@ export function ClipInspector({
 
             <div className="space-y-1.5">
               <p className="text-xs font-medium">{t("audio.inspector.tags")}</p>
-              <div className="flex flex-wrap gap-1.5" data-testid="clip-inspector-tags">
-                {[...new Set([...SUGGESTED_LINE_TAGS, ...tags])].map((tag) => (
-                  <button
-                    key={tag} type="button" aria-pressed={tags.includes(tag)} disabled={!canEdit}
-                    className={cn(
-                      "h-6 rounded-full border px-2 text-xs",
-                      tags.includes(tag) ? "border-primary bg-primary/10 font-medium text-foreground" : "text-muted-foreground hover:bg-accent",
-                    )}
-                    onClick={() => toggleTag(tag)}
-                  >
-                    {tag}
-                  </button>
-                ))}
-                {customTag == null ? (
-                  <button
-                    type="button" disabled={!canEdit}
-                    className="h-6 rounded-full border border-dashed px-2 text-xs text-muted-foreground hover:bg-accent"
-                    onClick={() => setCustomTag("")}
-                  >
-                    {t("audio.inspector.otherTag")}
-                  </button>
-                ) : (
-                  <form className="flex items-center gap-1" onSubmit={(e) => { e.preventDefault(); addCustomTag() }}>
-                    <Input
-                      autoFocus value={customTag} onChange={(e) => setCustomTag(e.target.value)}
-                      onBlur={addCustomTag}
-                      aria-label={t("audio.inspector.otherTagAriaLabel")}
-                      placeholder={t("audio.inspector.otherTagPlaceholder")}
-                      className="h-6 w-32 px-2 text-xs"
-                    />
-                  </form>
-                )}
-              </div>
+              <LineTagChips tags={tags} disabled={!canEdit} onChange={setTags} testId="clip-inspector-tags" />
               {readsTags ? (
                 <p className="text-[11px] text-muted-foreground">{t("audio.inspector.tagsNote")}</p>
               ) : (

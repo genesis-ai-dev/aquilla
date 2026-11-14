@@ -18,12 +18,22 @@
 // progress list. The steps themselves are the workspace's, handed in as
 // `actions`; the order they run in is make-speech.ts.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ArrowLeft, Play, Square } from "lucide-react"
+import { ArrowLeft, Play, RotateCcw, Square } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Slider } from "@/components/ui/slider"
 import { cn } from "@/lib/utils"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
+import { LineTagChips } from "./LineTagChips"
+import {
+  DEFAULT_ELEVENLABS_MODEL,
+  ELEVENLABS_SPEED_MAX,
+  ELEVENLABS_SPEED_MIN,
+  elevenLabsModelReadsTags,
+  elevenLabsSettingsOf,
+} from "@/lib/audio/elevenlabs/settings"
+import { voiceTakesLineDelivery } from "@/lib/audio/line-delivery"
 import {
   loadMakeSpeechRecipe,
   runMakeSpeech,
@@ -33,7 +43,7 @@ import {
   type MakeSpeechRecipe,
 } from "@/lib/audio/make-speech"
 import type { MessageKey } from "@/lib/i18n/messages/en"
-import type { Voice } from "@/lib/parsers/types"
+import type { LineDelivery, Voice } from "@/lib/parsers/types"
 
 export interface MakeSpeechLine {
   cellId: string
@@ -42,6 +52,8 @@ export interface MakeSpeechLine {
   /** The line has target text; without it, step 1 translates it first. */
   hasText: boolean
   hasSpeech: boolean
+  /** The voice cast on the line: who reads it when the recipe names no reader. */
+  voiceId?: string
 }
 
 export interface MakeSpeechPanelProps {
@@ -59,6 +71,11 @@ export interface MakeSpeechPanelProps {
   /** The language lines are translated into, as a person reads it ("Arabic"). */
   targetLanguage?: string
   actions: MakeSpeechActions
+  /**
+   * Keep the delivery set here (speed, tags) on the lines it was run on, so the
+   * clip inspector shows it afterwards. Absent: delivery is not offered.
+   */
+  onSaveDelivery?: (cellIds: readonly string[], delivery: LineDelivery) => Promise<void> | void
   /** Each line's state as the run goes, for whoever draws the lines (the timeline's ghosts). */
   onLineState?: (cellId: string, state: MakeSpeechLineState) => void
   onBack: () => void
@@ -81,7 +98,7 @@ const STEP_KEYS = {
 } as const satisfies Record<string, MessageKey>
 
 export function MakeSpeechPanel({
-  projectId, voices, lines, selectedCellId, picked, targetLanguage, actions, onLineState, onBack,
+  projectId, voices, lines, selectedCellId, picked, targetLanguage, actions, onSaveDelivery, onLineState, onBack,
 }: MakeSpeechPanelProps) {
   const t = useT()
   const [recipe, setRecipe] = useState<MakeSpeechRecipe>(() => loadMakeSpeechRecipe(projectId))
@@ -112,6 +129,25 @@ export function MakeSpeechPanel({
   // What step 1 will do to these lines.
   const untranslated = targetIds.filter((id) => byId.get(id)?.hasText === false).length
 
+  // ── Delivery: how the reader says these lines, before any of them has a take ──
+  // The voices that will read: the recipe's reader, or each line's own.
+  const speakers = useMemo(() => {
+    const ids = reader ? [reader] : [...new Set(targetIds.map((id) => byId.get(id)?.voiceId))]
+    return ids.map((id) => voices.find((v) => v.id === id)).filter((v): v is Voice => v != null)
+  }, [reader, targetIds, byId, voices])
+  const tunable = speakers.filter(voiceTakesLineDelivery)
+  const allReadTags = tunable.every((v) => elevenLabsModelReadsTags(v.elevenLabs?.modelId ?? DEFAULT_ELEVENLABS_MODEL))
+  const [speed, setSpeed] = useState<number | null>(null)
+  const [tags, setTags] = useState<string[]>([])
+  // What the slider rests on until it is moved: the one reader's own speed.
+  const ownSpeed = tunable.length === 1 ? elevenLabsSettingsOf(tunable[0]).speed : 1
+  const delivery = useMemo<LineDelivery | undefined>(
+    () => (tunable.length > 0 && (speed != null || tags.length > 0)
+      ? { settings: speed != null ? { speed } : {}, tags }
+      : undefined),
+    [tunable.length, speed, tags],
+  )
+
   const [progress, setProgress] = useState<Map<string, MakeSpeechLineState> | null>(null)
   const [running, setRunning] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
@@ -126,14 +162,16 @@ export function MakeSpeechPanel({
     // Progress is at the top of the panel; the button that started it is at the bottom.
     panelRef.current?.scrollTo({ top: 0, behavior: "smooth" })
     try {
-      await runMakeSpeech(targetIds, effective, actions, (cellId, state) => {
+      // The run is handed the delivery itself, so it does not wait on the save.
+      if (delivery) await Promise.resolve(onSaveDelivery?.(targetIds, delivery)).catch(() => {})
+      await runMakeSpeech(targetIds, { ...effective, delivery }, actions, (cellId, state) => {
         setProgress((cur) => new Map(cur ?? []).set(cellId, state))
         onLineState?.(cellId, state)
       }, abort.signal)
     } finally {
       setRunning(false)
     }
-  }, [running, targetIds, effective, actions, onLineState])
+  }, [running, targetIds, effective, delivery, actions, onSaveDelivery, onLineState])
 
   const done = progress ? [...progress.values()].filter((s) => s.kind !== "waiting" && s.kind !== "running").length : 0
   const labelOf = (cellId: string) => byId.get(cellId)?.label ?? cellId
@@ -257,6 +295,45 @@ export function MakeSpeechPanel({
             noneLabel={t("audio.makeSpeech.readerLineVoice")}
             onPick={(voiceId) => update({ readerVoiceId: voiceId })}
           />
+          {onSaveDelivery && (tunable.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground">{t("audio.makeSpeech.deliveryNeedsElevenLabs")}</p>
+          ) : (
+            <div className="space-y-2.5 border-t pt-2.5" data-testid="make-speech-delivery">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="font-medium">{t("audio.elevenLabs.speed")}</span>
+                  <span className="flex items-center gap-1 tabular-nums text-muted-foreground">
+                    {speed == null ? t("audio.makeSpeech.speedOwn") : `${speed.toFixed(2)}×`}
+                    {speed != null && (
+                      <button
+                        type="button" disabled={running} aria-label={t("audio.makeSpeech.speedReset")}
+                        className="grid size-5 place-items-center rounded hover:bg-accent hover:text-foreground"
+                        onClick={() => setSpeed(null)}
+                      >
+                        <RotateCcw className="size-3" aria-hidden />
+                      </button>
+                    )}
+                  </span>
+                </div>
+                <Slider
+                  min={ELEVENLABS_SPEED_MIN} max={ELEVENLABS_SPEED_MAX} step={0.05} disabled={running}
+                  value={[speed ?? ownSpeed]}
+                  onValueChange={(next) => {
+                    const value = Array.isArray(next) ? next[0] : next
+                    if (typeof value === "number") setSpeed(Math.round(value * 100) / 100)
+                  }}
+                  aria-label={t("audio.elevenLabs.speed")}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium">{t("audio.makeSpeech.tags")}</p>
+                <LineTagChips tags={tags} disabled={running} onChange={setTags} testId="make-speech-tags" />
+                <p className="text-[11px] text-muted-foreground">
+                  {allReadTags ? t("audio.inspector.tagsNote") : t("audio.makeSpeech.tagsSomeSkipped")}
+                </p>
+              </div>
+            </div>
+          ))}
         </Step>
 
         <Step n={3} title={t("audio.makeSpeech.step3")} strong={character != null}>

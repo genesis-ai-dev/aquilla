@@ -143,7 +143,7 @@ describe("MakeSpeechPanel", () => {
     const actions = {
       hasText: (id: string) => text.has(id),
       translate: vi.fn(async (id: string) => { calls.push(`translate ${id}`); text.add(id); return true }),
-      speak: vi.fn(async (id: string, voice: string | null) => { calls.push(`speak ${id} ${voice}`); return id !== "b" }),
+      speak: vi.fn(async (id: string, voice: string | null, _delivery?: unknown) => { calls.push(`speak ${id} ${voice}`); return id !== "b" }),
       revoice: vi.fn(async (id: string, voice: string) => { calls.push(`revoice ${id} ${voice}`); return true }),
     }
     return { calls, actions }
@@ -190,5 +190,34 @@ describe("MakeSpeechPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Make speech for 1 line" }))
     await waitFor(() => expect(onLineState).toHaveBeenCalledWith("b", { kind: "failed", step: "speak" }))
     expect(calls).toEqual(["translate b", "speak b layla"])
+  })
+
+  // Speed and tags are set before a line has any take: they go with the run,
+  // and are kept on the lines so the clip inspector shows them afterwards.
+  it("speaks the picked lines with the tags chosen in step 2, and keeps them on those lines", async () => {
+    const { actions } = harness()
+    const onSaveDelivery = vi.fn()
+    render(
+      <MakeSpeechPanel
+        projectId="p1" voices={[elevenVoice("layla", "Layla")]} selectedCellId={null} picked={["a"]} onBack={vi.fn()}
+        actions={actions} lines={lines.map((l) => ({ ...l, voiceId: "layla" }))} onSaveDelivery={onSaveDelivery}
+      />,
+    )
+    fireEvent.click(within(screen.getByTestId("make-speech-tags")).getByRole("button", { name: "whispers" }))
+    fireEvent.click(screen.getByRole("button", { name: "Make speech for 1 line" }))
+    await waitFor(() => expect(actions.speak).toHaveBeenCalledWith("a", null, { settings: {}, tags: ["whispers"] }))
+    expect(onSaveDelivery).toHaveBeenCalledWith(["a"], { settings: {}, tags: ["whispers"] })
+  })
+
+  it("offers no speed or tags when the voice that reads is not an ElevenLabs one", () => {
+    const { actions } = harness()
+    render(
+      <MakeSpeechPanel
+        projectId="p1" voices={[{ id: "plain", name: "Plain", provider: "inworld" }]} selectedCellId={null} picked={["a"]} onBack={vi.fn()}
+        actions={actions} lines={lines.map((l) => ({ ...l, voiceId: "plain" }))} onSaveDelivery={vi.fn()}
+      />,
+    )
+    expect(screen.queryByTestId("make-speech-delivery")).toBeNull()
+    expect(screen.getByText("Speed and tags can be set when an ElevenLabs voice reads the lines.")).toBeInTheDocument()
   })
 })

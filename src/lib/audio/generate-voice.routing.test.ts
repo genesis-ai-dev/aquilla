@@ -170,10 +170,12 @@ describe("generateAndAttachCellVoice routing", () => {
     const base = { projectId: "p", fileId: "f", session: { jwt: "j", username: "u" } as never, username: "u", projectTtsSettings }
     await generateAndAttachCellVoice({ ...base, cellId: "c", text: "مرحبا" })
     await generateAndAttachCellVoice({ ...base, cellId: "other", text: "مرحبا" })
+    // A delivery handed to the run itself (Make speech, before a first take) wins over the stored one.
+    await generateAndAttachCellVoice({ ...base, cellId: "c", text: "مرحبا", lineDelivery: { settings: { speed: 1.1 }, tags: ["excited"] } })
     expect(synthElevenLabs.mock.calls.map((call) => {
       const args = (call as unknown[])[0] as { cellId: string; text: string; voiceSettings: { speed: number } }
       return [args.cellId, args.text, args.voiceSettings.speed]
-    })).toEqual([["c", "[sighs] مرحبا", 0.85], ["other", "مرحبا", 1]])
+    })).toEqual([["c", "[sighs] مرحبا", 0.85], ["other", "مرحبا", 1], ["c", "[excited] مرحبا", 1.1]])
     expect(emitAttach).toHaveBeenCalledWith(expect.objectContaining({ voiceId: "v-el" }))
   })
 

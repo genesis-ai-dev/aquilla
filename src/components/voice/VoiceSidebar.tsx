@@ -27,7 +27,7 @@ import { liveTargetLaneLanguages } from "@/lib/lanes/lane-language"
 import type { ProjectTtsApi } from "@/hooks/useProjectTts"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
-import type { ProjectRecord as Project } from "@/lib/parsers/types"
+import type { LineDelivery, ProjectRecord as Project } from "@/lib/parsers/types"
 
 interface VoiceSidebarProps {
   cells: CellData[]
@@ -140,6 +140,13 @@ export function VoiceSidebar({
       />,
     )
   }
+  // AQU-2577: the delivery set in Make speech stays on the lines it ran on.
+  const saveDelivery = (cellIds: readonly string[], delivery: LineDelivery) => {
+    if (!canEdit) return
+    return tts.saveTts({
+      lineDelivery: { ...(tts.laneSettings?.lineDelivery ?? {}), ...Object.fromEntries(cellIds.map((id) => [id, delivery])) },
+    })
+  }
   // Lines picked on the timeline come first: the rail is about what was just clicked.
   const pickedLines = makeSpeech?.picked ?? []
   if (makeSpeech && pickedLines.length > 0) {
@@ -152,6 +159,7 @@ export function VoiceSidebar({
         picked={pickedLines}
         targetLanguage={languageLabel}
         actions={makeSpeech.actions}
+        onSaveDelivery={saveDelivery}
         onLineState={makeSpeech.onLineState}
         onBack={() => { makeSpeech.onClearPicked(); setView("cast") }}
       />,
@@ -191,6 +199,7 @@ export function VoiceSidebar({
         selectedCellId={makeSpeech.selectedCellId}
         targetLanguage={languageLabel}
         actions={makeSpeech.actions}
+        onSaveDelivery={saveDelivery}
         onLineState={makeSpeech.onLineState}
         onBack={() => setView("cast")}
       />,

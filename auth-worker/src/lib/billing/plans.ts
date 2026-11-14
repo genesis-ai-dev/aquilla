@@ -281,7 +281,3 @@ export function periodDaysBetween(
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return fallback
   return Math.max(1, Math.round((end - start) / 86_400_000))
 }
-
-export function isPaidStatus(status: BillingStatus): boolean {
-  return status === "active" || status === "trialing" || status === "past_due"
-}

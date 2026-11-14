@@ -1,6 +1,8 @@
+import { EmptyState } from "@/components/ui/empty"
+import { Spinner } from "@/components/ui/spinner"
 import { LoginMethodsSection } from "@/components/settings/LoginMethodsSection"
 import { Button } from "@/components/ui/button"
-import { useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import { Navigate, useLocation, useNavigate, useParams, type Location } from "react-router-dom"
 import { Bell, Cpu, Gauge, KeyRound, Link2, Mic, PanelLeft, ServerCog, UserRound } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
@@ -503,10 +505,18 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
 /** Nested nav groups after the inline General card. */
 const PREFERENCE_GROUPS = ["AI & personalization", "Account"] as const
 
+const preferenceIndexScroll = new Map<string, number>()
+
 /** The index: inline General card + grouped navigation rows for nested sections. */
 function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boolean; backgroundLocation?: Location }) {
   const { t } = useI18n()
   const { position } = useDockRailPosition()
+  const scrollContainer = useRef<HTMLDivElement>(null)
+  const scrollKey = modal ? `modal:${backgroundLocation?.key ?? "preferences"}` : "page"
+  useLayoutEffect(() => {
+    if (scrollContainer.current) scrollContainer.current.scrollTop = preferenceIndexScroll.get(scrollKey) ?? 0
+  }, [scrollKey])
+
 
   const profile = getTranslatorProfile()
   const profileFilled = PROFILE_KEYS.filter((k) => (profile[k] ?? "").trim().length > 0).length
@@ -525,7 +535,8 @@ function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boole
   }
 
   const content = (
-    <Page>
+    <Page ref={scrollContainer} data-testid="preferences-index-scroll"
+      onScroll={(event) => preferenceIndexScroll.set(scrollKey, event.currentTarget.scrollTop)}>
       <PageHeader
         title={t("nav.account.preferences")}
         description={t("onboarding.preferences.pageDescription")}
@@ -570,9 +581,25 @@ function sectionDescription(section: PreferenceSection, description: string): Re
 function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: boolean }) {
   const { t } = useI18n()
   const navigate = useNavigate()
+  const { session, loading, sessionLoadError, retrySessionLoad } = useFrontierSession()
   if (INLINE_PREFERENCE_SLUGS.has(slug)) return <Navigate to="/preferences" replace />
   const section = PREFERENCE_SECTIONS.find((s) => s.slug === slug)
   if (!section || (section.tauriOnly && !isTauriRuntime())) return <Navigate to="/preferences" replace />
+  // Account settings have no useful signed-out preview. Keep local preferences
+  // available, and wait for session hydration before asking anyone to log in.
+  if (section.group === "Account" && !session) {
+    const content = <div className={modal ? "flex min-h-[60dvh] items-center justify-center p-6" : "flex min-h-[calc(100dvh-4rem)] items-center justify-center p-6"}>
+      {loading ? <Spinner /> : sessionLoadError ? <EmptyState variant="inline" title={t("auth.login.sessionLoadFailed")}
+        action={<Button onClick={() => { void retrySessionLoad() }}>{t("common.retry")}</Button>} /> :
+        <EmptyState variant="inline" icon={UserRound}
+          title={t("auth.settings.loginRequired")}
+          description={t("auth.settings.loginDescription")}
+        />}
+    </div>
+    return modal ? content : <AppShell sidebar={<OrgSidebar />}
+      header={<OrgBreadcrumb parent={{ label: "Preferences", to: "/preferences" }} section={t(section.titleKey)} />}
+      statusBar={null} main={content} />
+  }
   if (modal) {
     // In the route-modal there is no breadcrumb, so the BackLink is the way
     // back to the index; it pops history to keep the dialog's depth intact.
@@ -630,7 +657,6 @@ export function PreferencesDialog() {
   } | null
   const backgroundLocation = modalState?.backgroundLocation
   const modalDepth = modalState?.preferencesModalDepth ?? 1
-
   return (
     <Dialog open onOpenChange={(open) => { if (!open) navigate(-modalDepth) }}>
       <DialogContent

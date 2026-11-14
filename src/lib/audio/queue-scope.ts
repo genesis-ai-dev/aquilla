@@ -31,11 +31,14 @@ export interface QueueForFile {
   progress: QueueProgress
 }
 
-export function selectQueueForFile(
+/** The same answer without the clock. A consumer that draws no time reads
+ *  this, so the ~4×/sec progress ticks do not re-render it. */
+export type QueueStateForFile = Omit<QueueForFile, "progress">
+
+export function selectQueueStateForFile(
   state: QueueState,
-  progress: QueueProgress,
   cellIds: ReadonlySet<string>,
-): QueueForFile {
+): QueueStateForFile {
   const cellId =
     "cellId" in state && state.cellId != null && cellIds.has(state.cellId) ? state.cellId : null
   const mine = cellId != null
@@ -46,6 +49,13 @@ export function selectQueueForFile(
     cellId,
     kind: mine ? state.kind : "idle",
     errorMessage: mine && state.kind === "error" ? state.message : null,
-    progress,
   }
+}
+
+export function selectQueueForFile(
+  state: QueueState,
+  progress: QueueProgress,
+  cellIds: ReadonlySet<string>,
+): QueueForFile {
+  return { ...selectQueueStateForFile(state, cellIds), progress }
 }

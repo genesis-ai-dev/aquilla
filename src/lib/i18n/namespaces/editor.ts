@@ -1607,6 +1607,13 @@ export const editor = defineNamespace({
       one: "New folder from {count} track",
       other: "New folder from {count} tracks",
     }),
+    "editor.timeline.trackMoveTo": "Move to",
+    "editor.timeline.trackMoveToCount": plural({
+      one: "Move {count} track to",
+      other: "Move {count} tracks to",
+    }),
+    "editor.timeline.trackMoveToNewFolder": "New folder",
+    "editor.timeline.trackMoveToNoFolder": "No folder",
     "editor.timeline.trackLeaveFolder": "Take out of folder",
     "editor.timeline.trackLeaveFolderCount": plural({
       one: "Take {count} track out of its folder",
@@ -2612,11 +2619,12 @@ export const editor = defineNamespace({
     // — Expansion tabs: issues and metadata ————————————————————————
     "editor.expansion.issues": "Issues",
     "editor.expansion.metadata": "Metadata",
-    // AQU-2408: the cell's own label, typed in the expansion panel. Metadata,
-    // never a voice or a character (docs/decisions/0007).
-    "editor.cellLabel.title": "Label",
+    // AQU-2408: the cell's own label, typed in the cell's corner label slot.
+    // Metadata, never a voice or a character (docs/decisions/0007).
     "editor.cellLabel.placeholder": "Add a label",
     "editor.cellLabel.inputAria": "Cell label",
+    "editor.cellLabel.add": "Add label",
+    "editor.cellLabel.edit": "Edit label",
     "editor.metadata.showOnCells": "Show {key} on cells",
     "editor.issues.none": "No translation rule issues on this cell.",
     "editor.issues.waived": "Waived",
@@ -3105,6 +3113,31 @@ export const editor = defineNamespace({
           "tracks. Replaces an older 'move to folder' submenu: a folder is made " +
           "FROM tracks, and moving into an existing one is a drag.",
         placeholders: { count: "How many tracks go into the new folder; it also selects the plural form." },
+      },
+      "editor.timeline.trackMoveTo": {
+        description:
+          "Submenu label on a timeline track's menu. Hovering it opens a list " +
+          "of the file's folders, each shown by its name; picking one moves " +
+          "the track into that folder. Read as 'Move to → <folder name>'.",
+      },
+      "editor.timeline.trackMoveToCount": {
+        description:
+          "The same submenu label when several timeline tracks are selected. " +
+          "It opens the list of folder names; picking one moves all of them " +
+          "into that folder.",
+        placeholders: { count: "How many tracks will move; it also selects the plural form." },
+      },
+      "editor.timeline.trackMoveToNewFolder": {
+        description:
+          "First choice in the 'Move to' submenu of a timeline track: makes a " +
+          "new folder and moves the selected tracks into it. Read as " +
+          "'Move to → New folder'.",
+      },
+      "editor.timeline.trackMoveToNoFolder": {
+        description:
+          "Choice in the 'Move to' submenu of a timeline track: takes the " +
+          "selected tracks out of their folder, back to the top level of the " +
+          "track list. Read as 'Move to → No folder'.",
       },
       "editor.timeline.trackLeaveFolderCount": {
         description:
@@ -10279,21 +10312,32 @@ export const editor = defineNamespace({
           "noun; the tab is disabled when there are none.",
         maxLength: 16,
       },
-      "editor.cellLabel.title": {
-        description:
-          "Label of the row at the top of a cell's expansion panel that holds the cell's " +
-          "own label — a short note typed on the line (a section name, a reviewer's " +
-          "mark). A noun. It is not a voice or a character.",
-        maxLength: 14,
-      },
       "editor.cellLabel.placeholder": {
         description:
           "Placeholder inside the empty cell-label text field, inviting the person to " +
-          "type one. A short imperative.",
+          "type one. The field appears in the top corner of a cell, where the label is " +
+          "shown. A short imperative.",
         maxLength: 24,
       },
       "editor.cellLabel.inputAria": {
-        description: "Screen-reader name of the cell-label text field in a cell's expansion panel.",
+        description:
+          "Screen-reader name of the text field a cell's own label is typed in — a " +
+          "short note on the line (a section name, a reviewer's mark). It is not a " +
+          "voice or a character.",
+      },
+      "editor.cellLabel.add": {
+        description:
+          "Tooltip and accessible name of the tag-icon button in a cell's More actions " +
+          "menu, on a cell with no label yet. Clicking it opens a small text field in " +
+          "the cell's top corner, where the label will show. A short imperative.",
+        maxLength: 24,
+      },
+      "editor.cellLabel.edit": {
+        description:
+          "Tooltip and accessible name of the same tag-icon button on a cell that " +
+          "already has a label; also the start of the accessible name of the label " +
+          "itself, which can be clicked to change it. A short imperative.",
+        maxLength: 24,
       },
       "editor.expansion.metadata": {
         description:

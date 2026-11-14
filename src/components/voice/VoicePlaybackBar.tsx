@@ -29,6 +29,7 @@ import { isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/
 import { resolveCastVoice } from "@/lib/audio/voices"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { layOutProgramme, playedProgramme, type BuildProgrammeOptions } from "@/lib/timeline/programme"
+import { fmtClock } from "@/components/timeline/format"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -81,23 +82,20 @@ interface Props {
   variant?: "bar" | "strip"
 }
 
-/** A running clock: the whole seconds gone by. */
+/** A running clock: the whole seconds gone by. Past an hour, `h:mm:ss`. */
 function fmtTime(s: number): string {
-  if (!Number.isFinite(s) || s <= 0) return "0:00"
-  const m = Math.floor(s / 60)
-  const sec = Math.floor(s % 60)
-  return `${m}:${sec.toString().padStart(2, "0")}`
+  return fmtClock(s)
 }
 
 /**
  * AQU-1758: a LENGTH, to the nearest second — the rounding the Timing control
  * states it with ("1 min 28 s long"). Floored like the clock, an 87.6 s
- * chapter read "1:27" here beside "1 min 28 s" there.
+ * chapter read "1:27" here beside "1 min 28 s" there. Past an hour the same
+ * clock the ruler uses, so `4646:34` reads `77:26:34`.
  */
 function fmtLength(s: number): string {
   if (!Number.isFinite(s) || s <= 0) return "0:00"
-  const whole = Math.round(s)
-  return `${Math.floor(whole / 60)}:${(whole % 60).toString().padStart(2, "0")}`
+  return fmtClock(Math.round(s))
 }
 
 export function VoicePlaybackBar({
@@ -328,7 +326,7 @@ export function VoicePlaybackBar({
               data-testid="transport-play"
               className="bg-foreground text-background hover:bg-foreground/90"
             >
-              {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 translate-x-px" />}
+              {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
             </Button>
           </AppTooltip>
           <IconButton small title={t("audio.playbackBar.nextLine")} disabled={!canPlay} onClick={() => stepLine(1)}>
@@ -432,7 +430,7 @@ export function VoicePlaybackBar({
               aria-label={isPlaying ? t("common.pause") : t("audio.playbackBar.playAll")}
               className="bg-foreground text-background hover:bg-foreground/90"
             >
-              {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-px" />}
+              {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
             </Button>
           </AppTooltip>
           <IconButton title={t("audio.playbackBar.nextLine")} disabled={!canPlay} onClick={() => stepLine(1)}>
@@ -611,25 +609,32 @@ function VolumeControl({
   what: string
   onChange: (v: number) => void
   onToggleMute: () => void
-  /** The media view's strip: the speaker alone, opening these two controls. */
+  /** The media view's strip: the speaker alone, and it mutes where it sits. */
   compact?: boolean
 }) {
   const t = useT()
   const label = `${muted ? t("audio.playbackBar.unmute") : t("audio.playbackBar.mute")} ${what}`
-  const controls = (
+  const speaker = (
+    <AppTooltip content={label}>
+      <Button
+        type="button"
+        size={compact ? "icon-xs" : "icon-sm"}
+        variant="ghost"
+        aria-label={label}
+        aria-pressed={muted}
+        data-testid={compact ? "transport-volume" : undefined}
+        onClick={onToggleMute}
+      >
+        {muted ? <VolumeX className={compact ? "size-4" : "h-4 w-4"} /> : <Volume2 className={compact ? "size-4" : "h-4 w-4"} />}
+      </Button>
+    </AppTooltip>
+  )
+  // The strip has no room for a slider, and opening one hid the mute behind a
+  // second click. The speaker itself is the mute.
+  if (compact) return speaker
+  return (
     <div className="flex items-center gap-2">
-      <AppTooltip content={label}>
-        <Button
-          type="button"
-          size="icon-sm"
-          variant="ghost"
-          aria-label={label}
-          aria-pressed={muted}
-          onClick={onToggleMute}
-        >
-          {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-        </Button>
-      </AppTooltip>
+      {speaker}
       <Slider
         min={0}
         max={1}
@@ -644,25 +649,8 @@ function VolumeControl({
           if (muted && v > 0) onToggleMute()
         }}
         aria-label={t("common.volume")}
-        className={compact ? "w-28" : "hidden w-24 sm:block"}
+        className="hidden w-24 sm:block"
       />
     </div>
-  )
-  if (!compact) return controls
-  return (
-    <Popover>
-      <AppTooltip content={t("common.volume")}>
-        <PopoverTrigger
-          render={
-            <Button type="button" size="icon-xs" variant="ghost" aria-label={t("common.volume")} data-testid="transport-volume">
-              {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
-            </Button>
-          }
-        />
-      </AppTooltip>
-      <PopoverContent align="end" side="top" className="w-auto p-1.5">
-        {controls}
-      </PopoverContent>
-    </Popover>
   )
 }

@@ -18,6 +18,7 @@ import type { UnitSet } from "./units"
 import type { WriteBackConflict } from "./write-back"
 import type { ClassifiedUnit } from "./classify"
 import { bridgeStore, type MirrorLink } from "./store"
+import { bridgeStateId } from "./project"
 import { reconcileBook, writeBookEdits, type BookLocation } from "./book-sync"
 import { diffCellsAgainstUnits, unitsByRef, type MirrorCell } from "./mirror-map"
 import { onParatextFileChanged, paratextTauri } from "./tauri"
@@ -105,7 +106,7 @@ export function useParatextMirror(host: MirrorHost): [MirrorState, MirrorActions
   const location = useCallback((): BookLocation | null => {
     const link = linkRef.current
     const book = bookRef.current
-    return link && book ? { projectPath: link.projectPath, fileName: book.fileName, guid: link.projectGuid } : null
+    return link && book ? { projectPath: link.projectPath, fileName: book.fileName, stateId: bridgeStateId(link.projectGuid, link.projectPath) } : null
   }, [])
 
   // Which Paratext project and book this file mirrors, if any.
@@ -156,7 +157,7 @@ export function useParatextMirror(host: MirrorHost): [MirrorState, MirrorActions
     if (!loc || !book) return
     const seq = ++pendingSeqRef.current
     try {
-      const [cells, base] = await Promise.all([loadCells(hostRef.current), bridgeStore.lastSeen(loc.guid, book.code)])
+      const [cells, base] = await Promise.all([loadCells(hostRef.current), bridgeStore.lastSeen(loc.stateId, book.code)])
       if (seq !== pendingSeqRef.current || bookRef.current !== book) return
       const pending = base ? diffCellsAgainstUnits(cells, base).edits.length : 0
       setState((s) => (s.pending === pending ? s : { ...s, pending }))
@@ -173,11 +174,11 @@ export function useParatextMirror(host: MirrorHost): [MirrorState, MirrorActions
     setState((s) => ({ ...s, busy: "sync", error: null }))
     try {
       const cells = await loadCells(hostRef.current)
-      const lastSeen = await bridgeStore.lastSeen(loc.guid, bookRef.current!.code)
+      const lastSeen = await bridgeStore.lastSeen(loc.stateId, bookRef.current!.code)
       if (!lastSeen) {
         // First contact after the import: the file as it is IS the base.
         const r = await reconcileBook(loc)
-        await bridgeStore.setLastSeen(loc.guid, r.units.book, r.units)
+        await bridgeStore.setLastSeen(loc.stateId, r.units.book, r.units)
         lastBlobRef.current = r.units.blobHash
         setState((s) => ({ ...s, busy: null, onHold: r.onHold }))
         void refreshPending()
@@ -188,7 +189,7 @@ export function useParatextMirror(host: MirrorHost): [MirrorState, MirrorActions
       lastBlobRef.current = r.units.blobHash
       await commitTheirs(r.theirs, cells)
       if (r.conflicts.length === 0) {
-        await bridgeStore.setLastSeen(loc.guid, r.units.book, r.units)
+        await bridgeStore.setLastSeen(loc.stateId, r.units.book, r.units)
         pendingUnitsRef.current = null
       } else {
         pendingUnitsRef.current = r.units
@@ -234,10 +235,10 @@ export function useParatextMirror(host: MirrorHost): [MirrorState, MirrorActions
     setState((s) => ({ ...s, busy: "write", error: null }))
     try {
       const cells = await loadCells(hostRef.current)
-      let base = await bridgeStore.lastSeen(loc.guid, bookRef.current!.code)
+      let base = await bridgeStore.lastSeen(loc.stateId, bookRef.current!.code)
       if (!base) {
         const r = await reconcileBook(loc)
-        await bridgeStore.setLastSeen(loc.guid, r.units.book, r.units)
+        await bridgeStore.setLastSeen(loc.stateId, r.units.book, r.units)
         base = r.units
       }
       const { edits, unmapped } = diffCellsAgainstUnits(cells, base)
@@ -263,7 +264,7 @@ export function useParatextMirror(host: MirrorHost): [MirrorState, MirrorActions
   const finishResolutions = useCallback(async (remaining: ClassifiedUnit[]) => {
     const loc = location()
     if (remaining.length === 0 && loc && pendingUnitsRef.current) {
-      await bridgeStore.setLastSeen(loc.guid, pendingUnitsRef.current.book, pendingUnitsRef.current)
+      await bridgeStore.setLastSeen(loc.stateId, pendingUnitsRef.current.book, pendingUnitsRef.current)
       pendingUnitsRef.current = null
     }
     setState((s) => ({ ...s, conflicts: remaining }))
@@ -296,7 +297,7 @@ export function useParatextMirror(host: MirrorHost): [MirrorState, MirrorActions
   const releaseHold = useCallback(async () => {
     const loc = location()
     if (!loc || !bookRef.current) return
-    await bridgeStore.setHold(loc.guid, bookRef.current.code, false)
+    await bridgeStore.setHold(loc.stateId, bookRef.current.code, false)
     setState((s) => ({ ...s, onHold: false }))
   }, [location])
 

@@ -49,10 +49,10 @@ describe("AdminDevAccessSection", () => {
     vi.unstubAllGlobals()
   })
 
-  it("says the list only applies on dev when it is off", async () => {
+  it("directs list management to dev when it is off", async () => {
     vi.mocked(api.getAdminDevAccess).mockResolvedValue({ enabled: false, entries: [] })
     render(<AdminDevAccessSection jwt="t" />)
-    expect(await screen.findByText(/only applies on dev\.aquilla\.app/)).toBeTruthy()
+    expect(await screen.findByText(/Manage access.*dev\.aquilla\.app/)).toBeTruthy()
     expect(screen.queryByLabelText("Add someone")).toBeNull()
   })
 })

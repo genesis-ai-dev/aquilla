@@ -1,7 +1,7 @@
-import { readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { harnessHealth, type Evidence, type Recorded } from "./health"
+import { harnessHealth, SETUP_FAILURE_FILE, type Evidence, type Recorded } from "./health"
 
 export const MARKER = "<!-- aquilla-adversarial -->"
 
@@ -12,6 +12,8 @@ export interface CommentInput {
   runUrl: string
   /** Set when the suite never ran, e.g. the preview never served this commit. */
   notRun?: string
+  /** Set when global setup stopped for a publishable reason (setup.ts), e.g. a bot account off the dev access list. */
+  setupFailure?: string
   tests?: SuiteTest[]
 }
 
@@ -32,6 +34,8 @@ interface Assessed {
 
 function assess(input: CommentInput): Assessed {
   if (input.notRun) return { status: "not_run", reason: input.notRun, recorded: [], served: undefined }
+  // Nothing ran after a failed setup, so its own reason beats "the canary did not run".
+  if (input.setupFailure) return { status: "harness_unavailable", reason: input.setupFailure, recorded: [], served: undefined }
   const tests = input.tests ?? []
   const recorded: Recorded[] = tests.map((test) => ({
     project: test.title.startsWith("canary:") ? "canary" : "attacks",
@@ -104,8 +108,14 @@ export function renderComment(input: CommentInput): string {
 // last step fails the job unless line 1 is "healthy".
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [sha, runUrl, third, reason] = process.argv.slice(2)
+  const setupFailureFile = path.join(third ?? "", SETUP_FAILURE_FILE)
   const input: CommentInput = third === "--not-run" ? { sha, runUrl, notRun: reason }
-    : { sha, runUrl, tests: (JSON.parse(readFileSync(path.join(third, "suite.json"), "utf8")) as { tests: SuiteTest[] }).tests }
+    : {
+      sha, runUrl,
+      tests: (JSON.parse(readFileSync(path.join(third, "suite.json"), "utf8")) as { tests: SuiteTest[] }).tests,
+      ...(existsSync(setupFailureFile)
+        ? { setupFailure: (JSON.parse(readFileSync(setupFailureFile, "utf8")) as { reason: string }).reason } : {}),
+    }
   process.stdout.write(renderComment(input) + "\n")
   const statusFile = process.env.ADVERSARIAL_STATUS_FILE
   if (statusFile) {

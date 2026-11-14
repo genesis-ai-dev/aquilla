@@ -47,7 +47,7 @@ describe("login", () => {
     const err = await login({ username: "wendi", password: "pw" }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(FrontierAuthError);
     expect((err as FrontierAuthError).status).toBe(403);
-    expect((err as Error).message).toMatch(/dev\.aquilla\.app is restricted/);
+    expect((err as Error).message).toMatch(/Access to dev is restricted/);
     expect(await loadSession()).toBeNull();
   });
 
@@ -391,6 +391,16 @@ describe("hydrateSessionEmails", () => {
 });
 
 describe("AUTH_BASE env override", () => {
+  it("names CI previews when their backend refuses access", async () => {
+    vi.stubEnv("VITE_AUTH_BASE", "https://ci-test-aquilla-auth-preview.example.workers.dev");
+    vi.resetModules();
+    const mod = await import("./auth");
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ code: "dev_access_restricted" }), { status: 403 }));
+    try {
+      await expect(mod.login({ username: "test", password: "pw" })).rejects.toThrow("Access to CI previews is restricted. Ask the Aquilla team to add you to the dev access list.");
+    } finally { spy.mockRestore(); }
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.resetModules();

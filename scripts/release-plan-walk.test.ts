@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { fillWalks, lookupPr, lookupWalk, normalizeVerdict, parseWalkComment, walkOf } from "./release-plan-walk.mjs"
+import { fillWalks, isTrustedWalkAuthor, lookupPr, lookupWalk, normalizeVerdict, parseWalkComment, walkOf, walkTrustedLogins } from "./release-plan-walk.mjs"
 
 const HEAD_SHA = "a".repeat(40)
 const OTHER_SHA = "b".repeat(40)
@@ -155,6 +155,8 @@ interface AssociatedPr {
 
 interface FakeComment {
   body: string
+  author_association?: string
+  user?: { login: string }
 }
 
 function fakeGitHub({
@@ -166,7 +168,8 @@ function fakeGitHub({
   const fetchImpl = async (url: string) => {
     calls.push(url)
     if (url.includes("/pulls")) return { ok: true, json: async () => associatedPrs }
-    if (url.includes("/comments")) return { ok: true, json: async () => comments }
+    // An organization member wrote the comment unless a case says otherwise.
+    if (url.includes("/comments")) return { ok: true, json: async () => comments.map((comment) => ({ author_association: "MEMBER", ...comment })) }
     if (url.includes("/check-runs")) {
       // GitHub Actions is the producer unless a case says otherwise.
       return { ok: true, json: async () => ({ check_runs: checkRuns.map((run) => ({ app: { slug: "github-actions" }, ...run })) }) }
@@ -286,6 +289,40 @@ describe("lookupWalk", () => {
     }
   })
 
+  // Anyone with a GitHub account can comment on a PR in a public repository.
+  // A walk decides whether a merged PR rides the hourly production line, so
+  // only someone with standing in the repository may post one.
+  it("ignores a walk from an author with no standing in the repository, PASS or FAIL", async () => {
+    const pr = { number: 771, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA }
+    const stranger = (verdict: string, author_association = "NONE") => ({ body: `<!-- aquilla-qa-walk ${HEAD_SHA} -->\n**${verdict}** · claim walks 1/1`, author_association })
+    const cases: Array<[FakeComment[], string]> = [
+      [[stranger("PASS")], "unknown"],
+      [[stranger("PASS", "CONTRIBUTOR")], "unknown"],
+      [[stranger("PASS", "FIRST_TIME_CONTRIBUTOR")], "unknown"],
+      [[{ body: walkComment(771, HEAD_SHA, "FAIL") }, stranger("PASS")], "fail"],
+      [[{ body: walkComment(771, HEAD_SHA, "PASS") }, stranger("FAIL")], "PASS"],
+      [[{ body: walkComment(771, HEAD_SHA, "PASS"), author_association: "COLLABORATOR" }], "PASS"],
+      [[{ body: walkComment(771, HEAD_SHA, "PASS"), author_association: "OWNER" }], "PASS"],
+    ]
+    for (const [comments, walk] of cases) {
+      const { fetchImpl } = fakeGitHub({ associatedPrs: [pr], comments })
+      expect(await lookupWalk({ mergeSha: MERGE_SHA, token: "t", fetchImpl, trustedLogins: [] })).toBe(walk)
+    }
+  })
+
+  it("reads a walk from a login named in WALK_TRUSTED_LOGINS whatever its association", async () => {
+    const comments = [{ body: walkComment(771, HEAD_SHA, "PASS"), author_association: "NONE", user: { login: "qa-app[bot]" } }]
+    const pr = { number: 771, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA }
+    const listed = fakeGitHub({ associatedPrs: [pr], comments })
+    expect(await lookupWalk({ mergeSha: MERGE_SHA, token: "t", fetchImpl: listed.fetchImpl, trustedLogins: ["qa-app[bot]"] })).toBe("PASS")
+    const unlisted = fakeGitHub({ associatedPrs: [pr], comments })
+    expect(await lookupWalk({ mergeSha: MERGE_SHA, token: "t", fetchImpl: unlisted.fetchImpl, trustedLogins: ["someone-else"] })).toBe("unknown")
+    expect(walkTrustedLogins({ WALK_TRUSTED_LOGINS: "a, b[bot]" })).toEqual(["a", "b[bot]"])
+    expect(walkTrustedLogins({})).toEqual([])
+    expect(isTrustedWalkAuthor({ user: { login: "a" } }, [])).toBe(false)
+    expect(isTrustedWalkAuthor(null, ["a"])).toBe(false)
+  })
+
   it("returns unknown when no PR is associated with the commit", async () => {
     const { fetchImpl } = fakeGitHub({ associatedPrs: [] })
     expect(await lookupWalk({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toBe("unknown")
@@ -393,7 +430,7 @@ describe("fillWalks", () => {
       call++
       if (url.includes(MERGE_SHA)) throw new Error("network error")
       if (url.includes("/pulls")) return { ok: true, json: async () => [{ number: 2, head: { sha: HEAD_SHA } }] }
-      return { ok: true, json: async () => [{ body: walkComment(2, HEAD_SHA, "PASS") }] }
+      return { ok: true, json: async () => [{ body: walkComment(2, HEAD_SHA, "PASS"), author_association: "MEMBER" }] }
     }
     const prs = [
       { number: 1, sha: MERGE_SHA, walk: "unknown" },

@@ -455,9 +455,19 @@ function withoutLost(
   lost: ReadonlySet<DocxPiece>,
   lostChar: (piece: DocxPiece, i: number) => boolean = () => false,
 ): RNode[] {
+  // Where a lost line's words are taken out from between two spaces, one of
+  // them goes too, as the gap between the lines around it is written once.
   const keptText = (piece: TextPiece) => {
     let out = ""
-    for (let i = 0; i < piece.text.length; i++) if (!lostChar(piece, i)) out += piece.text[i]
+    let cut = false
+    for (let i = 0; i < piece.text.length; i++) {
+      if (lostChar(piece, i)) {
+        cut = true
+        continue
+      }
+      if (!(cut && /\s/.test(piece.text[i]) && /\s$/.test(out))) out += piece.text[i]
+      cut = false
+    }
     return out
   }
   const ownsAny = (leaf: LeafNode) =>

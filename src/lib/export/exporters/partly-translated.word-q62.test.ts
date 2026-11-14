@@ -527,6 +527,18 @@ describe("Word export — what a lost line owns is its own text range and its fo
     }
   })
 
+  it("a link over the end of line 1, all of a lost line 2 and the start of line 3, in one run, keeps the words left with one space", async () => {
+    const tail = "with many more words, long enough that the importer cuts the paragraph after this sentence ends."
+    const bytes = await docxBytes(para(run("First line here and it goes on ") + `${LINK}${run(`${tail} Second line here${PAD} Third line`)}</w:hyperlink>` + run(" here" + PAD)) + NEXT)
+    const [a, b, c, ...rest] = await importCells(bytes, false)
+    expect(b.original.replaceAll(PAD.trim(), "…")).toBe("Second line here …")
+    for (const out of [await wordOut(bytes, [a, hide(b), c, ...rest]), await wordOut(bytes, [a, c, ...rest], [b])]) {
+      expect(paras(out.body)[0]).toBe("First line here … Third line here …")
+      expect(firstPara(out.body)).toContain(`${LINK}<w:r><w:t xml:space="preserve">${tail} Third line</w:t></w:r></w:hyperlink>`)
+      expect(out.result.fidelity.droppedLinks).toBe(0)
+    }
+  })
+
   // R7: the structure check flags a link with no run again; only a link this
   // export emptied on purpose (its words were all a lost line's) is exempt,
   // named by its start tag.

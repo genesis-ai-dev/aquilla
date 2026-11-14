@@ -981,7 +981,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
             ? "prose prose-sm max-w-none min-w-0 break-words px-1 py-0 leading-snug focus:outline-none"
             : "prose prose-sm max-w-none h-full min-h-[40px] min-w-0 break-words px-1 py-0.5 leading-relaxed focus:outline-none",
           idmlContext && "whitespace-pre-wrap",
-          "rounded-lg transition-colors",
+          "rounded-lg",
           className
         ),
       },

@@ -1607,6 +1607,13 @@ export const editor = defineNamespace({
       one: "New folder from {count} track",
       other: "New folder from {count} tracks",
     }),
+    "editor.timeline.trackMoveTo": "Move to",
+    "editor.timeline.trackMoveToCount": plural({
+      one: "Move {count} track to",
+      other: "Move {count} tracks to",
+    }),
+    "editor.timeline.trackMoveToNewFolder": "New folder",
+    "editor.timeline.trackMoveToNoFolder": "No folder",
     "editor.timeline.trackLeaveFolder": "Take out of folder",
     "editor.timeline.trackLeaveFolderCount": plural({
       one: "Take {count} track out of its folder",
@@ -3106,6 +3113,31 @@ export const editor = defineNamespace({
           "tracks. Replaces an older 'move to folder' submenu: a folder is made " +
           "FROM tracks, and moving into an existing one is a drag.",
         placeholders: { count: "How many tracks go into the new folder; it also selects the plural form." },
+      },
+      "editor.timeline.trackMoveTo": {
+        description:
+          "Submenu label on a timeline track's menu. Hovering it opens a list " +
+          "of the file's folders, each shown by its name; picking one moves " +
+          "the track into that folder. Read as 'Move to → <folder name>'.",
+      },
+      "editor.timeline.trackMoveToCount": {
+        description:
+          "The same submenu label when several timeline tracks are selected. " +
+          "It opens the list of folder names; picking one moves all of them " +
+          "into that folder.",
+        placeholders: { count: "How many tracks will move; it also selects the plural form." },
+      },
+      "editor.timeline.trackMoveToNewFolder": {
+        description:
+          "First choice in the 'Move to' submenu of a timeline track: makes a " +
+          "new folder and moves the selected tracks into it. Read as " +
+          "'Move to → New folder'.",
+      },
+      "editor.timeline.trackMoveToNoFolder": {
+        description:
+          "Choice in the 'Move to' submenu of a timeline track: takes the " +
+          "selected tracks out of their folder, back to the top level of the " +
+          "track list. Read as 'Move to → No folder'.",
       },
       "editor.timeline.trackLeaveFolderCount": {
         description:

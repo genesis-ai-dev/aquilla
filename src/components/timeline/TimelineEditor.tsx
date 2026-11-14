@@ -1,8 +1,11 @@
 // The timeline editor: composes the lanes, ruler, playhead and chip strip into
 // the top of the Media-lens surface. Owns zoom (persisted per file), horizontal
-// scroll/windowing, and selection. Hand-rolled, with no media dependency of its
-// own — the play queue is the master clock, and the linked video lives beside
-// the text table as MediaVideoPane (AQU-646).
+// scroll, and selection. The rows scroll in one horizontal LegendList of
+// fixed-width time columns that share the track column's scrollbar, so a
+// wheel tick moves columns without re-rendering the editor. The ruler stays
+// on that same pixel axis. No media dependency of its own — the play queue
+// is the master clock, and the linked video lives beside the text table as
+// MediaVideoPane (AQU-646).
 
 import {
   Fragment,
@@ -12,6 +15,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -33,7 +37,6 @@ import {
   Film,
   FolderInput,
   FolderPlus,
-  GripVertical,
   Link2,
   LocateFixed,
   Magnet,
@@ -93,8 +96,7 @@ import { InfoNote } from "@/components/ui/info-note"
 import { TimingModeControl } from "./TimingModeControl"
 import { createMenuHandle } from "@/components/ui/menu-parts"
 import { EMPTY_CUE_LINK_INDEX, type CueLinkIndex } from "@/lib/sync/cell-links-read"
-import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
-import { resolveCueCharacter, formatCueCharacter } from "@/lib/timeline/cue-character"
+import { MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
 import type { TakePlace } from "@/lib/timeline/take-place"
 import { gutterWidthPx, loadGutterCollapsed, saveGutterCollapsed } from "@/lib/timeline/gutter-width"
@@ -105,7 +107,9 @@ import {
   type TrackKind,
 } from "@/lib/timeline/tracks"
 import { computeFollowScroll } from "@/lib/timeline/follow"
-import { secToPx, pxToSec, clampScrollLeft, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
+import { secToPx, pxToSec, clampScrollLeft, zoomCeiling, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
+import { cellIdNearestStart, resumeScrollLeft } from "@/lib/timeline/resume-place"
+import { timeSlices } from "@/lib/timeline/horizontal-slices"
 import {
   chipHeightPx,
   chipPadPx,
@@ -118,25 +122,66 @@ import {
   ROW_H_MIN,
   TL_ROW_H_CLASS,
 } from "@/lib/timeline/row-metrics"
-import { orderForDrop, type RowBound } from "@/lib/timeline/track-reorder"
+import {
+  applyPendingOrders,
+  applyPendingScopes,
+  orderForDrop,
+  withoutPendingOrder,
+  withPendingScopeOrders,
+  type PendingTrackScope,
+} from "@/lib/timeline/track-reorder"
 import { SCRUB_SEEK_THROTTLE_MS } from "@/lib/timeline/scrub"
 import {
   buildTrackRows,
-  folderIdsOf,
+  contentFileIdsOfShownTracks,
   hiddenTracksOf,
   folderMembers,
-  folderReachInPx,
-  resolveDropTarget,
   scopeSiblings,
-  trackScope,
   type ScopeSiblings,
-  type TrackDropTarget,
   type TrackRow,
 } from "@/lib/timeline/track-groups"
 import { loadCollapsedFolders, loadHiddenTracks, saveCollapsedFolders, saveHiddenTracks, toggleCollapsed } from "@/lib/timeline/track-collapse"
 import { TRACK_ACCENT_CLASS, TRACK_DOT_CLASS, trackHueVarsFor } from "@/lib/timeline/track-colors"
 import type { SummarySpan } from "@/lib/timeline/summary-band"
 import { TimelineFolderLane } from "./TimelineFolderLane"
+import {
+  createGutterDragStore,
+  useGutterGapShift,
+  useGutterIndent,
+  type FolderPreview,
+  type GutterDragGap,
+  type GutterDragStore,
+} from "./gutter-drag-store"
+import type { DragEndEvent, DragMoveEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core"
+import {
+  TIMELINE_ROOT_GROUP,
+  SortableTrackBlock,
+  TrackReorderDnd,
+  TrackSortableList,
+  FOLDER_ENTER_DWELL_MS,
+  FOLDER_EXIT_DWELL_MS,
+  TRACK_ORDER_SAVE_QUIET_MS,
+  TRACK_RELEASE_SETTLE_MS,
+  adjustTrackDrop,
+  canDragTrack,
+  commitTrackReorder,
+  dragGapForDrop,
+  folderDragEdge,
+  orderAboveClosedFolder,
+  orderBesideFolder,
+  paintLaneNode,
+  paintLaneShifts,
+  resolveTrackDrop,
+  shouldRetainTopDragGap,
+  type TrackLaneShift,
+} from "./track-gutter-dnd"
+import {
+  TRACK_MOVE_MAX_WAIT_MS,
+  playTrackMove,
+  snapshotTrackMove,
+  trackMoveLanded,
+  type TrackMoveSnapshot,
+} from "./track-move-flip"
 import { RowMetricsContext, useRowMetrics, type RowMetrics } from "./useRowMetrics"
 // Read-only queue subscriptions only — playback COMMANDS stay in the
 // workspace (onSeekToTime), keeping this component testable with a spy prop.
@@ -145,7 +190,8 @@ import { RowMetricsContext, useRowMetrics, type RowMetrics } from "./useRowMetri
 // write behind lib/audio/audibility, because the video pane's header carries a
 // mute button too now and two components each merging a toggle into their OWN
 // copy of the preference clobber one another.
-import { useQueueForFile, useMissingClipCells, queueClockIsFileTime } from "@/lib/audio/play-queue"
+import { useQueueStateValue, useMissingClipCells } from "@/lib/audio/play-queue"
+import { selectQueueStateForFile } from "@/lib/audio/queue-scope"
 import { seedAudibility, toggleAudibility, trackAudible, useQueueAudibility } from "@/lib/audio/audibility"
 
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
@@ -156,20 +202,22 @@ import { nextFolderName, nextTrackName } from "@/lib/timeline/track-names"
 import { usePersonPref } from "@/lib/prefs/person-prefs"
 import { timelineFollowPlayheadPref, timelineSnapPref } from "@/lib/prefs/person-pref-list"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
-import { useVideoClockSec, useVideoClockPlaying } from "@/lib/timeline/video-clock"
-import { useVirtualClockPlaying, useVirtualClockSec } from "@/lib/timeline/virtual-clock"
+import { useVideoClockPlaying } from "@/lib/timeline/video-clock"
 import { useVideoDurationSec } from "@/lib/timeline/video-duration"
 import { useUiSlot } from "@/lib/ui-slots"
 import { setAudioQualityPref, useAudioQualityPref } from "@/lib/store/audio-quality-pref"
 import { setSkipSilentLinesPref, useSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import { useBatchProgress, canTranscribeCell } from "@/lib/audio/batch-audio"
 import { useOnline } from "@/hooks/useOnline"
-import { TimelineRuler } from "./TimelineRuler"
+import { TimelineHorizontalList, TimelineScrollingRuler } from "./TimelineHorizontalList"
+import { TimelineOrigin } from "./timeline-origin"
+import { createTimelineScrollBus, TimelineScrollBusContext, type TimelineScrollBus } from "./timeline-scroll-bus"
 import { TimelineLane } from "./TimelineLane"
 import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions, type TargetAudioItem } from "./TargetAudioLane"
 import type { TakeVoiceNote } from "@/lib/audio/take-voice"
-import { TimelinePlayhead } from "./TimelinePlayhead"
-import { MediaTextHeader, TimelineTimingRow } from "./TimelineChipStrip"
+import { TimelineTransportClock } from "./TimelineTransportClock"
+import { useCreatePlayheadStore } from "./playhead-store"
+import { TimelineCurrentChip } from "./TimelineCurrentChip"
 import {
   applySelect,
   EMPTY_SELECTION,
@@ -178,10 +226,8 @@ import {
   type SelectMods,
   type TimelineSelection,
 } from "./selection"
-import { useTimelineClock } from "./useTimelineClock"
-import { armOutputLatency, displaySec, HIGH_LATENCY_SEC } from "@/lib/audio/output-latency"
+import { HIGH_LATENCY_SEC } from "@/lib/audio/output-latency"
 import { useOutputLatency } from "./useOutputLatency"
-import { resolveEntryAudio, useClipAudioMissing } from "./useClipAudioMissing"
 import type { CellData } from "@/hooks/useCells"
 import { type AudioTimingMode, type ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -191,6 +237,18 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import type { MessageKey } from "@/lib/i18n/messages/en"
+
+/** A text-table row click or chapter pick, consumed once per `nonce`. */
+export type TimelineActivateRequest = {
+  cellId: string
+  nonce: number
+  /** Roll playback from this line. Absent keeps the cue-only row-click rule. */
+  play?: boolean
+  /** Ease the scroll. A chapter pick uses this; a row click jumps. */
+  smooth?: boolean
+  /** Where the line sits in the view. A chapter pick uses `"start"`. */
+  align?: "start" | "center"
+}
 
 export interface TimelineEditorProps {
   cells: CellData[]
@@ -515,6 +573,9 @@ export interface TimelineEditorProps {
   initialSelectedCellId?: string | null
   /** AQU-646 round 3 (media→text trace): mirrors every selection change up. */
   onSelectedCellChange?(cellId: string | null): void
+  /** The line under the middle of the timeline after the reader scrolls it.
+   *  A reload opens the file on this line. */
+  onResumePlace?(cellId: string): void
   /** 2026-08-07 (wire a): fires on USER chip clicks only — the workspace
    *  scrolls the text table to the matching row. Programmatic selection
    *  (activateRequest, the mount trace) stays silent to avoid echo loops. */
@@ -522,8 +583,11 @@ export interface TimelineEditorProps {
   /** 2026-08-07 (wire b): a text-table row click, as a nonce'd request —
    *  selects the chip and centers/cues exactly like a chip click.
    *  AQU-1117: `play` marks the one sender that means "and roll from there"
-   *  ("Play from this cue"); absent/false keeps the row-click cue-only rule. */
-  activateRequest?: { cellId: string; nonce: number; play?: boolean } | null
+   *  ("Play from this cue"); absent/false keeps the row-click cue-only rule.
+   *  A chapter pick passes `smooth` and `align: "start"`: the same move the
+   *  chapter navigator makes in the text, eased, with the chapter's first
+   *  line at the start of the view. */
+  activateRequest?: TimelineActivateRequest | null
   /** SUB-53: which job this FILE is for (pre-merge round: per-file, resolved
    *  via resolveFileTimingMode). "dubbing" (the default) draws the track
    *  against the imported recording's clock; "audioFirst" lays the verses out
@@ -598,6 +662,9 @@ export interface TimelineEditorProps {
   tracks?: TimelineTrack[]
   /** Independently imported text belongs to its referenced hidden cue file. */
   textTrackCells?: Readonly<Record<string, CellData[]>>
+  /** Fired when this person hides or shows a track, so a hidden track's
+   *  content file is not fetched. */
+  onHiddenTracksChange?(ids: ReadonlySet<string>): void
   textTrackErrors?: Readonly<Record<string, Error>>
   onRetryTextTrack?(fileId: string): void
   onRetimeTextTrack?(fileId: string, cellId: string, startSec: number, endSec: number): void
@@ -609,7 +676,7 @@ export interface TimelineEditorProps {
    * and negative values are normal, and only the named track changes.
    *
    * ABSENT IS THE PERMISSION GATE, and it withholds the whole affordance: no
-   * pointerdown handler, no grip, no grab cursor, no tab stop. Rendering a
+   * pointerdown handler and no tab stop. Rendering a
    * draggable-looking row that mints a 403 on release is the same lie
    * `hideTimingMode` was added to stop telling — a control you cannot use is
    * worse than no control, because you have to try it to find out.
@@ -667,6 +734,15 @@ export interface TimelineEditorProps {
      *  because a track arriving in a new scope needs a rank in it and its old
      *  number ranks it somewhere else entirely. */
     onMoveToScope(trackId: string, groupId: string | null, order: number): void
+    /** The menu's "Move to": these tracks go to the bottom of that folder. */
+    onMoveToFolder?(trackIds: readonly string[], folderId: string): void
+    /**
+     * "Move to" moves (folder changes and new folders) are drawn at once and
+     * held, like drops, until the track list has been left alone for
+     * `TRACK_ORDER_SAVE_QUIET_MS`. This saves the ones being held; the editor
+     * calls it on the same clock and triggers that save its own drops.
+     */
+    onSaveMoves?(): void
     onCreateFolderFrom(trackIds: readonly string[]): string
     onDelete(trackIds: readonly string[]): void
     /**
@@ -766,49 +842,18 @@ function loadRowHeight(fileId: string): number {
 }
 
 /**
- * Turns text selection off on the page for a drag, and returns how to put it
- * back. Kept outside the component: writing the page's own style from inside
- * it reads to React's compiler as a render changing something it doesn't own.
- */
-function pauseTextSelection(): () => void {
-  const before = document.body.style.userSelect
-  document.body.style.userSelect = "none"
-  return () => {
-    document.body.style.userSelect = before
-  }
-}
-
-/**
- * Everything a gutter row needs to be DRAGGED, or undefined for a user who may
- * not reorder tracks — in which case the row renders exactly the DOM it always
- * has. See `onReorderTrack` for why the gate is all-or-nothing.
+ * Everything a gutter row needs to be reordered, or undefined for a user who
+ * may not — in which case the row renders exactly the DOM it always has.
+ * The pointer drag is the row itself; this only keeps the keyboard.
  */
 interface LaneLabelReorder {
   trackId: string
-  /** How far this row is currently lifted, in px; null unless it is the one
-   *  under the pointer. Raw pointer delta — no rAF, no easing (TimelineCard's
-   *  drag does the same on the other axis, and a lifted label that lags the
-   *  finger reads as the app being busy). */
-  liftPx: number | null
-  /** Which of this row's own edges carries the 2px drop-indicator line, if
-   *  either. The line is the whole readout — there is no drag chip. */
-  dropEdge: "top" | "bottom" | null
-  /** Drawn short and inset, meaning "inside the folder above". */
-  dropIndent?: boolean
-  /** Where in the row the line is drawn instead, in px from its top, when its
-   *  edge is out of sight — scrolled up under the header or past the column's
-   *  foot (AQU-2236). Null while the edge itself can be seen. */
-  dropTopPx?: number | null
-  onPointerDown(e: ReactPointerEvent<HTMLDivElement>): void
   onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>): void
 }
 
 /** How far the lane prompt keeps from the visible left edge, and from the end
  *  of a lane long enough to hold it. */
 const LANE_PROMPT_INSET_PX = 10
-
-/** The track drop line's thickness (`h-0.5`), for holding it inside the view. */
-const DROP_LINE_PX = 2
 
 /**
  * Sam's D3 (2026-10-05): the empty Source text lane of a linked video with no
@@ -875,6 +920,27 @@ function LinkedVideoLanePrompt({ onAttach }: { onAttach?: () => void }) {
   )
 }
 
+/** A gutter block with its cross-folder gap slide read straight from the drag
+ *  store. A member also counters its folder block's slide (see `counterShiftY`). */
+function GapShiftedTrackBlock({
+  gutterDrag,
+  folderId = null,
+  ...block
+}: Omit<ComponentProps<typeof SortableTrackBlock>, "shiftY" | "counterShiftY"> & {
+  gutterDrag: GutterDragStore
+  folderId?: string | null
+}) {
+  const shift = useGutterGapShift(gutterDrag, block.id)
+  const folderShift = useGutterGapShift(gutterDrag, folderId)
+  return (
+    <SortableTrackBlock
+      {...block}
+      shiftY={shift - folderShift}
+      counterShiftY={folderId == null ? undefined : folderShift}
+    />
+  )
+}
+
 function LaneLabel({
   name,
   sub,
@@ -884,7 +950,8 @@ function LaneLabel({
   subSlot,
   reorder,
   folder,
-  indented,
+  indented: restingIndent,
+  dragIndent,
   renaming,
   selected,
   onRowClick,
@@ -928,6 +995,8 @@ function LaneLabel({
   folder?: { trackId: string; collapsed: boolean; memberCount: number; onToggle(): void }
   /** …and this row is inside one. */
   indented?: boolean
+  /** Where a drag in the air would put this row, which overrides `indented`. */
+  dragIndent?: { store: GutterDragStore; trackId: string }
   /** AQU-646 stage 3b: the whole gutter is collapsed to a strip, so this row
    *  keeps only the glyphs that still mean something without words. ALL ROWS
    *  TOGETHER OR NONE (Sam) — there is no per-row version of this, which is why
@@ -936,7 +1005,7 @@ function LaneLabel({
   collapsed?: boolean
 } & Omit<React.HTMLAttributes<HTMLDivElement>, "children">) {
   const t = useT()
-  const lifted = reorder?.liftPx != null
+  const indented = useGutterIndent(dragIndent, restingIndent ?? false)
   const renameRef = useRef<HTMLInputElement>(null)
   const renameFocused = useRef(false)
   const isRenaming = renaming != null
@@ -971,10 +1040,9 @@ function LaneLabel({
     // zoom the sublabel is taller than its row, and without the clip it would
     // print across the label below it rather than being cut off by it.
     //
-    // Stage 3: THE WHOLE LABEL IS THE DRAG HANDLE (Sam: "dragging on the
-    // name"). The grip beside the dot is an affordance and nothing more — it
-    // has no handler of its own, so there is no thin target to hunt for.
-    // `role="listitem"` and deliberately NOT `role="button"`: the app's
+    // The whole row is the drag handle. A short press is still a click.
+    // `role="listitem"` and deliberately NOT
+    // `role="button"`: the app's
     // keyboard layer treats buttons as controls that refuse Space
     // (`spacebarShouldToggle`), so a focused label would silently kill the
     // timeline's transport key.
@@ -987,17 +1055,15 @@ function LaneLabel({
       // an intervening generic element breaks that ownership for assistive
       // tech. `className` is merged rather than spread, at the bottom.
       {...rest}
-      // How `beginTrackDrag` finds the rows to measure. A data attribute and
-      // not a testid, and only on the draggable rows: the gutter's contract is
-      // that it renders what the hardcoded rows did, and the untimed strip
-      // below the tracks is not one of them.
+      // How tests and the reorder slot find the row. A data attribute and
+      // not a testid, and only on the rows that can be reordered: the gutter's
+      // contract is that it renders what the hardcoded rows did, and the
+      // untimed strip below the tracks is not one of them.
       data-tl-track-row={reorder ? "" : undefined}
+      data-tl-track-id={folder?.trackId ?? reorder?.trackId}
       role={reorder ? "listitem" : undefined}
       aria-roledescription={reorder ? t("editor.timeline.sortableTrackRole") : undefined}
       tabIndex={reorder ? 0 : undefined}
-      // While the name is being edited, the row is not a drag handle: the
-      // pointer belongs to the text field.
-      onPointerDown={renaming ? undefined : reorder?.onPointerDown}
       onKeyDown={renaming ? undefined : reorder?.onKeyDown}
       onClick={renaming ? undefined : onRowClick}
       data-selected={selected ? "" : undefined}
@@ -1029,10 +1095,8 @@ function LaneLabel({
         folder ? undefined : TL_ROW_H_CLASS,
         // Everything on this line is withheld from a user who cannot reorder,
         // down to the `relative` — the row a viewer sees is byte-for-byte the
-        // row that shipped. `touch-none` for the same reason TimelineCard has
-        // it: without it the browser claims a vertical drag as a scroll gesture
-        // and the pointer stream stops mid-drag.
-        reorder && "group relative cursor-grab touch-none select-none outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500",
+        // row that shipped. The row itself is what the pointer drags.
+        reorder && "group relative select-none outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500",
         // 2026-08-27 (Sam): THE FOLDER ROW IS A GREY BAND, continuous across
         // both columns — TimelineFolderLane paints the same token on its half.
         // Opaque and lifted above the gutter's edge rule (z-30 over the
@@ -1042,15 +1106,8 @@ function LaneLabel({
         // LIFTED folder drops back under the rule (the lift's z-10 wins the z
         // group), which is today's look for every travelling row.
         folder && "relative z-30 bg-[color:var(--tl-folder-band)]",
-        // The lift. Opaque background + shadow because the row it passes over
-        // is still drawn where it always was — the other rows deliberately do
-        // NOT part (see the gutter's comment), so the only thing separating the
-        // travelling row from the stationary one underneath is this.
-        lifted && "z-10 cursor-grabbing bg-background opacity-90 shadow-lg",
-        // The selection tint. AFTER the lift, so a row being dragged keeps its
-        // opaque background and does not read as translucent over the rows it
-        // passes; before `className`, so a caller can still override.
-        selected && !lifted && "bg-accent",
+        // The selection tint. Before `className`, so a caller can still override.
+        selected && "bg-accent",
         className,
       )}
       style={{
@@ -1058,7 +1115,6 @@ function LaneLabel({
         // so both read it without either being handed a colour.
         ...hueVars,
         ...(folder ? { height: `${ownRowH}px` } : undefined),
-        ...(lifted ? { transform: `translateY(${reorder?.liftPx}px)` } : undefined),
       }}
       // Collapsed, the row has no visible name — so it gets one that a pointer
       // and a screen reader can still find. `title` is the hover tooltip, which
@@ -1070,41 +1126,22 @@ function LaneLabel({
       title={collapsed ? name : rest.title}
       aria-label={collapsed ? name : rest["aria-label"]}
     >
-      {reorder?.dropEdge && (
-        <span
-          aria-hidden
-          data-testid="tl-track-drop-line"
-          className={cn(
-            "pointer-events-none absolute z-20 h-0.5 bg-sky-500",
-            reorder.dropTopPx == null && (reorder.dropEdge === "top" ? "top-0" : "bottom-0"),
-            // The indent matches the one a member row is drawn with, so the
-            // line lands exactly where the row it promises will.
-            reorder.dropIndent ? "left-3.5 right-0" : "inset-x-0",
-          )}
-          style={reorder.dropTopPx == null ? undefined : { top: `${reorder.dropTopPx}px` }}
-        />
-      )}
-      {/* The indent is on the CONTENT, not the row, so the drop line and the
-          lifted-row background still span the full gutter. */}
-      <div className={cn("flex min-w-0 flex-col gap-0.5", indented && !collapsed && "pl-3.5")}>
+      {/* The indent is on the CONTENT, not the row, so the row's background
+          still spans the full gutter. A member steps in past the folder's
+          own name, which is what makes the nest readable. It eases on the
+          rows' slide curve, so a track dragged over a folder steps in with
+          the gap opening for it. */}
+      <div
+        className={cn(
+          "flex min-w-0 flex-col gap-0.5 transition-[padding-left] duration-[180ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
+          indented && !collapsed && "pl-6",
+        )}
+      >
         <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-foreground">
-          {/* An <svg> inside the existing name span, and it MUST NOT grow a
-              `span.font-semibold` of its own: the gutter parity test reads the
-              track names by selecting exactly that class and mapping
-              textContent, so a wrapper here would read back as a nameless
-              extra row. An icon contributes no text, so the names are
-              untouched. */}
-          {reorder && !collapsed && (
-            <GripVertical
-              data-testid={`tl-track-grip-${reorder.trackId}`}
-              className="-ml-1.5 h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-30 transition-opacity group-hover:opacity-100"
-            />
-          )}
           {/* AQU-646 stage 2: a folder's disclosure control stands where every
               other row's colour dot stands, so the column of glyphs stays a
-              column. A real <button>, which also means `beginTrackDrag`'s
-              existing `closest("button")` bail keeps a click on it from
-              starting a drag — the same way the speaker toggle is protected. */}
+              column. A real <button>, so a press on it does not start a drag —
+              the same way the speaker toggle is protected. */}
           {folder ? (
             <button
               type="button"
@@ -1334,6 +1371,7 @@ export function TimelineEditor({
   recordingSlot = null,
   initialSelectedCellId,
   onSelectedCellChange,
+  onResumePlace,
   onChipActivated,
   activateRequest,
   timingMode = "dubbing",
@@ -1349,8 +1387,9 @@ export function TimelineEditor({
   session,
   audioByCellId,
   legacyMeasure,
-  tracks = DEFAULT_TRACKS,
+  tracks: tracksProp = DEFAULT_TRACKS,
   textTrackCells,
+  onHiddenTracksChange,
   textTrackErrors,
   onRetryTextTrack,
   onRetimeTextTrack,
@@ -1361,11 +1400,27 @@ export function TimelineEditor({
   trackEditing,
 }: TimelineEditorProps) {
   const t = useT()
+  /** Drops painted here but not yet handed to `onReorderTrack` (`orders`) or
+   *  `onMoveToScope` (`scopes`). A track is in one or the other, never both. */
+  const [unsavedOrders, setUnsavedOrders] = useState<{
+    fileId: string
+    orders: ReadonlyMap<string, number>
+    scopes: ReadonlyMap<string, PendingTrackScope>
+  } | null>(null)
+  const tracks = useMemo(
+    () => (unsavedOrders?.fileId === fileId
+      ? applyPendingScopes(applyPendingOrders(tracksProp, unsavedOrders.orders), unsavedOrders.scopes)
+      : tracksProp),
+    [tracksProp, unsavedOrders, fileId],
+  )
+  const folderTracks = useMemo(() => tracks.filter((tr) => tr.kind === "folder"), [tracks])
   const audioFirst = timingMode === "audioFirst"
   // AQU-646 stage 6B: the two masters that fire takes through the overlay pool
   // — and therefore honour their trims. See the lane's `masterHonorsTrims`.
   const masterHonorsTrims = Boolean(coreMediaUrl) || virtualIsTransport
-  const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
+  // The zoom asked for. What is drawn is `pxPerSec`, held under the ceiling
+  // a file of this length allows.
+  const [chosenPxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
   // Stage 3: the OTHER zoom. Every row container and every chip box reads these
   // three numbers through CSS custom properties on the root below, so one state
   // value resizes the gutter, four lanes and everything drawn on them at once —
@@ -1420,13 +1475,17 @@ export function TimelineEditor({
   }, [fileId])
   // AQU-1684: which tracks this person has hidden on THIS file — the same
   // personal, per-file, on-this-device state as folder collapse (Sam's
-  // decision), re-read on a file switch for the same reason. Hiding changes
-  // only what is drawn: the queue sounds every track from `tracks`, hidden or
-  // not, and mute stays the speaker's.
+  // decision), re-read on a file switch for the same reason. A hidden track
+  // is not drawn and nothing is built for it: no lane, no chips, no
+  // waveforms, no content-file fetch. The queue still sounds every track
+  // from `tracks`, hidden or not, and mute stays the speaker's.
   const [hiddenTrackIds, setHiddenTrackIds] = useState<ReadonlySet<string>>(() => loadHiddenTracks(fileId))
   useEffect(() => {
     setHiddenTrackIds(loadHiddenTracks(fileId))
   }, [fileId])
+  useEffect(() => {
+    onHiddenTracksChange?.(hiddenTrackIds)
+  }, [hiddenTrackIds, onHiddenTracksChange])
 
   /**
    * The rows to draw: the tracks, with folder members lifted under their
@@ -1441,6 +1500,16 @@ export function TimelineEditor({
    * lanes render the same list, in the same order" a property of the code
    * rather than a coincidence two `.map` calls have to keep agreeing on.
    */
+  // The folder preview and the cross-folder gap, read by the gutter rows alone.
+  // The preview only changes the indent. The row stays under the pointer,
+  // and the folder write waits until the pointer comes up. The gap is the room
+  // a cross-folder drag is opening while it is still in the air: which folder
+  // the dragged track would land in (null = the top level) and how far each
+  // other row slides to make that room. Set from the same resolution the
+  // release commits, so the gap shown is the landing made.
+  const [gutterDrag] = useState(createGutterDragStore)
+  const setFolderPreview = gutterDrag.setPreview
+  const setDragGap = gutterDrag.setGap
   const trackRows = buildTrackRows(tracks, collapsedFolders, hiddenTrackIds)
 
   function toggleFolder(folderId: string) {
@@ -1506,17 +1575,19 @@ export function TimelineEditor({
     window.addEventListener("pointercancel", release, true)
   }
   /** Tracks that may not be hidden right now: the one the recorder is taking
-   *  into, the one being reordered and the lane a drag is under way in. */
+   *  into and the lane a drag is under way in. */
   function busyTrackIds(): ReadonlySet<string> {
     const busy = new Set<string>()
     if (recordingSlot) busy.add(trackIdForSlot(recordingSlot))
-    if (trackDrag) busy.add(trackDrag.trackId)
     if (pressedLaneTrackId) busy.add(pressedLaneTrackId)
     return busy
   }
   function hideTracks(trackIds: readonly string[]) {
     const busy = busyTrackIds()
-    const hiding = trackIds.filter((id) => !busy.has(id))
+    // The row being reordered too. Its menu cannot be open mid-drag, so it is
+    // checked here and not drawn: a render per lift and drop redraws every lane.
+    const dragged = draggedTrackRef.current
+    const hiding = trackIds.filter((id) => !busy.has(id) && id !== dragged)
     if (hiding.length === 0) return
     setHiddenTrackIds((prev) => {
       const next = new Set(prev)
@@ -1598,7 +1669,7 @@ export function TimelineEditor({
    */
   function onTrackRowClick(rowIndex: number, e: ReactMouseEvent<HTMLDivElement>) {
     // The speaker, the `⋯`, the disclosure triangle and the rename field all
-    // own their own clicks — the same carve-out `beginTrackDrag` makes.
+    // own their own clicks. A drag that already moved is not a click either.
     if (e.target instanceof Element && e.target.closest("button, input")) return
     if (trackDragMovedRef.current) {
       trackDragMovedRef.current = false
@@ -1653,6 +1724,8 @@ export function TimelineEditor({
         canPromote: Boolean(onPromoteTrackToRows),
         canHide: canHideTracks,
         canSetLengths: Boolean(lineLengthsAction),
+        canMoveToFolder: Boolean(trackEditing?.onMoveToFolder),
+        folders: folderTracks,
       }),
     )
   }
@@ -1718,6 +1791,51 @@ export function TimelineEditor({
     return count
   }
 
+  // "Move to" moves rows the way a drop does: measured now, slid once the move
+  // paints. `openOnLanding` is a closed destination folder, opened in the same
+  // pass so the track is seen arriving instead of vanishing into it.
+  const pendingTrackMove = useRef<{ snapshot: TrackMoveSnapshot; openOnLanding: string | null } | null>(null)
+  function armTrackMove(trackIds: readonly string[], destinationFolderId: string | null) {
+    const root = editorRef.current
+    if (!root) return
+    const chosen = new Set(trackIds)
+    pendingTrackMove.current = {
+      snapshot: snapshotTrackMove(
+        root,
+        tracks.filter((tr) => chosen.has(tr.id)).map((tr) => ({ id: tr.id, groupId: tr.groupId ?? null })),
+      ),
+      openOnLanding: destinationFolderId,
+    }
+  }
+  useLayoutEffect(() => {
+    const pending = pendingTrackMove.current
+    const root = editorRef.current
+    if (!pending || !root) return
+    if (performance.now() - pending.snapshot.at > TRACK_MOVE_MAX_WAIT_MS) {
+      pendingTrackMove.current = null
+      return
+    }
+    if (!trackMoveLanded(pending.snapshot, tracks)) return
+    const destination = pending.openOnLanding
+    if (destination && collapsedFolders.has(destination)) {
+      // Re-renders before paint; this effect plays the move on that pass.
+      const next = new Set(collapsedFolders)
+      next.delete(destination)
+      saveCollapsedFolders(fileId, next)
+      setCollapsedFolders(next)
+      return
+    }
+    pendingTrackMove.current = null
+    playTrackMove(root, pending.snapshot)
+  }, [tracks, collapsedFolders, fileId])
+
+  /** A "Move to" move waits for the list to settle, as a drop does. Offline it
+   *  saves now, so a refusal is said while the move is still in mind. */
+  function holdMenuMove() {
+    if (online) armQuietSave()
+    else saveUnsavedOrders()
+  }
+
   function trackMenu(track: TimelineTrack): ReactNode {
     // Stage 2b: the menu acts on the SELECTION when the row it was opened on is
     // part of one — see `menuTargets`, which also makes an outside row the
@@ -1730,14 +1848,27 @@ export function TimelineEditor({
       onSetColor: onSetTrackColor,
       onPromote: onPromoteTrackToRows,
       ...(canHideTracks ? { onHide: hideTracks, busyTrackIds: busyTrackIds() } : {}),
+      folders: folderTracks,
       editing: trackEditing
         ? {
-            onLeaveFolder: trackEditing.onLeaveFolder,
+            onLeaveFolder: (trackIds) => {
+              armTrackMove(trackIds, null)
+              trackEditing.onLeaveFolder(trackIds)
+              holdMenuMove()
+            },
+            onMoveToFolder: trackEditing.onMoveToFolder
+              ? (trackIds, folderId) => {
+                  armTrackMove(trackIds, folderId)
+                  trackEditing.onMoveToFolder?.(trackIds, folderId)
+                  holdMenuMove()
+                }
+              : undefined,
             onCreateFolderFrom: (trackIds) => {
+              armTrackMove(trackIds, null)
               const folderId = trackEditing.onCreateFolderFrom(trackIds)
-              // The row does not exist until the write lands and the refresh
-              // arrives; setting this now means the field is focused the
-              // instant it does, with no second gesture.
+              holdMenuMove()
+              // The workspace draws the new row before saving it, so the
+              // field is focused as it appears, with no second gesture.
               setRenamingTrackId(folderId)
               setTrackSelection(EMPTY_SELECTION)
             },
@@ -1758,7 +1889,6 @@ export function TimelineEditor({
   // scope for the transcribe row. Every rule about how a click changes this
   // lives in `applySelect`; this component only stores the two halves.
   const [extraIds, setExtraIds] = useState<readonly string[]>([])
-  const [scrollLeft, setScrollLeft] = useState(0)
   const [viewportPx, setViewportPx] = useState(0)
   // Follow playhead (AQU-2264): the button is a preference that follows the
   // person, remembered and shared with Preferences → Recording. A manual scroll
@@ -1770,6 +1900,16 @@ export function TimelineEditor({
   const [followReleased, setFollowReleased] = useState(false)
   const follow = followPref && !followReleased
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null)
+  const bindScroll = useCallback((node: HTMLDivElement | null) => {
+    scrollRef.current = node
+    setScrollEl(node)
+  }, [])
+  /** Horizontal offset for the ruler and the gap label. Not React state: a
+   *  wheel tick must not re-render the lanes. */
+  const scrollBusRef = useRef<TimelineScrollBus | null>(null)
+  if (!scrollBusRef.current) scrollBusRef.current = createTimelineScrollBus()
+  const scrollBus = scrollBusRef.current
   /** The clipped label column, and the div inside it that carries the vertical
    *  offset. The gutter is not scrolled by us — see `handleTrackScroll` — and
    *  when the browser scrolls it anyway `handleGutterScroll` hands the offset
@@ -1789,60 +1929,100 @@ export function TimelineEditor({
   /** Programmatic scrolls stamp this; the onScroll handler treats scroll
    *  events within 150ms of a stamp as our own, not a user disengage. */
   const lastProgrammaticScrollAt = useRef(0)
-  /**
-   * Stage 3: a track being dragged up or down the gutter.
-   *
-   * `bounds` is snapshotted from the live DOM at pointerdown and carried in the
-   * state rather than recomputed per move — the rows deliberately do not move
-   * during a drag, so one measurement is the whole truth, and measuring 60x a
-   * second would be four forced layouts per frame for an answer that cannot
-   * have changed. It is also why the row height never appears in this code:
-   * hit-testing measured midpoints is correct with rows of different heights
-   * and survives the vertical zoom being changed between two drags, which
-   * dividing a pointer offset by a row height is not and does not.
-   */
-  // AQU-646 stage 2: EVERY INDEX IN HERE IS A SCOPE INDEX, NOT A ROW INDEX, and
-  // conflating the two is the way this goes wrong. A drag reorders a track
-  // among its own siblings — the top-level rows, or the members of one folder —
-  // because crossing a folder boundary means writing `groupId`, which is a
-  // gated operation and a menu command. So the arithmetic runs over the SCOPE,
-  // while the lifted row and the drop line are drawn in ROW space. `rowIndexes`
-  // is the bridge between them.
-  const [trackDrag, setTrackDrag] = useState<{
-    /** Which track is in the air. By id, because a row index is only valid
-     *  against the render that produced it, and a collaborator's edit can land
-     *  mid-drag. */
-    trackId: string
-    /** Raw pointer travel, straight onto the row's transform. */
-    dy: number
-    /** Row-space, one per rendered row — what the drop line is measured in. */
-    rowBounds: RowBound[]
-    /**
-     * Where release would put it, or null while the drag has not moved far
-     * enough to mean anything (or would change nothing).
-     *
-     * Stage 2b: this is now the WHOLE answer, indicator included, because the
-     * drop depends on both pointer axes — Y for the position, X for whether it
-     * goes inside a folder. Keeping the resolution in one pure function is what
-     * lets the preview and the commit be the same decision rather than two that
-     * agree by inspection.
-     */
-    target: TrackDropTarget | null
-    /** Past the 3px threshold: a drag, not a press. Stays true once set, for
-     *  the rest of the gesture — unlike `target`, which goes back to null
-     *  over the row's own slot — so what it switches on cannot flicker. */
-    moved: boolean
-    /** The stretch of the column that can be seen, in the same content frame
-     *  as `rowBounds`: from the header's foot to the column's. Measured with
-     *  the target, on every move, so the line is held inside it (AQU-2236).
-     *  Null when there is no layout to measure. */
-    view: { top: number; bottom: number } | null
-  } | null>(null)
-  const clock = useTimelineClock()
+  const resumeGestureRef = useRef(false)
+  const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** A chapter pick eases the column. The animation lasts longer than the
+   *  150ms stamp, and its scroll events are still ours. */
+  const smoothScrollingRef = useRef(false)
+  const smoothScrollCleanupRef = useRef<(() => void) | null>(null)
+  /** The restored line, and how far it sits from the left edge. A later clock
+   *  change keeps that spot instead of sliding the view backward. */
+  const traceHoldRef = useRef<{ id: string; at: number; offsetPx: number } | null>(null)
+  const traceWatchRef = useRef(0)
+  useEffect(() => {
+    resumeGestureRef.current = false
+    smoothScrollCleanupRef.current?.()
+    smoothScrollCleanupRef.current = null
+    smoothScrollingRef.current = false
+    traceHoldRef.current = null
+    traceWatchRef.current += 1
+    return () => {
+      if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
+    }
+  }, [fileId])
+  const folderExitTimer = useRef<number | null>(null)
+  const folderEnterTimer = useRef<number | null>(null)
+  const folderEnterTarget = useRef<string | null>(null)
+  const folderExitMove = useRef<((event: PointerEvent) => void) | null>(null)
+  const folderExitUp = useRef<((event: PointerEvent) => void) | null>(null)
+  const folderPreviewCommitted = useRef(false)
+  /** The last gap painted, so a drag-over that changes nothing re-renders nothing. */
+  const dragGapKey = useRef<string | null>(null)
+  /** Where the pointer rested to begin the empty-folder dwell, so the folder
+   *  sliding out from under a still pointer cannot cancel its own dwell. */
+  const folderEnterAnchor = useRef<{ folderId: string; x: number; y: number } | null>(null)
+  const folderHomeRef = useRef<{ trackId: string; folderId: string; top: number; bottom: number } | null>(null)
+  /** The track in the air, so it cannot be hidden mid-drag. */
+  const draggedTrackRef = useRef<string | null>(null)
+  const folderPreviewRef = useRef<FolderPreview | null>(null)
+  const baseRowsRef = useRef(trackRows)
+  baseRowsRef.current = trackRows
+  const liveTrackEditing = useRef(trackEditing)
+  liveTrackEditing.current = trackEditing
+  useEffect(() => () => {
+    if (folderExitTimer.current != null) window.clearTimeout(folderExitTimer.current)
+    if (folderEnterTimer.current != null) window.clearTimeout(folderEnterTimer.current)
+    if (folderExitMove.current) document.removeEventListener("pointermove", folderExitMove.current)
+    if (folderExitUp.current) document.removeEventListener("pointerup", folderExitUp.current)
+  }, [])
+  // The preview stays up through the write. Once the tracks themselves show
+  // the same place, the indent is the row's own and the preview can go.
+  useEffect(() => {
+    const preview = folderPreviewRef.current
+    if (!preview) return
+    const track = tracks.find((item) => item.id === preview.trackId)
+    if (!track) return
+    const arrived = preview.kind === "enter"
+      ? track.groupId === preview.folderId
+      : (track.groupId ?? null) === null
+    if (arrived) {
+      folderPreviewRef.current = null
+      setFolderPreview(null)
+    }
+  }, [tracks])
+  /** Lane copies of each row's slide. A ref, painted onto the lane nodes:
+   *  storing it in state re-rendered every time column on each pointer move. */
+  const editorRef = useRef<HTMLDivElement>(null)
+  const laneShiftsRef = useRef<Map<string, TrackLaneShift>>(new Map())
+  const reportLaneShift = useCallback((id: string, shift: TrackLaneShift | null) => {
+    const shifts = laneShiftsRef.current
+    // y 0 is a real position while a drag is underway: the lane has to ease
+    // back to it. Only a null report means the row is at rest again.
+    if (shift == null) {
+      if (!shifts.delete(id)) return
+    } else {
+      const current = shifts.get(id)
+      if (
+        current
+        && current.y === shift.y
+        && current.hidden === shift.hidden
+        && current.transition === shift.transition
+        && current.hold === shift.hold
+        && current.lift === shift.lift
+      ) {
+        return
+      }
+      shifts.set(id, shift)
+    }
+    const root = editorRef.current
+    if (root) paintLaneShifts(root, shifts)
+  }, [])
+  const bindLaneShift = useCallback((node: HTMLDivElement | null) => {
+    if (node) paintLaneNode(node, laneShiftsRef.current)
+  }, [])
+  const clock = useCreatePlayheadStore()
   // AQU-1758: read (never rendered from) when a take's ⋯ opens its menu.
-  const playheadSecRef = useRef(0)
-  playheadSecRef.current = clock.currentSec
-  const getPlayheadSec = useCallback(() => playheadSecRef.current, [])
+  const getPlayheadSec = clock.sec
   const chipStripSlot = useUiSlot("media-chip-strip")
   // Media redesign, layout: the workspace's top bar, where the tools go.
   const topToolsSlot = useUiSlot("media-top-tools")
@@ -1865,52 +2045,22 @@ export function TimelineEditor({
   // (the playhead's rAF interpolation must park during a gate — that's the
   // whole point), but the follow re-engage below keys on running, or every cold
   // boundary would re-yank a user who deliberately scrolled away mid-playback.
-  const queue = useQueueForFile(cellIdSet)
-  const queueProgress = queue.progress
-  const { active: queueActive, playing: queuePlaying, running: queueRunning } = queue
-  // Decision 2026-08-05: the verse being WAITED ON shows a small spinner on
-  // its chip ("loading" is exactly the parked-gate/cold-load state and
-  // carries the cellId), and a definitively 404'd dub shows a missing badge.
-  const loadingCellId = queue.kind === "loading" ? queue.cellId : null
+  // Two flags off the queue's STATE, and not its line. Every render here
+  // redraws every mounted time column; its seconds tick ~4×/sec
+  // (`TimelineTransportClock` reads them) and its line changes on every verse
+  // (`TimelineCurrentChip` reads that, and each chip reads whether it is the
+  // one being waited on — decision 2026-08-05, a small spinner).
+  const queueActive = useQueueStateValue((state) => selectQueueStateForFile(state, cellIdSet).active)
+  const queueRunning = useQueueStateValue((state) => selectQueueStateForFile(state, cellIdSet).running)
+  // A definitively 404'd dub shows a missing badge.
   const missingCellIds = useMissingClipCells()
-  // 2026-08-11: the queue's progress is only a FILE position when the master
-  // element is the shared source clip. On a take it is a per-take clock that
-  // restarts at 0 — play-queue says outright that "no consumer may treat [it]
-  // as a position on the file" — so writing it here yanked the playhead to
-  // zero whenever a take was played from a row's rail. Same test the video
-  // pane already makes (MediaVideoPane's `clockIsFileTime`).
-  const queueSoundingCell = useMemo(
-    () => (queue.cellId != null ? cells.find((c) => c.id === queue.cellId) : undefined),
-    [cells, queue.cellId],
-  )
-  // AQU-1747: ...and in FREE TIMING the x-axis is not the file at all — it is
-  // the programme, the verses laid end to end. There a shared source clip's
-  // file position is the wrong number, and the right one (the programme second
-  // the transport publishes) was never read, so a video-less subtitle file
-  // played its takes back to back while the playhead sat on 0:00. So: ask each
-  // mode for the clock IT draws, and accept nothing else. `programmeClock`
-  // carries the same guarantee for the programme that `queueClockIsFileTime`
-  // does for the file — a per-take clock satisfies neither.
-  const queueClockOnTimeline = audioFirst
-    ? queueProgress.programmeClock
-    : queueClockIsFileTime(queueSoundingCell)
   /**
-   * AQU-646 stage 5: where the hand is, while the playhead is being dragged.
-   *
-   * NON-NULL MEANS THE SCRUB OWNS THE CLOCK, and that ownership is the whole
-   * reason a drag looks right. This clock has three writers below, each an
-   * effect fired by a transport publishing where it actually landed — and a
-   * landed position is always BEHIND the pointer, because the picture is being
-   * seeked on a throttle. Leave them running during a drag and every seek
-   * yanks the head back to where the throttle last sampled: an oscillation
-   * between the hand and the film, at the throttle's period, fully rendered
-   * because pausing also stops `monotonicSec` from swallowing regressions.
-   *
-   * Held in a ref as well as state: the three effects below read it, and they
-   * must see the CURRENT value rather than the one captured when they were
-   * scheduled.
+   * AQU-646 stage 5: the playhead is being dragged, so the hand owns the
+   * clock. The transport writers in `TimelineTransportClock` stand down while
+   * this is set: a transport's landed position is always BEHIND the pointer,
+   * because the picture is being seeked on a throttle, and letting them write
+   * yanked the head back to where the throttle last sampled.
    */
-  const [scrubSec, setScrubSec] = useState<number | null>(null)
   const scrubbingRef = useRef(false)
   // The workspace crossing is the expensive part of a seek — it re-renders a
   // tree the size of the whole project view — so it is throttled while the
@@ -1918,94 +2068,8 @@ export function TimelineEditor({
   // the trailing edge the last thing the hand did might never be sent.
   const scrubSendRef = useRef<{ at: number; timer: ReturnType<typeof setTimeout> | null }>({ at: 0, timer: null })
   useEffect(() => () => { if (scrubSendRef.current.timer) clearTimeout(scrubSendRef.current.timer) }, [])
-  useEffect(() => {
-    if (scrubbingRef.current) return
-    if (queueActive && queueClockOnTimeline) clock.setCurrentSec(queueProgress.currentTime)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
-  }, [queueActive, queueClockOnTimeline, queueProgress.currentTime])
-  // The other driver: a file with a linked video but NO audio can never start
-  // the queue, so the video plays itself and owns the playhead. Strictly gated
-  // on the queue being idle, so the two writers can never overlap — which is
-  // exactly what used to happen when the <video> lived in this component.
-  const videoClockSec = useVideoClockSec()
   const videoPlaying = useVideoClockPlaying()
-  useEffect(() => {
-    if (scrubbingRef.current) return
-    if (!queueActive && videoClockSec != null) clock.setCurrentSec(videoClockSec)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
-  }, [queueActive, videoClockSec])
-  // AQU-646 stage 3h: THE THIRD WRITER — a file with timings and no master.
-  //
-  // Sam, 2026-08-25: a VTT imported on its own never moved the playhead, and
-  // the reason was honest rather than broken — the queue only publishes a FILE
-  // position while an imported recording is the master, and there was no film
-  // either. So nothing wrote this at all.
-  //
-  // Gated on BOTH of the others being idle, for the same reason they are gated
-  // against each other: two writers on one clock is what made the playhead and
-  // the film detach, and `virtualOwnsFile` already guarantees exclusivity —
-  // this is the belt to its braces, and it is what keeps the ordering of these
-  // three effects from mattering.
-  const virtualClockSec = useVirtualClockSec()
-  const virtualPlaying = useVirtualClockPlaying()
-  useEffect(() => {
-    if (scrubbingRef.current) return
-    if (!queueActive && videoClockSec == null && virtualClockSec != null) {
-      clock.setCurrentSec(virtualClockSec)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
-  }, [queueActive, videoClockSec, virtualClockSec])
-  // Whichever transport actually owns the clock. Parking (rather than merely
-  // withholding seconds) matters: the playhead's rAF interpolation extrapolates
-  // from its last anchor while `playing`, so leaving it running against a
-  // position nobody updates draws steady, confident, wrong motion.
-  const transportPlaying = queueActive
-    ? queuePlaying && queueClockOnTimeline
-    : videoClockSec != null
-      ? videoPlaying
-      : virtualPlaying
-  const transportRate = queueActive ? queueProgress.rate : 1
-  // AQU-646: how far behind the clock your EARS are, and whether to draw the
-  // playhead there.
-  //
-  // COMPENSATION IS A LATCH, NOT A GATE ON `transportPlaying`. That flag is
-  // deliberately strict — it dips false at every COLD VERSE GATE (see the
-  // comment above it) — so applying the shift only while it is true would
-  // switch compensation off and on at every verse: a forward jump into the
-  // gate, then a hold coming out of it as the never-move-backward rule
-  // swallowed the re-application. That is precisely the bounce this timeline
-  // spent a round eliminating, arriving again by another route.
-  //
-  // So: arm on the rising edge of playing, disarm when the transport goes
-  // genuinely idle, and disarm on an explicit seek (in `seekTo` below). A cold
-  // gate touches none of those, so it changes nothing.
   const outputLatencySec = useOutputLatency()
-  const transportActive = queueActive || videoClockSec != null
-  const [compensating, setCompensating] = useState(false)
-  const wasPlayingRef = useRef(false)
-  useEffect(() => {
-    if (transportPlaying && !wasPlayingRef.current) {
-      armOutputLatency()
-      setCompensating(true)
-    }
-    wasPlayingRef.current = transportPlaying
-  }, [transportPlaying])
-  useEffect(() => {
-    if (!transportActive) setCompensating(false)
-  }, [transportActive])
-  // Where the head is DRAWN. Raw `clock.currentSec` still drives everything
-  // that seeks or writes; this drives everything that renders or scrolls TO the
-  // head, so the page-flip cannot fire several pixels from where the line is.
-  // While scrubbing, the hand IS the position — no latency compensation, which
-  // describes where a sound will be heard and has no meaning for a picture
-  // being dragged.
-  const displayCurrentSec =
-    scrubSec != null ? scrubSec : displaySec(clock.currentSec, outputLatencySec, compensating)
-  useEffect(() => {
-    if (transportPlaying) clock.play()
-    else clock.pause()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
-  }, [transportPlaying])
   useEffect(() => {
     // Starting playback is an explicit "watch this" — re-engage follow. Keyed
     // on running (playing OR loading) so a gate's brief "loading" dip doesn't
@@ -2025,8 +2089,14 @@ export function TimelineEditor({
     const el = scrollRef.current
     if (!el) return
     setViewportPx(el.clientWidth)
+    el.style.setProperty("--tl-scroll-left", `${el.scrollLeft}px`)
+    scrollBus.set(el.scrollLeft, el.clientWidth)
     if (typeof ResizeObserver === "undefined") return // happy-dom
-    const ro = new ResizeObserver(() => setViewportPx(el.clientWidth))
+    const ro = new ResizeObserver(() => {
+      setViewportPx(el.clientWidth)
+      el.style.setProperty("--tl-scroll-left", `${el.scrollLeft}px`)
+      scrollBus.set(el.scrollLeft, el.clientWidth)
+    })
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
@@ -2102,7 +2172,7 @@ export function TimelineEditor({
         if (el) {
           lastProgrammaticScrollAt.current = performance.now()
           el.scrollLeft = 0
-          setScrollLeft(0)
+          scrollBus.set(0, el.clientWidth)
         }
         setFollowReleased(false)
       }
@@ -2168,9 +2238,22 @@ export function TimelineEditor({
   // AQU-2204: following its recordings, a book with no times lays its lines
   // out in order (see `timelineLanes`).
   const { subtitle, dialogue, untimed } = useMemo(() => timelineLanes(cells, timingMode), [cells, timingMode])
+  // A hidden track's captions are not laid out. The parent stops fetching
+  // them; this also drops a file that was already in hand when it was hidden.
+  const shownTextTrackCells = useMemo(() => {
+    if (!textTrackCells || hiddenTrackIds.size === 0) return textTrackCells
+    const shown = new Set(contentFileIdsOfShownTracks(tracks, hiddenTrackIds))
+    const hiddenFile = tracks.some((track) => track.contentFileId && !shown.has(track.contentFileId))
+    if (!hiddenFile) return textTrackCells
+    const out: Record<string, CellData[]> = {}
+    for (const [id, cells] of Object.entries(textTrackCells)) {
+      if (shown.has(id)) out[id] = cells
+    }
+    return out
+  }, [textTrackCells, tracks, hiddenTrackIds])
   const independentTextCells = useMemo(
-    () => Object.values(textTrackCells ?? {}).flat(),
-    [textTrackCells],
+    () => Object.values(shownTextTrackCells ?? {}).flat(),
+    [shownTextTrackCells],
   )
   const independentTextLayout = useMemo(
     () => buildTimelineLayout("dubbing", independentTextCells, [], null),
@@ -2678,15 +2761,16 @@ export function TimelineEditor({
   // AQU-1767: ONE CHIP PER PIECE. A take cut in two is two selected pieces of
   // one group; each is drawn, moved, trimmed, approved and renamed on its own
   // (approving and renaming since decision 7), and chosen with its whole take.
+  const targetAudioHidden = hiddenTrackIds.has("target-audio")
   const targetItems = useMemo<TargetAudioItem[]>(
-    () => targetSource.flatMap((c) => piecesAsItems(c, resolveTargetPieces(c))),
-    [targetSource],
+    () => targetAudioHidden ? [] : targetSource.flatMap((c) => piecesAsItems(c, resolveTargetPieces(c))),
+    [targetAudioHidden, targetSource],
   )
   // SUB-51: the complement — sections still waiting for a dub. Their empty
   // space in the Target row offers a record button on hover.
   const emptyTargets = useMemo(
-    () => targetSource.filter((c) => !resolveTarget(c)),
-    [targetSource, resolveTarget],
+    () => targetAudioHidden ? [] : targetSource.filter((c) => !resolveTarget(c)),
+    [targetAudioHidden, targetSource, resolveTarget],
   )
   /**
    * The cells an ADDED track's chips line up against. (AQU-646 stage 3)
@@ -2782,12 +2866,12 @@ export function TimelineEditor({
   const takeSelCellFor = (slot: string) => (takeSel?.slot === slot ? takeSel.cellId : null)
   function selectedTakeCutAtPlayhead(): { cellId: string; audioId: string; atMs: number } | null {
     if (!takeSel) return null
-    const sec = displayCurrentSec
+    const sec = clock.displaySec()
     const items =
       takeSel.slot === RECORDING_SLOT
         ? targetItems
         : tracks
-            .filter((tr) => tr.kind === "audio" && slotForTrack(tr.id) === takeSel.slot)
+            .filter((tr) => tr.kind === "audio" && slotForTrack(tr.id) === takeSel.slot && !hiddenTrackIds.has(tr.id))
             .flatMap((tr) => targetItemsForTrack(tr).items)
     // A cut take is several chips on its line; the one the playhead is over.
     for (const item of items) {
@@ -2938,6 +3022,8 @@ export function TimelineEditor({
   }
 
   const durationSec = Math.max(layout.totalSec, independentTextLayout.totalSec)
+  const maxPxPerSec = zoomCeiling(durationSec)
+  const pxPerSec = Math.min(chosenPxPerSec, maxPxPerSec)
   const trackWidthPx = secToPx(durationSec, pxPerSec)
   // A short file's timeline still runs to the edge of the view — the ruler and
   // every row's ground — rather than stopping where the file ends (Sam, Oct
@@ -2947,155 +3033,51 @@ export function TimelineEditor({
   // edges don't pop in/out during zoom glides and fast scrolls (windowing was
   // exact-to-the-pixel, so any transient scroll/zoom mismatch blinked cards).
   const overscanSec = pxToSec(240, pxPerSec)
-  const viewStartSec = pxToSec(scrollLeft, pxPerSec) - overscanSec
-  // Before the scroll container is measured (viewportPx 0), fall back to the
-  // full track so every card renders — correct, and keeps tests deterministic.
-  const viewEndSec = pxToSec(scrollLeft + (viewportPx || trackWidthPx), pxPerSec) + overscanSec
-  // 2026-08-07: the chip strip describes the CURRENT chip — an explicit
-  // selection wins; with nothing selected it follows the cell the queue is
-  // sounding (or holds while paused); after the queue goes idle it keeps the
-  // last one so the strip doesn't blank out mid-thought. Same file guard as the
-  // playhead: a stale singleton queue never fills this file's strip.
-  const soundingId = queueActive ? queue.cellId : null
-  const [lastTouchedId, setLastTouchedId] = useState<string | null>(null)
-  useEffect(() => {
-    const id = selectedId ?? soundingId
-    if (id) setLastTouchedId(id)
-  }, [selectedId, soundingId])
-  // 2026-08-08 (Sam): an AUTOMATIC playback advance clears the selection —
-  // one pointer, one moving light. EDGE-triggered on the sounding cell's
-  // transitions: only when the queue moves from A to B (both non-null) and
-  // the departed A was the selected cell does the selection drop. A fresh
-  // click-then-jump is race-proof by construction (its selection ≠ the
-  // departed cell), untimed selections survive (they never sound), and
-  // pause/idle produce no transition, so nothing clears.
-  const prevSoundingRef = useRef<string | null>(null)
-  useEffect(() => {
-    const prev = prevSoundingRef.current
-    prevSoundingRef.current = soundingId
-    if (prev == null || soundingId == null || soundingId === prev) return
-    setSelectedId((sel) => (sel === prev ? null : sel))
-  }, [soundingId])
-  const currentCellId = selectedId ?? soundingId ?? lastTouchedId
-  // Searches the AUDIO CUES too (stage 4): a cue is a legitimate selection now,
-  // and it lives in the hidden sibling file, so looking only in `cells` left the
-  // timing readout blank for every chip on the Source-audio row.
-  const currentCell = useMemo(
-    () =>
-      cells.find((c) => c.id === currentCellId) ??
-      audioCues?.find((c) => c.id === currentCellId) ??
-      independentTextCells.find((c) => c.id === currentCellId) ??
-      null,
-    [cells, audioCues, independentTextCells, currentCellId],
+  // Unmeasured (tests, the commit before layout): a short prefix of the
+  // track. Once the column has a width, the horizontal list owns the window
+  // and this range is only the fallback.
+  const viewStartSec = -overscanSec
+  // Before the column is measured, draw a short prefix. A book is hours long;
+  // drawing every card on that first commit is what keeps the page from
+  // loading. Tests use short files, so they still see the whole track. The
+  // measured column hands the window to the horizontal list.
+  const UNMEASURED_WINDOW_SEC = 600
+  const viewEndSec = (viewportPx > 0
+    ? pxToSec(viewportPx, pxPerSec)
+    : Math.min(pxToSec(trackWidthPx, pxPerSec), UNMEASURED_WINDOW_SEC)) + overscanSec
+  const horizontalSlices = useMemo(
+    () => (viewportPx > 0 ? timeSlices(canvasWidthPx, pxPerSec) : []),
+    [viewportPx, canvasWidthPx, pxPerSec],
   )
-  // AQU-646 stage 6: who speaks the current chip, and whether the camera is on
-  // them. Resolved HERE because this is the one place that holds both halves —
-  // the links and the subtitle cells the character sheet was keyed to. A cue
-  // has no character of its own, so without this the header opposite the video
-  // named nobody for the only kind of chip stage 4 leaves you selecting.
-  const currentCharacter = useMemo(
-    () => resolveCueCharacter({ cell: currentCell, links, textCells: cells }),
-    [currentCell, links, cells],
-  )
-  // One object for the header's two call sites below — portalled and inline.
-  // They render the SAME thing and used to say so twice; a third prop was one
-  // more chance for the two to drift apart.
-  // Meeting note (2026-08-05): the detail readout carries the dub's own
-  // numbers — its range, its duration, and ALWAYS the end-to-end difference
-  // (original end − dub end). 2026-08-06 (Sam): the diff is INFORMATIONAL (a
-  // difference can be intentional) — chip-vs-chip OVERLAP is the warning, a
-  // separate number computed with the same trespasser gating the lane uses.
-  // Dubbing only, and never from a guessed width (SUB-48).
-  const currentChipStats = useMemo(() => {
-    if (!currentCell) return null
-    // Free timing (2026-08-06, Sam): the file-clock RANGES are meaningless
-    // against the re-flowed track — the only honest numbers are durations.
-    // Src = the original's window length, Tgt = the dub's measured length.
-    if (audioFirst) {
-      // AQU-2204 (Sam, Oct 26): a file that follows its recordings shows no
-      // SOURCE timing anywhere — not even the original's length — so only the
-      // recording's own length is read out.
-      const srcDurationSec = null
-      // AQU-1767: a split take's length is all its pieces'.
-      const geoms = targetItems
-        .filter((t) => t.cell.id === currentCell.id)
-        .map((t) => layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId], t.audioId))
-      const tgtDurationSec = geoms.length > 0 && geoms.every((g) => g && !g.usingFallback)
-        ? geoms.reduce((sum, g) => sum + (g!.end - g!.start), 0)
-        : null
-      // Always the free readout, even with nothing measured: falling back to
-      // the plain row would print the line's SOURCE range.
-      return { kind: "free" as const, srcDurationSec, tgtDurationSec }
-    }
-    // AQU-1767: a split take's pieces are consecutive items, and the pills read
-    // them as the one take they are (Sam, 2026-10-19): from the first piece's
-    // start to the last piece's end, the sound they keep added up, and how many
-    // pieces. Diff and overlap measure that span against the line and its
-    // neighbours — the silences between pieces are inside the take.
-    const first = targetItems.findIndex((t) => t.cell.id === currentCell.id)
-    if (first < 0) return null
-    let last = first
-    while (targetItems[last + 1]?.cell.id === currentCell.id) last += 1
-    const geomOf = (t: (typeof targetItems)[number] | undefined) =>
-      t ? layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId], t.audioId) : null
-    const pieceGeoms = targetItems.slice(first, last + 1).map(geomOf)
-    if (pieceGeoms.some((g) => !g || g.usingFallback)) return null
-    const spans = pieceGeoms.map((g) => ({ start: g!.start, end: g!.end }))
-    const geom = {
-      start: Math.min(...spans.map((s) => s.start)),
-      end: Math.max(...spans.map((s) => s.end)),
-    }
-    const soundSec = spans.reduce((sum, s) => sum + (s.end - s.start), 0)
-    const { startTime, endTime } = currentCell
-    const prev = geomOf(targetItems[first - 1])
-    const next = geomOf(targetItems[last + 1])
-    const { headSec, tailSec } = chipOverlaps(
-      geom,
-      prev ? { start: prev.start, end: prev.end } : null,
-      next?.start ?? null,
-    )
-    // Blame the trespasser (same rule as the chip): only territory THIS chip
-    // left its own section to claim counts toward its overlap number. The
-    // head half also depends on the PREVIOUS chip's end, so it is masked when
-    // that width is a guess (SUB-48 — same mask the lane applies).
-    // 2026-08-08 (Sam): the two halves stay SEPARATE — a chip that spills at
-    // both ends reads as two labeled numbers, not one meaningless sum.
-    const tailTrespass = tailSec != null && typeof endTime === "number" && geom.end > endTime ? tailSec : 0
-    const headTrespass =
-      headSec != null && !prev?.usingFallback && typeof startTime === "number" && geom.start < startTime
-        ? headSec
-        : 0
-    // 2026-08-08 (Sam): Diff is the whole DURATION difference now. The old
-    // end-only number missed a target that also starts before its verse:
-    // start + end diffs sum to (source duration − target duration), positive
-    // exactly when the target is shorter. The halves survive in the hover.
-    const startDiffSec = typeof startTime === "number" ? geom.start - startTime : null
-    const endDiffSec = typeof endTime === "number" ? endTime - geom.end : null
-    return {
-      kind: "dubbing" as const,
-      startSec: geom.start,
-      endSec: geom.end,
-      durationSec: soundSec,
-      ...(spans.length > 1 ? { pieces: spans.length } : {}),
-      startDiffSec,
-      endDiffSec,
-      durationDiffSec: startDiffSec != null && endDiffSec != null ? startDiffSec + endDiffSec : null,
-      headOverlapSec: headTrespass > 0 ? headTrespass : null,
-      tailOverlapSec: tailTrespass > 0 ? tailTrespass : null,
-    }
-  }, [audioFirst, currentCell, targetItems, layout])
-  const currentClipAudio = useMemo(
-    () => (currentCellId ? resolveEntryAudio(audioByCellId?.get(currentCellId)) : null),
-    [audioByCellId, currentCellId],
-  )
-  const audioMissing = useClipAudioMissing({
-    audio: currentClipAudio,
-    projectId: project?.id ?? null,
-    fileId,
-    session: session ?? null,
-  })
+  // Bumps on every render of this editor, and on none of the scroll ticks.
+  // Mounted columns redraw when the lanes' data changes.
+  const laneEpoch = useRef(0)
+  laneEpoch.current += 1
+  /** Set just before a render whose only change is a dropped order painting. */
+  const paintingOrderOnly = useRef(false)
+  /** Each lane as last drawn, by track and time window. A render that only
+   *  paints a dropped order moves these into place rather than drawing every
+   *  lane again — on a long file that redraw is most of what a drop costs, and
+   *  it lands on the next grab when the tracks are being sorted quickly. The
+   *  columns draw in a later commit than this render, so the choice is taken
+   *  here and closed over. */
+  const drawnLanesRef = useRef(new Map<string, ReactNode>())
+  const reuseDrawnLanes = paintingOrderOnly.current
+  if (!reuseDrawnLanes) drawnLanesRef.current = new Map()
+  const drawnLanes = drawnLanesRef.current
+  useLayoutEffect(() => { paintingOrderOnly.current = false })
+  function endSmoothScroll() {
+    smoothScrollCleanupRef.current?.()
+    smoothScrollCleanupRef.current = null
+    smoothScrollingRef.current = false
+  }
 
-  function scrollTrackTo(requested: number) {
+  /** True while a scroll we started is still moving the column. */
+  function scrollIsProgrammatic() {
+    return smoothScrollingRef.current || performance.now() - lastProgrammaticScrollAt.current < 150
+  }
+
+  function scrollTrackTo(requested: number, smooth = false) {
     const el = scrollRef.current
     if (!el) return
     // Only as far as the column can actually scroll. The browser clamps the
@@ -3106,13 +3088,38 @@ export function TimelineEditor({
     // `clampScrollLeft`).
     const left = clampScrollLeft(requested, el.scrollWidth, el.clientWidth)
     lastProgrammaticScrollAt.current = performance.now()
+    endSmoothScroll()
+    // A chapter pick eases, the way the text navigator eases a row into
+    // place. The ruler follows the scroll events, so it stays with the chips
+    // instead of jumping to the destination on the first frame.
+    if (smooth && Math.abs(el.scrollLeft - left) > 1) {
+      smoothScrollingRef.current = true
+      const finish = () => endSmoothScroll()
+      el.addEventListener("scrollend", finish)
+      const backup = window.setTimeout(finish, 1200)
+      smoothScrollCleanupRef.current = () => {
+        el.removeEventListener("scrollend", finish)
+        window.clearTimeout(backup)
+      }
+      el.scrollTo({ left, behavior: "smooth" })
+      return
+    }
     el.scrollLeft = left
     // Belt and braces for the axis test in handleTrackScroll: the scroll event
     // this write provokes already knows where we put it. (If the browser clamps
     // to a different offset the values differ, the handler runs in full, and the
     // real number wins — which is exactly what should happen.)
     lastScrollLeft.current = left
-    setScrollLeft(left)
+    scrollBus.set(left, el.clientWidth)
+  }
+
+  /** The reader grabbed the column. An ease still in flight stops where it is. */
+  function handScrollToReader() {
+    resumeGestureRef.current = true
+    if (!smoothScrollingRef.current) return
+    const el = scrollRef.current
+    endSmoothScroll()
+    if (el) el.scrollTo({ left: el.scrollLeft, behavior: "auto" })
   }
 
   /**
@@ -3138,14 +3145,42 @@ export function TimelineEditor({
     if (inner) inner.style.transform = `translateY(${-el.scrollTop}px)`
     if (el.scrollLeft === lastScrollLeft.current) return
     lastScrollLeft.current = el.scrollLeft
-    setScrollLeft(el.scrollLeft)
-    setViewportPx(el.clientWidth)
+    // The film-length gap label reads this. Publishing it through React
+    // re-rendered every source cue on the wheel tick.
+    el.style.setProperty("--tl-scroll-left", `${el.scrollLeft}px`)
+    scrollBus.set(el.scrollLeft, el.clientWidth)
     // A MANUAL scroll while playback runs means "stop following me". Our own
     // programmatic scrolls fire this handler too — the 150ms stamp window
     // filters them out.
-    if (transportPlaying && performance.now() - lastProgrammaticScrollAt.current > 150) {
+    if (clock.transportPlaying() && !scrollIsProgrammatic()) {
       setFollowReleased(true)
     }
+    scheduleResumePlace()
+  }
+
+  /** The line under the middle of the view, written once the scroll settles.
+   *  The column's own first layout sits at 0 and is not a place the reader
+   *  chose; a gesture, or a scroll we just performed, is. */
+  function scheduleResumePlace() {
+    if (!onResumePlace) return
+    const el = scrollRef.current
+    if (!el) return
+    if (scrollIsProgrammatic()) return
+    if (el.scrollLeft < 1 && !resumeGestureRef.current) return
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
+    const left = el.scrollLeft
+    const width = el.clientWidth
+    const rate = pxPerSec
+    resumeTimerRef.current = setTimeout(() => {
+      resumeTimerRef.current = null
+      const starts: { id: string; startSec: number }[] = []
+      for (const cell of cells) {
+        const startSec = layout.seekSecFor(cell)
+        if (startSec != null) starts.push({ id: cell.id, startSec })
+      }
+      const id = cellIdNearestStart(starts, pxToSec(left + width / 2, rate))
+      if (id) onResumePlace(id)
+    }, 400)
   }
 
   /**
@@ -3204,11 +3239,16 @@ export function TimelineEditor({
     if (!gutter || !header || !inner || !el || !(target instanceof Element)) return
     if (!target.matches(":focus-visible")) return
     // The ROW, not the control in it: a focused ⋯ alone would leave the row's
-    // own top edge under the header. The rows are `inner`'s children; a
-    // menu's portaled items, whose focus bubbles here through React, are not.
-    let row: Element | null = target
-    while (row && row.parentElement !== inner) row = row.parentElement
-    if (!row) return
+    // own top edge under the header. The drag handle sits around that row, so
+    // the row is not `inner`'s own child; the name row is what has to clear
+    // the header. A menu's portaled items, whose focus bubbles here through
+    // React, are not in the gutter at all.
+    const labeled = target.closest("[data-tl-track-row]")
+    let row: Element | null = labeled && inner.contains(labeled) ? labeled : target
+    if (row !== labeled) {
+      while (row && row.parentElement !== inner) row = row.parentElement
+    }
+    if (!row || !inner.contains(row)) return
     const rect = row.getBoundingClientRect()
     const hidden = header.getBoundingClientRect().bottom - rect.top
     const below = rect.bottom - gutter.getBoundingClientRect().bottom
@@ -3222,7 +3262,7 @@ export function TimelineEditor({
   }
 
   function applyZoom(next: number) {
-    const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next))
+    const z = Math.max(ZOOM_MIN, Math.min(maxPxPerSec, next))
     // AQU-646: keep an anchor stable across the zoom — the playhead when
     // following live playback, otherwise the viewport center.
     const el = scrollRef.current
@@ -3230,7 +3270,7 @@ export function TimelineEditor({
       // Round 5: a video-driven follow keeps its anchor too — zooming used to
       // recentre on the viewport middle instead of the playhead.
       const followAnchor = follow && (queueActive || videoPlaying)
-      const anchorSec = followAnchor ? displayCurrentSec : pxToSec(scrollLeft + viewportPx / 2, pxPerSec)
+      const anchorSec = followAnchor ? clock.displaySec() : pxToSec(el.scrollLeft + el.clientWidth / 2, pxPerSec)
       const target = Math.max(0, secToPx(anchorSec, z) - (followAnchor ? viewportPx * 0.1 : viewportPx / 2))
       setPxPerSec(z)
       // Apply after React paints the new track width, or the browser clamps
@@ -3279,32 +3319,516 @@ export function TimelineEditor({
     commitRowHeight(next)
   }
 
-  /**
-   * The pointer's position in the gutter's CONTENT coordinates — the frame
-   * `RowBound`s are stored in.
-   *
-   * The `scrollTop` term is the whole point. The gutter is dragged along by the
-   * track column, which the user can keep scrolling mid-drag (a wheel still
-   * works, and edge-autoscroll would too if it is ever added); bounds taken
-   * once at pointerdown would be wrong by exactly the distance scrolled from
-   * that moment on, so the pointer is converted into their frame instead of
-   * them being re-measured into its.
-   *
-   * The gutter COLUMN's top is the origin, not the inner div's: the inner div
-   * is the thing carrying `translateY(-scrollTop)`, so measuring against it
-   * would cancel the offset out again and quietly reintroduce the bug.
-   */
-  function gutterContentY(clientY: number): number {
-    const top = gutterRef.current?.getBoundingClientRect().top ?? 0
-    return clientY - top + (scrollRef.current?.scrollTop ?? 0)
+  /** Where the pointer is, in the same frame the collision rect is measured. */
+  function trackPointer(event: DragOverEvent | DragMoveEvent | DragEndEvent): { y: number; overTop: number; overHeight: number; activeHeight: number } | null {
+    const rect = event.over?.rect
+    const start = event.activatorEvent
+    if (!rect || !(start instanceof MouseEvent)) return null
+    return {
+      y: start.clientY + event.delta.y,
+      overTop: rect.top,
+      overHeight: rect.height,
+      activeHeight: event.active.rect.current.initial?.height ?? 0,
+    }
   }
 
-  /** Where the drag ends up, as a single `file.track.set` write. Shared by the
-   *  pointer drop and the keyboard move — one implementation, two inputs. */
-  /** A move expressed in SCOPE indices — see the trackDrag state for why the
-   *  distinction is load-bearing. `scope.tracks` is ascending by `order` by
-   *  construction (that is what scoping buys), which is the precondition
-   *  orderForDrop's midpoint arithmetic depends on. Returns whether it wrote. */
+  function resolvedTrackDrop(event: DragOverEvent | DragMoveEvent | DragEndEvent) {
+    return adjustTrackDrop(trackRows, resolveTrackDrop(event.active, event.over), trackPointer(event))
+  }
+
+  /** The gap currently painted, for the top-edge retention in the handler below. */
+  const dragGapRef = useRef<GutterDragGap | null>(null)
+
+  function clearDragGap() {
+    dragGapRef.current = null
+    if (dragGapKey.current == null) return
+    dragGapKey.current = null
+    setDragGap(null)
+  }
+
+  /** The first gutter row's top WITHOUT its gap slide — where the column
+   *  actually starts, however far its first row is currently displaced. */
+  function firstRowLayoutTop(): number | null {
+    const slot = gutterInnerRef.current?.querySelector("[data-reorderable]")
+    if (!(slot instanceof HTMLElement)) return null
+    const rect = slot.getBoundingClientRect()
+    if (typeof DOMMatrixReadOnly !== "function") return rect.top
+    const shifted = new DOMMatrixReadOnly(getComputedStyle(slot).transform).m42
+    return rect.top - (Number.isFinite(shifted) ? shifted : 0)
+  }
+
+  /**
+   * Open the gap the release would land in, while the drag is still in the
+   * air. Same-scope reorders get this from the sortable already; a drag
+   * crossing a folder wall got nothing, so a folder's members stood still
+   * while a track was dragged in among them, and a member dragged above its
+   * folder disappeared under the folder's band with the folder never moving.
+   *
+   * Wired to drag MOVE as well as drag over: the gap's boundary is decided
+   * by which half of the hovered member the pointer is in, and that can
+   * change — the track sliding between two members of a folder it has not
+   * entered yet — without the hovered row ever changing.
+   */
+  function onTrackDragOver(event: DragOverEvent | DragMoveEvent) {
+    if (!liveTrackEditing.current) { clearDragGap(); return }
+    const trackId = String(event.active.id)
+    // Above the whole column the collision gives up — the nearest target
+    // becomes the dragged row itself, or nothing — and the answer turns
+    // into a same-list drop, or a heading hit, that would clear or re-aim
+    // this gap. But a release at that height still lands at the top (the
+    // folder's leave preview, or the first row's slot), so a gap already
+    // open at the top STAYS open: the folder at the head of the column
+    // keeps the dragged track's room however far above it the pointer
+    // rides, instead of sliding home the moment the pointer leaves the
+    // last row's rect.
+    const current = dragGapRef.current
+    const start = event.activatorEvent
+    const pointerY = start instanceof MouseEvent ? start.clientY + event.delta.y : null
+    const top = pointerY == null ? null : firstRowLayoutTop()
+    if (shouldRetainTopDragGap(current, trackId, pointerY, top)) return
+    const gap = dragGapForDrop(
+      baseRowsRef.current,
+      resolvedTrackDrop(event),
+      event.active.rect.current.initial?.height ?? rowH,
+    )
+    if (!gap) { clearDragGap(); return }
+    const key = `${trackId}|${gap.groupId ?? ""}|${gap.boundary}`
+    if (dragGapKey.current === key) return
+    dragGapKey.current = key
+    const next = { ...gap, trackId }
+    dragGapRef.current = next
+    setDragGap(next)
+  }
+
+  function clearFolderExit() {
+    if (folderExitTimer.current != null) {
+      window.clearTimeout(folderExitTimer.current)
+      folderExitTimer.current = null
+    }
+    if (folderEnterTimer.current != null) {
+      window.clearTimeout(folderEnterTimer.current)
+      folderEnterTimer.current = null
+    }
+    folderEnterTarget.current = null
+    if (folderExitMove.current) {
+      document.removeEventListener("pointermove", folderExitMove.current)
+      folderExitMove.current = null
+    }
+    if (folderExitUp.current) {
+      document.removeEventListener("pointerup", folderExitUp.current)
+      folderExitUp.current = null
+    }
+  }
+
+  function openFolder(folderId: string) {
+    setCollapsedFolders((prev) => {
+      if (!prev.has(folderId)) return prev
+      const next = new Set(prev)
+      next.delete(folderId)
+      saveCollapsedFolders(fileId, next)
+      return next
+    })
+  }
+
+  function commitFolderPreview() {
+    const preview = folderPreviewRef.current
+    const editing = liveTrackEditing.current
+    if (!preview || !editing || folderPreviewCommitted.current) return
+    folderPreviewCommitted.current = true
+    if (preview.kind === "enter") {
+      openFolder(preview.folderId)
+      holdScopeMove(preview.trackId, preview.folderId, preview.order)
+      return
+    }
+    holdScopeMove(preview.trackId, null, preview.order)
+  }
+
+  function showLeavePreview(edge: "above" | "below") {
+    const home = folderHomeRef.current
+    if (!home) return
+    const current = folderPreviewRef.current
+    if (current?.kind === "leave" && current.edge === edge && current.trackId === home.trackId) return
+    const order = orderBesideFolder(baseRowsRef.current, home.folderId, edge)
+    if (order == null) return
+    const next = { kind: "leave" as const, trackId: home.trackId, folderId: home.folderId, edge, order }
+    folderPreviewRef.current = next
+    setFolderPreview(next)
+  }
+
+  function showEnterPreview(folderId: string) {
+    const trackId = draggedTrackRef.current
+    if (!trackId) return
+    const current = folderPreviewRef.current
+    if (current?.kind === "enter" && current.folderId === folderId && current.trackId === trackId) return
+    const next = { kind: "enter" as const, trackId, folderId, edge: null, order: 0 }
+    folderPreviewRef.current = next
+    setFolderPreview(next)
+  }
+
+  function clearFolderPreview() {
+    if (folderExitTimer.current != null) {
+      window.clearTimeout(folderExitTimer.current)
+      folderExitTimer.current = null
+    }
+    if (folderEnterTimer.current != null) {
+      window.clearTimeout(folderEnterTimer.current)
+      folderEnterTimer.current = null
+    }
+    folderEnterTarget.current = null
+    if (!folderPreviewRef.current) return
+    folderPreviewRef.current = null
+    setFolderPreview(null)
+  }
+
+  function clearLeavePreview() {
+    if (folderExitTimer.current != null) {
+      window.clearTimeout(folderExitTimer.current)
+      folderExitTimer.current = null
+    }
+    if (folderPreviewRef.current?.kind !== "leave") return
+    folderPreviewRef.current = null
+    setFolderPreview(null)
+  }
+
+  function clearEnterPreview() {
+    if (folderEnterTimer.current != null) {
+      window.clearTimeout(folderEnterTimer.current)
+      folderEnterTimer.current = null
+    }
+    folderEnterTarget.current = null
+    if (folderPreviewRef.current?.kind !== "enter") return
+    folderPreviewRef.current = null
+    setFolderPreview(null)
+  }
+
+  /** The top-level folder whose block, heading and open members, the pointer is on. */
+  function folderRowAt(pointerY: number): TrackRow | null {
+    for (const row of baseRowsRef.current) {
+      if (row.depth !== 0 || row.track.kind !== "folder") continue
+      const toggle = document.querySelector(`[data-testid="tl-folder-toggle-${CSS.escape(row.track.id)}"]`)
+      const block = toggle?.closest("[data-reorderable]")
+      if (!(block instanceof HTMLElement)) continue
+      const rect = block.getBoundingClientRect()
+      if (pointerY >= rect.top && pointerY <= rect.bottom) return row
+    }
+    return null
+  }
+
+  /** The heading the pointer is on of a folder a track goes into by resting
+   *  there: an empty one, or a closed one, which opens for it. */
+  function restingFolderAt(pointerY: number): string | null {
+    const row = folderRowAt(pointerY)
+    return row && (row.members.length === 0 || row.collapsed) ? row.track.id : null
+  }
+
+  /**
+   * Leaving a folder only drops the indent. Entering an empty one only adds
+   * it, after the track has rested on the heading; resting on a closed one
+   * opens it, so the track can be aimed among its members. The row stays with
+   * the pointer either way; the write is the pointer coming up.
+   */
+  function followFolderDrag(pointerX: number, pointerY: number) {
+    if (!liveTrackEditing.current) return
+    const restId = restingFolderAt(pointerY)
+    if (restId) {
+      clearLeavePreview()
+      if (folderEnterAnchor.current?.folderId !== restId) {
+        folderEnterAnchor.current = { folderId: restId, x: pointerX, y: pointerY }
+      }
+      const current = folderPreviewRef.current
+      if (current?.kind === "enter" && current.folderId === restId) return
+      if (folderEnterTimer.current != null && folderEnterTarget.current === restId) return
+      if (folderEnterTimer.current != null) {
+        window.clearTimeout(folderEnterTimer.current)
+        folderEnterTimer.current = null
+      }
+      folderEnterTarget.current = restId
+      folderEnterTimer.current = window.setTimeout(() => {
+        folderEnterTimer.current = null
+        const folder = baseRowsRef.current.find((row) => row.track.id === restId)
+        if (folder && folder.members.length > 0) openFolder(restId)
+        else showEnterPreview(restId)
+      }, FOLDER_ENTER_DWELL_MS)
+      return
+    }
+    // Resting is measured against where the pointer STOPPED, not against
+    // where the folder is now: the sortable slides the folder out from under
+    // a pointer that crosses its midpoint, so a still pointer soon reads as
+    // "no longer over the folder" and the dwell cancelled itself before it
+    // could ever fire. A pointer that has genuinely moved on cancels it.
+    const anchor = folderEnterAnchor.current
+    if (
+      anchor
+      && (folderEnterTarget.current === anchor.folderId
+        || (folderPreviewRef.current?.kind === "enter" && folderPreviewRef.current.folderId === anchor.folderId))
+      && Math.hypot(pointerX - anchor.x, pointerY - anchor.y) <= 8
+    ) return
+    folderEnterAnchor.current = null
+    clearEnterPreview()
+
+    const home = folderHomeRef.current
+    if (!home) return
+    // Over another open folder, the drop goes in among its members.
+    const over = folderRowAt(pointerY)
+    if (over && over.track.id !== home.folderId) {
+      clearLeavePreview()
+      return
+    }
+    const edge = folderDragEdge(home.top, home.bottom, pointerY)
+    if (edge === "above") {
+      if (folderExitTimer.current != null) {
+        window.clearTimeout(folderExitTimer.current)
+        folderExitTimer.current = null
+      }
+      showLeavePreview("above")
+      return
+    }
+    if (edge === "below") {
+      if (folderPreviewRef.current?.kind === "leave" && folderPreviewRef.current.edge === "above") clearLeavePreview()
+      if (
+        folderExitTimer.current != null
+        || (folderPreviewRef.current?.kind === "leave" && folderPreviewRef.current.edge === "below")
+      ) return
+      folderExitTimer.current = window.setTimeout(() => {
+        folderExitTimer.current = null
+        showLeavePreview("below")
+      }, FOLDER_EXIT_DWELL_MS)
+      return
+    }
+    clearLeavePreview()
+  }
+
+  function endTrackDrag() {
+    draggedTrackRef.current = null
+    folderHomeRef.current = null
+    folderEnterAnchor.current = null
+    clearDragGap()
+    clearFolderExit()
+    // Unconditionally: the drag start stopped the clock for "Move to" moves
+    // the workspace is holding too, and an empty save is nothing.
+    armQuietSave()
+  }
+
+  /** A reorder dropped but not yet painted: see `TRACK_RELEASE_SETTLE_MS`. */
+  const pendingReorder = useRef<{ timer: number; paint: () => void } | null>(null)
+  /** `orderOnly`: nothing else in this batch touches the lanes. Not so for the
+   *  save, which runs inside whatever click or shortcut prompted it. */
+  const flushPendingReorder = useCallback((orderOnly = true) => {
+    const pending = pendingReorder.current
+    if (!pending) return
+    pendingReorder.current = null
+    window.clearTimeout(pending.timer)
+    if (orderOnly) paintingOrderOnly.current = true
+    pending.paint()
+  }, [])
+  /** Each painted drop's write, bound to the props it was dropped on (this
+   *  component is not remounted on a file switch). One per track: a later drop
+   *  of the same track replaces it, except that a reorder of a track whose
+   *  folder move is unsaved is that move's new order. A `groupId` (null is the
+   *  top level) makes it a move. See `TRACK_ORDER_SAVE_QUIET_MS`. */
+  const unsavedWrites = useRef(new Map<string, {
+    order: number
+    groupId?: string | null
+    reorder?: (trackId: string, order: number) => void
+    move?: (trackId: string, groupId: string | null, order: number) => void
+  }>())
+  const quietSaveTimer = useRef<number | null>(null)
+  const cancelQuietSave = useCallback(() => {
+    if (quietSaveTimer.current == null) return
+    window.clearTimeout(quietSaveTimer.current)
+    quietSaveTimer.current = null
+  }, [])
+  /** The drops held here. The "Move to" moves the workspace holds stay put. */
+  const saveDragWrites = useCallback(() => {
+    flushPendingReorder(false)
+    cancelQuietSave()
+    const writes = [...unsavedWrites.current]
+    if (writes.length === 0) return
+    unsavedWrites.current.clear()
+    // The parent paints each write's place in the same batch as this clear.
+    for (const [trackId, place] of writes) {
+      if (place.groupId !== undefined) place.move?.(trackId, place.groupId, place.order)
+      else place.reorder?.(trackId, place.order)
+    }
+    setUnsavedOrders(null)
+  }, [flushPendingReorder, cancelQuietSave])
+  /** Everything waiting. "Move to" moves first: a drop held here was made
+   *  after them (pressing "Move to" saves the drops before it), so it lands
+   *  last and wins. */
+  const saveUnsavedOrders = useCallback(() => {
+    liveTrackEditing.current?.onSaveMoves?.()
+    saveDragWrites()
+  }, [saveDragWrites])
+  /** Restarted by every drop, cancelled by every drag start. */
+  const armQuietSave = useCallback(() => {
+    cancelQuietSave()
+    quietSaveTimer.current = window.setTimeout(saveUnsavedOrders, TRACK_ORDER_SAVE_QUIET_MS)
+  }, [cancelQuietSave, saveUnsavedOrders])
+  function reorderAfterSettle(trackId: string, order: number) {
+    const reorder = onReorderTrack
+    if (!reorder) return
+    const forFileId = fileId
+    // Offline, the parent refuses with a reason; say so now, not seconds later.
+    const holdUnsaved = online
+    flushPendingReorder()
+    const timer = window.setTimeout(() => flushPendingReorder(), TRACK_RELEASE_SETTLE_MS)
+    pendingReorder.current = {
+      timer,
+      paint: () => {
+        const unsaved = unsavedWrites.current.get(trackId)
+        unsavedWrites.current.set(trackId, unsaved?.groupId !== undefined ? { ...unsaved, order } : { order, reorder })
+        setUnsavedOrders((current) => {
+          const same = current?.fileId === forFileId
+          const scopes = same ? current.scopes : new Map<string, PendingTrackScope>()
+          if (scopes.has(trackId)) {
+            return { fileId: forFileId, orders: current?.orders ?? new Map(), scopes: withPendingScopeOrders(scopes, [{ trackId, order }]) }
+          }
+          const orders = new Map(same ? current.orders : [])
+          orders.set(trackId, order)
+          return { fileId: forFileId, orders, scopes }
+        })
+        if (holdUnsaved) {
+          armQuietSave()
+        } else {
+          paintingOrderOnly.current = false
+          saveUnsavedOrders()
+        }
+      },
+    }
+  }
+  /** A drop into, out of or between folders. Painted with the release, which
+   *  glides the row into its new list, and saved like a reorder. */
+  function holdScopeMove(trackId: string, groupId: string | null, order: number) {
+    const move = liveTrackEditing.current?.onMoveToScope
+    if (!move) return
+    const forFileId = fileId
+    flushPendingReorder()
+    unsavedWrites.current.set(trackId, { order, groupId, move })
+    paintingOrderOnly.current = true
+    setUnsavedOrders((current) => {
+      const same = current?.fileId === forFileId
+      const scopes = new Map(same ? current.scopes : [])
+      scopes.set(trackId, { groupId, order })
+      return { fileId: forFileId, orders: withoutPendingOrder(same ? current.orders : new Map(), trackId), scopes }
+    })
+    if (online) {
+      armQuietSave()
+    } else {
+      paintingOrderOnly.current = false
+      saveUnsavedOrders()
+    }
+  }
+  // Anything but arranging tracks saves first: a click off the rows (menus,
+  // undo, the editor), a shortcut, a hidden tab, a file switch, an unmount.
+  // Plain typing does not, so the first keystroke after a drag stays light.
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest("[data-reorderable]")) return
+      // "Move to" is arranging tracks too, so the moves keep settling. The
+      // drops are saved, so the move is placed against the rows on screen.
+      if (event.target instanceof Element && event.target.closest("[data-tl-track-move]")) {
+        saveDragWrites()
+        return
+      }
+      saveUnsavedOrders()
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) saveUnsavedOrders()
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") saveUnsavedOrders()
+    }
+    window.addEventListener("pointerdown", onPointerDown, true)
+    window.addEventListener("keydown", onKeyDown, true)
+    document.addEventListener("visibilitychange", onVisibility)
+    window.addEventListener("pagehide", saveUnsavedOrders)
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown, true)
+      window.removeEventListener("keydown", onKeyDown, true)
+      document.removeEventListener("visibilitychange", onVisibility)
+      window.removeEventListener("pagehide", saveUnsavedOrders)
+      saveUnsavedOrders()
+    }
+  }, [fileId, saveUnsavedOrders, saveDragWrites])
+
+  function onTrackDragStart(event: DragStartEvent) {
+    // The next drag measures the list, so the last drop must be painted in it.
+    flushPendingReorder()
+    cancelQuietSave()
+    trackDragMovedRef.current = true
+    const id = String(event.active.id)
+    draggedTrackRef.current = id
+    clearFolderPreview()
+    clearFolderExit()
+    folderPreviewCommitted.current = false
+    const isFolder = baseRowsRef.current.some((row) => row.track.id === id && row.track.kind === "folder")
+    if (!liveTrackEditing.current || isFolder) return
+    const member = baseRowsRef.current.find((row) => row.track.id === id && row.depth === 1)
+    const folderId = member?.track.groupId
+    if (folderId) {
+      const toggle = document.querySelector(`[data-testid="tl-folder-toggle-${CSS.escape(folderId)}"]`)
+      const block = toggle?.closest("[data-reorderable]")
+      if (block instanceof HTMLElement) {
+        const rect = block.getBoundingClientRect()
+        folderHomeRef.current = { trackId: id, folderId, top: rect.top, bottom: rect.bottom }
+      }
+    }
+    const move = (pointer: PointerEvent) => followFolderDrag(pointer.clientX, pointer.clientY)
+    const up = () => commitFolderPreview()
+    folderExitMove.current = move
+    folderExitUp.current = up
+    document.addEventListener("pointermove", move)
+    document.addEventListener("pointerup", up)
+  }
+
+  function onTrackDragEnd(event: DragEndEvent): boolean | "scope" {
+    const preview = folderPreviewRef.current
+    endTrackDrag()
+    if (preview) {
+      // Out of its folder, the track lands where the gap shows it going.
+      // Beside the folder is only for a pointer with no row to aim at.
+      const out = preview.kind === "leave"
+        ? commitTrackReorder(baseRowsRef.current, resolvedTrackDrop(event), true)
+        : null
+      if (out?.kind === "move" && out.groupId === null && out.trackId === preview.trackId) {
+        folderPreviewCommitted.current = true
+        holdScopeMove(out.trackId, null, out.order)
+        return "scope"
+      }
+      // A preview commit is a scope move like any other — say so, or the
+      // release plan reads it as a cancelled drag and the row teleports to
+      // its new list instead of gliding there.
+      commitFolderPreview()
+      return "scope"
+    }
+    const resolution = resolvedTrackDrop(event)
+    const pointer = trackPointer(event)
+    if (pointer && resolution.kind === "move") {
+      const over = baseRowsRef.current.filter((row) => row.depth === 0)[resolution.toPosition]?.track
+      const toggle = over?.kind === "folder"
+        ? document.querySelector(`[data-testid="tl-folder-toggle-${CSS.escape(over.id)}"]`)
+        : null
+      const heading = toggle?.closest("[data-reorderable]")
+      const top = heading instanceof HTMLElement ? heading.getBoundingClientRect().top : null
+      const above = top == null ? null : orderAboveClosedFolder(baseRowsRef.current, resolution, pointer.y, top)
+      if (above && onReorderTrack) {
+        reorderAfterSettle(above.trackId, above.order)
+        return true
+      }
+    }
+    const commit = commitTrackReorder(baseRowsRef.current, resolution, Boolean(trackEditing))
+    if (!commit) return false
+    if (commit.kind === "reorder") {
+      reorderAfterSettle(commit.trackId, commit.order)
+      return true
+    }
+    holdScopeMove(commit.trackId, commit.groupId, commit.order)
+    return "scope"
+  }
+
+  /** A move expressed in scope indices. `scope.tracks` is ascending by `order`,
+   *  which is the precondition orderForDrop's midpoint arithmetic depends on.
+   *  Returns whether it wrote. */
   function commitScopedMove(scope: ScopeSiblings, toIndex: number): boolean {
     if (!onReorderTrack) return false
     const drop = orderForDrop(scope.tracks, scope.fromIndex, toIndex)
@@ -3313,140 +3837,6 @@ export function TimelineEditor({
     if (!drop) return false
     onReorderTrack(drop.trackId, drop.order)
     return true
-  }
-
-  /**
-   * …and a drop from the pointer, which may also have changed the track's
-   * FOLDER.
-   *
-   * TWO CALLBACKS, BECAUSE THEY ARE TWO PERMISSIONS. A plain reorder writes
-   * `{order}` alone and rides `onReorderTrack`, which is ungated because
-   * dragging shipped before the setting existed. A drop that lands the track in
-   * a different scope writes `groupId` too, which is gated — so it goes through
-   * `trackEditing`, and can only ever be reached when the resolver was allowed
-   * to cross in the first place.
-   */
-  function commitDrop(track: TimelineTrack, target: TrackDropTarget | null) {
-    if (!target) return
-    const folderIds = folderIdsOf(tracks)
-    const currentScope = trackScope(track, folderIds)
-    if (target.groupId === currentScope) {
-      onReorderTrack?.(track.id, target.order)
-      return
-    }
-    trackEditing?.onMoveToScope(track.id, target.groupId, target.order)
-  }
-
-  /**
-   * TimelineCard's `beginDrag`, retargeted from clientX to clientY, plus the
-   * two things a vertical drag inside a scroller needs that a chip drag does
-   * not: a `pointercancel` listener (the browser can and does take the pointer
-   * back — a touch turning into a scroll, a system gesture) and the body's
-   * `userSelect` saved and restored, both exactly as EditorTable's drag-select
-   * does them. Without the cancel listener a taken-back pointer leaves the row
-   * lifted forever with window listeners still attached.
-   */
-  function beginTrackDrag(fromIndex: number, e: ReactPointerEvent<HTMLDivElement>) {
-    // `e.ctrlKey` and not just the button: a macOS ctrl+click is BUTTON 0, so
-    // it fires `pointerdown` here AND `contextmenu` at the row's menu trigger.
-    // The 3px threshold below stops the reorder from committing, but by then
-    // this handler has already set body.userSelect = "none", installed three
-    // window listeners and taken the pointer capture — and a captured pointer
-    // can swallow the `mouseup` the menu trigger is waiting for, leaving a
-    // lifted row sitting under an open menu.
-    if (!onReorderTrack || e.button !== 0 || e.ctrlKey) return
-    // The speaker toggle lives INSIDE the label, and the label is the handle:
-    // without this, muting a track starts a drag and the click never lands.
-    if (e.target instanceof Element && e.target.closest("button")) return
-    const inner = gutterInnerRef.current
-    if (!inner) return
-    const rowEls = Array.from(inner.querySelectorAll<HTMLElement>("[data-tl-track-row]"))
-    // AGAINST THE RENDERED ROWS, NOT `tracks` — a collapsed folder hides its
-    // members, so the two counts legitimately differ and comparing with
-    // `tracks.length` would make dragging stop working the moment anybody
-    // closed a folder. Silently: no error, no partial behaviour, just a dead
-    // handle. That is the failure shape that cost a debug cycle last round.
-    if (rowEls.length !== trackRows.length) return
-    const originTop = gutterRef.current?.getBoundingClientRect().top ?? 0
-    const scrolled = scrollRef.current?.scrollTop ?? 0
-    const rowBounds: RowBound[] = rowEls.map((row) => {
-      const rect = row.getBoundingClientRect()
-      return { top: rect.top - originTop + scrolled, bottom: rect.bottom - originTop + scrolled }
-    })
-    // Stage 2b: the pointer's X matters now, so the gutter's left edge is the
-    // origin the indent is measured from.
-    const gutterLeft = gutterRef.current?.getBoundingClientRect().left ?? 0
-    const resolve = (ev: { clientX: number; clientY: number }) =>
-      resolveDropTarget(
-        trackRows,
-        rowBounds,
-        fromIndex,
-        { contentY: gutterContentY(ev.clientY), indentX: ev.clientX - gutterLeft },
-        {
-          // THE GATE. With track editing off a drag may not change which folder
-          // anything is in, so the resolver clamps every answer to the row's
-          // current scope and the gesture behaves exactly as it did before
-          // folders existed.
-          allowCrossing: Boolean(trackEditing),
-          // Half the column, measured live — the gutter is 56px collapsed and
-          // 240px expanded, and a fixed threshold made "into the folder" the
-          // answer almost everywhere on the wide one.
-          reachInPx: folderReachInPx(gutterWidthPx(gutterCollapsed)),
-        },
-      )
-
-    const startY = e.clientY
-    try {
-      ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
-    } catch {
-      /* happy-dom / unsupported — the window listeners still carry the drag */
-    }
-    const restoreUserSelect = pauseTextSelection()
-    setTrackDrag({ trackId: trackRows[fromIndex].track.id, dy: 0, rowBounds, target: null, moved: false, view: null })
-    // AQU-2236: what the column shows, below the header. Read on every move,
-    // like the target it is drawn for, because the list can scroll mid-drag.
-    const visible = () => {
-      const header = gutterHeaderRef.current?.getBoundingClientRect()
-      const column = gutterRef.current?.getBoundingClientRect()
-      if (!header || !column || column.bottom <= header.bottom) return null
-      return { top: gutterContentY(header.bottom), bottom: gutterContentY(column.bottom) }
-    }
-    // Same 3px threshold TimelineCard uses: a drag has to be INTENDED. Below
-    // it the row does not follow and a release commits nothing, so a click that
-    // wobbles by a pixel cannot silently reorder the timeline.
-    let moved = false
-    const onMove = (ev: PointerEvent) => {
-      const dy = ev.clientY - startY
-      if (Math.abs(dy) > 3) {
-        moved = true
-        // AQU-646 stage 2b: tell the row's `click` that this was a DRAG. The
-        // browser fires `click` after `pointerup` regardless, and without this
-        // every completed reorder would also change the selection. Same
-        // `movedRef` idiom TimelineCard uses for its own seek-vs-drag split.
-        trackDragMovedRef.current = true
-      }
-      const target = moved ? resolve(ev) : null
-      const view = moved ? visible() : null
-      setTrackDrag((d) => (d ? { ...d, dy, target, moved, view } : d))
-    }
-    const stop = () => {
-      window.removeEventListener("pointermove", onMove)
-      window.removeEventListener("pointerup", onUp)
-      window.removeEventListener("pointercancel", onCancel)
-      restoreUserSelect()
-      setTrackDrag(null)
-    }
-    const onUp = (ev: PointerEvent) => {
-      stop()
-      if (!moved) return
-      commitDrop(trackRows[fromIndex].track, resolve(ev))
-    }
-    // A CANCELLED drag commits nothing. The pointer was taken away, so there is
-    // no release position to read as an intention.
-    const onCancel = () => stop()
-    window.addEventListener("pointermove", onMove)
-    window.addEventListener("pointerup", onUp)
-    window.addEventListener("pointercancel", onCancel)
   }
 
   /**
@@ -3494,61 +3884,6 @@ export function TimelineEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reads refs and the DOM only; the order is the trigger
   }, [rowOrderKey])
 
-  /**
-   * The insertion boundary the drop-indicator line is drawn at: 0..tracks.length,
-   * counting the gaps between rows rather than the rows themselves.
-   *
-   * It is `proposeDropIndex`'s lifted-row adjustment read backwards — dragging
-   * DOWN to index i means the line sits below row i (boundary i+1), dragging up
-   * means above it. null while the drop would change nothing, so a drag that
-   * has not left its own slot draws no promise it will not keep.
-   */
-  /**
-   * The drop indicator, in RENDERED-row space — which is where it is drawn and,
-   * since stage 2b, where the resolver already computes it.
-   *
-   * It used to be derived here from a scope-space boundary, which needed a
-   * bridge (`rowIndexes`) because the two spaces disagree whenever a folder is
-   * open. The resolver knows both, so it hands back the finished answer and
-   * this is a read.
-   */
-  const dropRow = trackDrag?.target?.indicator ?? null
-
-  /**
-   * The same line, in the LANE column, in content pixels.
-   *
-   * The two columns share a coordinate frame by construction: the gutter's
-   * non-translating spacer is the same `h-7` as the ruler, so a row's content-y
-   * measured in the gutter is the same content-y in the scroller — which is
-   * exactly what `top` inside the track content div means. If either height
-   * ever changes without the other, the line will be off by the difference.
-   */
-  const dropEdgeContentY =
-    trackDrag && dropRow
-      ? dropRow.edge === "top"
-        ? trackDrag.rowBounds[dropRow.rowIndex]?.top
-        : trackDrag.rowBounds[dropRow.rowIndex]?.bottom
-      : null
-  /**
-   * …held where it can be seen (AQU-2236). Near the top of a scrolled list the
-   * edge a drop lands on can be scrolled up past the header, out of the column,
-   * and the line drawn there showed nowhere — so the top row, the drop people
-   * reach for most up there, had no readout at all. The line stops just under
-   * the header instead, and just above the column's foot at the other end. The
-   * drop itself is unchanged: the line only ever moves to the edge of the view
-   * the real boundary lies beyond.
-   */
-  const dropLineContentY =
-    dropEdgeContentY == null || !trackDrag?.view
-      ? dropEdgeContentY
-      : Math.min(Math.max(dropEdgeContentY, trackDrag.view.top), trackDrag.view.bottom - DROP_LINE_PX)
-  /** The gutter half's place inside its row, or null where the row's own edge
-   *  is in sight and the line sits on it as it always has. */
-  const dropTopInRowPx =
-    dropRow && dropLineContentY != null && dropLineContentY !== dropEdgeContentY
-      ? dropLineContentY - (trackDrag?.rowBounds[dropRow.rowIndex]?.top ?? 0)
-      : null
-
   // SUB-12: cursor-centered wheel/pinch zoom (ctrl + wheel — a trackpad pinch
   // arrives as a ctrlKey wheel). Native listener with passive:false because
   // React's synthetic onWheel can't reliably preventDefault (the browser would
@@ -3568,6 +3903,8 @@ export function TimelineEditor({
   //    detach/re-attach gaps.
   const pxPerSecRef = useRef(pxPerSec)
   pxPerSecRef.current = pxPerSec
+  const maxPxPerSecRef = useRef(maxPxPerSec)
+  maxPxPerSecRef.current = maxPxPerSec
   /**
    * The row height a ⌘-pinch is steering toward, advanced SYNCHRONOUSLY on
    * every wheel event.
@@ -3610,14 +3947,9 @@ export function TimelineEditor({
       const anchor = zoomGestureAnchorRef.current
       zoomAnchorRef.current = anchor
       setPxPerSec(next)
-      // SUB-18 (flicker): update the scroll STATE in the same batch as the
-      // zoom. Otherwise each glide frame renders with new zoom + stale
-      // scrollLeft (state only catches up via the DOM scroll event a beat
-      // later), the visibility window miscomputes for that frame, and edge
-      // cards blink out. The layout effect still writes the DOM scrollLeft.
-      if (anchor) {
-        setScrollLeft(Math.max(0, secToPx(anchor.timeSec, next) - anchor.offsetX))
-      }
+      // The columns are fixed pixel ranges, so a new zoom does not need a
+      // scroll offset in state to keep the right chips mounted. The layout
+      // effect below writes the DOM offset that holds the anchor still.
       if (next !== target) {
         zoomAnimRef.current = requestAnimationFrame(step)
       } else {
@@ -3676,7 +4008,7 @@ export function TimelineEditor({
       const speed = mag >= 90 ? mag * 0.0022 : Math.min(mag * 0.019, 0.55)
       const target = Math.max(
         ZOOM_MIN,
-        Math.min(ZOOM_MAX, zoomTargetRef.current * Math.exp(e.deltaY < 0 ? speed : -speed)),
+        Math.min(maxPxPerSecRef.current, zoomTargetRef.current * Math.exp(e.deltaY < 0 ? speed : -speed)),
       )
       if (target === zoomTargetRef.current && target === pxPerSecRef.current) return
       zoomTargetRef.current = target
@@ -3735,9 +4067,10 @@ export function TimelineEditor({
     const wanted = Math.max(0, secToPx(anchor.timeSec, pxPerSec) - anchor.offsetX)
     const left = clampScrollLeft(wanted, el.scrollWidth, el.clientWidth)
     el.scrollLeft = left
-    // The glide step already put `wanted` in state. Past what the column can
-    // scroll, the DOM may not move at all, so no scroll event would correct it.
-    if (left !== wanted) setScrollLeft(left)
+    lastScrollLeft.current = left
+    // Past what the column can scroll, the DOM may not move at all, so no
+    // scroll event would tell the ruler. Publish the offset either way.
+    scrollBus.set(left, el.clientWidth)
   }, [pxPerSec])
 
   // ── AQU-646 stage 5: dragging the playhead ────────────────────────────────
@@ -3754,11 +4087,8 @@ export function TimelineEditor({
   }
 
   function moveScrub(sec: number) {
-    setScrubSec(sec)
-    // Keep the local clock in step for everything else that reads it (the
-    // follow-scroll anchor, the cell trace), even though the head is drawn from
-    // `scrubSec` directly.
-    clock.seekTo(sec)
+    // Moves the head and the clock, and renders only the head.
+    clock.scrub(sec)
     const now = performance.now()
     const send = scrubSendRef.current
     if (send.timer) { clearTimeout(send.timer); send.timer = null }
@@ -3778,7 +4108,7 @@ export function TimelineEditor({
     const send = scrubSendRef.current
     if (send.timer) { clearTimeout(send.timer); send.timer = null }
     scrubbingRef.current = false
-    setScrubSec(null)
+    clock.scrub(null)
     // CLEARED BEFORE THE LANDING SEEK, so that seek routes through the ordinary
     // path and the queue is cued where the hand stopped. The other order leaves
     // the transport suppressed for its own landing.
@@ -3798,8 +4128,7 @@ export function TimelineEditor({
   function sendSeek(sec: number, send: ((sec: number) => void) | undefined) {
     // A deliberate seek must land exactly where it was aimed: the timeline is
     // an editor, and at rest the head has to agree with the chip edge under it.
-    setCompensating(false)
-    clock.seekTo(sec)
+    clock.seek(sec)
     // AQU-646: explicit seeks drive the audio queue too, and re-engage follow.
     // The linked video rides along on this same call — the workspace stamps a
     // seek for the pane before deciding what the queue can do with it, because
@@ -3823,7 +4152,7 @@ export function TimelineEditor({
   // Center the track on a clip and cue playback (paused) at its start —
   // identical to a clean card click. Reads the live clientWidth (viewportPx
   // state can still be 0 pre-measurement). Untimed cells: no timecode, no-op.
-  function centerAndCue(cellId: string, opts?: { play?: boolean }) {
+  function centerAndCue(cellId: string, opts?: { play?: boolean; smooth?: boolean; align?: "start" | "center" }) {
     // Searches the AUDIO CUES too. A cue is a legitimate destination now — the
     // pairing drawer navigates to one — and looking only in `cells` meant every
     // such request found nothing and silently returned, so the track never
@@ -3832,17 +4161,65 @@ export function TimelineEditor({
     const at = cell ? layout.seekSecFor(cell) : null
     if (at == null) return
     const viewport = scrollRef.current?.clientWidth ?? 0
-    scrollTrackTo(Math.max(0, secToPx(at, pxPerSec) - viewport / 2))
+    // "start" matches the chapter navigator, which puts the chapter's first
+    // row at the top of the text. The line's start sits at the left edge.
+    const origin = opts?.align === "start" ? 0 : viewport / 2
+    scrollTrackTo(Math.max(0, secToPx(at, pxPerSec) - origin), opts?.smooth === true)
     if (opts?.play) playFromTime(at)
     else seekTo(at)
   }
 
-  // AQU-646 round 3: consume the text→media trace once on mount (the seed
-  // alone already selected the cell via the useState initializer).
+  // A reload paints the column where the reader left it. Centering the saved
+  // line on top of that slides the view backward — a chapter, or more once
+  // the programme grows and the line's clock moves. Keep the line where it
+  // already sits. If the column is still at the start, center the line. If
+  // its clock later moves, keep the same spot in the view.
+  function placeRestoredCell(cellId: string | null | undefined, cue: boolean) {
+    if (!cellId || resumeGestureRef.current) return
+    const el = scrollRef.current
+    if (!el) return
+    const cell = cells.find((c) => c.id === cellId) ?? audioCues?.find((c) => c.id === cellId)
+    const at = cell ? layout.seekSecFor(cell) : null
+    if (at == null) return
+    const hold = traceHoldRef.current
+    // No measured view yet: the column cannot show a restored scroll. Cue the
+    // line the way a fresh open always has. A measured view that already
+    // shows the line is left where the reload put it.
+    if (el.clientWidth <= 0) {
+      if (hold?.id === cellId) return
+      centerAndCue(cellId)
+      traceHoldRef.current = { id: cellId, at, offsetPx: 0 }
+      return
+    }
+    const heldOffset = hold?.id === cellId ? hold.offsetPx : null
+    const decision = resumeScrollLeft({
+      atPx: secToPx(at, pxPerSec),
+      scrollLeft: el.scrollLeft,
+      viewportPx: el.clientWidth,
+      heldOffsetPx: heldOffset,
+    })
+    traceHoldRef.current = { id: cellId, at, offsetPx: decision.offsetPx }
+    if (decision.move) scrollTrackTo(decision.left)
+    if (cue && hold?.id !== cellId) seekTo(at)
+  }
   useEffect(() => {
-    if (initialSelectedCellId) centerAndCue(initialSelectedCellId)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only trace consume
-  }, [])
+    if (!initialSelectedCellId) return
+    const token = ++traceWatchRef.current
+    let tries = 0
+    const tick = () => {
+      if (traceWatchRef.current !== token || resumeGestureRef.current) return
+      placeRestoredCell(initialSelectedCellId, true)
+      tries += 1
+      // The horizontal list mounts after the scrollport is measured and can
+      // put the column back toward 0 a frame later. A few frames is enough
+      // to put the line back; a later clock change re-runs this effect.
+      if (tries < 6) requestAnimationFrame(tick)
+    }
+    tick()
+    return () => { traceWatchRef.current += 1 }
+    // placeRestoredCell reads the live column, the line, and its clock.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSelectedCellId, viewportPx, cells, layout, audioCues])
 
   // 2026-08-07 (wire b): a text-table row click arrives as an activate
   // request — select the chip and center/cue exactly like a chip click, but
@@ -3853,7 +4230,11 @@ export function TimelineEditor({
     setSelectedId(activateRequest.cellId)
     // AQU-928: a row click is a plain selection, so it replaces the batch scope.
     setExtraIds([])
-    centerAndCue(activateRequest.cellId, { play: activateRequest.play })
+    centerAndCue(activateRequest.cellId, {
+      play: activateRequest.play,
+      smooth: activateRequest.smooth,
+      align: activateRequest.align,
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consumed per nonce
   }, [activateRequest?.nonce])
 
@@ -3866,26 +4247,6 @@ export function TimelineEditor({
   useEffect(() => {
     setMediaCursorCell(selectedId)
   }, [selectedId])
-
-  // AQU-646 follow-playhead: page-flip the view when the playhead approaches
-  // the right edge (or leaves the left). Reads the element's live scrollLeft —
-  // state can lag a programmatic scroll by a frame.
-  // 2026-08-11: reads the CLOCK, not the queue's progress. A linked video with
-  // no audio never starts the queue, so this used to sit out the entire film —
-  // and it is the only thing that scrolls a track which, on a 70-minute
-  // episode, is roughly 160,000px wide.
-  useEffect(() => {
-    if (!follow || !transportPlaying) return
-    const el = scrollRef.current
-    if (!el) return
-    const target = computeFollowScroll(
-      secToPx(displayCurrentSec, pxPerSec),
-      el.scrollLeft,
-      viewportPx,
-      trackWidthPx,
-    )
-    if (target != null) scrollTrackTo(target)
-  }, [follow, transportPlaying, displayCurrentSec, pxPerSec, viewportPx, trackWidthPx])
 
   // 2026-08-07 (wire a): USER chip selection — as opposed to programmatic
   // selection from a row click — also notifies the workspace so the text
@@ -3972,9 +4333,6 @@ export function TimelineEditor({
   }, [transcribeTargetIds, takeCells])
 
   const mediaTextHeaderProps = {
-    cell: currentCell,
-    castName: formatCueCharacter(currentCharacter.names),
-    cameraState: currentCharacter.cameraState ?? null,
     // AQU-646 stage 3e: the transcribe controls used to be a full-width row of
     // their own beneath the lanes, on screen whether or not there was anything
     // to transcribe. They sit in the text header now, and ONLY WHEN THERE IS A
@@ -4060,7 +4418,7 @@ export function TimelineEditor({
    */
   function summarySpansForTrack(track: TimelineTrack): SummarySpan[] {
     if (track.contentFileId) {
-      return (textTrackCells?.[track.contentFileId] ?? []).flatMap(cell => {
+      return (shownTextTrackCells?.[track.contentFileId] ?? []).flatMap(cell => {
         const span = independentTextLayout.spanFor(cell, "subtitle")
         return span ? [{ startSec: span.start, endSec: span.end }] : []
       })
@@ -4117,11 +4475,17 @@ export function TimelineEditor({
   // handler above — hoisting it to module scope would mean threading twenty
   // reactive values through a parameter object, and the first one anybody
   // forgot to pass would be a lane that quietly stopped updating.
-  function laneForTrack(row: TrackRow): ReactNode {
+  function laneForTrack(row: TrackRow, win?: { startSec: number; endSec: number }): ReactNode {
+    const rowProps = {
+      ...laneProps,
+      viewStartSec: win?.startSec ?? viewStartSec,
+      viewEndSec: win?.endSec ?? viewEndSec,
+    }
     const track = row.track
+    if (hiddenTrackIds.has(track.id)) return null
     if (track.contentFileId && ["source-subtitles", "target-subtitles"].includes(track.kind)) {
       const contentFileId = track.contentFileId
-      const contentCells = textTrackCells?.[contentFileId] ?? []
+      const contentCells = shownTextTrackCells?.[contentFileId] ?? []
       const error = textTrackErrors?.[contentFileId]
       if (error) return <div role="alert" className="flex h-[var(--tl-row-h)] items-center gap-3 px-3 text-sm">
         <span>{error.message}</span>
@@ -4130,7 +4494,7 @@ export function TimelineEditor({
       </div>
       return <TimelineLane
         key={track.id} cells={contentCells} variant="subtitle"
-        {...laneProps} layout={independentTextLayout}
+        {...rowProps} layout={independentTextLayout}
         retimable={!timingLocked && Boolean(onRetimeTextTrack)}
         onRetime={(cellId, start, end) => onRetimeTextTrack?.(contentFileId, cellId, start, end)}
         onSeek={cellId => {
@@ -4183,7 +4547,7 @@ export function TimelineEditor({
             // sit wherever it likes, so this must never be on by default.
             boundNeighbours={subtitleFileWithFootage}
             snapEnabled={snapOn}
-            {...laneProps}
+            {...rowProps}
             // AQU-646: the stretches of film with no line of their own. Only
             // this arrangement offers them — everywhere else the lane is
             // exactly as it was.
@@ -4219,15 +4583,15 @@ export function TimelineEditor({
         // transcript chips over the film's own speech, with a dashed empty chip
         // across each stretch where nobody talks.
         return dialogue.length > 0 ? (
-          <TimelineLane key={track.id} cells={dialogue} variant="dialogue" retimable={false} {...laneProps} />
+          <TimelineLane key={track.id} cells={dialogue} variant="dialogue" retimable={false} {...rowProps} />
         ) : (
           <SourceRegionLane
             key={track.id}
             map={audioRegions}
             cells={audioCues ?? []}
             pxPerSec={pxPerSec}
-            viewStartSec={viewStartSec}
-            viewEndSec={viewEndSec}
+            viewStartSec={rowProps.viewStartSec}
+            viewEndSec={rowProps.viewEndSec}
             selectedId={selectedId}
             editable={editable}
             // AUDIO CHIPS SELECT, AND ALWAYS SHOULD HAVE. Stage 2 refused it
@@ -4260,7 +4624,6 @@ export function TimelineEditor({
                 : undefined
             }
             hideGaps={Boolean(linkedVideoEmpty) && audioFirst}
-            scrollLeftPx={scrollLeft}
           />
         )
       case "target-subtitles":
@@ -4274,7 +4637,7 @@ export function TimelineEditor({
             cells={subtitle}
             variant="target-subtitle"
             retimable={false}
-            {...laneProps}
+            {...rowProps}
             // The same pencil, in the same silences, doing the same thing —
             // and that is the point (Sam, 2026-08-13). It creates the SAME cell
             // the source row's pencil creates, because these two rows are two
@@ -4293,11 +4656,10 @@ export function TimelineEditor({
             layout={layout}
             getOtherLayout={getOtherLayout}
             pxPerSec={pxPerSec}
-            viewStartSec={viewStartSec}
-            viewEndSec={viewEndSec}
+            viewStartSec={rowProps.viewStartSec}
+            viewEndSec={rowProps.viewEndSec}
             selectedId={selectedId}
             selectedTakeCellId={takeSelCellFor(RECORDING_SLOT)}
-            loadingCellId={loadingCellId}
             missingCellIds={missingCellIds}
             editable={editable}
             masterHonorsTrims={masterHonorsTrims}
@@ -4356,8 +4718,8 @@ export function TimelineEditor({
             collapsed={row.collapsed}
             spans={row.collapsed ? row.members.flatMap(summarySpansForTrack) : NO_SUMMARY_SPANS}
             pxPerSec={pxPerSec}
-            viewStartSec={viewStartSec}
-            viewEndSec={viewEndSec}
+            viewStartSec={rowProps.viewStartSec}
+            viewEndSec={rowProps.viewEndSec}
           />
         )
       case "audio": {
@@ -4381,11 +4743,10 @@ export function TimelineEditor({
             layout={layout}
             getOtherLayout={getOtherLayout}
             pxPerSec={pxPerSec}
-            viewStartSec={viewStartSec}
-            viewEndSec={viewEndSec}
+            viewStartSec={rowProps.viewStartSec}
+            viewEndSec={rowProps.viewEndSec}
             selectedId={selectedId}
             selectedTakeCellId={takeSelCellFor(slotForTrack(track.id))}
-            loadingCellId={loadingCellId}
             missingCellIds={missingCellIds}
             editable={editable}
             masterHonorsTrims={masterHonorsTrims}
@@ -4503,6 +4864,11 @@ export function TimelineEditor({
       triggerIcon={Plus}
       testId="tl-add-track"
       ariaLabel={t("editor.timeline.trackAdd")}
+      // Still drops below the +. align start keeps the panel's leading edge
+      // on the button, so the list grows across the lanes instead of back
+      // over the track names. "start" follows the page direction.
+      side="bottom"
+      align="start"
     />
   ) : null
   const addTrackMenuItems = addTrackItems.length > 0 ? (
@@ -4598,7 +4964,7 @@ export function TimelineEditor({
             const el = scrollRef.current
             if (el) {
               const target = computeFollowScroll(
-                secToPx(displayCurrentSec, pxPerSec), el.scrollLeft, viewportPx, trackWidthPx,
+                secToPx(clock.displaySec(), pxPerSec), el.scrollLeft, el.clientWidth, trackWidthPx,
               )
               if (target != null) scrollTrackTo(target)
             }
@@ -4698,6 +5064,9 @@ export function TimelineEditor({
           items={checkMenuItems}
           triggerVariant="outline"
           triggerSize="icon-sm"
+          // The square sits in the bar, not on the window's edge. The panel
+          // opens from the button's left edge, the same way Timing does.
+          align="start"
           triggerTooltip={t(linkingMode ? "editor.timeline.checkMenuLinking" : "editor.timeline.checkMenu")}
           triggerIcon={cueLinksPending ? Spinner : ClipboardCheck}
           // Armed linking is a MODE, so the control has to look different
@@ -4890,7 +5259,159 @@ export function TimelineEditor({
     </>
   )
 
-  return (
+  function renderGutterBlocks(renderRow: (row: TrackRow, index: number) => ReactNode) {
+    const blocks: { row: TrackRow; index: number; members: { row: TrackRow; index: number }[] }[] = []
+    trackRows.forEach((row, index) => {
+      if (row.depth === 1) blocks[blocks.length - 1]?.members.push({ row, index })
+      else blocks.push({ row, index, members: [] })
+    })
+    const sortable = Boolean(onReorderTrack)
+    const allowCrossing = Boolean(trackEditing)
+    const rootIds = blocks.map((block) => block.row.track.id)
+    return (
+      <TrackSortableList id={TIMELINE_ROOT_GROUP} items={rootIds}>
+        {blocks.map((block) => {
+          const folderId = block.row.track.kind === "folder" ? block.row.track.id : null
+          const open = folderId != null && !block.row.collapsed && block.members.length > 0
+          const renaming = renamingTrackId === block.row.track.id
+          const draggable = !renaming && canDragTrack(block.row, trackRows, allowCrossing)
+          // The cross-folder gap, converted from flattened row space into
+          // this block's nesting: the block paints its heading's slide, and
+          // each member paints only what is left of its own slide once the
+          // block's is taken off (its lane adds the block's back on).
+          return (
+            <GapShiftedTrackBlock
+              key={block.row.track.id}
+              gutterDrag={gutterDrag}
+              sortable={sortable}
+              id={block.row.track.id}
+              group={TIMELINE_ROOT_GROUP}
+              draggable={draggable}
+              onShift={reportLaneShift}
+            >
+              {renderRow(block.row, block.index)}
+              {open && folderId && (
+                <TrackSortableList id={folderId} items={block.members.map((member) => member.row.track.id)}>
+                  {block.members.map((member) => {
+                    const memberRenaming = renamingTrackId === member.row.track.id
+                    const memberDraggable = !memberRenaming && canDragTrack(member.row, trackRows, allowCrossing)
+                    return (
+                      <GapShiftedTrackBlock
+                        key={member.row.track.id}
+                        gutterDrag={gutterDrag}
+                        folderId={folderId}
+                        sortable={sortable}
+                        id={member.row.track.id}
+                        group={folderId}
+                        draggable={memberDraggable}
+                        onShift={reportLaneShift}
+                      >
+                        {renderRow(member.row, member.index)}
+                      </GapShiftedTrackBlock>
+                    )
+                  })}
+                </TrackSortableList>
+              )}
+            </GapShiftedTrackBlock>
+          )
+        })}
+      </TrackSortableList>
+    )
+  }
+
+  function drawnLane(row: TrackRow, startSec: number, endSec: number): ReactNode {
+    // A folder's band summarises its members, so a reorder inside it redraws it.
+    if (row.track.kind === "folder") return laneForTrack(row, { startSec, endSec })
+    const key = `${row.track.id}|${startSec}|${endSec}`
+    if (reuseDrawnLanes && drawnLanes.has(key)) return drawnLanes.get(key)
+    const lane = laneForTrack(row, { startSec, endSec })
+    drawnLanes.set(key, lane)
+    return lane
+  }
+
+  function renderTrackRows(startSec: number, endSec: number) {
+    return trackRows.map((row) => {
+      const lane = drawnLane(row, startSec, endSec)
+                // A row with NO MENU CAPABILITY at all — a viewer — is the row
+                // that shipped, byte for byte. That flag is role-derived and
+                // never flips mid-session, so this early return costs nothing.
+                //
+                // AN EMPTY MENU IS NOT THAT CASE, and used to share this line
+                // (2026-08-28). `trackMenuEmpty` flips DURING INTERACTION: with
+                // rename-only clearance, selecting a second track empties the
+                // menu for every selected row at once. That swapped this
+                // element between `lane` and `ContextMenu` at the same key —
+                // different type, so React unmounted and remounted every one of
+                // them. The tint vanishing was the visible half; the rest was
+                // worse. A remount runs `TargetAudioChip`'s cleanup, which
+                // STOPS A PLAYING PREVIEW; it empties `useTargetChipPeaks`'
+                // session cache, so every visible waveform refetches and
+                // redecodes; and it drops any in-flight drag. Ctrl-clicking a
+                // second track silenced audio you were listening to.
+                //
+                // So the menu stays MOUNTED and only its content is withheld.
+                // Consequence to know: a right-click on an empty-menu row now
+                // does nothing at all, where before it showed the browser's own
+                // menu (no trigger was mounted to swallow it). That is the same
+                // answer a chip already gives, and it is the price of not
+                // remounting the lane under a playing take.
+                if (!hasTrackMenu) return lane
+                const menuEmpty = trackMenuEmpty(row.track.id)
+                return (
+                  // Sam's ruling: right-click ANYWHERE in a track that is not a
+                  // chip. So the lane gets the same menu the label does.
+                  //
+                  // THE WRAPPER MUST CREATE NO STACKING CONTEXT — no `relative`,
+                  // no `isolate`, no `z-*`, no `transform`, no `filter`.
+                  // TargetAudioLane's own root carries `isolate` specifically so
+                  // chip z-indexes stack WITHIN the lane and never over the
+                  // playhead, and a stacking context one level up would undo
+                  // exactly that. A bare block element is the whole wrapper, and
+                  // the lane inside it is a fixed row height, so it adds no
+                  // geometry either.
+                  <ContextMenu
+                    key={row.track.id}
+                    onOpenChange={(open) => { if (open) onTrackContextMenu(row.track.id) }}
+                  >
+                    {/* AQU-646 stage 2b: the selection reaches ACROSS the whole
+                        track, not just its name — otherwise selecting a track
+                        highlights a 128px label and says nothing about the
+                        thing you actually selected. Fainter than the gutter's
+                        tint because it sits under the chips rather than behind
+                        text, and `bg-*` creates no stacking context, so the
+                        rule above still holds. */}
+                    <ContextMenuTrigger
+                      render={
+                        <div
+                          ref={bindLaneShift}
+                          data-tl-track-lane={row.track.id}
+                          data-tl-lane-group={row.depth === 1 ? row.track.groupId ?? undefined : undefined}
+                          // In the air it is drawn over the lanes it crosses,
+                          // a folder's band included, and under the playhead
+                          // (z-20). Only then: at rest, the rule above holds.
+                          className={cn(
+                            "data-[tl-lifted]:relative data-[tl-lifted]:z-10",
+                            selectedTrackIdSet.has(row.track.id)
+                              ? "bg-accent/40 data-[tl-lifted]:bg-[color-mix(in_oklab,var(--color-accent)_40%,var(--color-background))]"
+                              : "data-[tl-lifted]:bg-background",
+                          )}
+                          // AQU-1684: a drag under way in this lane keeps it
+                          // from being hidden. Capture, because the chips own
+                          // their pointerdown.
+                          onPointerDownCapture={(e) => pressLane(row.track.id, e)}
+                        />
+                      }
+                    >
+                      {lane}
+                    </ContextMenuTrigger>
+                    {!menuEmpty && (
+                      <ContextMenuContent className="w-48">{trackMenu(row.track)}</ContextMenuContent>
+                    )}
+                  </ContextMenu>
+                )
+    })
+  }
+
     // Stage 3: the editor FILLS the height it is given, and gives it all to the
     // tracks. It sits in a resizable panel now, so it no longer sizes itself to
     // its content (which is what the 2026-08-07 note here used to say) — every
@@ -4905,8 +5426,11 @@ export function TimelineEditor({
     // exists in exactly one place. The context beside them carries the same
     // numbers to the components that need to make DECISIONS about the height
     // (which pieces of a chip still fit) rather than merely be that tall.
+    return (
     <div
+      ref={editorRef}
       data-testid="tl-editor"
+      data-tl-lane-epoch={laneEpoch.current}
       className="flex h-full min-h-0 flex-col overflow-hidden"
       style={
         {
@@ -5012,7 +5536,10 @@ export function TimelineEditor({
           `grid-rows-[minmax(0,1fr)]` is load-bearing, not tidiness: with an
           implicit `auto` row the row sizes to its content, the columns overflow
           the panel, and there is NO SCROLLBAR AT ALL — a failure that looks
-          exactly like the resizable panel not having taken. */}
+          exactly like the resizable panel not having taken. The track column
+          is `minmax(0, 1fr)` for the same reason on the other axis: a bare
+          `1fr` will not shrink below the canvas, and a long book is millions
+          of pixels wide. */}
       <RowMetricsContext.Provider value={rowMetrics}>
         {/* AN INLINE STYLE, NOT A CLASS, and that is forced rather than
             chosen: Tailwind generates only the classes it can literally see in
@@ -5042,7 +5569,7 @@ export function TimelineEditor({
           dir="ltr"
           data-testid="tl-grid"
           className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)]"
-          style={{ gridTemplateColumns: `${gutterWidthPx(gutterCollapsed)}px 1fr` }}
+          style={{ gridTemplateColumns: `${gutterWidthPx(gutterCollapsed)}px minmax(0, 1fr)` }}
         >
           {/* NOTHING MAY BE INSERTED BETWEEN THESE TWO COLUMNS, and the gutter
               must not grow a testid: TimelineEditor.test.tsx reads the labels
@@ -5151,6 +5678,15 @@ export function TimelineEditor({
                 immovable thing after another is noise. (The untimed strip below
                 is a sibling in here and carries no listitem role — it is not a
                 track, and it cannot be moved.) */}
+            <TrackReorderDnd
+              enabled={Boolean(onReorderTrack)}
+              onDragStart={onTrackDragStart}
+              onDragOver={onTrackDragOver}
+              onDragMove={onTrackDragOver}
+              onDragEnd={onTrackDragEnd}
+              onDragCancel={endTrackDrag}
+              onPaintNow={flushPendingReorder}
+            >
             <div
               ref={gutterInnerRef}
               // ABOVE THE DIVIDER RULE, AND THAT IS LOAD-BEARING (2026-08-27).
@@ -5165,16 +5701,9 @@ export function TimelineEditor({
               // where a row paints something opaque, which is what the folder
               // band is.
               //
-              // …AND OVER THE HEADER TOO, BUT ONLY MID-DRAG (AQU-2236). At rest
-              // the names pass under the header, as the chips pass under the
-              // ruler. During a drag the lane half of the drop line still draws
-              // over the ruler (its z-30 beats the ruler's z-20), so near the
-              // top the gutter half and the row in the air would vanish under
-              // the header while the lane half showed — and the drop still
-              // resolves up there. A dragged chip lifts its whole lane over the
-              // ruler for the same reason (TargetAudioLane): mid-gesture, the
-              // thing under the pointer is what you need to see.
-              className={cn("relative", trackDrag?.moved ? "z-50" : "z-30")}
+              // The row itself moves, at its own height. There is no preview and
+              // no drop line.
+              className="relative z-30"
               role={onReorderTrack ? "list" : undefined}
               aria-label={onReorderTrack ? t("editor.timeline.gutterReorderAria") : undefined}
             >
@@ -5182,7 +5711,7 @@ export function TimelineEditor({
                   one row here per row there, in the same order, off the same
                   array. `name` comes from the track and not from the kind, which
                   is the whole seam a rename arrives through. */}
-              {trackRows.map((row, index) => {
+              {renderGutterBlocks((row, index) => {
                 const track = row.track
                 const render = TRACK_RENDER[track.kind]
                 // EVERY audible row gets its speaker, in every arrangement.
@@ -5244,25 +5773,8 @@ export function TimelineEditor({
                           }
                         : undefined
                     }
-                    // THE TRAVELLING ROW RE-INDENTS AS YOU AIM (Sam,
-                    // 2026-08-25). The drop line already showed which of the
-                    // two outcomes a release would pick, but the row under the
-                    // pointer kept whatever indent it started with — so the
-                    // thing being moved and the line promising where it lands
-                    // disagreed for the whole gesture, and you only found out
-                    // by letting go.
-                    //
-                    // Off the RESOLVED target rather than the pointer, so it
-                    // can never promise something the drop would not do: with
-                    // track editing off the resolver clamps every answer to the
-                    // row's own scope, and the indent stays put along with it.
-                    // A dragged FOLDER always resolves to the top level (a
-                    // folder is never inside another), so it never indents.
-                    indented={
-                      trackDrag?.trackId === track.id && trackDrag.target
-                        ? trackDrag.target.groupId != null
-                        : row.depth === 1
-                    }
+                    indented={row.depth === 1}
+                    dragIndent={{ store: gutterDrag, trackId: track.id }}
                     // Sam, Oct 5: the playback-sound menu belongs on the Source
                     // audio lane too. It takes the sublabel's line, under the
                     // name and next to the speaker, so the name keeps its full
@@ -5306,11 +5818,8 @@ export function TimelineEditor({
                             without a real button there would be no way to reach
                             these items without a pointer at all. It doubles as
                             the discoverability answer for right-click, which
-                            nothing on screen advertises.
-
-                            `beginTrackDrag` already bails on
-                            `closest("button")`, so pressing it cannot start a
-                            drag. */}
+                            nothing on screen advertises. A press on the button
+                            does not start a drag. */}
                         {/* NOT WHILE THE GUTTER IS A STRIP. `opacity-0` hides
                             it until hover but it still TAKES ITS WIDTH, and a
                             dot, a speaker and this together overflow the
@@ -5323,7 +5832,7 @@ export function TimelineEditor({
                             handle={menuHandleFor(track.id)}
                             data-testid={`tl-track-menu-${track.id}`}
                             aria-label={t("editor.timeline.trackMenuAria", { name: track.name })}
-                            className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100 aria-expanded:opacity-100"
+                            className="rounded-md p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100 aria-expanded:opacity-100"
                           >
                             <MoreHorizontal className="h-3.5 w-3.5" />
                           </DropdownMenuTrigger>
@@ -5354,19 +5863,6 @@ export function TimelineEditor({
                       onReorderTrack
                         ? {
                             trackId: track.id,
-                            // By ID, not by index: the drag runs in scope space
-                            // and the rows are in row space, so comparing
-                            // indices would lift whichever row happened to sit
-                            // at the dragged track's sibling position.
-                            liftPx: trackDrag?.trackId === track.id ? trackDrag.dy : null,
-                            dropEdge: dropRow?.rowIndex === index ? dropRow.edge : null,
-                            // Stage 2b: the line INDENTS when release would put
-                            // the track inside a folder, so the two possible
-                            // outcomes of one gesture are distinguishable
-                            // before the pointer is let go.
-                            dropIndent: Boolean(dropRow?.indent),
-                            dropTopPx: dropRow?.rowIndex === index ? dropTopInRowPx : null,
-                            onPointerDown: (e) => beginTrackDrag(index, e),
                             onKeyDown: (e) => onTrackLabelKeyDown(index, e),
                           }
                         : undefined
@@ -5446,6 +5942,7 @@ export function TimelineEditor({
                 </div>
               )}
             </div>
+            </TrackReorderDnd>
           </div>
           {/* `overflow-auto` says out loud what `overflow-x-auto` already
               computed to. `overscroll-contain` is new and deliberate: now that
@@ -5453,92 +5950,43 @@ export function TimelineEditor({
               would otherwise chain the gesture into the page behind it and
               scroll the whole workspace away. */}
           <div
-            ref={scrollRef}
+            ref={bindScroll}
             data-testid="tl-scroll"
             className="overflow-auto overscroll-contain"
             onScroll={handleTrackScroll}
+            onPointerDown={handScrollToReader}
+            onWheel={handScrollToReader}
           >
+            <TimelineScrollBusContext.Provider value={scrollBus}>
             <div className="relative" data-testid="tl-canvas" data-file-px={trackWidthPx} style={{ width: `${canvasWidthPx}px` }}>
-              <TimelineRuler
+              <TimelineScrollingRuler
                 durationSec={durationSec}
                 pxPerSec={pxPerSec}
                 fillPx={canvasWidthPx}
-                viewStartSec={viewStartSec}
-                viewEndSec={viewEndSec}
                 onScrub={seekTo}
                 onScrubStart={beginScrub}
                 onScrubMove={moveScrub}
                 onScrubEnd={endScrub}
               />
-              {trackRows.map((row) => {
-                const lane = laneForTrack(row)
-                // A row with NO MENU CAPABILITY at all — a viewer — is the row
-                // that shipped, byte for byte. That flag is role-derived and
-                // never flips mid-session, so this early return costs nothing.
-                //
-                // AN EMPTY MENU IS NOT THAT CASE, and used to share this line
-                // (2026-08-28). `trackMenuEmpty` flips DURING INTERACTION: with
-                // rename-only clearance, selecting a second track empties the
-                // menu for every selected row at once. That swapped this
-                // element between `lane` and `ContextMenu` at the same key —
-                // different type, so React unmounted and remounted every one of
-                // them. The tint vanishing was the visible half; the rest was
-                // worse. A remount runs `TargetAudioChip`'s cleanup, which
-                // STOPS A PLAYING PREVIEW; it empties `useTargetChipPeaks`'
-                // session cache, so every visible waveform refetches and
-                // redecodes; and it drops any in-flight drag. Ctrl-clicking a
-                // second track silenced audio you were listening to.
-                //
-                // So the menu stays MOUNTED and only its content is withheld.
-                // Consequence to know: a right-click on an empty-menu row now
-                // does nothing at all, where before it showed the browser's own
-                // menu (no trigger was mounted to swallow it). That is the same
-                // answer a chip already gives, and it is the price of not
-                // remounting the lane under a playing take.
-                if (!hasTrackMenu) return lane
-                const menuEmpty = trackMenuEmpty(row.track.id)
-                return (
-                  // Sam's ruling: right-click ANYWHERE in a track that is not a
-                  // chip. So the lane gets the same menu the label does.
-                  //
-                  // THE WRAPPER MUST CREATE NO STACKING CONTEXT — no `relative`,
-                  // no `isolate`, no `z-*`, no `transform`, no `filter`.
-                  // TargetAudioLane's own root carries `isolate` specifically so
-                  // chip z-indexes stack WITHIN the lane and never over the
-                  // playhead, and a stacking context one level up would undo
-                  // exactly that. A bare block element is the whole wrapper, and
-                  // the lane inside it is a fixed row height, so it adds no
-                  // geometry either.
-                  <ContextMenu
-                    key={row.track.id}
-                    onOpenChange={(open) => { if (open) onTrackContextMenu(row.track.id) }}
-                  >
-                    {/* AQU-646 stage 2b: the selection reaches ACROSS the whole
-                        track, not just its name — otherwise selecting a track
-                        highlights a 128px label and says nothing about the
-                        thing you actually selected. Fainter than the gutter's
-                        tint because it sits under the chips rather than behind
-                        text, and `bg-*` creates no stacking context, so the
-                        rule above still holds. */}
-                    <ContextMenuTrigger
-                      render={
-                        <div
-                          className={cn(selectedTrackIdSet.has(row.track.id) && "bg-accent/40")}
-                          // AQU-1684: a drag under way in this lane keeps it
-                          // from being hidden. Capture, because the chips own
-                          // their pointerdown.
-                          onPointerDownCapture={(e) => pressLane(row.track.id, e)}
-                        />
-                      }
-                    >
-                      {lane}
-                    </ContextMenuTrigger>
-                    {!menuEmpty && (
-                      <ContextMenuContent className="w-48">{trackMenu(row.track)}</ContextMenuContent>
-                    )}
-                  </ContextMenu>
-                )
-              })}
+              {viewportPx > 0 && scrollEl ? (
+                <TimelineHorizontalList
+                  scrollElement={scrollEl}
+                  slices={horizontalSlices}
+                  extraData={laneEpoch.current}
+                  renderSlice={(slice) => (
+                    <TimelineOrigin px={slice.startPx}>
+                      <div
+                        data-tl-slice={slice.key}
+                        style={{ width: slice.widthPx, overflowX: "clip", overflowY: "visible" }}
+                      >
+                        {renderTrackRows(slice.startSec, slice.endSec)}
+                      </div>
+                    </TimelineOrigin>
+                  )}
+                />
+              ) : (
+                renderTrackRows(viewStartSec, viewEndSec)
+              )}
               {untimed.length > 0 && (
                 <div className="flex h-12 items-center gap-2 overflow-x-auto border-b border-border px-3">
                   {untimed.map((c) => (
@@ -5559,53 +6007,43 @@ export function TimelineEditor({
                   ))}
                 </div>
               )}
-              <TimelinePlayhead
-                currentSec={displayCurrentSec}
+              <TimelineTransportClock
+                store={clock}
+                cellIds={cellIdSet}
+                cells={cells}
+                audioFirst={audioFirst}
+                scrubbingRef={scrubbingRef}
                 pxPerSec={pxPerSec}
-                // AQU-646 stage 5: NOT just `transportPlaying`. That flag is
-                // derived from store state and lags a pause by a commit or two,
-                // and while it is still true the playhead's own rAF keeps
-                // extrapolating FORWARD over the scrub position. It is also
-                // what makes `monotonicSec` swallow a backward drag as a hold.
-                playing={transportPlaying && scrubSec == null}
-                rate={transportRate}
+                follow={follow}
+                viewportPx={viewportPx}
+                trackWidthPx={trackWidthPx}
+                scrollRef={scrollRef}
+                scrollTrackTo={scrollTrackTo}
               />
-              {/* The drop indicator's other half. THE ROWS DELIBERATELY DO NOT
-                  PART AND THE LANES DO NOT MOVE while a track is dragged: the
-                  lanes carry absolutely positioned cards on a pixel timeline
-                  with a playhead drawn across the whole stack, so animating
-                  four of them apart would mean re-laying out every card sixty
-                  times a second and visually severing the playhead for the
-                  length of the drag. One 2px line in each column says where the
-                  row will land, and on release both columns move together
-                  because they are rendered off the same array. */}
-              {dropLineContentY != null && (
-                <div
-                  aria-hidden
-                  data-testid="tl-track-drop-line-lane"
-                  className="pointer-events-none absolute inset-x-0 z-30 h-0.5 bg-sky-500"
-                  style={{ top: `${dropLineContentY}px` }}
-                />
-              )}
             </div>
+            </TimelineScrollBusContext.Provider>
           </div>
         </div>
       </RowMetricsContext.Provider>
 
-      {/* 2026-08-08 (Sam): the NUMBERS stay with the timeline — they measure
-          the chips above, not the dialogue below — and close this section off
-          at its bottom edge. The wrapper is the row's `shrink-0`: it is chrome,
-          and the panel's height belongs to the tracks. */}
-      <div className="shrink-0">
-        <TimelineTimingRow cell={currentCell} chipStats={currentChipStats} audioMissing={audioMissing} />
-      </div>
-      {/* The section label, the line's own context and the segment navigator
-          head the TEXT column of the band below, opposite the Video header.
-          The slot is owned by the workspace; portal when it exists, render
-          inline when this editor is mounted alone (tests). */}
-      {chipStripSlot
-        ? createPortal(<MediaTextHeader {...mediaTextHeaderProps} />, chipStripSlot)
-        : <MediaTextHeader {...mediaTextHeaderProps} />}
+      <TimelineCurrentChip
+        cellIds={cellIdSet}
+        selectedId={selectedId}
+        setSelectedId={setSelectedId}
+        cells={cells}
+        audioCues={audioCues}
+        independentTextCells={independentTextCells}
+        links={links}
+        audioFirst={audioFirst}
+        targetItems={targetItems}
+        layout={layout}
+        audioByCellId={audioByCellId}
+        projectId={project?.id ?? null}
+        fileId={fileId}
+        session={session ?? null}
+        chipStripSlot={chipStripSlot}
+        header={mediaTextHeaderProps}
+      />
       {/* Both lanes' clicks arrive at one `toggleLink`, so one dialog covers
           making and breaking alike. Rendered unconditionally and gated on its
           own `open` — a dialog that unmounts mid-animation flickers. */}

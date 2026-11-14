@@ -4,9 +4,11 @@
 // sub-0.2s gap rule is pinned because a real VTT carries 1–100ms rounding gaps
 // between most consecutive cues, and a sliver chip at every one reads as dirt.
 
+import { Profiler, act } from "react"
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { SourceRegionLane } from "./SourceRegionLane"
+import { createTimelineScrollBus, TimelineScrollBusContext } from "./timeline-scroll-bus"
 import { deriveSourceRegions } from "@/lib/timeline/source-regions"
 import { chipRadiusPx } from "@/lib/timeline/scale"
 import type { CellData } from "@/hooks/useCells"
@@ -221,9 +223,9 @@ describe("SourceRegionLane", () => {
   })
 
   // Round 9b: the illusion Sam reported lived exactly here — a narrow silence
-  // flush against a solid-walled cue, both carrying an 8px corner, reading as
+  // flush against a solid-walled cue, both carrying a full corner, reading as
   // one interlocked shape with a solid wall and a dashed wall.
-  it("a narrow silence sharpens its corners; a wide one keeps them", () => {
+  it("a narrow silence sharpens its corners; a wide one keeps the app corner", () => {
     const cs = [cell("a", 0, 5), cell("b", 6, 10), cell("c", 30, 34)]
     const m = deriveSourceRegions(cs, 34)
     renderLane({ map: m, cells: cs, pxPerSec: 20, viewStartSec: 0, viewEndSec: 34 })
@@ -233,7 +235,7 @@ describe("SourceRegionLane", () => {
     const narrow = parseFloat(byStart("5").style.borderRadius)
     const wide = parseFloat(byStart("10").style.borderRadius)
     expect(narrow).toBeCloseTo(chipRadiusPx(20), 3)
-    expect(wide).toBe(8)
+    expect(wide).toBe(6)
     expect(narrow).toBeLessThan(wide)
   })
 
@@ -249,6 +251,36 @@ describe("SourceRegionLane", () => {
     // Scrolled 500px in, the label is held 10px inside the visible edge.
     expect(label.style.left).toBe("510px")
     expect(gap.textContent).not.toContain("10:35.0")
+  })
+
+  it("holds a film-length label on the scroll variable, so a scroll does not render the lane", () => {
+    const bus = createTimelineScrollBus()
+    let commits = 0
+    render(
+      <TimelineScrollBusContext.Provider value={bus}>
+        <Profiler id="lane" onRender={() => { commits += 1 }}>
+          <SourceRegionLane
+            map={deriveSourceRegions([], 635)}
+            cells={[]}
+            pxPerSec={10}
+            viewStartSec={0}
+            viewEndSec={635}
+            selectedId={null}
+            editable
+            onSelect={() => {}}
+            onSeek={() => {}}
+            onSeekSec={() => {}}
+            gapLabel="The video's own sound"
+          />
+        </Profiler>
+      </TimelineScrollBusContext.Provider>,
+    )
+    const label = screen.getByTestId("tl-source-gap-label")
+    expect(label.style.left).toContain("var(--tl-scroll-left")
+    const painted = commits
+    act(() => { bus.set(800, 400) })
+    expect(commits).toBe(painted)
+    expect(label.style.left).toContain("var(--tl-scroll-left")
   })
 
   it("draws no placeholder at all when asked to hide them", () => {

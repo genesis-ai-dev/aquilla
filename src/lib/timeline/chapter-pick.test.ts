@@ -119,7 +119,7 @@ describe.each([
     const plan = planChapterPick({ chapters: CHAPTERS, lines: RUTH, pickedKey: "RUT 2", playingKey: "RUT 1", queueKind: getQueueState().kind })
     applyChapterPick(plan, { lines: RUTH, projectId: "p1", session })
     await settle()
-    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "r2v1" })
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "r2v1", cellIndex: 2 })
     expect(take("r2v1")?.paused).toBe(false)
     // Nothing of Ruth 1 sounds any more.
     expect(FakeAudio.instances.filter((a) => a.src.includes("/r1v") && !a.paused)).toHaveLength(0)

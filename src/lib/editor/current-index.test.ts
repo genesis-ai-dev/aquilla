@@ -76,6 +76,23 @@ describe("resolveCurrentCellIndex", () => {
     expect(resolveCurrentCellIndex({ ...base, measurements: uniformRows(150) })).toBe(1)
   })
 
+  it("does not read unmeasured rows as the start of the file", () => {
+    // Scrolled into a later chapter. LegendList reports 0 for every row it
+    // has not measured, including the ones above the window. The first of
+    // those used to win, and Media opened on chapter 1.
+    const ids = Array.from({ length: 80 }, (_, i) => ({ id: `c${i}` }))
+    expect(resolveCurrentCellIndex({
+      ...base,
+      displayCells: ids,
+      cells: ids,
+      measurements: {
+        scroll: 5000,
+        positionAtIndex: (index) => (index >= 48 && index <= 55 ? index * 100 : 0),
+        sizeAtIndex: (index) => (index >= 48 && index <= 55 ? 100 : 0),
+      },
+    })).toBe(50)
+  })
+
   it("estimates from scrollTop when no virtualizer state is available", () => {
     expect(resolveCurrentCellIndex({ ...base, fallbackScrollTop: 320 })).toBe(3)
     // Clamped to the last row on overscroll.

@@ -80,7 +80,7 @@ describe("CastGutterVoice", () => {
     expect(screen.getByTestId("gutter-voice-scope-line")).toBeChecked()
   })
 
-  it("a line without a character offers only this line, and says why", () => {
+  it("a line without a character offers only this line", () => {
     const onPick = vi.fn()
     ui(
       <CastGutterVoice voice={mary} explicit castName={null} editable voices={VOICES} onPick={onPick} />,
@@ -89,7 +89,7 @@ describe("CastGutterVoice", () => {
     expect(screen.getByPlaceholderText("Search voices…")).toBeInTheDocument()
     expect(screen.queryByTestId("gutter-voice-scope-file")).toBeNull()
     expect(screen.queryByTestId("gutter-voice-scope-everywhere")).toBeNull()
-    expect(screen.getByTestId("gutter-voice-scope-none")).toHaveTextContent("This line has no character, so the voice is for this line only.")
+    expect(screen.queryByTestId("gutter-voice-scope-none")).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: /^John$/ }))
     expect(onPick).toHaveBeenCalledWith("v-john", { scope: "line" })
   })

@@ -1,6 +1,7 @@
-import { act, render, screen } from "@testing-library/react"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { act, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
+import { Toaster, toast } from "@/components/ui/toast"
 import {
   __testOnlySetStatus,
   clearPrefetchStatus,
@@ -14,87 +15,91 @@ function downloading(loaded: number, total: number) {
 function renderChip() {
   return render(
     <I18nProvider>
+      <Toaster />
       <AiModelDownloadChip />
     </I18nProvider>,
   )
 }
 
+async function expectGone(text: string) {
+  await waitFor(() => expect(screen.queryByText(text)).toBeNull())
+}
+
 describe("AiModelDownloadChip", () => {
   beforeEach(async () => {
     await clearPrefetchStatus()
+    toast.close()
   })
 
   afterEach(async () => {
-    vi.useRealTimers()
+    toast.close()
     await clearPrefetchStatus()
   })
 
   it("renders nothing when idle", () => {
-    const { container } = renderChip()
-    expect(container).toBeEmptyDOMElement()
+    renderChip()
+    expect(screen.queryByText("Downloading AI models")).toBeNull()
+    expect(screen.queryByText("Loading AI model")).toBeNull()
   })
 
-  it("shows a green bar and percentage while a model is downloading", () => {
+  it("shows a download toast with a bar and percentage for the model", () => {
     __testOnlySetStatus("whisper", downloading(58, 100))
     renderChip()
 
     expect(screen.getByText("Downloading AI models")).toBeTruthy()
-    expect(screen.getByText("Whisper")).toBeTruthy()
+    const bar = screen.getByRole("progressbar", { name: "Whisper" })
+    expect(bar).toHaveAttribute("aria-valuenow", "58")
+    expect(bar.querySelector(".bg-emerald-500")).toBeNull()
+    expect(bar.querySelector(".bg-primary")).toBeTruthy()
     expect(screen.getByText("58%")).toBeTruthy()
-    expect(document.querySelector(".bg-emerald-500")).toBeTruthy()
+    expect(screen.queryByText(/Runs in the background/)).toBeNull()
+    expect(document.querySelector("[data-slot=spinner]")).toBeTruthy()
+    expect(screen.queryByText("Loading AI model")).toBeNull()
+
+    act(() => {
+      __testOnlySetStatus("whisper", downloading(70, 100))
+    })
+    expect(screen.getByRole("progressbar", { name: "Whisper" })).toHaveAttribute("aria-valuenow", "70")
   })
 
-  it("keeps a finished model in the same row with a right-side check until the batch is done", () => {
+  it("keeps one bar per model and swaps a finished download onto the loading toast", async () => {
     __testOnlySetStatus("whisper", downloading(58, 100))
     __testOnlySetStatus("mms", downloading(87, 100))
     renderChip()
 
     act(() => {
-      __testOnlySetStatus("whisper", { kind: "ready" })
+      __testOnlySetStatus("whisper", { kind: "loading", file: "model.onnx" })
     })
 
     expect(screen.getByText("Downloading AI models")).toBeInTheDocument()
-    expect(screen.getByText("87%")).toBeInTheDocument()
-    expect(screen.queryByText("100%")).not.toBeInTheDocument()
-    expect(screen.getByLabelText("Whisper ready to use")).toBeInTheDocument()
-    expect(screen.queryByText("ready to use")).not.toBeInTheDocument()
-
-    const whisper = screen.getByText("Whisper")
-    const mms = screen.getByText("MMS")
-    expect(whisper.compareDocumentPosition(mms) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  })
-
-  it("does not hide a finished row after 4s while others are still downloading", () => {
-    vi.useFakeTimers()
-    __testOnlySetStatus("whisper", downloading(10, 100))
-    __testOnlySetStatus("mms", downloading(100, 100))
-    renderChip()
+    expect(screen.getByRole("progressbar", { name: "MMS" })).toHaveAttribute("aria-valuenow", "87")
+    expect(screen.queryByRole("progressbar", { name: "Whisper" })).toBeNull()
+    expect(screen.getByText("Loading Whisper model")).toBeInTheDocument()
+    expect(screen.queryByText("Loading AI model")).toBeNull()
 
     act(() => {
-      __testOnlySetStatus("mms", { kind: "ready" })
-    })
-    act(() => {
-      vi.advanceTimersByTime(5000)
+      __testOnlySetStatus("mms", { kind: "loading", file: "model.onnx" })
     })
 
-    expect(screen.getByText("MMS")).toBeTruthy()
-    expect(screen.getByLabelText("MMS ready to use")).toBeTruthy()
-    expect(screen.getByText("Downloading AI models")).toBeTruthy()
-  })
-
-  it("switches the heading once every model in the batch is ready", () => {
-    __testOnlySetStatus("whisper", downloading(10, 100))
-    __testOnlySetStatus("mms", downloading(10, 100))
-    renderChip()
+    await expectGone("Downloading AI models")
+    expect(screen.getByText("Loading AI models")).toBeInTheDocument()
+    expect(screen.getByRole("progressbar", { name: "Whisper" })).toBeInTheDocument()
+    expect(screen.getByRole("progressbar", { name: "MMS" })).toBeInTheDocument()
 
     act(() => {
       __testOnlySetStatus("whisper", { kind: "ready" })
       __testOnlySetStatus("mms", { kind: "ready" })
     })
 
-    expect(screen.getByText("AI models ready")).toBeTruthy()
-    expect(screen.getByLabelText("Whisper ready to use")).toBeTruthy()
-    expect(screen.getByLabelText("MMS ready to use")).toBeTruthy()
-    expect(screen.queryByText("ready to use")).toBeNull()
+    await expectGone("Loading AI models")
+  })
+
+  it("shows a retryable error toast when a download fails", () => {
+    __testOnlySetStatus("whisper", { kind: "error", message: "Network blocked the download." })
+    renderChip()
+
+    expect(screen.getByText("Whisper download failed")).toBeTruthy()
+    expect(screen.getByText("Network blocked the download.")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy()
   })
 })

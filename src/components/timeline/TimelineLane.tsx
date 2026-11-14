@@ -26,6 +26,7 @@ import { CueLinkOverlay, type LaneLinkOverlay } from "./CueLinkOverlay"
 import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useTimelineOriginPx } from "./timeline-origin"
 
 export interface TimelineLaneProps {
   /** Already lane-filtered + time-sorted (from deriveLanes). */
@@ -104,6 +105,7 @@ export function TimelineLane({
   emptyPrompt,
 }: TimelineLaneProps) {
   const t = useT()
+  const originPx = useTimelineOriginPx()
   // Which add-line slot the pointer is on. State rather than CSS `:hover` —
   // see TimelineSlotButton's header for the six-lit-at-once bug that forced it.
   const { hotKey, slotHoverProps } = useHotSlot(viewStartSec, pxPerSec)
@@ -221,7 +223,7 @@ export function TimelineLane({
         <div
           key={`add-${span.startSec}`}
           data-testid={`tl-add-line-${span.startSec}`}
-          style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+          style={{ left: `${leftPx - originPx}px`, width: `${widthPx}px` }}
           className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
           {...slotHoverProps(String(span.startSec))}
         >

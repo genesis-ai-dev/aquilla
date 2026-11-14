@@ -7564,7 +7564,6 @@ export const ha: Catalog = {
   "workspace.castGutterVoice.scopeFile": "Kowane layin «{name}» a wannan fayil",
   "workspace.castGutterVoice.scopeFileCount": {"forms":{"one":"Kowane layin «{name}» a wannan fayil ({count})","other":"Kowane layin «{name}» a wannan fayil ({count})"},"countVar":"count"},
   "workspace.castGutterVoice.scopeEverywhere": "Kowane layin «{name}», a kowane kashi",
-  "workspace.castGutterVoice.scopeNoCharacter": "Wannan layi ba shi da hali, don haka murya ta wannan layi kawai ce.",
   "workspace.castGutterVoice.clearOneFileAtATime": "Ku zaɓi wannan layi ko wannan fayil don cire hali.",
   "workspace.openWorkspace.openingProject": "Ana buɗe aiki",
   "workspace.fileSort.lastUpdated": "Sabuntawa ta ƙarshe",

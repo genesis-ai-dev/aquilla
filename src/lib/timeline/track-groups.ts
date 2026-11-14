@@ -154,6 +154,20 @@ export function hiddenTracksOf(
   return tracks.filter((track) => track.kind !== "folder" && hidden.has(track.id))
 }
 
+/** Content files of tracks this person has not hidden. A hidden track is not
+ *  drawn, so nothing should fetch or lay out the file it points at. */
+export function contentFileIdsOfShownTracks(
+  tracks: readonly { id: string; contentFileId?: string | null }[],
+  hidden: ReadonlySet<string> | null | undefined,
+): string[] {
+  const out: string[] = []
+  for (const track of tracks) {
+    if (!track.contentFileId || hidden?.has(track.id)) continue
+    out.push(track.contentFileId)
+  }
+  return out
+}
+
 /**
  * What a drag is actually reordering: the dragged track's SIBLINGS, and the
  * screen extent of each.
@@ -216,11 +230,8 @@ export function scopeSiblings(
 }
 
 /**
- * How far a MEMBER ROW is drawn in from the wall — `pl-3.5`, and the width the
- * drop line inherits so the line lands where the row it promises will.
- *
- * THIS IS A DRAWING MEASUREMENT, NOT A GESTURE ONE. It used to be both, and
- * that was the bug: see `folderReachInPx`.
+ * Floor for the old horizontal reach gesture. A member row is drawn with
+ * `pl-6`, and that indent is not this number. See `folderReachInPx`.
  */
 export const FOLDER_DROP_INDENT_PX = 16
 

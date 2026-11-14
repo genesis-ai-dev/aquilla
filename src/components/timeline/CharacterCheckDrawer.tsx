@@ -200,7 +200,7 @@ function RowShell({
       }}
       className={cn(
         "rounded-md border border-border p-2 text-xs transition-colors",
-        inert ? "cursor-default" : "cursor-pointer hover:bg-muted/40",
+        !inert && "hover:bg-muted/40",
         muted && "border-border/60 bg-muted/20",
       )}
     >
@@ -453,13 +453,14 @@ export function CharacterCheckDrawer({
           </span>
         )}
         <Button
-          size="sm"
+          type="button"
           variant="ghost"
-          className="ml-auto"
+          size="icon-sm"
+          className="ml-auto text-muted-foreground"
           aria-label={t("common.close")}
           onClick={onClose}
         >
-          <X className="h-4 w-4" />
+          <X />
         </Button>
       </header>
 

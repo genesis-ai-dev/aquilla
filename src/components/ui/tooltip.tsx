@@ -220,7 +220,7 @@ function DisabledReason({
         align={align}
         sideOffset={6}
         data-slot="disabled-reason-note"
-        className={cn("w-auto max-w-72 p-3 text-xs leading-relaxed", className)}
+        className={cn("w-auto max-w-xs rounded-md border border-border px-3 py-1.5 text-xs ring-0", className)}
       >
         {content}
       </PopoverContent>

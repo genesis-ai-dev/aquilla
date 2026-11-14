@@ -52,5 +52,8 @@ export async function eagerlyPrefetchPeaks(args: EagerPrefetchArgs): Promise<voi
     getSyncToken: audioSyncTokenFetcherForSession(args.session),
     isCancelled: args.isCancelled,
     onLoaded: (attachmentKey) => args.onCellDone?.(attachmentKey),
+    // A whole book of takes, decoded back to back, is a hitch on every clip
+    // until the sweep finishes. The gap lets the timeline paint between them.
+    pauseMs: 48,
   })
 }

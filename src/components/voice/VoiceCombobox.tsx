@@ -15,12 +15,17 @@ import type { Voice } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { VoiceNameWithLanguage } from "@/components/voice/VoiceLanguageBadge"
 
+/** Same row metrics as a notifications-inbox row: flush, instant hover. */
+export const voicePickerRowClass =
+  "flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1 text-start text-sm outline-hidden select-none hover:bg-accent/40 focus-visible:bg-accent focus-visible:text-accent-foreground disabled:opacity-60"
+
 export function VoicePickerContent({
   voices,
   activeId,
   busy,
   onPick,
   beforeList,
+  afterList,
   footer,
   showLanguageBadge = false,
 }: {
@@ -30,7 +35,9 @@ export function VoicePickerContent({
   onPick: (voiceId: string) => void
   /** Optional first row inside the cast list (e.g. "No character"). */
   beforeList?: ReactNode
-  /** Optional extra row under the list (e.g. "apply to all speaker lines"). */
+  /** Optional last row of the cast list (e.g. "Add a voice…"), flush with the voices. */
+  afterList?: ReactNode
+  /** Optional block under the list (e.g. how far a cast reaches). */
   footer?: ReactNode
   showLanguageBadge?: boolean
 }) {
@@ -41,8 +48,8 @@ export function VoicePickerContent({
     return q ? voices.filter((v) => v.name.toLowerCase().includes(q)) : voices
   }, [voices, query])
   return (
-    <>
-      <InputGroup className="mb-1.5">
+    <div className="flex flex-col gap-2">
+      <InputGroup>
         <InputGroupAddon>
           <Search />
         </InputGroupAddon>
@@ -54,33 +61,36 @@ export function VoicePickerContent({
           placeholder={t("audio.library.searchPlaceholder")}
         />
       </InputGroup>
-      <div className="max-h-56 space-y-0.5 overflow-y-auto">
-        {beforeList}
-        {filtered.length === 0 ? (
-          <p className="px-2 py-3 text-center text-xs italic text-muted-foreground">{t("common.noMatches")}</p>
-        ) : (
-          filtered.map((v) => (
-            <button
-              key={v.id}
-              type="button"
-              disabled={busy}
-              onClick={() => onPick(v.id)}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-accent/50 disabled:opacity-60"
-            >
-              <VoiceAvatar voice={v} size={20} />
-              <VoiceNameWithLanguage
-                name={v.name}
-                language={v.language}
-                showBadge={showLanguageBadge}
-                className="min-w-0 flex-1"
-              />
-              {v.id === activeId && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
-            </button>
-          ))
-        )}
+      <div className="flex flex-col">
+        <div className="flex max-h-56 flex-col overflow-y-auto overscroll-contain scrollbar-thin">
+          {beforeList}
+          {filtered.length === 0 ? (
+            <p className="px-2 py-3 text-center text-xs italic text-muted-foreground">{t("common.noMatches")}</p>
+          ) : (
+            filtered.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                disabled={busy}
+                onClick={() => onPick(v.id)}
+                className={voicePickerRowClass}
+              >
+                <VoiceAvatar voice={v} size={20} />
+                <VoiceNameWithLanguage
+                  name={v.name}
+                  language={v.language}
+                  showBadge={showLanguageBadge}
+                  className="min-w-0 flex-1"
+                />
+                {v.id === activeId && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+              </button>
+            ))
+          )}
+        </div>
+        {afterList}
+        {footer}
       </div>
-      {footer}
-    </>
+    </div>
   )
 }
 
@@ -138,7 +148,7 @@ export function VoiceCombobox({
           />
           <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </PopoverTrigger>
-      <PopoverContent align="start" side="bottom" className="w-60 p-2">
+      <PopoverContent align="start" side="bottom" className="w-60 gap-0 overflow-hidden p-2">
         <VoicePickerContent
           voices={voices}
           activeId={active.id}

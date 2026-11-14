@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { interpolatedSec, monotonicSec, MAX_EXTRAPOLATION_SEC, MAX_REGRESSION_SEC } from "./TimelinePlayhead"
+import { followFrame, interpolatedSec, seekBoundSec, MAX_EXTRAPOLATION_SEC, MAX_REGRESSION_SEC } from "./TimelinePlayhead"
 
 describe("interpolatedSec", () => {
   it("advances with wall time, scaled by rate", () => {
@@ -12,36 +12,44 @@ describe("interpolatedSec", () => {
   })
 })
 
-// 2026-08-08 (bounce forensics): every verse boundary used to paint a ~90ms
-// backward snap when the first real anchor landed behind the optimistic
-// handoff. The clamp renders those as a hold, never backward motion.
-describe("monotonicSec", () => {
-  it("forward motion always passes", () => {
-    expect(monotonicSec(10, 10.2, true)).toBe(10.2)
+describe("followFrame", () => {
+  it("keeps moving through ticks that arrive late by differing amounts", () => {
+    // 60fps; the clock ticks every 250ms and each tick reaches the head 10 to
+    // 45ms after the element sampled it — one or two effects behind, varying
+    // from tick to tick as it does in the app.
+    const frameMs = 1000 / 60
+    const lateMs = [10, 45, 20, 40]
+    let head = { sec: 0, at: 0 }
+    let clock = { sec: 0, at: 0 }
+    let stopped = 0
+    for (let now = frameMs; now < 3000; now += frameMs) {
+      const tick = Math.floor(now / 250)
+      const late = lateMs[tick % lateMs.length]
+      const due = tick * 250
+      if (due > 0 && now >= due + late && clock.sec !== due / 1000) clock = { sec: due / 1000, at: now }
+      const next = followFrame(head, clock.sec, clock.at, now, 1)
+      expect(next.sec).toBeGreaterThanOrEqual(head.sec)
+      if (now > 300 && next.sec === head.sec) stopped++
+      head = next
+    }
+    expect(stopped).toBe(0)
+    expect(head.sec).toBeCloseTo(3, 1)
   })
 
-  it("a small regression HOLDS at the last painted position while playing", () => {
-    expect(monotonicSec(10.2, 10.11, true)).toBe(10.2) // the measured ~90ms case
-    expect(monotonicSec(10.2, 10.2 - MAX_REGRESSION_SEC + 0.01, true)).toBe(10.2)
+  // 2026-08-08 (bounce forensics): a correction never paints backward motion
+  // while playing; a gap of a seek's size, scaled by rate, is a seek.
+  it.each([
+    { name: "a small regression holds", head: 10.2, clock: 10.11, rate: 1, want: 10.2 },
+    { name: "a backward seek jumps", head: 60, clock: 5, rate: 1, want: 5 },
+    { name: "a forward seek jumps", head: 5, clock: 60, rate: 1, want: 60 },
+    { name: "at 2x a 0.85s regression is still overshoot", head: 10.9, clock: 10.05, rate: 2, want: 10.9 },
+    { name: "at 2x a 1s regression is a seek", head: 10.9, clock: 9.9, rate: 2, want: 9.9 },
+  ])("$name", ({ head, clock, rate, want }) => {
+    expect(followFrame({ sec: head, at: 1000 }, clock, 1000, 1000, rate).sec).toBeCloseTo(want, 5)
   })
 
-  it("a genuine backward seek (large regression) passes through", () => {
-    expect(monotonicSec(10.2, 10.2 - MAX_REGRESSION_SEC, true)).toBe(10.2 - MAX_REGRESSION_SEC)
-    expect(monotonicSec(60, 5, true)).toBe(5)
-  })
-
-  it("the pass-through bound scales with playback rate (review finding)", () => {
-    // At 2x the extrapolation cap is 0.9s — a stall-then-resume regression of
-    // ~0.9s is still overshoot, not a seek, and must HOLD.
-    expect(monotonicSec(10.9, 10.05, true, 2)).toBe(10.9)
-    // Beyond the scaled bound it is a genuine backward seek.
-    expect(monotonicSec(10.9, 9.9, true, 2)).toBe(9.9)
-    // At 1x the bound stays MAX_REGRESSION_SEC.
-    expect(monotonicSec(10.9, 10.35, true, 1)).toBe(10.35)
-  })
-
-  it("paused rendering follows the clock exactly — even backwards", () => {
-    expect(monotonicSec(10.2, 10.11, false)).toBe(10.11)
-    expect(monotonicSec(null, 3, true)).toBe(3)
+  it("the seek bound covers the worst extrapolation overshoot", () => {
+    expect(seekBoundSec(1)).toBe(MAX_REGRESSION_SEC)
+    expect(seekBoundSec(2)).toBeGreaterThan(MAX_EXTRAPOLATION_SEC * 2)
   })
 })

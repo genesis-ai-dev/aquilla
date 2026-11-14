@@ -544,3 +544,61 @@ export const TRACK_CHIP_PLAYING_CLASS =
 export function isColorableKind(kind: string): boolean {
   return kind === "target-audio" || kind === "audio"
 }
+
+/**
+ * The list to DRAW while a recolour is in flight. Copies only the rows whose
+ * colour actually changes, so a caller cannot write the overlay back into
+ * `trackOverrides`. An id the server has no row for is ignored.
+ */
+export function applyPendingColors<T extends { id: string; color?: string | null }>(
+  tracks: readonly T[],
+  pending: ReadonlyMap<string, string | null>,
+): T[] {
+  let changed = false
+  const next = tracks.map((track) => {
+    if (!pending.has(track.id)) return track
+    const color = pending.get(track.id) ?? null
+    if ((track.color ?? null) === color) return track
+    changed = true
+    return { ...track, color }
+  })
+  return changed ? next : (tracks as T[])
+}
+
+/** Pending ids the server has echoed exactly. Absent and null are the same
+ *  "no colour": clearing a colour removes the override rather than storing null. */
+export function settledPendingColors(
+  pending: ReadonlyMap<string, string | null>,
+  serverTracks: readonly { id: string; color?: string | null }[],
+): string[] {
+  const settled: string[] = []
+  for (const track of serverTracks) {
+    if (!pending.has(track.id)) continue
+    if ((track.color ?? null) === (pending.get(track.id) ?? null)) settled.push(track.id)
+  }
+  return settled
+}
+
+/** Lay a new colour over whatever is already in flight. A second pick replaces
+ *  the first; the map is the colour the row is showing, not a history. */
+export function withPendingColors(
+  current: ReadonlyMap<string, string | null> | null,
+  updates: ReadonlyArray<{ trackId: string; color: string | null }>,
+): Map<string, string | null> {
+  const colors = new Map(current ?? [])
+  for (const update of updates) colors.set(update.trackId, update.color)
+  return colors
+}
+
+/** Take a failed write back off, and only that write. A newer colour for the
+ *  same track is left where the user put it. Null means nothing is left in flight. */
+export function withoutPendingColors(
+  current: ReadonlyMap<string, string | null>,
+  updates: ReadonlyArray<{ trackId: string; color: string | null }>,
+): Map<string, string | null> | null {
+  const colors = new Map(current)
+  for (const update of updates) {
+    if (colors.get(update.trackId) === update.color) colors.delete(update.trackId)
+  }
+  return colors.size === 0 ? null : colors
+}

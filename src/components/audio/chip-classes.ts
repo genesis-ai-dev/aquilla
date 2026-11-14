@@ -12,7 +12,7 @@ const CORNER_BUTTON_RADIUS = "rounded-[min(var(--radius-md),12px)]"
  *  discover by hovering would simply go unfound. */
 export function chipCornerButtonClass(side: "left" | "right", reveal: "hover" | "always" = "hover"): string {
   return reveal === "hover"
-    ? `absolute ${side === "left" ? "left-2" : "right-2"} top-1 z-10 flex h-4 w-4 items-center justify-center ${CORNER_BUTTON_RADIUS} bg-background/80 opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/chip:opacity-100 focus-visible:opacity-100`
+    ? `absolute ${side === "left" ? "left-2" : "right-2"} top-1 z-10 flex h-4 w-4 items-center justify-center ${CORNER_BUTTON_RADIUS} bg-background/80 opacity-0 shadow-sm ring-1 ring-border hover:bg-background group-hover/chip:opacity-100 focus-visible:opacity-100`
     : `absolute ${side === "left" ? "left-2" : "right-2"} top-1 z-10 flex h-4 w-4 items-center justify-center ${CORNER_BUTTON_RADIUS} bg-background/80 shadow-sm ring-1 ring-border transition-colors hover:bg-background`
 }
 

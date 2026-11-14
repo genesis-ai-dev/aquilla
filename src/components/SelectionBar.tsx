@@ -769,7 +769,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     <div
       className={cn(
         "pointer-events-auto fixed left-1/2 z-30 flex -translate-x-1/2 items-center gap-2",
-        "bottom-4 rounded-md border bg-card px-4 py-2 text-xs ring-1 ring-foreground/10",
+        "bottom-4 rounded-md border bg-card px-2 py-2 text-xs ring-1 ring-foreground/10",
       )}
       role="toolbar"
       aria-label={t("editor.selection.actions")}

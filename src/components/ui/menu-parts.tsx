@@ -160,16 +160,58 @@ function MenuShortcut({ className, ...props }: React.ComponentProps<"span">) {
   )
 }
 
+type MenuAnchor = NonNullable<MenuPrimitive.Positioner.Props["anchor"]>
+
+/**
+ * A rect with the trigger row's height and the whole parent menu's width. A
+ * submenu anchored to the row itself opens over the parent's padding; anchored
+ * here, it sits against the parent's outer edge on whichever side it lands.
+ */
+function parentMenuEdge(trigger: HTMLElement) {
+  const menu = trigger.closest<HTMLElement>('[role="menu"]') ?? trigger
+  return {
+    contextElement: trigger,
+    getBoundingClientRect() {
+      const row = trigger.getBoundingClientRect()
+      const edge = menu.getBoundingClientRect()
+      return {
+        x: edge.left,
+        y: row.top,
+        left: edge.left,
+        right: edge.right,
+        top: row.top,
+        bottom: row.bottom,
+        width: edge.width,
+        height: row.height,
+      }
+    },
+  }
+}
+
+const SubmenuAnchorContext = React.createContext<{
+  setTrigger: (node: HTMLElement | null) => void
+  anchor: MenuAnchor
+} | null>(null)
+
 function MenuSubTrigger({
   className,
   inset,
   children,
+  ref,
+  delay = 0,
   ...props
 }: MenuPrimitive.SubmenuTrigger.Props & {
   inset?: boolean
 }) {
+  const submenu = React.useContext(SubmenuAnchorContext)
   return (
     <MenuPrimitive.SubmenuTrigger
+      delay={delay}
+      ref={(node: HTMLDivElement | null) => {
+        submenu?.setTrigger(node)
+        if (typeof ref === "function") ref(node)
+        else if (ref) ref.current = node
+      }}
       data-slot="menu-sub-trigger"
       data-inset={inset}
       className={cn(
@@ -188,18 +230,46 @@ function MenuSubTrigger({
  * Popup chrome shared by every menu surface. Width and root-level positioning
  * stay with each surface's own `Content`, as does the `data-instant` reposition
  * rule that only a context menu can trigger.
+ *
+ * Open and close are transitions on `data-starting-style` / `data-ending-style`.
+ * Base UI paints the starting style for one frame with transitions disabled,
+ * then removes it, which is what a transition needs. A keyframe enter
+ * (`data-open:animate-in`) never shows: the popup mounts already open, and the
+ * registered enter variables resolve to their initial values on that first
+ * frame, so only the close — an attribute change on an element already on
+ * screen — plays.
  */
-const POPUP_BASE =
-  "z-50 max-h-(--available-height) origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 outline-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+const POPUP_SURFACE =
+  "z-50 max-h-(--available-height) overflow-x-hidden overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none"
+
+const POPUP_BASE = cn(
+  POPUP_SURFACE,
+  "origin-(--transform-origin) transition-[opacity,scale,translate] duration-100 ease-out data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:scale-95 data-ending-style:opacity-0 data-[side=bottom]:data-starting-style:-translate-y-2 data-[side=inline-end]:data-starting-style:-translate-x-2 data-[side=inline-start]:data-starting-style:translate-x-2 data-[side=left]:data-starting-style:translate-x-2 data-[side=right]:data-starting-style:-translate-x-2 data-[side=top]:data-starting-style:translate-y-2",
+)
 
 function MenuSub({ ...props }: MenuPrimitive.SubmenuRoot.Props) {
-  return <MenuPrimitive.SubmenuRoot data-slot="menu-sub" {...props} />
+  const triggerRef = React.useRef<HTMLElement | null>(null)
+  const anchor = React.useMemo(
+    () => ({
+      setTrigger: (node: HTMLElement | null) => {
+        triggerRef.current = node
+      },
+      anchor: () => (triggerRef.current ? parentMenuEdge(triggerRef.current) : null),
+    }),
+    [],
+  )
+  return (
+    <SubmenuAnchorContext.Provider value={anchor}>
+      <MenuPrimitive.SubmenuRoot data-slot="menu-sub" {...props} />
+    </SubmenuAnchorContext.Provider>
+  )
 }
 
 /**
- * A submenu anchors to its own trigger on every surface, so unlike a root popup
- * it needs no per-surface positioning — and it never inherits a context menu's
- * reposition flag, because it opens on its own (hover, arrow keys).
+ * A submenu anchors to its parent menu's edge on every surface, so unlike a
+ * root popup it needs no per-surface positioning. It opens and closes without
+ * motion: the parent is already on screen, and a submenu that grows out of it
+ * reads as lag while the pointer moves down a list of submenu rows.
  */
 function MenuSubContent({
   align = "start",
@@ -213,10 +283,12 @@ function MenuSubContent({
     MenuPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset"
   >) {
+  const submenu = React.useContext(SubmenuAnchorContext)
   return (
     <MenuPrimitive.Portal>
       <MenuPrimitive.Positioner
         className="isolate z-50 outline-none"
+        anchor={submenu?.anchor}
         align={align}
         alignOffset={alignOffset}
         side={side}
@@ -224,7 +296,7 @@ function MenuSubContent({
       >
         <MenuPrimitive.Popup
           data-slot="menu-sub-content"
-          className={cn(POPUP_BASE, "w-auto min-w-[96px] shadow-lg", className)}
+          className={cn(POPUP_SURFACE, "w-auto min-w-[96px] shadow-lg", className)}
           {...props}
         />
       </MenuPrimitive.Positioner>
@@ -236,6 +308,7 @@ export {
   MenuPrimitive,
   POPUP_BASE,
   createMenuHandle,
+  parentMenuEdge,
   MenuItem,
   MenuCheckboxItem,
   MenuRadioGroup,

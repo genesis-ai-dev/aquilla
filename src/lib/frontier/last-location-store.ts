@@ -109,6 +109,13 @@ interface CellEntry {
   projectId: string
   fileId: string
   cellId: string
+  /** Where that row sat. Absent means center, which is what a click restores. */
+  align?: "top" | "center"
+}
+
+export interface LastCellPlace {
+  cellId: string
+  align: "top" | "center"
 }
 
 function readCellEntries(): CellEntry[] {
@@ -133,7 +140,20 @@ export function readLastCell(
   projectId: string,
   fileId: string,
 ): string | null {
-  return readCellEntries().find((e) => sameFile(e, userId, projectId, fileId))?.cellId ?? null
+  return readLastCellPlace(userId, projectId, fileId)?.cellId ?? null
+}
+
+/** The last cell, and whether a reload should put it at the top or the center.
+ *  A scroll saves "top" (that row was the top of the view). A click saves
+ *  "center". Entries written before this distinction restore centered. */
+export function readLastCellPlace(
+  userId: string,
+  projectId: string,
+  fileId: string,
+): LastCellPlace | null {
+  const found = readCellEntries().find((e) => sameFile(e, userId, projectId, fileId))
+  if (!found) return null
+  return { cellId: found.cellId, align: found.align === "top" ? "top" : "center" }
 }
 
 /** Remember the cell this user is on in this file (LRU, most-recent first). */
@@ -142,10 +162,11 @@ export function writeLastCell(
   projectId: string,
   fileId: string,
   cellId: string,
+  align: "top" | "center" = "center",
 ): void {
   if (typeof window === "undefined") return
   const rest = readCellEntries().filter((e) => !sameFile(e, userId, projectId, fileId))
-  const next = [{ userId, projectId, fileId, cellId }, ...rest].slice(0, MAX_CELL_ENTRIES)
+  const next = [{ userId, projectId, fileId, cellId, ...(align === "top" ? { align } : {}) }, ...rest].slice(0, MAX_CELL_ENTRIES)
   try {
     window.localStorage.setItem(CELL_STORAGE_KEY, JSON.stringify(next))
   } catch {

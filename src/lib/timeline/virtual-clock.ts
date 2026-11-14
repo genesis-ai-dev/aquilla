@@ -353,6 +353,15 @@ export function useVirtualClockSec(): number | null {
   return useSyncExternalStore(subscribe, getVirtualClockSec, () => null)
 }
 
+/** Whether the clock is driving at all. It ticks every `TICK_MS`; this does
+ *  not, so a reader of it is not re-rendered twenty times a second. */
+export function useVirtualClockActive(): boolean {
+  return useSyncExternalStore(subscribe, () => driving, () => false)
+}
+
+/** For a consumer that acts on each tick without rendering it. */
+export const subscribeVirtualClock = subscribe
+
 export function useVirtualClockPlaying(): boolean {
   return useSyncExternalStore(subscribe, getVirtualClockPlaying, () => false)
 }

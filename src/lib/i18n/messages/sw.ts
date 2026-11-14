@@ -7561,7 +7561,6 @@ export const sw: Catalog = {
   "workspace.castGutterVoice.scopeFile": "Kila mstari wa «{name}» katika faili hii",
   "workspace.castGutterVoice.scopeFileCount": {"forms":{"one":"Kila mstari wa «{name}» katika faili hii ({count})","other":"Kila mstari wa «{name}» katika faili hii ({count})"},"countVar":"count"},
   "workspace.castGutterVoice.scopeEverywhere": "Kila mstari wa «{name}», katika kila kipindi",
-  "workspace.castGutterVoice.scopeNoCharacter": "Mstari huu hauna mhusika, kwa hiyo sauti ni ya mstari huu pekee.",
   "workspace.castGutterVoice.clearOneFileAtATime": "Chagua mstari huu au faili hii ili kuondoa mhusika.",
   "workspace.openWorkspace.openingProject": "Inafungua mradi",
   "workspace.fileSort.lastUpdated": "Iliyosasishwa mwisho",

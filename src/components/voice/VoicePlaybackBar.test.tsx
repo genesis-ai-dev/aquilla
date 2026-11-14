@@ -402,6 +402,17 @@ describe("VoicePlaybackBar — the media view's strip", () => {
     expect(strip).not.toHaveTextContent(/Nothing playing|Press play/)
   })
 
+  it("mutes from the speaker itself, without opening a volume popover", () => {
+    render(<VoicePlaybackBar variant="strip" cells={[cell()]} projectId="p" session={null} settings={undefined} />)
+    const speaker = screen.getByTestId("transport-volume")
+    expect(speaker).toHaveAttribute("aria-pressed", "false")
+    fireEvent.click(speaker)
+    expect(screen.queryByRole("slider", { name: "Volume" })).toBeNull()
+    expect(screen.getByTestId("transport-volume")).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(screen.getByTestId("transport-volume"))
+    expect(screen.getByTestId("transport-volume")).toHaveAttribute("aria-pressed", "false")
+  })
+
   it("drops the time first on a narrow view (a container query), never the buttons", () => {
     render(<VoicePlaybackBar variant="strip" cells={[cell()]} projectId="p" session={null} settings={undefined} />)
     expect(screen.getByTestId("transport-time").className).toMatch(/\bhidden\b.*@md:inline/)
@@ -430,6 +441,14 @@ describe("VoicePlaybackBar — the strip's length (AQU-1758)", () => {
   beforeEach(() => {
     transportSource.value = "queue"
     __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 })
+  })
+
+  it("writes hours once the length passes an hour", () => {
+    // 278794 s is what the strip used to print as 4646:34.
+    act(() => __setQueuePlaybackForTests({ cellId: "v1", currentTime: 3661, playing: true, duration: 278794 }))
+    render(strip())
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("1:01:01 / 77:26:34")
+    act(() => __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 }))
   })
 
   it("shows the book's laid-out length before anything plays", () => {

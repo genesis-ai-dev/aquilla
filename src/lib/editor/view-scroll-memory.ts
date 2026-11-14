@@ -30,6 +30,26 @@ export interface ViewScrollMemory {
   recall(fileId: string | null, lens: EditorLens): string | null
 }
 
+/**
+ * The line Media opens on when leaving Text.
+ *
+ * The row at the top of the text is the chapter the reader is on. The
+ * virtualizer's current index is only a fallback: a row it has not measured
+ * reports position 0, and that 0 is the start of the file — Media then opens
+ * on chapter 1 and the text follows it there. A missing top row together
+ * with index 0 therefore leaves the timeline where it is, instead of
+ * selecting the first line.
+ */
+export function cellIdForMediaTrace(
+  topVisibleCellId: string | null,
+  currentIndex: number,
+  cellIdAtIndex: (index: number) => string | undefined,
+): string | null {
+  if (topVisibleCellId) return topVisibleCellId
+  if (currentIndex > 0) return cellIdAtIndex(currentIndex) ?? null
+  return null
+}
+
 export function createViewScrollMemory(): ViewScrollMemory {
   const topRowByFileAndLens = new Map<string, string>()
   const key = (fileId: string, lens: EditorLens) => `${fileId}|${lens}`

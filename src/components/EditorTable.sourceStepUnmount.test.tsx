@@ -21,8 +21,8 @@ import { emitSourceCellCommit } from "@/lib/sync/events-emit"
 import { settleSourceStep } from "@/lib/history/source-steps"
 
 const openCellMenu = async () => {
-  const trigger = (await screen.findAllByRole("button", { name: "Cell actions" }))[0]
-  fireEvent.click(trigger)
+  const trigger = (await screen.findAllByLabelText("Source text"))[0]
+  fireEvent.contextMenu(trigger)
   return screen.findByTestId("cell-menu-edit-source")
 }
 vi.mock("@/hooks/useDcsUpstreamCursor", () => ({

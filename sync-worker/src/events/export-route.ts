@@ -33,11 +33,8 @@ import { verifyTokenForProject } from "../auth"
 import { withCors } from "../cors"
 import { ROLE } from "./role-policy"
 import { resolveExportFloor } from "./export-floor"
-import {
-  parseUsfmLossless,
-  serializeUsfmLossless,
-  countLossyVerses,
-} from "../lib/usfm-lossless"
+import { parseUsfmLossless } from "../lib/usfm-lossless"
+import { countLossyVersesWithLayout, serializeUsfmWithLayout } from "../../../db/shared/usfm-layout"
 import { findUsfmChapter, serializeUsfmChapter } from "../lib/usfm-chapter"
 import { buildUsfmExportPlan } from "./usfm-export-plan"
 import { buildPlainTextExport } from "./plaintext-export"
@@ -395,8 +392,10 @@ export async function handleExportSourceRequest(
     out = sliced.text
     lossyVerseCount = sliced.lossyVerseCount
   } else {
-    lossyVerseCount = countLossyVerses(doc, overrides)
-    out = serializeUsfmLossless(doc, overrides, edits)
+    // AQU-2559: the layout serializer, shared with the SPA's live export
+    // preview. A translated verse keeps the paragraph lines after it.
+    lossyVerseCount = countLossyVersesWithLayout(doc, overrides)
+    out = serializeUsfmWithLayout(doc, overrides, edits)
   }
 
   return withCors(

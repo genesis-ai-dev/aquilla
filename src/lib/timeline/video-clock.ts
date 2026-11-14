@@ -146,6 +146,15 @@ export function useVideoClockSec(): number | null {
   return useSyncExternalStore(subscribe, () => currentSec, () => null)
 }
 
+/** Whether the picture is driving at all. Unlike the seconds, this does not
+ *  change on every `timeupdate`, so a reader of it is not re-rendered by one. */
+export function useVideoClockActive(): boolean {
+  return useSyncExternalStore(subscribe, () => currentSec != null, () => false)
+}
+
+/** For a consumer that acts on each tick without rendering it. */
+export const subscribeVideoClock = subscribe
+
 export function useVideoClockPlaying(): boolean {
   return useSyncExternalStore(subscribe, () => playing, () => false)
 }

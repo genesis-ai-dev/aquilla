@@ -169,6 +169,28 @@ describe("useMediaDock", () => {
     }
   })
 
+  // Text folded, the page reloaded, Text turned back on: an empty 0 px column.
+  // Pinned while alone in its row, the area was held at zero by the panel
+  // group for good, whatever the dock asked of it after.
+  it("pins a folded area only beside an open one", () => {
+    const pinned = { minSize: 0, maxSize: 0 }
+    writeStoredDock("f2", { ...startDockLayout(), folded: { tl: false, ll: false, lr: true } })
+    const left = { tab: null, isRail: true, setTab: () => {} }
+    const alone = renderHook(() =>
+      useMediaDock({ fileId: "f2", timelineStacked: true, filmPresent: false, start: START, left }),
+    )
+    expect(alone.result.current.constraints.body).toEqual(pinned)
+    expect(alone.result.current.constraints.lr).toEqual({})
+
+    const { result } = setup()
+    act(() => result.current.dock.fold("lr"))
+    expect(result.current.dock.constraints.lr).toEqual(pinned)
+    press(FULL_SCREEN)
+    expect(result.current.dock.constraints.body).toEqual(pinned)
+    expect(result.current.dock.constraints.ll).toEqual({})
+    expect(result.current.dock.constraints.lr).toEqual({})
+  })
+
   // Review finding 7, as Sources › Hide film already did.
   describe("hiding a panel", () => {
     it("one of two tabs: the other shows, and the area they share stays open", () => {
@@ -188,6 +210,43 @@ describe("useMediaDock", () => {
       expect(result.current.dock.view.isOpen("ll")).toBe(false)
       expect(result.current.dock.view.isShowing("text")).toBe(true)
     })
+  })
+
+  // Station closed, the page reloaded, then the Station tab: the text was
+  // display:none and laid out at 0. LegendList crashes on that collapse, and
+  // again if it has to come back from it. A tab behind another keeps the
+  // area's size instead.
+  it("keeps the text at the area's size when the Station tab opens", () => {
+    const { result } = setup()
+    const ll = document.createElement("div")
+    const lr = document.createElement("div")
+    document.body.append(ll, lr)
+    act(() => {
+      result.current.dock.boxRefs.ll(ll)
+      result.current.dock.boxRefs.lr(lr)
+    })
+    const text = result.current.dock.hosts.text!
+    const station = result.current.dock.hosts.station!
+    expect(text.style.display).toBe("")
+    expect(text.style.visibility).toBe("")
+    expect(station.style.display).not.toBe("none")
+    expect(station.style.visibility).toBe("hidden")
+    expect(station.style.position).toBe("absolute")
+
+    act(() => result.current.dock.activate("station"))
+    expect(result.current.dock.view.isShowing("station")).toBe(true)
+    expect(result.current.dock.view.isShowing("text")).toBe(false)
+    expect(text.parentElement).toBe(lr)
+    expect(text.style.display).not.toBe("none")
+    expect(text.style.visibility).toBe("hidden")
+    expect(text.style.position).toBe("absolute")
+    expect(text.inert).toBe(true)
+    expect(station.style.display).toBe("")
+    expect(station.style.visibility).toBe("")
+    expect(station.style.position).toBe("")
+    expect(station.inert).toBe(false)
+    ll.remove()
+    lr.remove()
   })
 
   // Review finding 4: what the YouTube picture listens for

@@ -17,12 +17,16 @@ import {
   TRACK_BAR_CLASS,
   TRACK_WAVE_FILL_CLASS,
   WAVE_LOOK,
+  applyPendingColors,
   hexToRgba,
   isColorableKind,
   hueForTrack,
   parseTrackHue,
+  settledPendingColors,
   trackHueVars,
   trackHueVarsFor,
+  withPendingColors,
+  withoutPendingColors,
 } from "./track-colors"
 
 const hue = (id: string) => TRACK_HUES.find((h) => h.id === id)!
@@ -377,6 +381,34 @@ describe("the folder band is visible in both themes", () => {
   // The bug in one line: this is what the band used to be painted with.
   it("records that --muted is NOT usable for it, because dark defines it to the ground", () => {
     expect(tokenIn(DARK, "muted")).toBe(ground(DARK))
+  })
+})
+
+describe("a recolour in flight", () => {
+  const tracks = [
+    { id: "target-audio", color: null as string | null },
+    { id: "music", color: "green" },
+  ]
+
+  it("paints the chosen colour immediately and leaves the source list untouched", () => {
+    const pending = withPendingColors(null, [{ trackId: "target-audio", color: "cyan" }])
+    const shown = applyPendingColors(tracks, pending)
+    expect(shown.find((row) => row.id === "target-audio")?.color).toBe("cyan")
+    expect(shown.find((row) => row.id === "music")).toBe(tracks[1])
+    expect(tracks[0].color).toBeNull()
+    expect(settledPendingColors(pending, tracks)).toEqual([])
+    expect(settledPendingColors(pending, shown)).toEqual(["target-audio"])
+  })
+
+  it("keeps the newer colour when an older write fails, and treats a cleared colour as absent", () => {
+    const first = withPendingColors(null, [{ trackId: "music", color: "amber" }])
+    const newer = withPendingColors(first, [{ trackId: "music", color: "violet" }])
+    expect(withoutPendingColors(newer, [{ trackId: "music", color: "amber" }])?.get("music")).toBe("violet")
+    const cleared = withPendingColors(newer, [{ trackId: "music", color: null }])
+    expect(applyPendingColors(tracks, cleared).find((row) => row.id === "music")?.color).toBeNull()
+    expect(settledPendingColors(cleared, [{ id: "music" }])).toEqual(["music"])
+    expect(settledPendingColors(cleared, [{ id: "music", color: "violet" }])).toEqual([])
+    expect(withoutPendingColors(cleared, [{ trackId: "music", color: null }])).toBeNull()
   })
 })
 

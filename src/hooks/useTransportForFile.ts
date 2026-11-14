@@ -5,16 +5,20 @@
 // three stores, and out of `play-queue.ts` so the queue does not have to know
 // the video exists.
 
-import { useMemo } from "react"
-import { useQueueForFile } from "@/lib/audio/play-queue"
+import { useMemo, useSyncExternalStore } from "react"
+import { useQueueForFile, useQueueStateForFile } from "@/lib/audio/play-queue"
 import {
   selectTransportForFile,
   videoOwnsFile,
   virtualOwnsFile,
   type TransportForFile,
+  type TransportSource,
 } from "@/lib/audio/transport"
 import {
+  getVideoClockSec,
+  subscribeVideoClock,
   useVideoBuffering,
+  useVideoClockActive,
   useVideoClockPlaying,
   useVideoClockSec,
   useVideoRate,
@@ -23,7 +27,11 @@ import {
 } from "@/lib/timeline/video-clock"
 import { useVideoDurationSec } from "@/lib/timeline/video-duration"
 import { recordingDrivesPlayback, type PlaybackSource } from "@/lib/audio/playback-source"
+import { heldCellIdAtSec, type RegionSegment } from "@/lib/timeline/source-regions"
 import {
+  getVirtualClockSec,
+  subscribeVirtualClock,
+  useVirtualClockActive,
   useVirtualClockPlaying,
   useVirtualClockRate,
   useVirtualClockSec,
@@ -130,4 +138,87 @@ export function useTransportForFile({
       virtualSoundingCellId,
     ],
   )
+}
+
+export type TransportStateForFile = Omit<TransportForFile, "progress">
+
+const NO_PROGRESS = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
+
+/**
+ * `useTransportForFile` without the clock, for a consumer that draws no time.
+ * The clocks publish 4–20×/sec while playing, and a workspace that read them
+ * re-rendered the whole timeline on each one. Only whether each engine is
+ * driving reaches the selector here, which is all its state depends on.
+ */
+export function useTransportStateForFile({
+  cellIds,
+  coreMediaUrl,
+  anyCellClockIsFileTime,
+  paneOnScreen,
+  timelineDurationSec = 0,
+  virtualSoundingCellId = null,
+  playbackSource = "recording",
+  freeTiming = false,
+}: UseTransportForFileArgs): TransportStateForFile {
+  const queue = useQueueStateForFile(cellIds)
+  const videoActive = useVideoClockActive()
+  const playing = useVideoClockPlaying()
+  const soundingCellId = useVideoSoundingCellId()
+  const buffering = useVideoBuffering()
+  const ownedByVideo = videoOwnsFile(
+    coreMediaUrl,
+    recordingDrivesPlayback(anyCellClockIsFileTime, playbackSource),
+    paneOnScreen,
+  )
+  const virtualActive = useVirtualClockActive()
+  const virtualPlaying = useVirtualClockPlaying()
+  const ownedByVirtual = virtualOwnsFile(ownedByVideo, anyCellClockIsFileTime, timelineDurationSec, freeTiming)
+
+  return useMemo(() => {
+    const { progress: _progress, ...state } = selectTransportForFile(
+      { ...queue, progress: NO_PROGRESS },
+      ownedByVideo
+        ? { currentSec: videoActive ? 0 : null, playing, durationSec: 0, soundingCellId, rate: 1, volume: 1, buffering }
+        : null,
+      ownedByVirtual
+        ? {
+            currentSec: virtualActive ? 0 : null,
+            playing: virtualPlaying,
+            durationSec: 0,
+            soundingCellId: virtualSoundingCellId,
+            rate: 1,
+            volume: 1,
+          }
+        : null,
+    )
+    return state
+  }, [
+    queue, ownedByVideo, videoActive, playing, soundingCellId, buffering,
+    ownedByVirtual, virtualActive, virtualPlaying, virtualSoundingCellId,
+  ])
+}
+
+const clockOf: Partial<Record<TransportSource, { subscribe: (l: () => void) => () => void; sec: () => number | null }>> = {
+  video: { subscribe: subscribeVideoClock, sec: getVideoClockSec },
+  virtual: { subscribe: subscribeVirtualClock, sec: getVirtualClockSec },
+}
+const NO_CLOCK = { subscribe: () => () => {}, sec: () => null }
+
+/**
+ * The line under a picture's or virtual clock's head, held through the
+ * silence after it (`heldCellIdAtSec`). Re-renders when the LINE changes, not
+ * on every tick. Null for the queue, which always names its own line while it
+ * runs.
+ */
+export function useHeldCellIdOnClock(
+  source: TransportSource,
+  enabled: boolean,
+  segments: readonly RegionSegment[],
+): string | null {
+  const clock = (enabled ? clockOf[source] : undefined) ?? NO_CLOCK
+  const read = () => {
+    const sec = clock.sec()
+    return sec == null ? null : heldCellIdAtSec(segments, sec)
+  }
+  return useSyncExternalStore(clock.subscribe, read, read)
 }

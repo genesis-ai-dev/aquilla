@@ -368,7 +368,7 @@ export function useFileAudioAttachments(
     // fetch re-runs the moment the session lands on a cold reload.
     if (!projectId || !fileId || !jwt) {
       cancelRetry()
-      setByCellId(EMPTY)
+      setByCellId((prev) => (prev.size === 0 ? prev : EMPTY))
       return
     }
     // FORTIFY (SUB-48 across reloads): the shadow registry is memory-only but
@@ -401,7 +401,7 @@ export function useFileAudioAttachments(
      * changes is that the empty map is no longer the last word.
      */
     const failRead = (): void => {
-      if (answeredKeyRef.current !== key) setByCellId(EMPTY)
+      if (answeredKeyRef.current !== key) setByCellId((prev) => (prev.size === 0 ? prev : EMPTY))
       const attempt = retryAttemptsRef.current
       if (attempt >= READ_RETRY_DELAYS_MS.length) return
       retryAttemptsRef.current = attempt + 1
@@ -412,7 +412,11 @@ export function useFileAudioAttachments(
         if (gen === generationRef.current) void doFetchRef.current?.()
       }, READ_RETRY_DELAYS_MS[attempt])
     }
-    setIsLoading(true)
+    // The first read of a file has nothing on screen to mark in-flight, and
+    // flipping the flag re-renders every surface that holds this hook before
+    // the answer exists. A refetch of a file already answered still reports
+    // that it is in flight.
+    if (answeredKeyRef.current === key) setIsLoading(true)
     try {
       const registry = getOptimisticShadows(fileId)
       const queuedIds: string[] = []
@@ -461,7 +465,7 @@ export function useFileAudioAttachments(
         }
         if (entry) map.set(cellId, entry)
       }
-      setByCellId(map)
+      setByCellId((prev) => (map.size === 0 && prev.size === 0 ? prev : map))
       answeredKeyRef.current = key
       retryAttemptsRef.current = 0
       // Re-arm a sweep for the EARLIEST grace deadline still outstanding.

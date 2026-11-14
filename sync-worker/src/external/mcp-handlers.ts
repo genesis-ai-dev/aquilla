@@ -39,6 +39,7 @@ import { MAX_SEARCH_PROJECTS } from './search-reads'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { COMMAND_CATALOG } from '../../../db/shared/command-catalog'
 import { AGENT_SKILLS, getSkill } from '../../../db/shared/agent-skills'
+import { helpIndex, helpPage } from './help-site'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import type { ExternalEnv } from './types'
 
@@ -189,6 +190,14 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'nothing on its own. Call get_skill { name } for the full body before starting the ' +
         'workflow it covers. project-setup: intake template → one ProjectSetup command → one ' +
         'approval → verification receipt.',
+    },
+    // AQU-2581: app help from the public help site, not API documentation.
+    help: {
+      tool: 'get_help',
+      note:
+        'Public app help from https://help.aquilla.app: how to do things in the Aquilla app and where ' +
+        'its controls are. Call get_help with no page for the index, then get_help { page } for one ' +
+        'page. Not API documentation: for commands use describe_command and for API workflows get_skill.',
     },
     projectSettings: {
       readTool: 'get_project_settings',
@@ -621,6 +630,18 @@ function getSkillTool(args: Record<string, unknown>): McpToolResult {
     })
   }
   return ok({ name: skill.name, title: skill.title, oneLiner: skill.oneLiner, body: skill.body })
+}
+
+// ── get_help ─────────────────────────────────────────────────────────────────
+
+/** AQU-2581: app help from the public help site (help-site.ts). Like get_skill,
+ *  no role gate and no projectId: the pages are public text. The helpers never
+ *  throw, so an outage is a tool error and the other tools are unaffected. */
+async function getHelpTool(env: ExternalEnv, args: Record<string, unknown>): Promise<McpToolResult> {
+  const page = str(args, 'page')
+  const result = page === undefined ? await helpIndex(env) : await helpPage(env, page)
+  if (!result.ok) return fail(result.code, result.message, result.details ? { details: result.details } : undefined)
+  return ok(result.body)
 }
 
 // ── delegated reads ──────────────────────────────────────────────────────────
@@ -1597,6 +1618,8 @@ export async function callTool(
       return describeCommandTool(args)
     case 'get_skill':
       return getSkillTool(args)
+    case 'get_help':
+      return getHelpTool(env, args)
     case 'search_project':
       return searchProject(env, token, args)
     case 'transcribe_audio':

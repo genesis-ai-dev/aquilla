@@ -13,6 +13,14 @@ vi.mock("@/components/ui/toast", async (importActual) => {
   const actual = await importActual<typeof import("@/components/ui/toast")>()
   return { ...actual, toast: { ...actual.toast, add: toastAdd } }
 })
+const queueState = vi.hoisted(() => ({ current: { kind: "idle" } as import("@/lib/audio/play-queue").QueueState }))
+vi.mock("@/lib/audio/play-queue", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/audio/play-queue")>()
+  return {
+    ...actual,
+    useQueueStateValue: <T,>(select: (state: import("@/lib/audio/play-queue").QueueState) => T) => select(queueState.current),
+  }
+})
 
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
 import { chipRadiusPx } from "@/lib/timeline/scale"
@@ -1095,10 +1103,20 @@ describe("TargetAudioLane — missing badge + loading spinner (2026-08-05)", () 
     await expectTakeDetails("c1", /This clip's audio is missing\./)
   })
 
-  it("the verse being waited on shows the loading spinner", () => {
-    render(<TargetAudioLane {...base} items={[item({}, 4000)]} loadingCellId="c1" />)
-    expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-loading", "true")
-    expect(screen.getByTestId("tl-target-c1-loading")).toBeInTheDocument()
+  // The timeline does not pass `loadingCellId`: each chip reads the queue, so
+  // the line being waited on changing does not redraw every lane.
+  it.each([
+    { by: "the prop", loadingCellId: "c1", queue: { kind: "idle" } as const },
+    { by: "the queue", loadingCellId: undefined, queue: { kind: "loading", cellIndex: 0, cellId: "c1" } as const },
+  ])("the verse being waited on shows the loading spinner, told by $by", ({ loadingCellId, queue }) => {
+    queueState.current = queue
+    try {
+      render(<TargetAudioLane {...base} items={[item({}, 4000)]} loadingCellId={loadingCellId} />)
+      expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-loading", "true")
+      expect(screen.getByTestId("tl-target-c1-loading")).toBeInTheDocument()
+    } finally {
+      queueState.current = { kind: "idle" }
+    }
   })
 
   // AQU-2495 (review, Nov 9): a line's main take whose file is gone marked the

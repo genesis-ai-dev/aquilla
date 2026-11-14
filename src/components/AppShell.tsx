@@ -36,8 +36,8 @@ export { useIsLgUp } from "@/hooks/useIsLgUp"
 //            cause portal'd menus/tooltips to paint BEHIND the chrome.
 //   z-10 — content stickies (table headers, sticky cells)
 //   z-20 — in-content floats (action rails, expansion glyphs)
-//   z-30 — fixed bottom action chips/bars (SelectionBar, AiModelDownloadChip,
-//          AudioBulkProgressBanner) that float over the editor
+//   z-30 — fixed bottom action chips/bars (SelectionBar, AudioBulkProgressBanner)
+//          that float over the editor. AI model download/load uses a toast.
 //   z-40 — fixed overlay banners (PrivateMode, SyncFreeze), popovers, menus,
 //          dropdowns, tooltips, autocomplete
 //   z-50 — modals, sheets, dialogs (+ their backdrops)

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { TimelineCard } from "./TimelineCard"
+import { TimelineOrigin } from "./timeline-origin"
 import { chipRadiusPx } from "@/lib/timeline/scale"
 import type { CellData } from "@/hooks/useCells"
 
@@ -32,6 +33,15 @@ describe("TimelineCard", () => {
     render(<TimelineCard cell={cell()} {...base} onSelect={() => {}} onRetime={() => {}} />)
     const el = screen.getByTestId("tl-card-c1")
     expect(el).toHaveStyle({ left: "40px", width: "80px" }) // 1s*40, (3-1)s*40
+  })
+
+  it("positions from the mounted column's left edge", () => {
+    render(
+      <TimelineOrigin px={1000}>
+        <TimelineCard cell={cell()} {...base} onSelect={() => {}} onRetime={() => {}} />
+      </TimelineOrigin>,
+    )
+    expect(screen.getByTestId("tl-card-c1")).toHaveStyle({ left: "-960px", width: "80px" })
   })
 
   it("selects on click", () => {
@@ -492,7 +502,7 @@ describe("TimelineCard", () => {
 
       const wide = radii(200)
       expect(wide.card).toBeCloseTo(chipRadiusPx(200), 3)
-      expect(wide.card).toBe(8) // unchanged from the rounded-lg it replaced
+      expect(wide.card).toBe(6) // the app's rounded-lg (--radius)
 
       const narrow = radii(20)
       expect(narrow.card).toBeCloseTo(chipRadiusPx(20), 3)

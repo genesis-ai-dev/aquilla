@@ -25,6 +25,7 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 vi.mock("@/lib/audio/prefetch", () => ({
   useModelStatus: () => ({ kind: "idle" }),
   prefetchAiModels: vi.fn(),
+  modelWeightsOnDevice: (status: { kind: string }) => status.kind === "ready" || status.kind === "loading",
 }))
 
 function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {

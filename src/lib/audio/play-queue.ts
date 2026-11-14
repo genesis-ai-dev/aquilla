@@ -26,10 +26,10 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { claimActiveAudio, clearActiveAudioIf, getActiveAudio, type ActiveAudioController } from "./audio-coordinator"
 import { t } from "@/lib/i18n/standalone"
 import { clipLevelOf, isMixed, mixElement, setMixerVolume } from "./mixer"
-import { selectQueueForFile, type QueueForFile } from "./queue-scope"
+import { selectQueueForFile, selectQueueStateForFile, type QueueForFile, type QueueStateForFile } from "./queue-scope"
 import { isHiddenCell } from "@/lib/cells/hidden"
 
-export type { QueueForFile }
+export type { QueueForFile, QueueStateForFile }
 
 export type QueueState =
   | { kind: "idle" }
@@ -44,7 +44,17 @@ const listeners = new Set<() => void>()
 
 function notify(): void { for (const l of listeners) l() }
 
+function sameState(a: QueueState, b: QueueState): boolean {
+  if (a.kind !== b.kind) return false
+  if (a.kind === "error" || b.kind === "error") return a === b
+  if (a.kind === "idle" || b.kind === "idle") return true
+  return a.cellIndex === b.cellIndex && a.cellId === b.cellId
+}
+
 function setState(next: QueueState): void {
+  // An unchanged state is not published: every subscriber re-renders on a new
+  // object, and the workspace and the whole timeline are among them.
+  if (sameState(state, next)) return
   state = next
   notify()
 }
@@ -76,6 +86,12 @@ function subscribe(listener: () => void): () => void {
 
 export function useQueueState(): QueueState {
   return useSyncExternalStore(subscribe, () => state, () => IDLE)
+}
+
+/** One value read off the state. A select that returns a primitive
+ *  re-renders only when that value changes, not on every new line. */
+export function useQueueStateValue<T>(select: (state: QueueState) => T): T {
+  return useSyncExternalStore(subscribe, () => select(state), () => select(IDLE))
 }
 
 // ── Current-cell selectors (2026-08-07) ─────────────────────────────────────
@@ -158,11 +174,16 @@ export function __setQueuePlaybackForTests(next: {
   /** The run's length; left as it was when absent. */
   duration?: number
 }): void {
-  state = next.playing && next.cellId
-    ? { kind: "playing", cellIndex: 0, cellId: next.cellId }
-    : IDLE
+  // A tick on the same line publishes progress alone, as a playing element's
+  // `timeupdate` does; a fresh state object here would re-render every state
+  // subscriber on each tick, which real playback never does.
+  const nextCellId = next.playing ? next.cellId : null
+  const currentCellId = state.kind === "playing" ? state.cellId : null
+  if (nextCellId !== currentCellId || (nextCellId == null && state !== IDLE)) {
+    state = nextCellId ? { kind: "playing", cellIndex: 0, cellId: nextCellId } : IDLE
+    notify()
+  }
   progress = { ...progress, currentTime: next.currentTime, ...(next.duration != null ? { duration: next.duration } : {}) }
-  notify()
   notifyProgress()
 }
 
@@ -290,13 +311,20 @@ function setProgress(patch: Partial<QueueProgress>): void {
   notifyProgress()
 }
 
-function subscribeProgress(listener: () => void): () => void {
+export function subscribeQueueProgress(listener: () => void): () => void {
   progressListeners.add(listener)
   return () => { progressListeners.delete(listener) }
 }
+const subscribeProgress = subscribeQueueProgress
 
 export function useQueueProgress(): QueueProgress {
   return useSyncExternalStore(subscribeProgress, () => progress, () => progress)
+}
+
+/** One value read off the progress. A select that returns a primitive
+ *  re-renders only when that value changes, not on every tick. */
+export function useQueueProgressValue<T>(select: (progress: QueueProgress) => T): T {
+  return useSyncExternalStore(subscribeProgress, () => select(progress), () => select(progress))
 }
 
 export function getQueueProgress(): QueueProgress { return progress }
@@ -307,6 +335,12 @@ export function useQueueForFile(cellIds: ReadonlySet<string>): QueueForFile {
   const s = useQueueState()
   const p = useQueueProgress()
   return useMemo(() => selectQueueForFile(s, p, cellIds), [s, p, cellIds])
+}
+
+/** `useQueueForFile` without the clock, for a consumer that draws no time. */
+export function useQueueStateForFile(cellIds: ReadonlySet<string>): QueueStateForFile {
+  const s = useQueueState()
+  return useMemo(() => selectQueueStateForFile(s, cellIds), [s, cellIds])
 }
 
 // ── Track audibility (round 5: per-track speaker buttons) ───────────────────

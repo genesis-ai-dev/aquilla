@@ -7564,7 +7564,6 @@ export const am: Catalog = {
   "workspace.castGutterVoice.scopeFile": "በዚህ ፋይል ውስጥ እያንዳንዱ «{name}» መስመር",
   "workspace.castGutterVoice.scopeFileCount": {"forms":{"one":"በዚህ ፋይል ውስጥ እያንዳንዱ «{name}» መስመር ({count})","other":"በዚህ ፋይል ውስጥ እያንዳንዱ «{name}» መስመር ({count})"},"countVar":"count"},
   "workspace.castGutterVoice.scopeEverywhere": "በእያንዳንዱ ኤፒሶድ እያንዳንዱ «{name}» መስመር",
-  "workspace.castGutterVoice.scopeNoCharacter": "ይህ መስመር ገጸ ባህሪ የለውም፣ ስለዚህ ድምጹ ለዚህ መስመር ብቻ ነው።",
   "workspace.castGutterVoice.clearOneFileAtATime": "ገጸ ባህሪ ለማስወገድ ይህን መስመር ወይም ይህን ፋይል ይምረጡ።",
   "workspace.openWorkspace.openingProject": "ፕሮጀክት በመክፈት ላይ",
   "workspace.fileSort.lastUpdated": "መጨረሻ የዘመነ",

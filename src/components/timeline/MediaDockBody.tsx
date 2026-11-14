@@ -45,7 +45,7 @@ function MediaArea({ dock, area, stacked, first }: { dock: MediaDock; area: Dock
         {stacked && <MediaAreaStrip dock={dock} area={area} />}
         <div
           ref={dock.boxRefs[area]}
-          className="flex min-h-0 min-w-0 flex-1 flex-col"
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col"
           // Folded, the content keeps the size it last had, so nothing in it
           // re-lays-out at zero and it comes back exactly as it went.
           style={frozen ? { minWidth: frozen.width, minHeight: frozen.height } : undefined}

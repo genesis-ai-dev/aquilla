@@ -18,6 +18,7 @@ import {
   hydratePrefetchStatus,
   prefetchAiModels,
   useModelStatus,
+  modelWeightsOnDevice,
   type ModelId,
 } from "@/lib/audio/prefetch"
 import { clearStoredConsent, storeAiModelConsent } from "@/lib/audio/ai-consent"
@@ -115,8 +116,9 @@ function ModelRow({ meta }: { meta: ModelMeta }) {
   const status = useModelStatus(meta.id)
   const [busy, setBusy] = useState(false)
 
-  const isReady = status.kind === "ready"
-  const isDownloading = status.kind === "downloading" || busy
+  const onDisk = modelWeightsOnDevice(status)
+  const isLoadingMemory = status.kind === "loading"
+  const isDownloading = status.kind === "downloading" || isLoadingMemory || busy
   const isError = status.kind === "error"
 
   const download = async () => {
@@ -158,7 +160,12 @@ function ModelRow({ meta }: { meta: ModelMeta }) {
           <Button variant="outline" onClick={download} disabled={isDownloading}>
             <RotateCw /> {t("common.retry")}
           </Button>
-        ) : isReady ? (
+        ) : isLoadingMemory ? (
+          <Button variant="outline" disabled>
+            <Spinner />
+            {t("common.loading")}
+          </Button>
+        ) : onDisk ? (
           <>
             <Button variant="ghost" onClick={download} disabled={isDownloading}>
               <Download /> Re-download
@@ -207,14 +214,10 @@ function StatusBadge({
       </Badge>
     )
   }
-  if (status.kind === "downloading") {
-    return (
-      <Badge variant="secondary">
-        <Spinner data-icon="inline-start" />
-        {t("onboarding.checklist.aiModels.statusDownloading")}
-      </Badge>
-    )
-  }
+  // Download and memory-load already show a spinner on the action button
+  // (and a progress bar while bytes are moving). A second badge spinner
+  // beside the model name just duplicates that.
+  if (status.kind === "loading" || status.kind === "downloading") return null
   return (
     <Badge variant="outline">{t("projectSettings.localModels.notDownloadedBadge", { size: sizeMb })}</Badge>
   )
@@ -226,8 +229,8 @@ function DownloadBar({ loaded, total }: { loaded: number; total: number }) {
     <div className="mt-1.5 flex items-center gap-2">
       <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
         <div
-          className="h-full rounded-md bg-primary transition-[width] duration-150"
-          style={{ width: `${pct ?? 8}%` }}
+          className="h-full w-0 rounded-md bg-primary transition-[width] duration-150"
+          style={{ width: `${pct ?? 0}%` }}
         />
       </div>
       {pct != null && <span className="w-8 text-end text-[10px] tabular-nums text-muted-foreground">{pct}%</span>}

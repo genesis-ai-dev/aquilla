@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest"
-import { readLastCell, readLastLocation, writeLastCell, writeLastLocation } from "./last-location-store"
+import { readLastCell, readLastCellPlace, readLastLocation, writeLastCell, writeLastLocation } from "./last-location-store"
 
 // jsdom provides localStorage; we reset it between tests.
 beforeEach(() => {
@@ -79,6 +79,13 @@ describe("per-file last cell", () => {
     writeLastCell("alice", "proj-1", "file-a", "a-1")
     writeLastCell("alice", "proj-1", "file-a", "a-9")
     expect(readLastCell("alice", "proj-1", "file-a")).toBe("a-9")
+  })
+
+  it("remembers a scroll as the top of the view and a click as the center", () => {
+    writeLastCell("alice", "proj-1", "file-a", "scrolled", "top")
+    expect(readLastCellPlace("alice", "proj-1", "file-a")).toEqual({ cellId: "scrolled", align: "top" })
+    writeLastCell("alice", "proj-1", "file-a", "clicked")
+    expect(readLastCellPlace("alice", "proj-1", "file-a")).toEqual({ cellId: "clicked", align: "center" })
   })
 
   it("does not leak across users or projects", () => {

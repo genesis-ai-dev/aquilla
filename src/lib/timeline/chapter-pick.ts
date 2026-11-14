@@ -59,7 +59,15 @@ export function applyChapterPick(
 ): boolean {
   if (plan.kind === "show") return false
   if (plan.kind === "play" && run.projectId && run.session) {
-    startQueue({ cells: scopeCells(run.lines, plan.chapter), projectId: run.projectId, session: run.session }, 0)
+    // The timeline is the whole book, so the run is the whole book too.
+    // Starting at this chapter's first line keeps the playhead on the same
+    // seconds the timeline drew.
+    const firstId = scopeCells(run.lines, plan.chapter)[0]?.id
+    const at = firstId == null ? -1 : run.lines.findIndex((cell) => cell.id === firstId)
+    startQueue(
+      { cells: [...run.lines], projectId: run.projectId, session: run.session },
+      at < 0 ? 0 : at,
+    )
     return true
   }
   stopQueue()

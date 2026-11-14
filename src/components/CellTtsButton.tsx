@@ -20,7 +20,7 @@ import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { bornTakePlace } from "@/lib/audio/new-take-place"
 import { withGroup } from "@/lib/history/history"
 import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
-import { useModelStatus } from "@/lib/audio/prefetch"
+import { modelWeightsOnDevice, useModelStatus } from "@/lib/audio/prefetch"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioMimeForExt } from "@/lib/audio/mime"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
@@ -183,7 +183,7 @@ export function CellTtsButton({
   const offlineGate = ttsOfflineGate({
     offline: !browserOnline || backendReachable === false,
     usesLocalModel: ttsProviderModel(provider) === "mms",
-    localModelReady: modelStatus.kind === "ready",
+    localModelReady: modelWeightsOnDevice(modelStatus),
   })
   const previewOnly = playOnly || offlineGate.kind === "previewOnly"
   const audioRef = useRef<HTMLAudioElement | null>(null)

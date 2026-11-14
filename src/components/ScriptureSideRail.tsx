@@ -32,11 +32,13 @@ interface ScriptureSideRailProps {
   onSelect: (panel: RightRailPanel | null) => void
 }
 
-/** One slim rail of buttons that switches between the scripture side panels. */
+/** One slim rail of buttons that switches between the scripture side panels.
+ *  `pt-10` matches the chapter row (`min-h-10`) so the first tab sits on the
+ *  Source / Target rule. It stays put — it does not track that row. */
 export function ScriptureSideRail({ tabs, openPanel, onSelect }: ScriptureSideRailProps) {
   const t = useT()
   return (
-    <div className="hidden h-full w-9 shrink-0 flex-col items-center gap-1 border-s bg-background pt-2 sm:flex">
+    <div className="hidden h-full w-9 shrink-0 flex-col items-center border-s bg-background pt-10 sm:flex">
       {tabs.map((tab) => {
         const { icon: Icon, label, testId } = TAB[tab]
         const active = tab === openPanel
@@ -50,7 +52,9 @@ export function ScriptureSideRail({ tabs, openPanel, onSelect }: ScriptureSideRa
             aria-pressed={active}
             data-testid={testId}
             className={cn(
-              "flex w-8 flex-col items-center gap-1.5 rounded-md py-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+              // The rail is wider than the button. The pseudo fills that gutter
+              // so the accent stays while the pointer is in the side padding.
+              "relative flex w-8 flex-col items-center gap-1.5 rounded-md py-1 text-muted-foreground hover:bg-accent hover:text-foreground before:absolute before:inset-y-0 before:-inset-x-0.5 before:content-['']",
               active && "bg-accent text-foreground",
             )}
           >

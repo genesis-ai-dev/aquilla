@@ -992,15 +992,26 @@ function seenByReader(el: XmlElement, hidden: (run: XmlElement) => boolean): boo
  *  stay in the document, in order: its range marks (a bookmark, a comment's
  *  range and reference, see isPairedMark), and the runs of a field that runs
  *  on into another paragraph (its start, or its end). A field all its own
- *  goes with its words. What Word does not show (deleted, moved away) is not
- *  looked into. */
+ *  goes with its words. In what Word does not show (deleted, moved away) only
+ *  the range marks are looked for (review r11), and they are taken out of it. */
 function rangeMarks(paragraphXml: string): string {
   const out: { at: number; xml: string }[] = []
   const open: { at: number; xml: string }[][] = []
   const take = (el: XmlElement) => ({ at: el.start!, xml: paragraphXml.slice(el.start, el.end) })
+  const marksIn = (el: XmlElement) => {
+    for (const child of el.children) {
+      if (!isElement(child)) continue
+      if (isPairedMark(child)) out.push(take(child))
+      else marksIn(child)
+    }
+  }
   const visit = (el: XmlElement) => {
     for (const child of el.children) {
-      if (!isElement(child) || NOT_SHOWN.has(child.tagName)) continue
+      if (!isElement(child)) continue
+      if (NOT_SHOWN.has(child.tagName)) {
+        marksIn(child)
+        continue
+      }
       if (isPairedMark(child)) {
         out.push(take(child))
         continue

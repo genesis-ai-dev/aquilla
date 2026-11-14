@@ -638,6 +638,23 @@ describe("Word export — what a lost line owns is its own text range and its fo
     }
   })
 
+  // Review r11 (finding 4): a mark inside text Word does not show (deleted, or
+  // moved away) is the paragraph's all the same: it keeps the paragraph, and
+  // stays in it, out of the deletion, so its pair still has both ends.
+  it.each([
+    ["w:del", `<w:bookmarkStart w:id="6" w:name="b6"/>`, `<w:bookmarkEnd w:id="6"/>`],
+    ["w:moveFrom", `<w:bookmarkStart w:id="6" w:name="b6"/>`, `<w:bookmarkEnd w:id="6"/>`],
+    ["w:del", `<w:commentRangeStart w:id="3"/>`, `<w:commentRangeEnd w:id="3"/><w:r><w:commentReference w:id="3"/></w:r>`],
+  ])("a paragraph whose lines are all lost keeps a mark it holds inside %s, out of it", async (tag, start, end) => {
+    const gone = moved(tag, `${end}<w:r><w:delText>old</w:delText></w:r>`)
+    const bytes = await docxBytes(para(start + run("Before words.")) + para(run(ONLY) + gone) + NEXT)
+    const [before, line, next] = await importCells(bytes, false)
+    for (const out of [await wordOut(bytes, [before, hide(typed(line, "Caché.")), next]), await wordOut(bytes, [before, next], [line])]) {
+      expect(out.body).toContain(para(start + run("Before words.")) + para(end) + NEXT)
+      expect(out.result.removed).toBe(1)
+    }
+  })
+
   it("a paragraph whose lines are all lost keeps a contents field's start running on into the next paragraph; a field all its own goes", async () => {
     const begin = `<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r>`
     const end = `<w:r><w:fldChar w:fldCharType="end"/></w:r>`

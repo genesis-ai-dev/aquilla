@@ -54,10 +54,12 @@ type StructureReaders = Parameters<StructureCache["read"]>[1]
 /** Read the table's numbering for `rowIds` (the file's rows in table order,
  *  `getCellIdsForLens`), as EditorTable reads it. */
 export function readLineNumbering(
-  store: StructureReaders & {
+  // Own readers first: the structure cache also reads getCellView, and a call
+  // through the intersection takes the first one's return type.
+  store: {
     getCellView(id: string): LineNameCell | null
     getNavigationIndex(ids?: readonly string[]): readonly { kind: string }[]
-  },
+  } & StructureReaders,
   rowIds: readonly string[],
   structureCache: StructureCache,
 ): LineNumbering {

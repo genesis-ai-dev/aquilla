@@ -7389,6 +7389,54 @@ describe("TimelineEditor — splitting takes (AQU-1767)", () => {
   })
 })
 
+// AQU-2499 (review, Nov 9): once the take menu named the take right-clicked,
+// Change voice on a music or effects layer's clip would have sent the music
+// through the voice converter. A layer's clips are not a line's voice.
+describe("TimelineEditor — Change voice and a layer's clips (AQU-2499)", () => {
+  beforeEach(() => { topOwner.value = 1 })
+  const VOICE = "audio-l1-1700000000-boaz.wav"
+  const MUSIC = "audio-l1-1700000001-music.wav"
+  const tracks = deriveTracksForFile({
+    trackOverrides: {
+      boaz: { kind: "audio", name: "Boaz", order: 5 },
+      music: { kind: "audio", name: "Music", order: 6, setsLineLengths: false },
+    },
+  })
+  const line = cell({
+    id: "l1", original: "One", translated: "Uno", startTime: 0, endTime: 5,
+    selectedBySlot: { boaz: VOICE, music: MUSIC },
+    attachments: {
+      [VOICE]: { type: "audio", url: `frontier-audio://${VOICE}`, slot: "boaz", durationMs: 3000 },
+      [MUSIC]: { type: "audio", url: `frontier-audio://${MUSIC}`, slot: "music", durationMs: 3000 },
+    },
+  } as unknown as Partial<CellData>)
+  const renderBoth = () => render(
+    <TimelineEditor
+      fileId="f1" coreMediaUrl={null} editable cells={[line]} onRetimeSubtitle={() => {}}
+      tracks={tracks} onRemoveTake={vi.fn()}
+      onChangeVoice={vi.fn()} changeVoiceStateFor={() => ({ voiceName: "Narrator", blocker: null })}
+    />,
+  )
+  const rightClickOn = (trackId: string) => {
+    const chip = within(screen.getByTestId(`tl-target-lane-${trackId}`)).getByTestId("tl-target-l1")
+    fireEvent.pointerDown(chip, { button: 2, clientX: 20, pointerId: 1 })
+    fireEvent.contextMenu(chip, { button: 2, clientX: 20 })
+  }
+
+  it("leaves Change voice out of a layer clip's menu", async () => {
+    renderBoth()
+    rightClickOn("music")
+    await screen.findByTestId("tl-take-menu-delete")
+    expect(screen.queryByTestId("tl-take-menu-change-voice")).toBeNull()
+  })
+
+  it("still offers it on an added voice track's take", async () => {
+    renderBoth()
+    rightClickOn("boaz")
+    expect(await screen.findByTestId("tl-take-menu-change-voice")).toBeInTheDocument()
+  })
+})
+
 // AQU-1684 (Sam's decision): each person hides lanes on their own screen, per
 // file, stored on the device like folder collapse. A lane never vanishes
 // without trace — "Hidden tracks (N)" lists it to show again — and one that is

@@ -337,7 +337,7 @@ describe("PreviewPanel — USFM structure findings (AQU-1731)", () => {
         onConfirm={vi.fn()}
         onCancel={vi.fn()}
         reimport
-        reimportChanges={{ added: 2, updated: 1, addedCells: [{ text: "A new line", number: 4 }], updatedCells: [{ text: "After", previous: "Before", number: 2 }] }}
+        reimportChanges={{ added: 2, updated: 1, removed: 0, addedCells: [{ text: "A new line", number: 4 }], updatedCells: [{ text: "After", previous: "Before", number: 2 }], removedCells: [] }}
       />,
     )
     expect(screen.getByRole("region", { name: "Analysis" })).toBeTruthy()
@@ -345,6 +345,85 @@ describe("PreviewPanel — USFM structure findings (AQU-1731)", () => {
     expect(screen.getByTestId("reimport-changes")).toHaveTextContent("4 A new line")
     expect(screen.getByTestId("reimport-changes")).toHaveTextContent("1 cell updated")
     expect(screen.getByTestId("reimport-changes")).toHaveTextContent("2 Before → After")
+  })
+
+  // AQU-2487 (import sweep, Nov 2): a new file that only drops lines read
+  // "Nothing in this file has changed." while "Update this file" hid them.
+  it("lists the lines the new file no longer has instead of saying nothing changed", () => {
+    render(
+      <PreviewPanel
+        results={RESULTS}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+        reimport
+        reimportChanges={{ added: 0, updated: 0, removed: 1, addedCells: [], updatedCells: [], removedCells: [{ text: "A dropped line", number: 3 }] }}
+      />,
+    )
+    const analysis = screen.getByTestId("reimport-changes")
+    expect(analysis).toHaveTextContent("1 cell no longer in the file")
+    expect(analysis).toHaveTextContent("3 A dropped line")
+    expect(analysis).not.toHaveTextContent("Nothing in this file has changed.")
+  })
+
+  // AQU-2487 (review, Nov 9): the Analysis listed the missing cells, but
+  // nothing said which of the three buttons hides them.
+  it("says under the buttons that Update this file hides the cells the new file no longer has", () => {
+    const view = render(
+      <PreviewPanel
+        results={RESULTS}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+        reimport
+        reimportChanges={{ added: 0, updated: 0, removed: 12, addedCells: [], updatedCells: [], removedCells: [{ text: "A dropped line", number: 3 }] }}
+      />,
+    )
+    const line = "Update this file hides the 12 cells that are no longer in the file, along with their translations."
+    expect(screen.getByText(line)).toBeTruthy()
+    // It belongs to that one button, not to the two copies.
+    expect(screen.getByRole("button", { name: "Update this file" })).toHaveAccessibleDescription(line)
+    expect(screen.getByRole("button", { name: "Make updated copy" })).not.toHaveAccessibleDescription()
+    expect(screen.getByRole("button", { name: "Make a blank copy" })).not.toHaveAccessibleDescription()
+    // The heading stays neutral.
+    expect(screen.getByTestId("reimport-changes")).toHaveTextContent("12 cells no longer in the file")
+    view.unmount()
+
+    render(
+      <PreviewPanel
+        results={RESULTS}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+        reimport
+        reimportChanges={{ added: 0, updated: 0, removed: 1, addedCells: [], updatedCells: [], removedCells: [{ text: "A dropped line", number: 3 }] }}
+      />,
+    )
+    expect(screen.getByText("Update this file hides the 1 cell that is no longer in the file, along with its translation.")).toBeTruthy()
+  })
+
+  it("says nothing about hiding when the new file drops no cells", () => {
+    render(
+      <PreviewPanel
+        results={RESULTS}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+        reimport
+        reimportChanges={{ added: 1, updated: 0, removed: 0, addedCells: [{ text: "A new line", number: 4 }], updatedCells: [], removedCells: [] }}
+      />,
+    )
+    expect(screen.queryByText(/Update this file hides/)).toBeNull()
+    expect(screen.getByRole("button", { name: "Update this file" })).not.toHaveAccessibleDescription()
+  })
+
+  it("still says nothing changed when the new file matches line for line", () => {
+    render(
+      <PreviewPanel
+        results={RESULTS}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+        reimport
+        reimportChanges={{ added: 0, updated: 0, removed: 0, addedCells: [], updatedCells: [], removedCells: [] }}
+      />,
+    )
+    expect(screen.getByTestId("reimport-changes")).toHaveTextContent("Nothing in this file has changed.")
   })
 })
 

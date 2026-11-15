@@ -5,7 +5,7 @@
 // and the destination, which is match.ts's job.
 
 import { toWesternDigits } from "../../../../shared/decimal-digits"
-import { BookNameIndex } from "./book-names"
+import { BOOK_CODES, BookNameIndex } from "./book-names"
 
 export type NumberMarker = "chapter" | "verse" | "line" | "part" | "take"
 
@@ -35,6 +35,15 @@ export interface NameReading {
    *  no table knows — the hint that the project may call its books something
    *  the built-in table does not. */
   unknownBookWord: string | null
+  /** AQU-2496 (review, Nov 9): the numbers left unread because an ordinary
+   *  word came before them, and that word: "mstari" and 5 in "Ruthu sura 2
+   *  mstari 5", "ENGESV" and 2023 in "Genesis 1-1 ENGESV 2023". Null when no
+   *  number follows such a word. Whether those numbers mattered is match.ts's
+   *  call (`cutShortByWord`). */
+  afterWord: { word: string; numbers: number[] } | null
+  /** AQU-2496 (review, Nov 9): the name has the Digital Bible Platform's shape
+   *  but doesn't fit it (`readDbpName`), so nothing in it was read. */
+  halfFits?: true
 }
 
 const DASHES = /^(?:-|–|—|‑|‐|−|~|～|to|through|thru|至|到)$/u
@@ -50,6 +59,24 @@ const MARKERS: ReadonlyMap<string, NumberMarker> = new Map([
   ...["line", "lines", "ln", "row", "track", "trk", "cue", "seg", "segment", "clip", "no", "nr", "num", "number", "item", "sentence", "para", "paragraph"].map((w) => [w, "line"] as const),
   ...["part", "pt", "p", "piece", "pc", "parte", "partie", "bagian"].map((w) => [w, "part"] as const),
   ...["take", "tk"].map((w) => [w, "take"] as const),
+])
+
+/**
+ * AQU-2496 (review, Nov 9): words that mean "take" or "version", or another
+ * copy of the same recording, in the languages teams name files in. After a
+ * reference's numbers, the number such a word gives is that take's, never a
+ * verse: "Génesis 1 toma 2" is the whole of Genesis 1, take 2. ("take" and
+ * "tk" are take markers anywhere, in MARKERS.) Expected to grow: add a word
+ * here when a team's names use one the app doesn't know yet.
+ */
+const TAKE_OR_VERSION_WORDS: ReadonlySet<string> = new Set([
+  // take
+  "toma", "tomada", "prise", "aufnahme", "ripresa", "opname", "дубль",
+  // version, revision
+  "version", "versión", "versao", "versão", "versione", "versie", "fassung",
+  "rev", "revision", "révision", "revisión", "revisao", "revisão",
+  // another copy of one recording ("Genesis 1 copy 2", as a Mac names it)
+  "copy", "copia", "cópia", "copie", "kopie",
 ])
 
 /** Markers written after their number. */
@@ -117,7 +144,12 @@ function tokenize(stem: string): Tok[] {
   // AQU-2329: a script's own digits (٥, ۵, ५, ৫, ၅, ๕…) read as 0–9; NFKC leaves them alone.
   const text = splitChineseMarkers(toWesternDigits(stem.normalize("NFKC")))
   const out: Tok[] = []
-  const re = /(\d+)|(\p{L}+)|([^\p{L}\d]+)/gu
+  // AQU-2496 (review, Nov 9): a word is its letters AND the marks written on
+  // them. Hindi, Bengali, Thai and vowelled Arabic write vowels and joined
+  // consonants as marks ("उत्पत्ति", "تَكْوِين"); cut at each mark, no book name
+  // in those scripts was ever read. A zero-width joiner or non-joiner between
+  // two letters (Persian, Bengali) stays inside the word too.
+  const re = /(\d+)|(\p{L}(?:[\p{L}\p{M}]|[\u200c\u200d](?=[\p{L}\p{M}]))*)|([^\p{L}\d]+)/gu
   let m: RegExpExecArray | null
   while ((m = re.exec(text)) !== null) {
     if (m[1] !== undefined) out.push({ kind: "num", text: m[1], value: Number(m[1]) })
@@ -164,7 +196,7 @@ function findBooks(toks: Tok[], index: BookNameIndex): BookHit[] {
       const tok = toks[j]
       if (tok.kind === "sep") { j++; n--; continue }
       if (tok.kind === "num" && (n > 0 || tok.value > 3 || tok.letter)) break
-      text += (text && tok.kind === "word" && /\p{L}$/u.test(text) ? " " : "") + tok.text
+      text += (text && tok.kind === "word" && /[\p{L}\p{M}]$/u.test(text) ? " " : "") + tok.text
       const after = nextSignificant(toks, j + 1)
       const beforeNumber = after < toks.length && toks[after].kind === "num"
       // A lone digit is never a book on its own.
@@ -183,10 +215,42 @@ function findBooks(toks: Tok[], index: BookNameIndex): BookHit[] {
 }
 
 /**
+ * AQU-2496 (review, Nov 9): Faith Comes By Hearing's Digital Bible Platform
+ * (Bible.is) names a chapter's recording "A01___03_Genesis_____ENGESVO2DA": A
+ * for the Old Testament or B for the New and the book's place in it, the
+ * chapter after the first run of underscores, the book's name padded with
+ * underscores, then the fileset's id, whose digits are never a chapter or a
+ * verse. Read word by word, the "2" in "…O2DA" was the only number after the
+ * book, so every chapter of a book landed on chapter 2 (or 1).
+ *
+ * Read whole, when the book's name and its place name the same book. A name
+ * with the shape that doesn't fit it (they disagree, the name is one no table
+ * knows, something follows the id) is not guessed at: nothing in it is read.
+ */
+const DBP_SHAPE = /^[AB]\d{2}_{2,}\d/iu
+const DBP_NAME = /^([AB])(\d{2})_{2,}(\d{1,3})_([\p{L}\p{M}\d_]+?)_+([A-Za-z0-9]+)$/iu
+
+function readDbpName(stem: string, index: BookNameIndex): NameReading | null {
+  if (!DBP_SHAPE.test(stem)) return null
+  const none = { stem, book: null, numbers: [], partWord: null, words: [], unknownBookWord: null, afterWord: null }
+  const m = DBP_NAME.exec(stem)
+  if (!m) return { ...none, halfFits: true }
+  const [, testament, place, chapter, name, fileset] = m
+  const newTestament = testament.toUpperCase() === "B"
+  const at = Number(place)
+  const code = at >= 1 && at <= (newTestament ? 27 : 39) ? BOOK_CODES[(newTestament ? 39 : 0) + at - 1] : undefined
+  const named = index.lookup(name.replace(/_/g, " "), false)
+  if (!code || named?.code !== code) return { ...none, halfFits: true }
+  return { ...none, book: named, numbers: [{ value: Number(chapter), sepBefore: "", marker: "chapter" }], words: [fileset] }
+}
+
+/**
  * Read one name. `index` holds the built-in book names plus the project's own.
  */
 export function readName(fileName: string, index: BookNameIndex): NameReading {
   const stem = nameStem(fileName)
+  const dbp = readDbpName(stem, index)
+  if (dbp) return dbp
   const toks = tokenize(stem)
   const hits = findBooks(toks, index)
   // The book is the one the reference follows; failing that, the first one.
@@ -201,6 +265,8 @@ export function readName(fileName: string, index: BookNameIndex): NameReading {
   let stopped = false
   const startAt = hit ? hit.end + 1 : 0
   let unknownBookWord: string | null = null
+  const afterStop: number[] = []
+  let stopWord = ""
 
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i]
@@ -246,8 +312,14 @@ export function readName(fileName: string, index: BookNameIndex): NameReading {
         pendingSep += ` ${w} `
         continue
       }
+      if (started && !stopped && TAKE_OR_VERSION_WORDS.has(w)) {
+        pendingMarker = "take"
+        pendingSep = ""
+        continue
+      }
       // An ordinary word after the numbers ends the reference: "Genesis 1-1
       // ENGESV 2023" must not read 2023 as a part.
+      if (started && !stopped) stopWord = t.text
       if (started) stopped = true
       if (!hit && !started) {
         const after = nextSignificant(toks, i + 1)
@@ -258,7 +330,13 @@ export function readName(fileName: string, index: BookNameIndex): NameReading {
       continue
     }
     // A number.
-    if (stopped) continue
+    if (stopped) {
+      // AQU-2496 (review, Nov 9): digits run on to the letters before them
+      // ("RVR60", "NIV84", "…O2DA") are part of that word, a version's code,
+      // never a verse.
+      if (toks[i - 1]?.kind !== "word") afterStop.push(t.value)
+      continue
+    }
     const sep = pendingSep.trim().length > 0 ? pendingSep.trim() : pendingSep.length > 0 ? " " : ""
     numbers.push({
       value: t.value,
@@ -278,6 +356,7 @@ export function readName(fileName: string, index: BookNameIndex): NameReading {
     partWord,
     words,
     unknownBookWord: hit ? null : unknownBookWord,
+    afterWord: afterStop.length > 0 ? { word: stopWord, numbers: afterStop } : null,
   }
 }
 

@@ -84,6 +84,45 @@ describe("specialty import durability", () => {
     expect(published).toBe(true)
   })
 
+  // AQU-2487 (browser pass, Nov 12, and its review): a file whose rows give
+  // only "1:1" was refused with the sentence about the first three columns
+  // whenever its name didn't give one book, which sends the person to the
+  // wrong place. The refusal names the file name instead: the books in it when
+  // it holds more than one, else that it doesn't say the book. Rows that are
+  // wrong themselves keep the columns sentence.
+  it("refuses a Translation Notes file by its name when the rows need the book from it and the name doesn't give one", async () => {
+    const current = "Reference\tID\tNote\n1:1\tabc1\tA note.\n1:2\tabc2\tAnother."
+    const fetchMock = vi.fn()
+    vi.stubGlobal("fetch", fetchMock)
+    const ctx = { projectId: "p1", author: "alice", getToken: async () => "tok" }
+    const refusal = async (name: string, text = current): Promise<string> => {
+      try {
+        await importTranslationNotes(new File([text], name), ctx)
+        return "(imported)"
+      } catch (e) {
+        return (e as Error).message
+      }
+    }
+    const twoBooks = (books: string, example: string) =>
+      `The file name holds more than one book (${books}), so the notes can't be filed under one. ` +
+      `Rename the file so it names one book, such as ${example}.`
+    // One sentence for every name that holds no book, or holds one elsewhere
+    // ("GEN_tn.tsv"): it says how the name falls short, not that it has none.
+    const noBook =
+      "The file name doesn't give the book the way unfoldingWord names its files. Rename the file to name one book, such as tn_GEN.tsv."
+
+    expect(await refusal("tn_GEN_rev.tsv")).toBe(twoBooks("GEN, REV", "tn_GEN.tsv"))
+    expect(await refusal("rev_tn_GEN.tsv")).toBe(twoBooks("GEN, REV", "tn_GEN.tsv"))
+    expect(await refusal("GEN_REV.tsv")).toBe(twoBooks("GEN, REV", "tn_GEN.tsv"))
+    for (const name of ["Titus notes.tsv", "my_new_notes.tsv", "notes_job.tsv", "GEN_tn.tsv", "tn_en_GEN.tsv"]) {
+      expect(await refusal(name), name).toBe(noBook)
+    }
+    // No reference at all, or three columns with the book left blank.
+    expect(await refusal("tn_GEN_rev.tsv", "Reference\tID\tNote\n\tx\tA note.")).toMatch(/first three columns/)
+    expect(await refusal("tn_GEN_rev.tsv", "Book\tChapter\tVerse\tNote\n\t1\t1\tA note.")).toMatch(/first three columns/)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   // AQU-527 seam: the notes sidebar only reads files `isTranslationNotesFile`
   // accepts. The importer sends `fileType: "tsv"` AND `kind: "translation-notes"`;
   // the server stores `kind ?? fileType` and the files read route answers

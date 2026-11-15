@@ -16,7 +16,14 @@ import { render, screen, act, fireEvent, waitFor } from "@testing-library/react"
 // The DCS catalog browser hits the network on mount; stub it so this test
 // exercises ImportDialog's routing/gating, not the real client.
 vi.mock("@/components/dcs/DcsCatalogBrowser", () => ({
-  DcsCatalogBrowser: () => <div data-testid="dcs-catalog-browser">catalog browser</div>,
+  DcsCatalogBrowser: ({ onPick }: { onPick: (entry: unknown) => void }) => (
+    <div data-testid="dcs-catalog-browser">
+      catalog browser
+      <button type="button" onClick={() => onPick({ fullName: "unfoldingWord/en_ult", ref: "v89", language: "" })}>
+        pick en_ult
+      </button>
+    </div>
+  ),
 }))
 vi.mock("@/lib/dcs/import-dcs", () => ({ importDcsResource: vi.fn() }))
 vi.mock("@/lib/dcs/catalog", () => ({ DcsClient: class {} }))
@@ -53,6 +60,8 @@ vi.mock("@/lib/parsers/helloao", () => ({
 vi.mock("uuid", () => ({ v7: () => "mock-uuid" }))
 
 import { ImportDialog } from "./ImportDialog"
+import { importDcsResource } from "@/lib/dcs/import-dcs"
+import { toast } from "@/components/ui/toast"
 
 const baseProps = {
   open: true,
@@ -88,6 +97,53 @@ describe("ImportDialog — Door43 (DCS) source", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("dcs-catalog-browser")).toBeTruthy()
+    })
+  })
+
+  // AQU-2487 (import sweep, Nov 2): the only notice that the release was not
+  // pinned sat on a summary that was replaced the moment it was drawn (the
+  // dialog closes straight after). For a project lead the pin always fails,
+  // and no screen ever said so.
+  describe("when the release could not be pinned", () => {
+    async function importWithPin(pinned: boolean | Error) {
+      vi.mocked(importDcsResource).mockResolvedValue({
+        files: 1, cells: 2, refs: [], skipped: [], cursor: { ref: "v89" },
+      } as unknown as Awaited<ReturnType<typeof importDcsResource>>)
+      const add = vi.spyOn(toast, "add").mockImplementation(() => "toast-id")
+      const patchDcsCursor = vi.fn(async () => {
+        if (pinned instanceof Error) throw pinned
+        return pinned
+      })
+      await act(async () => {
+        render(<ImportDialog {...baseProps} patchDcsCursor={patchDcsCursor} />)
+      })
+      await act(async () => {
+        fireEvent.click(await screen.findByText("Door43 (DCS)"))
+      })
+      await act(async () => {
+        fireEvent.click(await screen.findByRole("button", { name: "pick en_ult" }))
+      })
+      await waitFor(() => expect(baseProps.onImported).toHaveBeenCalled())
+      return add
+    }
+    const notPinned = {
+      type: "warning",
+      title: "Imported, but couldn't pin the release — you may lack maintainer rights on this project.",
+    }
+
+    it("says so in a notice that outlives the dialog", async () => {
+      const add = await importWithPin(false)
+      expect(add).toHaveBeenCalledWith(notPinned)
+    })
+
+    it("says so when the pin write itself fails", async () => {
+      const add = await importWithPin(new Error("offline"))
+      expect(add).toHaveBeenCalledWith(notPinned)
+    })
+
+    it("says nothing extra when the release was pinned", async () => {
+      const add = await importWithPin(true)
+      expect(add).not.toHaveBeenCalled()
     })
   })
 })

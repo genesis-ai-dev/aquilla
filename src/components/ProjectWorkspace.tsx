@@ -527,7 +527,7 @@ import { onStationShowRequest, openInStation, setStationAvailable } from "@/lib/
 import { STATION_PICKS } from "@/lib/station/picks"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import type { SyncTokenResponse } from "@/lib/sync/sync-token"
-import { takeTrackVars } from "@/lib/timeline/take-colors"
+import { takeTrackIsLayer, takeTrackVars } from "@/lib/timeline/take-colors"
 import { filmLabelFor, MediaTopBar } from "@/components/timeline/MediaTopBar"
 import { MediaStatusRing } from "@/components/timeline/MediaStatusRing"
 import { PanelMenuItemsContext, regionControls } from "@/components/timeline/MediaPanelChrome"
@@ -13844,6 +13844,7 @@ export function ProjectWorkspace() {
       },
       lineName,
       trackVars: (fileId, slot) => takeTrackVars({ files: project.files, fileId, slot }),
+      takeIsLayer: (fileId, slot) => takeTrackIsLayer({ files: project.files, fileId, slot }),
       voteState: timelineVoteState,
       vote: handleVoteTimelineTake,
       trim: handleTrimTarget,

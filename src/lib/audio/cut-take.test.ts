@@ -1,6 +1,6 @@
 // AQU-1767: the client's mirror of the server's cut rule, and piece names.
 import { describe, it, expect } from "vitest"
-import { CUT_MIN_PIECE_MS, canCutAt, newPieceAudioId, pieceLabels } from "./cut-take"
+import { CUT_MIN_PIECE_MS, canCutAt, levelsAfterCut, newPieceAudioId, pieceLabels } from "./cut-take"
 import { pieceTrimLimitsMs, selectedDubTakes, selectedPieceIds, type CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 
 describe("canCutAt", () => {
@@ -97,5 +97,27 @@ describe("pieceTrimLimitsMs", () => {
   })
   it("limits nothing on a take never cut", () => {
     expect(pieceTrimLimitsMs(pieces(), "other")).toEqual({ minStartMs: null, maxEndMs: null })
+  })
+})
+
+// AQU-2494 (review, Nov 9): the client's mirror of what the server gives each
+// piece of a cut take that has a volume change or fades.
+describe("levelsAfterCut", () => {
+  it("gives both pieces the volume, the first the fade-in and the last the fade-out", () => {
+    expect(levelsAfterCut({ durationMs: 5000, gainDb: 6, fadeInMs: 300, fadeOutMs: 500 }, 2500)).toEqual({
+      first: { gainDb: 6, fadeInMs: 300, fadeOutMs: null },
+      second: { gainDb: 6, fadeInMs: null, fadeOutMs: 500 },
+    })
+  })
+  it("holds each fade to the length of its piece", () => {
+    expect(levelsAfterCut({ durationMs: 4000, trimStartMs: 200, trimEndMs: 3800, fadeInMs: 1500, fadeOutMs: 1500 }, 3200)).toEqual({
+      first: { gainDb: null, fadeInMs: 1500, fadeOutMs: null },
+      second: { gainDb: null, fadeInMs: null, fadeOutMs: 600 },
+    })
+    expect(levelsAfterCut({ durationMs: 4000, trimStartMs: 200, fadeInMs: 1500 }, 1000).first.fadeInMs).toBe(800)
+  })
+  it("a take as recorded stays as recorded", () => {
+    const flat = { gainDb: null, fadeInMs: null, fadeOutMs: null }
+    expect(levelsAfterCut({ durationMs: 4000 }, 2000)).toEqual({ first: flat, second: flat })
   })
 })

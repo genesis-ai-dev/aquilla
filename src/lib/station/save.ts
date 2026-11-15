@@ -32,6 +32,9 @@ export interface VersionPlacement {
   /** The take it replaces on that line. */
   fromAudioId: string
   slot: string
+  /** AQU-2494 (review, Nov 9): the voice an AI take was made with — on an
+   *  added track its only mark — so the new version is still marked AI. */
+  voiceId?: string | null
   label: string | null
   /** Its kept part in the NEW recording, ms; null = the edge. */
   trimStartMs: number | null
@@ -125,6 +128,7 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
             url,
             slot: p.slot,
             mimeType: "audio/wav",
+            ...(p.voiceId ? { voiceId: p.voiceId } : {}),
             referenceAudioId: p.fromAudioId,
             durationMs,
             ...(p.label ? { label: p.label } : {}),
@@ -162,7 +166,7 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
               url,
               slot: p.slot,
               mimeType: "audio/wav",
-              voiceId: null,
+              voiceId: p.voiceId ?? null,
               referenceAudioId: p.fromAudioId,
               durationMs,
               trimStartMs: p.trimStartMs,

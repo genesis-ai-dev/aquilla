@@ -12,6 +12,7 @@
 import { completeStep, historyView, matchingSteps, recordStep, type StepHandler, type StepOutcome } from "./history"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { clearTakeUndone, markTakeUndone } from "@/lib/audio/undone-takes"
+import { levelsAfterCut } from "@/lib/audio/cut-take"
 
 export type TakeWindow = { trimStartMs?: number; trimEndMs?: number }
 
@@ -336,15 +337,19 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
       levelsIntact(c, first, second)
     )
   }
-  // AQU-2492 (review, Nov 9), finding 7: …and each still has the volume and
-  // fades the cut left it — the first piece the take's, the second none (this
-  // server's cut gives it no level). A level changed on either since is work
-  // the join would throw away: the server gives the joined take the level it
-  // had before the cut.
+  // AQU-2494 (review, Nov 9): …and each still has the volume and fades the cut
+  // gave it. A level changed on either piece since is work the join would
+  // throw away (the new piece goes, and the first gets the old level back).
   const sameLevel = (att: CodexCellAttachment, l: TakeLevel) =>
     (att.gainDb ?? null) === l.gainDb && (att.fadeInMs ?? null) === l.fadeInMs && (att.fadeOutMs ?? null) === l.fadeOutMs
   const levelsIntact = (c: CutRecord, first: CodexCellAttachment, second: CodexCellAttachment | null): boolean => {
     if (!c.before.level) return true
+    const cut = levelsAfterCut({ ...c.before.level, trimStartMs: first.trimStartMs, trimEndMs: c.before.trimEndMs, durationMs: first.durationMs }, c.atMs)
+    if (sameLevel(first, cut.first) && (second == null || sameLevel(second, cut.second))) return true
+    // AQU-2494 (review, Nov 9), finding 5: or as a sync worker from before
+    // levels went with a cut stores it — the take's whole level left on the
+    // first piece, none on the new one — when the web app is deployed first.
+    // The join then needs no level of its own: the first piece already has it.
     return sameLevel(first, c.before.level) && (second == null || sameLevel(second, { gainDb: null, fadeInMs: null, fadeOutMs: null }))
   }
   const whole = (c: CutRecord): boolean | null => {

@@ -46,7 +46,8 @@ import { createSmartQuotesExtension, smartQuoteMarks, type SmartQuoteMarks } fro
 import type { QuoteMarksProfile } from "../../db/shared/language-profile"
 import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/richtext/terminology-chip-plugin"
 import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
-import { acceptGhostText, createGhostTextExtension, getGhostText, handleGhostKeyDown } from "@/lib/richtext/ghost-text-plugin"
+import { acceptGhostText, createGhostTextExtension, getGhostText, handleGhostKeyDown, type GhostTextEvent } from "@/lib/richtext/ghost-text-plugin"
+import posthog from "@/lib/posthog"
 import type { ForecastClient } from "@/lib/forecast/forecast-client"
 import { useForecast } from "@/context/ForecastContext"
 import { WordsThatFitMenu } from "@/components/WordsThatFitMenu"
@@ -118,6 +119,15 @@ export const PRESENCE_WORD_BATCH_SIZE = 2
 /** Keep presence frames lightweight even if a malformed/imported cell is huge. */
 export const MAX_PRESENCE_DRAFT_LENGTH = 16_384
 const EMPTY_HEALTH_SPANS: readonly HealthScoreDecorationSpan[] = []
+
+/**
+ * "Suggest next words" acceptance rate = accepted / shown. No text is sent:
+ * only which guesser produced the word and how it was accepted.
+ */
+function captureGhostTextEvent(event: GhostTextEvent): void {
+  if (event.type === "shown") posthog.capture("next word suggestion shown", { source: event.source })
+  else posthog.capture("next word suggestion accepted", { source: event.source, how: event.how })
+}
 
 function placeDomCaretAtProseMirrorPosition(view: EditorView, position: number): void {
   const selection = view.dom.ownerDocument.getSelection()
@@ -935,6 +945,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         : [createGhostTextExtension({
             getClient: () => ghostClientRef.current,
             getCellId: () => ghostCellIdRef.current,
+            onEvent: captureGhostTextEvent,
           })]),
       createSmartQuotesExtension(() => smartQuoteMarksRef.current),
       ...(terminologyConcepts !== undefined

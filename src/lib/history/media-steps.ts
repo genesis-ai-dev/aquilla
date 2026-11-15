@@ -1,6 +1,7 @@
 /**
  * History steps for what a file's media hangs on: its film, which heard line
  * performs which subtitle, and who speaks each line. (Decision 11, slice 13.)
+ * AQU-2492: and what its timing follows (`file.timing.set`).
  *
  * All three belong to every language (step-lane.ts), and all three are plain
  * values that an existing event sets — `file.video.set`, `cell.link.set`,
@@ -13,7 +14,8 @@
  * entries it changed in those maps and puts back each one nobody has changed
  * since. Voices an import added to the library stay there.
  */
-import type { StepHandler, StepOutcome } from "./history"
+import { recordStep, type StepHandler, type StepOutcome } from "./history"
+import { resolveFileTimingMode } from "@/lib/parsers/types"
 
 const DONE: StepOutcome = { kind: "done" }
 const GONE: StepOutcome = { kind: "skipped", reason: "gone" }
@@ -42,6 +44,113 @@ export function filmNow(read: string | null, pending: PendingFilm | undefined): 
   if (!pending) return { film: read, settled: true }
   if (pending.url === read || read !== pending.readBefore) return { film: read, settled: true }
   return { film: pending.url, settled: false }
+}
+
+// ── Timing ──────────────────────────────────────────────────────────────────
+
+/** What a file follows: its source ("dubbing") or its recordings ("audioFirst"). */
+export type FileTiming = "dubbing" | "audioFirst"
+
+/**
+ * AQU-2492 (review, Nov 9; Sam's call the same day): switching a file between
+ * Follows source and Follows recordings. The modes are what the file
+ * FOLLOWED, as its own choice resolves (a film or a project default included),
+ * so Undo puts the file back on the timing it had.
+ */
+export interface FileTimingData { fileId: string; before: FileTiming; after: FileTiming }
+
+/** A timing written from here that the project read has not answered yet. */
+export interface PendingTiming {
+  mode: FileTiming
+  /** What the read said when it was written. */
+  readBefore: FileTiming
+}
+
+/** The timing a file has now, as far as this tab knows: the film's rule (`filmNow`). */
+export function timingNow(read: FileTiming, pending: PendingTiming | undefined): { mode: FileTiming; settled: boolean } {
+  if (!pending) return { mode: read, settled: true }
+  if (pending.mode === read || read !== pending.readBefore) return { mode: read, settled: true }
+  return { mode: pending.mode, settled: false }
+}
+
+/**
+ * AQU-2492 (review, Nov 9), finding 11: may this file follow `mode`? Asked of
+ * THE resolver the file's timing is resolved by, with the file's own choice
+ * set to `mode`: it may when choosing it is what the file would then follow.
+ * The switch (no caller writes a mode the resolver would ignore) and its Undo
+ * both ask this, so the rule lives in the resolver alone — whatever it says
+ * about films and files with nothing to follow, both follow it. `opts` are
+ * the resolver's own; with a choice stated, only these two can override it.
+ */
+export function fileMayFollowTiming(
+  file: Parameters<typeof resolveFileTimingMode>[0],
+  project: Parameters<typeof resolveFileTimingMode>[1],
+  opts: { hasAudioCues?: boolean; nothingToFollow?: boolean },
+  mode: FileTiming,
+): boolean {
+  const chosen = (file ? { ...file, timingMode: mode } : { timingMode: mode }) as Parameters<typeof resolveFileTimingMode>[0]
+  return resolveFileTimingMode(chosen, project, opts) === mode
+}
+
+export interface TimingStepContext {
+  /** What the file follows now; undefined when the file can't be read (not open). */
+  readTiming(fileId: string): FileTiming | undefined
+  /** The switch's own role rule: whether this person may switch a file's timing. */
+  mayChangeTiming(): boolean
+  /** Whether the file can follow `mode` now: what the file's timing resolver
+   *  says (`fileMayFollowTiming`). Today's resolver keeps a file timed to a
+   *  film on its source, and a file with nothing to follow on its recordings. */
+  offersTiming(fileId: string, mode: FileTiming): boolean
+  /** Write it; false when the write was refused. */
+  writeTiming(fileId: string, mode: FileTiming): Promise<boolean>
+  /**
+   * AQU-2492 (review, Nov 9), finding 5: whether a switch can be written now.
+   * The switch itself is refused offline (a queued mode leaves the toolbar on
+   * the old one until the connection is back), and so are its Undo and Redo:
+   * the step is kept, for when the person is back online.
+   */
+  online?(): boolean
+}
+
+/**
+ * AQU-2492 (review, Nov 9), finding 5: record a switch the moment it STARTS,
+ * waiting on its write (`write` resolves false when it was refused, which
+ * drops the step). ⌘Z pressed while it saves waits for it and undoes the
+ * switch; it never reaches past it to an older step, whose Redo the switch's
+ * step, landing late, would then have cleared.
+ */
+export function recordTimingSwitch(d: FileTimingData, where: { fileName?: string | null }, write: Promise<boolean>): void {
+  recordStep(
+    {
+      kind: "file.timing",
+      data: d,
+      labelKey: d.after === "audioFirst" ? "editor.history.stepTimingFollowsRecordings" : "editor.history.stepTimingFollowsSource",
+      fileId: d.fileId,
+      ...(where.fileName ? { fileName: where.fileName } : {}),
+    },
+    undefined,
+    { pending: write },
+  )
+}
+
+export function timingStepHandlers(ctx: TimingStepContext): Record<string, StepHandler<never>> {
+  const flip = async (d: FileTimingData, from: FileTiming, to: FileTiming): Promise<StepOutcome> => {
+    // Finding 5: offline, refused the way the switch is, and kept.
+    if (ctx.online && !ctx.online()) return { kind: "blocked", reason: "offline" }
+    // Who may: the switch's own rule, asked now (gap 29).
+    if (!ctx.mayChangeTiming()) return { kind: "skipped", reason: "notAllowed" }
+    const now = ctx.readTiming(d.fileId)
+    if (now === undefined) return GONE
+    // Someone else switched it since, or the file can no longer follow it.
+    if (now !== from || !ctx.offersTiming(d.fileId, to)) return CHANGED
+    return (await ctx.writeTiming(d.fileId, to)) ? DONE : { kind: "failed", error: new Error("timing refused") }
+  }
+  return {
+    "file.timing": {
+      undo: (d: FileTimingData) => flip(d, d.after, d.before),
+      redo: (d: FileTimingData) => flip(d, d.before, d.after),
+    } as StepHandler<never>,
+  }
 }
 
 // ── Cue links ───────────────────────────────────────────────────────────────

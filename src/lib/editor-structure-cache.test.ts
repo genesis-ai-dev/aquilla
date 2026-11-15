@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { createEditorStructureCache } from "./editor-structure-cache"
+import { createEditorStructureCache, tableLineNumber } from "./editor-structure-cache"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { CellRow } from "./sync/cells-read-types"
 import { cellNumberLabel, importDisplayLabel } from "./scripture-reference"
@@ -89,5 +89,20 @@ describe("verse parts", () => {
       })
     }
     expect(store.getCellIds().map(label)).toEqual(["4", "5a", "5b", "5c", null, "6"])
+  })
+})
+
+// AQU-2432 (review, Nov 9): the number the table's # column shows for a line,
+// read by the timeline's marker for a line with no room.
+describe("tableLineNumber", () => {
+  it("counts the table's numbered lines, skips headings, and answers nothing for a line it does not hold", () => {
+    const store = new CellStore()
+    store.setRuntime({ projectId: "p", fileId: "f", username: "alice", requiredValidations: 1, auditStats: new Map() })
+    store.replaceRows([row("h", { type: "heading" }), row("a", { anchorCellId: "h" }), row("b", { anchorCellId: "a" })])
+    const cache = createEditorStructureCache()
+    expect(tableLineNumber(store, cache, "a")).toBe("1")
+    expect(tableLineNumber(store, cache, "b")).toBe("2")
+    expect(tableLineNumber(store, cache, "h")).toBeNull()
+    expect(tableLineNumber(store, cache, "elsewhere")).toBeNull()
   })
 })

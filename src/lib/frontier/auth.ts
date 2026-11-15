@@ -1,3 +1,4 @@
+import { classifyApiHost } from "@/lib/deployment-environment"
 import { sessionClaims as jwtClaims } from "./session-claims"
 import { passwordResetReturnTo } from "../../../shared/password-reset-return-to"
 // Workspace auth module — wraps the aquilla-identity (/api/v2/auth/*).
@@ -92,7 +93,7 @@ export async function login(
   }
   // AQU-2469: dev.aquilla.app admits only platform admins and its access list.
   if (res.status === 403 && (await readErrorCode(res)) === "dev_access_restricted") {
-    throw new FrontierAuthError(t("auth.login.devAccessRestricted"), 403);
+    throw new FrontierAuthError(t(classifyApiHost(AUTH_BASE) === "preview" ? "auth.login.previewAccessRestricted" : "auth.login.devAccessRestricted"), 403);
   }
   if (!res.ok) {
     // The status stays on the error object for diagnostics; it isn't in the

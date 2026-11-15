@@ -19,6 +19,36 @@ export interface Evidence {
 
 export interface Recorded { project: string; status: string; evidence: Evidence | null }
 
+/** The identity Worker's refusal code for the dev access list (auth-worker/src/services/dev-access.ts). */
+export const DEV_ACCESS_RESTRICTED = "dev_access_restricted"
+
+/** Written beside suite.json when global setup stops for a reason the PR comment may repeat. */
+export const SETUP_FAILURE_FILE = "setup-failure.json"
+
+/**
+ * A global-setup failure whose message may be published: PR comments, run
+ * logs and artifacts are public, so the message is built only from a
+ * username, an HTTP status and a refusal code. Never wrap a caught error or
+ * a response body in one.
+ */
+export class SetupFailure extends Error {}
+
+/**
+ * Why a bot account could not sign in. A dev-access refusal names the list,
+ * because "HTTP 403" alone read as a broken harness for three days while the
+ * accounts were simply not listed (AQU-2562).
+ */
+export function loginFailure(username: string, status: number, code: unknown): string {
+  if (code !== DEV_ACCESS_RESTRICTED) return `login ${username} failed: HTTP ${status}`
+  if (status === 403) {
+    return `Sign-in was refused: ${username} is not on the dev access list (HTTP 403, ${DEV_ACCESS_RESTRICTED}). `
+      + "A platform admin must add the account's email under dev → Admin → Platform → Dev access "
+      + "(docs/security/preview-access.md)."
+  }
+  return `Sign-in was refused: the dev access list could not be read (HTTP ${status}, ${DEV_ACCESS_RESTRICTED}). `
+    + "The target fails closed until its DEV_ACCESS_LIST binding answers."
+}
+
 /**
  * Decide whether the run said anything about the build. The canary must
  * have run and passed, and at least one attack must have reached a verdict.

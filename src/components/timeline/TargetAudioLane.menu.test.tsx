@@ -265,8 +265,28 @@ describe("TargetAudioLane — per-line Change voice (AQU-2026)", () => {
     const item = await screen.findByTestId("tl-take-menu-change-voice")
     expect(item.textContent).toContain("Change voice")
     fireEvent.click(item)
-    expect(actions.changeVoice).toHaveBeenCalledWith("c1")
-    expect(actions.changeVoiceState).toHaveBeenCalledWith("c1")
+    expect(actions.changeVoice).toHaveBeenCalledWith("c1", TAKE)
+    expect(actions.changeVoiceState).toHaveBeenCalledWith("c1", TAKE)
+  })
+
+  // AQU-2499 (review, Nov 9): on an added track the menu re-voiced the main
+  // track's take; it now names the take that was right-clicked.
+  it("names the take right-clicked, so an added track's take is the one converted", async () => {
+    const ADDED = "audio-c1-1700000900-added.wav"
+    const actions = menuActions()
+    const onAdded = cell({ [ADDED]: { type: "audio", url: "frontier-audio://added", slot: "0199aaaa-track", durationMs: 4000 } })
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: onAdded, kind: "take", audioId: ADDED }]}
+        onCutTarget={vi.fn()}
+        takeMenu={actions}
+      />,
+    )
+    rightClick("tl-target-c1", 80)
+    fireEvent.click(await screen.findByTestId("tl-take-menu-change-voice"))
+    expect(actions.changeVoiceState).toHaveBeenCalledWith("c1", ADDED)
+    expect(actions.changeVoice).toHaveBeenCalledWith("c1", ADDED)
   })
 
   it("says nothing on a line whose only sound is the film's own audio", async () => {
@@ -304,6 +324,29 @@ describe("TargetAudioLane — per-line Change voice (AQU-2026)", () => {
     )
     rightClick("tl-target-c1", 80)
     expect(screen.queryByTestId("tl-take-menu-change-voice")).toBeNull()
+  })
+})
+
+// AQU-2499 (review, Nov 9): Change voice on a line whose recording other lines
+// share converted the whole recording, paid, once per line. It is refused,
+// and the item says why in one sentence.
+describe("TargetAudioLane — Change voice on a recording several lines share", () => {
+  it("greys the item and says how many lines share the recording", async () => {
+    const actions = menuActions({ changeVoiceState: vi.fn(() => changeVoiceState({ blocker: "shared", sharedLines: 24 })) })
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]}
+        onCutTarget={vi.fn()}
+        takeMenu={actions}
+      />,
+    )
+    rightClick("tl-target-c1", 80)
+    const item = await screen.findByTestId("tl-take-menu-change-voice")
+    expect(item.getAttribute("aria-disabled") === "true" || item.hasAttribute("data-disabled")).toBe(true)
+    expect(item.textContent).toContain("This recording is shared by 24 lines, so Change voice can't re-voice one line of it yet.")
+    fireEvent.click(item)
+    expect(actions.changeVoice).not.toHaveBeenCalled()
   })
 })
 

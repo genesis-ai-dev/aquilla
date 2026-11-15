@@ -136,11 +136,6 @@ export function orderPairs(pairs: CellPair[]): CellPair[] {
 
 // ── Selection ───────────────────────────────────────────────────────────────
 
-export interface SelectScope {
-  fileId?: string
-  range?: RefRange
-}
-
 interface PairRow {
   cell_id: string
   canonical_ref: string | null

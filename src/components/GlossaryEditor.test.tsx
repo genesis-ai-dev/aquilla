@@ -747,6 +747,82 @@ describe("GlossaryEditor — term-base file import (AQU-684)", () => {
     expect(emitTermCreate).not.toHaveBeenCalled()
   })
 
+  // AQU-2487 (import sweep, Nov 2): the import appended every term in the
+  // file, so picking the same word list again doubled every term.
+  it("adds nothing when the same file is imported again, and says so", async () => {
+    const { container } = renderEditor()
+
+    pickFile(container, "Lexicon.lift", FLEX_EXPORT)
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalledTimes(1))
+
+    pickFile(container, "Lexicon.lift", FLEX_EXPORT)
+    expect(await screen.findByText(/Every term in this file is already in the list/)).toBeInTheDocument()
+    expect(emitTermCreate).toHaveBeenCalledTimes(1)
+  })
+
+  it("adds only the terms an updated file brings that the list doesn't have yet", async () => {
+    const { container } = renderEditor()
+    const created = (call: number) => {
+      const term = emitTermCreate.mock.calls[call][0] as { sourceTerm: string; renderings: { rendering: string }[] }
+      return [term.sourceTerm, term.renderings.map((r) => r.rendering)]
+    }
+    const entry = (gloss: string, word: string) =>
+      `<entry><lexical-unit><form lang="pmy"><text>${word}</text></form></lexical-unit>
+        <sense><gloss lang="en"><text>${gloss}</text></gloss></sense></entry>`
+
+    pickFile(container, "Lexicon.lift", FLEX_EXPORT)
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalledTimes(1))
+
+    // "light" is unchanged and "water" is new: only "water" is added.
+    pickFile(container, "Lexicon.lift", `<lift version="0.13">${entry("light", "trang")}${entry("water", "wai")}</lift>`)
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalledTimes(2))
+    expect(created(1)).toEqual(["water", ["wai"]])
+
+    // "light" with another word is a change someone has to look at, so it
+    // still comes in as its own term, as before.
+    pickFile(container, "Lexicon.lift", `<lift version="0.13">${entry("light", "cahaya")}${entry("water", "wai")}</lift>`)
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalledTimes(3))
+    expect(created(2)).toEqual(["light", ["cahaya"]])
+  })
+
+  // AQU-2487 (review, Nov 9): an updated word list left most of its terms
+  // out and added a few, and no line said how many of each.
+  it("says how many terms an import added and how many were already in the list", async () => {
+    const { container } = renderEditor()
+    const entry = (gloss: string, word: string) =>
+      `<entry><lexical-unit><form lang="pmy"><text>${word}</text></form></lexical-unit>
+        <sense><gloss lang="en"><text>${gloss}</text></gloss></sense></entry>`
+    const lift = (...entries: string[]) => `<lift version="0.13">${entries.join("")}</lift>`
+    const light = entry("light", "trang")
+    const water = entry("water", "wai")
+    const fire = entry("fire", "api")
+    const earth = entry("earth", "tanah")
+
+    // A first import: nothing was there before, so only the added count.
+    pickFile(container, "Lexicon.lift", lift(light))
+    const notice = await screen.findByTestId("term-import-notice")
+    expect(notice).toHaveTextContent(/^1 term added\.$/)
+
+    pickFile(container, "Lexicon.lift", lift(light, water, fire))
+    await waitFor(() =>
+      expect(screen.getByTestId("term-import-notice")).toHaveTextContent(
+        "2 terms added. 1 term in the file was already in the list.",
+      ),
+    )
+
+    pickFile(container, "Lexicon.lift", lift(light, water, fire, earth))
+    await waitFor(() =>
+      expect(screen.getByTestId("term-import-notice")).toHaveTextContent(
+        "1 term added. 3 terms in the file were already in the list.",
+      ),
+    )
+
+    // Nothing new: the line that says so replaces the counts.
+    pickFile(container, "Lexicon.lift", lift(light, water))
+    expect(await screen.findByText(/Every term in this file is already in the list/)).toBeInTheDocument()
+    expect(screen.queryByTestId("term-import-notice")).toBeNull()
+  })
+
   // AQU-1693: a shared termbase keeps its Bible entity links, so nobody has
   // to link Jesus again in the project that imports it.
   it("keeps a TBX entry's Bible entity link through the import into term.create", async () => {

@@ -29,8 +29,13 @@ import { MAX_VOICE_CLIP_BYTES, voiceRefObjectKey, type VoiceConvertEnv } from ".
  *  the same floor as editing the project's voice settings. */
 export const CUSTOM_VOICE_ROLE_LEVEL = 600
 
-/** At most this many recordings per voice (each ≤ MAX_VOICE_CLIP_BYTES). */
-export const MAX_CUSTOM_VOICE_CLIPS = 40
+/**
+ * At most this many uploads per voice (each ≤ MAX_VOICE_CLIP_BYTES). The app
+ * cuts a long WAV into pieces of that size (AQU-2573), so this, not the
+ * per-upload cap, is what bounds a recording: 80 fits an hour of 48 kHz /
+ * 24-bit stereo. The forge takes clip indexes below 200.
+ */
+export const MAX_CUSTOM_VOICE_CLIPS = 80
 
 /** Per-user starts per rate-limit window. A start is ~45 GPU-minutes. */
 export const CUSTOM_VOICE_STARTS_PER_WINDOW = 5

@@ -3,8 +3,11 @@
 // WHY these tests matter:
 //   - The user's key must reach ElevenLabs as `xi-api-key` and nowhere else:
 //     never in a log line, never in an R2 object.
-//   - ElevenLabs' error envelope has to land on the four failures the UI can
-//     explain (bad key, out of characters, plan can't clone, rate limited).
+//   - ElevenLabs' error envelope has to land on the failures the UI can
+//     explain (bad key, out of characters, plan can't clone, rate limited,
+//     a restricted key missing a permission).
+//   - A restricted key without `user_read` is a valid key: it must connect,
+//     with its quota reported as unknown, not be refused as a bad one.
 //   - A generated clip must follow /voice/tts's storage + response contract,
 //     and a converted one /voice/convert's (vc-<fingerprint>-audio-<cell>…),
 //     or the client's attach and take-lineage code would not recognise them.
@@ -113,6 +116,15 @@ function stubUpstream(responder: (url: string) => Response) {
 const mp3 = (n = 16000) => new Uint8Array(n).fill(0xff)
 const elError = (status: number, code: string) =>
   Response.json({ detail: { type: "x", code, status: code, message: code } }, { status })
+/** What ElevenLabs answers a restricted key with (captured from the live API, Nov 2026). */
+const missingPermission = (permission: string) => Response.json({
+  detail: {
+    type: "authentication_error",
+    code: "unauthorized",
+    message: `The API key you used is missing the permission ${permission} to execute this operation.`,
+    status: "missing_permissions",
+  },
+}, { status: 401 })
 
 /** Every console line written during the test, joined — the key must never be in it. */
 let logged: string[] = []
@@ -144,11 +156,43 @@ describe("ElevenLabs reads", () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
       tier: "creator", characterCount: 12_340, characterLimit: 100_000, canClone: true, resetAtUnix: 1_800_000_000,
+      quotaKnown: true,
     })
     expect(calls).toHaveLength(1)
     expect(calls[0].url).toBe(`${BASE}/v1/user/subscription`)
     expect(calls[0].headers.get("xi-api-key")).toBe(KEY)
     expect(calls[0].url).not.toContain(KEY)
+  })
+
+  it("connects a restricted key that may list voices but not read the account", async () => {
+    const calls = stubUpstream((url) => url.includes("/v1/user/subscription")
+      ? missingPermission("user_read")
+      : Response.json({ voices: [{ voice_id: "v1", name: "Rachel", category: "premade" }], has_more: false }))
+    const res = await get(makeEnv(), "user?projectId=p1", { Authorization: `Bearer ${await token()}`, "X-ElevenLabs-Key": KEY })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      tier: "", characterCount: 0, characterLimit: 0, canClone: null, resetAtUnix: null, quotaKnown: false,
+    })
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual(["/v1/user/subscription", "/v2/voices"])
+    expect(logged.join("\n")).not.toContain(KEY)
+  })
+
+  it("names the permission when a restricted key can read neither the account nor voices", async () => {
+    stubUpstream((url) => missingPermission(url.includes("/v1/user/subscription") ? "user_read" : "voices_read"))
+    const res = await get(makeEnv(), "user?projectId=p1", { Authorization: `Bearer ${await token()}`, "X-ElevenLabs-Key": KEY })
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({
+      error: "elevenlabs_missing_permission",
+      message: "ElevenLabs API key is missing the permission voices_read",
+      permission: "voices_read",
+    })
+  })
+
+  it("still refuses a key ElevenLabs does not know", async () => {
+    const calls = stubUpstream(() => elError(401, "invalid_api_key"))
+    const res = await get(makeEnv(), "user?projectId=p1", { Authorization: `Bearer ${await token()}`, "X-ElevenLabs-Key": KEY })
+    expect(res.status).toBe(401)
+    expect(calls).toHaveLength(1)
   })
 
   it("refuses before calling upstream without a key or a sync token", async () => {
@@ -213,6 +257,24 @@ describe("mapElevenLabsError", () => {
       const err = mapElevenLabsError(upstream, JSON.stringify({ detail: { code, status: code, message: code } }), context)
       expect([err.status, err.code], `${upstream} ${code}`).toEqual([status, mapped])
     }
+  })
+
+  it("tells a restricted key apart from a rejected one, and names what it lacks", () => {
+    const body = JSON.stringify({
+      detail: {
+        type: "authentication_error",
+        code: "unauthorized",
+        message: "The API key you used is missing the permission text_to_speech to execute this operation.",
+        status: "missing_permissions",
+      },
+    })
+    for (const context of ["tts", "sts", "clone", "read"] as const) {
+      const err = mapElevenLabsError(401, body, context)
+      expect([err.status, err.code, err.permission], context).toEqual([403, "elevenlabs_missing_permission", "text_to_speech"])
+    }
+    // No permission named: still not a rejected key.
+    const bare = mapElevenLabsError(401, JSON.stringify({ detail: { status: "missing_permissions", message: "" } }), "tts")
+    expect([bare.code, bare.permission]).toEqual(["elevenlabs_missing_permission", null])
   })
 
   it("surfaces a mapped error as JSON with the same status", async () => {

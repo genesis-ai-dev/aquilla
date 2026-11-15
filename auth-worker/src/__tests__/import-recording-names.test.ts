@@ -145,6 +145,61 @@ describe("POST /api/v1/import/recording-names", () => {
     expect(await response.json()).toMatchObject({ error: "invalid_naming_rule" })
   })
 
+  // AQU-2496 (review, Nov 9): a folder mixing "v01" with "v02a" and "v02b"
+  // failed every time: the prompt never said what {part} and {take} are or
+  // that a placeholder can't be optional, and an unusable answer came back
+  // with no reason, so asking again (temperature 0) got the same answer.
+  it("tells the assistant what {part} and {take} are, that no placeholder is optional, and how to write names with and without a piece", async () => {
+    const jwt = await seedLead()
+    const upstream = modelAnswers(GOOD_RULE)
+    await app.request("/api/v1/import/recording-names", { method: "POST", headers: authHeader(jwt), body: ruleBody() }, testEnv())
+    const prompt = (JSON.parse(String(upstream.mock.calls[0][1]?.body)) as { messages: Array<{ content: string }> }).messages[1].content
+    expect(prompt).toContain("{part} is a piece of one line")
+    expect(prompt).toContain("{take} is the number of a retake")
+    expect(prompt).toContain("never optional")
+    expect(prompt).toContain('"v{verse}{part}" fits both "v01" and "v02a"')
+    expect(prompt).toContain("use two templates")
+    expect(prompt).toContain("{any} can never sit right beside another placeholder")
+    expect(prompt).not.toContain("refused")
+  })
+
+  it("says why an unusable answer was refused, and puts that reason in the prompt when it is asked again", async () => {
+    const jwt = await seedLead()
+    const names = ["Ru-ch01_v01.wav", "Ru-ch01_v02a.wav", "Ru-ch01_v02b.wav"]
+    modelAnswers({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}{any}" }], books: { Ru: "RUT" } })
+    const first = await app.request("/api/v1/import/recording-names", { method: "POST", headers: authHeader(jwt), body: ruleBody({ names }) }, testEnv())
+    expect(first.status).toBe(502)
+    const refusal = await first.json() as { error: string; reason?: string }
+    expect(refusal.error).toBe("invalid_naming_rule")
+    expect(refusal.reason).toContain('"{book}-ch{chapter}_v{verse}{any}"')
+    expect(refusal.reason).toContain("{any} can't sit right beside another placeholder")
+
+    vi.restoreAllMocks()
+    const upstream = modelAnswers({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}{part}" }], books: { Ru: "RUT" } })
+    const second = await app.request("/api/v1/import/recording-names", {
+      method: "POST", headers: authHeader(jwt), body: ruleBody({ names, refused: refusal.reason }),
+    }, testEnv())
+    expect(second.status).toBe(200)
+    const prompt = (JSON.parse(String(upstream.mock.calls[0][1]?.body)) as { messages: Array<{ content: string }> }).messages[1].content
+    expect(prompt).toContain("Your last answer for these names was refused")
+    expect(prompt).toContain(`<refused-because>${JSON.stringify(refusal.reason)}</refused-because>`)
+    const { rule } = await second.json() as { rule: { templates: unknown[] } }
+    expect(rule.templates).toEqual([{ pattern: "{book}-ch{chapter}_v{verse}{part}" }])
+  })
+
+  it("gives a reason for an answer that isn't JSON, and refuses an over-long reason sent back before calling the model", async () => {
+    const jwt = await seedLead()
+    modelAnswers("Here is the rule you asked for")
+    const response = await app.request("/api/v1/import/recording-names", { method: "POST", headers: authHeader(jwt), body: ruleBody() }, testEnv())
+    expect(response.status).toBe(502)
+    expect((await response.json() as { reason?: string }).reason).toContain("JSON")
+    vi.restoreAllMocks()
+    const upstream = vi.spyOn(globalThis, "fetch")
+    const long = await app.request("/api/v1/import/recording-names", { method: "POST", headers: authHeader(jwt), body: ruleBody({ refused: "x".repeat(2000) }) }, testEnv())
+    expect(long.status).toBe(400)
+    expect(upstream).not.toHaveBeenCalled()
+  })
+
   it("reads the model's loose ends the way the browser does: a long explanation trimmed, a null one and an empty folder as none", async () => {
     const jwt = await seedLead()
     modelAnswers({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}", folder: "" }], books: { Mt: "MAT" }, explanation: "x".repeat(400) })

@@ -68,10 +68,13 @@ import { emitCellAudioGain } from "@/lib/sync/events-emit"
 import { levelBeforeCut, levelsAfterCut } from "./cut-take"
 import { takeStepHandlers, type TakeAddData } from "@/lib/history/take-steps"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
+import type { CellData } from "@/hooks/useCells"
 
 const session = { jwt: "jwt", username: "dev", createdAt: "" } as never
 const URL_A = "frontier-audio://audio-c1-1700000000000-a.wav"
-const args = { session, projectId: "p1", fileId: "f1", cellId: "c1", slot: "recording", username: "dev" }
+// The line the joined take lands on (dev's Join places it, AQU-2492).
+const LINE_C1 = { id: "c1", fileId: "f1", startTime: 10, endTime: 20 } as unknown as CellData
+const args = { session, projectId: "p1", fileId: "f1", cellId: "c1", slot: "recording", username: "dev", line: LINE_C1, onLayer: false }
 /** The browser pass's take: 3.4 s, +6 dB, a 300 ms fade-in and a 500 ms fade-out. */
 const TAKE = { gainDb: 6, fadeInMs: 300, fadeOutMs: 500, durationMs: 3400 }
 

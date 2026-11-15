@@ -157,7 +157,7 @@ describe("take.cut", () => {
     it("undo joins the halves while both still have the levels the cut gave them", async () => {
       const { ctx, handlers } = ctxFor(structuredClone(asCut))
       expect(await handlers["take.cut"].undo({ cuts: [withLevel()] })).toEqual({ kind: "done" })
-      expect(ctx.uncut).toHaveBeenCalledWith(withLevel())
+      expect(ctx.uncut).toHaveBeenCalledWith(expect.objectContaining(withLevel()))
     })
 
     it("is skipped once someone has changed a piece's volume or fades since", async () => {
@@ -183,7 +183,7 @@ describe("take.cut", () => {
       }
       const { ctx, handlers } = ctxFor(structuredClone(oldWorker))
       expect(await handlers["take.cut"].undo({ cuts: [withLevel()] })).toEqual({ kind: "done" })
-      expect(ctx.uncut).toHaveBeenCalledWith(withLevel())
+      expect(ctx.uncut).toHaveBeenCalledWith(expect.objectContaining(withLevel()))
       // …and still skipped once a piece's level was changed since.
       const changed = structuredClone(oldWorker)
       changed.b = { ...changed.b, gainDb: 3 }

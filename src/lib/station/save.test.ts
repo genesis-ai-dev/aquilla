@@ -218,7 +218,6 @@ describe("Save as new version", () => {
           applyPlace: async () => {},
           cut: async () => true,
           uncut: async () => {},
-          newPieceId: () => "fresh",
           select: async (_c, _slot, id) => {
             if (id) takes[id] = { ...takes[id], isDeleted: false }
           },

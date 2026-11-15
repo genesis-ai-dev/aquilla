@@ -118,7 +118,6 @@ const S1 = `The first line${PAD}`
 const S2 = `The second line${PAD}`
 const S3 = `The third line${PAD}`
 const T1 = "Première ligne, traduite."
-const T2 = "Deuxième ligne, traduite."
 const T3 = "Troisième ligne, traduite."
 const NOTE = (text: string) => `\\f + \\ft ${text}\\f*`
 

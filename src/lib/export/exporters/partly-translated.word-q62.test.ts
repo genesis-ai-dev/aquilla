@@ -605,7 +605,6 @@ describe("Word export — what a lost line owns is its own text range and its fo
   // stays, emptied of its words, with those marks in it, whatever follows it.
   // Nothing moves to another paragraph, so nothing pointing at them, or
   // pairing with them, is left without them or ends before it starts.
-  const nextOf = (xml: string) => xml.match(/<w:body>[\s\S]*?(<w:p\b[^>]*>(?:(?!<\/w:p>)[\s\S])*Next paragraph\.[\s\S]*?<\/w:p>)/)![1]
   it("a heading whose lines are all lost stays, emptied, with its bookmark, so the contents' page number still finds it", async () => {
     const pageRef = para(`<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGEREF _Toc1 \\h </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r>${run("3")}<w:r><w:fldChar w:fldCharType="end"/></w:r>`)
     const heading = `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:bookmarkStart w:id="5" w:name="_Toc1"/>${run("Chapter one heading.")}<w:bookmarkEnd w:id="5"/></w:p>`

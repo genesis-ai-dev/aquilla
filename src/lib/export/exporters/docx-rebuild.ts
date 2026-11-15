@@ -533,7 +533,8 @@ function pairOf(piece: Leaf): { key: string; side: "start" | "end" | "reference"
     const reference = children.find((c): c is XmlElement => isElement(c) && c.tagName === "w:commentReference")
     return reference ? { key: `comment:${reference.attributes["w:id"] ?? ""}`, side: "reference" } : null
   }
-  const mark = piece.kind === "keep" ? PAIRED_MARKS[piece.el.tagName] : undefined
+  if (piece.kind !== "keep") return null
+  const mark = PAIRED_MARKS[piece.el.tagName]
   return mark ? { key: `${mark[0]}:${piece.el.attributes["w:id"] ?? ""}`, side: mark[1] } : null
 }
 

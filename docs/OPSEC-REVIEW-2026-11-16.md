@@ -234,10 +234,41 @@ FACT on the behaviour]
    question, and the lane path is the enforced one.
 3. **`knowledge.ts` is the new head of the queue** (OPS-48: 2 writes). The
    ledger carries the row, so the next pass does not need this document.
-4. **Still outstanding and unchanged from earlier passes:** OPS-55 — restore
-   the Jev model provider, *then* tighten `harnessHealth`, in that order, and
-   until both are done treat a green **Adversarial Jev** comment as saying
-   nothing (read its `inconclusive`/`passed` counts instead); 10-26's audit of
+4. **OPS-55 got worse while this pass was open, and this PR's own run is the
+   limit case of the bug.** [FACT] The **Adversarial Jev** comment on
+   `c23e802e` reports *"No failures found."* over
+   **no evidence: 11 · inconclusive: 6 · passed: 1**. One attack of eighteen
+   ran. The provider 404 11-09 reported (*"Model provider returned HTTP 404; no
+   action executed"*) is still unfixed nine days later, and the run also shows a
+   category 11-09 did not record: eleven rows with **no evidence at all**, their
+   attack names rendered as `?`.
+
+   The rule is `smart-tests/adversarial/health.ts:63`:
+
+   ```ts
+   if (attacks.length > 0 && attacks.every((entry) =>
+         entry.evidence?.outcome.verdict === "inconclusive" || !entry.evidence)) {
+     return { available: false, reason: "Every attack ended inconclusive." }
+   }
+   ```
+
+   Because the predicate is `every`, **one** passing attack is enough to certify
+   the whole run healthy — and the one that passed, `signoff.two-reviewers`, is
+   among the handful needing no model agent. So the gate's own trend is
+   **3 inconclusive / 15 passed** (#1927, 11-07) → **14 / 4** (11-09) →
+   **17 dark / 1 passed** (this PR, 11-16), green at every step. 11-09 called a
+   partial outage "indistinguishable from a healthy run"; this run shows there
+   is no floor to that at all.
+
+   Still **reported, not fixed**, for 11-09's reasons, which this pass has no
+   standing to overrule: tightening the threshold turns the job red on every
+   open PR until the provider is restored, and it is not auth/session code.
+   Order remains: restore the provider, *then* tighten. Note for this series in
+   particular — `redteam.edit-other-project` and `redteam.viewer-wipe-file`, the
+   suite's only cross-project **authorization** attacks and the ones most
+   relevant to every finding in this series, are among the dark rows and have
+   now not run on any commit since 11-07.
+5. **Still outstanding and unchanged from earlier passes:** 10-26's audit of
    `integration_connections` / `integration_links` for rows written on platform
    authority; the QA-walker identity question 10-12 left open (platform-admin
    paths are not QA-walkable on any preview — `scripts/cloudflare-stack-preview.mjs`

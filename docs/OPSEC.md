@@ -543,7 +543,15 @@
 > actor, so a smaller gap than 11-02's and 11-09's); a `kind: "file"` scope is
 > stored without checking it names a file of the project, which narrows rather
 > than widens and so is reported, not fixed; and `knowledge.ts` is the new head
-> of the queue.
+> of the queue. The pass also records **OPS-55 degrading further** while it was
+> open, with its own PR as the limit case: the Adversarial Jev comment on
+> `c23e802e` read *"No failures found."* over **no evidence: 11 · inconclusive:
+> 6 · passed: 1**. Because `harnessHealth`'s rule is `attacks.every(…)`, a
+> *single* passing attack certifies the whole run — so the trend is 3/15
+> (11-07) -> 14/4 (11-09) -> **17 dark / 1 passed** (11-16), green throughout,
+> and the provider 404 is unfixed nine days on. Still reported, not fixed, for
+> 11-09's reasons; the two cross-project authorization attacks most relevant to
+> this series have not run on any commit since 11-07.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)

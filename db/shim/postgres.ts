@@ -49,11 +49,19 @@
 // Connection timeouts (AQU-1876)
 // ---------------------------------
 // Every handle built by makePostgres() carries `statement_timeout` and
-// `idle_in_transaction_session_timeout` as Postgres *startup parameters*, so
-// the ceilings are in force from the connection's first query at zero extra
-// round-trips. One pathological query (a whole-project search, a large
-// confidence read) can otherwise hold a Neon connection and compute
-// indefinitely, starving Hyperdrive for every other request.
+// `idle_in_transaction_session_timeout` as Postgres *startup parameters*. One
+// pathological query (a whole-project search, a large confidence read) can
+// otherwise hold a Neon connection and compute indefinitely, starving
+// Hyperdrive for every other request.
+//
+// On a DIRECT connection (local dev stack, tests, scripts) that puts the
+// ceilings in force from the first query at zero extra round-trips. Through
+// Hyperdrive it does not: Hyperdrive forwards only `application_name` from
+// the startup message, so a deployed worker's sessions run with no statement
+// ceiling until the role they log in as carries one as its default. What was
+// measured, and the runbook for that default: docs/POSTGRES-TIMEOUTS.md.
+// A transaction-local `SET LOCAL` does work through Hyperdrive, so everything
+// below about long operations holds in both cases.
 //
 // Long operations that legitimately outrun the default opt out through ONE
 // registry — LONG_OPERATION_TIMEOUTS below — via

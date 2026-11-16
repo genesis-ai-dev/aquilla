@@ -84,7 +84,11 @@ CONCURRENTLY` takes an explicit non-transactional path and must stay idempotent
 `lock_timeout` — 5 s by default, `AQUILLA_MIGRATION_LOCK_TIMEOUT` to widen it
 for a window where blocking every write to `events`/`cells` is acceptable — so a
 migration queued behind a long transaction fails fast instead of holding the
-write queue open. **`neon:apply:prod` refuses without a snapshot decision:**
+write queue open. Every migration session also opts out of the statement and
+idle-in-transaction ceilings at startup, so a role-level default set for the
+workers cannot cancel a long statement part-way, and `apply` refuses to start
+if that did not take effect (`docs/POSTGRES-TIMEOUTS.md`).
+**`neon:apply:prod` refuses without a snapshot decision:**
 pass `--snapshot` to have it cut a `premigrate-<timestamp>` Neon branch off
 production first (instant and copy-on-write, and what you restore from if the
 apply goes wrong), or `--no-snapshot` if one already exists. `dev` and `local`

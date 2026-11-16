@@ -586,14 +586,29 @@ export function capInFlight(executor: PgExecutor, limit: number): PgExecutor {
 }
 
 /** Build an Aquilla database handle from a Postgres connection string (prod). */
-/** Per-request pool size. The events route fans out SIX prefetch SELECTs in
- *  one Promise.all (route.ts PERF-2) — at max=5 the sixth always queued behind
- *  a full pool, i.e. one guaranteed extra round-trip on every flush. 8 covers
- *  that fan-out with headroom for the concurrent membership/settings reads
- *  that follow, and connections are opened lazily (postgres.js dials only when
- *  a query has to wait), so a simple request still uses one or two. Hyperdrive
- *  pools the origin side, so the cost of the extra client connections is
- *  local to the Worker isolate and bounded by the request's lifetime. */
+/** Per-request pool size, and — since `capInFlight` — the ceiling on a
+ *  handle's concurrent work.
+ *
+ *  It is sized by the widest fan-out in either worker: the events route's
+ *  prefetch (`sync-worker/src/events/route.ts`, PERF-2) issues EIGHT SELECTs
+ *  in one Promise.all. It was six when this constant was chosen and has grown
+ *  since; at max=5 the sixth always queued behind a full pool, i.e. one
+ *  guaranteed extra round-trip on every flush.
+ *
+ *  So eight is EXACTLY that fan-out, with no headroom. The reads that follow
+ *  it (membership, settings) are sequential, so nothing else is in flight
+ *  beside it today — but a ninth prefetch SELECT added to that Promise.all
+ *  would silently run in a second wave rather than widening the pool. Raise
+ *  this (and re-check `capInFlight`'s limit, which tracks it) before widening
+ *  that array, not after.
+ *
+ *  Connections are opened lazily (postgres.js dials only when a query has to
+ *  wait), so a simple request still uses one or two. Hyperdrive pools the
+ *  origin side, so the cost of the extra client connections is local to the
+ *  Worker isolate and bounded by the request's lifetime.
+ *
+ *  The fan-outs in both workers that are WIDER than this, and what drives
+ *  each, are inventoried in `docs/QUERY-FAN-OUT-AUDIT-2026-11-16.md` (AQU-2614). */
 export const DEFAULT_POOL_MAX = 8
 
 /** Per-connection timeout overrides for makePostgres(). Omitted fields take

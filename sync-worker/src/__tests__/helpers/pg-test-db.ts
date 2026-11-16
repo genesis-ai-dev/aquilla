@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url"
 import path from "node:path"
 import { PostgresDb, type PgExecutor } from "../../../../db/shim/postgres"
 import { installTestLaneFill, rewriteTestLaneResolve } from "../../../../db/shared/test-lane-fill"
+import { guardPoolOverflow } from "../../../../db/shared/test-pool-guard"
 import { resetChainCacheForTests } from "../../events/cells-read-route"
 
 const SCHEMA = readFileSync(
@@ -235,7 +236,9 @@ export async function makeTestDb(seed: Seed = {}, opts: TestDbOptions = {}): Pro
   for (const [table, rows] of seeded) {
     await seedRows(pg, table, rows!)
   }
-  const db = new PostgresDb(pgliteExecutor(pg, opts)) as unknown as AquillaDb
+  // AQU-2613: a request may not have more statements in flight than its pool
+  // (DEFAULT_POOL_MAX) holds. See db/shared/test-pool-guard.ts.
+  const db = new PostgresDb(guardPoolOverflow(pgliteExecutor(pg, opts))) as unknown as AquillaDb
   return {
     db,
     pg,

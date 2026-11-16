@@ -191,7 +191,30 @@ export function AccountSecurity({
             </>
           )}
           {(status.enabled || setup) && !codes && (
-            <>
+            <form
+              className="flex flex-col gap-4"
+              onSubmit={(event) => {
+                event.preventDefault()
+                if (busy || !code) return
+                void run(async () => {
+                  if (setup) {
+                    const result = await securityRequest<{
+                      recoveryCodes: string[]
+                    }>(jwt, "confirm", {
+                      generation: setup.generation,
+                      code,
+                    })
+                    setCodes(result.recoveryCodes)
+                  } else {
+                    await securityRequest(jwt, "verify", {
+                      code,
+                      recovery,
+                    })
+                    await refresh()
+                  }
+                })
+              }}
+            >
               {recovery ? (
                 <Input
                   aria-label={t("auth.security.recoveryCode")}
@@ -203,6 +226,7 @@ export function AccountSecurity({
               )}
               {status.enabled && (
                 <Button
+                  type="button"
                   variant="link"
                   onClick={() => {
                     setRecovery(!recovery)
@@ -214,28 +238,7 @@ export function AccountSecurity({
                     : t("auth.security.useARecoveryCode")}
                 </Button>
               )}
-              <Button
-                disabled={busy || !code}
-                onClick={() =>
-                  void run(async () => {
-                    if (setup) {
-                      const result = await securityRequest<{
-                        recoveryCodes: string[]
-                      }>(jwt, "confirm", {
-                        generation: setup.generation,
-                        code,
-                      })
-                      setCodes(result.recoveryCodes)
-                    } else {
-                      await securityRequest(jwt, "verify", {
-                        code,
-                        recovery,
-                      })
-                      await refresh()
-                    }
-                  })
-                }
-              >
+              <Button type="submit" disabled={busy || !code}>
                 {setup
                   ? t("auth.security.confirmAuthenticator")
                   : t("auth.security.verify")}
@@ -246,6 +249,7 @@ export function AccountSecurity({
                     {t("auth.security.turnOffWarning")}
                   </p>
                   <Button
+                    type="button"
                     variant="destructive"
                     disabled={busy || !code}
                     onClick={() =>
@@ -263,6 +267,7 @@ export function AccountSecurity({
                     {t("auth.security.turnOffProtection")}
                   </Button>
                   <Button
+                    type="button"
                     variant="outline"
                     disabled={busy || !code}
                     onClick={() =>
@@ -283,12 +288,29 @@ export function AccountSecurity({
                   </Button>
                 </div>
               )}
-            </>
+            </form>
           )}
           {!status.enabled && !setup && status.configured && enrolling && (
             <>
               {status.password && (
-                <>
+                <form
+                  className="flex flex-col gap-4"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    if (busy || !password) return
+                    void run(async () => {
+                      await securityRequest(jwt, "password-proof", {
+                        password,
+                      })
+                      const s = await securityRequest<{
+                        secret: string
+                        generation: string
+                        uri: string
+                      }>(jwt, "setup", {})
+                      setSetup({ ...s, qr: await QRCode.toDataURL(s.uri) })
+                    })
+                  }}
+                >
                   <label htmlFor={passwordId}>
                     {t("auth.security.currentAquillaPassword")}
                   </label>
@@ -299,25 +321,10 @@ export function AccountSecurity({
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                   />
-                  <Button
-                    disabled={busy || !password}
-                    onClick={() =>
-                      void run(async () => {
-                        await securityRequest(jwt, "password-proof", {
-                          password,
-                        })
-                        const s = await securityRequest<{
-                          secret: string
-                          generation: string
-                          uri: string
-                        }>(jwt, "setup", {})
-                        setSetup({ ...s, qr: await QRCode.toDataURL(s.uri) })
-                      })
-                    }
-                  >
+                  <Button type="submit" disabled={busy || !password}>
                     {t("auth.security.setUpWithYourPassword")}
                   </Button>
-                </>
+                </form>
               )}
               {status.google && !status.google_verified && (
                 <Button

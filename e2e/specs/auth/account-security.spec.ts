@@ -37,7 +37,12 @@ test("authenticator enrollment protects settings, recovery unlocks them, and nor
       exact: true,
     }),
   ).toBeVisible()
-  await page.getByTestId("account-login-security").screenshot({ path: testInfo.outputPath("login-settings.png"), animations: "disabled" })
+  await page
+    .getByTestId("account-login-security")
+    .screenshot({
+      path: testInfo.outputPath("login-settings.png"),
+      animations: "disabled",
+    })
   await page
     .getByRole("button", { name: "Set up an authenticator app", exact: true })
     .click()
@@ -50,8 +55,8 @@ test("authenticator enrollment protects settings, recovery unlocks them, and nor
       r.request().method() === "POST",
   )
   await page
-    .getByRole("button", { name: "Set up with your password", exact: true })
-    .click()
+    .getByLabel("Current Aquilla password", { exact: true })
+    .press("Enter")
   const setup = (await (await setupResponse).json()) as { secret: string }
   await expect(page.getByRole("dialog")).toBeVisible()
   await expect(page.getByAltText("Authenticator setup QR code")).toBeVisible()
@@ -62,9 +67,7 @@ test("authenticator enrollment protects settings, recovery unlocks them, and nor
   await page
     .getByLabel("Authenticator code", { exact: true })
     .fill(await totp(setup.secret, Math.floor(Date.now() / 30000)))
-  await page
-    .getByRole("button", { name: "Confirm authenticator", exact: true })
-    .click()
+  await page.getByLabel("Authenticator code", { exact: true }).press("Enter")
   const codes = (await page.locator("pre").innerText()).split("\n")
   expect(codes).toHaveLength(8)
   await page
@@ -98,7 +101,7 @@ test("authenticator enrollment protects settings, recovery unlocks them, and nor
     .getByRole("button", { name: "Use a recovery code", exact: true })
     .click()
   await page.getByLabel("Recovery code", { exact: true }).fill(codes[0])
-  await page.getByRole("button", { name: "Verify", exact: true }).click()
+  await page.getByLabel("Recovery code", { exact: true }).press("Enter")
   await expect(
     page.getByRole("button", { name: "Change email", exact: true }),
   ).toBeVisible()

@@ -286,6 +286,32 @@ describe("verified email changes", () => {
     expect(await env.AQUILLA_PG.prepare("SELECT session_version FROM users WHERE id=1").first()).toEqual({session_version:1})
   })
 
+  // [Pen test] 2026-11-16: the code only reaches the new mailbox, so the old
+  // one is otherwise never told its account moved.
+  it("tells the old address once the change lands, and only then", async () => {
+    await request()
+    const sent = () => (send.mock.calls as unknown as [{ to: string[]; subject: string; text: string }][]).map(([mail]) => mail)
+    expect(sent().map(mail => mail.to)).toEqual([["new@example.com"]])
+    const token = code()
+    expect((await post("confirm", { token: token === "000000" ? "000001" : "000000" })).status).toBe(400)
+    expect(sent()).toHaveLength(1)
+    expect((await post("confirm", { token })).status).toBe(200)
+    const notice = sent().at(-1)!
+    expect(sent()).toHaveLength(2)
+    expect(notice.to).toEqual(["alice@example.com"])
+    expect(notice.subject).toBe("Your Aquilla account email was changed")
+    // No code and no new address: the notice proves nothing and leaks nothing.
+    expect(notice.text).not.toMatch(/[0-9]{6}|new@example\.com/)
+  })
+
+  it("still changes the email when the old-address notice cannot be delivered", async () => {
+    await request()
+    const token = code()
+    send.mockRejectedValueOnce(new Error("unavailable"))
+    expect((await post("confirm", { token })).status).toBe(200)
+    expect(await env.AQUILLA_PG.prepare("SELECT email FROM users WHERE id=1").first()).toEqual({ email: "new@example.com" })
+  })
+
   it("accepts password recovery issued to the newly verified email", async () => {
     await request()
     expect((await post("confirm",{token:code()})).status).toBe(200)

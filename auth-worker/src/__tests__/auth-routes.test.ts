@@ -235,6 +235,34 @@ describe("POST /api/v2/auth/register", () => {
     expect((await register(preview)).status).toBe(409)
   })
 
+  // [Pen test] 2026-11-16: a platform_admins row may be written before its
+  // owner signs up, and registering proves nothing about the mailbox.
+  it("refuses to self-register a platform_admins address in every environment", async () => {
+    await env.AQUILLA_PG.prepare("INSERT INTO platform_admins (email) VALUES ('pending-admin@example.com')").run()
+    const register = (e: typeof env, username: string, email: string) =>
+      app.request(
+        "/api/v2/auth/register",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, email, password: "very-secure" }),
+        },
+        e,
+      )
+    for (const ENVIRONMENT of ["production", "development"]) {
+      const res = await register({ ...env, ENVIRONMENT }, "squatter", "Pending-Admin@example.com")
+      expect(res.status).toBe(409)
+      // Same body as the ADMIN_EMAILS refusal: no token, nothing to tell them apart.
+      expect(await res.json()).toEqual({ detail: "User already exists", error: "Registration failed" })
+    }
+    // Nor as a username, which login would resolve ahead of the owner's email.
+    expect((await register(env, "pending-admin@example.com", "other@example.com")).status).toBe(409)
+    const rows = await env.AQUILLA_PG.prepare("SELECT 1 FROM users").all()
+    expect(rows.results.length).toBe(0)
+    // An ordinary address is unaffected.
+    expect((await register(env, "ordinary", "ordinary@example.com")).status).toBe(200)
+  })
+
   it("sends a welcome email on successful registration", async () => {
     const send = vi.fn(
       async (_message: {

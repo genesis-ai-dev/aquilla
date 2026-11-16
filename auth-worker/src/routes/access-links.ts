@@ -42,6 +42,7 @@ import {
   type ProjectAccessLinkRow,
 } from "../types"
 import { resolveProjectRole, isLinkRoleLevel } from "../services/project-permissions"
+import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { hashPasswordWerkzeugScrypt, verifyPasswordWerkzeugScrypt } from "../utils/password"
 import {
   ACCESS_LINK_REDEEM_MAX_PER_IP,
@@ -123,6 +124,56 @@ async function hasDivergedFootprint(
   return !!row
 }
 
+/**
+ * [Pen test] Auth & session (2026-11-16): standing the membership tables do
+ * not show. Redeeming a link is a full sign-in as the bound account, and the
+ * footprint checks only read `project_members` and `org_members` — so an
+ * account with power but no membership row passed as "fresh", and any user
+ * could mint a link for it from their own project and sign in as it.
+ *
+ * A platform admin is the sharpest case (identity is by email; no membership
+ * row is needed or usual), and it kills a link at redeem too. The rest apply
+ * at mint: an account that created a project (the creator fallback grants
+ * owner with no `project_members` row), sits in a team, holds a live API
+ * credential, or signs in with Google is somebody's working account, not a
+ * translator provisioned for this link.
+ */
+async function isPlatformAdminAccount(env: Env, userId: number): Promise<boolean> {
+  const row = await env.AQUILLA_PG.prepare("SELECT email FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ email: string | null }>()
+  return !!row?.email && (await isPlatformAdminEmail(env, row.email))
+}
+
+async function hasStandingOutsideMemberships(
+  env: Env,
+  userId: number,
+  projectId: string,
+): Promise<boolean> {
+  if (await isPlatformAdminAccount(env, userId)) return true
+  const row = await env.AQUILLA_PG.prepare(
+    `SELECT 1 FROM projects WHERE created_by = ? AND id != ?
+     UNION ALL
+     SELECT 1 FROM group_members WHERE user_id = ?
+     UNION ALL
+     SELECT 1 FROM api_credentials WHERE user_id = ? AND revoked_at IS NULL`,
+  )
+    .bind(userId, projectId, userId, String(userId))
+    .first()
+  if (row) return true
+  try {
+    return !!(await env.AQUILLA_PG.prepare(
+      "SELECT 1 FROM provider_identities WHERE user_id = ?",
+    )
+      .bind(userId)
+      .first())
+  } catch {
+    // The Google-login migration has not reached this database (see
+    // lib/google-login-schema.ts), so no account here signs in with Google.
+    return false
+  }
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // POST /api/v2/access-links — mint a per-user link + PIN.
 //
@@ -198,7 +249,7 @@ accessLinks.post("/", authMiddleware, zValidator("json", createSchema), async (c
         )
           .bind(userId, projectId, userId, orgId)
           .first()
-  if (foreignFootprint) {
+  if (foreignFootprint || (await hasStandingOutsideMemberships(c.env, userId, projectId))) {
     return c.json(
       { error: "target user already has access elsewhere on the platform" },
       403,
@@ -393,7 +444,11 @@ accessLinks.post("/:token/redeem", zValidator("json", redeemSchema), async (c) =
   // typically the minting project lead — sign in as a user who has since
   // joined other orgs/projects. Re-check at redeem; a diverged account's link
   // is dead (indistinguishable from any other dead link).
-  if (await hasDivergedFootprint(c.env.AQUILLA_PG, link.user_id, link.project_id)) {
+  // Becoming a platform admin diverges too, and writes no membership row.
+  if (
+    (await hasDivergedFootprint(c.env.AQUILLA_PG, link.user_id, link.project_id)) ||
+    (await isPlatformAdminAccount(c.env, link.user_id))
+  ) {
     await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, false)
     return c.json(DEAD_LINK, 401)
   }

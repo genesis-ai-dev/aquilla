@@ -37,6 +37,12 @@ import { DEFAULT_POOL_MAX } from "../shim/postgres"
 /** Statement methods: each call is one unit of work on one connection. */
 const UNIT_METHODS = new Set(["all", "first", "run", "raw", "batch", "batchPipelined"])
 
+/** `_on()` re-binds a statement onto a transaction's executor — the shim does
+ *  it for every statement inside a batch. Those run on the connection the
+ *  batch already holds, so what it hands back leaves the guard behind: the
+ *  batch was counted once, when it was asked for. */
+const UNCOUNTED_FROM = new Set(["_on"])
+
 export class PoolOverflowError extends Error {
   readonly limit: number
   readonly statement: string
@@ -103,6 +109,7 @@ export function guardPoolOverflow<T extends object>(db: T, limit = DEFAULT_POOL_
         return (...args: unknown[]) => {
           if (!UNIT_METHODS.has(name)) {
             const out = Reflect.apply(value, obj, args) as unknown
+            if (UNCOUNTED_FROM.has(name)) return out
             // prepare() / bind() / withUser() hand back more of the surface.
             return out && typeof out === "object" && !(out instanceof Promise) ? wrap(out) : out
           }

@@ -335,6 +335,16 @@ fix was applied — the series' standard decisive check.
   remaining output is the `partyserver` `TS2307`s from `sync-worker`, whose
   package is not installed in this environment — same as 09-28 through 11-09).
 * `npx eslint` on all three changed/new files: **0 errors, 0 warnings.**
+* Root `npx tsc -b --force`: **exit 0, no diagnostics** — the ledger file lives
+  under `scripts/`, which `tsconfig.node.json` owns rather than `auth-worker`'s
+  own `tsc`, so the auth-worker typecheck above does not cover it.
+* `pnpm run check:doc-pins`: **109 pins resolve across 402 docs.**
+* Full `auth-worker` suite (`npx vitest run`): **414 files, 4960 passing, 2
+  expected-fail, 0 failures** (1092 s). Nothing red remains in this package to
+  distinguish from the change under review — the condition that makes a suite
+  run worth anything as evidence — and it is clean for the fifth pass running.
+  11-09 measured 407 files / 4771 passing; the 7 new files and 189 new tests
+  since include this pass's own 16, and the two expected-fails are the same two.
 
 Environment note, for whoever re-runs this: dependencies are **not** installed
 in this container at session start. Use **`pnpm install --ignore-scripts`** at

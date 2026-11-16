@@ -44,6 +44,7 @@ function Harness({
   suggestions,
   emptySuggestionsHint,
   scopedSearch,
+  lookupProjectId,
   onStageTyped = () => {},
   onToggleResult = () => {},
 }: {
@@ -51,6 +52,7 @@ function Harness({
   suggestions?: Array<{ id: number; username: string; secondary?: string | null }>
   emptySuggestionsHint?: string
   scopedSearch?: boolean
+  lookupProjectId?: string | null
   onStageTyped?: () => void
   onToggleResult?: (u: { id: number; username: string }) => void
 }) {
@@ -63,6 +65,7 @@ function Harness({
       suggestions={suggestions}
       emptySuggestionsHint={emptySuggestionsHint}
       scopedSearch={scopedSearch}
+      lookupProjectId={lookupProjectId}
       multiSelect={
         multiSelect
           ? { stagedUsernames: new Set(), onToggleResult, onStageTyped }
@@ -146,7 +149,69 @@ describe("UsernameTypeahead — suggestions + settled-miss staging", () => {
     fireEvent.change(input(), { target: { value: "zed" } })
 
     expect(await screen.findByText(/no aquilla user named "zed"/i)).toBeInTheDocument()
-    expect(vi.mocked(lookupUser)).toHaveBeenCalledWith("jwt", "zed")
+    // AQU-2576 added a third argument: the project scoping an email lookup.
+    // Unscoped surfaces pass null, which keeps the route username-only.
+    expect(vi.mocked(lookupUser)).toHaveBeenCalledWith("jwt", "zed", null)
+  })
+
+  // AQU-2576: a project owner is given a reviewer's EMAIL, not their handle.
+  // Where a project scopes the lookup, the address resolves to the account and
+  // a miss says so in the address's own terms — "no account uses this email",
+  // not "no user named n@example.com".
+  describe("AQU-2576: resolving an add-member target by email", () => {
+    const EMAIL = "naladda@proton.me"
+
+    it("scopes the lookup to the project when one is given", async () => {
+      vi.mocked(lookupUser).mockResolvedValue({ id: 1220, username: "Naladda" })
+      render(<Harness multiSelect scopedSearch lookupProjectId="proj-1" />)
+      fireEvent.focus(input())
+      fireEvent.change(input(), { target: { value: EMAIL } })
+
+      expect(await screen.findByText(/is an aquilla user/i)).toBeInTheDocument()
+      expect(vi.mocked(lookupUser)).toHaveBeenCalledWith("jwt", EMAIL, "proj-1")
+    })
+
+    it("offers the resolved account by username — the string the owner needs", async () => {
+      vi.mocked(lookupUser).mockResolvedValue({ id: 1220, username: "Naladda" })
+      const onToggleResult = vi.fn()
+      render(
+        <Harness multiSelect scopedSearch lookupProjectId="proj-1" onToggleResult={onToggleResult} />,
+      )
+      fireEvent.focus(input())
+      fireEvent.change(input(), { target: { value: EMAIL } })
+
+      fireEvent.click(await screen.findByRole("button", { name: /add naladda/i }))
+      expect(onToggleResult).toHaveBeenCalledWith({ id: 1220, username: "Naladda" })
+    })
+
+    it("says no ACCOUNT uses the address when the lookup confirms the miss", async () => {
+      render(<Harness multiSelect scopedSearch lookupProjectId="proj-1" />)
+      fireEvent.focus(input())
+      fireEvent.change(input(), { target: { value: EMAIL } })
+
+      expect(
+        await screen.findByText(/no aquilla account uses the email naladda@proton\.me/i),
+      ).toBeInTheDocument()
+      expect(screen.queryByText(/no aquilla user named/i)).not.toBeInTheDocument()
+    })
+
+    it("keeps the username wording for a typed username, scoped or not", async () => {
+      render(<Harness multiSelect scopedSearch lookupProjectId="proj-1" />)
+      fireEvent.focus(input())
+      fireEvent.change(input(), { target: { value: "zed" } })
+
+      expect(await screen.findByText(/no aquilla user named "zed"/i)).toBeInTheDocument()
+    })
+
+    it("tells the person an email works here, only where one actually would", () => {
+      const hint = /enter their email address instead/i
+      const { unmount } = render(<Harness multiSelect scopedSearch lookupProjectId="proj-1" />)
+      expect(screen.getByText(hint)).toBeInTheDocument()
+      unmount()
+
+      render(<Harness multiSelect scopedSearch />)
+      expect(screen.queryByText(hint)).not.toBeInTheDocument()
+    })
   })
 })
 

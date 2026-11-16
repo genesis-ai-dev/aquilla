@@ -111,6 +111,13 @@ export interface MemberMultiAddRowProps {
    * picks every lane or names the ones this person may use.
    */
   targetLanes?: readonly TargetLaneOption[];
+  /**
+   * AQU-2576: the project being staffed. Passing it lets the typeahead resolve
+   * an EMAIL to the matching account (server-gated to callers who can already
+   * add members to that project) and shows the "enter their email instead"
+   * hint. Omit on org/team surfaces, where no single project scopes the lookup.
+   */
+  lookupProjectId?: string | null;
 }
 
 /**
@@ -134,6 +141,7 @@ export function MemberMultiAddRow({
   buttonSize = "default",
   grantScope,
   targetLanes = [],
+  lookupProjectId,
 }: MemberMultiAddRowProps) {
   const { t, locale } = useI18n();
   const searchDisabled = disabled || disabledReason != null;
@@ -333,6 +341,7 @@ export function MemberMultiAddRow({
             scopedSearch={scopedUserSearch}
             suggestions={suggestions}
             emptySuggestionsHint={emptySuggestionsHint}
+            lookupProjectId={lookupProjectId}
             multiSelect={{
               stagedUsernames,
               onToggleResult: (u) => toggleStaged({ username: u.username, id: u.id }),

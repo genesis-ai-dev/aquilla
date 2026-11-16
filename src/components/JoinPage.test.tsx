@@ -25,8 +25,16 @@ vi.mock("@/lib/sync/invites", () => ({
   acceptMultiInvite: vi.fn(async () => ({ ok: false, reason: "invalid" })),
 }))
 
-let sessionValue: { session: { jwt: string } | null; loading: boolean } = { session: null, loading: false }
-vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => sessionValue }))
+let sessionValue: {
+  session: { jwt: string; username?: string; email?: string } | null
+  loading: boolean
+} = { session: null, loading: false }
+// AQU-2576: the email-mismatch rejection offers a sign-out, so the hook's
+// logout is part of this page's contract now.
+const logoutSpy = vi.fn(async () => {})
+vi.mock("@/hooks/useFrontierSession", () => ({
+  useFrontierSession: () => ({ ...sessionValue, logout: logoutSpy }),
+}))
 
 vi.mock("@/components/git-import/FrontierSignupForm", () => ({
   FrontierSignupForm: ({ onSuccess, initialEmail }: { onSuccess: () => void; initialEmail?: string | null }) => (
@@ -260,13 +268,92 @@ describe("JoinPage AQU-364: accept-time failures are classified honestly", () =>
     expect(await screen.findByText(/couldn't reach the server/i)).toBeInTheDocument()
   })
 
-  it("shows the wrong-email error when accept returns 403", async () => {
-    sessionValue = { session: { jwt: fakeJwt(3600) }, loading: false }
+  it("shows the wrong-email error when accept returns 403 and the server names no address", async () => {
+    sessionValue = { session: { jwt: fakeJwt(3600), username: "Naladda" }, loading: false }
     vi.mocked(acceptMultiInvite).mockResolvedValueOnce({ ok: false, reason: "wrong_email" })
     vi.mocked(acceptServerInvite).mockResolvedValueOnce({ ok: false, reason: "wrong_email" })
     renderJoin()
     fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }))
     expect(await screen.findByText("This invite was sent to a different email address.")).toBeInTheDocument()
+  })
+})
+
+// AQU-2576: the real failure this replaces — an invite minted for one address,
+// opened by an account registered under another. The old screen said only
+// "This invite was sent to a different email address.", which told neither the
+// recipient which account to use nor the owner which account to add. It cost a
+// Biblica reviewer a working day.
+describe("JoinPage — email-mismatch rejection (AQU-2576)", () => {
+  const session = {
+    jwt: fakeJwt(3600),
+    username: "Naladda",
+    email: "naladda.other@example.com",
+  }
+
+  function mockMismatch(invitedEmail?: string) {
+    vi.mocked(acceptMultiInvite).mockResolvedValueOnce({ ok: false, reason: "wrong_email" })
+    vi.mocked(acceptServerInvite).mockResolvedValueOnce(
+      invitedEmail
+        ? { ok: false, reason: "wrong_email", invitedEmail }
+        : { ok: false, reason: "wrong_email" },
+    )
+  }
+
+  async function reject(invitedEmail?: string) {
+    sessionValue = { session, loading: false }
+    mockMismatch(invitedEmail)
+    renderJoin()
+    fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }))
+  }
+
+  it("names the address the invite was for, as the server masked it", async () => {
+    await reject("n…l@proton.me")
+    expect(await screen.findByText(/this invite is for/i)).toBeInTheDocument()
+    expect(screen.getByText("n…l@proton.me")).toBeInTheDocument()
+  })
+
+  it("names the signed-in account in full — the string the owner needs", async () => {
+    await reject("n…l@proton.me")
+    expect(await screen.findByText("Naladda")).toBeInTheDocument()
+    expect(screen.getByText(/you're signed in as/i)).toBeInTheDocument()
+  })
+
+  it("masks the signed-in account's own address", async () => {
+    await reject("n…l@proton.me")
+    expect(await screen.findByText(/n…r@example\.com/)).toBeInTheDocument()
+    expect(screen.queryByText(/naladda\.other@example\.com/)).not.toBeInTheDocument()
+  })
+
+  it("offers both ways out: sign in as the invited address, or be added directly", async () => {
+    await reject("n…l@proton.me")
+    expect(
+      await screen.findByRole("button", { name: /sign out and use the invited address/i }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/ask the project owner to add your account/i)).toBeInTheDocument()
+  })
+
+  it("signs out on request, returning the page to its sign-in state", async () => {
+    await reject("n…l@proton.me")
+    fireEvent.click(
+      await screen.findByRole("button", { name: /sign out and use the invited address/i }),
+    )
+    await waitFor(() => expect(logoutSpy).toHaveBeenCalled())
+  })
+
+  it("never auto-joins — the person chose which account to sign in with", async () => {
+    await reject("n…l@proton.me")
+    await screen.findByText(/this invite is for/i)
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the generic sentence when the server names no address", async () => {
+    await reject()
+    expect(
+      await screen.findByText("This invite was sent to a different email address."),
+    ).toBeInTheDocument()
+    // The rest of the help still renders — the username is the fact that
+    // unblocks the other way out, and it does not depend on the server.
+    expect(screen.getByText(/ask the project owner to add your account/i)).toBeInTheDocument()
   })
 })
 

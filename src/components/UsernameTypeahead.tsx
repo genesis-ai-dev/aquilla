@@ -15,6 +15,7 @@ import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
 import { useExactUserLookup } from "@/hooks/useExactUserLookup"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
+import { looksLikeEmail } from "../../db/shared/mask-email"
 
 /** AQU-2609: how wide the suggestion list may grow, and the viewport margin it keeps. */
 const DROPDOWN_CAP_PX = 480
@@ -90,6 +91,14 @@ interface Props {
   suggestions?: readonly TypeaheadPerson[]
   /** Shown when `suggestions` is provided but empty and nothing is typed. */
   emptySuggestionsHint?: string
+  /**
+   * AQU-2576: the project being staffed. When set, the exact lookup resolves an
+   * EMAIL as well as a username, so an owner who was given a reviewer's address
+   * and not their handle can still find the account — and the dead-end states
+   * say "no account uses this email" instead of "no user named <address>".
+   * Omit where no single project is in hand; the input stays username-only.
+   */
+  lookupProjectId?: string | null
 }
 
 /**
@@ -162,6 +171,7 @@ export function UsernameTypeahead({
   multiSelect,
   suggestions,
   emptySuggestionsHint,
+  lookupProjectId,
 }: Props) {
   const { t, locale } = useI18n()
   const [open, setOpen] = useState(false)
@@ -239,7 +249,13 @@ export function UsernameTypeahead({
   const exactLookup = useExactUserLookup(
     value.mode === "username" ? trimmedRaw : "",
     canShowSettledEmptyState && lastFetchOk,
+    lookupProjectId,
   )
+  // AQU-2576: an email can only resolve where the caller named a project they
+  // can staff, so the email-flavoured copy follows the same condition as the
+  // lookup itself — nowhere else does the input accept an address at all.
+  const emailLookupAvailable = lookupProjectId != null && lookupProjectId !== ""
+  const typedLooksLikeEmail = emailLookupAvailable && looksLikeEmail(trimmedRaw)
   const exactLookupCurrent = exactLookup.forUsername === trimmedRaw
   const exactUser =
     exactLookupCurrent && exactLookup.status === "found" ? exactLookup.user : null
@@ -428,6 +444,16 @@ export function UsernameTypeahead({
         </InputGroup>
       </div>
 
+      {/* AQU-2576: the field is labelled "Aquilla username", and an owner
+          staffing a project usually has an email and nothing else. Say that the
+          address works here, under the field, rather than leaving them to find
+          out from a dead end. Only where the server will actually resolve one. */}
+      {value.mode === "username" && emailLookupAvailable && !disabled && (
+        <p className="text-[11px] text-muted-foreground">
+          {t("workspace.typeahead.emailAlsoWorksHint")}
+        </p>
+      )}
+
       {/* Username suggestions dropdown */}
       {showSuggestions && dropdownPosition && typeof document !== "undefined" && createPortal(
         <div
@@ -515,7 +541,9 @@ export function UsernameTypeahead({
               ) : exactLookup.status === "notfound" ? (
                 <>
                   <p className="text-[11px] text-muted-foreground">
-                    {t("workspace.typeahead.noUserNamed", { query: trimmedRaw })}
+                    {typedLooksLikeEmail
+                      ? t("workspace.typeahead.noAccountWithEmail", { query: trimmedRaw })
+                      : t("workspace.typeahead.noUserNamed", { query: trimmedRaw })}
                   </p>
                   {showModeToggle && (
                     <button

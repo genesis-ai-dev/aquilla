@@ -9,10 +9,14 @@ import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/ra
 import { isPlatformAdmin } from "../middleware/platform-admin"
 import {
   lookupUserByUsername,
+  lookupUserByUsernameOrEmail,
   searchUsersByPrefix,
   searchUsersByScopedPrefix,
 } from "../services/user-lookup"
 import { callerCanSearchUsers } from "../services/user-search-access"
+import { resolveProjectRole } from "../services/project-permissions"
+import { ROLE } from "../types"
+import { looksLikeEmail } from "../../../db/shared/mask-email"
 
 const SEARCH_MIN_PREFIX_LEN = 2
 const SEARCH_DEFAULT_LIMIT = 10
@@ -28,17 +32,52 @@ const users = new Hono<AuthHonoEnv>()
 users.use("*", authMiddleware)
 
 /**
- * GET /api/v2/users/lookup?username=X
+ * GET /api/v2/users/lookup?username=X[&projectId=UUID]
  *
  * Resolve a username to a public user record. Auth-gated. Trimmed +
  * case-insensitive (AQU-457) — matches lookupUserByUsername. Used by the
  * "Add member" UX.
+ *
+ * AQU-2576: with `projectId`, the identifier may ALSO be an email address,
+ * resolved to the account whose login email matches (case-insensitive). A
+ * project owner staffing a project usually has the person's email and nothing
+ * else — the account exists, only the lookup key was missing, and walking
+ * other projects' rosters to recover a username is not a workflow.
+ *
+ * The email branch is behind `projectId` precisely because it is an
+ * email -> account oracle, so it is scoped to the people who can already act
+ * on that answer: the same `role >= project_lead` bar that POST
+ * /projects/:id/members enforces. Without `projectId` the route behaves
+ * exactly as before — username only — so no existing caller gains the oracle,
+ * and a caller who names a project they cannot staff is refused before any
+ * lookup runs (the refusal must not depend on whether the address exists).
  */
 users.get("/lookup", async (c) => {
   const username = c.req.query("username")
   const trimmed = username?.trim() ?? ""
   if (!trimmed) {
     return c.json({ error: "username query parameter is required" }, 400)
+  }
+  const projectId = c.req.query("projectId")?.trim() ?? ""
+  let allowEmail = false
+  if (projectId) {
+    const callerRole = await resolveProjectRole(c.env, c.get("user"), projectId)
+    if (!callerRole || callerRole.level < ROLE.PROJECT_LEAD) {
+      return c.json(
+        { error: "role >= project_lead required to look a member up by email" },
+        403,
+      )
+    }
+    allowEmail = true
+  }
+  if (!allowEmail && looksLikeEmail(trimmed)) {
+    // Fail closed rather than silently falling through to a username lookup
+    // that can never match: the caller asked a question this route will not
+    // answer unscoped, and saying so is what sends them to the scoped call.
+    return c.json(
+      { error: "email lookup requires a projectId you can add members to" },
+      400,
+    )
   }
   const limit = await enforceRateLimit(c.env.AQUILLA_PG, {
     kind: "users_lookup",
@@ -53,7 +92,9 @@ users.get("/lookup", async (c) => {
       { "Retry-After": String(limit.retryAfterSeconds) },
     )
   }
-  const user = await lookupUserByUsername(c.env, trimmed)
+  const user = allowEmail
+    ? await lookupUserByUsernameOrEmail(c.env, trimmed)
+    : await lookupUserByUsername(c.env, trimmed)
   if (!user) {
     return c.json({ error: "user not found" }, 404)
   }

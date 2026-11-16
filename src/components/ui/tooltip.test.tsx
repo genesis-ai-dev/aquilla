@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { Button } from "@/components/ui/button"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { AppTooltip, TooltipProvider } from "@/components/ui/tooltip"
 
 describe("AppTooltip", () => {
@@ -200,6 +201,51 @@ describe("AppTooltip", () => {
         await act(async () => { await vi.advanceTimersByTimeAsync(0) })
         expect(document.querySelector('[data-slot="disabled-reason-note"]')).toHaveTextContent(tip)
       })
+    })
+
+    it("sizes a disabled reason like an enabled tooltip, including a click note", async () => {
+      render(
+        <TooltipProvider delay={0}>
+          <AppTooltip content="Play all">
+            <Button type="button" disabled>Play all</Button>
+          </AppTooltip>
+          <AppTooltip content="Play">
+            <Button type="button">Play</Button>
+          </AppTooltip>
+          <NoteOnClick note="Nothing recorded on this line to play">
+            <span>Play cell</span>
+          </NoteOnClick>
+        </TooltipProvider>,
+      )
+
+      fireEvent.click(document.querySelector('[data-slot="tooltip-disabled-trigger"]')!)
+      const disabled = await waitFor(() => {
+        const note = document.querySelector('[data-slot="disabled-reason-note"]')
+        expect(note).not.toBeNull()
+        return note!
+      })
+      fireEvent.click(screen.getByRole("button", { name: "Play cell", exact: true }))
+      const note = await waitFor(() => {
+        const popup = [...document.querySelectorAll('[data-slot="popover-content"]')].find((el) =>
+          el.textContent?.includes("Nothing recorded"),
+        )
+        expect(popup).toBeTruthy()
+        return popup!
+      })
+      const play = screen.getByRole("button", { name: "Play", exact: true })
+      fireEvent.pointerEnter(play, { pointerType: "mouse" })
+      fireEvent.mouseEnter(play)
+      const enabled = await screen.findByRole("tooltip")
+
+      for (const popup of [enabled, disabled, note]) {
+        expect(popup.className).toContain("px-3")
+        expect(popup.className).toContain("py-1.5")
+        expect(popup.className).toContain("text-xs")
+        expect(popup.className).not.toMatch(/(?:^|\s)p-2\.5(?:\s|$)/)
+        expect(popup.className).not.toMatch(/(?:^|\s)p-3(?:\s|$)/)
+        expect(popup.className).not.toContain("leading-relaxed")
+        expect(popup.className).not.toContain("gap-2.5")
+      }
     })
 
     it("does NOT wrap an enabled trigger — no extra tab stop, no layout shim", () => {

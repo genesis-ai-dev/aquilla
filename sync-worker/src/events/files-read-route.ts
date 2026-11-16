@@ -63,6 +63,7 @@ interface FileRowRaw {
   deleted_at: number | null
   /** AQU-656: true when file_source_blobs has a row (pointer or legacy inline). */
   has_original_source: boolean | number | null
+  head_revision_n?: number | null
 }
 
 interface FileSummary {
@@ -144,6 +145,10 @@ interface FileSummary {
   deletedAt: number | null
   /** AQU-656: original import blob exists (R2 or legacy raw_source). */
   hasOriginalSource: boolean
+  /** AQU-2459: the source side is a revision chain (`files.head_revision_n`).
+   *  A provider that refreshes the file must post a revision, because cells a
+   *  revision inserted do not carry the provider's own deterministic ids. */
+  revisioned: boolean
   /** Smart Extensions apiRev 7: files.meta.extension (kind, tags, group,
    *  owner, meta). Null on ordinary files. */
   extension: FileExtensionMeta | null
@@ -212,6 +217,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     lastEditAt: row.last_edit_at,
     deletedAt: row.deleted_at ?? null,
     hasOriginalSource: Boolean(row.has_original_source),
+    revisioned: row.head_revision_n != null,
     extension: readFileExtension(meta),
   }
 }
@@ -345,7 +351,7 @@ export async function handleFilesReadRequest(
             ELSE 0
           END AS audio_validated_count, ` +
     "f.word_count, f.last_edit_at, f.deleted_at, " +
-    "(b.file_id IS NOT NULL) AS has_original_source"
+    "(b.file_id IS NOT NULL) AS has_original_source, f.head_revision_n"
   // Anchored on the bound project id rather than on either table, so the CTE
   // always yields exactly one row: a project that has never had a settings row
   // still gets its org's default, and the threshold still resolves from the

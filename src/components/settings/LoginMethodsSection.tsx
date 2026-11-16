@@ -1,3 +1,4 @@
+import { AccountSecurity, PasswordManagement } from "./AccountSecurity"
 import { EmailChangeForm } from "./EmailChangeForm"
 import { Spinner } from "@/components/ui/spinner"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
@@ -8,15 +9,15 @@ import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { SettingsGroup, SettingsRow, SettingsBlock } from "@/components/ui/page"
-import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
 import { googleRequest, startGoogleLogin } from "@/lib/frontier/google-login"
 
 export function LoginMethodsSection() {
   const { active } = useAccounts()
-  return active ? <AccountLoginMethods key={active.username} jwt={active.jwt} username={active.username} /> : null
+  return active ? <AccountSecurity key={active.jwt} jwt={active.jwt} username={active.username}><AccountLoginMethods jwt={active.jwt} username={active.username} /></AccountSecurity> : null
 }
 function AccountLoginMethods({ jwt, username }: { jwt: string; username: string }) {
   const t = useT()
+  const [offerBackup,setOfferBackup]=useState(true)
   const [changingEmail, setChangingEmail] = useState(false)
   const [methods, setMethods] = useState<{ email: string; password: boolean; google: boolean; google_available: boolean } | null>(null)
   const [error, setError] = useState(false), [busy, setBusy] = useState(false)
@@ -61,6 +62,8 @@ function AccountLoginMethods({ jwt, username }: { jwt: string; username: string 
       {error && <SettingsBlock><p role="alert" className="text-sm text-destructive">{t("auth.methods.failed")}</p><Button size="sm" variant="outline" onClick={() => setRevision(n => n + 1)}>{t("auth.methods.refresh")}</Button></SettingsBlock>}
       {!methods && !error && <SettingsBlock><Spinner /></SettingsBlock>}
       {methods && <>
+        {methods.google&&!methods.password&&offerBackup&&!recovering&&<SettingsBlock><p className="font-medium">{t("auth.security.addABackupPassword")}</p><p>{t("auth.security.setAnAquillaPasswordSoYouCanStill")}</p><div className="flex gap-2"><Button onClick={()=>setRecovering(true)}>{t("auth.security.setAPassword")}</Button><Button variant="ghost" onClick={()=>setOfferBackup(false)}>{t("auth.security.notNow")}</Button></div></SettingsBlock>}
+
         <SettingsRow label={methods.email} description={t("auth.emailChange.accountEmail")} control={<Button size="sm" variant="outline" disabled={refreshing || error} onClick={() => { setRecovering(false); setChangingEmail(true) }}>{t("auth.emailChange.action")}</Button>} />
         {changingEmail && <SettingsBlock><EmailChangeForm jwt={jwt} passwordAvailable={methods.password} googleLinked={methods.google} statusUnavailable={refreshing || error} onSetPassword={() => { setChangingEmail(false); setRecovering(true) }} onBack={() => setChangingEmail(false)} /></SettingsBlock>}
         <SettingsRow
@@ -68,7 +71,7 @@ function AccountLoginMethods({ jwt, username }: { jwt: string; username: string 
           label={t(methods.password ? "auth.methods.passwordSet" : "auth.methods.passwordMissing")}
           control={!(changingEmail && !methods.password) && <Button size="sm" variant="outline" disabled={refreshing || error} onClick={() => { setChangingEmail(false); setRecovering(true) }}>{t(methods.password ? "auth.methods.resetPassword" : "auth.methods.setPassword")}</Button>}
         />
-        {recovering && <SettingsBlock><div className="max-w-md"><FrontierForgotPasswordForm account={{ email: methods.email, jwt }} backLabel={t("auth.methods.back")} onBack={() => setRecovering(false)} returnTo="/preferences/login-methods" /></div></SettingsBlock>}
+        {recovering && <SettingsBlock><div className="max-w-md"><PasswordManagement jwt={jwt} username={username} google={methods.google} googleAvailable={methods.google_available} passwordSet={methods.password} onChanged={()=>{setRecovering(false);setRevision(n=>n+1)}}/><Button variant="ghost" onClick={()=>setRecovering(false)}>{t("auth.methods.back")}</Button></div></SettingsBlock>}
         <SettingsRow
           className="flex-wrap items-center"
           label={t(methods.google ? "auth.methods.connected" : "auth.methods.notConnected")}

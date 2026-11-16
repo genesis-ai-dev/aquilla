@@ -6,7 +6,7 @@ vi.mock("@/lib/frontier/session-expiry", () => ({ notifySessionExpiredIfCurrent:
 vi.mock("@/hooks/useAccounts", () => ({ useAccounts: () => ({ active: mocks.active }) }))
 vi.mock("@/lib/i18n/I18nProvider", () => ({ useT: () => (key: string) => key }))
 vi.mock("@/lib/frontier/google-login", () => ({ googleRequest: mocks.request, startGoogleLogin: mocks.start }))
-vi.mock("@/components/git-import/FrontierForgotPasswordForm", () => ({ FrontierForgotPasswordForm: () => <div>email-reset</div> }))
+vi.mock("./AccountSecurity", () => ({ AccountSecurity: ({children}: {children:import("react").ReactNode}) => <>{children}</>, PasswordManagement: () => <div>password-management</div> }))
 import { MemoryRouter } from "react-router-dom"
 import { LoginMethodsSection } from "./LoginMethodsSection"
 beforeEach(() => { vi.clearAllMocks(); mocks.active = { username: "alice", jwt: "alice-token" }; mocks.start.mockResolvedValue(undefined) })
@@ -20,12 +20,12 @@ it("does not start Google before the connect click and binds that attempt to the
   fireEvent.click(connect)
   expect(mocks.start).toHaveBeenCalledWith("/preferences/login-methods", false, "alice")
 })
-it("keeps a Google-only account connected and offers the existing email reset flow", async () => {
+it("keeps a Google-only account connected and offers verified password setup", async () => {
   mocks.request.mockResolvedValue({ password: false, google: true, google_available: true })
   render(<LoginMethodsSection />)
   fireEvent.click(await screen.findByRole("button", { name: "auth.methods.setPassword" }))
   expect(screen.queryByRole("button", { name: "auth.methods.disconnect" })).toBeNull()
-  expect(screen.getByText("email-reset")).toBeVisible()
+  expect(screen.getByText("password-management")).toBeVisible()
 })
 it("clears account-specific status and password when switching accounts", async () => {
   mocks.request.mockResolvedValueOnce({ password: true, google: true, google_available: true })
@@ -39,11 +39,11 @@ it("clears account-specific status and password when switching accounts", async 
   expect(screen.queryByDisplayValue("alice-secret")).toBeNull()
 })
 
-it("offers email password reset even when a password is already set", async () => {
+it("offers password management when a password is already set", async () => {
   mocks.request.mockResolvedValue({ password: true, google: true, google_available: true })
   render(<LoginMethodsSection />)
   fireEvent.click(await screen.findByRole("button", { name: "auth.methods.resetPassword" }))
-  expect(screen.getByText("email-reset")).toBeVisible()
+  expect(screen.getByText("password-management")).toBeVisible()
   expect(mocks.start).not.toHaveBeenCalled()
 })
 
@@ -61,7 +61,7 @@ it("opens password setup directly from the email-change prerequisite", async () 
   fireEvent.click(await screen.findByRole("button", { name: "auth.emailChange.action" }))
   expect(screen.queryByRole("button", { name: "auth.emailChange.back" })).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "auth.methods.setPassword" }))
-  expect(screen.getByText("email-reset")).toBeVisible()
+  expect(screen.getByText("password-management")).toBeVisible()
   expect(screen.queryByText("auth.emailChange.password_required")).toBeNull()
   expect(mocks.start).not.toHaveBeenCalled()
 })
@@ -128,10 +128,10 @@ it("closes the setup message when a password is set in another tab", async () =>
     .mockResolvedValueOnce({ email: "alice@example.com", password: true, google: true, google_available: true })
   render(<MemoryRouter><LoginMethodsSection /></MemoryRouter>)
   fireEvent.click(await screen.findByRole("button", { name: "auth.methods.setPassword" }))
-  expect(screen.getByText("email-reset")).toBeVisible()
+  expect(screen.getByText("password-management")).toBeVisible()
   fireEvent.focus(window)
   expect(await screen.findByText("auth.methods.passwordSet")).toBeVisible()
-  expect(screen.queryByText("email-reset")).toBeNull()
+  expect(screen.queryByText("password-management")).toBeNull()
 })
 it("keeps an intentionally opened password reset panel when the password was already set", async () => {
   mocks.request.mockResolvedValue({ email: "alice@example.com", password: true, google: true, google_available: true })
@@ -139,5 +139,5 @@ it("keeps an intentionally opened password reset panel when the password was alr
   fireEvent.click(await screen.findByRole("button", { name: "auth.methods.resetPassword" }))
   fireEvent.focus(window)
   await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(2))
-  expect(screen.getByText("email-reset")).toBeVisible()
+  expect(screen.getByText("password-management")).toBeVisible()
 })

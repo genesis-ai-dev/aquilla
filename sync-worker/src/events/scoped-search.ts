@@ -244,32 +244,6 @@ export function sanitizeFtsExactPhrase(raw: string): string | null {
   return '"' + tokens.join(" ") + '"'
 }
 
-/**
- * Sanitize free text into an FTS5 *any-term* (OR) query: `"t1" OR "t2" ...`.
- *
- * Unlike `sanitizeFtsQuery` (implicit-AND — every token must be present, right
- * for short user searches), this retrieves cells sharing *any* term, which is
- * what AD-14 health-as-confidence wants: feed a whole source cell as the query
- * and pull every validated cell that overlaps it, then let bm25 rank and the
- * coverage scorer decide. Tokenized with the same Unicode class as
- * `tokenizeForConfidence` so the terms FTS matches on are exactly the terms the
- * scorer measures coverage over. Deduped and capped at `maxTerms` to bound the
- * query size on long verses. Returns null when nothing survives.
- */
-export function sanitizeFtsAnyTerm(raw: string, maxTerms = 40): string | null {
-  const tokens = raw.toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? []
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const t of tokens) {
-    if (seen.has(t)) continue
-    seen.add(t)
-    out.push(t)
-    if (out.length >= maxTerms) break
-  }
-  if (out.length === 0) return null
-  return out.map((t) => `"${t}"`).join(" OR ")
-}
-
 // ---------------------------------------------------------------------------
 // Limit helpers
 // ---------------------------------------------------------------------------

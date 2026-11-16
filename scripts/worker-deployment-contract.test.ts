@@ -22,6 +22,7 @@ const deploymentManifest = JSON.parse(
       /** Bindings only this environment must have (AQU-2469). */
       requiredBindings?: Record<string, string>
       plainText: Record<string, string>
+      deploymentOnlyPlainText?: Record<string, string>
       hyperdrives: Record<string, string>
       r2Buckets: Record<string, string>
     }>
@@ -552,7 +553,7 @@ describe("worker deployment environment contract", () => {
         const section = environmentSection(config, environment)
         expect(section).toContain(`name = "${expected.worker}"`)
         for (const route of expected.routes) expect(section).toContain(`"${route}"`)
-        for (const [name, value] of Object.entries(expected.plainText)) {
+        for (const [name, value] of Object.entries({ ...expected.plainText, ...expected.deploymentOnlyPlainText })) {
           expect(section).toContain(`${name} = "${value}"`)
         }
         for (const [name, id] of Object.entries(expected.hyperdrives)) {

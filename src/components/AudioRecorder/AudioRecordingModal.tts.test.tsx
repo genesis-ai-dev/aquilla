@@ -45,10 +45,12 @@ vi.mock("@/lib/audio/audio-attachments-bus", () => ({
 const emitAttach = vi.fn(async (..._args: unknown[]) => "evt-attach")
 const emitSelect = vi.fn(async (..._args: unknown[]) => "evt-select")
 const emitDeselect = vi.fn(async (..._args: unknown[]) => "evt-deselect")
+const emitMeasure = vi.fn(async (..._args: unknown[]) => "evt-measure")
 vi.mock("@/lib/sync/events-emit", () => ({
+  emitCellAudioMeasure: (...args: unknown[]) => emitMeasure(...args),
   emitCellAudioDeselect: (...args: unknown[]) => emitDeselect(...args),
   emitCellAudioValidate: vi.fn(async () => "evt"),
-  emitCellLaneRetime: vi.fn(async () => "evt"),
+  emitCellAudioPlace: vi.fn(async () => "evt"),
   emitCellAudioAttach: (...args: unknown[]) => emitAttach(...args),
   emitCellAudioSelect: (...args: unknown[]) => emitSelect(...args),
   emitCellAudioRemove: vi.fn(async () => "evt"),
@@ -187,24 +189,36 @@ describe("AudioRecordingModal — durationless-take heal (round 8c)", () => {
   beforeEach(() => {
     attachmentsState.byCellId = new Map()
     emitAttach.mockClear()
+    emitMeasure.mockClear()
+    injectOptimistic.mockClear()
   })
 
-  it("re-attaches the SELECTED webm take with its decoded duration, keeping name and trims", async () => {
+  // AQU-2491 (review, Nov 9): the heal used to RE-ATTACH the take, and an
+  // attach chooses it and brings it back if deleted. On a slow network the
+  // measure lands after the person has recorded a new take or deleted this
+  // one, which then played again. It sends the fill-only length instead
+  // (`cell.audio.measure`), which chooses nothing and keeps name and trims.
+  it("fills in the SELECTED webm take's decoded length without choosing it again", async () => {
     seedEntry({
       "audio-c1-200-take.webm": att("audio-c1-200-take.webm", {
         mimeType: "audio/webm", durationMs: null, label: "Take 1", trimStartMs: 100, trimEndMs: 900,
       }),
     }, "audio-c1-200-take.webm")
     renderModal(cellWith("bonjour"))
-    await waitFor(() => expect(emitAttach).toHaveBeenCalledTimes(1))
-    expect(emitAttach).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(emitMeasure).toHaveBeenCalledTimes(1))
+    expect(emitMeasure).toHaveBeenCalledWith(expect.objectContaining({
+      fileId: "f1",
+      cellId: "c1",
       audioId: "audio-c1-200-take.webm",
-      slot: "recording",
       durationMs: 1000, // the mocked probe's decode result
-      label: "Take 1",
-      trimStartMs: 100,
-      trimEndMs: 900,
     }))
+    expect(emitAttach).not.toHaveBeenCalled()
+    // Painted at its length at once, without claiming the slot.
+    await waitFor(() => expect(injectOptimistic).toHaveBeenCalled())
+    const paint = injectOptimistic.mock.calls.at(-1) as unknown[]
+    expect(paint[2]).toMatchObject({ audioId: "audio-c1-200-take.webm", durationMs: 1000, label: "Take 1", trimStartMs: 100, trimEndMs: 900 })
+    expect(paint[3]).toBe("evt-measure")
+    expect(paint[4]).toEqual({ claimSelection: false })
   })
 
   it("does nothing when the selected take already has a duration", async () => {
@@ -212,6 +226,7 @@ describe("AudioRecordingModal — durationless-take heal (round 8c)", () => {
     renderModal(cellWith("bonjour"))
     await new Promise((r) => setTimeout(r, 50))
     expect(emitAttach).not.toHaveBeenCalled()
+    expect(emitMeasure).not.toHaveBeenCalled()
   })
 })
 

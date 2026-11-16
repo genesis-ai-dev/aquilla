@@ -279,6 +279,33 @@ describe("X-Usfm-Lossy-Verse-Count header (AQU-276)", () => {
   })
 })
 
+describe("paragraph layout in the exported USFM (AQU-2559)", () => {
+  const LAID_OUT = "\\id GEN\n\\c 1\n\\p\n\\v 1 In the beginning.\n\\p\n\\v 2 The earth was without form.\n\\v 3 And God said.\n"
+
+  it("keeps the source's paragraph lines around translated verses, and applies the translation's own", async () => {
+    // A verse's span runs to the next `\v`, so it holds the `\p` that opens
+    // the NEXT verse's paragraph. Translating verse 1 used to delete it, and
+    // every translated book exported as one paragraph per chapter.
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({
+        blob: { format: "usfm", raw_source: LAID_OUT },
+        cells: [
+          { canonical_ref: "GEN 1:1", value: "Au commencement." },
+          // The translator added a heading and a break before verse 3.
+          { canonical_ref: "GEN 1:3", value: "\\s1 La lumière\n\\p\nDieu dit." },
+        ],
+      }),
+      SNAPSHOTS: makeStubBucket(),
+    }
+    const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
+    expect(await res?.text()).toBe(
+      "\\id GEN\n\\c 1\n\\p\n\\v 1 Au commencement.\n\\p\n\\v 2 The earth was without form.\n\\s1 La lumière\n\\p\n\\v 3 Dieu dit.\n",
+    )
+    expect(res?.headers.get("X-Usfm-Lossy-Verse-Count")).toBe("0")
+  })
+})
+
 describe("?mode=raw — byte-exact original USFM upload", () => {
   const rawReq = (token: string): Request =>
     new Request("https://w/api/v1/projects/p1/files/f1/source?mode=raw", {

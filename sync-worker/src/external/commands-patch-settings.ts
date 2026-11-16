@@ -16,6 +16,8 @@ import {
   markChangesetSuperseded,
 } from './commit-gates'
 import { isPlanSatisfied } from './supersede'
+import { briefInertWarnings, plannedInstructionsOfOps } from './brief-inert-warning'
+import { BRIEF_SETTINGS_KEY } from '../../../db/shared/brief'
 import { resolveSupersedeState } from './supersede-state'
 import { stageAndRespond } from './stage'
 import { assertCredentialScope } from './token-bridge'
@@ -341,12 +343,19 @@ export async function preparePatchSettings(
 
   const settingsChanges: Record<string, string> = {}
   for (const op of cmd.ops) settingsChanges[op.key] = previewSettingValue(op.value)
+  // AQU-2425: a raw op on the brief key is a brief write, so it carries the
+  // same warning the dedicated SetBrief door does. Asked of the state this
+  // patch leaves behind — an op on the instructions key in the SAME list
+  // strands a sibling brief op, and one that unsets it hands the job back.
+  const writesBrief = cmd.ops.some((op) => op.key === BRIEF_SETTINGS_KEY)
   const summary: ChangesetSummary = {
     command: 'PatchSettings',
     projectId: urlProjectId,
     ifMatchVersion: cmd.ifMatchVersion,
     settingsChanges,
-    warnings: [],
+    warnings: writesBrief
+      ? briefInertWarnings(current.settings, plannedInstructionsOfOps(cmd.ops))
+      : [],
   }
 
   return stageAndRespond(db, env, {

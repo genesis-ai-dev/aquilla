@@ -17,21 +17,34 @@ export interface ReimportCountedCell {
   canonicalRef?: string | null
   anchorCellId?: string | null
   metadata?: unknown
+  /** An existing line that is already hidden (an earlier re-import dropped it). */
+  hidden?: boolean
 }
 
 export interface ReimportChangeCell {
   text: string
   /** The original file's text, when this cell is an update. */
   previous?: string
-  /** 1-based place of this cell in the uploaded document. */
+  /**
+   * 1-based place of this cell in the uploaded document; for a cell the
+   * upload no longer has, its place in the file as it is now.
+   */
   number: number
 }
 
 export interface ReimportChangeCounts {
   added: number
   updated: number
+  /**
+   * AQU-2487 (import sweep, Nov 2): lines of the file that the upload no
+   * longer has. "Update this file" hides them, so the Analysis lists them;
+   * it used to say "Nothing in this file has changed." over a file that only
+   * dropped lines. Lines already hidden are left out.
+   */
+  removed: number
   addedCells: readonly ReimportChangeCell[]
   updatedCells: readonly ReimportChangeCell[]
+  removedCells: readonly ReimportChangeCell[]
 }
 
 function unitKeyOf(metadata: unknown): string | null {
@@ -125,10 +138,18 @@ export function countReimportDiff(
       updatedCells.push({ text: row.incoming.value, previous: row.existing.value, number })
     }
   }
+  const kept = new Set(preliminary.flatMap((row) => (row.existing ? [row.existing.cellId] : [])))
+  const removedCells: ReimportChangeCell[] = []
+  existingOrdered.forEach((cell, index) => {
+    if (kept.has(cell.cellId) || cell.hidden) return
+    removedCells.push({ text: cell.value, number: index + 1 })
+  })
   return {
     added: addedCells.length,
     updated: updatedCells.length,
+    removed: removedCells.length,
     addedCells,
     updatedCells,
+    removedCells,
   }
 }

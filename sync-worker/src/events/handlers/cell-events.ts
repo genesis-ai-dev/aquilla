@@ -88,6 +88,8 @@ const AUDIO_ROLLUP_KINDS: ReadonlySet<string> = new Set([
   'cell.audio.unvalidate',
   // AQU-1767: a cut adds a selected dub piece and resets both halves' votes.
   'cell.audio.cut',
+  // AQU-2492: undoing one removes that piece and gives the take its votes back.
+  'cell.audio.uncut',
   // AQU-1767 phase 2: undoing a removal un-deletes the cell's takes.
   'source.cell.restore',
 ])

@@ -22,6 +22,7 @@ import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { getCellAudioStreamUrl, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioMimeForExt } from "@/lib/audio/mime"
 import { fetchVoiceReference } from "@/lib/audio/voice-clone"
+import { VOICE_PROJECT_SCOPE_FILE_ID } from "@/lib/audio/voice-project-scope"
 import {
   INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT,
   INWORLD_DESIGN_PREVIEW_TEXT_MAX,
@@ -150,7 +151,10 @@ export function InworldVoiceDesignField({
     },
     validators: { onSubmit: designPreviewSchema(t) },
     onSubmit: async ({ value }) => {
-      if (!projectId || !fileId || !session) {
+      // AQU-2487 (review, Nov 9): designing a voice is for the project, so no
+      // file has to be open. From the Voices panel with no file selected this
+      // said "Open a project file before designing a voice."
+      if (!projectId || !session) {
         setSubmitError(t("audio.newVoice.errorDesignNoProject"))
         return
       }
@@ -160,7 +164,7 @@ export function InworldVoiceDesignField({
         const rows = await designInworldVoice(
           {
             projectId,
-            fileId,
+            fileId: fileId || VOICE_PROJECT_SCOPE_FILE_ID,
             designPrompt: value.prompt.trim(),
             previewText: value.script.trim(),
             numberOfSamples: INWORLD_DESIGN_SAMPLE_COUNT,
@@ -284,7 +288,10 @@ export function InworldVoiceDesignField({
         && script.length <= INWORLD_DESIGN_PREVIEW_TEXT_MAX
       )
     if (loadingSaved || !canPlaySaved) return
-    if (!projectId || !fileId || !session) {
+    // AQU-2487 (review, Nov 9): the stored preview clip is the project's, so
+    // it plays with no file open. Only a voice with no stored clip still needs
+    // one (below): reading the script aloud stores audio under a real file.
+    if (!projectId || !session) {
       setSubmitError(t("audio.newVoice.errorDesignNoProject"))
       return
     }
@@ -299,7 +306,7 @@ export function InworldVoiceDesignField({
       if (existingPreviewAudioId) {
         const bytes = await fetchVoiceReference({
           projectId,
-          fileId,
+          fileId: fileId || VOICE_PROJECT_SCOPE_FILE_ID,
           referenceAudioId: existingPreviewAudioId,
           getSyncToken,
         })
@@ -311,6 +318,7 @@ export function InworldVoiceDesignField({
         playSrc(src, existingVoiceId)
         return
       }
+      if (!fileId) throw new Error(t("audio.newVoice.errorDesignNoProject"))
       const result = await synthesizeCellTts(
         {
           projectId,

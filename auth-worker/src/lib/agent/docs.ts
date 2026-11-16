@@ -352,7 +352,19 @@ of literalness, apply the key-term strategy, and avoid anything the constraints
 forbid. If the brief and a validated pair conflict, prefer the validated pair
 (it is observed project practice) but flag the tension to the user.
 If 'translationBrief' is null, the project has not authored a brief yet — say so
-rather than inventing standards.`
+rather than inventing standards.
+
+WHAT THE PROMPTS ACTUALLY READ: the key 'translationInstructions'. The brief is
+the long-form document behind that text, and it composes into drafting prompts
+ONLY while the project has not saved 'translationInstructions':
+SELECT settings::jsonb ->> 'translationInstructions' AS instructions
+FROM project_settings WHERE project_id = :project
+A non-null row there — a blank string included, which means "no instructions" —
+is authoritative, and the brief reaches no prompt. So a brief edit on such a
+project changes the document and changes nothing the AI reads (the staged
+changeset warns 'inert_write'). Check which case the project is in before
+telling someone a brief edit will change the AI's behaviour, and write
+'translationInstructions' when it is the behaviour they want changed.`
 
 const COOKBOOKS: Record<string, string> = {
   drafting: DRAFTING,

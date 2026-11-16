@@ -54,8 +54,9 @@ vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   injectOptimisticAudioRemove: vi.fn(),
 }))
 const emitAttach = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => "evt-attach"))
+const emitPlace = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => "evt-place"))
 vi.mock("@/lib/sync/events-emit", () => ({
-  emitCellLaneRetime: vi.fn(async () => "evt"),
+  emitCellAudioPlace: (...args: unknown[]) => emitPlace(...args),
   emitCellAudioAttach: (...args: unknown[]) => emitAttach(...args),
   emitCellAudioSelect: vi.fn(async () => "evt"),
   emitCellAudioValidate: vi.fn(async () => "evt"),
@@ -142,9 +143,34 @@ describe("AudioRecordingModal — upload a file", () => {
     recorderState.value = { kind: "idle" }
     attachmentsState.byCellId = new Map()
     emitAttach.mockClear()
+    emitPlace.mockClear()
     injectAttach.mockClear()
     uploadSpy.mockClear()
     onTakeSaved.mockClear()
+  })
+
+  // AQU-2491 (review, Nov 9): the line may hold a place an older recording
+  // left on it (its pre-roll). An uploaded take has no pre-roll: it is given
+  // its own place, the line's start, and never reads that one.
+  it("an uploaded take gets its own place on the line's start, never the line's old one", async () => {
+    render(
+      <AudioRecordingModal
+        open
+        project={project}
+        cells={[{ ...cell, startTime: 3, endTime: 6, metadata: { target_offset_ms: -200 } } as CellData]}
+        activeCellId="c1"
+        username="sam"
+        onActiveCellChange={() => {}}
+        onTakeSaved={onTakeSaved}
+        onClose={() => {}}
+      />,
+    )
+    pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
+    await waitFor(() => expect(emitPlace).toHaveBeenCalledTimes(1))
+    expect(emitPlace.mock.calls[0][0]).toMatchObject({
+      fileId: "f1", cellId: "c1", audioId: "audio-c1-999-new.wav", targetOffsetMs: 0, recordingsOffsetMs: null,
+    })
+    expect(injectAttach.mock.calls[0][2]).toMatchObject({ audioId: "audio-c1-999-new.wav", targetOffsetMs: 0 })
   })
 
   it("attaches the picked file as the NEXT numbered take", async () => {

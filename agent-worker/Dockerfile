@@ -6,9 +6,9 @@
 # the container. The runtime image is ours. The donor's tag must be the exact
 # @cloudflare/sandbox version pinned in package.json (the shim and the package
 # speak a versioned protocol; test/runtime-policy.test.ts enforces the pairing).
-# Bump both in the same PR. Dependabot's docker ecosystem reads `FROM` lines
-# only, which is why the shim arrives through a named stage rather than a bare
-# `COPY --from=docker.io/...`.
+# Bump both in the same PR (docs/DEPENDENCY-RULES.md). The shim arrives through
+# a named stage rather than a bare `COPY --from=docker.io/...` so the pairing is
+# one `FROM` line that tooling can read.
 FROM docker.io/cloudflare/sandbox:1.0.3 AS sandbox-shim
 
 # Python is the runtime that matters here (the agent's Tier-2 pandas/openpyxl/

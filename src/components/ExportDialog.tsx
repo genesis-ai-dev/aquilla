@@ -499,6 +499,8 @@ interface ExportDialogProps {
 /** AQU-2073: how many line pills the unvalidated-audio note shows before "+N more". */
 const UNVALIDATED_LINE_PILLS_SHOWN = 8
 
+const EMPTY_EXPORT_CELLS: CellData[] = []
+
 function profileIdFromCells(cells: readonly CellData[]): string | null {
   for (const cell of cells) {
     const metadata = cell.metadata
@@ -626,7 +628,7 @@ export function ExportDialog({
    * the format re-renders and simply carries everything.
    */
   const structuralNote = useMemo(() => {
-    if (!nativeFormatId) return null
+    if (!open || !nativeFormatId) return null
     // Word and PowerPoint place content by a per-paragraph locator recorded at
     // import. A file imported before that existed is matched BY POSITION, where
     // an inserted or dropped paragraph shifts every later one onto the wrong
@@ -643,7 +645,7 @@ export function ExportDialog({
       return "importExport.dialog.structuralNoteUnplaceable" as const
     }
     return null
-  }, [nativeFormatId, cells])
+  }, [open, nativeFormatId, cells])
 
   /**
    * AQU-1423: what this native export does with cells PARKED here ("Hide cell",
@@ -662,7 +664,7 @@ export function ExportDialog({
    * nothing surprising to explain.
    */
   const hiddenNote = useMemo(() => {
-    if (!nativeFormatId) return null
+    if (!open || !nativeFormatId) return null
     if (!hasHiddenCells(cells)) return null
     // No locators means no paragraph can be placed OR dropped, so a hidden cell
     // keeps the client's words here as well — the same answer IDML gives, for a
@@ -678,7 +680,7 @@ export function ExportDialog({
       return "importExport.dialog.hiddenNoteKeepsOriginal" as const
     }
     return null
-  }, [nativeFormatId, cells])
+  }, [open, nativeFormatId, cells])
 
   const [format, setFormat] = useState<ExportFormat>(nativeFormatId ?? "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
@@ -807,7 +809,7 @@ export function ExportDialog({
     setFormat(nativeFormatId ?? "tsv")
   }, [activeFileId, nativeFormatId])
 
-  const activeProfileId = useMemo(() => profileIdFromCells(cells), [cells])
+  const activeProfileId = useMemo(() => (open ? profileIdFromCells(cells) : null), [open, cells])
   const idmlExportOptions = useMemo(
     () => partnerIdmlExportOptionsFor(activeProfileId),
     [activeProfileId],
@@ -836,6 +838,7 @@ export function ExportDialog({
    * back when neither does.
    */
   const audioSourceCells = useMemo(() => {
+    if (!open) return EMPTY_EXPORT_CELLS
     const hasTake = (list: CellData[] | undefined) =>
       list?.some((c) => {
         const id = c.selectedAudioId ?? c.selectedGeneratedVoiceAudioId
@@ -859,7 +862,7 @@ export function ExportDialog({
     if (hasTake(audioCells)) return dropHiddenCells(audioCells!)
     if (hasTake(cells)) return dropHiddenCells(cells)
     return dropHiddenCells(audioCells ?? cells)
-  }, [audioCells, cells])
+  }, [open, audioCells, cells])
 
   /**
    * Is this a DUBBING file?
@@ -892,6 +895,27 @@ export function ExportDialog({
   const recordedLines = useMemo(
     () => audioPreview.reduce((n, c) => n + c.clipCount, 0),
     [audioPreview],
+  )
+  /**
+   * The same rows for the BY-LINE deliverable, which does not need a timeline.
+   *
+   * `audioPreview` counts only takes the by-character mix can place, so a line
+   * with no start time is not in it. A Bible book is nothing but such lines —
+   * a verse has no second it belongs at — and one preview serving both shapes
+   * told a Luke with a recording on every verse that "nothing is recorded
+   * yet". By line copies an untimed take across as it is, so here it counts.
+   */
+  const linePreview = useMemo(
+    () =>
+      previewAudioByCharacter(audioSourceCells, ttsSettings, resolveCharacterName, {
+        needsTiming: false,
+      }),
+    [audioSourceCells, ttsSettings, resolveCharacterName],
+  )
+  /** Takes on the default row, with or without a start time. */
+  const recordedTakes = useMemo(
+    () => linePreview.reduce((n, c) => n + c.clipCount, 0),
+    [linePreview],
   )
   const chapterPreview = useMemo(
     () => previewAudioByChapter(audioSourceCells, { includeChapterHeadings }),
@@ -1280,13 +1304,14 @@ export function ExportDialog({
   }
 
   const distinctVoices = useMemo(() => {
+    if (!open) return []
     const names = new Set<string>()
     for (const c of cells) {
       const v = getCellVoice(c)
       if (v) names.add(v)
     }
     return Array.from(names).sort()
-  }, [cells])
+  }, [open, cells])
 
   // Same Base UI label rule as `chapterItems` below: without `items` the
   // "All voices" option ("") renders an empty trigger.
@@ -1336,8 +1361,8 @@ export function ExportDialog({
   const isRoundTripFormat = format === "usfm" || format === "docx" || format === "pptx" || format === "idml"
 
   const validatedCellCount = useMemo(
-    () => cells.filter((c) => c.status === "validated").length,
-    [cells],
+    () => (open ? cells.filter((c) => c.status === "validated").length : 0),
+    [open, cells],
   )
 
   /**
@@ -1349,8 +1374,8 @@ export function ExportDialog({
    * under "validated only" it is how many lines are about to fall silent.
    */
   const unvalidatedAudioLines = useMemo(
-    () => unvalidatedAudioLineIds(audioSourceCells, audioValidationRequirement),
-    [audioSourceCells, audioValidationRequirement],
+    () => (open ? unvalidatedAudioLineIds(audioSourceCells, audioValidationRequirement) : []),
+    [open, audioSourceCells, audioValidationRequirement],
   )
   /** AQU-2073: those lines named for the note's pills — a line's reference
    *  ("JHN 6:5"), or "L3" the way the by-line export numbers its files. */
@@ -1374,7 +1399,7 @@ export function ExportDialog({
     [audioSourceCells, contentMode, audioValidationRequirement],
   )
 
-  const chapterLabels = useMemo(() => listChapterLabels(cells), [cells])
+  const chapterLabels = useMemo(() => (open ? listChapterLabels(cells) : []), [open, cells])
 
   // Base UI resolves the trigger's label from the root's `items`, not from
   // the mounted <SelectItem>s, and falls back to the raw value string when
@@ -1743,10 +1768,15 @@ export function ExportDialog({
         // REFUSE RATHER THAN DOWNLOAD NOTHING. A zip with no entries is still
         // a valid archive, and handing one over reads as success.
         if (result.characters === 0) {
+          // Not "could not be read" when nothing was even attempted: takes
+          // with no start time were left out because this shape cannot place
+          // them, and the fix is another shape rather than another try.
           const msg =
             result.clips === 0
               ? "No recordings found in this file, so there is nothing to export."
-              : `None of the ${result.clips} recordings could be read, so the export would be empty.`
+              : result.untimed === result.clips
+                ? t("importExport.dialog.nothingTimedToPlace", { count: result.untimed })
+                : `None of the ${result.clips} recordings could be read, so the export would be empty.`
           setStatus({ kind: "error", msg })
           if (exportToastRef.current != null) {
             toast.update(exportToastRef.current, { type: "error", title: msg })
@@ -2389,14 +2419,21 @@ export function ExportDialog({
    * list everywhere else.
    */
   const renderCharacterPreview = () => {
-          const preview = audioPreview
+          // WHICH DELIVERABLE THIS DESCRIBES. A dubbing file picks the shape on
+          // the Audio card, everything else in the format list.
+          const byLine = (isDubbingFile ? audioMode : format) === "audio-by-line"
+          const preview = byLine ? linePreview : audioPreview
           // WHO IS MISSING, not just who is included (codex-editor's lesson,
           // 2026-08-18). The list used to describe only what would be written,
           // so a character with nothing recorded simply was not in it — you
           // found out by opening the zip and noticing an absence.
           const recorded = preview.filter((p) => p.clipCount > 0)
           const unrecorded = preview.filter((p) => p.clipCount === 0)
-          const untimedTotal = preview.reduce((n, p) => n + p.untimedCount, 0)
+          // By line writes an untimed take anyway (it just carries no
+          // timestamp), so "cannot be placed" is only true of the mix.
+          const untimedTotal = byLine ? 0 : preview.reduce((n, p) => n + p.untimedCount, 0)
+          // Recordings exist, and not one of them has a second to sit at.
+          const nothingPlaceable = recorded.length === 0 && untimedTotal > 0
           return (
           <div className="flex flex-col gap-1 text-xs" data-testid="export-character-preview">
             <p className="font-medium text-muted-foreground text-[10px]">{t("importExport.dialog.characterPreviewHeading")}</p>
@@ -2424,7 +2461,7 @@ export function ExportDialog({
                         <> · {Math.floor(p.totalDurationMs / 60000)}:{String(Math.floor((p.totalDurationMs % 60000) / 1000)).padStart(2, "0")}</>
                       )}
                       {p.missingCount > 0 && <> · {t("importExport.dialog.stillToRecordCount", { count: p.missingCount })}</>}
-                      {p.untimedCount > 0 && <> · {t("importExport.dialog.untimedClipCount", { count: p.untimedCount })}</>}
+                      {!byLine && p.untimedCount > 0 && <> · {t("importExport.dialog.untimedClipCount", { count: p.untimedCount })}</>}
                     </span>
                   </div>
                 ))}
@@ -2433,11 +2470,18 @@ export function ExportDialog({
                     on added tracks "nothing is recorded" is false, and sat one
                     line away from a button that had just refused for the same
                     reason (2026-08-27). Say what is actually true. */}
+                {/* …and on a file whose lines have no start time — a Bible book,
+                    where every verse can be recorded and none of them sits at
+                    a second — "nothing is recorded" is just as false. The
+                    takes are there; this shape has nowhere to put them, and
+                    the two beside it do. */}
                 {recorded.length === 0 && (
-                  <p className="text-muted-foreground">
-                    {addedTrackTakes > 0
-                      ? t("importExport.dialog.nothingOnMainTrack", { count: addedTrackTakes })
-                      : t("importExport.dialog.nothingRecordedYet")}
+                  <p className="text-muted-foreground" data-testid="export-nothing-to-preview">
+                    {nothingPlaceable
+                      ? t("importExport.dialog.nothingTimedToPlace", { count: untimedTotal })
+                      : addedTrackTakes > 0
+                        ? t("importExport.dialog.nothingOnMainTrack", { count: addedTrackTakes })
+                        : t("importExport.dialog.nothingRecordedYet")}
                   </p>
                 )}
                 {/* The rest, folded away — still countable at a glance, still
@@ -2460,7 +2504,7 @@ export function ExportDialog({
                     </div>
                   </details>
                 )}
-                {untimedTotal > 0 && (
+                {untimedTotal > 0 && !nothingPlaceable && (
                   <p className="text-muted-foreground">
                     {t("importExport.dialog.untimedRecordingsNote", { count: untimedTotal })}
                   </p>
@@ -2518,6 +2562,8 @@ export function ExportDialog({
       </div>
     )
   }
+
+  if (!open) return <Dialog open={false} onOpenChange={handleOpenChange} />
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -2685,7 +2731,9 @@ export function ExportDialog({
                 onClick={() => handleExport(audioMode)}
                 // Nothing recorded means nothing to write. Better to say so on a
                 // dead button than to hand someone a refusal after they press it.
-                disabled={!activeFileId || isBusy || (recordedLines === 0 && addedTrackTakes === 0)}
+                // `recordedTakes`, not `recordedLines`: a take with no start
+                // time is still a recording, and by line writes it.
+                disabled={!activeFileId || isBusy || (recordedTakes === 0 && addedTrackTakes === 0)}
                 aria-busy={isBusy}
               >
                 {isBusy ? <Spinner aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}

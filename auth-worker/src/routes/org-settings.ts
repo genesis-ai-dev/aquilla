@@ -459,15 +459,24 @@ async function loadOverrideCounts(
   orgId: number,
   viewer: ProjectNameViewer,
 ) {
-  const [countStructuralCells, validationCount, validationCountAudio, autoPropagateRepetitions, ...media] = await Promise.all([
-    listOverrideProjects(env, orgId, INHERITED_KEY_COLUMNS[COUNT_STRUCTURAL_KEY], viewer),
-    listOverrideProjects(env, orgId, VALIDATION_THRESHOLD_COLUMNS.validationCount, viewer),
-    listOverrideProjects(env, orgId, VALIDATION_THRESHOLD_COLUMNS.validationCountAudio, viewer),
+  // One at a time, never Promise.all. These are nine statements against a
+  // per-request pool of eight (DEFAULT_POOL_MAX): issued together, the ninth
+  // had no connection of its own, and through Hyperdrive it was left half-sent,
+  // holding an origin connection in ClientRead until Hyperdrive dropped it ten
+  // minutes later. Every load of this page leaked one, and on 2026-11-13 and
+  // again on 2026-11-16 that emptied the production pool for every route.
+  const columns = [
+    INHERITED_KEY_COLUMNS[COUNT_STRUCTURAL_KEY],
+    VALIDATION_THRESHOLD_COLUMNS.validationCount,
+    VALIDATION_THRESHOLD_COLUMNS.validationCountAudio,
     // AQU-2263: the repetition default too.
-    listOverrideProjects(env, orgId, INHERITED_KEY_COLUMNS[AUTO_PROPAGATE_KEY], viewer),
+    INHERITED_KEY_COLUMNS[AUTO_PROPAGATE_KEY],
     // AQU-1768: and one per media default.
-    ...MEDIA_DEFAULT_KEYS.map((key) => listOverrideProjects(env, orgId, MEDIA_DEFAULT_COLUMNS[key], viewer)),
-  ])
+    ...MEDIA_DEFAULT_KEYS.map((key) => MEDIA_DEFAULT_COLUMNS[key]),
+  ]
+  const lists: OverrideProjectList[] = []
+  for (const column of columns) lists.push(await listOverrideProjects(env, orgId, column, viewer))
+  const [countStructuralCells, validationCount, validationCountAudio, autoPropagateRepetitions, ...media] = lists
   const mediaLists = Object.fromEntries(MEDIA_DEFAULT_KEYS.map((key, i) => [key, media[i]]))
   return {
     countStructuralOverrides: countStructuralCells.total,

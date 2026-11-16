@@ -180,14 +180,25 @@ const ORDINAL_WORDS: ReadonlyArray<readonly [RegExp, string]> = [
 ]
 
 /**
+ * AQU-2496 (review, Nov 9): the marks that are optional when a book's name is
+ * written: Arabic vowel marks (U+064B–U+065F, and the dagger alif U+0670),
+ * Hebrew points and cantillation (U+0591–U+05C7), and the zero-width joiner
+ * and non-joiner. They are often left out when typing, so "التكوين" and
+ * "التَّكْوِين", "בראשית" and "בְּרֵאשִׁית", "میکاه" and "می‌کاه" are one book.
+ * Indic vowel signs are part of the spelling and stay.
+ */
+const OPTIONAL_MARKS = /[\u064B-\u065F\u0670\u0591-\u05C7\u200C\u200D]/gu
+
+/**
  * How a book name is compared. NFKC (full-width letters and digits become
- * ordinary ones), any script's digits as 0–9 (AQU-2329), lower case, and no spaces, dots, hyphens or underscores —
+ * ordinary ones), any script's digits as 0–9 (AQU-2329), without the marks
+ * that are optional in writing (`OPTIONAL_MARKS`), lower case, and no spaces, dots, hyphens or underscores —
  * then a leading ordinal word or Roman numeral becomes its digit, so "I
  * Samuel", "First Samuel" and "1 Samuel" are one key. Only before a word: a
  * bare "I" is not a book.
  */
 export function bookKey(value: string): string {
-  const flat = toWesternDigits(value.normalize("NFKC")).toLowerCase().replace(/[\s._\-'’]+/gu, "")
+  const flat = toWesternDigits(value.normalize("NFKC")).replace(OPTIONAL_MARKS, "").toLowerCase().replace(/[\s._\-'’]+/gu, "")
   for (const [re, digit] of ORDINAL_WORDS) {
     const match = re.exec(flat)
     if (!match) continue

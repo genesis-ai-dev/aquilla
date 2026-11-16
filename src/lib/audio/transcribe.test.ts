@@ -120,6 +120,38 @@ describe("transcribeCell — local-first bytes (FRO-355)", () => {
   })
 })
 
+// ── AQU-2491 (review, Nov 9): a transcript landing never chooses a take ────
+//
+// The word timings come back as a re-attach of the take that was chosen when
+// the run STARTED. By the time they land the person may have recorded a newer
+// take, or deleted this one; an ordinary re-attach made this take the chosen,
+// live one again. The write says `wordsOnly`, which the server reads as "add
+// the words, choose nothing" (audio-late-transcript-projection.test.ts).
+describe("transcribeCell — the timings write chooses nothing (AQU-2491)", () => {
+  it("a take's timings ride a words-only re-attach", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    __setTranscribeAudioForTests(fakeTranscribe(["hola", "mundo"]))
+
+    await transcribeCell({ cell: makeCell(), session, projectId: "proj-1", slot: "track-9", targetLang: "fr" })
+
+    expect(emitCellAudioAttach).toHaveBeenCalledOnce()
+    expect(emitCellAudioAttach).toHaveBeenCalledWith(expect.objectContaining({
+      audioId: FULL_ID, slot: "track-9", targetLang: "fr", wordsOnly: true,
+    }))
+  })
+
+  it("so does an imported line's transcript", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    __setTranscribeAudioForTests(fakeTranscribe(["bonjour"]))
+
+    await transcribeCell({ cell: makeMediaCell(), session, projectId: "proj-1", language: "fra" })
+
+    expect(emitCellAudioAttach).toHaveBeenCalledWith(expect.objectContaining({
+      transcription: "bonjour", wordsOnly: true,
+    }))
+  })
+})
+
 // ── AQU-646: trim-window slicing (imported segments share ONE clip) ────────
 
 describe("slicePcmToTrim", () => {

@@ -60,6 +60,24 @@ describe("SdbhPanel not-imported gate", () => {
     expect(document.querySelector(".text-destructive")).toBeNull()
   })
 
+  // AQU-2487 (review, Nov 9): the label already ends in "(optional)" and the
+  // mark was added after it; the question's list was indented on the left
+  // only, which is the wrong side in a right-to-left language.
+  it("says (optional) once on the localized edition button", () => {
+    render(<SdbhPanel projectId="p1" username="alice" getToken={async () => "tok"} onImported={vi.fn()} />)
+    const label = screen.getByText(/Choose localized edition/).closest("label")!
+    expect(label.textContent?.match(/\(optional\)/g)).toHaveLength(1)
+  })
+
+  it("indents the question's list from the start of the line, whichever side that is", async () => {
+    mockImportWithGate()
+    render(<SdbhPanel projectId="p1" username="alice" getToken={async () => "tok"} onImported={vi.fn()} />)
+    await chooseMasterAndImport()
+    const list = (await screen.findByRole("alertdialog")).querySelector("ul")!
+    expect(list).toHaveClass("ps-4")
+    expect(list).not.toHaveClass("pl-4")
+  })
+
   it("proceeds when the user confirms", async () => {
     mockImportWithGate()
     const onImported = vi.fn()

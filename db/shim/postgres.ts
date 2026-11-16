@@ -528,8 +528,11 @@ export class PostgresDb implements AquillaDb {
   }
 }
 
-/** postgres.js → PgExecutor (prod path; over Hyperdrive's connection string). */
-function fromPostgresJs(sql: postgres.Sql): PgExecutor {
+/** postgres.js → PgExecutor (prod path; over Hyperdrive's connection string).
+ *  Capped at `max`, the pool's own size (see capInFlight): this is the only
+ *  place a production executor is built, so none exists without the cap.
+ *  Exported for the unit test of exactly that. */
+export function fromPostgresJs(sql: postgres.Sql, max: number): PgExecutor {
   const wrap = (s: postgres.Sql): PgExecutor => ({
     async run(query, params, opts) {
       const rows = (await s.unsafe(query, params as never[], opts?.prepare ? { prepare: true } : undefined)) as unknown as Record<string, unknown>[] & { count?: number }
@@ -538,7 +541,48 @@ function fromPostgresJs(sql: postgres.Sql): PgExecutor {
     begin: (fn) => s.begin((tx) => fn(wrap(tx as unknown as postgres.Sql))) as Promise<never>,
     close: () => sql.end({ timeout: 5 }),
   })
-  return wrap(sql)
+  return capInFlight(wrap(sql), max)
+}
+
+/**
+ * Hold a handle to at most `limit` units of work at once: a unit is one
+ * top-level statement or one whole transaction, i.e. one pool connection.
+ * The rest wait their turn here, in the order they were issued.
+ *
+ * Why here and not in the driver: with the cap equal to the pool size, the
+ * driver always has a free connection for whatever it is handed, so it never
+ * has to decide what to do with a statement it has no connection for. That
+ * decision is what took production down on 2026-11-13 and 2026-11-16: a
+ * statement issued past the pool was left half-sent through Hyperdrive and
+ * held an origin connection for ten minutes. The full record, including what
+ * is still not known about the trigger:
+ * docs/decisions/0011-in-flight-statement-cap.md.
+ *
+ * Statements INSIDE a transaction are not counted: they run on the
+ * connection their transaction already holds, and batchPipelined() depends
+ * on dispatching them together.
+ */
+export function capInFlight(executor: PgExecutor, limit: number): PgExecutor {
+  let active = 0
+  const waiting: Array<() => void> = []
+  const hold = async <T>(work: () => Promise<T>): Promise<T> => {
+    if (active < limit) active += 1
+    else await new Promise<void>((resolve) => waiting.push(resolve))
+    try {
+      return await work()
+    } finally {
+      // Hand the slot straight to the next in line, so a statement issued
+      // while others wait cannot jump the queue.
+      const next = waiting.shift()
+      if (next) next()
+      else active -= 1
+    }
+  }
+  return {
+    run: (query, params, opts) => hold(() => executor.run(query, params, opts)),
+    begin: (fn) => hold(() => executor.begin(fn)),
+    close: async () => { await executor.close?.() },
+  }
 }
 
 /** Build an Aquilla database handle from a Postgres connection string (prod). */
@@ -602,7 +646,7 @@ export function makePostgres(
       timestamp: { to: 1114, from: [1114, 1184], parse: (x: string) => x, serialize: (x: string) => x },
     },
   })
-  return new PostgresDb(fromPostgresJs(sql))
+  return new PostgresDb(fromPostgresJs(sql, max))
 }
 
 /**

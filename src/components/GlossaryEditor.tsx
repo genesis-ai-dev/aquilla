@@ -71,7 +71,7 @@ import {
   renderingsForLane,
   replaceLaneRenderings,
 } from "@/lib/terminology/rendering-lane"
-import { importTermbaseFile } from "@/lib/terminology/import-format"
+import { importTermbaseFile, termsNotAlreadyListed } from "@/lib/terminology/import-format"
 import { GlossaryRow } from "@/components/GlossaryRow"
 import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
 import { TerminologyMergeDialog } from "@/components/TerminologyMergeDialog"
@@ -283,6 +283,10 @@ export function GlossaryEditor({
   const [newSource, setNewSource] = useState("")
   const [newRendering, setNewRendering] = useState("")
   const [error, setError] = useState<string | null>(null)
+  // AQU-2487 (review, Nov 9): what the last term-list import did, in words:
+  // how many terms it added and how many the list already had. Cleared by the
+  // next change to the list, so it never describes an older state.
+  const [importNotice, setImportNotice] = useState<string | null>(null)
   const [predictedSuggestions, setPredictedSuggestions] = useState<PredictedEquivalent[] | undefined>(undefined)
   const [suggestionsLoading, setSuggestionsLoading] = useState(false)
   const violations = useTerminologyViolations({
@@ -323,6 +327,7 @@ export function GlossaryEditor({
       const next = updated.terminology ?? []
       conceptsRef.current = next
       setOptimisticConcepts(next)
+      setImportNotice(null)
       pendingWritesRef.current += 1
       try {
         await emitConceptDelta({ projectId, author, prev, next })
@@ -641,6 +646,7 @@ export function GlossaryEditor({
     (file: File) => {
       const p = guard()
       if (!p) return
+      setImportNotice(null)
       const reader = new FileReader()
       reader.onload = () => {
         try {
@@ -664,7 +670,24 @@ export function GlossaryEditor({
                 ),
               }))
             : imported
-          void persist({ terminology: [...(p.terminology ?? []), ...stamped] })
+          // AQU-2487 (import sweep, Nov 2): a term the list already has,
+          // word for word, is not added a second time.
+          const existing = p.terminology ?? []
+          const fresh = termsNotAlreadyListed(existing, stamped)
+          if (fresh.length === 0) {
+            setError(t("terminology.editor.importNothingNew"))
+            return
+          }
+          // AQU-2487 (review, Nov 9): an updated list adds a few terms and
+          // leaves the rest out; say how many of each once they are saved.
+          const already = stamped.length - fresh.length
+          void persist({ terminology: [...existing, ...fresh] }).then((saved) => {
+            if (!saved) return
+            const added = t("terminology.editor.importAdded", { count: fresh.length })
+            setImportNotice(
+              already > 0 ? `${added} ${t("terminology.editor.importAlreadyListed", { count: already })}` : added,
+            )
+          })
         } catch (err) {
           setError(err instanceof Error ? err.message : t("terminology.editor.errorImportFailed"))
         }
@@ -902,6 +925,11 @@ export function GlossaryEditor({
 
       {error && (
         <div className="border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">{error}</div>
+      )}
+      {importNotice && !error && (
+        <div role="status" data-testid="term-import-notice" className="border-b bg-muted/50 px-4 py-2 text-xs text-muted-foreground">
+          {importNotice}
+        </div>
       )}
 
       {/* AQU-1340: a refresh that failed OVER a termbase we already hold. The

@@ -222,8 +222,8 @@ its job. Keep this section in step with that manifest — a contract test assert
 | --- | --- | --- | --- |
 | Web (production) | `.` (repo root) | `aquilla-web` | `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE` |
 | Web (development) | `.` (repo root) | `aquilla-web-development` | none |
-| Identity (production) | `auth-worker` | `aquilla-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `OMNI_SHARED_SECRET` |
-| Identity (development) | `auth-worker` | `aquilla-dev-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `MONDAY_TOKEN_KEY`, `OMNI_SHARED_SECRET` |
+| Identity (production) | `auth-worker` | `aquilla-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `OMNI_SHARED_SECRET`, `ADMIN_TOTP_KEY`, `GOOGLE_LOGIN_CLIENT_SECRET` |
+| Identity (development) | `auth-worker` | `aquilla-dev-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `MONDAY_TOKEN_KEY`, `OMNI_SHARED_SECRET`, `ADMIN_TOTP_KEY`, `GOOGLE_LOGIN_CLIENT_SECRET` |
 | Sync (production) | `sync-worker` | `aquilla-sync-worker` | `SYNC_SECRET_KEY`, `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE`, `DIARIZATION_SHARED_SECRET`, `INWORLD_API_KEY`, `VOICE_FORGE_TOKEN`, `VOICE_FORGE_URL` |
 | Sync (development) | `sync-worker` | `aquilla-sync-worker-dev` | `SYNC_SECRET_KEY`, `VOICE_FORGE_TOKEN`, `VOICE_FORGE_URL` |
 
@@ -638,6 +638,14 @@ DELETE FROM platform_admins WHERE email = 'someone@example.com';
 leave it out. `note` is free text for why the person has access. An email can
 be added before the person signs up; `GET /api/v2/admin/admins` shows it with
 `hasAccount: false` until they do.
+
+Password sign-up refuses an address that is already in the table (the same
+`409` a taken address gets), because that form does not prove who holds the
+mailbox and the first person to register the address would become the admin.
+So a person added before they have an account signs up with **Google**, which
+does prove it. Where Google sign-in is not configured, have them register
+first and insert the row afterwards. Treat a `hasAccount: false` row as a
+loose end to close, not a place to leave things.
 
 Order for a first rollout: apply the migration (`neon:apply:dev` /
 `neon:apply:prod`), insert the admins, then deploy the auth Worker that no

@@ -357,3 +357,10 @@ vi.mock("@/lib/frontier/google-login", () => ({
   googleRequest: async () => ({ enabled: false }),
   startGoogleLogin: vi.fn(),
 }))
+
+it("prefills the changed email and requires login even when another account remains", () => {
+  mockSession = { jwt: "valid-jwt", username: "other", createdAt: new Date().toISOString() }
+  render(<MemoryRouter initialEntries={[{ pathname: "/login", search: "?add=1", state: { emailChanged: "new@example.com" } }]}><Login /></MemoryRouter>)
+  expect(screen.getByLabelText("Aquilla username or email")).toHaveProperty("value", "new@example.com")
+  expect(screen.getByText(/You have been logged out of this account/).getAttribute("role")).toBe("status")
+})

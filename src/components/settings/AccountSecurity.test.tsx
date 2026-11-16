@@ -90,9 +90,11 @@ it("offers protection without blocking settings when the factor is not enabled",
     </AccountSecurity>,
   )
   await screen.findByText("private settings")
+  expect(screen.queryByRole("dialog")).toBeNull()
   fireEvent.click(
     screen.getByRole("button", { name: "auth.security.enableProtection" }),
   )
+  expect(screen.getByRole("dialog")).toBeVisible()
   expect(
     screen.getByLabelText("auth.security.currentAquillaPassword"),
   ).toBeVisible()
@@ -102,6 +104,34 @@ it("offers protection without blocking settings when the factor is not enabled",
     }),
   ).toBeNull()
 })
+it("keeps enabled protection compact and clears unfinished input when its dialog closes", async () => {
+  status.verified = true
+  render(
+    <AccountSecurity jwt="token" username="alice">
+      <div>private settings</div>
+    </AccountSecurity>,
+  )
+  await screen.findByText("private settings")
+  expect(screen.queryByLabelText("auth.security.authenticatorCode")).toBeNull()
+  fireEvent.click(
+    screen.getByRole("button", { name: "auth.security.manageProtection" }),
+  )
+  fireEvent.click(
+    screen.getByRole("button", { name: "auth.security.useARecoveryCode" }),
+  )
+  fireEvent.change(screen.getByLabelText("auth.security.recoveryCode"), {
+    target: { value: "sensitive-draft" },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "common.close" }))
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  fireEvent.click(
+    screen.getByRole("button", { name: "auth.security.manageProtection" }),
+  )
+  expect(screen.getByLabelText("auth.security.authenticatorCode")).toHaveValue(
+    "",
+  )
+})
+
 it("never offers removal for the last login method and stops a change after a wrong current password", async () => {
   render(
     <PasswordManagement

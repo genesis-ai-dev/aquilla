@@ -26,11 +26,18 @@ test.beforeEach(async () => {
 })
 test("authenticator enrollment protects settings, recovery unlocks them, and normal login still works", async ({
   page,
-}) => {
+}, testInfo) => {
   const alice = seedUser("alice")
   await page.goto("/login")
   await injectSession(page, await ensureAuthState("alice"))
   await page.goto("/preferences/login-methods")
+  await expect(
+    page.getByRole("button", {
+      name: "Set up an authenticator app",
+      exact: true,
+    }),
+  ).toBeVisible()
+  await page.getByTestId("account-login-security").screenshot({ path: testInfo.outputPath("login-settings.png"), animations: "disabled" })
   await page
     .getByRole("button", { name: "Set up an authenticator app", exact: true })
     .click()
@@ -46,7 +53,12 @@ test("authenticator enrollment protects settings, recovery unlocks them, and nor
     .getByRole("button", { name: "Set up with your password", exact: true })
     .click()
   const setup = (await (await setupResponse).json()) as { secret: string }
+  await expect(page.getByRole("dialog")).toBeVisible()
   await expect(page.getByAltText("Authenticator setup QR code")).toBeVisible()
+  await page.screenshot({
+    path: testInfo.outputPath("authenticator-dialog.png"),
+    animations: "disabled",
+  })
   await page
     .getByLabel("Authenticator code", { exact: true })
     .fill(await totp(setup.secret, Math.floor(Date.now() / 30000)))
@@ -115,10 +127,8 @@ test("authenticator enrollment protects settings, recovery unlocks them, and nor
     },
   })
   expect(changedLogin.ok()).toBe(true)
-  await test
-    .info()
-    .attach("settings-protected-after-password-change", {
-      body: await page.screenshot(),
-      contentType: "image/png",
-    })
+  await test.info().attach("settings-protected-after-password-change", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  })
 })

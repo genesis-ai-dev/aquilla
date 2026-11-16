@@ -33,6 +33,10 @@ const INVITE_COUNT_PLACEHOLDER =
 
 export const auth = defineNamespace({
   keys: {
+    "auth.security.protectionEnabled": "Authenticator protection is on. Changes to your login methods require a verification code.",
+    "auth.security.manageProtection": "Manage protection",
+    "auth.security.saveRecoveryCodes": "Save your recovery codes",
+    "auth.methods.previewDisabled": "Google login is disabled in CI previews. Use your Aquilla password here.",
     "auth.security.linkFromSettings": "Log in with your Aquilla password, then connect Google in Login methods after verifying with your authenticator.",
     "auth.security.turnOffWarning": "Turning off protection removes the extra verification for your login settings. Enter a new code to confirm.",
     "auth.security.wrongPassword": "That password is incorrect. Try your current Aquilla password.",
@@ -343,6 +347,11 @@ export const auth = defineNamespace({
       screenshot: "auth",
     },
     keys: {
+      "auth.security.protectionEnabled": { description: "Login settings security status, dialog title, or environment availability explanation." },
+      "auth.security.manageProtection": { description: "Login settings security status, dialog title, or environment availability explanation." },
+      "auth.security.saveRecoveryCodes": { description: "Login settings security status, dialog title, or environment availability explanation." },
+      "auth.methods.previewDisabled": { description: "Login settings security status, dialog title, or environment availability explanation." },
+
       "auth.security.linkFromSettings": { description: "Google linking for an existing account with extra settings verification enabled." },
       "auth.security.turnOffWarning": { description: "Warning before removing the optional authenticator protection from account settings." },
       "auth.security.wrongPassword": { description: "Incorrect current password during an authenticated login-method change." },

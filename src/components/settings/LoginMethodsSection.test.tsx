@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({ active: { username: "alice", jwt: "alice-token" } as { username: string; jwt: string } | null, request: vi.fn(), start: vi.fn(), rejected: vi.fn() }))
+vi.mock("@/lib/deployment-environment", () => ({ resolveBackendEnvironment: () => ({ kind: "preview" }) }))
 vi.mock("@/lib/frontier/session-expiry", () => ({ notifySessionExpiredIfCurrent: mocks.rejected }))
 vi.mock("@/hooks/useAccounts", () => ({ useAccounts: () => ({ active: mocks.active }) }))
 vi.mock("@/lib/i18n/I18nProvider", () => ({ useT: () => (key: string) => key }))
@@ -140,4 +141,15 @@ it("keeps an intentionally opened password reset panel when the password was alr
   fireEvent.focus(window)
   await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(2))
   expect(screen.getByText("password-management")).toBeVisible()
+})
+
+it("shows the preview restriction beside Google and cannot start a disabled connection", async () => {
+  mocks.request.mockResolvedValue({ password: true, google: false, google_available: false })
+  render(<LoginMethodsSection />)
+  await screen.findByText("auth.methods.previewDisabled")
+  const connect = screen.getByRole("button", { name: "auth.methods.connect" })
+  expect(connect).toBeDisabled()
+  fireEvent.click(connect)
+  expect(mocks.start).not.toHaveBeenCalled()
+  expect(screen.queryByText("auth.google.privacy")).toBeNull()
 })

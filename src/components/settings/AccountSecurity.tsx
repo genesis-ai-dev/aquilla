@@ -5,6 +5,15 @@ import QRCode from "qrcode"
 import { AUTH_BASE, finalizeSession } from "@/lib/frontier/auth"
 import { useAccounts } from "@/hooks/useAccounts"
 import { startGoogleLogin } from "@/lib/frontier/google-login"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogBody,
+} from "@/components/ui/dialog"
+import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { Button } from "@/components/ui/button"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { Input } from "@/components/ui/input"
@@ -138,192 +147,165 @@ export function AccountSecurity({
     }
   }
   const locked = status?.enabled && !status.verified
-  return (
-    <div className="flex flex-col gap-6">
-      <section
-        className="flex max-w-xl flex-col gap-4 ph-no-capture"
-        data-ph-mask
-      >
-        <h2 className="text-lg font-medium">
-          {t("auth.security.protectYourLoginSettings")}
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          {t("auth.security.useAnAuthenticatorAppToApproveChangesTo")}
+  const closeSetup = () => {
+    if (busy || codes) return
+    setEnrolling(false)
+    setSetup(null)
+    setCode("")
+    setPassword("")
+    setRecovery(false)
+    setError("")
+  }
+  const form = (
+    <div className="flex flex-col gap-4 ph-no-capture" data-ph-mask>
+      {error && (
+        <p role="alert" className="text-destructive">
+          {error}
         </p>
-        {error && (
-          <p role="alert" className="text-destructive">
-            {error}
-          </p>
-        )}
-        {!status ? (
-          <Button onClick={() => void run(refresh)}>
-            {t("auth.security.reloadSecuritySettings")}
-          </Button>
-        ) : (
-          <>
-            {locked && (
-              <p>
-                {t("auth.security.verifyWithYourAuthenticatorAppToManageYour")}
-              </p>
-            )}
-            {(status.enabled || setup) && !codes && (
-              <>
-                {recovery ? (
-                  <Input
-                    aria-label={t("auth.security.recoveryCode")}
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                  />
-                ) : (
-                  <SecurityCode value={code} onChange={setCode} />
-                )}
-                {status.enabled && (
-                  <Button
-                    variant="link"
-                    onClick={() => {
-                      setRecovery(!recovery)
-                      setCode("")
-                    }}
-                  >
-                    {recovery
-                      ? t("auth.security.useAnAuthenticatorCode")
-                      : t("auth.security.useARecoveryCode")}
-                  </Button>
-                )}
+      )}
+      {!status ? (
+        <Button onClick={() => void run(refresh)}>
+          {t("auth.security.reloadSecuritySettings")}
+        </Button>
+      ) : (
+        <>
+          {locked && (
+            <p>
+              {t("auth.security.verifyWithYourAuthenticatorAppToManageYour")}
+            </p>
+          )}
+          {setup && !codes && (
+            <>
+              <p>{t("auth.security.scanThisQRCodeInYourAuthenticatorApp")}</p>
+              <img
+                src={setup.qr}
+                alt={t("auth.security.authenticatorSetupQRCode")}
+                className="self-center rounded-md border bg-white p-3"
+                width={200}
+                height={200}
+              />
+              <CopySecurityCode
+                value={setup.secret}
+                label={t("auth.security.copySetupKey")}
+              />
+            </>
+          )}
+          {(status.enabled || setup) && !codes && (
+            <>
+              {recovery ? (
+                <Input
+                  aria-label={t("auth.security.recoveryCode")}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                />
+              ) : (
+                <SecurityCode value={code} onChange={setCode} />
+              )}
+              {status.enabled && (
                 <Button
-                  disabled={busy || !code}
-                  onClick={() =>
-                    void run(async () => {
-                      if (setup) {
-                        const result = await securityRequest<{
-                          recoveryCodes: string[]
-                        }>(jwt, "confirm", {
-                          generation: setup.generation,
-                          code,
-                        })
-                        setCodes(result.recoveryCodes)
-                      } else {
+                  variant="link"
+                  onClick={() => {
+                    setRecovery(!recovery)
+                    setCode("")
+                  }}
+                >
+                  {recovery
+                    ? t("auth.security.useAnAuthenticatorCode")
+                    : t("auth.security.useARecoveryCode")}
+                </Button>
+              )}
+              <Button
+                disabled={busy || !code}
+                onClick={() =>
+                  void run(async () => {
+                    if (setup) {
+                      const result = await securityRequest<{
+                        recoveryCodes: string[]
+                      }>(jwt, "confirm", {
+                        generation: setup.generation,
+                        code,
+                      })
+                      setCodes(result.recoveryCodes)
+                    } else {
+                      await securityRequest(jwt, "verify", {
+                        code,
+                        recovery,
+                      })
+                      await refresh()
+                    }
+                  })
+                }
+              >
+                {setup
+                  ? t("auth.security.confirmAuthenticator")
+                  : t("auth.security.verify")}
+              </Button>
+              {status.enabled && !locked && (
+                <div className="flex flex-wrap gap-2">
+                  <p className="w-full text-sm text-muted-foreground">
+                    {t("auth.security.turnOffWarning")}
+                  </p>
+                  <Button
+                    variant="destructive"
+                    disabled={busy || !code}
+                    onClick={() =>
+                      void run(async () => {
                         await securityRequest(jwt, "verify", {
                           code,
                           recovery,
+                          disable: true,
                         })
+                        setEnrolling(false)
                         await refresh()
-                      }
-                    })
-                  }
-                >
-                  {setup
-                    ? t("auth.security.confirmAuthenticator")
-                    : t("auth.security.verify")}
-                </Button>
-                {status.enabled && !locked && (
-                  <div className="flex flex-wrap gap-2">
-                    <p className="w-full text-sm text-muted-foreground">
-                      {t("auth.security.turnOffWarning")}
-                    </p>
-                    <Button
-                      variant="destructive"
-                      disabled={busy || !code}
-                      onClick={() =>
-                        void run(async () => {
-                          await securityRequest(jwt, "verify", {
-                            code,
-                            recovery,
-                            disable: true,
-                          })
-                          await refresh()
-                        })
-                      }
-                    >
-                      {t("auth.security.turnOffProtection")}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      disabled={busy || !code}
-                      onClick={() =>
-                        void run(async () => {
-                          const r = await securityRequest<{
-                            recoveryCodes: string[]
-                          }>(jwt, "verify", {
-                            code,
-                            recovery,
-                            regenerate: true,
-                          })
-                          setCodes(r.recoveryCodes)
-                          await refresh()
-                        })
-                      }
-                    >
-                      {t("auth.security.replaceRecoveryCodes")}
-                    </Button>
-                  </div>
-                )}
-              </>
-            )}
-            {!status.enabled && !setup && status.configured && !enrolling && (
-              <Button onClick={() => setEnrolling(true)}>
-                {t("auth.security.enableProtection")}
-              </Button>
-            )}
-            {!status.enabled && !setup && status.configured && enrolling && (
-              <>
-                {status.password && (
-                  <>
-                    <label htmlFor={passwordId}>
-                      {t("auth.security.currentAquillaPassword")}
-                    </label>
-                    <RevealableInput
-                      id={passwordId}
-                      aria-label={t("auth.security.currentAquillaPassword")}
-                      autoComplete="current-password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                    />
-                    <Button
-                      disabled={busy || !password}
-                      onClick={() =>
-                        void run(async () => {
-                          await securityRequest(jwt, "password-proof", {
-                            password,
-                          })
-                          const s = await securityRequest<{
-                            secret: string
-                            generation: string
-                            uri: string
-                          }>(jwt, "setup", {})
-                          setSetup({ ...s, qr: await QRCode.toDataURL(s.uri) })
-                        })
-                      }
-                    >
-                      {t("auth.security.setUpWithYourPassword")}
-                    </Button>
-                  </>
-                )}
-                {status.google && !status.google_verified && (
-                  <Button
-                    variant="outline"
-                    disabled={busy || !status.google_available}
-                    onClick={() =>
-                      void run(async () =>
-                        startGoogleLogin(
-                          "/preferences/login-methods",
-                          false,
-                          username,
-                          false,
-                          true,
-                        ),
-                      )
+                      })
                     }
                   >
-                    {t("auth.security.verifyWithGoogleInstead")}
+                    {t("auth.security.turnOffProtection")}
                   </Button>
-                )}
-                {status.google_verified && (
                   <Button
                     variant="outline"
-                    disabled={busy}
+                    disabled={busy || !code}
                     onClick={() =>
                       void run(async () => {
+                        const r = await securityRequest<{
+                          recoveryCodes: string[]
+                        }>(jwt, "verify", {
+                          code,
+                          recovery,
+                          regenerate: true,
+                        })
+                        setCodes(r.recoveryCodes)
+                        await refresh()
+                      })
+                    }
+                  >
+                    {t("auth.security.replaceRecoveryCodes")}
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+          {!status.enabled && !setup && status.configured && enrolling && (
+            <>
+              {status.password && (
+                <>
+                  <label htmlFor={passwordId}>
+                    {t("auth.security.currentAquillaPassword")}
+                  </label>
+                  <RevealableInput
+                    id={passwordId}
+                    aria-label={t("auth.security.currentAquillaPassword")}
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                  <Button
+                    disabled={busy || !password}
+                    onClick={() =>
+                      void run(async () => {
+                        await securityRequest(jwt, "password-proof", {
+                          password,
+                        })
                         const s = await securityRequest<{
                           secret: string
                           generation: string
@@ -333,82 +315,166 @@ export function AccountSecurity({
                       })
                     }
                   >
-                    {t("auth.security.continueAfterGoogleVerification")}
+                    {t("auth.security.setUpWithYourPassword")}
                   </Button>
-                )}
-              </>
-            )}
-            {!status.enabled && !status.configured && (
-              <p>
-                {t(
-                  "auth.security.authenticatorSetupIsUnavailableInThisEnvironment",
-                )}
-              </p>
-            )}
-            {setup && !codes && (
-              <>
-                <p>{t("auth.security.scanThisQRCodeInYourAuthenticatorApp")}</p>
-                <img
-                  src={setup.qr}
-                  alt={t("auth.security.authenticatorSetupQRCode")}
-                  width={200}
-                  height={200}
-                />
-                <CopySecurityCode
-                  value={setup.secret}
-                  label={t("auth.security.copySetupKey")}
-                />
-              </>
-            )}
-            {codes && (
-              <>
-                <p>
-                  {t(
-                    "auth.security.saveTheseRecoveryCodesSomewhereSeparateFromYour",
-                  )}
-                </p>
-                <pre className="select-none" data-ph-mask>
-                  {codes.join("\n")}
-                </pre>
-                <CopySecurityCode
-                  value={codes.join("\n")}
-                  label={t("auth.security.copyRecoveryCodes")}
-                />
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={saved}
-                    onChange={(e) => setSaved(e.target.checked)}
-                  />
-                  {t("auth.security.iSavedMyRecoveryCodes")}
-                </label>
+                </>
+              )}
+              {status.google && !status.google_verified && (
                 <Button
-                  disabled={!saved || busy}
+                  variant="outline"
+                  disabled={busy || !status.google_available}
+                  onClick={() =>
+                    void run(async () =>
+                      startGoogleLogin(
+                        "/preferences/login-methods",
+                        false,
+                        username,
+                        false,
+                        true,
+                      ),
+                    )
+                  }
+                >
+                  {t("auth.security.verifyWithGoogleInstead")}
+                </Button>
+              )}
+              {status.google_verified && (
+                <Button
+                  variant="outline"
+                  disabled={busy}
                   onClick={() =>
                     void run(async () => {
-                      if (setup)
-                        await securityRequest(jwt, "complete", {
-                          generation: setup.generation,
-                          savedRecoveryCodes: true,
-                        })
-                      setCodes(null)
-                      setSetup(null)
-                      setSaved(false)
-                      await refresh()
+                      const s = await securityRequest<{
+                        secret: string
+                        generation: string
+                        uri: string
+                      }>(jwt, "setup", {})
+                      setSetup({ ...s, qr: await QRCode.toDataURL(s.uri) })
                     })
                   }
                 >
-                  {t("auth.security.done")}
+                  {t("auth.security.continueAfterGoogleVerification")}
                 </Button>
-              </>
-            )}
-          </>
-        )}
-      </section>
+              )}
+            </>
+          )}
+          {!status.enabled && !status.configured && (
+            <p>
+              {t(
+                "auth.security.authenticatorSetupIsUnavailableInThisEnvironment",
+              )}
+            </p>
+          )}
+          {codes && (
+            <>
+              <p>
+                {t(
+                  "auth.security.saveTheseRecoveryCodesSomewhereSeparateFromYour",
+                )}
+              </p>
+              <pre className="select-none" data-ph-mask>
+                {codes.join("\n")}
+              </pre>
+              <CopySecurityCode
+                value={codes.join("\n")}
+                label={t("auth.security.copyRecoveryCodes")}
+              />
+              <label>
+                <input
+                  type="checkbox"
+                  checked={saved}
+                  onChange={(e) => setSaved(e.target.checked)}
+                />
+                {t("auth.security.iSavedMyRecoveryCodes")}
+              </label>
+              <Button
+                disabled={!saved || busy}
+                onClick={() =>
+                  void run(async () => {
+                    if (setup)
+                      await securityRequest(jwt, "complete", {
+                        generation: setup.generation,
+                        savedRecoveryCodes: true,
+                      })
+                    setEnrolling(false)
+                    setCodes(null)
+                    setSetup(null)
+                    setSaved(false)
+                    await refresh()
+                  })
+                }
+              >
+                {t("auth.security.done")}
+              </Button>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  )
+  return (
+    <div className="flex flex-col gap-6" data-testid="account-login-security">
+      <SettingsGroup>
+        <SettingsRow
+          className="flex-wrap items-center"
+          label={t("auth.security.protectYourLoginSettings")}
+          description={
+            status?.enabled
+              ? t("auth.security.protectionEnabled")
+              : status && !status.configured
+                ? t(
+                    "auth.security.authenticatorSetupIsUnavailableInThisEnvironment",
+                  )
+                : t("auth.security.useAnAuthenticatorAppToApproveChangesTo")
+          }
+          control={
+            status && !locked ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!status.enabled && !status.configured}
+                onClick={() => setEnrolling(true)}
+              >
+                {t(
+                  status.enabled
+                    ? "auth.security.manageProtection"
+                    : "auth.security.enableProtection",
+                )}
+              </Button>
+            ) : undefined
+          }
+        />
+      </SettingsGroup>
+      {(!status || locked) && <section className="max-w-md">{form}</section>}
+      <Dialog
+        open={enrolling && !locked}
+        onOpenChange={(open) => {
+          if (!open) closeSetup()
+        }}
+      >
+        <DialogContent closeDisabled={busy || !!codes}>
+          <DialogHeader>
+            <DialogTitle>
+              {t(
+                codes
+                  ? "auth.security.saveRecoveryCodes"
+                  : status?.enabled
+                    ? "auth.security.manageProtection"
+                    : "auth.security.enableProtection",
+              )}
+            </DialogTitle>
+            <DialogDescription>
+              {t("auth.security.useAnAuthenticatorAppToApproveChangesTo")}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody>{form}</DialogBody>
+        </DialogContent>
+      </Dialog>
       {status && !locked && children}
     </div>
   )
 }
+
 export function PasswordManagement({
   jwt,
   username,

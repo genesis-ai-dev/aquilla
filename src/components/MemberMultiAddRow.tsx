@@ -16,9 +16,12 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GrantScopeNotice } from "@/components/GrantScopeNotice";
 import { RoleSelect } from "@/components/RoleSelect";
-import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead";
+import {
+  UsernameTypeahead,
+  type RecipientValue,
+  type TypeaheadPerson,
+} from "@/components/UsernameTypeahead";
 import { toast } from "@/components/ui/toast";
-import type { UserSearchResult } from "@/hooks/useUserSearch";
 import { useI18n } from "@/lib/i18n/I18nProvider";
 import {
   describeGrant,
@@ -72,8 +75,12 @@ export interface MemberMultiAddRowProps {
   excludedUserIds?: readonly number[];
   /** Disable for org membership, where search should find any Aquilla user. */
   scopedUserSearch?: boolean;
-  /** Eligible-colleague rows offered before any search (see UsernameTypeahead). */
-  suggestions?: readonly UserSearchResult[];
+  /**
+   * Eligible-colleague rows offered before any search (see UsernameTypeahead).
+   * AQU-2609: each row may carry a `secondary` identifier (an email the viewer
+   * is already permitted to see) so similar usernames stay distinguishable.
+   */
+  suggestions?: readonly TypeaheadPerson[];
   /** Shown when `suggestions` is provided but empty and nothing is typed. */
   emptySuggestionsHint?: string;
   /** Fires as an Add attempt starts — lets the parent clear its own error UI. */

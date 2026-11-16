@@ -238,7 +238,7 @@ export async function makeTestDb(seed: Seed = {}, opts: TestDbOptions = {}): Pro
   }
   // AQU-2613: a request may not have more statements in flight than its pool
   // (DEFAULT_POOL_MAX) holds. See db/shared/test-pool-guard.ts.
-  const db = new PostgresDb(guardPoolOverflow(pgliteExecutor(pg, opts))) as unknown as AquillaDb
+  const db = guardPoolOverflow(new PostgresDb(pgliteExecutor(pg, opts))) as unknown as AquillaDb
   return {
     db,
     pg,

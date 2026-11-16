@@ -85,7 +85,7 @@ export const snapshotsBucket = {
 export const env = {
   // AQU-2613: a request may not have more statements in flight than its pool
   // (DEFAULT_POOL_MAX) holds. See db/shared/test-pool-guard.ts.
-  AQUILLA_PG: new PostgresDb(guardPoolOverflow(pgliteExecutor(pg))) as unknown as AquillaDb,
+  AQUILLA_PG: guardPoolOverflow(new PostgresDb(pgliteExecutor(pg))) as unknown as AquillaDb,
   SNAPSHOTS: snapshotsBucket as unknown as R2Bucket,
   SECRET_KEY: "frontier-test-secret",
   SYNC_SECRET_KEY: "sync-secret",

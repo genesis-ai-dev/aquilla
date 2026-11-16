@@ -682,6 +682,11 @@ import {
   useTrackedCellRef as useEditorViewportTrackedCellRef,
 } from "@/hooks/useEditorViewportStore"
 
+// The Voices panel holds the clip inspector and Make speech, which are cramped
+// at the width the file list wants. It opens wider and keeps its own remembered
+// width, so widening it leaves the other tabs alone (AQU-2577).
+const VOICES_DOCK_DEFAULT_WIDTH = 380
+
 // Import runs inline in the workspace (upload + eBible corpus tabs). An
 // earlier AD-11 plan carved import out into a standalone import Worker; that
 // monorepo layout was abandoned (see CLAUDE.md), so there is nowhere to route
@@ -17154,7 +17159,8 @@ export function ProjectWorkspace() {
       <AppShell
         dockOpenRequest={extensionPanelRequestSeq}
         railCollapsed={dockTab === null}
-        dockStorageKey={projectId}
+        dockStorageKey={dockTab === "voices" ? `${projectId}:voices` : projectId}
+        dockDefaultWidth={dockTab === "voices" ? VOICES_DOCK_DEFAULT_WIDTH : undefined}
         leftDock={
           <LeftDock
             activeTab={dockTab}
@@ -17603,7 +17609,8 @@ export function ProjectWorkspace() {
       <AppShell
         dockOpenRequest={extensionPanelRequestSeq}
         railCollapsed={dockTab === null}
-        dockStorageKey={projectId}
+        dockStorageKey={dockTab === "voices" ? `${projectId}:voices` : projectId}
+        dockDefaultWidth={dockTab === "voices" ? VOICES_DOCK_DEFAULT_WIDTH : undefined}
         logoAccessory={
           dockTab !== null && lgUp ? (
             <AppTooltip content={t("nav.dock.hidePanel")} side="bottom">

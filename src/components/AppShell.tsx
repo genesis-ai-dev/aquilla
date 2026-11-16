@@ -54,8 +54,8 @@ const VIDEO_STORAGE_KEY = "aquilla:video-height"
 const VIDEO_DEFAULT_HEIGHT = 320
 const VIDEO_MIN_HEIGHT = 120
 
-function readStoredDockWidth(storageKey: string | undefined): number {
-  if (!storageKey) return DOCK_DEFAULT_WIDTH
+function readStoredDockWidth(storageKey: string | undefined, fallback = DOCK_DEFAULT_WIDTH): number {
+  if (!storageKey) return fallback
   try {
     const saved = localStorage.getItem(`left-dock-width:${storageKey}`)
     if (saved) {
@@ -65,7 +65,7 @@ function readStoredDockWidth(storageKey: string | undefined): number {
   } catch {
     // ignore
   }
-  return DOCK_DEFAULT_WIDTH
+  return fallback
 }
 
 function writeStoredDockWidth(storageKey: string | undefined, width: number) {
@@ -105,6 +105,10 @@ interface Props {
   leftDock?: ReactNode
   /** Persist dock width per project (`left-dock-width:${key}`). */
   dockStorageKey?: string
+  /** Width the dock opens at until one is stored under `dockStorageKey`
+   *  (default 256). A tab whose panel needs more room passes its own key and
+   *  width, so widening it leaves the other tabs alone (AQU-2577). */
+  dockDefaultWidth?: number
   /** @deprecated Use `leftDock` for ProjectWorkspace. Other pages still use
    * this for OrgSidebar until they migrate. */
   sidebar?: ReactNode
@@ -149,6 +153,7 @@ interface Props {
 export function AppShell({
   leftDock,
   dockStorageKey,
+  dockDefaultWidth,
   sidebar,
   logoSlot,
   logoAccessory,
@@ -189,7 +194,7 @@ export function AppShell({
   ) : null)
 
   const dockPanelRef = usePanelRef()
-  const [dockWidth] = useState(() => readStoredDockWidth(dockStorageKey))
+  const [dockWidth] = useState(() => readStoredDockWidth(dockStorageKey, dockDefaultWidth))
   /** The dock's last reported width, to tell a reopening clamp from a drag. */
   const dockSizeRef = useRef<number | null>(null)
   const [videoHeight] = useState(() => readStoredVideoHeight())
@@ -250,10 +255,10 @@ export function AppShell({
     }
     // A frame later: the panel's open limits (200–520 px) land after this
     // effect, and until they do a resize is held to the rail's 48 px.
-    const width = readStoredDockWidth(dockStorageKey)
+    const width = readStoredDockWidth(dockStorageKey, dockDefaultWidth)
     const frame = requestAnimationFrame(() => dockPanelRef.current?.resize(width))
     return () => cancelAnimationFrame(frame)
-  }, [railCollapsed, useDockResize, dockStorageKey, dockPanelRef, mobileNav])
+  }, [railCollapsed, useDockResize, dockStorageKey, dockDefaultWidth, dockPanelRef, mobileNav])
 
   // Status / playback sit at the bottom of the MAIN column (not under `aside`)
   // so the transport/volume share the editor's right edge when drawers/sidebars

@@ -34,6 +34,15 @@ beforeEach(async () => {
 const request = () =>
   post("request", { email: "new@example.com", password: "a strong password" })
 describe("verified email changes", () => {
+  it("reaches email-change through the production identity prefix", async () => {
+    const response = await app.request("/identity/api/v2/auth/email-change/request", {
+      method: "POST", headers: authHeader(jwt),
+      body: JSON.stringify({ email: "new@example.com", password: "a strong password" }),
+    }, testEnv, { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ sent: true })
+    expect(send).toHaveBeenCalledOnce()
+  })
   it("changes only after mailbox proof, unlinks Google and revokes the old session", async () => {
     await env.AQUILLA_PG.prepare(
       "INSERT INTO provider_identities(provider,subject,user_id) VALUES('google','stable-sub',1)",

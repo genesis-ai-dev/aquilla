@@ -270,11 +270,32 @@ FACT on the behaviour]
    now not run on any commit since 11-07.
 5. **Still outstanding and unchanged from earlier passes:** 10-26's audit of
    `integration_connections` / `integration_links` for rows written on platform
-   authority; the QA-walker identity question 10-12 left open (platform-admin
-   paths are not QA-walkable on any preview — `scripts/cloudflare-stack-preview.mjs`
-   sets no `ADMIN_EMAILS` and no `platform_admins` row exists on development
-   storage, so this change is one more thing a preview cannot exercise); and the
-   `desktop-release-signing` Environment's required reviewers (OPS-40).
+   authority; and the `desktop-release-signing`
+   Environment's required reviewers (OPS-40).
+6. **Correction — the QA-walker claim this series has repeated since 10-12 is
+   stale, and this change IS exercisable on a preview.** [FACT] Every pass from
+   10-12 onward has carried some form of *"platform-admin paths are not
+   QA-walkable on any preview — `scripts/cloudflare-stack-preview.mjs` sets no
+   `ADMIN_EMAILS` and no `platform_admins` row exists on development storage."*
+   The first half is no longer true: **AQU-1353** added
+   `PREVIEW_ADMIN_EMAIL = "qa-admin@local.test"` and uploads it as
+   `ADMIN_EMAILS` to `aquilla-auth-preview`, precisely *"so the QA bots can walk
+   /admin instead of reporting NOT CHECKED for want of a fixture."* The second
+   half does not rescue the claim, because `isPlatformAdminEmail`
+   (`auth-worker/src/middleware/platform-admin.ts`) is an **OR**: a
+   `platform_admins` row **or** the `ADMIN_EMAILS` allowlist. No table row is
+   needed.
+
+   Previews also set `ADMIN_REQUIRE_ELEVATION: "true"`, which is the other half
+   of what OPS-56 needs, so the whole finding can be walked end to end on a
+   branch preview as `qa-admin@local.test`: perform the scope `PUT` on a project
+   that account holds no grant on, expect
+   `403 "elevation required to manage a member's lane scopes with platform-admin
+   access"`, redeem the step-up code, and expect the same request to succeed.
+   This pass found the stale claim by grepping the preview script while ruling
+   its own change out of an unrelated CI symptom — it was never re-verified
+   after AQU-1353 landed, which is the same decay OPS-52 fixed for the ledger
+   and nothing yet fixes for prose.
 
 ---
 

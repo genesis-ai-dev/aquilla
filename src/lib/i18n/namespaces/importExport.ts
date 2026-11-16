@@ -673,10 +673,15 @@ export const importExport = defineNamespace({
       "Round-trip markdown: headings, ordered/unordered lists and quotes reconstructed; untranslated " +
       "blocks keep source (media lines use their transcription).",
     "importExport.format.html.label": "Web page",
+    // AQU-2224: AQU-2184 taught the page the book's layout, so the description no
+    // longer says it is dropped. Wording approved by Ryder on the ticket
+    // (2026-11-03). The format is offered for a Bible book only (ExportDialog's
+    // `offersHtmlPage`), so there is no sentence for non-scripture files.
     "importExport.format.html.description":
       "A readable page of the book in one self-contained file: chapter index, numbered verses and " +
-      "section headings, for reviewers and printing. Untranslated lines show their source text, " +
-      "marked. Not for re-import; paragraph layout and footnotes are not kept yet.",
+      "section headings, with paragraphs and poetry lines as the book lays them out and each " +
+      "chapter's footnotes listed at its end. For reviewers and printing. Untranslated lines show " +
+      "their source text, marked. Not for re-import.",
     "importExport.format.tsv.label": "Bilingual TSV",
     "importExport.format.tsv.description": "id/source/target tab-separated, one row per segment.",
     "importExport.format.csv.label": "Bilingual CSV",
@@ -877,6 +882,13 @@ export const importExport = defineNamespace({
     "importExport.dialog.stillToRecordCount": "{count} still to record",
     "importExport.dialog.untimedClipCount": "{count} untimed",
     "importExport.dialog.nothingRecordedYet": "Nothing is recorded yet, so there is nothing to export.",
+    // A Bible book: a recording on every verse, and no verse with a start
+    // time. "Nothing is recorded yet" was false there — the by-character mix
+    // just has nowhere to put a take that sits at no second.
+    "importExport.dialog.nothingTimedToPlace": plural({
+      one: "{count} recording has no start time, so it cannot be placed on a character track. Export by line or as chapter audio to include it.",
+      other: "{count} recordings have no start time, so they cannot be placed on character tracks. Export by line or as chapter audio to include them.",
+    }),
     "importExport.dialog.nothingOnMainTrack": plural({
       one: "Nothing is recorded on the main Target audio track — {count} take is on an added track. Export by line to include it.",
       other: "Nothing is recorded on the main Target audio track — {count} takes are on added tracks. Export by line to include them.",
@@ -934,6 +946,59 @@ export const importExport = defineNamespace({
       other: "Created {fileName}. {count} translations could not be paired and stayed on the original file.",
     }),
     "importExport.dialog.repairIdmlCopyNeedsOriginal": "This file has no original IDML package to repair from.",
+    // An InDesign export that stopped on translations typed as plain text (a
+    // linked file translated before it carried the IDML contract). The progress
+    // line while the placement runs is importExport.upload.aligningIdmlStyles.
+    "importExport.dialog.idmlTranslationsNotPlaced": plural({
+      one:
+        "{count} translation in this file is not in the InDesign style runs yet, so the " +
+        "translated file cannot be built. Placing it saves it as a draft: if it was validated, " +
+        "it will need validating again.",
+      other:
+        "{count} translations in this file are not in the InDesign style runs yet, so the " +
+        "translated file cannot be built. Placing them saves each one as a draft: validated " +
+        "lines will need validating again.",
+    }),
+    "importExport.dialog.idmlTranslationsNotPlacedKeep": plural({
+      one:
+        "{count} translation in this file is not in the InDesign style runs yet, so the " +
+        "translated file cannot be built. Placing it moves the same words into the runs: " +
+        "a validated line stays validated.",
+      other:
+        "{count} translations in this file are not in the InDesign style runs yet, so the " +
+        "translated file cannot be built. Placing them moves the same words into the runs: " +
+        "validated lines stay validated.",
+    }),
+    "importExport.dialog.placeIdmlTranslations": "Place translations",
+    "importExport.dialog.placingIdmlTranslations": "Checking the translations in {fileName}…",
+    "importExport.dialog.placedIdmlTranslations": plural({
+      one:
+        "{count} translation in {fileName} was placed into the style runs and is a draft to " +
+        "check again. Download the file again.",
+      other:
+        "{count} translations in {fileName} were placed into the style runs and are drafts to " +
+        "check again. Download the file again.",
+    }),
+    "importExport.dialog.placedIdmlTranslationsKept": plural({
+      one:
+        "{count} translation in {fileName} was placed into the style runs. Its validation is " +
+        "unchanged. Download the file again.",
+      other:
+        "{count} translations in {fileName} were placed into the style runs. Their validation " +
+        "is unchanged. Download the file again.",
+    }),
+    "importExport.dialog.placedIdmlTranslationsMixed":
+      "The translations in {fileName} were placed into the style runs: {kept} stay validated, " +
+      "and {drafts} were saved as drafts to check. Download the file again.",
+    "importExport.dialog.placedIdmlTranslationsManual": plural({
+      one:
+        "{count} translation in {fileName} could not be placed automatically and is marked " +
+        "for Align styles. Align it, then download again.",
+      other:
+        "{count} translations in {fileName} could not be placed automatically and are marked " +
+        "for Align styles. Align them, then download again.",
+    }),
+    "importExport.dialog.placeIdmlTranslationsFailed": "Could not place the translations in {fileName}: {message}",
     "importExport.dialog.lossyVerseCount": plural({
       one: "{count} verse contained footnotes, poetry, or character markers in the source USFM — its structure is replaced by plain translated text.",
       other: "{count} verses contained footnotes, poetry, or character markers in the source USFM — their structure is replaced by plain translated text.",
@@ -1038,6 +1103,11 @@ export const importExport = defineNamespace({
         "TN file parsed but no valid note rows were found — check that the first three columns are " +
         "book, chapter, and verse. ({count} rows skipped due to missing canonical reference)",
     }),
+    "importExport.errors.tnFileNameHoldsBooks":
+      "The file name holds more than one book ({books}), so the notes can't be filed under one. " +
+      "Rename the file so it names one book, such as {example}.",
+    "importExport.errors.tnFileNameNoBook":
+      "The file name doesn't give the book the way unfoldingWord names its files. Rename the file to name one book, such as tn_GEN.tsv.",
     "importExport.errors.biblicaExpectsIdml": "Biblica study notes import expects an InDesign .idml package.",
     "importExport.errors.biblicaNoStudyNotes":
       "{fileName} parsed successfully but contained no study notes. Biblica notes live in `intro:*` " +
@@ -1360,6 +1430,14 @@ export const importExport = defineNamespace({
     "importExport.reimport.updated": plural({
       one: "{count} cell updated",
       other: "{count} cells updated",
+    }),
+    "importExport.reimport.missing": plural({
+      one: "{count} cell no longer in the file",
+      other: "{count} cells no longer in the file",
+    }),
+    "importExport.reimport.updateHidesMissing": plural({
+      one: "Update this file hides the {count} cell that is no longer in the file, along with its translation.",
+      other: "Update this file hides the {count} cells that are no longer in the file, along with their translations.",
     }),
     "importExport.reimport.analysis": "Analysis",
     "importExport.reimport.noChanges": "Nothing in this file has changed.",
@@ -2360,6 +2438,67 @@ export const importExport = defineNamespace({
       "importExport.dialog.repairIdmlCopyNeedsOriginal": {
         description: "Error when the file being repaired has no stored IDML package to re-parse.",
       },
+      "importExport.dialog.idmlTranslationsNotPlaced": {
+        description:
+          "Error in the Export dialog when an InDesign (IDML) download stops because translations " +
+          "were typed as plain text and are not inside the file's style runs. A 'Place translations' button follows; " +
+          "the second sentence says what pressing it costs (the lines lose their validated state).",
+        placeholders: { count: "Number of translations that are not in the style runs, already locale-formatted." },
+      },
+      "importExport.dialog.idmlTranslationsNotPlacedKeep": {
+        description:
+          "Same error as importExport.dialog.idmlTranslationsNotPlaced, shown to a project lead, " +
+          "for whom pressing 'Place translations' keeps each line's validated state.",
+        placeholders: { count: "Number of translations that are not in the style runs, already locale-formatted." },
+      },
+      "importExport.dialog.placedIdmlTranslationsKept": {
+        description: "Success message after 'Place translations' when every placed line kept its validated state.",
+        placeholders: {
+          fileName: "Display name of the IDML file — not translated.",
+          count: "Number of translations placed, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.placedIdmlTranslationsMixed": {
+        description:
+          "Success message after 'Place translations' when validated lines kept their state and the rest " +
+          "(lines nobody had validated, or whose words the placement had to change) were saved as drafts.",
+        placeholders: {
+          fileName: "Display name of the IDML file — not translated.",
+          kept: "Number of lines that stay validated, already locale-formatted.",
+          drafts: "Number of lines saved as drafts, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.placeIdmlTranslations": {
+        description:
+          "Button beside that error. Moves each translation's words into the InDesign style runs of its paragraph.",
+      },
+      "importExport.dialog.placingIdmlTranslations": {
+        description: "Progress label in the Export dialog when the 'Place translations' pass starts.",
+        placeholders: { fileName: "Display name of the IDML file — not translated." },
+      },
+      "importExport.dialog.placedIdmlTranslations": {
+        description:
+          "Success message after 'Place translations' when the placed lines were saved as drafts (none of them kept a validated state).",
+        placeholders: {
+          fileName: "Display name of the IDML file — not translated.",
+          count: "Number of translations placed, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.placedIdmlTranslationsManual": {
+        description:
+          "Message after 'Place translations' when some lines need the editor's Align styles action before the file can be downloaded.",
+        placeholders: {
+          fileName: "Display name of the IDML file — not translated.",
+          count: "Number of translations left for a manual Align styles pass, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.placeIdmlTranslationsFailed": {
+        description: "Error when the 'Place translations' pass could not run.",
+        placeholders: {
+          fileName: "Display name of the IDML file — not translated.",
+          message: "The technical reason, as reported by the app — not translated.",
+        },
+      },
       "importExport.upload.cellsProgress": {
         description: "Upload progress detail line on the main Upload files panel.",
         placeholders: {
@@ -2531,6 +2670,11 @@ export const importExport = defineNamespace({
       "importExport.dialog.audioShapeGroupAriaLabel": {
         description:
           "Accessible name for the radio group choosing the shape of an audio export — one track per character, one file per recorded line, or one continuous file per chapter.",
+      },
+      "importExport.dialog.nothingTimedToPlace": {
+        description:
+          "Shown in the Export dialog's by-character audio preview, and as the refusal if the export is run anyway, when the file has recordings but none of its lines has a start time (typically a Bible book, where verses are recorded but not timed). The by-character export lays each recording at its own second on a track, so it cannot place these; 'by line' and 'chapter audio' are the two other audio export shapes in the same dialog, which can.",
+        placeholders: { count: "Number of recordings that have no start time." },
       },
       "importExport.dialog.nothingOnMainTrack": {
         description:
@@ -2757,6 +2901,18 @@ export const importExport = defineNamespace({
       "importExport.errors.tnNoValidRowsWithSkipped": {
         description: "Thrown when a Translation Notes TSV parsed to zero valid rows, and some rows were skipped for a known reason (missing reference).",
         placeholders: { count: "Number of rows skipped for missing a canonical reference." },
+      },
+      "importExport.errors.tnFileNameHoldsBooks": {
+        description:
+          "Thrown when a Translation Notes file gives its rows only chapter and verse (as unfoldingWord's files do) and its file name holds more than one book code, so the book can't be read from the name (for example tn_GEN_rev.tsv). Shown instead of the 'no valid note rows' message.",
+        placeholders: {
+          books: "The book codes found in the file name, comma-separated (e.g. 'GEN, REV') — not translated.",
+          example: "A file name naming one book the person could rename to (e.g. 'tn_GEN.tsv') — not translated.",
+        },
+      },
+      "importExport.errors.tnFileNameNoBook": {
+        description:
+          "Thrown when a Translation Notes file gives its rows only chapter and verse (as unfoldingWord's files do) and its file name doesn't give one book where unfoldingWord puts it: right after 'tn' (tn_GEN.tsv) or as 'NN-BOOK' at the start (01-GEN.tsv). The name may hold no book at all, or one in another place (GEN_tn.tsv), so the sentence says how it falls short, not that it has no book. Shown instead of the 'no valid note rows' message. 'tn_GEN.tsv' is an example file name: keep it as it is.",
       },
       "importExport.errors.biblicaNoStudyNotes": {
         description: "Thrown when a Biblica IDML package parses successfully but contains no study-note paragraphs.",
@@ -3850,6 +4006,20 @@ export const importExport = defineNamespace({
           "Heading inside the re-import Analysis window for cells whose source text changed. The list of those cells follows it.",
         placeholders: {
           count: "Number of cells whose source text changed; also selects the plural form.",
+        },
+      },
+      "importExport.reimport.missing": {
+        description:
+          "Heading inside the re-import Analysis window for cells that are in the file now and are not in the uploaded document. The list of those cells follows it. Shown only when there is at least one.",
+        placeholders: {
+          count: "Number of cells the uploaded document no longer has; also selects the plural form.",
+        },
+      },
+      "importExport.reimport.updateHidesMissing": {
+        description:
+          "One line under the three re-import buttons, shown only when the uploaded document no longer has some cells. Says what the primary button does with them; the two copy buttons do not hide anything. 'Update this file' must match the importExport.reimport.update button label.",
+        placeholders: {
+          count: "Number of cells the uploaded document no longer has; also selects the plural form.",
         },
       },
       "importExport.reimport.analysis": {

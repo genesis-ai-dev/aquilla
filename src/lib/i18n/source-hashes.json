@@ -3137,8 +3137,6 @@
     "importExport.preview.includeEpubMember": "0d8c90e78c02f18c",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.field.apiKeyRequired": "8fe40ee2620b4748",
@@ -4954,7 +4952,12 @@
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
     "nav.report.cropAlt": "83ec5c5cea391e3b",
-    "nav.report.descriptionFieldLabel": "526e0087cc3f254d"
+    "nav.report.descriptionFieldLabel": "526e0087cc3f254d",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -8099,8 +8102,6 @@
     "importExport.preview.includeEpubMember": "0d8c90e78c02f18c",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.field.apiKeyRequired": "8fe40ee2620b4748",
@@ -9893,7 +9894,12 @@
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
     "nav.report.cropAlt": "83ec5c5cea391e3b",
-    "nav.report.descriptionFieldLabel": "526e0087cc3f254d"
+    "nav.report.descriptionFieldLabel": "526e0087cc3f254d",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -13021,8 +13027,6 @@
     "importExport.preview.includeEpubMember": "0d8c90e78c02f18c",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.field.apiKeyRequired": "8fe40ee2620b4748",
@@ -14819,7 +14823,12 @@
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
     "nav.report.cropAlt": "83ec5c5cea391e3b",
-    "nav.report.descriptionFieldLabel": "526e0087cc3f254d"
+    "nav.report.descriptionFieldLabel": "526e0087cc3f254d",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -17965,8 +17974,6 @@
     "importExport.preview.includeEpubMember": "0d8c90e78c02f18c",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.field.apiKeyRequired": "8fe40ee2620b4748",
@@ -19771,7 +19778,12 @@
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
     "nav.report.cropAlt": "83ec5c5cea391e3b",
-    "nav.report.descriptionFieldLabel": "526e0087cc3f254d"
+    "nav.report.descriptionFieldLabel": "526e0087cc3f254d",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -22986,8 +22998,6 @@
     "projectSettings.permission.reconnectToEdit": "106366475a0b806a",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.create.trigger": "6f8d17646237f4f6",
@@ -25998,7 +26008,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -29213,8 +29228,6 @@
     "projectSettings.permission.reconnectToEdit": "106366475a0b806a",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.create.trigger": "6f8d17646237f4f6",
@@ -32227,7 +32240,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -36004,8 +36022,6 @@
     "projectSettings.permission.reconnectToEdit": "106366475a0b806a",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.create.trigger": "6f8d17646237f4f6",
@@ -38528,7 +38544,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -42384,8 +42405,6 @@
     "projectSettings.permission.reconnectToEdit": "106366475a0b806a",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.create.trigger": "6f8d17646237f4f6",
@@ -44876,7 +44895,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -48668,8 +48692,6 @@
     "projectSettings.permission.reconnectToEdit": "106366475a0b806a",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.create.trigger": "6f8d17646237f4f6",
@@ -51139,7 +51161,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -56108,8 +56135,6 @@
     "projectSettings.permission.reconnectToEdit": "106366475a0b806a",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.create.trigger": "6f8d17646237f4f6",
@@ -59348,7 +59373,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -64323,8 +64353,6 @@
     "projectSettings.permission.reconnectToEdit": "106366475a0b806a",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.create.trigger": "6f8d17646237f4f6",
@@ -67562,7 +67590,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -72111,7 +72144,6 @@
     "importExport.format.txt.description": "4adda09b399ec7d6",
     "importExport.format.md.description": "3cc87232f65fbe68",
     "importExport.format.html.label": "fae9f11dea030429",
-    "importExport.format.html.description": "bcbf0ee6e726827c",
     "importExport.format.tsv.label": "e9d490f8896eeda6",
     "importExport.format.tsv.description": "08d9e355f65a8dfb",
     "importExport.format.csv.label": "d6520e36625887ae",
@@ -72674,8 +72706,6 @@
     "projectSettings.permission.reconnectToEdit": "106366475a0b806a",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.create.trigger": "6f8d17646237f4f6",
@@ -75176,7 +75206,6 @@
     "workspace.castGutterVoice.scopeFile": "e61eb7f893fa2e5e",
     "workspace.castGutterVoice.scopeFileCount": "28f7a2e77b0a26c7",
     "workspace.castGutterVoice.scopeEverywhere": "3cdabd2cdb4ea0dc",
-    "workspace.castGutterVoice.scopeNoCharacter": "1338df54d5bc1ce1",
     "workspace.castGutterVoice.clearOneFileAtATime": "33a7e181c9c1e340",
     "workspace.openWorkspace.openingProject": "5a1b3e03b2bc0d81",
     "workspace.fileSort.lastUpdated": "382ac5f308f76c24",
@@ -76189,7 +76218,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -81197,8 +81231,6 @@
     "projectSettings.permission.reconnectToEdit": "106366475a0b806a",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.create.trigger": "6f8d17646237f4f6",
@@ -84457,7 +84489,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -89031,7 +89068,6 @@
     "importExport.format.txt.description": "4adda09b399ec7d6",
     "importExport.format.md.description": "3cc87232f65fbe68",
     "importExport.format.html.label": "fae9f11dea030429",
-    "importExport.format.html.description": "bcbf0ee6e726827c",
     "importExport.format.tsv.label": "e9d490f8896eeda6",
     "importExport.format.tsv.description": "08d9e355f65a8dfb",
     "importExport.format.csv.label": "d6520e36625887ae",
@@ -89594,8 +89630,6 @@
     "projectSettings.permission.reconnectToEdit": "106366475a0b806a",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.create.trigger": "6f8d17646237f4f6",
@@ -92099,7 +92133,6 @@
     "workspace.castGutterVoice.scopeFile": "e61eb7f893fa2e5e",
     "workspace.castGutterVoice.scopeFileCount": "28f7a2e77b0a26c7",
     "workspace.castGutterVoice.scopeEverywhere": "3cdabd2cdb4ea0dc",
-    "workspace.castGutterVoice.scopeNoCharacter": "1338df54d5bc1ce1",
     "workspace.castGutterVoice.clearOneFileAtATime": "33a7e181c9c1e340",
     "workspace.openWorkspace.openingProject": "5a1b3e03b2bc0d81",
     "workspace.fileSort.lastUpdated": "382ac5f308f76c24",
@@ -93104,7 +93137,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -97670,7 +97708,6 @@
     "importExport.format.txt.description": "4adda09b399ec7d6",
     "importExport.format.md.description": "3cc87232f65fbe68",
     "importExport.format.html.label": "fae9f11dea030429",
-    "importExport.format.html.description": "bcbf0ee6e726827c",
     "importExport.format.tsv.label": "e9d490f8896eeda6",
     "importExport.format.tsv.description": "08d9e355f65a8dfb",
     "importExport.format.csv.label": "d6520e36625887ae",
@@ -98233,8 +98270,6 @@
     "projectSettings.permission.reconnectToEdit": "106366475a0b806a",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.create.trigger": "6f8d17646237f4f6",
@@ -100733,7 +100768,6 @@
     "workspace.castGutterVoice.scopeFile": "e61eb7f893fa2e5e",
     "workspace.castGutterVoice.scopeFileCount": "28f7a2e77b0a26c7",
     "workspace.castGutterVoice.scopeEverywhere": "3cdabd2cdb4ea0dc",
-    "workspace.castGutterVoice.scopeNoCharacter": "1338df54d5bc1ce1",
     "workspace.castGutterVoice.clearOneFileAtATime": "33a7e181c9c1e340",
     "workspace.openWorkspace.openingProject": "5a1b3e03b2bc0d81",
     "workspace.fileSort.lastUpdated": "382ac5f308f76c24",
@@ -101744,7 +101778,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -106327,7 +106366,6 @@
     "importExport.format.txt.description": "4adda09b399ec7d6",
     "importExport.format.md.description": "3cc87232f65fbe68",
     "importExport.format.html.label": "fae9f11dea030429",
-    "importExport.format.html.description": "bcbf0ee6e726827c",
     "importExport.format.tsv.label": "e9d490f8896eeda6",
     "importExport.format.tsv.description": "08d9e355f65a8dfb",
     "importExport.format.csv.label": "d6520e36625887ae",
@@ -106888,8 +106926,6 @@
     "projectSettings.permission.reconnectToEdit": "106366475a0b806a",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.create.trigger": "6f8d17646237f4f6",
@@ -109401,7 +109437,6 @@
     "workspace.castGutterVoice.scopeFile": "e61eb7f893fa2e5e",
     "workspace.castGutterVoice.scopeFileCount": "28f7a2e77b0a26c7",
     "workspace.castGutterVoice.scopeEverywhere": "3cdabd2cdb4ea0dc",
-    "workspace.castGutterVoice.scopeNoCharacter": "1338df54d5bc1ce1",
     "workspace.castGutterVoice.clearOneFileAtATime": "33a7e181c9c1e340",
     "workspace.openWorkspace.openingProject": "5a1b3e03b2bc0d81",
     "workspace.fileSort.lastUpdated": "382ac5f308f76c24",
@@ -110420,7 +110455,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -114996,7 +115036,6 @@
     "importExport.format.txt.description": "4adda09b399ec7d6",
     "importExport.format.md.description": "3cc87232f65fbe68",
     "importExport.format.html.label": "fae9f11dea030429",
-    "importExport.format.html.description": "bcbf0ee6e726827c",
     "importExport.format.tsv.label": "e9d490f8896eeda6",
     "importExport.format.tsv.description": "08d9e355f65a8dfb",
     "importExport.format.csv.label": "d6520e36625887ae",
@@ -115559,8 +115598,6 @@
     "projectSettings.permission.reconnectToEdit": "106366475a0b806a",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.create.trigger": "6f8d17646237f4f6",
@@ -118062,7 +118099,6 @@
     "workspace.castGutterVoice.scopeFile": "e61eb7f893fa2e5e",
     "workspace.castGutterVoice.scopeFileCount": "28f7a2e77b0a26c7",
     "workspace.castGutterVoice.scopeEverywhere": "3cdabd2cdb4ea0dc",
-    "workspace.castGutterVoice.scopeNoCharacter": "1338df54d5bc1ce1",
     "workspace.castGutterVoice.clearOneFileAtATime": "33a7e181c9c1e340",
     "workspace.openWorkspace.openingProject": "5a1b3e03b2bc0d81",
     "workspace.fileSort.lastUpdated": "382ac5f308f76c24",
@@ -119082,7 +119118,12 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -123649,7 +123690,6 @@
     "importExport.format.txt.description": "4adda09b399ec7d6",
     "importExport.format.md.description": "3cc87232f65fbe68",
     "importExport.format.html.label": "fae9f11dea030429",
-    "importExport.format.html.description": "bcbf0ee6e726827c",
     "importExport.format.tsv.label": "e9d490f8896eeda6",
     "importExport.format.tsv.description": "08d9e355f65a8dfb",
     "importExport.format.csv.label": "d6520e36625887ae",
@@ -124212,8 +124252,6 @@
     "projectSettings.permission.reconnectToEdit": "106366475a0b806a",
     "projectSettings.permission.onlyRoleCanModify": "14a90be81061c603",
     "projectSettings.permission.viewPrivilegedMembers": "f0624b9c1b1113a4",
-    "projectSettings.permission.privilegedDialogTitle": "d6d7ca5d3d418477",
-    "projectSettings.permission.privilegedDialogDescription": "122b9f88bea19839",
     "projectSettings.permission.privilegedDialogEmpty": "59833805a1904db2",
     "projectSettings.permission.privilegedDialogError": "62f49d62a8f2aa7e",
     "projectSettings.create.trigger": "6f8d17646237f4f6",
@@ -126719,7 +126757,6 @@
     "workspace.castGutterVoice.scopeFile": "e61eb7f893fa2e5e",
     "workspace.castGutterVoice.scopeFileCount": "28f7a2e77b0a26c7",
     "workspace.castGutterVoice.scopeEverywhere": "3cdabd2cdb4ea0dc",
-    "workspace.castGutterVoice.scopeNoCharacter": "1338df54d5bc1ce1",
     "workspace.castGutterVoice.clearOneFileAtATime": "33a7e181c9c1e340",
     "workspace.openWorkspace.openingProject": "5a1b3e03b2bc0d81",
     "workspace.fileSort.lastUpdated": "382ac5f308f76c24",
@@ -127736,6 +127773,11 @@
     "nav.report.cropHint": "629d7d425b2429f8",
     "nav.report.keepWholeImage": "1db22549b75235cf",
     "nav.report.useSelection": "8049ab221a92659f",
-    "nav.report.cropAlt": "83ec5c5cea391e3b"
+    "nav.report.cropAlt": "83ec5c5cea391e3b",
+    "common.searchPlaceholder": "7336265a0467a255",
+    "common.searchListAria": "fa199181610e0d22",
+    "common.aboutAria": "c200f2ef2a407ce5",
+    "editor.ai.copyError": "19dc540f83585b33",
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
   }
 }

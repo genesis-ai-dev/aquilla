@@ -60,6 +60,9 @@ import { prepareSetBrief } from './commands-set-brief'
 import { prepareProjectSetup } from './prepare-project-setup'
 import type { ProjectSetupCommand } from './commands-project-setup'
 import { prepareRegenerateBriefSummary } from './commands-regenerate-brief'
+import { briefInertWarnings, plannedInstructionsOf } from './brief-inert-warning'
+import { deepEqualJson } from './canonical'
+import { BRIEF_SETTINGS_KEY } from '../../../db/shared/brief'
 import { isMemoryCommand, prepareMemoryCommand } from './commands-memory'
 import { isStyleRuleCommand, prepareStyleRuleCommand } from './commands-style-rules'
 import { prepareEmitEvents } from './emit-events-engine'
@@ -73,6 +76,7 @@ import { assertCredentialMayWrite, assertCredentialScope } from './token-bridge'
 import type { ChangesetSummary, ChangesetWarning, ExternalEnv, PlannedEventIds } from './types'
 import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
+import { resolveCallerProjectRoleForGate } from './support-access'
 import { loadProjectSettings } from '../../../db/shared/projects'
 import { buildAudioId } from '../../../db/shared/audio-id'
 import { laneContextFrom, laneIdRequiredMessage, resolveTargetLaneId } from './external-lane'
@@ -387,7 +391,19 @@ export async function prepareChangesetCore(
   const requiredRole = Math.max(
     ...validated.commands.map((command) => requiredRoleForCommand(command, assignmentMinRole)),
   )
-  const resolvedRole = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
+  // AQU-2504: support access is the LAST path tried here, as everywhere — a
+  // platform admin who is a genuine member of this project stages on their own
+  // grant and is not audited. Staging exposes project state (cell existence,
+  // the server-computed effect summary), so on support access it is recorded as
+  // a cross-tenant READ; the write itself is audited at the one door every
+  // external event write goes through.
+  const resolvedRole = await resolveCallerProjectRoleForGate(
+    db,
+    cred,
+    projectId,
+    'changeset prepare',
+    resolveProjectRoleShared,
+  )
   if (!resolvedRole || resolvedRole.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role to stage this changeset')
   }
@@ -1386,12 +1402,19 @@ async function prepareUpdateProjectSettings(
   for (const key of Object.keys(cmd.settings)) {
     settingsChanges[key] = previewSettingValue(cmd.settings[key])
   }
+  // AQU-2425: this blob IS the settings it leaves behind, so it answers the
+  // inert-brief question about itself — a blob that carries the instructions
+  // key strands the brief it also carries, and one that DROPS the key hands
+  // the job back to the brief and must not warn.
+  const blobWritesBrief = !deepEqualJson(cmd.settings[BRIEF_SETTINGS_KEY], current.settings[BRIEF_SETTINGS_KEY])
   const summary: ChangesetSummary = {
     command: 'UpdateProjectSettings',
     projectId: urlProjectId,
     ifMatchVersion: cmd.ifMatchVersion,
     settingsChanges,
-    warnings: [],
+    warnings: blobWritesBrief
+      ? briefInertWarnings(current.settings, plannedInstructionsOf(cmd.settings))
+      : [],
   }
   return stageReceiptOnlyChangeset(db, cred, urlProjectId, id, autonomyMode, cmd, plannedIds, summary, env)
 }

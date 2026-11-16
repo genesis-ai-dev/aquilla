@@ -15,8 +15,9 @@
  * Given `match` (Project settings, AQU-2262), it lists, undoes and reports
  * only the steps that names; steps made elsewhere stay where they are.
  */
-import { useState } from "react"
-import { History, Redo2, Undo2 } from "lucide-react"
+import { useState, type ReactNode } from "react"
+import { History, Redo2, Undo2, UndoDot } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -31,13 +32,19 @@ export interface HistoryPanelProps {
   onResult: (which: "undo" | "redo", result: HistoryResult) => void
   /** A language tag's name, the way the language switcher shows it. */
   laneName?: (lane: string) => string
+  /**
+   * Which edge of the button the panel lines up with. The media bar sits on
+   * the left, so the panel opens to the right (`start`). The chapter row's
+   * button sits on the right, so the panel opens back into the page (`end`).
+   */
+  align?: "start" | "end"
   /** Act only on the steps this names (Project settings: isSettingsStep). */
   match?: StepMatch
 }
 
 // Its button is a square like its neighbours in every view's bar, without
 // the count (canvas board 55, option E; in every view since Sam, Oct 28).
-export function HistoryPanel({ onResult, laneName, match }: HistoryPanelProps) {
+export function HistoryPanel({ onResult, laneName, align = "end", match }: HistoryPanelProps) {
   const t = useT()
   const fmt = useFormat()
   const view = useMatchingHistory(match)
@@ -106,106 +113,198 @@ export function HistoryPanel({ onResult, laneName, match }: HistoryPanelProps) {
         />
       </AppTooltip>
       <PopoverContent
-        className="flex max-h-[min(520px,calc(100vh-6rem))] w-[360px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden p-0"
-        align="end"
+        align={align}
+        side="bottom"
         sideOffset={6}
+        className="flex max-h-[min(560px,calc(100vh-6rem))] w-[420px] max-w-[calc(100vw-2rem)] flex-col gap-2 overflow-hidden pt-2 pr-0 pb-0 pl-2"
         data-testid="history-panel"
       >
-        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-          <span className="text-sm font-medium">{t("editor.history.panelTitle")}</span>
-          <span className="flex-1" />
-          <button
-            type="button"
-            aria-label={t("editor.history.undoAria")}
-            disabled={!view.canUndo}
-            onClick={() => run("undo")}
-            data-testid="history-panel-undo"
-            className="inline-flex items-center rounded-md border border-border px-1.5 py-1 text-foreground/70 hover:bg-muted disabled:opacity-40"
-          >
-            <Undo2 className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            aria-label={t("editor.history.redoAria")}
-            disabled={!view.canRedo}
-            onClick={() => run("redo")}
-            data-testid="history-panel-redo"
-            className="inline-flex items-center rounded-md border border-border px-1.5 py-1 text-foreground/70 hover:bg-muted disabled:opacity-40"
-          >
-            <Redo2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto py-1">
-          {redoSteps.length > 0 && (
-            <section aria-label={t("editor.history.redoSection")}>
-              <div className="px-3 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                {t("editor.history.redoSection")}
-              </div>
-              <ul>
-                {redoSteps.map((s) => (
-                  <li key={s.id} className="flex items-center gap-2 px-3 py-1 text-xs text-muted-foreground" data-testid="history-redo-step">
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate line-through decoration-muted-foreground/40">{name(s)}</span>
-                      {place(s) && <span className="block truncate text-[11px]">{place(s)}</span>}
-                    </span>
-                    <span className="tabular-nums">{fmt.time(s.at, { hour: "numeric", minute: "2-digit" })}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-          <section aria-label={t("editor.history.undoSection")}>
-            {redoSteps.length > 0 && (
-              <div className="px-3 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                {t("editor.history.undoSection")}
-              </div>
-            )}
-            {undoSteps.length === 0 ? (
-              <p className="px-3 py-3 text-xs text-muted-foreground">
-                {redoSteps.length > 0 ? t("editor.history.emptyAllUndone") : t("editor.history.empty")}
-              </p>
-            ) : (
-              <ul data-testid="history-panel-steps">
-                {undoSteps.map((s, i) => (
-                  <li key={s.id} className="group flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted/60" data-testid="history-step">
-                    <span className="min-w-0 flex-1">
-                      <span className={cn("block truncate", i === 0 && "font-medium")}>{name(s)}</span>
-                      {place(s) && <span className="block truncate text-[11px] text-muted-foreground">{place(s)}</span>}
-                    </span>
-                    <span className="tabular-nums text-muted-foreground">{fmt.time(s.at, { hour: "numeric", minute: "2-digit" })}</span>
-                    <button
-                      type="button"
-                      disabled={view.busy}
-                      onClick={() => undoToHere(s.id)}
-                      data-testid="history-undo-to-here"
-                      className="rounded border border-border px-1.5 py-0.5 text-[11px] text-foreground/80 opacity-0 hover:bg-muted focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-40"
-                    >
-                      {i === 0 ? t("editor.history.undoThis") : t("editor.history.undoToHere")}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-          {view.skipped.length > 0 && (
-            <section aria-label={t("editor.history.skippedSection")} className="border-t border-border">
-              <div className="px-3 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                {t("editor.history.skippedSection")}
-              </div>
-              <ul data-testid="history-panel-skipped">
-                {[...view.skipped].reverse().map((s) => (
-                  <li key={`${s.id}-${s.at}`} className="px-3 py-1 text-xs">
-                    <span className="block truncate">
-                      {s.which === "redo" ? t("editor.history.notRedone", { step: name(s) }) : name(s)}
-                    </span>
-                    <span className="block text-[11px] text-muted-foreground">{reasonText(s)}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
+        <header className="flex shrink-0 items-center justify-between gap-2 pr-2">
+          <h3 className="text-base font-semibold tracking-tight">{t("editor.history.panelTitle")}</h3>
+          <div className="flex items-center gap-1">
+            <HistoryIconButton
+              label={t("editor.history.undoAria")}
+              reason={view.canUndo ? undefined : t("editor.history.nothingToUndo")}
+              disabled={!view.canUndo}
+              testId="history-panel-undo"
+              onClick={() => run("undo")}
+            >
+              <Undo2 />
+            </HistoryIconButton>
+            <HistoryIconButton
+              label={t("editor.history.redoAria")}
+              reason={view.canRedo ? undefined : t("editor.history.nothingToRedo")}
+              disabled={!view.canRedo}
+              testId="history-panel-redo"
+              onClick={() => run("redo")}
+            >
+              <Redo2 />
+            </HistoryIconButton>
+          </div>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin pr-2 pb-2">
+          {undoSteps.length === 0 && redoSteps.length === 0 && view.skipped.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 px-3 py-10 text-center">
+              <span className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                <History className="size-4" aria-hidden />
+              </span>
+              <p className="max-w-64 text-sm text-muted-foreground">{t("editor.history.empty")}</p>
+            </div>
+          ) : (
+            <>
+              {redoSteps.length > 0 && (
+                <section aria-label={t("editor.history.redoSection")}>
+                  <div className="px-2 pb-1 pt-1 text-xs font-medium text-muted-foreground">
+                    {t("editor.history.redoSection")}
+                  </div>
+                  <ul>
+                    {redoSteps.map((s) => (
+                      <li key={s.id} className="rounded-md hover:bg-accent/40" data-testid="history-redo-step">
+                        <HistoryStepRow
+                          title={name(s)}
+                          place={place(s)}
+                          time={fmt.time(s.at, { hour: "numeric", minute: "2-digit" })}
+                          muted
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+              <section aria-label={t("editor.history.undoSection")}>
+                {redoSteps.length > 0 && (
+                  <div className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">
+                    {t("editor.history.undoSection")}
+                  </div>
+                )}
+                {undoSteps.length === 0 ? (
+                  <p className="px-2 py-3 text-xs text-muted-foreground">
+                    {redoSteps.length > 0 ? t("editor.history.emptyAllUndone") : t("editor.history.empty")}
+                  </p>
+                ) : (
+                  <ul data-testid="history-panel-steps">
+                    {undoSteps.map((s, i) => {
+                      const action = i === 0 ? t("editor.history.undoThis") : t("editor.history.undoToHere")
+                      return (
+                        <li key={s.id} className="flex items-center rounded-md hover:bg-accent/40" data-testid="history-step">
+                          <HistoryStepRow
+                            title={name(s)}
+                            place={place(s)}
+                            time={fmt.time(s.at, { hour: "numeric", minute: "2-digit" })}
+                            emphasized={i === 0}
+                          />
+                          <HistoryIconButton
+                            label={action}
+                            disabled={view.busy}
+                            testId="history-undo-to-here"
+                            size="icon-xs"
+                            className="me-1 text-muted-foreground"
+                            onClick={() => undoToHere(s.id)}
+                          >
+                            {i === 0 ? <Undo2 /> : <UndoDot />}
+                          </HistoryIconButton>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </section>
+              {view.skipped.length > 0 && (
+                <section aria-label={t("editor.history.skippedSection")}>
+                  <div className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">
+                    {t("editor.history.skippedSection")}
+                  </div>
+                  <ul data-testid="history-panel-skipped">
+                    {[...view.skipped].reverse().map((s) => (
+                      <li key={`${s.id}-${s.at}`} className="rounded-md px-2 py-1.5">
+                        <span className="block truncate text-sm font-medium">
+                          {s.which === "redo" ? t("editor.history.notRedone", { step: name(s) }) : name(s)}
+                        </span>
+                        <span className="mt-0.5 block truncate text-xs text-muted-foreground">{reasonText(s)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+            </>
           )}
         </div>
       </PopoverContent>
     </Popover>
+  )
+}
+
+/** A ghost icon button. Hover names it; a disabled one explains itself on click. */
+function HistoryIconButton({
+  label,
+  reason,
+  disabled,
+  testId,
+  onClick,
+  size = "icon-sm",
+  className,
+  children,
+}: {
+  label: string
+  /** Why it is greyed out. Shown on click, only while disabled. */
+  reason?: string
+  disabled?: boolean
+  testId: string
+  onClick: () => void
+  size?: "icon-sm" | "icon-xs"
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <AppTooltip content={disabled && reason ? reason : label}>
+      <Button
+        type="button"
+        variant="ghost"
+        size={size}
+        aria-label={label}
+        disabled={disabled}
+        onClick={onClick}
+        data-testid={testId}
+        className={className}
+      >
+        {children}
+      </Button>
+    </AppTooltip>
+  )
+}
+
+/** One history row: the step, where it happened, and the time, like an inbox notice. */
+function HistoryStepRow({
+  title,
+  place,
+  time,
+  muted = false,
+  emphasized = false,
+}: {
+  title: string
+  place: string | null
+  time: string
+  muted?: boolean
+  emphasized?: boolean
+}) {
+  return (
+    <span className="min-w-0 flex-1 px-2 py-1.5">
+      <span className="flex items-baseline justify-between gap-3">
+        <span
+          className={cn(
+            "truncate text-sm",
+            muted
+              ? "text-muted-foreground line-through decoration-muted-foreground/40"
+              : emphasized
+                ? "font-medium text-foreground"
+                : "font-medium text-foreground/90",
+          )}
+        >
+          {title}
+        </span>
+        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{time}</span>
+      </span>
+      {place ? <span className="mt-0.5 block truncate text-xs text-muted-foreground">{place}</span> : null}
+    </span>
   )
 }

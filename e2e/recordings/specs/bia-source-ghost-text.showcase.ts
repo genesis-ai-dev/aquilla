@@ -34,8 +34,8 @@ test("BIA · ghost text that reads the source verse", async ({ page }) => {
   const cellId = seeded.cellIds[seeded.rowOf(REF)]
   const ws = await openSeededProject(page, seeded)
   const assist = new TypingAssist(page, ws)
-  // Off by default (AQU-2117): opt in through the real switch before typing.
-  await assist.enableGhostText()
+  // On by default: the switch starts checked in a fresh browser.
+  await assist.expectGhostTextOnByDefault()
 
   const show = new Showcase(page, {
     persona: "p1-field-translator",
@@ -62,7 +62,7 @@ test("BIA · ghost text that reads the source verse", async ({ page }) => {
     await show.caption("“Be fruitful” → “Fructificad”: learned from this project's verses, not from any earlier context.")
     await show.beat(2600)
     await assist.acceptNextWord()
-    await show.caption("→ accepts one word.")
+    await show.caption("Ctrl + → accepts it too.")
     await show.beat(1400)
 
     const expected = "Y Dios los bendijo diciendo: Fructificad"

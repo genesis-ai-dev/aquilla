@@ -28,6 +28,7 @@ import {
   type DeploymentEnvironment,
 } from "@/lib/deployment-environment"
 import type { MessageKey } from "@/lib/i18n/messages/en"
+import { getDesktopVersions, type DesktopVersions } from "@/lib/offline/bundle-update"
 
 declare const __APP_VERSION__: string
 declare const __APP_BRANCH__: string
@@ -39,11 +40,30 @@ const BRANCH = __APP_BRANCH__
 const SHA = __APP_SHA__
 const BUILT_AT = __APP_BUILT_AT__
 
-const IDENTITY: BuildIdentity = { version: VERSION, branch: BRANCH, sha: SHA, builtAt: BUILT_AT }
-const label = formatBuildLabel(IDENTITY)
-/** AQU-1523: the width-bound variant for the left rail; see build-label.ts. */
-const railLabel = formatBuildRailLabel(IDENTITY)
-const title = formatBuildInfo(IDENTITY)
+const BAKED: BuildIdentity = { version: VERSION, branch: BRANCH, sha: SHA, builtAt: BUILT_AT }
+
+/**
+ * The build identity to show. On the web it is what the build baked in. Inside
+ * the desktop shell the version is the installed shell's own — the number in
+ * the About window and on the download — because a hot-updated web bundle only
+ * knows the version of the source it was built from, not the shell it runs in.
+ */
+function useBuildIdentity(): BuildIdentity {
+  const [desktop, setDesktop] = useState<DesktopVersions | null>(null)
+  useEffect(() => {
+    let live = true
+    void getDesktopVersions().then((versions) => {
+      if (live && versions) setDesktop(versions)
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+  return useMemo(
+    () => (desktop ? { ...BAKED, version: desktop.shell, bundle: desktop.bundle ?? undefined } : BAKED),
+    [desktop],
+  )
+}
 
 /**
  * Whether an in-flow version line (the rail <VersionTag/>, or an inline
@@ -125,7 +145,7 @@ function EnvironmentTag({ className }: { className?: string }) {
   )
 }
 
-function useCopyBuildInfo() {
+function useCopyBuildInfo(title: string) {
   const [copied, setCopied] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -139,7 +159,7 @@ function useCopyBuildInfo() {
       if (timerRef.current) clearTimeout(timerRef.current)
       timerRef.current = setTimeout(() => setCopied(false), 1500)
     })
-  }, [])
+  }, [title])
 
   return { copied, copy }
 }
@@ -157,7 +177,11 @@ function useCopyBuildInfo() {
  */
 export function VersionTag() {
   const t = useT()
-  const { copied, copy } = useCopyBuildInfo()
+  const identity = useBuildIdentity()
+  /** AQU-1523: the width-bound variant for the left rail; see build-label.ts. */
+  const railLabel = formatBuildRailLabel(identity)
+  const title = formatBuildInfo(identity)
+  const { copied, copy } = useCopyBuildInfo(title)
   useRegisterInFlowVersion()
 
   return (
@@ -225,7 +249,10 @@ function FloatingVersionBadge() {
 
 function VersionBadgeBody({ inline }: { inline: boolean }) {
   const t = useT()
-  const { copied, copy } = useCopyBuildInfo()
+  const identity = useBuildIdentity()
+  const label = formatBuildLabel(identity)
+  const title = formatBuildInfo(identity)
+  const { copied, copy } = useCopyBuildInfo(title)
 
   return (
     <div className={cn(

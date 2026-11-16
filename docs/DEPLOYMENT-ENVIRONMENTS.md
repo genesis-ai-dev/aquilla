@@ -222,8 +222,8 @@ its job. Keep this section in step with that manifest — a contract test assert
 | --- | --- | --- | --- |
 | Web (production) | `.` (repo root) | `aquilla-web` | `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE` |
 | Web (development) | `.` (repo root) | `aquilla-web-development` | none |
-| Identity (production) | `auth-worker` | `aquilla-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `OMNI_SHARED_SECRET` |
-| Identity (development) | `auth-worker` | `aquilla-dev-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `MONDAY_TOKEN_KEY`, `OMNI_SHARED_SECRET` |
+| Identity (production) | `auth-worker` | `aquilla-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `OMNI_SHARED_SECRET`, `ADMIN_TOTP_KEY`, `GOOGLE_LOGIN_CLIENT_SECRET` |
+| Identity (development) | `auth-worker` | `aquilla-dev-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `MONDAY_TOKEN_KEY`, `OMNI_SHARED_SECRET`, `ADMIN_TOTP_KEY`, `GOOGLE_LOGIN_CLIENT_SECRET` |
 | Sync (production) | `sync-worker` | `aquilla-sync-worker` | `SYNC_SECRET_KEY`, `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE`, `DIARIZATION_SHARED_SECRET`, `INWORLD_API_KEY`, `VOICE_FORGE_TOKEN`, `VOICE_FORGE_URL` |
 | Sync (development) | `sync-worker` | `aquilla-sync-worker-dev` | `SYNC_SECRET_KEY`, `VOICE_FORGE_TOKEN`, `VOICE_FORGE_URL` |
 
@@ -639,6 +639,14 @@ leave it out. `note` is free text for why the person has access. An email can
 be added before the person signs up; `GET /api/v2/admin/admins` shows it with
 `hasAccount: false` until they do.
 
+Password sign-up refuses an address that is already in the table (the same
+`409` a taken address gets), because that form does not prove who holds the
+mailbox and the first person to register the address would become the admin.
+So a person added before they have an account signs up with **Google**, which
+does prove it. Where Google sign-in is not configured, have them register
+first and insert the row afterwards. Treat a `hasAccount: false` row as a
+loose end to close, not a place to leave things.
+
 Order for a first rollout: apply the migration (`neon:apply:dev` /
 `neon:apply:prod`), insert the admins, then deploy the auth Worker that no
 longer sets `ADMIN_EMAILS`. Deploying first locks everyone out of the console
@@ -656,12 +664,19 @@ Worker (`aquilla-dev-identity`) admits only:
 
 Everyone else is refused at sign-in and sign-up with a plain message, and every
 API request they make answers `403` with `code: "dev_access_restricted"`.
-Production, the per-branch previews, local dev and e2e are never gated: the
-check keys on `DEPLOYMENT_WORKER_NAME` being the development identity Worker
-named in `config/cloudflare-deployments.json`.
+Production, local dev and e2e are never gated: the check keys on
+`DEPLOYMENT_WORKER_NAME` being the development identity Worker named in
+`config/cloudflare-deployments.json`. The per-branch previews
+(`aquilla-auth-preview`) enforce the same list since AQU-2555; see
+`docs/security/preview-access.md`.
+
+Automated suites sign in as ordinary accounts, so their accounts must be on
+the list too. `docs/security/preview-access.md` names them (today: Adversarial
+Jev's three bot accounts). Check that table before removing an entry you do
+not recognise.
 
 The list lives in the KV namespace `aquilla-dev-access-list`, bound as
-`DEV_ACCESS_LIST` on the development profile only. KV sits outside the Neon
+`DEV_ACCESS_LIST` on the development profile and on the branch previews. KV sits outside the Neon
 restore, so the nightly refresh never touches it. One key per lower-cased email.
 
 To change it, open **Admin → Platform → Dev access** on dev.aquilla.app. It

@@ -6,8 +6,9 @@
 // any Unicode decimal digit (General_Category Nd), so there is no per-script
 // list to keep up.
 //
-// Shared by bulk audio upload's name reader (AQU-2329) and the "number from
-// source missing" check (AQU-1667), so the two read numbers the same way.
+// Shared by bulk audio upload's name reader (AQU-2329), its naming rule
+// (AQU-2435) and the "number from source missing" check (AQU-1667), so they
+// all read numbers the same way.
 
 const IS_DIGIT = /^\p{Nd}$/u
 const ANY_DIGIT = /\p{Nd}/gu

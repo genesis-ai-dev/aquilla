@@ -166,4 +166,23 @@ describe("BiblicaPanel re-import", () => {
     expect(changes).toHaveTextContent("1 cell added")
     expect(changes).toHaveTextContent("0 cells updated")
   })
+
+  // AQU-2487 (review, Nov 9): the same three buttons as the document re-import,
+  // so the same line: only "Update this file" hides what the package dropped.
+  it("says that Update this file hides the cells the chosen package no longer has", async () => {
+    renderPanel({
+      fileId: "file-notes",
+      profileId: "builtin:biblica-study-notes",
+      existingNames: ["Genesis"],
+      existingSource: [{ cellId: "keep", value: "same" }, { cellId: "gone", value: "a paragraph the new package dropped" }],
+    })
+    expect(screen.queryByTestId("reimport-update-note")).toBeNull()
+    chooseFile()
+    const changes = await screen.findByTestId("reimport-changes")
+    expect(changes).toHaveTextContent("1 cell no longer in the file")
+    const line = "Update this file hides the 1 cell that is no longer in the file, along with its translation."
+    expect(screen.getByTestId("reimport-update-note")).toHaveTextContent(line)
+    expect(screen.getByRole("button", { name: "Update this file" })).toHaveAccessibleDescription(line)
+    expect(screen.getByRole("button", { name: "Make updated copy" })).not.toHaveAccessibleDescription()
+  })
 })

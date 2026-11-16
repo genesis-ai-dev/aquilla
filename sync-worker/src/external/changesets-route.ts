@@ -30,6 +30,7 @@ import { ROLE } from '../events/role-policy'
 import type { ExternalEnv, StoredChangeset } from './types'
 import { credentialAllowsOrganization, validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
+import { resolveCallerProjectRoleForGate } from './support-access'
 import { enforceRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
 
 // [Pen test] API security & data exposure (2026-08-27): fetching and
@@ -105,7 +106,10 @@ async function authorizeChangesetItem(
     return { cred, cs }
   }
   try { await assertCredentialScope(db, cred, projectId) } catch (err) { return toErrorResponse(err) }
-  const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
+  // AQU-2504: support access tried last (cross-tenant read of a stored plan).
+  const role = await resolveCallerProjectRoleForGate(
+    db, cred, projectId, 'GET /changesets/:id', resolveProjectRoleShared,
+  )
   if (!role || role.level < ROLE.VIEWER) return errorResponse('permission_denied', 'no project membership')
   return { cred, cs }
 }
@@ -134,7 +138,11 @@ async function authorizeChangesetRead(
   } catch (err) {
     return toErrorResponse(err)
   }
-  const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
+  // AQU-2504: support access tried last (cross-tenant read of this
+  // credential's plans).
+  const role = await resolveCallerProjectRoleForGate(
+    db, cred, projectId, 'GET /changesets', resolveProjectRoleShared,
+  )
   if (!role || role.level < ROLE.VIEWER) {
     return errorResponse('permission_denied', 'no project membership')
   }
@@ -264,7 +272,12 @@ async function handleDiscard(
   // Live-role resolution on every call (§2): the credential owner must still
   // resolve SOME role on the project — a user removed after prepare cannot
   // discard, matching every other lifecycle op.
-  const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
+  // AQU-2504: support access tried last. Discarding a staged plan changes
+  // nothing in the project — the changeset is the credential's own — so this is
+  // recorded as a cross-tenant read like the other lifecycle gates.
+  const role = await resolveCallerProjectRoleForGate(
+    db, cred, projectId, 'POST /changesets/:id/discard', resolveProjectRoleShared,
+  )
   if (!role) {
     return errorResponse('permission_denied', 'no project membership')
   }

@@ -449,7 +449,10 @@ export function useCompletion(
       found,
       collectValidatedPairs(corpusCells, sourceText, topK * 2),
       topK,
-      [...precedingContext, { source: sourceText }],
+      precedingContext,
+      // By id, not by source text: an identical line elsewhere in the project
+      // is an exact match and must reach the model.
+      [cell.id],
     )
     return {
       found,
@@ -1135,10 +1138,8 @@ export function useCompletion(
           passageCandidates(passages),
           collectValidatedPairs(corpusCells, concatenated, batchTopK * 2),
           batchTopK,
-          [
-            ...precedingContext,
-            ...chunk.map((cell) => ({ source: effectiveSourceText(cell) })),
-          ],
+          precedingContext,
+          chunk.map((cell) => cell.id),
         )
         const messages = buildBatchPrompt({
           sourceLanguage, targetLanguage,
@@ -1510,10 +1511,8 @@ export function useCompletion(
         passageCandidates(passages),
         collectValidatedPairs(cells, concatenated, topK * 2),
         topK,
-        [
-          ...precedingContext,
-          ...groupCells.map((cell) => ({ source: effectiveSourceText(cell) })),
-        ],
+        precedingContext,
+        groupCells.map((cell) => cell.id),
       )
 
       // AQU-2385: one mask per CALL covers the whole paragraph group — the

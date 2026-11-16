@@ -1059,6 +1059,8 @@ describe('isChainMutatingKind', () => {
     'cell.audio.place': false,
     // AQU-1767: a cut makes a second take row; it never moves the text chain.
     'cell.audio.cut': false,
+    // AQU-2492: undoing a cut moves take rows and votes; never the text chain.
+    'cell.audio.uncut': false,
     // A link says which subtitle a heard line performs; it never moves the
     // cell's own text chain.
     'cell.link.set': false,

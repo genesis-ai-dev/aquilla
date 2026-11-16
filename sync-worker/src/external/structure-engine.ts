@@ -824,6 +824,11 @@ export async function commitStructure(
   channel: ProvenanceChannel,
   wasStaged: boolean,
   ctx: Pick<ExecutionContext, 'waitUntil'> | undefined,
+  /** AQU-2504: did this commit's project resolve ONLY on the caller's connector
+   *  support access? Carried from commit.ts's role gate into the provenance
+   *  envelope, so a platform admin's support write is visible as one to the
+   *  org's own members. */
+  viaSupportAccess: boolean,
 ): Promise<Response> {
   const plan = cs.plannedIds?.structure
   if (!plan || plan.kind !== cmd.kind) {
@@ -966,7 +971,7 @@ export async function commitStructure(
     )
   }
 
-  const provenance = buildProvenance(request, cs, confirmationId, channel)
+  const provenance = buildProvenance(request, cs, confirmationId, channel, viaSupportAccess)
   const appliedIds = events.map((e) => e.id).filter((eid) => acceptedIds.has(eid))
   await stampProvenance(db, provenance, appliedIds)
 

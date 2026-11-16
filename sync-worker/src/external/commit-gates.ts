@@ -35,12 +35,28 @@ export function readAgentMeta(request: Request): unknown {
 
 /** Build the server-verified provenance envelope (§2). `channel` is decided by
  *  the entrypoint (PAT REST/MCP header sniff, or 'app' for session routes) —
- *  never trusted from external headers beyond the internal MCP marker. */
+ *  never trusted from external headers beyond the internal MCP marker.
+ *
+ *  AQU-2504 ATTRIBUTION. `viaSupportAccess` marks a write that rested on a
+ *  platform admin's connector support access — the caller has no grant in this
+ *  project but reached it on the time-boxed platform-admin window. The ticket
+ *  requires the org's own members to see that a platform admin did this, in the
+ *  normal places rather than in a separate operator-facing log, and
+ *  `events.provenance` is already the one column "what touched this cell" is
+ *  read from (AQU-533), so the marking belongs in this envelope beside the
+ *  identity `human_authority` already carries.
+ *
+ *  It is a REQUIRED parameter, not an optional one, deliberately: there are
+ *  several provenance call sites across commit.ts and the three command
+ *  engines, and an optional flag is one a future site forgets to pass, leaving
+ *  a cross-tenant write indistinguishable from a member's own edit. Required
+ *  means the compiler asks the question at every site. */
 export function buildProvenance(
   request: Request,
   cs: StoredChangeset,
   confirmationId: string | null,
   channel: ProvenanceChannel,
+  viaSupportAccess: boolean,
 ): Record<string, unknown> {
   return {
     origin: 'agent',
@@ -50,6 +66,7 @@ export function buildProvenance(
     autonomy_mode: cs.autonomyMode,
     changeset_id: cs.id,
     ...(confirmationId ? { confirmation_id: confirmationId } : {}),
+    ...(viaSupportAccess ? { support_access: { platform_admin: true } } : {}),
   }
 }
 

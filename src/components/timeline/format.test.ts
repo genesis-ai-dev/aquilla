@@ -13,6 +13,14 @@ describe("fmtClock", () => {
     expect(fmtClock(-5)).toBe("0:00")
     expect(fmtClock(NaN)).toBe("0:00")
   })
+  it("adds an hours field once the time passes an hour", () => {
+    expect(fmtClock(3599)).toBe("59:59")
+    expect(fmtClock(3600)).toBe("1:00:00")
+    // The ruler's 1388:36, and the transport's 4646:34.
+    expect(fmtClock(83316)).toBe("23:08:36")
+    expect(fmtClock(278794)).toBe("77:26:34")
+    expect(fmtClock(3723.4, true)).toBe("1:02:03.4")
+  })
 })
 
 describe("fmtCueClock (Sam's D2: a caption list's times)", () => {
